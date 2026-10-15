@@ -297,6 +297,76 @@ static class SelfTest
                        new() { ("n", new List<string> { nDir }), ("b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null, new[] { Path.Combine(root, "NOT-THERE"), stop });
         Check("the rerun resumes and finishes", rc == 0 && File.Exists(Path.Combine(outStop, "n.json")) && File.Exists(Path.Combine(outStop, "b13.json")), $"exit {rc}");
         Check("batch resume leaves an existing result untouched", File.GetLastWriteTimeUtc(Path.Combine(outBatch, "n.json")) == new DateTime(2020, 1, 1), "n.json not rewritten");
+
+        V2(root, nDir, order, folders, baseOv, outA);
+    }
+
+    // ---- rule v2 (4.26 selection v2): form links select, every candidate carries features, a score and the
+    //      newcomer-blind control rank (R-0: the installed plugin's own size alone) -----------------------------------
+    // Hand-derived from the fixture above:
+    //   form links  B12 overrides i3, which N's form list points at (1 link from N); B14's form list points at i1, which
+    //               N overrides (1 link to N). Under v2 both are candidates by formLinks; under v1 both stay left out.
+    //   R-0         B's own record count (every major record it carries), then its cells, then the name:
+    //               B3, B4, B5, B9 carry 3 records (WRLD, a cell, a reference) and one exterior cell each;
+    //               B2 carries 2 (the interior cell and a reference); B1, B12, B14, B15, B7, B8 carry 1 and no cell.
+    //   multiplicity under profile P2, which adds B16 and B17 overriding i1 as B1 does: three installed plugins share
+    //               the record i1 with N, so each scores 1/3 for it; N itself is never counted.
+    static void V2(string root, string nDir, string[] order, string[] folders, ISkyrimModGetter baseOv, string outV1)
+    {
+        var outV = Path.Combine(root, "out-v2");
+        int rc = Probe.Run(instance, "P", game, null, outV, true, new() { ("selection", new List<string> { nDir }) }, false, null, TextWriter.Null, rule: "v2");
+        var j = JsonNode.Parse(File.ReadAllText(Path.Combine(outV, "selection.json")))!;
+        Check("v2 run exits 0, schema 2, rule version v2", rc == 0 && (int?)j["schema"] == 2 && (string?)j["rule"]?["version"] == "v2",
+              $"exit {rc}, schema {j["schema"]}, version {j["rule"]?["version"]}");
+        var cands = j["candidates"]!.AsArray().ToDictionary(c => (string)c!["plugin"]!, c => c!, StringComparer.OrdinalIgnoreCase);
+        string Kinds(string p) => cands.TryGetValue(p, out var c) ? string.Join("+", c["kinds"]!.AsArray().Select(x => (string)x!)) : "(left out)";
+        int Ev(string p, string f) => cands.TryGetValue(p, out var c) ? (int?)c["evidence"]?[f] ?? -1 : -1;
+        Check("v2: B12 (N's form list points at its record) -> formLinks", Kinds("B12.esp") == "formLinks" && Ev("B12.esp", "formLinksOut") == 1,
+              $"{Kinds("B12.esp")}, out {Ev("B12.esp", "formLinksOut")}");
+        Check("v2: B14 (its form list points at N's record) -> formLinks", Kinds("B14.esp") == "formLinks" && Ev("B14.esp", "formLinksIn") == 1,
+              $"{Kinds("B14.esp")}, in {Ev("B14.esp", "formLinksIn")}");
+        Check("v2: B12's link example names the target i3", cands.TryGetValue("B12.esp", out var b12)
+              && (b12["evidence"]?["formLinkExamples"]?.AsArray().Select(x => (string)x!).Any(x => x.Contains("000812:Base.esm")) ?? false),
+              b12?["evidence"]?["formLinkExamples"]?.ToJsonString() ?? "");
+        Check("v2: exactly v1's nine candidates plus B12 and B14", cands.Keys.OrderBy(x => x).SequenceEqual(new[] { "B1.esp", "B12.esp", "B14.esp", "B15.esp", "B2.esp", "B3.esp", "B4.esp", "B5.esp", "B7.esp", "B8.esp", "B9.esp" }),
+              string.Join(", ", cands.Keys.OrderBy(x => x)));
+        var r0 = j["candidates"]!.AsArray().OrderBy(c => (int?)c!["controlRank"] ?? 999).Select(c => (string)c!["plugin"]!).ToList();
+        Check("v2: control rank R-0 orders by the plugin's own size alone", r0.SequenceEqual(new[] { "B3.esp", "B4.esp", "B5.esp", "B9.esp", "B2.esp", "B1.esp", "B12.esp", "B14.esp", "B15.esp", "B7.esp", "B8.esp" }),
+              string.Join(" > ", r0));
+        var ranks = j["candidates"]!.AsArray().Select(c => (int?)c!["rank"] ?? 0).ToList();
+        Check("v2: ranks are 1..n and every candidate has a score and features", ranks.SequenceEqual(Enumerable.Range(1, ranks.Count))
+              && j["candidates"]!.AsArray().All(c => c!["score"] is not null && c!["features"] is JsonObject), string.Join(",", ranks));
+        Check("v2: v1 still leaves B12 and B14 out", JsonNode.Parse(File.ReadAllText(Path.Combine(outV1, "selection.json")))!["candidates"]!.AsArray()
+              .All(c => (string)c!["plugin"]! is not ("B12.esp" or "B14.esp")), "v1 candidates");
+
+        // multiplicity: profile P2 = P plus B16 and B17, each overriding i1 as B1 does
+        SkyrimMod M(string name) => new(new ModKey(name, ModType.Plugin), Rel);
+        var i1 = new FormKey(new ModKey("Base", ModType.Master), 0x810);
+        foreach (var nm in new[] { "B16", "B17" }) { var m = M(nm); m.MiscItems.Add(new MiscItem(i1, Rel) { EditorID = "Misc810_by" + nm }); Write(m, nm, baseOv); }
+        var p2 = Path.Combine(instance, "profiles", "P2"); Directory.CreateDirectory(p2);
+        var order2 = order.Concat(new[] { "B16.esp", "B17.esp" }).ToArray();
+        File.WriteAllLines(Path.Combine(p2, "modlist.txt"), new[] { "# generated" }.Concat(folders.Concat(new[] { "B16", "B17" }).Select(f => "+" + f)).Append("-Orphan"));
+        File.WriteAllLines(Path.Combine(p2, "loadorder.txt"), new[] { "# generated" }.Concat(order2));
+        File.WriteAllLines(Path.Combine(p2, "plugins.txt"), new[] { "# generated" }.Concat(order2.Select(o => "*" + o)));
+        var outM = Path.Combine(root, "out-v2-p2");
+        Probe.Run(instance, "P2", game, null, outM, true, new() { ("selection", new List<string> { nDir }) }, false, null, TextWriter.Null, rule: "v2");
+        var jm = JsonNode.Parse(File.ReadAllText(Path.Combine(outM, "selection.json")))!;
+        double F(string p, string f) => jm["candidates"]!.AsArray().FirstOrDefault(c => (string)c!["plugin"]! == p)?["features"]?[f]?.GetValue<double>() ?? -1;
+        Check("v2 multiplicity: B1's one shared record, 3 carriers -> specRec 1/3", F("B1.esp", "rec") == 1 && Math.Abs(F("B1.esp", "specRec") - 1.0 / 3) < 1e-9,
+              $"rec {F("B1.esp", "rec")}, specRec {F("B1.esp", "specRec")}");
+        Check("v2 multiplicity: B16 likewise (the newcomer is never counted)", Math.Abs(F("B16.esp", "specRec") - 1.0 / 3) < 1e-9, $"specRec {F("B16.esp", "specRec")}");
+
+        // both = the two single runs
+        var outBoth = Path.Combine(root, "out-both");
+        rc = Probe.Run(instance, "P", game, null, outBoth, true, new() { ("selection", new List<string> { nDir }) }, false, null, TextWriter.Null, rule: "both");
+        Check("both: selection.v1.json equals the v1 single run", rc == 0 && File.Exists(Path.Combine(outBoth, "selection.v1.json"))
+              && SameButCost(Path.Combine(outV1, "selection.json"), Path.Combine(outBoth, "selection.v1.json")), $"exit {rc}");
+        Check("both: selection.v2.json equals the v2 single run", File.Exists(Path.Combine(outBoth, "selection.v2.json"))
+              && SameButCost(Path.Combine(outV, "selection.json"), Path.Combine(outBoth, "selection.v2.json")), "minus cost");
+        var outVB = Path.Combine(root, "out-v2-batch");
+        Probe.Run(instance, "P", game, null, outVB, true, new() { ("n", new List<string> { nDir }), ("b13", new List<string> { Path.Combine(mods, "B13") }) }, true, null, TextWriter.Null, rule: "both");
+        Check("both batch: n.v2.json equals the v2 single run", File.Exists(Path.Combine(outVB, "n.v2.json"))
+              && SameButCost(Path.Combine(outV, "selection.json"), Path.Combine(outVB, "n.v2.json")), "minus cost");
     }
 
     static bool SameButCost(string a, string b)
