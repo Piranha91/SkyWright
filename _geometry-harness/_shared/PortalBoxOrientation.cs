@@ -35,6 +35,15 @@ public static class PortalBoxOrientation
     /// shadow code computes it (cross of its edges) - the sealed test reads that one, and it still does.
     /// Returns null when the rectangle may be predicted, else the refusal text.</summary>
     public static string? Check(Vector3 quadNormal, Vector3 authoredNormal, Vector3 centre, Vector3 eye,
+                                float maxUprightAbsNormalZ, float maxHorizontalDeviation, bool horizontalNormalDownEyeAbove)
+        => Check(quadNormal, authoredNormal, centre, eye, maxHorizontalDeviation, horizontalNormalDownEyeAbove);   // RED STUB
+
+    public const string BoxOutsideScope = "box orientation outside the supplied rule's evidence scope; only upright boxes were measured";
+
+    public static string? BoxUpright(Vector3 axisX, Vector3 axisY, float maxUprightAbsNormalZ)
+        => MathF.Max(MathF.Abs(axisX.Z), MathF.Abs(axisY.Z)) <= 0.001f ? null : BoxOutsideScope;                // RED STUB
+
+    public static string? Check(Vector3 quadNormal, Vector3 authoredNormal, Vector3 centre, Vector3 eye,
                                 float maxAbsNormalZ, bool horizontalNormalDownEyeAbove)
     {
         if (MathF.Abs(quadNormal.Z) <= maxAbsNormalZ) return null;            // upright: the sealed class

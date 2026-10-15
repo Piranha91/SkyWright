@@ -22,7 +22,7 @@ static class StationRuleProof
 {
     /// <summary>Cases run below, excluding this count's own check. A case added without moving
     /// this number fails the last check rather than passing unnoticed.</summary>
-    public const int DeclaredCases = 149;
+    public const int DeclaredCases = 152;
 
     /// <summary>M7: SHA-256 of the face-on pose file over eight fixtures, recorded at the API stub
     /// over the unchanged face-on rule.</summary>
@@ -1056,7 +1056,7 @@ static class StationRuleProof
         var hAbove = new Vector3(300f, 200f, 150f);
         var hBelow = new Vector3(300f, 200f, -150f);
         string? V(( Vector3 Quad, Vector3 Authored, Vector3 Centre) o, Vector3 eye, bool on)
-            => PortalBoxOrientation.Check(o.Quad, o.Authored, o.Centre, eye, Tol, on);
+            => PortalBoxOrientation.Check(o.Quad, o.Authored, o.Centre, eye, Tol, Tol, on);
         C("H1 (a) the sealed rule refuses a horizontal normal-down panel seen from above",
           V(down, hAbove, false) == PortalBoxOrientation.OutsideScope, $"{V(down, hAbove, false) ?? "admitted"}");
         C("H2 (a) with the opt-in, the same panel from above is admitted",
@@ -1087,6 +1087,29 @@ static class StationRuleProof
           hs is not null && hs.Classify(new SphereBound(new Vector3(0f, 0f, -200f), 30f)) == ShadowRelation.Inside
           && hs.Classify(new SphereBound(new Vector3(900f, 0f, -200f), 30f)) == ShadowRelation.Outside,
           hs is null ? "no shadow" : "");
+
+        // ======================== U, the upright tolerance as its own rule field (cases 6016-6020) ==
+        // Lab block 3 (runs/2026-10-14-lab-block-1/RESULT.md): planes tilted up to |n.z| 0.021 cull as their true shape
+        // predicts, so the upright class widens to 0.021 while the horizontal class keeps 0.001.
+        const float Up = 0.021f;
+        (Vector3 Quad, Vector3 Authored, Vector3 Centre) Lean(float t)
+            => Orient(new Vector3(MathF.Asin(t) * (180f / MathF.PI), 0f, 0f), new Vector3(0f, 0f, 150f));
+        var lean0205 = Lean(0.0205f);
+        var lean0215 = Lean(0.0215f);
+        C("6016 upright 0.021, horizontal 0.001: a PortalBox at |n.z| 0.0205 is admitted, one at 0.0215 refused",
+          PortalBoxOrientation.Check(lean0205.Quad, lean0205.Authored, lean0205.Centre, hAbove, Up, Tol, true) is null
+          && PortalBoxOrientation.Check(lean0215.Quad, lean0215.Authored, lean0215.Centre, hAbove, Up, Tol, true) == PortalBoxOrientation.OutsideScope,
+          $"|n.z| {MathF.Abs(lean0205.Quad.Z)} and {MathF.Abs(lean0215.Quad.Z)}");
+        C("6018 upright 0.021, horizontal 0.001: H6's panel 0.2 deg off horizontal stays refused",
+          PortalBoxOrientation.Check(nearly.Quad, nearly.Authored, nearly.Centre, hAbove, Up, Tol, true) == PortalBoxOrientation.OutsideScope,
+          $"{PortalBoxOrientation.Check(nearly.Quad, nearly.Authored, nearly.Centre, hAbove, Up, Tol, true) ?? "admitted"}");
+        var boxX = Vector3.Normalize(new Vector3(1f, 0f, 0.0174f));
+        var boxXOut = Vector3.Normalize(new Vector3(1f, 0f, 0.0216f));
+        C("6020 BoxUpright: |axis.z| 0.0174 admitted at 0.021 and refused at 0.001; 0.0215 refused at 0.021",
+          PortalBoxOrientation.BoxUpright(boxX, Vector3.UnitY, Up) is null
+          && PortalBoxOrientation.BoxUpright(boxX, Vector3.UnitY, Tol) == PortalBoxOrientation.BoxOutsideScope
+          && PortalBoxOrientation.BoxUpright(boxXOut, Vector3.UnitY, Up) == PortalBoxOrientation.BoxOutsideScope,
+          $"axis z {boxX.Z} and {boxXOut.Z}");
 
         check("stationrule: declared case count", ran == DeclaredCases,
               $"{ran} cases ran, {DeclaredCases} declared");
