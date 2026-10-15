@@ -35,6 +35,14 @@ static class DriftQuestSelfTest
                 x.Quests[F.Q].Aliases.Count(a => a.Forced is not null) == 10 && x.Quests[F.Q].Aliases.Count(a => a.UniqueNpc is not null) == 1
                 && x.Quests[F.Q].Aliases.Count(a => a.Arm == "(none / conditions only)") == 1,
                 string.Join(", ", x.Quests[F.Q].Aliases.Select(a => $"{a.Id}:{a.Arm}")));
+
+        // Where each reference can stand (ActorReach), at its winning placement.
+        var reach = new ActorReach(x.PackFacts, x.History.Winning, x.RefBase, x.NpcPackages, x.NpcTemplated);
+        string Reach(FormKey r) => x.History.Winning(r) is { } at ? $"{reach.ReachOf(r, at).Verdict} {reach.ReachOf(r, at).Radius}" : "(no placement)";
+        t.Check("PD3-D-R1 a static stays at its placement: PlacementBound, radius 0", Reach(F.R1) == "PlacementBound 0", Reach(F.R1));
+        t.Check("PD3-D-R2 an actor with no packages: NoPackages", Reach(F.R3) == "NoPackages 0", Reach(F.R3));
+        t.Check("PD3-D-R3 actors kept near their editor location: PlacementBound at the package radius (600, 100)",
+                Reach(F.R5) == "PlacementBound 600" && Reach(F.R7) == "PlacementBound 100", $"{Reach(F.R5)} / {Reach(F.R7)}");
     });
 
     /// <summary>Pass 1 of a real run over <paramref name="order"/>: the tables Program.cs declares, filled by DriftIndex.</summary>

@@ -223,48 +223,18 @@ Console.WriteLine();
 // _shared/DetectorModel.cs and is owned by proofprobe cases.
 var masterClosure = DetectorModel.MasterClosure(masterIdx);
 
+// Where an actor can stand, for the reach filter (AliasSplits.cs, ActorReach).
+var reach = new ActorReach(packFacts, history.Winning, refBase, npcPackages, npcTemplated);
+
 // WHERE A PACKAGE PUTS AN ACTOR, resolved against the winning order. Everything here is
 // I/O — looking anchors up and measuring to them; the DECISION on what the numbers mean is
 // DetectorModel.ClassifyReach, which proofprobe owns.
-DetectorModel.PackageAnchor? AnchorOf(FormKey packageKey, Snap at)
-{
-    if (!packFacts.TryGetValue(packageKey, out var f)) return null;
-    if (f.Locations.Count == 0)
-        return new DetectorModel.PackageAnchor(false, false, false, null, 0, f.Scheduled, f.ScheduleMinutes);
-
-    bool allAtPlacement = true, anyUnresolved = false;
-    float? worst = null;
-    uint reach = 0;
-    foreach (var (arm, radius, link) in f.Locations)
-    {
-        if (arm == PackFacts.EditorArm || arm == PackFacts.SelfArm) { reach = Math.Max(reach, radius); continue; }
-        allAtPlacement = false;
-        // Only a placed reference has a position this order can read. A cell, a keyword, an
-        // object type, an alias and the player all resolve at run time or not at all.
-        if (arm != PackFacts.RefArm || link.IsNull || Winning(link) is not { } w || w.Cell != at.Cell)
-        { anyUnresolved = true; continue; }
-        // HORIZONTAL distance. A package radius bounds where an actor wanders on the floor; the
-        // anchor for a temple's sandbox sits 328u above the priests' heads, and counting that gap
-        // put Rorlund 8u outside a radius he is 404u inside of.
-        float d = DistXY(w.Pos, at.Pos);
-        if (d > radius) worst = MathF.Max(worst ?? 0f, d);
-        else reach = Math.Max(reach, (uint)MathF.Ceiling(d + radius));
-    }
-    return new DetectorModel.PackageAnchor(true, allAtPlacement, anyUnresolved, worst, reach,
-                                           f.Scheduled, f.ScheduleMinutes);
-}
+DetectorModel.PackageAnchor? AnchorOf(FormKey packageKey, Snap at) => reach.AnchorOf(packageKey, at);
 
 // An alias resolves to a placed reference; only an ACTOR carries packages. Anything else — a
 // marker, a container, a door — stays exactly where it was placed, so its placement predicts its
 // position perfectly and its reach is zero.
-(ReachVerdict Verdict, uint Radius, string Why) ReachOf(FormKey refKey, Snap at, bool byCoverage = false)
-{
-    var baseKey = refBase.GetValueOrDefault(refKey);
-    if (!npcPackages.TryGetValue(baseKey, out var pkgs))
-        return (ReachVerdict.PlacementBound, 0, "not an actor: it stays where it is placed");
-    return DetectorModel.ClassifyReach(pkgs.Select(k => AnchorOf(k, at)).ToArray(),
-                                       npcTemplated.Contains(baseKey), byCoverage);
-}
+(ReachVerdict Verdict, uint Radius, string Why) ReachOf(FormKey refKey, Snap at, bool byCoverage = false) => reach.ReachOf(refKey, at, byCoverage);
 
 // --actor: the records behind one actor's reach, printed as they were read. This exists because
 // the filter below is a claim about package data, and a claim about package data should be
@@ -887,11 +857,6 @@ static string Excerpt(string s, int max)
     s = s.Replace("\\r", " ").Replace("\\n", " ").Replace("\\t", " ");
     s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
     return s.Length <= max ? s : s[..max] + "…";
-}
-static float DistXY(Vec3 a, Vec3 b)
-{
-    float dx = a.X - b.X, dy = a.Y - b.Y;
-    return MathF.Sqrt(dx * dx + dy * dy);
 }
 
 static float Dist(Vec3 a, Vec3 b)
