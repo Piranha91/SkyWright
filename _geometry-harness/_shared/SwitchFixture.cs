@@ -150,4 +150,47 @@ public static class SwitchFixture
                 Call("TryToEnable", "::Alias_Door_var"), Call("EnableLinkChain", "::Alias_Gate7_var"), Call("TryToDisableNoWait", "::Alias_Gate8_var")) });
         return path;
     }
+
+    // THE RAW-DUMP ADDITION (F4, 2026-10-15): SwRaw.esp after the three above (masters SwMaster.esm), written by its own method
+    // so no other byte changes. Markers M9, M10 in SC1, each the XESP parent of one child; quest SwRawQ whose aliases Door9 and
+    // Gate10 are forced to M9 and M10. Its script SwRawScript has Fragment_0 at stage 10: Alias_Door9.TryToEnable(),
+    // Alias_Gate10.EnableLinkChain(), then a backward JMP no flow pattern matches, so the decompiler refuses the function and
+    // prints its raw bytecode; the calls are in that dump only.
+    public static readonly ModKey RawKey = new("SwRaw", ModType.Plugin);
+    public static readonly FormKey M9 = new(RawKey, 0x909), M10 = new(RawKey, 0x90A), F9 = new(RawKey, 0x919), F10 = new(RawKey, 0x91A),
+        RawQ = new(RawKey, 0x800);
+    public const string RawScript = "SwRawScript";
+
+    /// <summary>Write SwRaw.esp into <paramref name="dir"/> (which must already hold SwMaster.esm from <see cref="Write"/>)
+    /// and its script under dir\mods\SwRaw\Scripts. Returns the plugin's path.</summary>
+    public static string WriteRawDump(string dir)
+    {
+        using var mOv = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(dir, MasterKey.FileName.String), Rel);
+        var rm = new SkyrimMod(RawKey, Rel);
+        var c = Cell();
+        foreach (var (k, ch, x, e) in new[] { (M9, F9, 1000f, "SwGate9"), (M10, F10, 1100f, "SwGate10") })
+        { c.Temporary.Add(Ref(k, Marker, x, e)); c.Temporary.Add(Ref(ch, Thing, x + 10, parent: k)); }
+        MovedRefFixture.FileInterior(rm, c);
+        var quest = new Quest(RawQ, Rel) { EditorID = "SwRawQ" };
+        foreach (var (id, name, fk) in new[] { (0u, "Door9", M9), (1u, "Gate10", M10) })
+            quest.Aliases.Add(new QuestAlias { ID = id, Name = name, ForcedReference = new FormLinkNullable<IPlacedGetter>(fk) });
+        var qa = new QuestAdapter { FileName = RawScript };
+        qa.Scripts.Add(new ScriptEntry { Name = RawScript });
+        qa.Fragments.Add(new QuestScriptFragment { Stage = 10, StageIndex = 0, ScriptName = RawScript, FragmentName = "Fragment_0" });
+        quest.VirtualMachineAdapter = qa;
+        rm.Quests.Add(quest);
+        var path = Path.Combine(dir, rm.ModKey.FileName.String);
+        rm.BeginWrite.ToPath(path).WithLoadOrder(mOv).Write();
+
+        var scripts = Path.Combine(dir, "mods", RawKey.Name, "Scripts");
+        Directory.CreateDirectory(scripts);
+        var none = new[] { ("None", "::NoneVar") };
+        static (InstructionOpcode, PexObjectVariableData[]) Call(string name, string obj) => (InstructionOpcode.CALLMETHOD, new[] { PexWriter.Id(name), PexWriter.Id(obj), PexWriter.Id("::NoneVar"), PexWriter.Int(0) });
+        PexWriter.WritePex(Path.Combine(scripts, RawScript + ".pex"), RawScript, "Quest",
+            new[] { PexWriter.AutoObj("Alias_Door9", "ReferenceAlias"), PexWriter.AutoObj("Alias_Gate10", "ReferenceAlias") },
+            new[] { PexWriter.Function("Fragment_0", none,
+                Call("TryToEnable", "::Alias_Door9_var"), Call("EnableLinkChain", "::Alias_Gate10_var"),
+                (InstructionOpcode.JMP, new[] { PexWriter.Int(-2) })) });
+        return path;
+    }
 }
