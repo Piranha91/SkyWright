@@ -41,5 +41,16 @@ static class BlockRouteSelfTest
         t.Check("PD3-K-1b Rm is judged in I2 at its winning place; Dr, Ms and Sx in I1 at theirs",
                 Judged(F.Rm, F.I2) == "at 0,400" && Judged(F.Dr, F.I1) == "at -400,0" && Judged(F.Ms, F.I1) == "at 0,0" && Judged(F.Sx, F.I1) == "at 400,0",
                 $"{Judged(F.Rm, F.I2)} / {Judged(F.Dr, F.I1)} / {Judged(F.Ms, F.I1)} / {Judged(F.Sx, F.I1)}");
+
+        // The route rule's set-aside choice (RefAdmission.RouteSetAside), on the base types read as step 2 reads them.
+        var baseType = new Dictionary<FormKey, string>();
+        using (var m0 = SkyrimMod.CreateFromBinaryOverlay(w.Order[0], F.Rel))
+            foreach (var rec in m0.EnumerateMajorRecords())
+                if (rec is IModeledGetter mo && mo.Model?.File is { } f && !string.IsNullOrWhiteSpace(f.GivenPath))
+                    baseType[rec.FormKey] = rec.GetType().Name.Replace("BinaryOverlay", "");
+        string Aside(FormKey b) => baseType.TryGetValue(b, out var ty) ? $"{ty} {RefAdmission.RouteSetAside(ty)}" : "(no modeled base)";
+        t.Check("PD3-K-2 a Door is set aside as passable by design", Aside(F.DoorBase) == "Door Door", Aside(F.DoorBase));
+        t.Check("PD3-K-3 a MoveableStatic is set aside as pushed aside", Aside(F.PushBase) == "MoveableStatic Movable", Aside(F.PushBase));
+        t.Check("PD3-K-4 a Static is measured (control)", Aside(F.WallBase) == "Static Measure", Aside(F.WallBase));
     });
 }

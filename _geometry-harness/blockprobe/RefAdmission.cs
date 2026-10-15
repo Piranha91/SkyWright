@@ -15,4 +15,15 @@ static class RefAdmission
         if (r.Deleted) return null;
         return r;
     }
+
+    public enum SetAside { Door, Movable, Measure }
+
+    /// <summary>The route rule's choice by the base record's type: a Door is passable by design (the navmesh runs through the
+    /// doorway), a MoveableStatic is pushed aside (Part C's urn); both are set aside and counted. Everything else is measured.</summary>
+    public static SetAside RouteSetAside(string baseType)
+    {
+        if (baseType == "Door") return SetAside.Door;
+        if (baseType == "MoveableStatic") return SetAside.Movable;
+        return SetAside.Measure;
+    }
 }

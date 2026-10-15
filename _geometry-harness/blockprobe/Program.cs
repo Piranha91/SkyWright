@@ -540,8 +540,9 @@ foreach (var (cellKey, tcell) in targetCells)
         // A MoveableStatic is pushed aside, not a blocker (Part C's urn) — set aside the same way, counted.
         if (nCross > 0 && columns is not null)
         {
-            if (bm.Type == "Door") { routeDoors++; }
-            else if (bm.Type == "MoveableStatic") { routeMovable++; }
+            var aside = RefAdmission.RouteSetAside(bm.Type);
+            if (aside == RefAdmission.SetAside.Door) { routeDoors++; }
+            else if (aside == RefAdmission.SetAside.Movable) { routeMovable++; }
             else
             {
                 routeMeasured++;
