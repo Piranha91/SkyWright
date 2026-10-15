@@ -59,6 +59,18 @@ public sealed record RefGeometry(Aabb Box, TriangleSoup HostSoup, TriangleSoup D
     public float DepRadiusMax { get; } = DepSoup.TriangleRadii is { Length: > 0 } dr ? dr.Max() : 0f;
 }
 
+/// <summary>What every reader of a base's geometry except the soup builders reads: <see cref="RefGeometry"/> without its soups,
+/// the same members by the same rules. Kept per base for the whole run; the soups are not (<see cref="ContactIndex"/>).</summary>
+public sealed record GeomSummary(Aabb Box, char HostSrc, char DepSrc, bool HostUsable, int HostTriangles, int DepTriangles,
+                                 float HostRadiusMax, float DepRadiusMax, IReadOnlyList<(string Layer, string MotionSystem)> SolidBodies, bool PhantomOnly)
+{
+    public bool HasGeometry => !Box.IsEmpty && (HostSrc != '-' || DepSrc != '-');
+    public bool CanHost => HasGeometry && HostUsable && HostTriangles > 0;
+    public bool CanDepend => HasGeometry && DepTriangles > 0;
+    public static GeomSummary Of(RefGeometry g) => new(g.Box, g.HostSrc, g.DepSrc, g.HostUsable, g.HostSoup.TriangleCount, g.DepSoup.TriangleCount,
+                                                       g.HostRadiusMax, g.DepRadiusMax, g.SolidBodies, g.PhantomOnly);
+}
+
 /// <summary>Why a host's placement changed under its last plugin: moved within its space, relocated to another, or
 /// removed (disabled or deleted after having been placed — by its own record, or through an enable parent a later
 /// plugin disabled).</summary>
@@ -276,6 +288,8 @@ public sealed class ContactIndex
     /// Called at every exit of <see cref="MovedHosts"/>, <see cref="DependentSnaps"/>, <see cref="PhysicalWinners"/>,
     /// <see cref="PhysicalWithout"/> and <see cref="Judge"/>; each counted exit emits under the coverage key it counts.</summary>
     public IProbeTraceSink? Trace { get; set; }
+    /// <summary>Diagnostic (contactprobe HC_MEMSTAGES): called every 10,000 references inside the two hashes. Null: nothing is called.</summary>
+    public Action<string, int>? StageProbe { get; set; }
 
     /// <summary>Whether the attached sink wants events for this key (false with no sink — the untraced path does no work).</summary>
     bool Tw(FormKey key) => Trace is { } t && t.Wants(key);
@@ -285,6 +299,10 @@ public sealed class ContactIndex
     static Dictionary<string, double> Tv(string n1, double v1, string n2, double v2) => new() { [n1] = v1, [n2] = v2 };
     readonly Func<FormKey, RefGeometry?> _geomOf;
     readonly Dictionary<FormKey, RefGeometry?> _geomCache = new();
+    readonly Dictionary<FormKey, GeomSummary?> _summaries = new();
+    /// <summary>Memoise each base's full geometry for the run (the default). False: keep only a <see cref="GeomSummary"/> per base and
+    /// ask the geometry delegate again whenever a soup is needed: the caller bounds its store and decodes again (contactprobe).</summary>
+    readonly bool _memoiseGeometry;
     /// <summary>The byte budget the per-placement caches share (host grids, dependent soups, radius shells): least-recently-used,
     /// evicted by bytes (_shared/PlacementCache.cs). Automatic selection reads runtime, free physical and current managed
     /// memory; a preparation checkpoint may lower it. Explicit limits stay exact. Replaces the former entry-count bounds.</summary>
@@ -332,11 +350,11 @@ public sealed class ContactIndex
     float HostPadW(FormKey baseKey, Snap s)
     {
         if (!ReadRadius) return 0f;
-        float r = GeomOf(baseKey) is { } g ? g.HostRadiusMax * s.Scale : 0f;
+        float r = Summary(baseKey) is { } g ? g.HostRadiusMax * s.Scale : 0f;
         if (r > _maxHostRadiusW) _maxHostRadiusW = r;
         return r;
     }
-    float DepPadW(FormKey baseKey, Snap s) => ReadRadius && GeomOf(baseKey) is { } g ? g.DepRadiusMax * s.Scale : 0f;
+    float DepPadW(FormKey baseKey, Snap s) => ReadRadius && Summary(baseKey) is { } g ? g.DepRadiusMax * s.Scale : 0f;
     readonly PlacementCache<TriangleGrid> _shellGrids;
     readonly PlacementCache<TriangleSoup> _shellDeps;
 
@@ -360,9 +378,8 @@ public sealed class ContactIndex
     TriangleGrid? ShellGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
         if (_shellGrids.TryGetValue((key, snapIndex, baseKey), out var g)) return g;
-        var geom = GeomOf(baseKey);
         TriangleGrid? grid = null;
-        if (geom is { CanHost: true })
+        if (Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom)
             grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget);
         return _shellGrids[(key, snapIndex, baseKey)] = grid;
     }
@@ -370,9 +387,8 @@ public sealed class ContactIndex
     TriangleSoup? ShellDep(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
         if (_shellDeps.TryGetValue((key, snapIndex, baseKey), out var so)) return so;
-        var geom = GeomOf(baseKey);
         TriangleSoup? soup = null;
-        if (geom is { CanDepend: true })
+        if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
             soup = SpatialOverlap.TransformSoup(geom.DepShell ?? geom.DepSoup, s.Pos, s.Rot, s.Scale);
         return _shellDeps[(key, snapIndex, baseKey)] = soup;
     }
@@ -389,10 +405,12 @@ public sealed class ContactIndex
     /// <param name="cacheBudgetBytes">the per-placement caches' shared byte budget; null selects from current runtime,
     /// physical and uncollected managed readings. Explicit budgets are kept exactly, including synthetic tiny budgets.</param>
     /// <param name="automaticSelection">optional reading seam for deterministic known answers; never called for an explicit budget.</param>
+    /// <param name="memoiseGeometry">false: keep only a summary per base; <paramref name="geomOf"/> is asked again for every soup
+    /// and must return the same geometry each time (the caller's own bounded store).</param>
     public ContactIndex(Func<FormKey, RefGeometry?> geomOf, long? cacheBudgetBytes = null,
-        Func<CacheBudget.AutomaticSelection>? automaticSelection = null)
+        Func<CacheBudget.AutomaticSelection>? automaticSelection = null, bool memoiseGeometry = true)
     {
-        _geomOf = geomOf; Arms = new EnableArms(Index);
+        _geomOf = geomOf; _memoiseGeometry = memoiseGeometry; Arms = new EnableArms(Index);
         _automaticBudget = cacheBudgetBytes is null;
         _readAutomaticBudget = automaticSelection ?? CacheBudget.ReadAutomatic;
         long limit;
@@ -449,10 +467,31 @@ public sealed class ContactIndex
         yield return ("shellDeps", _shellDeps.StaleBaseLookups, (IReadOnlyList<(FormKey, int, FormKey, FormKey)>?)_shellDeps.StaleBaseKeys ?? none);
     }
 
+    /// <summary>The geometry memo: bases memoised, and the bytes of the distinct soups it holds (the HC_MEMSTAGES diagnostic).</summary>
+    public (int Bases, long SoupBytes) GeometryMemo()
+    {
+        var seen = new HashSet<TriangleSoup>(ReferenceEqualityComparer.Instance);
+        long bytes = 0;
+        foreach (var g in _geomCache.Values)
+            if (g is not null)
+                foreach (var so in new[] { g.HostSoup, g.DepSoup, g.HostShell, g.DepShell })
+                    if (so is not null && seen.Add(so)) bytes += PlacementCache<TriangleSoup>.SoupBytes(so);
+        return (_memoiseGeometry ? _geomCache.Count : _summaries.Count, bytes);
+    }
+
+    /// <summary>A base's full geometry, soups included. With memoiseGeometry false it is not kept here: every call asks the delegate.</summary>
     public RefGeometry? GeomOf(FormKey baseKey)
     {
+        if (!_memoiseGeometry) return _geomOf(baseKey);
         if (_geomCache.TryGetValue(baseKey, out var g)) return g;
         return _geomCache[baseKey] = _geomOf(baseKey);
+    }
+
+    /// <summary>A base's geometry without its soups: what everything but the soup builders reads. Kept per base.</summary>
+    public GeomSummary? Summary(FormKey baseKey)
+    {
+        if (_summaries.TryGetValue(baseKey, out var s)) return s;
+        return _summaries[baseKey] = GeomOf(baseKey) is { } g ? GeomSummary.Of(g) : null;
     }
 
     // ---- roles ---------------------------------------------------------------------------------
@@ -506,7 +545,7 @@ public sealed class ContactIndex
     public DependentMotion MotionOf(FormKey baseKey)
     {
         var (t, _) = BaseInfoOf(baseKey);
-        var g = GeomOf(baseKey);
+        var g = Summary(baseKey);
         return DetectorModel.ClassifyMotion(t == "?" ? null : t, g?.SolidBodies);
     }
 
@@ -590,7 +629,7 @@ public sealed class ContactIndex
 
     public Aabb WorldBox(FormKey baseKey, Snap s)
     {
-        var g = GeomOf(baseKey);
+        var g = Summary(baseKey);
         return g is null || !g.HasGeometry ? Aabb.Empty : SpatialOverlap.ToWorld(g.Box, s.Pos, s.Rot, s.Scale);
     }
 
@@ -599,9 +638,9 @@ public sealed class ContactIndex
     TriangleGrid? HostGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s, bool anySurface = false)
     {
         if (_hostGrids.TryGetValue((key, snapIndex, baseKey), out var g) && (g is not null || !anySurface)) return g;
-        var geom = GeomOf(baseKey);
+        var sum = Summary(baseKey);
         TriangleGrid? grid = null;
-        if (geom is { CanHost: true } || (anySurface && geom is { HasGeometry: true } && geom.HostSoup.TriangleCount > 0))
+        if ((sum is { CanHost: true } || (anySurface && sum is { HasGeometry: true } && sum.HostTriangles > 0)) && GeomOf(baseKey) is { } geom)
             grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget);
         return _hostGrids[(key, snapIndex, baseKey)] = grid;
     }
@@ -612,8 +651,7 @@ public sealed class ContactIndex
     TriangleGrid? ArmGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
         if (_armGrids.TryGetValue((key, snapIndex, baseKey), out var g)) return g;
-        var geom = GeomOf(baseKey);
-        TriangleGrid? grid = geom is { CanHost: true } ? TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget) : null;
+        TriangleGrid? grid = Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom ? TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget) : null;
         return _armGrids[(key, snapIndex, baseKey)] = grid;
     }
     readonly PlacementCache<TriangleGrid> _armGrids;
@@ -621,9 +659,8 @@ public sealed class ContactIndex
     TriangleSoup? DepSoup(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
         if (_depSoups.TryGetValue((key, snapIndex, baseKey), out var so)) return so;
-        var geom = GeomOf(baseKey);
         TriangleSoup? soup = null;
-        if (geom is { CanDepend: true })
+        if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
             soup = SpatialOverlap.TransformSoup(geom.DepSoup, s.Pos, s.Rot, s.Scale);
         return _depSoups[(key, snapIndex, baseKey)] = soup;
     }
@@ -703,7 +740,7 @@ public sealed class ContactIndex
             if (!armEn.Enabled) { skips.HostRuntimeDisabled++; if (tw) Te(key, MH, TraceOutcome.SetAside, "RuntimeDisabledInArm"); continue; }   // it did not exist before either
             var box = WorldBox(prevBase, prev);
             if (box.IsEmpty) { skips.HostNoGeometry++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "NoGeometry"); continue; }
-            if (GeomOf(prevBase) is not { CanHost: true }) { skips.HostNoCollision++; if (tw) Te(key, MH, TraceOutcome.SetAside, "NoSolidCollision"); continue; }
+            if (Summary(prevBase) is not { CanHost: true }) { skips.HostNoCollision++; if (tw) Te(key, MH, TraceOutcome.SetAside, "NoSolidCollision"); continue; }
             float dim = MaxDim(box);
             if (dim > MaxHostDim) { skips.HostVolume++; if (tw) Te(key, MH, TraceOutcome.SetAside, "VolumeScale", values: Tv("maxDim", dim, "limit", MaxHostDim)); continue; }
             if (dim < MinHostDim) { skips.HostTooSmall++; if (tw) Te(key, MH, TraceOutcome.SetAside, "TooSmallToHost", values: Tv("maxDim", dim, "limit", MinHostDim)); continue; }
@@ -721,8 +758,10 @@ public sealed class ContactIndex
     public BoxHash<(FormKey Key, int Snap)> DependentSnaps(ContactSkips skips)
     {
         var h = new BoxHash<(FormKey, int)>();
+        int seenRefs = 0;
         foreach (var (key, snaps) in Index.History.Refs)
         {
+            if (StageProbe is not null && ++seenRefs % 10_000 == 0) StageProbe("dependents hashing", seenRefs);
             // Trace: one role-level event per key, decided at the LAST snap (the snap the coverage counters count), with the
             // number of snaps hashed in the detail — the authoring arm may still judge an earlier one.
             bool tw = Tw(key);
@@ -757,14 +796,16 @@ public sealed class ContactIndex
     {
         var h = new BoxHash<FormKey>();
         const string W = TraceRole.WinnerArm;
+        int seenRefs = 0;
         foreach (var (key, snaps) in Index.History.Refs)
         {
+            if (StageProbe is not null && ++seenRefs % 10_000 == 0) StageProbe("winner arm hashing", seenRefs);
             bool tw = Tw(key);
             var s = snaps[^1];
             if (s.Deleted || Index.IsDeletedNow(key)) { if (tw) Te(key, W, TraceOutcome.Never, "DeletedNow"); continue; }
             if (inScope is not null && !inScope(s)) { if (tw) Te(key, W, TraceOutcome.Never, "OutOfScope"); continue; }
             var b = WinnerBase(key);
-            if (!IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) { if (tw) Te(key, W, TraceOutcome.Never, "NotPhysicalCanHost"); continue; }
+            if (!IsPhysicalType(b) || Summary(b) is not { CanHost: true }) { if (tw) Te(key, W, TraceOutcome.Never, "NotPhysicalCanHost"); continue; }
             var en = WinnerEnable(key);
             if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; if (tw) Te(key, W, TraceOutcome.Unjudgeable, "EnableChainUnresolved"); continue; }
             if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; if (tw) Te(key, W, TraceOutcome.SetAside, "RuntimeDisabled"); continue; }
@@ -805,7 +846,7 @@ public sealed class ContactIndex
             if (s.Deleted) { if (tw) Te(key, W, TraceOutcome.Never, "DeletedSnap", detail: Arm); continue; }
             if (inScope is not null && !inScope(s)) { if (tw) Te(key, W, TraceOutcome.Never, "OutOfScope", detail: Arm); continue; }
             var b = ArmBase(key, mover, closure);
-            if (b.IsNull || !IsPhysicalType(b) || GeomOf(b) is not { CanHost: true }) { if (tw) Te(key, W, TraceOutcome.Never, "NotPhysicalCanHost", detail: Arm); continue; }
+            if (b.IsNull || !IsPhysicalType(b) || Summary(b) is not { CanHost: true }) { if (tw) Te(key, W, TraceOutcome.Never, "NotPhysicalCanHost", detail: Arm); continue; }
             var en = ArmEnable(key, mover, closure);
             if (!en.Resolved) { if (skips is not null) skips.WinnerEnableUnresolved++; if (tw) Te(key, W, TraceOutcome.Unjudgeable, "EnableChainUnresolved", detail: Arm); continue; }
             if (!en.Enabled) { if (skips is not null) skips.WinnerRuntimeDisabled++; if (tw) Te(key, W, TraceOutcome.SetAside, "RuntimeDisabled", detail: Arm); continue; }
@@ -847,7 +888,7 @@ public sealed class ContactIndex
         neighboursTested = 0;
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
         if (soup is null) return null;
-        var depGeom = GeomOf(depBase)!;
+        var depGeom = Summary(depBase)!;
         ArmContact? best = null; float bestRank = 0f;          // the best contact that is not a pre-existing overlap, ranked by new depth
         ArmContact? bestPre = null;                            // the deepest pre-existing overlap
         List<(FormKey, float, float)>? deep = null;            // diagnostic: every neighbour deeper than ε and its authored depth
@@ -873,7 +914,7 @@ public sealed class ContactIndex
             if (!float.IsNaN(pd)) (deep ??= new()).Add((nKey, pen, pd));
             float rank = pen - pre;
             bool isPre = pre > 0f && rank <= Epsilon;
-            var hg = GeomOf(nBase)!;
+            var hg = Summary(nBase)!;
             float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : MaxDim(nBox);
             var arm = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap, PreexistingDepth = pre, PreexistingOnly = isPre };
             if (readCover && PlausibleShallowCover(depBox, grid, Epsilon, SupportCos))
@@ -962,7 +1003,7 @@ public sealed class ContactIndex
         if (soup is null || grid is null) return null;
         var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, hostKey, hostSnapIndex, hostBase, hostSnap);
         float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : float.NaN;
-        return new ArmContact(c, hostKey, GeomOf(depBase)!.DepSrc, GeomOf(hostBase)!.HostSrc, extent, RawDistance: c.Distance, RawAgainst: hostKey) { CoreGap = coreGap };
+        return new ArmContact(c, hostKey, Summary(depBase)!.DepSrc, Summary(hostBase)!.HostSrc, extent, RawDistance: c.Distance, RawAgainst: hostKey) { CoreGap = coreGap };
     }
 
     // ---- judge one host ------------------------------------------------------------------------------
@@ -1018,8 +1059,8 @@ public sealed class ContactIndex
             bool touched = Index.Touchers.TryGetValue(depKey, out var tl) && tl.Any(t => t == host.Mover || closure[t].Contains(host.Mover));
 
             var auth = PairContact(depKey, ai, depBase, depAuth, host.Key, hostPrevIndex, host.PrevBase, host.Previous);
-            var depGeom = GeomOf(depBase);
-            var hostGeom = GeomOf(host.PrevBase);
+            var depGeom = Summary(depBase);
+            var hostGeom = Summary(host.PrevBase);
             bool depHasGeom = depGeom is { CanDepend: true };
             bool hostHasGeom = hostGeom is { CanHost: true };
             var motion = MotionOf(depBase);
@@ -1058,7 +1099,7 @@ public sealed class ContactIndex
             TriangleSoup? depAuthSoup = null; bool depAuthBuilt = false;
             float Preexisting(FormKey nKey)
             {
-                if (!depAuthBuilt) { depAuthBuilt = true; depAuthSoup = depGeom is { CanDepend: true } ? SpatialOverlap.TransformSoup(depGeom.DepSoup, depAuth.Pos, depAuth.Rot, depAuth.Scale) : null; }
+                if (!depAuthBuilt) { depAuthBuilt = true; depAuthSoup = depGeom is { CanDepend: true } && GeomOf(depBase) is { } dg ? SpatialOverlap.TransformSoup(dg.DepSoup, depAuth.Pos, depAuth.Rot, depAuth.Scale) : null; }
                 if (depAuthSoup is null) return 0f;
                 var ns = Index.History.Of(nKey);
                 if (ns is null || ns.Count == 0) return 0f;
@@ -1091,11 +1132,11 @@ public sealed class ContactIndex
                 if (!en.Enabled) return Absent("authored_reference_runtime_absent");
                 var nBase = ArmBase(nKey, host.Mover, closure);
                 if (nBase.IsNull) return Unknown("authored_base_missing");
-                var geom = GeomOf(nBase);
+                var geom = Summary(nBase);
                 if (geom is null || !geom.HasGeometry) return Unknown("authored_host_geometry_missing");
                 if (!geom.CanHost) return Unknown("authored_host_surface_unavailable");
-                if (!depAuthBuilt) { depAuthBuilt = true; depAuthSoup = depGeom is { CanDepend: true }
-                    ? SpatialOverlap.TransformSoup(depGeom.DepSoup, depAuth.Pos, depAuth.Rot, depAuth.Scale) : null; }
+                if (!depAuthBuilt) { depAuthBuilt = true; depAuthSoup = depGeom is { CanDepend: true } && GeomOf(depBase) is { } dg
+                    ? SpatialOverlap.TransformSoup(dg.DepSoup, depAuth.Pos, depAuth.Rot, depAuth.Scale) : null; }
                 if (depAuthSoup is null) return Unknown("authored_dependent_geometry_missing");
                 var grid = ArmGrid(nKey, ni, nBase, nAuth);
                 if (grid is null) return Unknown("authored_host_grid_missing");

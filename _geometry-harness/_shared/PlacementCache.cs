@@ -15,10 +15,11 @@ public sealed class CacheBudget
     /// <summary>The automatic budget's share of the memory the runtime may use (physical, or the heap hard limit when one is set).</summary>
     public const double AutoFraction = 0.20;
 
-    /// <summary>The automatic budget's ceiling. Set from one case's measurements (2026-10-05, the lab whole order, radius off and
-    /// on): host-grid misses barely changed between 3.2 GiB and 13 GB, and a larger budget bought no measured speed but cost
-    /// memory. A case whose misses rise between 3.2 GiB and a larger budget would move it. An explicit budget may exceed it.</summary>
-    public const long AutoCeilingBytes = 4L << 30;
+    /// <summary>The automatic budget's ceiling: 1 GiB since 2026-10-14, when the budget began to hold contactprobe's decoded meshes as
+    /// well (4 GiB before). Set from one case's measurements (2026-10-05, the lab whole order): host-grid misses barely changed
+    /// between 1.72 GB and 13 GB (15,350 vs 15,314), and a larger budget bought no measured speed but cost memory. A case whose
+    /// misses rise between 1 GiB and a larger budget would move it. An explicit budget may exceed it.</summary>
+    public const long AutoCeilingBytes = 1L << 30;
 
     /// <summary>The automatic budget for a process allowed <paramref name="availableBytes"/>: <see cref="AutoFraction"/> of it, at most
     /// <see cref="AutoCeilingBytes"/>, never below <see cref="MinimumBytes"/>.</summary>
@@ -191,6 +192,8 @@ public sealed class CacheBudget
     public long Hits(string name) => _stats[_names.IndexOf(name)][0];
     public long Misses(string name) => _stats[_names.IndexOf(name)][1];
     public long Evictions(string name) => _stats[_names.IndexOf(name)][2];
+    /// <summary>Bytes each cache holds now, by name (the HC_MEMSTAGES diagnostic).</summary>
+    public IEnumerable<(string Name, long Bytes)> BytesNow() => _names.Select((n, i) => (n, _stats[i][3]));
 
     /// <summary>One line: the budget, the pool's peak, and per cache hits / misses / evictions / peak bytes.</summary>
     public string Report()

@@ -86,13 +86,13 @@ static class CacheBudgetProof
               tiny.Budget.Report());
 
         // T4: the automatic budget, the parser, and the fit check.
-        Check("cache-budget T4e: auto never exceeds the 4 GiB ceiling - 20 % of 64 GiB would be 12.8 GiB",
-              CacheBudget.Auto(64 * gib) == 4 * gib && CacheBudget.AutoCeilingBytes == 4 * gib && CacheBudget.Auto(20 * gib) == 4 * gib,
+        Check("cache-budget T4e (CM-6): auto never exceeds the 1 GiB ceiling - 20 % of 64 GiB would be 12.8 GiB, of 20 GiB 4 GiB",
+              CacheBudget.Auto(64 * gib) == gib && CacheBudget.AutoCeilingBytes == gib && CacheBudget.Auto(20 * gib) == gib,
               $"64 GiB -> {CacheBudget.Auto(64 * gib)}, 20 GiB -> {CacheBudget.Auto(20 * gib)}");
         Check("cache-budget T4a: auto = 20 % of what the runtime may use, never below the 64 MiB minimum",
-              CacheBudget.Auto(16 * gib) == (long)(16 * gib * 0.20) && CacheBudget.Auto(8 * gib) == (long)(8 * gib * 0.20)
+              CacheBudget.Auto(4 * gib) == (long)(4 * gib * 0.20) && CacheBudget.Auto(2 * gib) == (long)(2 * gib * 0.20)
            && CacheBudget.Auto(1L << 20) == CacheBudget.MinimumBytes && CacheBudget.MinimumBytes == 64L << 20,
-              $"16 GiB -> {CacheBudget.Auto(16 * gib)}, 8 GiB -> {CacheBudget.Auto(8 * gib)}, 1 MiB -> {CacheBudget.Auto(1L << 20)}");
+              $"4 GiB -> {CacheBudget.Auto(4 * gib)}, 2 GiB -> {CacheBudget.Auto(2 * gib)}, 1 MiB -> {CacheBudget.Auto(1L << 20)}");
         Check("cache-budget T4d: the free-memory term is 40 % of (free now - live), never below the minimum",
               CacheBudget.AutoFromFree(30 * gib, 2 * gib) == (long)(28 * gib * 0.40) && CacheBudget.AutoFromFree(2 * gib, 2 * gib) == CacheBudget.MinimumBytes,
               $"30/2 GiB -> {CacheBudget.AutoFromFree(30 * gib, 2 * gib)}, 2/2 GiB -> {CacheBudget.AutoFromFree(2 * gib, 2 * gib)}");
@@ -108,20 +108,20 @@ static class CacheBudgetProof
 
         // T5: literal known readings through the pure selector AND the constructor/refresh seams.
         var freeWins = CacheBudget.SelectAutomatic(64 * gib, 3 * gib, 2 * gib);
-        var runtimeWins = CacheBudget.SelectAutomatic(8 * gib, 30 * gib, 2 * gib);
+        var runtimeWins = CacheBudget.SelectAutomatic(4 * gib, 30 * gib, 2 * gib);
         var ceilingWins = CacheBudget.SelectAutomatic(64 * gib, 30 * gib, 2 * gib);
         var floorWins = CacheBudget.SelectAutomatic(64 * gib, 1L << 20, 2L << 20);
-        var unavailable = CacheBudget.SelectAutomatic(8 * gib, null, 2 * gib);
-        long freeExpected = (long)(gib * 0.40), runtimeExpected = (long)(8 * gib * 0.20);
+        var unavailable = CacheBudget.SelectAutomatic(4 * gib, null, 2 * gib);
+        long freeExpected = (long)(gib * 0.40), runtimeExpected = (long)(4 * gib * 0.20);
         Check("cache-budget T5a: the free term wins with literal runtime 64/free 3/managed 2 GiB readings",
               freeWins.SelectedBytes == freeExpected && freeWins.WinningTerm == "free-now-minus-managed"
            && freeWins.RuntimeAvailableBytes == 64 * gib && freeWins.AvailablePhysicalBytes == 3 * gib
            && freeWins.CurrentManagedBytes == 2 * gib && freeWins.ManagedMeasurement == "current uncollected managed bytes",
               freeWins.Describe());
-        Check("cache-budget T5b: the runtime term wins with runtime 8/free 30/managed 2 GiB readings",
+        Check("cache-budget T5b: the runtime term wins with runtime 4/free 30/managed 2 GiB readings",
               runtimeWins.SelectedBytes == runtimeExpected && runtimeWins.WinningTerm == "runtime", runtimeWins.Describe());
-        Check("cache-budget T5c: abundant runtime/free memory selects the existing 4 GiB ceiling",
-              ceilingWins.SelectedBytes == 4 * gib && ceilingWins.WinningTerm == "ceiling", ceilingWins.Describe());
+        Check("cache-budget T5c: abundant runtime/free memory selects the 1 GiB ceiling",
+              ceilingWins.SelectedBytes == gib && ceilingWins.WinningTerm == "ceiling", ceilingWins.Describe());
         Check("cache-budget T5d: free below managed selects the existing 64 MiB floor",
               floorWins.SelectedBytes == 64L << 20 && floorWins.WinningTerm == "free-now-minus-managed", floorWins.Describe());
         Check("cache-budget T5e: an unreadable physical reading selects the runtime term and names the missing free term",

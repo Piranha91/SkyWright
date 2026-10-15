@@ -44,6 +44,8 @@ public sealed class EnableArms
     }
 
     public void Clear() { _winner.Clear(); _winnerBaseline.Clear(); _arm.Clear(); }
+    /// <summary>Entries held across every memo (the HC_MEMSTAGES diagnostic).</summary>
+    public long MemoEntries => _winner.Count + _winnerBaseline.Count + _arm.Values.Sum(d => (long)d.Count);
 
     // FORCED ENABLE (G1 build list, Stage B; `--force-enable`): an initially-disabled reference with no enable parent and
     // no enable children — a singleton some quest or script enables at runtime, which no switch census can source — read
