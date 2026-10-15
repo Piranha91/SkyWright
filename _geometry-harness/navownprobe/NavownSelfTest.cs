@@ -216,6 +216,56 @@ static class NavownSelfTest
             t.Check("PD-N3 loser == winner: the loser's own version wins: Gone", same.State == PhysicalState.Gone, same.Detail);
             t.Check("PD-N3 a version's geometry unread: Unmeasured", missing.State == PhysicalState.Unmeasured, missing.Detail);
             t.Check("PD-N3 under NvFix, which restores the island: Gone", fixedMod.State == PhysicalState.Gone, fixedMod.Detail);
+
+            // The dangling-link state for the first n plugins, noted in record order as the main walk notes it.
+            DanglingLinks Links(int n)
+            {
+                var l = new DanglingLinks();
+                for (int i = 0; i < n; i++)
+                    foreach (var rec in nvMods[i].EnumerateMajorRecords())
+                        if (rec is Mutagen.Bethesda.Skyrim.INavigationMeshGetter nm) l.NoteNavmesh(nm);
+                        else if (rec is Mutagen.Bethesda.Skyrim.IPlacedObjectGetter po) l.NotePlaced(po, i);
+                return l;
+            }
+            string Id(FormKey k) => k == NavownFixture.NE ? "NE" : k == NavownFixture.NE2 ? "NE2" : k == NavownFixture.ND ? "ND" : k == NavownFixture.NG ? "NG"
+                                  : k == NavownFixture.NX ? "NX" : k == NavownFixture.DR3 ? "DR3" : k == NavownFixture.DR4 ? "DR4" : k == NavownFixture.VF ? "VF" : k.ToString();
+            int Owner(NavVersions v, FormKey nav) => v.Providers.TryGetValue(nav, out var pr) && pr.Count > 0 ? pr[^1] : -1;
+            var l6 = Links(6);
+            var f6 = l6.Find(k => Owner(o6.Versions, k), _ => "IC", reportDoorIdx: false);
+            var kinds = f6.Rows.Select(r => $"{r.Kind} {Id(r.Rec)}").OrderBy(x => x).ToList();
+
+            // PD-N4: the walk, at the triangle count.
+            t.Check("PD-N4 dangles: DOOR-TRI ND, DOOR-GONE NG, DOOR-NAV DR3, EDGE-IDX NE and VF (index = count), EDGE-NAV NX; NE2 (count - 1) is not one",
+                    kinds.SequenceEqual(new[] { "DOOR-GONE NG", "DOOR-NAV DR3", "DOOR-TRI ND", "EDGE-IDX NE", "EDGE-IDX VF", "EDGE-NAV NX" }),
+                    string.Join(", ", kinds));
+            var f6i = l6.Find(k => Owner(o6.Versions, k), _ => "IC", reportDoorIdx: true);
+            t.Check("PD-N4 DOOR-IDX is retired: counted once, listed only with --door-idx",
+                    f6.DoorIdxSuppressed == 1 && !f6.Rows.Any(r => r.Kind == "DOOR-IDX")
+                    && f6i.Rows.Count(r => r.Kind == "DOOR-IDX" && r.Rec == NavownFixture.DR4) == 1,
+                    $"suppressed {f6.DoorIdxSuppressed}; with the flag {f6i.Rows.Count(r => r.Kind == "DOOR-IDX")}");
+
+            // PD-N5: the predicate, re-asked of a winning state.
+            var l7 = Links(7);
+            var neBase = l6.Predicate("EDGE-IDX", NavownFixture.NE, NavownFixture.NT);
+            var ne2 = l6.Predicate("EDGE-IDX", NavownFixture.NE2, NavownFixture.NT);
+            var neFix = l7.Predicate("EDGE-IDX", NavownFixture.NE, NavownFixture.NT);
+            var ndBase = l6.Predicate("DOOR-TRI", NavownFixture.ND, NavownFixture.DR1);
+            var ndFix = l7.Predicate("DOOR-TRI", NavownFixture.ND, NavownFixture.DR1);
+            t.Check("PD-N5 EDGE-IDX at exactly the target's count: Holds", neBase.State == PhysicalState.Holds, neBase.Detail);
+            t.Check("PD-N5 EDGE-IDX at count - 1: Gone", ne2.State == PhysicalState.Gone, ne2.Detail);
+            t.Check("PD-N5 EDGE-IDX under NvFix, which gives NT a third triangle: Gone", neFix.State == PhysicalState.Gone, neFix.Detail);
+            t.Check("PD-N5 DOOR-TRI at exactly its own count: Holds, with and without NvFix",
+                    ndBase.State == PhysicalState.Holds && ndFix.State == PhysicalState.Holds, $"{ndBase.Detail} / {ndFix.Detail}");
+
+            // PD-N6: a dangle with only vanilla-named plugins on both ends is the floor, withheld; the rest are findings.
+            bool Touched(FormKey rec, string role) => DanglingLinks.ModTouched(
+                role == "navmesh" ? o6.Versions.Providers.GetValueOrDefault(rec) : l6.RefOverriders.GetValueOrDefault(rec),
+                i => ClobberFindings.Vanilla.Contains(o6.Names[i]));
+            var emitted = f6.Rows.Where(r => DanglingLinks.IsFinding(Touched(r.Rec, r.RecRole), Touched(r.Other, r.OtherRole)))
+                                 .Select(r => $"{r.Kind} {Id(r.Rec)}").OrderBy(x => x).ToList();
+            t.Check("PD-N6 emitted dangles: all but VF->VT (Dawnguard.esm on both ends)",
+                    emitted.SequenceEqual(new[] { "DOOR-GONE NG", "DOOR-NAV DR3", "DOOR-TRI ND", "EDGE-IDX NE", "EDGE-NAV NX" }),
+                    string.Join(", ", emitted));
         }
         finally { foreach (var mo in nvMods) (mo as IDisposable)?.Dispose(); }
     });
