@@ -3683,6 +3683,8 @@ MotionProof.RunPairMeshDefects(Check);
 MotionProof.RunPlacedCollapse(Check);
 // Usage-week M4 (2026-10-14): a model-less actor's body in box contact; EditorMarker shapes are not drawn (red until implemented).
 MotionProof.RunM4CannotTell(Check);
+// Motion rigs (2026-10-14): the motion reader's shapes and the swept never-tests answer to ShapeDrawing (MR-1..MR-9).
+MotionProof.RunMotionRigs(Check);
 // Lane B item 2 (2026-10-13): the actual-shape relation skips zero-area-in-model triangles and uses the pair frame (red until implemented).
 MotionProof.RunActualShape(Check);
 // Day lane 1 item 2 (2026-10-13): contact evidence takes the relation's zero-area skip and pair frame (red until implemented).
