@@ -7,9 +7,13 @@
 
 > **{{ pred.verdict }}**
 
-{% for g in pred["items"] %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:1] %} [Full evidence](evidence-index.md#{{ fid }}).{% endfor %}
+{% for g in pred["items"] if g.get("shownAs") != "alone" %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:1] %} [Full evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
-{% endfor %}
+{% endfor %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}**{{ pred.singleModHeading }}**
+
+{% for g in alone %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:1] %} [Full evidence](evidence-index.md#{{ fid }}).{% endfor %}
+
+{% endfor %}{% endif %}
 {% if pred.get("siblingSource") %}
 
 {{ pred.siblingSource }}
@@ -71,8 +75,11 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {% else %}Scope:
 
 ```text
-{{ (a.locationPluginScope.locations|join("; ") or "no CELL or worldspace location was supplied")|wordwrap(90, break_long_words=false, break_on_hyphens=false) }}
+{{ ((a.locationPluginScope.get("shown", a.locationPluginScope.locations))|join("; ") or "no CELL or worldspace location was supplied")|wordwrap(90, break_long_words=false, break_on_hyphens=false) }}
 ```
+{% if a.locationPluginScope.get("moreLine") %}
+{{ a.locationPluginScope.moreLine }} [Evidence index](evidence-index.md#scope).
+{% endif %}
 {% endif %}
 Coverage: {{ "all contributors to the listed locations identified" if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}
 
@@ -109,6 +116,9 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 {% endif %}{% endfor %}{% endfor %}{% endfor %}{% endfor %}
 {% if p.reader.get("detailAsideLine") %}
 {{ p.reader.detailAsideLine }} [Set aside from this list](evidence-index.md#detail-set-aside).
+{% endif %}
+{% if p.reader.get("detailSingleModLine") %}
+{{ p.reader.detailSingleModLine }} [Set aside from this list](evidence-index.md#detail-set-aside).
 {% endif %}
 
 ## {{ p.reader.sectionHeadings.changes }}

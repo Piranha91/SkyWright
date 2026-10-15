@@ -6522,6 +6522,241 @@ def case_47(tmp):
 CASES["case-47"] = case_47
 
 
+def record_transcript(folder: Path, plan: dict, arm: dict, formid: str = "000801:Skyrim.esm"):
+    """A record capture in the import shape: one batch, three of the arm's plugins read for one record, the second
+    plugin's change to LocationReference lost to the third's. Returns (request, response, the three plugin names)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    three = arm["requested"]["plugins"][:3]
+    vals = ["02008A:Skyrim.esm", "0A0001:Skyrim.esm", "0B0001:Skyrim.esm"]
+    req = [{"batchMarker": "rec-s00", "sourceFile": "raw/rec-s00.request.jsonl", "sourceSha256": "0" * 64},
+           initialize(f"evalrun:{plan['planId']}:{arm['armId']}")]
+    resp = [{"batchMarker": "rec-s00", "sourceFile": "raw/rec-s00.response.jsonl", "sourceSha256": "0" * 64},
+            {"jsonrpc": "2.0", "id": 0, "result": {"serverInfo": {"name": "houseCARL"}}}]
+    for i, (pl, v) in enumerate(zip(three, vals), start=1):
+        req.append({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {
+            "name": "housecarl_read_plugin_file",
+            "arguments": {"plugin": pl["path"], "formid": formid, "format": "text", "depth": 3}}})
+        text = (f"read_plugin_file\nfile: {pl['path']}\ntype=PlacedObject  formid={formid}  editorid=<none>\n"
+                f"fields (raw, from {pl['name']}):\n  FormKey = {formid}\n  FormVersion = 44\n"
+                f"  LocationReference = {v}\n")
+        resp.append({"jsonrpc": "2.0", "id": i, "result": {"content": [{"type": "text", "text": text}]}})
+    request, response = folder / "request.jsonl", folder / "response.jsonl"
+    request.write_text("\n".join(json.dumps(x) for x in req) + "\n", encoding="utf-8")
+    response.write_text("\n".join(json.dumps(x) for x in resp) + "\n", encoding="utf-8")
+    return request, response, [x["name"] for x in three]
+
+
+def record_import_doc(folder: Path, plan: dict, cid: str, arm: dict, rows: Path | None = None):
+    request, response, names = record_transcript(folder, plan, arm)
+    req = arm["requested"]
+    cfg = {"schemaVersion": 1, "source": f"candidate:{arm['candidateFile']}",
+           "plugins": [{"name": p["name"], "path": p["path"], "sha256": p["sha256"]} for p in req["plugins"]],
+           "providers": req["providers"], "overlays": req["overlays"],
+           "population": req["population"], "state": "baseline"}
+    cfg["fingerprint"] = import_fingerprint(cfg)
+    outs = [("request", request), ("response", response)] + ([("rows", rows)] if rows else [])
+    doc = {"schemaVersion": 1, "planId": plan["planId"], "checkId": cid, "armId": arm["armId"],
+           "state": "baseline", "origin": "fresh", "capturedUtc": datetime_now_z(),
+           "tool": {"name": "fixture record capture", "version": "1"}, "configuration": cfg,
+           "result": {"detector": "finding", "findings": 1,
+                      "coverage": [{"Population": "contested PlacedObject records", "Judged": 1, "Unjudgeable": {}}]},
+           "outputs": [{"role": role, "path": q.name, "sha256": sha_of(q)} for role, q in outs]}
+    manifest = folder / "import.json"
+    manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return manifest, names
+
+
+def recorded_bundle(tmp: Path, tag: str):
+    """case-01's evaluation with one record import credited on its first mcp-only arm, finalized and bundled."""
+    case = "case-01-geometry-and-quest"
+    run = tmp / f"{tag}-run"
+    expect(do_plan(run, case).returncode, 0, f"{tag}: plan exit", "setup")
+    _, _, _, scen = case_paths(case)
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{tag}: accounting run", "setup")
+    plan = load(run / "plan.json") or {}
+    checks = plan_checks(plan)
+    cid = next((c for c in ("records.contested-fields", "records.cell-attributes", "loadability.dangling-references")
+                if ((checks.get(c) or {}).get("adapter") or {}).get("kind") == "mcp-only"), None)
+    check(cid is not None, f"{tag}: fixture registry has an mcp-only record check")
+    arm_ids = [x.get("armId") for x in ((checks.get(cid) or {}).get("arms") or []) if x.get("status") == "mcp-only"]
+    arm = next(a for a in plan.get("arms") or [] if a.get("armId") in arm_ids)
+    m, names = record_import_doc(tmp / f"{tag}-capture", plan, cid, arm)
+    expect(evalrun(["import-results", "--run", run, "--file", m]).returncode, 0, f"{tag}: record import", "setup")
+    expect(evalrun(["finalize", "--run", run]).returncode, 0, f"{tag}: finalize", "setup")
+    bundle = tmp / f"{tag}-bundle"
+    expect(evalrun(["bundle", "--run", run, "--out", bundle]).returncode, 0, f"{tag}: bundle", "setup")
+    return bundle, plan, cid, arm, names
+
+
+def manifest_rows(bundle: Path, kind: str):
+    return [e for e in (load(bundle / "manifest.json") or {}).get("evidence") or []
+            if e.get("kind") == "enrichment" and e.get("enrichment") == kind]
+
+
+def rehash_manifest_row(bundle: Path, rel: str) -> None:
+    m = load(bundle / "manifest.json")
+    for e in m.get("evidence") or []:
+        if e.get("path") == rel:
+            e["sha256"] = sha_of(bundle / rel)
+            e["bytes"] = (bundle / rel).stat().st_size
+    (bundle / "manifest.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
+
+
+def case_61(tmp):
+    """C1 (4.24 phase 1): `enrich --kind record-rows` derives rows from the bundle's own import transcripts, every row
+    citing the bytes it came from; it changes no disposition, claim or count, and verify-bundle checks all of that."""
+    case = "case-61-enrich-record-rows"
+    bundle, plan, cid, arm, names = recorded_bundle(tmp, case)
+    disp_before = (bundle / "disposition.json").read_bytes()
+    b1 = tmp / f"{case}-b1"
+    shutil.copytree(bundle, b1)
+    r = evalrun(["enrich", "--bundle", b1, "--kind", "record-rows"])
+    expect(r.returncode, 0, f"{case}: enrich exit", "C1")
+    rows = [e for e in manifest_rows(b1, "record-rows") if e.get("checkId") == cid and e.get("armId") == arm["armId"]]
+    expect(len(rows), 1, f"{case}: one enrichment row for the imported check and arm", "C1")
+    for e in rows:
+        src = e.get("derivedFrom") or []
+        check(bool(src) and all((b1 / d["path"]).is_file() and sha_of(b1 / d["path"]) == d.get("sha256") for d in src),
+              f"{case}: every source the enrichment cites is a bundle file with that sha256 ({src})")
+        emit = load(b1 / e["path"]) or {}
+        lost = [c for c in emit.get("Conflicts") or [] if c.get("Kind") == "LOST-EDIT"]
+        expect([(c.get("A"), c.get("B"), c.get("Field")) for c in lost], [(names[1], names[2], "LocationReference")],
+               f"{case}: the derived row", "C1")
+    check((b1 / "disposition.json").read_bytes() == disp_before, f"{case}: the disposition is byte for byte unchanged")
+    expect(evalrun(["verify-bundle", b1]).returncode, 0, f"{case}: the enriched copy verifies", "C1")
+    again = evalrun(["enrich", "--bundle", b1, "--kind", "record-rows"])
+    expect(again.returncode, 2, f"{case}: a second enrichment of the same kind is refused", "C1")
+    check("already" in again.stderr and "record-rows" in again.stderr,
+          f"{case}: the refusal says the bundle is already enriched ({again.stderr.strip()[-160:]!r})")
+    if not rows:
+        check(False, f"{case}: no enrichment row to tamper with, so the three verification arms did not run")
+        return
+    rel = rows[0]["path"]
+    # a changed byte
+    b2 = tmp / f"{case}-b2"
+    shutil.copytree(b1, b2)
+    (b2 / rel).write_bytes((b2 / rel).read_bytes() + b" ")
+    expect(evalrun(["verify-bundle", b2]).returncode, 3, f"{case}: a changed enrichment byte fails verification", "C1")
+    # a row without its source, re-hashed so only the missing source can be what verify refuses
+    b3 = tmp / f"{case}-b3"
+    shutil.copytree(b1, b3)
+    emit = load(b3 / rel)
+    emit.pop("derivedFrom", None)
+    for c in emit.get("Conflicts") or []:
+        for n in c.get("Necessary") or []:
+            n.pop("Reads", None)
+    (b3 / rel).write_text(json.dumps(emit), encoding="utf-8")
+    rehash_manifest_row(b3, rel)
+    v3 = evalrun(["verify-bundle", b3])
+    expect(v3.returncode, 3, f"{case}: an enrichment row without its source fails verification", "C1")
+    # a count changed after enrichment: the disposition no longer equals the one the enrichment was derived beside
+    b4 = tmp / f"{case}-b4"
+    shutil.copytree(b1, b4)
+    d = load(b4 / "disposition.json")
+    for f in (d.get("evaluation") or {}).get("findings") or []:
+        if f.get("checkId") == cid:
+            f["findings"] = int(f.get("findings") or 0) + 5
+    (b4 / "disposition.json").write_text(json.dumps(d, indent=2), encoding="utf-8")
+    rehash_manifest_row(b4, "disposition.json")
+    expect(evalrun(["verify-bundle", b4]).returncode, 3,
+           f"{case}: a count changed beside an enrichment fails verification", "C1")
+
+
+def case_63(tmp):
+    """C1 (4.24 phase 1): `enrich --kind names` reads only plugin files whose bytes equal the bundle's recorded hash,
+    refusing by name otherwise, and records the source of every name (a stand-in reader answers the record reads)."""
+    case = "case-63-enrich-names"
+    bundle, plan, cid, arm, names = recorded_bundle(tmp, case)
+    fake = FIXT / "fake_records_mcp.py"
+    reader_cmd = f"{sys.executable} {fake}"
+    b1 = tmp / f"{case}-b1"
+    shutil.copytree(bundle, b1)
+    target_name = (plan.get("targets") or [{}])[0].get("name")
+    r = evalrun(["enrich", "--bundle", b1, "--kind", "names", "--reader-cmd", reader_cmd,
+                 "--mod-name", f"{target_name}=Declared Name"])
+    expect(r.returncode, 0, f"{case}: names enrich exit ({r.stderr.strip()[-200:]})", "C1")
+    row = next(iter(manifest_rows(b1, "names")), None)
+    check(row is not None, f"{case}: a names enrichment row is in the manifest")
+    doc = load(b1 / row["path"]) if row else {}
+    mods = (doc or {}).get("mods") or {}
+    expect((mods.get(target_name) or {}).get("source"), "declared", f"{case}: a declared mod name says so", "Q6")
+    check(all((m or {}).get("source") in ("declared", "nexus-catalogue", "plugin-name") for m in mods.values()),
+          f"{case}: every mod name has an offline source ({mods})")
+    src = (doc or {}).get("derivedFrom") or []
+    check(bool(src) and all(d.get("sha256") for d in src), f"{case}: every plugin read is cited with its sha256")
+    capture = [e for e in (load(b1 / "manifest.json") or {}).get("evidence") or []
+               if str(e.get("path") or "").startswith("enrichment/names/") and e.get("path") != (row or {}).get("path")]
+    check(bool(capture), f"{case}: the record reads' request and response travel with the names")
+    expect(evalrun(["verify-bundle", b1]).returncode, 0, f"{case}: the enriched copy verifies", "C1")
+    # a plugin whose bytes on disk differ from the recorded hash: refused before any read, naming the plugin
+    # an evaluated mod's file: the names enrichment always reads the evaluated mods
+    target = next(Path(p["path"]) for p in arm["requested"]["plugins"]
+                  if p.get("name") == target_name and p.get("path") and Path(p["path"]).is_file())
+    original = target.read_bytes()
+    b2 = tmp / f"{case}-b2"
+    shutil.copytree(bundle, b2)
+    try:
+        target.write_bytes(original + b"\0")
+        r2 = evalrun(["enrich", "--bundle", b2, "--kind", "names", "--reader-cmd", reader_cmd])
+        expect(r2.returncode, 2, f"{case}: a plugin with other bytes is refused", "C1")
+        check(target.name in r2.stderr, f"{case}: the refusal names the plugin ({r2.stderr.strip()[-200:]!r})")
+        check(not manifest_rows(b2, "names"), f"{case}: nothing was written on refusal")
+    finally:
+        target.write_bytes(original)
+    check(sha_of(target) == hashlib.sha256(original).hexdigest(), f"{case}: the plugin was restored by content")
+
+
+def case_65(tmp):
+    """4.24 phase 1: an import may carry a third output, `rows`, in the conflict-file shape; rows naming a plugin that
+    is not in the arm are refused; an accepted rows output travels in the bundle."""
+    case = "case-65-import-rows-output"
+    c = "case-01-geometry-and-quest"
+    run = tmp / f"{case}-run"
+    expect(do_plan(run, c).returncode, 0, f"{case}: plan exit", "setup")
+    _, _, _, scen = case_paths(c)
+    expect(evalrun(["run", "--run", run], scen).returncode, 0, f"{case}: accounting run", "setup")
+    plan = load(run / "plan.json") or {}
+    checks = plan_checks(plan)
+    cid = next((x for x in ("records.contested-fields", "records.cell-attributes", "loadability.dangling-references")
+                if ((checks.get(x) or {}).get("adapter") or {}).get("kind") == "mcp-only"), None)
+    arm_ids = [x.get("armId") for x in ((checks.get(cid) or {}).get("arms") or []) if x.get("status") == "mcp-only"]
+    arms = [a for a in plan.get("arms") or [] if a.get("armId") in arm_ids]
+    names = [p["name"] for p in arms[0]["requested"]["plugins"]]
+
+    def rows_file(folder, a, b):
+        folder.mkdir(parents=True, exist_ok=True)
+        f = folder / "rows.json"
+        f.write_text(json.dumps({"Population": "contested records", "State": "baseline",
+                                 "Coverage": [{"Population": "contested records", "Judged": 1, "Unjudgeable": {}}],
+                                 "Conflicts": [{"Kind": "LOST-EDIT", "A": a, "B": b, "Field": "LocationReference",
+                                                "Summary": "x", "Necessary": [{"FormKey": "000801:Skyrim.esm"}]}]}),
+                     encoding="utf-8")
+        return f
+
+    bad_dir = tmp / f"{case}-bad"
+    bad, _ = record_import_doc(bad_dir, plan, cid, arms[0], rows=rows_file(bad_dir, names[1], "NotInTheArm.esp"))
+    rb = evalrun(["import-results", "--run", run, "--file", bad])
+    expect(rb.returncode, 2, f"{case}: rows naming a plugin outside the arm are refused", "§4.8 rows")
+    check("NotInTheArm.esp" in rb.stderr, f"{case}: the refusal names the plugin ({rb.stderr.strip()[-200:]!r})")
+    good_dir = tmp / f"{case}-good"
+    good, _ = record_import_doc(good_dir, plan, cid, arms[0], rows=rows_file(good_dir, names[1], names[2]))
+    expect(evalrun(["import-results", "--run", run, "--file", good]).returncode, 0,
+           f"{case}: an import with a rows output is accepted", "§4.8 rows")
+    rc = load(run / "receipts" / f"{cid}__{arms[0]['armId']}.json") or {}
+    expect(len(rc.get("outputs") or []), 4, f"{case}: the manifest, request, response and rows are retained", "§4.8")
+    expect(evalrun(["finalize", "--run", run]).returncode, 0, f"{case}: finalize", "§4.8")
+    bundle = tmp / f"{case}-bundle"
+    expect(evalrun(["bundle", "--run", run, "--out", bundle]).returncode, 0, f"{case}: bundle", "§4.8")
+    check(any(str(e.get("path") or "").endswith("rows.json") for e in (load(bundle / "manifest.json") or {})
+              .get("evidence") or []), f"{case}: the rows output is in the bundle")
+    expect(evalrun(["verify-bundle", bundle]).returncode, 0, f"{case}: verify-bundle", "§4.8")
+
+
+CASES["case-61"] = case_61
+CASES["case-63"] = case_63
+CASES["case-65"] = case_65
+
+
 def case_49(tmp):
     """Task 2026-10-14-discovery-hits-get-no-qualification-row. In-process through `run_derived`: every relevant
     hit in an accepted patchprobe / poolprobe / fomodprobe `--json` output becomes one qualification row under D-1's
