@@ -269,6 +269,14 @@ def validate(registry):
                 problems.append(f"{cid}: adapter.{field}, when present, must be the non-empty string "
                                 "the probe's emit actually carries")
 
+        # P25: a probe that can be scoped to the plan's population names the flag that takes the population file.
+        # Only ordersweep passes it, so the key means nothing on any other kind.
+        if "populationFlag" in adapter:
+            if kind != "ordersweep-probe":
+                problems.append(f"{cid}: adapter.populationFlag is passed only by the ordersweep adapter, not by kind {kind}")
+            elif adapter["populationFlag"] != "--population":
+                problems.append(f"{cid}: adapter.populationFlag must be \"--population\", the flag ordersweep passes")
+
         output = adapter.get("output")
         result = adapter.get("result")
         if kind in KINDS_WITHOUT_OUTPUT and output is not None:

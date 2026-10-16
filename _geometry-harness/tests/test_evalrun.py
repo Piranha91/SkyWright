@@ -7406,6 +7406,252 @@ def pin_standard_settings(tmp: Path) -> None:
     os.environ["HOUSECARL_EVAL_SETTINGS"] = str(f)
 
 
+
+# ------------------------------------------------------- the plan's population (P25): cases 412-416
+#
+# The plan names a population (the targets plus every plugin and mod folder its arms differ by) and the ordersweep
+# adapter passes it to the probes whose registry row declares `populationFlag`; the others run on the whole order. The
+# fake probes write what the real ones write for --population (`<population>+population:<sha12>`), so the receipts are
+# validated exactly as a real run's would be.
+
+P25_CASE = "case-01-geometry-and-quest"
+
+
+def _p25_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evalrun_p25", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _p25_cmd(log: Path) -> str:
+    """The command line a Runner job log records on its first line (`$ argv`)."""
+    if not log.exists():
+        return ""
+    first = log.read_text(encoding="utf-8", errors="replace").splitlines()[:1]
+    return first[0] if first else ""
+
+
+def _p25_plan_run(tmp: Path, name: str, candidates: Path | None = None, scenario: Path | None = None,
+                  run_it: bool = True, strip_population: bool = False):
+    d = GEN / "cases" / P25_CASE
+    run = tmp / name
+    scen = scenario or d / "scenario.json"
+    args = ["plan", "--registry", GEN / "registry" / "fixture-check-registry.json", "--scope", d / "scope.json",
+            "--candidates", candidates or d / "candidates", "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+    p = evalrun(args, scen, expect_exit=0)
+    if strip_population and (run / "plan.json").exists():
+        # A plan frozen by the controller before P25: no population block, no per-check population, no file.
+        m = _p25_module()
+        plan = load(run / "plan.json")
+        plan.pop("population", None)
+        for c in plan["checks"]:
+            (c.get("adapter") or {}).pop("population", None)
+        m.write_json(run / "plan.json", plan)
+        (run / "plan.sha256").write_text(m.sha256_file(run / "plan.json") + "\n", encoding="utf-8")
+        (run / "population.json").unlink(missing_ok=True)
+    r = evalrun(["run", "--run", run], scen) if run_it and p.returncode == 0 else None
+    return run, p, r
+
+
+def _p25_ordersweep(run: Path, out: Path, population: Path | None, scen: Path):
+    """ordersweep.py launched directly over the run's assembled candidates, reusing its first launch's cache."""
+    cdir = run / "candidates"
+    argv = [sys.executable, str(HARNESS / "ordersweep.py"), "--candidates", cdir, "--out", out,
+            "--probes", "contactprobe,navownprobe,overlapprobe", "--harness", REAL_HARNESS,
+            "--baseline", cdir / "candidate-00-baseline.json", "--max-candidates", "0",
+            "--reuse-cache", last_sweep(run) / "cache.json"]
+    if population is not None:
+        argv += ["--population", population, "--population-probes", "contactprobe,overlapprobe"]
+    for p in ("contactprobe", "navownprobe", "overlapprobe", "conflictdiff"):
+        if p != "conflictdiff":
+            argv += ["--probe-cmd", f"{p}=python {FIXT / 'fakeprobes' / p}.py"]
+    env = dict(os.environ, EVALRUN_FAKE_SCENARIO=str(scen))
+    r = subprocess.run([str(a) for a in argv], capture_output=True, text=True, env=env, timeout=300)
+    log = out / "cache-log.txt"
+    return r, (log.read_text(encoding="utf-8").splitlines() if log.exists() else [])
+
+
+def case_412(tmp):
+    """The adapter passes the population to the scoped probes only, and keys their reuse by the file's hash. Rejects: a
+    navown run handed --population; a scoped receipt reused after the population changed; an unscoped one invalidated."""
+    case = "case-412-population-adapter"
+    d = GEN / "cases" / P25_CASE
+    run, p, r = _p25_plan_run(tmp, case)
+    plan = load(run / "plan.json") or {}
+    pop = plan.get("population") or {}
+    check(pop.get("scoped") is True, f"{case}: the plan is scoped ({pop.get('reason')})")
+    pfile = run / "population.json"
+    sweep = last_sweep(run)
+    for probe, scoped in (("overlapprobe", True), ("contactprobe", True), ("navownprobe", False)):
+        for arm in ("baseline", "candidate-01-reorder", "candidate-01-reorder-reverse"):
+            cmd = _p25_cmd(sweep / "logs" / f"{probe}-{arm}.txt")
+            check(bool(cmd), f"{case}: {probe} {arm} ran ({sweep / 'logs'})")
+            if cmd:
+                check(("--population " + str(pfile)) in cmd if scoped else "--population" not in cmd,
+                      f"{case}: {probe} {arm} {'gets' if scoped else 'does not get'} --population ({cmd[-160:]})")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    for cid in ("geometry.object-overlap", "geometry.placement-contact", "geometry.navmesh-ownership"):
+        ent = [v for k, v in led.items() if k.startswith(cid + "__")]
+        check(ent and all(execution_of(e) == "completed" for e in ent),
+              f"{case}: every {cid} part is completed ({[execution_of(e) for e in ent]})")
+    # Reuse: the same population file reuses every probe; a changed one reuses only the unscoped probe.
+    same = tmp / f"{case}-same.json"
+    shutil.copyfile(pfile, same)
+    r1, lines1 = _p25_ordersweep(run, tmp / f"{case}-sweep-same", same, d / "scenario.json")
+    reused1 = sorted(ln.split()[1].rstrip(":") for ln in lines1 if ln.startswith("REUSED"))
+    expect(reused1, ["contactprobe-baseline", "navownprobe-baseline", "overlapprobe-baseline"],
+           f"{case}: the same population (by content) reuses every baseline probe", "P25")
+    changed = tmp / f"{case}-changed.json"
+    changed.write_text(pfile.read_text(encoding="utf-8").replace('"schema": 1', '"schema": 1, "note": "changed"'),
+                       encoding="utf-8")
+    r2, lines2 = _p25_ordersweep(run, tmp / f"{case}-sweep-changed", changed, d / "scenario.json")
+    reused2 = sorted(ln.split()[1].rstrip(":") for ln in lines2 if ln.startswith("REUSED"))
+    miss2 = sorted(ln.split()[1].rstrip(":") for ln in lines2 if ln.startswith("MISS"))
+    expect((reused2, miss2), (["navownprobe-baseline"], ["contactprobe-baseline", "overlapprobe-baseline"]),
+           f"{case}: a changed population re-measures the scoped probes and reuses the unscoped one", "P25")
+    bad = subprocess.run([sys.executable, str(HARNESS / "ordersweep.py"), "--candidates", run / "candidates",
+                          "--out", tmp / f"{case}-bad", "--population-probes", "overlapprobe"],
+                         capture_output=True, text=True, timeout=60)
+    check(bad.returncode != 0 and "--population-probes needs --population" in (bad.stderr + bad.stdout),
+          f"{case}: --population-probes without a file is refused ({bad.returncode})")
+
+
+def case_413(tmp):
+    """The plan's population: targets plus the arms' delta, frozen by hash; the unscoped fallback names its reason.
+    Rejects: a delta computed from one arm; a population file whose bytes are not the plan's; a silent narrowing when
+    a delta mod folder cannot be named."""
+    case = "case-413-population-plan"
+    m = _p25_module()
+    expect(m.arm_delta([["A", "B", "C"], ["A", "C", "B"]]), ["B", "C"], f"{case}: a reorder's delta is the swapped pair")
+    expect(m.arm_delta([["A", "B"], ["A", "B", "X"], ["a", "b"]]), ["X"], f"{case}: presence, case-insensitive")
+    expect(m.arm_delta([["A", "B", "C", "D"], ["A", "B", "C", "D"]]), [], f"{case}: identical arms differ by nothing")
+    run, p, _ = _p25_plan_run(tmp, case, run_it=False)
+    plan = load(run / "plan.json") or {}
+    pop = plan.get("population") or {}
+    expect(pop.get("plugins"), ["FixtureBase.esp", "FixtureTarget.esp"], f"{case}: the reorder's two plugins are the population", "P25 D1")
+    expect(pop.get("targets"), ["FixtureTarget.esp"], f"{case}: the target is recorded", "P25 D1")
+    pf = run / "population.json"
+    check(pf.exists() and hashlib.sha256(pf.read_bytes()).hexdigest() == pop.get("sha256"),
+          f"{case}: population.json is frozen with the plan's sha256")
+    ident = pop.get("identity") or ""
+    expect(ident, "load-time+population:" + str(pop.get("sha256"))[:12], f"{case}: the identity a scoped emit carries", "P25 D3")
+    for c in plan.get("checks", []):
+        if (c.get("adapter") or {}).get("kind") == "ordersweep-probe":
+            want = ident if c["adapter"].get("exe") in ("overlapprobe", "contactprobe") else None
+            expect(c["adapter"].get("population"), want, f"{case}: {c['checkId']} expected population", "P25 D3")
+    # Fallback: arms that differ by an asset provider, planned without --instance, cannot name the folder.
+    cdir = tmp / f"{case}-mods-candidates"
+    shutil.copytree(GEN / "cases" / P25_CASE / "candidates", cdir)
+    for f, mods in (("candidate-00-baseline.json", ["fixture-mods"]), ("candidate-01-reorder.json", ["fixture-mods", "ExtraMeshes"])):
+        doc = load(cdir / f)
+        doc["Mods"] = mods
+        (cdir / f).write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    run2, p2, _ = _p25_plan_run(tmp, case + "-fallback", candidates=cdir, run_it=False)
+    pop2 = (load(run2 / "plan.json") or {}).get("population") or {}
+    check(pop2.get("scoped") is False and "no --instance" in str(pop2.get("reason")) and not (run2 / "population.json").exists(),
+          f"{case}: an unnameable mod folder leaves the plan unscoped and says why ({pop2.get('reason')})")
+    check(set((pop2.get("wholeOrderChecks") or {})) >= {"geometry.object-overlap", "geometry.placement-contact"},
+          f"{case}: the unscoped plan names the scoped checks as whole-order")
+    # --population-from: a sibling evaluation adopts another plan's file when it covers this plan's own population.
+    doc = json.loads(pf.read_text(encoding="utf-8"))
+    wider = dict(doc, plugins=doc["plugins"] + [{"name": "Wider.esp", "path": doc["plugins"][0]["path"], "sha256": "0" * 64}])
+    wf = tmp / f"{case}-wider.json"
+    wf.write_text(json.dumps(wider, indent=1), encoding="utf-8")
+    d = GEN / "cases" / P25_CASE
+    base_args = ["plan", "--registry", GEN / "registry" / "fixture-check-registry.json", "--scope", d / "scope.json",
+                 "--candidates", d / "candidates", "--harness", REAL_HARNESS] + probe_cmds()
+    r3 = evalrun(base_args + ["--out", tmp / f"{case}-adopt", "--population-from", wf], d / "scenario.json", expect_exit=0)
+    pop3 = (load(tmp / f"{case}-adopt" / "plan.json") or {}).get("population") or {}
+    check(r3.returncode == 0 and pop3.get("sha256") == hashlib.sha256(wf.read_bytes()).hexdigest()
+          and (tmp / f"{case}-adopt" / "population.json").read_bytes() == wf.read_bytes(),
+          f"{case}: --population-from a covering file is adopted byte for byte ({pop3.get('identity')})")
+    narrow = dict(doc, plugins=[x for x in doc["plugins"] if x["name"] != "FixtureBase.esp"])
+    nf = tmp / f"{case}-narrow.json"
+    nf.write_text(json.dumps(narrow, indent=1), encoding="utf-8")
+    r4 = evalrun(base_args + ["--out", tmp / f"{case}-narrow", "--population-from", nf], d / "scenario.json")
+    check(r4.returncode == 2 and "does not name FixtureBase.esp" in (r4.stdout + r4.stderr),
+          f"{case}: --population-from a file missing a delta plugin is refused ({r4.returncode})")
+
+
+def case_414(tmp):
+    """A scoped check whose emit judged another population is rejected by name. Rejects: crediting a whole-order emit
+    (or an emit of another population) against the plan's scoped request."""
+    case = "case-414-population-mismatch"
+    d = GEN / "cases" / P25_CASE
+    scen = load(d / "scenario.json")
+    for stem, entry in (scen.get("arms") or {}).get("overlapprobe", {}).items():
+        entry["ignorePopulation"] = True
+    sp = tmp / f"{case}-scenario.json"
+    sp.write_text(json.dumps(scen), encoding="utf-8")
+    run, p, r = _p25_plan_run(tmp, case, scenario=sp)
+    led = load(run / "ledger.json") or {}
+    ent = [v for k, v in ledger_entries(led).items() if k.startswith("geometry.object-overlap__")]
+    causes = sorted({x.get("cause") for e in ent for x in ((e.get("validation") or {}).get("rejections") or [])})
+    check(ent and "population-mismatch" in causes, f"{case}: the overlap receipts are rejected for population-mismatch ({causes})")
+    other = [v for k, v in ledger_entries(led).items() if k.startswith("geometry.navmesh-ownership__")]
+    check(other and all(execution_of(e) == "completed" for e in other),
+          f"{case}: the unscoped navmesh check is untouched ({[execution_of(e) for e in other]})")
+
+
+def case_415(tmp):
+    """Probes without a population flag stay on the whole order and the plan says so. Rejects: a whole-order check
+    presented as scoped, or a scoped one presented as whole-order."""
+    case = "case-415-whole-order-named"
+    run, p, _ = _p25_plan_run(tmp, case, run_it=False)
+    pop = (load(run / "plan.json") or {}).get("population") or {}
+    who = pop.get("wholeOrderChecks") or {}
+    check("geometry.navmesh-ownership" in who and "whole order" in who["geometry.navmesh-ownership"],
+          f"{case}: navmesh ownership is named whole-order with its reason ({who})")
+    expect(sorted(pop.get("scopedProbes") or []), ["contactprobe", "overlapprobe"], f"{case}: the scoped probes", "P25 D4")
+    reg = load(GEN / "registry" / "fixture-check-registry.json")
+    flagged = sorted(c["adapter"]["exe"] for c in reg["checks"] if (c.get("adapter") or {}).get("populationFlag"))
+    expect(flagged, ["contactprobe", "overlapprobe"], f"{case}: only the overlap and contact rows declare populationFlag", "P25 D4")
+
+
+def case_416(tmp):
+    """A plan frozen before P25 resumes exactly as before: no --population anywhere, and every request key is the
+    pre-P25 formula's. Rejects: a resumed old plan whose sweep gains a population term (its cached work re-measured,
+    or worse, a scoped emit filed under a whole-order request)."""
+    case = "case-416-old-plan"
+    run, p, r = _p25_plan_run(tmp, case, strip_population=True)
+    check(r is not None and r.returncode == 0, f"{case}: the frozen pre-P25 plan runs ({r.returncode if r else None})")
+    plan = load(run / "plan.json") or {}
+    check("population" not in plan and not (run / "population.json").exists(), f"{case}: the plan carries no population")
+    ocmd = _p25_cmd(run / "logs" / "ordersweep.txt")
+    check(bool(ocmd) and "--population" not in ocmd, f"{case}: the ordersweep command line has no population ({ocmd[-200:]})")
+    sweep = last_sweep(run)
+    cmds = [_p25_cmd(f) for f in sorted((sweep / "logs").glob("*probe-*.txt"))]
+    check(cmds and not any("--population" in c for c in cmds), f"{case}: no probe command line has --population ({len(cmds)})")
+    # The request key, recomputed with the pre-P25 formula (ordersweep.key_for at 77c414bf): probe, program key,
+    # order sha, base sha or "-", the joined common+extra args. Every recorded key must be one of these.
+    cache = load(sweep / "cache.json") or {}
+
+    def sha(pth):
+        return hashlib.sha256(Path(pth).read_bytes()).hexdigest()
+    cdir = run / "candidates"
+    want = set()
+    jobs = [json.loads(ln) for ln in (sweep / "jobs.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+    for j in jobs:
+        if j.get("kind") != "probe":
+            continue
+        probe = j["job"].split("-")[0]
+        prog = "probe-cmd:" + hashlib.sha256(f"python {FIXT / 'fakeprobes' / probe}.py".encode("utf-8")).hexdigest()
+        order = j["inputs"]["order"]
+        base = j["inputs"].get("base")
+        parts = [probe, prog, sha(order), sha(base) if base else "-", ""]
+        want.add(hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest())
+    check(cache and set(cache) <= want and len(cache) == len([j for j in jobs if j.get("kind") == "probe"]),
+          f"{case}: every request key is the pre-P25 formula's ({len(set(cache) & want)} of {len(cache)} match)")
+
+
+CASES["case-412"] = case_412
+CASES["case-413"] = case_413
+CASES["case-414"] = case_414
+CASES["case-415"] = case_415
+CASES["case-416"] = case_416
+
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""
     tmp = Path(tempfile.mkdtemp(prefix="hc-evalrun-test-"))

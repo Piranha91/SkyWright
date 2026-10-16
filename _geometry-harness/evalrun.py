@@ -207,6 +207,129 @@ def configuration_fingerprint(plugins, providers, overlays, population, state, s
     return hashlib.sha256("".join(sb).encode("utf-8")).hexdigest()
 
 
+# ---------------------------------------------------------------------------------- the plan's population (P25)
+
+def arm_delta(lists: list[list[str]]) -> list[str]:
+    """The names a set of ordered lists differ by: present in some list and not all, or whose relative order differs
+    between the first list and another. Case-insensitive; each name in the spelling of the first list that has it."""
+    if not lists:
+        return []
+    spelled: dict[str, str] = {}
+    for lst in lists:
+        for x in lst:
+            spelled.setdefault(str(x).lower(), str(x))
+    sets = [{str(x).lower() for x in lst} for lst in lists]
+    common = set.intersection(*sets)
+    out = set().union(*sets) - common
+    first = [str(x).lower() for x in lists[0] if str(x).lower() in common]
+    pos0 = {x: i for i, x in enumerate(first)}
+    for lst in lists[1:]:
+        pos = {x: i for i, x in enumerate(str(y).lower() for y in lst if str(y).lower() in common)}
+        for i, p in enumerate(first):
+            for q in first[i + 1:]:
+                if (pos0[p] < pos0[q]) != (pos[p] < pos[q]):
+                    out |= {p, q}
+    return sorted((spelled[x] for x in out), key=str.lower)
+
+
+def plan_population(checks: list[dict], arms: list[dict], targets: list, base_population: str,
+                    instance: str | None) -> tuple[dict, str | None]:
+    """The population the scoped geometry checks run on: the plan's targets plus every plugin and asset provider the
+    arms differ by (`arm_delta`). Returns (the plan's population block, the population file's text or None).
+
+    A population is planned only when every file it names can be stated: each plugin with one path and one sha256 that
+    the arms' frozen requests agree on, each mod folder under `--instance`. Anything less leaves every check on the whole
+    order and the block says why - never a silently narrower or wider sweep."""
+    planned = [c for c in checks if (c.get("adapter") or {}).get("kind") == "ordersweep-probe"
+               and any(r.get("status") == "planned" for r in c["arms"])]
+    scoped_probes = sorted({c["adapter"]["exe"] for c in planned if c["adapter"].get("populationFlag")})
+    whole = {c["checkId"]: "this probe takes no population (it runs on the whole order)"
+             for c in planned if not c["adapter"].get("populationFlag")}
+    target_names = [str(t.get("name")) for t in (targets or []) if isinstance(t, dict) and t.get("name")]
+
+    def unscoped(reason: str) -> tuple[dict, None]:
+        return ({"scoped": False, "reason": reason,
+                 "wholeOrderChecks": {**whole, **{c["checkId"]: reason for c in planned if c["adapter"].get("populationFlag")}}},
+                None)
+
+    if not scoped_probes:
+        return unscoped("no planned check takes a population")
+    plugin_names = arm_delta([list(a.get("plugins") or []) for a in arms])
+    for t in target_names:
+        if t.lower() not in {n.lower() for n in plugin_names}:
+            plugin_names.append(t)
+    mod_names = arm_delta([[str(v.get("name")) for v in ((a.get("requested") or {}).get("providers") or [])
+                            if str(v.get("kind") or "").lower() == "mod" and v.get("name")] for a in arms])
+    if not plugin_names and not mod_names:
+        return unscoped("the arms do not differ and the plan names no target, so there is no population to scope to")
+    plugins = []
+    for name in sorted(plugin_names, key=str.lower):
+        rows = [r for a in arms for r in ((a.get("requested") or {}).get("plugins") or [])
+                if Path(str(r.get("name") or "")).name.lower() == name.lower()]
+        stated = {(str(r.get("path")), str(r.get("sha256")).lower()) for r in rows if r.get("path") and is_sha256(r.get("sha256"))}
+        if len(stated) != 1:
+            return unscoped(f"the population needs {name} by path and hash, and the arms' frozen requests state "
+                            + ("no copy of it" if not stated else f"{len(stated)} different copies"))
+        path, sha = stated.pop()
+        plugins.append({"name": name, "path": path, "sha256": sha})
+    mods = []
+    for name in mod_names:
+        if not instance:
+            return unscoped(f"the population needs mod folder {name} by path, and no --instance was given")
+        folder = Path(instance) / "mods" / name
+        if not folder.is_dir():
+            return unscoped(f"the population needs mod folder {name}, and {folder} is not a folder")
+        swap = next((f for f in folder.rglob("*") if f.is_file() and f.name.lower().endswith("_swap.ini")), None)
+        if swap is not None:
+            return unscoped(f"mod folder {name} ships a Base Object Swapper ini ({swap.name}), whose swaps the population "
+                            "does not model")
+        mods.append({"name": name, "path": str(folder)})
+    text = json.dumps({"schema": 1, "plugins": plugins, "mods": mods, "targets": target_names}, indent=1, sort_keys=True) + "\n"
+    sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return ({"scoped": True, "file": "population.json", "sha256": sha,
+             "identity": f"{base_population}+population:{sha[:12]}",
+             "plugins": [p["name"] for p in plugins], "mods": [m["name"] for m in mods], "targets": target_names,
+             "scopedProbes": scoped_probes, "wholeOrderChecks": whole,
+             "note": "the scoped probes measure only rows a reference the population reaches can take part in; their "
+                     "whole-order index is kept, so every such row is computed as in a whole-order run"}, text)
+
+
+def adopt_population(path, own: dict, own_text: str | None, base_population: str):
+    """`plan --population-from FILE`: ((block, text), None) when FILE covers this plan's own population - every plugin
+    (same path and sha256) and every mod folder it needs - else (None, the refusal). The file is used byte for byte, so
+    two plans given the same file carry the same population identity."""
+    p = Path(path)
+    if not p.is_file():
+        return None, f"--population-from {p}: no such file"
+    if not own.get("scoped"):
+        return None, f"--population-from was given, but this plan cannot state its own population: {own.get('reason')}"
+    text = p.read_bytes().decode("utf-8")
+    try:
+        doc = json.loads(text)
+    except ValueError as ex:
+        return None, f"--population-from {p} is not JSON ({ex})"
+    if doc.get("schema") != 1:
+        return None, f"--population-from {p}: schema is not 1"
+    mine = json.loads(own_text)
+    have = {str(x.get("name")).lower(): x for x in doc.get("plugins") or []}
+    for x in mine["plugins"]:
+        y = have.get(x["name"].lower())
+        if y is None:
+            return None, f"--population-from {p} does not name {x['name']}, which this plan's arms differ by or target"
+        if str(y.get("sha256")).lower() != x["sha256"] or str(y.get("path")) != x["path"]:
+            return None, f"--population-from {p} names {x['name']} with another copy (path or sha256) than this plan's arms"
+    mods = {str(x.get("name")).lower() for x in doc.get("mods") or []}
+    for x in mine["mods"]:
+        if x["name"].lower() not in mods:
+            return None, f"--population-from {p} does not name mod folder {x['name']}, which this plan's arms differ by"
+    sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    block = dict(own, sha256=sha, identity=f"{base_population}+population:{sha[:12]}",
+                 plugins=[str(x.get("name")) for x in doc.get("plugins") or []],
+                 mods=[str(x.get("name")) for x in doc.get("mods") or []],
+                 targets=list(doc.get("targets") or []), adoptedFrom=str(p.resolve()))
+    return (block, text), None
+
+
 class HashMemo:
     """One hash per (resolved path, size, mtime) per invocation: re-checking 80 plugins across 60
     receipts reads each file once, not sixty times."""
@@ -1026,6 +1149,18 @@ def cmd_plan(a) -> int:
             "status": base_status,
         })
 
+    population_block, population_text = plan_population(checks, arms, (scope or {}).get("targets", []), population,
+                                                        a.instance)
+    if getattr(a, "population_from", None):
+        shared, why = adopt_population(a.population_from, population_block, population_text, population)
+        if shared is None:
+            return refuse(why)
+        population_block, population_text = shared
+    if population_block.get("scoped"):
+        for c in checks:
+            if c["adapter"].get("kind") == "ordersweep-probe" and c["adapter"].get("exe") in population_block["scopedProbes"]:
+                # the receipt validator's per-check population (adapter.population): what the scoped emit must carry
+                c["adapter"]["population"] = population_block["identity"]
     census_checks = sorted(c["checkId"] for c in checks if (c["inputs"] or {}).get("states") == "selected")
     states_not_explored = []
     for c in checks:
@@ -1074,6 +1209,7 @@ def cmd_plan(a) -> int:
         "checks": checks,
         "options": options,
         "ordersweepProbes": sorted(set(ordersweep_probes)),
+        "population": population_block,
         "budgets": {
             "minutes": a.budget_minutes,
             "maxCandidates": a.max_candidates,
@@ -1098,6 +1234,8 @@ def cmd_plan(a) -> int:
     plan["planId"] = sha256_text(canonical({k: v for k, v in plan.items() if k != "planId"}))[:12]
 
     run.mkdir(parents=True, exist_ok=True)
+    if population_text is not None:
+        (run / population_block["file"]).write_text(population_text, encoding="utf-8", newline="\n")
     set_run_store(run)
     with Run("evalrun-plan", stage_source="counted") as r:
         r.feature("checks", len(checks), "checks")
@@ -3162,6 +3300,23 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
         rows[-1].setdefault("sweepFolders", []).append(folder)
         ex.ledger.save()
     probes = sorted({c["adapter"]["exe"] for c in sweep_checks if c["adapter"].get("exe")})
+    population = plan.get("population") or {}
+    population_args: list[str] = []
+    if population.get("scoped"):
+        pfile = run / population["file"]
+        scoped_here = sorted(set(population.get("scopedProbes") or []) & set(probes))
+        if scoped_here and (not pfile.is_file() or sha256_file(pfile) != population["sha256"]):
+            why = (f"the plan's population file {pfile.name} is gone" if not pfile.is_file() else
+                   f"the plan's population file {pfile.name} no longer hashes to the plan's value")
+            for check in sweep_checks:
+                for arm_row in check["arms"]:
+                    if arm_row.get("status") == "planned":
+                        arm = next(x for x in plan["arms"] if x["armId"] == arm_row["armId"])
+                        ex.account(check, arm, "blocked(population-changed)", "stale-inputs", why)
+            print("   ordersweep: not run - " + why)
+            return
+        if scoped_here:
+            population_args = ["--population", str(pfile), "--population-probes", ",".join(scoped_here)]
     argv = [sys.executable, str(HERE / "ordersweep.py"),
             "--candidates", str(cdir), "--out", str(inv),
             "--probes", ",".join(probes), "--harness", str(ex.harness)]
@@ -3174,6 +3329,7 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
         argv += ["--diff-tolerance", str(ex.opts["diffTolerance"])]
     if ex.opts.get("noReverse"):
         argv += ["--no-reverse"]
+    argv += population_args
     for name, prefix in (ex.opts.get("probeCmd") or {}).items():
         argv += ["--probe-cmd", f"{name}={prefix}"]
     for f in reversed(earlier):
@@ -5782,6 +5938,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--instance"); p.add_argument("--profile"); p.add_argument("--game")
     p.add_argument("--harness", default=str(HERE))
     p.add_argument("--probe-args", default="")
+    p.add_argument("--population-from", metavar="FILE",
+                   help="use this population file (another plan's RUN/population.json) instead of the one this plan "
+                        "would compute, so two evaluations that a report joins (a sibling bundle) scope their geometry "
+                        "checks identically; refused unless it names every plugin and mod folder this plan's own "
+                        "population needs, with the same bytes")
     p.add_argument("--probe-cmd", action="append", metavar="NAME=<argv prefix>",
                    help="stand a different program in for a probe (fixtures); frozen into the plan")
     p.add_argument("--diff-tolerance")
