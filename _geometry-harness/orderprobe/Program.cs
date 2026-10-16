@@ -389,7 +389,7 @@ foreach (var c in report.Candidates)
         ["contention"] = $"{c.Contention} contested record(s) and path(s) between the plugins this candidate moves; cell contention {c.CellContention} of place {c.PlaceContention}",
         ["places"] = c.Places.Count == 0 ? "-" : string.Join(" | ", c.Places),
     };
-    new CandidateFile(ConfigurationIdentity.CurrentSchema, c.Name, profileName, c.Plugins, null, c.Changes, prov)
+    new CandidateFile(ConfigurationIdentity.CurrentSchema, c.Name, profileName, c.Plugins, null, c.Changes, CandidateFile.TextProvenance(prov))
         .Write(Path.Combine(outDir, file));
     manifestCandidates.Add(new ManifestCandidate(
         c.Name, file, c.Changes, c.Displaced, c.Contention, c.Moves.Count, c.Phase, c.Groups, c.Legality.Legal,
