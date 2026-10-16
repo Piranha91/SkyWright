@@ -79,7 +79,7 @@ if (args.Contains("--help") || args.Contains("-h"))
     Console.WriteLine("""
 overlapprobe: bounded strict render-surface scene capture
   --scene-id ID --scene-role ROLE --geometry-manifest OUTPUT
-  --scene-preflight --order CANDIDATE.json
+  --scene-preflight --order CANDIDATE.json [--json VERDICT.json]
   --candidate-plugin PLUGIN (repeatable) --candidate-mod FOLDER (repeatable)
   --scene-scope-from MANIFEST (repeatable) --scene-cell FORMKEY (repeatable)
   --contact-evidence-pairs INPUT --surface-tolerance N --max-triangle-pairs N --pair-seconds N
@@ -326,7 +326,23 @@ SceneCapture.AssetPreflight? assetPreflight = null;
 if (sceneCapture || scenePreflight)
 {
     try { assetPreflight = SceneCapture.PreflightCandidateAssets(orderFile!, profileName, profileDir, modsDir); }
-    catch (Exception ex) { Console.Error.WriteLine($"scene asset preflight refused: {ex.Message}"); return 2; }
+    catch (Exception ex)
+    {
+        var refusal = ex as SceneCapture.PreflightRefusal;
+        string remedy = refusal?.Remedy ?? "read the reason above, correct the candidate or the profile, then try again";
+        Console.Error.WriteLine($"scene asset preflight refused: {ex.Message}. To fix: {remedy}.");
+        if (scenePreflight && jsonPath is not null)
+            WritePreflightReceipt(jsonPath, new { schemaVersion = 1, verdict = "refused", code = refusal?.Code ?? "preflight-failed",
+                reason = ex.Message, remedy, candidate = Path.GetFullPath(orderFile!), profile = profileName,
+                providers = Array.Empty<object>() });
+        return 2;
+    }
+    if (scenePreflight && jsonPath is not null)
+        WritePreflightReceipt(jsonPath, new { schemaVersion = 1, verdict = "passed", code = (string?)null, reason = (string?)null,
+            remedy = (string?)null, candidate = assetPreflight.CandidatePath, profile = assetPreflight.BaseProfile,
+            profileProviderCount = assetPreflight.ProfileProviderCount, omittedProviderCount = assetPreflight.OmittedProviderCount,
+            providers = assetPreflight.Providers.Select(p => new { candidateName = p.CandidateName, mo2Name = p.Mo2Name,
+                mo2Priority = p.Mo2Priority, enabledInBaseProfile = p.Enabled }).ToArray() });
     Console.WriteLine($"scene asset preflight: {assetPreflight.Providers.Count} selected provider(s), all match MO2 names and retain strongest-first priority; subset of {assetPreflight.ProfileProviderCount}, {assetPreflight.OmittedProviderCount} deliberately omitted by the candidate view");
     foreach (var provider in assetPreflight.Providers)
         Console.WriteLine($"   priority {provider.Mo2Priority}: {provider.Mo2Name} ({(provider.Enabled ? "enabled" : "disabled in base profile; explicitly selected")})");
@@ -2002,6 +2018,14 @@ Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
 
 static float Rate(long hit, long total) => total == 0 ? 0 : 100f * hit / total;
+
+// The --scene-preflight verdict as data, so a caller (evalrun plan) acts on the probe's own decision.
+static void WritePreflightReceipt(string path, object receipt)
+{
+    var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+    File.WriteAllText(path, JsonSerializer.Serialize(receipt, new JsonSerializerOptions { WriteIndented = true }));
+}
 
 sealed record GeometryRead(string Status, string? Reason, string? RelativePath, string? AssetId,
                            PlacementResolution? Resolution, PlacementSource? Source,

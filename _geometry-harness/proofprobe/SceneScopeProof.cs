@@ -83,6 +83,9 @@ static class SceneScopeProof
     private static bool Refused(string candidate, string expected, string profile, string mods)
     {
         try { _ = SceneCapture.PreflightCandidateAssets(candidate, "Proof", profile, mods); return false; }
-        catch (InvalidDataException ex) { return ex.Message.Contains(expected, StringComparison.Ordinal); }
+        catch (SceneCapture.PreflightRefusal ex)
+        {
+            return ex.Message.Contains(expected, StringComparison.Ordinal) && ex.Code.Length > 0 && ex.Remedy.Length > 0;
+        }
     }
 }

@@ -10,6 +10,13 @@ static class SceneCapture
 
     internal sealed record AssetProviderCheck(string CandidateName, string Mo2Name, int Mo2Priority,
         bool Enabled, string Directory);
+    /// <summary>A preflight refusal: a stable code, the reason, and what to try.</summary>
+    internal sealed class PreflightRefusal(string code, string message, string remedy) : Exception(message)
+    {
+        public string Code { get; } = code;
+        public string Remedy { get; } = remedy;
+    }
+
     internal sealed record AssetPreflight(string CandidatePath, string BaseProfile,
         IReadOnlyList<AssetProviderCheck> Providers, int ProfileProviderCount, int OmittedProviderCount);
 
@@ -164,15 +171,27 @@ static class SceneCapture
     /// </summary>
     internal static AssetPreflight PreflightCandidateAssets(string path, string profileName, string profileDir, string modsDir)
     {
-        var candidate = CandidateFile.Read(path);
+        CandidateFile candidate;
+        try { candidate = CandidateFile.Read(path); }
+        catch (Exception ex) when (ex is IOException or JsonException or InvalidDataException or UnauthorizedAccessException)
+        {
+            throw new PreflightRefusal("candidate-unreadable", ex.Message,
+                "fix the candidate file so it reads as a schema-1 candidate (Plugins, Mods, Changes, Provenance), then try again");
+        }
         if (!string.Equals(candidate.BaseProfile, profileName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException($"candidate BaseProfile '{candidate.BaseProfile}' does not match --profile '{profileName}'");
+            throw new PreflightRefusal("base-profile-mismatch",
+                $"candidate BaseProfile '{candidate.BaseProfile}' does not match --profile '{profileName}'",
+                $"run with --profile '{candidate.BaseProfile}', or rebuild the candidate on profile '{profileName}'");
         if (candidate.Mods is null)
-            throw new InvalidDataException("scene capture requires the candidate file's explicit Mods list; profile assets are not an identified source scene");
+            throw new PreflightRefusal("no-explicit-mods",
+                "scene capture requires the candidate file's explicit Mods list; profile assets are not an identified source scene",
+                "add the candidate's Mods list, strongest first, to capture a scene from it");
 
         var profileRows = new List<(string Name, bool Enabled)>();
         string modlist = Path.Combine(profileDir, "modlist.txt");
-        if (!File.Exists(modlist)) throw new InvalidDataException($"MO2 provider list not found: {modlist}");
+        if (!File.Exists(modlist))
+            throw new PreflightRefusal("modlist-missing", $"MO2 provider list not found: {modlist}",
+                "check that --instance and --profile name an MO2 profile folder with a modlist.txt");
         foreach (var raw in File.ReadAllLines(modlist))
         {
             var line = raw.TrimEnd();
@@ -190,18 +209,26 @@ static class SceneCapture
         foreach (var requested in candidate.Mods)
         {
             if (string.IsNullOrWhiteSpace(requested))
-                throw new InvalidDataException("candidate Mods contains an empty provider name");
+                throw new PreflightRefusal("provider-empty-name", "candidate Mods contains an empty provider name",
+                    "remove the empty entry from the candidate's Mods");
             if (!seen.Add(requested))
-                throw new InvalidDataException($"candidate Mods lists provider '{requested}' more than once");
+                throw new PreflightRefusal("provider-listed-twice", $"candidate Mods lists provider '{requested}' more than once",
+                    "list each folder once in the candidate's Mods");
             if (!byName.TryGetValue(requested, out var profile))
-                throw new InvalidDataException($"candidate Mods names '{requested}', but the base profile's modlist.txt has no provider by that name (possible typo)");
+                throw new PreflightRefusal("provider-not-in-modlist",
+                    $"candidate Mods names '{requested}', but the base profile's modlist.txt has no provider by that name (possible typo)",
+                    "correct the name, or build the candidate on a profile whose modlist.txt lists every folder it names");
             if (profile.index <= previousPriority)
-                throw new InvalidDataException($"candidate Mods does not retain MO2 strongest-first priority at '{requested}'");
+                throw new PreflightRefusal("priority-not-retained",
+                    $"candidate Mods does not retain MO2 strongest-first priority at '{requested}'",
+                    "order the candidate's Mods as the base profile's modlist.txt orders them, strongest first");
             previousPriority = profile.index;
             string canonical = profileRows[profile.index].Name;
             string directory = Path.Combine(modsDir, canonical);
             if (!Directory.Exists(directory))
-                throw new InvalidDataException($"candidate Mods names MO2 provider '{canonical}', but its mod folder is missing: {directory}");
+                throw new PreflightRefusal("provider-folder-missing",
+                    $"candidate Mods names MO2 provider '{canonical}', but its mod folder is missing: {directory}",
+                    "install that mod folder or drop it from the candidate's Mods");
             checks.Add(new(requested, canonical, profile.index, profile.Enabled, Path.GetFullPath(directory)));
         }
         return new(Path.GetFullPath(path), candidate.BaseProfile, checks, profileRows.Count,
