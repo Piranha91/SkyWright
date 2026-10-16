@@ -333,6 +333,92 @@ def probe_exe(harness: Path, probe: str) -> Path:
     return Path(harness) / probe / "bin" / "Release" / "net9.0" / exe_name(probe)
 
 
+def probe_child_env(opts: dict) -> dict:
+    """HarnessTarget reads the instance from the environment, so a probe with no --instance flag
+    still resolves the same configuration the flagged ones do. Shared by `plan` and `run`."""
+    env = {}
+    for var, key in (("HOUSECARL_MO2_INSTANCE", "instance"), ("HOUSECARL_MO2_PROFILE", "profile"),
+                     ("HOUSECARL_GAME_PATH", "game")):
+        if opts.get(key):
+            env[var] = str(opts[key])
+    return env
+
+
+def probe_common_flags(opts: dict) -> list[str]:
+    out = []
+    for flag in ("instance", "profile", "game"):
+        if opts.get(flag):
+            out += [f"--{flag}", opts[flag]]
+    return out
+
+
+def probe_argv(opts: dict, harness: Path, exe: str | None) -> list[str] | None:
+    """The child's program. `--probe-cmd NAME=<argv prefix>` stands a fixture's fake probe in."""
+    if not exe:
+        return None
+    override = (opts.get("probeCmd") or {}).get(exe)
+    if override:
+        return override.split()
+    path = probe_exe(harness, exe)
+    if not path.exists():
+        return None
+    return [str(path)]
+
+
+SCENE_PREFLIGHT_PROBE = "overlapprobe"
+
+
+def scene_preflight(arms: list[dict], opts: dict, harness: Path) -> tuple[list[str], list[str]]:
+    """Run overlapprobe's own scene preflight on every arm, the check its scene captures will run, and record
+    each verdict on the arm as `scenePreflight`. Returns (refusals, notes): one line per arm the probe refused,
+    and lines for the plan's output. The rules live in the probe; this only acts on the verdict it writes."""
+    refusals, notes = [], []
+    if not (opts.get("instance") or os.environ.get("HOUSECARL_MO2_INSTANCE")):
+        reason = ("no --instance was given, so the plan could not check the arms' asset views against the base "
+                  "profile the way overlapprobe's scene captures will")
+        for arm in arms:
+            arm["scenePreflight"] = {"status": "not-run", "reason": reason}
+        notes.append("scene preflight not run: the arms' asset views were not checked against the base profile, "
+                     "because no --instance was given")
+        return refusals, notes
+    argv0 = probe_argv(opts, harness, SCENE_PREFLIGHT_PROBE)
+    if argv0 is None:
+        refusals.append(f"no overlapprobe build at {probe_exe(harness, SCENE_PREFLIGHT_PROBE)}, so the plan cannot "
+                        f"check the arms' asset views the way the scene captures will; build overlapprobe, then plan again")
+        return refusals, notes
+    override = (opts.get("probeCmd") or {}).get(SCENE_PREFLIGHT_PROBE)
+    tool = {"probeCmd": override} if override else tool_identity(harness, SCENE_PREFLIGHT_PROBE)
+    with tempfile.TemporaryDirectory(prefix="evalrun-preflight-") as td:
+        out = Path(td)
+        jobs = [{"id": f"scene-preflight-{i:02d}", "env": probe_child_env(opts),
+                 "argv": argv0 + ["--scene-preflight", "--order", str(arm["candidatePath"]),
+                                  "--json", str(out / f"{i:02d}.json")] + probe_common_flags(opts)}
+                for i, arm in enumerate(arms)]
+        results = Runner("evalrun-plan-preflight", out_dir=out / "logs", retries=0).run(jobs, echo=False)
+        for i, (arm, res) in enumerate(zip(arms, results)):
+            verdict = load_json(out / f"{i:02d}.json")
+            where = f"arm {arm['armId']} ({arm['candidateFile']})"
+            if not isinstance(verdict, dict) or verdict.get("verdict") not in ("passed", "refused"):
+                log = out / "logs" / f"scene-preflight-{i:02d}.txt"
+                tail = [ln for ln in (log.read_text(encoding="utf-8").splitlines() if log.exists() else []) if ln.strip()]
+                refusals.append(f"{where}: overlapprobe's scene preflight wrote no verdict (exit {res.get('exitCode')}): "
+                                f"{tail[-1] if tail else 'no output'}; run it by hand on that candidate to see why")
+                continue
+            if verdict["verdict"] == "passed":
+                arm["scenePreflight"] = {"status": "passed", "providers": len(verdict.get("providers") or []),
+                                         "omittedProviders": verdict.get("omittedProviderCount"), "tool": tool}
+            elif verdict.get("code") == "no-explicit-mods":
+                # A candidate that keeps the profile's assets is legitimate for the ordersweep probes; only a scene
+                # capture needs an explicit view, so the arm is recorded, not refused.
+                arm["scenePreflight"] = {"status": "no-asset-view", "code": verdict["code"],
+                                         "reason": verdict.get("reason"), "tool": tool}
+                notes.append(f"   {arm['armId']}: no scene can be captured from this arm: {verdict.get('reason')}")
+            else:
+                refusals.append(f"{where}: overlapprobe's scene preflight refused it: {verdict.get('reason')}. "
+                                f"To fix: {verdict.get('remedy')}.")
+    return refusals, notes
+
+
 def tool_identity(harness: Path, probe: str) -> dict:
     """The code that ACTUALLY runs: the managed assembly beside the apphost, not only the exe
     (memory: an apphost hash does not change when the managed code does)."""
@@ -487,7 +573,7 @@ def _modlist(instance: str, profile: str | None) -> tuple[list, list, bool, str 
 
 
 def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | None,
-                  game: str | None) -> dict:
+                  game: str | None, hash_rows: bool = True) -> dict:
     """Every layer that provides this plugin file, in the probes' own precedence order.
 
     The one Python spelling of `HarnessOrderCli.BuildLayerMap`
@@ -537,7 +623,8 @@ def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | 
         seen_dirs.add(folder.lower())
         path = _folder_plugins(folder).get(key)
         if path:
-            out["rows"].append({"layer": layer, "path": path, "sha256": sha256_file(Path(path))})
+            out["rows"].append({"layer": layer, "path": path,
+                                "sha256": sha256_file(Path(path)) if hash_rows else None})
             out["views"].append(view)
     if not modlist_read:
         # The modlist is what puts the folders outside the view in priority order. Without it they are
@@ -553,7 +640,7 @@ def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | 
             path = _folder_plugins(folder).get(key)
             if path:
                 out["rows"].append({"layer": "(not in modlist.txt)", "path": path,
-                                    "sha256": sha256_file(Path(path))})
+                                    "sha256": sha256_file(Path(path)) if hash_rows else None})
                 out["views"].append("unknown")
     return out
 
@@ -579,7 +666,64 @@ def read_candidate(p: Path) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
-def requested_plugin(name, scope_plugins: dict, resolve=None) -> dict:
+def scope_copy_still_wins(plain: str, own_view: dict) -> bool:
+    """Without a walk, the scope's copy is still the one the probes read when the arm's mod list adds no folder above
+    the layer that gave the scope its copy: overwrite outranks every folder; a mod folder must stay in the arm's list
+    with no new folder above it; the game's Data folder needs every folder of the arm's list to be one the scope's view
+    already had (they all rank above Data and none of them provided the file). Anything else is unknown."""
+    provider = (own_view.get("scopeProvider") or {}).get(plain.lower())
+    if not provider:
+        return False
+    arm = [m.lower() for m in own_view.get("armView") or []]
+    scope = [m.lower() for m in own_view.get("scopeView") or []]
+    p = str(provider).lower()
+    if p == "overwrite":
+        return True
+    if p == "data":
+        return set(arm) <= set(scope)
+    if p not in arm or p not in scope:
+        return False
+    return set(arm[:arm.index(p)]) <= set(scope[:scope.index(p)])
+
+
+def own_view_row(name, scoped_row: dict, own_view: dict) -> dict:
+    """SW1: a scope-listed plugin in an arm that declares its OWN mod list, different from the scope's. The probes read
+    the copy that arm's view puts first, which need not be the copy the scope measured (an author's same-named variant,
+    another folder's copy of a duplicated plugin). The scope's row stands when the view's winning copy is the scope's
+    file or has its bytes; otherwise the row names the view's copy. A walk that cannot be completed states nothing."""
+    plain = Path(str(name)).name
+    if not own_view.get("complete"):
+        if scope_copy_still_wins(plain, own_view):
+            return scoped_row
+        return {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated",
+                "scopeSha256": scoped_row.get("sha256"),
+                "unstatedReason": (f"this arm declares its own mod list, different from the scope's, and the plan was "
+                                   f"not given all of --instance, --game and --profile, so it cannot say whether that "
+                                   f"list puts another copy of {plain} first; the scope's hash is not assumed")}
+    res = own_view["walk"](plain, False)
+    win = next((r for r, v in zip(res["rows"], res["views"]) if v != "unknown"), None)
+    if win is None:
+        return {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated",
+                "scopeSha256": scoped_row.get("sha256"),
+                "unstatedReason": f"no layer of this arm's view, the game's Data folder or the profile provides {plain}"}
+    if scoped_row.get("path") and same_path(win["path"], scoped_row["path"]):
+        return scoped_row
+    sha = sha256_file(Path(win["path"]))
+    if sha and scoped_row.get("sha256") and sha.lower() == str(scoped_row["sha256"]).lower():
+        return scoped_row
+    full = own_view["walk"](plain, True)
+    row = {"name": str(name), "sha256": sha, "path": win["path"],
+           "hashSource": f"instance:{win['layer']}" if sha else "unstated",
+           "scopeSha256": scoped_row.get("sha256"),
+           "differsFromScope": (f"this arm's mod list puts the copy of {plain} in '{win['layer']}' first; it is not "
+                                f"the copy the scope measured"),
+           "providedBy": [dict(r) for r in full["rows"]]}
+    if not sha:
+        row["unstatedReason"] = f"the copy of {plain} at {win['path']} would not hash, so the plan states no content for it"
+    return row
+
+
+def requested_plugin(name, scope_plugins: dict, resolve=None, own_view: dict | None = None) -> dict:
     """One row of D1's requested plugin list.
 
     A name the MEASURED scope lists keeps that scope's path and hash (`hashSource: "scope"`). A name it
@@ -600,6 +744,8 @@ def requested_plugin(name, scope_plugins: dict, resolve=None) -> dict:
         if not sha:
             row["unstatedReason"] = (f"the measured scope lists {plain} with no 64-hex sha256, so the "
                                      f"plan states no content for it")
+        if own_view is not None and own_view.get("differs"):
+            return own_view_row(name, row, own_view)
         return row
 
     row = {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated"}
@@ -743,6 +889,10 @@ def cmd_plan(a) -> int:
         scope_plugins[str(p.get("name", p.get("Name", ""))).lower()] = {
             "name": p.get("name", p.get("Name")), "path": p.get("path", p.get("Path")),
             "sha256": p.get("sha256", p.get("Sha256"))}
+    # Which layer gave the scope its copy of each plugin (ConfigPlugin.Provider). Kept apart from scope_plugins, whose
+    # rows are frozen into the plan as they are.
+    scope_plugin_provider = {str(p.get("name", p.get("Name", ""))).lower(): p.get("provider", p.get("Provider"))
+                             for p in cfg.get("plugins", cfg.get("Plugins", []) or [])}
     population = cfg.get("population", cfg.get("Population")) or "load-time"
     # D1: the scope's providers and overlays are part of the REQUEST, not decoration. A provider list
     # the plan never recorded cannot be compared to what a child says it read.
@@ -786,6 +936,17 @@ def cmd_plan(a) -> int:
                 return None
             return plugin_layers(plain, _view, instance=a.instance, profile=a.profile, game=a.game)
 
+        # SW1: an arm that declares a mod list other than the scope's is resolved through it, even for names the
+        # scope measured; the probes read whichever copy that list puts first.
+        scope_view = [str(v.get("name")) for v in scope_providers
+                      if str(v.get("kind") or "").lower() == "mod" and v.get("name")]
+        arm_view = None
+        if own_view is not None and [m.lower() for m in own_view] != [m.lower() for m in scope_view]:
+            arm_view = {"differs": True, "complete": bool(a.instance and a.game and a.profile),
+                        "armView": list(own_view), "scopeView": scope_view, "scopeProvider": scope_plugin_provider,
+                        "walk": lambda plain, hashed, _view=tuple(view_mods): plugin_layers(
+                            plain, _view, instance=a.instance, profile=a.profile, game=a.game, hash_rows=hashed)}
+
         payload_missing, out_of_view = [], []
         for name in (declared or []):
             where = provides(Path(name).name, scope_plugins, resolve)
@@ -813,7 +974,7 @@ def cmd_plan(a) -> int:
             # view; and the population and states the plan selected. Every accepted receipt on this arm
             # is bound to THIS, not to whichever receipt happened to arrive first.
             "requested": {
-                "plugins": [requested_plugin(n, scope_plugins, resolve) for n in plugins],
+                "plugins": [requested_plugin(n, scope_plugins, resolve, arm_view) for n in plugins],
                 "overlays": [dict(o) for o in scope_overlays],
                 "providers": requested_providers(scope_providers, own_view),
                 "population": population,
@@ -924,6 +1085,12 @@ def cmd_plan(a) -> int:
         "probeCmd": probe_cmds, "diffTolerance": a.diff_tolerance,
         "noReverse": bool(a.no_reverse), "population": population,
     }
+
+    # B9: an arm the scene captures will refuse is refused here, by the same check, before anything runs.
+    preflight_refusals, preflight_notes = scene_preflight(arms, options, harness)
+    if preflight_refusals:
+        return refuse("overlapprobe's scene preflight, the check every scene capture runs, refused this plan; "
+                      "nothing was planned:\n   - " + "\n   - ".join(preflight_refusals))
 
     for check in reg.checks:
         for tok in (check.get("adapter") or {}).get("args") or []:
@@ -1116,6 +1283,8 @@ def cmd_plan(a) -> int:
     print(f"plan {plan['planId']}: {len(checks)} checks, {len(arms)} arms, states {','.join(states)}, depth {depth}")
     for s in settings.sentences():
         print(s)
+    for line in preflight_notes:
+        print(line)
     if live_choice == "ask" and LIVE_CHECK_ID not in opted:
         print("The live switch check is set to ask each evaluation and was not opted in "
               "(`--opt-in " + LIVE_CHECK_ID + "` opts in).")
@@ -2151,34 +2320,13 @@ class Executor:
     # -- argv assembly ----------------------------------------------------------------------
 
     def child_env(self) -> dict:
-        """HarnessTarget reads the instance from the environment, so a probe with no --instance flag
-        still resolves the same configuration the flagged ones do."""
-        env = {}
-        for var, key in (("HOUSECARL_MO2_INSTANCE", "instance"), ("HOUSECARL_MO2_PROFILE", "profile"),
-                         ("HOUSECARL_GAME_PATH", "game")):
-            if self.opts.get(key):
-                env[var] = str(self.opts[key])
-        return env
+        return probe_child_env(self.opts)
 
     def common_flags(self) -> list[str]:
-        out = []
-        for flag in ("instance", "profile", "game"):
-            if self.opts.get(flag):
-                out += [f"--{flag}", self.opts[flag]]
-        return out
+        return probe_common_flags(self.opts)
 
     def exe_argv(self, adapter: dict) -> list[str] | None:
-        """The child's program. `--probe-cmd NAME=<argv prefix>` stands a fixture's fake probe in."""
-        exe = adapter.get("exe")
-        if not exe:
-            return None
-        override = (self.opts.get("probeCmd") or {}).get(exe)
-        if override:
-            return override.split()
-        path = probe_exe(self.harness, exe)
-        if not path.exists():
-            return None
-        return [str(path)]
+        return probe_argv(self.opts, self.harness, adapter.get("exe"))
 
     def expand(self, args: list[str], subs: dict) -> list[str]:
         out = []

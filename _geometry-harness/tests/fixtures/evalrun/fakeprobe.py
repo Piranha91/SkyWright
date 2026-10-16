@@ -444,7 +444,13 @@ def main(probe: str, argv=None) -> int:
         print("fakeprobe: EVALRUN_FAKE_SCENARIO is not set", file=sys.stderr)
         return 2
     scen = json.loads(Path(spath).read_text(encoding="utf-8"))
-    plugin_dir = Path(scen.get("pluginDir") or (Path(spath).resolve().parent.parent / "plugins"))
+    if "--scene-preflight" in a["extra"] and a.get("json"):
+        # evalrun plan asks the real overlapprobe for a scene preflight verdict; the fixtures' asset views are not
+        # under test here (test_plan_scene_preflight.py drives the real probe), so the stand-in passes every arm.
+        Path(a["json"]).write_text(json.dumps({"schemaVersion": 1, "verdict": "passed", "code": None, "reason": None,
+                                               "remedy": None, "providers": []}), encoding="utf-8")
+        return 0
+    plugin_dir =Path(scen.get("pluginDir") or (Path(spath).resolve().parent.parent / "plugins"))
 
     emit = Path(a["emit"]) if a.get("emit") else None
     stem = emit.name[:-5] if emit and emit.name.endswith(".json") else (emit.stem if emit else "-")

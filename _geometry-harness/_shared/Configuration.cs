@@ -209,7 +209,8 @@ public sealed record ConfigurationIdentity(
 /// enabled mods and priority — and the identity then records that the asset view is the profile's, not the candidate's.</param>
 /// <param name="Changes">What this candidate changes against its base, in words ("moved X above Y"), for the report. Never
 /// load-bearing.</param>
-/// <param name="Provenance">Why this candidate exists: the rule(s) it satisfies or tests, the search step that produced it.</param>
+/// <param name="Provenance">Why this candidate exists: the rule(s) it satisfies or tests, the search step that produced it.
+/// Any JSON value, read as data and never load-bearing here; evalreport reads <c>patches</c> / <c>patchPlugins</c> as a list.</param>
 public sealed record CandidateFile(
     int SchemaVersion,
     string Name,
@@ -217,8 +218,12 @@ public sealed record CandidateFile(
     IReadOnlyList<string> Plugins,
     IReadOnlyList<string>? Mods,
     IReadOnlyList<string> Changes,
-    IReadOnlyDictionary<string, string>? Provenance)
+    IReadOnlyDictionary<string, JsonElement>? Provenance)
 {
+    /// <summary>Provenance whose values are all text, as orderprobe writes it; the file's bytes are those of the text.</summary>
+    public static IReadOnlyDictionary<string, JsonElement> TextProvenance(IReadOnlyDictionary<string, string> values)
+        => values.ToDictionary(kv => kv.Key, kv => JsonSerializer.SerializeToElement(kv.Value));
+
     public static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,
