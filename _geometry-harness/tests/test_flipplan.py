@@ -387,6 +387,44 @@ def test_c316_a_credit_the_source_lacks_keeps_the_generic_reason():
         assert [u["call"] for u in arm["unmapped"]] == ["Gate.Disable("], arm["unmapped"]
 
 
+NOOP = "every recorded call is a no-op from its load-time state"
+
+
+def test_c317_a_dropped_only_switch_reads_as_a_no_op_not_as_missing_source():
+    # rejects: "no supplied source line carries its recorded call" for a switch whose call is in the source and dropped
+    door = "000B02:Target.esp"
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(switch(GATE, "Gate", baseline=True, by=[by_s("GateScript", "F", "Alias_Gate.TryToDisable(")]),
+                         switch(door, "Door", baseline=True, by=[by_s("GateScript", "F", "Alias_Door.TryToEnable(")]))
+        arm = build_one(tmp, cen, "GateScript", "Function F()\n  Alias_Door.TryToEnable()\n  Alias_Gate.TryToDisable()\nEndFunction\n")
+        f = group({"arms": [arm]}, "GateScript.F")
+        assert [x["ref"] for x in f["dropped"]] == [door], f["dropped"]
+        assert [(x["ref"], x["reason"]) for x in arm["notPlanned"]] == [(door, NOOP)], arm["notPlanned"]
+
+
+def test_c318_a_path_whose_every_call_is_dropped_keeps_its_dropped_entries():
+    # rejects: an all-dropped path vanishing with its dropped entries (no group, nothing said but a false reason)
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(switch(GATE, "Gate", baseline=True, by=[by_s("GateScript", "H", "Gate.Enable(")]))
+        arm = build_one(tmp, cen, "GateScript", "Function H()\n  Gate.Enable()\nEndFunction\n")
+        assert arm["groups"] == [], arm["groups"]
+        sk = arm.get("skippedPaths")
+        assert sk and [(s["script"], s["function"], [(d["ref"], d["target"]) for d in s["dropped"]]) for s in sk] == [
+            ("GateScript", "H", [(GATE, "enabled")])], sk
+        assert "already enabled" in sk[0]["dropped"][0]["reason"] and "line 1" in sk[0]["dropped"][0]["source"], sk
+        assert [(x["ref"], x["reason"]) for x in arm["notPlanned"]] == [(GATE, NOOP)], arm["notPlanned"]
+
+
+def test_c319_a_dropped_switch_with_a_credit_the_source_lacks_keeps_the_generic_reason():
+    # guard: the no-op reason only when every recorded call was found and dropped
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(switch(GATE, "Gate", baseline=True, by=[by_s("GateScript", "H", "Gate.Enable("),
+                                                                 by_s("GateScript", "H", "Gate.EnableNoWait(")]))
+        arm = build_one(tmp, cen, "GateScript", "Function H()\n  Gate.Enable()\nEndFunction\n")
+        assert [(x["ref"], x["reason"]) for x in arm["notPlanned"]] == [
+            (GATE, "no supplied source line carries its recorded call")], arm["notPlanned"]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:
