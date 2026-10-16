@@ -573,7 +573,7 @@ def _modlist(instance: str, profile: str | None) -> tuple[list, list, bool, str 
 
 
 def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | None,
-                  game: str | None) -> dict:
+                  game: str | None, hash_rows: bool = True) -> dict:
     """Every layer that provides this plugin file, in the probes' own precedence order.
 
     The one Python spelling of `HarnessOrderCli.BuildLayerMap`
@@ -623,7 +623,8 @@ def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | 
         seen_dirs.add(folder.lower())
         path = _folder_plugins(folder).get(key)
         if path:
-            out["rows"].append({"layer": layer, "path": path, "sha256": sha256_file(Path(path))})
+            out["rows"].append({"layer": layer, "path": path,
+                                "sha256": sha256_file(Path(path)) if hash_rows else None})
             out["views"].append(view)
     if not modlist_read:
         # The modlist is what puts the folders outside the view in priority order. Without it they are
@@ -639,7 +640,7 @@ def plugin_layers(name: str, view_mods, *, instance: str | None, profile: str | 
             path = _folder_plugins(folder).get(key)
             if path:
                 out["rows"].append({"layer": "(not in modlist.txt)", "path": path,
-                                    "sha256": sha256_file(Path(path))})
+                                    "sha256": sha256_file(Path(path)) if hash_rows else None})
                 out["views"].append("unknown")
     return out
 
@@ -665,7 +666,42 @@ def read_candidate(p: Path) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
-def requested_plugin(name, scope_plugins: dict, resolve=None) -> dict:
+def own_view_row(name, scoped_row: dict, own_view: dict) -> dict:
+    """SW1: a scope-listed plugin in an arm that declares its OWN mod list, different from the scope's. The probes read
+    the copy that arm's view puts first, which need not be the copy the scope measured (an author's same-named variant,
+    another folder's copy of a duplicated plugin). The scope's row stands when the view's winning copy is the scope's
+    file or has its bytes; otherwise the row names the view's copy. A walk that cannot be completed states nothing."""
+    plain = Path(str(name)).name
+    if not own_view.get("complete"):
+        return {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated",
+                "scopeSha256": scoped_row.get("sha256"),
+                "unstatedReason": (f"this arm declares its own mod list, different from the scope's, and the plan was "
+                                   f"not given all of --instance, --game and --profile, so it cannot say whether that "
+                                   f"list puts another copy of {plain} first; the scope's hash is not assumed")}
+    res = own_view["walk"](plain, False)
+    win = next((r for r, v in zip(res["rows"], res["views"]) if v != "unknown"), None)
+    if win is None:
+        return {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated",
+                "scopeSha256": scoped_row.get("sha256"),
+                "unstatedReason": f"no layer of this arm's view, the game's Data folder or the profile provides {plain}"}
+    if scoped_row.get("path") and same_path(win["path"], scoped_row["path"]):
+        return scoped_row
+    sha = sha256_file(Path(win["path"]))
+    if sha and scoped_row.get("sha256") and sha.lower() == str(scoped_row["sha256"]).lower():
+        return scoped_row
+    full = own_view["walk"](plain, True)
+    row = {"name": str(name), "sha256": sha, "path": win["path"],
+           "hashSource": f"instance:{win['layer']}" if sha else "unstated",
+           "scopeSha256": scoped_row.get("sha256"),
+           "differsFromScope": (f"this arm's mod list puts the copy of {plain} in '{win['layer']}' first; it is not "
+                                f"the copy the scope measured"),
+           "providedBy": [dict(r) for r in full["rows"]]}
+    if not sha:
+        row["unstatedReason"] = f"the copy of {plain} at {win['path']} would not hash, so the plan states no content for it"
+    return row
+
+
+def requested_plugin(name, scope_plugins: dict, resolve=None, own_view: dict | None = None) -> dict:
     """One row of D1's requested plugin list.
 
     A name the MEASURED scope lists keeps that scope's path and hash (`hashSource: "scope"`). A name it
@@ -686,6 +722,8 @@ def requested_plugin(name, scope_plugins: dict, resolve=None) -> dict:
         if not sha:
             row["unstatedReason"] = (f"the measured scope lists {plain} with no 64-hex sha256, so the "
                                      f"plan states no content for it")
+        if own_view is not None and own_view.get("differs"):
+            return own_view_row(name, row, own_view)
         return row
 
     row = {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated"}
@@ -872,6 +910,16 @@ def cmd_plan(a) -> int:
                 return None
             return plugin_layers(plain, _view, instance=a.instance, profile=a.profile, game=a.game)
 
+        # SW1: an arm that declares a mod list other than the scope's is resolved through it, even for names the
+        # scope measured; the probes read whichever copy that list puts first.
+        scope_view = [str(v.get("name")) for v in scope_providers
+                      if str(v.get("kind") or "").lower() == "mod" and v.get("name")]
+        arm_view = None
+        if own_view is not None and [m.lower() for m in own_view] != [m.lower() for m in scope_view]:
+            arm_view = {"differs": True, "complete": bool(a.instance and a.game and a.profile),
+                        "walk": lambda plain, hashed, _view=tuple(view_mods): plugin_layers(
+                            plain, _view, instance=a.instance, profile=a.profile, game=a.game, hash_rows=hashed)}
+
         payload_missing, out_of_view = [], []
         for name in (declared or []):
             where = provides(Path(name).name, scope_plugins, resolve)
@@ -899,7 +947,7 @@ def cmd_plan(a) -> int:
             # view; and the population and states the plan selected. Every accepted receipt on this arm
             # is bound to THIS, not to whichever receipt happened to arrive first.
             "requested": {
-                "plugins": [requested_plugin(n, scope_plugins, resolve) for n in plugins],
+                "plugins": [requested_plugin(n, scope_plugins, resolve, arm_view) for n in plugins],
                 "overlays": [dict(o) for o in scope_overlays],
                 "providers": requested_providers(scope_providers, own_view),
                 "population": population,
