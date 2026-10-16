@@ -19,12 +19,18 @@ Rules:
     stay in it, because they are part of the same sequence;
   - a call maps to switches through the census `trigger.by` text (`Script.Function: call text`); a call that maps to
     no switch is listed under `unmapped`, never dropped silently;
-  - Enable* sets `enabled`, Disable* sets `disabled`; a call that would not change its switch from the state it has
+  - the calls are switchprobe's (_shared/ScriptFlipCalls.cs): a flip is Enable, Disable, their NoWait forms and the
+    TryToEnable/TryToDisable forms; a bare call is on Self (`Self.Enable()`); a whole-line comment is no code;
+    EnableLinkChain/DisableLinkChain change the object's linked chain, not the object, so they are listed under
+    `unmapped` with that reason and never planned;
+  - an enabling call (Enable, EnableNoWait, TryToEnable, TryToEnableNoWait) sets `enabled`, a disabling one
+    `disabled`; a call that would not change its switch from the state it has
     at that point of the path (its load-time state, then each earlier call) is dropped and named;
   - flagged, not dropped: an enable-parented switch (its own Enable() may be inert; the driver's readback settles
     it), a list element (its order inside the loop is not read), a load-time state the census could not resolve;
   - not planned, with the reason: a bound-but-unread switch, a script whose source was not supplied, a call the
-    supplied source does not contain;
+    supplied source does not contain, a switch credited only from the raw bytecode of a function the decompiler
+    refused (its branch structure is not read);
   - two branch paths that send the same calls are one group (`samePaths` names the others);
   - conditions per group and arm: `loaded` at the `coc`-reachable cell (an interior or a named exterior cell, not a
     worldspace's persistent cell) holding most of the flipped switches' members; `away` at the
@@ -52,13 +58,20 @@ SCHEMA_VERSION = 1
 CHECK_ID = "runtime.state-switch-flip"
 WINDOW_SECONDS, REPLICATES, MAX_PATHS = 60, 2, 32
 
-# switchprobe's ScriptCalls rules (switchprobe/Program.cs), so a call's text here is the text the census recorded
+# switchprobe's call rules (_shared/ScriptFlipCalls.cs), so a call's text here is the text the census recorded;
+# test_flipplan 310-311 pin the names and directions to the C# definition
+ENABLES = frozenset({"enable", "enablenowait", "trytoenable", "trytoenablenowait"})
+DISABLES = frozenset({"disable", "disablenowait", "trytodisable", "trytodisablenowait"})
+FLIP = ENABLES | DISABLES
+LINK_CHAIN = frozenset({"enablelinkchain", "disablelinkchain"})
+NAMES = ("TryToEnableNoWait|TryToDisableNoWait|TryToEnable|TryToDisable|EnableLinkChain|DisableLinkChain|EnableNoWait|"
+         "DisableNoWait|Enable|Disable")
 HEADER = re.compile(r"^\s*(?:[\w\[\]:]+\s+)?(?:Function|Event)\s+([\w:]+)\s*\(", re.I)
 END = re.compile(r"^\s*End(?:Function|Event)\b", re.I)
 CALL = re.compile(r"(?<![\w.])(?:Self\.)?(?P<obj>[A-Za-z_]\w*)(?:\[[^\]]*\])?(?:\.(?:GetReference|GetRef)\(\))?\."
-                  r"(?P<call>Enable|Disable|EnableNoWait|DisableNoWait)\s*\(", re.I)
-LINKED = re.compile(r"(?<![\w.])(?:Self\.)?GetLinkedRef\([^)]*\)\.(?P<call>Enable|Disable|EnableNoWait|DisableNoWait)\s*\(",
-                    re.I)
+                  r"(?P<call>" + NAMES + r")\s*\(", re.I)
+LINKED = re.compile(r"(?<![\w.])(?:Self\.)?GetLinkedRef\([^)]*\)\.(?P<call>" + NAMES + r")\s*\(", re.I)
+SELF_CALL = re.compile(r"(?<![\w.])(?:Self\.)?(?P<call>" + NAMES + r")\s*\(", re.I)
 IF = re.compile(r"^\s*If\b", re.I)
 ELSEIF = re.compile(r"^\s*ElseIf\b", re.I)
 ELSE = re.compile(r"^\s*Else\s*$", re.I)
@@ -86,7 +99,7 @@ def function_lines(source: str, fn: str) -> list[str] | None:
             continue
         if inside:
             semi = line.find(";")
-            out.append(line[:semi] if semi >= 0 and not line.lstrip().startswith(";") else line)
+            out.append(line[:semi] if semi >= 0 else line)   # code only: a whole-line comment is no code
     return out if inside else None
 
 
@@ -111,10 +124,10 @@ def parse_block(lines: list[str], i: int = 0, stop=None) -> tuple[list, int]:
                 i += 1
             items.append(("if", arms, has_else))
             continue
-        for m in CALL.finditer(line):
-            items.append(("call", m.group(0).strip(), m.group("call"), i))
-        for m in LINKED.finditer(line):
-            items.append(("call", m.group(0).strip(), m.group("call"), i))
+        found = [("call", m.group(0).strip(), m.group("call"), i) for rx in (CALL, LINKED) for m in rx.finditer(line)]
+        if not found and (m := SELF_CALL.search(line)):   # a bare call is on Self, recorded as switchprobe records it
+            found = [("call", f"Self.{m.group('call')}()", m.group("call"), i)]
+        items += found
         i += 1
     return items, i
 
@@ -194,6 +207,13 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
         for n, pth in enumerate(route, start=1):
             calls, dropped, flags, state = [], [], [], {}
             for _, text, name, line in pth:
+                if name.lower() in LINK_CHAIN:
+                    if (text, line) not in seen_unmapped:
+                        seen_unmapped.add((text, line))
+                        unmapped.append({"source": f"{script}.{fn}", "line": line + 1, "call": text,
+                                         "reason": "a link-chain call changes the references linked to its object, not "
+                                                   "the object: not a flip"})
+                    continue
                 keys = sorted(by_text.get(fk + (text,), set()))
                 if not keys:
                     if (text, line) not in seen_unmapped:
@@ -201,7 +221,7 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                         unmapped.append({"source": f"{script}.{fn}", "line": line + 1, "call": text,
                                          "reason": "the census maps this call to no switch"})
                     continue
-                target = "enabled" if name.lower().startswith("enable") else "disabled"
+                target = "enabled" if name.lower() in ENABLES else "disabled"
                 for key in keys:
                     s = switches[key]
                     src_txt = f"{script}.{fn}, line {line + 1}: {text}" + (f" (branch path {n})" if len(route) > 1 else "")
@@ -234,7 +254,18 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                            "arrival": arrival_cell([switches[c["ref"]] for c in calls])})
     for k in sorted(in_pop):
         if k not in planned_keys and not any(x["ref"] == k for x in not_planned):
-            not_planned.append({"ref": k, "reason": "no supplied source line carries its recorded call"})
+            raw, other = set(), False
+            for line in (switches[k].get("trigger") or {}).get("by") or []:
+                m = BY.search(str(line))
+                if m and m.group("text").startswith("raw bytecode "):
+                    raw.add(f"{m.group('script')}.{m.group('fn')}")
+                else:
+                    other = True
+            not_planned += [{"ref": k, "reason": f"credited from the raw bytecode of {f}, a function the decompiler "
+                                                 "refused: its branch structure is not read, so it is not planned"}
+                            for f in sorted(raw)]
+            if other or not raw:
+                not_planned.append({"ref": k, "reason": "no supplied source line carries its recorded call"})
     return {"population": pop["counts"], "causes": pop["causes"], "groups": groups, "unmapped": unmapped,
             "notPlanned": sorted({(x["ref"], x["reason"]): x for x in not_planned}.values(),
                                  key=lambda x: (x["ref"], x["reason"]))}
