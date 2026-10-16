@@ -25,6 +25,7 @@
     <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />

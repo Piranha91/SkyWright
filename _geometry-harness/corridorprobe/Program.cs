@@ -107,6 +107,17 @@ PopulationMode popMode;
 try { popMode = PopulationCli.Resolve("corridorprobe", flagsOnly, stateSpec, stateSupported: false); }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
+// arms and cut read the profile's order below: one whose plugin lacks a master is refused before any work (ruling 12).
+if (mode is "arms" or "cut")
+{
+    string mmInstance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
+    string mmProfile = Path.Combine(mmInstance, "profiles", HarnessTarget.Require(HarnessTarget.Profile, "MO2 profile name", "profile"));
+    string mmMods = Path.Combine(mmInstance, "mods"), mmOverwrite = Path.Combine(mmInstance, "overwrite");
+    var mmOrder = Mo2LoadOrder.Build(mmProfile, mmMods, dataDir, mmOverwrite);
+    if (OrderMasters.RefusalForProfile(mmProfile, mmMods, dataDir, mmOverwrite, mmOrder.OrderedPaths) is { } missingMaster)
+    { Console.Error.WriteLine(missingMaster); return 2; }
+}
+
 using var mod = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(dataDir, plugin), SkyrimRelease.SkyrimSE);
 CellPlacements? cell = null;
 foreach (var cp in PlacementExtract.FromMod(mod))

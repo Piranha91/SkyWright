@@ -101,6 +101,9 @@ var cfg = HarnessOrderCli.Resolve(profileName, profileDir, modsDir, dataDir, ove
                                   orderFile, enablePlugins, disablePlugins);
 if (cfg.Refused) { Console.Error.WriteLine(cfg.RefusedReason); return 2; }
 IReadOnlyList<string> paths = extraPlugins.Count == 0 ? cfg.OrderedPaths : cfg.OrderedPaths.Concat(extraPlugins).ToList();
+// An --extra-plugin is loaded into the order measured, so its masters are checked like the order's own (ruling 12).
+if (extraPlugins.Count > 0 && OrderMasters.RefusalForProfile(profileDir, modsDir, dataDir, overwriteDir, paths) is { } missingMaster)
+{ Console.Error.WriteLine(missingMaster); return 2; }
 Console.WriteLine($"load order: {paths.Count} plugins ({sw.ElapsedMilliseconds} ms)\n");
 HarnessOrderCli.Print(cfg);
 

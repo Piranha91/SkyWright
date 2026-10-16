@@ -39,7 +39,12 @@ public sealed record SyntheticResult(
     IReadOnlyList<string> OrderedPaths,
     IReadOnlyList<string> Warnings,
     IReadOnlyList<string> Applied,
-    int LoadedCount);
+    int LoadedCount)
+{
+    /// <summary>Plugins asked for with --enable that were kept off because a master they declare is not loaded. The
+    /// order built without them is not the order asked for, so the shared reader refuses on any (ruling 12).</summary>
+    public IReadOnlyList<MasterGap> RefusedForMasters { get; init; } = Array.Empty<MasterGap>();
+}
 
 public static class SyntheticOrder
 {
@@ -51,6 +56,7 @@ public static class SyntheticOrder
     {
         var warnings = new List<string>();
         var applied = new List<string>();
+        var refusedForMasters = new List<MasterGap>();
         var comp = Mo2LoadOrder.ReadComposition(profileDir, warnings);
 
         var enableSet = new HashSet<string>(enable ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -92,6 +98,7 @@ public static class SyntheticOrder
             if (missing.Count == 0) continue;
             state[name] = false;
             loadedNames.Remove(name);
+            refusedForMasters.Add(new MasterGap(name, missing));
             warnings.Add(
                 $"REFUSED to enable '{name}': it masters {string.Join(", ", missing.Select(m => $"'{m}'"))}, " +
                 "absent from the synthetic order. The game cannot load that state, so any finding computed " +
@@ -145,7 +152,7 @@ public static class SyntheticOrder
             if (!seen.Contains(name))
                 warnings.Add($"'{name}' was asked to be disabled but is not in loadorder.txt; nothing to do.");
 
-        return new SyntheticResult(orderedPaths, warnings, applied, loaded);
+        return new SyntheticResult(orderedPaths, warnings, applied, loaded) { RefusedForMasters = refusedForMasters };
     }
 
     /// <summary>filename → winning real path, in MO2's own precedence: overwrite, then enabled mods by

@@ -23,6 +23,7 @@
   <ItemGroup>
     <Compile Include="..\_shared\FomodModel.cs" Link="FomodModel.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />

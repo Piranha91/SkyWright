@@ -178,12 +178,14 @@ if (winning)
 {
     if (mode == "sweep") { Console.Error.WriteLine("--winning is for cell, line, points and reach (one cell resolved through the load order), not sweep"); return 2; }
     walk.AddRange(cfg is not null ? cfg.OrderedPaths : Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths);
+    if (cfg is null && HarnessShared.OrderMasters.RefusalForProfile(profileDir, modsDir, dataDir, overwriteDir, walk) is { } missingMaster) { Console.Error.WriteLine(missingMaster); return 2; }   // ruling 12: the game will not load it
 }
 else
 {
     string pluginPath = Path.Combine(dataDir, plugin);
     if (!File.Exists(pluginPath))
     {
+        // Exempt from the missing-master refusal (ruling 12): the order only finds this one plugin's file; no order is evaluated.
         var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
         pluginPath = order.OrderedPaths.FirstOrDefault(pp => string.Equals(Path.GetFileName(pp), plugin, StringComparison.OrdinalIgnoreCase)) ?? "";
         if (pluginPath.Length == 0) { Console.Error.WriteLine($"{plugin} is neither in {dataDir} nor in the profile's load order"); return 2; }

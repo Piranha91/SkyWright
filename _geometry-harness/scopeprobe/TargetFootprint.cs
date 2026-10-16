@@ -19,7 +19,7 @@ sealed class FootprintLists
 }
 
 // Pass 1 of scopeprobe, out of the top-level statements so --self-test calls the code the run calls: one target's own
-// footprint, or the one-sentence walk failure that makes the scope incomplete (absent, missing a master, unopenable,
+// footprint, or the one-sentence walk failure that makes the scope incomplete (absent, unopenable,
 // unwalkable, or holding a record that cannot be read).
 static class TargetFootprint
 {
@@ -34,16 +34,7 @@ static class TargetFootprint
             return;
         }
 
-        // A master the configuration does not load: the game will not start, and a record overriding that master's
-        // cannot be told from the target's own, so nothing measured here would describe a game anyone can run.
-        var missingMasters = plugin.Masters.Where(m => !byName.ContainsKey(m)).ToList();
-        if (missingMasters.Count > 0)
-        {
-            o.WalkFailures.Add($"'{wanted}' masters {string.Join(", ", missingMasters.Select(m => $"'{m}'"))}, which the resolved "
-                             + $"configuration ({configPlugins} plugins, {configSource}) does not load; the game will not start on a "
-                             + "missing master, so its footprint was not measured");
-            return;
-        }
+        // A target missing a master never reaches here: the shared reader refused the whole configuration (ruling 12).
 
         ISkyrimModGetter mod;
         try { mod = LoadOrderResolver.OpenOverlay(plugin.Path, dataDir); }

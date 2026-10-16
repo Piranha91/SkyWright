@@ -122,6 +122,7 @@ if (bosOn)
 {
     sw.Restart();
     var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+    if (HarnessShared.OrderMasters.RefusalForProfile(profileDir, modsDir, dataDir, overwriteDir, order.OrderedPaths) is { } missingMaster) { Console.Error.WriteLine(missingMaster); return 2; }   // ruling 12: the game will not load it
     __run.Feature("plugins", order.OrderedPaths.Count, "plugins").Stage("swap-layer", "walking the order for the swap index", order.OrderedPaths.Count, "plugins");
 
     foreach (var p in order.OrderedPaths)

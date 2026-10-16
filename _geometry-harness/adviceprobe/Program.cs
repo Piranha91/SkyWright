@@ -254,6 +254,7 @@ string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
+// Exempt from the missing-master refusal (ruling 12): only mod metadata is read to write rules; no record is read.
 var comp = Mo2LoadOrder.ReadComposition(profileDir, warnings);
 var filenameMap = SyntheticOrder.BuildFilenameMap(comp, modsDir, dataDir, overwriteDir);
 var inactive = new HashSet<string>(comp.InactivePluginNames, StringComparer.OrdinalIgnoreCase);

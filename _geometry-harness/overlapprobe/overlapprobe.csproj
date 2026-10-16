@@ -25,6 +25,7 @@
     <Compile Include="..\_shared\OverlapClassFixture.cs" Link="OverlapClassFixture.cs" />
     <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
     <Compile Include="..\_shared\HarnessOrderCli.cs" Link="HarnessOrderCli.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <Compile Include="..\_shared\PlacementHistory.cs" Link="PlacementHistory.cs" />

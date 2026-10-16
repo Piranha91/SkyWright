@@ -57,6 +57,7 @@ Console.WriteLine($"BARE order: {bare.Count} plugins (base masters + Creation Cl
                   $"positions as in loadorder.txt");
 foreach (var m in missing) Console.WriteLine($"   ⚠ '{m}' matched the bare filter but no file was found — excluded, counted here.");
 
+// Exempt from the missing-master refusal (ruling 12): this bare order is swept for missing masters, which are its findings.
 using var resolver = LoadOrderResolver.Build(bare);
 var res = ErrorCheck.Run(resolver, null, int.MaxValue);
 if (res.Error is not null) { Console.Error.WriteLine(res.Error); return 1; }
