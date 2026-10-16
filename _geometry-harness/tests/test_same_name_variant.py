@@ -78,7 +78,8 @@ def make_instance(root: Path):
     c = root / "candidates"
     c.mkdir()
     for stem, mods in (("candidate-00-x-baseline", ["Main"]), ("candidate-01-variant", ["Variant"]),
-                       ("candidate-02-copy", ["Copy"]), ("candidate-03-profile-assets", None)):
+                       ("candidate-02-copy", ["Copy"]), ("candidate-03-profile-assets", None),
+                       ("candidate-04-empty-view", [])):
         doc = {"SchemaVersion": 1, "Name": stem, "BaseProfile": "P", "Plugins": ["Skyrim.esm", "Mod.esp"],
                "Changes": ["fixture"], "Provenance": {"why": "fixture"}}
         if mods is not None:
@@ -157,6 +158,13 @@ def plan_cases(root: Path):
           "454: a narrower view that keeps the provider keeps the scope row without a walk")
     check(row(doc2, "candidate-02-copy").get("hashSource") == "unstated",
           "454: a view that drops the scope's provider is unstated without a walk")
+    # 459b: dropping the providing folder and adding nothing is still not the scope's copy: the probes then read a lower
+    # layer (here the profile's Variant folder, outside the view). Without a walk: unstated; with one: that copy.
+    check(row(doc2, "candidate-04-empty-view").get("hashSource") == "unstated",
+          "459: an empty view that drops the scope's providing folder is unstated without a walk")
+    e = row(doc, "candidate-04-empty-view")
+    check(e.get("sha256") == sha(VARIANT) and e.get("hashSource") == "instance:Variant",
+          f"459: with a walk the empty view reads the lower layer's copy ({str(e.get('sha256'))[:12]}, {e.get('hashSource')})")
 
 
 def rows(names, shas, unstated=()):
