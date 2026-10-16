@@ -7,6 +7,7 @@ outside the tracked tree.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -239,6 +240,151 @@ def test_g20_arrival_is_a_cell_coc_can_reach():
             s["onSet"] += [{"key": "0001FF:Target.esp", "cell": "Tamriel (persistent cell)", "cellKey": "000D74:Skyrim.esm"}] * 3
         plan, _ = F.build([("patched", "Prof-P", cen)], SCOPE, scripts_dir(tmp))
         assert {c["arrival"]["cell"] for c in plan["conditions"]} == {"TownInterior"}, plan["conditions"]
+
+
+# ---- 310-316: the call rules follow switchprobe's (_shared/ScriptFlipCalls.cs) ----
+
+CS_RULES = Path(F.__file__).resolve().parent / "_shared" / "ScriptFlipCalls.cs"
+GATE = "000B01:Target.esp"
+
+
+def cs_rules():
+    """(flip, link-chain, enables, disables, proper-case names) read from the C# definition; each found exactly once."""
+    src = CS_RULES.read_text(encoding="utf-8")
+
+    def one(rx, what):
+        hits = re.findall(rx, src)
+        assert len(hits) == 1, f"{what}: {len(hits)} matches in {CS_RULES}"
+        names = re.findall(r'"(\w+)"', hits[0]) if "|" not in hits[0] else hits[0].split("|")
+        assert names, f"{what}: no names in {CS_RULES}"
+        return names
+    flip = {n.lower() for n in one(r"\bFlip\s*=\s*new HashSet<string>\([^)]*\)\s*\{([^}]*)\}", "Flip")}
+    chain = {n.lower() for n in one(r"\bLinkChain\s*=\s*new HashSet<string>\([^)]*\)\s*\{([^}]*)\}", "LinkChain")}
+    en = {n.lower() for n in one(r"\bbool Enables\(string call\)\s*=>\s*call is ([^;]+);", "Enables")}
+    dis = {n.lower() for n in one(r"\bbool Disables\(string call\)\s*=>\s*call is ([^;]+);", "Disables")}
+    proper = one(r'const string Names = "([^"]+)"', "Names")
+    assert en | dis == flip and not en & dis, f"C# Enables {sorted(en)} / Disables {sorted(dis)} do not split Flip {sorted(flip)}"
+    assert {n.lower() for n in proper} == flip | chain, f"C# Names {proper} is not Flip + LinkChain"
+    return flip, chain, en, dis, {n.lower(): n for n in proper}
+
+
+def by_s(script, fn, text, head="quest GateQ"):
+    return f"{head} ({script}.{fn}: {text})"
+
+
+def one_census(*switches):
+    sw = list(switches)
+    return {"summary": {"switches": len(sw), "triggers": {"triggered": len(sw)}}, "unreadable": [], "switches": sw,
+            "jointFlips": []}
+
+
+def build_one(tmp, cen, script, text):
+    d = Path(tmp) / "scripts"
+    d.mkdir(exist_ok=True)
+    (d / f"{script}.psc").write_text(text, encoding="utf-8")
+    return F.build([("patched", "Prof-P", cen)], SCOPE, d)[1]["arms"][0]
+
+
+def test_c310_every_flip_switchprobe_credits_is_planned_in_its_direction():
+    # rejects: a name in switchprobe's flip family that flipplan does not plan, or plans in the wrong direction
+    flip, _, en, _, proper = cs_rules()
+    wrong = []
+    for name in sorted(flip):
+        call = proper[name]
+        want = "enabled" if name in en else "disabled"
+        with tempfile.TemporaryDirectory() as tmp:
+            cen = one_census(switch(GATE, "Gate", baseline=want != "enabled", by=[by_s("GateScript", "F", f"Gate.{call}(")]))
+            arm = build_one(tmp, cen, "GateScript", f"Function F()\n  Gate.{call}()\nEndFunction\n")
+            got = [(c["ref"], c["target"]) for g in arm["groups"] for c in g["calls"]]
+            if got != [(GATE, want)]:
+                wrong.append(f"{call}: planned {got}, switchprobe credits {want}")
+    assert not wrong, "; ".join(wrong)
+
+
+def test_c311_a_link_chain_call_is_never_a_flip_of_its_object():
+    # rejects: Gate.EnableLinkChain() planned as a flip of Gate (it flips Gate's linked chain), or dropped without a word
+    _, chain, _, _, proper = cs_rules()
+    wrong = []
+    for name in sorted(chain):
+        call = proper[name]
+        with tempfile.TemporaryDirectory() as tmp:
+            # a forged census credit: switchprobe never writes one, and flipplan must not trust it if it does
+            cen = one_census(switch(GATE, "Gate", baseline=name.startswith("disable"),
+                                    by=[by_s("GateScript", "F", f"Gate.{call}(")]))
+            arm = build_one(tmp, cen, "GateScript", f"Function F()\n  Gate.{call}()\nEndFunction\n")
+            planned = [c for g in arm["groups"] for c in g["calls"]]
+            listed = [u for u in arm["unmapped"] if u["call"] == f"Gate.{call}(" and "link" in u["reason"]]
+            if planned or len(listed) != 1:
+                wrong.append(f"{call}: planned {planned}, listed {arm['unmapped']}")
+    assert not wrong, "; ".join(wrong)
+
+
+def test_c312_tryto_direction_follows_the_state_of_the_path():
+    # rejects: TryToEnable read as `disabled` (a startswith("enable") rule), or the source order lost
+    door = "000B02:Target.esp"
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(
+            switch(GATE, "Gate", baseline=True, by=[by_s("GateScript", "F", "Alias_Gate.TryToDisable("),
+                                                    by_s("GateScript", "G", "Alias_Gate.TryToDisable("),
+                                                    by_s("GateScript", "G", "Alias_Gate.TryToEnableNoWait(")]),
+            switch(door, "Door", baseline=True, by=[by_s("GateScript", "F", "Alias_Door.TryToEnable(")]))
+        arm = build_one(tmp, cen, "GateScript", "Function F()\n  Alias_Door.TryToEnable()\n  Alias_Gate.TryToDisable()\n"
+                                                "EndFunction\n\nFunction G()\n  Alias_Gate.TryToDisable()\n"
+                                                "  Alias_Gate.TryToEnableNoWait()\nEndFunction\n")
+        f, g = group({"arms": [arm]}, "GateScript.F"), group({"arms": [arm]}, "GateScript.G")
+        assert calls(f) == [(GATE, "disabled")], calls(f)
+        assert [(x["ref"], x["target"]) for x in f["dropped"]] == [(door, "enabled")] and "already enabled" in f["dropped"][0]["reason"], f["dropped"]
+        assert calls(g) == [(GATE, "disabled"), (GATE, "enabled")], calls(g)
+
+
+def test_c313_a_bare_call_is_a_call_on_self():
+    # rejects: a ref script's bare Enable() (switchprobe credits it as Self.Enable()) never planned; a bare link-chain
+    # call planned
+    lever = "000B03:Target.esp"
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(switch(lever, "Lever", baseline=False,
+                                by=[by_s("LeverScript", "OnActivate", "Self.Enable()", head="ref Lever")]))
+        arm = build_one(tmp, cen, "LeverScript", "Scriptname LeverScript extends ObjectReference\n"
+                                                 "Event OnActivate(ObjectReference akActionRef)\n  Enable()\n"
+                                                 "  EnableLinkChain()\nEndEvent\n")
+        g = group({"arms": [arm]}, "LeverScript.OnActivate")
+        assert calls(g) == [(lever, "enabled")], calls(g)
+        assert [(u["call"], "link" in u["reason"]) for u in arm["unmapped"]] == [("Self.EnableLinkChain()", True)], arm["unmapped"]
+
+
+def test_c314_a_whole_line_comment_is_not_a_call():
+    # rejects: a commented-out `; Gate.Enable()` read as code (the live call then dropped as already enabled)
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(switch(GATE, "Gate", baseline=False, by=[by_s("GateScript", "F", "Gate.Enable(")]))
+        arm = build_one(tmp, cen, "GateScript", "Function F()\n  ; Gate.Enable()\n  ;Gate.Disable()\n  Gate.Enable()\nEndFunction\n")
+        g = group({"arms": [arm]}, "GateScript.F")
+        assert calls(g) == [(GATE, "enabled")] and "line 3:" in g["calls"][0]["source"], g["calls"]
+        assert g["dropped"] == [] and arm["unmapped"] == [], (g["dropped"], arm["unmapped"])
+
+
+RAW = "raw bytecode CALLMETHOD id:TryToEnable id:::Alias_Door9_var id:::NoneVar int:0"
+
+
+def test_c315_a_raw_bytecode_credit_is_not_planned_with_its_reason():
+    # rejects: a flip seen only in a refused function's bytecode left under the generic reason (or planned without its
+    # branch structure)
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(switch(GATE, "Gate", baseline=False,
+                                by=[by_s("GateScript", "Fragment_0", RAW, head="quest GateQ stage 10")]))
+        arm = build_one(tmp, cen, "GateScript", "Function Fragment_0()\n  ;   " + RAW[len("raw bytecode "):] + "\nEndFunction\n")
+        assert not arm["groups"], arm["groups"]
+        np_ = [x for x in arm["notPlanned"] if x["ref"] == GATE]
+        assert len(np_) == 1 and "raw bytecode" in np_[0]["reason"] and "GateScript.Fragment_0" in np_[0]["reason"], np_
+
+
+def test_c316_a_credit_the_source_lacks_keeps_the_generic_reason():
+    # guard: 315's rule must not take over a real missing-source case
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = one_census(switch(GATE, "Gate", baseline=False, by=[by_s("GateScript", "F", "Gate.Enable(")]))
+        arm = build_one(tmp, cen, "GateScript", "Function F()\n  Gate.Disable()\nEndFunction\n")
+        assert [(x["ref"], x["reason"]) for x in arm["notPlanned"]] == [
+            (GATE, "no supplied source line carries its recorded call")], arm["notPlanned"]
+        assert [u["call"] for u in arm["unmapped"]] == ["Gate.Disable("], arm["unmapped"]
 
 
 def main():
