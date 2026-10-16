@@ -333,6 +333,92 @@ def probe_exe(harness: Path, probe: str) -> Path:
     return Path(harness) / probe / "bin" / "Release" / "net9.0" / exe_name(probe)
 
 
+def probe_child_env(opts: dict) -> dict:
+    """HarnessTarget reads the instance from the environment, so a probe with no --instance flag
+    still resolves the same configuration the flagged ones do. Shared by `plan` and `run`."""
+    env = {}
+    for var, key in (("HOUSECARL_MO2_INSTANCE", "instance"), ("HOUSECARL_MO2_PROFILE", "profile"),
+                     ("HOUSECARL_GAME_PATH", "game")):
+        if opts.get(key):
+            env[var] = str(opts[key])
+    return env
+
+
+def probe_common_flags(opts: dict) -> list[str]:
+    out = []
+    for flag in ("instance", "profile", "game"):
+        if opts.get(flag):
+            out += [f"--{flag}", opts[flag]]
+    return out
+
+
+def probe_argv(opts: dict, harness: Path, exe: str | None) -> list[str] | None:
+    """The child's program. `--probe-cmd NAME=<argv prefix>` stands a fixture's fake probe in."""
+    if not exe:
+        return None
+    override = (opts.get("probeCmd") or {}).get(exe)
+    if override:
+        return override.split()
+    path = probe_exe(harness, exe)
+    if not path.exists():
+        return None
+    return [str(path)]
+
+
+SCENE_PREFLIGHT_PROBE = "overlapprobe"
+
+
+def scene_preflight(arms: list[dict], opts: dict, harness: Path) -> tuple[list[str], list[str]]:
+    """Run overlapprobe's own scene preflight on every arm, the check its scene captures will run, and record
+    each verdict on the arm as `scenePreflight`. Returns (refusals, notes): one line per arm the probe refused,
+    and lines for the plan's output. The rules live in the probe; this only acts on the verdict it writes."""
+    refusals, notes = [], []
+    if not (opts.get("instance") or os.environ.get("HOUSECARL_MO2_INSTANCE")):
+        reason = ("no --instance was given, so the plan could not check the arms' asset views against the base "
+                  "profile the way overlapprobe's scene captures will")
+        for arm in arms:
+            arm["scenePreflight"] = {"status": "not-run", "reason": reason}
+        notes.append("scene preflight not run: the arms' asset views were not checked against the base profile, "
+                     "because no --instance was given")
+        return refusals, notes
+    argv0 = probe_argv(opts, harness, SCENE_PREFLIGHT_PROBE)
+    if argv0 is None:
+        refusals.append(f"no overlapprobe build at {probe_exe(harness, SCENE_PREFLIGHT_PROBE)}, so the plan cannot "
+                        f"check the arms' asset views the way the scene captures will; build overlapprobe, then plan again")
+        return refusals, notes
+    override = (opts.get("probeCmd") or {}).get(SCENE_PREFLIGHT_PROBE)
+    tool = {"probeCmd": override} if override else tool_identity(harness, SCENE_PREFLIGHT_PROBE)
+    with tempfile.TemporaryDirectory(prefix="evalrun-preflight-") as td:
+        out = Path(td)
+        jobs = [{"id": f"scene-preflight-{i:02d}", "env": probe_child_env(opts),
+                 "argv": argv0 + ["--scene-preflight", "--order", str(arm["candidatePath"]),
+                                  "--json", str(out / f"{i:02d}.json")] + probe_common_flags(opts)}
+                for i, arm in enumerate(arms)]
+        results = Runner("evalrun-plan-preflight", out_dir=out / "logs", retries=0).run(jobs, echo=False)
+        for i, (arm, res) in enumerate(zip(arms, results)):
+            verdict = load_json(out / f"{i:02d}.json")
+            where = f"arm {arm['armId']} ({arm['candidateFile']})"
+            if not isinstance(verdict, dict) or verdict.get("verdict") not in ("passed", "refused"):
+                log = out / "logs" / f"scene-preflight-{i:02d}.txt"
+                tail = [ln for ln in (log.read_text(encoding="utf-8").splitlines() if log.exists() else []) if ln.strip()]
+                refusals.append(f"{where}: overlapprobe's scene preflight wrote no verdict (exit {res.get('exitCode')}): "
+                                f"{tail[-1] if tail else 'no output'}; run it by hand on that candidate to see why")
+                continue
+            if verdict["verdict"] == "passed":
+                arm["scenePreflight"] = {"status": "passed", "providers": len(verdict.get("providers") or []),
+                                         "omittedProviders": verdict.get("omittedProviderCount"), "tool": tool}
+            elif verdict.get("code") == "no-explicit-mods":
+                # A candidate that keeps the profile's assets is legitimate for the ordersweep probes; only a scene
+                # capture needs an explicit view, so the arm is recorded, not refused.
+                arm["scenePreflight"] = {"status": "no-asset-view", "code": verdict["code"],
+                                         "reason": verdict.get("reason"), "tool": tool}
+                notes.append(f"   {arm['armId']}: no scene can be captured from this arm: {verdict.get('reason')}")
+            else:
+                refusals.append(f"{where}: overlapprobe's scene preflight refused it: {verdict.get('reason')}. "
+                                f"To fix: {verdict.get('remedy')}.")
+    return refusals, notes
+
+
 def tool_identity(harness: Path, probe: str) -> dict:
     """The code that ACTUALLY runs: the managed assembly beside the apphost, not only the exe
     (memory: an apphost hash does not change when the managed code does)."""
@@ -925,6 +1011,12 @@ def cmd_plan(a) -> int:
         "noReverse": bool(a.no_reverse), "population": population,
     }
 
+    # B9: an arm the scene captures will refuse is refused here, by the same check, before anything runs.
+    preflight_refusals, preflight_notes = scene_preflight(arms, options, harness)
+    if preflight_refusals:
+        return refuse("overlapprobe's scene preflight, the check every scene capture runs, refused this plan; "
+                      "nothing was planned:\n   - " + "\n   - ".join(preflight_refusals))
+
     for check in reg.checks:
         for tok in (check.get("adapter") or {}).get("args") or []:
             for name in re.findall(r"\{([A-Za-z0-9_]+)\}", str(tok)):
@@ -1116,6 +1208,8 @@ def cmd_plan(a) -> int:
     print(f"plan {plan['planId']}: {len(checks)} checks, {len(arms)} arms, states {','.join(states)}, depth {depth}")
     for s in settings.sentences():
         print(s)
+    for line in preflight_notes:
+        print(line)
     if live_choice == "ask" and LIVE_CHECK_ID not in opted:
         print("The live switch check is set to ask each evaluation and was not opted in "
               "(`--opt-in " + LIVE_CHECK_ID + "` opts in).")
@@ -2151,34 +2245,13 @@ class Executor:
     # -- argv assembly ----------------------------------------------------------------------
 
     def child_env(self) -> dict:
-        """HarnessTarget reads the instance from the environment, so a probe with no --instance flag
-        still resolves the same configuration the flagged ones do."""
-        env = {}
-        for var, key in (("HOUSECARL_MO2_INSTANCE", "instance"), ("HOUSECARL_MO2_PROFILE", "profile"),
-                         ("HOUSECARL_GAME_PATH", "game")):
-            if self.opts.get(key):
-                env[var] = str(self.opts[key])
-        return env
+        return probe_child_env(self.opts)
 
     def common_flags(self) -> list[str]:
-        out = []
-        for flag in ("instance", "profile", "game"):
-            if self.opts.get(flag):
-                out += [f"--{flag}", self.opts[flag]]
-        return out
+        return probe_common_flags(self.opts)
 
     def exe_argv(self, adapter: dict) -> list[str] | None:
-        """The child's program. `--probe-cmd NAME=<argv prefix>` stands a fixture's fake probe in."""
-        exe = adapter.get("exe")
-        if not exe:
-            return None
-        override = (self.opts.get("probeCmd") or {}).get(exe)
-        if override:
-            return override.split()
-        path = probe_exe(self.harness, exe)
-        if not path.exists():
-            return None
-        return [str(path)]
+        return probe_argv(self.opts, self.harness, adapter.get("exe"))
 
     def expand(self, args: list[str], subs: dict) -> list[str]:
         out = []
