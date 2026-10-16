@@ -109,6 +109,7 @@ if (cfg is null)
     var arch = ArchiveDiscovery.Discover(profileDir, modsDir, dataDir, overwriteDir, GamePath);
     assetsBuilt = AssetResolver.Build(overwriteDir, modsDir, dataDir, comp.EnabledMods, arch.Archives);
     orderedPaths = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir).OrderedPaths;
+    if (HarnessShared.OrderMasters.RefusalForProfile(profileDir, modsDir, dataDir, overwriteDir, orderedPaths) is { } missingMaster) { Console.Error.WriteLine(missingMaster); return 2; }   // ruling 12: the game will not load it
 }
 else
 {

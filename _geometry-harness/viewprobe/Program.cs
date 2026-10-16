@@ -1176,6 +1176,13 @@ if (candidateConfiguration is null && order.OrderedPaths.Count < order.ActiveCou
                           + "they override would be used silently.");
     return 2;
 }
+// A profile plugin whose master is not loaded: refused, as --order refuses it (ruling 12; _shared/OrderMasters.cs).
+if (candidateConfiguration is null
+    && HarnessShared.OrderMasters.RefusalForProfile(profileDir, modsDir, dataDir, overwriteDir, order.OrderedPaths) is { } missingMaster)
+{
+    Console.Error.WriteLine(missingMaster);
+    return 2;
+}
 // The configuration this capture REPORTS, which is not always the one it was built from:
 // --order REPLACES the configuration, while --config-identity only asks what the profile's own
 // inputs were. Kept in its own variable so asking the question cannot change the order, the asset

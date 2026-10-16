@@ -10,6 +10,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
   </ItemGroup>
 </Project>

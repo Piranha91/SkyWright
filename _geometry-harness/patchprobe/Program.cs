@@ -118,6 +118,7 @@ foreach (var root in roots)
                 profile = o >= 0 && c > o ? line[(o + 1)..c] : line.Split('=', 2).Last().Trim();
             }
 
+        // Exempt from the missing-master refusal (ruling 12): a patch whose master is inactive is this probe's finding, not an order it measures.
         var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (profile is not null)
         {

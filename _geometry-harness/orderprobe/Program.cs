@@ -125,6 +125,9 @@ foreach (var name in comp.OrderedPluginNames)
     baseline.Add(name);
     paths.Add(p);
 }
+// No reordering repairs a missing master, so a baseline with one is refused before any search (ruling 12).
+if (OrderMasters.RefusalForProfile(profileDir, modsDir, dataDir, overwriteDir, paths) is { } missingMaster)
+{ Console.Error.WriteLine(missingMaster); return 2; }
 
 Console.WriteLine($"orderprobe — {profileName} @ {Instance}");
 Console.WriteLine($"baseline: {baseline.Count} loaded plugin(s) of {comp.OrderedPluginNames.Count} in loadorder.txt\n");

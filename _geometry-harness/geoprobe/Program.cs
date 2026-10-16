@@ -30,6 +30,7 @@ for (int ai = 0; ai + 1 < args.Length; ai++) if (args[ai] == "--dump") dumpPath 
 
 var sw = Stopwatch.StartNew();
 var order = Mo2LoadOrder.Build(profileDir, modsDir, dataDir, overwriteDir);
+if (HarnessShared.OrderMasters.RefusalForProfile(profileDir, modsDir, dataDir, overwriteDir, order.OrderedPaths) is { } missingMaster) { Console.Error.WriteLine(missingMaster); return 2; }   // ruling 12: the game will not load it
 Console.WriteLine($"load order: {order.ResolvedCount} plugins resolved of {order.ActiveCount} active "
                 + $"({order.Warnings.Count} warnings) in {sw.ElapsedMilliseconds} ms");
 
@@ -269,6 +270,7 @@ File.WriteAllText(outPath, JsonSerializer.Serialize(
         verts = x.r.Verts, tris = x.r.Tris,
     }), new JsonSerializerOptions { WriteIndented = false }));
 Console.WriteLine($"\nwrote {outPath}");
+return 0;
 
 void Bump(string k) { errs.TryGetValue(k, out var c); errs[k] = c + 1; }
 static string Short(string? s) => s is null ? "?" : (s.Length > 90 ? s[..90] : s);

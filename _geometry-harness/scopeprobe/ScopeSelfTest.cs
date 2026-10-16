@@ -53,22 +53,27 @@ static class ScopeSelfTest
                 && !ScopeOutcome.Complete(bad.WalkFailures.Count, bad.Summaries.Count, 1),
                 string.Join(" | ", bad.WalkFailures) + $"; unreadable records {bad.UnreadableRecords.Count}");
 
-        // SS-1: a target whose master the configuration does not load. The game will not start on it, and records that
-        // override the master's cannot be told from new ones, so the footprint is not measured: one walk failure naming
-        // the target and the missing master, no footprint, the scope incomplete (exit 1).
-        var orphan = WalkIn(Array.Empty<(string, string)>(), ("MrA.esp", mrA));
-        t.Check("SS-1 MrA.esp without MrMaster.esm: one walk failure naming MrA.esp and MrMaster.esm, no footprint, incomplete",
-                orphan.Summaries.Count == 0 && orphan.WalkFailures.Count == 1 && orphan.WalkFailures[0].StartsWith("'MrA.esp' ")
-                && orphan.WalkFailures[0].Contains("'MrMaster.esm'")
-                && !ScopeOutcome.Complete(orphan.WalkFailures.Count, orphan.Summaries.Count, 1)
-                && ScopeOutcome.ExitCode(ScopeOutcome.Complete(orphan.WalkFailures.Count, orphan.Summaries.Count, 1)) == 1,
-                $"summaries {orphan.Summaries.Count}; " + string.Join(" | ", orphan.WalkFailures));
+        // SS-1: a configuration whose plugin lacks a master. The game will not start on it, so the shared reader refuses the
+        // whole configuration before any walk (ruling 12, _shared/OrderMasters.cs): the refusal names MrA.esp and
+        // MrMaster.esm, and the run exits 2 with no scope.json (ScopeOutcome.Refuse).
+        string? Refusal(params (string Name, string Path)[] loaded)
+        {
+            var gaps = OrderMasters.Gaps(loaded.Select(x => (x.Name, PluginHeader.TryRead(x.Path)?.Masters)).ToList());
+            return gaps.Count == 0 ? null : OrderMasters.Sentence(gaps, g => $"switch '{g.Plugin}' off");
+        }
+        var orphan = Refusal(("MrA.esp", mrA));
+        t.Check("SS-1 MrA.esp without MrMaster.esm: refused in one sentence naming both, starting MISSING MASTER",
+                orphan is not null && orphan.StartsWith("MISSING MASTER - 'MrA.esp' masters 'MrMaster.esm'")
+                && orphan.Count(c => c == ';') == 1,
+                orphan ?? "(not refused)");
         var withMaster = WalkIn(new[] { ("MrMaster.esm", master) }, ("MrA.esp", mrA));
-        t.Check("SS-1 control: MrA.esp with MrMaster.esm loaded (not a target): footprint measured, no walk failure",
-                withMaster.Summaries.Count == 1 && withMaster.WalkFailures.Count == 0, string.Join(" | ", withMaster.WalkFailures));
+        t.Check("SS-1 control: MrA.esp with MrMaster.esm loaded: not refused; footprint measured, no walk failure",
+                Refusal(("MrMaster.esm", master), ("MrA.esp", mrA)) is null
+                && withMaster.Summaries.Count == 1 && withMaster.WalkFailures.Count == 0, string.Join(" | ", withMaster.WalkFailures));
         var masterOnly = WalkIn(Array.Empty<(string, string)>(), ("MrMaster.esm", master));
-        t.Check("SS-1 control: a master-less target (MrMaster.esm) alone: footprint measured, no walk failure",
-                masterOnly.Summaries.Count == 1 && masterOnly.WalkFailures.Count == 0, string.Join(" | ", masterOnly.WalkFailures));
+        t.Check("SS-1 control: a master-less target (MrMaster.esm) alone: not refused; footprint measured, no walk failure",
+                Refusal(("MrMaster.esm", master)) is null
+                && masterOnly.Summaries.Count == 1 && masterOnly.WalkFailures.Count == 0, string.Join(" | ", masterOnly.WalkFailures));
 
         // SS-4: a target holding a record whose body cannot be read: SdBad.esp's one STAT, marked compressed, with a body
         // that does not inflate. The open succeeds (the overlay frames groups and headers only); the read of that record

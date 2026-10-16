@@ -30,6 +30,10 @@ namespace HarnessShared;
 // game that cannot start (SyntheticOrder learned this on 2026-08-27, when enabling a patch with an absent
 // master "repaired" nine records). So those are refusals, named per plugin, not warnings.
 //
+// A MISSING MASTER IS REFUSED FROM EVERY SOURCE (ruling 12, 2026-10-15): the profile, a --enable/--disable what-if
+// (including a --enable that SyntheticOrder had to leave off) and a candidate. The reason is OrderMasters' one sentence,
+// starting "MISSING MASTER"; the caller prints it and exits 2 with nothing written.
+//
 // WHAT IT ALLOWS AND RECORDS INSTEAD (ConfigurationIdentity.Limits — read before believing a geometry or
 // script result computed under one):
 //   - a plugin whose winning provider is a mod folder that is NOT in the asset view (a disabled folder, or
@@ -190,6 +194,9 @@ public static class HarnessOrderCli
             source = $"synthetic:{profileName}";
             viewMods = comp.EnabledMods;
             var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enable, disable);
+            if (syn.RefusedForMasters.Count > 0)
+                return Refuse(OrderMasters.Sentence(syn.RefusedForMasters,
+                    g => $"also --enable {OrderMasters.Names(g.Masters)} (install it first if no folder has it) or leave '{g.Plugin}' off"));
             paths = syn.OrderedPaths.ToList();
             names = paths.Select(Path.GetFileName).ToList()!;
             warnings.AddRange(syn.Warnings);
@@ -217,6 +224,7 @@ public static class HarnessOrderCli
         var plugins = new List<ConfigPlugin>(paths.Count);
         var inView = new HashSet<string>(viewMods, StringComparer.OrdinalIgnoreCase);
         var outOfView = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var loadedMasters = new List<(string Name, IReadOnlyList<string>? Masters)>(paths.Count);
         for (int i = 0; i < paths.Count; i++)
         {
             var path = paths[i];
@@ -230,11 +238,24 @@ public static class HarnessOrderCli
             plugins.Add(new ConfigPlugin(name, path, sha, bytes, provider,
                                          hdr?.MasterFlag ?? false, hdr?.LightFlag ?? false,
                                          hdr?.Masters ?? Array.Empty<string>()));
+            loadedMasters.Add((name, hdr?.Masters));
             if (provider is not ("overwrite" or "Data") && !inView.Contains(provider))
             {
                 if (!outOfView.TryGetValue(provider, out var list)) outOfView[provider] = list = new List<string>();
                 list.Add(name);
             }
+        }
+        // The game will not start on a missing master (ruling 12): refused here for the profile and a what-if; a candidate
+        // was already refused by CheckLegality with the same sentence.
+        var gaps = OrderMasters.Gaps(loadedMasters);
+        if (gaps.Count > 0)
+        {
+            var disabled = new HashSet<string>(disable ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var profileRemedy = OrderMasters.ProfileRemedy(comp, modsDir, dataDir, overwriteDir);
+            return Refuse(OrderMasters.Sentence(gaps, g =>
+                g.Masters.Where(disabled.Contains).ToList() is { Count: > 0 } off
+                    ? $"also --disable '{g.Plugin}' or keep {OrderMasters.Names(off)}"
+                    : profileRemedy(g)));
         }
         // One line per offending FOLDER, naming its plugins — not one per plugin. A profile with the Creation Club
         // content installed as a disabled mod puts seventy of them in this bucket at once, and seventy near-identical
@@ -320,15 +341,18 @@ public static class HarnessOrderCli
                            + "SKIPPED for it. An unreadable header is not a clean bill of health.");
         }
 
+        var gaps = OrderMasters.Gaps(names.Select((n, i) => (n, headers[i]?.Masters)).ToList());
+        if (gaps.Count > 0)
+            refusals.Add(OrderMasters.Sentence(gaps,
+                g => $"add {OrderMasters.Names(g.Masters)} to the candidate ahead of '{g.Plugin}' or drop '{g.Plugin}'"));
+
         for (int i = 0; i < names.Count; i++)
         {
             if (headers[i] is not { } h) continue;
             foreach (var m in h.Masters)
             {
                 if (!pos.TryGetValue(m, out int j))
-                    refusals.Add($"candidate loads '{names[i]}' but not '{m}', which it masters — the game refuses to "
-                               + "start on a missing master, so nothing computed from this order would describe a game "
-                               + "anyone can run.");
+                    continue;                                   // the missing-master sentence above names it
                 else if (j > i)
                     refusals.Add($"candidate puts '{names[i]}' at position {i} ahead of its master '{m}' at position {j} "
                                + "— the engine loads a plugin's masters before it, so this is not an order it would use.");

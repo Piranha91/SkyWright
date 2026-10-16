@@ -80,6 +80,7 @@ var sw = Stopwatch.StartNew();
 // plugins.txt omits the base-game masters entirely; anything loadorder.txt lists that plugins.txt
 // never mentions is exactly one of those implicit always-on plugins.
 var profileDir = Path.Combine(Instance, "profiles", Profile);
+// Exempt from the missing-master refusal (ruling 12): the active set decides which patches apply; no order is measured.
 var active = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 {
     var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

@@ -31,5 +31,7 @@
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
     <Compile Include="..\_shared\StateArm.cs" Link="StateArm.cs" />
     <Compile Include="..\_shared\EnableArms.cs" Link="EnableArms.cs" />
+    <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
+    <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
   </ItemGroup>
 </Project>
