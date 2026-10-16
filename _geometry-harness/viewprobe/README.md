@@ -2132,7 +2132,7 @@ A sphere bound is classified by the same `Classify` a rectangle uses, so exact c
 `Crossing` and is never promoted to a cull. **A union of per-face shadows is NOT separated from the
 silhouette by the supporting evidence and remains untested**; the reported `scope` says so whenever
 a rule opts in. Outside the opted-in scope the Box is refused **by name**, never silently: a box
-that is not upright within the rule's own `maximumAbsNormalZ`, an eye inside or on the box, a
+that is not upright within the rule's upright tolerance (below), an eye inside or on the box, a
 degenerate box, non-positive bounds or scale, and an eye nearer than `minimumEyeDistance` each
 give their own reason. The near-eye distance for a box is measured to its nearest surface point.
 
@@ -2155,6 +2155,18 @@ before the field existed. The decision is `HarnessShared.PortalBoxOrientation`, 
 `stationrule: H0…H9` in `proofprobe`. **Opting in is a claim about engine behaviour.** A rule that
 sets it must cite in-game evidence for the class. The reported `scope` names the class whenever a
 rule opts in.
+
+**The upright tolerance (`uprightMaximumAbsNormalZ`, optional).** Both upright tests — a
+PortalBox's normal and a Box's two horizontal axes — use this field when a rule states it.
+`maximumAbsNormalZ` then governs only the horizontal class above. A rule that omits it uses
+`maximumAbsNormalZ` for both, exactly as before, and the field is not written into
+`ruleConfiguration`, so such a report is byte-identical. It must be finite and in [0, 1]. Both
+upright decisions live in `HarnessShared.PortalBoxOrientation` (`Check`, `BoxUpright`). Their cases
+are `stationrule: 6016…6020` in `proofprobe` and `--occlusion-rule-selftest DIR` (cases 6000–6014,
+run by `tools/test_occlusion_rule.py`). The reported `scope` names the tolerance when a rule states
+it. Widening it is a claim about engine behaviour: one lab test (2026-10-15) found PortalBoxes
+tilted |n.z| 0.0065 and 0.021, in both lean senses, and a Box tilted 0.021 culling as their true
+shape predicts. That test did not separate the true shape from an upright-snapped one.
 
 The geometry primitive tests each source NIF shape's stored sphere against the finite
 PortalBox shadow's surface and four side half-spaces — or, where a rule opts in, against that Box

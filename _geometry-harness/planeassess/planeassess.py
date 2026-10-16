@@ -381,6 +381,7 @@ def rule_issue(s, eye, rule):
     """None when the occlusion rule predicts this shape from this eye, else the refusal reason (viewprobe's
     ShapeOcclusion.Shadow and PortalBoxOrientation.Check, read for scoping)."""
     r, tol = refr_rotation(*s["rot"]), rule["maximumAbsNormalZ"]
+    utol = rule.get("uprightMaximumAbsNormalZ", tol)          # the upright class's own tolerance; absent: the old one
     if s["kind"] not in ("Box", "PortalBox"):
         return "not a Box or PortalBox primitive"
     full = shape_polys(s)
@@ -388,7 +389,7 @@ def rule_issue(s, eye, rule):
     if s["kind"] == "Box":
         if not rule.get("boxSilhouette"):
             return "Box face behavior unassessed (rule has no Box silhouette)"
-        if max(abs(r[0][2]), abs(r[1][2])) > tol:
+        if max(abs(r[0][2]), abs(r[1][2])) > utol:
             return "box not upright"
         if eye_inside_box(s, eye):
             return "eye inside the box"
@@ -396,7 +397,7 @@ def rule_issue(s, eye, rule):
             return "near-eye"
         return None
     n = r[1]
-    if abs(n[2]) > tol:
+    if abs(n[2]) > utol:
         if not rule.get("horizontalPortalBoxNormalDownEyeAbove"):
             return "PortalBox tilted"
         if not (abs(n[0]) <= tol and abs(n[1]) <= tol):
@@ -447,6 +448,18 @@ def geometry_selftest(verbose=True):
     chk("R8 Box with the rule's Box silhouette off: refused", rule_issue(P([0, 1000, 120], [300, 300, 300], kind="Box"), eye, dict(rule, boxSilhouette=False)),
         "Box face behavior unassessed (rule has no Box silhouette)")
     chk("R9 PortalBox 30 u from the eye: near-eye", rule_issue(P([0, 30, 120], [300, 1, 200]), eye, rule), "near-eye")
+    # The upright tolerance as its own field (lab block 3: tilts up to |n.z| 0.021 cull as their true shape predicts).
+    up = dict(rule, uprightMaximumAbsNormalZ=0.021)
+    chk("6022 upright 0.021: PortalBox at |n.z| 0.0205 predicted",
+        rule_issue(P([0, 1000, 120], [300, 1, 200], (math.asin(0.0205), 0, 0)), eye, up), None)
+    chk("6024 upright 0.021: PortalBox at |n.z| 0.0215 refused",
+        rule_issue(P([0, 1000, 120], [300, 1, 200], (math.asin(0.0215), 0, 0)), eye, up), "PortalBox tilted")
+    chk("6026 upright 0.021: Box at |axis.z| 0.0174 predicted",
+        rule_issue(P([0, 1000, 120], [300, 300, 300], (0, math.asin(0.0174), 0), kind="Box"), eye, up), None)
+    chk("6028 upright 0.021: horizontal normal-down panel 0.00768 off horizontal still refused",
+        rule_issue(P([0, 1000, 0], [300, 1, 200], (math.pi / 2 + math.asin(0.00768), 0, 0)), eye, up), "PortalBox tilted")
+    chk("6030 no upright field: PortalBox at |n.z| 0.0205 refused as before",
+        rule_issue(P([0, 1000, 120], [300, 1, 200], (math.asin(0.0205), 0, 0)), eye, rule), "PortalBox tilted")
     if verbose:
         print("SELFTEST", "PASS" if not fails else "FAIL %d" % len(fails))
     return fails
