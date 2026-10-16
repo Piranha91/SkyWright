@@ -219,9 +219,10 @@ public sealed class StateEvaluator
                 else
                 {
                     var (v, why) = DetectorModel.StateDifferential(before, after);
+                    // A route row has no other reference: its other side is the switch that brings the obstacle in or takes it out.
                     rows.Add(new StateRow(arm.Name, root.Key, root.Owner, StateRowKind.Route, v, $"{rm.V}: {rm.Why}",
                         key, after, placer, attacher, f.Base, null, -1, FormKey.Null, win.Cell, win.Space, interior,
-                        Pop(resp, -1), false, Route: rm.V, Navcut: navcut, MemberResponsible: resp,
+                        Pop(resp, root.Owner), false, Route: rm.V, Navcut: navcut, MemberResponsible: resp,
                         Physical: PhysicalState.Holds, PhysicalDetail: $"{rm.V} on the cell's winning navmesh"));
                 }
             }
