@@ -856,8 +856,13 @@ def build_prediction(ctx: dict) -> dict:
     p_targets = [t for t in ctx["targets"] if str(t).lower() in p_set]
     pt_lower = lower(p_targets)
 
+    replaced_by = ctx.get("armReplaced") or {}
+
     def arm_with(plugins_lower):
         for arm_id in ctx["armIds"]:
+            # A same-named variant has the plain setup's names but not its files (SW2): never take it as that setup.
+            if replaced_by.get(arm_id):
+                continue
             if arm_id != p_arm and lower(orders.get(arm_id) or []) == plugins_lower:
                 return arm_id
         return None
@@ -1402,6 +1407,35 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         added = [n for n in names if n and n.lower() not in base_set] if arm_id != "baseline" else []
         removed = [n for n in base_names if n and n.lower() not in {x.lower() for x in names if x}] if (arm_id != "baseline" and names) else []
         arm_changes[arm_id] = (added, removed)
+    # SW2: a plugin is the same plugin only with the same NAME and the same BYTES. An arm can keep every name and still
+    # load a different file under one of them (an author's same-named "compatible" variant). A row whose hash is
+    # unstated on either side cannot be compared, and is said to be so rather than taken as equal.
+    base_rows = {str(p.get("name")).lower(): p for p in
+                 ((plan_arms.get("baseline") or {}).get("requested") or {}).get("plugins") or [] if p.get("name")}
+
+    def stated(row):
+        sha = str((row or {}).get("sha256") or "")
+        return sha.lower() if len(sha) == 64 and (row or {}).get("hashSource") != "unstated" else None
+    arm_replaced, arm_unverified = {}, {}
+    for arm_id in arm_ids:
+        replaced, unverified = [], []
+        if arm_id != "baseline":
+            for p in ((plan_arms.get(arm_id) or {}).get("requested") or {}).get("plugins") or []:
+                b_row = base_rows.get(str(p.get("name") or "").lower())
+                if b_row is None:
+                    continue
+                mine, theirs = stated(p), stated(b_row)
+                if mine is None or theirs is None:
+                    unverified.append(p.get("name"))
+                elif mine != theirs:
+                    replaced.append(p.get("name"))
+        arm_replaced[arm_id], arm_unverified[arm_id] = replaced, unverified
+
+    def replacement_folder(arm_id, name):
+        row = next((p for p in ((plan_arms.get(arm_id) or {}).get("requested") or {}).get("plugins") or []
+                    if str(p.get("name") or "").lower() == str(name).lower()), {})
+        src = str(row.get("hashSource") or "")
+        return src.split(":", 1)[1] if src.startswith("instance:") else None
     base_order = [n.lower() for n in arm_orders.get("baseline") or []]
     plan_target_set = {str(t.get("name")).lower() for t in (b.plan.get("targets") or []) if isinstance(t, dict) and t.get("name")}
 
@@ -1420,8 +1454,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     #   mod-removal         the arm removes some but not all targets. Fewer conflicts here is
     #                       arithmetic: a setup without a mod does not have that mod's
     #                       conflicts.
-    #   same-order-control  the arm's plugin set equals the baseline's -- a comparability
-    #                       control, not a change.
+    #   same-order-control  the arm's plugins equal the baseline's -- names, order AND bytes --
+    #                       a comparability control, not a change.
+    #   same-name-replacement  the same names in the same order, but at least one is a different
+    #                       file (stated hashes differ): an author's same-named variant, say.
+    #   bytes-not-compared  the same names in the same order, but a hash is unstated on one side,
+    #                       so whether it is the same file was not checked; never called a control.
     #   mixed               adds and removes at once; described explicitly, never summarised.
     # --- DECLARED patch identity. A patch is declared, never inferred.
     #
@@ -1453,15 +1491,26 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         added, removed = arm_changes.get(arm_id) or ([], [])
         removed_targets = [n for n in removed if n.lower() in plan_target_set]
         added_targets = [n for n in added if n.lower() in plan_target_set]
+        replaced = arm_replaced.get(arm_id) or []
+        same_order = [n.lower() for n in arm_orders.get(arm_id) or []] == base_order
         if added and removed:
             return "mixed"
         if not added and not removed:
             # Same MEMBERSHIP is not the same configuration. A load order is ordered, and
             # reordering it is a real tested alternative that can change every winner.
-            # Calling it a control asserted an equality that was never checked.
-            return ("same-order-control"
-                    if [n.lower() for n in arm_orders.get(arm_id) or []] == base_order
-                    else "reordered-alternative")
+            # Calling it a control asserted an equality that was never checked. Nor is the same
+            # NAME the same file (SW2): a same-named replacement is its own comparison.
+            if replaced:
+                return "same-name-replacement" if same_order else "mixed"
+            if not same_order:
+                return "reordered-alternative"
+            return "bytes-not-compared" if arm_unverified.get(arm_id) else "same-order-control"
+        if replaced:
+            moved = added + removed + replaced
+            if any(n.lower() in plan_target_set for n in moved):
+                return "mixed"
+            return ("patch-comparison" if all(n.lower() in declared_patches for n in moved)
+                    else "unstated-difference")
         # An evaluated MOD moving decides the kind, whichever direction it moves in. Its
         # companion files travel with it and are collateral, not a patch: a mod's own extra
         # masters differ from the baseline for the same reason the mod does.
@@ -1525,6 +1574,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             return ("These setups hold the same plugins in a different load order. A change "
                     "here is a load-order effect, not a patch, and installing nothing would "
                     "reproduce it.")
+        if kinds_here <= {"same-name-replacement"}:
+            return ("These setups swap a plugin for a different file with the same name, such as an "
+                    "author's compatibility version. A change here comes from that file's contents; "
+                    "it is not reported as a fix.")
+        if kinds_here <= {"bytes-not-compared"}:
+            return ("These setups list the same plugins in the same order, but the plan could not state "
+                    "the bytes of every one, so they were not compared and the setups are not called "
+                    "the same.")
         if kinds_here <= {"unstated-difference"}:
             return ("These setups differ by a plugin that is not declared as a patch, so the "
                     "change cannot be attributed to one. Declare the patch to have this "
@@ -1536,7 +1593,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
 
     def arm_subject(arm_id) -> str:
         added, removed = arm_changes.get(arm_id) or ([], [])
-        change = " and ".join(([f"adding {', '.join(added)}"] if added else []) + ([f"removing {', '.join(removed)}"] if removed else []))
+        replaced = [f"replacing {n} with another file of the same name"
+                    + (f" (from {replacement_folder(arm_id, n)})" if replacement_folder(arm_id, n) else "")
+                    for n in arm_replaced.get(arm_id) or []]
+        unverified = ([f"keeping {', '.join(arm_unverified[arm_id])}, whose bytes were not compared"]
+                      if not added and not removed and not replaced and arm_unverified.get(arm_id) else [])
+        change = " and ".join(([f"adding {', '.join(added)}"] if added else []) + ([f"removing {', '.join(removed)}"] if removed else [])
+                              + replaced + unverified)
         return change[:1].upper() + change[1:] if change else "The supplied setup"
 
     def setup_subject(ids) -> str:
@@ -2365,6 +2428,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                   + unstated_text)
     for _a in arms_out:
         _a["comparisonKind"] = comparison_kinds.get(_a.get("armId"))
+        if arm_replaced.get(_a.get("armId")):
+            _a["replacedPlugins"] = list(arm_replaced[_a.get("armId")])
+        if comparison_kinds.get(_a.get("armId")) == "bytes-not-compared":
+            _a["bytesNotCompared"] = list(arm_unverified[_a.get("armId")])
     alternative_arms = [a["armId"] for a in arms_out if a.get("kind") != "baseline"]
     candidate_orders = [a.get("orderEvaluation") or {} for a in arms_out if a.get("kind") != "baseline"]
     reader_regressions = [f for f in findings if f.get("kind") == "regression" and f.get("readerRelevant")]
@@ -2654,7 +2721,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # verdict -- and so the reel's opening -- is the prediction.
     lead = build_prediction({
         "findings": findings, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
-        "declared": declared_patches, "comparisonKinds": comparison_kinds, "armChanges": arm_changes,
+        "declared": declared_patches, "comparisonKinds": comparison_kinds, "armChanges": arm_changes, "armReplaced": arm_replaced,
         "missing": missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
         "checkTitle": b.check_title, "armLabels": arm_labels,
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
