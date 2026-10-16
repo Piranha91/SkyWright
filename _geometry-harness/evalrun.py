@@ -666,6 +666,26 @@ def read_candidate(p: Path) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
+def scope_copy_still_wins(plain: str, own_view: dict) -> bool:
+    """Without a walk, the scope's copy is still the one the probes read when the arm's mod list adds no folder above
+    the layer that gave the scope its copy: overwrite outranks every folder; a mod folder must stay in the arm's list
+    with no new folder above it; the game's Data folder needs every folder of the arm's list to be one the scope's view
+    already had (they all rank above Data and none of them provided the file). Anything else is unknown."""
+    provider = (own_view.get("scopeProvider") or {}).get(plain.lower())
+    if not provider:
+        return False
+    arm = [m.lower() for m in own_view.get("armView") or []]
+    scope = [m.lower() for m in own_view.get("scopeView") or []]
+    p = str(provider).lower()
+    if p == "overwrite":
+        return True
+    if p == "data":
+        return set(arm) <= set(scope)
+    if p not in arm or p not in scope:
+        return False
+    return set(arm[:arm.index(p)]) <= set(scope[:scope.index(p)])
+
+
 def own_view_row(name, scoped_row: dict, own_view: dict) -> dict:
     """SW1: a scope-listed plugin in an arm that declares its OWN mod list, different from the scope's. The probes read
     the copy that arm's view puts first, which need not be the copy the scope measured (an author's same-named variant,
@@ -673,6 +693,8 @@ def own_view_row(name, scoped_row: dict, own_view: dict) -> dict:
     file or has its bytes; otherwise the row names the view's copy. A walk that cannot be completed states nothing."""
     plain = Path(str(name)).name
     if not own_view.get("complete"):
+        if scope_copy_still_wins(plain, own_view):
+            return scoped_row
         return {"name": str(name), "sha256": None, "path": None, "hashSource": "unstated",
                 "scopeSha256": scoped_row.get("sha256"),
                 "unstatedReason": (f"this arm declares its own mod list, different from the scope's, and the plan was "
@@ -867,6 +889,10 @@ def cmd_plan(a) -> int:
         scope_plugins[str(p.get("name", p.get("Name", ""))).lower()] = {
             "name": p.get("name", p.get("Name")), "path": p.get("path", p.get("Path")),
             "sha256": p.get("sha256", p.get("Sha256"))}
+    # Which layer gave the scope its copy of each plugin (ConfigPlugin.Provider). Kept apart from scope_plugins, whose
+    # rows are frozen into the plan as they are.
+    scope_plugin_provider = {str(p.get("name", p.get("Name", ""))).lower(): p.get("provider", p.get("Provider"))
+                             for p in cfg.get("plugins", cfg.get("Plugins", []) or [])}
     population = cfg.get("population", cfg.get("Population")) or "load-time"
     # D1: the scope's providers and overlays are part of the REQUEST, not decoration. A provider list
     # the plan never recorded cannot be compared to what a child says it read.
@@ -917,6 +943,7 @@ def cmd_plan(a) -> int:
         arm_view = None
         if own_view is not None and [m.lower() for m in own_view] != [m.lower() for m in scope_view]:
             arm_view = {"differs": True, "complete": bool(a.instance and a.game and a.profile),
+                        "armView": list(own_view), "scopeView": scope_view, "scopeProvider": scope_plugin_provider,
                         "walk": lambda plain, hashed, _view=tuple(view_mods): plugin_layers(
                             plain, _view, instance=a.instance, profile=a.profile, game=a.game, hash_rows=hashed)}
 

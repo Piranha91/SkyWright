@@ -69,9 +69,9 @@ def make_instance(root: Path):
     (prof / "plugins.txt").write_text("*Skyrim.esm\n*Mod.esp\n", encoding="utf-8")
     scope = {"complete": True, "configuration": {
         "population": "load-time", "source": "profile:P",
-        "plugins": [{"name": "Skyrim.esm", "path": str(game / "Data" / "Skyrim.esm"), "sha256": sha(SKYRIM)},
-                    {"name": "Mod.esp", "path": str(inst / "mods" / "Main" / "Mod.esp"), "sha256": sha(MAIN)}],
-        "providers": [{"name": "overwrite", "kind": "overwrite"}, {"name": "Main", "kind": "mod"},
+        "plugins": [{"name": "Skyrim.esm", "path": str(game / "Data" / "Skyrim.esm"), "sha256": sha(SKYRIM), "provider": "Data"},
+                    {"name": "Mod.esp", "path": str(inst / "mods" / "Main" / "Mod.esp"), "sha256": sha(MAIN), "provider": "Main"}],
+        "providers": [{"name": "overwrite", "kind": "overwrite"}, {"name": "Main", "kind": "mod"}, {"name": "Copy", "kind": "mod"},
                       {"name": "Data", "kind": "data"}],
         "overlays": []}}
     (root / "scope.json").write_text(json.dumps(scope), encoding="utf-8")
@@ -152,6 +152,11 @@ def plan_cases(root: Path):
           f"454: incomplete walk -> unstated with the reason ({u.get('hashSource')})")
     check(row(doc2, "candidate-03-profile-assets").get("hashSource") == "scope",
           "454: an arm without Mods still keeps the scope row without an instance")
+    # 454: a view that only drops a folder below the scope's provider provably reads the same copy, walk or not.
+    check(row(doc2, "baseline") == row(doc, "baseline") and row(doc2, "baseline").get("hashSource") == "scope",
+          "454: a narrower view that keeps the provider keeps the scope row without a walk")
+    check(row(doc2, "candidate-02-copy").get("hashSource") == "unstated",
+          "454: a view that drops the scope's provider is unstated without a walk")
 
 
 def rows(names, shas, unstated=()):
