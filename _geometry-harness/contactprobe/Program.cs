@@ -165,6 +165,9 @@ bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
+// --population FILE (P25): the plan's population (_shared/PopulationScope.cs), default pass only; --population-audit EMIT OUT
+// writes, for every row of EMIT, whether it is in that population (the equivalence check reads it).
+string? populationPath = null, populationAuditEmit = null, populationAuditOut = null;
 string? boxContactOut = null;   // --box-contact FILE (with --overlap-json): does a supplied world box meet a member's render surface (lane 3b)
 string? emptySpaceOut = null;   // --empty-space FILE: the LEFT IN EMPTY SPACE pass (_shared/ContactAssembly.cs), its own mode
 string? traceOut = null, traceKeysPath = null, volumeOut = null, surfaceOut = null, anchorOut = null;   // --surface FILE: measured surface contact (with --overlap-json); --anchor FILE: the anchor body test (G1 build list row 2)
@@ -252,6 +255,13 @@ try
             throw new ArgumentException("contactprobe does not support --flags");
         }
         else if (flag == "--switch-map") { switchMapPath = NeedValue(i, flag); i++; }
+        else if (flag == "--population") { populationPath = NeedValue(i, flag); i++; }
+        else if (flag == "--population-audit")
+        {
+            populationAuditEmit = NeedValue(i, flag);
+            if (i + 2 >= args.Length || args[i + 2].StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException("--population-audit requires EMIT and OUT");
+            populationAuditOut = args[i + 2]; i += 2;
+        }
         else if (flag == "--instance") { Instance = NeedValue(i, flag); i++; }
         else if (flag == "--game") { GamePath = NeedValue(i, flag); i++; }
         else if (flag == "--profile") { profileName = NeedValue(i, flag); i++; }
@@ -292,6 +302,8 @@ if (anchorOut is not null && motionOptions is { Mode: not "swept" }) { Console.E
 if ((motionDelta is not null || motionBudget is not null) && motionOptions?.Mode != "swept") { Console.Error.WriteLine("--motion-delta and --motion-budget are valid only with --motion swept"); return 2; }
 if (motionDelta is { } md && !(md > 0 && double.IsFinite(md)) || motionBudget is { } mb && mb < 2) { Console.Error.WriteLine("--motion-delta must be positive and finite; --motion-budget at least 2"); return 2; }
 if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trace is valid only in the default moved-host pass"); return 2; }
+if (populationPath is not null && selectedModes > 0) { Console.Error.WriteLine("--population is valid only in the default moved-host pass"); return 2; }
+if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
 List<FormKey>? traceKeys = null;
 if (traceKeysPath is not null && File.Exists(traceKeysPath))
 {
@@ -299,9 +311,16 @@ if (traceKeysPath is not null && File.Exists(traceKeysPath))
     catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 }
 foreach (var input in new[] { (Flag: "--overlap-json", Path: overlapJson), (Flag: "--base", Path: basePath),
-    (Flag: "--switch-map", Path: switchMapPath), (Flag: "--order", Path: orderFile), (Flag: "--trace-keys", Path: traceKeysPath) })
+    (Flag: "--switch-map", Path: switchMapPath), (Flag: "--order", Path: orderFile), (Flag: "--trace-keys", Path: traceKeysPath),
+    (Flag: "--population-audit", Path: populationAuditEmit) })
     if (input.Path is not null && !File.Exists(input.Path))
     { Console.Error.WriteLine($"{input.Flag} input does not exist: {input.Path}"); return 2; }
+PopulationScope? population = null;
+if (populationPath is not null)
+{
+    try { population = PopulationScope.Load(populationPath); }
+    catch (PopulationRefused ex) { Console.Error.WriteLine(ex.Message); return 2; }
+}
 
 Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance", "--instance");
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
@@ -576,6 +595,16 @@ if (forceEnable.Count > 0)
     Console.WriteLine($"   force-enable: {cidx.Arms.Forced.Count} reference(s) {EnableArms.ForcedLabel}: {string.Join(", ", cidx.Arms.Forced)}");
 }
 
+if (population is not null)
+{
+    population.Bind(idx);
+    Console.WriteLine("   " + population.Describe());
+}
+// The contact population rule: a host or a dependent that is a seed, or any placement either ever takes inside the region
+// (an interior cell of the population, the 3x3 ring of a seed's exterior cell, a large delta placement's box). The ring is
+// what keeps a row whose support another mod placed (or removed) beside the dependent: supports touch within a few units.
+bool RefInPopulation(FormKey key) => population is null || population.Seeds.Contains(key)
+    || (idx.History.Of(key) is { } hs && hs.Any(population.PlaceInScope));
 string PluginName(int p) => p < 0 ? "(none)" : p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => p >= 0 && Vanilla.Contains(PluginName(p));
 bool IsUssep(int p) => p >= 0 && BaseGamePlugins.IsUssep(PluginName(p));
@@ -880,10 +909,24 @@ Console.WriteLine($"   dependents hashed: {depHash.Count:N0} undeleted snaps of 
 Console.WriteLine($"   winner arm: {winHash.Count:N0} physical refs placed, undeleted and enabled at runtime under the winner, any size (R3); left out: {skips.WinnerRuntimeDisabled:N0} disabled at runtime (R1), {skips.WinnerEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
 var rows = new List<ContactRow>();
-int done = 0;
+int done = 0, hostsOutsidePopulation = 0, rowsOutsidePopulation = 0;
 foreach (var h in hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.Previous.Cell.ToString()))
 {
-    rows.AddRange(cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: allRows));
+    if (population is not null && !RefInPopulation(h.Key))
+    {
+        // A host is judged only when one of the dependents Judge would consider (the same search) is in the population.
+        var hb = cidx.WorldBox(h.PrevBase, h.Previous);
+        bool any = !hb.IsEmpty && depHash.Near(h.Previous.Space, hb, cidx.Reach).Any(d => RefInPopulation(d.Item.Key));
+        if (!any) { hostsOutsidePopulation++; done++; continue; }
+    }
+    var judged = cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: allRows);
+    if (population is not null)
+    {
+        int before = judged.Count;
+        judged = judged.Where(r => RefInPopulation(r.Host.Key) || RefInPopulation(r.Dependent)).ToList();
+        rowsOutsidePopulation += before - judged.Count;
+    }
+    rows.AddRange(judged);
     if (++done % 2000 == 0) Console.WriteLine($"   ... {done:N0}/{hosts.Count:N0} hosts, {rows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
     if (done % 500 == 0) MemStages.Print("host loop", cidx, rows.Count, done);
 }
@@ -1146,11 +1189,34 @@ if (emitPath is not null)
             new Dictionary<string, long> { ["BoxesApart"] = skips.BoxesApart, ["DepIntroducedByMover"] = skips.DepIntroducedByMover, ["DepOtherSpace"] = skips.DepOtherSpace, ["DepAbsentInArm"] = skips.DepAbsentInArm },
             $"relationships {rel.Count:N0}, class {classRows.Count:N0}"),
     };
-    var identity = cfg.Identity("load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName);
+    string populationIdentity = population?.Identity("load-time") ?? "load-time";
+    if (population is not null)
+        coverage.Add(new("population scope", hosts.Count - hostsOutsidePopulation, new Dictionary<string, long>(),
+            new Dictionary<string, long> { ["HostOutsidePopulation"] = hostsOutsidePopulation, ["RowOutsidePopulation"] = rowsOutsidePopulation },
+            $"hosts judged only where a host or a dependent is in the plan's population; {population.Describe()}"));
+    var identity = cfg.Identity(populationIdentity, cidx.State?.Name ?? EnablePopulation.BaselineStateName);
     ConflictIo.Write(emitPath, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-                                                "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity));
+                                                populationIdentity, cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity));
     Console.WriteLine($"configuration: {identity.Short}");
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Fixed Stranded + Orphaned conflicts -> {emitPath}");
+}
+if (population is not null)
+    Console.WriteLine($"   population: {hostsOutsidePopulation:N0} of {hosts.Count:N0} hosts and {rowsOutsidePopulation:N0} judged rows outside it were not measured");
+if (population is not null && populationAuditEmit is not null)
+{
+    // For each row of another emit (the whole-order run's): the dependent is the necessary record, the host the alternative.
+    var auditRows = new List<object>();
+    foreach (var c in ConflictIo.Read(populationAuditEmit).Conflicts)
+    {
+        string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+        foreach (var rec in c.Necessary)
+            auditRows.Add(new { identity = ConflictIo.RowIdentity(c.Kind, rec.FormKey, other, c.A),
+                                inScope = RefInPopulation(FormKey.Factory(rec.FormKey)) || (other is not null && RefInPopulation(FormKey.Factory(other))) });
+    }
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(populationAuditOut!))!);
+    File.WriteAllText(populationAuditOut!, JsonSerializer.Serialize(new { probe = "contactprobe", population = population.Identity("load-time"), emit = Path.GetFullPath(populationAuditEmit), rows = auditRows },
+        new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"population audit: {auditRows.Count:N0} row(s) of {Path.GetFileName(populationAuditEmit)} -> {populationAuditOut}");
 }
 
 if (jsonPath is not null)

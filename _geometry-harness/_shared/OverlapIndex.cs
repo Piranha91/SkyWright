@@ -567,7 +567,7 @@ public sealed class OverlapIndex
         IReadOnlyList<HashSet<int>> closure, double tolerance = 1e-5, long maxTrianglePairs = 2_000_000,
         TimeSpan? pairTimeout = null, Func<int, int, bool>? includeResponsiblePair = null,
         Action<long>? onProgress = null, float tile = 256f, CancellationToken cancellationToken = default,
-        bool retainSameResults = false)
+        bool retainSameResults = false, Func<SurfaceOverlapCandidate, SurfaceOverlapCandidate, bool>? includePair = null)
     {
         var timeout = pairTimeout ?? TimeSpan.FromSeconds(120);
         var sweep = new SurfacePairSweep();
@@ -587,6 +587,8 @@ public sealed class OverlapIndex
                         || (double)b.WorldBounds.Min.Z - a.WorldBounds.Max.Z > tolerance
                         || (double)a.WorldBounds.Min.Z - b.WorldBounds.Max.Z > tolerance) continue;
                     if (includeResponsiblePair is not null && !includeResponsiblePair(a.Win.Plugin, b.Win.Plugin)) continue;
+                    // --population (P25): a pair neither of whose references is in the plan's population is not measured.
+                    if (includePair is not null && !includePair(a, b)) continue;
                     sweep.PairsChecked++;
                     var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken);
                     bool intersects = query.Intersects == true;
