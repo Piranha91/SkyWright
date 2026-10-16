@@ -41,11 +41,22 @@ static class ShapeCullPolicy
     /// below and every other tilt stay refused. A rule file that omits it predicts exactly what it always did,
     /// and the field is not written into a report's ruleConfiguration unless it is on, so such a report is
     /// byte-identical to one written before the field existed.</param>
+    /// <param name="UprightMaximumAbsNormalZ">The upright class's own tolerance: how far a PortalBox's normal, or a
+    /// Box's horizontal axes, may leave level. A rule file that omits it uses <paramref name="MaximumAbsNormalZ"/>, which
+    /// then governs only the horizontal class; the field is not written into a report unless the rule states it.</param>
     public sealed record Rule(string Identity, float MinimumEyeDistance, float MaximumAbsNormalZ,
                               bool Frozen, string[] Evidence, bool BoxSilhouette = false,
                               [property: System.Text.Json.Serialization.JsonIgnore(
                                   Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
-                              bool HorizontalPortalBoxNormalDownEyeAbove = false);
+                              bool HorizontalPortalBoxNormalDownEyeAbove = false,
+                              [property: System.Text.Json.Serialization.JsonIgnore(
+                                  Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+                              float? UprightMaximumAbsNormalZ = null)
+    {
+        /// <summary>The upright tolerance in force: the rule's own, else <see cref="MaximumAbsNormalZ"/>.</summary>
+        [System.Text.Json.Serialization.JsonIgnore]
+        public float UprightTolerance => UprightMaximumAbsNormalZ ?? MaximumAbsNormalZ;
+    }
     public static Rule? Configuration { get; private set; }
     public static string? Sha256 { get; private set; }
     public static string Identity => Configuration?.Identity ?? "unconfigured";
@@ -54,7 +65,11 @@ static class ShapeCullPolicy
     /// <summary>What the configured rule claims to cover. The Box clause appears only when a rule
     /// opts in, so a rule file that says nothing about boxes reports exactly what it always did.</summary>
     public const string HorizontalScope = " Horizontal PortalBox rectangles whose authored normal points down (-Z), seen from above their plane, are predicted by the same rectangle shadow; the normal-up form, an eye below the plane and every other tilt remain refused.";
+    /// <summary>The upright tolerance's clause, only for a rule that states its own.</summary>
+    static string UprightScope(float t) =>
+        $" Upright Box and PortalBox primitives are admitted within |n.z| <= {t.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture)} of upright (a rectangle's normal, a box's horizontal axes); larger tilts outside the horizontal class remain refused.";
     public static string Scope => (Configuration is { BoxSilhouette: true } ? RectangleScope + BoxScope : RectangleScope)
+                                  + (Configuration is { UprightMaximumAbsNormalZ: { } u } ? UprightScope(u) : "")
                                   + (Configuration is { HorizontalPortalBoxNormalDownEyeAbove: true } ? HorizontalScope : "");
 
     public static void Load(string path)
@@ -66,6 +81,7 @@ static class ShapeCullPolicy
         if (rule is null || string.IsNullOrWhiteSpace(rule.Identity) ||
             !float.IsFinite(rule.MinimumEyeDistance) || rule.MinimumEyeDistance < 0 ||
             !float.IsFinite(rule.MaximumAbsNormalZ) || rule.MaximumAbsNormalZ < 0 || rule.MaximumAbsNormalZ > 1 ||
+            rule.UprightMaximumAbsNormalZ is { } upright && (!float.IsFinite(upright) || upright < 0 || upright > 1) ||
             rule.Evidence is null || rule.Evidence.Length == 0 || rule.Evidence.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException("Occlusion rule requires an identity, finite camera/orientation limits and evidence references.");
         Configuration = rule;
@@ -80,12 +96,10 @@ static class ShapeCullPolicy
             if (!rule.BoxSilhouette) return (null, "Box face behavior unassessed");
             if (!SphereBound.Finite(p.Bounds) || p.Bounds.X <= 0 || p.Bounds.Y <= 0 || p.Bounds.Z <= 0 ||
                 !float.IsFinite(p.Scale) || p.Scale <= 0) return (null, "invalid plane bounds or scale");
-            // Upright, on the same tolerance the rule already states for a rectangle's normal: the
-            // measured box had no X or Y rotation, so both of its horizontal axes must stay level.
-            float tilt = MathF.Max(MathF.Abs(PlaneGeometry.Axis(p, Vector3.UnitX).Z),
-                                   MathF.Abs(PlaneGeometry.Axis(p, Vector3.UnitY).Z));
-            if (!float.IsFinite(tilt) || tilt > rule.MaximumAbsNormalZ)
-                return (null, "box orientation outside the supplied rule's evidence scope; only upright boxes were measured");
+            // Upright, on the rule's upright tolerance: both of the box's horizontal axes stay level within it.
+            var boxIssue = HarnessShared.PortalBoxOrientation.BoxUpright(PlaneGeometry.Axis(p, Vector3.UnitX),
+                PlaneGeometry.Axis(p, Vector3.UnitY), rule.UprightTolerance);
+            if (boxIssue is not null) return (null, boxIssue);
             var volume = ConvexShadow.FromBox(p.Corners, eye);
             if (volume is null) return (null, "no box view shadow: a degenerate box, or an eye inside or on it, is unassessed");
             if (volume.EyeDistance <= rule.MinimumEyeDistance)
@@ -98,7 +112,7 @@ static class ShapeCullPolicy
         if (shadow is null) return (null, "degenerate plane or camera");
         var normal = Vector3.Normalize(Vector3.Cross(p.Quad[1]-p.Quad[0], p.Quad[3]-p.Quad[0]));
         var orientation = HarnessShared.PortalBoxOrientation.Check(normal, p.Normal, p.Centre, eye,
-            rule.MaximumAbsNormalZ, rule.HorizontalPortalBoxNormalDownEyeAbove);
+            rule.UprightTolerance, rule.MaximumAbsNormalZ, rule.HorizontalPortalBoxNormalDownEyeAbove);
         if (orientation is not null) return (null, orientation);
         if (shadow.EyeDistance <= rule.MinimumEyeDistance)
             return (null, "near-eye behavior unassessed; observations bracket an exemption and do not establish a sharp threshold");
