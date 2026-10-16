@@ -28,6 +28,9 @@ Rules:
     at that point of the path (its load-time state, then each earlier call) is dropped and named;
   - flagged, not dropped: an enable-parented switch (its own Enable() may be inert; the driver's readback settles
     it), a list element (its order inside the loop is not read), a load-time state the census could not resolve;
+  - a branch path whose every call is dropped makes no group; its drops are kept under `skippedPaths` (present
+    only when there is one), and a switch never planned whose every recorded call was found and dropped is not
+    planned as "every recorded call is a no-op from its load-time state";
   - not planned, with the reason: a bound-but-unread switch, a script whose source was not supplied, a call the
     supplied source does not contain, a switch credited only from the raw bytecode of a function the decompiler
     refused (its branch structure is not read);
@@ -184,6 +187,7 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                 names[(m.group("script").lower(), m.group("fn").lower())] = (m.group("script"), m.group("fn"))
 
     groups, unmapped, not_planned, planned_keys = [], [], [], set()
+    skipped, found, dropped_keys = [], set(), set()   # all-dropped paths; census calls met in source; refs dropped
     for p in pop["population"]:
         if p["trigger"] == "BoundUnread":
             not_planned.append({"ref": p["key"], "reason": "bound, but the call was not read, so its order and target are unknown"})
@@ -221,6 +225,7 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                         unmapped.append({"source": f"{script}.{fn}", "line": line + 1, "call": text,
                                          "reason": "the census maps this call to no switch"})
                     continue
+                found.add(fk + (text,))
                 target = "enabled" if name.lower() in ENABLES else "disabled"
                 for key in keys:
                     s = switches[key]
@@ -229,6 +234,7 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                     if now is not None and (now is True) == (target == "enabled"):
                         dropped.append({"ref": key, "target": target, "source": src_txt,
                                         "reason": f"already {target} at this point (load-time state, then earlier calls)"})
+                        dropped_keys.add(key)
                         continue
                     state[key] = target == "enabled"
                     calls.append({"ref": key, "target": target, "source": src_txt})
@@ -241,6 +247,14 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                     if s.get("baselineResolved") is False:
                         flags.append({"ref": key, "flag": "the load-time state is unresolved, so no call is dropped as a no-op"})
             if not any(c["ref"] in in_pop for c in calls):
+                if any(d["ref"] in in_pop for d in dropped):   # every call here is a no-op: no group, the drops kept
+                    same = next((x for x in skipped if x["script"] == script and x["function"] == fn and
+                                 [(d["ref"], d["target"]) for d in x["dropped"]] == [(d["ref"], d["target"]) for d in dropped]), None)
+                    if same is not None:
+                        same["samePaths"].append(n)
+                    else:
+                        skipped.append({"script": script, "function": fn, "path": n, "samePaths": [], "paths": len(route),
+                                        "dropped": dropped})
                 continue
             same = next((g for g in groups if g["script"] == script and g["function"] == fn
                          and [(c["ref"], c["target"]) for c in g["calls"]] == [(c["ref"], c["target"]) for c in calls]), None)
@@ -254,21 +268,27 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                            "arrival": arrival_cell([switches[c["ref"]] for c in calls])})
     for k in sorted(in_pop):
         if k not in planned_keys and not any(x["ref"] == k for x in not_planned):
-            raw, other = set(), False
+            raw, other, unfound = set(), False, False
             for line in (switches[k].get("trigger") or {}).get("by") or []:
                 m = BY.search(str(line))
                 if m and m.group("text").startswith("raw bytecode "):
                     raw.add(f"{m.group('script')}.{m.group('fn')}")
                 else:
                     other = True
+                    unfound |= not m or (m.group("script").lower(), m.group("fn").lower(), m.group("text")) not in found
             not_planned += [{"ref": k, "reason": f"credited from the raw bytecode of {f}, a function the decompiler "
                                                  "refused: its branch structure is not read, so it is not planned"}
                             for f in sorted(raw)]
-            if other or not raw:
+            if other and not unfound and k in dropped_keys:
+                not_planned.append({"ref": k, "reason": "every recorded call is a no-op from its load-time state"})
+            elif other or not raw:
                 not_planned.append({"ref": k, "reason": "no supplied source line carries its recorded call"})
-    return {"population": pop["counts"], "causes": pop["causes"], "groups": groups, "unmapped": unmapped,
-            "notPlanned": sorted({(x["ref"], x["reason"]): x for x in not_planned}.values(),
-                                 key=lambda x: (x["ref"], x["reason"]))}
+    out = {"population": pop["counts"], "causes": pop["causes"], "groups": groups, "unmapped": unmapped,
+           "notPlanned": sorted({(x["ref"], x["reason"]): x for x in not_planned}.values(),
+                                key=lambda x: (x["ref"], x["reason"]))}
+    if skipped:   # only when there is one, so a document without an all-dropped path keeps its bytes
+        out["skippedPaths"] = skipped
+    return out
 
 
 def coc_name(label) -> str | None:
