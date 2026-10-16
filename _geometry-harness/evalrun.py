@@ -232,6 +232,38 @@ def arm_delta(lists: list[list[str]]) -> list[str]:
     return sorted((spelled[x] for x in out), key=str.lower)
 
 
+def plugin_top_groups_from_bytes(data: bytes) -> dict[str, int] | None:
+    """A plugin's top-level groups -> how many records each holds (records directly in the group; a group that nests
+    others counts its nested records too). None when the bytes are not a plugin (no TES4 header first). Read from the
+    group headers alone, which are never compressed."""
+    import struct
+    if len(data) < 24 or data[:4] != b"TES4":
+        return None
+    p = 24 + struct.unpack_from("<I", data, 4)[0]
+    out: dict[str, int] = {}
+
+    def count(s, e):
+        n, q = 0, s
+        while q + 24 <= e:
+            sig = data[q:q + 4]
+            size = struct.unpack_from("<I", data, q + 4)[0]
+            if sig == b"GRUP":
+                n += count(q + 24, q + size)
+                q += max(size, 24)
+            else:
+                n += 1
+                q += 24 + size
+        return n
+    while p + 24 <= len(data):
+        if data[p:p + 4] != b"GRUP":
+            break
+        size = struct.unpack_from("<I", data, p + 4)[0]
+        label = data[p + 8:p + 12].decode("ascii", "replace")
+        out[label] = out.get(label, 0) + count(p + 24, p + size)
+        p += max(size, 24)
+    return out
+
+
 def plan_population(checks: list[dict], arms: list[dict], targets: list, base_population: str,
                     instance: str | None) -> tuple[dict, str | None]:
     """The population the scoped geometry checks run on: the plan's targets plus every plugin and asset provider the
@@ -271,6 +303,15 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
             return unscoped(f"the population needs {name} by path and hash, and the arms' frozen requests state "
                             + ("no copy of it" if not stated else f"{len(stated)} different copies"))
         path, sha = stated.pop()
+        # The probes refuse a population whose delta reaches every reference by a route they do not model; deciding it
+        # here leaves the plan unscoped at plan time instead of failing every scoped probe hours into the run.
+        try:
+            groups = plugin_top_groups_from_bytes(Path(path).read_bytes())
+        except OSError:
+            groups = None
+        if groups and groups.get("COLL", 0) > 0:
+            return unscoped(f"{name} carries collision-layer records (COLL), which change how every reference collides; "
+                            "the scoped probes do not model that, so these checks run on the whole order")
         plugins.append({"name": name, "path": path, "sha256": sha})
     mods = []
     for name in mod_names:

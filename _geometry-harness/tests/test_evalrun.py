@@ -7554,6 +7554,48 @@ def case_413(tmp):
           f"{case}: an unnameable mod folder leaves the plan unscoped and says why ({pop2.get('reason')})")
     check(set((pop2.get("wholeOrderChecks") or {})) >= {"geometry.object-overlap", "geometry.placement-contact"},
           f"{case}: the unscoped plan names the scoped checks as whole-order")
+    # Plan-time refusals (Gate B review condition 2): a delta plugin carrying COLL records leaves the plan unscoped with
+    # the reason at `plan`, instead of every scoped probe refusing hours into the run.
+    import struct
+
+    def plugin_bytes(groups):
+        body = b""
+        for label, nrec in groups:
+            recs = b"".join(struct.pack("<4sIIIIHH", label.encode(), 0, 0, 0x800 + i, 0, 44, 0) for i in range(nrec))
+            body += struct.pack("<4sI4siHHHH", b"GRUP", 24 + len(recs), label.encode(), 0, 0, 0, 44, 0) + recs
+        return struct.pack("<4sIIIIHH", b"TES4", 0, 0, 0, 0, 44, 0) + body
+    expect(m.plugin_top_groups_from_bytes(plugin_bytes([("STAT", 2), ("COLL", 1)])), {"STAT": 2, "COLL": 1},
+           f"{case}: the top groups of a plugin and their record counts are read", "P25 condition 2")
+    expect(m.plugin_top_groups_from_bytes(b"fixture text, not a plugin"), None, f"{case}: a file that is not a plugin reads as None")
+    gen2 = tmp / f"{case}-coll-gen"
+    subprocess.run([sys.executable, str(FIXT / "make_fixtures.py"), "--out", str(gen2)], capture_output=True, text=True, check=True)
+    tgt = gen2 / "plugins" / "FixtureTarget.esp"
+    tgt.write_bytes(plugin_bytes([("STAT", 1), ("COLL", 1)]))
+    d2 = gen2 / "cases" / P25_CASE
+    rc = evalrun(["plan", "--registry", gen2 / "registry" / "fixture-check-registry.json", "--scope", d2 / "scope.json",
+                  "--candidates", d2 / "candidates", "--out", tmp / f"{case}-coll", "--harness", REAL_HARNESS] + probe_cmds(),
+                 d2 / "scenario.json")
+    popc = (load(tmp / f"{case}-coll" / "plan.json") or {}).get("population") or {}
+    check(rc.returncode == 0 and popc.get("scoped") is False and "collision-layer" in str(popc.get("reason"))
+          and "FixtureTarget.esp" in str(popc.get("reason")) and not (tmp / f"{case}-coll" / "population.json").exists(),
+          f"{case}: a delta plugin with COLL records leaves the plan unscoped at plan time, naming it ({popc.get('reason')})")
+    # The other two plan-time refusals, on plan_population directly: a delta mod folder shipping a *_SWAP.ini, and an
+    # empty population.
+    chk = [{"checkId": "geometry.object-overlap", "adapter": {"kind": "ordersweep-probe", "exe": "overlapprobe",
+                                                               "populationFlag": "--population"},
+            "arms": [{"armId": "baseline", "status": "planned"}]}]
+    inst = tmp / f"{case}-inst"
+    (inst / "mods" / "SwapMod").mkdir(parents=True)
+    (inst / "mods" / "SwapMod" / "Thing_SWAP.ini").write_text("[Forms]" + chr(10), encoding="utf-8")
+    arm_a = {"plugins": ["A.esp"], "requested": {"plugins": [], "providers": [{"name": "Base", "kind": "mod"}]}}
+    arm_b = {"plugins": ["A.esp"], "requested": {"plugins": [], "providers": [{"name": "SwapMod", "kind": "mod"},
+                                                                             {"name": "Base", "kind": "mod"}]}}
+    blk, txt = m.plan_population(chk, [arm_a, arm_b], [], "load-time", str(inst))
+    check(blk.get("scoped") is False and "Base Object Swapper" in str(blk.get("reason")) and txt is None,
+          f"{case}: a delta mod folder shipping a *_SWAP.ini leaves the plan unscoped at plan time ({blk.get('reason')})")
+    blk, txt = m.plan_population(chk, [arm_a, dict(arm_a)], [], "load-time", str(inst))
+    check(blk.get("scoped") is False and "no population" in str(blk.get("reason")) and txt is None,
+          f"{case}: an empty population leaves the plan unscoped at plan time ({blk.get('reason')})")
     # --population-from: a sibling evaluation adopts another plan's file when it covers this plan's own population.
     doc = json.loads(pf.read_text(encoding="utf-8"))
     wider = dict(doc, plugins=doc["plugins"] + [{"name": "Wider.esp", "path": doc["plugins"][0]["path"], "sha256": "0" * 64}])
