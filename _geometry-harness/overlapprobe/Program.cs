@@ -207,6 +207,9 @@ string? accountingFixture = null;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
+// --population FILE (P25): the plan's population (_shared/PopulationScope.cs); --population-audit EMIT OUT writes, for every
+// row of EMIT, whether it is in that population (the equivalence check reads it).
+string? populationPath = null, populationAuditEmit = null, populationAuditOut = null;
 string NeedValue(int index, string flag)
 {
     if (index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal))
@@ -266,6 +269,13 @@ try
         else if (flag == "--scene-preflight") scenePreflight = true;
         else if (flag == "--self-check-imported-accounting") { accountingFixture = NeedValue(i, flag); i++; }
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
+        else if (flag == "--population") { populationPath = NeedValue(i, flag); i++; }
+        else if (flag == "--population-audit")
+        {
+            populationAuditEmit = NeedValue(i, flag);
+            if (i + 2 >= args.Length || args[i + 2].StartsWith("--", StringComparison.Ordinal)) throw new ArgumentException("--population-audit requires EMIT and OUT");
+            populationAuditOut = args[i + 2]; i += 2;
+        }
         else if (flag == "--enable") { enablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--disable") { disablePlugins.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--bos") { bosOn = BosHook.ParseFlag(NeedValue(i, flag)) ?? throw new ArgumentException("--bos takes on|off"); i++; }
@@ -310,6 +320,19 @@ if (!double.IsFinite(surfaceTolerance) || surfaceTolerance < 0 || maxTrianglePai
 {
     Console.Error.WriteLine("surface tolerance must be finite and nonnegative; max triangle pairs and pair seconds must be finite positive values");
     return 3;
+}
+if (populationPath is not null && (sceneCapture || scenePreflight || responsiblePairNames.Count > 0 || geometryManifestPath is not null))
+{
+    Console.Error.WriteLine("--population scopes the emit pass; it does not combine with scene capture, --scene-preflight, --responsible-pair or --geometry-manifest");
+    return 2;
+}
+if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
+if (populationAuditEmit is not null && !File.Exists(populationAuditEmit)) { Console.Error.WriteLine($"--population-audit input does not exist: {populationAuditEmit}"); return 2; }
+PopulationScope? population = null;
+if (populationPath is not null)
+{
+    try { population = PopulationScope.Load(populationPath); }
+    catch (PopulationRefused ex) { Console.Error.WriteLine(ex.Message); return 2; }
 }
 PopulationMode popMode;
 try { popMode = PopulationCli.Resolve("overlapprobe", flagsOnly, stateSpec); }
@@ -474,6 +497,14 @@ if (bosOn)
     foreach (var l in bosRep.Summary()) Console.WriteLine("   " + l);
 }
 else Console.WriteLine("   BOS: off — record bases (--bos on to apply the *_SWAP.ini layer)");
+if (population is not null)
+{
+    population.Bind(idx);
+    Console.WriteLine("   " + population.Describe());
+}
+// The overlap population rule: a pair is measured when either reference is in the plan's population.
+bool PairInPopulation(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b)
+    => population is null || population.KeyInScope(a.Key, a.Win.Cell) || population.KeyInScope(b.Key, b.Win.Cell);
 
 string PluginName(int p) => p == bosPlugin ? BosApplyReport.PseudoPluginName : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => BaseGamePlugins.IsBaseGame(PluginName(p));   // _shared/BaseGamePlugins.cs
@@ -1339,7 +1370,7 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
         if (checkedPairs - lastPairProgress < 250) return;
         lastPairProgress = checkedPairs;
         Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
-    }, retainSameResults: sceneCapture);
+    }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation);
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
 
 // A published, ACTIVE patch mastering both sides is the community saying "these two are known to
@@ -1486,15 +1517,45 @@ if (emitPath is not null)
             notRebuilt == 0 ? new Dictionary<string, long>() : new Dictionary<string, long> { ["CounterfactualGeometryUnmeasurable"] = notRebuilt }, null,
             $"class {cls.Count:N0}; unknown counterfactual rows have null provenance and are withheld from the class"),
     };
-    var identity = cfg.Identity(pop.Identity, pop.StateName);
+    string populationIdentity = population?.Identity(pop.Identity) ?? pop.Identity;
+    if (population is not null)
+    {
+        long inScope = candidates.Count(c => population.KeyInScope(c.Key, c.Win.Cell));
+        coverage.Add(new("population scope", inScope, new Dictionary<string, long>(),
+            new Dictionary<string, long> { ["OutsidePopulation"] = candidates.Count - inScope },
+            $"pairs measured only where a reference is in the plan's population; {population.Describe()}"));
+    }
+    var identity = cfg.Identity(populationIdentity, pop.StateName);
     __run.ReviseTotal(reconciliationPredicates, "the current class and optional base emit established the exact predicate count");
     __run.Stage("emit-artifact", "writing overlap conflict artifact", 1, "artifacts");
     ConflictIo.Write(emitPath, new ConflictFile("overlapprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-        pop.Identity, pop.StateName, identity, MeasurementPolicy: NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance)));
+        populationIdentity, pop.StateName, identity, MeasurementPolicy: NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance)));
     __run.Advance().Artifact(emitPath);
     Console.WriteLine($"configuration: {identity.Short}");
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Introduced + Blind conflicts -> {emitPath}");
+}
+if (population is not null && populationAuditEmit is not null)
+{
+    // For each row of another emit (the whole-order run's), whether it is in this population under this order: the rule
+    // the pair filter applies, on each reference's winning geometry pose.
+    bool RefIn(string fk)
+    {
+        var key = FormKey.Factory(fk);
+        var pose = idx.WinningGeometryPose(key) ?? idx.History.Winning(key);
+        return population.KeyInScope(key, pose?.Cell ?? FormKey.Null);
+    }
+    var auditRows = new List<object>();
+    foreach (var c in ConflictIo.Read(populationAuditEmit).Conflicts)
+    {
+        string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+        foreach (var rec in c.Necessary)
+            auditRows.Add(new { identity = ConflictIo.RowIdentity(c.Kind, rec.FormKey, other, c.A), inScope = RefIn(rec.FormKey) || (other is not null && RefIn(other)) });
+    }
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(populationAuditOut!))!);
+    File.WriteAllText(populationAuditOut!, JsonSerializer.Serialize(new { probe = "overlapprobe", population = population.Identity(pop.Identity), emit = Path.GetFullPath(populationAuditEmit), rows = auditRows },
+        new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine($"population audit: {auditRows.Count:N0} row(s) of {Path.GetFileName(populationAuditEmit)} -> {populationAuditOut}");
 }
 
 if (jsonPath is not null)

@@ -394,6 +394,11 @@ def main() -> int:
     ap.add_argument("--probe-cmd", action="append", default=[], metavar="NAME=<argv prefix>",
                     help="run NAME (a probe, or conflictdiff) as <argv prefix> instead of its Release binary. "
                          "Repeatable. A test seam: it changes which program runs, not how the result is read.")
+    ap.add_argument("--population", metavar="FILE",
+                    help="the plan's population file (P25): passed as --population to the probes named by "
+                         "--population-probes, and part of their request key by its sha256")
+    ap.add_argument("--population-probes", default="",
+                    help="comma-separated probes that take --population; the others run on the whole order")
     ap.add_argument("--reuse-cache", action="append", default=[], metavar="FILE",
                     help="an earlier launch's cache.json to reuse verified emits from, read-only; repeatable, searched "
                          "in the order given after this --out's own cache (evalrun passes one per earlier launch)")
@@ -444,6 +449,17 @@ def main() -> int:
         if not name.strip() or not prefix.strip():
             sys.exit(f"--probe-cmd {spec!r}: expected NAME=<argv prefix>")
         overrides[name.strip()] = prefix.strip()
+    pop_probes = {p.strip() for p in a.population_probes.split(",") if p.strip()}
+    if pop_probes and not a.population:
+        sys.exit("--population-probes needs --population FILE")
+    if a.population and not pop_probes:
+        sys.exit("--population needs --population-probes naming the probes that take it")
+    if pop_probes - set(probes):
+        sys.exit("--population-probes names probes this sweep does not run: " + ", ".join(sorted(pop_probes - set(probes))))
+    pop_file = Path(a.population).resolve() if a.population else None
+    if pop_file is not None and not pop_file.is_file():
+        sys.exit(f"--population {pop_file}: no such file")
+    pop_sha = sha256_file(pop_file) if pop_file is not None else None
     exes = {p: probe_program(harness, p, overrides) for p in probes}
     exe_sha = {p: program_key(harness, p, overrides) for p in probes}
     diff_exe = probe_program(harness, "conflictdiff", overrides)
@@ -451,6 +467,9 @@ def main() -> int:
 
     def key_for(probe: str, order_file: Path, base_emit: Path | None) -> str:
         parts = [probe, exe_sha[probe], sha256_file(order_file), sha256_file(base_emit) if base_emit else "-", " ".join(common + extra)]
+        if probe in pop_probes:
+            # Only a scoped probe's key gains a term, so a sweep without --population keys exactly as before.
+            parts.append("population:" + pop_sha)
         return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
     # Under a caller's deadline the Runner's tree semantics apply: a probe whose launched process exits while
@@ -473,6 +492,8 @@ def main() -> int:
             record_job(job_id, "probe", "reused", 0, reused, written=False, reused_from=src, inputs=inputs)
             return 0, False, False, reused, True
         argv = exes[probe] + ["--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
+        if probe in pop_probes:
+            argv += ["--population", str(pop_file)]
         # An earlier run's emit may already be at this path when --out is reused by hand (evalrun gives every launch
         # a fresh folder): only an emit THIS launch wrote is recorded or measured.
         before = emit_signature(emit)
@@ -561,10 +582,13 @@ def main() -> int:
             results[cand.stem] = rows
 
     # ------------------------------------------------------------------------------------ the report
-    summary = {"baseline": str(baseline), "probes": probes, "candidates": {}, "manifest": manifest}
+    summary = {"baseline": str(baseline), "probes": probes, "candidates": {}, "manifest": manifest,
+               **({"population": {"file": str(pop_file), "sha256": pop_sha, "probes": sorted(pop_probes)}} if pop_probes else {})}
     lines = ["# ordersweep report", "",
              f"baseline: `{baseline.name}`; probes: {', '.join(probes)}; candidates evaluated: {len(cands)}; "
-             f"reverse measurement: {'off' if a.no_reverse else 'on'}", ""]
+             f"reverse measurement: {'off' if a.no_reverse else 'on'}"
+             + (f"; population {pop_sha[:12]} for {', '.join(sorted(pop_probes))}, the other probes on the whole order"
+                if pop_probes else ""), ""]
     lines += ["| candidate | changes | " + " | ".join(probes) + " | rules | classification |", "|---|---|" + "---|" * len(probes) + "---|---|"]
     ranking = []
     for cand in cands:

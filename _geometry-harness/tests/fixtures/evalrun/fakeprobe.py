@@ -424,7 +424,7 @@ def parse(argv):
     while i < len(argv):
         t = argv[i]
         if t in ("--order", "--emit", "--base", "--json", "--out", "--instance", "--profile", "--game",
-                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map") and i + 1 < len(argv):
+                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population") and i + 1 < len(argv):
             if t == "--target":
                 a["target"].append(argv[i + 1])
             else:
@@ -460,6 +460,10 @@ def main(probe: str, argv=None) -> int:
     entry = arms.get(stem) or arms.get("*") or {}
     behaviour = entry.get("behaviour", "ok")
     population = entry.get("population", scen.get("population", "load-time"))
+    if a.get("population") and not entry.get("ignorePopulation"):
+        # what the real overlapprobe / contactprobe write for --population FILE (P25, _shared/PopulationScope.cs)
+        import hashlib
+        population = f"{population}+population:{hashlib.sha256(Path(a['population']).read_bytes()).hexdigest()[:12]}"
     state = entry.get("state", scen.get("state", "baseline"))
 
     print(f"fakeprobe {probe}: arm '{stem}' behaviour '{behaviour}'")

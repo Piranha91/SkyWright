@@ -33,5 +33,8 @@ static class OverlapSelfTest
 
         // Slice 4: the class split, the provenance-unknown count and the physical predicate (_shared/OverlapClassFixture.cs).
         OverlapClassSelfTest.Run(t);
+
+        // P25: the plan's population (_shared/PopulationScope.cs) on its own fixture.
+        PopulationSelfTest.Run(t);
     });
 }
