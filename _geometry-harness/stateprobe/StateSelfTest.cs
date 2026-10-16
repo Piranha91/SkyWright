@@ -120,10 +120,10 @@ static class StateSelfTest
         t.Check("PD4-S-C4 StM4: C4 arrives Sunk on S4, both StMod's: same author",
                 Of("StM4") == Want($"Contact StateConditional {F.C4}/{F.S4} ModOnMod same-author"), Of("StM4"));
         t.Check("PD4-S-C5 the stub's route rows: W1 and W3 arrive (StateConditional), W2 leaves (StateResolved)",
-                Rows(all.Where(r => r.Kind == StateRowKind.Route)) == Want($"Route StateConditional {F.W1}/- ModOnMod", $"Route StateResolved {F.W2}/- ModOnMod", $"Route StateConditional {F.W3}/- ModRefUnderVanillaSet"),
+                Rows(all.Where(r => r.Kind == StateRowKind.Route)) == Want($"Route StateConditional {F.W1}/- ModOnMod", $"Route StateResolved {F.W2}/- ModOnMod", $"Route StateConditional {F.W3}/- BethesdaFloor"),
                 Rows(all.Where(r => r.Kind == StateRowKind.Route)));
-        t.Check("PD4-S-F5 W3, a Bethesda obstacle under a Bethesda switch, reads ModRefUnderVanillaSet (today's behaviour; task 2026-10-15-stateprobe-vanilla-population)",
-                all.SingleOrDefault(r => r.Member == F.W3)?.Population == StatePopulation.ModRefUnderVanillaSet, all.SingleOrDefault(r => r.Member == F.W3)?.Population.ToString() ?? "no W3 row");
+        t.Check("PD4-S-F5 W3, a Bethesda obstacle under a Bethesda switch, reads BethesdaFloor: the switch is the route row's other side",
+                all.SingleOrDefault(r => r.Member == F.W3)?.Population == StatePopulation.BethesdaFloor, all.SingleOrDefault(r => r.Member == F.W3)?.Population.ToString() ?? "no W3 row");
 
         // ST4 and ST1: stateprobe/StateFindings.cs over every state's rows.
         var split = StateFindings.Of(all);
@@ -133,8 +133,8 @@ static class StateSelfTest
                 $"class {Rows(split.Class)} | resolved {Rows(split.Resolved)} | own floor {Rows(split.OwnFloor)}");
         var emitted = StateFindings.Emitted(split.Class).ToList();
         RouteChecks(t, pl);
-        t.Check("PD4-S-E  the emit carries C1, W1 and W3; C2 (Bethesda floor) is withheld",
-                string.Join(" ", emitted.Select(r => r.Member.ToString()).OrderBy(x => x)) == string.Join(" ", new[] { F.C1, F.W1, F.W3 }.Select(k => k.ToString()).OrderBy(x => x)),
+        t.Check("PD4-S-E  the emit carries C1 and W1; C2 and W3 (Bethesda floor) are withheld",
+                string.Join(" ", emitted.Select(r => r.Member.ToString()).OrderBy(x => x)) == string.Join(" ", new[] { F.C1, F.W1 }.Select(k => k.ToString()).OrderBy(x => x)),
                 Rows(emitted));
     });
 }
