@@ -29,6 +29,9 @@ sealed class MeshGeometryReader
     /// <summary>Hold decoded meshes in <paramref name="budget"/> as the "meshGeoms" cache. Required before <see cref="Get"/>.</summary>
     public void Attach(CacheBudget budget) => _cache = new PlacementCache<RefGeometry>(budget, "meshGeoms", GeometryBytes);
 
+    /// <summary>Choose the store for a run: <paramref name="bounded"/> (the default pass) holds decoded meshes in the shared budget.</summary>
+    public void Store(bool bounded, CacheBudget budget) => Attach(budget);
+
     public RefGeometry? Get(string path)
     {
         var cache = _cache ?? throw new InvalidOperationException("MeshGeometryReader.Attach must be called before Get");

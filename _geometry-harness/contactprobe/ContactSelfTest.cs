@@ -75,6 +75,39 @@ static class ContactSelfTest
             try { reader.Get(a); } catch (MeshChangedOnDiskException ex) { refusal = ex.Message; }
             Check("CM-4 a mesh whose bytes changed on disk between its first decode and a reload refuses in one sentence",
                   refusal is not null && refusal.Contains("changed on disk during the run"), refusal ?? "(no refusal: the changed bytes were decoded)");
+
+            // 470-472: the store a mode chooses (MeshGeometryReader.Store). The modes whose index memoises every base's geometry
+            // (--empty-space and the other non-default modes) decode each mesh once and share it, as before the bounded pass;
+            // a 1-byte budget must not make them decode a mesh twice and keep both copies. The default pass stays bounded.
+            File.WriteAllBytes(a, new byte[] { 10, 20, 30 });
+            int MeshDecodes(string path, List<string> log) => log.Count(p => p == path);
+            var keepLog = new List<string>();
+            var keep = new MeshGeometryReader(path => File.ReadAllBytes(path), (path, bytes, first) => { keepLog.Add(path); return Decode(path, bytes, first); });
+            keep.Store(bounded: false, new CacheBudget(1));
+            var k1 = keep.Get(a); keep.Get(b); var k2 = keep.Get(a); keep.Get(b); var k3 = keep.Get(a);
+            Check("471 a memoising mode's store decodes each mesh once whatever the budget (a, b, a, b, a: 2 decodes) and returns one object",
+                  keep.Decodes == 2 && keep.Redecodes == 0 && MeshDecodes(a, keepLog) == 1 && ReferenceEquals(k1, k2) && ReferenceEquals(k1, k3),
+                  $"decodes {keep.Decodes} (again {keep.Redecodes}), a decoded {MeshDecodes(a, keepLog)}x, same object {ReferenceEquals(k1, k3)}");
+
+            var mod = Mutagen.Bethesda.Plugins.ModKey.FromNameAndExtension("SelfTest.esp");
+            Mutagen.Bethesda.Plugins.FormKey baseA = new(mod, 0x801), baseB = new(mod, 0x802), baseC = new(mod, 0x803);
+            var meshOf = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, string> { [baseA] = a, [baseB] = a, [baseC] = b };
+            var idxLog = new List<string>();
+            var idxReader = new MeshGeometryReader(path => File.ReadAllBytes(path), (path, bytes, first) => { idxLog.Add(path); return Decode(path, bytes, first); });
+            var cidx = new ContactIndex(k => idxReader.Get(meshOf[k]), cacheBudgetBytes: 1, memoiseGeometry: true);
+            idxReader.Store(bounded: false, cidx.Budget);
+            var gA = cidx.GeomOf(baseA); cidx.GeomOf(baseC); var gB = cidx.GeomOf(baseB);
+            Check("470 a memoising index: two bases sharing one mesh, another mesh asked between them on a 1-byte budget, hold one object decoded once",
+                  gA is not null && ReferenceEquals(gA, gB) && MeshDecodes(a, idxLog) == 1,
+                  $"same object {ReferenceEquals(gA, gB)}, mesh a decoded {MeshDecodes(a, idxLog)}x");
+
+            var bndLog = new List<string>();
+            var bnd = new MeshGeometryReader(path => File.ReadAllBytes(path), (path, bytes, first) => { bndLog.Add(path); return Decode(path, bytes, first); });
+            bnd.Store(bounded: true, new CacheBudget(1));
+            var n1 = bnd.Get(a); bnd.Get(b); var n2 = bnd.Get(a);
+            Check("472 control: the default pass's store stays bounded: an evicted mesh is decoded again (a, b, a: 3 decodes, 1 again) with the same geometry",
+                  bnd.Decodes == 3 && bnd.Redecodes == 1 && n1 is not null && n2 is not null && n1.Box.Equals(n2.Box),
+                  $"decodes {bnd.Decodes} (again {bnd.Redecodes})");
         }
         finally { Directory.Delete(dir, recursive: true); }
 
