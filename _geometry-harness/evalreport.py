@@ -1260,6 +1260,44 @@ def build_prediction(ctx: dict) -> dict:
     # the pair's clashes first, then the ones that could not be separated, then those of one mod alone (own heading)
     shown_rank = {"pair": 0, "unseparated": 1, "alone": 2}
     items.sort(key=lambda g: (shown_rank[g["shownAs"]], -g["count"], g["checkId"], g["mods"]))
+    # W-B4: overwrite history between the evaluated mods is not a clash, but a navmesh one mod's navmesh replaces with
+    # a measured loss of ground (its predicate holds) is a measured fact of this setup: said here, with the largest
+    # losses, and tied to the broken links counted above that point into a replaced navmesh. No claim about NPCs.
+    loss_lines = []
+    by_pair = collections.OrderedDict()
+    for rk, hit in sorted(p_rows.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
+        if not (hit["history"] and rk[0] == "geometry.navmesh-ownership" and rk[2].lower() != rk[3].lower()
+                and {rk[2].lower(), rk[3].lower()} <= pt_lower):
+            continue
+        by_pair.setdefault((rk[2], rk[3]), []).append(hit)
+    for (loser, winner), hits in by_pair.items():
+        held = [h for h in hits if h["row"].get("physical") == "Holds"]
+        if not held:
+            continue
+        drops = []
+        for h in held:
+            m = re.match(r"^(.*?)\s+(\d+) tris -> (\d+)$", str(h["row"].get("label") or ""))
+            if m:
+                drops.append((int(m.group(2)) - int(m.group(3)), m.group(1), int(m.group(2)), int(m.group(3)),
+                              h["row"].get("formKey")))
+        drops.sort(key=lambda d: (-d[0], str(d[4])))
+        replaced = {str(h["row"].get("formKey")) for h in hits}
+        links = [r_ for k_, r_ in p_rows.items() if k_[0] == "geometry.navmesh-ownership" and not r_["history"]
+                 and {k_[2].lower(), k_[3].lower()} == {loser.lower(), winner.lower()}
+                 and any(str(o) in replaced for o in r_["row"].get("other") or ())]
+        targets = list(dict.fromkeys(str(o) for r_ in links for o in r_["row"].get("other") or () if str(o) in replaced))
+        tdesc = []
+        for t in targets:
+            d = next((x for x in drops if str(x[4]) == t), None)
+            tdesc.append(f"{t} ({fmt_n(d[2])} -> {fmt_n(d[3])} triangles)" if d else t)
+        text = bind(words["historyLossLine"], {
+            "setup": words["historyLossSetup"]["withoutPatches" if patched_arm else "together"],
+            "winner": winner, "loser": loser, "count": fmt_n(len(hits)), "holds": fmt_n(len(held)),
+            "examples": "; ".join(f"{d[1]} {fmt_n(d[2])} -> {fmt_n(d[3])} triangles" for d in drops[:3])})
+        if links:
+            text += " " + bind(words["historyLossLinks"], {"links": fmt_n(len(links)), "targets": ", ".join(tdesc)})
+        loss_lines.append({"text": text, "findingIds": list(dict.fromkeys(
+            h["finding"].get("id") for h in held if h["finding"].get("id")))})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
     alone_lines = collections.OrderedDict()
@@ -1335,7 +1373,7 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"]}
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
-                  "items": items, "aloneLines": [{**v, "groups": [{"from": k, "entries": e} for k, e in v["groups"].items()]}
+                  "items": items, "historyLossLines": loss_lines, "aloneLines": [{**v, "groups": [{"from": k, "entries": e} for k, e in v["groups"].items()]}
                                                  for v in alone_lines.values()],
                   "verdictCounts": verdict_counts, "counts": counts, "headlineUnit": unit,
                   "singleModMode": single_mode, "singleModHeading": words.get("singleModHeading"),

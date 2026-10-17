@@ -1646,7 +1646,28 @@ def main():
               and "1 still reported as a clash between two mods" in line and line in md)
         return ok, f"by item {bi}; line {line!r}"
 
+    # C485. The navmesh one evaluated mod's navmesh replaces with a measured loss of ground is stated in the prediction
+    # section as a measured fact, with the largest losses, and tied to the broken links that point into it; no claim
+    # about NPCs
+    def c485_navmesh_loss_stated_in_prediction():
+        n1, n2 = f"000N01:{BASE}", f"000N02:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior02 (ext)  689 tris -> 5"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="CityHouse (int)  1 tris -> 165"),
+                  row("EDGE-IDX", MOD_A, MOD_B, f"000E01:{BASE}", label="CityExterior03 (ext)", other=n1),
+                  row("EDGE-IDX", MOD_A, MOD_B, f"000E02:{BASE}", label="CityExterior03 (ext)", other=n1)]
+        plan, md, html = compile_and_render(PATCHED_ARMS, {(NAVOWN, "without-patch"): p_rows, (NAVOWN, "baseline"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        line = next((x for x in sec.splitlines() if "navmesh replaces" in x), "")
+        ok = (f"without the patches, {MOD_B}'s navmesh replaces {MOD_A}'s in 2 navmesh records, and in 2 of them" in line
+              and "CityExterior02 (ext) 689 -> 5 triangles" in line
+              and f"The 2 broken navmesh links counted above point to triangles of a navmesh this replacement cut "
+                  f"down: {n1} (689 -> 5 triangles)" in line
+              and "NPC" not in line and "navmesh replaces" in html)
+        return ok, f"line {line!r}"
+
     for name, fn in [("w2-round3/C481-place-counts-from-listed-rows", c481_place_counts_from_listed_rows),
+                     ("w2-round3/C485-navmesh-loss-stated-in-prediction", c485_navmesh_loss_stated_in_prediction),
                      ("w2-round3/C483-light-without-model-is-not-a-clash", c483_light_without_model_is_not_a_clash),
                      ("w2-round3/C484-left-overlaps-split-by-record-data", c484_left_overlaps_split_by_record_data),
                      ("w2-round3/C482-verify-refuses-over-limit", c482_verify_refuses_over_limit)]:
