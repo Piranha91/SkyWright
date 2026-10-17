@@ -421,12 +421,21 @@ def refuse(run: Run | None, reason: str, code: int = EXIT_REFUSED_INPUT) -> int:
     return code
 
 
-FILE_PATH = re.compile(r"[\w .'()-]+(?:[\\/][\w .'()-]+)+\.[A-Za-z0-9]{2,4}")
+PATH_RUN = re.compile(r"[\w .'()\\/-]+")          # one character class: linear, no backtracking
+PATH_END = re.compile(r"\.[A-Za-z0-9]{2,4}\s*$")
+
+
+def _fold_paths(v: str) -> str:
+    """Every run of path characters that holds a slash and ends in a file extension, lower-cased with forward slashes."""
+    def one(m):
+        t = m.group(0)
+        return t.replace("\\", "/").lower() if ("\\" in t or "/" in t) and PATH_END.search(t) else t
+    return PATH_RUN.sub(one, v)
 
 
 def path_folded(v) -> str:
     """A value with every file path in it compared as the game reads it: letter case and slash direction ignored."""
-    return FILE_PATH.sub(lambda m: m.group(0).replace("\\", "/").lower().strip(), str(v))
+    return _fold_paths(str(v))
 
 
 def same_but_path_case(a, b) -> bool:

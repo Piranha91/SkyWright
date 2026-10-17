@@ -261,7 +261,16 @@ def parse_transcript(request: Path, response: Path) -> dict:
 
 # ---------------------------------------------------------------------------------------------- rows
 
-FILE_PATH = re.compile(r"[\w .'()-]+(?:[\\/][\w .'()-]+)+\.[A-Za-z0-9]{2,4}")
+PATH_RUN = re.compile(r"[\w .'()\\/-]+")          # one character class: linear, no backtracking
+PATH_END = re.compile(r"\.[A-Za-z0-9]{2,4}\s*$")
+
+
+def _fold_paths(v: str) -> str:
+    """Every run of path characters that holds a slash and ends in a file extension, lower-cased with forward slashes."""
+    def one(m):
+        t = m.group(0)
+        return t.replace("\\", "/").lower() if ("\\" in t or "/" in t) and PATH_END.search(t) else t
+    return PATH_RUN.sub(one, v)
 
 
 def _norm(v: str) -> str:
@@ -274,7 +283,7 @@ def _norm(v: str) -> str:
             out.append("0" if x == 0 else f"{x:.4f}".rstrip("0").rstrip("."))
         return ",".join(out)
     # a file path is read by the game without regard to letter case or slash direction
-    return FILE_PATH.sub(lambda m: m.group(0).replace("\\", "/").lower(), v)
+    return _fold_paths(v)
 
 
 TWO_PI = 2 * math.pi
