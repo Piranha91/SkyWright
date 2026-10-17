@@ -715,6 +715,20 @@ def parse_diff_log(text: str) -> list[dict]:
     return out
 
 
+def base_has_no_model(names: dict | None, fk) -> bool:
+    """A placed object whose base record the names enrichment read with no model (the field absent, "") has no body,
+    whatever the record's type: a light, a marker, an activator with no mesh (round 4 ruling)."""
+    if not isinstance(names, dict):
+        return False
+    base = ((names.get("bases") or {}).get(((names.get("refs") or {}).get(str(fk)) or {}).get("base") or "") or {})
+    return bool(base.get("type")) and base.get("model") == ""
+
+
+def row_has_no_body(names: dict | None, r: dict) -> bool:
+    """A geometry row whose object, or any partner object, has no body (see base_has_no_model)."""
+    return any(base_has_no_model(names, x) for x in [r.get("formKey"), *(r.get("other") or ())] if x)
+
+
 def conflict_rows(conflict: dict, evidence_id: str | None) -> list[dict]:
     rows = []
     # the partner objects a geometry row is measured against (an overlap's other object, a fixture's removed host):
@@ -1074,9 +1088,9 @@ def build_prediction(ctx: dict) -> dict:
     name_refs, name_bases = names.get("refs") or {}, names.get("bases") or {}
 
     def bodiless(fk):
-        """A light whose base record has no model has no body to clash (W-B3): decided from the record, never a name."""
-        base = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
-        return base.get("type") == "Light" and base.get("model") == ""
+        """An object whose base record has no model has no body to clash, whatever its type (W-B3, round 4): decided
+        from the record's model field, never a name."""
+        return base_has_no_model(names, fk)
 
     def no_body(rk, other):
         return rk[1] != "LOST-EDIT" and (bodiless(rk[4]) or any(bodiless(o) for o in other or ()))
@@ -1113,7 +1127,7 @@ def build_prediction(ctx: dict) -> dict:
         if not ({a.lower(), b.lower()} & pt_lower):
             return "notInvolving"
         if no_body(rk, other):
-            return "noBody"                    # a clash between the mods but for a light with no body (W-B3)
+            return "noBody"                    # a clash between the mods but for an object with no model (no body)
         if body_unread(rk, other):
             return "bodyUnread"                # cannot tell: its base record was not read
         if rk[1] == "LOST-EDIT" and path_case_only(rk):
@@ -1676,17 +1690,18 @@ def build_prediction(ctx: dict) -> dict:
         patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
         patch_lower = {str(x).lower() for x in patch_names}
         # A lost edit (record lane) is not judged by presence: with the patch loaded last the same plugin's change can
-        # still be lost, to the patch. Four outcomes: resolved (no change to the field is lost with the patch, or the
-        # patch wins with a value other than the winning value without it); kept on purpose (the patch wins with the
-        # same winning value: the patch author confirmed the winner, whichever mod's value that is); left (the
-        # field's winner with the patch is not a patch: nothing touched it); cannot tell (the patch wins, but a
-        # winning value is not recorded on one side, so the two cannot be compared). A lost edit whose winner is the
-        # patch is the patch's choice, never a problem the patch causes.
+        # still be lost, to the patch. Which plugins' values lose to the patch says what the patch carries, the same
+        # way whether or not the values are recorded (round 4): only the winning side's value loses (the patch carries
+        # the lost change: resolved); both lose (the patch's own value: the change is still lost); only the losing
+        # side's loses (the patch carries the value that wins without it: kept, with no claim about why). No change
+        # lost with the patch is resolved; a winner that is not a patch is left (nothing touched it). Where neither
+        # side loses to the patch, the recorded values decide, and with a placeholder value it cannot be told.
         lost_w = collections.defaultdict(list)
         for rk, hit in patched_rows.items():
             if rk[1] == "LOST-EDIT" and not same_but_path_case((hit["row"].get("values") or {}).get("lost"),
                                                                (hit["row"].get("values") or {}).get("winner")):
-                lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"winnerPlugin": rk[3]})
+                lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"winnerPlugin": rk[3],
+                                                                                    "loserPlugin": rk[2]})
 
         unrecorded = {str(x) for x in words.get("unrecordedValues") or []}
 
@@ -1703,10 +1718,18 @@ def build_prediction(ctx: dict) -> dict:
             w = rows_w[0]
             if str(w["winnerPlugin"]).lower() not in patch_lower:
                 return "left"
+            losers = {str(r["loserPlugin"]).lower() for r in rows_w if str(r["winnerPlugin"]).lower() in patch_lower}
+            a_lost, b_lost = str(e["A"]).lower() in losers, str(e["B"]).lower() in losers
+            if a_lost and b_lost:
+                return "own"
+            if b_lost or a_lost:
+                return "resolved" if b_lost else "kept"
             with_patch, without = (w.get("values") or {}).get("winner"), (e.get("values") or {}).get("winner")
-            if not (recorded(with_patch) and recorded(without)):
+            lost_v = (e.get("values") or {}).get("lost")
+            if not (recorded(with_patch) and recorded(without) and recorded(lost_v)):
                 return "cannot-tell-value"
-            return "resolved" if path_folded(with_patch) != path_folded(without) else "kept"
+            return ("kept" if path_folded(with_patch) == path_folded(without) else
+                    "resolved" if path_folded(with_patch) == path_folded(lost_v) else "own")
         # A geometry row is judged by its own predicate re-measured with the patch, where the probe carries one (an
         # emit's `Predicates`: every row of the setup it was measured against, measured again in this setup): Gone is
         # resolved, Holds is left (whoever owns the objects now), anything else cannot be told. Presence of the row
@@ -1759,6 +1782,7 @@ def build_prediction(ctx: dict) -> dict:
             return "notAttributed"
         left_split = {id(e): left_kind(e) for e in judged if outcome[id(e)] == "left" and e["kind"] != "LOST-EDIT"}
         hits = [e for e in judged if outcome[id(e)] == "resolved"]
+        own = [e for e in judged if outcome[id(e)] == "own"]
         kept = [e for e in judged if outcome[id(e)] == "kept"]
         open_ = [e for e in judged if outcome[id(e)] == "left"]
         untold = [e for e in judged if outcome[id(e)] == "cannot-tell"]
@@ -1773,7 +1797,7 @@ def build_prediction(ctx: dict) -> dict:
             if present(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
                 continue
             if no_body(rk, hit["row"].get("other")):
-                no_body_new += 1               # a light with no model inside geometry: no body, not a clash
+                no_body_new += 1               # an object with no model: no body, not a clash
                 continue
             if is_base_game(rk[2], words) or is_base_game(rk[3], words):
                 continue
@@ -1788,9 +1812,15 @@ def build_prediction(ctx: dict) -> dict:
         # overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted)
         history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds")
         sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)})]
+        if own:
+            sentences.append(bind(words["validationOwn"], {"patch": patch, "count": len(own)}))
         if kept:
             sentences.append(bind(words["validationKept"], {"patch": patch, "count": len(kept)}))
-        sentences += [bind(words["validationOpen"], {"patch": patch, "count": len(open_)}),
+        # still present: left untouched never counts a clash whose objects a patch edits (round 4)
+        edited = sum(1 for e in open_ if left_split.get(id(e)) == "patchHeld")
+        sentences += [bind(words["validationOpen"], {"patch": patch, "count": len(open_), "split": bind(
+                          words["validationOpenSplit"], {"untouched": fmt_n(len(open_) - edited), "edited": fmt_n(edited)})
+                          if edited else ""}),
                      bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems)})]
         sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]}) for s in blind]
         if history_holds:
@@ -1814,6 +1844,7 @@ def build_prediction(ctx: dict) -> dict:
         for g in prediction["items"]:
             k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
             by_item.append({"hits": sum(1 for e in hits if item_of(e) == k),
+                            "own": sum(1 for e in own if item_of(e) == k),
                             "open": sum(1 for e in open_ if item_of(e) == k),
                             "kept": sum(1 for e in kept if item_of(e) == k),
                             "cannotTell": sum(1 for e in untold + untold_value if item_of(e) == k),
@@ -1827,14 +1858,14 @@ def build_prediction(ctx: dict) -> dict:
         ow = words["itemOutcomeWords"]
 
         def outcome_text(bi):
-            parts = [bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
-                     for k in ("hits", "kept", "open", "cannotTell", "notMeasured") if bi.get(k)]
+            keys = ("hits", "own", "kept", "open", "cannotTell", "notMeasured")
+            parts = [bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) for k in keys if bi.get(k)]
             if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed")):
                 # the objects still intersect: say how many are still reported between two mods and why the rest
                 # are not (W-B2), never a bare "left N" that the detail sections cannot reconcile
                 split = [bind(ow["openSplit"][n], {"count": fmt_n(bi[f"open{n[0].upper()}{n[1:]}"])})
                          for n in ("listed", "patchHeld", "notAttributed") if bi.get(f"open{n[0].upper()}{n[1:]}")]
-                parts[[k for k in ("hits", "kept", "open", "cannotTell", "notMeasured") if bi.get(k)].index("open")] = (
+                parts[[k for k in keys if bi.get(k)].index("open")] = (
                     bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(split) + ")")
             return ", ".join(parts) if parts else ow["none"]
         item_lines, alone_total = [], collections.Counter()
@@ -1853,7 +1884,7 @@ def build_prediction(ctx: dict) -> dict:
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
-                      "hits": len(hits), "kept": len(kept), "open": len(open_),
+                      "hits": len(hits), "own": len(own), "kept": len(kept), "open": len(open_),
                       "cannotTell": len(untold) + len(untold_value), "valueUnrecorded": len(untold_value),
                       "falseAlarms": None,
                       "patchProblems": len(problems),
@@ -1871,6 +1902,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     """sibling_dir: a verified bundle of the same order without the patch; its single-mod setups stand in for the ones
     this bundle lacks (build_prediction's join). Raises InputRefused when it cannot be joined at all."""
     b = Bundle(bundle_dir)
+    # the names enrichment, where the bundle carries one: each placed object's base and the base's model, so every
+    # section that counts objects leaves out an object with no body (round 4)
+    names_row0 = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
+    names_doc0 = load_json(bundle_dir / names_row0["path"]) if names_row0 else None
+    body_checks = set(((pr.get("reader") or {}).get("prediction") or {}).get("bodyChecks") or [])
     sibling = None
     if sibling_dir is not None:
         sib_plan = compile_plan(Path(sibling_dir), verify, settings, pr, str(sibling_dir))
@@ -2217,6 +2253,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     def add(f: dict) -> dict:
         f.setdefault("rows", [])
         f["rowsTotal"] = len(f["rows"])
+        if f.get("kind") == "finding" and f.get("checkId") in body_checks:
+            # rows whose object (or partner) has no model: not counted on the page, kept in the evidence index
+            f["rowsNoBody"] = sum(1 for r in f["rows"] if row_has_no_body(names_doc0, r))
+        f["readerRows"] = f["rowsTotal"] - int(f.get("rowsNoBody") or 0)
         f.setdefault("mediaIds", [])
         f.setdefault("evidenceIds", [])
         f.setdefault("groupId", None)
@@ -2267,26 +2307,44 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 rows = []
                 reader_form_keys = set()
                 group = None
+                # the created rows whose object has no model (no body) are not new problems (round 4): counted only
+                # where the created rows are known, the group's rows on this setup less those the setup compared with
+                # already had, and only when that is exactly the comparison's own count
+                no_body_created = 0
+                base_path = b.output_emit_path(check_id, "baseline", "arm") if arm_id != "baseline" else None
+                base_emit = b.emit(base_path) if base_path else None
                 for d in created_groups:
                     g = group_for(check_id, d["kind"], d["A"], d["B"])
                     group = group or g
+                    created_rows = []
                     if isinstance(emit, dict):
                         for c in emit.get("Conflicts") or []:
                             if (c.get("Kind"), c.get("A"), c.get("B")) == (d["kind"], d["A"], d["B"]):
                                 group_rows = conflict_rows(c, eid_by_path.get(emit_path))
                                 rows.extend(group_rows)
+                                created_rows.extend(group_rows)
                                 if not context_only(check_id, d.get("kind")):
                                     reader_form_keys.update(x.get("formKey") for x in group_rows if x.get("formKey"))
+                    if (check_id in body_checks and names_doc0 is not None and not context_only(check_id, d.get("kind"))
+                            and len(created_rows) != int(d.get("created") or 0) and isinstance(base_emit, dict)):
+                        had = {(x.get("formKey"), tuple(x.get("other") or ())) for c in base_emit.get("Conflicts") or []
+                               if (c.get("Kind"), c.get("A"), c.get("B")) == (d["kind"], d["A"], d["B"])
+                               for x in conflict_rows(c, None)}
+                        created_rows = [x for x in created_rows if (x.get("formKey"), tuple(x.get("other") or ())) not in had]
+                    if (check_id in body_checks and not context_only(check_id, d.get("kind"))
+                            and len(created_rows) == int(d.get("created") or 0)):
+                        no_body_created += sum(1 for x in created_rows if row_has_no_body(names_doc0, x))
                 first = created_groups[0] if created_groups else {}
                 gated = bool(context_only_by_check.get(str(check_id)))
                 reader_groups = [d for d in created_groups if not context_only(check_id, d.get("kind"))]
                 reader_shrank = [d for d in shrank_groups if not context_only(check_id, d.get("kind"))]
-                reader_created = (sum(int(d.get("created") or 0) for d in reader_groups) if created_groups
-                                  else (0 if gated else int(p.get("newDefect") or p.get("created") or 0)))
+                reader_created = (sum(int(d.get("created") or 0) for d in reader_groups) - no_body_created
+                                  if created_groups else (0 if gated else int(p.get("newDefect") or p.get("created") or 0)))
                 reader_repaired = (sum(int(d.get("repaired") or 0) for d in reader_shrank) if shrank_groups
                                    else (0 if gated else int(p.get("repaired") or 0)))
                 counts_r = {**counts, "groups": [{"kind": d["kind"], "A": d["A"], "B": d["B"], "created": d.get("created", 0)}
                                                  for d in created_groups], "readerCreated": reader_created,
+                            "readerNoBody": no_body_created,
                             "readerRepaired": reader_repaired}
                 f = add({"id": None, "kind": "regression", "priority": 1, "checkId": check_id,
                          "family": b.check_family(check_id), "armId": arm_id, "part": "diff",
@@ -2298,7 +2356,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                                                              if x not in eids_for(check_id, arm_id, "diff")],
                          "mediaIds": media_for(check_id, arm_id, reader_form_keys),
                          "groupId": group, "rows": rows})
-                f["readerRelevant"] = bool(reader_groups) if created_groups else not gated
+                f["readerRelevant"] = (bool(reader_groups) and reader_created > 0) if created_groups else not gated
+                if created_groups and reader_groups and reader_created <= 0:
+                    f["readerEvidenceReason"] = "no-body-only"     # every created row names an object with no body
                 if not f["readerRelevant"] and gated:
                     f["readerEvidenceReason"] = "context-only-or-inseparable"
                 f["_group"] = group
@@ -2532,7 +2592,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 one = False
             return singular if one else (plural or singular + "s")
 
-        count_rows = int(f.get("rowsTotal") or 0)
+        count_rows = int(f.get("readerRows", f.get("rowsTotal")) or 0)     # an object with no body is not counted
         phrases = kind_phrases.get(group_kind) or {}
         group_label = (phrases.get("singular") if count_rows == 1 else phrases.get("plural")) or labels.get(
             group_kind, noun(count_rows, "reported conflict"))
@@ -2550,12 +2610,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                              {"repairedCount": repaired_count,
                                               "candidateNoun": overlap_candidate_noun(repaired_count)})
             else:
+                no_body_n = int(c.get("readerNoBody") or 0)
                 f["readerPlain"] = (f"{arm_subject(f.get('armId'))} introduced {fmt_n(new_count)} new "
-                                    f"{noun(new_count, 'problem')} in the {check_phrase}." +
+                                    f"{noun(new_count, 'problem')} in the {check_phrase}"
+                                    + (bind((reader_data.get("comparisonState") or {})["noBodyCreated"], {"count": fmt_n(no_body_n)})
+                                       if no_body_n else "")
+                                    + "." +
                                     (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
                                      "those repairs do not cancel the new problem." if repaired_count else ""))
         elif f["kind"] == "finding" and c.get("A") and c.get("B"):
             sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
+                           and not (f.get("rowsNoBody") and row_has_no_body(names_doc0, r))
                            and " tris" not in str(r.get("label")).lower()
                            and not re.match(r"^[0-9a-f]{6}:", str(r.get("label")), re.I)), None)
             unit = phrases.get("unitSingular") if count_rows == 1 else phrases.get("unitPlural")
@@ -2930,7 +2995,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         a_, b_ = c.get("A"), c.get("B")
         aside = ("countOnly" if not (a_ and b_) else "sameMod" if str(a_).lower() == str(b_).lower() else
                  "baseGame" if (is_base_game(a_, reader_data.get("prediction") or {})
-                                or is_base_game(b_, reader_data.get("prediction") or {})) else None)
+                                or is_base_game(b_, reader_data.get("prediction") or {})) else
+                 "noBody" if f.get("rowsNoBody") and not f.get("readerRows") else None)
         f["readerDetail"] = aside is None
         f["readerDetailAside"] = aside
         if aside and f.get("readerRelevant"):
@@ -3029,14 +3095,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         for f in reader_regressions:
             if f.get("checkId") == "geometry.object-overlap":
                 continue
-            per_check.setdefault(f.get("checkId"), (f, [], []))[1].append(int((f.get("counts") or {}).get("readerCreated") or 0))
+            per_check.setdefault(f.get("checkId"), (f, [], [], []))[1].append(int((f.get("counts") or {}).get("readerCreated") or 0))
+            per_check[f.get("checkId")][3].append(int((f.get("counts") or {}).get("readerNoBody") or 0))
             if (comparison_state.get((f.get("checkId"), f.get("armId"))) or {}).get("notAccepted"):
                 per_check[f.get("checkId")][2].append(True)
         parts = []
-        for check_id, (f, ns, unacc) in per_check.items():
+        for check_id, (f, ns, unacc, nbs) in per_check.items():
             title_ = (reader_data.get("checkTitles") or {}).get(check_id, f.get("title"))
             if len(ns) == 1:
-                parts.append(f"{fmt_n(ns[0])} new {'problem' if ns[0] == 1 else 'problems'} in the check \"{title_}\"")
+                parts.append(f"{fmt_n(ns[0])} new {'problem' if ns[0] == 1 else 'problems'} in the check \"{title_}\""
+                             + (bind(cmp_words["noBodyCreated"], {"count": fmt_n(nbs[0])}) if nbs[0] else ""))
             else:                              # one count per setup, never summed across setups
                 parts.append(f"new problems in the check \"{title_}\" in {len(ns)} setups ("
                              + ", ".join(fmt_n(n_) for n_ in ns) + ")")
@@ -3115,6 +3183,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         verdict = "The completed checks found no problem in what they examined; no alternative setup was supplied for comparison."
     else:
         verdict = "The available results cannot determine whether the target mod has a problem in the measured setup."
+    # a comparison that refused a verdict is said in the summary, where a reader decides, not only further down
+    # (round 4); its counts were never part of the sentence above
+    refused_said, refused_lines = [], []
+    for (check_id_, arm_), state_ in comparison_state.items():
+        if state_.get("refused") and arm_ in alternative_arms and check_id_ not in refused_said:
+            refused_said.append(check_id_)
+            refused_lines.append(bind(cmp_words["refusedSummary"], {
+                "title": (reader_data.get("checkTitles") or {}).get(check_id_) or b.check_title(check_id_),
+                "why": refused_words(state_)}))
+    if refused_lines:
+        verdict += " " + " ".join(refused_lines)
     limitations = []
     if missing:
         limitations.append("Testing is incomplete; outstanding areas are listed below.")
@@ -3375,13 +3454,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         for i in pred_["items"]:
             if i.get("shownAs") == "alone":
                 alone_mods += [m for m in i["mods"] if m.lower() not in {x.lower() for x in pair} and m not in alone_mods]
+        # a counted clash between one evaluated mod and a third mod (it appears only with both loaded) is said to be
+        # counted, never hidden behind "between the pair" (round 4)
+        pair_lower = {x.lower() for x in pair}
+        third_counted = list(dict.fromkeys(m for i in pred_["items"] if i["attribution"] == "needs-both"
+                                           for m in i["mods"] if m.lower() not in pair_lower))
         partner = bind(sw["pair"], {"modA": pair[0], "modB": " and ".join(pair[1:])}) + (
+            " " + bind(sw["thirdCounted"], {"mods": ", ".join(third_counted)})
+            if third_counted and sw.get("thirdCounted") else "") + (
             " " + bind(sw["alone"], {"mods": ", ".join(alone_mods)}) if alone_mods and sw.get("alone") else "")
         scope_line = scope_head + partner + " " + scope_tail
         reader["scopeLine"] = scope_line
         reader["scopePair"] = pair
         reader["comparisonMods"] = alone_mods
     reader["verdict"] = verdict
+    reader["refusedSummary"] = refused_lines       # said again where the page reports no new problem
     reader["prediction"] = lead["prediction"]
     # Evidence derived after measurement (bundle standard §8, enrichment): listed in the evidence index with what
     # it was derived from; names reach the plan so a reader's page needs no side input.
@@ -3410,7 +3497,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     reader["detailAsideLine"] = (bind(pw["detailAsideLine"], {
         "count": fmt_n(aside_total), "resultNoun": "result" if aside_total == 1 else "results",
         "parts": "; ".join(f"{fmt_n(aside_counts[k])} {pw['detailAside'][k]}"
-                           for k in ("baseGame", "sameMod", "countOnly") if aside_counts.get(k))})
+                           for k in ("baseGame", "sameMod", "countOnly", "noBody") if aside_counts.get(k))})
                                  if aside_total else None)
     reader["detailSingleModLine"] = (bind(pw["detailSingleModLine"], {
         "count": fmt_n(single_mod_count), "resultNoun": "result" if single_mod_count == 1 else "results",
@@ -3786,7 +3873,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                         ph = phrases.get(str(c.get("groupKind") or "")) or {}
                         e_ = by_pair.setdefault((c.get("A"), c.get("B"), ph.get("unitPlural")),
                                                 {"n": 0, "ids": [], "ph": ph, "A": c.get("A"), "B": c.get("B")})
-                        e_["n"] += int(f.get("rowsTotal") or 0)
+                        e_["n"] += int(f.get("readerRows", f.get("rowsTotal")) or 0)
                         e_["ids"].append(f["id"])
                     entries = []
                     for e_ in by_pair.values():

@@ -107,7 +107,7 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 {% for m in f.figures %}{% if m.reportPath %}![{{ (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
 
 *Evidence image.* [Image provenance](evidence-index.md#{{ m.id }}).
-{% endif %}{% endfor %}{% endfor %}{% else %}The completed comparisons did not report a newly introduced physical defect.
+{% endif %}{% endfor %}{% endfor %}{% else %}The completed comparisons did not report a newly introduced physical defect.{% for x in p.reader.get('refusedSummary') or [] %} {{ x }}{% endfor %}
 {% endif %}
 
 ## What the checks found

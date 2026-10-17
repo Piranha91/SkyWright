@@ -1381,21 +1381,25 @@ def main():
         ok = val.get("hits") == 1 and val.get("open") == 1 and val.get("patchProblems") == 1
         return ok, f"hits {val.get('hits')}, open {val.get('open')}, new {val.get('patchProblems')}"
 
-    # C463. A lost edit the patch keeps on purpose is its own count, printed, never "left"
+    # C463. A lost edit the patch keeps (it carries the winning value) is its own count, printed, never "left"; round 4
+    # (ruling a): said as what the record data shows, with no claim that it was chosen
     def c463_patch_kept_winner_is_not_left():
         plan, md, html = record_validation_bundle()
         val = reader(plan).get("validation") or {}
         text = section_text(md, headings(plan).get("validation") or "\0")
-        ok = val.get("kept") == 1 and val.get("open") == 1 and "kept on purpose" in text
-        return ok, f"kept {val.get('kept')}, open {val.get('open')}; printed: {'kept on purpose' in text}"
+        said = "carries the value that wins without it" in text and "on purpose" not in text
+        ok = val.get("kept") == 1 and val.get("open") == 1 and said
+        return ok, f"kept {val.get('kept')}, open {val.get('open')}; printed: {said}"
 
-    # C464. A placeholder winner value is never compared: cannot tell, said on the page
+    # C464. A placeholder winner value is never compared; round 4 (ruling f): the edit is classified by which side
+    # loses to the patch, as with recorded values (701 ModB's loses: resolved; 703 ModA's loses: kept); cannot tell
+    # only when neither side is known (C495)
     def c464_placeholder_value_cannot_tell():
         plan, md, html = placeholder_value_bundle()
         val = reader(plan).get("validation") or {}
         text = section_text(md, headings(plan).get("validation") or "\0")
-        ok = (val.get("hits") == 0 and val.get("kept") == 0 and val.get("open") == 1 and val.get("cannotTell") == 2
-              and "does not record the winning value" in text)
+        ok = (val.get("hits") == 1 and val.get("kept") == 1 and val.get("open") == 1 and val.get("cannotTell") == 0
+              and "cannot be told" not in text)
         return ok, (f"hits {val.get('hits')}, kept {val.get('kept')}, open {val.get('open')}, "
                     f"cannot tell {val.get('cannotTell')}")
 
@@ -1503,14 +1507,15 @@ def main():
               and f"For example: 000701:{BASE} (LocationReference)" in md)
         return ok, f"direction printed: {MOD_A + chr(39) + 's value is lost' in md}; example printed: {'For example' in md}"
 
-    # C478. A lost edit the patch wins is described as the patch's own choice in the detail list
+    # C478. A lost edit the patch wins is described as the patch's value winning in the detail list; round 4 (ruling
+    # f): it points to the patch comparison, never "not a problem" (C498)
     def c478_patch_win_is_its_choice():
         plan, md, html = record_validation_bundle()
         # the concise page counts a setup's patch-won lost edits in one line (P53); the plan words each one
         f = next((x for x in plan.get("findings") or [] if x.get("readerPatchChoice")), {})
-        ok = (f"where {PATCH}'s value wins over {MOD_B}'s: the patch's own choice" in (f.get("readerPlain") or "")
-              and "where a declared patch's value wins: the patches' own choices" in md)
-        return ok, f"finding wording {f.get('readerPlain')!r}; collapsed line printed: {'own choices' in md}"
+        ok = (f"where {PATCH}'s value wins over {MOD_B}'s; what this means" in (f.get("readerPlain") or "")
+              and "where a declared patch's value wins; what this means" in md)
+        return ok, f"finding wording {f.get('readerPlain')!r}"
 
     # C479. Patches are named in load order, not alphabetically
     def c479_patches_in_load_order():
@@ -1619,7 +1624,7 @@ def main():
         p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
         adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in p.get("record") or [])
         ok = (adm == [("000L01", "noBody"), ("000L02", "admitted"), ("000S01", "admitted")]
-              and val.get("patchProblems") == 1 and "Also not counted: 1 clashes between the mods whose object is a light source" in md
+              and val.get("patchProblems") == 1 and "Also not counted: 1 clashes between the mods whose object's record has no model" in md
               and "Not counted as new clashes" in md)
         return ok, f"admission {adm}; new clashes {val.get('patchProblems')}"
 
@@ -1782,6 +1787,128 @@ def main():
                      ("w2-round3/C483-light-without-model-is-not-a-clash", c483_light_without_model_is_not_a_clash),
                      ("w2-round3/C484-left-overlaps-split-by-record-data", c484_left_overlaps_split_by_record_data),
                      ("w2-round3/C482-verify-refuses-over-limit", c482_verify_refuses_over_limit)]:
+        cell(name, fn)
+
+    # ------------------------------------------- round 4: the second blind review of the regenerated reports
+    def no_model_bundle():
+        """C494. Without the patch ModA's static S1 and its activator T1 each lost their support; with the patch S3 and
+        T3 did. The activator's base record has no model (read as absent): it has no body. The comparison of the setup
+        without the patch with the measured order counts both of its rows as created."""
+        S1, T1, S3, T3 = (f"000{x}:{MOD_A}" for x in ("S01", "T01", "S03", "T03"))
+        hosts = [f"000H0{i}:{MOD_B}" for i in range(1, 5)]
+        p_rows = [row("CONTACT", MOD_B, MOD_A, S1, other=hosts[0]), row("CONTACT", MOD_B, MOD_A, T1, other=hosts[1])]
+        w_rows = [row("CONTACT", MOD_B, MOD_A, S3, other=hosts[2]), row("CONTACT", MOD_B, MOD_A, T3, other=hosts[3])]
+        refs = {S1: {"base": f"0B0S01:{MOD_A}"}, S3: {"base": f"0B0S01:{MOD_A}"}, T1: {"base": f"0B0T01:{MOD_A}"},
+                T3: {"base": f"0B0T01:{MOD_A}"}, **{h: {"base": f"0B0S01:{MOD_A}"} for h in hosts}}
+        bases = {f"0B0S01:{MOD_A}": {"type": "Static", "model": "rock.nif"},
+                 f"0B0T01:{MOD_A}": {"type": "Activator", "model": ""}}
+        order = {"without-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                        created=2, newDefect=2, attributed=0, unmeasured=0)}}
+        log = f"NEW     CONTACT    {MOD_B}  x  {MOD_A}   +2 record(s): created 2\n"
+        return compile_and_render(PATCHED_ARMS, {(CONTACT, "without-patch"): p_rows, (CONTACT, "baseline"): w_rows},
+                                  [MOD_A, MOD_B], patches=[PATCH], names={"refs": refs, "bases": bases}, order=order,
+                                  diff_logs={(CONTACT, "without-patch"): log})
+
+    # C494. An object whose base record has no model has no body, whatever its type: no section that counts objects
+    # counts it (the prediction, the new clashes with the patch, the comparison's new problems, the detail list)
+    def c494_no_model_counted_nowhere():
+        plan, md, html = no_model_bundle()
+        p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in p.get("record") or [])
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        found = section_text(md, "What the checks found")
+        bad = [x for x in md.splitlines() if re.search(r"\b2 (new problems|records|clashes|cases)\b", x)]
+        ok = (adm == [("000S01", "admitted"), ("000T01", "noBody")]
+              and val.get("patchProblems") == 1 and (reg.get("counts") or {}).get("readerCreated") == 1
+              and "introduces 1 new problem in the check" in md and "introduced 1 new problem in the" in md
+              and found.count("1 record shows") == 2 and not bad)
+        return ok, (f"admission {adm}; new with patch {val.get('patchProblems')}; comparison "
+                    f"{(reg.get('counts') or {}).get('readerCreated')}; lines still counting 2: {bad}")
+
+    def lost_classes_bundle():
+        """C495. Without the patch ModA's change to six records is lost to ModB; every winner value is a placeholder.
+        With the patch: 701 ModB's value loses to the patch (the patch carries ModA's); 702 both lose to the patch (its
+        own value); 703 ModA's loses to the patch (it carries ModB's); 704 ModA's still loses to ModB; 705 no change is
+        lost; 706 only a third plugin loses to the patch, so neither side is known."""
+        ph = "(the winner's value)"
+        p_rows = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", ph, "v") for i in range(1, 7)]
+        w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", ph, "v"),
+                  lost_row(MOD_A, PATCH, f"000702:{BASE}", "LocationReference", "a2", ph, "v"),
+                  lost_row(MOD_B, PATCH, f"000702:{BASE}", "LocationReference", "b2", ph, "v"),
+                  lost_row(MOD_A, PATCH, f"000703:{BASE}", "LocationReference", "a3", ph, "v"),
+                  lost_row(MOD_A, MOD_B, f"000704:{BASE}", "LocationReference", "a4", ph, "v"),
+                  lost_row(OTHER, PATCH, f"000706:{BASE}", "LocationReference", "o6", ph, "v")]
+        enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "baseline"): w_rows}
+        count_only = {(RECORDS, "without-patch"): 6, (RECORDS, "baseline"): 6}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+        return compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH], count_only=count_only,
+                                  enrichment=enr)
+
+    # C495. A lost edit is classified by which side loses to the patch, the same way whether or not values are
+    # recorded: the patch carries the lost value (resolved), its own value (the change is still lost, never
+    # "resolved"), the winning value (no claim about intent); cannot tell only when neither side is known
+    def c495_lost_edit_classes_by_losing_side():
+        plan, md, html = lost_classes_bundle()
+        val = reader(plan).get("validation") or {}
+        bi = (val.get("byItem") or [{}])[0]
+        text = section_text(md, headings(plan).get("validation") or "\0")
+        ok = (bi.get("hits") == 2 and bi.get("own") == 1 and bi.get("kept") == 1 and bi.get("open") == 1
+              and bi.get("cannotTell") == 1 and val.get("own") == 1
+              and "own value" in text and "still lost" in text
+              and "on purpose" not in md and "author's" not in md and "own choice" not in md)
+        return ok, f"by item {bi}; printed own value {'own value' in text}; intent words {'on purpose' in md}"
+
+    # C496. "Left untouched" never counts a clash a patch edited: the objects still intersect with a patch's version
+    # of one of them loaded last is still present, but not untouched
+    def c496_untouched_excludes_patch_edited():
+        X, Z = f"000X01:{MOD_A}", f"000Z01:{MOD_A}"
+        ys = [f"000Y0{i}:{MOD_B}" for i in (1, 2, 3)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys] + [
+            row("OVERLAP", MOD_B, MOD_A, Z, other=f"000W01:{MOD_B}")]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        preds.append({"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": Z, "Other": f"000W01:{MOD_B}",
+                      "Physical": "Gone"})
+        refs = {ys[1]: {"carriedBy": [MOD_B, PATCH]}, ys[2]: {"carriedBy": [MOD_B]}, X: {"carriedBy": [MOD_A]}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): [
+            row("OVERLAP", MOD_B, MOD_A, X, other=ys[0])]}, [MOD_A, MOD_B], patches=[PATCH],
+            predicates={(OVERLAP, "with-patch"): preds}, names={"refs": refs})
+        text = section_text(md, headings(plan).get("validation") or "\0")
+        line = next((x for x in text.splitlines() if "untouched" in x), "")
+        ok = ("untouched" in line and re.search(r"\b2 left untouched\b", line) is not None
+              and re.search(r"\b1 where a patch edits one of the two objects\b", line) is not None
+              and not re.search(r"left untouched by [^:]*: 3\b", text))
+        return ok, f"line {line!r}"
+
+    # C497. The headline calls overlaps candidates, never inconsistencies; and the scope line says when clashes with a
+    # third mod are counted because they appear only with both evaluated mods
+    def c497_headline_candidates_and_scope():
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, f"000X01:{MOD_A}", other=f"000Y01:{MOD_B}"),
+                  row("OVERLAP", OTHER, MOD_A, f"000X02:{MOD_A}", other=f"000Y02:{OTHER}")]
+        results = {(OVERLAP, a): [] for a in ("dependency-only", "plus-a", "plus-b")}
+        results[(OVERLAP, "baseline")] = p_rows
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        v, scope = reader(plan).get("verdict") or "", reader(plan).get("scopeLine") or ""
+        ok = ("overlap candidate" in v and "inconsistenc" not in v and OTHER in scope and "counted" in scope
+              and scope in md)
+        return ok, f"verdict {v!r}; scope {scope!r}"
+
+    # C498. Lost edits a patch wins are not called "not problems they leave", which the patch comparison contradicts;
+    # and a refused comparison is said in the patch section's summary, not only further down
+    def c498_patch_wins_and_refusal_in_summary():
+        plan, md, html = record_validation_bundle()
+        f = next((x for x in plan.get("findings") or [] if x.get("readerPatchChoice")), {})
+        words_ok = ("not a problem" not in (f.get("readerPlain") or "") and "not problems" not in md
+                    and "own choice" not in md and "patch's value wins" in md)
+        plan2, md2, html2 = comparison_bundle("refused")
+        summary = section_text(md2, headings(plan2).get("validation") or "\0").strip().split("\n\n")[0]
+        ok = words_ok and "refused a verdict" in summary and "rose from 8.33% to 23.47%" in summary
+        return ok, f"patch-win words ok {words_ok}; summary {summary[:300]!r}"
+
+    for name, fn in [("w2-round4/C494-no-model-object-counted-nowhere", c494_no_model_counted_nowhere),
+                     ("w2-round4/C495-lost-edit-classes-by-losing-side", c495_lost_edit_classes_by_losing_side),
+                     ("w2-round4/C496-untouched-excludes-patch-edited", c496_untouched_excludes_patch_edited),
+                     ("w2-round4/C497-headline-candidates-and-scope", c497_headline_candidates_and_scope),
+                     ("w2-round4/C498-patch-wins-and-refusal-in-summary", c498_patch_wins_and_refusal_in_summary)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
