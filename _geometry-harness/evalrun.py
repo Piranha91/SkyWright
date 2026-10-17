@@ -589,6 +589,14 @@ def scene_preflight(arms: list[dict], opts: dict, harness: Path) -> tuple[list[s
     return refusals, notes
 
 
+def arm_requested_plugins(arm: dict) -> set[str]:
+    """The plugin names (lower case) an arm's frozen request loads: `requested.plugins`, else the arm's `plugins`."""
+    rows = (arm.get("requested") or {}).get("plugins")
+    if isinstance(rows, list):
+        return {str(p.get("name") or "").lower() for p in rows if isinstance(p, dict)}
+    return {str(p).lower() for p in (arm.get("plugins") or [])}
+
+
 def tool_identity(harness: Path, probe: str) -> dict:
     """The code that ACTUALLY runs: the managed assembly beside the apphost, not only the exe
     (memory: an apphost hash does not change when the managed code does)."""
@@ -1316,9 +1324,7 @@ def cmd_plan(a) -> int:
             arm = next(x for x in arms if x["armId"] == aid)
             st = base_status
             if st is None:
-                if kind == "probe-target" and aid != "baseline":
-                    st = "unsupported-for-arm"
-                elif want == "baseline" and aid != "baseline":
+                if want == "baseline" and aid != "baseline":
                     st = "unsupported-for-arm"
                 elif arm.get("supplied", {}).get("payloadMissing"):
                     st = "blocked-payload-missing"
@@ -3024,6 +3030,15 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
                 ex.account(check, arm, "blocked(no-target)", None,
                            "the plan names no target plugin, so this probe cannot be told what to read")
                 return
+            if kind == "probe-target":
+                # P51: the probe reads this arm's candidate, so it is told only the targets that candidate loads
+                # (the rule scope_omission applies); an arm that loads none has no target to judge.
+                loads = arm_requested_plugins(arm)
+                targets = [t for t in targets if t.lower() in loads]
+                if not targets:
+                    ex.account(check, arm, "not-applicable", None,
+                               "this arm loads none of the plan's target plugins, so it has no target objects to judge")
+                    return
             # The SHAPE the registry wrote decides: `--target {target}` is a flag and repeats with
             # its flag; a bare `{target}` is POSITIONAL and repeats on its own. Handing a positional
             # probe a `--target` is how blockprobe was told to open a plugin called "--target".
@@ -3093,7 +3108,7 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
             args += [flag, str(st)]
 
     argv = list(prog)
-    if kind in ("scopeprobe", "probe-emit", "probe-json") and "--order" not in args and arm["candidatePath"]:
+    if kind in ("scopeprobe", "probe-emit", "probe-json", "probe-target") and "--order" not in args and arm["candidatePath"]:
         argv += ["--order", arm["candidatePath"]]
     if kind == "scopeprobe" and "--target" not in args:
         # scopeprobe reads WHAT A TARGET CONTAINS; without a target it has nothing to open and
