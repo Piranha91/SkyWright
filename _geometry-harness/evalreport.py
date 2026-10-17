@@ -1125,6 +1125,8 @@ def build_prediction(ctx: dict) -> dict:
             entry["findingId"] = None
         if hit["row"].get("other") is not None:
             entry["other"] = list(hit["row"]["other"])
+        if hit["row"].get("physical") is not None:
+            entry["physical"] = hit["row"]["physical"]
         if hit["row"].get("field") is not None:
             entry["field"] = hit["row"]["field"]
             entry["values"] = hit["row"].get("values")
@@ -1160,6 +1162,17 @@ def build_prediction(ctx: dict) -> dict:
         label = hit["row"].get("label")
         if label and len(g["examples"]) < 2 and label not in g["examples"]:
             g["examples"].append(label)
+        # what makes the item actionable: the direction a lost edit goes, example records, the places it is in,
+        # and whether its count rests on a result reused from another evaluation
+        g.setdefault("_directions", set()).add((rk[2], rk[3]))
+        if rk[1] == "LOST-EDIT" and rk[4] and len(g.setdefault("_records", [])) < 2:
+            ex = f"{rk[4]} ({hit['row'].get('field')})" if hit["row"].get("field") else str(rk[4])
+            if ex not in g["_records"]:
+                g["_records"].append(ex)
+        if label and rk[1] != "LOST-EDIT" and not re.match(r"^[0-9a-f]{6}:", str(label), re.I) and " tris" not in str(label):
+            g.setdefault("_places", collections.Counter())[str(label)] += 1
+        if hit["finding"].get("readerProvenance"):
+            g["_provenance"] = hit["finding"]["readerProvenance"]
 
     titles, in_game, phrases = ctx["checkTitles"], ctx["inGame"], ctx["kindPhrases"]
 
@@ -1201,8 +1214,27 @@ def build_prediction(ctx: dict) -> dict:
         # a kind whose rows are fields of a record (a path, not a thing) also says how many records they are on
         on = (f", on {fmt_n(g['objects'])} {ph['objectsSingular'] if g['objects'] == 1 else ph['objectsPlural']},"
               if ph.get("objectsPlural") else "")
+        directions = g.pop("_directions", set())
+        detail = []
+        if g["kind"] == "LOST-EDIT" and len(directions) == 1:
+            loser, winner = next(iter(directions))
+            detail.append(bind(words["itemDirection"], {"loser": loser, "winner": winner}))
+        if g.get("_records"):
+            detail.append(bind(words["itemExamples"], {"examples": "; ".join(g["_records"])}))
+        places = g.pop("_places", None)
+        if places:
+            top = places.most_common(2)
+            if len(places) == 1:
+                detail.append(bind(words["itemPlaceOne" if g["count"] == 1 else "itemPlaceAll"], {"place": top[0][0]}))
+            else:
+                detail.append(bind(words["itemPlaces"], {"places": "; ".join(f"{pl} ({fmt_n(n)})" for pl, n in top),
+                                                        "more": (bind(words["itemPlacesMore"], {"count": len(places) - len(top)})
+                                                                 if len(places) > len(top) else "")}))
+        g.pop("_records", None)
+        provenance = g.pop("_provenance", None)
         g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
-                      + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else ""))
+                      + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else "")
+                      + "".join(" " + d for d in detail) + (f" {provenance}" if provenance else ""))
         g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else words["inGameMissing"])
         g["shownAs"] = ("pair" if not multi or g["attribution"] == "needs-both" else
                         "alone" if g["attribution"] == "single-mod" else "unseparated")
@@ -1540,7 +1572,7 @@ def build_prediction(ctx: dict) -> dict:
         untold_value = [e for e in judged if outcome[id(e)] == "cannot-tell-value"]
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
-        problems, choices = [], 0
+        problems, choices, problem_finding = [], 0, {}
         for rk, hit in patched_rows.items():
             if rk[1] == "LOST-EDIT" and rk[3].lower() in patch_lower:
                 choices += 1
@@ -1551,15 +1583,23 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             if (rk[0], p_of(rk[0])) in measured:
                 problems.append(rk)
-        spots = collections.Counter(e["admission"] for e in record if e["admission"] not in ("admitted", "repeat")
-                                    and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e)))
+                problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
+        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat")
+                     and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
+        spots = collections.Counter(e["admission"] for e in spot_rows)
         blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())]
+        # overwrite history is not a predicted clash, but a row the patch removes whose physical test held (the
+        # overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted)
+        history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds")
         sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)})]
         if kept:
             sentences.append(bind(words["validationKept"], {"patch": patch, "count": len(kept)}))
         sentences += [bind(words["validationOpen"], {"patch": patch, "count": len(open_)}),
                      bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems)})]
         sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]}) for s in blind]
+        if history_holds:
+            sentences.append(bind(words["validationHistoryHolds"], {"count": history_holds,
+                                                                    "total": spots.get("history", 0)}))
         if untold:
             sentences.append(bind(words["validationCannotTell"], {"patch": patch, "count": len(untold)}))
         if untold_value:
@@ -1578,7 +1618,30 @@ def build_prediction(ctx: dict) -> dict:
                             "kept": sum(1 for e in kept if item_of(e) == k),
                             "cannotTell": sum(1 for e in untold + untold_value if item_of(e) == k),
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
+        new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
+                         "findingIds": [x for x in dict.fromkeys(fids) if x]}
+                        for c, fids in sorted(problem_finding.items(), key=lambda kv: title_of(kv[0]))]
+        ow = words["itemOutcomeWords"]
+
+        def outcome_text(bi):
+            parts = [bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
+                     for k in ("hits", "kept", "open", "cannotTell", "notMeasured") if bi.get(k)]
+            return ", ".join(parts) if parts else ow["none"]
+        item_lines, alone_total = [], collections.Counter()
+        for g, bi in zip(prediction["items"], by_item):
+            if g.get("shownAs") == "alone":
+                alone_total.update({k: v for k, v in bi.items() if isinstance(v, int)})
+                alone_total["count"] += g["count"]
+                continue
+            item_lines.append(bind(words["validationItemLine"], {"title": g["title"], "modA": g["mods"][0],
+                                                                 "modB": g["mods"][1], "count": fmt_n(g["count"]),
+                                                                 "outcomes": outcome_text(bi)}))
+        if alone_total.get("count"):
+            item_lines.append(bind(words["validationAloneLine"], {"count": fmt_n(alone_total["count"]),
+                                                                  "outcomes": outcome_text(alone_total)}))
         validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
+                      "itemLines": item_lines, "newByCheck": new_by_check,
+                      "newByCheckHeading": words["validationNewByCheck"],
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
                       "hits": len(hits), "kept": len(kept), "open": len(open_),
                       "cannotTell": len(untold) + len(untold_value), "valueUnrecorded": len(untold_value),
@@ -1754,11 +1817,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # PATCH COMPARISON. Previously any non-target plugin that differed at all was named as a
     # patch, so a mod's own companion masters -- removed only because the mod they belong to
     # was removed -- were reported to the reader as the patches under evaluation.
+    load_position = {n.lower(): i for i, n in enumerate(arm_orders.get("baseline") or [])}
+    for arm_id in arm_ids:
+        for i, n in enumerate(arm_orders.get(arm_id) or []):
+            load_position.setdefault(n.lower(), len(load_position) + i)
     supplied = sorted({n
                        for arm_id, (added, removed) in arm_changes.items()
                        if comparison_kinds.get(arm_id) == "patch-comparison"
                        for n in added + removed
-                       if n.lower() in declared_patches and n.lower() not in plan_target_set})
+                       if n.lower() in declared_patches and n.lower() not in plan_target_set},
+                      key=lambda n: (load_position.get(n.lower(), 10 ** 6), n.lower()))
     # Differences carried by an arm whose patch identity is not declared. Named to the reader
     # as what they are -- a plugin that differs -- and never as an evaluated patch.
     unstated_difference_plugins = sorted({n
@@ -2276,7 +2344,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                            and " tris" not in str(r.get("label")).lower()
                            and not re.match(r"^[0-9a-f]{6}:", str(r.get("label")), re.I)), None)
             unit = phrases.get("unitSingular") if count_rows == 1 else phrases.get("unitPlural")
-            if unit:
+            if group_kind == "LOST-EDIT" and str(c.get("B") or "").lower() in declared_patches:
+                f["readerPlain"] = bind((pr.get("reader") or {}).get("patchChoiceLine") or "{count} {unit}: {patch}", {
+                    "count": fmt_n(count_rows), "unit": unit or "record fields", "patch": c.get("B"), "other": c.get("A")})
+                f["readerPatchChoice"] = True
+            elif unit:
                 f["readerPlain"] = (f"{fmt_n(count_rows)} {unit} {'was' if count_rows == 1 else 'were'} reported between {c.get('A')} and {c.get('B')}. "
                                     f"{phrases.get('readerQualification', '')}".strip())
             else:
@@ -2736,23 +2808,24 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                            for f in findings)
     def defect_phrase() -> str:
         # how many new problems, in which checks, and whether a comparison was not accepted as a result
-        per_check, unaccepted = collections.OrderedDict(), 0
+        per_check = collections.OrderedDict()
         for f in reader_regressions:
             if f.get("checkId") == "geometry.object-overlap":
                 continue
-            per_check.setdefault(f.get("checkId"), (f, []))[1].append(int((f.get("counts") or {}).get("readerCreated") or 0))
+            per_check.setdefault(f.get("checkId"), (f, [], []))[1].append(int((f.get("counts") or {}).get("readerCreated") or 0))
             if (comparison_state.get((f.get("checkId"), f.get("armId"))) or {}).get("notAccepted"):
-                unaccepted += 1
+                per_check[f.get("checkId")][2].append(True)
         parts = []
-        for check_id, (f, ns) in per_check.items():
+        for check_id, (f, ns, unacc) in per_check.items():
             title_ = (reader_data.get("checkTitles") or {}).get(check_id, f.get("title"))
             if len(ns) == 1:
                 parts.append(f"{fmt_n(ns[0])} new {'problem' if ns[0] == 1 else 'problems'} in the check \"{title_}\"")
             else:                              # one count per setup, never summed across setups
                 parts.append(f"new problems in the check \"{title_}\" in {len(ns)} setups ("
                              + ", ".join(fmt_n(n_) for n_ in ns) + ")")
-        text = " and ".join(parts) if parts else "a new defect in a check that ran"
-        return text + (cmp_words["verdictNotAccepted"] if unaccepted else "")
+            if unacc:
+                parts[-1] += cmp_words["verdictNotAccepted"]
+        return " and ".join(parts) if parts else "a new defect in a check that ran"
 
     if has_regression:
         if has_other_regression:
@@ -2911,17 +2984,24 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # The no-problem list below already names the setup this way.
     arm_order = {a["armId"]: i for i, a in enumerate(arms_out)}
     missing_summary = []
-    for status in sorted({str(m.get("status")) for m in reader_missing}):
+    statuses_by_check = collections.OrderedDict()
+    for m in reader_missing:
+        sts = statuses_by_check.setdefault(str(m.get("checkId")), [])
+        if str(m.get("status")) not in sts:
+            sts.append(str(m.get("status")))
+    for status_set in sorted({tuple(sorted(v)) for v in statuses_by_check.values()}):
         rows_ = []
         for m in reader_missing:
-            if str(m.get("status")) != status:
+            if tuple(sorted(statuses_by_check[str(m.get("checkId"))])) != status_set:
                 continue
             title = check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
             rows_.append((title, arm_order.get(m.get("armId"), len(arm_order)),
                           arm_labels.get(m.get("armId"), "Measured setup")))
         subjects = [f"{title} — {setup}" for title, _, setup in sorted(dict.fromkeys(rows_))]
-        missing_summary.append({"reason": missing_reason(status, "has no accepted result"), "subjects": subjects,
-                                "explanation": reason_explanations.get(status)})
+        missing_summary.append({"reason": "; and ".join(missing_reason(st, "has no accepted result") for st in status_set),
+                                "subjects": subjects,
+                                "explanation": " ".join(x for x in (reason_explanations.get(st) for st in status_set) if x)
+                                or None})
     null_summary = []
     comparison_summary = []
     kind_phrases_all = reader_data.get("kindPhrases") or {}

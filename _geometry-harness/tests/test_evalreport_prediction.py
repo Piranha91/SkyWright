@@ -47,7 +47,8 @@ CELLATTR = "records.cell-attributes"
 FIXTURE = "geometry.fixture-empty-space"
 OVERLAP = "geometry.object-overlap"
 PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None, CELLATTR: None,
-         FIXTURE: None, OVERLAP: "overlapprobe"}
+         FIXTURE: None, OVERLAP: "overlapprobe", "geometry.navmesh-ownership": "navownprobe"}
+NAVOWN = "geometry.navmesh-ownership"
 MOD_A, MOD_B = "ModA.esp", "ModB.esp"
 OTHER = "OtherMod.esp"                       # a mod already in the order, not evaluated
 PATCH = "ModA - ModB patch.esp"
@@ -710,6 +711,21 @@ def limits_bundle():
                (RECORDS, "baseline", "rejected(exit-nonzero)"), (CELLATTR, "baseline", "blocked(no-pair-source)")]
     return compile_and_render(arms, results, [MOD_A], unjudgeable=pops + pops, missing=missing,
                               states_not_explored=states)
+
+
+def history_bundle():
+    """C476. The order with both mods and the same order with the patch added. ModB re-cuts a navmesh ModA edited
+    (overwrite history, not a predicted clash); the physical test holds (ModA's ground lost). The patch removes it."""
+    results = {(NAVOWN, "baseline"): [row("CLOBBERED", MOD_A, MOD_B, f"000N01:{BASE}")], (NAVOWN, "with-patch"): []}
+    return compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH])
+
+
+def two_patch_bundle():
+    """C479. Two declared patches, the one that loads first named second in the alphabet."""
+    arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"),
+            arm("with-patches", [BASE, MOD_A, MOD_B, "Zeta patch.esp", "Alpha patch.esp"])]
+    results = {(CONTACT, "baseline"): [row("CONTACT", MOD_B, MOD_A, f"000801:{MOD_A}")], (CONTACT, "with-patches"): []}
+    return compile_and_render(arms, results, [MOD_A, MOD_B], patches=["Zeta patch.esp", "Alpha patch.esp"])
 
 
 def placeholder_value_bundle():
@@ -1461,7 +1477,49 @@ def main():
         ok = "does not describe in words" not in cov
         return ok, f"generic phrase on the page: {not ok}"
 
-    for name, fn in [("w2-review/C469-world-states-in-words-not-records", c469_states_in_words),
+    # C475. The patch section says per item what the patch does, and names and links the new clashes
+    def c475_per_item_outcomes_and_new_clashes_linked():
+        plan, md, html = overlap_predicate_bundle()
+        val = reader(plan).get("validation") or {}
+        new = val.get("newByCheck") or []
+        ok = (any("resolved 1, left 1" in x for x in val.get("itemLines") or [])
+              and len(new) == 1 and new[0].get("count") == 1 and new[0].get("findingIds")
+              and f"(evidence-index.md#{new[0]['findingIds'][0]})" in section_text(md, headings(plan).get("validation") or "\0"))
+        return ok, f"item lines {val.get('itemLines')}; new by check {new}"
+
+    # C476. Overwrite history the patch removes says how many rows held a measured loss
+    def c476_history_with_measured_loss_named():
+        plan, md, html = history_bundle()
+        text = section_text(md, headings(plan).get("validation") or "\0")
+        ok = "1 held a measured loss" in text
+        return ok, f"history line printed: {ok}"
+
+    # C477. A record item says which way the edit is lost and gives example records
+    def c477_direction_and_examples():
+        plan, md, html, index = record_rows_bundle()
+        ok = (f"In every one, {MOD_A}'s value is lost to {MOD_B}'s." in md
+              and f"For example: 000701:{BASE} (LocationReference)" in md)
+        return ok, f"direction printed: {MOD_A + chr(39) + 's value is lost' in md}; example printed: {'For example' in md}"
+
+    # C478. A lost edit the patch wins is described as the patch's own choice in the detail list
+    def c478_patch_win_is_its_choice():
+        plan, md, html = record_validation_bundle()
+        ok = f"where {PATCH}'s value wins over {MOD_B}'s: the patch's own choice" in md
+        return ok, f"patch-choice line printed: {ok}"
+
+    # C479. Patches are named in load order, not alphabetically
+    def c479_patches_in_load_order():
+        plan, md, html = two_patch_bundle()
+        title = reader(plan).get("title") or ""
+        ok = "with Zeta patch.esp, Alpha patch.esp" in title
+        return ok, f"title {title!r}"
+
+    for name, fn in [("w2-review/C475-per-item-outcomes-and-new-clashes-linked", c475_per_item_outcomes_and_new_clashes_linked),
+                     ("w2-review/C476-history-with-measured-loss-named", c476_history_with_measured_loss_named),
+                     ("w2-review/C477-record-item-direction-and-examples", c477_direction_and_examples),
+                     ("w2-review/C478-patch-win-is-its-own-choice-in-detail", c478_patch_win_is_its_choice),
+                     ("w2-review/C479-patches-in-load-order", c479_patches_in_load_order),
+                     ("w2-review/C469-world-states-in-words-not-records", c469_states_in_words),
                      ("w2-review/C470-populations-counted-once-not-summed", c470_populations_counted_once_not_summed),
                      ("w2-review/C471-judged-elsewhere-named-by-title", c471_judged_elsewhere_named_by_title),
                      ("w2-review/C472-one-line-per-check-and-its-reasons", c472_one_line_per_check_reasons),
