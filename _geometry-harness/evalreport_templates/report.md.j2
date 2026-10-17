@@ -9,7 +9,9 @@
 
 {% for g in pred["items"] if g.get("shownAs") != "alone" %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:4] %} [{{ "Full evidence" if loop.first else "and " ~ fid }}](evidence-index.md#{{ fid }}){% if loop.last %}.{% endif %}{% endfor %}
 
-{% endfor %}{% for h in pred.get("historyLossLines") or [] %}- {{ h.text }}{% for fid in h.findingIds[:1] %} [Evidence](evidence-index.md#{{ fid }}).{% endfor %}
+{% endfor %}{% for o in pred.get("onceLines") or [] %}{{ o }}{{ " " if not loop.last else "" }}{% if loop.last %}
+
+{% endif %}{% endfor %}{% for h in pred.get("historyLossLines") or [] %}- {{ h.text }}{% for fid in h.findingIds[:1] %} [Evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
 {% endfor %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}**{{ pred.singleModHeading }}**
 
@@ -114,7 +116,7 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 
 {% endif %}
 
-{% for part in cb.parts if not part.indexOnly %}{% for c in part.get("compact") or [] %}{% if c.get("entries") %}- **{{ c.readerArmLabel }}:** {% for e in c.entries %}{{ e.text }} ([evidence](evidence-index.md#{{ e.id }})){% if not loop.last %}; {% endif %}{% endfor %}.{% if c.note %} {{ c.note }}{% endif %}{{ "\n" }}{% else %}- **{{ c.readerArmLabel }}:** {{ c.text }}. [Full evidence](evidence-index.md#{{ c.ids[0] }}).{{ "\n" }}{% endif %}{% endfor %}{% for f in part.groups if f.readerRelevant %}- **{{ f.readerArmLabel }}:** {{ f.readerPlain }}{% if f.get("readerProvenance") %} {{ f.readerProvenance }}{% endif %} [Full evidence](evidence-index.md#{{ f.id }}).
+{% for part in cb.parts if not part.indexOnly %}{% for c in part.get("compact") or [] %}{% if c.get("entries") %}- **{{ c.readerArmLabel }}:** {% for e in c.entries %}{{ e.text }} ([evidence](evidence-index.md#{{ e.id }}){% for m in e.get("more") or [] %} [{{ m }}](evidence-index.md#{{ m }}){% endfor %}){% if not loop.last %}; {% endif %}{% endfor %}.{% if c.note %} {{ c.note }}{% endif %}{{ "\n" }}{% else %}- **{{ c.readerArmLabel }}:** {{ c.text }}. [Full evidence](evidence-index.md#{{ c.ids[0] }}).{{ "\n" }}{% endif %}{% endfor %}{% for f in part.groups if f.readerRelevant %}- **{{ f.readerArmLabel }}:** {{ f.readerPlain }}{% if f.get("readerProvenance") %} {{ f.readerProvenance }}{% endif %} [Full evidence](evidence-index.md#{{ f.id }}).
 {% endfor %}{% for f in part.groups if f.readerRelevant %}{% for m in f.figures %}{% if m.reportPath %}
 ![{{ (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
 

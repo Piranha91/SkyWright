@@ -2936,7 +2936,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                       "No comparison mod was identified by the recorded conflicts. "))
                   + " ".join(x for x in (
                       ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
-                        f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
+                        (f"The patches evaluated are {patch_text}, {patch_how}." if len(supplied) <= 2 else
+                        f"The {len(supplied)} patches named in the title are evaluated, {patch_how}.")) if supplied else
                        # never claim no patch was declared while a changed plugin is a declared patch
                        "" if mixed_declared_patches else
                        "No separate patch plugin was declared for this comparison."),
@@ -2944,7 +2945,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                   + unstated_text)
     scope_tail = (" ".join(x for x in (
                       ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
-                        f"The patches evaluated are {patch_text}, {patch_how}.") if supplied else
+                        (f"The patches evaluated are {patch_text}, {patch_how}." if len(supplied) <= 2 else
+                        f"The {len(supplied)} patches named in the title are evaluated, {patch_how}.")) if supplied else
                        "" if mixed_declared_patches else
                        "No separate patch plugin was declared for this comparison."),
                       mixed_declared_text) if x)
@@ -3592,6 +3594,49 @@ def fmt_kv(d) -> str:
     return ", ".join(f"{k} {fmt_n(v)}" for k, v in items)
 
 
+def once_on_page(reader: dict, pr: dict) -> dict:
+    """W-B1 (P53): the concise page states a sentence every prediction item repeats once, after the headline (the
+    reuse of the result a count rests on; a check whose in-game look is not described), and a check that found no
+    problem in its short form. The plan keeps every item's full sentence; only the page is shorter."""
+    conc, words = pr.get("concise") or {}, ((pr.get("reader") or {}).get("prediction") or {})
+    pred = dict(reader.get("prediction") or {})
+    reused, missing_look, items = [], [], []
+    for g in pred.get("items") or []:
+        g = dict(g)
+        if g.get("shownAs") != "alone":
+            if words.get("itemReused") and g.get("plain", "").endswith(" " + words["itemReused"]):
+                g["plain"] = g["plain"][:-len(words["itemReused"]) - 1]
+                reused.append(g.get("title"))
+            if words.get("inGameMissing") and g.get("inGameText") == words["inGameMissing"]:
+                g["inGameText"] = ""
+                missing_look.append(g.get("title"))
+        items.append(g)
+    pred["items"] = items
+    # the attribution every shown item shares, said once before the others (each item keeps it in the plan)
+    nb = ((words.get("attribution") or {}).get("needs-both") or "")
+    shown = [g for g in items if g.get("shownAs") != "alone"]
+    lead_once = []
+    if nb and len(shown) > 1 and conc.get("onceNeedsBoth") and all(f" {nb} " in g.get("plain", "") + " " for g in shown):
+        for g in shown:
+            g["plain"] = (g["plain"] + " ").replace(f" {nb} ", " ", 1).rstrip()
+        lead_once.append(conc["onceNeedsBoth"])
+
+    def titles(xs):
+        xs = list(dict.fromkeys(f'"{x}"' for x in xs if x))
+        return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+    once = []
+    if reused and conc.get("onceReused"):
+        once.append(bind(conc["onceReused"], {"titles": titles(reused)}))
+    if missing_look and conc.get("onceInGameMissing"):
+        once.append(bind(conc["onceInGameMissing"], {"titles": titles(missing_look)}))
+    pred["onceLines"] = lead_once + once
+    out = dict(reader)
+    out["prediction"] = pred
+    if conc.get("nullLong") and conc.get("nullShort"):
+        out["nullSummary"] = [x.replace(conc["nullLong"], conc["nullShort"]) for x in reader.get("nullSummary") or []]
+    return out
+
+
 def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr: dict, layout: str = "normal") -> dict:
     """The plan as the templates see it at one ladder step: rows shown per finding, figures per finding,
     omissions recomputed for the effective settings (exhaustive mode: everything, no ladder)."""
@@ -3690,13 +3735,22 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                     "ids": [f["id"] for f in choices]})
                 relevant = [f for f in rest if f.get("readerRelevant")]
                 if len(relevant) > compact_over:
-                    entries = []
+                    # one entry per plugin pair and unit: the pair's groups (several kinds of one check) are summed,
+                    # each still linked
+                    by_pair = collections.OrderedDict()
                     for f in relevant:
                         c = f.get("counts") or {}
                         ph = phrases.get(str(c.get("groupKind") or "")) or {}
-                        n_ = int(f.get("rowsTotal") or 0)
+                        e_ = by_pair.setdefault((c.get("A"), c.get("B"), ph.get("unitPlural")),
+                                                {"n": 0, "ids": [], "ph": ph, "A": c.get("A"), "B": c.get("B")})
+                        e_["n"] += int(f.get("rowsTotal") or 0)
+                        e_["ids"].append(f["id"])
+                    entries = []
+                    for e_ in by_pair.values():
+                        n_, ph = e_["n"], e_["ph"]
                         unit = (ph.get("unitSingular") if n_ == 1 else ph.get("unitPlural")) or ("record" if n_ == 1 else "records")
-                        entries.append({"id": f["id"], "text": f"{fmt_n(n_)} {unit} between {c.get('A')} and {c.get('B')}"})
+                        entries.append({"id": e_["ids"][0], "more": e_["ids"][1:],
+                                        "text": f"{fmt_n(n_)} {unit} between {e_['A']} and {e_['B']}"})
                     compact.append({"id": relevant[0]["id"], "readerArmLabel": relevant[0].get("readerArmLabel"),
                                     "entries": entries,
                                     "note": next((f.get("readerProvenance") for f in relevant if f.get("readerProvenance")), None)})
@@ -3704,7 +3758,27 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                 part["groups"] = rest
                 part["compact"] = compact
         finding_blocks.append({**cb, "parts": parts})
+    if mode != "exhaustive" and conc.get("provenanceAgain"):
+        # a provenance sentence the detail list already printed is said again in short (P53); the index keeps it
+        said = set()
+        for cb in finding_blocks:
+            for part in cb["parts"]:
+                for c in part.get("compact") or []:
+                    if c.get("note"):
+                        c["note"] = conc["provenanceAgain"] if c["note"] in said else c["note"]
+                        said.add(c["note"])
+                groups = []
+                for f in part["groups"]:
+                    pv = f.get("readerProvenance")
+                    if pv and pv in said and f.get("readerRelevant"):
+                        f = {**f, "readerProvenance": conc["provenanceAgain"]}
+                    elif pv:
+                        said.add(pv)
+                    groups.append(f)
+                part["groups"] = groups
     view = dict(plan)
+    if mode != "exhaustive":
+        view["reader"] = once_on_page(plan.get("reader") or {}, pr)
     view["missingRows"] = missing_rows
     view["findingBlocks"] = finding_blocks
     view["detailAside"] = detail_aside

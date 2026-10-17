@@ -1711,7 +1711,23 @@ def main():
         ok = (title not in sec and "1 of the problems in the setup it was compared with is still physically there" in md)
         return ok, f"no-problem section {sec.strip()[:300]!r}"
 
+    # C490. The concise page says once what every shown item repeats (the shared attribution, a missing in-game
+    # description); the plan keeps each item's full sentence
+    def c490_concise_page_says_repeats_once():
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2)]
+        ct = [row("CONTACT", MOD_B, MOD_A, f"000C0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2, 3)]
+        results = {(c, a): [] for c in (FIXTURE, CONTACT) for a in ("dependency-only", "plus-a", "plus-b")}
+        results.update({(FIXTURE, "baseline"): fx, (CONTACT, "baseline"): ct})
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        nb = priorities()["reader"]["prediction"]["attribution"]["needs-both"]
+        items = (reader(plan).get("prediction") or {}).get("items") or []
+        ok = (sec.count(priorities()["concise"]["onceNeedsBoth"]) == 1 and nb not in sec
+              and all(nb in i.get("plain", "") for i in items) and len(items) == 2)
+        return ok, f"once line printed {sec.count(priorities()['concise']['onceNeedsBoth'])}; per-item left {nb in sec}"
+
     for name, fn in [("w2-round3/C481-place-counts-from-listed-rows", c481_place_counts_from_listed_rows),
+                     ("w2-round3/C490-concise-page-says-repeats-once", c490_concise_page_says_repeats_once),
                      ("w2-round3/C486-setup-without-partner-named", c486_setup_without_partner_named),
                      ("w2-round3/C487-headline-counts-each-object-once", c487_headline_counts_each_object_once),
                      ("w2-round3/C488-path-case-only-is-not-a-lost-edit", c488_path_case_only_is_not_lost),
