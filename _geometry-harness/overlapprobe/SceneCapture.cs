@@ -8,7 +8,7 @@ static class SceneCapture
 {
     internal const double ExteriorContextMargin = 4096d;
 
-    internal sealed record AssetProviderCheck(string CandidateName, string Mo2Name, int Mo2Priority,
+    internal sealed record AssetProviderCheck(string CandidateName, string Mo2Name, int CandidateRank, int Mo2Priority,
         bool Enabled, string Directory);
     /// <summary>A preflight refusal: a stable code, the reason, and what to try.</summary>
     internal sealed class PreflightRefusal(string code, string message, string remedy) : Exception(message)
@@ -17,8 +17,12 @@ static class SceneCapture
         public string Remedy { get; } = remedy;
     }
 
+    /// <param name="ReorderedProviders">Selected providers whose rank in the candidate differs from their rank among
+    /// the selected providers in the base profile's modlist.txt, in candidate order. Empty when the candidate keeps
+    /// the profile's relative order.</param>
     internal sealed record AssetPreflight(string CandidatePath, string BaseProfile,
-        IReadOnlyList<AssetProviderCheck> Providers, int ProfileProviderCount, int OmittedProviderCount);
+        IReadOnlyList<AssetProviderCheck> Providers, int ProfileProviderCount, int OmittedProviderCount,
+        IReadOnlyList<string> ReorderedProviders);
 
     internal enum ExteriorMembership { InNeighbourhood, OutsideNeighbourhood, Unresolved }
     internal sealed record ExteriorDisposition(ExteriorMembership Membership, bool AdmitToScene,
@@ -166,8 +170,9 @@ static class SceneCapture
 
     /// <summary>
     /// Validates the asset half of a source-scene candidate without resolving or hashing its plugin order.
-    /// A candidate may deliberately select a subset of the profile's providers, but every selected folder
-    /// must be a real MO2 provider and the selected providers must retain their strongest-first priority.
+    /// A candidate may deliberately select a subset of the profile's providers, and every selected folder
+    /// must be a real MO2 provider. The candidate's Mods order is its stated MO2 priority, strongest first: every
+    /// probe builds the asset view from that order (HarnessOrderCli.Resolve), so a re-order is reported, not refused.
     /// </summary>
     internal static AssetPreflight PreflightCandidateAssets(string path, string profileName, string profileDir, string modsDir)
     {
@@ -205,7 +210,6 @@ static class SceneCapture
             x => x.row.Name, x => (x.index, x.row.Enabled), StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var checks = new List<AssetProviderCheck>(candidate.Mods.Count);
-        int previousPriority = -1;
         foreach (var requested in candidate.Mods)
         {
             if (string.IsNullOrWhiteSpace(requested))
@@ -218,21 +222,18 @@ static class SceneCapture
                 throw new PreflightRefusal("provider-not-in-modlist",
                     $"candidate Mods names '{requested}', but the base profile's modlist.txt has no provider by that name (possible typo)",
                     "correct the name, or build the candidate on a profile whose modlist.txt lists every folder it names");
-            if (profile.index <= previousPriority)
-                throw new PreflightRefusal("priority-not-retained",
-                    $"candidate Mods does not retain MO2 strongest-first priority at '{requested}'",
-                    "order the candidate's Mods as the base profile's modlist.txt orders them, strongest first");
-            previousPriority = profile.index;
             string canonical = profileRows[profile.index].Name;
             string directory = Path.Combine(modsDir, canonical);
             if (!Directory.Exists(directory))
                 throw new PreflightRefusal("provider-folder-missing",
                     $"candidate Mods names MO2 provider '{canonical}', but its mod folder is missing: {directory}",
                     "install that mod folder or drop it from the candidate's Mods");
-            checks.Add(new(requested, canonical, profile.index, profile.Enabled, Path.GetFullPath(directory)));
+            checks.Add(new(requested, canonical, checks.Count, profile.index, profile.Enabled, Path.GetFullPath(directory)));
         }
+        var profileOrder = checks.OrderBy(c => c.Mo2Priority).ToList();
+        var reordered = checks.Where(c => profileOrder.IndexOf(c) != c.CandidateRank).Select(c => c.Mo2Name).ToList();
         return new(Path.GetFullPath(path), candidate.BaseProfile, checks, profileRows.Count,
-            profileRows.Count - checks.Count);
+            profileRows.Count - checks.Count, reordered);
     }
 
     internal static ExteriorMembership ExteriorUnknownMembership(FormKey space, double x, double y, double z,

@@ -315,6 +315,32 @@ static class BatEmit
         return sb.ToString();
     }
 
+    /// <summary>P50: the game serves loose files in the launched profile's modlist.txt order. A candidate that states its
+    /// own Mods order can be looked at in game only from a profile that enables those folders in that relative order,
+    /// strongest first. Returns one plain sentence when <paramref name="profile"/> does not, else null.</summary>
+    internal static string? ProfilePriorityRefusal(string instance, string profile, IReadOnlyList<string> mods)
+    {
+        string ml = Path.Combine(instance, "profiles", profile, "modlist.txt");
+        if (!File.Exists(ml))
+            return $"--bats-profiles names '{profile}', which has no modlist.txt at {ml}, so the asset priority the game would show is unknown";
+        var rows = new Dictionary<string, (int Index, bool Enabled)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in File.ReadAllLines(ml))
+        {
+            var line = raw.Trim();
+            if (line.Length > 1 && line[0] is '+' or '-') rows.TryAdd(line[1..].Trim(), (rows.Count, line[0] == '+'));
+        }
+        int last = -1; string? lastName = null;
+        foreach (var name in mods)
+        {
+            if (!rows.TryGetValue(name, out var row) || !row.Enabled)
+                return $"profile '{profile}' does not enable mod folder '{name}' that the candidate's asset view needs; enable it there (or name a profile that does), then emit again";
+            if (row.Index < last)
+                return $"profile '{profile}' orders '{name}' above '{lastName}', but the candidate states the opposite asset priority and the game follows the profile; give a profile the candidate's Mods order (strongest first) and name that one";
+            last = row.Index; lastName = name;
+        }
+        return null;
+    }
+
     /// <summary>
     /// Enable the bats mod in the named profiles and DISABLE it everywhere else, so a session's
     /// files cannot leak into a profile whose load order a finding was measured against.

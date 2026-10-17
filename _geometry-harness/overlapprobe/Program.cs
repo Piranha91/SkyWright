@@ -364,11 +364,14 @@ if (sceneCapture || scenePreflight)
         WritePreflightReceipt(jsonPath, new { schemaVersion = 1, verdict = "passed", code = (string?)null, reason = (string?)null,
             remedy = (string?)null, candidate = assetPreflight.CandidatePath, profile = assetPreflight.BaseProfile,
             profileProviderCount = assetPreflight.ProfileProviderCount, omittedProviderCount = assetPreflight.OmittedProviderCount,
+            reorderedProviders = assetPreflight.ReorderedProviders,
             providers = assetPreflight.Providers.Select(p => new { candidateName = p.CandidateName, mo2Name = p.Mo2Name,
-                mo2Priority = p.Mo2Priority, enabledInBaseProfile = p.Enabled }).ToArray() });
-    Console.WriteLine($"scene asset preflight: {assetPreflight.Providers.Count} selected provider(s), all match MO2 names and retain strongest-first priority; subset of {assetPreflight.ProfileProviderCount}, {assetPreflight.OmittedProviderCount} deliberately omitted by the candidate view");
+                candidateRank = p.CandidateRank, mo2Priority = p.Mo2Priority, enabledInBaseProfile = p.Enabled }).ToArray() });
+    Console.WriteLine($"scene asset preflight: {assetPreflight.Providers.Count} selected provider(s), all match MO2 names; subset of {assetPreflight.ProfileProviderCount}, {assetPreflight.OmittedProviderCount} deliberately omitted by the candidate view");
+    if (assetPreflight.ReorderedProviders.Count > 0)
+        Console.WriteLine($"   the candidate states its own order for {assetPreflight.ReorderedProviders.Count} provider(s) ({string.Join(", ", assetPreflight.ReorderedProviders)}): the asset view follows the candidate's Mods order, not profile '{assetPreflight.BaseProfile}''s modlist.txt; to see it in game, give an MO2 profile that order");
     foreach (var provider in assetPreflight.Providers)
-        Console.WriteLine($"   priority {provider.Mo2Priority}: {provider.Mo2Name} ({(provider.Enabled ? "enabled" : "disabled in base profile; explicitly selected")})");
+        Console.WriteLine($"   rank {provider.CandidateRank} (MO2 row {provider.Mo2Priority}): {provider.Mo2Name} ({(provider.Enabled ? "enabled" : "disabled in base profile; explicitly selected")})");
     if (scenePreflight) return 0;
 }
 
@@ -1964,9 +1967,10 @@ if (geometryManifestPath is not null)
                 selectedProviderCount = assetPreflight.Providers.Count,
                 profileProviderCount = assetPreflight.ProfileProviderCount,
                 omittedProviderCount = assetPreflight.OmittedProviderCount,
-                subsetPolicy = "the candidate Mods list intentionally selects a subset; every selected provider must match an MO2 name and retain relative strongest-first priority",
+                subsetPolicy = "the candidate Mods list intentionally selects a subset; every selected provider must match an MO2 name, and the candidate's Mods order is the asset priority read, strongest first",
+                reorderedProviders = assetPreflight.ReorderedProviders,
                 providers = assetPreflight.Providers.Select(p => new { candidateName = p.CandidateName, mo2Name = p.Mo2Name,
-                    mo2Priority = p.Mo2Priority, enabledInBaseProfile = p.Enabled, directory = p.Directory }).ToArray()
+                    candidateRank = p.CandidateRank, mo2Priority = p.Mo2Priority, enabledInBaseProfile = p.Enabled, directory = p.Directory }).ToArray()
             },
             discovery = new
             {

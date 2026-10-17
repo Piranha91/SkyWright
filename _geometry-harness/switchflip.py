@@ -211,6 +211,38 @@ def launch_job(job_id: str, argv: list[str], cond: dict) -> dict:
                                                       "windowSeconds": (cond.get("windowSeconds"), "seconds")}}
 
 
+def profile_priority_refusal(instance: str, profile: str, earm: dict) -> str | None:
+    """P50: the game serves loose files in the launched profile's modlist.txt order, not the plan's. A bound arm
+    whose candidate states its own asset priority runs only on a profile that holds it: every mod folder the arm
+    requests enabled, in the arm's relative order (strongest first). Returns one plain sentence, or None."""
+    mods = [str(v.get("name")) for v in (earm.get("requested") or {}).get("providers") or []
+            if str(v.get("kind")).lower() == "mod"]
+    if not mods:
+        return None
+    path = Path(instance) / "profiles" / profile / "modlist.txt"
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return f"arm {earm.get('armId')}: profile '{profile}' has no readable modlist.txt at {path}, so the asset priority the game would use is unknown"
+    rows = {}
+    for raw in lines:
+        line = raw.strip()
+        if len(line) > 1 and line[0] in "+-":
+            rows.setdefault(line[1:].strip().lower(), (len(rows), line[0] == "+"))
+    last, last_name = -1, None
+    for name in mods:
+        row = rows.get(name.lower())
+        if row is None or not row[1]:
+            return (f"arm {earm.get('armId')}: profile '{profile}' does not enable mod folder '{name}' that the arm's "
+                    f"asset view needs; enable it in that profile (or launch a profile that does), then run again")
+        if row[0] < last:
+            return (f"arm {earm.get('armId')}: profile '{profile}' orders '{name}' above '{last_name}', but the arm's "
+                    f"candidate states the opposite asset priority and the game follows the profile; give a profile "
+                    f"the candidate's Mods order (strongest first) and launch that")
+        last, last_name = row[0], name
+    return None
+
+
 def cmd_batch(a) -> int:
     doc, plan_sha, problems = load_plan(a.plan)
     if problems:
@@ -231,6 +263,12 @@ def cmd_batch(a) -> int:
         if eval_plan.get("planId") != doc["binding"]["planId"]:
             print(f"REFUSED: --evalrun-plan is plan {eval_plan.get('planId')}, the flip plan is bound to "
                   f"{doc['binding']['planId']}")
+            return EXIT_REFUSED_INPUT
+        arms_by_id = {x.get("armId"): x for x in eval_plan.get("arms") or []}
+        wrong = [w for arm in doc["arms"] if arm.get("evalArmId") in arms_by_id
+                 for w in [profile_priority_refusal(a.instance, arm["profile"], arms_by_id[arm["evalArmId"]])] if w]
+        if wrong:
+            print("REFUSED: " + "; ".join(wrong))
             return EXIT_REFUSED_INPUT
     out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(a.plan, out / "flipplan.json")

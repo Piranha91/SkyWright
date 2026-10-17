@@ -19,8 +19,11 @@ using HousecarlCore.Progress;
 //   cells where it did NOT                          -> expect blockage to concentrate here
 // If those two rates come out the same, the detector is not measuring what it claims to.
 //
-// usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
+// usage: blockprobe <TargetPlugin.esp> [<Target2.esp> ...] [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
 //                   [--state SPEC] [--switch-map FILE] [--flags] [--order FILE]
+//   targets   one or more plugins, judged as ONE set (P51): the union of their cells and references; each listed row
+//              names the target(s) that place it in the cell it is judged in ({by ...}), and the route-cut verdicts
+//              are tallied per target. An unknown argument is refused (exit 2), never skipped.
 //   --order    evaluate a candidate configuration (a CandidateFile: the loaded plugins in order, and optionally the mod
 //              folders) instead of the profile's own, through _shared/HarnessOrderCli.cs as stateprobe and navownprobe do.
 //              Without it the run reads the profile exactly as before.
@@ -66,8 +69,10 @@ string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
 
-if (args.Length == 0) { Console.Error.WriteLine("usage: blockprobe <TargetPlugin.esp> [--exclude Other.esp ...] [--list N]"); return 1; }
-string target = args[0];
+if (args.Length == 0) { Console.Error.WriteLine("usage: blockprobe <TargetPlugin.esp> [<Target2.esp> ...] [--exclude Other.esp ...] [--list N]"); return 1; }
+// One or more target plugins, positionally: their union is judged as one set, and every listed row names which target
+// placed or overrode it (P51). Any argument this loop does not know is refused, never skipped.
+var targets = new List<string>();
 var exclude = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 int listN = 25;
 string geometrySource = "collision";
@@ -75,8 +80,13 @@ bool controllerBand = true;   // --band controller|nominal: the route rules' ban
 bool bosOn = true;
 string? stateSpec = null, switchMapPath = null, orderFile = null;
 bool flagsOnly = false;
-for (int i = 1; i < args.Length; i++)
+for (int i = 0; i < args.Length; i++)
 {
+    if (!args[i].StartsWith("--", StringComparison.Ordinal))
+    {
+        if (!targets.Contains(args[i], StringComparer.OrdinalIgnoreCase)) targets.Add(args[i]);
+        continue;
+    }
     if (args[i] == "--order" && i + 1 < args.Length) { orderFile = args[++i]; continue; }
     if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--switch-map" && i + 1 < args.Length) { switchMapPath = args[++i]; continue; }
@@ -86,7 +96,15 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--geometry" && i + 1 < args.Length) geometrySource = args[++i];
     else if (args[i] == "--band" && i + 1 < args.Length) controllerBand = args[++i] != "nominal";
     else if (args[i] == "--bos" && i + 1 < args.Length) bosOn = BosHook.ParseFlag(args[++i]) ?? throw new ArgumentException("--bos takes on|off");
+    else
+    {
+        Console.Error.WriteLine(args[i] is "--instance" or "--profile" or "--game"
+            ? $"blockprobe does not take {args[i]}: it reads the instance, profile and game from HOUSECARL_MO2_INSTANCE, HOUSECARL_MO2_PROFILE and HOUSECARL_GAME_PATH (or the harness config); set those instead."
+            : $"blockprobe does not know the argument '{args[i]}' (or it is missing its value); check the usage line and run again.");
+        return 2;
+    }
 }
+if (targets.Count == 0) { Console.Error.WriteLine("blockprobe needs at least one target plugin, named positionally."); return 2; }
 if (geometrySource is not ("collision" or "render")) { Console.Error.WriteLine("--geometry must be collision or render"); return 1; }
 PopulationMode popMode;
 try { popMode = PopulationCli.Resolve("blockprobe", flagsOnly, stateSpec); }
@@ -119,21 +137,49 @@ else
 using var assets = assetsBuilt;
 
 var paths = orderedPaths.Where(p => !exclude.Contains(Path.GetFileName(p))).ToList();
-string? targetPath = paths.FirstOrDefault(p => string.Equals(Path.GetFileName(p), target, StringComparison.OrdinalIgnoreCase));
-if (targetPath is null) { Console.Error.WriteLine($"'{target}' is not in the active load order."); return 1; }
+var targetPaths = new List<string>();
+foreach (var t in targets)
+{
+    string? tp = paths.FirstOrDefault(p => string.Equals(Path.GetFileName(p), t, StringComparison.OrdinalIgnoreCase));
+    if (tp is null) { Console.Error.WriteLine($"'{t}' is not in the {(cfg is null ? "active load order" : "candidate configuration")}."); return 1; }
+    targetPaths.Add(tp);
+}
+string target = string.Join(" + ", targets);
 
 Console.WriteLine($"load order: {paths.Count} plugins" + (exclude.Count > 0 ? $"  (EXCLUDING {string.Join(", ", exclude)})" : ""));
-Console.WriteLine($"target    : {target}   position {paths.FindIndex(p => p == targetPath) + 1}/{paths.Count}\n");
+for (int t = 0; t < targets.Count; t++)
+    Console.WriteLine($"target    : {targets[t]}   position {paths.FindIndex(p => p == targetPaths[t]) + 1}/{paths.Count}");
+Console.WriteLine(targets.Count > 1 ? $"   {targets.Count} targets judged as one set; each listed row names the target(s) that place it {{by …}}\n" : "");
 
-// ---------- 1. which cells does the target touch? ----------
+// ---------- 1. which cells do the targets touch? ----------
+// The union over the targets: a cell two targets touch carries both targets' references (each once) and navmeshes.
+// refBy records which target plugin(s) carry each reference IN EACH CELL; a reference is judged only in its winning
+// cell, so a listed row names the targets that place it there (judgedBy), never one that placed it elsewhere.
 var targetCells = new Dictionary<FormKey, CellPlacements>();
-using (var tm = SkyrimMod.CreateFromBinaryOverlay(targetPath, SkyrimRelease.SkyrimSE))
-    foreach (var cp in PlacementExtract.FromMod(tm))
-        targetCells[cp.Cell] = cp;
+var refBy = new Dictionary<(FormKey Cell, FormKey Ref), SortedSet<string>>();
+var judgedBy = new Dictionary<FormKey, SortedSet<string>>();
+for (int t = 0; t < targets.Count; t++)
+    using (var tm = SkyrimMod.CreateFromBinaryOverlay(targetPaths[t], SkyrimRelease.SkyrimSE))
+        foreach (var cp in PlacementExtract.FromMod(tm))
+        {
+            foreach (var r in cp.Refs)
+            {
+                if (!refBy.TryGetValue((cp.Cell, r.FormKey), out var by)) refBy[(cp.Cell, r.FormKey)] = by = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                by.Add(targets[t]);
+            }
+            if (!targetCells.TryGetValue(cp.Cell, out var have)) { targetCells[cp.Cell] = cp; continue; }
+            var seen = have.Refs.Select(r => r.FormKey).ToHashSet();
+            targetCells[cp.Cell] = have with
+            {
+                Refs = have.Refs.Concat(cp.Refs.Where(r => !seen.Contains(r.FormKey))).ToList(),
+                Navmeshes = have.Navmeshes.Concat(cp.Navmeshes).ToList(),
+            };
+        }
+string By(FormKey k) => judgedBy.TryGetValue(k, out var s) ? "{by " + string.Join("+", s) + "}" : "{by ?}";
 
-var targetModKey = ModKey.FromFileName(target);
-int targetNewRefs = targetCells.Values.Sum(c => c.Refs.Count(r => r.FormKey.ModKey == targetModKey));
-int targetOverrides = targetCells.Values.Sum(c => c.Refs.Count(r => r.FormKey.ModKey != targetModKey));
+var targetModKeys = targets.Select(t => ModKey.FromFileName(t)).ToHashSet();
+int targetNewRefs = targetCells.Values.Sum(c => c.Refs.Count(r => targetModKeys.Contains(r.FormKey.ModKey)));
+int targetOverrides = targetCells.Values.Sum(c => c.Refs.Count(r => !targetModKeys.Contains(r.FormKey.ModKey)));
 Console.WriteLine($"target touches {targetCells.Count:N0} cells: "
                 + $"{targetNewRefs:N0} refs it INTRODUCES, {targetOverrides:N0} it overrides, "
                 + $"{targetCells.Values.Sum(c => c.Navmeshes.Count):N0} navmeshes it supplies");
@@ -420,6 +466,8 @@ var crossTab = new Dictionary<(RouteVerdict Old, RouteCutVerdict New), int>();
 var noLineWhy = new Dictionary<LineStatus, int>();
 var cutHits = new List<(RouteCutVerdict V, RouteVerdict Old, string Cell, string Mesh, FormKey Fk, string Why, int Touched, RouteLine? Line)>();
 void TallyCut(RouteCutVerdict v) { cutTally.TryGetValue(v, out var n); cutTally[v] = n + 1; }
+// The same verdicts per target plugin (P51): a reference two targets both carry counts under each.
+var cutByTarget = new Dictionary<(string Target, RouteCutVerdict V), int>();
 
 var navByCell = winNav.Values.GroupBy(v => v.Cell)
                              .ToDictionary(g => g.Key, g => g.ToList());
@@ -461,6 +509,7 @@ foreach (var (cellKey, tcell) in targetCells)
         // Test the WINNING placement — if a later patch moved or removed this reference,
         // the target's own copy is not what the game uses.
         if (RefAdmission.Winning(tref.FormKey, cellKey, winRef, winRefCell) is not { } r) { skipped++; continue; }
+        if (refBy.TryGetValue((cellKey, tref.FormKey), out var placedBy)) judgedBy[r.FormKey] = placedBy;
         // The Base Object Swapper layer: the base and transform the game LOADS for this reference (the record's own under
         // --bos off).
         var eff = bos.Effective(r, cellKey, bosRep);
@@ -560,6 +609,8 @@ foreach (var (cellKey, tcell) in targetCells)
                 var line = facts.Line;
                 var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
                 TallyCut(vc.Verdict);
+                if (judgedBy.TryGetValue(r.FormKey, out var byTargets))
+                    foreach (var bt in byTargets) { cutByTarget.TryGetValue((bt, vc.Verdict), out var bn); cutByTarget[(bt, vc.Verdict)] = bn + 1; }
                 if (eff.Touched) { cutTallyBos.TryGetValue(vc.Verdict, out var bt); cutTallyBos[vc.Verdict] = bt + 1; }
                 crossTab.TryGetValue((v64.Verdict, vc.Verdict), out var xt); crossTab[(v64.Verdict, vc.Verdict)] = xt + 1;
                 if (vc.Verdict == RouteCutVerdict.NoLine && line is not null) { noLineWhy.TryGetValue(line.Status, out var nl); noLineWhy[line.Status] = nl + 1; }
@@ -687,7 +738,7 @@ if (routeHits.Count > 0)
 {
     Console.WriteLine($"\n   ---- Blocked / Narrowed / Unjudgeable references ----");
     foreach (var h in routeHits.OrderBy(h => h.V64 == RouteVerdict.Blocked ? 0 : h.V64 == RouteVerdict.Narrowed ? 1 : 2).ThenBy(h => h.Cell).Take(listN * 2))
-        Console.WriteLine($"   {h.V64,-11} {h.V128,-11} touched {h.Touched,4} intact {h.Intact,2}/{h.IntactWithout,2}  {h.Cell,-26} {Short(h.Mesh, 46),-46} {h.Fk}   {h.Why}");
+        Console.WriteLine($"   {h.V64,-11} {h.V128,-11} touched {h.Touched,4} intact {h.Intact,2}/{h.IntactWithout,2}  {h.Cell,-26} {Short(h.Mesh, 46),-46} {h.Fk} {By(h.Fk)}   {h.Why}");
 }
 
 Console.WriteLine($"\n   ---- the ROUTE-CUT rule (4.7's closing step): the corridor's path line, cut at capsule 22 u inside the band 32..top ----");
@@ -696,6 +747,13 @@ Console.WriteLine($"   references measured: {routeMeasured:N0}   doors set aside
 Console.WriteLine($"   {"verdict",-14} {"refs",8}");
 foreach (var v in new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable })
     Console.WriteLine($"   {v,-14} {(cutTally.TryGetValue(v, out var a) ? a : 0),8:N0}" + (v == RouteCutVerdict.NoLine && noLineWhy.Count > 0 ? "   (" + string.Join(", ", noLineWhy.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")) + ")" : ""));
+if (targets.Count > 1)
+{
+    Console.WriteLine("   by target (a reference carried by two targets counts under each):");
+    foreach (var t in targets)
+        Console.WriteLine($"      {t,-40} " + string.Join(", ", new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }
+                                                  .Select(v => $"{v} {(cutByTarget.TryGetValue((t, v), out var c) ? c : 0):N0}")));
+}
 {
     Console.WriteLine($"   navcut boxes in the target's cells (population '{pop.StateName}') — {navcutMeasured:N0} measured, {navcutSkippedDisabled:N0} not present in it, {navcutNoCross:N0} over no walkable ground: "
                     + string.Join(", ", new[] { RouteCutVerdict.Blocked, RouteCutVerdict.LikelyBlocked, RouteCutVerdict.Clipped, RouteCutVerdict.NoLine, RouteCutVerdict.None, RouteCutVerdict.Unjudgeable }
@@ -725,7 +783,7 @@ if (cutHits.Count > 0)
     Console.WriteLine($"\n   ---- Blocked / LikelyBlocked / NoLine / Unjudgeable references (route-cut) ----");
     static string Pass(RouteLine? l) => l is null || float.IsNaN(l.Passage) ? "   -" : l.Passage >= l.PassageCap ? $"≥{l.PassageCap:0}" : $"{l.Passage,4:0}";
     foreach (var h in cutHits.OrderBy(h => h.V == RouteCutVerdict.Blocked ? 0 : h.V == RouteCutVerdict.LikelyBlocked ? 1 : h.V == RouteCutVerdict.NoLine ? 2 : 3).ThenBy(h => h.Cell).Take(listN * 3))
-        Console.WriteLine($"   {h.V,-14} was {h.Old,-9} touched {h.Touched,4} passage {Pass(h.Line)} (L {(h.Line is null || float.IsNaN(h.Line.PassageLeft) ? "-" : h.Line.PassageLeft.ToString("0")),3} / R {(h.Line is null || float.IsNaN(h.Line.PassageRight) ? "-" : h.Line.PassageRight.ToString("0")),3})  {h.Cell,-26} {Short(h.Mesh, 44),-44} {h.Fk}   {h.Why}");
+        Console.WriteLine($"   {h.V,-14} was {h.Old,-9} touched {h.Touched,4} passage {Pass(h.Line)} (L {(h.Line is null || float.IsNaN(h.Line.PassageLeft) ? "-" : h.Line.PassageLeft.ToString("0")),3} / R {(h.Line is null || float.IsNaN(h.Line.PassageRight) ? "-" : h.Line.PassageRight.ToString("0")),3})  {h.Cell,-26} {Short(h.Mesh, 44),-44} {h.Fk} {By(h.Fk)}   {h.Why}");
 }
 
 if (severHits.Count > 0)

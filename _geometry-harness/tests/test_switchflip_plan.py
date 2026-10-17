@@ -173,6 +173,61 @@ def test_export_refuses_standalone_block():
         assert rc == S.EXIT_REFUSED_INPUT and doc is None
 
 
+# P50: a bound arm's candidate may state its own asset priority; the game follows the launched profile's modlist.txt.
+def _priority_instance(d: Path, modlist: str) -> Path:
+    (d / "profiles" / "P1").mkdir(parents=True)
+    (d / "profiles" / "P1" / "modlist.txt").write_text(modlist, encoding="utf-8")
+    return d
+
+
+def _earm(mods):
+    return {"armId": "patched", "requested": {"providers": [{"name": "overwrite", "kind": "overwrite"}]
+                                              + [{"name": m, "kind": "mod"} for m in mods] + [{"name": "Data", "kind": "data"}]}}
+
+
+# rejects: launching a profile that holds a different asset priority than the arm's candidate states
+def test_p50_profile_with_other_priority_refused():
+    with tempfile.TemporaryDirectory() as d:
+        inst = _priority_instance(Path(d), "# header\n+High\n+Other\n+Low\n")
+        why = S.profile_priority_refusal(str(inst), "P1", _earm(["Low", "High"]))
+        assert why and "orders 'High' above 'Low'" in why and "\n" not in why, why
+
+
+# rejects: launching a profile where a folder the arm's view needs is off
+def test_p50_profile_with_folder_disabled_refused():
+    with tempfile.TemporaryDirectory() as d:
+        inst = _priority_instance(Path(d), "+Low\n-High\n")
+        why = S.profile_priority_refusal(str(inst), "P1", _earm(["Low", "High"]))
+        assert why and "does not enable mod folder 'High'" in why, why
+
+
+# rejects: refusing a profile that holds the candidate's priority (other folders between are allowed)
+def test_p50_profile_holding_priority_passes():
+    with tempfile.TemporaryDirectory() as d:
+        inst = _priority_instance(Path(d), "+Low\n-Other\n+High\n")
+        assert S.profile_priority_refusal(str(inst), "P1", _earm(["Low", "High"])) is None
+        assert S.profile_priority_refusal(str(inst), "P1", _earm([])) is None
+
+
+# rejects: a bound block that launches before the priority check (refusal must come before any lock or launch)
+def test_p50_bound_batch_refuses_before_the_lock():
+    import argparse
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        inst = _priority_instance(d / "inst", "+High\n+Low\n")
+        plan = copy.deepcopy(GOOD)
+        plan["binding"] = {"planId": "abc", "checkId": "runtime.state-switch-flip"}
+        plan["arms"] = [{"id": "patched", "profile": "P1", "evalArmId": "patched"},
+                        {"id": "unpatched", "profile": "P1", "evalArmId": "unpatched"}]
+        (d / "flip.json").write_text(json.dumps(plan), encoding="utf-8")
+        eplan = {"planId": "abc", "arms": [_earm(["Low", "High"]), {**_earm(["High", "Low"]), "armId": "unpatched"}]}
+        (d / "plan.json").write_text(json.dumps(eplan), encoding="utf-8")
+        a = argparse.Namespace(plan=str(d / "flip.json"), out=str(d / "out"), instance=str(inst), lock=str(d / "LOCK"),
+                               refuse_if=[], evalrun_plan=str(d / "plan.json"), dry=False, min_free_gb=0)
+        rc = S.cmd_batch(a)
+        assert rc == S.EXIT_REFUSED_INPUT and not (d / "LOCK").exists() and not (d / "out").exists(), rc
+
+
 # rejects: a launch job the shared Runner cannot run (a block that dies before its first launch)
 def test_launch_job_is_accepted_by_the_runner():
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), "scripts"))

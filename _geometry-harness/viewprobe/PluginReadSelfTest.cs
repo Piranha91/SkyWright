@@ -200,7 +200,8 @@ internal static class PluginReadSelfTest
     // ---- the child run -----------------------------------------------------------------------------------------------
     sealed record Child(int Exit, string Out, string Err, List<JsonElement> Dump);
 
-    static Child RunViewprobe(string armDir, string master, string? plugin, bool listPlugin, string[] extraArgs, string? dumpTo)
+    static Child RunViewprobe(string armDir, string master, string? plugin, bool listPlugin, string[] extraArgs, string? dumpTo,
+                               string[]? modlist = null)
     {
         string inst = Path.Combine(armDir, "inst"), game = Path.Combine(armDir, "game"), prof = Path.Combine(inst, "profiles", "P");
         Directory.CreateDirectory(Path.Combine(game, "Data"));
@@ -212,7 +213,9 @@ internal static class PluginReadSelfTest
         var names = listPlugin ? new[] { "PrMaster.esm", "PrA.esp" } : new[] { "PrMaster.esm" };
         File.WriteAllLines(Path.Combine(prof, "plugins.txt"), names.Select(n => "*" + n));
         File.WriteAllLines(Path.Combine(prof, "loadorder.txt"), names);
-        File.WriteAllLines(Path.Combine(prof, "modlist.txt"), new[] { "+Pr" });
+        modlist ??= new[] { "+Pr" };
+        foreach (var row in modlist) Directory.CreateDirectory(Path.Combine(inst, "mods", row[1..]));
+        File.WriteAllLines(Path.Combine(prof, "modlist.txt"), modlist);
         var psi = new ProcessStartInfo(Environment.ProcessPath!) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in extraArgs) psi.ArgumentList.Add(a);
         foreach (var a in new[] { "--instance", inst, "--game", game, "--profile", "P" }) psi.ArgumentList.Add(a);
@@ -512,6 +515,26 @@ internal static class PluginReadSelfTest
             var ok = RunViewprobe(Path.Combine(root, "arm-bats-ok"), mPath, aPath, true,
                                   new[] { wl, "--emit-bats", Path.Combine(root, "bats", "out-ok") }, null);
             Check("S5b     --emit-bats over the undamaged override: runs (exit 0)", ok.Exit == 0, Brief(ok));
+        }
+
+        // ---- S16 (P50): --emit-bats --order with a candidate stating its own Mods order, played in a named profile ----------
+        {
+            var wl = Path.Combine(root, "bats16", "pr.worklist.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(wl)!);
+            File.WriteAllText(wl, "{\"Label\":\"pr\",\"Cells\":[{\"Cell\":\"" + target + "\",\"Shots\":[{\"Label\":\"s\",\"Eye\":[100,100,600],\"Look\":[2000,2000,0]}]}]}");
+            var cand = Path.Combine(root, "bats16", "candidate.json");
+            File.WriteAllText(cand, "{\"SchemaVersion\":1,\"Name\":\"p50\",\"BaseProfile\":\"P\",\"Plugins\":[\"PrMaster.esm\",\"PrA.esp\"],\"Mods\":[\"Q\",\"Pr\"],\"Changes\":[\"p50\"]}");
+            var other = RunViewprobe(Path.Combine(root, "arm-bats16-other"), mPath, aPath, true,
+                new[] { wl, "--emit-bats", Path.Combine(root, "bats16", "out-other"), "--order", cand, "--bats-profiles", "P" }, null,
+                new[] { "+Pr", "+Q" });
+            string otherList = File.ReadAllText(Path.Combine(root, "arm-bats16-other", "inst", "profiles", "P", "modlist.txt"));
+            Check("S16     --emit-bats into a profile that orders the candidate's mods the other way: refused in one sentence, modlist untouched",
+                  other.Exit == 2 && !Unhandled(other) && Named(other, "orders 'Pr' above 'Q'") && otherList.Replace("\r", "") == "+Pr\n+Q\n",
+                  Brief(other));
+            var held = RunViewprobe(Path.Combine(root, "arm-bats16-held"), mPath, aPath, true,
+                new[] { wl, "--emit-bats", Path.Combine(root, "bats16", "out-held"), "--order", cand, "--bats-profiles", "P" }, null,
+                new[] { "+Q", "-X", "+Pr" });
+            Check("S16b    --emit-bats into a profile that holds the candidate's order: runs (exit 0)", held.Exit == 0, Brief(held));
         }
 
         // ---- the other direction of every refusal and count: an undamaged order is not refused and names nothing ----

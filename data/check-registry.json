@@ -544,7 +544,7 @@
         "loadability.masters-and-order"
       ],
       "inputs": {
-        "arms": "baseline",
+        "arms": "all",
         "states": "baseline"
       },
       "adapter": {
@@ -567,7 +567,7 @@
       "evidence": {
         "strength": "calibrated-inference",
         "claim": "ROUTE CUT",
-        "limits": "blockprobe takes the target plugin positionally and has no --order, so it evaluates the PROFILE's order only: on every candidate or supplied-combination arm this check is unsupported-for-arm, visibly, and the baseline result must not be read as covering them. Q30's fold applies: a single object's clearance, not collective blockage."
+        "limits": "blockprobe reads each arm's candidate (--order) and is told the plan targets that arm loads, judged as one set; each listed reference names the target(s) that place it ({by ...}) and the output tallies the route-cut verdicts per target. An arm that loads no target is not-applicable. Q30's fold applies: a single object's clearance, not collective blockage."
       },
       "manualDecisionAllowed": false
     },

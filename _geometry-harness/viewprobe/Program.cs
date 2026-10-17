@@ -1223,6 +1223,16 @@ if (emitBats is not null)
     bool asPath = Path.IsPathRooted(emitBats) || Path.GetFileName(emitBats) != emitBats;
     string batsDir = asPath ? Path.GetFullPath(emitBats) : Path.Combine(modsDir, emitBats);
     string batsName = Path.GetFileName(Path.TrimEndingDirectorySeparator(batsDir));
+    // P50: the bat files are played in the real game, which shows the launched profile's assets. A candidate with its own
+    // Mods order is refused for any named profile that does not hold that order; without a named profile, say so.
+    if (orderFile is not null && HarnessShared.CandidateFile.Read(orderFile).Mods is { } candidateMods)
+    {
+        if (batsProfiles.Count == 0)
+            Console.WriteLine("emit-bats: the game shows the assets of the profile you launch; to see this candidate's view, launch a profile that enables its Mods in the candidate's order");
+        foreach (var batsProfile in batsProfiles)
+            if (ViewProbe.BatEmit.ProfilePriorityRefusal(Instance, batsProfile, candidateMods) is { } refusal)
+            { Console.Error.WriteLine("--emit-bats refused: " + refusal + "."); return 2; }
+    }
     try { return ViewProbe.BatEmit.Run(worklist!, worklistPaths[0], batsDir, batsName, order.OrderedPaths, Instance, batsProfiles); }
     catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
 }
