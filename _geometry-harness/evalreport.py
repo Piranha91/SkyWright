@@ -695,12 +695,18 @@ def parse_diff_log(text: str) -> list[dict]:
 
 def conflict_rows(conflict: dict, evidence_id: str | None) -> list[dict]:
     rows = []
+    # the partner objects a geometry row is measured against (an overlap's other object, a fixture's removed host):
+    # with the row's own object they identify the relationship whatever plugins own the two objects
+    alternative = conflict.get("Alternative")
+    other = (sorted(str(x.get("FormKey")) for x in alternative if isinstance(x, dict) and x.get("FormKey"))
+             if isinstance(alternative, list) and conflict.get("Kind") != "LOST-EDIT" else None)
     for n in conflict.get("Necessary") or []:
         if not isinstance(n, dict):
             continue
         rows.append({"formKey": n.get("FormKey"), "label": n.get("Label"), "summary": conflict.get("Summary"),
                      "physical": n.get("Physical"), "physicalDetail": n.get("PhysicalDetail"),
                      "evidenceId": evidence_id,
+                     **({"other": other} if other is not None else {}),
                      **({"field": conflict.get("Field"), "values": n.get("Values"), "reads": n.get("Reads")}
                         if conflict.get("Kind") == "LOST-EDIT" else {})})
     if not rows:
@@ -871,6 +877,23 @@ def build_prediction(ctx: dict) -> dict:
 
     # --- per (check, arm): measured rows, measured with no conflict file, or nothing
     rows_by, prefixes, measured, count_only = {}, {}, set(), {}
+    ident_of = {}
+    by_object = set(words.get("identityByObject") or [])
+
+    def identity(check_id, kind, a, b, r):
+        """What makes two rows on two setups the same clash. A record lost edit is one plugin's change to one field
+        of one record lost to another plugin: the pair and the field belong to it. A geometry row with a partner
+        object is the relationship between two objects, whichever plugins own them on each setup. A check whose row
+        is a state of its own object (skill data `identityByObject`: a fixture left hanging, an object left without
+        support) is that object: a fixture hanging because both evaluated mods remove hosts hangs with one of them
+        alone if that one removes enough. Any other row keeps its plugin pair."""
+        if kind == "LOST-EDIT":
+            return (check_id, kind, a, b, r.get("formKey"), r.get("field"))
+        if check_id in by_object:
+            return (check_id, kind, r.get("formKey"))
+        if r.get("other") is not None:
+            return (check_id, kind, r.get("formKey"), tuple(r.get("other") or ()))
+        return (check_id, kind, a, b, r.get("formKey"))
 
     def collect(fs, prefix=""):
         for f in fs:
@@ -894,7 +917,9 @@ def build_prediction(ctx: dict) -> dict:
                           r.get("formKey"), str(r.get("summary") or ""))
                     rows_by.setdefault(key, {})[rk] = {"finding": f, "row": r,
                                                        "history": f.get("readerEvidenceReason") == "context-only-kind"}
-                    prefixes.setdefault(key, set()).add(rk[:5])
+                    ident = identity(rk[0], rk[1], rk[2], rk[3], r)
+                    ident_of.setdefault(rk, ident)
+                    prefixes.setdefault(key, set()).add(ident)
     collect(findings)
 
     # --- the sibling: a separate evaluation of the same order without the patch, whose single-mod setups stand in
@@ -990,7 +1015,7 @@ def build_prediction(ctx: dict) -> dict:
             return False                       # a sibling check that does not match on the shared setup is unused
         if arm_id == p_arm:
             arm_id = p_of(rk[0])
-        return arm_id is not None and tuple(rk[:5]) in (prefixes.get((rk[0], arm_id)) or set())
+        return arm_id is not None and ident_of.get(rk, tuple(rk[:5])) in (prefixes.get((rk[0], arm_id)) or set())
 
     def admission(rk, history):
         a, b = rk[2], rk[3]
@@ -1019,7 +1044,9 @@ def build_prediction(ctx: dict) -> dict:
             else:
                 why = bind(words["notSeparableWhy"]["notMeasured"], {"mod": unmeasured[0]})
             return "not-separable", None, why
-        alone = [t for t in p_targets if present(s_arms[t], rk)]
+        # an object both evaluated mods break may be broken by either alone; the mod the row names comes first
+        alone = sorted((t for t in p_targets if present(s_arms[t], rk)), key=lambda t: t.lower() not in
+                       {rk[2].lower(), rk[3].lower()})
         if alone:
             return "single-mod", alone[0], None
         return "needs-both", None, None
@@ -1045,6 +1072,8 @@ def build_prediction(ctx: dict) -> dict:
             entry["source"] = "sibling"
             entry["siblingFindingId"] = entry.pop("findingId")
             entry["findingId"] = None
+        if hit["row"].get("other") is not None:
+            entry["other"] = list(hit["row"]["other"])
         if hit["row"].get("field") is not None:
             entry["field"] = hit["row"]["field"]
             entry["values"] = hit["row"].get("values")
@@ -1102,7 +1131,11 @@ def build_prediction(ctx: dict) -> dict:
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
         ph = phrases.get(g["kind"]) or {}
         noun = (ph.get("unitSingular") if g["count"] == 1 else ph.get("unitPlural")) or ("clash" if g["count"] == 1 else "clashes")
-        attr_text = bind(words["attribution"][g["attribution"]], {"mod": g["attributionMod"], "why": g["attributionWhy"] or ""})
+        attr_key = g["attribution"]
+        if (attr_key == "single-mod" and g["attributionMod"]
+                and str(g["attributionMod"]).lower() not in {m.lower() for m in g["mods"]}):
+            attr_key = "single-mod-elsewhere"       # the same object is broken with the other evaluated mod alone
+        attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "why": g["attributionWhy"] or ""})
         subjects_of[id(g)] = g.pop("_subjects")
         g["relationships"] = g["count"]
         g["objects"] = len(subjects_of[id(g)])
@@ -1304,7 +1337,7 @@ def build_prediction(ctx: dict) -> dict:
     else:
         patch = ", ".join(patch_names)
         admitted = [e for e in record if e["admission"] == "admitted"]
-        keyof = lambda e: (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"])          # noqa: E731
+        keyof = lambda e: (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])  # noqa: E731
         not_measured = [e for e in admitted if (e["checkId"], patched_arm) not in measured]
         judged = [e for e in admitted if (e["checkId"], patched_arm) in measured]
         patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
@@ -1325,12 +1358,45 @@ def build_prediction(ctx: dict) -> dict:
             w = rows_w[0]
             return (str(w["winnerPlugin"]).lower() in patch_lower
                     and (w.get("values") or {}).get("winner") != (e.get("values") or {}).get("winner"))
-        hits = [e for e in judged if (acted_on(e) if e["kind"] == "LOST-EDIT" else not present(patched_arm, keyof(e)))]
-        hit_ids = {id(e) for e in hits}
-        open_ = [e for e in judged if id(e) not in hit_ids]
-        judged_ids = {id(x) for x in judged}
+        # A geometry row is judged by its own predicate re-measured with the patch, where the probe carries one (an
+        # emit's `Predicates`: every row of the setup it was measured against, measured again in this setup): Gone is
+        # resolved, Holds is left (whoever owns the objects now), anything else cannot be told. Presence of the row
+        # (by its identity) is the rule only for a check whose emits carry no predicates.
+        pred_cache = {}
+
+        def predicates(check_id):
+            if check_id not in pred_cache:
+                pred_cache[check_id] = None
+                bundle = ctx.get("mainBundle")
+                if bundle is not None and p_of(check_id) == p_arm:
+                    where = ((patched_arm, "arm") if p_arm == "baseline" else
+                             (p_arm, "reverse") if patched_arm == "baseline" else None)
+                    path = None
+                    if where:
+                        path = bundle.output_emit_path(check_id, *where) or (
+                            bundle.output_emit_path(check_id, where[0], None) if where[1] == "arm" else None)
+                    emit = bundle.emit(path) if path else None
+                    preds = emit.get("Predicates") if isinstance(emit, dict) else None
+                    if isinstance(preds, list):
+                        pred_cache[check_id] = {(x.get("Kind"), x.get("A"), x.get("B"), x.get("FormKey"), x.get("Other")):
+                                                str(x.get("Physical")) for x in preds if isinstance(x, dict)}
+            return pred_cache[check_id]
+
+        def geometry_outcome(e):
+            preds = predicates(e["checkId"])
+            if preds is None:
+                return "left" if present(patched_arm, keyof(e)) else "resolved"
+            other = e.get("other") or []
+            physical = preds.get((e["kind"], e["A"], e["B"], e["formKey"], other[0] if other else None))
+            return {"Gone": "resolved", "Holds": "left"}.get(physical, "cannot-tell")
+
+        outcome = {id(e): ("resolved" if acted_on(e) else "left") if e["kind"] == "LOST-EDIT" else geometry_outcome(e)
+                   for e in judged}
+        hits = [e for e in judged if outcome[id(e)] == "resolved"]
+        open_ = [e for e in judged if outcome[id(e)] == "left"]
+        untold = [e for e in judged if outcome[id(e)] == "cannot-tell"]
         for e in admitted:
-            e["withPatch"] = ("resolved" if id(e) in hit_ids else "left" if id(e) in judged_ids else "not-measured")
+            e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices = [], 0
         for rk, hit in patched_rows.items():
             if rk[1] == "LOST-EDIT" and rk[3].lower() in patch_lower:
@@ -1349,6 +1415,8 @@ def build_prediction(ctx: dict) -> dict:
                      bind(words["validationOpen"], {"patch": patch, "count": len(open_)}),
                      bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems)})]
         sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]}) for s in blind]
+        if untold:
+            sentences.append(bind(words["validationCannotTell"], {"patch": patch, "count": len(untold)}))
         if not_measured:
             sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": len(not_measured)}))
         # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
@@ -1360,10 +1428,12 @@ def build_prediction(ctx: dict) -> dict:
             k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
             by_item.append({"hits": sum(1 for e in hits if item_of(e) == k),
                             "open": sum(1 for e in open_ if item_of(e) == k),
+                            "cannotTell": sum(1 for e in untold if item_of(e) == k),
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
         validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
-                      "hits": len(hits), "open": len(open_), "falseAlarms": None, "patchProblems": len(problems),
+                      "hits": len(hits), "open": len(open_), "cannotTell": len(untold), "falseAlarms": None,
+                      "patchProblems": len(problems),
                       "patchChoices": choices,
                       "notMeasured": len(not_measured), "blindSpots": blind, "sentences": sentences,
                       "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],

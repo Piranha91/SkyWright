@@ -44,7 +44,10 @@ SEAMS = "environment.land-seams"
 WATER = "environment.water-boundaries"
 RECORDS = "records.contested-fields"
 CELLATTR = "records.cell-attributes"
-PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None, CELLATTR: None}
+FIXTURE = "geometry.fixture-empty-space"
+OVERLAP = "geometry.object-overlap"
+PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None, CELLATTR: None,
+         FIXTURE: None, OVERLAP: "overlapprobe"}
 MOD_A, MOD_B = "ModA.esp", "ModB.esp"
 OTHER = "OtherMod.esp"                       # a mod already in the order, not evaluated
 PATCH = "ModA - ModB patch.esp"
@@ -64,9 +67,11 @@ def arm(arm_id, names, kind="candidate", shas=None):
             "expected": {"states": ["baseline"], "population": "load-time"}}
 
 
-def row(kind, a, b, form_key, label=None):
-    return {"Kind": kind, "A": a, "B": b, "Summary": f"{kind} between {a} and {b}",
-            "Necessary": [{"FormKey": form_key, "Label": label or f"object {form_key[:6]}", "Physical": "Holds"}]}
+def row(kind, a, b, form_key, label=None, other=None):
+    """other: the partner object (an overlap's other object, a fixture's removed host), as the probes write it."""
+    return {"Kind": kind, "A": a, "B": b, "Summary": f"{kind} between {a} and {b}" + (f" with {other}" if other else ""),
+            "Necessary": [{"FormKey": form_key, "Label": label or f"object {form_key[:6]}", "Physical": "Holds"}],
+            **({"Alternative": [{"FormKey": other, "Role": "placed-ref"}]} if other else {})}
 
 
 def lost_row(a, b, form_key, field, lost, winner, overridden, label=None):
@@ -79,7 +84,7 @@ def lost_row(a, b, form_key, field, lost, winner, overridden, label=None):
 
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
-                enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None):
+                enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -93,7 +98,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     receipt records its arm's requested plugins.
     names: a names enrichment document, written as `enrichment/names/names.json`.
     enrichment_unjudged: {(checkId, armId): [{FormKey, Field, Reason, Plugins}]} -- the fields that enrichment left
-    unjudged, written as its `Unjudged` list and counted in its coverage line."""
+    unjudged, written as its `Unjudged` list and counted in its coverage line.
+    predicates: {(checkId, armId): [{Kind, A, B, FormKey, Other, Physical}]} -- the rows of the setup that arm was
+    measured against, measured again in that arm's setup (an emit's `Predicates`)."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
 
@@ -123,7 +130,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                        (check_id, arm_id), "d" * 64), "coreDllSha256": "c" * 64},
                                 "configuration": {"plugins": config_of(check_id, arm_id)}}}
         emit = {"Population": "placed references", "State": "baseline", "Conflicts": rows,
-                "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}]}
+                "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}],
+                **({"Predicates": predicates[(check_id, arm_id)]} if (check_id, arm_id) in (predicates or {}) else {})}
         (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipt), encoding="utf-8")
         (root / "evidence" / f"{rid}.json").write_text(json.dumps(emit), encoding="utf-8")
         evidence.append({"id": f"{2 * n:016x}", "kind": "receipt", "path": f"receipts/{rid}.json", "sha256": "0" * 64,
@@ -601,6 +609,53 @@ def index_section(index, anchor):
     return "\n".join(out)
 
 
+# ------------------------------------------- window-2 review bundles (C460-C499: the report review of 2026-10-16)
+
+PATCH_ADDED_ARMS = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"),
+                    arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+
+
+def object_identity_bundle():
+    """C460. The four setups. A third mod's fixture X hangs with both mods loaded, and the probe names ModB as the
+    remover of one of its hosts; with ModA alone the same fixture already hangs, ModA named as the remover of another
+    host. The fixture is broken with ModA alone: it is not a clash the pair adds."""
+    p_rows = [row("EMPTY-SPACE", OTHER, MOD_B, f"000F01:{OTHER}", other=f"000H02:{BASE}")]
+    a_rows = [row("EMPTY-SPACE", OTHER, MOD_A, f"000F01:{OTHER}", other=f"000H01:{BASE}")]
+    results = {(FIXTURE, "baseline"): p_rows, (FIXTURE, "dependency-only"): [], (FIXTURE, "plus-a"): a_rows,
+               (FIXTURE, "plus-b"): []}
+    return compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+
+
+def field_identity_bundle():
+    """C461. The four setups. OtherMod's changes to two fields of one record are lost to ModA with both mods loaded;
+    with ModA alone only the Scale field is lost. Placement needs both mods; Scale comes from ModA alone."""
+    p_rows = [lost_row(OTHER, MOD_A, f"000771:{BASE}", "Placement", "o1", "a1", "v1"),
+              lost_row(OTHER, MOD_A, f"000771:{BASE}", "Scale", "o2", "a2", "v2")]
+    a_rows = [lost_row(OTHER, MOD_A, f"000771:{BASE}", "Scale", "o2", "a2", "v2")]
+    enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "dependency-only"): [], (RECORDS, "plus-a"): a_rows,
+           (RECORDS, "plus-b"): []}
+    count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+    results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+    return compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+
+
+def overlap_predicate_bundle():
+    """C462. The order with both mods and the same order with the patch added. Two predicted overlaps on object X:
+    with Y and with Z. With the patch, its emit holds X's overlap with a third object W (a new pair) and none of the
+    two predicted ones, but its predicates say X still crosses Y (the patch now owns one of them) and no longer
+    crosses Z. One resolved, one left, one new."""
+    p_rows = [row("OVERLAP", MOD_B, MOD_A, f"000X01:{MOD_A}", other=f"000Y01:{MOD_B}"),
+              row("OVERLAP", MOD_B, MOD_A, f"000X01:{MOD_A}", other=f"000Z01:{MOD_B}")]
+    w_rows = [row("OVERLAP", MOD_B, MOD_A, f"000X01:{MOD_A}", other=f"000W01:{MOD_B}")]
+    preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": f"000X01:{MOD_A}", "Other": f"000Y01:{MOD_B}",
+              "Physical": "Holds"},
+             {"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": f"000X01:{MOD_A}", "Other": f"000Z01:{MOD_B}",
+              "Physical": "Gone"}]
+    results = {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): w_rows}
+    return compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                              predicates={(OVERLAP, "with-patch"): preds})
+
+
 def priorities():
     return json.loads(PRIORITIES.read_text(encoding="utf-8"))
 
@@ -850,7 +905,8 @@ def main():
         val = reader(plan).get("validation") or {}
         by = val.get("byItem")
         ok = (isinstance(by, list) and len(by) == len(p.get("items") or [])
-              and by == [{"hits": 2, "open": 1, "notMeasured": 0}])
+              and len(by) == 1 and {k: by[0].get(k) for k in ("hits", "open", "notMeasured", "cannotTell")}
+              == {"hits": 2, "open": 1, "notMeasured": 0, "cannotTell": 0})
         return ok, f"validation.byItem {by!r} for items {[(i.get('checkId'), i.get('count')) for i in p.get('items') or []]}"
 
     def sibling_foreign_refused():
@@ -1180,6 +1236,37 @@ def main():
             ("base-game-in-prediction/base-game-only-difference-is-not-a-predicted-clash", base_game_not_a_prediction),
             ("prediction-missing/no-patch-validation-says-so", no_patch_says_so),
             ("prediction-missing/reel-opening-speaks-the-prediction", reel_opens_with_prediction)]:
+        cell(name, fn)
+
+    # C460. A third mod's object broken with one evaluated mod alone is not "needs both" because the pair names differ
+    def c460_object_broken_with_one_mod_alone():
+        plan, md, html = object_identity_bundle()
+        items = (reader(plan).get("prediction") or {}).get("items") or []
+        it = next((i for i in items if i.get("checkId") == FIXTURE), {})
+        ok = (len(items) == 1 and it.get("attribution") == "single-mod" and it.get("attributionMod") == MOD_A
+              and f"already in this state with {MOD_A} alone" in md)
+        return ok, f"items {[(i.get('mods'), i.get('attribution'), i.get('attributionMod')) for i in items]}"
+
+    # C461. Single-mod attribution of a lost edit is per field, not per record
+    def c461_lost_edit_attributed_per_field():
+        plan, md, html = field_identity_bundle()
+        rec = {e.get("field"): e.get("attribution") for e in (reader(plan).get("prediction") or {}).get("record") or []
+               if e.get("admission") == "admitted"}
+        ok = rec == {"Placement": "needs-both", "Scale": "single-mod"}
+        return ok, f"attribution by field {rec}"
+
+    # C462. A predicted overlap is resolved by its own pair's predicate with the patch, not by any row on its object
+    def c462_overlap_judged_by_pair_predicate():
+        plan, md, html = overlap_predicate_bundle()
+        val = reader(plan).get("validation") or {}
+        ok = val.get("hits") == 1 and val.get("open") == 1 and val.get("patchProblems") == 1
+        return ok, f"hits {val.get('hits')}, open {val.get('open')}, new {val.get('patchProblems')}"
+
+    for name, fn in [("w2-review/C460-third-mod-object-broken-with-one-mod-alone-is-single-mod",
+                      c460_object_broken_with_one_mod_alone),
+                     ("w2-review/C461-lost-edit-attributed-per-field", c461_lost_edit_attributed_per_field),
+                     ("w2-review/C462-overlap-judged-by-its-pair-predicate-with-the-patch",
+                      c462_overlap_judged_by_pair_predicate)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
