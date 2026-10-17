@@ -1726,7 +1726,20 @@ def main():
               and all(nb in i.get("plain", "") for i in items) and len(items) == 2)
         return ok, f"once line printed {sec.count(priorities()['concise']['onceNeedsBoth'])}; per-item left {nb in sec}"
 
+    # C491. A record item's first example is a field skill data prefers (a placed object's position), not whatever
+    # record sorts first
+    def c491_examples_prefer_placement():
+        rows_ = [lost_row(MOD_A, MOD_B, f"00003C:{BASE}", "HdLodDiffuseTexture", "a", "(the winner's value)", "x"),
+                 lost_row(MOD_A, MOD_B, f"000702:{BASE}", "Placement", "1,2,3", "(the winner's value)", "x")]
+        enr = {(RECORDS, a): (rows_ if a == "baseline" else []) for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+        results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+        ok = f"For example: 000702:{BASE} (Placement); 00003C:{BASE} (HdLodDiffuseTexture)" in md
+        return ok, f"examples line: {[x for x in md.splitlines() if 'For example' in x][:1]}"
+
     for name, fn in [("w2-round3/C481-place-counts-from-listed-rows", c481_place_counts_from_listed_rows),
+                     ("w2-round3/C491-examples-prefer-placement", c491_examples_prefer_placement),
                      ("w2-round3/C490-concise-page-says-repeats-once", c490_concise_page_says_repeats_once),
                      ("w2-round3/C486-setup-without-partner-named", c486_setup_without_partner_named),
                      ("w2-round3/C487-headline-counts-each-object-once", c487_headline_counts_each_object_once),

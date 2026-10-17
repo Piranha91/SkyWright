@@ -1069,6 +1069,7 @@ def build_prediction(ctx: dict) -> dict:
 
     # The names enrichment, where the bundle carries one: each object a row names, its base and the plugins read that
     # carry a version of it (in load order); each base, its type and model ("" when the record has none).
+    preferred_example_fields = set(words.get("examplePreferredFields") or [])
     names = ctx.get("names") if isinstance(ctx.get("names"), dict) else {}
     name_refs, name_bases = names.get("refs") or {}, names.get("bases") or {}
 
@@ -1211,10 +1212,14 @@ def build_prediction(ctx: dict) -> dict:
         # what makes the item actionable: the direction a lost edit goes, example records, the places it is in,
         # and whether its count rests on a result reused from another evaluation
         g.setdefault("_directions", set()).add((rk[2], rk[3]))
-        if rk[1] == "LOST-EDIT" and rk[4] and len(g.setdefault("_records", [])) < 2:
+        if rk[1] == "LOST-EDIT" and rk[4]:
+            # examples: a field skill data prefers (a placed object's position) before any other (Snazzy review 3:
+            # a worldspace texture path is no example a modder can act on)
             ex = f"{rk[4]} ({hit['row'].get('field')})" if hit["row"].get("field") else str(rk[4])
-            if ex not in g["_records"]:
-                g["_records"].append(ex)
+            rank = 0 if hit["row"].get("field") in preferred_example_fields else 1
+            pool = g.setdefault("_recordPool", ([], []))[rank]
+            if len(pool) < 2 and ex not in pool:
+                pool.append(ex)
         if label and rk[1] != "LOST-EDIT":
             # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
             # part of its place
@@ -1269,6 +1274,9 @@ def build_prediction(ctx: dict) -> dict:
         if g["kind"] == "LOST-EDIT" and len(directions) == 1:
             loser, winner = next(iter(directions))
             detail.append(bind(words["itemDirection"], {"loser": loser, "winner": winner}))
+        pool = g.pop("_recordPool", None)
+        if pool:
+            g["_records"] = (pool[0] + pool[1])[:2]
         if g.get("_records"):
             detail.append(bind(words["itemExamples"], {"examples": "; ".join(g["_records"])}))
         places = g.pop("_places", None)
