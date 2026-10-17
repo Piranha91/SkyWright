@@ -1254,7 +1254,8 @@ def followup_totals_wording_control(bundle: Path):
           f"(got probe {probe_total!r}, counted {counted}, history {history})")
     check("out of 4 conflict(s) the probe reported" in " ".join(str(f.get("plain")) for f in base_rows),
           f"{label}: the evidence-index sentence keeps the probe's own total of 4")
-    want = ("In total this check reported 3 records with a problem in the measured load order and 2 in this setup, "
+    # round 5 (third blind review, W-S4): the navmesh rows are counted in their own unit, broken links
+    want = ("In total this check reported 3 broken navmesh links in the measured load order and 2 in this setup, "
             "including conflicts that do not involve the target mods, which this report does not list.")
     check(want in line, f"{label}/navmesh: the totals name their unit and the unlisted pairs (got {line!r})")
     want_history = ("Not counted: 1 navmesh edit overwritten by another mod in the measured load order and 1 in this "
@@ -1265,7 +1266,7 @@ def followup_totals_wording_control(bundle: Path):
     check(want in md and want_history in md and html_escape(want) in html and html_escape(want_history) in html,
           f"{label}/navmesh: report.md and report.html carry both sentences")
     plan, md, html, line = followup_totals_control(bundle, "plain")
-    check(line.endswith("In total this check reported 1 record with a problem in the measured load order and 0 in this setup.")
+    check(line.endswith("In total this check reported 1 broken navmesh link in the measured load order and 0 in this setup.")
           and "Not counted" not in line and "do not involve" not in line,
           f"{label}/plain: with no unlisted pair and no history, neither clause appears (got {line!r})")
     plan, md, html, line = followup_totals_control(bundle, "patch")
