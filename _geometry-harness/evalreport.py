@@ -3196,6 +3196,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     reader["names"] = ({k: names_doc.get(k) for k in ("places", "objects", "mods", "missing", "derivedFrom")}
                        if isinstance(names_doc, dict) else None)
     reader["coverage"] = lead["coverage"]
+    # P53 (accepted under the standing rule, 2026-10-17): in concise mode a check with no result on a setup the
+    # coverage section already lists, by reason and with its setups, is not listed again on the page under "what
+    # still needs checking"; one sentence points there. `missingSummary` stays complete in the plan;
+    # `missingShown` is what the page lists.
+    if settings.get("mode") != "exhaustive":
+        covered = set(lead["coverage"].get("relevantArms") or [])
+        rest = [m for m in reader_missing if m.get("armId") not in covered]
+        reader["missingShown"] = summarise_missing(rest)
+        if len(rest) < len(reader_missing):
+            reader["missingCoveredLine"] = (reader_data.get("prediction") or {}).get("missingCoveredLine")
     reader["validation"] = lead["validation"]
     reader["sectionHeadings"].update(lead["headings"])
     pw = reader_data.get("prediction") or {}

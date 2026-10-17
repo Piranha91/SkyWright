@@ -135,7 +135,9 @@ Coverage: {{ "all contributors to the listed locations identified" if a.location
 
 ## What still needs checking
 
-{% if p.scope.completion.missingRequired %}{% for row in p.reader.missingSummary %}- **{{ row.reason[:1]|upper }}{{ row.reason[1:] }}:** {{ row.subjects|join("; ") }}.{{ " " ~ row.explanation if row.explanation else "" }}
+{% if p.scope.completion.missingRequired %}{% if p.reader.get("missingCoveredLine") %}{{ p.reader.missingCoveredLine }}
+
+{% endif %}{% for row in (p.reader.missingShown if p.reader.get("missingShown") is not none else p.reader.missingSummary) %}- **{{ row.reason[:1]|upper }}{{ row.reason[1:] }}:** {{ row.subjects|join("; ") }}.{{ " " ~ row.explanation if row.explanation else "" }}
 
 {% endfor %}
 The exact missing checks and recorded reasons are in the [evidence index](evidence-index.md#missing-results).

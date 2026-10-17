@@ -1434,24 +1434,36 @@ def check_missing_setup_naming(bundle: Path):
     check(f"{alt_only} — {base_label}" not in by_reason.get(not_supplied, []),
           f"{label}: the setup that supplied {alt_only!r} is not listed as missing it")
     # scoped to the section itself: the same "check — setup" phrase legitimately appears in the no-problem list
-    # for the setup that DID supply the result, which is the point
+    # for the setup that DID supply the result, which is the point.
+    # Since the window-2 report review (P53, accepted under the standing rule 2026-10-17) the concise page lists here
+    # only the missing checks on setups the coverage section ("What the checks could not judge") does not already
+    # list by reason and setup; one sentence points there. The plan's missingSummary stays complete (asserted above).
+    covered = set(((reader.get("coverage") or {}).get("relevantArms")) or [])
+    label_of = {base_label: "baseline", alt_label: "candidate-02-patchb"}
     for fmt, text_, start, end in (("report.md", md, "## What still needs checking", "\n## "),
                                    ("report.html", html, "<h2>What still needs checking</h2>", "<h2>")):
         esc = html_escape if fmt == "report.html" else (lambda s: s)
         body = text_.split(start, 1)[1]
         body = body.split(end, 1)[0]
         check(bool(body.strip()), f"{label}/{fmt}: the what-still-needs-checking section was located")
-        for title, setup in ((both, base_label), (both, alt_label), (alt_only, alt_label)):
-            check(esc(f"{title} — {setup}") in body,
-                  f"{label}/{fmt}: '{title} — {setup}' is named in what still needs checking")
+        check(not covered or "listed under" in body,
+              f"{label}/{fmt}: the section points to the coverage section for the setups it covers")
+        for title, setup in ((both, base_label), (both, alt_label), (alt_only, alt_label), (base_only, base_label)):
+            on_page = esc(f"{title} — {setup}") in body
+            if label_of.get(setup) in covered:
+                check(not on_page, f"{label}/{fmt}: '{title} — {setup}' is not repeated (the coverage section lists it)")
+            else:
+                check(on_page, f"{label}/{fmt}: '{title} — {setup}' is named in what still needs checking")
         for title, setup in ((alt_only, base_label), (base_only, alt_label)):
             check(esc(f"{title} — {setup}") not in body,
                   f"{label}/{fmt}: '{title} — {setup}' is NOT named there - that setup is not missing that check")
-        check(esc(f"{base_only} — {base_label}") in body,
-              f"{label}/{fmt}: '{base_only} — {base_label}' is named")
         # the reason clause stays the group's lead, said once per status, with its explanation attached to it
         check(body.count(not_supplied[:1].upper() + not_supplied[1:]) == 1,
               f"{label}/{fmt}: the not-supplied reason is stated once, as the group's lead")
+    # what the page no longer repeats is on it once, in the coverage section, with its setup
+    cov = md.split("## What the checks could not judge", 1)[1].split("\n## ", 1)[0]
+    for title in (both, base_only):
+        check(title in cov, f"{label}: '{title}' is named in the coverage section")
     explanation = "These checks still need to be completed for each setup being considered."
     expect([md.count(explanation), html.count(explanation)], [1, 1],
            f"{label}: the status explanation stays attached to its own group, once")
