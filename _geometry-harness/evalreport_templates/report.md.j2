@@ -7,13 +7,16 @@
 
 > **{{ pred.verdict }}**
 
-{% for g in pred["items"] if g.get("shownAs") != "alone" %}- **{{ g.title }}:** {{ g.plain }} {{ g.inGameText }}{% for fid in g.findingIds[:4] %} [{{ "Full evidence" if loop.first else "and " ~ fid }}](evidence-index.md#{{ fid }}){% if loop.last %}.{% endif %}{% endfor %}
+{% for g in pred["items"] if g.get("shownAs") != "alone" %}- **{{ g.title }}:** {{ g.plain }}{% if g.inGameText %} {{ g.inGameText }}{% endif %}{% for fid in g.findingIds[:4] %} [{{ "Full evidence" if loop.first else "and " ~ fid }}](evidence-index.md#{{ fid }}){% if loop.last %}.{% endif %}{% endfor %}
 
-{% endfor %}{% for o in pred.get("onceLines") or [] %}{{ o }}{{ " " if not loop.last else "" }}{% if loop.last %}
+{% endfor %}{% for o in pred.get("onceLines") or [] %}{% if loop.first %}{{ "
+" }}{% endif %}{{ o }}{{ " " if not loop.last else "
 
-{% endif %}{% endfor %}{% for h in pred.get("historyLossLines") or [] %}- {{ h.text }}{% for fid in h.findingIds[:1] %} [Evidence](evidence-index.md#{{ fid }}).{% endfor %}
+" }}{% endfor %}{% for h in pred.get("historyLossLines") or [] %}{% if loop.first %}{{ "
+" }}{% endif %}- {{ h.text }}{% for fid in h.findingIds[:1] %} [Evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
-{% endfor %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}**{{ pred.singleModHeading }}**
+{% endfor %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}{{ "
+" }}**{{ pred.singleModHeading }}**
 
 {% for a in pred.get("aloneLines") or [] %}- **{{ a.title }}** ({{ a.unit }}): {% for g in a.groups %}{{ g.from }} {% for e in g.entries %}{{ e.text }}{% for fid in e.findingIds[:1] %} ([evidence](evidence-index.md#{{ fid }})){% endfor %}{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}; {% endif %}{% endfor %}. {{ a.inGameText }}
 
