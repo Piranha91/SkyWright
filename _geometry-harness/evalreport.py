@@ -1343,21 +1343,36 @@ def build_prediction(ctx: dict) -> dict:
         patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
         patch_lower = {str(x).lower() for x in patch_names}
         # A lost edit (record lane) is not judged by presence: with the patch loaded last the same plugin's change can
-        # still be lost, to the patch. It is acted on when, with the patch, the field's winner is the patch and its
-        # value differs from the winning value without it; otherwise it is left. A lost edit whose winner is the
+        # still be lost, to the patch. Four outcomes: resolved (no change to the field is lost with the patch, or the
+        # patch wins with a value other than the winning value without it); kept on purpose (the patch wins with the
+        # same winning value: the patch author confirmed the winner, whichever mod's value that is); left (the
+        # field's winner with the patch is not a patch: nothing touched it); cannot tell (the patch wins, but a
+        # winning value is not recorded on one side, so the two cannot be compared). A lost edit whose winner is the
         # patch is the patch's choice, never a problem the patch causes.
         lost_w = collections.defaultdict(list)
         for rk, hit in patched_rows.items():
             if rk[1] == "LOST-EDIT":
                 lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"winnerPlugin": rk[3]})
 
-        def acted_on(e):
+        unrecorded = {str(x) for x in words.get("unrecordedValues") or []}
+
+        def recorded(v):
+            if v is None or v == "" or v == []:
+                return False
+            vs = v if isinstance(v, list) else [v]
+            return not any(str(x) in unrecorded for x in vs)
+
+        def lost_outcome(e):
             rows_w = lost_w.get((e["checkId"], e["formKey"], e.get("field")))
             if not rows_w:
-                return True                    # no plugin's change to the field is lost with the patch
+                return "resolved"              # no plugin's change to the field is lost with the patch
             w = rows_w[0]
-            return (str(w["winnerPlugin"]).lower() in patch_lower
-                    and (w.get("values") or {}).get("winner") != (e.get("values") or {}).get("winner"))
+            if str(w["winnerPlugin"]).lower() not in patch_lower:
+                return "left"
+            with_patch, without = (w.get("values") or {}).get("winner"), (e.get("values") or {}).get("winner")
+            if not (recorded(with_patch) and recorded(without)):
+                return "cannot-tell-value"
+            return "resolved" if with_patch != without else "kept"
         # A geometry row is judged by its own predicate re-measured with the patch, where the probe carries one (an
         # emit's `Predicates`: every row of the setup it was measured against, measured again in this setup): Gone is
         # resolved, Holds is left (whoever owns the objects now), anything else cannot be told. Presence of the row
@@ -1390,11 +1405,12 @@ def build_prediction(ctx: dict) -> dict:
             physical = preds.get((e["kind"], e["A"], e["B"], e["formKey"], other[0] if other else None))
             return {"Gone": "resolved", "Holds": "left"}.get(physical, "cannot-tell")
 
-        outcome = {id(e): ("resolved" if acted_on(e) else "left") if e["kind"] == "LOST-EDIT" else geometry_outcome(e)
-                   for e in judged}
+        outcome = {id(e): lost_outcome(e) if e["kind"] == "LOST-EDIT" else geometry_outcome(e) for e in judged}
         hits = [e for e in judged if outcome[id(e)] == "resolved"]
+        kept = [e for e in judged if outcome[id(e)] == "kept"]
         open_ = [e for e in judged if outcome[id(e)] == "left"]
         untold = [e for e in judged if outcome[id(e)] == "cannot-tell"]
+        untold_value = [e for e in judged if outcome[id(e)] == "cannot-tell-value"]
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices = [], 0
@@ -1411,12 +1427,16 @@ def build_prediction(ctx: dict) -> dict:
         spots = collections.Counter(e["admission"] for e in record if e["admission"] not in ("admitted", "repeat")
                                     and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e)))
         blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())]
-        sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)}),
-                     bind(words["validationOpen"], {"patch": patch, "count": len(open_)}),
+        sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)})]
+        if kept:
+            sentences.append(bind(words["validationKept"], {"patch": patch, "count": len(kept)}))
+        sentences += [bind(words["validationOpen"], {"patch": patch, "count": len(open_)}),
                      bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems)})]
         sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]}) for s in blind]
         if untold:
             sentences.append(bind(words["validationCannotTell"], {"patch": patch, "count": len(untold)}))
+        if untold_value:
+            sentences.append(bind(words["validationValueUnrecorded"], {"patch": patch, "count": len(untold_value)}))
         if not_measured:
             sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": len(not_measured)}))
         # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
@@ -1428,11 +1448,14 @@ def build_prediction(ctx: dict) -> dict:
             k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
             by_item.append({"hits": sum(1 for e in hits if item_of(e) == k),
                             "open": sum(1 for e in open_ if item_of(e) == k),
-                            "cannotTell": sum(1 for e in untold if item_of(e) == k),
+                            "kept": sum(1 for e in kept if item_of(e) == k),
+                            "cannotTell": sum(1 for e in untold + untold_value if item_of(e) == k),
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
         validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
-                      "hits": len(hits), "open": len(open_), "cannotTell": len(untold), "falseAlarms": None,
+                      "hits": len(hits), "kept": len(kept), "open": len(open_),
+                      "cannotTell": len(untold) + len(untold_value), "valueUnrecorded": len(untold_value),
+                      "falseAlarms": None,
                       "patchProblems": len(problems),
                       "patchChoices": choices,
                       "notMeasured": len(not_measured), "blindSpots": blind, "sentences": sentences,

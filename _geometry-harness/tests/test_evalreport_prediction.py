@@ -490,7 +490,8 @@ def record_validation_bundle():
     """The patched order and the same order without the patch; record rows on both. Without the patch, ModA's change
     to three records is lost to ModB. With the patch: on 000701 the patch sets ModA's value (ModB's change is lost to
     the patch) -- acted on; on 000702 nothing changes -- left; on 000703 the patch carries ModB's value unchanged
-    (ModA's change is lost to the patch, with ModB's value) -- an identity forward, left."""
+    (ModA's change is lost to the patch, with ModB's value) -- kept on purpose by the patch (C463: until the window-2
+    review this was counted "left", which printed the patch author's choices as unfixed problems)."""
     p_rows = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", f"b{i}", "v")
               for i in (1, 2, 3)]
     w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", "a1", "a1"),
@@ -654,6 +655,22 @@ def overlap_predicate_bundle():
     results = {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): w_rows}
     return compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
                               predicates={(OVERLAP, "with-patch"): preds})
+
+
+def placeholder_value_bundle():
+    """C464. As record_validation_bundle, but every winner value is the placeholder a hand-built import wrote instead
+    of the value it read. Where the patch wins, whether it changed the outcome cannot be told; where it does not win
+    (000702), the edit is left whatever the values say."""
+    ph = "(the winner's value)"
+    p_rows = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", ph, "v") for i in (1, 2, 3)]
+    w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", ph, "a1"),
+              lost_row(MOD_A, MOD_B, f"000702:{BASE}", "LocationReference", "a2", ph, "v"),
+              lost_row(MOD_A, PATCH, f"000703:{BASE}", "LocationReference", "a3", ph, "v")]
+    enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "baseline"): w_rows}
+    count_only = {(RECORDS, "without-patch"): 3, (RECORDS, "baseline"): 3}
+    results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+    return compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH], count_only=count_only,
+                              enrichment=enr)
 
 
 def priorities():
@@ -1085,8 +1102,9 @@ def main():
     def record_validation_acted_on():
         plan, md, html = record_validation_bundle()
         val = reader(plan).get("validation") or {}
-        ok = val.get("hits") == 1 and val.get("open") == 2 and val.get("patchProblems") == 0
-        return ok, f"hits {val.get('hits')}, open {val.get('open')}, patch problems {val.get('patchProblems')}"
+        ok = (val.get("hits") == 1 and val.get("open") == 1 and val.get("kept") == 1 and val.get("patchProblems") == 0)
+        return ok, (f"hits {val.get('hits')}, kept {val.get('kept')}, open {val.get('open')}, "
+                    f"patch problems {val.get('patchProblems')}")
 
     # 33. a check only the sibling measured on the shared setup is joined when its receipt's configuration matches
     def sibling_only_joined():
@@ -1262,7 +1280,27 @@ def main():
         ok = val.get("hits") == 1 and val.get("open") == 1 and val.get("patchProblems") == 1
         return ok, f"hits {val.get('hits')}, open {val.get('open')}, new {val.get('patchProblems')}"
 
-    for name, fn in [("w2-review/C460-third-mod-object-broken-with-one-mod-alone-is-single-mod",
+    # C463. A lost edit the patch keeps on purpose is its own count, printed, never "left"
+    def c463_patch_kept_winner_is_not_left():
+        plan, md, html = record_validation_bundle()
+        val = reader(plan).get("validation") or {}
+        text = section_text(md, headings(plan).get("validation") or "\0")
+        ok = val.get("kept") == 1 and val.get("open") == 1 and "kept on purpose" in text
+        return ok, f"kept {val.get('kept')}, open {val.get('open')}; printed: {'kept on purpose' in text}"
+
+    # C464. A placeholder winner value is never compared: cannot tell, said on the page
+    def c464_placeholder_value_cannot_tell():
+        plan, md, html = placeholder_value_bundle()
+        val = reader(plan).get("validation") or {}
+        text = section_text(md, headings(plan).get("validation") or "\0")
+        ok = (val.get("hits") == 0 and val.get("kept") == 0 and val.get("open") == 1 and val.get("cannotTell") == 2
+              and "does not record the winning value" in text)
+        return ok, (f"hits {val.get('hits')}, kept {val.get('kept')}, open {val.get('open')}, "
+                    f"cannot tell {val.get('cannotTell')}")
+
+    for name, fn in [("w2-review/C463-patch-kept-winner-is-its-own-count-not-left", c463_patch_kept_winner_is_not_left),
+                     ("w2-review/C464-placeholder-winner-value-is-cannot-tell", c464_placeholder_value_cannot_tell),
+                     ("w2-review/C460-third-mod-object-broken-with-one-mod-alone-is-single-mod",
                       c460_object_broken_with_one_mod_alone),
                      ("w2-review/C461-lost-edit-attributed-per-field", c461_lost_edit_attributed_per_field),
                      ("w2-review/C462-overlap-judged-by-its-pair-predicate-with-the-patch",
