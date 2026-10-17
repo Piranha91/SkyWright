@@ -1166,10 +1166,13 @@ def build_prediction(ctx: dict) -> dict:
     def title_of(check_id):
         return titles.get(str(check_id)) or ctx["checkTitle"](check_id)
 
-    def reason_words(code):
+    def reason_words(code, check_id=None):
         # a probe's reason in the skill's words; a reason already written in words passes through; a code the skill
-        # does not name gets one generic phrase, never the code (the code stays in the evidence index)
+        # does not name gets one generic phrase, never the code (the code stays in the evidence index). A count the
+        # adapter reads with no reason ("unjudgeable") is worded for its check where the skill names it.
         code = str(code or "").strip()
+        if code in ("", "unjudgeable") and check_id and (words.get("unjudgeableByCheck") or {}).get(check_id):
+            return words["unjudgeableByCheck"][check_id]
         known = (words.get("unjudgeableWords") or {}).get(code)
         if known:
             return known
@@ -1282,15 +1285,20 @@ def build_prediction(ctx: dict) -> dict:
     reasons = words["coverageReasons"]
     lines = []
     relevant_arms = {p_arm, patched_arm, w_arm, *s_arms.values()} - {None}
-    by_status = collections.OrderedDict()
+    statuses_of, arms_of = collections.OrderedDict(), {}
     for m in ctx["missing"]:
         if m.get("armId") in relevant_arms:
-            by_status.setdefault(str(m.get("status")), collections.OrderedDict()).setdefault(
-                str(m.get("checkId")), []).append((m.get("armId"), m.get("part")))
+            statuses_of.setdefault(str(m.get("checkId")), [])
+            if str(m.get("status")) not in statuses_of[str(m.get("checkId"))]:
+                statuses_of[str(m.get("checkId"))].append(str(m.get("status")))
+            arms_of.setdefault(str(m.get("checkId")), []).append((m.get("armId"), m.get("part")))
+    by_status = collections.OrderedDict()
+    for check_id, sts in statuses_of.items():
+        by_status.setdefault(tuple(sts), collections.OrderedDict())[check_id] = arms_of[check_id]
     labels = ctx["armLabels"]
     all_relevant = len(relevant_arms)
-    for status, by_check in by_status.items():
-        reason = ctx["missingReason"](status, "has no accepted result")
+    for status_set, by_check in by_status.items():
+        reason = "; and ".join(ctx["missingReason"](st, "has no accepted result") for st in status_set)
         subjects = []
         for check_id, arms_ in sorted(by_check.items(), key=lambda kv: title_of(kv[0])):
             # a missing comparison part is the comparison with the measured order, not the setup's own result
@@ -1307,28 +1315,74 @@ def build_prediction(ctx: dict) -> dict:
             subjects.append(title_of(check_id) + where)
         lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(by_check),
                       "unit": "check" if len(by_check) == 1 else "checks", "subject": "; ".join(subjects)})
-    unjudged = collections.OrderedDict()
-    for u in (ctx["unassessed"].get("unjudgeablePopulations") or []):
-        if u.get("armId") != p_arm:
+    # What P's own measurement could not judge, read from P's own receipt (the disposition's list also carries
+    # each comparison's receipts, which counted one population two or three times), one clause per population in
+    # its own unit, never summed across populations. A reason that names another check is not "could not be
+    # judged": it is judged there, and said so on its own line.
+    elsewhere_re = re.compile(r"^(.*?):\s*judged by ([\w.-]+), not field-compared here$")
+
+    def own_coverage(check_id):
+        arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
+        if str(arm_id).startswith("sibling:"):
+            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
+        rc = None
+        if bundle is not None:
+            rc = bundle.receipt_by_key.get((check_id, arm_id, "arm")) or bundle.receipt_by_key.get((check_id, arm_id, None))
+        cov = ((rc or {}).get("result") or {}).get("coverage") if rc else None
+        own = [(c.get("Population", c.get("population")), c.get("Unjudgeable", c.get("unjudgeable")))
+               for c in cov if isinstance(c, dict)] if isinstance(cov, list) else []
+        if any((sum(v for v in uj.values() if isinstance(v, (int, float))) if isinstance(uj, dict) else uj or 0) > 0
+               for _, uj in own):
+            return own
+        seen, out = set(), []                  # no receipt here: the disposition's rows for P, each population once
+        for u in ctx["unassessed"].get("unjudgeablePopulations") or []:
+            if u.get("armId") == p_arm and u.get("checkId") == check_id and u.get("population") not in seen:
+                seen.add(u.get("population"))
+                out.append((u.get("population"), u.get("unjudgeable")))
+        return out
+    unjudged_checks = list(dict.fromkeys(
+        [str(u.get("checkId")) for u in ctx["unassessed"].get("unjudgeablePopulations") or [] if u.get("armId") == p_arm]
+        + list(checks_on_p)))
+    elsewhere = collections.Counter()
+    for check_id in unjudged_checks:
+        pops = []
+        for population, uj in own_coverage(check_id):
+            per = collections.Counter()
+            for k, v in (uj.items() if isinstance(uj, dict) else [("unjudgeable", uj)]):
+                if not (isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0):
+                    continue
+                m_ = elsewhere_re.match(str(k))
+                if m_:
+                    elsewhere[(m_.group(1).strip(), title_of(m_.group(2)))] += v
+                    continue
+                per[reason_words(k, check_id)] += v
+            if per:
+                pops.append((population, per))
+        if not pops:
             continue
-        uj = u.get("unjudgeable")
-        per = unjudged.setdefault(title_of(u.get("checkId")), collections.Counter())
-        for k, v in (uj.items() if isinstance(uj, dict) else [("", uj)]):
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
-                per[reason_words(k)] += v
-    for title, per in unjudged.items():
-        if not per:
-            continue
-        top = per.most_common()
-        shown = top[:3]
-        rest = len(top) - len(shown)
-        # the line's own count is the total; a single reason does not repeat it
-        detail = "; ".join(r if len(top) == 1 else f"{r} {fmt_n(n)}" for r, n in shown)
-        if rest:
-            detail += "; " + bind(reasons["unjudgeableMore"], {"count": rest})
-        total_n = sum(per.values())
-        lines.append({"reason": reasons["unjudgeable"], "count": total_n,
-                      "unit": "item" if total_n == 1 else "items", "subject": f"{title}: {detail}"})
+
+        def detail_of(per):
+            top = per.most_common()
+            shown = top[:3]
+            text = "; ".join(r if len(top) == 1 else f"{r} {fmt_n(n)}" for r, n in shown)
+            if len(top) > len(shown):
+                text += "; " + bind(reasons["unjudgeableMore"], {"count": len(top) - len(shown)})
+            return text
+        if len(pops) == 1:
+            total_n = sum(pops[0][1].values())
+            lines.append({"reason": reasons["unjudgeable"], "count": total_n,
+                          "unit": "item" if total_n == 1 else "items",
+                          "subject": f"{title_of(check_id)}: {detail_of(pops[0][1])}"})
+        else:
+            lines.append({"reason": reasons["unjudgeable"], "count": None,
+                          "subject": f"{title_of(check_id)}: " + "; ".join(
+                              f"{fmt_n(sum(per.values()))} {population or 'items'} ({detail_of(per)})"
+                              for population, per in pops)})
+    if elsewhere:
+        lines.append({"reason": reasons["judgedElsewhere"], "count": sum(elsewhere.values()),
+                      "unit": "item" if sum(elsewhere.values()) == 1 else "items",
+                      "subject": "; ".join(bind(reasons["judgedElsewhereItem"], {"what": what, "check": t, "count": fmt_n(n)})
+                                           for (what, t), n in elsewhere.items())})
     # The fields a check left unjudged on P, as its rows file lists them (a record-rows enrichment's `Unjudged`):
     # counted with why, and how many lie on records both evaluated mods change, where a clash between them could
     # hide (Gate C round 1, M1).
@@ -1344,13 +1398,14 @@ def build_prediction(ctx: dict) -> dict:
         return ul if isinstance(ul, list) else None
     for check_id in checks_on_p:
         ul = [u for u in emit_unjudged(check_id) or [] if isinstance(u, dict)]
-        fields = [u for u in ul if u.get("Field")]
-        if not ul:
+        fields = [u for u in ul if u.get("Field") and not elsewhere_re.match(str(u.get("Reason") or ""))]
+        if not fields and not [u for u in ul if not u.get("Field")]:
             continue
         per = collections.Counter(reason_words(u.get("Reason")) for u in fields)
         parts = [f"{r} {fmt_n(n)}" for r, n in per.most_common()]
-        if len(ul) > len(fields):
-            parts.append(bind(words["recordsUnreadable"], {"count": fmt_n(len(ul) - len(fields))}))
+        unreadable_records = [u for u in ul if not u.get("Field")]
+        if unreadable_records:
+            parts.append(bind(words["recordsUnreadable"], {"count": fmt_n(len(unreadable_records))}))
         if multi:
             both = sum(1 for u in fields if pt_lower <= {str(x).lower() for x in u.get("Plugins") or []})
             parts.append(bind(words["fieldsUnjudgedBoth"], {"count": fmt_n(both)}))
@@ -1367,9 +1422,19 @@ def build_prediction(ctx: dict) -> dict:
         lines.append({"reason": reasons["countOnly"], "count": sum(co.values()),
                       "subject": "; ".join(sorted(title_of(c) for c in co))})
     un = ctx["unassessed"]
-    if un.get("statesNotExplored"):
-        lines.append({"reason": reasons["statesNotExplored"], "count": len(un["statesNotExplored"]),
-                      "subject": ", ".join(map(str, un["statesNotExplored"]))})
+    states_p = [x for x in un.get("statesNotExplored") or []
+                if not isinstance(x, dict) or x.get("armId") in (None, p_arm, p_of(x.get("checkId")))]
+    if states_p:
+        state_words = words.get("stateClassWords") or {}
+
+        def state_clause(x):
+            if not isinstance(x, dict):
+                return str(x)
+            what = state_words.get(str(x.get("code") or x.get("subject"))) or str(x.get("reason") or x.get("subject"))
+            n_ = x.get("count")
+            return f"{what} ({fmt_n(n_)})" if isinstance(n_, int) else f"{what} ({words['stateExtentUnknown']})"
+        lines.append({"reason": reasons["statesNotExplored"], "count": len(states_p),
+                      "subject": "; ".join(dict.fromkeys(state_clause(x) for x in states_p))})
     if un.get("scopeUnmeasured"):
         # the controller's extent ids in the skill's words; an id it does not name gets one generic phrase (the ids
         # stay in the evidence index)
@@ -1378,9 +1443,10 @@ def build_prediction(ctx: dict) -> dict:
                                    for x in un["scopeUnmeasured"] if isinstance(x, dict)))
         lines.append({"reason": reasons["scopeUnmeasured"], "count": len(un["scopeUnmeasured"]),
                       "subject": "; ".join(areas)})
-    if un.get("familiesUnsupportedOrManual"):
-        lines.append({"reason": reasons["familiesUnsupported"], "count": len(un["familiesUnsupportedOrManual"]),
-                      "subject": ", ".join(ctx["familyTitle"](x) for x in un["familiesUnsupportedOrManual"])})
+    cannot_run = [c for c in ctx.get("cannotRunChecks") or [] if c not in statuses_of and (c, p_of(c)) not in measured]
+    if cannot_run:
+        lines.append({"reason": reasons["checksCannotRun"], "count": len(cannot_run),
+                      "subject": "; ".join(sorted(title_of(c) for c in cannot_run))})
     coverage = {"lines": lines, "notes": list(ctx["limitations"]), "setAsideLine": prediction["setAsideLine"],
                 "checksOnPrediction": len(checks_on_p)}
 
@@ -2966,7 +3032,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
               "catalogueSummary": catalogue_summary,
               "context": {"evaluatedAt": disp.get("createdUtc") or b.manifest.get("createdUtc"),
                           "statesExamined": (b.plan.get("states") or {}).get("selected") or [],
-                          "statesNotExamined": (b.plan.get("states") or {}).get("notExplored") or []}}
+                          # the plan's own list and the classes the census could not express, in words, once each
+                          "statesNotExamined": list(dict.fromkeys(
+                              [str(x) for x in (b.plan.get("states") or {}).get("notExplored") or []]
+                              + [((reader_data.get("prediction") or {}).get("stateClassWords") or {}).get(
+                                  str(x.get("code") or x.get("subject"))) or str(x.get("subject"))
+                                 for x in un.get("statesNotExplored") or [] if isinstance(x, dict)]))}}
     # The report leads with the prediction (what adding the evaluated mods will break), then coverage, then the patch
     # as the answer key. The comparison sentence above keeps its words as the validation headline; the reader's
     # verdict -- and so the reel's opening -- is the prediction.
@@ -2976,6 +3047,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "missing": reader_missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
         "checkTitle": b.check_title, "armLabels": arm_labels,
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
+        "cannotRunChecks": [str(c.get("checkId")) for c in b.plan.get("checks") or []
+                            if isinstance(c, dict) and c.get("status") in ("unsupported", "manual")],
         "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,

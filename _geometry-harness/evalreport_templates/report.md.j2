@@ -27,7 +27,7 @@
 
 ## {{ p.reader.sectionHeadings.coverage }}
 
-{% for line in cov.lines %}- **{{ line.reason }}:** {{ line.count|n }}{% if line.get("unit") %} {{ line.unit }}{% endif %}{% if line.subject %} — {{ line.subject }}{% endif %}.
+{% for line in cov.lines %}- **{{ line.reason }}:**{% if line.count is not none %} {{ line.count|n }}{% if line.get("unit") %} {{ line.unit }}{% endif %}{% if line.subject %} —{% endif %}{% endif %}{% if line.subject %} {{ line.subject }}{% endif %}.
 {% else %}- No check on the setup with the evaluated mods reported anything it could not judge.
 {% endfor %}
 {% for item in cov.notes %}- {{ item }}

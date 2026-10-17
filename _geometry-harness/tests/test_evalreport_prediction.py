@@ -85,7 +85,7 @@ def lost_row(a, b, form_key, field, lost, winner, overridden, label=None):
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
-                diff_logs=None):
+                diff_logs=None, states_not_explored=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -206,7 +206,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                                         "status": m[2], "cause": m[2], "required": True,
                                         "family": m[0].split(".")[0]} for m in missing]},
             "arms": arms_disp, "importedEvidence": [],
-            "unassessed": {"unjudgeablePopulations": list(unjudgeable), "scopeUnmeasured": list(scope_unmeasured)}}
+            "unassessed": {"unjudgeablePopulations": list(unjudgeable), "scopeUnmeasured": list(scope_unmeasured),
+                           **({"statesNotExplored": list(states_not_explored)} if states_not_explored else {})}}
     registry = {"registryVersion": 1, "checks": [{"id": c, "family": c.split(".")[0], "title": c,
                                                    "adapter": {"exe": PROBE[c]}} for c in checks]}
     (root / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
@@ -685,6 +686,30 @@ def one_target_bundle():
                (CONTACT, "without-a"): [],
                (CONTACT, "without-other"): [row("CONTACT", BASE, MOD_A, f"000G02:{MOD_A}", other=f"000S03:{BASE}")]}
     return compile_and_render(arms, results, [MOD_A])
+
+
+def limits_bundle():
+    """C469-C474. One mod added; the limits section's inputs as a real bundle carries them: the census's state classes
+    as records; one check's two populations of different units, each listed twice (the setup's own receipt and its
+    comparison's); a reason naming the check that judges those items instead; one check missing for two reasons on
+    the same setups; a check that failed to run; a check with no pair list to search."""
+    arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("dependency-only", [BASE, OTHER])]
+    results = {(SEAMS, "baseline"): [], (SEAMS, "dependency-only"): [], (CONTACT, "baseline"): [],
+               (CONTACT, "dependency-only"): []}
+    pops = [{"checkId": SEAMS, "armId": "baseline", "population": "exterior cells with a LAND", "judged": 9,
+             "unjudgeable": {"UnreadableLand": 0, "DeclaresNoHeights": 205}},
+            {"checkId": SEAMS, "armId": "baseline", "population": "edge-adjacent pairs", "judged": 9,
+             "unjudgeable": {"Undecodable": 0, "DeclaresNoHeights": 391}},
+            {"checkId": CONTACT, "armId": "baseline", "population": "navmesh and landscape records", "judged": 0,
+             "unjudgeable": {"navmesh geometry: judged by geometry.navmesh-ownership, not field-compared here": 73}}]
+    states = [{"checkId": "state.conditional-geometry", "armId": "baseline", "subject": "disabled-singletons",
+               "kind": "class", "code": "disabled-singletons", "reason": "Initially disabled references.", "count": 12916},
+              {"checkId": "state.conditional-geometry", "armId": "baseline", "subject": "combinations", "kind": "class",
+               "code": "combinations", "reason": "Combinations are not enumerated.", "count": None}]
+    missing = [(WATER, "baseline", "unknown-applicability"), (WATER, "baseline", "unsupported"),
+               (RECORDS, "baseline", "rejected(exit-nonzero)"), (CELLATTR, "baseline", "blocked(no-pair-source)")]
+    return compile_and_render(arms, results, [MOD_A], unjudgeable=pops + pops, missing=missing,
+                              states_not_explored=states)
 
 
 def placeholder_value_bundle():
@@ -1391,7 +1416,58 @@ def main():
               and f"It needs both {MOD_A} and {OTHER}" in md and "comes from" in md)
         return ok, f"without arm {p.get('withoutArm')}; attribution {attr}"
 
-    for name, fn in [("w2-review/C468-one-target-needs-both-from-setup-without-partner",
+    def limits():
+        plan, md, html = get("limits", limits_bundle)
+        return plan, section_text(md, headings(plan).get("coverage") or "\0"), md
+
+    # C469. World states are words and counts, never a printed record, and the context line agrees
+    def c469_states_in_words():
+        plan, cov, md = limits()
+        ok = ("{'" not in md and "references disabled at the start that no switch names (12,916)" in cov
+              and "extent unknown" in cov and "Additional states not examined: none named" not in md)
+        return ok, f"raw record printed: {'{' + chr(39) in md}; states line: {[x for x in cov.splitlines() if 'World states' in x]}"
+
+    # C470. Each population in its own unit, counted once, never summed with another population
+    def c470_populations_counted_once_not_summed():
+        plan, cov, md = limits()
+        ok = ("205 exterior cells with a LAND" in cov and "391 edge-adjacent pairs" in cov
+              and "1,192" not in cov and "596" not in cov and "the landscape declares no heights" in cov)
+        return ok, f"seam line: {[x for x in cov.splitlines() if 'LAND' in x]}"
+
+    # C471. A reason naming another check is "judged by" that check's title, never a check id or "could not judge"
+    def c471_judged_elsewhere_named_by_title():
+        plan, cov, md = limits()
+        line = [x for x in cov.splitlines() if "navmesh geometry" in x]
+        ok = (len(line) == 1 and "Judged by another check" in line[0] and "geometry.navmesh-ownership" not in md)
+        return ok, f"line {line}"
+
+    # C472. One check missing for two reasons on the same setups is one line
+    def c472_one_line_per_check_reasons():
+        plan, cov, md = limits()
+        title = (priorities()["reader"]["checkTitles"]).get(WATER, WATER)
+        lines = [x for x in cov.splitlines() if title in x and x.startswith("- **No result")]
+        ok = len(lines) == 1 and "could not decide" in lines[0] and "cannot yet be measured" in lines[0]
+        return ok, f"lines naming the check: {lines}"
+
+    # C473. Statuses in words: a check that failed to run, a check with no pair list
+    def c473_statuses_in_words():
+        plan, cov, md = limits()
+        ok = "failed to run" in cov and "no list of patch pairs was supplied" in cov
+        return ok, f"failed-to-run worded: {'failed to run' in cov}; no-pair-source worded: {'no list of patch pairs' in cov}"
+
+    # C474. No named reason code reaches the page as "a reason this report does not describe in words"
+    def c474_named_codes_in_words():
+        plan, cov, md = limits()
+        ok = "does not describe in words" not in cov
+        return ok, f"generic phrase on the page: {not ok}"
+
+    for name, fn in [("w2-review/C469-world-states-in-words-not-records", c469_states_in_words),
+                     ("w2-review/C470-populations-counted-once-not-summed", c470_populations_counted_once_not_summed),
+                     ("w2-review/C471-judged-elsewhere-named-by-title", c471_judged_elsewhere_named_by_title),
+                     ("w2-review/C472-one-line-per-check-and-its-reasons", c472_one_line_per_check_reasons),
+                     ("w2-review/C473-statuses-in-words", c473_statuses_in_words),
+                     ("w2-review/C474-named-codes-in-words", c474_named_codes_in_words),
+                     ("w2-review/C468-one-target-needs-both-from-setup-without-partner",
                       c468_one_target_uses_setup_without_partner),
                      ("w2-review/C465-refused-comparison-prints-no-repair-and-cannot-tell",
                       c465_refused_comparison_counts_nothing),
