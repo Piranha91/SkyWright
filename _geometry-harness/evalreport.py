@@ -872,8 +872,29 @@ def build_prediction(ctx: dict) -> dict:
             if arm_id != p_arm and lower(orders.get(arm_id) or []) == plugins_lower:
                 return arm_id
         return None
-    w_arm = arm_with(p_set - pt_lower) if p_targets else None
-    s_arms = {t: arm_with(p_set - (pt_lower - {str(t).lower()})) for t in p_targets} if len(p_targets) > 1 else {}
+    # Every setup's plugins, in this bundle and (below) the sibling: a plugin that is loaded in exactly the setups
+    # that load a given mod travels with it (its own resources or masters), so the setup without that mod also lacks
+    # it. A target or a declared patch never travels with anything.
+    setups_seen = [lower(v) for v in orders.values()]
+    declared_lower = {str(x).lower() for x in declared}
+
+    def companions(drop_lower):
+        out = set()
+        for d in drop_lower:
+            with_d = [s_ for s_ in setups_seen if d in s_]
+            without_d = [s_ for s_ in setups_seen if d not in s_]
+            if not with_d or not without_d:
+                continue
+            for c in set.intersection(*with_d) - set.union(*without_d) if without_d else set():
+                if c != d and c not in target_lower and c not in declared_lower:
+                    out.add(c)
+        return out
+
+    def arm_without(drop_lower):
+        """This bundle's setup equal to P without these plugins (and, failing that, without their companions too)."""
+        return arm_with(p_set - drop_lower) or arm_with(p_set - drop_lower - companions(drop_lower))
+    w_arm = arm_without(pt_lower) if p_targets else None
+    s_arms = {t: arm_without(pt_lower - {str(t).lower()}) for t in p_targets} if len(p_targets) > 1 else {}
 
     # --- per (check, arm): measured rows, measured with no conflict file, or nothing
     rows_by, prefixes, measured, count_only = {}, {}, set(), {}
@@ -927,6 +948,7 @@ def build_prediction(ctx: dict) -> dict:
     #     hash for hash, and a check is used only where both ran the same adapter and probe build and measured the
     #     same rows on that shared setup. Otherwise nothing is joined (refusal) or the check stays unseparated.
     sibling, sib_ok, sibling_record = ctx.get("sibling"), {}, None
+    sib_role_ref = []
     sib_only, anchor = set(), None
     if sibling is not None and p_targets:
         main_b, sib_b = ctx["mainBundle"], sibling["bundle"]
@@ -945,10 +967,16 @@ def build_prediction(ctx: dict) -> dict:
             raise InputRefused("sibling-foreign: the sibling bundle has no setup with the same plugins, in the same "
                                "order and with the same bytes, as the setup without the patch, so nothing was joined.")
         collect(sibling["findings"], "sibling:")
+        setups_seen.extend({x[0].lower() for x in v[0]} for v in sib_idents.values())
 
         def sib_role(drop_lower):
-            want = (tuple(x for x in p_plugs if x[0].lower() not in drop_lower), p_pop, p_states)
-            return next((a for a, v in sib_idents.items() if v == want), None)
+            for drop in (drop_lower, drop_lower | companions(drop_lower)):
+                want = (tuple(x for x in p_plugs if x[0].lower() not in drop), p_pop, p_states)
+                found = next((a for a, v in sib_idents.items() if v == want), None)
+                if found:
+                    return found
+            return None
+        sib_role_ref.append(sib_role)
         roles = {}
         if w_arm is None:
             w_sib = sib_role(pt_lower)
@@ -1031,10 +1059,33 @@ def build_prediction(ctx: dict) -> dict:
             return "notInvolving"
         return "admitted"
 
+    without_cache = {}
+
+    def without_other(m_lower):
+        """The setup equal to P without one other mod (and its companions), in this bundle or the sibling."""
+        if m_lower not in without_cache:
+            found = arm_without({m_lower})
+            if found is None and sib_role_ref:
+                s_ = sib_role_ref[0]({m_lower})
+                found = "sibling:" + s_ if s_ else None
+            without_cache[m_lower] = found
+        return without_cache[m_lower]
+
     def attribution(rk):
         sides = [x for x in (rk[2], rk[3]) if x.lower() in pt_lower]
         if len(p_targets) <= 1:
-            return "single-mod", (sides[0] if sides else None), None
+            # One evaluated mod t, a clash with another mod m: does it need m too? Only the setup without m can say
+            # (Snazzy review, P38): absent there, it needs both; present there, it comes from t; not measured, the
+            # report says it appears when t is added and no more.
+            t = sides[0] if sides else None
+            others = [x for x in (rk[2], rk[3]) if x.lower() not in pt_lower]
+            if not t or not others:
+                return "single-mod", t, None
+            arm_m = without_other(others[0].lower())
+            if (arm_m is None or (rk[0], arm_m) not in measured
+                    or (str(arm_m).startswith("sibling:") and not sib_ok.get(rk[0]))):
+                return "with-target", t, None
+            return ("single-mod" if present(arm_m, rk) else "needs-both"), t, None
         if any(str(s_arms.get(t)).startswith("sibling:") for t in p_targets) and not sib_ok.get(rk[0]):
             return "not-separable", None, words["notSeparableWhy"]["siblingDisagrees"]
         unmeasured = [t for t in p_targets if s_arms.get(t) is None or (rk[0], s_arms[t]) not in measured]
@@ -1132,10 +1183,15 @@ def build_prediction(ctx: dict) -> dict:
         ph = phrases.get(g["kind"]) or {}
         noun = (ph.get("unitSingular") if g["count"] == 1 else ph.get("unitPlural")) or ("clash" if g["count"] == 1 else "clashes")
         attr_key = g["attribution"]
-        if (attr_key == "single-mod" and g["attributionMod"]
+        other_mod = next((m for m in g["mods"] if str(m).lower() != str(g["attributionMod"] or "").lower()), "")
+        if not multi and attr_key in ("needs-both", "single-mod", "with-target") and g["attributionMod"]:
+            attr_key = {"needs-both": "needs-both-other", "single-mod": "single-mod-target",
+                        "with-target": "with-target"}[attr_key]
+        elif (attr_key == "single-mod" and g["attributionMod"]
                 and str(g["attributionMod"]).lower() not in {m.lower() for m in g["mods"]}):
             attr_key = "single-mod-elsewhere"       # the same object is broken with the other evaluated mod alone
-        attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "why": g["attributionWhy"] or ""})
+        attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "other": other_mod,
+                                                          "why": g["attributionWhy"] or ""})
         subjects_of[id(g)] = g.pop("_subjects")
         g["relationships"] = g["count"]
         g["objects"] = len(subjects_of[id(g)])
@@ -1185,7 +1241,8 @@ def build_prediction(ctx: dict) -> dict:
 
     def listed(parts):
         return parts[0] if len(parts) == 1 else "; ".join(parts[:-1]) + "; and " + parts[-1]
-    by_attr = {k: [g for g in items if g["attribution"] == k] for k in ("needs-both", "single-mod", "not-separable")}
+    by_attr = {k: [g for g in items if g["attribution"] == k]
+               for k in ("needs-both", "single-mod", "not-separable", "with-target")}
     counts = {key: per_kind(by_attr[a])
               for key, a in (("needsBoth", "needs-both"), ("singleMod", "single-mod"), ("notSeparable", "not-separable"))}
     counted = by_attr["needs-both"] if multi else items

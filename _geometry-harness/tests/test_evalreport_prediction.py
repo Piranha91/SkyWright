@@ -672,6 +672,21 @@ def overlap_predicate_bundle():
                               predicates={(OVERLAP, "with-patch"): preds})
 
 
+def one_target_bundle():
+    """C468. One evaluated mod (ModA, with its own resources plugin) added to an order holding OtherMod. Setups: all
+    of them; without ModA (its resources leave with it); without OtherMod. Object 1's clash with OtherMod is not there
+    without OtherMod: it needs both. Object 2 is unsupported without OtherMod too: it comes from ModA."""
+    res = "ModA Resources.esp"
+    arms = [arm("baseline", [BASE, OTHER, res, MOD_A], kind="baseline"),
+            arm("without-a", [BASE, OTHER]),
+            arm("without-other", [BASE, res, MOD_A])]
+    results = {(CONTACT, "baseline"): [row("CONTACT", OTHER, MOD_A, f"000G01:{MOD_A}", other=f"000S01:{OTHER}"),
+                                       row("CONTACT", OTHER, MOD_A, f"000G02:{MOD_A}", other=f"000S02:{OTHER}")],
+               (CONTACT, "without-a"): [],
+               (CONTACT, "without-other"): [row("CONTACT", BASE, MOD_A, f"000G02:{MOD_A}", other=f"000S03:{BASE}")]}
+    return compile_and_render(arms, results, [MOD_A])
+
+
 def placeholder_value_bundle():
     """C464. As record_validation_bundle, but every winner value is the placeholder a hand-built import wrote instead
     of the value it read. Where the patch wins, whether it changed the outcome cannot be told; where it does not win
@@ -865,8 +880,10 @@ def main():
         hit = [i for i in items if sorted(i.get("mods") or []) == sorted([MOD_A, USSEP])]
         text = section_text(md, headings(plan).get("prediction") or "\0")
         ok = (p.get("status") == "found" and len(items) == 1 and len(hit) == 1 and hit[0].get("count") == 1
-              and hit[0].get("attribution") == "single-mod" and hit[0].get("attributionMod") == MOD_A
-              and USSEP in text)
+              # no setup without the Unofficial Patch was measured, so whether the clash needs it too is not
+              # claimed (C468; until the window-2 review this read "comes from ModA alone")
+              and hit[0].get("attribution") == "with-target" and hit[0].get("attributionMod") == MOD_A
+              and USSEP in text and "alone" not in text)
         return ok, f"items {[(i.get('mods'), i.get('count'), i.get('attribution'), i.get('attributionMod')) for i in items]}"
 
     # 8. a probe's reason code reaches the reader as words, never as the code (the code stays in the evidence index)
@@ -1364,7 +1381,19 @@ def main():
         ok = "1 of the problems in the setup it was compared with is still physically there" in md
         return ok, f"still-holding sentence printed: {ok}; validation hits {val.get('hits')}, open {val.get('open')}"
 
-    for name, fn in [("w2-review/C465-refused-comparison-prints-no-repair-and-cannot-tell",
+    # C468. One evaluated mod: the setup without its partner decides "needs both"; its resources leave with it
+    def c468_one_target_uses_setup_without_partner():
+        plan, md, html = one_target_bundle()
+        p = reader(plan).get("prediction") or {}
+        attr = {(e.get("formKey") or "")[:6]: e.get("attribution") for e in p.get("record") or []
+                if e.get("admission") == "admitted"}
+        ok = (p.get("withoutArm") == "without-a" and attr == {"000G01": "needs-both", "000G02": "single-mod"}
+              and f"It needs both {MOD_A} and {OTHER}" in md and "comes from" in md)
+        return ok, f"without arm {p.get('withoutArm')}; attribution {attr}"
+
+    for name, fn in [("w2-review/C468-one-target-needs-both-from-setup-without-partner",
+                      c468_one_target_uses_setup_without_partner),
+                     ("w2-review/C465-refused-comparison-prints-no-repair-and-cannot-tell",
                       c465_refused_comparison_counts_nothing),
                      ("w2-review/C466-unaccepted-comparison-says-why-everywhere", c466_unaccepted_comparison_one_statement),
                      ("w2-review/C467-overlaps-still-holding-named-beside-no-problem", c467_still_holding_named),
