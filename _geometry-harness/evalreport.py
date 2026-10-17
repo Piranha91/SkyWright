@@ -751,6 +751,61 @@ def conflict_rows(conflict: dict, evidence_id: str | None) -> list[dict]:
     return rows
 
 
+def _transcript_messages(text: str):
+    """(batch marker, message) per JSON line of an MCP import transcript; a batch starts at each `batchMarker` line."""
+    batch = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        m = json.loads(line)
+        if isinstance(m, dict) and "batchMarker" in m:
+            batch = m["batchMarker"]
+            continue
+        for x in (m if isinstance(m, list) else [m]):
+            if isinstance(x, dict):
+                yield batch, x
+
+
+def missing_assets(b: "Bundle", check_id: str, arm_id: str) -> list[dict] | None:
+    """The asset paths a missing-asset check's import measured absent on one setup, each with the plugins whose records
+    name it (their `Model.File`), read from the import's own transcripts: every `housecarl_asset_status` answer's
+    results with `exists` false, and every `housecarl_records` answer's Model.File values with the plugin that carries
+    the record. None when the receipt records no transcript pair or it cannot be read."""
+    rc = b.receipt_by_key.get((check_id, arm_id, None)) or b.receipt_by_key.get((check_id, arm_id, "arm"))
+    if not rc:
+        return None
+    paths = [e["path"] for e in b.evidence_for(check_id, arm_id, rc.get("part")) if e.get("kind") == "emit"]
+    req = next((x for x in paths if x.endswith("request.jsonl")), None)
+    resp = next((x for x in paths if x.endswith("response.jsonl")), None)
+    if not req or not resp:
+        return None
+    try:
+        calls = {(bt, m.get("id")): (m.get("params") or {}).get("name")
+                 for bt, m in _transcript_messages((b.dir / req).read_text(encoding="utf-8"))
+                 if m.get("method") == "tools/call"}
+        owners, absent = collections.defaultdict(list), []
+        for bt, m in _transcript_messages((b.dir / resp).read_text(encoding="utf-8")):
+            name = calls.get((bt, m.get("id")))
+            if name not in ("housecarl_records", "housecarl_asset_status"):
+                continue
+            text = "".join(c.get("text", "") for c in ((m.get("result") or {}).get("content") or []) if isinstance(c, dict))
+            doc = json.loads(text) if text.strip().startswith("{") else {}
+            if name == "housecarl_asset_status":
+                absent += [str(x.get("path")) for x in doc.get("results") or []
+                           if isinstance(x, dict) and x.get("exists") is False and x.get("path")]
+                continue
+            for rec in doc.get("matches") or []:
+                for fl in (rec.get("fields") or []) if isinstance(rec, dict) else []:
+                    if isinstance(fl, dict) and fl.get("path") == "Model.File" and fl.get("value"):
+                        v = str(fl["value"]).replace("\\", "/").lstrip("/")
+                        v = (v if v.lower().startswith("meshes/") else "meshes/" + v).lower()
+                        if rec.get("source") and rec["source"] not in owners[v]:
+                            owners[v].append(rec["source"])
+    except (OSError, ValueError):
+        return None
+    return [{"path": p_, "namedBy": owners.get(p_.replace("\\", "/").lower(), [])} for p_ in dict.fromkeys(absent)]
+
+
 def infer_clobber_direction(finding: dict, plugin_order: list[str]) -> dict | None:
     c = finding.get("counts") or {}
     if c.get("groupKind") != "CLOBBERED" or not c.get("A") or not c.get("B"):
@@ -847,6 +902,11 @@ def imported_evidence(b: Bundle) -> dict:
                 row["armCandidate"] = drow.get("armCandidate")
         rows.append(row)
     return {"source": source if rows or isinstance(listed, list) else None, "rows": rows}
+
+
+def plain_population(population, words: dict) -> str:
+    """A probe's population name in the skill's words (`populationWords`); a name not listed is shown as written."""
+    return str((words.get("populationWords") or {}).get(str(population)) or population)
 
 
 def is_base_game(name: str, words: dict) -> bool:
@@ -986,6 +1046,7 @@ def build_prediction(ctx: dict) -> dict:
     sibling, sib_ok, sibling_record = ctx.get("sibling"), {}, None
     sib_role_ref = []
     sib_only, anchor = set(), None
+    all_orders = {a_: [str(x) for x in v_] for a_, v_ in orders.items()}      # every setup's plugins, sibling's prefixed
     if sibling is not None and p_targets:
         main_b, sib_b = ctx["mainBundle"], sibling["bundle"]
 
@@ -1004,6 +1065,7 @@ def build_prediction(ctx: dict) -> dict:
                                "order and with the same bytes, as the setup without the patch, so nothing was joined.")
         collect(sibling["findings"], "sibling:")
         setups_seen.extend({x[0].lower() for x in v[0]} for v in sib_idents.values())
+        all_orders.update({"sibling:" + a_: [x[0] for x in v_[0]] for a_, v_ in sib_idents.items()})
 
         def sib_role(drop_lower):
             for drop in (drop_lower, drop_lower | companions(drop_lower)):
@@ -1171,6 +1233,80 @@ def build_prediction(ctx: dict) -> dict:
         v = (p_rows.get(rk) or {}).get("row", {}).get("values") or {}
         return same_but_path_case(v.get("lost"), v.get("winner"))
 
+    # The base game's own value of a record field, read from any measured setup's lost-edit row whose overridden value
+    # is a base-game plugin's (the plugin before the losing one) and whose losing plugin is not: the value before any
+    # mod changed it. A losing value equal to it is no edit of that mod's: it only undoes the change of the mod before
+    # it, and is a change only against that mod (fourth blind review, W2).
+    unrecorded_values = {str(x) for x in words.get("unrecordedValues") or []}
+
+    def value_recorded(v):
+        vs = v if isinstance(v, list) else [v]
+        return v not in (None, "", []) and not any(str(x) in unrecorded_values for x in vs)
+    base_value_cache = []
+
+    def base_value(fk, field):
+        if not base_value_cache:
+            got = {}
+            for rs in rows_by.values():
+                for k_, h_ in rs.items():
+                    r_ = h_["row"]
+                    reads = r_.get("reads") or []
+                    if k_[1] != "LOST-EDIT" or len(reads) < 2 or not isinstance(reads[0], dict):
+                        continue
+                    if is_base_game(reads[0].get("plugin"), words) and not is_base_game(k_[2], words):
+                        ov = (r_.get("values") or {}).get("overridden")
+                        if value_recorded(ov):
+                            got.setdefault((str(k_[4]), r_.get("field")), ov)
+            base_value_cache.append(got)
+        return base_value_cache[0].get((str(fk), field))
+
+    prior_cache = {}
+
+    def prior_values(fk, field, before):
+        """The values the field had just before `before` changed it, in P's own chain: the overridden value of any
+        setup's row in which `before` is the losing plugin, from a setup whose load order up to `before` is P's (the
+        same plugins in the same order, so the same chain up to it)."""
+        key = (str(fk), field, str(before).lower())
+        if key not in prior_cache:
+            p_order = all_orders.get(p_arm) or []          # the sibling's shared setup has P's plugins exactly
+
+            def prefix(order):
+                o = [x.lower() for x in order]
+                return o[:o.index(key[2]) + 1] if key[2] in o else None
+            want = prefix(p_order)
+            got = set()
+            for (c_, a_), rs in rows_by.items():
+                if want is None or prefix(all_orders.get(a_) or []) != want:
+                    continue
+                for k_, h_ in rs.items():
+                    r_ = h_["row"]
+                    reads = r_.get("reads") or []
+                    if (k_[1] == "LOST-EDIT" and str(k_[4]) == key[0] and r_.get("field") == field and len(reads) >= 2
+                            and isinstance(reads[1], dict) and str(reads[1].get("plugin")).lower() == key[2]):
+                        ov = (r_.get("values") or {}).get("overridden")
+                        if value_recorded(ov):
+                            got.add(path_folded(ov))
+            prior_cache[key] = got
+        return prior_cache[key]
+
+    def undoes_earlier(rk):
+        """The losing value is no edit of that mod's: it is the base game's own, or the value the field had just before
+        the mod loaded before it changed it, so it only undoes that mod's change (fourth blind review, W2). Returns
+        (that mod, whether the winner carries that mod's own value), else None."""
+        r_ = (p_rows.get(rk) or {}).get("row") or {}
+        reads, v = r_.get("reads") or [], r_.get("values") or {}
+        before = reads[0].get("plugin") if reads and isinstance(reads[0], dict) else None
+        if not before or is_base_game(before, words) or str(before).lower() in (rk[2].lower(), rk[3].lower()):
+            return None
+        if not value_recorded(v.get("lost")):
+            return None
+        lost = path_folded(v.get("lost"))
+        base = base_value(rk[4], r_.get("field"))
+        prior = prior_values(rk[4], r_.get("field"), before)
+        if not ((base is not None and lost == path_folded(base)) or (len(prior) == 1 and lost in prior)):
+            return None
+        return before, value_recorded(v.get("winner")) and path_folded(v.get("winner")) == path_folded(v.get("overridden"))
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -1191,6 +1327,8 @@ def build_prediction(ctx: dict) -> dict:
             return "pathCase"                  # the two values name the same file (Snazzy review 3)
         if rk[1] == "LOST-EDIT" and both_disabled(rk):
             return "bothDisabled"              # both mods disable the object: no effect in game
+        if rk[1] == "LOST-EDIT" and undoes_earlier(rk):
+            return "notOwnEdit"                # the losing value is the base game's: no edit of that mod's
         if (rk[0] == "geometry.fixture-empty-space" and anchor_unclear_re is not None
                 and anchor_unclear_re.search(rk[5])):
             return "anchorUnclear"             # a floor or wall's box reaches it though no touch was found: cannot tell
@@ -1277,6 +1415,9 @@ def build_prediction(ctx: dict) -> dict:
             lost_seen.add(same)
         if adm != "admitted":
             set_aside[adm] += 1
+            if adm == "notOwnEdit":
+                entry["undoes"], earlier_wins = undoes_earlier(rk)
+                set_aside["notOwnEditEarlierWins"] += 1 if earlier_wins else 0
             record.append(entry)
             continue
         attr, attr_mod, why = attribution(rk)
@@ -1405,10 +1546,37 @@ def build_prediction(ctx: dict) -> dict:
     loss_lines = []
     by_pair = collections.OrderedDict()
     for rk, hit in sorted(p_rows.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
-        if not (hit["history"] and rk[0] == "geometry.navmesh-ownership" and rk[2].lower() != rk[3].lower()
-                and {rk[2].lower(), rk[3].lower()} <= pt_lower):
+        if not (hit["history"] and rk[0] == "geometry.navmesh-ownership" and rk[2].lower() != rk[3].lower()):
+            continue
+        # two evaluated mods: the loss between them; one evaluated mod: its loss against any other mod (fourth blind
+        # review, S2), never the base game
+        if not ({rk[2].lower(), rk[3].lower()} <= pt_lower if multi else
+                ({rk[2].lower(), rk[3].lower()} & pt_lower and not is_base_game(rk[2], words)
+                 and not is_base_game(rk[3], words))):
             continue
         by_pair.setdefault((rk[2], rk[3]), []).append(hit)
+    # a navmesh whose loss of ground still holds with the patch, flagged between other plugins: never credited to the
+    # patch (fourth blind review, W3)
+    patched_hist = collections.defaultdict(list)
+    for (c_, a_), rs in rows_by.items():
+        if patched_arm is None or a_ != patched_arm or c_ != "geometry.navmesh-ownership":
+            continue
+        for k_, h_ in rs.items():
+            if h_["history"] and h_["row"].get("physical") == "Holds" and k_[2].lower() != k_[3].lower():
+                patched_hist[str(k_[4])].append((k_[2], k_[3], h_["row"].get("label")))
+    patch_text = (", ".join(patch_names) if len(patch_names) <= 2 else
+                  bind(words["patchesShort"], {"count": len(patch_names)}))
+
+    def tri_label(label):
+        m = re.match(r"^(.*?)\s+(\d+) tris -> (\d+)$", str(label or ""))
+        return f"{m.group(1)} {fmt_n(int(m.group(2)))} -> {fmt_n(int(m.group(3)))} triangles" if m else str(label or "")
+
+    def persisting(fks):
+        """(count, places) of these navmesh records whose loss still holds with the patch under another pair: every one
+        named by its place and triangles (the pairs are in the evidence index)."""
+        got = [(fk, patched_hist[str(fk)][0]) for fk in fks if patched_hist.get(str(fk))]
+        return len(got), "; ".join(bind(words["historyPersistsExample"], {"place": tri_label(lab), "loser": a_,
+                                                                           "winner": b_}) for _, (a_, b_, lab) in got)
     for (loser, winner), hits in by_pair.items():
         held = [h for h in hits if h["row"].get("physical") == "Holds"]
         if not held:
@@ -1430,13 +1598,45 @@ def build_prediction(ctx: dict) -> dict:
             d = next((x for x in drops if str(x[4]) == t), None)
             tdesc.append(f"{t} ({fmt_n(d[2])} -> {fmt_n(d[3])} triangles)" if d else t)
         text = bind(words["historyLossLine"], {
-            "setup": words["historyLossSetup"]["withoutPatches" if patched_arm else "together"],
+            "setup": words["historyLossSetup"][("withoutPatches" if len(patch_names) > 1 else "withoutPatch")
+                                               if patched_arm else "together"],
             "winner": winner, "loser": loser, "count": fmt_n(len(hits)), "holds": fmt_n(len(held)),
             "examples": "; ".join(f"{d[1]} {fmt_n(d[2])} -> {fmt_n(d[3])} triangles" for d in drops[:3])})
         if links:
             text += " " + bind(words["historyLossLinks"], {"links": fmt_n(len(links)), "targets": ", ".join(tdesc)})
+        n_persist, persist_ex = persisting([h["row"].get("formKey") for h in held])
+        if n_persist:
+            text += " " + bind(words["historyLossPersists"][0 if n_persist == 1 else 1], {
+                "patch": patch_text, "count": fmt_n(n_persist), "examples": persist_ex})
         loss_lines.append({"text": text, "findingIds": list(dict.fromkeys(
             h["finding"].get("id") for h in held if h["finding"].get("id")))})
+    # W4: the asset files a missing-asset check measured absent are named, with the plugins whose records name them and
+    # the setups they are missing in; the check then leaves the count-only line
+    asset_named = set()
+    for check_id in words.get("missingAssetChecks") or []:
+        main_b = ctx.get("mainBundle")
+        if main_b is None or (check_id, p_arm) not in count_only:
+            continue
+        got_p = missing_assets(main_b, check_id, p_arm)
+        got_w = missing_assets(main_b, check_id, patched_arm) if patched_arm else None
+        if got_p is None:
+            continue
+        asset_named.add(check_id)
+        if not got_p:
+            continue
+        with_paths = {x["path"].lower() for x in got_w or []}
+        where = ("both" if got_w is not None and {x["path"].lower() for x in got_p} == with_paths else
+                 "withoutOnly" if got_w is not None and not with_paths else "only")
+        owners = list(dict.fromkeys(o for x in got_p for o in x["namedBy"]))
+        text = bind(words["missingAssetLine"], {
+            "count": fmt_n(len(got_p)), "noun": bind(words["missingAssetNoun"][0 if len(got_p) == 1 else 1], {
+                "owners": " and ".join(owners) if owners else words["missingAssetOwnersUnknown"]}),
+            "where": bind(words["missingAssetWhere"][where], {"patch": patch_text}),
+            "paths": "; ".join(x["path"] for x in got_p)})
+        if where == "only" and got_w:
+            text += " " + bind(words["missingAssetWithPatch"], {"patch": patch_text, "count": fmt_n(len(got_w))})
+        loss_lines.append({"text": text, "findingIds": [f_.get("id") for f_ in findings if f_.get("checkId") == check_id
+                                                        and f_.get("armId") == p_arm and f_.get("id")][:1]})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
     alone_lines = collections.OrderedDict()
@@ -1544,7 +1744,7 @@ def build_prediction(ctx: dict) -> dict:
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
-             "anchorUnclear": set_aside["anchorUnclear"]}
+             "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"]}
     if sibling_record:
         # Snazzy review 1: the sibling's setup that decided "needs both" for a partner mod is named with the others
         for m_, a_ in partner_arms.items():
@@ -1564,6 +1764,12 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
                                    + (" " + bind(words["setAsideBothDisabled"], aside) if aside["bothDisabled"] else "")
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
+                                   + (" " + bind(words["setAsideNotOwnEdit"], {
+                                       "count": fmt_n(aside["notOwnEdit"]),
+                                       "noun": words["fieldNoun"][0 if aside["notOwnEdit"] == 1 else 1],
+                                       "earlier": bind(words["setAsideNotOwnEditEarlier"], {
+                                           "count": fmt_n(set_aside["notOwnEditEarlierWins"])})
+                                       if set_aside["notOwnEditEarlierWins"] else ""}) if aside["notOwnEdit"] else "")
                                    if sum(aside.values()) else None),
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
@@ -1681,7 +1887,7 @@ def build_prediction(ctx: dict) -> dict:
         else:
             lines.append({"reason": reasons["unjudgeable"], "count": None,
                           "subject": f"{title_of(check_id)}: " + "; ".join(
-                              f"{fmt_n(sum(per.values()))} {population or 'items'} ({detail_of(per)})"
+                              f"{fmt_n(sum(per.values()))} {plain_population(population, words) if population else 'items'} ({detail_of(per)})"
                               for population, per in pops)})
     if elsewhere:
         lines.append({"reason": reasons["judgedElsewhere"], "count": sum(elsewhere.values()),
@@ -1712,7 +1918,7 @@ def build_prediction(ctx: dict) -> dict:
         lines.append({"reason": reasons["notSeparable"], "count": not_sep,
                       "subject": "; ".join(sorted({title_of(g["checkId"]) for g in items
                                                    if g["attribution"] == "not-separable"}))})
-    co = {c: n for (c, a), n in count_only.items() if a == p_arm}
+    co = {c: n for (c, a), n in count_only.items() if a == p_arm and c not in asset_named}
     if co:
         lines.append({"reason": reasons["countOnly"], "count": sum(co.values()),
                       "subject": "; ".join(sorted(title_of(c) for c in co))})
@@ -1865,12 +2071,14 @@ def build_prediction(ctx: dict) -> dict:
         open_ = [e for e in judged if outcome[id(e)] == "left"]
         untold = [e for e in judged if outcome[id(e)] == "cannot-tell"]
         untold_value = [e for e in judged if outcome[id(e)] == "cannot-tell-value"]
-        # by item: every judged clash; the totals: only the clashes the prediction counts. A clash already there with
-        # one mod alone is not credited to the patch (third blind review): it has its own line.
+        # by item: every judged clash; the totals: only the clashes the prediction counts. With two evaluated mods, a
+        # clash already there with one mod alone is not credited to the patch (third blind review): it has its own
+        # line. With one evaluated mod, a clash that comes from it alone is counted in the headline, so the patch is
+        # credited with it too (fourth blind review, S1): the totals add up to the headline.
         all_ = {"hits": hits, "own": own, "kept": kept, "open": open_, "untold": untold + untold_value}
 
         def credit(xs):
-            return [e for e in xs if e.get("attribution") != "single-mod"]
+            return [e for e in xs if not multi or e.get("attribution") != "single-mod"]
         hits, own, kept, open_, untold, untold_value = (credit(x) for x in (hits, own, kept, open_, untold, untold_value))
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
@@ -1892,15 +2100,23 @@ def build_prediction(ctx: dict) -> dict:
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat")
                      and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
         spots = collections.Counter(e["admission"] for e in spot_rows)
-        blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())]
-        # overwrite history is not a predicted clash, but a row the patch removes whose physical test held (the
-        # overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted)
+        # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
+        blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())
+                 if k != "history"]
+        # overwrite history is not a predicted clash, but a row no longer flagged with the patch whose physical test held
+        # (the overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted), and
+        # a navmesh whose loss still holds with the patch under another pair is named as persisting (fourth review, W3)
+        held_gone = [e for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds"
+                     and e["checkId"] == "geometry.navmesh-ownership"]
         history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds")
         sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)})]
         if own:
             sentences.append(bind(words["validationOwn"], {"patch": patch, "count": len(own)}))
         if kept:
-            sentences.append(bind(words["validationKept"], {"patch": patch, "count": len(kept)}))
+            kept_by = collections.Counter(e["A"] for e in kept)
+            sentences.append(bind(words["validationKept"], {"patch": patch, "count": fmt_n(len(kept)), "by": "; ".join(
+                bind(words["validationKeptBy"], {"loser": m_, "count": fmt_n(n_)})
+                for m_, n_ in sorted(kept_by.items(), key=lambda kv: (-kv[1], kv[0].lower())))}))
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
         edited = sum(1 for e in open_ if left_split.get(id(e)) == "patchHeld")
         sentences += [bind(words["validationOpen"], {"patch": patch, "count": len(open_), "split": bind(
@@ -1914,9 +2130,13 @@ def build_prediction(ctx: dict) -> dict:
         else:
             sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]})
                           for s in blind]
-        if history_holds:
-            sentences.append(bind(words["validationHistoryHolds"], {"count": history_holds,
-                                                                    "total": spots.get("history", 0)}))
+        if spots.get("history"):
+            sentences.append(bind(words["validationHistoryHolds"], {"count": fmt_n(history_holds), "patch": patch,
+                                                                    "total": fmt_n(spots.get("history", 0))}))
+            n_persist, persist_ex = persisting(list(dict.fromkeys(e["formKey"] for e in held_gone)))
+            if n_persist:
+                sentences.append(bind(words["validationHistoryPersists"], {"patch": patch, "count": fmt_n(n_persist),
+                                                                           "examples": persist_ex}))
         if no_body_new:
             sentences.append(bind(words["validationNoBody"], {"patch": patch, "count": no_body_new}))
         if problems and not bases_read and any(rk[0] in body_checks for rk in problems):
@@ -1938,6 +2158,7 @@ def build_prediction(ctx: dict) -> dict:
                             "own": sum(1 for e in all_["own"] if item_of(e) == k),
                             "open": sum(1 for e in all_["open"] if item_of(e) == k),
                             "kept": sum(1 for e in all_["kept"] if item_of(e) == k),
+                            "keptBy": collections.Counter(e["A"] for e in all_["kept"] if item_of(e) == k),
                             "cannotTell": sum(1 for e in all_["untold"] if item_of(e) == k),
                             **{f"open{n[0].upper()}{n[1:]}": sum(1 for e in all_["open"] if item_of(e) == k
                                                                  and left_split.get(id(e)) == n)
@@ -1950,7 +2171,17 @@ def build_prediction(ctx: dict) -> dict:
 
         def outcome_text(bi):
             keys = ("hits", "own", "kept", "open", "cannotTell", "notMeasured")
-            parts = [bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) for k in keys if bi.get(k)]
+
+            def part(k):
+                if k != "kept":
+                    return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
+                # whose change stays lost, as without the patch (fourth blind review, W1): never "kept" alone
+                by = bi.get("keptBy") or {}
+                if sum(by.values()) != bi.get("kept"):
+                    return bind(ow["keptUnnamed"], {"count": fmt_n(bi.get(k) or 0)})
+                return ", ".join(bind(ow["kept"], {"loser": m_, "count": fmt_n(n_)})
+                                 for m_, n_ in sorted(by.items(), key=lambda kv: (-kv[1], kv[0].lower())))
+            parts = [part(k) for k in keys if bi.get(k)]
             if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed")):
                 # the objects still intersect: say how many are still reported between two mods and why the rest
                 # are not (W-B2), never a bare "left N" that the detail sections cannot reconcile
@@ -1961,19 +2192,23 @@ def build_prediction(ctx: dict) -> dict:
             return ", ".join(parts) if parts else ow["none"]
         item_lines, alone_total = [], collections.Counter()
         for g, bi in zip(prediction["items"], by_item):
-            if g.get("shownAs") == "alone" or g.get("attribution") == "single-mod":
+            if g.get("shownAs") == "alone" or (multi and g.get("attribution") == "single-mod"):
+                # many losing mods in one line: their changes are counted together, said as the losing mod's
                 alone_total.update({k: v for k, v in bi.items() if isinstance(v, int)})
                 alone_total["count"] += g["count"]
                 continue
-            item_lines.append(bind(words["validationItemLine"], {"title": g["title"], "modA": g["mods"][0],
-                                                                 "modB": g["mods"][1], "count": fmt_n(g["count"]),
-                                                                 "outcomes": outcome_text(bi)}))
+            from_one = not multi and g.get("attribution") == "single-mod" and g.get("attributionMod")
+            item_lines.append(bind(words["validationItemLineFrom" if from_one else "validationItemLine"], {
+                "title": g["title"], "modA": g["mods"][0], "modB": g["mods"][1], "count": fmt_n(g["count"]),
+                "mod": g.get("attributionMod"), "other": next((m_ for m_ in g["mods"] if m_.lower() != str(
+                    g.get("attributionMod")).lower()), ""), "outcomes": outcome_text(bi)}))
         if alone_total.get("count"):
             item_lines.append(bind(words["validationAloneLine"], {"count": fmt_n(alone_total["count"]),
                                                                   "outcomes": outcome_text(alone_total)}))
         # what stays with the patch, said at the top under the prediction (third blind review, W-S6 / S-S5)
         prediction["withPatchLine"] = bind(words["withPatchLine"], {"patch": patch, "outcomes": outcome_text({
-            "hits": len(hits), "own": len(own), "kept": len(kept), "open": len(open_),
+            "hits": len(hits), "own": len(own), "kept": len(kept), "keptBy": collections.Counter(e["A"] for e in kept),
+            "open": len(open_),
             "cannotTell": len(untold) + len(untold_value), "notMeasured": len(credit(not_measured))})})
         validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
                       "itemLines": item_lines, "newByCheck": new_by_check,
@@ -2773,7 +3008,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         why = str(state.get("refusedWhy") or "")
         m = re.match(r"^(.+?):\s*unjudgeable\s+([\d.]+%)\s*->\s*([\d.]+%).*?more than\s+([\d.]+%)", why)
         if m:
-            return bind(cmp_words["refusedShare"], {"population": m.group(1).strip(), "before": m.group(2),
+            return bind(cmp_words["refusedShare"], {"population": plain_population(
+                m.group(1).strip(), reader_data.get("prediction") or {}), "before": m.group(2),
                                                      "after": m.group(3), "limit": m.group(4)})
         return cmp_words["refusedUnnamed"]
 

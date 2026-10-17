@@ -1399,7 +1399,9 @@ def main():
         plan, md, html = record_validation_bundle()
         val = reader(plan).get("validation") or {}
         text = section_text(md, headings(plan).get("validation") or "\0")
-        said = "keeps the value that wins without it" in text and "on purpose" not in text and "still lost" not in text
+        # fourth blind review (W1): the sentence says the patch carries the winning value and the change stays lost
+        said = ("carries the value that wins without it" in text and "stays lost" in text and "on purpose" not in text
+                and "still lost" not in text)
         ok = val.get("kept") == 1 and val.get("open") == 1 and said
         return ok, f"kept {val.get('kept')}, open {val.get('open')}; printed: {said}"
 
@@ -1464,9 +1466,10 @@ def main():
     # C470. Each population in its own unit, counted once, never summed with another population
     def c470_populations_counted_once_not_summed():
         plan, cov, md = limits()
-        ok = ("205 exterior cells with a LAND" in cov and "391 edge-adjacent pairs" in cov
+        # population names in the skill's plain words since the fourth blind review (B1, C526)
+        ok = ("205 exterior cells with landscape" in cov and "391 pairs of neighbouring cells" in cov
               and "1,192" not in cov and "596" not in cov and "the landscape declares no heights" in cov)
-        return ok, f"seam line: {[x for x in cov.splitlines() if 'LAND' in x]}"
+        return ok, f"seam line: {[x for x in cov.splitlines() if 'landscape' in x]}"
 
     # C471. A reason naming another check is "judged by" that check's title, never a check id or "could not judge"
     def c471_judged_elsewhere_named_by_title():
@@ -1509,7 +1512,7 @@ def main():
     def c476_history_with_measured_loss_named():
         plan, md, html = history_bundle()
         text = section_text(md, headings(plan).get("validation") or "\0")
-        ok = "1 held a measured loss" in text
+        ok = "1 of which held a measured loss" in text and "removes" not in text   # W3: never "the patch removes"
         return ok, f"history line printed: {ok}"
 
     # C477. A record item says which way the edit is lost and gives example records
@@ -1677,7 +1680,7 @@ def main():
                                             [MOD_A, MOD_B], patches=[PATCH])
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         line = next((x for x in sec.splitlines() if "navmesh replaces" in x), "")
-        ok = (f"without the patches, {MOD_B}'s navmesh replaces {MOD_A}'s in 2 navmesh records, and in 2 of them" in line
+        ok = (f"without the patch, {MOD_B}'s navmesh replaces {MOD_A}'s in 2 navmesh records, and in 2 of them" in line
               and "CityExterior02 (ext) 689 -> 5 triangles" in line
               and f"The 2 broken navmesh links counted above point to triangles of a navmesh this replacement cut "
                   f"down: {n1} (689 -> 5 triangles)" in line
@@ -2047,7 +2050,7 @@ def main():
         adm = sorted(((e.get("formKey") or "")[:6], e.get("A"), e.get("admission")) for e in p.get("record") or []
                      if e.get("B") == MOD_B)
         ok = (adm == [("000901", OTHER, "notOwnEdit"), ("000902", OTHER, "admitted"), ("000903", OTHER, "admitted")]
-              and "1 record field whose losing value is the base game's own" in md
+              and "1 record field whose losing value only undoes the change of the mod loaded before it" in md
               and "in 1 of them the winning value is that earlier mod's own" in md)
         return ok, f"admission {adm}; set aside {(p.get('setAsideLine') or '')[-400:]!r}"
 
@@ -2141,10 +2144,36 @@ def main():
         plan2, md2, html2 = comparison_bundle("refused")
         titles = " ".join(priorities()["reader"]["checkTitles"].values())
         bad = [t for t in ("a LAND", "edge-adjacent", "dependent-host") if t in lim or t in md2]
-        ok = (not bad and "neighbouring cells" in lim and not re.search(r"\b(FLST|LCTN)\b", titles))
+        ok = (not bad and "neighbouring cells" in lim and not re.search(r"\b(FLST|LCTN)\b", titles)
+              and "records.registration-and-dialogue" in priorities()["reader"]["checkTitles"])
         return ok, f"tool words left {bad}; limits {lim[:300]!r}"
 
-    for name, fn in [("w2-polish/C520-kept-says-whose-change-stays-lost", c520_kept_says_whose_change_stays_lost),
+    # C527. The same with no base-game value in sight: a mod loaded before the earlier mod changed the field first. The
+    # losing value equals the value the field had just before the earlier mod changed it (another row of the same setup
+    # names it), so it only undoes the earlier mod's change; a setup whose load order differs before that mod is not read
+    def c527_undo_of_earlier_change_is_no_edit():
+        early = "Early.esp"
+        arms = [arm("baseline", [BASE, early, OTHER, MOD_A, MOD_B], kind="baseline"),
+                arm("dependency-only", [BASE, early, OTHER]), arm("plus-a", [BASE, early, OTHER, MOD_A]),
+                arm("plus-b", [BASE, early, OTHER, MOD_B]), arm("reordered", [BASE, OTHER, early, MOD_A, MOD_B])]
+        R1, R2 = f"000911:{BASE}", f"000912:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_B, R1, "Name", "e1", "x1", "o1", before=early),      # Early's change, OTHER's
+                  lost_row(MOD_A, MOD_B, R1, "Name", "o1", "x1", "e1", before=OTHER),      # ModA undoes OTHER's change
+                  lost_row(MOD_A, MOD_B, R2, "Name", "q2", "x2", "o2", before=OTHER)]      # only the reordered setup says q2
+        r_rows = [lost_row(OTHER, MOD_B, R2, "Name", "o2", "x2", "q2", before=early)]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "reordered"): r_rows}
+        enr.update({(RECORDS, a): [] for a in ("dependency-only", "plus-a", "plus-b")})
+        count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+        results = {(CONTACT, a["armId"]): [] for a in arms}
+        plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+        p = reader(plan).get("prediction") or {}
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("A"), e.get("admission")) for e in p.get("record") or []
+                     if e.get("A") == MOD_A)
+        ok = adm == [("000911", MOD_A, "notOwnEdit"), ("000912", MOD_A, "admitted")]
+        return ok, f"admission {adm}"
+
+    for name, fn in [("w2-polish/C527-undo-of-earlier-change-is-no-edit", c527_undo_of_earlier_change_is_no_edit),
+                     ("w2-polish/C520-kept-says-whose-change-stays-lost", c520_kept_says_whose_change_stays_lost),
                      ("w2-polish/C521-base-game-value-is-no-edit", c521_base_game_value_is_no_edit),
                      ("w2-polish/C522-history-loss-persisting-is-named", c522_history_loss_persisting_is_named),
                      ("w2-polish/C523-missing-meshes-named", c523_missing_meshes_named),
