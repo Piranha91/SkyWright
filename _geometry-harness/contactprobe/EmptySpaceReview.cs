@@ -13,9 +13,18 @@ static class EmptySpaceReview
                           Func<int, string> pluginName, Func<FormKey, string> baseLabel, Func<FormKey, string> cellOf,
                           Func<int, bool> isFloorPlugin, Func<string, bool> isBethesdaFile, Func<FormKey, string, bool?> nodeCheck,
                           string outPath, string? emitPath, string? basePath, string instance, int pluginsRead, int pluginsUnreadable,
-                          ConfigurationIdentity identity, int listN, Stopwatch sw)
+                          ConfigurationIdentity identity, int listN, Stopwatch sw,
+                          PopulationScope? population = null, string? auditEmit = null, string? auditOut = null)
     {
         var search = new EmptySpaceSearch(cidx, closure, pluginName, nodeCheck, isBethesdaFile, isFloorPlugin);
+        // --population (window 2, task 1): the population's interior cells, closed over relocations and rack links.
+        EmptySpaceScope? scope = null;
+        if (population is not null)
+        {
+            scope = new EmptySpaceScope(cidx.Index, population.InteriorClosure(cidx.Index, search.RackPartners));
+            Console.WriteLine($"   population scope: {scope.Cells.Count:N0} interior cells (the population's {population.Describe()})");
+        }
+        long outsidePairs = 0, judgedDropped = 0;
         int moverIndex(string name) { for (int p = 0; p < closure.Count; p++) if (string.Equals(pluginName(p), name, StringComparison.OrdinalIgnoreCase)) return p; return -1; }
         Console.WriteLine($"\n==== EMPTY SPACE — fixtures whose assembly reached a floor or wall a mover removed or moved ====");
         Console.WriteLine($"   anchors: Static (or Fixed MoveableStatic) with solid collision, at least {search.MinAnchorDim:0}u across, not a marker, not a reference "
@@ -26,11 +35,15 @@ static class EmptySpaceReview
         foreach (var (f, m) in search.CandidatesNear(hosts))
         {
             if (++seen % 5000 == 0) Console.WriteLine($"   ... {seen:N0} pairs, {rows.Count:N0} rows, touch tests {search.TouchTests:N0}, {sw.Elapsed.TotalSeconds:0}s");
+            if (scope is not null && !scope.MustJudge(f)) { outsidePairs++; continue; }
             var r = search.Judge(f, m);
+            if (scope is not null && !scope.InScope(f)) { judgedDropped++; continue; }
             if (r.Verdict == EmptySpaceVerdict.Absent) { absent++; continue; }
             if (r.Verdict == EmptySpaceVerdict.NoRelation) noRelation++;
             rows.Add(r);
         }
+        if (scope is not null)
+            Console.WriteLine($"   population: {outsidePairs:N0} pairs outside it not judged; {judgedDropped:N0} judged only to keep the exterior memos exact, not reported");
         Console.WriteLine($"   pairs judged: {rows.Count + absent:N0} (absent in an arm {absent:N0}, not listed); touch tests {search.TouchTests:N0}, surfaces built {search.SurfacesBuilt:N0}, walks {search.WalksRun:N0} (reused {search.WalksReused:N0}); exterior hosts not searched (the land is not read) {search.ExteriorHostsSkipped:N0}  ({sw.Elapsed.TotalSeconds:0.0}s)");
         foreach (var g in rows.GroupBy(r => r.Verdict).OrderBy(g => g.Key))
             Console.WriteLine($"      {g.Key,-20} {g.Count(),8:N0}   distinct fixtures {g.Select(r => r.Fixture).Distinct().Count(),7:N0}");
@@ -45,13 +58,21 @@ static class EmptySpaceReview
         var opts = new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
         var dir = Path.GetDirectoryName(Path.GetFullPath(outPath));
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        File.WriteAllText(outPath, cidx.Arms.StampForced(JsonSerializer.Serialize(new
+        string sideText = JsonSerializer.Serialize(new
         {
             Schema = "housecarl.empty-space/1", State = cidx.State?.Name ?? EnablePopulation.BaselineStateName,
             Parameters = new { Epsilon = cidx.Epsilon, search.MinAnchorDim, search.MaxMembers, search.AnchorReport, Reach = search.Reach },
             Counts = rows.GroupBy(r => r.Verdict.ToString()).ToDictionary(g => g.Key, g => g.Count()), Absent = absent,
             Rows = rows.Where(r => r.Verdict != EmptySpaceVerdict.NoRelation).Select(r => EmptySpaceOutput.Row(r, pluginName, baseLabel, cellOf)).ToList(),
-        }, opts)));
+        }, opts);
+        if (population is not null)
+        {
+            // a scoped side file names its population (an unscoped one keeps its shape byte for byte)
+            var node = System.Text.Json.Nodes.JsonNode.Parse(sideText)!.AsObject();
+            node["Population"] = population.Identity("load-time");
+            sideText = node.ToJsonString(opts);
+        }
+        File.WriteAllText(outPath, cidx.Arms.StampForced(sideText));
         Console.WriteLine($"wrote {outPath} (no-relation rows counted, not listed: {noRelation:N0})");
 
         if (emitPath is not null)
@@ -83,10 +104,16 @@ static class EmptySpaceReview
                                                    ["FloorPopulation"] = rows.Count(r => r.Verdict == EmptySpaceVerdict.FloorPopulation) },
                     $"class {cls.Count:N0}"),
             };
+            if (scope is not null)
+                coverage.Add(new("population scope", rows.Count + absent, new Dictionary<string, long>(),
+                    new Dictionary<string, long> { ["PairOutsidePopulation"] = outsidePairs, ["JudgedForExteriorMemo"] = judgedDropped },
+                    $"fixtures judged only in the population's {scope.Cells.Count:N0} interior cells (closed over relocations and rack links); {population!.Describe()}"));
             ConflictIo.Write(emitPath, new ConflictFile("contactprobe", instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-                                                        "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity));
+                                                        population?.Identity("load-time") ?? "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity));
             Console.WriteLine($"emitted {conflicts.Count:N0} EMPTY-SPACE conflicts -> {emitPath}");
         }
+        if (scope is not null && auditEmit is not null)
+            EmptySpaceAudit.Write(auditEmit, auditOut!, "contactprobe", population!.Identity("load-time"), (_, f) => scope.InScope(f) ? "empty-space" : null);
         Console.WriteLine("Limits: interiors only (the land is not read); the anchor gate is a stated parameter: another plugin's Static at anchor size that itself");
         Console.WriteLine("        floats grounds what touches it; a render-only floor is no anchor; runtime existence is the records' enable chain (R1).");
         Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");

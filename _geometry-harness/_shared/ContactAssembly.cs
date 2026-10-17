@@ -299,6 +299,27 @@ public sealed class EmptySpaceSearch
         }
     }
 
+    /// <summary>The other references of the weapon rack(s) a reference belongs to (activator, trigger, starting items): the walk
+    /// joins them through <see cref="MountPartners"/>, wherever each is filed. Empty for a reference on no rack.</summary>
+    public IEnumerable<FormKey> RackPartners(FormKey k)
+    {
+        BuildRacks();
+        if (_rackGroups is null)
+        {
+            _rackGroups = new();
+            void Link(FormKey a, FormKey b)
+            {
+                if (a.IsNull || b.IsNull || a == b) return;
+                if (!_rackGroups.TryGetValue(a, out var la)) _rackGroups[a] = la = new();
+                if (!_rackGroups.TryGetValue(b, out var lb)) _rackGroups[b] = lb = new();
+                la.Add(b); lb.Add(a);
+            }
+            foreach (var (item, (act, trig)) in _rackItem!) { Link(item, act); Link(item, trig); Link(act, trig); }
+        }
+        return _rackGroups.TryGetValue(k, out var l) ? l : Enumerable.Empty<FormKey>();
+    }
+    Dictionary<FormKey, HashSet<FormKey>>? _rackGroups;
+
     /// <summary>The rest rule's rack reading for an item in an arm (null when it is no rack's starting item).</summary>
     public RackMountReading? MountOf(FormKey item, int mover)
     {
@@ -565,8 +586,13 @@ public sealed class EmptySpaceSearch
     /// <summary>One world state's pass (stateprobe --empty-space): the state is set on the ContactIndex arms, every interior candidate
     /// that ARRIVES in it is judged against every mover near it, and the state is cleared again. Every judged pair is returned, each
     /// with the switch whose set brought the fixture in; the caller counts and filters.</summary>
-    public List<(EmptySpaceRow Row, FormKey Switch)> JudgeArrivals(StateArm arm, SwitchIndex sx)
+    public List<(EmptySpaceRow Row, FormKey Switch)> JudgeArrivals(StateArm arm, SwitchIndex sx) => JudgeArrivals(arm, sx, null, out _, out _);
+
+    /// <summary><see cref="JudgeArrivals(StateArm, SwitchIndex)"/> within a population (<paramref name="scope"/>; null: all): an
+    /// arrival is judged when <see cref="EmptySpaceScope.MustJudge"/> and returned when <see cref="EmptySpaceScope.InScope"/>.</summary>
+    public List<(EmptySpaceRow Row, FormKey Switch)> JudgeArrivals(StateArm arm, SwitchIndex sx, EmptySpaceScope? scope, out int outside, out int judgedDropped)
     {
+        outside = 0; judgedDropped = 0;
         var res = new List<(EmptySpaceRow, FormKey)>();
         var arrivals = arm.Changes(sx).Where(c => c.After).GroupBy(c => c.Key).Select(g => (g.Key, g.First().Root.Key)).ToList();
         if (arrivals.Count == 0) return res;
@@ -577,7 +603,13 @@ public sealed class EmptySpaceSearch
             foreach (var (f, sw) in arrivals)
             {
                 if (Place(f, -1) is not { } pf || !IsCandidate(f, pf) || !pf.Snap.Interior) continue;
-                foreach (var m in MoversNear(f)) res.Add((Judge(f, m, arm.Name), sw));
+                if (scope is not null && !scope.MustJudge(f)) { outside++; continue; }
+                bool keep = scope is null || scope.InScope(f);
+                foreach (var m in MoversNear(f))
+                {
+                    var r = Judge(f, m, arm.Name);
+                    if (keep) res.Add((r, sw)); else judgedDropped++;
+                }
             }
         }
         finally { C.State = was; ClearMemo(); }
@@ -598,6 +630,21 @@ public sealed class EmptySpaceSearch
         return w.Grounded ? (PhysicalState.Gone, $"its assembly reaches a floor or wall ({w.Anchors[0].Key})")
                           : (PhysicalState.Holds, $"its assembly of {w.Members} reaches no floor or wall");
     }
+}
+
+/// <summary>The empty-space pass inside a plan's population (window 2, task 1): <see cref="Cells"/> is the population's interior
+/// cells closed over relocations and rack links (<see cref="PopulationScope.InteriorClosure"/>). A fixture with an interior placement
+/// there is IN SCOPE: judged and reported. A fixture ever placed in an exterior is judged as well (its rows dropped unless in
+/// scope), so the search's memos of exterior assemblies fill exactly as in a whole-order run. Every other fixture is not judged.
+/// The search's memos are keyed by the references a walk visits, and a walk from a fixture in these cells visits only references
+/// of these cells (or exterior ones), so every in-scope row is the one the whole-order run writes.</summary>
+public sealed class EmptySpaceScope
+{
+    readonly OverlapIndex _idx;
+    public IReadOnlySet<FormKey> Cells { get; }
+    public EmptySpaceScope(OverlapIndex idx, IReadOnlySet<FormKey> cells) { _idx = idx; Cells = cells; }
+    public bool InScope(FormKey f) => _idx.History.Of(f) is { } hs && hs.Any(s => s.Interior && Cells.Contains(s.Cell));
+    public bool MustJudge(FormKey f) => _idx.History.Of(f) is { } hs && hs.Any(s => !s.Interior || Cells.Contains(s.Cell));
 }
 
 /// <summary>The output shapes both probes write for the empty-space pass: one JSON row per judged pair, and the emit's conflict for a
@@ -664,5 +711,30 @@ public static class EmptySpaceOutput
             }
             return names?.Contains(node);
         };
+    }
+}
+
+/// <summary>--population-audit EMIT OUT (window 2, task 1): for every row of another emit (a whole-order run's), whether this run's
+/// population rule keeps it and which part of the rule does (null: dropped). The necessary record decides (the fixture, or a state
+/// row's member); <c>rule</c> gets the row's kind and that record.</summary>
+public static class EmptySpaceAudit
+{
+    public static void Write(string emit, string outPath, string probe, string population, Func<string, FormKey, string?> rule)
+    {
+        var rows = new List<object>();
+        foreach (var c in ConflictIo.Read(emit).Conflicts)
+        {
+            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+            foreach (var rec in c.Necessary)
+            {
+                var why = rule(c.Kind, FormKey.Factory(rec.FormKey));
+                rows.Add(new { identity = ConflictIo.RowIdentity(c.Kind, rec.FormKey, other, c.A), kind = c.Kind, key = rec.FormKey, inScope = why is not null, rule = why });
+            }
+        }
+        var dir = Path.GetDirectoryName(Path.GetFullPath(outPath));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        File.WriteAllText(outPath, System.Text.Json.JsonSerializer.Serialize(new { probe, population, emit = Path.GetFullPath(emit), rows },
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine($"population audit: {rows.Count:N0} row(s) of {Path.GetFileName(emit)} -> {outPath}");
     }
 }

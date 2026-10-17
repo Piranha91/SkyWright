@@ -56,6 +56,8 @@ public sealed class StateTally
     public int HostsLeaving, HostsArriving, DepsArriving, DepsLeaving, DepsRemainOnHost, ReSupported, FloatingOnArrival, TouchingOnArrival, ContactUnmeasured;
     public int RouteAsked, RouteUnjudged, RouteNoLine, RouteClipped, RouteNone;
     public double ElapsedMs;
+    /// <summary>Changed references a population scope did not process (window 2, task 1).</summary>
+    public int OutsidePopulation;
 }
 
 /// <summary>The probe's route measurement for one reference IN ONE STATE — the route-cut verdict of its obstacle (its
@@ -79,6 +81,10 @@ public sealed class StateEvaluator
     public ISet<string> Obstructing { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
     public RouteAsk? Route { get; set; }
+    /// <summary>A plan's population (window 2, task 1): a changed reference this says false for is not processed. Every row is
+    /// computed from its own changed reference and the whole-order index, so the rows of a processed one are the whole-order
+    /// run's. Null: every changed reference.</summary>
+    public Func<FormKey, bool>? KeyInScope { get; set; }
 
     [Flags] enum Role { None = 0, Obstructing = 1, Dependent = 2, Physical = 4, Host = 8, Navcut = 16 }
     readonly BoxHash<FormKey> _boxes = new();
@@ -139,6 +145,16 @@ public sealed class StateEvaluator
 
     public bool HasBox(FormKey k) => _facts.ContainsKey(k);
 
+    /// <summary>Whether any boxed reference within <paramref name="reach"/> of <paramref name="k"/>'s winning box (its winning space)
+    /// satisfies <paramref name="pred"/>: the neighbourhood the contact half reads.</summary>
+    public bool AnyNear(FormKey k, float reach, Func<FormKey, bool> pred)
+    {
+        if (!_facts.TryGetValue(k, out var f) || Index.History.Winning(k) is not { } w) return false;
+        foreach (var (n, _, _) in _boxes.Near(w.Space, f.Box, reach))
+            if (n != k && pred(n)) return true;
+        return false;
+    }
+
     /// <summary>The class for one state. <paramref name="isVanilla"/> / <paramref name="isUssep"/> classify a plugin index.</summary>
     public List<StateRow> Evaluate(StateArm arm, Func<int, bool> isVanilla, Func<int, bool> isUssep, StateTally tally)
     {
@@ -168,6 +184,7 @@ public sealed class StateEvaluator
 
         foreach (var (key, before, after, root, member) in changes)
         {
+            if (KeyInScope is not null && !KeyInScope(key)) { tally.OutsidePopulation++; continue; }
             if (after) tally.Arrivals++; else tally.Departures++;
             if (member is null) tally.SwitchesThemselves++;
             if (!_allowLegacyBoundsOverlapForProof && _stateOverlapScope.Contains(key)) tally.StateOverlapUnmeasured++;
