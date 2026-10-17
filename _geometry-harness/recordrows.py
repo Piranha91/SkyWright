@@ -261,6 +261,9 @@ def parse_transcript(request: Path, response: Path) -> dict:
 
 # ---------------------------------------------------------------------------------------------- rows
 
+FILE_PATH = re.compile(r"[\w .'()-]+(?:[\\/][\w .'()-]+)+\.[A-Za-z0-9]{2,4}")
+
+
 def _norm(v: str) -> str:
     v = str(v).strip()
     parts = [p.strip() for p in v.split(",")]
@@ -270,7 +273,8 @@ def _norm(v: str) -> str:
             x = round(float(p), 4)
             out.append("0" if x == 0 else f"{x:.4f}".rstrip("0").rstrip("."))
         return ",".join(out)
-    return v
+    # a file path is read by the game without regard to letter case or slash direction
+    return FILE_PATH.sub(lambda m: m.group(0).replace("\\", "/").lower(), v)
 
 
 TWO_PI = 2 * math.pi

@@ -1666,7 +1666,56 @@ def main():
               and "NPC" not in line and "navmesh replaces" in html)
         return ok, f"line {line!r}"
 
+    # C486. One evaluated mod: the setup that decided "needs both" for a partner mod is named in the record
+    def c486_setup_without_partner_named():
+        plan, md, html = one_target_bundle()
+        p = reader(plan).get("prediction") or {}
+        ok = p.get("withoutPartnerArms") == {OTHER: "without-other"}
+        return ok, f"without-partner setups {p.get('withoutPartnerArms')}"
+
+    # C487. An object two by-object checks both name (a fixture hanging that is also left without support) is counted
+    # once in the headline; the second check counts its other objects and says how many it shares
+    def c487_headline_counts_each_object_once():
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2)]
+        ct = [row("CONTACT", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2, 3)]
+        results = {(c, a): [] for c in (FIXTURE, CONTACT) for a in ("dependency-only", "plus-a", "plus-b")}
+        results.update({(FIXTURE, "baseline"): fx, (CONTACT, "baseline"): ct})
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        ok = ("3 cases of objects left floating" in v and "the same 2 objects also found by the check "
+              f"\"{priorities()['reader']['checkTitles'].get(FIXTURE)}\" (counted once, above)" in v)
+        return ok, f"verdict {v!r}"
+
+    # C488. A lost edit whose two values name the same file, differing only in letter case or slashes, is not a lost
+    # edit
+    def c488_path_case_only_is_not_lost():
+        rows_ = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "Texture", "data\\textures\\a\\rock01.dds",
+                          "Data\\Textures\\A\\Rock01.dds", "x"),
+                 lost_row(MOD_A, MOD_B, f"000702:{BASE}", "Texture", "data\\textures\\a\\rock01.dds",
+                          "Data\\Textures\\A\\Rock02.dds", "x")]
+        enr = {(RECORDS, a): (rows_ if a == "baseline" else []) for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+        results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission"))
+                     for e in (reader(plan).get("prediction") or {}).get("record") or [])
+        ok = (adm == [("000701", "pathCase"), ("000702", "admitted")]
+              and "1 record fields whose two values name the same file" in md)
+        return ok, f"admission {adm}"
+
+    # C489. A check whose rows are still physically there is never listed under "found no problem"
+    def c489_still_holding_not_no_problem():
+        plan, md, html = comparison_bundle("holding")
+        sec = section_text(md, "Checks that found no problem")
+        title = (priorities()["reader"]["checkTitles"]).get(OVERLAP, OVERLAP)
+        ok = (title not in sec and "1 of the problems in the setup it was compared with is still physically there" in md)
+        return ok, f"no-problem section {sec.strip()[:300]!r}"
+
     for name, fn in [("w2-round3/C481-place-counts-from-listed-rows", c481_place_counts_from_listed_rows),
+                     ("w2-round3/C486-setup-without-partner-named", c486_setup_without_partner_named),
+                     ("w2-round3/C487-headline-counts-each-object-once", c487_headline_counts_each_object_once),
+                     ("w2-round3/C488-path-case-only-is-not-a-lost-edit", c488_path_case_only_is_not_lost),
+                     ("w2-round3/C489-still-holding-is-not-no-problem", c489_still_holding_not_no_problem),
                      ("w2-round3/C485-navmesh-loss-stated-in-prediction", c485_navmesh_loss_stated_in_prediction),
                      ("w2-round3/C483-light-without-model-is-not-a-clash", c483_light_without_model_is_not_a_clash),
                      ("w2-round3/C484-left-overlaps-split-by-record-data", c484_left_overlaps_split_by_record_data),

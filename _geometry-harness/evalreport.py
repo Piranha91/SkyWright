@@ -421,6 +421,19 @@ def refuse(run: Run | None, reason: str, code: int = EXIT_REFUSED_INPUT) -> int:
     return code
 
 
+FILE_PATH = re.compile(r"[\w .'()-]+(?:[\\/][\w .'()-]+)+\.[A-Za-z0-9]{2,4}")
+
+
+def path_folded(v) -> str:
+    """A value with every file path in it compared as the game reads it: letter case and slash direction ignored."""
+    return FILE_PATH.sub(lambda m: m.group(0).replace("\\", "/").lower().strip(), str(v))
+
+
+def same_but_path_case(a, b) -> bool:
+    """Two values that differ only in the letter case or slashes of a file path are the same value to the game."""
+    return a is not None and b is not None and str(a) != str(b) and path_folded(a) == path_folded(b)
+
+
 def fmt_n(v) -> str:
     if isinstance(v, bool) or v is None:
         return str(v)
@@ -1058,6 +1071,10 @@ def build_prediction(ctx: dict) -> dict:
     def no_body(rk, other):
         return rk[1] != "LOST-EDIT" and (bodiless(rk[4]) or any(bodiless(o) for o in other or ()))
 
+    def path_case_only(rk):
+        v = (p_rows.get(rk) or {}).get("row", {}).get("values") or {}
+        return same_but_path_case(v.get("lost"), v.get("winner"))
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -1072,9 +1089,11 @@ def build_prediction(ctx: dict) -> dict:
             return "notInvolving"
         if no_body(rk, other):
             return "noBody"                    # a clash between the mods but for a light with no body (W-B3)
+        if rk[1] == "LOST-EDIT" and path_case_only(rk):
+            return "pathCase"                  # the two values name the same file (Snazzy review 3)
         return "admitted"
 
-    without_cache = {}
+    without_cache, partner_arms = {}, {}
 
     def without_other(m_lower):
         """The setup equal to P without one other mod (and its companions), in this bundle or the sibling."""
@@ -1097,6 +1116,8 @@ def build_prediction(ctx: dict) -> dict:
             if not t or not others:
                 return "single-mod", t, None
             arm_m = without_other(others[0].lower())
+            if arm_m is not None:
+                partner_arms.setdefault(others[0], arm_m)       # named in the record: which setup said so
             if (arm_m is None or (rk[0], arm_m) not in measured
                     or (str(arm_m).startswith("sibling:") and not sib_ok.get(rk[0]))):
                 return "with-target", t, None
@@ -1171,6 +1192,7 @@ def build_prediction(ctx: dict) -> dict:
                                    "_subjects": set()})
         g["count"] += 1
         g["_subjects"].add(rk[4] if rk[4] is not None else ("row", rk[5]))
+        g.setdefault("_subjectRows", collections.Counter())[rk[4] if rk[4] is not None else ("row", rk[5])] += 1
         fid = hit["finding"].get("id") if rk[0] not in sib_only else None
         if fid and fid not in g["findingIds"]:
             g["findingIds"].append(fid)
@@ -1210,7 +1232,7 @@ def build_prediction(ctx: dict) -> dict:
         if " " in code:
             return code
         return words["unjudgeableUnnamed"]
-    items, subjects_of = [], {}
+    items, subjects_of, subject_rows_of = [], {}, {}
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
@@ -1227,6 +1249,7 @@ def build_prediction(ctx: dict) -> dict:
         attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "other": other_mod,
                                                           "why": g["attributionWhy"] or ""})
         subjects_of[id(g)] = g.pop("_subjects")
+        subject_rows_of[id(g)] = g.pop("_subjectRows")
         g["relationships"] = g["count"]
         g["objects"] = len(subjects_of[id(g)])
         # a kind whose rows are fields of a record (a path, not a thing) also says how many records they are on
@@ -1354,6 +1377,32 @@ def build_prediction(ctx: dict) -> dict:
               for key, a in (("needsBoth", "needs-both"), ("singleMod", "single-mod"), ("notSeparable", "not-separable"))}
     counted = by_attr["needs-both"] if multi else items
     verdict_counts = stated(per_kind(counted))
+    # Snazzy review 2: an object a check names as a state of its own (identityByObject: a fixture left hanging, an
+    # object left without support) is counted once in the headline, in the first such check that names it; a later
+    # one counts only its other objects and says how many it shares
+    seen_objects = set()
+    for i, e in enumerate(verdict_counts):
+        if e["checkId"] not in by_object:
+            continue
+        rows_of = collections.Counter()
+        for g in counted:
+            if (g["checkId"], g["kind"]) == (e["checkId"], e["kind"]):
+                rows_of.update(subject_rows_of[id(g)])
+        subj = set(rows_of)
+        shared_objects = subj & seen_objects
+        seen_objects |= subj
+        if not shared_objects:
+            continue
+        shared = len(shared_objects)
+        # the count left in the entry's own unit: its objects not counted above, or the rows on them
+        new = (len(subj - shared_objects) if e["unit"] == "objects"
+               else sum(n for s_, n in rows_of.items() if s_ not in shared_objects))
+        w = vk.get(f"{e['checkId']}|{e['kind']}") or vk.get(e["checkId"]) or vk["default"]
+        nouns = w.get(e["unit"]) or vk["default"][e["unit"]]
+        phrase = (f"{fmt_n(new)} " + bind(nouns[0] if new == 1 else nouns[1], {"title": title_of(e["checkId"])})
+                  + " " + bind(words["verdictSharedObjects"], {"count": fmt_n(shared)}) if new else
+                  bind(words["verdictSameObjects"], {"count": fmt_n(shared), "title": title_of(e["checkId"])}))
+        verdict_counts[i] = {**e, "count": new, "sharedObjects": shared, "phrase": phrase}
     unseparated = stated(counts["notSeparable"]) if multi else []
     checks_on_p = sorted({c for (c, a) in measured if a == p_of(c)})
     if verdict_counts:
@@ -1370,7 +1419,12 @@ def build_prediction(ctx: dict) -> dict:
     aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
              "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
-             "repeat": set_aside["repeat"], "noBody": set_aside["noBody"]}
+             "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"]}
+    if sibling_record:
+        # Snazzy review 1: the sibling's setup that decided "needs both" for a partner mod is named with the others
+        for m_, a_ in partner_arms.items():
+            if str(a_).startswith("sibling:"):
+                sibling_record["roles"].setdefault(f"without {m_}", a_.split(":", 1)[1])
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
                   "items": items, "historyLossLines": loss_lines, "aloneLines": [{**v, "groups": [{"from": k, "entries": e} for k, e in v["groups"].items()]}
@@ -1381,12 +1435,13 @@ def build_prediction(ctx: dict) -> dict:
                   "setAside": aside,
                   "setAsideLine": (bind(words["setAsideLine"], aside) + (" " + bind(words["setAsideNoBody"], aside)
                                                                          if aside["noBody"] else "")
+                                   + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
                                    if sum(aside.values()) else None),
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
                       "subject": subject}),
                   "record": record, "detailAsideWords": words.get("detailAside") or {},
-                  "sibling": sibling_record,
+                  "sibling": sibling_record, "withoutPartnerArms": dict(partner_arms),
                   "siblingSource": words.get("siblingSource") if sibling_record and sibling_record["roles"] else None}
 
     # --- coverage: what the checks could not judge, by named reason and count
@@ -1588,7 +1643,8 @@ def build_prediction(ctx: dict) -> dict:
         # patch is the patch's choice, never a problem the patch causes.
         lost_w = collections.defaultdict(list)
         for rk, hit in patched_rows.items():
-            if rk[1] == "LOST-EDIT":
+            if rk[1] == "LOST-EDIT" and not same_but_path_case((hit["row"].get("values") or {}).get("lost"),
+                                                               (hit["row"].get("values") or {}).get("winner")):
                 lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"winnerPlugin": rk[3]})
 
         unrecorded = {str(x) for x in words.get("unrecordedValues") or []}
@@ -1609,7 +1665,7 @@ def build_prediction(ctx: dict) -> dict:
             with_patch, without = (w.get("values") or {}).get("winner"), (e.get("values") or {}).get("winner")
             if not (recorded(with_patch) and recorded(without)):
                 return "cannot-tell-value"
-            return "resolved" if with_patch != without else "kept"
+            return "resolved" if path_folded(with_patch) != path_folded(without) else "kept"
         # A geometry row is judged by its own predicate re-measured with the patch, where the probe carries one (an
         # emit's `Predicates`: every row of the setup it was measured against, measured again in this setup): Gone is
         # resolved, Holds is left (whoever owns the objects now), anything else cannot be told. Presence of the row
@@ -3184,6 +3240,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         return (" " + bind(cmp_words["stillHolding"], {"count": fmt_n(n_), "verb": "is" if n_ == 1 else "are"})
                 if n_ else "")
 
+    diff_said = {(f.get("checkId"), f.get("armId")) for f in findings
+                 if f.get("kind") == "null" and f.get("part") == "diff" and holding_sentence(f)}
     for f in findings:
         if f.get("kind") != "null":
             continue
@@ -3193,10 +3251,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 comparison_summary.append(f"{subject} — {f.get('readerArmLabel')}: {f.get('readerPlain')}"
                                           f"{setup_totals_sentence(f)}{holding_sentence(f)}")
             continue
+        if holding_sentence(f):
+            # Snazzy review 4: rows still physically there are not "no problem"; they are said once, with the
+            # comparison (its own line carries the sentence; a check whose comparison has no line gets one here)
+            if (f.get("checkId"), f.get("armId")) not in diff_said:
+                comparison_summary.append(f"{subject} — {f.get('readerArmLabel')}:{holding_sentence(f)}")
+            continue
         context = (f.get("readerPlain") or ("the comparison found no additional issue" if f.get("part") == "diff" else
                                             "no problem was found in the records examined")).rstrip(".")
-        if holding_sentence(f):
-            context += "." + holding_sentence(f).rstrip(".")
         if f.get("readerProvenance"):
             context += ". " + str(f["readerProvenance"]).rstrip(".")
         null_summary.append(f"{subject} — {f.get('readerArmLabel')}: {context}")
