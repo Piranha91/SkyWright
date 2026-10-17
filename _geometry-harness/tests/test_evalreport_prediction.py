@@ -1126,7 +1126,8 @@ def main():
         plan, md, html = get("four", four_setup_unpatched)
         head = pw.get("singleModHeading")
         sec = section_text(md, headings(plan).get("prediction") or "\0")
-        line = f"between {MOD_A} and {OTHER}"
+        # since P53 the single-mod clashes are one line per check: "from ModA, with OtherMod 1"
+        line = f"from {MOD_A}, with {OTHER} 1"
         at_h, at_l = (sec.find(head) if head else -1), sec.find(line)
         item = next((i for i in (reader(plan).get("prediction") or {}).get("items") or []
                      if i.get("attribution") == "single-mod"), {})
@@ -1361,7 +1362,8 @@ def main():
         items = (reader(plan).get("prediction") or {}).get("items") or []
         it = next((i for i in items if i.get("checkId") == FIXTURE), {})
         ok = (len(items) == 1 and it.get("attribution") == "single-mod" and it.get("attributionMod") == MOD_A
-              and f"already in this state with {MOD_A} alone" in md)
+              and "already in this state with" in it.get("plain", "")
+              and f"the same object already so with {MOD_A} alone, between {MOD_B} and {OTHER} 1" in md)
         return ok, f"items {[(i.get('mods'), i.get('attribution'), i.get('attributionMod')) for i in items]}"
 
     # C461. Single-mod attribution of a lost edit is per field, not per record
@@ -1504,8 +1506,11 @@ def main():
     # C478. A lost edit the patch wins is described as the patch's own choice in the detail list
     def c478_patch_win_is_its_choice():
         plan, md, html = record_validation_bundle()
-        ok = f"where {PATCH}'s value wins over {MOD_B}'s: the patch's own choice" in md
-        return ok, f"patch-choice line printed: {ok}"
+        # the concise page counts a setup's patch-won lost edits in one line (P53); the plan words each one
+        f = next((x for x in plan.get("findings") or [] if x.get("readerPatchChoice")), {})
+        ok = (f"where {PATCH}'s value wins over {MOD_B}'s: the patch's own choice" in (f.get("readerPlain") or "")
+              and "where a declared patch's value wins: the patches' own choices" in md)
+        return ok, f"finding wording {f.get('readerPlain')!r}; collapsed line printed: {'own choices' in md}"
 
     # C479. Patches are named in load order, not alphabetically
     def c479_patches_in_load_order():
@@ -1514,7 +1519,16 @@ def main():
         ok = "with Zeta patch.esp, Alpha patch.esp" in title
         return ok, f"title {title!r}"
 
-    for name, fn in [("w2-review/C475-per-item-outcomes-and-new-clashes-linked", c475_per_item_outcomes_and_new_clashes_linked),
+    # C480. Concise: a setup's several pair groups in one check are one line, each pair with its count and link
+    def c480_setup_pairs_one_line():
+        plan, md, html = busy_third_mod_bundle()
+        sec = section_text(md, "What the checks found")
+        lines = [x for x in sec.splitlines() if x.startswith("- **Measured load order:**")]
+        ok = len(lines) == 1 and lines[0].count("(evidence-index.md#F-") == 2
+        return ok, f"measured-load-order lines {lines}"
+
+    for name, fn in [("w2-review/C480-concise-setup-pairs-one-line", c480_setup_pairs_one_line),
+                     ("w2-review/C475-per-item-outcomes-and-new-clashes-linked", c475_per_item_outcomes_and_new_clashes_linked),
                      ("w2-review/C476-history-with-measured-loss-named", c476_history_with_measured_loss_named),
                      ("w2-review/C477-record-item-direction-and-examples", c477_direction_and_examples),
                      ("w2-review/C478-patch-win-is-its-own-choice-in-detail", c478_patch_win_is_its_choice),

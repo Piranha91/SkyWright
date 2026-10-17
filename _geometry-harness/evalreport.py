@@ -1172,7 +1172,8 @@ def build_prediction(ctx: dict) -> dict:
         if label and rk[1] != "LOST-EDIT" and not re.match(r"^[0-9a-f]{6}:", str(label), re.I) and " tris" not in str(label):
             g.setdefault("_places", collections.Counter())[str(label)] += 1
         if hit["finding"].get("readerProvenance"):
-            g["_provenance"] = hit["finding"]["readerProvenance"]
+            # the full sentence is in the limits and beside the finding; the item says it in short
+            g["_provenance"] = words.get("itemReused") or hit["finding"]["readerProvenance"]
 
     titles, in_game, phrases = ctx["checkTitles"], ctx["inGame"], ctx["kindPhrases"]
 
@@ -1242,6 +1243,22 @@ def build_prediction(ctx: dict) -> dict:
     # the pair's clashes first, then the ones that could not be separated, then those of one mod alone (own heading)
     shown_rank = {"pair": 0, "unseparated": 1, "alone": 2}
     items.sort(key=lambda g: (shown_rank[g["shownAs"]], -g["count"], g["checkId"], g["mods"]))
+    # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
+    # comes from; the check's in-game sentence once
+    alone_lines = collections.OrderedDict()
+    for g in items:
+        if g["shownAs"] != "alone":
+            continue
+        ph = phrases.get(g["kind"]) or {}
+        mod = str(g["attributionMod"] or "")
+        elsewhere = mod.lower() not in {m.lower() for m in g["mods"]}
+        third = next((m for m in g["mods"] if m.lower() != mod.lower()), g["mods"][0]) if not elsewhere else \
+            " and ".join(g["mods"])
+        line = alone_lines.setdefault(g["checkId"], {"title": g["title"], "inGameText": g["inGameText"],
+                                                     "unit": ph.get("unitPlural") or "clashes", "groups": {}})
+        key = bind(words["aloneFrom" + ("Elsewhere" if elsewhere else "")], {"mod": mod})
+        line["groups"].setdefault(key, []).append({"text": f"{third} {fmt_n(g['count'])}",
+                                                   "findingIds": list(g["findingIds"])})
 
     subject_mods = p_targets or list(ctx["targets"])
     subject = (" and ".join([", ".join(subject_mods[:-1]), subject_mods[-1]]) + " together"
@@ -1301,7 +1318,9 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"]}
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
-                  "items": items, "verdictCounts": verdict_counts, "counts": counts, "headlineUnit": unit,
+                  "items": items, "aloneLines": [{**v, "groups": [{"from": k, "entries": e} for k, e in v["groups"].items()]}
+                                                 for v in alone_lines.values()],
+                  "verdictCounts": verdict_counts, "counts": counts, "headlineUnit": unit,
                   "singleModMode": single_mode, "singleModHeading": words.get("singleModHeading"),
                   "missingFacts": list(dict.fromkeys(missing_facts)),
                   "setAside": aside,
@@ -1376,7 +1395,21 @@ def build_prediction(ctx: dict) -> dict:
         [str(u.get("checkId")) for u in ctx["unassessed"].get("unjudgeablePopulations") or [] if u.get("armId") == p_arm]
         + list(checks_on_p)))
     elsewhere = collections.Counter()
+
+    def emit_unjudged(check_id):
+        arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
+        if str(arm_id).startswith("sibling:"):
+            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
+        if bundle is None:
+            return None
+        path = bundle.output_emit_path(check_id, arm_id, "arm") or bundle.output_emit_path(check_id, arm_id, None)
+        emit = bundle.emit(path) if path else None
+        ul = emit.get("Unjudged") if isinstance(emit, dict) else None
+        return ul if isinstance(ul, list) else None
     for check_id in unjudged_checks:
+        # a check whose rows file lists its unjudged fields gets the fields line below, which says more; its
+        # populations line would count the same fields twice (judged-elsewhere reasons are still read here)
+        fields_line = any(isinstance(u, dict) and u.get("Field") for u in emit_unjudged(check_id) or [])
         pops = []
         for population, uj in own_coverage(check_id):
             per = collections.Counter()
@@ -1390,7 +1423,7 @@ def build_prediction(ctx: dict) -> dict:
                 per[reason_words(k, check_id)] += v
             if per:
                 pops.append((population, per))
-        if not pops:
+        if not pops or fields_line:
             continue
 
         def detail_of(per):
@@ -1418,16 +1451,6 @@ def build_prediction(ctx: dict) -> dict:
     # The fields a check left unjudged on P, as its rows file lists them (a record-rows enrichment's `Unjudged`):
     # counted with why, and how many lie on records both evaluated mods change, where a clash between them could
     # hide (Gate C round 1, M1).
-    def emit_unjudged(check_id):
-        arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
-        if str(arm_id).startswith("sibling:"):
-            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
-        if bundle is None:
-            return None
-        path = bundle.output_emit_path(check_id, arm_id, "arm") or bundle.output_emit_path(check_id, arm_id, None)
-        emit = bundle.emit(path) if path else None
-        ul = emit.get("Unjudged") if isinstance(emit, dict) else None
-        return ul if isinstance(ul, list) else None
     for check_id in checks_on_p:
         ul = [u for u in emit_unjudged(check_id) or [] if isinstance(u, dict)]
         fields = [u for u in ul if u.get("Field") and not elsewhere_re.match(str(u.get("Reason") or ""))]
@@ -1480,7 +1503,7 @@ def build_prediction(ctx: dict) -> dict:
         lines.append({"reason": reasons["checksCannotRun"], "count": len(cannot_run),
                       "subject": "; ".join(sorted(title_of(c) for c in cannot_run))})
     coverage = {"lines": lines, "notes": list(ctx["limitations"]), "setAsideLine": prediction["setAsideLine"],
-                "checksOnPrediction": len(checks_on_p)}
+                "checksOnPrediction": len(checks_on_p), "relevantArms": sorted(relevant_arms)}
 
     # --- validation against the patch
     if patched_arm is None:
@@ -1490,7 +1513,9 @@ def build_prediction(ctx: dict) -> dict:
                       "hits": None, "open": None, "falseAlarms": None, "patchProblems": None, "blindSpots": [],
                       "byItem": [], "missingFacts": []}
     else:
-        patch = ", ".join(patch_names)
+        # several patches are named once (the scope line and the setups list name them all) and called "the N
+        # patches" in each sentence after (P53: six names repeated in every line took a page)
+        patch = ", ".join(patch_names) if len(patch_names) <= 2 else bind(words["patchesShort"], {"count": len(patch_names)})
         admitted = [e for e in record if e["admission"] == "admitted"]
         keyof = lambda e: (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])  # noqa: E731
         not_measured = [e for e in admitted if (e["checkId"], patched_arm) not in measured]
@@ -1886,7 +1911,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                     for n in arm_replaced.get(arm_id) or []]
         unverified = ([f"keeping {', '.join(arm_unverified[arm_id])}, whose bytes were not compared"]
                       if not added and not removed and not replaced and arm_unverified.get(arm_id) else [])
-        change = " and ".join(([f"adding {', '.join(added)}"] if added else []) + ([f"removing {', '.join(removed)}"] if removed else [])
+        def named(ns):
+            # more than two declared patches are "the N patches" here; the setups list names every one (P53)
+            if len(ns) > 2 and all(n.lower() in declared_patches for n in ns):
+                return f"the {len(ns)} patches"
+            return ", ".join(ns)
+        change = " and ".join(([f"adding {named(added)}"] if added else []) + ([f"removing {named(removed)}"] if removed else [])
                               + replaced + unverified)
         return change[:1].upper() + change[1:] if change else "The supplied setup"
 
@@ -2910,8 +2940,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     scope_limits = reader_data.get("scopeLimits") or {}
     other_limits = [scope_limits.get(x.get("extent"), "An additional area could not be assessed; see the full scope in the evidence index.")
                     for x in un.get("scopeUnmeasured") or [] if isinstance(x, dict)]
-    if un.get("unjudgeablePopulations"):
-        other_limits.append("Some objects could not be assessed because the needed geometry or links were unavailable. Their counts and reasons are in the evidence index.")
+    # the areas not measured and the objects not judged are stated with their counts under the coverage heading;
+    # this list keeps only what that heading does not say (P53: each was printed twice)
+    other_limits = []
     if unassessed_media:
         other_limits.append("Some supplied images or clips could not be matched to this evaluation and were excluded from the evidence shown.")
     # One bullet, not one per import. Notes that embed per-import counts differ only in their
@@ -2983,25 +3014,28 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # supplied on one setup and missing on another is never told as a statement about the evaluation as a whole.
     # The no-problem list below already names the setup this way.
     arm_order = {a["armId"]: i for i, a in enumerate(arms_out)}
-    missing_summary = []
-    statuses_by_check = collections.OrderedDict()
-    for m in reader_missing:
-        sts = statuses_by_check.setdefault(str(m.get("checkId")), [])
-        if str(m.get("status")) not in sts:
-            sts.append(str(m.get("status")))
-    for status_set in sorted({tuple(sorted(v)) for v in statuses_by_check.values()}):
-        rows_ = []
-        for m in reader_missing:
-            if tuple(sorted(statuses_by_check[str(m.get("checkId"))])) != status_set:
-                continue
-            title = check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
-            rows_.append((title, arm_order.get(m.get("armId"), len(arm_order)),
-                          arm_labels.get(m.get("armId"), "Measured setup")))
-        subjects = [f"{title} — {setup}" for title, _, setup in sorted(dict.fromkeys(rows_))]
-        missing_summary.append({"reason": "; and ".join(missing_reason(st, "has no accepted result") for st in status_set),
-                                "subjects": subjects,
-                                "explanation": " ".join(x for x in (reason_explanations.get(st) for st in status_set) if x)
-                                or None})
+    def summarise_missing(rows_in):
+        missing_summary = []
+        statuses_by_check = collections.OrderedDict()
+        for m in rows_in:
+            sts = statuses_by_check.setdefault(str(m.get("checkId")), [])
+            if str(m.get("status")) not in sts:
+                sts.append(str(m.get("status")))
+        for status_set in sorted({tuple(sorted(v)) for v in statuses_by_check.values()}):
+            rows_ = []
+            for m in rows_in:
+                if tuple(sorted(statuses_by_check[str(m.get("checkId"))])) != status_set:
+                    continue
+                title = check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
+                rows_.append((title, arm_order.get(m.get("armId"), len(arm_order)),
+                              arm_labels.get(m.get("armId"), "Measured setup")))
+            subjects = [f"{title} — {setup}" for title, _, setup in sorted(dict.fromkeys(rows_))]
+            missing_summary.append({"reason": "; and ".join(missing_reason(st, "has no accepted result") for st in status_set),
+                                    "subjects": subjects,
+                                    "explanation": " ".join(x for x in (reason_explanations.get(st) for st in status_set) if x)
+                                    or None})
+        return missing_summary
+    missing_summary = summarise_missing(reader_missing)
     null_summary = []
     comparison_summary = []
     kind_phrases_all = reader_data.get("kindPhrases") or {}
@@ -3471,8 +3505,42 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         part["rowsTotal"] += f["rowsTotal"]
     finding_blocks = []
     arm_kinds = {a["armId"]: a.get("kind") for a in plan["scope"]["arms"]}
+    conc = pr.get("concise") or {}
+    phrases = (pr.get("reader") or {}).get("kindPhrases") or {}
+    compact_over = int(conc.get("compactGroupsOver", 3))
     for cb in blocks.values():
         parts = sorted(cb["parts"].values(), key=lambda x: (arm_sort_key(x["armId"] or "", arm_kinds), PART_ORDER.get(x["part"], 9)))
+        if mode != "exhaustive":
+            for part in parts:
+                # P53: a setup's many pair lines become one line, each pair with its count and its evidence link; the
+                # lost edits a declared patch wins are counted once as the patches' own choices. The evidence index
+                # keeps every group in full.
+                choices = [f for f in part["groups"] if f.get("readerPatchChoice") and f.get("readerRelevant")]
+                rest = [f for f in part["groups"] if f not in choices]
+                compact = []
+                if choices:
+                    compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
+                                    "text": bind(conc.get("patchChoicesCollapsed") or "{count} record fields in {pairs} pairs where a patch wins", {
+                                        "count": fmt_n(sum(int(f.get("rowsTotal") or 0) for f in choices)),
+                                        "pairs": fmt_n(len(choices)),
+                                        "fieldNoun": "field" if sum(int(f.get("rowsTotal") or 0) for f in choices) == 1 else "fields",
+                                        "pairNoun": "pair" if len(choices) == 1 else "pairs"}),
+                                    "ids": [f["id"] for f in choices]})
+                relevant = [f for f in rest if f.get("readerRelevant")]
+                if len(relevant) > compact_over:
+                    entries = []
+                    for f in relevant:
+                        c = f.get("counts") or {}
+                        ph = phrases.get(str(c.get("groupKind") or "")) or {}
+                        n_ = int(f.get("rowsTotal") or 0)
+                        unit = (ph.get("unitSingular") if n_ == 1 else ph.get("unitPlural")) or ("record" if n_ == 1 else "records")
+                        entries.append({"id": f["id"], "text": f"{fmt_n(n_)} {unit} between {c.get('A')} and {c.get('B')}"})
+                    compact.append({"id": relevant[0]["id"], "readerArmLabel": relevant[0].get("readerArmLabel"),
+                                    "entries": entries,
+                                    "note": next((f.get("readerProvenance") for f in relevant if f.get("readerProvenance")), None)})
+                    rest = [f for f in rest if not f.get("readerRelevant")]
+                part["groups"] = rest
+                part["compact"] = compact
         finding_blocks.append({**cb, "parts": parts})
     view = dict(plan)
     view["missingRows"] = missing_rows
