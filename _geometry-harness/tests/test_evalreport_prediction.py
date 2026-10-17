@@ -84,7 +84,8 @@ def lost_row(a, b, form_key, field, lost, winner, overridden, label=None):
 
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
-                enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None):
+                enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
+                diff_logs=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -100,7 +101,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     enrichment_unjudged: {(checkId, armId): [{FormKey, Field, Reason, Plugins}]} -- the fields that enrichment left
     unjudged, written as its `Unjudged` list and counted in its coverage line.
     predicates: {(checkId, armId): [{Kind, A, B, FormKey, Other, Physical}]} -- the rows of the setup that arm was
-    measured against, measured again in that arm's setup (an emit's `Predicates`)."""
+    measured against, measured again in that arm's setup (an emit's `Predicates`).
+    diff_logs: {(checkId, armId): text} -- the log of that arm's comparison with the baseline (a `diff` receipt).
+    missing rows may carry a fourth element, the part (default `arm`)."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
 
@@ -109,7 +112,7 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     (root / "receipts").mkdir(exist_ok=True)
     (root / "evidence").mkdir(exist_ok=True)
     count_only = dict(count_only or {})
-    checks = sorted({c for c, _ in results} | {c for c, _, _ in missing} | {c for c, _ in count_only})
+    checks = sorted({c for c, _ in results} | {m[0] for m in missing} | {c for c, _ in count_only})
     plan_targets = [{"name": t} for t in targets]
     if cells and plan_targets:
         plan_targets[0]["footprint"] = {"placed": {"cells": list(cells)}}
@@ -157,6 +160,17 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                          "checkId": check_id, "armId": arm_id, "recordedBy": rid, "strength": "geometric-measurement"})
         findings.append({"checkId": check_id, "armId": arm_id, "part": "arm", "findings": count,
                          "verdict": None, "strength": "geometric-measurement"})
+    for n, ((check_id, arm_id), text) in enumerate(sorted((diff_logs or {}).items())):
+        rid = f"{check_id}__{arm_id}__diff"
+        (root / "receipts" / f"{rid}.json").write_text(json.dumps({
+            "receiptId": rid, "checkId": check_id, "armId": arm_id, "part": "diff", "schemaVersion": 1, "exitCode": 0,
+            "validation": {"accepted": True, "identityLimits": []}, "result": {"detector": "inconclusive"}}),
+            encoding="utf-8")
+        (root / "evidence" / f"{rid}.txt").write_text(text, encoding="utf-8")
+        evidence.append({"id": f"d{2 * n:015x}", "kind": "receipt", "path": f"receipts/{rid}.json", "sha256": "0" * 64,
+                         "checkId": check_id, "armId": arm_id, "recordedBy": rid})
+        evidence.append({"id": f"d{2 * n + 1:015x}", "kind": "log", "path": f"evidence/{rid}.txt", "sha256": "1" * 64,
+                         "checkId": check_id, "armId": arm_id, "recordedBy": rid})
     for n, ((check_id, arm_id), rows) in enumerate(sorted((enrichment or {}).items())):
         rel = f"enrichment/record-rows/{check_id}__{arm_id}.json"
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -188,8 +202,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     disp = {"createdUtc": "2026-01-01T00:00:00+00:00",
             "evaluation": {"complete": not missing, "claim": "incomplete" if missing else "findings",
                            "findings": findings, "completedNullChecks": nulls,
-                           "missing": [{"checkId": c, "armId": a, "part": "arm", "status": s, "cause": s,
-                                        "required": True, "family": c.split(".")[0]} for c, a, s in missing]},
+                           "missing": [{"checkId": m[0], "armId": m[1], "part": (m[3] if len(m) > 3 else "arm"),
+                                        "status": m[2], "cause": m[2], "required": True,
+                                        "family": m[0].split(".")[0]} for m in missing]},
             "arms": arms_disp, "importedEvidence": [],
             "unassessed": {"unjudgeablePopulations": list(unjudgeable), "scopeUnmeasured": list(scope_unmeasured)}}
     registry = {"registryVersion": 1, "checks": [{"id": c, "family": c.split(".")[0], "title": c,
@@ -671,6 +686,32 @@ def placeholder_value_bundle():
     results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
     return compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH], count_only=count_only,
                               enrichment=enr)
+
+
+def comparison_bundle(variant):
+    """C465-C467. The order with both mods, and the same order with the patch added; two predicted clashes.
+    `refused`: the contact comparison refused a verdict (UNJUDGED, its log's REFUSED line), though it counts 2
+    repaired. `unaccepted`: the contact comparison counts 1 new problem but 1 row could not be measured in both
+    setups, so the controller lists it as missing. `holding`: the overlap comparison repaired one predicted overlap
+    and the other left the class still holding (the patch now owns it), so the patched setup reports none."""
+    pair = [row("CONTACT" if variant != "holding" else "OVERLAP", MOD_B, MOD_A, f"00081{i}:{MOD_A}",
+                other=f"00091{i}:{MOD_B}") for i in (1, 2)]
+    check, probe = (CONTACT, "contactprobe") if variant != "holding" else (OVERLAP, "overlapprobe")
+    results = {(check, "baseline"): pair, (check, "with-patch"): []}
+    counts = {"refused": dict(verdict="DIFFERENTIAL-UNJUDGED", repaired=2, reclassified=0, created=0, newDefect=0,
+                              attributed=0, unmeasured=0),
+              "unaccepted": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0, created=1, newDefect=1,
+                                 attributed=0, unmeasured=1),
+              "holding": dict(verdict="DIFFERENTIAL-VERIFIED", repaired=1, reclassified=1, created=0, newDefect=0,
+                              attributed=0, unmeasured=0)}[variant]
+    log = {"refused": "   repaired     : 2 record(s)\n   ! REFUSED: dependent-host pairs: unjudgeable 8.33% -> 23.47% "
+                      "(313 of 3,757 -> 1,461 of 6,226) — rose by more than 1.00%\n",
+           "unaccepted": "   created      : 1 record(s)\n   unmeasured   : 1 record(s)\n",
+           "holding": "   reclassified : 1 record(s)   (left the class still holding 1; left with no physical defect to "
+                      "begin with 0; entered reading Gone 0)\n"}[variant]
+    missing = [(check, "with-patch", "completed", "diff")] if variant != "holding" else []
+    return compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH], missing=missing,
+                              order={"with-patch": {probe: counts}}, diff_logs={(check, "with-patch"): log})
 
 
 def priorities():
@@ -1298,7 +1339,36 @@ def main():
         return ok, (f"hits {val.get('hits')}, kept {val.get('kept')}, open {val.get('open')}, "
                     f"cannot tell {val.get('cannotTell')}")
 
-    for name, fn in [("w2-review/C463-patch-kept-winner-is-its-own-count-not-left", c463_patch_kept_winner_is_not_left),
+    # C465. A refused comparison prints no repair, and its predicted clashes are "cannot tell" against the patch
+    def c465_refused_comparison_counts_nothing():
+        plan, md, html = comparison_bundle("refused")
+        val = reader(plan).get("validation") or {}
+        ok = (val.get("hits") == 0 and val.get("cannotTell") == 2 and "repaired 2" not in md
+              and "repaired" not in section_text(md, "Changes made by adding " + PATCH)
+              and "rose from 8.33% to 23.47%" in md)
+        return ok, (f"hits {val.get('hits')}, cannot tell {val.get('cannotTell')}; 'repaired 2' printed: "
+                    f"{'repaired 2' in md}; refusal named: {'rose from 8.33% to 23.47%' in md}")
+
+    # C466. A comparison measured but not accepted says why in both places, never bare "has no accepted result"
+    def c466_unaccepted_comparison_one_statement():
+        plan, md, html = comparison_bundle("unaccepted")
+        ok = ("has no accepted result" not in md.lower() and md.count("could not be measured in both setups") >= 2
+              and "1 new problem" in md)
+        return ok, (f"bare 'no accepted result' {('has no accepted result' in md.lower())}; qualifier printed "
+                    f"{md.count('could not be measured in both setups')} times")
+
+    # C467. Overlaps that left the class with the defect still there are named beside the no-problem line
+    def c467_still_holding_named():
+        plan, md, html = comparison_bundle("holding")
+        val = reader(plan).get("validation") or {}
+        ok = "1 of the problems in the setup it was compared with is still physically there" in md
+        return ok, f"still-holding sentence printed: {ok}; validation hits {val.get('hits')}, open {val.get('open')}"
+
+    for name, fn in [("w2-review/C465-refused-comparison-prints-no-repair-and-cannot-tell",
+                      c465_refused_comparison_counts_nothing),
+                     ("w2-review/C466-unaccepted-comparison-says-why-everywhere", c466_unaccepted_comparison_one_statement),
+                     ("w2-review/C467-overlaps-still-holding-named-beside-no-problem", c467_still_holding_named),
+                     ("w2-review/C463-patch-kept-winner-is-its-own-count-not-left", c463_patch_kept_winner_is_not_left),
                      ("w2-review/C464-placeholder-winner-value-is-cannot-tell", c464_placeholder_value_cannot_tell),
                      ("w2-review/C460-third-mod-object-broken-with-one-mod-alone-is-single-mod",
                       c460_object_broken_with_one_mod_alone),

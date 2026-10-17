@@ -823,7 +823,7 @@ def check_patch_direction(bundle: Path):
     check("The patch evaluated is Patch.esp, included in the measured load order and removed for comparison."
           in str(reader.get("scopeLine")) and "No separate patch plugin" not in str(reader.get("scopeLine")),
           f"{label}/removes: the opening names the patch and says the comparison removes it (got {reader.get('scopeLine')!r})")
-    expect(headline(reader), "Removing Patch.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Removing Patch.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/removes: the Result says the defect comes with removing the patch")
     check(regression_plain(plan, "candidate-02-patchb").startswith("Removing Patch.esp introduced 2 new problems"),
           f"{label}/removes: the finding sentence names the removal (got {regression_plain(plan, 'candidate-02-patchb')!r})")
@@ -846,7 +846,7 @@ def check_patch_direction(bundle: Path):
     check("The patch evaluated is Patch.esp, added to the measured load order for comparison." in str(reader.get("scopeLine"))
           and "removed for comparison" not in str(reader.get("scopeLine")),
           f"{label}/adds: the opening names the patch and says the comparison adds it (got {reader.get('scopeLine')!r})")
-    expect(headline(reader), "Adding Patch.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Adding Patch.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/adds: the Result says the defect comes with adding the patch")
     check(regression_plain(plan, "candidate-02-patchb").startswith("Adding Patch.esp introduced 2 new problems"),
           f"{label}/adds: the finding sentence names the addition (got {regression_plain(plan, 'candidate-02-patchb')!r})")
@@ -864,7 +864,7 @@ def check_patch_direction(bundle: Path):
     check("No separate patch plugin was declared for this comparison." in str(reader.get("scopeLine")),
           f"{label}/none: the opening keeps the no-separate-patch wording (got {reader.get('scopeLine')!r})")
     # the title with no separate patch: followup_title_control
-    expect(headline(reader), "Removing FixtureTarget.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Removing FixtureTarget.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/none: the Result names the removal even when no patch is involved")
     check("supplied setup" not in md.lower() and "This setup also loads" not in md,
           f"{label}/none: a removal arm is not the supplied setup, and no omitted patch is claimed")
@@ -876,7 +876,7 @@ def check_patch_direction(bundle: Path):
     expect(reader.get("title"), "FixtureTarget.esp with Other.esp, Patch.esp — patch review", f"{label}/mixed: title")
     check("The patches evaluated are Other.esp, Patch.esp, added or removed for comparison." in str(reader.get("scopeLine")),
           f"{label}/mixed: the opening says the comparisons add or remove them (got {reader.get('scopeLine')!r})")
-    expect(headline(reader), "A tested alternative setup introduces a new defect in a check that ran.",
+    expect(headline(reader), "A tested alternative setup introduces new problems in the check \"Objects left without their supporting surface\" in 2 setups (2, 2).",
            f"{label}/mixed: arms that change different things share no single subject, and one removes a plugin")
     check(regression_plain(plan, "candidate-01-patcha").startswith("Adding Patch.esp introduced")
           and regression_plain(plan, "candidate-02-patchb").startswith("Removing Other.esp introduced"),
@@ -928,13 +928,16 @@ def check_patch_direction(bundle: Path):
                f"{label}/{variant}/contact-repair: the repaired-only Result names the change")
         plan, md, html = patch_direction_control(bundle, variant, "contact-regression-repair")
         expect(headline(plan.get("reader")),
-               f"{subject} resolves some measured conflicts, but it also introduces a new defect in a check that ran.",
+               f"{subject} resolves some measured conflicts, but it also introduces "
+               + ("new problems in the check \"Objects left without their supporting surface\" in 2 setups (2, 2)."
+                  if variant == "mixed" else
+                  "2 new problems in the check \"Objects left without their supporting surface\"."),
                f"{label}/{variant}/contact-regression-repair: the regression-plus-repair Result names the change")
 
     # (h) one arm that adds one plugin and removes another names both changes
     plan, md, html = patch_direction_control(bundle, "both")
     reader = plan.get("reader") or {}
-    expect(headline(reader), "Adding Patch.esp and removing Other.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Adding Patch.esp and removing Other.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/both: the Result names the addition and the removal")
     # One arm that adds and removes is "mixed": neither declared patch is evaluated on its own, and the opening
     # says so and names them. It must never claim no patch was declared (ruling 2026-10-05, option 2).

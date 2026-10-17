@@ -1397,7 +1397,11 @@ def build_prediction(ctx: dict) -> dict:
                                                 str(x.get("Physical")) for x in preds if isinstance(x, dict)}
             return pred_cache[check_id]
 
+        diff_arm = patched_arm if p_arm == "baseline" else (p_arm if patched_arm == "baseline" else None)
+
         def geometry_outcome(e):
+            if ((ctx.get("comparisonState") or {}).get((e["checkId"], diff_arm)) or {}).get("refused"):
+                return "cannot-tell"           # the comparison with and without the patch refused a verdict
             preds = predicates(e["checkId"])
             if preds is None:
                 return "left" if present(patched_arm, keyof(e)) else "resolved"
@@ -1813,6 +1817,28 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         findings.append(f)
         return f
 
+    # What each comparison's own record says about it, read once: a verdict the comparison refused (an UNJUDGED
+    # verdict, its log's `REFUSED:` line) prints no repaired or created count anywhere; counts the controller did not
+    # accept (a `missing` diff row whose comparison was not refused: rows measured on one side only) are printed with
+    # that qualifier; rows that left the class with their defect still there are named beside a no-problem line.
+    missing_diff = {(m.get("checkId"), m.get("armId")) for m in ev.get("missing") or [] if m.get("part") == "diff"}
+    comparison_state = {}
+    for arm_id in arm_ids:
+        per = (((arms_disp.get(arm_id) or {}).get("orderEvaluation") or {}).get("perProbe") or {})
+        for probe in sorted(per):
+            check_id = b.exe_to_check.get(probe, probe)
+            log_path = b.diff_log_path(check_id, arm_id)
+            text = read_text(bundle_dir / log_path) if log_path else ""
+            refused_line = next((m.group(1).strip() for m in re.finditer(r"^\s*!\s*REFUSED:\s*(.+)$", text, re.M)), None)
+            holding = re.search(r"left the class still holding (\d+)", text)
+            verdict_ = str((per[probe] or {}).get("verdict") or "")
+            refused = verdict_.endswith("UNJUDGED") or refused_line is not None
+            comparison_state[(check_id, arm_id)] = {
+                "verdict": verdict_, "refused": refused, "refusedWhy": refused_line,
+                "notAccepted": (check_id, arm_id) in missing_diff and not refused,
+                "unmeasured": int((per[probe] or {}).get("unmeasured") or 0),
+                "stillHolding": int(holding.group(1)) if holding else 0}
+
     # (1) regressions and (4) repairs, from orderEvaluation verbatim
     for arm_id in arm_ids:
         oe = (arms_disp.get(arm_id) or {}).get("orderEvaluation") or {}
@@ -2167,6 +2193,30 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             f["readerPlain"] = f"The check recorded {fmt_n(c.get('count'))} {c.get('unit') or 'item(s)'} for reference."
         else:
             f["readerPlain"] = "Details are recorded in the evidence index."
+    cmp_words = reader_data.get("comparisonState") or {}
+
+    def refused_words(state) -> str:
+        """A comparison's refusal in words: the share it could not judge, before and after, and the limit."""
+        why = str(state.get("refusedWhy") or "")
+        m = re.match(r"^(.+?):\s*unjudgeable\s+([\d.]+%)\s*->\s*([\d.]+%).*?more than\s+([\d.]+%)", why)
+        if m:
+            return bind(cmp_words["refusedShare"], {"population": m.group(1).strip(), "before": m.group(2),
+                                                     "after": m.group(3), "limit": m.group(4)})
+        return cmp_words["refusedUnnamed"]
+
+    for f in findings:
+        state = comparison_state.get((f.get("checkId"), f.get("armId")))
+        if not state or f.get("kind") not in ("regression", "repaired", "reclassified"):
+            continue
+        if state["refused"]:
+            # its counts are not a result: never printed as a repair or a new problem, never counted in a verdict
+            f["readerRelevant"] = False
+            f["readerEvidenceReason"] = "comparison-refused"
+        elif state["notAccepted"]:
+            f["readerPlain"] = (f.get("readerPlain") or "").rstrip() + " " + bind(
+                cmp_words["notAcceptedQualifier"], {"count": state["unmeasured"],
+                                                    "rowNoun": "row" if state["unmeasured"] == 1 else "rows"})
+
     gi = 0
     for key in sorted(groups):
         gi += 1
@@ -2398,6 +2448,19 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     import_notes = list(dict.fromkeys(r["note"] for r in imports["rows"] if r.get("note")))
     imports["notes"] = import_notes
     missing = ev.get("missing") or []
+
+    def reader_status(m) -> str:
+        status = str(m.get("status"))
+        state = comparison_state.get((m.get("checkId"), m.get("armId"))) if m.get("part") == "diff" else None
+        if status == "completed" and state:
+            if state["refused"]:
+                return "comparison-refused|" + refused_words(state)
+            if state["unmeasured"]:
+                return f"comparison-unmeasured|{state['unmeasured']}"
+        if status == "completed" and not state:
+            return "completed(undetermined)"   # it ran and its detector reached no verdict
+        return status
+    reader_missing = [{**m, "status": reader_status(m)} for m in missing]
     by_cause = collections.Counter(str(m.get("status")) for m in missing)
     run_ids = b.manifest.get("runIds") or []
     scope_out = {"targets": targets, "registryVersion": b.plan.get("registry", {}).get("registryVersion") or disp.get("registryVersion"),
@@ -2548,19 +2611,39 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                and f.get("readerRelevant") for f in findings)
     has_context_only = any(f.get("readerEvidenceReason") in ("context-only-kind", "context-only-or-inseparable")
                            for f in findings)
+    def defect_phrase() -> str:
+        # how many new problems, in which checks, and whether a comparison was not accepted as a result
+        per_check, unaccepted = collections.OrderedDict(), 0
+        for f in reader_regressions:
+            if f.get("checkId") == "geometry.object-overlap":
+                continue
+            per_check.setdefault(f.get("checkId"), (f, []))[1].append(int((f.get("counts") or {}).get("readerCreated") or 0))
+            if (comparison_state.get((f.get("checkId"), f.get("armId"))) or {}).get("notAccepted"):
+                unaccepted += 1
+        parts = []
+        for check_id, (f, ns) in per_check.items():
+            title_ = (reader_data.get("checkTitles") or {}).get(check_id, f.get("title"))
+            if len(ns) == 1:
+                parts.append(f"{fmt_n(ns[0])} new {'problem' if ns[0] == 1 else 'problems'} in the check \"{title_}\"")
+            else:                              # one count per setup, never summed across setups
+                parts.append(f"new problems in the check \"{title_}\" in {len(ns)} setups ("
+                             + ", ".join(fmt_n(n_) for n_ in ns) + ")")
+        text = " and ".join(parts) if parts else "a new defect in a check that ran"
+        return text + (cmp_words["verdictNotAccepted"] if unaccepted else "")
+
     if has_regression:
         if has_other_regression:
             change_subject = setup_subject({f.get("armId") for f in reader_regressions
                                             if f.get("checkId") != "geometry.object-overlap"} | repair_arms)
             if repaired_total and repair_claimable(repair_arms):
                 verdict = (f"{change_subject} resolves some measured conflicts, but it also "
-                           f"introduces a new defect in a check that ran.")
+                           f"introduces {defect_phrase()}.")
             elif repaired_total:
                 verdict = (f"{change_subject} records fewer conflicts than the measured load "
-                           f"order and also introduces a new defect in a check that ran. "
+                           f"order and also introduces {defect_phrase()}. "
                            + non_repair_reason(repair_arms))
             else:
-                verdict = f"{change_subject} introduces a new defect in a check that ran."
+                verdict = f"{change_subject} introduces {defect_phrase()}."
             if overlap_created_total:
                 verdict += bind(reader_verdict_templates["overlapAlongsideDefect"],
                                 {"createdCount": overlap_created_total,
@@ -2692,6 +2775,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if blocked_by and reader_data.get("missingPrerequisiteReason"):
             prerequisite = check_titles.get(blocked_by.group(1)) or b.check_title(blocked_by.group(1))
             return bind(reader_data["missingPrerequisiteReason"], {"prerequisite": lower_first(prerequisite)})
+        if status.startswith("comparison-refused|"):
+            return bind(cmp_words["missingRefused"], {"why": status.split("|", 1)[1]})
+        if status.startswith("comparison-unmeasured|"):
+            n_ = int(status.split("|", 1)[1])
+            return bind(cmp_words["missingUnmeasured"], {"count": fmt_n(n_), "rowNoun": "row" if n_ == 1 else "rows"})
         return reason_labels.get(status, fallback)
     reason_explanations = reader_data.get("missingReasonExplanations") or {}
     # Grouped by status, as the reason is a statement about the status - but each subject names the setup it is
@@ -2700,9 +2788,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # The no-problem list below already names the setup this way.
     arm_order = {a["armId"]: i for i, a in enumerate(arms_out)}
     missing_summary = []
-    for status in sorted({str(m.get("status")) for m in missing}):
+    for status in sorted({str(m.get("status")) for m in reader_missing}):
         rows_ = []
-        for m in missing:
+        for m in reader_missing:
             if str(m.get("status")) != status:
                 continue
             title = check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
@@ -2767,6 +2855,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                          "as problems.")
         return sentence
 
+    def holding_sentence(f) -> str:
+        # rows that left the class with their defect still there are not "no problem" (the comparison's own count)
+        n_ = int((comparison_state.get((f.get("checkId"), f.get("armId"))) or {}).get("stillHolding") or 0)
+        return (" " + bind(cmp_words["stillHolding"], {"count": fmt_n(n_), "verb": "is" if n_ == 1 else "are"})
+                if n_ else "")
+
     for f in findings:
         if f.get("kind") != "null":
             continue
@@ -2774,14 +2868,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if f.get("part") in ("diff", "reverse"):
             if f.get("part") == "diff":
                 comparison_summary.append(f"{subject} — {f.get('readerArmLabel')}: {f.get('readerPlain')}"
-                                          f"{setup_totals_sentence(f)}")
+                                          f"{setup_totals_sentence(f)}{holding_sentence(f)}")
             continue
         context = (f.get("readerPlain") or ("the comparison found no additional issue" if f.get("part") == "diff" else
                                             "no problem was found in the records examined")).rstrip(".")
+        if holding_sentence(f):
+            context += "." + holding_sentence(f).rstrip(".")
         if f.get("readerProvenance"):
             context += ". " + str(f["readerProvenance"]).rstrip(".")
         null_summary.append(f"{subject} — {f.get('readerArmLabel')}: {context}")
     null_summary = sorted(set(null_summary))
+    for (check_id, arm_id), state in sorted(comparison_state.items()):
+        if state["refused"] and arm_id != "baseline":
+            comparison_summary.append(f"{check_titles.get(str(check_id), b.check_title(check_id))} — "
+                                      f"{arm_labels.get(arm_id, 'Measured setup')}: "
+                                      + bind(cmp_words["refusedLine"], {"why": refused_words(state)}))
     catalogue_summary = sorted({check_titles.get(str(f.get("checkId")), f.get("title"))
                                 for f in findings if f.get("kind") == "catalogue"})
     catalogue_summary += sorted({f"{check_titles.get(str(f.get('checkId')), f.get('title'))} — {f.get('readerArmLabel')}: "
@@ -2815,12 +2916,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     lead = build_prediction({
         "findings": findings, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
         "declared": declared_patches, "comparisonKinds": comparison_kinds, "armChanges": arm_changes, "armReplaced": arm_replaced,
-        "missing": missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
+        "missing": reader_missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
         "checkTitle": b.check_title, "armLabels": arm_labels,
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
         "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
-        "mainBundle": b, "sibling": sibling,
+        "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit")})
     verdict = lead["prediction"]["verdict"]
     # The scope line names the evaluated pair when the counted clashes need both of them, never the third mod with
