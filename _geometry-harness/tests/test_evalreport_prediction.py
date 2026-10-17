@@ -1387,7 +1387,7 @@ def main():
         plan, md, html = record_validation_bundle()
         val = reader(plan).get("validation") or {}
         text = section_text(md, headings(plan).get("validation") or "\0")
-        said = "carries the value that wins without it" in text and "on purpose" not in text
+        said = "keeps the value that wins without it" in text and "on purpose" not in text and "still lost" not in text
         ok = val.get("kept") == 1 and val.get("open") == 1 and said
         return ok, f"kept {val.get('kept')}, open {val.get('open')}; printed: {said}"
 
@@ -1854,7 +1854,7 @@ def main():
         text = section_text(md, headings(plan).get("validation") or "\0")
         ok = (bi.get("hits") == 2 and bi.get("own") == 1 and bi.get("kept") == 1 and bi.get("open") == 1
               and bi.get("cannotTell") == 1 and val.get("own") == 1
-              and "own value" in text and "still lost" in text
+              and "sets its own value" in text and "still lost" not in md
               and "on purpose" not in md and "author's" not in md and "own choice" not in md)
         return ok, f"by item {bi}; printed own value {'own value' in text}; intent words {'on purpose' in md}"
 
@@ -1903,6 +1903,113 @@ def main():
         summary = section_text(md2, headings(plan2).get("validation") or "\0").strip().split("\n\n")[0]
         ok = words_ok and "refused a verdict" in summary and "rose from 8.33% to 23.47%" in summary
         return ok, f"patch-win words ok {words_ok}; summary {summary[:300]!r}"
+
+    # ------------------------------------------- round 5: the third blind review (claims against every setup's rows)
+    # C499. A geometry clash is attributed from each single-mod setup's own re-measure of it, not only from that setup's
+    # pair listing: X2 still Holds with ModA alone (listed nowhere there, because its partner is a base-game object at
+    # its own position), so it is already there with ModA alone, not "needs both", and the patch is not credited with it
+    def c499_attribution_from_single_mod_remeasure():
+        X1, X2 = f"000X01:{MOD_A}", f"000X02:{MOD_A}"
+        Y1, Y2 = f"000Y01:{MOD_B}", f"000Y02:{BASE}"
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X1, other=Y1), row("OVERLAP", MOD_B, MOD_A, X2, other=Y2)]
+
+        def preds(p1, p2):
+            return [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X1, "Other": Y1, "Physical": p1},
+                    {"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X2, "Other": Y2, "Physical": p2}]
+        arms = four_arms() + [arm("with-patch", [BASE, OTHER, MOD_A, MOD_B, PATCH])]
+        results = {(OVERLAP, a): [] for a in ("dependency-only", "plus-a", "plus-b", "with-patch")}
+        results[(OVERLAP, "baseline")] = p_rows
+        plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], patches=[PATCH], predicates={
+            (OVERLAP, "plus-a"): preds("Unmeasured", "Holds"), (OVERLAP, "plus-b"): preds("Unmeasured", "Unmeasured"),
+            (OVERLAP, "dependency-only"): preds("Unmeasured", "Unmeasured"), (OVERLAP, "with-patch"): preds("Gone", "Gone")})
+        p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
+        attr = {(e.get("formKey") or "")[:6]: e.get("attribution") for e in p.get("record") or []
+                if e.get("admission") == "admitted"}
+        ok = (attr == {"000X01": "needs-both", "000X02": "single-mod"} and val.get("hits") == 1
+              and "1 overlap candidate" in (p.get("verdict") or ""))
+        return ok, f"attribution {attr}; credited to the patch {val.get('hits')}; verdict {p.get('verdict')!r}"
+
+    # C500. A navmesh comparison counts navmesh records, the prediction broken links: the comparison says its unit
+    def c500_navmesh_comparison_names_its_unit():
+        n1 = f"000N01:{BASE}"
+        p_rows = [row("EDGE-IDX", MOD_A, MOD_B, f"000E0{i}:{BASE}", label="CityExterior03 (ext)", other=n1) for i in (1, 2, 3)]
+        order = {"without-patch": {"navownprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                       created=1, newDefect=1, attributed=0, unmeasured=0)}}
+        log = f"NEW     EDGE-IDX    {MOD_A}  x  {MOD_B}   +1 record(s): created 1\n"
+        plan, md, html = compile_and_render(PATCHED_ARMS, {(NAVOWN, "without-patch"): p_rows, (NAVOWN, "baseline"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                            diff_logs={(NAVOWN, "without-patch"): log})
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        ok = ("1 navmesh record with new broken links" in (reg.get("readerPlain") or "") and "3 broken navmesh links" in v
+              and "1 navmesh record with new broken links" in md)
+        return ok, f"comparison {reg.get('readerPlain')!r}; verdict {v!r}"
+
+    # C501. An object two by-object checks name is counted once, and the second check's headline number is still its
+    # own total, with how many of them are already counted (never a smaller number than its bullet)
+    def c501_shared_objects_keep_their_total():
+        ct = [row("CONTACT", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2, 3, 4)]
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2, 5)]
+        results = {(c, a): [] for c in (FIXTURE, CONTACT) for a in ("dependency-only", "plus-a", "plus-b")}
+        results.update({(FIXTURE, "baseline"): fx, (CONTACT, "baseline"): ct})
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        title = priorities()["reader"]["checkTitles"].get(FIXTURE)
+        ok = (f"3 inconsistencies found by the check \"{title}\" (2 of them objects already counted above)" in v)
+        return ok, f"verdict {v!r}"
+
+    # C502. A fixture whose nearest floor or wall's box reaches it (0u) although the contact walk finds no touch is not
+    # counted as hanging: cannot tell, said with its count
+    def c502_fixture_at_zero_is_cannot_tell():
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2)]
+        fx[0]["Summary"] = "LeftInEmptySpace: Static Pelt; its assembly of 1 touches no floor or wall now (nearest floor or wall 0u)"
+        fx[1]["Summary"] = "LeftInEmptySpace: Static Rack; its assembly of 1 touches no floor or wall now (nearest floor or wall 27u)"
+        results = {(FIXTURE, a): [] for a in ("dependency-only", "plus-a", "plus-b")}
+        results[(FIXTURE, "baseline")] = fx
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission"))
+                     for e in (reader(plan).get("prediction") or {}).get("record") or [])
+        ok = (adm == [("000F01", "anchorUnclear"), ("000F02", "admitted")]
+              and "Cannot tell, so not counted: 1 fixtures whose nearest floor or wall" in md)
+        return ok, f"admission {adm}"
+
+    # C503. A lost edit on an object both mods disable (moved below the world) has no effect in game and is not counted;
+    # an item whose winning value disables the object the losing mod's value leaves in place says so
+    def c503_disables_said_and_both_disabled_set_aside():
+        rows_ = [lost_row(MOD_A, MOD_B, f"000801:{BASE}", "Placement", "Position=1,2,-30000; Rotation=0,0,0",
+                          "Position=5,6,-30000; Rotation=0,0,0", "Position=1,2,3; Rotation=0,0,0"),
+                 lost_row(MOD_A, MOD_B, f"000801:{BASE}", "EnableParent", "Reference=000014:Skyrim.esm; Unknown=1",
+                          "Reference=000014:Skyrim.esm; Unknown=0", "x"),
+                 lost_row(MOD_A, MOD_B, f"000802:{BASE}", "Placement", "Position=1,2,3; Rotation=0,0,0",
+                          "Position=1,2,-30000; Rotation=0,0,0", "Position=1,2,3; Rotation=0,0,0")]
+        enr = {(RECORDS, a): (rows_ if a == "baseline" else []) for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+        results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+        p = reader(plan).get("prediction") or {}
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("field"), e.get("admission")) for e in p.get("record") or [])
+        item = next((i for i in p.get("items") or [] if i["checkId"] == RECORDS), {})
+        ok = (adm == [("000801", "EnableParent", "bothDisabled"), ("000801", "Placement", "bothDisabled"),
+                      ("000802", "Placement", "admitted")]
+              and "disables the object" in item.get("plain", "") and "2 record fields on objects both mods disable" in md)
+        return ok, f"admission {adm}; item {item.get('plain', '')[:200]!r}"
+
+    # C504. What stays with the patch is said at the top, in the prediction section; a value a patch sets or keeps is
+    # never called "still lost"
+    def c504_with_patch_line_at_top():
+        plan, md, html = record_validation_bundle()
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        line = (reader(plan).get("prediction") or {}).get("withPatchLine") or ""
+        ok = (bool(line) and line in sec and PATCH in line and "still lost" not in md)
+        return ok, f"with-patch line {line!r}; in the prediction section {bool(line) and line in sec}"
+
+    for name, fn in [("w2-round5/C499-attribution-from-single-mod-remeasure", c499_attribution_from_single_mod_remeasure),
+                     ("w2-round5/C500-navmesh-comparison-names-its-unit", c500_navmesh_comparison_names_its_unit),
+                     ("w2-round5/C501-shared-objects-keep-their-total", c501_shared_objects_keep_their_total),
+                     ("w2-round5/C502-fixture-at-zero-is-cannot-tell", c502_fixture_at_zero_is_cannot_tell),
+                     ("w2-round5/C503-disables-said-and-both-disabled-set-aside", c503_disables_said_and_both_disabled_set_aside),
+                     ("w2-round5/C504-with-patch-line-at-top", c504_with_patch_line_at_top)]:
+        cell(name, fn)
 
     for name, fn in [("w2-round4/C494-no-model-object-counted-nowhere", c494_no_model_counted_nowhere),
                      ("w2-round4/C495-lost-edit-classes-by-losing-side", c495_lost_edit_classes_by_losing_side),
