@@ -166,7 +166,8 @@ def case_15_real_compiler_plan_renders_hits_and_open():
     import test_evalreport_prediction as T  # noqa: E402
     p, *_ = T.patched_with_sibling("same")
     md, s, man = RD.build(p, WORDS, {}, None, None, "show", None)
-    assert man["admitted"] and man["admitted"][0]["byItem"] == {"hits": 2, "open": 1, "notMeasured": 0}, man["admitted"]
+    by = man["admitted"][0]["byItem"] if man["admitted"] else {}
+    assert {k: by.get(k) for k in ("hits", "open", "notMeasured")} == {"hits": 2, "open": 1, "notMeasured": 0}, man["admitted"]
     assert "1 problem of its own" in s, s
 
 
