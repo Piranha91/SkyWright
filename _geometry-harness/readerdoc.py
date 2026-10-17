@@ -216,7 +216,7 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         fixable = [(i, it) for i, it in both if it.get("kind") != "LOST-EDIT"]
         hits = sum(by[i]["hits"] for i, _ in fixable)
         total = sum(int(it.get("count") or 0) for _, it in fixable)
-        left = sum(by[i]["open"] + by[i]["notMeasured"] for i, _ in fixable)
+        left = sum(by[i]["open"] + by[i]["notMeasured"] + by[i].get("cannotTell", 0) for i, _ in fixable)
         if fixable and hits == total and left == 0:
             install = ins["all"]
         elif not fixable:
@@ -256,12 +256,14 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         if d_both:
             fixed = [bind(rd["patchFixesItem"], n=ER.fmt_n(d["n"]), units=plural(d["unit"], d["n"]))
                      for (i, it), d in zip(both, d_both) if it.get("kind") != "LOST-EDIT"
-                     and val["byItem"][i]["open"] == 0 and val["byItem"][i]["notMeasured"] == 0]
+                     and val["byItem"][i]["open"] == 0 and val["byItem"][i]["notMeasured"] == 0
+                     and val["byItem"][i].get("cannotTell", 0) == 0]
             if fixed:
                 sents.append(bind(rd["patchFixes"], phrase=join_words(fixed)))
             rec = [(i, it) for i, it in both if it.get("kind") == "LOST-EDIT"]
             if rec:
-                sets = sum(val["byItem"][i]["hits"] for i, _ in rec)
+                # a field the patch keeps on purpose is still one it sets (evalreport's four lost-edit outcomes)
+                sets = sum(val["byItem"][i]["hits"] + val["byItem"][i].get("kept", 0) for i, _ in rec)
                 n_rec = sum(int(it.get("count") or 0) for _, it in rec)
                 sents.append(bind(rd["patchSetsFields"], sets=ER.fmt_n(sets), total=ER.fmt_n(n_rec),
                                   left=ER.fmt_n(n_rec - sets)))

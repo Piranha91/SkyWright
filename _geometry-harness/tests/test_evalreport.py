@@ -823,7 +823,7 @@ def check_patch_direction(bundle: Path):
     check("The patch evaluated is Patch.esp, included in the measured load order and removed for comparison."
           in str(reader.get("scopeLine")) and "No separate patch plugin" not in str(reader.get("scopeLine")),
           f"{label}/removes: the opening names the patch and says the comparison removes it (got {reader.get('scopeLine')!r})")
-    expect(headline(reader), "Removing Patch.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Removing Patch.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/removes: the Result says the defect comes with removing the patch")
     check(regression_plain(plan, "candidate-02-patchb").startswith("Removing Patch.esp introduced 2 new problems"),
           f"{label}/removes: the finding sentence names the removal (got {regression_plain(plan, 'candidate-02-patchb')!r})")
@@ -846,7 +846,7 @@ def check_patch_direction(bundle: Path):
     check("The patch evaluated is Patch.esp, added to the measured load order for comparison." in str(reader.get("scopeLine"))
           and "removed for comparison" not in str(reader.get("scopeLine")),
           f"{label}/adds: the opening names the patch and says the comparison adds it (got {reader.get('scopeLine')!r})")
-    expect(headline(reader), "Adding Patch.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Adding Patch.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/adds: the Result says the defect comes with adding the patch")
     check(regression_plain(plan, "candidate-02-patchb").startswith("Adding Patch.esp introduced 2 new problems"),
           f"{label}/adds: the finding sentence names the addition (got {regression_plain(plan, 'candidate-02-patchb')!r})")
@@ -864,7 +864,7 @@ def check_patch_direction(bundle: Path):
     check("No separate patch plugin was declared for this comparison." in str(reader.get("scopeLine")),
           f"{label}/none: the opening keeps the no-separate-patch wording (got {reader.get('scopeLine')!r})")
     # the title with no separate patch: followup_title_control
-    expect(headline(reader), "Removing FixtureTarget.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Removing FixtureTarget.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/none: the Result names the removal even when no patch is involved")
     check("supplied setup" not in md.lower() and "This setup also loads" not in md,
           f"{label}/none: a removal arm is not the supplied setup, and no omitted patch is claimed")
@@ -876,7 +876,7 @@ def check_patch_direction(bundle: Path):
     expect(reader.get("title"), "FixtureTarget.esp with Other.esp, Patch.esp — patch review", f"{label}/mixed: title")
     check("The patches evaluated are Other.esp, Patch.esp, added or removed for comparison." in str(reader.get("scopeLine")),
           f"{label}/mixed: the opening says the comparisons add or remove them (got {reader.get('scopeLine')!r})")
-    expect(headline(reader), "A tested alternative setup introduces a new defect in a check that ran.",
+    expect(headline(reader), "A tested alternative setup introduces new problems in the check \"Objects left without their supporting surface\" in 2 setups (2, 2).",
            f"{label}/mixed: arms that change different things share no single subject, and one removes a plugin")
     check(regression_plain(plan, "candidate-01-patcha").startswith("Adding Patch.esp introduced")
           and regression_plain(plan, "candidate-02-patchb").startswith("Removing Other.esp introduced"),
@@ -928,13 +928,16 @@ def check_patch_direction(bundle: Path):
                f"{label}/{variant}/contact-repair: the repaired-only Result names the change")
         plan, md, html = patch_direction_control(bundle, variant, "contact-regression-repair")
         expect(headline(plan.get("reader")),
-               f"{subject} resolves some measured conflicts, but it also introduces a new defect in a check that ran.",
+               f"{subject} resolves some measured conflicts, but it also introduces "
+               + ("new problems in the check \"Objects left without their supporting surface\" in 2 setups (2, 2)."
+                  if variant == "mixed" else
+                  "2 new problems in the check \"Objects left without their supporting surface\"."),
                f"{label}/{variant}/contact-regression-repair: the regression-plus-repair Result names the change")
 
     # (h) one arm that adds one plugin and removes another names both changes
     plan, md, html = patch_direction_control(bundle, "both")
     reader = plan.get("reader") or {}
-    expect(headline(reader), "Adding Patch.esp and removing Other.esp introduces a new defect in a check that ran.",
+    expect(headline(reader), "Adding Patch.esp and removing Other.esp introduces 2 new problems in the check \"Objects left without their supporting surface\".",
            f"{label}/both: the Result names the addition and the removal")
     # One arm that adds and removes is "mixed": neither declared patch is evaluated on its own, and the opening
     # says so and names them. It must never claim no patch was declared (ruling 2026-10-05, option 2).
@@ -1072,6 +1075,11 @@ def check_alternative_identity(bundle: Path):
     check(len(masters) == 1 and names(masters[0], "candidate-02-patchb")
           and not names(masters[0], "candidate-01-patcha") and not names(masters[0], "candidate-03-combined"),
           f"{label}: a check clean on exactly one arm names that arm alone (got {masters!r})")
+    # the concise page prints a no-problem line in its short form (skill data concise.nullLong -> nullShort, W-B1)
+    conc_ = (json.loads((HARNESS.parent / ".claude/skills/evaluation-reporting/references/report-priorities.json")
+                        .read_text(encoding="utf-8")).get("concise") or {})
+    links = [x.replace(conc_.get("nullLong") or "\0", conc_.get("nullShort") or "") for x in links]
+    masters = [x.replace(conc_.get("nullLong") or "\0", conc_.get("nullShort") or "") for x in masters]
     md_null = section(md, "## Checks that found no problem", "## Reference information collected")
     html_null = section(html, "<h2>Checks that found no problem</h2>", "</ul>")
     check(md_null and "Tested alternative setup:" not in md_null and all(x in md_null for x in links + masters),
@@ -1246,7 +1254,8 @@ def followup_totals_wording_control(bundle: Path):
           f"(got probe {probe_total!r}, counted {counted}, history {history})")
     check("out of 4 conflict(s) the probe reported" in " ".join(str(f.get("plain")) for f in base_rows),
           f"{label}: the evidence-index sentence keeps the probe's own total of 4")
-    want = ("In total this check reported 3 records with a problem in the measured load order and 2 in this setup, "
+    # round 5 (third blind review, W-S4): the navmesh rows are counted in their own unit, broken links
+    want = ("In total this check reported 3 broken navmesh links in the measured load order and 2 in this setup, "
             "including conflicts that do not involve the target mods, which this report does not list.")
     check(want in line, f"{label}/navmesh: the totals name their unit and the unlisted pairs (got {line!r})")
     want_history = ("Not counted: 1 navmesh edit overwritten by another mod in the measured load order and 1 in this "
@@ -1257,7 +1266,7 @@ def followup_totals_wording_control(bundle: Path):
     check(want in md and want_history in md and html_escape(want) in html and html_escape(want_history) in html,
           f"{label}/navmesh: report.md and report.html carry both sentences")
     plan, md, html, line = followup_totals_control(bundle, "plain")
-    check(line.endswith("In total this check reported 1 record with a problem in the measured load order and 0 in this setup.")
+    check(line.endswith("In total this check reported 1 broken navmesh link in the measured load order and 0 in this setup.")
           and "Not counted" not in line and "do not involve" not in line,
           f"{label}/plain: with no unlisted pair and no history, neither clause appears (got {line!r})")
     plan, md, html, line = followup_totals_control(bundle, "patch")
@@ -1431,24 +1440,36 @@ def check_missing_setup_naming(bundle: Path):
     check(f"{alt_only} — {base_label}" not in by_reason.get(not_supplied, []),
           f"{label}: the setup that supplied {alt_only!r} is not listed as missing it")
     # scoped to the section itself: the same "check — setup" phrase legitimately appears in the no-problem list
-    # for the setup that DID supply the result, which is the point
+    # for the setup that DID supply the result, which is the point.
+    # Since the window-2 report review (P53, accepted under the standing rule 2026-10-17) the concise page lists here
+    # only the missing checks on setups the coverage section ("What the checks could not judge") does not already
+    # list by reason and setup; one sentence points there. The plan's missingSummary stays complete (asserted above).
+    covered = set(((reader.get("coverage") or {}).get("relevantArms")) or [])
+    label_of = {base_label: "baseline", alt_label: "candidate-02-patchb"}
     for fmt, text_, start, end in (("report.md", md, "## What still needs checking", "\n## "),
                                    ("report.html", html, "<h2>What still needs checking</h2>", "<h2>")):
         esc = html_escape if fmt == "report.html" else (lambda s: s)
         body = text_.split(start, 1)[1]
         body = body.split(end, 1)[0]
         check(bool(body.strip()), f"{label}/{fmt}: the what-still-needs-checking section was located")
-        for title, setup in ((both, base_label), (both, alt_label), (alt_only, alt_label)):
-            check(esc(f"{title} — {setup}") in body,
-                  f"{label}/{fmt}: '{title} — {setup}' is named in what still needs checking")
+        check(not covered or "listed under" in body,
+              f"{label}/{fmt}: the section points to the coverage section for the setups it covers")
+        for title, setup in ((both, base_label), (both, alt_label), (alt_only, alt_label), (base_only, base_label)):
+            on_page = esc(f"{title} — {setup}") in body
+            if label_of.get(setup) in covered:
+                check(not on_page, f"{label}/{fmt}: '{title} — {setup}' is not repeated (the coverage section lists it)")
+            else:
+                check(on_page, f"{label}/{fmt}: '{title} — {setup}' is named in what still needs checking")
         for title, setup in ((alt_only, base_label), (base_only, alt_label)):
             check(esc(f"{title} — {setup}") not in body,
                   f"{label}/{fmt}: '{title} — {setup}' is NOT named there - that setup is not missing that check")
-        check(esc(f"{base_only} — {base_label}") in body,
-              f"{label}/{fmt}: '{base_only} — {base_label}' is named")
         # the reason clause stays the group's lead, said once per status, with its explanation attached to it
         check(body.count(not_supplied[:1].upper() + not_supplied[1:]) == 1,
               f"{label}/{fmt}: the not-supplied reason is stated once, as the group's lead")
+    # what the page no longer repeats is on it once, in the coverage section, with its setup
+    cov = md.split("## What the checks could not judge", 1)[1].split("\n## ", 1)[0]
+    for title in (both, base_only):
+        check(title in cov, f"{label}: '{title}' is named in the coverage section")
     explanation = "These checks still need to be completed for each setup being considered."
     expect([md.count(explanation), html.count(explanation)], [1, 1],
            f"{label}: the status explanation stays attached to its own group, once")

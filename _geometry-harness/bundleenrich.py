@@ -230,9 +230,14 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             continue
         doc = _load(d / e["path"])
         for c in (doc.get("Conflicts") if isinstance(doc, dict) else None) or []:
-            for n in c.get("Necessary") or []:
+            # a row's own object and its partner (an overlap's other object, a contact's host)
+            for n in (c.get("Necessary") or []) + (c.get("Alternative") or []):
                 if isinstance(n, dict) and FK.match(str(n.get("FormKey") or "")):
                     fks.add(n["FormKey"])
+        for p_ in (doc.get("Predicates") if isinstance(doc, dict) else None) or []:
+            for k in ("FormKey", "Other"):
+                if isinstance(p_, dict) and FK.match(str(p_.get(k) or "")):
+                    fks.add(p_[k])
     for t in scope.get("targets") or []:
         for c in ((t.get("footprint") or {}).get("placed") or {}).get("cells") or []:
             if c.get("cell") and FK.match(str(c["cell"])):
@@ -281,11 +286,17 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             if rec.get("error") or not rec.get("formid"):
                 return None                     # this plugin has no version of the record
             fl = {f.get("path"): f.get("value") for f in rec.get("fields") or [] if f.get("value") is not None}
+            absent = {f.get("path") for f in rec.get("fields") or [] if f.get("note") == "(absent)"}
             prev = found.get(rec["formid"]) or {}
+            # the model a later version carries wins; a version that reads the field as absent has none
+            model = (fl.get("Model.File") if "Model.File" in fl else "" if "Model.File" in absent
+                     else prev.get("model"))
             found[rec["formid"]] = {"type": rec.get("type") or prev.get("type"),
                                     "editorId": rec.get("editorid") or prev.get("editorId"),
                                     "name": fl.get("Name") or prev.get("name"),
-                                    "from": x["name"] if fl.get("Name") else prev.get("from")}
+                                    "from": x["name"] if fl.get("Name") else prev.get("from"),
+                                    "model": model,
+                                    "carriedBy": (prev.get("carriedBy") or []) + [x["name"]]}
             return fl
         for x in order:
             for rec in read(x, targets_fk, ["Name", "Base"]):
@@ -296,7 +307,7 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
         if base_fks:
             for x in [p for p in plugins if str(p.get("name")).lower() in
                       {b.split(":", 1)[1].lower() for b in base_fks} | {t.lower() for t in targets}]:
-                for rec in read(x, base_fks, ["Name"]):
+                for rec in read(x, base_fks, ["Name", "Model.File"]):
                     keep(rec, x)
     finally:
         reader.close()
@@ -331,7 +342,14 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
     (d / resp_rel).write_text("".join(json.dumps(m) + "\n" for m in reader.resp), encoding="utf-8")
     derived = [{"path": str(x["path"]), "sha256": str(x["sha256"]).lower(), "plugin": x["name"], "outside": True}
                for x in order]
+    # every object a row names: its base and the plugins read that carry a version of it, in load order (the last is
+    # the winner among them); every base: its type and model ("" when the record has none, null when not read)
+    refs = {fk: {"base": bases.get(fk), "carriedBy": list(dict.fromkeys((found.get(fk) or {}).get("carriedBy") or []))}
+            for fk in targets_fk if fk in found}
+    base_rows = {fk: {"type": (found.get(fk) or {}).get("type"), "editorId": (found.get(fk) or {}).get("editorId"),
+                      "model": (found.get(fk) or {}).get("model")} for fk in sorted(set(bases.values())) if fk in found}
     _write(d / out_rel, {"schema": "names-v1", "places": places, "objects": objects, "mods": mods,
+                         "refs": refs, "bases": base_rows, "readOrder": [x["name"] for x in order],
                          "missing": missing, "derivedFrom": derived,
                          "capture": [{"path": req_rel, "sha256": sha(d / req_rel)},
                                      {"path": resp_rel, "sha256": sha(d / resp_rel)}],
