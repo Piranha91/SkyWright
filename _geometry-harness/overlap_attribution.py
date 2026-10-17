@@ -65,10 +65,41 @@ def _explicit_pair_scope(manifest: dict[str, Any], pair_key: str) -> bool:
     return False
 
 
+def _declarable_owners(manifest: dict[str, Any]) -> frozenset[str] | None:
+    """Casefolded names of every plugin the setup loads or any loaded plugin lists as a master; None when unknown."""
+    plugins = ((manifest.get("scope") or {}).get("configuration") or {}).get("Plugins")
+    if not isinstance(plugins, list) or not plugins:
+        return None
+    names: set[str] = set()
+    for plugin in plugins:
+        name = plugin.get("Name") if isinstance(plugin, dict) else None
+        masters = plugin.get("Masters") if isinstance(plugin, dict) else None
+        if not isinstance(name, str) or not name or not isinstance(masters, list):
+            return None
+        names.add(name.casefold())
+        names.update(m.casefold() for m in masters if isinstance(m, str))
+    return frozenset(names)
+
+
+def _owner_not_loaded(formid: str, declarable: frozenset[str] | None) -> str | None:
+    """The owning plugin of a FormKey when no plugin in the setup can declare it (owner neither loaded nor mastered)."""
+    if declarable is None or ":" not in formid:
+        return None
+    owner = formid.split(":", 1)[1]
+    return owner if owner and owner.casefold() not in declarable else None
+
+
 def _object_snapshot(manifest: dict[str, Any], formid: str, records: dict[str, dict[str, Any]],
-                     assets: dict[str, dict[str, Any]]) -> dict[str, Any]:
+                     assets: dict[str, dict[str, Any]], declarable: frozenset[str] | None = None) -> dict[str, Any]:
     record = records.get(formid)
     if record is None:
+        owner = _owner_not_loaded(formid, declarable)
+        if owner is not None:
+            # Only the owner or a plugin mastering it can declare this FormKey; neither is in the setup,
+            # so the object does not exist there. Decided from the plugin set, never from a reason string.
+            return {"formid": formid, "status": "absent",
+                    "absence": {"basis": "owning-plugin-not-loaded", "owningPlugin": owner},
+                    "reason": "the owning plugin is not in this setup and no loaded plugin masters it"}
         # No record row at all: the scene enumerated nothing about this reference, so nothing
         # here establishes absence. Distinct from an enumerated record whose own resolved state
         # says it is off, which is evidence. Callers gate on the pair row's retention.
@@ -141,6 +172,7 @@ def attribute(setups: dict[str, dict], combined: str, comparisons: list[str],
     record_maps = {setup_id: _record_map(manifest) for setup_id, manifest in setups.items()}
     pair_maps = {setup_id: _pair_map(manifest) for setup_id, manifest in setups.items()}
     asset_maps = {setup_id: _asset_map(manifest) for setup_id, manifest in setups.items()}
+    declarable = {setup_id: _declarable_owners(manifest) for setup_id, manifest in setups.items()}
     for setup_id, manifest in setups.items():
         valid, reasons = _setup_valid(manifest)
         scene = manifest.get("scene") or {}
@@ -170,7 +202,9 @@ def attribute(setups: dict[str, dict], combined: str, comparisons: list[str],
         "policy": POLICY, "combinedSetupId": combined, "comparisonSetupIds": comparison_ids,
         "candidatePlugins": sorted(set(candidate_plugins), key=str.casefold), "directionIndependent": True,
         "statuses": sorted(STATUSES),
-        "absenceRule": "absence requires a valid explicit scene whose retained union contains the pair; unknown never means absent",
+        "absenceRule": ("absence requires a valid explicit scene whose retained union contains the pair, shown by an "
+            "enumerated record's own state or by an owning plugin the setup neither loads nor masters; unknown never means absent"),
+        "absenceBases": ["record-state", "owning-plugin-not-loaded"],
     }
     rows: list[dict[str, Any]] = []
     counts = {s: 0 for s in STATUSES}
@@ -191,10 +225,10 @@ def attribute(setups: dict[str, dict], combined: str, comparisons: list[str],
             before_manifest = setups[before_id]
             before_pair = pair_maps[before_id].get(pair_key)
             after_pair = after_pairs.get(pair_key)
-            before_objects = [_object_snapshot(before_manifest, a, record_maps[before_id], asset_maps[before_id]),
-                              _object_snapshot(before_manifest, b, record_maps[before_id], asset_maps[before_id])]
-            after_objects = [_object_snapshot(after_manifest, a, record_maps[combined], asset_maps[combined]),
-                             _object_snapshot(after_manifest, b, record_maps[combined], asset_maps[combined])]
+            before_objects = [_object_snapshot(before_manifest, x, record_maps[before_id], asset_maps[before_id],
+                                               declarable[before_id]) for x in (a, b)]
+            after_objects = [_object_snapshot(after_manifest, x, record_maps[combined], asset_maps[combined],
+                                              declarable[combined]) for x in (a, b)]
             changed = {formid: _changes(old, new) for formid, old, new in zip((a, b), before_objects, after_objects)}
             before_valid = setup_meta[before_id]["validity"] == "valid"
             after_valid = setup_meta[combined]["validity"] == "valid"
