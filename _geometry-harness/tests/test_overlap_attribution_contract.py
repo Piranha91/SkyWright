@@ -461,4 +461,146 @@ class RetainedPairAbsenceBoundaryTests(unittest.TestCase):
         out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
         self.assertEqual("unresolved", out["attribution"]["status"])
 
+
+class OwnerNotLoadedAbsenceTests(unittest.TestCase):
+    """P41: a FormKey can only be declared by its owning plugin or a plugin mastering it. When the setup's
+    configuration neither loads nor masters the owner, the object does not exist there: absence decided
+    from the plugin set. A reference the scene merely failed to enumerate stays unresolved."""
+    UNPROVEN = "a retained pair row names an endpoint this scene never enumerated, so its absence is unproven"
+    a, b = "000001:Base.esm", "000801:Cand.esp"
+
+    @staticmethod
+    def _plugins(setup, *plugins):
+        """plugins: (name, [masters]) tuples, written as the producer writes scope.configuration.Plugins."""
+        s = copy.deepcopy(setup)
+        s["scope"]["configuration"]["Plugins"] = [{"Name": n, "Masters": list(m)} for n, m in plugins]
+        return s
+
+    @staticmethod
+    def _retained(a, b, reason="a historical reference is absent from the evaluated order"):
+        row = copy.deepcopy(_pair(a, b))
+        row["actualShape"] = {"status": "unknown", "reason": reason, "surfaceRelation": "unknown",
+                              "containment": "unknown", "intersects": None, "trianglePairsTested": 0}
+        return row
+
+    def _combined(self):
+        return self._plugins(_setup("combined", [_record(self.a, "a"), _record(self.b, "b")], [_pair(self.a, self.b)]),
+                             ("Base.esm", []), ("Cand.esp", ["Base.esm"]))
+
+    def _source(self, *plugins, reason="a historical reference is absent from the evaluated order"):
+        return self._plugins(_setup("source", [_record(self.a, "a")], [self._retained(self.a, self.b, reason)]),
+                             *plugins)
+
+    @staticmethod
+    def _cmp(out, side="before"):
+        c = out["attribution"]["comparisons"][0]
+        return c, {o["formid"]: o for o in c[side]["objects"]}
+
+    def test_c500_before_side_owner_not_loaded_is_new(self):
+        out = _attribute({"source": self._source(("Base.esm", [])), "combined": self._combined()},
+                         ["source"])["pairs"][0]
+        c, before = self._cmp(out)
+        self.assertEqual("new", c["status"])
+        self.assertEqual("new", out["attribution"]["status"])
+        self.assertEqual("absent", before[self.b]["status"])
+        self.assertEqual({"basis": "owning-plugin-not-loaded", "owningPlugin": "Cand.esp"}, before[self.b]["absence"])
+
+    def test_c501_owner_loaded_but_unenumerated_stays_unresolved(self):
+        src = self._source(("Base.esm", []), ("Cand.esp", ["Base.esm"]))
+        out = _attribute({"source": src, "combined": self._combined()}, ["source"])["pairs"][0]
+        c, before = self._cmp(out)
+        self.assertEqual("unresolved", c["status"])
+        self.assertEqual(self.UNPROVEN, c["reason"])
+        self.assertEqual("unknown", before[self.b]["status"])
+
+    def test_c502_owner_mastered_by_a_loaded_plugin_stays_unresolved(self):
+        src = self._source(("Base.esm", []), ("Other.esp", ["Base.esm", "Cand.esp"]))
+        out = _attribute({"source": src, "combined": self._combined()}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+        self.assertEqual(self.UNPROVEN, self._cmp(out)[0]["reason"])
+
+    def test_c503_setup_without_plugins_stays_unresolved(self):
+        src = _setup("source", [_record(self.a, "a")], [self._retained(self.a, self.b)])
+        out = _attribute({"source": src, "combined": self._combined()}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+        self.assertEqual("unknown", self._cmp(out)[1][self.b]["status"])
+
+    def test_c504_after_side_owner_not_loaded_is_absent_excluded(self):
+        source = self._plugins(_setup("source", [_record(self.a, "a"), _record(self.b, "b")], [_pair(self.a, self.b)]),
+                               ("Base.esm", []), ("Cand.esp", ["Base.esm"]))
+        combined = self._plugins(_setup("combined", [_record(self.a, "a")], [self._retained(self.a, self.b)]),
+                                 ("Base.esm", []))
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        c, after = self._cmp(out, "after")
+        self.assertEqual("absent_excluded", c["status"])
+        self.assertEqual("owning-plugin-not-loaded", after[self.b]["absence"]["basis"])
+
+    def test_c505_reason_prose_does_not_move_either_status(self):
+        for prose in ("a historical reference is absent from the evaluated order",
+                      "the reference is absent in the selected state", "", "totally reworded next release"):
+            with self.subTest(prose=prose):
+                unloaded = self._source(("Base.esm", []), reason=prose)
+                loaded = self._source(("Base.esm", []), ("Cand.esp", ["Base.esm"]), reason=prose)
+                self.assertEqual("new", _attribute({"source": unloaded, "combined": self._combined()},
+                                                   ["source"])["pairs"][0]["attribution"]["status"])
+                self.assertEqual("unresolved", _attribute({"source": loaded, "combined": self._combined()},
+                                                          ["source"])["pairs"][0]["attribution"]["status"])
+
+    def test_c506_owner_match_is_case_insensitive(self):
+        src = self._source(("Base.esm", []), ("CAND.ESP", ["base.esm"]))
+        out = _attribute({"source": src, "combined": self._combined()}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+
+    def test_c507_two_candidates_three_comparisons_all_new(self):
+        a, b = "000801:CandA.esp", "000802:CandB.esp"
+        base, ca, cb = ("Base.esm", []), ("CandA.esp", ["Base.esm"]), ("CandB.esp", ["Base.esm"])
+        combined = self._plugins(_setup("combined", [_record(a, "a"), _record(b, "b")], [_pair(a, b)]), base, ca, cb)
+        dep = self._plugins(_setup("dependency", [], [self._retained(a, b)]), base)
+        only_a = self._plugins(_setup("only-a", [_record(a, "a")], [self._retained(a, b)]), base, ca)
+        only_b = self._plugins(_setup("only-b", [_record(b, "b")], [self._retained(a, b)]), base, cb)
+        full = _attribute({"combined": combined, "dependency": dep, "only-a": only_a, "only-b": only_b},
+                          ["dependency", "only-a", "only-b"])
+        out = full["pairs"][0]
+        self.assertEqual({"dependency": "new", "only-a": "new", "only-b": "new"},
+                         {c["beforeSetupId"]: c["status"] for c in out["attribution"]["comparisons"]})
+        self.assertEqual("new", out["attribution"]["status"])
+        self.assertTrue(full["accounting"]["attribution"]["complete"])
+
+    def test_c508_owner_absence_does_not_override_a_hard_unresolved_cause(self):
+        src = self._source(("Base.esm", []))
+        src["readerVersion"] = "reader-v2"
+        out = _attribute({"source": src, "combined": self._combined()}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+        self.assertEqual("reader/predicate/tolerance/limit identities do not match", self._cmp(out)[0]["reason"])
+        invalid = self._source(("Base.esm", []))
+        invalid["scene"]["validity"] = {"status": "unresolved", "reasons": ["fixture incomplete"]}
+        out = _attribute({"source": invalid, "combined": self._combined()}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+
+    def test_c509_after_missing_pair_with_owner_absent_endpoint_stays_unresolved(self):
+        source = self._plugins(_setup("source", [_record(self.a, "a"), _record(self.b, "b")], [_pair(self.a, self.b)]),
+                               ("Base.esm", []), ("Cand.esp", ["Base.esm"]))
+        combined = self._plugins(_setup("combined", [_record(self.a, "a")], []), ("Base.esm", []))
+        out = _attribute({"source": source, "combined": combined}, ["source"])["pairs"][0]
+        self.assertEqual("unresolved", out["attribution"]["status"])
+
+    def test_c510_injected_record_whose_owner_is_a_listed_master_is_not_owner_absent(self):
+        """A loaded plugin that overrides or places a FormKey of one of its masters can declare the object even
+        when the owner itself is not in Plugins. Without a record row that stays unresolved; with one, the
+        record's own state decides (present here), never the owner rule."""
+        injector = ("Injector.esp", ["Base.esm", "Cand.esp"])
+        no_row = self._source(("Base.esm", []), injector)
+        out = _attribute({"source": no_row, "combined": self._combined()}, ["source"])["pairs"][0]
+        c, before = self._cmp(out)
+        self.assertEqual("unresolved", c["status"])
+        self.assertEqual(self.UNPROVEN, c["reason"])
+        self.assertNotIn("absence", before[self.b])
+        with_row = self._plugins(_setup("source", [_record(self.a, "a"), _record(self.b, "b")],
+                                        [_pair(self.a, self.b)]), ("Base.esm", []), injector)
+        out = _attribute({"source": with_row, "combined": self._combined()}, ["source"])["pairs"][0]
+        c, before = self._cmp(out)
+        self.assertEqual("present", before[self.b]["status"])
+        self.assertEqual("inherited", c["status"])
+
+
 if __name__ == "__main__": unittest.main()
