@@ -1169,8 +1169,10 @@ def build_prediction(ctx: dict) -> dict:
             ex = f"{rk[4]} ({hit['row'].get('field')})" if hit["row"].get("field") else str(rk[4])
             if ex not in g["_records"]:
                 g["_records"].append(ex)
-        if label and rk[1] != "LOST-EDIT" and not re.match(r"^[0-9a-f]{6}:", str(label), re.I) and " tris" not in str(label):
-            g.setdefault("_places", collections.Counter())[str(label)] += 1
+        if label and rk[1] != "LOST-EDIT":
+            # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
+            # part of its place
+            g.setdefault("_places", collections.Counter())[re.sub(r"\s+\d+ tris -> \d+$", "", str(label))] += 1
         if hit["finding"].get("readerProvenance"):
             # the full sentence is in the limits and beside the finding; the item says it in short
             g["_provenance"] = words.get("itemReused") or hit["finding"]["readerProvenance"]
@@ -4059,6 +4061,10 @@ def cmd_verify(a) -> int:
                 if pi.get("status") == "within-limit" and pi.get("maxPages") is not None and (pages_now or 0) > pi["maxPages"]:
                     defects.append({"kind": "limit-contradiction", "path": "report.pdf",
                                     "detail": f"{pages_now} page(s) exceed the limit {pi['maxPages']} yet the status is within-limit"})
+                if pi.get("status") == "over-limit":
+                    # a report over its page limit fails its own acceptance: verify never says ok for it
+                    defects.append({"kind": "over-limit", "path": "report.pdf",
+                                    "detail": f"{pages_now} page(s) against a limit of {pi.get('maxPages')}"})
         r.advance(1)
         result = {"schemaVersion": 1, "checkedUtc": utc_now(), "out": str(out), "presentationId": plan.get("presentationId"),
                   "ok": not defects, "artifacts": counter["artifacts"], "media": counter["media"],

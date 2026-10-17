@@ -1554,6 +1554,54 @@ def main():
                       c462_overlap_judged_by_pair_predicate)]:
         cell(name, fn)
 
+    # ---- window-2 review, round 3 (blind review of the regenerated reports)
+
+    # C481. An item's place counts and "All are in" come from its own listed rows: every row's place is counted,
+    # a place the probe names by form key included, and a navmesh row's triangle note is not part of its place
+    def c481_place_counts_from_listed_rows():
+        places = ["CityExterior02 (ext)", "CityExterior02 (ext)", "CityExterior02 (ext)", "CityExterior01 (ext)",
+                  "CityExterior01 (ext)", f"008EC2:{BASE} (ext)", f"008E63:{BASE} (ext)", "CityDocks (ext)"]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, f"0008{i:02X}:{MOD_A}", label=pl, other=f"0009{i:02X}:{MOD_B}")
+                  for i, pl in enumerate(places)]
+        nav_places = ["CityExterior03 (ext)", "CityExterior03 (ext)", f"008EC2:{BASE} (ext)"]
+        n_rows = [row("EDGE-IDX", MOD_B, MOD_A, f"00A0{i:02X}:{BASE}", label=pl) for i, pl in enumerate(nav_places)]
+        n_rows.append(row("EDGE-IDX", MOD_B, MOD_A, f"00A0FF:{BASE}", label="CityExterior03 (ext)  689 tris -> 5"))
+        nav_places.append("CityExterior03 (ext)")
+        results = {(OVERLAP, "baseline"): p_rows, (OVERLAP, "dependency-only"): [], (OVERLAP, "plus-a"): [],
+                   (OVERLAP, "plus-b"): [], (NAVOWN, "baseline"): n_rows, (NAVOWN, "dependency-only"): [],
+                   (NAVOWN, "plus-a"): [], (NAVOWN, "plus-b"): []}
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        items = {i["checkId"]: i["plain"] for i in (reader(plan).get("prediction") or {}).get("items") or []}
+        ov, nv = items.get(OVERLAP, ""), items.get(NAVOWN, "")
+        want_more = len(set(places)) - 2           # the two most common places are named, the rest counted
+        ok = (f"and {want_more} more places" in ov and "All are in" not in nv
+              and f"008EC2:{BASE} (ext)" in nv and "tris" not in nv.split("Most are in")[-1])
+        return ok, f"overlap item {ov!r}; navmesh item {nv!r}"
+
+    # C482. verify does not say ok while the printed report is over its page limit
+    def c482_verify_refuses_over_limit():
+        import types
+        plan = record_rows_bundle()[0]
+        R.stamp(plan)
+        with tempfile.TemporaryDirectory() as td:
+            out = Path(td)
+            R.write_json(out / "presentation.json", plan)
+            pdf = (b"%PDF-1.4\n1 0 obj << /Type /Pages /Count 9 >> endobj\n"
+                   + b"".join(f"{i + 2} 0 obj << /Type /Page >> endobj\n".encode() for i in range(9)))
+            (out / "report.pdf").write_bytes(pdf)
+            R.write_json(out / "presentation-manifest.json", {
+                "schemaVersion": 1, "presentationId": plan.get("presentationId"), "artifacts": [], "media": [],
+                "supportingEvidence": [], "print": {"status": "over-limit", "pages": 9, "maxPages": 8}})
+            code = R.cmd_verify(types.SimpleNamespace(out=str(out)))
+            res = json.loads((out / "presentation-verify.json").read_text(encoding="utf-8"))
+        kinds = [d.get("kind") for d in res.get("defects") or []]
+        ok = res.get("ok") is False and "over-limit" in kinds and code != 0
+        return ok, f"exit {code}; ok {res.get('ok')}; defects {kinds}"
+
+    for name, fn in [("w2-round3/C481-place-counts-from-listed-rows", c481_place_counts_from_listed_rows),
+                     ("w2-round3/C482-verify-refuses-over-limit", c482_verify_refuses_over_limit)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
