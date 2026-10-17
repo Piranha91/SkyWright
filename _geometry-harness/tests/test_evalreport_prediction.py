@@ -1608,7 +1608,8 @@ def main():
         new = [light_row(f"000L03:{MOD_A}", f"000H04:{MOD_B}"), light_row(f"000S02:{MOD_A}", f"000H05:{MOD_B}")]
         refs = {f"000L01:{MOD_A}": {"base": f"0B0L01:{MOD_A}"}, f"000L03:{MOD_A}": {"base": f"0B0L01:{MOD_A}"},
                 f"000L02:{MOD_A}": {"base": f"0B0L02:{MOD_A}"}, f"000S01:{MOD_A}": {"base": f"0B0S01:{MOD_A}"},
-                f"000S02:{MOD_A}": {"base": f"0B0S01:{MOD_A}"}}
+                f"000S02:{MOD_A}": {"base": f"0B0S01:{MOD_A}"},
+                **{f"000H0{i}:{MOD_B}": {"base": f"0B0S01:{MOD_A}"} for i in range(1, 6)}}
         bases = {f"0B0L01:{MOD_A}": {"type": "Light", "model": ""},
                  f"0B0L02:{MOD_A}": {"type": "Light", "model": "lights\\lantern.nif"},
                  f"0B0S01:{MOD_A}": {"type": "Static", "model": "rock.nif"}}
@@ -1738,7 +1739,39 @@ def main():
         ok = f"For example: 000702:{BASE} (Placement); 00003C:{BASE} (HdLodDiffuseTexture)" in md
         return ok, f"examples line: {[x for x in md.splitlines() if 'For example' in x][:1]}"
 
+    def body_rows():
+        base = [row("CONTACT", MOD_B, MOD_A, f"000L0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2, 3)]
+        return {(CONTACT, "baseline"): base, (CONTACT, "with-patch"): base + [
+            row("CONTACT", MOD_B, MOD_A, f"000L09:{MOD_A}", other=f"000H09:{MOD_B}")]}
+
+    # C492. With no names enrichment the base records were not read: the report says it cannot tell whether the
+    # geometry clashes it counts have a body, with their count, never silently
+    def c492_no_enrichment_says_body_not_read():
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, body_rows(), [MOD_A, MOD_B], patches=[PATCH])
+        cov = section_text(md, headings(plan).get("coverage") or "\0")
+        line = [x for x in cov.splitlines() if "Cannot tell whether the object has a body" in x]
+        val = reader(plan).get("validation") or {}
+        ok = (len(line) == 1 and "** 3" in line[0] and "no names enrichment" in line[0]
+              and any("cannot be told: the base records were not read" in x for x in val.get("sentences") or []))
+        return ok, f"coverage line {line}"
+
+    # C493. With the enrichment, a clash whose object's base record it did not read is "cannot tell" and not counted
+    def c493_base_not_read_is_cannot_tell():
+        refs = {f"000L0{i}:{MOD_A}": {"base": f"0B0S01:{MOD_A}"} for i in (1, 2)}
+        refs.update({f"000H0{i}:{MOD_B}": {"base": f"0B0S01:{MOD_A}"} for i in (1, 2, 3)})
+        bases = {f"0B0S01:{MOD_A}": {"type": "Static", "model": "rock.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, body_rows(), [MOD_A, MOD_B], patches=[PATCH],
+                                            names={"refs": refs, "bases": bases})
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission"))
+                     for e in (reader(plan).get("prediction") or {}).get("record") or [])
+        ok = (adm == [("000L01", "admitted"), ("000L02", "admitted"), ("000L03", "bodyUnread")]
+              and "Cannot tell, so not counted: 1 clashes whose object's base record was not read" in md
+              and "Cannot tell whether the object has a body" not in md)
+        return ok, f"admission {adm}"
+
     for name, fn in [("w2-round3/C481-place-counts-from-listed-rows", c481_place_counts_from_listed_rows),
+                     ("w2-round3/C492-no-enrichment-says-body-not-read", c492_no_enrichment_says_body_not_read),
+                     ("w2-round3/C493-base-not-read-is-cannot-tell", c493_base_not_read_is_cannot_tell),
                      ("w2-round3/C491-examples-prefer-placement", c491_examples_prefer_placement),
                      ("w2-round3/C490-concise-page-says-repeats-once", c490_concise_page_says_repeats_once),
                      ("w2-round3/C486-setup-without-partner-named", c486_setup_without_partner_named),

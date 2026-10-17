@@ -1081,6 +1081,21 @@ def build_prediction(ctx: dict) -> dict:
     def no_body(rk, other):
         return rk[1] != "LOST-EDIT" and (bodiless(rk[4]) or any(bodiless(o) for o in other or ()))
 
+    # Whether an object has a body is read from its base record; with no names enrichment carrying base records the
+    # report cannot tell for any geometry clash (a coverage line says so, with the count), and a clash whose object's
+    # base the enrichment did not read is "cannot tell", never counted or dropped unsaid (round 3, coordinator D2)
+    bases_read = isinstance(names.get("bases"), dict)
+
+    def base_unknown(fk):
+        base = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
+        return not base.get("type") or (base.get("type") == "Light" and base.get("model") is None)
+
+    body_checks = set(words.get("bodyChecks") or [])   # checks whose rows name placed objects, which have a base
+
+    def body_unread(rk, other):
+        return (bases_read and rk[0] in body_checks
+                and (base_unknown(rk[4]) or any(base_unknown(o) for o in other or ())))
+
     def path_case_only(rk):
         v = (p_rows.get(rk) or {}).get("row", {}).get("values") or {}
         return same_but_path_case(v.get("lost"), v.get("winner"))
@@ -1099,6 +1114,8 @@ def build_prediction(ctx: dict) -> dict:
             return "notInvolving"
         if no_body(rk, other):
             return "noBody"                    # a clash between the mods but for a light with no body (W-B3)
+        if body_unread(rk, other):
+            return "bodyUnread"                # cannot tell: its base record was not read
         if rk[1] == "LOST-EDIT" and path_case_only(rk):
             return "pathCase"                  # the two values name the same file (Snazzy review 3)
         return "admitted"
@@ -1436,7 +1453,8 @@ def build_prediction(ctx: dict) -> dict:
     aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
              "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
-             "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"]}
+             "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
+             "bodyUnread": set_aside["bodyUnread"]}
     if sibling_record:
         # Snazzy review 1: the sibling's setup that decided "needs both" for a partner mod is named with the others
         for m_, a_ in partner_arms.items():
@@ -1453,6 +1471,7 @@ def build_prediction(ctx: dict) -> dict:
                   "setAsideLine": (bind(words["setAsideLine"], aside) + (" " + bind(words["setAsideNoBody"], aside)
                                                                          if aside["noBody"] else "")
                                    + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
+                                   + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
                                    if sum(aside.values()) else None),
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
@@ -1627,6 +1646,11 @@ def build_prediction(ctx: dict) -> dict:
                                    for x in un["scopeUnmeasured"] if isinstance(x, dict)))
         lines.append({"reason": reasons["scopeUnmeasured"], "count": len(un["scopeUnmeasured"]),
                       "subject": "; ".join(areas)})
+    if not bases_read:
+        body_rows = [e for e in record if e["admission"] == "admitted" and e["checkId"] in body_checks]
+        if body_rows:
+            lines.append({"reason": reasons["bodyNotRead"], "count": len(body_rows),
+                          "subject": "; ".join(sorted({title_of(e["checkId"]) for e in body_rows}))})
     cannot_run = [c for c in ctx.get("cannotRunChecks") or [] if c not in statuses_of and (c, p_of(c)) not in measured]
     if cannot_run:
         lines.append({"reason": reasons["checksCannotRun"], "count": len(cannot_run),
@@ -1774,6 +1798,8 @@ def build_prediction(ctx: dict) -> dict:
                                                                     "total": spots.get("history", 0)}))
         if no_body_new:
             sentences.append(bind(words["validationNoBody"], {"patch": patch, "count": no_body_new}))
+        if problems and not bases_read and any(rk[0] in body_checks for rk in problems):
+            sentences.append(bind(words["validationBodyNotRead"], {"patch": patch}))
         if untold:
             sentences.append(bind(words["validationCannotTell"], {"patch": patch, "count": len(untold)}))
         if untold_value:
