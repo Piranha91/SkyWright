@@ -1045,7 +1045,20 @@ def build_prediction(ctx: dict) -> dict:
             arm_id = p_of(rk[0])
         return arm_id is not None and ident_of.get(rk, tuple(rk[:5])) in (prefixes.get((rk[0], arm_id)) or set())
 
-    def admission(rk, history):
+    # The names enrichment, where the bundle carries one: each object a row names, its base and the plugins read that
+    # carry a version of it (in load order); each base, its type and model ("" when the record has none).
+    names = ctx.get("names") if isinstance(ctx.get("names"), dict) else {}
+    name_refs, name_bases = names.get("refs") or {}, names.get("bases") or {}
+
+    def bodiless(fk):
+        """A light whose base record has no model has no body to clash (W-B3): decided from the record, never a name."""
+        base = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
+        return base.get("type") == "Light" and base.get("model") == ""
+
+    def no_body(rk, other):
+        return rk[1] != "LOST-EDIT" and (bodiless(rk[4]) or any(bodiless(o) for o in other or ()))
+
+    def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
             return "history"
@@ -1057,6 +1070,8 @@ def build_prediction(ctx: dict) -> dict:
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
             return "notInvolving"
+        if no_body(rk, other):
+            return "noBody"                    # a clash between the mods but for a light with no body (W-B3)
         return "admitted"
 
     without_cache = {}
@@ -1114,7 +1129,7 @@ def build_prediction(ctx: dict) -> dict:
             p_rows.update(rs)
     for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
         hit = p_rows[rk]
-        adm = admission(rk, hit["history"])
+        adm = admission(rk, hit["history"], hit["row"].get("other"))
         entry = {"checkId": rk[0], "kind": rk[1], "A": rk[2], "B": rk[3], "formKey": rk[4], "summary": rk[5],
                  "admission": adm,
                  "findingId": hit["finding"].get("id")}
@@ -1317,7 +1332,7 @@ def build_prediction(ctx: dict) -> dict:
     aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
              "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
-             "repeat": set_aside["repeat"]}
+             "repeat": set_aside["repeat"], "noBody": set_aside["noBody"]}
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
                   "items": items, "aloneLines": [{**v, "groups": [{"from": k, "entries": e} for k, e in v["groups"].items()]}
@@ -1326,7 +1341,9 @@ def build_prediction(ctx: dict) -> dict:
                   "singleModMode": single_mode, "singleModHeading": words.get("singleModHeading"),
                   "missingFacts": list(dict.fromkeys(missing_facts)),
                   "setAside": aside,
-                  "setAsideLine": bind(words["setAsideLine"], aside) if sum(aside.values()) else None,
+                  "setAsideLine": (bind(words["setAsideLine"], aside) + (" " + bind(words["setAsideNoBody"], aside)
+                                                                         if aside["noBody"] else "")
+                                   if sum(aside.values()) else None),
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
                       "subject": subject}),
@@ -1592,6 +1609,20 @@ def build_prediction(ctx: dict) -> dict:
             return {"Gone": "resolved", "Holds": "left"}.get(physical, "cannot-tell")
 
         outcome = {id(e): lost_outcome(e) if e["kind"] == "LOST-EDIT" else geometry_outcome(e) for e in judged}
+
+        def left_kind(e):
+            """Why a geometry clash left by its own predicate (the objects still intersect with the patch) is, or is no
+            longer, reported between two mods (W-B2): still listed in the setup with the patch; not listed, and a
+            declared patch's version of one of the two objects loads last among the plugins the names enrichment read
+            (the record data says who holds it); or not listed for a reason the record data does not give."""
+            if present(patched_arm, keyof(e)):
+                return "listed"
+            for fk in [e["formKey"]] + list(e.get("other") or []):
+                carriers = (name_refs.get(str(fk)) or {}).get("carriedBy") or []
+                if carriers and str(carriers[-1]).lower() in patch_lower:
+                    return "patchHeld"
+            return "notAttributed"
+        left_split = {id(e): left_kind(e) for e in judged if outcome[id(e)] == "left" and e["kind"] != "LOST-EDIT"}
         hits = [e for e in judged if outcome[id(e)] == "resolved"]
         kept = [e for e in judged if outcome[id(e)] == "kept"]
         open_ = [e for e in judged if outcome[id(e)] == "left"]
@@ -1599,12 +1630,15 @@ def build_prediction(ctx: dict) -> dict:
         untold_value = [e for e in judged if outcome[id(e)] == "cannot-tell-value"]
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
-        problems, choices, problem_finding = [], 0, {}
+        problems, choices, problem_finding, no_body_new = [], 0, {}, 0
         for rk, hit in patched_rows.items():
             if rk[1] == "LOST-EDIT" and rk[3].lower() in patch_lower:
                 choices += 1
                 continue
             if present(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
+                continue
+            if no_body(rk, hit["row"].get("other")):
+                no_body_new += 1               # a light with no model inside geometry: no body, not a clash
                 continue
             if is_base_game(rk[2], words) or is_base_game(rk[3], words):
                 continue
@@ -1627,6 +1661,8 @@ def build_prediction(ctx: dict) -> dict:
         if history_holds:
             sentences.append(bind(words["validationHistoryHolds"], {"count": history_holds,
                                                                     "total": spots.get("history", 0)}))
+        if no_body_new:
+            sentences.append(bind(words["validationNoBody"], {"patch": patch, "count": no_body_new}))
         if untold:
             sentences.append(bind(words["validationCannotTell"], {"patch": patch, "count": len(untold)}))
         if untold_value:
@@ -1644,6 +1680,9 @@ def build_prediction(ctx: dict) -> dict:
                             "open": sum(1 for e in open_ if item_of(e) == k),
                             "kept": sum(1 for e in kept if item_of(e) == k),
                             "cannotTell": sum(1 for e in untold + untold_value if item_of(e) == k),
+                            **{f"open{n[0].upper()}{n[1:]}": sum(1 for e in open_ if item_of(e) == k
+                                                                 and left_split.get(id(e)) == n)
+                               for n in ("listed", "patchHeld", "notAttributed")},
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
                          "findingIds": [x for x in dict.fromkeys(fids) if x]}
@@ -1653,6 +1692,13 @@ def build_prediction(ctx: dict) -> dict:
         def outcome_text(bi):
             parts = [bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
                      for k in ("hits", "kept", "open", "cannotTell", "notMeasured") if bi.get(k)]
+            if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed")):
+                # the objects still intersect: say how many are still reported between two mods and why the rest
+                # are not (W-B2), never a bare "left N" that the detail sections cannot reconcile
+                split = [bind(ow["openSplit"][n], {"count": fmt_n(bi[f"open{n[0].upper()}{n[1:]}"])})
+                         for n in ("listed", "patchHeld", "notAttributed") if bi.get(f"open{n[0].upper()}{n[1:]}")]
+                parts[[k for k in ("hits", "kept", "open", "cannotTell", "notMeasured") if bi.get(k)].index("open")] = (
+                    bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(split) + ")")
             return ", ".join(parts) if parts else ow["none"]
         item_lines, alone_total = [], collections.Counter()
         for g, bi in zip(prediction["items"], by_item):
@@ -3157,6 +3203,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # The report leads with the prediction (what adding the evaluated mods will break), then coverage, then the patch
     # as the answer key. The comparison sentence above keeps its words as the validation headline; the reader's
     # verdict -- and so the reel's opening -- is the prediction.
+    # the names enrichment: each named object's base and carriers, each base's type and model (W-B2, W-B3)
+    names_early_row = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
+    names_early = load_json(bundle_dir / names_early_row["path"]) if names_early_row else None
     lead = build_prediction({
         "findings": findings, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
         "declared": declared_patches, "comparisonKinds": comparison_kinds, "armChanges": arm_changes, "armReplaced": arm_replaced,
@@ -3168,7 +3217,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
-        "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit")})
+        "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
+        "names": names_early})
     verdict = lead["prediction"]["verdict"]
     # The scope line names the evaluated pair when the counted clashes need both of them, never the third mod with
     # the most rows; the third mods of single-mod clashes shown are named after it.

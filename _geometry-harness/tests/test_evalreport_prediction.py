@@ -1598,7 +1598,57 @@ def main():
         ok = res.get("ok") is False and "over-limit" in kinds and code != 0
         return ok, f"exit {code}; ok {res.get('ok')}; defects {kinds}"
 
+    # C483. A light whose base record has no model is not a physical clash, in the prediction and with the patch; a
+    # light with a model is (decided from the record's model field, read by the names enrichment, never a name)
+    def c483_light_without_model_is_not_a_clash():
+        def light_row(fk, host):
+            return row("CONTACT", MOD_B, MOD_A, fk, other=host)
+        base = [light_row(f"000L01:{MOD_A}", f"000H01:{MOD_B}"), light_row(f"000L02:{MOD_A}", f"000H02:{MOD_B}"),
+                light_row(f"000S01:{MOD_A}", f"000H03:{MOD_B}")]
+        new = [light_row(f"000L03:{MOD_A}", f"000H04:{MOD_B}"), light_row(f"000S02:{MOD_A}", f"000H05:{MOD_B}")]
+        refs = {f"000L01:{MOD_A}": {"base": f"0B0L01:{MOD_A}"}, f"000L03:{MOD_A}": {"base": f"0B0L01:{MOD_A}"},
+                f"000L02:{MOD_A}": {"base": f"0B0L02:{MOD_A}"}, f"000S01:{MOD_A}": {"base": f"0B0S01:{MOD_A}"},
+                f"000S02:{MOD_A}": {"base": f"0B0S01:{MOD_A}"}}
+        bases = {f"0B0L01:{MOD_A}": {"type": "Light", "model": ""},
+                 f"0B0L02:{MOD_A}": {"type": "Light", "model": "lights\\lantern.nif"},
+                 f"0B0S01:{MOD_A}": {"type": "Static", "model": "rock.nif"}}
+        results = {(CONTACT, "baseline"): base, (CONTACT, "with-patch"): base + new}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                            names={"refs": refs, "bases": bases})
+        p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in p.get("record") or [])
+        ok = (adm == [("000L01", "noBody"), ("000L02", "admitted"), ("000S01", "admitted")]
+              and val.get("patchProblems") == 1 and "Also not counted: 1 clashes between the mods whose object is a light source" in md
+              and "Not counted as new clashes" in md)
+        return ok, f"admission {adm}; new clashes {val.get('patchProblems')}"
+
+    # C484. Overlaps the patch leaves (still intersecting) are split by the record data: still reported between two
+    # mods; no longer reported, a patch's version of one object loading last; no longer reported, not attributed
+    def c484_left_overlaps_split_by_record_data():
+        X, Z = f"000X01:{MOD_A}", f"000Z01:{MOD_A}"
+        ys = [f"000Y0{i}:{MOD_B}" for i in (1, 2, 3)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys] + [
+            row("OVERLAP", MOD_B, MOD_A, Z, other=f"000W01:{MOD_B}")]
+        w_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=ys[0])]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        preds.append({"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": Z, "Other": f"000W01:{MOD_B}",
+                      "Physical": "Gone"})
+        refs = {ys[1]: {"carriedBy": [MOD_B, PATCH]}, ys[2]: {"carriedBy": [MOD_B]}, X: {"carriedBy": [MOD_A]}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows,
+                                                               (OVERLAP, "with-patch"): w_rows},
+                                            [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                            names={"refs": refs})
+        val = reader(plan).get("validation") or {}
+        bi = (val.get("byItem") or [{}])[0]
+        line = next((x for x in val.get("itemLines") or [] if "Objects" in x or OVERLAP in x), "")
+        ok = (bi.get("open") == 3 and bi.get("openListed") == 1 and bi.get("openPatchHeld") == 1
+              and bi.get("openNotAttributed") == 1 and "1 still intersect, not attributed" in line
+              and "1 still reported as a clash between two mods" in line and line in md)
+        return ok, f"by item {bi}; line {line!r}"
+
     for name, fn in [("w2-round3/C481-place-counts-from-listed-rows", c481_place_counts_from_listed_rows),
+                     ("w2-round3/C483-light-without-model-is-not-a-clash", c483_light_without_model_is_not_a_clash),
+                     ("w2-round3/C484-left-overlaps-split-by-record-data", c484_left_overlaps_split_by_record_data),
                      ("w2-round3/C482-verify-refuses-over-limit", c482_verify_refuses_over_limit)]:
         cell(name, fn)
 

@@ -6777,6 +6777,14 @@ def case_63(tmp):
     capture = [e for e in (load(b1 / "manifest.json") or {}).get("evidence") or []
                if str(e.get("path") or "").startswith("enrichment/names/") and e.get("path") != (row or {}).get("path")]
     check(bool(capture), f"{case}: the record reads' request and response travel with the names")
+    # round 3 (W-B2, W-B3): each object a row names keeps its base and the plugins read that carry it; each base its
+    # type and model, "" when the record reads the model as absent
+    refs, bases = (doc or {}).get("refs") or {}, (doc or {}).get("bases") or {}
+    check(bool(refs) and all(str(r.get("base") or "").startswith("0BB0") and r.get("carriedBy") for r in refs.values()),
+          f"{case}: every named object has its base and its carriers ({list(refs.items())[:2]})")
+    check(bool(bases) and all(b.get("model") == ("" if b.get("type") == "Light" else "fixture.nif")
+                              for b in bases.values()),
+          f"{case}: every base has its model, none for a light without one ({bases})")
     expect(evalrun(["verify-bundle", b1]).returncode, 0, f"{case}: the enriched copy verifies", "C1")
     # a plugin whose bytes on disk differ from the recorded hash: refused before any read, naming the plugin
     # an evaluated mod's file: the names enrichment always reads the evaluated mods
