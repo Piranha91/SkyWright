@@ -569,8 +569,14 @@ def scene_preflight(arms: list[dict], opts: dict, harness: Path) -> tuple[list[s
                                 f"{tail[-1] if tail else 'no output'}; run it by hand on that candidate to see why")
                 continue
             if verdict["verdict"] == "passed":
+                reordered = list(verdict.get("reorderedProviders") or [])
                 arm["scenePreflight"] = {"status": "passed", "providers": len(verdict.get("providers") or []),
-                                         "omittedProviders": verdict.get("omittedProviderCount"), "tool": tool}
+                                         "omittedProviders": verdict.get("omittedProviderCount"),
+                                         "reorderedProviders": reordered, "tool": tool}
+                if reordered:
+                    # P50: the probes read the candidate's own Mods order; say so, since the base profile differs.
+                    notes.append(f"   {arm['armId']}: states its own asset priority for {', '.join(reordered)}; the "
+                                 f"probes read the candidate's Mods order, not the base profile's modlist.txt")
             elif verdict.get("code") == "no-explicit-mods":
                 # A candidate that keeps the profile's assets is legitimate for the ordersweep probes; only a scene
                 # capture needs an explicit view, so the arm is recorded, not refused.

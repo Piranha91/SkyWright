@@ -1,4 +1,4 @@
-"""`evalrun plan` runs overlapprobe's scene preflight on every arm (cases 440-450).
+"""`evalrun plan` runs overlapprobe's scene preflight on every arm (cases 440-451).
 
     python _geometry-harness/tests/test_plan_scene_preflight.py
 
@@ -111,15 +111,22 @@ def case_440(root: Path):
 
 
 def case_441(root: Path):
-    """Strongest-first order reversed against the profile is refused."""
+    """P50: a candidate that states its own asset priority (reversed against the profile) plans; the arm says so."""
     inst, game = make_instance(root)
     c = root / "c"
     candidate(c, "candidate-00-x-baseline", ["High", "Low"])
     candidate(c, "candidate-01-reversed", ["Low", "High"])
     r, doc = plan(root, c, instance=inst, game=game)
-    check(r.returncode == 2 and doc is None, f"441: plan refuses a reversed priority (exit {r.returncode})")
-    check("does not retain MO2 strongest-first priority at 'High'" in r.stderr,
-          "441: the probe's priority sentence reaches the caller")
+    check(r.returncode == 0 and doc is not None,
+          f"441: plan accepts a candidate's own priority (exit {r.returncode}) {r.stderr.strip()[:300]}")
+    pf = arm(doc, "candidate-01-reversed").get("scenePreflight") or {}
+    check(pf.get("status") == "passed" and pf.get("reorderedProviders") == ["Low", "High"],
+          f"441: the reversed arm passes and names the providers it re-orders ({pf})")
+    base = arm(doc, "baseline").get("scenePreflight") or {}
+    check(base.get("status") == "passed" and base.get("reorderedProviders") == [],
+          f"441: the arm in the profile's order re-orders nothing ({base})")
+    check("candidate-01-reversed" in r.stdout and "Low" in r.stdout and "its own" in r.stdout,
+          "441: the plan output says which arm states its own asset priority")
 
 
 def case_442(root: Path):
@@ -139,11 +146,11 @@ def case_443(root: Path):
     c = root / "c"
     candidate(c, "candidate-00-x-baseline", ["Other"])
     candidate(c, "candidate-01-ok", ["High"])
-    candidate(c, "candidate-02-reversed", ["Low", "High"])
+    candidate(c, "candidate-02-twice", ["Low", "Low"])
     r, doc = plan(root, c, instance=inst, game=game)
     lines = [ln for ln in r.stderr.splitlines() if "scene preflight refused" in ln]
     check(r.returncode == 2 and doc is None, f"443: plan refuses (exit {r.returncode})")
-    check(len(lines) == 2 and any("baseline" in ln for ln in lines) and any("candidate-02-reversed" in ln for ln in lines),
+    check(len(lines) == 2 and any("baseline" in ln for ln in lines) and any("candidate-02-twice" in ln for ln in lines),
           f"443: both bad arms are listed, the good one is not ({len(lines)} refusal line(s))")
 
 
@@ -225,7 +232,7 @@ def case_449(root: Path):
     c = root / "c"
     rows = [("ok", ["High", "Low"], "P", None, "passed", None),
             ("typo", ["Other"], "P", None, "refused", "provider-not-in-modlist"),
-            ("reversed", ["Low", "High"], "P", None, "refused", "priority-not-retained"),
+            ("reversed", ["Low", "High"], "P", None, "passed", None),
             ("twice", ["High", "High"], "P", None, "refused", "provider-listed-twice"),
             ("blank", [" "], "P", None, "refused", "provider-empty-name"),
             ("noview", None, "P", None, "refused", "no-explicit-mods"),
@@ -264,9 +271,27 @@ def case_450(root: Path):
           "450: the ordinary --order read gets past the candidate file to the next check (no Skyrim.esm here)")
 
 
+def case_451(root: Path):
+    """P50: the receipt carries each provider's candidate rank and base-profile priority, and the re-ordered names."""
+    inst, game = make_instance(root)
+    c = root / "c"
+    p = candidate(c, "mixed", ["Low", "Mid", "High"])
+    r, doc = preflight(p, inst, game, root / "mixed.preflight.json")
+    doc = doc or {}
+    rows = [(v.get("mo2Name"), v.get("candidateRank"), v.get("mo2Priority")) for v in doc.get("providers") or []]
+    check(r.returncode == 0 and doc.get("verdict") == "passed", f"451: passed (exit {r.returncode}) {r.stderr.strip()[:200]}")
+    check(rows == [("Low", 0, 2), ("Mid", 1, 1), ("High", 2, 0)], f"451: candidate rank and MO2 priority per provider ({rows})")
+    check(doc.get("reorderedProviders") == ["Low", "High"], f"451: re-ordered providers ({doc.get('reorderedProviders')})")
+    check("its own order" in r.stdout and "Low" in r.stdout, "451: stdout says the probes read the candidate's order")
+    same = candidate(c, "same", ["High", "Low"])
+    _, sdoc = preflight(same, inst, game, root / "same.preflight.json")
+    check((sdoc or {}).get("reorderedProviders") == [], f"451: profile order re-orders nothing ({(sdoc or {}).get('reorderedProviders')})")
+
+
 CASES = {"case-440": case_440, "case-441": case_441, "case-442": case_442, "case-443": case_443,
          "case-444": case_444, "case-445": case_445, "case-446": case_446, "case-447": case_447,
-         "case-448": case_448, "case-449": case_449, "case-450": case_450}
+         "case-448": case_448, "case-449": case_449, "case-450": case_450,
+         "case-451": case_451}
 
 
 def main() -> int:

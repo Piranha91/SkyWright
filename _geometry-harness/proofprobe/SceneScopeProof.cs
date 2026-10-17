@@ -1,6 +1,7 @@
 using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Skyrim;
 
 static class SceneScopeProof
 {
@@ -59,10 +60,41 @@ static class SceneScopeProof
                 result.Providers.Count == 0 && result.OmittedProviderCount == 3,
                 $"selected {result.Providers.Count}; omitted {result.OmittedProviderCount}");
 
+            // P50: the candidate's Mods order is its stated MO2 priority. The preflight accepts it and names the re-order,
+            // and the asset view every probe and the scene capture build from the same candidate serves that order.
             new CandidateFile(ConfigurationIdentity.CurrentSchema, "proof", "Proof", ["Skyrim.esm"],
                 ["Lowest", "Highest"], ["proof"], null).Write(candidate);
-            check("scene preflight: reversed provider priority is refused",
-                Refused(candidate, "does not retain MO2 strongest-first priority", profile, mods), "priority refusal");
+            result = SceneCapture.PreflightCandidateAssets(candidate, "Proof", profile, mods);
+            check("scene preflight: a candidate's own provider priority is accepted and the re-order is named",
+                result.ReorderedProviders.SequenceEqual(["Lowest", "Highest"])
+                && result.Providers.Select(p => (p.Mo2Name, p.CandidateRank, p.Mo2Priority)).SequenceEqual([("Lowest", 0, 2), ("Highest", 1, 0)]),
+                $"re-ordered [{string.Join(", ", result.ReorderedProviders)}]");
+            string data = Path.Combine(root, "game", "Data");
+            string overwrite = Path.Combine(root, "overwrite");
+            Directory.CreateDirectory(overwrite);
+            Directory.CreateDirectory(data);
+            File.WriteAllText(Path.Combine(profile, "loadorder.txt"), "Skyrim.esm\n");
+            File.WriteAllText(Path.Combine(profile, "plugins.txt"), "*Skyrim.esm\n");
+            var master = new ModKey("Skyrim", ModType.Master);
+            new SkyrimMod(master, SkyrimRelease.SkyrimSE).BeginWrite.ToPath(Path.Combine(data, "Skyrim.esm")).WithNoLoadOrder().Write();
+            foreach (var m in new[] { "Highest", "Lowest" })
+            {
+                Directory.CreateDirectory(Path.Combine(mods, m, "meshes"));
+                File.WriteAllText(Path.Combine(mods, m, "meshes", "p50.nif"), "copy from " + m);
+            }
+            var cfg = HarnessOrderCli.Resolve("Proof", profile, mods, data, overwrite, Path.Combine(root, "game"), candidate, null, null);
+            string? winner = null;
+            if (!cfg.Refused)
+                using (var assets = AssetResolver.Build(overwrite, mods, data, cfg.EnabledMods, cfg.Archives.Archives))
+                    winner = assets.Resolve(@"meshes\p50.nif").Winner?.Source;
+            check("scene preflight: the asset view built from that candidate serves its stronger-by-candidate folder's copy",
+                !cfg.Refused && cfg.EnabledMods.SequenceEqual(["Lowest", "Highest"]) && winner == "Lowest",
+                cfg.Refused ? cfg.RefusedReason ?? "refused" : $"view [{string.Join(", ", cfg.EnabledMods)}] serves {winner}");
+
+            new CandidateFile(ConfigurationIdentity.CurrentSchema, "proof", "Proof", ["Skyrim.esm"],
+                ["Highest", "Highest"], ["proof"], null).Write(candidate);
+            check("scene preflight: a provider named twice is refused",
+                Refused(candidate, "more than once", profile, mods), "duplicate refusal");
 
             new CandidateFile(ConfigurationIdentity.CurrentSchema, "proof", "Proof", ["Skyrim.esm"],
                 ["Higest"], ["proof"], null).Write(candidate);
