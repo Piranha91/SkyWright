@@ -47,7 +47,8 @@ CELLATTR = "records.cell-attributes"
 FIXTURE = "geometry.fixture-empty-space"
 OVERLAP = "geometry.object-overlap"
 PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None, CELLATTR: None,
-         FIXTURE: None, OVERLAP: "overlapprobe", "geometry.navmesh-ownership": "navownprobe"}
+         FIXTURE: None, OVERLAP: "overlapprobe", "geometry.navmesh-ownership": "navownprobe",
+         "loadability.missing-assets": None}
 NAVOWN = "geometry.navmesh-ownership"
 MOD_A, MOD_B = "ModA.esp", "ModB.esp"
 OTHER = "OtherMod.esp"                       # a mod already in the order, not evaluated
@@ -75,18 +76,22 @@ def row(kind, a, b, form_key, label=None, other=None):
             **({"Alternative": [{"FormKey": other, "Role": "placed-ref"}]} if other else {})}
 
 
-def lost_row(a, b, form_key, field, lost, winner, overridden, label=None):
-    """A record lane row: `a`'s authored value of `field` (a change from `overridden`) is lost to `b`'s `winner`."""
+def lost_row(a, b, form_key, field, lost, winner, overridden, label=None, before=None):
+    """A record lane row: `a`'s authored value of `field` (a change from `overridden`) is lost to `b`'s `winner`.
+    before: the plugin whose value `overridden` is (the one before `a` in the record's chain); with it the row carries
+    its reads, as the record-rows enrichment writes them (that plugin, `a`, `b`)."""
+    reads = ([{"batch": "b1", "id": i, "plugin": p} for i, p in enumerate((before, a, b))] if before else None)
     return {"Kind": "LOST-EDIT", "A": a, "B": b, "Field": field,
             "Summary": f"PlacedObject {form_key[:6]}: {field} - {a}'s value lost to {b}'s",
             "Necessary": [{"FormKey": form_key, "Label": label or f"record {form_key[:6]}",
-                           "Values": {"lost": lost, "winner": winner, "overridden": overridden}}]}
+                           "Values": {"lost": lost, "winner": winner, "overridden": overridden},
+                           **({"Reads": reads} if reads else {})}]}
 
 
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
-                diff_logs=None, states_not_explored=None):
+                diff_logs=None, states_not_explored=None, transcripts=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -104,6 +109,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     predicates: {(checkId, armId): [{Kind, A, B, FormKey, Other, Physical}]} -- the rows of the setup that arm was
     measured against, measured again in that arm's setup (an emit's `Predicates`).
     diff_logs: {(checkId, armId): text} -- the log of that arm's comparison with the baseline (a `diff` receipt).
+    transcripts: {(checkId, armId): (request lines, response lines)} -- an MCP import's two transcripts for a check
+    `count_only` names, written as `NN-request.jsonl` / `NN-response.jsonl` emits its receipt records.
     missing rows may carry a fourth element, the part (default `arm`)."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
@@ -161,6 +168,11 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                          "checkId": check_id, "armId": arm_id, "recordedBy": rid, "strength": "geometric-measurement"})
         findings.append({"checkId": check_id, "armId": arm_id, "part": "arm", "findings": count,
                          "verdict": None, "strength": "geometric-measurement"})
+        for j, (role, lines) in enumerate(zip(("request", "response"), (transcripts or {}).get((check_id, arm_id)) or ())):
+            rel = f"evidence/{rid}-0{j + 1}-{role}.jsonl"
+            (root / rel).write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+            evidence.append({"id": f"t{2 * n + j:015x}", "kind": "emit", "path": rel, "sha256": "1" * 64,
+                             "checkId": check_id, "armId": arm_id, "recordedBy": rid})
     for n, ((check_id, arm_id), text) in enumerate(sorted((diff_logs or {}).items())):
         rid = f"{check_id}__{arm_id}__diff"
         (root / "receipts" / f"{rid}.json").write_text(json.dumps({
@@ -2002,6 +2014,144 @@ def main():
         line = (reader(plan).get("prediction") or {}).get("withPatchLine") or ""
         ok = (bool(line) and line in sec and PATCH in line and "still lost" not in md)
         return ok, f"with-patch line {line!r}; in the prediction section {bool(line) and line in sec}"
+
+    # ------------------------------------------- report polish: the fourth blind review
+    # C520. Where a patch only carries the value that wins without it, the losing mod's change stays lost exactly as
+    # without the patch: the with-patch line and the item line say whose change it is, never "keeps the winning value"
+    def c520_kept_says_whose_change_stays_lost():
+        plan, md, html = record_validation_bundle()
+        p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
+        line = p.get("withPatchLine") or ""
+        items = " ".join(val.get("itemLines") or [])
+        ok = (f"{MOD_A}'s change stays lost" in line and f"{MOD_A}'s change stays lost" in items
+              and "keeps the winning value" not in md and f"{MOD_A}'s change stays lost" in md)
+        return ok, f"with-patch line {line!r}; item lines {items[:240]!r}"
+
+    # C521. A lost value that is the base game's own value is no edit of that mod's: it only undoes the change of the mod
+    # before it, so it is not counted against the winner (where the winner carries that earlier mod's value, nothing is
+    # lost in game). The base value is read from another setup's row whose overridden plugin is the record's master. A
+    # real edit (a value differing from the base game's) and a value whose base is not known stay counted.
+    def c521_base_game_value_is_no_edit():
+        R1, R2, R3 = f"000901:{BASE}", f"000902:{BASE}", f"000903:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_B, R1, "Placement", "v1", "a1", "a1", before=MOD_A),   # OTHER undoes ModA's change
+                  lost_row(OTHER, MOD_B, R2, "Placement", "o2", "a2", "a2", before=MOD_A),   # OTHER's own edit
+                  lost_row(OTHER, MOD_B, R3, "Placement", "v3", "a3", "a3", before=MOD_A)]   # base value not known
+        a_rows = [lost_row(MOD_A, OTHER, R1, "Placement", "a1", "v1", "v1", before=BASE),
+                  lost_row(MOD_A, OTHER, R2, "Placement", "a2", "o2", "v2", before=BASE)]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "plus-a"): a_rows, (RECORDS, "plus-b"): [],
+               (RECORDS, "dependency-only"): []}
+        count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+        results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+        p = reader(plan).get("prediction") or {}
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("A"), e.get("admission")) for e in p.get("record") or []
+                     if e.get("B") == MOD_B)
+        ok = (adm == [("000901", OTHER, "notOwnEdit"), ("000902", OTHER, "admitted"), ("000903", OTHER, "admitted")]
+              and "1 record field whose losing value is the base game's own" in md
+              and "in 1 of them the winning value is that earlier mod's own" in md)
+        return ok, f"admission {adm}; set aside {(p.get('setAsideLine') or '')[-400:]!r}"
+
+    # C522. Overwrite history a patch no longer flags is never said removed by the patch: a navmesh whose loss still holds
+    # with the patch, flagged between other plugins, is named as still losing that ground, in the patch section and at
+    # the top
+    def c522_history_loss_persisting_is_named():
+        n1, n2 = f"000N01:{BASE}", f"000N02:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  689 tris -> 5")]
+        w_rows = [row("CLOBBERED", OTHER, PATCH, n1, label="CityExterior01 (ext)  465 tris -> 345")]
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): w_rows},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        p = reader(plan).get("prediction") or {}
+        val_sec = section_text(md, headings(plan).get("validation") or "\0")
+        top = " ".join(x.get("text", "") for x in p.get("historyLossLines") or [])
+        persist = [ln for ln in val_sec.splitlines() if "CityExterior01 (ext)" in ln and "still" in ln]
+        ok = ("rows the patch removes" not in md and "no longer flagged" in val_sec and bool(persist)
+              and "CityExterior02" not in " ".join(persist) and "CityExterior01 (ext)" in top and "still" in top)
+        return ok, f"persisting lines {persist}; top {top[-300:]!r}"
+
+    # C523. Missing meshes the check measures are named, with the plugins whose records name them and the setups they are
+    # missing in; the check no longer sits in the count-only line
+    def c523_missing_meshes_named():
+        MA = "loadability.missing-assets"
+
+        def call(i, name, args):
+            return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": args}}
+
+        def answer(i, doc):
+            return {"jsonrpc": "2.0", "id": i, "result": {"content": [{"type": "text", "text": json.dumps(doc)}]}}
+        req = [{"batchMarker": "b6-models"}, call(1, "housecarl_records", {"fields": ["Model.File"]}),
+               {"batchMarker": "b7-assets"}, call(1, "housecarl_asset_status", {"asset_paths": ["x"]})]
+        resp = [{"batchMarker": "b6-models"},
+                answer(1, {"matches": [{"source": MOD_A, "fields": [{"path": "Model.File", "value": "Arch\\House01.nif"}]},
+                                       {"source": MOD_B, "fields": [{"path": "Model.File", "value": "arch\\Fine.nif"}]}]}),
+                {"batchMarker": "b7-assets"},
+                answer(1, {"results": [{"path": "meshes/Arch/House01.nif", "exists": False},
+                                       {"path": "meshes/arch/Fine.nif", "exists": True}]})]
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+        plan, md, html = compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                            count_only={(MA, "baseline"): 1, (MA, "without-patch"): 1},
+                                            transcripts={(MA, "baseline"): (req, resp), (MA, "without-patch"): (req, resp)})
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        line = next((ln for ln in sec.splitlines() if "House01.nif" in ln), "")
+        lim = [ln for ln in md.splitlines() if "count without the records" in ln]
+        ok = (bool(line) and MOD_A in line and "Fine.nif" not in md and "both setups" in line
+              and not any(MA in ln or "Missing meshes" in ln for ln in lim))
+        return ok, f"line {line!r}; count-only lines {lim}"
+
+    # C524. With one evaluated mod, a clash that comes from it alone (no partner needed) is counted in the headline, so
+    # the patch tally counts it too: the with-patch line adds up to the headline's clashes, and no line calls it
+    # "already there with one mod alone"
+    def c524_single_target_tally_matches_headline():
+        res = "ModA Resources.esp"
+        arms = [arm("baseline", [BASE, OTHER, res, MOD_A], kind="baseline"),
+                arm("without-a", [BASE, OTHER]), arm("without-other", [BASE, res, MOD_A]),
+                arm("with-patch", [BASE, OTHER, res, MOD_A, PATCH])]
+        results = {(CONTACT, "baseline"): [row("CONTACT", OTHER, MOD_A, f"000G01:{MOD_A}", other=f"000S01:{OTHER}"),
+                                           row("CONTACT", OTHER, MOD_A, f"000G02:{MOD_A}", other=f"000S02:{OTHER}")],
+                   (CONTACT, "without-a"): [], (CONTACT, "with-patch"): [],
+                   (CONTACT, "without-other"): [row("CONTACT", BASE, MOD_A, f"000G02:{MOD_A}", other=f"000S03:{BASE}")]}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
+        line = p.get("withPatchLine") or ""
+        items = val.get("itemLines") or []
+        ok = ("resolved 2" in line and val.get("hits") == 2 and not any("Already there" in x for x in items)
+              and any(f"from {MOD_A} alone" in x for x in items))
+        return ok, f"with-patch line {line!r}; item lines {items}"
+
+    # C525. With one evaluated mod, its navmesh replacing another mod's with a measured loss of ground is said near the
+    # top as a measured fact, without a claim about NPCs
+    def c525_single_target_navmesh_loss_at_top():
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER]),
+                arm("with-patch", [BASE, OTHER, MOD_A, PATCH])]
+        results = {(NAVOWN, "baseline"): [row("CLOBBERED", OTHER, MOD_A, f"000N01:{BASE}", label="Shop (int)  55 tris -> 93")],
+                   (NAVOWN, "without-a"): [], (NAVOWN, "with-patch"): []}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        p = reader(plan).get("prediction") or {}
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        lines = [x.get("text", "") for x in p.get("historyLossLines") or []]
+        ok = (len(lines) == 1 and f"{MOD_A}'s navmesh replaces {OTHER}'s" in lines[0] and lines[0][:60] in sec
+              and "NPC" not in lines[0] and "without the patch," in lines[0])
+        return ok, f"lines {lines}"
+
+    # C526. The limits are in words a modder reads: no probe population names (a LAND, edge-adjacent pairs, dependent-host
+    # pairs) in the limits or in a refused comparison's reason, and no record signatures in a check title
+    def c526_limits_in_plain_words():
+        plan, md, html = limits_bundle()
+        lim = section_text(md, headings(plan).get("coverage") or "\0")
+        plan2, md2, html2 = comparison_bundle("refused")
+        titles = " ".join(priorities()["reader"]["checkTitles"].values())
+        bad = [t for t in ("a LAND", "edge-adjacent", "dependent-host") if t in lim or t in md2]
+        ok = (not bad and "neighbouring cells" in lim and not re.search(r"\b(FLST|LCTN)\b", titles))
+        return ok, f"tool words left {bad}; limits {lim[:300]!r}"
+
+    for name, fn in [("w2-polish/C520-kept-says-whose-change-stays-lost", c520_kept_says_whose_change_stays_lost),
+                     ("w2-polish/C521-base-game-value-is-no-edit", c521_base_game_value_is_no_edit),
+                     ("w2-polish/C522-history-loss-persisting-is-named", c522_history_loss_persisting_is_named),
+                     ("w2-polish/C523-missing-meshes-named", c523_missing_meshes_named),
+                     ("w2-polish/C524-single-target-tally-matches-headline", c524_single_target_tally_matches_headline),
+                     ("w2-polish/C525-single-target-navmesh-loss-at-top", c525_single_target_navmesh_loss_at_top),
+                     ("w2-polish/C526-limits-in-plain-words", c526_limits_in_plain_words)]:
+        cell(name, fn)
 
     for name, fn in [("w2-round5/C499-attribution-from-single-mod-remeasure", c499_attribution_from_single_mod_remeasure),
                      ("w2-round5/C500-navmesh-comparison-names-its-unit", c500_navmesh_comparison_names_its_unit),
