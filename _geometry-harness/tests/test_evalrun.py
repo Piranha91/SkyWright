@@ -7649,7 +7649,8 @@ def case_415(tmp):
     expect(sorted(pop.get("scopedProbes") or []), ["contactprobe", "overlapprobe"], f"{case}: the scoped probes", "P25 D4")
     reg = load(GEN / "registry" / "fixture-check-registry.json")
     flagged = sorted(c["adapter"]["exe"] for c in reg["checks"] if (c.get("adapter") or {}).get("populationFlag"))
-    expect(flagged, ["contactprobe", "overlapprobe"], f"{case}: only the overlap and contact rows declare populationFlag", "P25 D4")
+    expect(flagged, ["contactprobe", "overlapprobe", "stateprobe"],
+           f"{case}: the overlap and contact rows (P25) and the state row (window 2) declare populationFlag; the navmesh row does not", "P25 D4")
 
 
 def case_416(tmp):
@@ -7693,6 +7694,160 @@ CASES["case-413"] = case_413
 CASES["case-414"] = case_414
 CASES["case-415"] = case_415
 CASES["case-416"] = case_416
+
+
+# ---------------------------------------------------------------------------------- window 2: probe-emit checks scoped
+# A probe-emit check whose registry row declares `populationFlag` (state.conditional-geometry in the fixture trim;
+# geometry.fixture-empty-space in the shipped registry) is scoped by check id: the plan sets its adapter.population, and
+# run_generic hands the probe the plan's frozen population file itself, gated by the file's hash.
+
+def _w2_plan_run(tmp: Path, name: str, run_it: bool = True, strip_population: bool = False, scenario: Path | None = None):
+    d = GEN / "cases" / P25_CASE
+    run = tmp / name
+    scen = scenario or d / "scenario.json"
+    args = ["plan", "--registry", GEN / "registry" / "fixture-check-registry.json", "--scope", d / "scope.json",
+            "--candidates", d / "candidates", "--out", run, "--harness", REAL_HARNESS, "--states", "baseline,fixture-switched",
+            "--select", "state.conditional-geometry"] + probe_cmds()
+    p = evalrun(args, scen, expect_exit=0)
+    if strip_population and (run / "plan.json").exists():
+        # A plan frozen before window 2: no scopedChecks, and the probe-emit adapter carries neither populationFlag nor
+        # population (the frozen registry row predates them).
+        m = _p25_module()
+        plan = load(run / "plan.json")
+        (plan.get("population") or {}).pop("scopedChecks", None)
+        for c in plan["checks"]:
+            if (c.get("adapter") or {}).get("kind") == "probe-emit":
+                c["adapter"].pop("population", None)
+                c["adapter"].pop("populationFlag", None)
+        m.write_json(run / "plan.json", plan)
+        (run / "plan.sha256").write_text(m.sha256_file(run / "plan.json") + "\n", encoding="utf-8")
+    r = evalrun(["run", "--run", run], scen) if run_it and p.returncode == 0 else None
+    return run, p, r
+
+
+def _w2_state_cmds(run: Path) -> list[str]:
+    return [_p25_cmd(f) for f in sorted((run / "logs").glob("state.conditional-geometry__*.txt"))]
+
+
+def case_428(tmp):
+    """The plan scopes a probe-emit check by id and run_generic passes the frozen file to it alone. Rejects: a scoped
+    probe-emit check run without --population (whole order under a scoped request); --population handed to a check
+    that does not declare it; a changed population file used anyway; an old plan resumed with a population."""
+    case = "case-428-probe-emit-population"
+    run, p, r = _w2_plan_run(tmp, case)
+    plan = load(run / "plan.json") or {}
+    pop = plan.get("population") or {}
+    check(pop.get("scoped") is True and "state.conditional-geometry" in (pop.get("scopedChecks") or []),
+          f"{case}: the plan names the state check among its scoped checks ({pop.get('scopedChecks')}, {pop.get('reason')})")
+    geo = next((c for c in plan.get("checks", []) if c["checkId"] == "state.conditional-geometry"), {})
+    expect((geo.get("adapter") or {}).get("population"), pop.get("identity"),
+           f"{case}: the state check's expected population is the scoped identity", "window 2")
+    census = next((c for c in plan.get("checks", []) if c["checkId"] == "state.switch-census"), {})
+    expect((census.get("adapter") or {}).get("population"), None, f"{case}: the census (no populationFlag) is not scoped")
+    cmds = _w2_state_cmds(run)
+    pfile = run / "population.json"
+    check(cmds and all(("--population " + str(pfile)) in c for c in cmds),
+          f"{case}: every stateprobe launch gets --population {pfile.name} ({[c[-160:] for c in cmds]})")
+    census_cmds = [_p25_cmd(f) for f in sorted((run / "logs").glob("state.switch-census__*.txt"))]
+    check(census_cmds and not any("--population" in c for c in census_cmds),
+          f"{case}: switchprobe never gets --population ({len(census_cmds)} launches)")
+    led = ledger_entries(load(run / "ledger.json") or {})
+    ent = [v for k, v in led.items() if k.startswith("state.conditional-geometry__")]
+    check(ent and all(execution_of(e) == "completed" for e in ent),
+          f"{case}: every state check part is accepted against the scoped identity ({[execution_of(e) for e in ent]})")
+    # A population file changed after the plan froze blocks the check by name; it is never run on another population.
+    run2, p2, _ = _w2_plan_run(tmp, case + "-changed", run_it=False)
+    pf2 = run2 / "population.json"
+    pf2.write_text(pf2.read_text(encoding="utf-8").replace('"schema": 1', '"schema": 1, "note": "changed"'), encoding="utf-8")
+    evalrun(["run", "--run", run2], GEN / "cases" / P25_CASE / "scenario.json")
+    led2 = ledger_entries(load(run2 / "ledger.json") or {})
+    ent2 = [v for k, v in led2.items() if k.startswith("state.conditional-geometry__")]
+    check(ent2 and all(execution_of(e) == "blocked(population-changed)" for e in ent2) and not _w2_state_cmds(run2),
+          f"{case}: a changed population file blocks the state check and launches nothing ({[execution_of(e) for e in ent2]})")
+    # A plan frozen before window 2 resumes whole-order for the probe-emit check.
+    run3, p3, r3 = _w2_plan_run(tmp, case + "-old", strip_population=True)
+    cmds3 = _w2_state_cmds(run3)
+    check(r3 is not None and r3.returncode == 0 and cmds3 and not any("--population" in c for c in cmds3),
+          f"{case}: an old plan's state check runs with no --population ({[c[-120:] for c in cmds3]})")
+    led3 = ledger_entries(load(run3 / "ledger.json") or {})
+    ent3 = [v for k, v in led3.items() if k.startswith("state.conditional-geometry__")]
+    check(ent3 and all(execution_of(e) == "completed" for e in ent3),
+          f"{case}: the old plan's whole-order state emits are accepted ({[execution_of(e) for e in ent3]})")
+
+
+def case_429(tmp):
+    """A scoped probe-emit check whose emit judged another population is rejected by name. Rejects: crediting a
+    whole-order state emit against the plan's scoped request."""
+    case = "case-429-probe-emit-population-mismatch"
+    d = GEN / "cases" / P25_CASE
+    scen = load(d / "scenario.json")
+    for stem, entry in (scen.get("arms") or {}).get("stateprobe", {}).items():
+        entry["ignorePopulation"] = True
+    sp = tmp / f"{case}-scenario.json"
+    sp.write_text(json.dumps(scen), encoding="utf-8")
+    run, p, r = _w2_plan_run(tmp, case, scenario=sp)
+    led = ledger_entries(load(run / "ledger.json") or {})
+    ent = [v for k, v in led.items() if k.startswith("state.conditional-geometry__")]
+    causes = sorted({x.get("cause") for e in ent for x in ((e.get("validation") or {}).get("rejections") or [])})
+    check(ent and "population-mismatch" in causes, f"{case}: the state receipts are rejected for population-mismatch ({causes})")
+
+
+def case_430(tmp):
+    """Registry and plan rules for a scoped probe-emit check. Rejects: populationFlag accepted on a kind that runs no
+    probe; a RACE-carrying delta planned with the state check scoped (stateprobe would refuse hours into the run)."""
+    case = "case-430-probe-emit-registry-and-race"
+    m = _p25_module()
+    import struct
+
+    def plugin_bytes(groups):
+        body = b""
+        for label, nrec in groups:
+            recs = b"".join(struct.pack("<4sIIIIHH", label.encode(), 0, 0, 0x800 + i, 0, 44, 0) for i in range(nrec))
+            body += struct.pack("<4sI4siHHHH", b"GRUP", 24 + len(recs), label.encode(), 0, 0, 0, 44, 0) + recs
+        return struct.pack("<4sIIIIHH", b"TES4", 0, 0, 0, 0, 44, 0) + body
+    race = tmp / f"{case}-Race.esp"
+    race.write_bytes(plugin_bytes([("RACE", 1), ("STAT", 1)]))
+    plain = tmp / f"{case}-Plain.esp"
+    plain.write_bytes(plugin_bytes([("STAT", 1)]))
+    sha = lambda f: hashlib.sha256(f.read_bytes()).hexdigest()  # noqa: E731
+    chk = [{"checkId": "geometry.object-overlap", "adapter": {"kind": "ordersweep-probe", "exe": "overlapprobe", "populationFlag": "--population"},
+            "arms": [{"armId": "baseline", "status": "planned"}]},
+           {"checkId": "state.conditional-geometry", "adapter": {"kind": "probe-emit", "exe": "stateprobe", "populationFlag": "--population"},
+            "arms": [{"armId": "baseline", "status": "planned"}]},
+           {"checkId": "geometry.fixture-empty-space", "adapter": {"kind": "probe-emit", "exe": "contactprobe", "populationFlag": "--population"},
+            "arms": [{"armId": "baseline", "status": "planned"}]}]
+
+    def arms_with(f):
+        a = {"plugins": ["A.esp"], "requested": {"plugins": [], "providers": []}}
+        b = {"plugins": ["A.esp", f.name], "requested": {"plugins": [{"name": f.name, "path": str(f), "sha256": sha(f)}], "providers": []}}
+        return [a, b]
+    blk, txt = m.plan_population(chk, arms_with(race), [], "load-time", None)
+    check(blk.get("scoped") is True and blk.get("scopedChecks") == ["geometry.fixture-empty-space", "geometry.object-overlap"]
+          and "RACE" in str((blk.get("wholeOrderChecks") or {}).get("state.conditional-geometry")),
+          f"{case}: a RACE-carrying delta leaves the state check whole-order with the reason, the others scoped "
+          f"({blk.get('scopedChecks')}, {blk.get('wholeOrderChecks')})")
+    blk2, _ = m.plan_population(chk, arms_with(plain), [], "load-time", None)
+    expect(blk2.get("scopedChecks"), ["geometry.fixture-empty-space", "geometry.object-overlap", "state.conditional-geometry"],
+           f"{case}: without RACE every flagged check is scoped", "window 2")
+    # evalregistry: populationFlag on probe-emit is valid; on a kind that runs no probe it is not.
+    reg = load(GEN / "registry" / "fixture-check-registry.json")
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("evalregistry_w2", HARNESS / "evalregistry.py")
+    er = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(er)
+    bad = json.loads(json.dumps(reg))
+    tgt = next(c for c in bad["checks"] if (c.get("adapter") or {}).get("kind") == "mcp-only")
+    tgt["adapter"]["populationFlag"] = "--population"
+    probs_ok = [x for x in er.validate(reg) if "populationFlag" in x] if hasattr(er, "validate") else None
+    probs_bad = [x for x in er.validate(bad) if "populationFlag" in x] if hasattr(er, "validate") else None
+    check(probs_ok == [] and probs_bad and "probe-emit" in probs_bad[0],
+          f"{case}: evalregistry accepts populationFlag on probe-emit and refuses it on {tgt['adapter']['kind']} ({probs_ok}, {probs_bad})")
+
+
+CASES["case-428"] = case_428
+CASES["case-429"] = case_429
+CASES["case-430"] = case_430
+
 
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""
