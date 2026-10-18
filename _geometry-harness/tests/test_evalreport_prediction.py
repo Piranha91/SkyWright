@@ -2213,9 +2213,10 @@ def main():
         ok = want in line and want in items and "resolved" not in line and val.get("hits") == 0
         return ok, f"with-patch line {line!r}; items {items[:240]!r}"
 
-    # C530. A record change a patch newly undoes (no change to that field was lost without the patch) is a new clash,
-    # with the mod whose change it is and how many switch an object back on; a field with a clash without the patch is
-    # not counted again
+    # C530. A record change a patch newly undoes (no change to that field was lost without the patch) is counted with the
+    # mod whose change it is and how many switch an object back on (the objects as examples); a field with a clash
+    # without the patch is not counted again. Coordinator ruling: said in its own neutral line, never as a new clash
+    # (that reprints the patch author's choices as problems, P52), so "new clashes" stays the geometry ones (C532)
     def c530_newly_undone_record_changes_are_new_clashes():
         p_rows = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]
         w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", "a1", "a1"),
@@ -2228,10 +2229,13 @@ def main():
         plan, md, html = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
                                             count_only=count_only, enrichment=enr)
         val = reader(plan).get("validation") or {}
-        line = next((ln for ln in md.splitlines() if ln.startswith("- New clashes in the setup")), "")
-        ok = (val.get("undone") == 2 and val.get("undoneBy") == {MOD_A: 1, MOD_B: 1} and ": 2 (" in line
-              and "2 record fields a patch newly undoes" in line and "1 of them switch an object back on" in line)
-        return ok, f"undone {val.get('undone')} {val.get('undoneBy')}; line {line!r}"
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
+        new = next((ln for ln in md.splitlines() if ln.startswith("- New clashes in the setup")), "")
+        ok = (val.get("undone") == 2 and val.get("undoneBy") == {MOD_A: 1, MOD_B: 1}
+              and f"2 changes the mods made ({MOD_A} 1, {MOD_B} 1)" in line
+              and f"1 of them switch an object back on, for example 000702:{BASE}" in line
+              and new.endswith(": 0.") and "undo" not in new and val.get("patchProblems") == 0)
+        return ok, f"undone {val.get('undone')} {val.get('undoneBy')}; line {line!r}; new clashes {new!r}"
 
     # C531. One unit per line or both stated: a record kind in the headline gives its records and its fields, and the
     # with-patch line says the total of the clashes it divides

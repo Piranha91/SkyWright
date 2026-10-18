@@ -2151,8 +2151,10 @@ def build_prediction(ctx: dict) -> dict:
                      and e["checkId"] == "geometry.navmesh-ownership"]
         history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds")
         undone_by = collections.Counter(rk[2] for rk, _ in undone)
-        n_enable = sum(1 for rk, h_ in undone if disables((h_["row"].get("values") or {}).get("lost"))
-                       and not disables((h_["row"].get("values") or {}).get("winner")))
+        switched_on = [rk for rk, h_ in undone if disables((h_["row"].get("values") or {}).get("lost"))
+                       and not disables((h_["row"].get("values") or {}).get("winner"))]
+        n_enable = len(switched_on)
+        enable_examples = list(dict.fromkeys(str(rk[4]) for rk in switched_on))[:3]
         sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)})]
 
         def pair_by(xs):
@@ -2175,16 +2177,17 @@ def build_prediction(ctx: dict) -> dict:
         sentences += [bind(words["validationOpen"], {"patch": patch, "count": len(open_), "split": bind(
                           words["validationOpenSplit"], {"untouched": fmt_n(len(open_) - edited), "edited": fmt_n(edited)})
                           if edited else ""}),
-                     bind(words["validationPatchProblems"], {"patch": patch, "count": fmt_n(len(problems) + len(undone)),
-                                                             "undone": bind(words["validationUndone"], {
-                                                                 "geometry": fmt_n(len(problems)),
-                                                                 "count": fmt_n(len(undone)), "patch": patch,
-                                                                 "by": ", ".join(f"{m_} {fmt_n(n_)}" for m_, n_ in sorted(
-                                                                     undone_by.items(), key=lambda kv: (-kv[1], kv[0].lower()))),
-                                                                 "enables": bind(words["validationUndoneEnables"], {
-                                                                     "count": fmt_n(n_enable)}) if n_enable else ""})
-                                                             if undone else ""})]
+                     bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
+        if undone:
+            # changes the patches undo are the patch author's choices, said in their own neutral line, never as new
+            # clashes (coordinator, item 3 of the fifth review; P52): the objects switched back on are the examples
+            sentences.append(bind(words["validationUndone"], {
+                "patch": patch, "count": fmt_n(len(undone)),
+                "by": ", ".join(f"{m_} {fmt_n(n_)}" for m_, n_ in sorted(undone_by.items(),
+                                                                          key=lambda kv: (-kv[1], kv[0].lower()))),
+                "enables": bind(words["validationUndoneEnables"], {
+                    "count": fmt_n(n_enable), "examples": "; ".join(enable_examples)}) if n_enable else ""}))
         if len(blind) > 1 and words.get("validationBlindSpots"):
             # several reasons in one sentence, each with its count (P53: one line each took a third of a page)
             sentences.append(bind(words["validationBlindSpots"], {"patch": patch, "parts": "; ".join(
