@@ -2113,13 +2113,21 @@ def main():
                                            row("CONTACT", OTHER, MOD_A, f"000G02:{MOD_A}", other=f"000S02:{OTHER}")],
                    (CONTACT, "without-a"): [], (CONTACT, "with-patch"): [],
                    (CONTACT, "without-other"): [row("CONTACT", BASE, MOD_A, f"000G02:{MOD_A}", other=f"000S03:{BASE}")]}
-        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        # coordinator D3: the clash from ModA alone is credited only on the patched setup's own re-measure (Gone);
+        # with no re-measure, its absence from the patched listing is "cannot tell", never resolved
+        preds = [{"Kind": "CONTACT", "A": OTHER, "B": MOD_A, "FormKey": f"000G0{i}:{MOD_A}", "Other": f"000S0{i}:{OTHER}",
+                  "Physical": "Gone"} for i in (1, 2)]
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH], predicates={(CONTACT, "with-patch"): preds})
         p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
         line = p.get("withPatchLine") or ""
         items = val.get("itemLines") or []
+        plan2, md2, html2 = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        p2, val2 = reader(plan2).get("prediction") or {}, reader(plan2).get("validation") or {}
         ok = ("resolved 2" in line and val.get("hits") == 2 and not any("Already there" in x for x in items)
-              and any(f"from {MOD_A} alone" in x for x in items))
-        return ok, f"with-patch line {line!r}; item lines {items}"
+              and any(f"from {MOD_A} alone" in x for x in items)
+              and val2.get("hits") == 1 and val2.get("cannotTell") == 1)
+        return ok, (f"with-patch line {line!r}; item lines {items}; without re-measure hits {val2.get('hits')}, "
+                    f"cannot tell {val2.get('cannotTell')}")
 
     # C525. With one evaluated mod, its navmesh replacing another mod's with a measured loss of ground is said near the
     # top as a measured fact, without a claim about NPCs

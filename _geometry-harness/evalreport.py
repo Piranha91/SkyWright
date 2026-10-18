@@ -2045,7 +2045,11 @@ def build_prediction(ctx: dict) -> dict:
                 return "cannot-tell"           # the comparison with and without the patch refused a verdict
             preds = predicates(e["checkId"])
             if preds is None:
-                return "left" if present(patched_arm, keyof(e)) else "resolved"
+                if present(patched_arm, keyof(e)):
+                    return "left"
+                # with one evaluated mod, a clash from it alone is credited to the patch only on the patched setup's
+                # own re-measure (Gone), never from its absence from a list (coordinator, D3)
+                return "cannot-tell" if not multi and e.get("attribution") == "single-mod" else "resolved"
             other = e.get("other") or []
             physical = preds.get((e["kind"], e["A"], e["B"], e["formKey"], other[0] if other else None))
             return {"Gone": "resolved", "Holds": "left"}.get(physical, "cannot-tell")
