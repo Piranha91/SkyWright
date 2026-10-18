@@ -1214,8 +1214,10 @@ def main():
     def record_validation_acted_on():
         plan, md, html = record_validation_bundle()
         val = reader(plan).get("validation") or {}
-        ok = (val.get("hits") == 1 and val.get("open") == 1 and val.get("kept") == 1 and val.get("patchProblems") == 0)
-        return ok, (f"hits {val.get('hits')}, kept {val.get('kept')}, open {val.get('open')}, "
+        # fifth blind review (W-S2): the patch keeping ModA's value drops ModB's change: "switched", not resolved
+        ok = (val.get("switched") == 1 and val.get("hits") == 0 and val.get("open") == 1 and val.get("kept") == 1
+              and val.get("patchProblems") == 0)
+        return ok, (f"switched {val.get('switched')}, hits {val.get('hits')}, kept {val.get('kept')}, open {val.get('open')}, "
                     f"patch problems {val.get('patchProblems')}")
 
     # 33. a check only the sibling measured on the shared setup is joined when its receipt's configuration matches
@@ -1269,7 +1271,8 @@ def main():
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         ok = ("total" not in p
               and verdict_counts(p) == [(CONTACT, unit, contact_n), (RECORDS, "objects", 2)]
-              and {contact_n, 2} <= nums and not nums & {11, 6, 5, 10, 7}
+              # fifth blind review (W-S4): a record kind states its records and, in brackets, its fields (7)
+              and {contact_n, 2} <= nums and not nums & {11, 6, 5, 10} and "(7 record fields)" in v
               and re.search(r"\b7 record fields\b", sec) is not None and re.search(r"\b7 record fields\b", html) is not None)
         return ok, f"verdict counts {verdict_counts(p)}; numbers in the verdict {sorted(nums)}; verdict {v!r}"
 
@@ -1412,9 +1415,9 @@ def main():
         plan, md, html = placeholder_value_bundle()
         val = reader(plan).get("validation") or {}
         text = section_text(md, headings(plan).get("validation") or "\0")
-        ok = (val.get("hits") == 1 and val.get("kept") == 1 and val.get("open") == 1 and val.get("cannotTell") == 0
+        ok = (val.get("switched") == 1 and val.get("kept") == 1 and val.get("open") == 1 and val.get("cannotTell") == 0
               and "cannot be told" not in text)
-        return ok, (f"hits {val.get('hits')}, kept {val.get('kept')}, open {val.get('open')}, "
+        return ok, (f"switched {val.get('switched')}, kept {val.get('kept')}, open {val.get('open')}, "
                     f"cannot tell {val.get('cannotTell')}")
 
     # C465. A refused comparison prints no repair, and its predicted clashes are "cannot tell" against the patch
@@ -1867,7 +1870,8 @@ def main():
         val = reader(plan).get("validation") or {}
         bi = (val.get("byItem") or [{}])[0]
         text = section_text(md, headings(plan).get("validation") or "\0")
-        ok = (bi.get("hits") == 2 and bi.get("own") == 1 and bi.get("kept") == 1 and bi.get("open") == 1
+        ok = (bi.get("hits") == 1 and bi.get("switched") == 1 and bi.get("own") == 1 and bi.get("kept") == 1
+              and bi.get("open") == 1
               and bi.get("cannotTell") == 1 and val.get("own") == 1
               and "sets its own value" in text and "still lost" not in md
               and "on purpose" not in md and "author's" not in md and "own choice" not in md)
@@ -2061,15 +2065,21 @@ def main():
         n1, n2 = f"000N01:{BASE}", f"000N02:{BASE}"
         p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345"),
                   row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  689 tris -> 5")]
+        # fifth blind review (W-S1): N01 is flagged again with the patch but its re-measure says Gone; N02 is no longer
+        # flagged (the patch's navmesh masters ModA) but its re-measure still Holds: N02 persists, N01 does not
         w_rows = [row("CLOBBERED", OTHER, PATCH, n1, label="CityExterior01 (ext)  465 tris -> 345")]
+        preds = [{"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n1, "Other": None, "Physical": "Gone",
+                  "Detail": "no point of the loser's mesh is farther than 120u from the winner's"},
+                 {"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n2, "Other": None, "Physical": "Holds",
+                  "Detail": "victim-only ground: 22597 sample(s) of the loser's mesh farther than 120u from the winner's"}]
         plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): w_rows},
-                                            [MOD_A, MOD_B], patches=[PATCH])
+                                            [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
         p = reader(plan).get("prediction") or {}
         val_sec = section_text(md, headings(plan).get("validation") or "\0")
         top = " ".join(x.get("text", "") for x in p.get("historyLossLines") or [])
-        persist = [ln for ln in val_sec.splitlines() if "CityExterior01 (ext)" in ln and "still" in ln]
+        persist = [ln for ln in val_sec.splitlines() if "1 of them still lose that ground" in ln]
         ok = ("rows the patch removes" not in md and "no longer flagged" in val_sec and bool(persist)
-              and "CityExterior02" not in " ".join(persist) and "CityExterior01 (ext)" in top and "still" in top)
+              and "1 of these navmesh records still loses that ground (CityExterior02 (ext) 22,597 samples" in top)
         return ok, f"persisting lines {persist}; top {top[-300:]!r}"
 
     # C523. Missing meshes the check measures are named, with the plugins whose records name them and the setups they are
@@ -2179,6 +2189,65 @@ def main():
                      if e.get("A") == MOD_A)
         ok = adm == [("000911", MOD_A, "notOwnEdit"), ("000912", MOD_A, "admitted")]
         return ok, f"admission {adm}"
+
+    # ------------------------------------------- report polish round 2: the fifth blind review
+    # C528. With no re-measure of the overwrite-history rows in the setup with the patch, nothing is said to still lose
+    # ground, even when the same navmesh is flagged again there between other plugins: flagging is not a measurement
+    def c528_navmesh_still_lost_only_from_remeasure():
+        n1 = f"000N01:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345")]
+        w_rows = [row("CLOBBERED", OTHER, PATCH, n1, label="CityExterior01 (ext)  465 tris -> 345")]
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): w_rows},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        ok = "still lose" not in md and "Measured again" not in md and "navmesh replaces" in top
+        return ok, f"top {top[-260:]!r}"
+
+    # C529. A record field the patch gives to the losing mod drops the winning mod's change: said as "the patch keeps
+    # ModA's value; ModB's change is dropped", never counted as resolved
+    def c529_switched_said_as_change_dropped():
+        plan, md, html = record_validation_bundle()
+        p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
+        line, items = p.get("withPatchLine") or "", " ".join(val.get("itemLines") or [])
+        want = f"the patch keeps {MOD_A}'s value; {MOD_B}'s change is dropped 1"
+        ok = want in line and want in items and "resolved" not in line and val.get("hits") == 0
+        return ok, f"with-patch line {line!r}; items {items[:240]!r}"
+
+    # C530. A record change a patch newly undoes (no change to that field was lost without the patch) is a new clash,
+    # with the mod whose change it is and how many switch an object back on; a field with a clash without the patch is
+    # not counted again
+    def c530_newly_undone_record_changes_are_new_clashes():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]
+        w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", "a1", "a1"),
+                  lost_row(MOD_A, PATCH, f"000702:{BASE}", "SkyrimMajorRecordFlags", "InitiallyDisabled", "0", "0"),
+                  lost_row(MOD_B, PATCH, f"000703:{BASE}", "Placement", "Position=1,2,3; Rotation=0,0,0",
+                           "Position=4,5,6; Rotation=0,0,0", "v")]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
+        count_only = {(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 3}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                            count_only=count_only, enrichment=enr)
+        val = reader(plan).get("validation") or {}
+        line = next((ln for ln in md.splitlines() if ln.startswith("- New clashes in the setup")), "")
+        ok = (val.get("undone") == 2 and val.get("undoneBy") == {MOD_A: 1, MOD_B: 1} and ": 2 (" in line
+              and "2 record fields a patch newly undoes" in line and "1 of them switch an object back on" in line)
+        return ok, f"undone {val.get('undone')} {val.get('undoneBy')}; line {line!r}"
+
+    # C531. One unit per line or both stated: a record kind in the headline gives its records and its fields, and the
+    # with-patch line says the total of the clashes it divides
+    def c531_headline_and_tally_reconcile():
+        plan, md, html = record_validation_bundle()
+        p = reader(plan).get("prediction") or {}
+        v, line = p.get("verdict") or "", p.get("withPatchLine") or ""
+        ok = "(3 record fields)" in v and "of the 3 clashes counted above" in line
+        return ok, f"verdict {v!r}; with-patch line {line!r}"
+
+    for name, fn in [("w2-polish/C528-navmesh-still-lost-only-from-remeasure", c528_navmesh_still_lost_only_from_remeasure),
+                     ("w2-polish/C529-switched-said-as-change-dropped", c529_switched_said_as_change_dropped),
+                     ("w2-polish/C530-newly-undone-record-changes-are-new-clashes",
+                      c530_newly_undone_record_changes_are_new_clashes),
+                     ("w2-polish/C531-headline-and-tally-reconcile", c531_headline_and_tally_reconcile)]:
+        cell(name, fn)
 
     for name, fn in [("w2-polish/C527-undo-of-earlier-change-is-no-edit", c527_undo_of_earlier_change_is_no_edit),
                      ("w2-polish/C520-kept-says-whose-change-stays-lost", c520_kept_says_whose_change_stays_lost),
