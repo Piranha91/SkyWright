@@ -270,12 +270,13 @@ def validate(registry):
                                 "the probe's emit actually carries")
 
         # P25: a probe that can be scoped to the plan's population names the flag that takes the population file.
-        # Only ordersweep passes it, so the key means nothing on any other kind.
+        # ordersweep passes it to a sweep probe and evalrun to a probe-emit check (window 2); no other kind runs a probe
+        # that could take it, so the key means nothing there.
         if "populationFlag" in adapter:
-            if kind != "ordersweep-probe":
-                problems.append(f"{cid}: adapter.populationFlag is passed only by the ordersweep adapter, not by kind {kind}")
+            if kind not in ("ordersweep-probe", "probe-emit"):
+                problems.append(f"{cid}: adapter.populationFlag is passed only by the ordersweep and probe-emit adapters, not by kind {kind}")
             elif adapter["populationFlag"] != "--population":
-                problems.append(f"{cid}: adapter.populationFlag must be \"--population\", the flag ordersweep passes")
+                problems.append(f"{cid}: adapter.populationFlag must be \"--population\", the flag the scoped probes take")
 
         output = adapter.get("output")
         result = adapter.get("result")

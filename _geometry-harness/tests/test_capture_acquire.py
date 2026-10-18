@@ -96,7 +96,7 @@ def scene(fingerprint=FINGERPRINT, alcove=True):
     return sc
 
 
-def build_bundle(root: Path) -> tuple[Path, str, dict]:
+def build_bundle(root: Path, configuration: dict | None = None) -> tuple[Path, str, dict]:
     """Write the synthetic evidence bundle and packet; return (packet path, request id, request).
 
     The request is the REAL selector's output: a `geometry.object-overlap` finding over an
@@ -105,8 +105,8 @@ def build_bundle(root: Path) -> tuple[Path, str, dict]:
     root.mkdir(parents=True, exist_ok=True)
     emit_path = root / "overlap-emit.json"
     emit = {"Probe": "overlapprobe", "State": "baseline",
-            "Configuration": {"Fingerprint": FINGERPRINT,
-                              "Plugins": [{"Name": "Earlier.esp"}, {"Name": "Later.esp"}]},
+            "Configuration": configuration or {"Fingerprint": FINGERPRINT,
+                                               "Plugins": [{"Name": "Earlier.esp"}, {"Name": "Later.esp"}]},
             "Conflicts": [{"Kind": "OVERLAP", "A": "Earlier.esp", "B": "Later.esp",
                            "Necessary": [{"FormKey": "000101:Later.esp", "Label": "SyntheticAlcove",
                                           "Physical": "Holds",
@@ -332,6 +332,87 @@ def case_configuration(root: Path, packet: Path, rid: str, request: dict):
           and doc["refusal"]["expectedFingerprint"] == FINGERPRINT
           and plan2["status"] == "verified",
           f"planner said {plan2['status']}")
+
+
+# --------------------------------------------------------------------------------------
+# case 9 -- a population-scoped source (P33, window 2): cases C431-C435
+# --------------------------------------------------------------------------------------
+# The fingerprint text, spelled here independently of evalrun (the oracle): schema, population, state, one line per plugin
+# (lower-case name, sha256), provider (kind, lower-case name), overlay (kind, sha256), each newline-terminated; sha256 hex.
+
+def fingerprint_of(cfg: dict, population: str | None = None) -> str:
+    text = (f"schema:{cfg['SchemaVersion']}\n" f"population:{population or cfg['Population']}\n" f"state:{cfg['State']}\n"
+            + "".join(f"plugin:{x['Name'].lower()}:{x['Sha256']}\n" for x in cfg["Plugins"])
+            + "".join(f"provider:{x['Kind']}:{x['Name'].lower()}\n" for x in cfg["Providers"])
+            + "".join(f"overlay:{x['Kind']}:{x['Sha256']}\n" for x in cfg["Overlays"]))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def scoped_configuration(population="load-time+population:0123456789ab", plugin_sha="1" * 64) -> dict:
+    cfg = {"SchemaVersion": 1, "Population": population, "State": "baseline",
+           "Plugins": [{"Name": "Earlier.esp", "Sha256": "e" * 64}, {"Name": "Later.esp", "Sha256": plugin_sha}],
+           "Providers": [{"Name": "overwrite", "Kind": "overwrite"}, {"Name": "Earlier", "Kind": "mod"}],
+           "Overlays": []}
+    cfg["Fingerprint"] = fingerprint_of(cfg)
+    return cfg
+
+
+def case_population_scoped(base: Path):
+    cfg = scoped_configuration()
+    scene_fp = fingerprint_of(cfg, "load-time")
+    root = base / "scoped"
+    packet, rid, request = build_bundle(root, cfg)
+    sha_src = request["source"]["sha256"]
+    check("premise: the scoped request carries the population-bound fingerprint, not the scene's",
+          request["configurationFingerprint"] == cfg["Fingerprint"] != scene_fp)
+    proc, doc, _o, _p = acquire(root, packet, rid, points_doc(rid, sha_src), scene(fingerprint=scene_fp), tag="scoped-ready")
+    check("C431 a population-scoped request obtains its camera when the renderer read the same scene at load-time",
+          proc.returncode == 0 and doc and doc["status"] == "camera-ready"
+          and doc["configuration"]["observed"] == scene_fp and doc["configuration"]["expected"] == cfg["Fingerprint"]
+          and (doc["configuration"]["populationScoped"] or {}).get("sceneFingerprint") == scene_fp
+          and doc["configuration"]["populationScoped"]["population"] == cfg["Population"],
+          f"exit {proc.returncode}; " + " ".join((proc.stderr or proc.stdout).split())[-260:])
+
+    # The coordinator's case: the load-time part of the configuration differs (one plugin's bytes), so the scene differs.
+    other = scoped_configuration(plugin_sha="2" * 64)
+    other_scene = fingerprint_of(other, "load-time")
+    proc, doc, _o, _p = acquire(root, packet, rid, points_doc(rid, sha_src), scene(fingerprint=other_scene), tag="scoped-other")
+    check("C432 a renderer that read another load order (one plugin's hash differs) is still refused",
+          proc.returncode != 0 and doc and doc["refusal"]["code"] == "configuration-mismatch"
+          and doc["refusal"].get("observedFingerprint") == other_scene and doc["refusal"].get("sceneFingerprint") == scene_fp,
+          str((doc or {}).get("refusal", {}).get("code")))
+
+    # The source's configuration does not give its own recorded fingerprint: its components cannot be trusted.
+    bad = dict(cfg, Plugins=[dict(x) for x in cfg["Plugins"]])
+    bad["Plugins"][1]["Sha256"] = "3" * 64
+    root3 = base / "scoped-tampered"
+    packet3, rid3, request3 = build_bundle(root3, bad)
+    proc, doc, _o, _p = acquire(root3, packet3, rid3, points_doc(rid3, request3["source"]["sha256"]),
+                                scene(fingerprint=fingerprint_of(bad, "load-time")), tag="scoped-tampered")
+    check("C433 a source whose configuration does not recompute to its fingerprint is refused, not rebuilt",
+          proc.returncode != 0 and doc and doc["refusal"]["code"] == "source-configuration-inconsistent",
+          str((doc or {}).get("refusal", {}).get("code")))
+
+    # A population that is not P25's scoped form: no scene is rebuilt, the plain comparison refuses.
+    odd = scoped_configuration(population="load-time+elsewhere")
+    root4 = base / "scoped-odd"
+    packet4, rid4, request4 = build_bundle(root4, odd)
+    proc, doc, _o, _p = acquire(root4, packet4, rid4, points_doc(rid4, request4["source"]["sha256"]),
+                                scene(fingerprint=fingerprint_of(odd, "load-time")), tag="scoped-odd")
+    check("C435 a population not of the scoped form is compared as it stands and refused",
+          proc.returncode != 0 and doc and doc["refusal"]["code"] == "configuration-mismatch"
+          and doc["refusal"].get("sceneFingerprint") is None,
+          str((doc or {}).get("refusal", {}).get("code")))
+
+    # An unscoped source keeps the exact comparison (case 3 covers another configuration; here the scene of a scoped twin).
+    plain = dict(cfg, Population="load-time")
+    plain["Fingerprint"] = fingerprint_of(plain)
+    root5 = base / "unscoped"
+    packet5, rid5, request5 = build_bundle(root5, plain)
+    proc, doc, _o, _p = acquire(root5, packet5, rid5, points_doc(rid5, request5["source"]["sha256"]),
+                                scene(fingerprint=other_scene), tag="unscoped-other")
+    check("C434 an unscoped request with a different renderer fingerprint is refused as before",
+          proc.returncode != 0 and doc and doc["refusal"]["code"] == "configuration-mismatch")
 
 
 # --------------------------------------------------------------------------------------
@@ -638,6 +719,8 @@ def main(argv):
         case_exported_command_keeps_the_aspect(root, packet, rid, request)
         print("\n-- case 8: a refused plan with a top-down fallback publishes nothing")
         case_fallback_plan_is_refused(root, packet, rid, request)
+        print("\n-- case 9: a population-scoped source (P33)")
+        case_population_scoped(root / "p33")
 
     print()
     if FAILS:

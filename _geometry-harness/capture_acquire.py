@@ -29,6 +29,12 @@ judged against the configuration the finding was measured in. The request's EXPE
 can never stand in for a missing observed one -- that substitution is the exact silent wrong
 answer the binding exists to prevent.
 
+A POPULATION-SCOPED request (P25: its source emit's population is `<base>+population:<id>`) carries a fingerprint
+that differs from any renderer's by the population line alone, because a scoped probe measured only some rows of
+the same scene. For it the observed fingerprint is compared with the SCENE identity rebuilt from the re-hashed
+source emit's own configuration -- once that configuration is shown to give the request's fingerprint -- with the
+population line set to `<base>` (`scene_identity`, P33). Any other difference still refuses.
+
 The fingerprint's scope is the planner's, unchanged and restated in the result: the plugin
 set/order and their content, the provider list, the BOS overlays, the population and the state.
 NOT mesh or material bytes, NOT archive contents, NOT the renderer build. Same records and same
@@ -51,6 +57,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -69,6 +76,18 @@ EXIT_OK, EXIT_REFUSED = 0, 2
 # how the two drift apart.
 def _load_shotplan():
     spec = importlib.util.spec_from_file_location("housecarl_shotplan", SHOTPLAN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+# The configuration fingerprint has ONE Python spelling, evalrun's `configuration_fingerprint` (the text of
+# `_shared/Configuration.cs`'s ConfigurationIdentity.Compute). Loaded the same way as the planner, for the same reason.
+EVALRUN = HERE / "evalrun.py"
+
+
+def _load_evalrun():
+    spec = importlib.util.spec_from_file_location("housecarl_evalrun_fingerprint", EVALRUN)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -210,6 +229,50 @@ def verify_source(request: dict, bundle: Path) -> dict:
                       f"evidence changed after the request was planned")
     return {"evidenceId": src.get("evidenceId"), "path": rel, "sha256": want,
             "rehashedAt": utcnow(), "absolutePath": str(path)}
+
+
+# ---------------------------------------------------------------- a population-scoped source --
+
+#: A P25 scoped emit's population (`PopulationScope.IdentityOf`): the enable population, then the population file's id.
+SCOPED_POPULATION = re.compile(r"^(?P<base>.+)\+population:[0-9a-f]{12}$")
+
+
+def scene_identity(source: dict, expected: str) -> dict | None:
+    """For a request whose source emit was measured on a plan's POPULATION (P25), the identity of the SCENE it was measured
+    in: the same configuration with the population line set back to the enable population the renderer reads. None when the
+    source's population is not of that form (the ordinary comparison then stands alone).
+
+    A scoped probe judged only the rows its population reaches, but over the whole load order: its fingerprint differs from
+    a renderer's only in the population line (P33). The scene identity is rebuilt from the source emit's OWN configuration
+    (re-hashed by `verify_source`), and only after that configuration is shown to give the request's fingerprint, so the
+    renderer is compared with the plugins, hashes, order, providers, overlays and state the finding was measured in."""
+    try:
+        doc = load_json(Path(source["absolutePath"]))
+    except (OSError, ValueError, KeyError) as exc:
+        raise Refused("source-unreadable", f"the source emit could not be read to rebuild its configuration ({exc})")
+    cfg = doc.get("Configuration") if isinstance(doc, dict) else None
+    population = (cfg or {}).get("Population")
+    m = SCOPED_POPULATION.match(population or "")
+    if not m:
+        return None
+    fp = _load_evalrun().configuration_fingerprint
+
+    def recompute(pop: str) -> str:
+        return fp([{"name": x.get("Name"), "sha256": x.get("Sha256")} for x in cfg.get("Plugins") or []],
+                  [{"kind": x.get("Kind"), "name": x.get("Name")} for x in cfg.get("Providers") or []],
+                  [{"kind": x.get("Kind"), "sha256": x.get("Sha256")} for x in cfg.get("Overlays") or []],
+                  pop, cfg.get("State"), cfg.get("SchemaVersion"))
+    own = recompute(population)
+    if own != cfg.get("Fingerprint") or own != expected:
+        raise Refused("source-configuration-inconsistent",
+                      f"the source emit's configuration recomputes to {own[:16]}…, not to its recorded fingerprint "
+                      f"{str(cfg.get('Fingerprint'))[:16]}… and the request's {str(expected)[:16]}…, so the scene it was "
+                      "measured in cannot be rebuilt from it", recomputedFingerprint=own, expectedFingerprint=expected)
+    return {"population": population, "base": m.group("base"), "sceneFingerprint": recompute(m.group("base")),
+            "rule": ("the request's fingerprint is population-bound (P25): the source emit's own configuration was "
+                     "recomputed to it, then with the population line set to the enable population the renderer reads; "
+                     "the renderer's fingerprint equals that, so the plugins, their hashes and order, the providers, "
+                     "overlays and state are the ones the finding was measured in")}
 
 
 # ---------------------------------------------------------------- the supplied-points side --
@@ -480,12 +543,17 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
         raise Refused("request-configuration-unidentified",
                       "the request records no measured configuration fingerprint to match the "
                       "renderer's against", observedFingerprint=observed)
+    scoped = None
     if observed != expected:
-        raise Refused("configuration-mismatch",
-                      f"the renderer read configuration {observed[:16]}… but this finding was "
-                      f"measured in {expected[:16]}… -- the camera was judged against a different "
-                      f"scene than the request",
-                      expectedFingerprint=expected, observedFingerprint=observed)
+        scoped = scene_identity(source, expected)
+        if scoped is None or scoped["sceneFingerprint"] != observed:
+            raise Refused("configuration-mismatch",
+                          f"the renderer read configuration {observed[:16]}… but this finding was "
+                          f"measured in {expected[:16]}…"
+                          + (f" (scene {scoped['sceneFingerprint'][:16]}… at {scoped['base']})" if scoped else "")
+                          + " -- the camera was judged against a different scene than the request",
+                          expectedFingerprint=expected, observedFingerprint=observed,
+                          sceneFingerprint=(scoped or {}).get("sceneFingerprint"))
 
     pose = (verification or {}).get("pose") or {}
     # THE EXPORTED COMMAND MUST CARRY THE ASPECT. It used to emit eye/yaw/pitch/fov only, beside a
@@ -533,6 +601,7 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
                            "cameraConstraints": points["camera"]},
         "configuration": {
             "expected": expected, "observed": observed, "match": True,
+            "populationScoped": scoped,
             "source": "the verification render's own `capture input configuration:` line",
             "scope": shotplan_mod.SCENE_FINGERPRINT_SCOPE,
             "covers": shotplan_mod.SCENE_FINGERPRINT_COVERS,
@@ -607,6 +676,7 @@ def bind_packet(packet: dict, request_id: str, result: dict, result_path: Path) 
                                      "plannerStatus": result["planner"]["status"],
                                      "configurationMatch": result["configuration"]["match"],
                                      "observedFingerprint": result["configuration"]["observed"],
+                                     "populationScoped": result["configuration"].get("populationScoped"),
                                      "worklist": result["receipts"].get("worklist"),
                                      "synthetic": result["synthetic"]},
                      "nextAction": ("The camera is planned and geometrically verified. Capture the "

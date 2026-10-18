@@ -1,4 +1,5 @@
-"""Known answers for the plan's population (P25): overlapprobe and contactprobe with --population, on PopulationFixture.
+"""Known answers for the plan's population (P25): overlapprobe and contactprobe with --population, on PopulationFixture;
+and (window 2) contactprobe --empty-space and stateprobe with --population, on ScopeFixture.
 
     python _geometry-harness/tests/test_population_scope.py
 
@@ -278,6 +279,195 @@ TESTS = [
     ("C410 contact, arm without: scoped = whole restricted to the probe's audit", scoped_is_whole_in_scope("contactprobe", "without")),
     ("C411 conflictdiff refuses scoped vs unscoped; two scoped emits give the whole-order diff's verdict and counts", diff_gate_and_counts),
     ("C411 --population is refused outside the pass it scopes", refused_outside_default_pass),
+]
+
+
+
+# ======================================================================================================================
+# Window 2, task 1: contactprobe --empty-space and stateprobe with --population, on ScopeFixture (_shared/ScopeFixture.cs,
+# its table is the expectation). Cases C420-C430.
+# ======================================================================================================================
+
+SC_ORDER = ["ScBase.esm", "ScA.esp", "ScReloc.esp", "ScMover.esp", "ScDelta.esp"]
+S = {"f1": fk("000901", "ScA.esp"), "f2": fk("000902", "ScA.esp"), "f3": fk("000903", "ScA.esp"), "f4": fk("000904", "ScA.esp"),
+     "c1": fk("000921", "ScA.esp"), "c2": fk("000922", "ScA.esp"), "c3": fk("000923", "ScA.esp"), "c4": fk("000924", "ScA.esp"),
+     "c5": fk("000925", "ScA.esp"), "c6": fk("000926", "ScA.esp")}
+SC_RULE = {"c1": "contact", "c2": None, "c3": "route-ring", "c4": None, "c5": "route-ring", "c6": "large-ref"}
+
+
+class ScLab:
+    """ScopeFixture laid out as an MO2 instance; every run the checks below read (run once, shared)."""
+
+    def __init__(self, tmp: Path):
+        self.tmp = tmp
+        keep = tmp / "fixture"
+        st = run([exe(HARNESS, "stateprobe"), "--write-scope-fixture", keep])
+        sc = keep / "sc"
+        if st.returncode != 0 or not all((sc / n).exists() for n in SC_ORDER):
+            raise RuntimeError(f"the scope fixture was not written (exit {st.returncode}): {st.stdout[-600:]} {st.stderr[-600:]}")
+        self.inst, self.game = tmp / "instance", tmp / "game"
+        prof = self.inst / "profiles" / "P"
+        prof.mkdir(parents=True)
+        (self.inst / "overwrite").mkdir()
+        (self.game / "Data").mkdir(parents=True)
+        for n in SC_ORDER:
+            stem = Path(n).stem
+            shutil.copytree(sc / "mods" / stem, self.inst / "mods" / stem)
+            shutil.copyfile(sc / n, self.inst / "mods" / stem / n)
+        mods = [Path(n).stem for n in reversed(SC_ORDER)]
+        (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in SC_ORDER), encoding="utf-8")
+        (prof / "loadorder.txt").write_text("".join(n + "\n" for n in SC_ORDER), encoding="utf-8")
+        (prof / "modlist.txt").write_text("".join("+" + m + "\n" for m in mods), encoding="utf-8")
+        self.cand = {}
+        for arm, plugins in (("with", SC_ORDER), ("without", [n for n in SC_ORDER if n != "ScDelta.esp"])):
+            p = tmp / f"sc-candidate-{arm}.json"
+            p.write_text(json.dumps({"SchemaVersion": 1, "Name": arm, "BaseProfile": "P", "Plugins": plugins,
+                                     "Mods": [m for m in mods if m + ".esp" in plugins or m + ".esm" in plugins], "Changes": []}),
+                         encoding="utf-8")
+            self.cand[arm] = p
+        import hashlib
+
+        def popfile(name, plugin_path):
+            sha = hashlib.sha256(Path(plugin_path).read_bytes()).hexdigest()
+            p = tmp / name
+            p.write_text(json.dumps({"schema": 1, "plugins": [{"name": Path(plugin_path).name, "path": str(plugin_path), "sha256": sha}],
+                                     "mods": [], "targets": [Path(plugin_path).name]}, indent=1), encoding="utf-8")
+            return p
+        self.population = popfile("sc-population.json", self.inst / "mods" / "ScDelta" / "ScDelta.esp")
+        self.race_population = popfile("sc-race-population.json", sc / "ScRace.esp")
+        self.out, self.logs = {}, {}
+        for probe in ("contactprobe", "stateprobe"):
+            for arm in ("with", "without"):
+                whole = tmp / f"sc-{probe}-{arm}-whole.json"
+                side_w = tmp / f"sc-{probe}-{arm}-whole.side.json"
+                r = self.probe(probe, arm, ["--emit", whole, "--empty-space", side_w])
+                self.logs[(probe, arm, "whole")] = r
+                scoped = tmp / f"sc-{probe}-{arm}-scoped.json"
+                side_s = tmp / f"sc-{probe}-{arm}-scoped.side.json"
+                audit = tmp / f"sc-{probe}-{arm}-audit.json"
+                r2 = self.probe(probe, arm, ["--emit", scoped, "--empty-space", side_s, "--population", self.population,
+                                             "--population-audit", whole, audit])
+                self.logs[(probe, arm, "scoped")] = r2
+                self.out[(probe, arm)] = (whole, scoped, audit, side_w, side_s)
+
+    def probe(self, probe, arm, extra):
+        mode = ["--all"] if probe == "stateprobe" else []
+        return run([exe(PROBES, probe), "--order", self.cand[arm], "--instance", self.inst, "--game", self.game,
+                    "--profile", "P"] + mode + extra)
+
+
+SC_LAB = None
+
+
+def sclab():
+    global SC_LAB
+    if SC_LAB is None:
+        SC_LAB = ScLab(Path(tempfile.mkdtemp(prefix="pop-scope-sc-")))
+    return SC_LAB
+
+
+def sc_keys(doc):
+    """The necessary record of every row, by fixture name."""
+    names = {v.lower(): k for k, v in S.items()}
+    return {names.get(r["FormKey"].lower(), "UNEXPECTED " + c["Summary"][:120])
+            for c in doc.get("Conflicts", []) for r in c["Necessary"]}
+
+
+def sc_expect(probe, arm, which, want):
+    """Rejects: a scoped run that keeps a row the fixture puts outside the population, or drops one inside it."""
+    def t():
+        L = sclab()
+        whole, scoped, *_ = L.out[(probe, arm)]
+        log = L.logs[(probe, arm, which)]
+        doc = json.loads(Path(whole if which == "whole" else scoped).read_text(encoding="utf-8")) if Path(whole if which == "whole" else scoped).exists() else None
+        assert log.returncode == 0 and doc is not None, f"{probe} {arm} {which}: exit {log.returncode}: {log.stderr[-600:]} {log.stdout[-600:]}"
+        got = sc_keys(doc)
+        assert got == want, f"{probe} {arm} {which}: rows {sorted(got)}, the fixture's table says {sorted(want)}"
+    return t
+
+
+def sc_scoped_is_whole_in_scope(probe, arm):
+    """Rejects: a scoped row that differs in any field from the whole-order run's; a kept or dropped row the audit disagrees
+    with; a side-file row that differs."""
+    def t():
+        L = sclab()
+        whole, scoped, audit, side_w, side_s = L.out[(probe, arm)]
+        w, s, a = (json.loads(Path(p).read_text(encoding="utf-8")) for p in (whole, scoped, audit))
+        wr, sr = rows_of(w), rows_of(s)
+        ins = {x["identity"] for x in a["rows"] if x["inScope"]}
+        assert len(a["rows"]) == len(wr), f"the audit judged {len(a['rows'])} rows of {len(wr)}"
+        assert set(sr) == ins, f"scoped rows {sorted(set(sr) ^ ins)} differ from the audit's in-scope set"
+        for i in sr:
+            assert sr[i] == wr[i], f"row {i} differs: scoped {json.dumps(sr[i])[:400]} vs whole {json.dumps(wr[i])[:400]}"
+        pop = s.get("Population") or ""
+        assert pop.startswith("load-time+population:") and len(pop) == len("load-time+population:") + 12, pop
+        assert (w.get("Population") or "") == "load-time", w.get("Population")
+        assert s["Configuration"]["Population"] == pop, "the configuration identity carries the scoped population"
+        sw_, ss = (json.loads(Path(p).read_text(encoding="utf-8")) for p in (side_w, side_s))
+        assert "Population" not in sw_ and ss.get("Population") == pop, (sw_.get("Population"), ss.get("Population"))
+        kept = {r["Fixture"].lower() for r in ss["Rows"]}
+        want_side = [r for r in sw_["Rows"] if r["Fixture"].lower() in kept]
+        assert sorted(json.dumps(r, sort_keys=True) for r in ss["Rows"]) == sorted(json.dumps(r, sort_keys=True) for r in want_side), \
+            "a side-file row of a kept fixture differs from the whole-order run's"
+    return t
+
+
+def sc_rules():
+    """Rejects: a changed reference kept by the wrong part of the route rule (ring 2 for 5, no delta-terrain cell, no large-
+    reference list), or one kept that the table drops."""
+    L = sclab()
+    for arm in ("with", "without"):
+        a = json.loads(Path(L.out[("stateprobe", arm)][2]).read_text(encoding="utf-8"))
+        got = {}
+        names = {v.lower(): k for k, v in S.items()}
+        for row in a["rows"]:
+            got[names.get(row["key"].lower(), row["key"])] = row["rule"]
+        missing = [k for k in SC_RULE if k not in got]
+        wrong = {k: got.get(k) for k in SC_RULE if k in got and got[k] != SC_RULE[k]}
+        assert not missing and not wrong, f"{arm}: rules {got}; missing {missing}, wrong {wrong}; the fixture's table says {SC_RULE}"
+
+
+def sc_closure_and_exterior():
+    """Rejects: an empty-space scope without the relocation closure (IFar's f3 dropped), or one that does not judge the fixture
+    once placed outside (f4: its exterior assembly's readings would then come from another order of judgements)."""
+    L = sclab()
+    for arm in ("with", "without"):
+        log = L.logs[("contactprobe", arm, "scoped")].stdout
+        line = next((ln for ln in log.splitlines() if "population scope:" in ln and "interior cells" in ln), "")
+        assert line.strip().startswith("population scope: 2 interior cells"), f"{arm}: {line!r} (IPop and, by r's relocation, IFar)"
+        ex = next((ln for ln in log.splitlines() if "judged only to keep the exterior memos exact" in ln), "")
+        n = int(ex.split(";")[1].split()[0].replace(",", "")) if ";" in ex else -1
+        assert n >= 1, f"{arm}: f4 must be judged and not reported ({ex!r})"
+
+
+def sc_race_refused():
+    """Rejects: stateprobe accepting a population whose delta carries RACE records (every actor band reads them)."""
+    L = sclab()
+    r = run([exe(PROBES, "stateprobe"), "--order", L.cand["with"], "--instance", L.inst, "--game", L.game, "--profile", "P",
+             "--all", "--emit", L.tmp / "race.json", "--population", L.race_population])
+    assert r.returncode == 2 and "RACE records" in r.stderr, (r.returncode, r.stderr[-300:])
+    r2 = run([exe(PROBES, "contactprobe"), "--order", L.cand["with"], "--instance", L.inst, "--game", L.game, "--profile", "P",
+              "--empty-space", L.tmp / "es.json", "--emit", L.tmp / "es-emit.json", "--base", L.out[("contactprobe", "with")][0],
+              "--population", L.population])
+    assert r2.returncode == 2 and "takes no --base" in r2.stderr, (r2.returncode, r2.stderr[-300:])
+
+
+TESTS += [
+    ("C420 empty space, arm with, whole-order rows are the fixture's", sc_expect("contactprobe", "with", "whole", {"f1", "f2", "f3", "f4"})),
+    ("C420 empty space, arm with, scoped: f1 (a delta cell) and f3 (pulled in by the relocation closure) kept, f2 dropped",
+     sc_expect("contactprobe", "with", "scoped", {"f1", "f3"})),
+    ("C420 empty space, arm without, scoped: the same fixtures where the delta is absent", sc_expect("contactprobe", "without", "scoped", {"f1", "f3"})),
+    ("C420 empty space, arm with: scoped = whole restricted to the probe's audit, every field, side file too", sc_scoped_is_whole_in_scope("contactprobe", "with")),
+    ("C420 empty space, arm without: scoped = whole restricted to the probe's audit", sc_scoped_is_whole_in_scope("contactprobe", "without")),
+    ("C421/C423 the closure pulls IFar in; the once-exterior fixture is judged and not reported", sc_closure_and_exterior),
+    ("C424 state, arm with, whole-order rows are the fixture's", sc_expect("stateprobe", "with", "whole", {"c1", "c2", "c3", "c4", "c5", "c6"})),
+    ("C424/C425 state, arm with, scoped: c1 (population cell), c3 (4 cells from a seed), c5 (4 from a delta terrain cell), c6 (3 from a listed large ref)",
+     sc_expect("stateprobe", "with", "scoped", {"c1", "c3", "c5", "c6"})),
+    ("C425 state, arm without, scoped: the same rows where the delta is absent", sc_expect("stateprobe", "without", "scoped", {"c1", "c3", "c5", "c6"})),
+    ("C425 each kept changed reference is kept by the rule the table names", sc_rules),
+    ("C427 state, arm with: scoped = whole restricted to the probe's audit, every field", sc_scoped_is_whole_in_scope("stateprobe", "with")),
+    ("C427 state, arm without: scoped = whole restricted to the probe's audit", sc_scoped_is_whole_in_scope("stateprobe", "without")),
+    ("C426 stateprobe refuses a RACE-carrying delta; --population with --empty-space refuses --base", sc_race_refused),
 ]
 
 

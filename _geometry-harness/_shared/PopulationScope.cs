@@ -48,6 +48,15 @@ public sealed class PopulationScope
     public HashSet<FormKey> FileRecords { get; } = new();
     public HashSet<FormKey> FileCells { get; } = new();
     public HashSet<string> ModFiles { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Cells where a delta plugin carries terrain or navmesh (interior cell keys; exterior worldspace + grid), whatever
+    /// else the cell holds: the route half of stateprobe reads both (task 1 of window 2).</summary>
+    public HashSet<FormKey> FileGeometryInterior { get; } = new();
+    public HashSet<(FormKey Ws, int X, int Y)> FileGeometryExterior { get; } = new();
+    /// <summary>References a delta plugin's worldspace records name in their large-reference lists (RNAM): the lists decide
+    /// which far references a floor field admits.</summary>
+    public HashSet<FormKey> FileListedLarge { get; } = new();
+    /// <summary>The delta plugins that carry RACE records (actor heights and the tallest playable race: every actor band).</summary>
+    public List<string> RaceCarriers { get; } = new();
     readonly Dictionary<FormKey, List<(FormKey Cell, FormKey Ws, bool Interior, Vec3 Pos, float Scale, FormKey? Base)>> _filePlacements = new();
     readonly Dictionary<FormKey, Vec3> _fileObnd = new();
 
@@ -121,12 +130,21 @@ public sealed class PopulationScope
             if (rec is ICollisionLayerGetter)
                 throw new PopulationRefused($"{name} carries a collision-layer record ({rec.FormKey}), which changes how every reference collides; run this probe on the whole order (no --population).");
             if (rec is IPlacedGetter) continue;
+            if (rec is IRaceGetter && !RaceCarriers.Contains(name)) RaceCarriers.Add(name);
+            if (rec is IWorldspaceGetter ws) FileListedLarge.UnionWith(LargeReferenceLists.ListedIn(ws));
             FileRecords.Add(rec.FormKey);
             if (rec is IObjectBoundedGetter ob && ob.ObjectBounds is { } b)
                 _fileObnd[rec.FormKey] = new Vec3(MathF.Abs(b.Second.X - b.First.X), MathF.Abs(b.Second.Y - b.First.Y), MathF.Abs(b.Second.Z - b.First.Z));
         }
-        foreach (var cp in PlacementExtract.FromMod(mod, includeEmpty: false, includeDeletions: true))
+        foreach (var cp in PlacementExtract.FromMod(mod, includeEmpty: true, includeDeletions: true))
         {
+            bool geometry = cp.Navmeshes.Count > 0 || cp.DeletedNavmeshes is { Count: > 0 }
+                         || cp.Land is not null || cp.LandUnreadableReason is not null || cp.LandDeclaresNoHeights;
+            if (geometry)
+            {
+                if (cp.Interior) FileGeometryInterior.Add(cp.Cell);
+                else if (cp.Grid is { } gg && !cp.Worldspace.IsNull) FileGeometryExterior.Add((cp.Worldspace, gg.X, gg.Y));
+            }
             bool worldPersistent = !cp.Interior && cp.Grid is null && !cp.Worldspace.IsNull;
             if (!worldPersistent && (cp.Refs.Count > 0 || cp.DeletedRefs is { Count: > 0 })) FileCells.Add(cp.Cell);
             foreach (var r in cp.Refs)
@@ -266,6 +284,101 @@ public sealed class PopulationScope
                 if (s.Pos.X >= b.Min.X && s.Pos.X <= b.Max.X && s.Pos.Y >= b.Min.Y && s.Pos.Y <= b.Max.Y && s.Pos.Z >= b.Min.Z && s.Pos.Z <= b.Max.Z) return true;
         return false;
     }
+
+    // ---- the empty-space scope (window 2, task 1) ----------------------------------------------------------------------
+
+    /// <summary>The interior cells an empty-space judgement in the population can read: the region's interior cells, closed
+    /// so that a reference with an interior placement in the set has every interior placement in it, and so are its rack
+    /// partners' (<paramref name="partners"/>). An assembly walk stays in one interior cell except through those two links,
+    /// so a fixture of these cells reads, and leaves behind in the search's memos, only references of these cells.</summary>
+    public HashSet<FormKey> InteriorClosure(OverlapIndex idx, Func<FormKey, IEnumerable<FormKey>>? partners, bool close = true)
+    {
+        RequireBound();
+        var set = new HashSet<FormKey>(_regionInterior);
+        if (!close) return set;
+        var byCell = new Dictionary<FormKey, List<FormKey>>();
+        foreach (var (key, snaps) in idx.History.Refs)
+            foreach (var s in snaps)
+                if (s.Interior)
+                {
+                    if (!byCell.TryGetValue(s.Cell, out var l)) byCell[s.Cell] = l = new();
+                    if (l.Count == 0 || l[^1] != key) l.Add(key);
+                }
+        var queue = new Queue<FormKey>(set);
+        var seenRef = new HashSet<FormKey>();
+        void Pull(FormKey r)
+        {
+            if (idx.History.Of(r) is not { } hs) return;
+            foreach (var s in hs)
+                if (s.Interior && set.Add(s.Cell)) queue.Enqueue(s.Cell);
+        }
+        while (queue.Count > 0)
+        {
+            var c = queue.Dequeue();
+            if (!byCell.TryGetValue(c, out var refs)) continue;
+            foreach (var r in refs)
+            {
+                if (!seenRef.Add(r)) continue;
+                Pull(r);
+                if (partners is not null) foreach (var p in partners(r)) Pull(p);
+            }
+        }
+        return set;
+    }
+
+    // ---- the state route scope (window 2, task 1) ----------------------------------------------------------------------
+
+    /// <summary>How far, in exterior cells, a floor reference reaches into another cell's field: filed in the 5x5 and entering
+    /// the 3x3, or a listed large reference from rings 3 to 5 (_shared/FloorFeed.cs).</summary>
+    public const int RouteRing = 5;
+    readonly Dictionary<FormKey, HashSet<(int X, int Y)>> _routeCentres = new();
+    readonly Dictionary<FormKey, HashSet<(int X, int Y)>> _largeCentres = new();
+    public int RouteRingUsed { get; private set; } = RouteRing;
+
+    /// <summary>The centres the route rule measures from: every exterior position a seed ever takes (this arm's history and
+    /// the delta files' placements), every exterior cell a delta plugin carries terrain or navmesh for; and, apart, every
+    /// position of a reference a delta worldspace record lists as large.</summary>
+    public void BindRoute(OverlapIndex idx, int ring = RouteRing)
+    {
+        RequireBound();
+        RouteRingUsed = ring;
+        _routeCentres.Clear(); _largeCentres.Clear();
+        void Add(Dictionary<FormKey, HashSet<(int, int)>> d, FormKey ws, (int, int) g)
+        { if (!d.TryGetValue(ws, out var h)) d[ws] = h = new(); h.Add(g); }
+        void Poses(FormKey k, Dictionary<FormKey, HashSet<(int, int)>> d)
+        {
+            if (idx.History.Of(k) is { } snaps)
+                foreach (var s in snaps) if (!s.Interior && !s.Worldspace.IsNull) Add(d, s.Worldspace, GridOf(s.Pos));
+            if (_filePlacements.TryGetValue(k, out var fp))
+                foreach (var p in fp) if (!p.Interior && !p.Ws.IsNull) Add(d, p.Ws, GridOf(p.Pos));
+        }
+        foreach (var k in Seeds) Poses(k, _routeCentres);
+        foreach (var (ws, x, y) in FileGeometryExterior) Add(_routeCentres, ws, (x, y));
+        foreach (var k in FileListedLarge) Poses(k, _largeCentres);
+    }
+
+    static bool WithinRing(Dictionary<FormKey, HashSet<(int X, int Y)>> d, FormKey ws, (int X, int Y) g, int ring)
+    {
+        if (!d.TryGetValue(ws, out var h) || h.Count == 0) return false;
+        for (int dx = -ring; dx <= ring; dx++)
+            for (int dy = -ring; dy <= ring; dy++)
+                if (h.Contains((g.X + dx, g.Y + dy))) return true;
+        return false;
+    }
+
+    /// <summary>The route rule for a changed reference standing in <paramref name="cell"/>: which part of the rule admits it
+    /// ("route-interior", "route-ring", "large-ref"), or null. <paramref name="grid"/> is the exterior cell's grid.</summary>
+    public string? RouteRule(FormKey cell, bool interior, FormKey ws, (int X, int Y)? grid)
+    {
+        RequireBound();
+        if (interior) return _regionInterior.Contains(cell) || FileGeometryInterior.Contains(cell) ? "route-interior" : null;
+        if (ws.IsNull || grid is not { } g) return null;
+        if (WithinRing(_routeCentres, ws, g, RouteRingUsed)) return "route-ring";
+        if (WithinRing(_largeCentres, ws, g, RouteRingUsed)) return "large-ref";
+        return null;
+    }
+
+    public static (int X, int Y) GridAt(Vec3 p) => GridOf(p);
 
     public string Describe() =>
         $"population {Short} ({FilePath}): {Plugins.Count} plugin(s), {Mods.Count} mod folder(s); {FileRefs.Count:N0} delta references, "

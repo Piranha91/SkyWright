@@ -302,7 +302,8 @@ if (anchorOut is not null && motionOptions is { Mode: not "swept" }) { Console.E
 if ((motionDelta is not null || motionBudget is not null) && motionOptions?.Mode != "swept") { Console.Error.WriteLine("--motion-delta and --motion-budget are valid only with --motion swept"); return 2; }
 if (motionDelta is { } md && !(md > 0 && double.IsFinite(md)) || motionBudget is { } mb && mb < 2) { Console.Error.WriteLine("--motion-delta must be positive and finite; --motion-budget at least 2"); return 2; }
 if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trace is valid only in the default moved-host pass"); return 2; }
-if (populationPath is not null && selectedModes > 0) { Console.Error.WriteLine("--population is valid only in the default moved-host pass"); return 2; }
+if (populationPath is not null && selectedModes > 0 && emptySpaceOut is null) { Console.Error.WriteLine("--population is valid only in the default moved-host pass and with --empty-space"); return 2; }
+if (populationPath is not null && emptySpaceOut is not null && basePath is not null) { Console.Error.WriteLine("--population with --empty-space takes no --base: the physical half of a row outside the population is not computed; run the predicate pass on the whole order"); return 2; }
 if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
 List<FormKey>? traceKeys = null;
 if (traceKeysPath is not null && File.Exists(traceKeysPath))
@@ -898,7 +899,8 @@ Console.WriteLine($"   top movers: " + string.Join(", ", hosts.GroupBy(h => h.Mo
 if (emptySpaceOut is not null)
     return EmptySpaceReview.Run(cidx, closure, hosts, PluginName, BaseLabel, CellOf, p => IsVanilla(p) || IsUssep(p), f => Vanilla.Contains(f),
                                 EmptySpaceOutput.NodeCheck(idx, assets), emptySpaceOut, emitPath, basePath, Instance, paths.Count - unreadable.Count, unreadable.Count,
-                                cfg.Identity("load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw);
+                                cfg.Identity(population?.Identity("load-time") ?? "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw,
+                                population, populationAuditEmit, populationAuditOut);
 var depHash = cidx.DependentSnaps(skips);
 MemStages.Print("dependents hashed", cidx, 0, 0);
 if (FitCheck() is { } fitRefusal) { Console.Error.WriteLine("contactprobe: " + fitRefusal); return 2; }

@@ -33,6 +33,12 @@ using HousecarlCore.Progress;
 //                    baseline's floor mixes two worlds. Fields are keyed on (cell, state) and the baseline's field is
 //                    reused where the flip changes nothing in that cell, so the cost is a lookup, not a rebuild.
 //   --emit FILE      the measured class as a ConflictFile (STATE-CONTACT / STATE-ROUTE @ state); STATE-OVERLAP is explicitly unmeasured
+//   --population F   the plan's population (_shared/PopulationScope.cs; window 2): only the changed references it can reach are
+//                    processed (contact: a population reference or one within reach of it; route: an interior population or
+//                    delta-terrain/navmesh cell, or an exterior cell within 5 cells of a seed, a delta terrain/navmesh cell or a
+//                    reference a delta worldspace lists as large), and per-state empty space judges fixtures of the population's
+//                    interior cells; the index stays whole, so every kept row is the whole-order run's. A delta carrying RACE
+//                    records is refused (every actor band reads it). --population-audit EMIT OUT: per row of EMIT, kept or not.
 //   --empty-space F  LEFT IN EMPTY SPACE for each state's ARRIVING references (_shared/ContactAssembly.cs, DetectorModel.EmptySpace):
 //                    in the state, a fixture whose assembly reached a floor or wall some plugin removed or moved, and reaches none
 //                    under the winner; rows to F, the class to --emit as STATE-EMPTY @ state (a fixture that only exists after a
@@ -43,6 +49,8 @@ using var __run = RunLog.BeginProcess("stateprobe", args);
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return RouteSelfTest.Run();
 // Known answers for the class, emit and route-obstacle decisions over a synthetic order (_shared/StateFixture.cs).
 if (args.Length >= 1 && args[0] == "--self-test") return StateSelfTest.Run();
+// The scope fixture (window 2): written for tests/test_population_scope.py, which runs the real probes on it.
+if (args.Length >= 2 && args[0] == "--write-scope-fixture") { var w = ScopeFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.RacePlugin).Append(w.ModsDir))); return 0; }
 const string StateMeasurementPolicy = "state-contact-route-v1|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
@@ -68,6 +76,7 @@ bool all = false, routeOn = true;
 var stateSpecs = new List<string>(); var cellFilters = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
 string? orderFile = null;
+string? populationPath = null, populationAuditEmit = null, populationAuditOut = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -90,6 +99,21 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
+    else if (args[i] == "--population" && i + 1 < args.Length) populationPath = args[++i];
+    else if (args[i] == "--population-audit" && i + 2 < args.Length) { populationAuditEmit = args[++i]; populationAuditOut = args[++i]; }
+}
+if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
+if (populationAuditEmit is not null && !File.Exists(populationAuditEmit)) { Console.Error.WriteLine($"--population-audit input does not exist: {populationAuditEmit}"); return 2; }
+PopulationScope? population = null;
+if (populationPath is not null)
+{
+    try { population = PopulationScope.Load(populationPath); }
+    catch (PopulationRefused ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    if (population.RaceCarriers.Count > 0)
+    {
+        Console.Error.WriteLine($"{string.Join(", ", population.RaceCarriers)} carries RACE records, which change every actor band the route half reads; run stateprobe on the whole order (no --population).");
+        return 2;
+    }
 }
 if (stateSpecs.Count == 0 && cellFilters.Count == 0 && !all) { Console.Error.WriteLine("nothing to evaluate: give --state, --cell or --all"); return 2; }
 
@@ -194,6 +218,7 @@ foreach (var a in arms) foreach (var c in a.Changes(sx)) if (idx.History.Winning
 Console.WriteLine($"cells touched by the states' changes: {wantedCells.Count:N0}");
 RouteAsk? oracle = null;
 Func<string>? routeFloorLine = null;
+Dictionary<FormKey, (FormKey Wrld, int X, int Y)>? routeCellGrid = null;
 long routeMeasured = 0, routeNoNav = 0, routeNoGeo = 0, routeSetAside = 0, routeNoCross = 0;
 if (routeOn)
 {
@@ -206,6 +231,7 @@ if (routeOn)
     var winNav = rwalk.WinNav;
     var cellRefs = rwalk.CellRefs;
     var cellGridOf = rwalk.CellGridOf;
+    routeCellGrid = cellGridOf;
     var floorRefsByWorld = rwalk.FloorRefsByWorld;
     var floorLandByWorld = rwalk.FloorLandByWorld;
     // A plugin the first pass could not read is counted there (rule 6); this walk decides which version of a reference
@@ -376,6 +402,31 @@ else Console.WriteLine("route oracle: off (--route on to measure the route half)
 // ---------------------------------------------------------------------------------------
 sw.Restart();
 var ev = new StateEvaluator(cidx, sx) { Route = oracle };
+// The population rule (window 2, task 1), decided once per changed reference and the same in every state.
+var keyRule = new Dictionary<FormKey, string?>();
+bool RefInPopulation(FormKey key) => population!.Seeds.Contains(key) || (idx.History.Of(key) is { } hs && hs.Any(population.PlaceInScope));
+float contactNeighbourhood = cidx.Reach + cidx.BoxBand + cidx.MaxDependentDim;
+string? RuleOf(FormKey k)
+{
+    if (keyRule.TryGetValue(k, out var hit)) return hit;
+    string? r = null;
+    if (RefInPopulation(k) || ev.AnyNear(k, contactNeighbourhood, RefInPopulation)) r = "contact";
+    else if (idx.History.Winning(k) is { } w)
+    {
+        (int X, int Y)? grid = null;
+        if (!w.Interior)
+            grid = routeCellGrid is not null && routeCellGrid.TryGetValue(w.Cell, out var cg) && cg.Wrld == w.Worldspace ? (cg.X, cg.Y) : PopulationScope.GridAt(w.Pos);
+        r = population!.RouteRule(w.Cell, w.Interior, w.Worldspace, grid);
+    }
+    return keyRule[k] = r;
+}
+if (population is not null)
+{
+    population.Bind(idx);
+    population.BindRoute(idx);
+    Console.WriteLine("   " + population.Describe() + $"; route ring {population.RouteRingUsed}, delta terrain/navmesh cells {population.FileGeometryInterior.Count + population.FileGeometryExterior.Count:N0}, listed large {population.FileListedLarge.Count:N0}");
+    ev.KeyInScope = k => RuleOf(k) is not null;
+}
 // The evaluator constructor prepares the winning geometry; refresh after that work, before evaluating any arm.
 try { cidx.RefreshAutomaticBudget(); }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
@@ -401,6 +452,7 @@ static void Merge(StateTally a, StateTally b)
     a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
     a.HostsLeaving += b.HostsLeaving; a.HostsArriving += b.HostsArriving; a.DepsArriving += b.DepsArriving; a.DepsLeaving += b.DepsLeaving; a.ReSupported += b.ReSupported; a.FloatingOnArrival += b.FloatingOnArrival; a.TouchingOnArrival += b.TouchingOnArrival; a.ContactUnmeasured += b.ContactUnmeasured;
     a.RouteAsked += b.RouteAsked; a.RouteUnjudged += b.RouteUnjudged; a.RouteNoLine += b.RouteNoLine; a.RouteClipped += b.RouteClipped; a.RouteNone += b.RouteNone; a.ElapsedMs += b.ElapsedMs;
+    a.OutsidePopulation += b.OutsidePopulation;
 }
 double totalS = sw.Elapsed.TotalSeconds;
 var cellStates = perState.Sum(p => arms.First(a => a == p.Arm).Changes(sx).Select(c => idx.History.Winning(c.Key)?.Cell ?? FormKey.Null).Distinct().Count());
@@ -408,6 +460,12 @@ Console.WriteLine($"\n==== COST ====");
 Console.WriteLine($"   {arms.Count:N0} states over {tally.Changes:N0} changed references ({tally.Arrivals:N0} arrivals, {tally.Departures:N0} departures) in {totalS:0.0}s — {(arms.Count == 0 ? 0 : 1000 * totalS / arms.Count):0} ms per state; "
                 + $"{cellStates:N0} cell-states, {(cellStates == 0 ? 0 : 1000 * totalS / cellStates):0} ms per cell-state; the route half measured {routeMeasured:N0} obstacles");
 if (routeFloorLine is not null) Console.WriteLine("   " + routeFloorLine());
+var keptByRule = keyRule.Values.Where(v => v is not null).GroupBy(v => v!).ToDictionary(g => g.Key, g => (long)g.Count());
+long keysDropped = keyRule.Values.LongCount(v => v is null);
+if (population is not null)
+    Console.WriteLine($"   population: {tally.OutsidePopulation:N0} changed reference-states not processed; distinct changed references kept by rule "
+                    + string.Join(", ", new[] { "contact", "route-interior", "route-ring", "large-ref" }.Select(k => $"{k} {keptByRule.GetValueOrDefault(k):N0}"))
+                    + $", dropped {keysDropped:N0}");
 Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry, a marker, or a navcut without a primitive); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
 Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasured:N0} changed obstructing reference-state(s); strict placed render-surface migration is pending, so no box overlap is a finding or repair predicate");
 
@@ -416,17 +474,26 @@ Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasur
 var esRows = new List<EmptySpaceRow>();
 var esTrigger = new Dictionary<EmptySpaceRow, string>(ReferenceEqualityComparer.Instance);
 long esAbsent = 0, esNoRelation = 0, esFalls = 0, esPairs = 0;
+long esOutside = 0, esJudgedDropped = 0;
 EmptySpaceSearch? es = null;
+EmptySpaceScope? esScope = null;
 if (emptySpaceOut is not null)
 {
     sw.Restart();
     var closure = DetectorModel.MasterClosure(masterIdx);
     es = new EmptySpaceSearch(cidx, closure, PluginName, EmptySpaceOutput.NodeCheck(idx, assets), f => PluginKinds.IsBethesda(f), p => IsVanilla(p) || IsUssep(p));
+    if (population is not null)
+    {
+        esScope = new EmptySpaceScope(idx, population.InteriorClosure(idx, es.RackPartners));
+        Console.WriteLine($"   empty space population scope: {esScope.Cells.Count:N0} interior cells");
+    }
     int esDone = 0;
     foreach (var arm in arms)
     {
         if (++esDone % 250 == 0) Console.WriteLine($"   ... empty space: {esDone:N0}/{arms.Count:N0} states, {esRows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
-        foreach (var (r, sk) in es.JudgeArrivals(arm, sx))
+        var judgedHere = es.JudgeArrivals(arm, sx, esScope, out var o1, out var o2);
+        esOutside += o1; esJudgedDropped += o2;
+        foreach (var (r, sk) in judgedHere)
         {
             esPairs++;
             if (r.Verdict == EmptySpaceVerdict.Absent) { esAbsent++; continue; }
@@ -443,14 +510,25 @@ if (emptySpaceOut is not null)
         Console.WriteLine($"   @ {r.State}: {RefLabel(r.Fixture)} ({r.HeldBy}) in {CellOf(r.Cell)}: {PluginName(r.Mover)} removed or moved {string.Join(" ", r.Authoring.ChangedAnchors.Take(3))}; assembly {r.Winner.Members}");
     var dirE = Path.GetDirectoryName(Path.GetFullPath(emptySpaceOut));
     if (!string.IsNullOrEmpty(dirE)) Directory.CreateDirectory(dirE);
-    File.WriteAllText(emptySpaceOut, JsonSerializer.Serialize(new
+    var esOpts = new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+    string esText = JsonSerializer.Serialize(new
     {
         Schema = "housecarl.empty-space/1", States = arms.Count,
         Parameters = new { Epsilon = cidx.Epsilon, es.MinAnchorDim, es.MaxMembers, es.AnchorReport, Reach = es.Reach },
         Counts = esRows.GroupBy(r => r.Verdict.ToString()).ToDictionary(g => g.Key, g => g.Count()),
         Pairs = esPairs, Absent = esAbsent, NoRelation = esNoRelation, Falls = esFalls,
         Rows = esRows.Select(r => EmptySpaceOutput.Row(r, PluginName, BaseLabel, CellOf)).ToList(),
-    }, new JsonSerializerOptions { WriteIndented = false, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+    }, esOpts);
+    if (population is not null)
+    {
+        // a scoped side file names its population (an unscoped one keeps its shape byte for byte)
+        var node = System.Text.Json.Nodes.JsonNode.Parse(esText)!.AsObject();
+        node["Population"] = population.Identity("load-time");
+        esText = node.ToJsonString(esOpts);
+    }
+    File.WriteAllText(emptySpaceOut, esText);
+    if (esScope is not null)
+        Console.WriteLine($"   empty space population: {esOutside:N0} arrivals outside it not judged; {esJudgedDropped:N0} pairs judged only to keep the exterior memos exact, not reported");
     Console.WriteLine($"wrote {esRows.Count:N0} empty-space rows -> {emptySpaceOut}");
 }
 
@@ -567,14 +645,25 @@ if (emitPath is not null)
             new Dictionary<string, long> { ["AbsentInArm"] = esAbsent, ["Falls"] = esFalls, ["NoRelation"] = esNoRelation,
                                            ["FloatsAsShipped"] = esRows.Count(r => r.Verdict == EmptySpaceVerdict.FloatsAsShipped), ["FloorPopulation"] = esRows.Count(r => r.Verdict == EmptySpaceVerdict.FloorPopulation) },
             $"class {esRows.Count(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace):N0}"));
+    string populationIdentity = population?.Identity("load-time") ?? "load-time";
+    if (population is not null)
+        coverage.Add(new("population scope", keyRule.Count - keysDropped, new Dictionary<string, long>(),
+            new Dictionary<string, long> { ["ChangedReferenceOutsidePopulation"] = keysDropped, ["ReferenceStateOutsidePopulation"] = tally.OutsidePopulation,
+                                           ["EmptySpaceArrivalOutsidePopulation"] = esOutside, ["EmptySpaceJudgedForExteriorMemo"] = esJudgedDropped },
+            "changed references processed only where the plan's population reaches them (" + string.Join(", ", keptByRule.OrderBy(k => k.Key, StringComparer.Ordinal).Select(k => $"{k.Key} {k.Value:N0}"))
+            + $"); {population.Describe()}"));
     // Every row of this emit is a DIFFERENTIAL between the baseline and one flipped state, so the emit's own state is
     // the baseline it differs from; the state each row belongs to is in the row's own kind (STATE-<kind>@<state>@<trigger>).
     ConflictIo.Write(emitPath, new ConflictFile("stateprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
-                                                Population: "load-time", State: EnablePopulation.BaselineStateName,
-                                                Configuration: cfg.Identity("load-time", EnablePopulation.BaselineStateName),
+                                                Population: populationIdentity, State: EnablePopulation.BaselineStateName,
+                                                Configuration: cfg.Identity(populationIdentity, EnablePopulation.BaselineStateName),
                                                 MeasurementPolicy: StateMeasurementPolicy));
     Console.WriteLine($"emitted {conflicts.Count:N0} StateConditional conflicts -> {emitPath}");
 }
+
+if (population is not null && populationAuditEmit is not null)
+    EmptySpaceAudit.Write(populationAuditEmit, populationAuditOut!, "stateprobe", population.Identity("load-time"),
+        (kind, k) => kind.StartsWith(EmptySpaceOutput.StateKind, StringComparison.Ordinal) ? (esScope?.InScope(k) == true ? "empty-space" : null) : RuleOf(k));
 
 Console.WriteLine();
 Console.WriteLine("A StateConditional row exists only once its switch is flipped — a quest stage, a scene or a trigger the records name, or one they do not (Unknown");

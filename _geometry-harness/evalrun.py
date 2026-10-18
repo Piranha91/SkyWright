@@ -277,14 +277,19 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
     scoped_probes = sorted({c["adapter"]["exe"] for c in planned if c["adapter"].get("populationFlag")})
     whole = {c["checkId"]: "this probe takes no population (it runs on the whole order)"
              for c in planned if not c["adapter"].get("populationFlag")}
+    # A probe-emit check that declares populationFlag (window 2: empty space, conditional geometry) is scoped by check id:
+    # evalrun hands it the file itself (run_generic), not ordersweep.
+    emit_scoped = [c for c in checks if (c.get("adapter") or {}).get("kind") == "probe-emit"
+                   and c["adapter"].get("populationFlag") and any(r.get("status") == "planned" for r in c["arms"])]
     target_names = [str(t.get("name")) for t in (targets or []) if isinstance(t, dict) and t.get("name")]
 
     def unscoped(reason: str) -> tuple[dict, None]:
         return ({"scoped": False, "reason": reason,
-                 "wholeOrderChecks": {**whole, **{c["checkId"]: reason for c in planned if c["adapter"].get("populationFlag")}}},
+                 "wholeOrderChecks": {**whole, **{c["checkId"]: reason for c in planned + emit_scoped
+                                                  if c["adapter"].get("populationFlag")}}},
                 None)
 
-    if not scoped_probes:
+    if not scoped_probes and not emit_scoped:
         return unscoped("no planned check takes a population")
     plugin_names = arm_delta([list(a.get("plugins") or []) for a in arms])
     for t in target_names:
@@ -295,6 +300,7 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
     if not plugin_names and not mod_names:
         return unscoped("the arms do not differ and the plan names no target, so there is no population to scope to")
     plugins = []
+    race_carriers = []
     for name in sorted(plugin_names, key=str.lower):
         rows = [r for a in arms for r in ((a.get("requested") or {}).get("plugins") or [])
                 if Path(str(r.get("name") or "")).name.lower() == name.lower()]
@@ -312,6 +318,8 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
         if groups and groups.get("COLL", 0) > 0:
             return unscoped(f"{name} carries collision-layer records (COLL), which change how every reference collides; "
                             "the scoped probes do not model that, so these checks run on the whole order")
+        if groups and groups.get("RACE", 0) > 0:
+            race_carriers.append(name)
         plugins.append({"name": name, "path": path, "sha256": sha})
     mods = []
     for name in mod_names:
@@ -327,10 +335,19 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
         mods.append({"name": name, "path": str(folder)})
     text = json.dumps({"schema": 1, "plugins": plugins, "mods": mods, "targets": target_names}, indent=1, sort_keys=True) + "\n"
     sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    scoped_checks = sorted(c["checkId"] for c in planned if c["adapter"].get("populationFlag"))
+    for c in emit_scoped:
+        if c["adapter"].get("exe") == "stateprobe" and race_carriers:
+            # stateprobe refuses this population too (every actor band reads RACE); deciding it here keeps the check running
+            whole[c["checkId"]] = (f"{', '.join(race_carriers)} carries RACE records, which change every actor band the "
+                                   "state route check reads, so it runs on the whole order")
+        else:
+            scoped_checks.append(c["checkId"])
+    scoped_checks.sort()
     return ({"scoped": True, "file": "population.json", "sha256": sha,
              "identity": f"{base_population}+population:{sha[:12]}",
              "plugins": [p["name"] for p in plugins], "mods": [m["name"] for m in mods], "targets": target_names,
-             "scopedProbes": scoped_probes, "wholeOrderChecks": whole,
+             "scopedProbes": scoped_probes, "scopedChecks": scoped_checks, "wholeOrderChecks": whole,
              "note": "the scoped probes measure only rows a reference the population reaches can take part in; their "
                      "whole-order index is kept, so every such row is computed as in a whole-order run"}, text)
 
@@ -1378,7 +1395,8 @@ def cmd_plan(a) -> int:
         population_block, population_text = shared
     if population_block.get("scoped"):
         for c in checks:
-            if c["adapter"].get("kind") == "ordersweep-probe" and c["adapter"].get("exe") in population_block["scopedProbes"]:
+            if (c["adapter"].get("kind") == "ordersweep-probe" and c["adapter"].get("exe") in population_block["scopedProbes"]) \
+                    or (c["adapter"].get("kind") == "probe-emit" and c["checkId"] in (population_block.get("scopedChecks") or [])):
                 # the receipt validator's per-check population (adapter.population): what the scoped emit must carry
                 c["adapter"]["population"] = population_block["identity"]
     census_checks = sorted(c["checkId"] for c in checks if (c["inputs"] or {}).get("states") == "selected")
@@ -3133,6 +3151,17 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
         argv += ex.common_flags()
     if ex.opts.get("probeArgs"):
         argv += ex.opts["probeArgs"].split()
+    population = ex.plan.get("population") or {}
+    if kind == "probe-emit" and population.get("scoped") and check["checkId"] in (population.get("scopedChecks") or []):
+        # The plan's population, by the file the plan froze (window 2): a changed or missing file blocks the check rather
+        # than running it on another population or on the whole order under a scoped request.
+        pfile = ex.run / population["file"]
+        if not pfile.is_file() or sha256_file(pfile) != population["sha256"]:
+            ex.account(check, arm, "blocked(population-changed)", "stale-inputs",
+                       f"the plan's population file {pfile.name} is gone" if not pfile.is_file() else
+                       f"the plan's population file {pfile.name} no longer hashes to the plan's value")
+            return
+        argv += [adapter.get("populationFlag") or "--population", str(pfile)]
 
     if kind == "adviceprobe":
         if "--refresh" in argv:
