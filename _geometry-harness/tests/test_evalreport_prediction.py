@@ -1857,7 +1857,9 @@ def main():
         """C495. Without the patch ModA's change to six records is lost to ModB; every winner value is a placeholder.
         With the patch: 701 ModB's value loses to the patch (the patch carries ModA's); 702 both lose to the patch (its
         own value); 703 ModA's loses to the patch (it carries ModB's); 704 ModA's still loses to ModB; 705 no change is
-        lost; 706 only a third plugin loses to the patch, so neither side is known."""
+        lost; 706 only a third plugin loses to the patch: ModA's change is not lost to it, so the patch carries ModA's
+        value (by the record lane's rule a change still lost has a row), resolved (Clockwork review 4, P101: three
+        OcclusionData rows of this shape carry Grand Solitude's value; until lane cw this was "cannot tell")."""
         ph = "(the winner's value)"
         p_rows = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", ph, "v") for i in range(1, 7)]
         w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", ph, "v"),
@@ -1874,15 +1876,15 @@ def main():
 
     # C495. A lost edit is classified by which side loses to the patch, the same way whether or not values are
     # recorded: the patch carries the lost value (resolved), its own value (the change is still lost, never
-    # "resolved"), the winning value (no claim about intent); cannot tell only when neither side is known
+    # "resolved"), the winning value (no claim about intent); neither side lost to the patch is resolved (lane cw, P101)
     def c495_lost_edit_classes_by_losing_side():
         plan, md, html = lost_classes_bundle()
         val = reader(plan).get("validation") or {}
         bi = (val.get("byItem") or [{}])[0]
         text = section_text(md, headings(plan).get("validation") or "\0")
-        ok = (bi.get("hits") == 1 and bi.get("switched") == 1 and bi.get("own") == 1 and bi.get("kept") == 1
+        ok = (bi.get("hits") == 2 and bi.get("switched") == 1 and bi.get("own") == 1 and bi.get("kept") == 1
               and bi.get("open") == 1
-              and bi.get("cannotTell") == 1 and val.get("own") == 1
+              and bi.get("cannotTell") == 0 and val.get("own") == 1
               and "sets its own value" in text and "still lost" not in md
               and "on purpose" not in md and "author's" not in md and "own choice" not in md)
         return ok, f"by item {bi}; printed own value {'own value' in text}; intent words {'on purpose' in md}"

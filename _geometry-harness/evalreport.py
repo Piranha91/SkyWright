@@ -965,6 +965,99 @@ def field_name(row: dict) -> str:
     return m.group(1) if m else str(row.get("field"))
 
 
+# lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
+NOISE_ADMISSIONS = ("navmeshCheck", "orderOnly", "carriedList", "unusedBits")
+FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
+                    / "references" / "record-field-scope.json")
+_field_masks = []
+
+
+def field_masks() -> dict:
+    """{record type: {field path: mask}}: the bytes of an integer field the game reads (record-field-scope.json)."""
+    if not _field_masks:
+        try:
+            data = json.loads(FIELD_SCOPE_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        _field_masks.append({t: {k: int(m) for k, m in (v or {}).items() if not k.startswith("_")}
+                             for t, v in (data.get("integerMasks") or {}).items() if isinstance(v, dict)})
+    return _field_masks[0]
+
+
+LEAF_VALUE = re.compile(r"^\s*([A-Za-z][\w.]*)\s*=\s*(.*?)\s*$")
+
+
+def value_leaves(v, top: str) -> dict | None:
+    """A recorded lost-edit value as {field path: value} ("Grid.Flags=8", or "Flags=8; Point=1,2" under the field), else
+    None (a summary such as a list comparison is not a value)."""
+    out = {}
+    for item in (v if isinstance(v, list) else [v]):
+        for part in str(item).split("; "):
+            m = LEAF_VALUE.match(part)
+            if not m:
+                return None
+            k = m.group(1)
+            out[k if k == top or k.startswith(top + ".") else f"{top}.{k}"] = m.group(2)
+    return out or None
+
+
+def masked_same(lost, overridden, rtype: str, top: str) -> bool:
+    """The losing value differs from the one it overrides only in bytes of the field the game does not read."""
+    masks = field_masks().get(str(rtype)) or {}
+    a, b = value_leaves(lost, top), value_leaves(overridden, top)
+    if not a or not b or set(a) != set(b) or not any(k in masks for k in a):
+        return False
+    for k in a:
+        if k in masks:
+            try:
+                if (int(a[k]) & masks[k]) != (int(b[k]) & masks[k]):
+                    return False
+            except ValueError:
+                return False
+        elif a[k] != b[k]:
+            return False
+    return True
+
+
+def moved_plugins(before: list, after: list, prefer_moved=()) -> list:
+    """The plugins whose place differs between two orders of the same plugins, each with the plugins it moved past:
+    the plugins outside the longest run kept in the same relative order (among equally long runs, the one that moves
+    the plugins of `prefer_moved`, the evaluated mods). [(plugin, "after" | "before", [plugins it now loads after or
+    before, in the new order])]."""
+    a, b = [str(x) for x in before], [str(x) for x in after]
+    pref = {str(x).lower() for x in prefer_moved}
+    n, m = len(a), len(b)
+    big = 2 * (n + 1)
+    w = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n - 1, -1, -1):
+        for j in range(m - 1, -1, -1):
+            w[i][j] = max(w[i + 1][j], w[i][j + 1],
+                          (w[i + 1][j + 1] + big - (1 if a[i].lower() in pref else 0)) if a[i] == b[j] else -1)
+    kept, i, j = set(), 0, 0
+    while i < n and j < m:
+        if a[i] == b[j] and w[i][j] == w[i + 1][j + 1] + big - (1 if a[i].lower() in pref else 0):
+            kept.add(a[i])
+            i, j = i + 1, j + 1
+        elif w[i + 1][j] >= w[i][j + 1]:
+            i += 1
+        else:
+            j += 1
+    pa, pb = {x: k for k, x in enumerate(a)}, {x: k for k, x in enumerate(b)}
+    out = []
+    for x in b:
+        if x in kept or x not in pa:
+            continue
+        past = [y for y in b if y != x and y in pa and (pa[y] < pa[x]) != (pb[y] < pb[x])]
+        if past:
+            out.append((x, "after" if pb[past[0]] < pb[x] else "before", past))
+    return out
+
+
+def record_type_of(summary) -> str:
+    """The record type a record-lane row's words open with ("Cell X: Grid - ...")."""
+    return str(summary or "").split(" ", 1)[0]
+
+
 def is_geometry_check(check_id, words: dict) -> bool:
     """A check whose rows are objects in the world (they intersect, lose their support, hang): a clash there is physical
     and shows in game whoever built on whom, so the own-master rule, which is about record values, never applies."""
@@ -1397,6 +1490,55 @@ def build_prediction(ctx: dict) -> dict:
             return None
         return before, value_recorded(v.get("winner")) and path_folded(v.get("winner")) == path_folded(v.get("overridden"))
 
+    lv_words = words.get("lostEditValuePatterns") or {}
+    order_only_re = re.compile(lv_words["orderOnly"]) if lv_words.get("orderOnly") else None
+    list_diff_re = re.compile(lv_words["listDiff"]) if lv_words.get("listDiff") else None
+    judged_by = [x for x in words.get("lostEditJudgedBy") or [] if isinstance(x, dict)]
+
+    def carried_list(v, b):
+        """Every entry a list comparison whose winning list keeps every item of the losing list and adds only items of
+        the winning plugin's own (FormKeys in it): no plugin before the losing one can hold those, so the losing mod's
+        additions and removals both stand; its change is carried forward, not lost (Clockwork review 3, P105)."""
+        items = v if isinstance(v, list) else [v]
+        if not items or list_diff_re is None:
+            return False
+        for it in items:
+            m = list_diff_re.match(str(it))
+            if not m or "(+" in m.group("rest"):
+                return False
+            parts = re.split(r";\s*only ", m.group("rest"))
+            if len(parts) != 1 or not m.group("rest").startswith("only in "):
+                return False                   # an item only in the losing list (lost), or another difference
+            listed = m.group("rest").split(":", 1)[1] if ":" in m.group("rest") else ""
+            for x in listed.split(";"):
+                fk = re.search(r"\]\s*([0-9A-Fa-f]{6}:(.+?))\s*$", x)
+                if not fk or fk.group(2).strip().lower() != str(b).lower():
+                    return False
+        return True
+
+    def lost_edit_noise(rk):
+        """A lost-edit row whose values show no change the game sees, or whose subject another check judges: lists
+        holding the same items in another order (lists are compared as sets of items, the record lane's rule; P108), a
+        list the winner keeps in full (P105), a change only in bytes the game does not read (P21), and a navmesh's
+        geometry, which the navmesh check judges by links and lost ground (P103). Kept in the record, said apart."""
+        r_ = (p_rows.get(rk) or {}).get("row") or {}
+        v = r_.get("values") or {}
+        lost = v.get("lost")
+        top = str(r_.get("field") or "")
+        rtype = record_type_of(rk[5])
+        for j_ in judged_by:
+            if (rtype == j_.get("recordType") and top == j_.get("field")
+                    and (j_.get("check"), p_of(j_.get("check"))) in measured):
+                return "navmeshCheck"
+        if order_only_re is not None and lost and all(order_only_re.match(str(x))
+                                                      for x in (lost if isinstance(lost, list) else [lost])):
+            return "orderOnly"
+        if carried_list(lost, rk[3]):
+            return "carriedList"
+        if masked_same(lost, v.get("overridden"), rtype, top):
+            return "unusedBits"
+        return None
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -1421,6 +1563,10 @@ def build_prediction(ctx: dict) -> dict:
             return "bothDisabled"              # both mods disable the object: no effect in game
         if rk[1] == "LOST-EDIT" and undoes_earlier(rk):
             return "notOwnEdit"                # the losing value is the base game's: no edit of that mod's
+        if rk[1] == "LOST-EDIT":
+            noise = lost_edit_noise(rk)
+            if noise:
+                return noise
         if (rk[0] == "geometry.fixture-empty-space" and anchor_unclear_re is not None
                 and anchor_unclear_re.search(rk[5])):
             return "anchorUnclear"             # a floor or wall's box reaches it though no touch was found: cannot tell
@@ -1488,7 +1634,7 @@ def build_prediction(ctx: dict) -> dict:
     # The same lost value carried by two plugins (a patch carrying its master's change forward) is one change lost:
     # counted once, under the plugin loaded first (Pilgrim review S1); the other row stays in the record
     p_order_low = [x.lower() for x in all_orders.get(p_arm) or []]
-    carried, by_value = set(), collections.defaultdict(list)
+    carried, by_value, carried_base = set(), collections.defaultdict(list), {}
     for rk_, h_ in p_rows.items():
         if rk_[1] == "LOST-EDIT":
             v_ = (h_["row"].get("values") or {}).get("lost")
@@ -1499,6 +1645,9 @@ def build_prediction(ctx: dict) -> dict:
             keep = min(rks_, key=lambda r_: (p_order_low.index(r_[2].lower()) if r_[2].lower() in p_order_low else 10 ** 6,
                                              str(r_)))
             carried.update(r_ for r_ in rks_ if r_ != keep)
+            if is_base_game(keep[2], words):
+                # the value a base-game plugin itself holds: no edit of the later plugins that carry it (Clockwork P104)
+                carried_base.update({r_: keep[2] for r_ in rks_ if r_ != keep})
     # An object pair one check counts is not counted again by a later check that finds the same two objects (Sewers
     # review S1: a scaffold in 13 Sewers objects was 13 overlaps and 13 world-state clashes); the first check's item
     # says the other found it too
@@ -1506,8 +1655,9 @@ def build_prediction(ctx: dict) -> dict:
     for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
         hit = p_rows[rk]
         adm = admission(rk, hit["history"], hit["row"].get("other"))
+        base_carrier = carried_base.get(rk)
         if adm == "admitted" and rk in carried:
-            adm = "sameValue"
+            adm = "notOwnEdit" if base_carrier else "sameValue"
         pair_ = (frozenset([str(rk[4]), str((hit["row"].get("other") or [None])[0])])
                  if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other") else None)
         if adm == "admitted" and pair_ is not None and pair_ in pair_owner and pair_owner[pair_][0] != rk[0]:
@@ -1552,7 +1702,7 @@ def build_prediction(ctx: dict) -> dict:
             # Two record checks read overlapping populations (a cell's fields are in both the contested-fields and
             # the cell-attributes check): the same lost edit is one relationship, counted under the first check.
             same = (rk[2].lower(), rk[3].lower(), rk[4], entry["field"])
-            if adm in ("admitted", "ownMaster") and same in lost_seen:
+            if adm in ("admitted", "ownMaster", *NOISE_ADMISSIONS) and same in lost_seen:
                 adm = entry["admission"] = "repeat"
             lost_seen.add(same)
         if adm != "admitted":
@@ -1560,7 +1710,7 @@ def build_prediction(ctx: dict) -> dict:
             if adm == "samePair":
                 entry["sameAsCheck"] = pair_owner[pair_][0]
             if adm == "notOwnEdit":
-                entry["undoes"], earlier_wins = undoes_earlier(rk)
+                entry["undoes"], earlier_wins = undoes_earlier(rk) or (base_carrier, False)
                 set_aside["notOwnEditEarlierWins"] += 1 if earlier_wins else 0
             record.append(entry)
             continue
@@ -1888,7 +2038,12 @@ def build_prediction(ctx: dict) -> dict:
         if (e["admission"] == "baseGame" and e["kind"] != "LOST-EDIT" and is_geometry_check(e["checkId"], words)
                 and {e["A"].lower(), e["B"].lower()} & pt_lower and e["A"].lower() != e["B"].lower()):
             mod_ = e["A"] if e["A"].lower() in pt_lower else e["B"]
-            c_ = base_geo.setdefault(mod_, collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"]})
+            c_ = base_geo.setdefault(mod_, collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"], "pairs": set()})
+            # a pair of objects is one clash however many world states show it (Pilgrim's second review, S5)
+            pair_ = (state_split(e["kind"])[0], str(e["formKey"]), tuple(sorted(map(str, e.get("other") or ()))))
+            if pair_ in c_["pairs"]:
+                continue
+            c_["pairs"].add(pair_)
             c_["n"] += 1
             if e.get("findingId") and e["findingId"] not in c_["fids"]:
                 c_["fids"].append(e["findingId"])
@@ -2047,7 +2202,8 @@ def build_prediction(ctx: dict) -> dict:
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
              "ownMaster": set_aside["ownMaster"], "sameClash": set_aside["sameClash"],
-             "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"]}
+             "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
+             **{k_: set_aside[k_] for k_ in NOISE_ADMISSIONS}}
     def describe_setup(arm_id):
         """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
         plugs = all_orders.get(arm_id) or []
@@ -2116,10 +2272,20 @@ def build_prediction(ctx: dict) -> dict:
             for (a_, b_), g_ in sorted(per_pair.items(), key=lambda kv: -kv[1]["n"]):
                 types_ = collections.Counter(t_ for t_ in g_["records"].values() if t_)
                 n_rec = len(g_["records"])
+                mw_ = words.get("orderMoved") or {}
+
+                def names_(xs):
+                    shown = xs if len(xs) <= 4 else xs[:3]
+                    t_ = ", ".join(shown[:-1]) + " and " + shown[-1] if len(shown) > 1 else shown[0]
+                    return t_ if len(xs) <= 4 else bind(mw_.get("more") or "{shown} and {count} more",
+                                                        {"shown": ", ".join(shown), "count": fmt_n(len(xs) - 3)})
+                moved_ = (mw_.get("join") or "; ").join(
+                    bind(mw_.get(d_) or "{plugin} moved " + d_ + " {plugins}", {"plugin": x_, "plugins": names_(ps_)})
+                    for x_, d_, ps_ in moved_plugins([n for n, _ in p_plugs], [n for n, _ in o_plugs], p_targets))
                 order_lines.append({"path": "evidence/order-setup-" + str(o_.get("armId")) + ".json",
                                     "text": bind(words["orderRiskLine"], {
-                    "loser": a_, "winner": b_, "count": fmt_n(g_["n"]),
-                    "noun": words["fieldNoun"][0 if g_["n"] == 1 else 1],
+                    "loser": a_, "winner": b_, "count": fmt_n(g_["n"]), "moved": moved_,
+                    "noun": words["fieldNoun"][1], "verb": "is" if g_["n"] == 1 else "are",
                     "records": f"{fmt_n(n_rec)} {'record' if n_rec == 1 else 'records'}" + (
                         " (" + ", ".join(f"{t_} {fmt_n(c_)}" for t_, c_ in types_.most_common()) + ")" if types_ else ""),
                     "fields": fields_text(g_["fields"])})})
@@ -2156,6 +2322,9 @@ def build_prediction(ctx: dict) -> dict:
                                        "earlier": bind(words["setAsideNotOwnEditEarlier"], {
                                            "count": fmt_n(set_aside["notOwnEditEarlierWins"])})
                                        if set_aside["notOwnEditEarlierWins"] else ""}) if aside["notOwnEdit"] else "")
+                                   + "".join(" " + bind(words["setAsideNoise"][k_], {
+                                       "count": fmt_n(aside[k_]), "noun": words["fieldNoun"][0 if aside[k_] == 1 else 1]})
+                                       for k_ in NOISE_ADMISSIONS if aside[k_] and (words.get("setAsideNoise") or {}).get(k_))
                                    if sum(aside.values()) else None),
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
@@ -2395,6 +2564,17 @@ def build_prediction(ctx: dict) -> dict:
             vs = v if isinstance(v, list) else [v]
             return not any(str(x) in unrecorded for x in vs)
 
+        def no_change_of_winner(e):
+            """The winning mod's value without the patch is the one the losing mod changed (winner = overridden), or
+            the base game's own: it made no change of its own there, only carried the earlier value."""
+            v_ = e.get("values") or {}
+            w_, o_ = v_.get("winner"), v_.get("overridden")
+            if not recorded(w_):
+                return False
+            b_ = base_value(e["formKey"], e.get("field"))
+            return ((recorded(o_) and path_folded(w_) == path_folded(o_))
+                    or (b_ is not None and path_folded(w_) == path_folded(b_)))
+
         def lost_outcome(e):
             rows_w = lost_w.get((e["checkId"], e["formKey"], e.get("field")))
             if not rows_w:
@@ -2407,14 +2587,20 @@ def build_prediction(ctx: dict) -> dict:
             if a_lost and b_lost:
                 return "own"
             if b_lost or a_lost:
-                # the patch keeps one side's value and drops the other's change (fifth blind review, W-S2): symmetric
-                return "switched" if b_lost else "kept"
+                # the patch keeps one side's value and drops the other's change (fifth blind review, W-S2): symmetric.
+                # Where the winning mod's value is the one the losing mod changed (no change of its own), the patch
+                # restores the losing mod's change and drops nothing of the winning mod's (Pilgrim's second review, B1)
+                if b_lost:
+                    return "resolved" if no_change_of_winner(e) else "switched"
+                return "kept"
             with_patch, without = (w.get("values") or {}).get("winner"), (e.get("values") or {}).get("winner")
             lost_v = (e.get("values") or {}).get("lost")
             if not (recorded(with_patch) and recorded(without) and recorded(lost_v)):
-                return "cannot-tell-value"
+                # neither side's value loses to the patch: the losing mod's change, lost without it, is no longer lost,
+                # so the patch carries that value, and the winning mod had no change of its own there (Clockwork P101)
+                return "resolved"
             return ("kept" if path_folded(with_patch) == path_folded(without) else
-                    "switched" if path_folded(with_patch) == path_folded(lost_v) else "own")
+                    "resolved" if path_folded(with_patch) == path_folded(lost_v) else "own")
         # A geometry row is judged by its own predicate re-measured with the patch, where the probe carries one (an
         # emit's `Predicates`: every row of the setup it was measured against, measured again in this setup): Gone is
         # resolved, Holds is left (whoever owns the objects now), anything else cannot be told. Presence of the row
@@ -2524,7 +2710,8 @@ def build_prediction(ctx: dict) -> dict:
                 problems.append(rk)
 
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
-        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash", "sameValue", "samePair")
+        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash", "sameValue", "samePair",
+                                                                 *NOISE_ADMISSIONS)
                      and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
         spots = collections.Counter(e["admission"] for e in spot_rows)
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
@@ -4855,11 +5042,16 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                 rest = [f for f in part["groups"] if f not in choices]
                 compact = []
                 if choices:
+                    # record fields, not rows: one field two plugins lose to the patch is one field in two pairs
+                    # (Pilgrim's second review, S4)
+                    fields_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices
+                               for r_ in f.get("allRows") or [] if isinstance(r_, dict)}
+                    n_fields = len(fields_) or sum(int(f.get("rowsTotal") or 0) for f in choices)
                     compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
                                     "text": bind(conc.get("patchChoicesCollapsed") or "{count} record fields in {pairs} pairs where a patch wins", {
-                                        "count": fmt_n(sum(int(f.get("rowsTotal") or 0) for f in choices)),
+                                        "count": fmt_n(n_fields),
                                         "pairs": fmt_n(len(choices)),
-                                        "fieldNoun": "field" if sum(int(f.get("rowsTotal") or 0) for f in choices) == 1 else "fields",
+                                        "fieldNoun": "field" if n_fields == 1 else "fields",
                                         "pairNoun": "pair" if len(choices) == 1 else "pairs"}),
                                     "ids": [f["id"] for f in choices]})
                 relevant = [f for f in rest if f.get("readerRelevant")]
