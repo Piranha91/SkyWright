@@ -129,6 +129,7 @@ public sealed class CellBoundaryIndex
     readonly Dictionary<int, int> _ownWatrCells = new();
     readonly Dictionary<int, string> _pluginName = new();
     readonly Dictionary<int, ModKey> _pluginKey = new();
+    readonly Dictionary<int, HashSet<int>> _closure = new();
 
     public IReadOnlyDictionary<FormKey, CellInfo> Cells => _cells;
     public IReadOnlyDictionary<FormKey, List<WorldWaterSnap>> Worlds => _worlds;
@@ -173,6 +174,16 @@ public sealed class CellBoundaryIndex
     {
         _pluginName[p] = mod.ModKey.FileName.String;
         _pluginKey[p] = mod.ModKey;
+        // The master closure over the plugins ingested before it, the rule DetectorModel.MasterClosure applies for the callers.
+        var closure = new HashSet<int>();
+        try
+        {
+            var masters = mod.ModHeader.MasterReferences.Select(m => m.Master).ToHashSet();
+            foreach (var (q, k) in _pluginKey)
+                if (q < p && masters.Contains(k)) { closure.Add(q); if (_closure.TryGetValue(q, out var qc)) closure.UnionWith(qc); }
+        }
+        catch { }
+        _closure[p] = closure;
 
         // WATR: the definer of each, and the plugin's foreign overrides.
         foreach (var w in mod.Waters.Records)
@@ -270,7 +281,10 @@ public sealed class CellBoundaryIndex
         }
         catch { }
         var snap = new LandSnap(p, lc.Offset, grad, quad);
-        if (info.Land.Count == 0 || !info.Land[^1].SameHeightsAs(snap) || !info.Land[^1].SameTexturesAs(snap))
+        // A restatement is dropped only when it repeats a plugin in its own closure: the authoring view walks the closure,
+        // so a repeat of a plugin it never saw is the ground it authored and is kept.
+        var last = info.Land.Count > 0 ? info.Land[^1] : null;
+        if (last is null || !last.SameHeightsAs(snap) || !last.SameTexturesAs(snap) || last.Plugin != p && !_closure[p].Contains(last.Plugin))
         { info.Land.Add(snap); LandSnaps++; }
     }
 
