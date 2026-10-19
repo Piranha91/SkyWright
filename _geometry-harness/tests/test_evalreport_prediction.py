@@ -2958,6 +2958,20 @@ def main():
         ok = OTHER in line and CASE not in line and "main recorded conflicts" in line
         return ok, f"scope {line[:200]!r}"
 
+    # C632 (coordinator D2 on lane cw). The patch-wins line in the detail applies the same set-aside rules as the
+    # prediction: a row the patch wins whose change is only in unused bytes is not counted there, and is said apart
+    def c632_patch_wins_line_sets_noise_aside():
+        G9, O9 = f"00C321:{BASE}", f"00C322:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, O9, "Owner", "o", "a", "v")]
+        w_rows = [lost_row(MOD_B, PATCH, G9, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"]),
+                  lost_row(OTHER, PATCH, O9, "Owner", "o", "p", "v")]
+        for r_ in p_rows + w_rows:
+            r_["Summary"] = r_["Summary"].replace("PlacedObject", "Cell")
+        plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
+        ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
+        ok = "1 record field, in 1 plugin pair," in ln and "1 more" in ln
+        return ok, f"line {ln[:240]!r}"
+
     for name, fn in [("w2-cw/C620-no-change-never-dropped", c620_no_change_never_dropped),
                      ("w2-cw/C621-neither-lost-is-resolved", c621_neither_lost_is_resolved),
                      ("w2-cw/C622-navmesh-data-judged-by-navmesh-check", c622_navmesh_data_judged_by_navmesh_check),
@@ -2969,7 +2983,8 @@ def main():
                      ("w2-cw/C628-patch-wins-fields-once", c628_patch_wins_fields_once),
                      ("w2-cw/C629-base-game-state-pairs-once", c629_base_game_state_pairs_once),
                      ("w2-cw/C630-with-target-said-once", c630_with_target_said_once),
-                     ("w2-cw/C631-scope-names-counted-partners", c631_scope_names_counted_partners)]:
+                     ("w2-cw/C631-scope-names-counted-partners", c631_scope_names_counted_partners),
+                     ("w2-cw/C632-patch-wins-line-sets-noise-aside", c632_patch_wins_line_sets_noise_aside)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
