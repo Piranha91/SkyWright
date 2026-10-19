@@ -1280,6 +1280,20 @@ class Subject:
         return self.z + args.subject_height / 2.0
 
 
+def parse_bearing_window(spec):
+    """--bearing-window CENTRE,HALF -> (centre, half) in degrees, or None. Bearings are the planner's own: from the
+    subjects' centroid to the eye, 0 = +Y, clockwise. A malformed window refuses rather than widening."""
+    if spec is None:
+        return None
+    try:
+        c, h = (float(v) for v in str(spec).split(","))
+    except ValueError:
+        raise SystemExit(f"--bearing-window takes CENTRE,HALF in degrees, not {spec!r}")
+    if not (0.0 < h <= 180.0):
+        raise SystemExit(f"--bearing-window half-width must be in (0, 180] degrees, not {h:g}")
+    return c % 360.0, h
+
+
 def resolve_floor(subjects, args):
     """Which storey are we planning on?
 
@@ -2232,6 +2246,7 @@ def refused_json(args, floor_z, aim, pose_id, scene, subjects, run):
     """The --json body of a plan refused BEFORE the final check: the keys a refused plan's JSON
     has where they exist (no candidate was chosen, so there is no `chosen` or `verification`)."""
     return {"cell": args.cell, "floorZ": floor_z, "aim": aim, "status": "refused",
+            "bearingWindow": getattr(args, "bearing_window", None),
             "poseId": pose_id, "scene": scene, "verification": None, "verifyAttempts": [],
             "subjects": [{"label": s.label, "pos": s.pos(), "kind": s.kind, "extent": s.extent}
                          for s in subjects],
@@ -2495,13 +2510,21 @@ def cmd_plan(args):
     stands = [args.standoff_min + i * args.standoff_step
               for i in range(int((args.standoff_max - args.standoff_min) / args.standoff_step) + 1)]
     cands = []
+    window = parse_bearing_window(args.bearing_window)
     for i in range(n_bear):
         b = i * args.bearing_step
+        # --bearing-window: candidates outside the caller's witnessed sector are not generated at all.
+        if window is not None and abs(ang_diff(b, window[0])) > window[1]:
+            continue
         ux, uy = bearing_vec(b)
         for st in stands:
             cands.append((b, st, (round(cx + ux * st), round(cy + uy * st))))
+    n_kept = len(cands) // max(1, len(stands))
     print(f"\n--- pass 2: {len(cands)} candidate poses "
-          f"({n_bear} bearings x {len(stands)} standoffs), scored without navmesh ---")
+          f"({n_kept} bearings x {len(stands)} standoffs), scored without navmesh ---")
+    if window is not None:
+        print(f"  bearing window {window[0]:g} +- {window[1]:g} deg (--bearing-window): the "
+              f"{n_bear - n_kept} bearing(s) outside it were not considered")
     stage1 = []
     for b, st, xy in cands:
         eye = (float(xy[0]), float(xy[1]), floor_z + args.eye_height)
@@ -2777,6 +2800,7 @@ def cmd_plan(args):
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
             doc = {"cell": args.cell, "floorZ": floor_z, "aim": aim,
+                   "bearingWindow": args.bearing_window,
                        # THE field to read. "verified" means the delivered pose was probed as
                        # itself and every target came back clear or confirmed; "refused" means it
                        # was probed and did not; "unverified" means --no-verify, so the final
@@ -3285,6 +3309,9 @@ def main(argv=None):
     p.add_argument("--standoff-min", type=float, default=250.0)
     p.add_argument("--standoff-max", type=float, default=1200.0)
     p.add_argument("--standoff-step", type=float, default=50.0)
+    p.add_argument("--bearing-window", default=None, metavar="CENTRE,HALF",
+                   help="consider only eye bearings (from the subjects' centroid, 0 = +Y, clockwise) within HALF "
+                        "degrees of CENTRE, e.g. the sector a point picker witnessed; default all bearings")
     p.add_argument("--fill", type=float, default=0.55,
                    help="how much of the half-frame the subjects should reach (default 0.55)")
     p.add_argument("--comfort", type=float, default=200.0,
