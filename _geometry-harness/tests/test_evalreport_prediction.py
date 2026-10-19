@@ -91,7 +91,7 @@ def lost_row(a, b, form_key, field, lost, winner, overridden, label=None, before
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
-                diff_logs=None, states_not_explored=None, transcripts=None):
+                diff_logs=None, states_not_explored=None, transcripts=None, masters=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -111,6 +111,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     diff_logs: {(checkId, armId): text} -- the log of that arm's comparison with the baseline (a `diff` receipt).
     transcripts: {(checkId, armId): (request lines, response lines)} -- an MCP import's two transcripts for a check
     `count_only` names, written as `NN-request.jsonl` / `NN-response.jsonl` emits its receipt records.
+    masters: {plugin: [its masters]} -- each emit's configuration lists every plugin of its setup with these master
+    lists (none listed: no masters); False writes no configuration, as an emit that records no master lists.
     missing rows may carry a fourth element, the part (default `arm`)."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
@@ -142,7 +144,10 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                                 "configuration": {"plugins": config_of(check_id, arm_id)}}}
         emit = {"Population": "placed references", "State": "baseline", "Conflicts": rows,
                 "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}],
-                **({"Predicates": predicates[(check_id, arm_id)]} if (check_id, arm_id) in (predicates or {}) else {})}
+                **({"Predicates": predicates[(check_id, arm_id)]} if (check_id, arm_id) in (predicates or {}) else {}),
+                **({} if masters is False else {"Configuration": {"Plugins": [
+                    {"Name": x["name"], "Sha256": x["sha256"], "Masters": list((masters or {}).get(x["name"]) or [])}
+                    for x in config_of(check_id, arm_id)]}})}
         (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipt), encoding="utf-8")
         (root / "evidence" / f"{rid}.json").write_text(json.dumps(emit), encoding="utf-8")
         evidence.append({"id": f"{2 * n:016x}", "kind": "receipt", "path": f"receipts/{rid}.json", "sha256": "0" * 64,
@@ -2276,6 +2281,150 @@ def main():
                      ("w2-round4/C496-untouched-excludes-patch-edited", c496_untouched_excludes_patch_edited),
                      ("w2-round4/C497-headline-candidates-and-scope", c497_headline_candidates_and_scope),
                      ("w2-round4/C498-patch-wins-and-refusal-in-summary", c498_patch_wins_and_refusal_in_summary)]:
+        cell(name, fn)
+
+    # ------------------------------------------- P63/P64: the first new mod on the deployed tools (blind review)
+    def own_master_bundle(masters=None):
+        """C540/C541. One evaluated mod, ModA, whose plugin lists OtherMod as a master, added to an order holding
+        OtherMod and ModB; a patch for ModA and ModB. OtherMod's value of record 701 is lost to ModA's, and OtherMod's
+        object S1 is left without support by ModA (ModA building on its master); ModA's value of 702 is lost to ModB's,
+        and ModB's object H2 is left without support by ModA (two different mods)."""
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A], kind="baseline"),
+                arm("without-a", [BASE, OTHER, MOD_B]),
+                arm("with-patch", [BASE, OTHER, MOD_B, MOD_A, PATCH])]
+        p_rec = [lost_row(OTHER, MOD_A, f"000701:{BASE}", "Name", "o1", "a1", "v1"),
+                 lost_row(MOD_A, MOD_B, f"000702:{BASE}", "Name", "a2", "b2", "v2")]
+        w_rec = [lost_row(OTHER, MOD_A, f"000701:{BASE}", "Name", "o1", "a1", "v1")]
+        enr = {(RECORDS, "baseline"): p_rec, (RECORDS, "without-a"): [], (RECORDS, "with-patch"): w_rec}
+        count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+        results = {(CONTACT, "baseline"): [row("CONTACT", OTHER, MOD_A, f"000S01:{OTHER}", other=f"000G01:{MOD_A}"),
+                                           row("CONTACT", MOD_B, MOD_A, f"000H02:{MOD_B}", other=f"000G02:{MOD_A}")],
+                   (CONTACT, "without-a"): [], (CONTACT, "with-patch"): []}
+        m = {MOD_A: [BASE, OTHER], PATCH: [BASE, MOD_A, MOD_B]} if masters is None else masters
+        return compile_and_render(arms, results, [MOD_A], patches=[PATCH], count_only=count_only, enrichment=enr,
+                                  masters=m)
+
+    # C540. A mod changing a value of a plugin it lists as a master builds on it as intended: never a clash between
+    # mods, never in a clash count or the patch tally; said as "<mod> changes <master>'s value (its master)"
+    def c540_own_master_override_is_not_a_clash():
+        plan, md, html = own_master_bundle()
+        p = reader(plan).get("prediction") or {}
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in p.get("record") or [])
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        counted = sum(i["count"] for i in p.get("items") or [])
+        ok = (adm == [("000701", "ownMaster"), ("000702", "admitted"), ("000H02", "admitted"), ("000S01", "ownMaster")]
+              and counted == 2 and OTHER not in (p.get("verdict") or "")
+              and "of the 2 clashes" in (p.get("withPatchLine") or "")
+              and f"{MOD_A} changes {OTHER}'s value (its master)" in sec
+              and f"{MOD_A} changes {OTHER}'s value (its master)" in html
+              and "2 where a mod changes the value of a plugin it lists as a master" in md
+              and OTHER not in (reader(plan).get("scopeLine") or ""))
+        return ok, f"admission {adm}; counted {counted}; prediction {sec[:400]!r}"
+
+    # C541. Decided from the plugins' master lists, never their names: a plugin that does not list the other is a
+    # clash; with no master list recorded at all the report says it cannot tell, and counts the clash as found
+    def c541_master_lists_decide_never_names():
+        plan, md, html = own_master_bundle(masters={})
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission"))
+                     for e in (reader(plan).get("prediction") or {}).get("record") or [])
+        plan2, md2, html2 = own_master_bundle(masters=False)
+        adm2 = sorted(((e.get("formKey") or "")[:6], e.get("admission"))
+                      for e in (reader(plan2).get("prediction") or {}).get("record") or [])
+        cov2 = section_text(md2, headings(plan2).get("coverage") or "\0")
+        want = [("000701", "admitted"), ("000702", "admitted"), ("000H02", "admitted"), ("000S01", "admitted")]
+        ok = (adm == want and adm2 == want and "its master" not in md
+              and "the bundle records no plugin's master list" in cov2 and "master list" not in md)
+        return ok, f"no master listed {adm}; no lists recorded {adm2}; coverage {cov2[-300:]!r}"
+
+    def new_by_object_bundle(names=None, repaired=0):
+        """C542/C543/C545. With the patch, object X1 is left without support against three hosts (three rows) and X2
+        against two; without the patch only G0 is. The comparison counts the five rows as created."""
+        X1, X2, G0 = f"000X01:{MOD_A}", f"000X02:{MOD_A}", f"000G00:{MOD_A}"
+        base = [row("CONTACT", MOD_B, MOD_A, G0, other=f"000H00:{MOD_B}")]
+        new = ([row("CONTACT", MOD_B, MOD_A, X1, other=f"000H1{i}:{MOD_B}") for i in (1, 2, 3)]
+               + [row("CONTACT", MOD_B, MOD_A, X2, other=f"000H2{i}:{MOD_B}") for i in (1, 2)])
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=repaired, reclassified=0,
+                                                     created=5, newDefect=5, attributed=0, unmeasured=0)}}
+        log = (f"NEW     CONTACT    {MOD_B}  x  {MOD_A}   +5 record(s): created 5\n"
+               + (f"SHRANK  CONTACT    {OTHER}  x  {MOD_A}   -{repaired} record(s): repaired {repaired}\n"
+                  if repaired else ""))
+        return compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): base, (CONTACT, "with-patch"): base + new},
+                                  [MOD_A, MOD_B], patches=[PATCH], order=order, names=names,
+                                  diff_logs={(CONTACT, "with-patch"): log})
+
+    # C542. New problems with the patch count objects, not rows: an object left without support against three hosts is
+    # one new problem, in the patch section, the comparison and the verdict alike
+    def c542_new_problems_count_objects():
+        plan, md, html = new_by_object_bundle()
+        val = reader(plan).get("validation") or {}
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        nb = [n.get("count") for n in val.get("newByCheck") or []]
+        created = (reg.get("counts") or {}).get("readerCreated")
+        ok = (val.get("patchProblems") == 2 and nb == [2] and created == 2
+              and "introduces 2 new problems in the check" in md and "New clashes in the setup with" in md
+              and not re.search(r"\b5 new problems\b", md))
+        return ok, f"new with patch {val.get('patchProblems')}; by check {nb}; comparison {created}"
+
+    # C543. The body rule applies to the new problems by object: an object whose base has no model is left out once,
+    # however many rows name it; a base with a model (an opaque plane included) stays counted
+    def c543_new_problems_no_body_by_object():
+        refs = {f"000X01:{MOD_A}": {"base": f"0B0L01:{MOD_A}"}, f"000X02:{MOD_A}": {"base": f"0B0P01:{MOD_A}"},
+                f"000G00:{MOD_A}": {"base": f"0B0P01:{MOD_A}"},
+                **{f"000H{i}:{MOD_B}": {"base": f"0B0S01:{MOD_B}"} for i in ("00", "11", "12", "13", "21", "22")}}
+        bases = {f"0B0L01:{MOD_A}": {"type": "Light", "model": ""},
+                 f"0B0P01:{MOD_A}": {"type": "Static", "model": "plane.nif"},
+                 f"0B0S01:{MOD_B}": {"type": "Static", "model": "wall.nif"}}
+        plan, md, html = new_by_object_bundle(names={"refs": refs, "bases": bases})
+        val = reader(plan).get("validation") or {}
+        c = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {}).get("counts") or {}
+        ok = (val.get("patchProblems") == 1 and c.get("readerCreated") == 1 and c.get("readerNoBody") == 1
+              and "1 whose object's record has no model" in md and "introduces 1 new problem in the check" in md)
+        return ok, (f"new with patch {val.get('patchProblems')}; comparison {c.get('readerCreated')} "
+                    f"(no body {c.get('readerNoBody')})")
+
+    # C544. A fixture listed once against each of two plugins with the patch is one object left hanging
+    def c544_fixture_listed_twice_is_one_object():
+        F = f"000F01:{MOD_A}"
+        new = [row("EMPTY-SPACE", MOD_A, MOD_B, F, other=f"000H01:{BASE}"),
+               row("EMPTY-SPACE", MOD_A, PATCH, F, other=f"000H02:{BASE}")]
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(FIXTURE, "baseline"): [], (FIXTURE, "with-patch"): new},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        val = reader(plan).get("validation") or {}
+        nb = [n.get("count") for n in val.get("newByCheck") or []]
+        ok = val.get("patchProblems") == 1 and nb == [1]
+        return ok, f"new with patch {val.get('patchProblems')}; by check {nb}"
+
+    # C545. A comparison that also repaired problems says its repairs do not cancel the new problems, in its own number
+    def c545_repairs_sentence_agrees_in_number():
+        plan, md, html = new_by_object_bundle(repaired=2)
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        rp = reg.get("readerPlain") or ""
+        ok = "do not cancel the new problems." in rp and "introduced 2 new problems" in rp
+        return ok, f"comparison {rp!r}"
+
+    # C546. The changes the patch undoes are linked to their evidence, like every other count in the patch section
+    def c546_undone_changes_linked():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]
+        w_rows = [lost_row(MOD_A, PATCH, f"000702:{BASE}", "Name", "a2", "p2", "v2")]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
+        count_only = {(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 1}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}
+        plan, md, html, index = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                                   count_only=count_only, enrichment=enr, want_index=True)
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
+        fids = re.findall(r"\(evidence-index\.md#(F-\d+)\)", line)
+        anchors = set(re.findall(r'id="(F-\d+)"', index)) | set(re.findall(r"\{#(F-\d+)\}", index)) | set(
+            re.findall(r"^#+ .*?(F-\d+)", index, re.M))
+        ok = bool(fids) and set(fids) <= anchors
+        return ok, f"undone line {line!r}; anchors {sorted(anchors)[:6]}"
+
+    for name, fn in [("w2-p63/C540-own-master-override-is-not-a-clash", c540_own_master_override_is_not_a_clash),
+                     ("w2-p63/C541-master-lists-decide-never-names", c541_master_lists_decide_never_names),
+                     ("w2-p64/C542-new-problems-count-objects", c542_new_problems_count_objects),
+                     ("w2-p64/C543-new-problems-no-body-by-object", c543_new_problems_no_body_by_object),
+                     ("w2-p64/C544-fixture-listed-twice-is-one-object", c544_fixture_listed_twice_is_one_object),
+                     ("w2-p64/C545-repairs-sentence-agrees-in-number", c545_repairs_sentence_agrees_in_number),
+                     ("w2-p64/C546-undone-changes-linked", c546_undone_changes_linked)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
