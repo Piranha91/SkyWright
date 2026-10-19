@@ -55,8 +55,8 @@ SHOTPLAN = HERE / "viewprobe" / "tools" / "shotplan.py"
 
 EXIT_OK, EXIT_REFUSED = 0, 2
 
-# viewprobe's --ref-surface marks as they arrive in a report-mode PNG (flat overlay after tone mapping), measured on the
-# deployed renderer 2026-10-19 (Midden pair: 2,383 of 2,498 cyan-ish pixels carry exactly this value).
+# viewprobe's --ref-surface marks as they arrive in a report-mode PNG (flat overlay after tone mapping), read off the
+# renderer's own frames 2026-10-19: almost every marked pixel carries exactly this value; edges and blends do not.
 SURFACE_RGB = {"cyan": (19, 255, 255), "magenta": (255, 76, 255)}
 COLOUR_TOL = 2
 
