@@ -2194,7 +2194,7 @@ def build_prediction(ctx: dict) -> dict:
             "mod": mod_, "master": mas_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
             "examples": "; ".join(f"{fk_} ({f_})" for fk_, f_ in list(u_["fields"])[:2]),
             "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
-                "patch": " and ".join(patch_names) if patch_names else "", "left": fmt_n(left_), "count": fmt_n(n_)})}),
+                "patch": patch_text, "left": fmt_n(left_), "count": fmt_n(n_)})}),
             "findingIds": u_["findingIds"][:1]})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
