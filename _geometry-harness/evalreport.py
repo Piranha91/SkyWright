@@ -1516,19 +1516,19 @@ def build_prediction(ctx: dict) -> dict:
                     return False
         return True
 
-    def lost_edit_noise(rk):
+    def lost_edit_noise(rk, rows=None, arm=None):
         """A lost-edit row whose values show no change the game sees, or whose subject another check judges: lists
         holding the same items in another order (lists are compared as sets of items, the record lane's rule; P108), a
         list the winner keeps in full (P105), a change only in bytes the game does not read (P21), and a navmesh's
         geometry, which the navmesh check judges by links and lost ground (P103). Kept in the record, said apart."""
-        r_ = (p_rows.get(rk) or {}).get("row") or {}
+        r_ = ((p_rows if rows is None else rows).get(rk) or {}).get("row") or {}
         v = r_.get("values") or {}
         lost = v.get("lost")
         top = str(r_.get("field") or "")
         rtype = record_type_of(rk[5])
         for j_ in judged_by:
             if (rtype == j_.get("recordType") and top == j_.get("field")
-                    and (j_.get("check"), p_of(j_.get("check"))) in measured):
+                    and (j_.get("check"), arm or p_of(j_.get("check"))) in measured):
                 return "navmeshCheck"
         if order_only_re is not None and lost and all(order_only_re.match(str(x))
                                                       for x in (lost if isinstance(lost, list) else [lost])):
@@ -2544,6 +2544,12 @@ def build_prediction(ctx: dict) -> dict:
         not_measured = [e for e in admitted if (e["checkId"], patched_arm) not in measured]
         judged = [e for e in admitted if (e["checkId"], patched_arm) in measured]
         patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
+        # the patched setup's lost edits a declared patch wins whose values show no change in game, by the same rules
+        # as the prediction's (coordinator D2): the detail's patch-wins line does not count them
+        patch_noise = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
+                             for rk, h_ in patched_rows.items()
+                             if rk[1] == "LOST-EDIT" and str(rk[3]).lower() in {str(x).lower() for x in patch_names}
+                             and lost_edit_noise(rk, patched_rows, patched_arm))
         patch_lower = {str(x).lower() for x in patch_names}
         # A lost edit (record lane) is not judged by presence: with the patch loaded last the same plugin's change can
         # still be lost, to the patch. Which plugins' values lose to the patch says what the patch carries, the same
@@ -2959,6 +2965,7 @@ def build_prediction(ctx: dict) -> dict:
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
+                      "patchChoiceNoise": patch_noise,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "undone": len(undone), "undoneBy": dict(undone_by),
                       "undoneSentence": undone_sentence,
@@ -5071,16 +5078,33 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                 if choices:
                     # record fields, not rows: one field two plugins lose to the patch is one field in two pairs
                     # (Pilgrim's second review, S4)
-                    fields_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices
-                               for r_ in f.get("allRows") or [] if isinstance(r_, dict)}
-                    n_fields = len(fields_) or sum(int(f.get("rowsTotal") or 0) for f in choices)
+                    # rows whose values show no change in game are set aside here as in the prediction (D2)
+                    noise_ = {tuple(x) for x in ((plan.get("reader") or {}).get("validation") or {}).get("patchChoiceNoise") or []}
+
+                    def kept_rows(f):
+                        c_ = f.get("counts") or {}
+                        return [r_ for r_ in f.get("allRows") or [] if isinstance(r_, dict) and (
+                            str(f.get("checkId")), str(r_.get("formKey")), str(r_.get("field")), str(c_.get("A")),
+                            str(c_.get("B"))) not in noise_]
+                    all_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices
+                            for r_ in f.get("allRows") or [] if isinstance(r_, dict)}
+                    fields_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices for r_ in kept_rows(f)}
+                    n_aside = len(all_ - fields_)
+                    n_fields = len(fields_) if all_ else sum(int(f.get("rowsTotal") or 0) for f in choices)
+                    ids_ = [f["id"] for f in choices]
+                    if n_aside:
+                        choices = [f for f in choices if kept_rows(f)]
                     compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
-                                    "text": bind(conc.get("patchChoicesCollapsed") or "{count} record fields in {pairs} pairs where a patch wins", {
+                                    "text": bind(conc.get("patchChoicesCollapsed" if n_fields else "patchChoicesNone")
+                                                 or "{count} record fields in {pairs} pairs where a patch wins{aside}", {
                                         "count": fmt_n(n_fields),
                                         "pairs": fmt_n(len(choices)),
                                         "fieldNoun": "field" if n_fields == 1 else "fields",
-                                        "pairNoun": "pair" if len(choices) == 1 else "pairs"}),
-                                    "ids": [f["id"] for f in choices]})
+                                        "pairNoun": "pair" if len(choices) == 1 else "pairs",
+                                        "aside": bind(conc.get("patchChoicesAside") or " ({count} more not counted)", {
+                                            "count": fmt_n(n_aside), "fieldNoun": "field" if n_aside == 1 else "fields"})
+                                        if n_aside else ""}),
+                                    "ids": ids_})
                 relevant = [f for f in rest if f.get("readerRelevant")]
                 if len(relevant) > compact_over:
                     # one entry per plugin pair and unit: the pair's groups (several kinds of one check) are summed,
