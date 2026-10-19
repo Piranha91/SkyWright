@@ -1857,7 +1857,9 @@ def main():
         """C495. Without the patch ModA's change to six records is lost to ModB; every winner value is a placeholder.
         With the patch: 701 ModB's value loses to the patch (the patch carries ModA's); 702 both lose to the patch (its
         own value); 703 ModA's loses to the patch (it carries ModB's); 704 ModA's still loses to ModB; 705 no change is
-        lost; 706 only a third plugin loses to the patch, so neither side is known."""
+        lost; 706 only a third plugin loses to the patch: ModA's change is not lost to it, so the patch carries ModA's
+        value (by the record lane's rule a change still lost has a row), resolved (Clockwork review 4, P101: three
+        OcclusionData rows of this shape carry Grand Solitude's value; until lane cw this was "cannot tell")."""
         ph = "(the winner's value)"
         p_rows = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", ph, "v") for i in range(1, 7)]
         w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", ph, "v"),
@@ -1874,15 +1876,15 @@ def main():
 
     # C495. A lost edit is classified by which side loses to the patch, the same way whether or not values are
     # recorded: the patch carries the lost value (resolved), its own value (the change is still lost, never
-    # "resolved"), the winning value (no claim about intent); cannot tell only when neither side is known
+    # "resolved"), the winning value (no claim about intent); neither side lost to the patch is resolved (lane cw, P101)
     def c495_lost_edit_classes_by_losing_side():
         plan, md, html = lost_classes_bundle()
         val = reader(plan).get("validation") or {}
         bi = (val.get("byItem") or [{}])[0]
         text = section_text(md, headings(plan).get("validation") or "\0")
-        ok = (bi.get("hits") == 1 and bi.get("switched") == 1 and bi.get("own") == 1 and bi.get("kept") == 1
+        ok = (bi.get("hits") == 2 and bi.get("switched") == 1 and bi.get("own") == 1 and bi.get("kept") == 1
               and bi.get("open") == 1
-              and bi.get("cannotTell") == 1 and val.get("own") == 1
+              and bi.get("cannotTell") == 0 and val.get("own") == 1
               and "sets its own value" in text and "still lost" not in md
               and "on purpose" not in md and "author's" not in md and "own choice" not in md)
         return ok, f"by item {bi}; printed own value {'own value' in text}; intent words {'on purpose' in md}"
@@ -2751,6 +2753,238 @@ def main():
     for name, fn in [("w2-p93/C585-identical-words-other-partner-kept", c585_identical_words_other_partner_kept),
                      ("w2-p94/C586-one-object-two-supports-unit", c586_one_object_two_supports_unit),
                      ("w2-p95/C587-sibling-only-check-said", c587_sibling_only_check_said)]:
+        cell(name, fn)
+
+    # ------------------------------------------- window 2, lane cw: Pilgrim's second blind review (B1) and Clockwork (P101,
+    # P103, P104, P105, P108, P21/P53)
+    WP_ARMS = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+               arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+    PH = "(the winner's value)"
+
+    def cw_bundle(p_rows, w_rows=(), check=RECORDS, extra_results=None, arms=None):
+        enr = {(check, "without-patch"): list(p_rows), (check, "baseline"): list(w_rows)}
+        count_only = {k: max(1, len(v)) for k, v in enr.items()}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+        results.update(extra_results or {})
+        return compile_and_render(arms or WP_ARMS, results, [MOD_A], patches=[PATCH], count_only=count_only,
+                                  enrichment=enr)
+
+    def rec_of(plan, fk, field=None):
+        return [e for e in (reader(plan).get("prediction") or {}).get("record") or []
+                if str(e.get("formKey")) == fk and (field is None or e.get("field") == field)]
+
+    # C620 (Pilgrim's second blind review, B1). Where the winning mod's value equals the value the losing mod changed
+    # (winner = overridden: it carries the earlier value, no change of its own), a patch that takes the losing mod's
+    # value restores that change: resolved, never "the winning mod's change is dropped". Only a genuine change counts as
+    # dropped.
+    def c620_no_change_never_dropped():
+        R1, R2 = f"00C201:{BASE}", f"00C202:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, R1, "Placement", "o1", "v1", "v1"),      # ModA restates the earlier value
+                  lost_row(OTHER, MOD_A, R2, "Placement", "o2", "a2", "v2")]      # ModA's own move
+        w_rows = [lost_row(MOD_A, PATCH, R1, "Placement", "v1", "o1", "o1"),
+                  lost_row(MOD_A, PATCH, R2, "Placement", "a2", "o2", "o2")]
+        plan, md, html = cw_bundle(p_rows, w_rows)
+        w1 = [e.get("withPatch") for e in rec_of(plan, R1)]
+        w2 = [e.get("withPatch") for e in rec_of(plan, R2)]
+        dropped = [ln for ln in md.splitlines() if "change is dropped" in ln]
+        ok = (w1 == ["resolved"] and w2 == ["switched"] and dropped
+              and all("dropped 1" in ln and "dropped 2" not in ln for ln in dropped))
+        return ok, f"R1 {w1}, R2 {w2}; dropped lines {[ln[:140] for ln in dropped]}"
+
+    # C621 (Clockwork P101). With the patch winning and neither mod's value lost to it (a third plugin's is), the patch
+    # carries the losing mod's value and the winning mod made no change of its own there: resolved, not "cannot tell",
+    # even where the import records the winner's value only as a placeholder.
+    def c621_neither_lost_is_resolved():
+        R3 = f"00C203:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, R3, "OcclusionData", ["OcclusionData=AA"], PH, ["OcclusionData=00"])]
+        w_rows = [lost_row(OTHER, PATCH, R3, "OcclusionData", ["OcclusionData=BB"], PH, ["OcclusionData=AA"])]
+        arms = [arm("baseline", [BASE, MOD_A, OTHER, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, MOD_A, OTHER, MOD_B])]
+        plan, md, html = cw_bundle(p_rows, w_rows, check=CELLATTR, arms=arms)
+        got = [e.get("withPatch") for e in rec_of(plan, R3)]
+        sec = section_text(md, headings(plan).get("validation") or "\0")
+        ok = got == ["resolved"] and "cannot tell" not in md.lower().split("## what the checks could not judge")[0]
+        return ok, f"withPatch {got}; {sec[:200]!r}"
+
+    # C622 (Clockwork P103). A navmesh record's geometry (NavigationMesh Data) is judged by the navmesh check, by its
+    # links and lost ground: where that check measured the setup, the record lane's row is not counted again as a record
+    # field (it is kept in the record and said in the set-aside line); where it did not, it stays counted.
+    def c622_navmesh_data_judged_by_navmesh_check():
+        N1 = f"0C3901:{BASE}"
+        r_ = lost_row(MOD_B, MOD_A, N1, "Data", ["Data.Max=1,2,3"], PH, ["Data.Max=0,0,0"])
+        r_["Summary"] = f"NavigationMesh {N1}: Data - {MOD_B}'s value lost to {MOD_A}'s"
+        q_ = lost_row(MOD_B, MOD_A, f"00C204:{BASE}", "Owner", "b", "a", "v")
+        measured = {(NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): []}
+        plan, md, _ = cw_bundle([r_, q_], extra_results=measured)
+        adm = [e["admission"] for e in rec_of(plan, N1)]
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        plan2, md2, _ = cw_bundle([r_, q_])
+        adm2 = [e["admission"] for e in rec_of(plan2, N1)]
+        ok = adm == ["navmeshCheck"] and "navmesh" in line and adm2 == ["admitted"]
+        return ok, f"with navmesh check {adm}; without {adm2}; line {line[-260:]!r}"
+
+    # C623 (Clockwork P104). A losing value equal to a base-game plugin's own value of the same field (its row in the
+    # same setup) is no edit of that mod's: set aside as such, never "the same lost value carried by a second plugin"
+    def c623_base_value_not_own_edit():
+        F1 = f"00C205:{BASE}"
+        p_rows = [lost_row("Update.esm", MOD_A, F1, "MaxHeight", ["MaxHeight.CellData=0A0B"], PH, ["MaxHeight.CellData=0C"]),
+                  lost_row(OTHER, MOD_A, F1, "MaxHeight", ["MaxHeight.CellData=0A0B"], PH, ["MaxHeight.CellData=0D"])]
+        arms = [arm("baseline", [BASE, "Update.esm", OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, "Update.esm", OTHER, MOD_A, MOD_B])]
+        plan, md, _ = cw_bundle(p_rows, arms=arms)
+        adm = {e["A"]: e["admission"] for e in rec_of(plan, F1)}
+        ok = adm.get(OTHER) == "notOwnEdit" and adm.get("Update.esm") == "baseGame"
+        return ok, f"admissions {adm}"
+
+    # C624 (Clockwork P105). A list the winner holds in full, adding only items of its own (FormKeys of the winning
+    # plugin), carries the losing mod's change forward: not a lost edit. A list missing an item of the losing list, or
+    # adding an item an earlier plugin could have held, stays counted.
+    def c624_carried_list_not_lost():
+        L1, L2, L3 = (f"00C2{i}0:{BASE}" for i in (6, 7, 8))
+        dash = "—"
+        p_rows = [lost_row(OTHER, MOD_A, L1, "Items", [f"Items: 14 vs {MOD_A} 15 item(s) {dash} only in {MOD_A}: [14] 220EC9:{MOD_A}"], PH,
+                           [f"Items: 11 vs {MOD_A} 15 item(s) {dash} only in {MOD_A}: [11] 0131F1:{BASE}; [12] 0131F2:{BASE} (+2 more element(s))"]),
+                  lost_row(OTHER, MOD_A, L2, "Items", [f"Items: 14 vs {MOD_A} 15 item(s) {dash} only in {MOD_A}: [14] 0131F3:{BASE}"], PH, ["Items: 3"]),
+                  lost_row(OTHER, MOD_A, L3, "Items", [f"Items: 14 vs {MOD_A} 14 item(s) {dash} only here: [3] 0131F4:{BASE}; only in {MOD_A}: [13] 220ECA:{MOD_A}"], PH, ["Items: 3"])]
+        plan, md, _ = cw_bundle(p_rows)
+        adm = [rec_of(plan, x)[0]["admission"] for x in (L1, L2, L3)]
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        ok = adm == ["carriedList", "admitted", "admitted"] and "keeps every item" in line
+        return ok, f"admissions {adm}; line {line[-220:]!r}"
+
+    # C625 (Clockwork P108). Lists are compared as sets of items (the record lane's rule): a list whose only difference
+    # is the order of the same items is not a lost edit; a value with any other difference stays counted.
+    def c625_order_only_not_lost():
+        G1, G2 = f"00C211:{BASE}", f"00C212:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, G1, "Regions", [f"Regions: same 7 item(s), ORDER DIFFERS from {MOD_A}"], PH, [PH]),
+                  lost_row(OTHER, MOD_A, G2, "Data", [f"Data.EdgeLinks: same 25 item(s), ORDER DIFFERS from {MOD_A}",
+                                                      f"Data.Triangles: 238 vs {MOD_A} 238 item(s), contents differ"], PH, [PH])]
+        plan, md, _ = cw_bundle(p_rows, check=CELLATTR)
+        adm = [rec_of(plan, x)[0]["admission"] for x in (G1, G2)]
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        ok = adm == ["orderOnly", "admitted"] and "same items in another order" in line
+        return ok, f"admissions {adm}; line {line[-200:]!r}"
+
+    # C626 (Clockwork P21, P53). A field whose bytes the game reads only in part (a cell's Grid flags: one byte of land
+    # flags, three unused) is compared on the bytes read: a change only in the unused bytes is not a lost edit; a change
+    # in the read byte stays counted.
+    def c626_unused_bits_not_lost():
+        C1, C2 = f"00C221:{BASE}", f"00C222:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, C1, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"]),
+                  lost_row(OTHER, MOD_A, C2, "Grid", ["Grid.Flags=1"], PH, ["Grid.Flags=0"])]
+        for r_ in p_rows:
+            r_["Summary"] = r_["Summary"].replace("PlacedObject", "Cell")
+        plan, md, _ = cw_bundle(p_rows, check=CELLATTR)
+        adm = [rec_of(plan, x)[0]["admission"] for x in (C1, C2)]
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        ok = adm == ["unusedBits", "admitted"] and "unused" in line
+        return ok, f"admissions {adm}; line {line[-220:]!r}"
+
+    # C627 (Pilgrim's second blind review, S3). The order-risk line states the order measured exactly: the plugin moved
+    # and every plugin it moved past, never only one of them.
+    def c627_order_line_names_the_move():
+        O2, O3 = "Early.esp", "Late.esp"
+        p_rec = [lost_row(O2, MOD_A, f"000C05:{BASE}", "Music", "e", "a", "v")]
+        arms = [arm("baseline", [BASE, O2, MOD_A, OTHER, O3], kind="baseline")]
+        o_rows = [dict(lost_row(OTHER, MOD_A, f"000C01:{BASE}", "Lighting", "o", "a", "v"), _check=CELLATTR, _type="Cell")]
+        setup = {"armId": "late", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
+                 "plugins": plugins(BASE, O2, OTHER, O3, MOD_A), "rows": o_rows}
+        plan, md, html = compile_and_render(arms, {(CONTACT, "baseline"): []}, [MOD_A],
+                                            count_only={(CELLATTR, "baseline"): 1},
+                                            enrichment={(CELLATTR, "baseline"): p_rec}, order_setups=[setup])
+        lines = [x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or []]
+        want = f"{MOD_A} moved after {OTHER} and {O3}"
+        ok = len(lines) == 1 and want in lines[0] and f"{OTHER} moved before" not in lines[0]
+        return ok, f"lines {lines}"
+
+    # C628 (Pilgrim's second blind review, S4). The patch-wins line counts record fields, not rows: one field two
+    # plugins lose to the patch is 1 record field in 2 plugin pairs.
+    def c628_patch_wins_fields_once():
+        F2 = f"00929C:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, F2, "OcclusionData", "o", "a", "v")]
+        w_rows = [lost_row(OTHER, PATCH, F2, "OcclusionData", "o", "p", "v"),
+                  lost_row(MOD_A, PATCH, F2, "OcclusionData", "a", "p", "o")]
+        plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
+        ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
+        ok = "1 record field, in 2 plugin pairs" in ln
+        return ok, f"line {ln[:160]!r}"
+
+    # C629 (Pilgrim's second blind review, S5). The base-game geometry line counts a pair of objects once however many
+    # world states show it.
+    def c629_base_game_state_pairs_once():
+        X2 = f"000X02:{MOD_A}"
+        p_rows = [state_row("S1", BASE, MOD_A, X, S0), state_row("S2", BASE, MOD_A, X, S0),
+                  state_row("S1", BASE, MOD_A, X2, S0)]
+        # two broken links in one navmesh are two links (rows of a check that is not by world state stay rows)
+        links = [row("NAV-LINK", BASE, MOD_A, f"000N01:{BASE}"), row("NAV-LINK", BASE, MOD_A, f"000N01:{BASE}")]
+        for i_, r_ in enumerate(links):
+            r_["Summary"] = f"navmesh 000N01 triangle {i_} links to a removed triangle"
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): p_rows, (STATE, "without-b"): [],
+                   (STATE, "without-a"): [], (NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): links,
+                   (NAVOWN, "without-b"): [], (NAVOWN, "without-a"): []}
+        plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
+        ln = next((x for x in md.splitlines() if "against base-game objects" in x), "")
+        title_ = (priorities()["reader"]["checkTitles"].get(STATE) or STATE)
+        ok = (f"2 clashes ({title_})" in ln and "3 clashes" not in ln
+              and re.search(r"(?<![\d,])2 [^;]*\((Navmesh|geometry\.navmesh)", ln) is not None)
+        return ok, f"line {ln[:200]!r}"
+
+    # C630 (Clockwork review 5, P53). "Whether it also needs X was not measured" on every item is said once on the page,
+    # for the items it applies to; the plan keeps each item's full sentence
+    def c630_with_target_said_once():
+        O2 = "Second.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A, MOD_B])]
+        p_rows = [lost_row(OTHER, MOD_A, f"00C301:{BASE}", "Owner", "o", "a", "v"),
+                  lost_row(O2, MOD_A, f"00C302:{BASE}", "Owner", "s", "a", "v")]
+        plan, md, html = cw_bundle(p_rows, arms=arms)
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        its = (reader(plan).get("prediction") or {}).get("items") or []
+        n_md = sec.count("was not measured, because no setup without")
+        ok = (len(its) == 2 and n_md == 1 and all("was not measured" in i["plain"] for i in its)
+              and "For every item above" in sec)
+        return ok, f"said {n_md} times on the page; items {len(its)}"
+
+    # C631 (Pilgrim's second blind review, S1). The scope line's "main recorded conflicts" names only mods with a counted
+    # clash; a mod whose only rows are set aside (here two values naming the same file) is not named there
+    def c631_scope_names_counted_partners():
+        CASE = "CaseOnly.esp"
+        arms = [arm("baseline", [BASE, OTHER, CASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, CASE, MOD_A, MOD_B])]
+        p_rows = [lost_row(OTHER, MOD_A, f"00C311:{BASE}", "Owner", "o", "a", "v")] + [
+            lost_row(CASE, MOD_A, f"00C31{i}:{BASE}", "Model", "Meshes\X\A.nif", "meshes/x/a.nif", "v") for i in (2, 3)]
+        plan, md, html = cw_bundle(p_rows, arms=arms)
+        line = reader(plan).get("scopeLine") or ""
+        ok = OTHER in line and CASE not in line and "main recorded conflicts" in line
+        return ok, f"scope {line[:200]!r}"
+
+    # C632 (coordinator D2 on lane cw). The patch-wins line in the detail applies the same set-aside rules as the
+    # prediction: a row the patch wins whose change is only in unused bytes is not counted there, and is said apart
+    def c632_patch_wins_line_sets_noise_aside():
+        G9, O9 = f"00C321:{BASE}", f"00C322:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, O9, "Owner", "o", "a", "v")]
+        w_rows = [lost_row(MOD_B, PATCH, G9, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"]),
+                  lost_row(OTHER, PATCH, O9, "Owner", "o", "p", "v")]
+        for r_ in p_rows + w_rows:
+            r_["Summary"] = r_["Summary"].replace("PlacedObject", "Cell")
+        plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
+        ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
+        ok = "1 record field, in 1 plugin pair," in ln and "1 more" in ln
+        return ok, f"line {ln[:240]!r}"
+
+    for name, fn in [("w2-cw/C620-no-change-never-dropped", c620_no_change_never_dropped),
+                     ("w2-cw/C621-neither-lost-is-resolved", c621_neither_lost_is_resolved),
+                     ("w2-cw/C622-navmesh-data-judged-by-navmesh-check", c622_navmesh_data_judged_by_navmesh_check),
+                     ("w2-cw/C623-base-value-not-own-edit", c623_base_value_not_own_edit),
+                     ("w2-cw/C624-carried-list-not-lost", c624_carried_list_not_lost),
+                     ("w2-cw/C625-order-only-not-lost", c625_order_only_not_lost),
+                     ("w2-cw/C626-unused-bits-not-lost", c626_unused_bits_not_lost),
+                     ("w2-cw/C627-order-line-names-the-move", c627_order_line_names_the_move),
+                     ("w2-cw/C628-patch-wins-fields-once", c628_patch_wins_fields_once),
+                     ("w2-cw/C629-base-game-state-pairs-once", c629_base_game_state_pairs_once),
+                     ("w2-cw/C630-with-target-said-once", c630_with_target_said_once),
+                     ("w2-cw/C631-scope-names-counted-partners", c631_scope_names_counted_partners),
+                     ("w2-cw/C632-patch-wins-line-sets-noise-aside", c632_patch_wins_line_sets_noise_aside)]:
         cell(name, fn)
 
     for name, ok, detail in cells:

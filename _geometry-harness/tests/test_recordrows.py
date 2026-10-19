@@ -348,6 +348,19 @@ def case_33_every_unjudged_field_is_listed_with_its_record_and_plugins():
     assert len(failed) == 1 and failed[0].get("Field") is None and "read failed" in str(failed[0].get("Reason")), failed
 
 
+def case_35_a_change_only_in_bytes_the_game_does_not_read_is_not_a_row():
+    """Clockwork review 1 (P21, lane cw C630): a cell's Grid flags are one byte of land flags and three unused bytes
+    (record-field-scope.json integerMasks); 103 cells differed only in the unused bytes. A change in the read byte stays."""
+    def cell(flags):
+        return {"Grid.Flags": flags, "Grid.Point": "1,2"}
+    with tempfile.TemporaryDirectory() as td:
+        emit, _ = rows_of(three("000D01:Skyrim.esm", cell("5504256"), cell("327680"), cell("0"), rtype="Cell"), Path(td))
+    assert conflicts(emit) == [], conflicts(emit)
+    with tempfile.TemporaryDirectory() as td:
+        emit2, _ = rows_of(three("000D02:Skyrim.esm", cell("5504256"), cell("327681"), cell("0"), rtype="Cell"), Path(td))
+    assert [c["Field"] for c in conflicts(emit2)] == ["Grid"], conflicts(emit2)
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
