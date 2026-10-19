@@ -3274,8 +3274,9 @@ def main():
 
     # C722 (Missives review B2). Whose change a value is, against the nearest master that carries the record: ModA lists
     # Update.esm, which sets the water type; ModA's value is the one from before Update.esm's change, so ModA changed it
-    # (it puts the earlier value back): counted and said so, not set aside as the base game's. ModA's water set to a value
-    # of its own is a change to the base game's value, set aside as before.
+    # (it puts the earlier value back), not the base game's value. Coordinator D1 (with P63): undoing its own master's
+    # fix is said on its own line, not counted as a clash between mods. ModA's water set to a value of its own is a
+    # change to the base game's value, set aside as before.
     def c722_putting_back_masters_earlier_value_is_counted():
         W1, W2 = f"00C724:{BASE}", f"00C725:{BASE}"
         arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
@@ -3291,12 +3292,13 @@ def main():
                                   masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE]})
         got = (rec_of(plan, W1)[0]["admission"], rec_of(plan, W2)[0]["admission"])
         top = md.split("\n## ", 2)[1] if "\n## " in md else md
-        said = f"{MOD_A} puts back the value from before {UPD}'s change" in md and "Still there" in top and \
-            f"of {UPD}'s changes lost to {MOD_A}" in top and "clashes between their objects" not in md
-        return got == ("admitted", "baseGame") and said, f"W1, W2 {got}; said {said}"
+        said = (f"{MOD_A} undoes its master {UPD}'s fix in 1 record field" in top
+                and f"of {UPD}'s changes lost to {MOD_A}" not in top and "clashes between their objects" not in md)
+        return got == ("undoesMaster", "baseGame") and said, f"W1, W2 {got}; said {said}"
 
     # C723 (Missives review B2, the same rule for a mod's master that is not the base game): ModA lists OtherMod as a
-    # master and puts back the value from before OtherMod's fix: counted, not "a plugin's value over its own master's".
+    # master and puts back the value from before OtherMod's fix: said as undoing its master's fix (coordinator D1), not
+    # as "a plugin's value over its own master's".
     def c723_putting_back_mod_masters_earlier_value_is_counted():
         M1 = f"00C726:{BASE}"
         chains = [(M1, "PlacedObject", [(BASE, {"Placement": "v"}), (OTHER, {"Placement": "o"}),
@@ -3304,8 +3306,8 @@ def main():
         p_rows = [lost_row(OTHER, MOD_A, M1, "Placement", "o", "v", "v", before=BASE)]
         plan, md, _ = core_bundle(p_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE, OTHER], MOD_B: [BASE]})
         got = [e["admission"] for e in rec_of(plan, M1)]
-        said = f"{MOD_A} puts back the value from before {OTHER}'s change" in md
-        return got == ["admitted"] and said, f"{got}; said {said}"
+        said = f"{MOD_A} undoes its master {OTHER}'s fix" in md
+        return got == ["undoesMaster"] and said, f"{got}; said {said}"
 
     # C724 (Missives review B2). A one-sided water seam on a cell where the mod puts back the water from before its
     # master's change is said as that, never as the mod against the base game's value on the other side.
@@ -3324,7 +3326,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains, extra_results=extra,
                                   masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE]})
         line = next((ln for ln in md.splitlines() if "cell boundar" in ln.lower() and ln.startswith("- Measured")), "")
-        ok = f"puts back the value from before {UPD}'s change" in line and "base game's value on the other side" not in line
+        ok = f"undoes its master {UPD}'s fix" in line and "base game's value on the other side" not in line
         return ok, line[:300]
 
     # C725 (Missives review B1). Each row's status is decided before rows with the same lost value are counted once:

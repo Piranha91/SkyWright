@@ -1600,9 +1600,10 @@ def build_prediction(ctx: dict) -> dict:
         if (rk[1] == "LOST-EDIT" and {a.lower(), b.lower()} & pt_lower and not is_base_game(b, words)
                 and puts_back(p_of(rk[0]), rk)):
             # the winner puts back the value from before its own master's change (Missives review B2): its own change,
-            # whose effect is that master's change lost in game; counted and said so, whoever the master is
+            # whose effect is that master's fix lost in game. A plugin built on its master is no clash between mods
+            # (P63; coordinator D1): said on its own line as undoing that master's fix, never in the clash counts
             put_back.add(rk)
-            return lost_edit_noise(rk) or "admitted"
+            return lost_edit_noise(rk) or "undoesMaster"
         if is_base_game(a, words) or is_base_game(b, words):
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
@@ -1760,7 +1761,7 @@ def build_prediction(ctx: dict) -> dict:
             # Two record checks read overlapping populations (a cell's fields are in both the contested-fields and
             # the cell-attributes check): the same lost edit is one relationship, counted under the first check.
             same = (rk[2].lower(), rk[3].lower(), rk[4], entry["field"])
-            if adm in ("admitted", "ownMaster", *NOISE_ADMISSIONS) and same in lost_seen:
+            if adm in ("admitted", "ownMaster", "undoesMaster", *NOISE_ADMISSIONS) and same in lost_seen:
                 adm = entry["admission"] = "repeat"
             lost_seen.add(same)
         if adm != "admitted":
@@ -1819,9 +1820,7 @@ def build_prediction(ctx: dict) -> dict:
         if rk[1] == "LOST-EDIT":
             # what each side has (Pilgrim review B1): the winner put back its master's earlier value, or changed the
             # field itself too; said in the item, never only "lost to"
-            if rk in put_back:
-                g.setdefault("_putBack", collections.Counter())[(rk[2], rk[3])] += 1
-            elif (own_edit(p_of(rk[0]), rk, rk[3]) or {}).get("changed"):
+            if (own_edit(p_of(rk[0]), rk, rk[3]) or {}).get("changed"):
                 g["_winnerOwn"] = g.get("_winnerOwn", 0) + 1
                 v_ = hit["row"].get("values") or {}
                 if value_recorded(v_.get("lost")) and value_recorded(v_.get("winner")):
@@ -1837,7 +1836,7 @@ def build_prediction(ctx: dict) -> dict:
             pool = g.setdefault("_recordPool", ([], []))[rank]
             if len(pool) < 2 and ex not in pool:
                 pool.append(ex)
-        if master_of(masters, rk[2], rk[3]) and rk not in put_back:
+        if master_of(masters, rk[2], rk[3]):
             g["_ownMaster"] = master_of(masters, rk[2], rk[3])  # a geometry clash with its master's objects (P63)
         if label and rk[1] != "LOST-EDIT":
             # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
@@ -1921,8 +1920,6 @@ def build_prediction(ctx: dict) -> dict:
         if g["kind"] == "LOST-EDIT" and len(directions) == 1:
             loser, winner = next(iter(directions))
             detail.append(bind(words["itemDirection"], {"loser": loser, "winner": winner}))
-        for (loser_, winner_), n_ in sorted((g.pop("_putBack", None) or {}).items()):
-            detail.append(bind(words["itemPutBack"], {"count": fmt_n(n_), "loser": loser_, "winner": winner_}))
         n_own, ex_own = g.pop("_winnerOwn", 0), g.pop("_winnerOwnExample", None)
         if n_own and len(directions) == 1:
             loser, winner = next(iter(directions))
@@ -2119,7 +2116,7 @@ def build_prediction(ctx: dict) -> dict:
     base_geo = collections.OrderedDict()
     # a cell whose counted lost edit is its mod putting back the value from before its master's change: a one-sided
     # seam there is that change seen at the cell's boundary, said as that (Missives review B2)
-    put_cells = {str(rk_[4]): (rk_[3].lower(), rk_[2]) for rk_ in put_back if adm_of.get(rk_) == "admitted"}
+    put_cells = {str(rk_[4]): (rk_[3].lower(), rk_[2]) for rk_ in put_back if adm_of.get(rk_) == "undoesMaster"}
     seam_cells = {}
     for e in record:
         if (e["admission"] == "baseGame" and e["kind"] != "LOST-EDIT"
@@ -2179,6 +2176,26 @@ def build_prediction(ctx: dict) -> dict:
             "mod": dep, "master": mas, "count": fmt_n(sum(c_["n"] for c_ in by_check.values())),
             "parts": ", ".join(parts)}),
             "findingIds": list(dict.fromkeys(fids))})
+    # coordinator D1: a mod undoing its own master's fix (it puts back the value from before that master's change) is a
+    # measured effect, one line per mod and master: the fields, examples, and how many are still so with the patch
+    undo_ = collections.OrderedDict()
+    for e in record:
+        if e["admission"] == "undoesMaster":
+            u_ = undo_.setdefault((e["B"], e["A"]), {"fields": collections.OrderedDict(), "findingIds": []})
+            u_["fields"].setdefault((str(e["formKey"]), e.get("field")),
+                                    (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"]))
+            if e.get("findingId") and e["findingId"] not in u_["findingIds"]:
+                u_["findingIds"].append(e["findingId"])
+    for (mod_, mas_), u_ in undo_.items():
+        n_ = len(u_["fields"])
+        left_ = (sum(1 for rk_ in u_["fields"].values() if there(patched_arm, rk_))
+                 if patched_arm and any((rk_[0], patched_arm) in measured for rk_ in u_["fields"].values()) else None)
+        loss_lines.append({"text": bind(words["undoesMasterLine"], {
+            "mod": mod_, "master": mas_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
+            "examples": "; ".join(f"{fk_} ({f_})" for fk_, f_ in list(u_["fields"])[:2]),
+            "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
+                "patch": " and ".join(patch_names) if patch_names else "", "left": fmt_n(left_), "count": fmt_n(n_)})}),
+            "findingIds": u_["findingIds"][:1]})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
     alone_lines = collections.OrderedDict()
@@ -2302,7 +2319,8 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
-             "ownMaster": set_aside["ownMaster"], "sameClash": set_aside["sameClash"],
+             "ownMaster": set_aside["ownMaster"], "undoesMaster": set_aside["undoesMaster"],
+             "sameClash": set_aside["sameClash"],
              "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
              **{k_: set_aside[k_] for k_ in NOISE_ADMISSIONS}}
     def describe_setup(arm_id):
@@ -2821,6 +2839,7 @@ def build_prediction(ctx: dict) -> dict:
 
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash", "sameValue", "samePair",
+                                                                 "undoesMaster",
                                                                  *NOISE_ADMISSIONS)
                      and (e["checkId"], patched_arm) in measured
                      # overwrite history is said by whether it is still flagged; its measured loss, apart (W-S1)
