@@ -2685,6 +2685,69 @@ def main():
                      ("w2-order/C584-order-risk-said", c584_order_risk_said)]:
         cell(name, fn)
 
+    # ------------------------------------------- window 2, lane p72: Sewers' blind review (P93, P94, P95)
+    # C585. Two world-state rows of one object against two different objects, whose words are the same, are two clashes:
+    # none is lost to an identical summary (Sewers: a tower base against 13 objects was shown as 12)
+    def c585_identical_words_other_partner_kept():
+        Y2 = f"000Y02:{MOD_B}"
+        p_rows = [state_row("S1", MOD_A, MOD_B, X, Y), state_row("S1", MOD_A, MOD_B, X, Y2)]
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): p_rows, (STATE, "without-b"): [],
+                   (STATE, "without-a"): []}
+        plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
+        p = reader(plan).get("prediction") or {}
+        its = [i for i in p.get("items") or [] if i["checkId"] == STATE]
+        rec = [e for e in p.get("record") or [] if e["checkId"] == STATE]
+        ok = len(its) == 1 and its[0]["count"] == 2 and len(rec) == 2 and "2 inconsistencies" in (p.get("verdict") or "")
+        return ok, f"items {[i['count'] for i in its]}; record rows {len(rec)}; verdict {p.get('verdict')!r}"
+
+    # C586. One object left without two supports is two clashes, never "2 objects" (Sewers: one object printed as 2 and
+    # 4 objects); the headline's shared-object phrase is in the singular for one object
+    def c586_one_object_two_supports_unit():
+        Z1, H1, H2 = f"000Z11:{MOD_A}", f"000H11:{MOD_B}", f"000H12:{MOD_B}"
+        p_c = [row("CONTACT", MOD_B, MOD_A, Z1, other=H1, label="Temple (int)"),
+               row("CONTACT", MOD_B, MOD_A, Z1, other=H2, label="Temple (int)")]
+        p_f = [row("EMPTY-SPACE", MOD_B, MOD_A, Z1, other=H1, label="Temple (int)")]
+        preds = [{"Kind": "CONTACT", "A": MOD_B, "B": MOD_A, "FormKey": Z1, "Other": h, "Physical": "Gone"} for h in (H1, H2)]
+        results = {(CONTACT, "baseline"): p_c, (CONTACT, "with-patch"): [], (FIXTURE, "baseline"): p_f,
+                   (FIXTURE, "with-patch"): []}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A], patches=[PATCH],
+                                            predicates={(CONTACT, "with-patch"): preds})
+        p = reader(plan).get("prediction") or {}
+        lines = [x for x in p.get("withPatchLines") or [] if x.startswith("Objects left without")]
+        hits = next((ln for ln in md.splitlines() if ln.startswith("- Predicted and resolved by")), "")
+        v = p.get("verdict") or ""
+        ok = (len(lines) == 1 and "(2 clashes)" in lines[0] and "objects)" not in lines[0]
+              and "objects" not in hits and "the same object also found by the check" in v and "the same 1 objects" not in v)
+        return ok, f"lines {lines}; resolved {hits!r}; verdict {v[-160:]!r}"
+
+    # C587. A check this evaluation could not run on the measured order, counted from the separate evaluation without the
+    # patch, is said as such where it is counted (with its file) and where the failure is listed (Sewers R20 vs R46)
+    def c587_sibling_only_check_said():
+        p_rows = [state_row("S1", MOD_A, MOD_B, X, Y)]
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B])]
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+        s_arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("plus-a", [BASE, MOD_A]),
+                  arm("plus-b", [BASE, MOD_B]), arm("dependency-only", [BASE])]
+        s_results = {(STATE, "baseline"): p_rows, (STATE, "plus-a"): [], (STATE, "plus-b"): [],
+                     (STATE, "dependency-only"): [], (CONTACT, "baseline"): [], (CONTACT, "plus-a"): [],
+                     (CONTACT, "plus-b"): [], (CONTACT, "dependency-only"): []}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH],
+                                            missing=[(STATE, "without-patch", "failed"), (STATE, "baseline", "failed")],
+                                            sibling=(s_arms, s_results, [MOD_A], {"plan_id": "sibl00000000"}))
+        p = reader(plan).get("prediction") or {}
+        its = [i for i in p.get("items") or [] if i["checkId"] == STATE]
+        miss = [ln for ln in md.splitlines() if "No result" in ln and STATE in ln or
+                ("No result" in ln and (priorities()["reader"]["checkTitles"].get(STATE) or "\0") in ln)]
+        ok = (len(its) == 1 and "Measured in the separate evaluation without the patch" in its[0]["plain"]
+              and "state.conditional-geometry" in its[0]["plain"]
+              and len(miss) == 1 and "come from the separate evaluation without the patch" in miss[0])
+        return ok, f"items {[i['plain'][-260:] for i in its]}; missing {miss}"
+
+    for name, fn in [("w2-p93/C585-identical-words-other-partner-kept", c585_identical_words_other_partner_kept),
+                     ("w2-p94/C586-one-object-two-supports-unit", c586_one_object_two_supports_unit),
+                     ("w2-p95/C587-sibling-only-check-said", c587_sibling_only_check_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
