@@ -3292,7 +3292,7 @@ def main():
         got = (rec_of(plan, W1)[0]["admission"], rec_of(plan, W2)[0]["admission"])
         top = md.split("\n## ", 2)[1] if "\n## " in md else md
         said = f"{MOD_A} puts back the value from before {UPD}'s change" in md and "Still there" in top and \
-            f"of {UPD}'s changes lost to {MOD_A}" in top
+            f"of {UPD}'s changes lost to {MOD_A}" in top and "clashes between their objects" not in md
         return got == ("admitted", "baseGame") and said, f"W1, W2 {got}; said {said}"
 
     # C723 (Missives review B2, the same rule for a mod's master that is not the base game): ModA lists OtherMod as a

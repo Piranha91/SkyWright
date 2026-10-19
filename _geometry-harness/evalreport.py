@@ -1837,7 +1837,7 @@ def build_prediction(ctx: dict) -> dict:
             pool = g.setdefault("_recordPool", ([], []))[rank]
             if len(pool) < 2 and ex not in pool:
                 pool.append(ex)
-        if master_of(masters, rk[2], rk[3]):
+        if master_of(masters, rk[2], rk[3]) and rk not in put_back:
             g["_ownMaster"] = master_of(masters, rk[2], rk[3])  # a geometry clash with its master's objects (P63)
         if label and rk[1] != "LOST-EDIT":
             # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
