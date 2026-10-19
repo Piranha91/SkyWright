@@ -361,6 +361,101 @@ def case_35_a_change_only_in_bytes_the_game_does_not_read_is_not_a_row():
     assert [c["Field"] for c in conflicts(emit2)] == ["Grid"], conflicts(emit2)
 
 
+C = "ModC.esp"                              # a mod loaded between the base game and ModA that ModA does not master
+
+
+def records_transcript(folder: Path, chain, fk, rtype, form):
+    """A houseCARL 2.0 `housecarl_records` capture of one record in every plugin of `chain` ([(plugin, {field: value})],
+    load order, winner last). form "fields": one by-name read per plugin (`source`); form "tree": one tree answer whose
+    nodes list each plugin's differences from the winner, as the record imports carry them."""
+    folder.mkdir(parents=True, exist_ok=True)
+    req = [{"batchMarker": "b1"}]
+    resp = [{"batchMarker": "b1"}]
+    if form == "fields":
+        for i, (plugin, fields) in enumerate(chain, start=1):
+            req.append({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": "housecarl_records",
+                        "arguments": {"formids": [fk], "source": plugin, "format": "json",
+                                      "project": {"form": "fields", "fields": sorted(fields)}}}})
+            body = {"records": [{"formid": fk, "type": rtype, "editorid": None, "source": plugin,
+                                 "fields": [{"path": k, "value": v} for k, v in fields.items()]}]}
+            resp.append({"jsonrpc": "2.0", "id": i, "result": {"content": [{"type": "text", "text": json.dumps(body)}]}})
+    else:
+        winner, wf = chain[-1]
+        nodes = []
+        for plugin, fields in chain[:-1]:
+            deltas = [f"{k}={v} ({winner} {wf.get(k)})" for k, v in fields.items() if wf.get(k) != v]
+            nodes.append({"plugin": plugin, "is_winner": False, "complete": True, "deltas": deltas})
+        nodes.append({"plugin": winner, "is_winner": True})
+        req.append({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "housecarl_records",
+                    "arguments": {"formids": [fk], "format": "json", "project": {"form": "tree"}}}})
+        body = {"form": "tree", "rows": [{"formid": fk, "type": rtype, "editorid": None,
+                                          "touchers": [p for p, _ in chain], "nodes": nodes}]}
+        resp.append({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": json.dumps(body)}]}})
+    (folder / "01-request.jsonl").write_text("\n".join(json.dumps(x) for x in req) + "\n", encoding="utf-8")
+    (folder / "02-response.jsonl").write_text("\n".join(json.dumps(x) for x in resp) + "\n", encoding="utf-8")
+    return folder / "01-request.jsonl", folder / "02-response.jsonl"
+
+
+ORDER_C = [{"name": n, "path": f"X:/Lab/{n}", "sha256": "0" * 64} for n in (BASE, C, A, B)]
+
+
+def case_37_a_value_equal_to_the_masters_is_no_change_of_that_plugin():
+    """Window 2, lane core (Pilgrim's blind review, B1): ModA's water height is its master's (the base game's) value;
+    ModC, loaded before it and not its master, changed it, and ModB puts ModC's value back. ModA made no change of its
+    own: it only undoes ModC's, so it loses no edit. Without master lists the plugin before it is what it overrides."""
+    fk = "0216BB:Skyrim.esm"
+    chain = [(BASE, {"WaterHeight": "0"}), (C, {"WaterHeight": "-2147483600"}), (A, {"WaterHeight": "0"}),
+             (B, {"WaterHeight": "-2147483600"})]
+    masters = {BASE.lower(): set(), C.lower(): {BASE.lower()}, A.lower(): {BASE.lower()}, B.lower(): {BASE.lower()}}
+    with tempfile.TemporaryDirectory() as td:
+        req, resp = records_transcript(Path(td), chain, fk, "Cell", "fields")
+        chains = RR.read_chains(req, resp, ORDER_C, RR.load_scope())
+        got = chains[fk]
+        i = got["providers"].index(A)
+        changed, j = RR.own_change(got["providers"], got["values"]["WaterHeight"], i, masters.get(A.lower()))
+        assert (changed, got["providers"][j]) == (False, BASE), (changed, got["providers"][j])
+        changed2, j2 = RR.own_change(got["providers"], got["values"]["WaterHeight"], i, None)
+        assert (changed2, got["providers"][j2]) == (True, C), (changed2, got["providers"][j2])
+        emit = RR.rows_for_setup(RR.reads_of(req, resp, ORDER_C), ORDER_C, RR.load_scope(), masters=masters)
+    assert [c for c in conflicts(emit) if c["A"] == A] == [], conflicts(emit)
+
+
+def case_39_the_tree_and_the_by_name_reads_give_one_answer():
+    """Window 2, lane core: the record imports carry two capture forms (by-name reads per plugin; one tree answer of
+    each plugin's differences from the winner). Whose change a value is, is the same question in both: ModA's value is
+    its master ModC's (no change of its own); ModB's is its own."""
+    fk = "000801:Skyrim.esm"
+    chain = [(BASE, {"Owner": "1"}), (C, {"Owner": "2"}), (A, {"Owner": "2"}), (B, {"Owner": "3"})]
+    masters = {A.lower(): {BASE.lower(), C.lower()}, B.lower(): {BASE.lower()}}
+    answers = {}
+    for form in ("fields", "tree"):
+        with tempfile.TemporaryDirectory() as td:
+            req, resp = records_transcript(Path(td), chain, fk, "PlacedObject", form)
+            got = RR.read_chains(req, resp, ORDER_C, RR.load_scope())[fk]
+            answers[form] = [RR.own_change(got["providers"], got["values"]["Owner"], got["providers"].index(p),
+                                           masters.get(p.lower()))[0] for p in (A, B)]
+    assert answers == {"fields": [False, True], "tree": [False, True]}, answers
+
+
+def case_41_a_tree_value_differing_from_the_winner_only_in_path_case_is_the_winners():
+    """Window 2, lane core (Clockwork review B1): a tree answer lists Grand Solitude's LOD texture as a difference from
+    the winner's, only in letter case and slashes. The game reads one file: ModA holds the value it inherits (no change
+    of its own), ModB its own."""
+    fk = "00003C:Skyrim.esm"
+    win = "Data\\Textures\\Landscape\\Mountains\\MountainSlab02.dds"
+    chain = [(BASE, {"HdLodDiffuseTexture": win}), (C, {"HdLodDiffuseTexture": win}),
+             (A, {"HdLodDiffuseTexture": "data/textures/landscape/mountains/mountainslab02.dds"}),
+             (B, {"HdLodDiffuseTexture": "data/textures/other.dds"}), ("ModD.esp", {"HdLodDiffuseTexture": win})]
+    order = ORDER_C + [{"name": "ModD.esp", "path": "X:/Lab/ModD.esp", "sha256": "0" * 64}]
+    masters = {A.lower(): {C.lower()}, B.lower(): {C.lower()}}
+    with tempfile.TemporaryDirectory() as td:
+        req, resp = records_transcript(Path(td), chain, fk, "Worldspace", "tree")
+        got = RR.read_chains(req, resp, order, RR.load_scope())[fk]
+    vals = got["values"]["HdLodDiffuseTexture"]
+    own = [RR.own_change(got["providers"], vals, got["providers"].index(p), masters.get(p.lower()))[0] for p in (A, B)]
+    assert own == [False, True], (own, vals)
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

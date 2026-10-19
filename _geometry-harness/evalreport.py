@@ -47,6 +47,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
 sys.path.insert(0, str(HERE))
 import evalsettings  # noqa: E402
+import recordrows  # noqa: E402
 
 try:
     import jinja2
@@ -688,6 +689,20 @@ class Bundle:
     def enrichment(self) -> list[dict]:
         return [e for e in self.evidence if e.get("kind") == "enrichment"]
 
+    def transcripts(self, check_id: str, arm_id: str):
+        """A record import's two MCP transcripts and the plugins of the configuration it consumed: (request path,
+        response path, plugins), or None when the check's receipt records no such pair."""
+        rc = self.receipt_by_key.get((check_id, arm_id, "arm")) or self.receipt_by_key.get((check_id, arm_id, None))
+        if not rc:
+            return None
+        paths = [e["path"] for e in self.evidence if e.get("recordedBy") == rc["receiptId"] and e.get("path")]
+        req = next((x for x in paths if x.endswith("request.jsonl")), None)
+        resp = next((x for x in paths if x.endswith("response.jsonl")), None)
+        plugs = ((rc.get("consumed") or {}).get("configuration") or {}).get("plugins")
+        if not (req and resp and isinstance(plugs, list)):
+            return None
+        return self.dir / req, self.dir / resp, plugs
+
     def diff_log_path(self, check_id: str, arm_id: str) -> str | None:
         rc = self.receipt_by_key.get((check_id, arm_id, "diff"))
         if not rc:
@@ -1162,21 +1177,24 @@ def build_prediction(ctx: dict) -> dict:
         return (m_.group("kind"), m_.group("state")) if m_ else (kind, None)
 
     def identity(check_id, kind, a, b, r):
-        """What makes two rows on two setups the same clash. A record lost edit is one plugin's change to one field
-        of one record lost to another plugin: the pair and the field belong to it. A geometry row with a partner
-        object is the relationship between two objects, whichever plugins own them on each setup. A check whose row
-        is a state of its own object (skill data `identityByObject`: a fixture left hanging, an object left without
-        support) is that object: a fixture hanging because both evaluated mods remove hosts hangs with one of them
-        alone if that one removes enough. Any other row keeps its plugin pair."""
+        """What makes two rows on two setups the same clash, never the plugin pair a probe names (window 2, lane core:
+        new with a mod is the same object or field with and without it, in every check). A record lost edit is one
+        plugin's change to one field of one record, lost whoever wins it. A geometry row with a partner object is the
+        relationship between two objects, whichever plugins own them on each setup. A check whose row is a state of
+        its own object (skill data `identityByObject`: a fixture left hanging, an object left without support) is that
+        object: a fixture hanging because both evaluated mods remove hosts hangs with one of them alone if that one
+        removes enough. Any other row is its object in that kind of clash."""
         if kind == "LOST-EDIT":
-            return (check_id, kind, a, b, r.get("formKey"), r.get("field"))
+            # whose change is lost, and where: the losing plugin's change to one field of one record, whoever wins it
+            # (Clockwork review B1: a change already lost without the mod, to another winner, is not new with it)
+            return (check_id, kind, r.get("formKey"), r.get("field"), str(a).lower())
         base_kind, in_state = state_split(kind)
         if in_state is not None:
             if base_kind in state_by_object:
                 return (check_id, base_kind, r.get("formKey"))
             if r.get("other") is not None:
                 return (check_id, base_kind, r.get("formKey"), tuple(r.get("other") or ()))
-            return (check_id, base_kind, a, b, r.get("formKey"))
+            return (check_id, base_kind, r.get("formKey"))
         if check_id in by_object:
             return (check_id, kind, r.get("formKey"))
         if check_id in by_summary:
@@ -1185,7 +1203,7 @@ def build_prediction(ctx: dict) -> dict:
             return (check_id, kind, tuple(r.get("other") or ()), str(r.get("summary") or ""))
         if r.get("other") is not None:
             return (check_id, kind, r.get("formKey"), tuple(r.get("other") or ()))
-        return (check_id, kind, a, b, r.get("formKey"))
+        return (check_id, kind, r.get("formKey"))
 
     def collect(fs, prefix=""):
         for f in fs:
@@ -1354,10 +1372,12 @@ def build_prediction(ctx: dict) -> dict:
         return remeasure_cache[key]
 
     def there(arm_id, rk):
-        """The clash is there on that setup: listed by its identity, or re-measured there as still holding."""
+        """New with a mod, or already there without it: the one comparison every check, count and sentence uses. The
+        clash is there on that setup when it lists the same clash by its identity (the object or field, never the pair
+        a probe names), or re-measures the prediction setup's row there as still holding."""
         if present(arm_id, rk):
             return True
-        if rk[1] == "LOST-EDIT":
+        if rk[1] == "LOST-EDIT" or rk not in p_rows:
             return False
         preds = remeasured(arm_id, rk[0])
         if not preds:
@@ -1416,79 +1436,59 @@ def build_prediction(ctx: dict) -> dict:
         v = (p_rows.get(rk) or {}).get("row", {}).get("values") or {}
         return same_but_path_case(v.get("lost"), v.get("winner"))
 
-    # The base game's own value of a record field, read from any measured setup's lost-edit row whose overridden value
-    # is a base-game plugin's (the plugin before the losing one) and whose losing plugin is not: the value before any
-    # mod changed it. A losing value equal to it is no edit of that mod's: it only undoes the change of the mod before
-    # it, and is a change only against that mod (fourth blind review, W2).
+    # Whose edit a value is (window 2, lane core; Pilgrim's review B1): the one rule, recordrows.own_change, asked of
+    # the record's provider chain in that setup, read from the record import's own transcripts. A plugin changed a field
+    # only if its value differs from the one it inherits from its nearest master; a value equal to it is no edit of
+    # that plugin's, whoever loaded before it changed the field. Every lost, kept, dropped and undone change asks this.
     unrecorded_values = {str(x) for x in words.get("unrecordedValues") or []}
 
     def value_recorded(v):
         vs = v if isinstance(v, list) else [v]
         return v not in (None, "", []) and not any(str(x) in unrecorded_values for x in vs)
-    base_value_cache = []
+    chain_cache, chain_scope, needed_fks = {}, [], collections.defaultdict(set)
+    for (c_, a_), rs in rows_by.items():
+        needed_fks[(c_, a_)].update(str(k_[4]) for k_ in rs if k_[1] == "LOST-EDIT")
 
-    def base_value(fk, field):
-        if not base_value_cache:
-            got = {}
-            for rs in rows_by.values():
-                for k_, h_ in rs.items():
-                    r_ = h_["row"]
-                    reads = r_.get("reads") or []
-                    if k_[1] != "LOST-EDIT" or len(reads) < 2 or not isinstance(reads[0], dict):
-                        continue
-                    if is_base_game(reads[0].get("plugin"), words) and not is_base_game(k_[2], words):
-                        ov = (r_.get("values") or {}).get("overridden")
-                        if value_recorded(ov):
-                            got.setdefault((str(k_[4]), r_.get("field")), ov)
-            base_value_cache.append(got)
-        return base_value_cache[0].get((str(fk), field))
+    def chains_of(check_id, arm_id):
+        key = (check_id, arm_id)
+        if key not in chain_cache:
+            chain_cache[key] = None
+            bundle, a = ctx.get("mainBundle"), arm_id
+            if str(arm_id).startswith("sibling:"):
+                bundle, a = (sibling or {}).get("bundle"), str(arm_id).split(":", 1)[1]
+            got = bundle.transcripts(check_id, a) if bundle is not None and needed_fks.get(key) else None
+            if got:
+                if not chain_scope:
+                    chain_scope.append(recordrows.load_scope())
+                chain_cache[key] = recordrows.read_chains(got[0], got[1], got[2], chain_scope[0], needed_fks[key])
+        return chain_cache[key]
 
-    prior_cache = {}
-
-    def prior_values(fk, field, before):
-        """The values the field had just before `before` changed it, in P's own chain: the overridden value of any
-        setup's row in which `before` is the losing plugin, from a setup whose load order up to `before` is P's (the
-        same plugins in the same order, so the same chain up to it)."""
-        key = (str(fk), field, str(before).lower())
-        if key not in prior_cache:
-            p_order = all_orders.get(p_arm) or []          # the sibling's shared setup has P's plugins exactly
-
-            def prefix(order):
-                o = [x.lower() for x in order]
-                return o[:o.index(key[2]) + 1] if key[2] in o else None
-            want = prefix(p_order)
-            got = set()
-            for (c_, a_), rs in rows_by.items():
-                if want is None or prefix(all_orders.get(a_) or []) != want:
-                    continue
-                for k_, h_ in rs.items():
-                    r_ = h_["row"]
-                    reads = r_.get("reads") or []
-                    if (k_[1] == "LOST-EDIT" and str(k_[4]) == key[0] and r_.get("field") == field and len(reads) >= 2
-                            and isinstance(reads[1], dict) and str(reads[1].get("plugin")).lower() == key[2]):
-                        ov = (r_.get("values") or {}).get("overridden")
-                        if value_recorded(ov):
-                            got.add(path_folded(ov))
-            prior_cache[key] = got
-        return prior_cache[key]
-
-    def undoes_earlier(rk):
-        """The losing value is no edit of that mod's: it is the base game's own, or the value the field had just before
-        the mod loaded before it changed it, so it only undoes that mod's change (fourth blind review, W2). Returns
-        (that mod, whether the winner carries that mod's own value), else None."""
-        r_ = (p_rows.get(rk) or {}).get("row") or {}
-        reads, v = r_.get("reads") or [], r_.get("values") or {}
-        before = reads[0].get("plugin") if reads and isinstance(reads[0], dict) else None
-        if not before or is_base_game(before, words) or str(before).lower() in (rk[2].lower(), rk[3].lower()):
-            return None
-        if not value_recorded(v.get("lost")):
-            return None
-        lost = path_folded(v.get("lost"))
-        base = base_value(rk[4], r_.get("field"))
-        prior = prior_values(rk[4], r_.get("field"), before)
-        if not ((base is not None and lost == path_folded(base)) or (len(prior) == 1 and lost in prior)):
-            return None
-        return before, value_recorded(v.get("winner")) and path_folded(v.get("winner")) == path_folded(v.get("overridden"))
+    def own_edit(arm_id, rk, plugin):
+        """Whether `plugin`'s value of the row's field is a change of its own in that setup: {changed, inherits (the
+        plugin it inherits from), before (the plugin loaded just before it), beforeWins (the winner holds that plugin's
+        value)}. Read from the setup's provider chain; where the transcripts do not hold it, from the row's own three
+        values (the plugin before the loser, the loser, the winner). None where neither can tell."""
+        row_ = ((rows_by.get((rk[0], arm_id)) or {}).get(rk) or {}).get("row") or {}
+        field = row_.get("field")
+        ch = (chains_of(rk[0], arm_id) or {}).get(str(rk[4]))
+        if ch and str(plugin).lower() in [str(x).lower() for x in ch["providers"]] and (
+                field in ch["values"] or ch.get("allListed")):
+            # a tree answer lists every difference from the winner: a field it does not list, every provider holds
+            provs = list(ch["providers"])
+            vals = list(ch["values"].get(field) or [()] * len(provs))
+        else:
+            reads, v = row_.get("reads") or [], row_.get("values") or {}
+            before = reads[0].get("plugin") if reads and isinstance(reads[0], dict) else None
+            three = [v.get("overridden"), v.get("lost"), v.get("winner")]
+            if not all(value_recorded(x) for x in three):
+                return None
+            provs, vals = [before or "", rk[2], rk[3]], [path_folded(x) for x in three]
+        i = [str(x).lower() for x in provs].index(str(plugin).lower())
+        ms = (masters or {}).get(str(plugin).lower()) if masters is not None else None
+        changed, j = recordrows.own_change(provs, vals, i, ms)
+        return {"changed": changed, "inherits": provs[j] if j is not None else None,
+                "before": provs[i - 1] if i > 0 else None,
+                "beforeWins": i > 0 and vals[-1] == vals[i - 1]}
 
     lv_words = words.get("lostEditValuePatterns") or {}
     order_only_re = re.compile(lv_words["orderOnly"]) if lv_words.get("orderOnly") else None
@@ -1539,6 +1539,14 @@ def build_prediction(ctx: dict) -> dict:
             return "unusedBits"
         return None
 
+    one_sided_res = {k: re.compile(v) for k, v in (words.get("oneSidedKinds") or {}).items() if k != "about"}
+
+    def one_sided(rk):
+        """Whose change a seam row is: only one side differs from the base game, so the plugin on the other side
+        carries the base game's value and made no change of its own there (skill data `oneSidedKinds`)."""
+        r_ = one_sided_res.get(state_split(rk[1])[0])
+        return bool(r_ and r_.search(str(rk[5])))
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -1547,6 +1555,9 @@ def build_prediction(ctx: dict) -> dict:
             return "sameMod"
         if there(w_arm, rk):
             return "alreadyPresent"
+        if one_sided(rk):
+            # new with the evaluated mods and only one side differs: their side against the base game's value
+            return "baseGame"
         if is_base_game(a, words) or is_base_game(b, words):
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
@@ -1561,12 +1572,13 @@ def build_prediction(ctx: dict) -> dict:
             return "pathCase"                  # the two values name the same file (Snazzy review 3)
         if rk[1] == "LOST-EDIT" and both_disabled(rk):
             return "bothDisabled"              # both mods disable the object: no effect in game
-        if rk[1] == "LOST-EDIT" and undoes_earlier(rk):
-            return "notOwnEdit"                # the losing value is the base game's: no edit of that mod's
         if rk[1] == "LOST-EDIT":
             noise = lost_edit_noise(rk)
             if noise:
                 return noise
+            oe = own_edit(p_of(rk[0]), rk, rk[2])
+            if oe is not None and not oe["changed"]:
+                return "notOwnEdit"            # the losing value is the one it inherits: no edit of that mod's
         if (rk[0] == "geometry.fixture-empty-space" and anchor_unclear_re is not None
                 and anchor_unclear_re.search(rk[5])):
             return "anchorUnclear"             # a floor or wall's box reaches it though no touch was found: cannot tell
@@ -1634,7 +1646,7 @@ def build_prediction(ctx: dict) -> dict:
     # The same lost value carried by two plugins (a patch carrying its master's change forward) is one change lost:
     # counted once, under the plugin loaded first (Pilgrim review S1); the other row stays in the record
     p_order_low = [x.lower() for x in all_orders.get(p_arm) or []]
-    carried, by_value, carried_base = set(), collections.defaultdict(list), {}
+    carried, by_value = set(), collections.defaultdict(list)
     for rk_, h_ in p_rows.items():
         if rk_[1] == "LOST-EDIT":
             v_ = (h_["row"].get("values") or {}).get("lost")
@@ -1645,9 +1657,6 @@ def build_prediction(ctx: dict) -> dict:
             keep = min(rks_, key=lambda r_: (p_order_low.index(r_[2].lower()) if r_[2].lower() in p_order_low else 10 ** 6,
                                              str(r_)))
             carried.update(r_ for r_ in rks_ if r_ != keep)
-            if is_base_game(keep[2], words):
-                # the value a base-game plugin itself holds: no edit of the later plugins that carry it (Clockwork P104)
-                carried_base.update({r_: keep[2] for r_ in rks_ if r_ != keep})
     # An object pair one check counts is not counted again by a later check that finds the same two objects (Sewers
     # review S1: a scaffold in 13 Sewers objects was 13 overlaps and 13 world-state clashes); the first check's item
     # says the other found it too
@@ -1655,9 +1664,8 @@ def build_prediction(ctx: dict) -> dict:
     for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
         hit = p_rows[rk]
         adm = admission(rk, hit["history"], hit["row"].get("other"))
-        base_carrier = carried_base.get(rk)
         if adm == "admitted" and rk in carried:
-            adm = "notOwnEdit" if base_carrier else "sameValue"
+            adm = "sameValue"
         pair_ = (frozenset([str(rk[4]), str((hit["row"].get("other") or [None])[0])])
                  if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other") else None)
         if adm == "admitted" and pair_ is not None and pair_ in pair_owner and pair_owner[pair_][0] != rk[0]:
@@ -1710,8 +1718,9 @@ def build_prediction(ctx: dict) -> dict:
             if adm == "samePair":
                 entry["sameAsCheck"] = pair_owner[pair_][0]
             if adm == "notOwnEdit":
-                entry["undoes"], earlier_wins = undoes_earlier(rk) or (base_carrier, False)
-                set_aside["notOwnEditEarlierWins"] += 1 if earlier_wins else 0
+                oe = own_edit(p_of(rk[0]), rk, rk[2]) or {}
+                entry["undoes"], entry["inherits"] = oe.get("before"), oe.get("inherits")
+                set_aside["notOwnEditEarlierWins"] += 1 if oe.get("beforeWins") else 0
             record.append(entry)
             continue
         attr, attr_mod, why = attribution(rk)
@@ -2036,10 +2045,12 @@ def build_prediction(ctx: dict) -> dict:
     # clashes between mods, but they are measured problems of that mod: said by check, never only in a set-aside count
     base_geo = collections.OrderedDict()
     for e in record:
-        if (e["admission"] == "baseGame" and e["kind"] != "LOST-EDIT" and is_geometry_check(e["checkId"], words)
+        if (e["admission"] == "baseGame" and e["kind"] != "LOST-EDIT"
+                and (is_geometry_check(e["checkId"], words) or state_split(e["kind"])[0] in one_sided_res)
                 and {e["A"].lower(), e["B"].lower()} & pt_lower and e["A"].lower() != e["B"].lower()):
             mod_ = e["A"] if e["A"].lower() in pt_lower else e["B"]
-            c_ = base_geo.setdefault(mod_, collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"], "pairs": set()})
+            side_ = state_split(e["kind"])[0] in one_sided_res     # the other side carries the base game's value
+            c_ = base_geo.setdefault((mod_, side_), collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"], "pairs": set()})
             # a pair of objects is one clash however many world states show it (Pilgrim's second review, S5)
             base_k, in_st = state_split(e["kind"])
             pair_ = ((base_k, str(e["formKey"]), tuple(sorted(map(str, e.get("other") or ())))) if in_st is not None
@@ -2050,9 +2061,10 @@ def build_prediction(ctx: dict) -> dict:
             c_["n"] += 1
             if e.get("findingId") and e["findingId"] not in c_["fids"]:
                 c_["fids"].append(e["findingId"])
-    for mod_, by_c in base_geo.items():
-        if words.get("baseGameGeometryLine"):
-            loss_lines.append({"text": bind(words["baseGameGeometryLine"], {"mod": mod_, "parts": "; ".join(
+    for (mod_, side_), by_c in base_geo.items():
+        line_ = words.get("baseGameSideLine" if side_ else "baseGameGeometryLine")
+        if line_:
+            loss_lines.append({"text": bind(line_, {"mod": mod_, "parts": "; ".join(
                 f"{fmt_n(c_['n'])} {unit_noun(cid_, c_['kind'], c_['n'])} ({title_of(cid_)})" for cid_, c_ in by_c.items())}),
                 "findingIds": [f_ for c_ in by_c.values() for f_ in c_["fids"]][:1]})
     # P63: a mod changing a value of a plugin it lists as a master is said as that, one line per mod and master, with
@@ -2243,8 +2255,9 @@ def build_prediction(ctx: dict) -> dict:
         p_req = next((x for x in (main_b.plan.get("arms") if main_b else None) or [] if x.get("armId") == p_arm), {})
         p_plugs = [(str(x.get("name")), str(x.get("sha256") or "")) for x in (p_req.get("requested") or {}).get("plugins") or []]
         p_pos = {n.lower(): i for i, (n, _) in enumerate(p_plugs)}
-        p_lost = {(c_, k_[2].lower(), k_[3].lower(), str(k_[4]), h_["row"].get("field"))
-                  for (c_, a_), rs in rows_by.items() if a_ == p_of(c_) for k_, h_ in rs.items() if k_[1] == "LOST-EDIT"}
+        # the measured order loses the same change (the same plugin's change to the same field), whoever wins it
+        p_lost = {ident_of.get(k_) for (c_, a_), rs in rows_by.items() if a_ == p_of(c_) for k_ in rs
+                  if k_[1] == "LOST-EDIT"}
         for o_ in ctx["orderSetups"]:
             o_plugs = [(str(x.get("name")), str(x.get("sha256") or "")) for x in o_.get("plugins") or []]
             if sorted(o_plugs) != sorted(p_plugs):
@@ -2266,7 +2279,8 @@ def build_prediction(ctx: dict) -> dict:
                     v_ = n_.get("Values") or {}
                     if same_but_path_case(v_.get("lost"), v_.get("winner")):
                         continue
-                    if (str(r_.get("_check")), al, bl, str(n_.get("FormKey")), r_.get("Field")) in p_lost:
+                    if identity(str(r_.get("_check")), "LOST-EDIT", a_, b_, {"formKey": n_.get("FormKey"),
+                                                                           "field": r_.get("Field")}) in p_lost:
                         continue               # the measured order loses it too
                     g_ = per_pair.setdefault((a_, b_), {"n": 0, "records": {}, "fields": collections.Counter()})
                     g_["n"] += 1
@@ -2574,15 +2588,9 @@ def build_prediction(ctx: dict) -> dict:
             return not any(str(x) in unrecorded for x in vs)
 
         def no_change_of_winner(e):
-            """The winning mod's value without the patch is the one the losing mod changed (winner = overridden), or
-            the base game's own: it made no change of its own there, only carried the earlier value."""
-            v_ = e.get("values") or {}
-            w_, o_ = v_.get("winner"), v_.get("overridden")
-            if not recorded(w_):
-                return False
-            b_ = base_value(e["formKey"], e.get("field"))
-            return ((recorded(o_) and path_folded(w_) == path_folded(o_))
-                    or (b_ is not None and path_folded(w_) == path_folded(b_)))
+            """The winning mod made no change of its own to the field without the patch (whose edit: own_edit)."""
+            oe = own_edit(p_of(e["checkId"]), keyof(e), e["B"])
+            return oe is not None and not oe["changed"]
 
         def lost_outcome(e):
             rows_w = lost_w.get((e["checkId"], e["formKey"], e.get("field")))
@@ -2629,7 +2637,7 @@ def build_prediction(ctx: dict) -> dict:
                 return "cannot-tell"           # the comparison with and without the patch refused a verdict
             preds = predicates(e["checkId"])
             if preds is None:
-                if present(patched_arm, keyof(e)):
+                if there(patched_arm, keyof(e)):
                     return "left"
                 # with one evaluated mod, a clash from it alone is credited to the patch only on the patched setup's
                 # own re-measure (Gone), never from its absence from a list (coordinator, D3)
@@ -2695,10 +2703,11 @@ def build_prediction(ctx: dict) -> dict:
                 v_ = hit["row"].get("values") or {}
                 if (rk[2].lower() not in patch_lower and not is_base_game(rk[2], words)
                         and (str(rk[4]), hit["row"].get("field")) not in p_fields
-                        and not same_but_path_case(v_.get("lost"), v_.get("winner"))):
+                        and not same_but_path_case(v_.get("lost"), v_.get("winner"))
+                        and (own_edit(patched_arm, rk, rk[2]) or {"changed": True})["changed"]):
                     undone.append((rk, hit))
                 continue
-            if present(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
+            if there(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
                 continue
             # counted by what the clash is (an object of a by-object check, once however many rows name it), never
             # by rows (P64): an object left without support against three hosts is one new problem
@@ -2713,7 +2722,7 @@ def build_prediction(ctx: dict) -> dict:
                 continue                       # the base game, or a record value over the plugin's own master (P63)
             if (rk[0], p_of(rk[0])) in measured and ident_ not in problem_seen:
                 problem_seen.add(ident_)
-                where_ = next((a_ for a_ in no_patch_arms if (rk[0], a_) in measured and present(a_, rk)), None)
+                where_ = next((a_ for a_ in no_patch_arms if (rk[0], a_) in measured and there(a_, rk)), None)
                 if where_ is not None:
                     not_new.append((rk, where_))     # still new with the patch; said where else it is measured
                 problems.append(rk)
@@ -2721,7 +2730,9 @@ def build_prediction(ctx: dict) -> dict:
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash", "sameValue", "samePair",
                                                                  *NOISE_ADMISSIONS)
-                     and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
+                     and (e["checkId"], patched_arm) in measured
+                     # overwrite history is said by whether it is still flagged; its measured loss, apart (W-S1)
+                     and not (present if e["admission"] == "history" else there)(patched_arm, keyof(e))]
         spots = collections.Counter(e["admission"] for e in spot_rows)
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
         blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())

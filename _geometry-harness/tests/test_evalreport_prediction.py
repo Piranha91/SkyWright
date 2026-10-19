@@ -89,6 +89,23 @@ def lost_row(a, b, form_key, field, lost, winner, overridden, label=None, before
                            **({"Reads": reads} if reads else {})}]}
 
 
+def records_transcript(chains):
+    """chains: [(formKey, record type, [(plugin, {field: value})])] in load order: the 2.0 by-name reads the record
+    imports carry, one `housecarl_records` call per plugin and record."""
+    req, resp, n = [{"batchMarker": "b1"}], [{"batchMarker": "b1"}], 0
+    for fk, rtype, chain in chains:
+        for plugin, fields in chain:
+            n += 1
+            req.append({"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {
+                "name": "housecarl_records", "arguments": {"formids": [fk], "source": plugin, "format": "json",
+                                                           "project": {"form": "fields", "fields": sorted({k.split(".")[0] for k in fields})}}}})
+            body = {"records": [{"formid": fk, "type": rtype, "editorid": None, "source": plugin,
+                                 "fields": [{"path": k, "value": v} for k, v in fields.items()]}]}
+            resp.append({"jsonrpc": "2.0", "id": n, "result": {"content": [{"type": "text",
+                                                                            "text": json.dumps(body)}]}})
+    return req, resp
+
+
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
@@ -2011,8 +2028,10 @@ def main():
                           "Position=5,6,-30000; Rotation=0,0,0", "Position=1,2,3; Rotation=0,0,0"),
                  lost_row(MOD_A, MOD_B, f"000801:{BASE}", "EnableParent", "Reference=000014:Skyrim.esm; Unknown=1",
                           "Reference=000014:Skyrim.esm; Unknown=0", "x"),
+                 # (window 2, lane core: the overridden value differs from the lost one, as in every real row; the
+                 # fixture had them equal, which says ModA made no change there)
                  lost_row(MOD_A, MOD_B, f"000802:{BASE}", "Placement", "Position=1,2,3; Rotation=0,0,0",
-                          "Position=1,2,-30000; Rotation=0,0,0", "Position=1,2,3; Rotation=0,0,0")]
+                          "Position=1,2,-30000; Rotation=0,0,0", "Position=9,9,3; Rotation=0,0,0")]
         enr = {(RECORDS, a): (rows_ if a == "baseline" else []) for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
         count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
         results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
@@ -2054,6 +2073,8 @@ def main():
     # lost in game). The base value is read from another setup's row whose overridden plugin is the record's master. A
     # real edit (a value differing from the base game's) and a value whose base is not known stay counted.
     def c521_base_game_value_is_no_edit():
+        # window 2, lane core: whose edit a value is reads the record's chain in the setup (the import's transcripts)
+        # and the plugin's masters; R3's chain is not in the transcripts, so only its row's own values say anything
         R1, R2, R3 = f"000901:{BASE}", f"000902:{BASE}", f"000903:{BASE}"
         p_rows = [lost_row(OTHER, MOD_B, R1, "Placement", "v1", "a1", "a1", before=MOD_A),   # OTHER undoes ModA's change
                   lost_row(OTHER, MOD_B, R2, "Placement", "o2", "a2", "a2", before=MOD_A),   # OTHER's own edit
@@ -2064,7 +2085,15 @@ def main():
                (RECORDS, "dependency-only"): []}
         count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
         results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
-        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+        arms = [arm("baseline", [BASE, MOD_A, OTHER, MOD_B], kind="baseline"), arm("dependency-only", [BASE, OTHER]),
+                arm("plus-a", [BASE, MOD_A, OTHER]), arm("plus-b", [BASE, OTHER, MOD_B])]
+        chains = [(R1, "PlacedObject", [(BASE, {"Placement": "v1"}), (MOD_A, {"Placement": "a1"}),
+                                        (OTHER, {"Placement": "v1"}), (MOD_B, {"Placement": "a1"})]),
+                  (R2, "PlacedObject", [(BASE, {"Placement": "v2"}), (MOD_A, {"Placement": "a2"}),
+                                        (OTHER, {"Placement": "o2"}), (MOD_B, {"Placement": "a2"})])]
+        plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr,
+                                            transcripts={(RECORDS, "baseline"): records_transcript(chains)},
+                                            masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         p = reader(plan).get("prediction") or {}
         adm = sorted(((e.get("formKey") or "")[:6], e.get("A"), e.get("admission")) for e in p.get("record") or []
                      if e.get("B") == MOD_B)
@@ -2181,24 +2210,31 @@ def main():
               and "records.registration-and-dialogue" in priorities()["reader"]["checkTitles"])
         return ok, f"tool words left {bad}; limits {lim[:300]!r}"
 
-    # C527. The same with no base-game value in sight: a mod loaded before the earlier mod changed the field first. The
-    # losing value equals the value the field had just before the earlier mod changed it (another row of the same setup
-    # names it), so it only undoes the earlier mod's change; a setup whose load order differs before that mod is not read
+    # C527. The same where a mod loaded before the earlier mod changed the field first. Window 2, lane core: whose edit
+    # a value is is read from the record's chain and the plugin's masters, not from other rows: ModA's R1 value is its
+    # master's (the base game's), so it only undoes OtherMod's change; its R2 value is Early's, but Early is not its
+    # master and the base game's differs, so it is ModA's own change (until lane core, the rows of other setups decided)
     def c527_undo_of_earlier_change_is_no_edit():
         early = "Early.esp"
         arms = [arm("baseline", [BASE, early, OTHER, MOD_A, MOD_B], kind="baseline"),
                 arm("dependency-only", [BASE, early, OTHER]), arm("plus-a", [BASE, early, OTHER, MOD_A]),
                 arm("plus-b", [BASE, early, OTHER, MOD_B]), arm("reordered", [BASE, OTHER, early, MOD_A, MOD_B])]
         R1, R2 = f"000911:{BASE}", f"000912:{BASE}"
-        p_rows = [lost_row(OTHER, MOD_B, R1, "Name", "e1", "x1", "o1", before=early),      # Early's change, OTHER's
-                  lost_row(MOD_A, MOD_B, R1, "Name", "o1", "x1", "e1", before=OTHER),      # ModA undoes OTHER's change
-                  lost_row(MOD_A, MOD_B, R2, "Name", "q2", "x2", "o2", before=OTHER)]      # only the reordered setup says q2
-        r_rows = [lost_row(OTHER, MOD_B, R2, "Name", "o2", "x2", "q2", before=early)]
+        p_rows = [lost_row(OTHER, MOD_B, R1, "Owner", "e1", "x1", "o1", before=early),      # Early's change, OTHER's
+                  lost_row(MOD_A, MOD_B, R1, "Owner", "o1", "x1", "e1", before=OTHER),      # ModA undoes OTHER's change
+                  lost_row(MOD_A, MOD_B, R2, "Owner", "q2", "x2", "o2", before=OTHER)]      # only the reordered setup says q2
+        r_rows = [lost_row(OTHER, MOD_B, R2, "Owner", "o2", "x2", "q2", before=early)]
         enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "reordered"): r_rows}
         enr.update({(RECORDS, a): [] for a in ("dependency-only", "plus-a", "plus-b")})
         count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
         results = {(CONTACT, a["armId"]): [] for a in arms}
-        plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
+        chains = [(R1, "PlacedObject", [(BASE, {"Owner": "o1"}), (early, {"Owner": "o1"}), (OTHER, {"Owner": "e1"}),
+                                        (MOD_A, {"Owner": "o1"}), (MOD_B, {"Owner": "x1"})]),
+                  (R2, "PlacedObject", [(BASE, {"Owner": "z2"}), (early, {"Owner": "q2"}), (OTHER, {"Owner": "o2"}),
+                                        (MOD_A, {"Owner": "q2"}), (MOD_B, {"Owner": "x2"})])]
+        plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr,
+                                            transcripts={(RECORDS, "baseline"): records_transcript(chains)},
+                                            masters={early: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         p = reader(plan).get("prediction") or {}
         adm = sorted(((e.get("formKey") or "")[:6], e.get("A"), e.get("admission")) for e in p.get("record") or []
                      if e.get("A") == MOD_A)
@@ -2667,7 +2703,10 @@ def main():
                   dict(lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell"),
                   # Early's change, lost to OtherMod in the measured order, is lost to ModA in the other: lost either way,
                   # and the order of Early and ModA did not change, so it is no order risk
-                  dict(lost_row(O2, MOD_A, f"000C04:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell")]
+                  dict(lost_row(O2, MOD_A, f"000C04:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell"),
+                  # (lane core) Early's change lost to ModA in the other order only, but Early and ModA kept their order:
+                  # no order risk, decided by the order rule alone (000C04 is now also caught as lost either way)
+                  dict(lost_row(O2, MOD_A, f"000C06:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell")]
         setup = {"armId": "lux-first", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
                  "plugins": plugins(BASE, O2, OTHER, MOD_A), "rows": o_rows}
         plan, md, html = compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 3},
@@ -2773,6 +2812,22 @@ def main():
         return [e for e in (reader(plan).get("prediction") or {}).get("record") or []
                 if str(e.get("formKey")) == fk and (field is None or e.get("field") == field)]
 
+    THIRD = "ThirdMod.esp"
+
+    def core_bundle(p_rows, w_rows=(), check=RECORDS, arms=None, masters=None, p_chains=(), w_chains=(),
+                    extra_results=None, targets=(MOD_A,), patches=(PATCH,), p_arm="without-patch", w_arm="baseline"):
+        enr = {(check, p_arm): list(p_rows)}
+        tr = {(check, p_arm): records_transcript(p_chains)} if p_chains else {}
+        if w_arm:
+            enr[(check, w_arm)] = list(w_rows)
+            if w_chains:
+                tr[(check, w_arm)] = records_transcript(w_chains)
+        count_only = {k: max(1, len(v)) for k, v in enr.items()}
+        results = {(CONTACT, a_): [] for (_, a_) in enr}
+        results.update(extra_results or {})
+        return compile_and_render(arms or WP_ARMS, results, list(targets), patches=list(patches),
+                                  count_only=count_only, enrichment=enr, transcripts=tr, masters=masters)
+
     # C620 (Pilgrim's second blind review, B1). Where the winning mod's value equals the value the losing mod changed
     # (winner = overridden: it carries the earlier value, no change of its own), a patch that takes the losing mod's
     # value restores that change: resolved, never "the winning mod's change is dropped". Only a genuine change counts as
@@ -2783,7 +2838,13 @@ def main():
                   lost_row(OTHER, MOD_A, R2, "Placement", "o2", "a2", "v2")]      # ModA's own move
         w_rows = [lost_row(MOD_A, PATCH, R1, "Placement", "v1", "o1", "o1"),
                   lost_row(MOD_A, PATCH, R2, "Placement", "a2", "o2", "o2")]
-        plan, md, html = cw_bundle(p_rows, w_rows)
+        # window 2, lane core: the record's chain (the import's transcripts) and ModA's masters say whose change it is
+        chains = [(R1, "PlacedObject", [(BASE, {"Placement": "v1"}), (OTHER, {"Placement": "o1"}),
+                                        (MOD_A, {"Placement": "v1"})]),
+                  (R2, "PlacedObject", [(BASE, {"Placement": "v2"}), (OTHER, {"Placement": "o2"}),
+                                        (MOD_A, {"Placement": "a2"})])]
+        plan, md, html = core_bundle(p_rows, w_rows, p_chains=chains,
+                                     masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         w1 = [e.get("withPatch") for e in rec_of(plan, R1)]
         w2 = [e.get("withPatch") for e in rec_of(plan, R2)]
         dropped = [ln for ln in md.splitlines() if "change is dropped" in ln]
@@ -2829,9 +2890,15 @@ def main():
         F1 = f"00C205:{BASE}"
         p_rows = [lost_row("Update.esm", MOD_A, F1, "MaxHeight", ["MaxHeight.CellData=0A0B"], PH, ["MaxHeight.CellData=0C"]),
                   lost_row(OTHER, MOD_A, F1, "MaxHeight", ["MaxHeight.CellData=0A0B"], PH, ["MaxHeight.CellData=0D"])]
-        arms = [arm("baseline", [BASE, "Update.esm", OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
-                arm("without-patch", [BASE, "Update.esm", OTHER, MOD_A, MOD_B])]
-        plan, md, _ = cw_bundle(p_rows, arms=arms)
+        arms = [arm("baseline", [BASE, "Update.esm", THIRD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, "Update.esm", THIRD, OTHER, MOD_A, MOD_B])]
+        # window 2, lane core: OtherMod's value is Update.esm's, its master's: read from the record's chain
+        chains = [(F1, "Worldspace", [(BASE, {"MaxHeight.CellData": "0C"}), ("Update.esm", {"MaxHeight.CellData": "0A0B"}),
+                                      (THIRD, {"MaxHeight.CellData": "0D"}), (OTHER, {"MaxHeight.CellData": "0A0B"}),
+                                      (MOD_A, {"MaxHeight.CellData": "0E"})])]
+        plan, md, _ = core_bundle(p_rows, arms=arms, p_chains=chains,
+                                  masters={"Update.esm": [BASE], THIRD: [BASE], OTHER: [BASE, "Update.esm"],
+                                           MOD_A: [BASE], MOD_B: [BASE]})
         adm = {e["A"]: e["admission"] for e in rec_of(plan, F1)}
         ok = adm.get(OTHER) == "notOwnEdit" and adm.get("Update.esm") == "baseGame"
         return ok, f"admissions {adm}"
@@ -2985,6 +3052,196 @@ def main():
                      ("w2-cw/C630-with-target-said-once", c630_with_target_said_once),
                      ("w2-cw/C631-scope-names-counted-partners", c631_scope_names_counted_partners),
                      ("w2-cw/C632-patch-wins-line-sets-noise-aside", c632_patch_wins_line_sets_noise_aside)]:
+        cell(name, fn)
+
+    # ------------------------------------------- window 2, lane core: one function decides whose change a value is, one
+    # decides what is new with a mod (Pilgrim's and Clockwork's blind reviews failed on each applied in some paths only)
+    # C660 (Pilgrim review B1). Whose change a value is: ModA's water height is its masters' (the base game's) value;
+    # OtherMod, loaded before it and not its master, changed it, and ModB puts OtherMod's value back. ModA made no change
+    # of its own there, so nothing of ModA's is lost: set aside as no edit of ModA's (it only undoes OtherMod's), never a
+    # clash. ModA's own change to another cell stays counted.
+    def c660_masters_value_is_no_own_change():
+        W1, W2 = f"0216B1:{BASE}", f"0216B2:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, W1, "WaterHeight", "0", "-2147483600", "-2147483600", before=OTHER),
+                  lost_row(MOD_A, MOD_B, W2, "WaterHeight", "5", "-2147483600", "-2147483600", before=OTHER)]
+        chains = [(fk, "Cell", [(BASE, {"WaterHeight": "0"}), (OTHER, {"WaterHeight": "-2147483600"}),
+                                (MOD_A, {"WaterHeight": v}), (MOD_B, {"WaterHeight": "-2147483600"})])
+                  for fk, v in ((W1, "0"), (W2, "5"))]
+        masters = {OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]}
+        plan, md, _ = core_bundle(p_rows, check=CELLATTR, masters=masters, p_chains=chains)
+        e1, e2 = rec_of(plan, W1), rec_of(plan, W2)
+        ok = ([e["admission"] for e in e1] == ["notOwnEdit"] and [e.get("undoes") for e in e1] == [OTHER]
+              and [e["admission"] for e in e2] == ["admitted"])
+        return ok, f"W1 {[(e['admission'], e.get('undoes')) for e in e1]}; W2 {[e['admission'] for e in e2]}"
+
+    # C661. The value a plugin inherits is its nearest master's, not the plugin's before it: a patch built on OtherMod
+    # that keeps OtherMod's value where ThirdMod (not its master) changed it makes no change of its own; with only the
+    # base game as its master the same value is its own change.
+    def c661_nearest_master_decides():
+        F1 = f"00C661:{BASE}"
+        arms = [arm("baseline", [BASE, OTHER, THIRD, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, THIRD, MOD_A, MOD_B])]
+        p_rows = [lost_row(MOD_A, MOD_B, F1, "Owner", "2", "4", "3", before=THIRD)]
+        chains = [(F1, "PlacedObject", [(BASE, {"Owner": "1"}), (OTHER, {"Owner": "2"}), (THIRD, {"Owner": "3"}),
+                                        (MOD_A, {"Owner": "2"}), (MOD_B, {"Owner": "4"})])]
+        got = []
+        for m_a in ([BASE, OTHER], [BASE]):
+            plan, _, _ = core_bundle(p_rows, arms=arms, p_chains=chains,
+                                     masters={OTHER: [BASE], THIRD: [BASE], MOD_A: m_a, MOD_B: [BASE]})
+            got.append([e["admission"] for e in rec_of(plan, F1)])
+        return got == [["notOwnEdit"], ["admitted"]], f"masters [Base, Other] {got[0]}; [Base] {got[1]}"
+
+    # C662 (Pilgrim review S6). A patch that takes ModA's value drops ModB's change only where ModB made one: ModB's
+    # value is its master's (the base game's) though OtherMod changed it before, so nothing of ModB's is dropped
+    # (resolved); where ModB's value is its own, the patch drops it (switched).
+    def c662_dropped_only_an_own_change():
+        S1, S2 = f"00C621:{BASE}", f"00C622:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, S1, "Placement", "a1", "v1", "o1", before=OTHER),
+                  lost_row(MOD_A, MOD_B, S2, "Placement", "a2", "b2", "o2", before=OTHER)]
+        w_rows = [lost_row(MOD_B, PATCH, S1, "Placement", "v1", "a1", "a1"),
+                  lost_row(MOD_B, PATCH, S2, "Placement", "b2", "a2", "a2")]
+        chains = [(S1, "PlacedObject", [(BASE, {"Placement": "v1"}), (OTHER, {"Placement": "o1"}),
+                                        (MOD_A, {"Placement": "a1"}), (MOD_B, {"Placement": "v1"})]),
+                  (S2, "PlacedObject", [(BASE, {"Placement": "v2"}), (OTHER, {"Placement": "o2"}),
+                                        (MOD_A, {"Placement": "a2"}), (MOD_B, {"Placement": "b2"})])]
+        masters = {OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]}
+        plan, md, _ = core_bundle(p_rows, w_rows, masters=masters, p_chains=chains)
+        w1, w2 = [e.get("withPatch") for e in rec_of(plan, S1)], [e.get("withPatch") for e in rec_of(plan, S2)]
+        dropped = [ln for ln in md.splitlines() if "change is dropped" in ln]
+        ok = w1 == ["resolved"] and w2 == ["switched"] and dropped and all("dropped 2" not in ln for ln in dropped)
+        return ok, f"S1 {w1}, S2 {w2}; {[ln[:120] for ln in dropped]}"
+
+    # C663. "Undone by the patch: N changes the mods made" counts only changes a mod made: ModA's value lost to the patch
+    # is its master's (the base game's), so the patch undoes nothing of ModA's there; ModB's own change it undoes is
+    # counted.
+    def c663_undone_counts_own_changes():
+        U1, U2 = f"00C631:{BASE}", f"00C632:{BASE}"
+        arms = [arm("baseline", [BASE, THIRD, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, THIRD, MOD_A, MOD_B])]
+        w_rows = [lost_row(MOD_A, PATCH, U1, "Owner", "1", "7", "5", before=THIRD),
+                  lost_row(MOD_B, PATCH, U2, "Owner", "8", "7", "1", before=MOD_A)]
+        w_chains = [(U1, "PlacedObject", [(BASE, {"Owner": "1"}), (THIRD, {"Owner": "5"}), (MOD_A, {"Owner": "1"}),
+                                          (PATCH, {"Owner": "7"})]),
+                    (U2, "PlacedObject", [(BASE, {"Owner": "1"}), (MOD_A, {"Owner": "1"}), (MOD_B, {"Owner": "8"}),
+                                          (PATCH, {"Owner": "7"})])]
+        masters = {THIRD: [BASE], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]}
+        p_rows = [lost_row(OTHER, MOD_A, f"00C633:{BASE}", "Owner", "o", "a", "v")]
+        plan, md, _ = core_bundle(p_rows, w_rows, arms=arms, masters=masters, w_chains=w_chains)
+        v = reader(plan).get("validation") or {}
+        ok = v.get("undone") == 1 and v.get("undoneBy") == {MOD_B: 1}
+        return ok, f"undone {v.get('undone')} by {v.get('undoneBy')}; {v.get('undoneSentence')!r}"
+
+    # C670 (Clockwork review B1, records). New with ModA is decided field by field on the same setup with and without
+    # ModA, whoever wins: OtherMod's change is already lost without ModA (to ModB), so it is not a clash ModA brings,
+    # however the pair is labelled; ModB's change, which wins without ModA, is.
+    def c670_already_lost_whoever_wins():
+        R1, R2 = f"00C701:{BASE}", f"00C702:{BASE}"
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A], kind="baseline"),
+                arm("without-a", [BASE, OTHER, MOD_B])]
+        p_rows = [lost_row(OTHER, MOD_A, R1, "Owner", "o", "a", "v"),
+                  lost_row(MOD_B, MOD_A, R2, "Owner", "b", "a", "v")]
+        w_rows = [lost_row(OTHER, MOD_B, R1, "Owner", "o", "b", "v")]
+        plan, _, _ = core_bundle(p_rows, w_rows, arms=arms, patches=(), p_arm="baseline", w_arm="without-a")
+        got = (rec_of(plan, R1)[0]["admission"], rec_of(plan, R2)[0]["admission"])
+        return got == ("alreadyPresent", "admitted"), f"R1, R2 {got}"
+
+    # C671 (Clockwork review B1, cells). The same rule for a cell's fields: Grand Solitude's occlusion value already lost
+    # without ModA (to Landscape Fixes) is not new with ModA.
+    def c671_cell_field_already_lost():
+        C1 = f"00927C:{BASE}"
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A], kind="baseline"),
+                arm("without-a", [BASE, OTHER, MOD_B])]
+        p_rows = [lost_row(OTHER, MOD_A, C1, "OcclusionData", "o", "a", "v")]
+        w_rows = [lost_row(OTHER, MOD_B, C1, "OcclusionData", "o", "b", "v")]
+        plan, _, _ = core_bundle(p_rows, w_rows, check=CELLATTR, arms=arms, patches=(), p_arm="baseline",
+                                 w_arm="without-a")
+        got = [e["admission"] for e in rec_of(plan, C1)]
+        return got == ["alreadyPresent"], f"{got}"
+
+    # C672. A geometry row of one object (no partner object) is the same object in the same state of clash with and
+    # without ModA whichever plugins the probe names on each setup: already there, not new with ModA.
+    def c672_object_row_whoever_named():
+        SG = "state.conditional-geometry"
+        kind = f"STATE-ROUTE@014656:{BASE}@Triggered"
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A], kind="baseline"),
+                arm("without-a", [BASE, OTHER, MOD_B])]
+        p = [row(kind, MOD_A, OTHER, f"190A95:{BASE}")]
+        w = [row(kind, MOD_B, OTHER, f"190A95:{BASE}")]
+        plan, _, _ = compile_and_render(arms, {(SG, "baseline"): p, (SG, "without-a"): w}, [MOD_A])
+        got = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
+               if e["checkId"] == SG]
+        return got == ["alreadyPresent"], f"{got}"
+
+    # C673. "Does it need ModB?" is the same comparison: ModA's change lost to ModB is lost without ModB too (to
+    # OtherMod), so it does not need ModB.
+    def c673_needs_partner_whoever_wins():
+        R3 = f"00C703:{BASE}"
+        arms = [arm("baseline", [BASE, MOD_A, OTHER, MOD_B], kind="baseline"),
+                arm("without-b", [BASE, MOD_A, OTHER])]
+        p_rows = [lost_row(MOD_A, MOD_B, R3, "Owner", "a", "b", "v")]
+        w_rows = [lost_row(MOD_A, OTHER, R3, "Owner", "a", "o", "v")]
+        plan, _, _ = core_bundle(p_rows, w_rows, arms=arms, patches=(), p_arm="baseline", w_arm="without-b")
+        got = [e.get("attribution") for e in rec_of(plan, R3)]
+        return got == ["single-mod"], f"{got}"
+
+    # C674. A load-order risk is a change the other order loses that the measured order does not: OtherMod's change is
+    # lost in the measured order too (to ThirdMod), so moving ModA after it is no new risk for that field.
+    def c674_order_risk_whoever_wins():
+        O1 = f"000C74:{BASE}"
+        arms = [arm("baseline", [BASE, MOD_A, OTHER, THIRD], kind="baseline")]
+        p_rec = [lost_row(OTHER, THIRD, O1, "Lighting", "o", "t", "v")]
+        o_rows = [dict(lost_row(OTHER, MOD_A, O1, "Lighting", "o", "a", "v"), _check=CELLATTR, _type="Cell")]
+        setup = {"armId": "late", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
+                 "plugins": plugins(BASE, OTHER, THIRD, MOD_A), "rows": o_rows}
+        plan, _, _ = compile_and_render(arms, {(CONTACT, "baseline"): []}, [MOD_A],
+                                        count_only={(CELLATTR, "baseline"): 1},
+                                        enrichment={(CELLATTR, "baseline"): p_rec}, order_setups=[setup])
+        lines = [x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or []]
+        return lines == [], f"lines {lines}"
+
+    # C675. New with the patch is the same comparison: OtherMod's change lost to ModB with the patch was already lost
+    # without the patch (to ModA), so it is no new clash of the patch's.
+    def c675_new_with_patch_whoever_wins():
+        N1 = f"00C705:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, N1, "Owner", "o", "a", "v")]
+        w_rows = [lost_row(OTHER, MOD_B, N1, "Owner", "o", "b", "v")]
+        plan, md, _ = core_bundle(p_rows, w_rows)
+        v = reader(plan).get("validation") or {}
+        return v.get("patchProblems") == 0, f"new with the patch {v.get('patchProblems')}"
+
+    # C676 (Missives review, blocking 2). Whose change a water seam is: the probe names the two cells' plugins as a pair,
+    # but where only one side differs from the base game's water (attributed to side A or B), the other side's plugin
+    # carries the base game's value and made no change there: the seam is one mod against the base game, said in the
+    # base-game line, never a clash between the two mods. A seam both sides make stays a clash between mods.
+    def c676_one_sided_water_seam_is_base_game():
+        WB = "environment.water-boundaries"
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
+
+        def seam(fk, other, side):
+            r_ = row("WATER-SEAM", OTHER, MOD_A, fk, other=other)
+            r_["Summary"] = (f"Tamriel (1,1) E Tamriel (2,1): joined under the truth (001232:Update.esm z -14000), apart "
+                             f"under the winner (105CC3:Skyrim.esm z -14000 | 001232:Update.esm z -14000) — "
+                             f"attributed to {side}")
+            return r_
+        p = [seam(f"009301:{BASE}", f"009302:{BASE}", "side A"), seam(f"009303:{BASE}", f"009304:{BASE}", "both sides")]
+        plan, md, _ = compile_and_render(arms, {(WB, "baseline"): p, (WB, "without-a"): []}, [MOD_A])
+        got = {e["formKey"][:6]: e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
+               if e["checkId"] == WB}
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        ok = got == {"009301": "baseGame", "009303": "admitted"} and MOD_A in top and "1 clash" in top
+        return ok, f"{got}; base-game line {top[:200]!r}"
+
+    for name, fn in [("w2-core/C676-one-sided-water-seam-is-base-game", c676_one_sided_water_seam_is_base_game),
+                     ("w2-core/C660-masters-value-is-no-own-change", c660_masters_value_is_no_own_change),
+                     ("w2-core/C661-nearest-master-decides", c661_nearest_master_decides),
+                     ("w2-core/C662-dropped-only-an-own-change", c662_dropped_only_an_own_change),
+                     ("w2-core/C663-undone-counts-own-changes", c663_undone_counts_own_changes),
+                     ("w2-core/C670-already-lost-whoever-wins", c670_already_lost_whoever_wins),
+                     ("w2-core/C671-cell-field-already-lost", c671_cell_field_already_lost),
+                     ("w2-core/C672-object-row-whoever-named", c672_object_row_whoever_named),
+                     ("w2-core/C673-needs-partner-whoever-wins", c673_needs_partner_whoever_wins),
+                     ("w2-core/C674-order-risk-whoever-wins", c674_order_risk_whoever_wins),
+                     ("w2-core/C675-new-with-patch-whoever-wins", c675_new_with_patch_whoever_wins)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
