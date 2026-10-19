@@ -347,11 +347,12 @@ def c713(fx):
     sc = side_by_side(fx.cy, fx.mg)
     sc["boxes"].append(kiosk)
     proc, doc = pick(fx, sc, "c713")
-    sts = {s["id"]: s for s in ((doc or {}).get("witness") or {}).get("stations", [])}
-    s01 = sts.get("s01") or {}
+    sts = [s for s in ((doc or {}).get("witness") or {}).get("stations", [])
+           if s["bearing"] == 0 and s["standoff"] == 250]
+    s01 = sts[0] if sts else {}
     check("C713 a station inside a box is excluded by the planner's inside verdict",
           proc.returncode == 0 and s01.get("valid") is False and "inside" in (s01.get("why") or "")
-          and doc["witness"]["station"]["id"] != "s01", str(s01.get("why"))[:160])
+          and doc["witness"]["station"]["id"] != s01.get("id"), str(s01.get("why"))[:160])
 
 
 def c714(fx):

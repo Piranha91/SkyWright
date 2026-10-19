@@ -20,7 +20,7 @@ HOW, in three viewprobe runs, each one cell load:
                   walkable storey the stations and the pair share (navmesh first; else the first placed surface below
                   the pair's level), never a heightmap read at an XY regardless of what stands over it. A pair whose
                   floor lies under the cell's water surface is refused: no camera stands on that floor.
-  3. witnesses    one static worklist of stations on a ring around the pair (12 bearings x 2 standoffs, eye at floor +
+  3. witnesses    one static worklist of stations on a ring around the pair (12 bearings x 3 standoffs, 150-400 u, eye at floor +
                   eye height, looking at the pair), every shot with `--ref A=cyan --ref B=magenta --ref-surface`, a
                   grid of `--pick` pixels and the planner's own placement queries at the station eye.
 
@@ -238,7 +238,7 @@ def choose_floor(levels: list[float], minz: float, maxz: float, below: float, ab
 # ---------------------------------------------------------------- the picker --
 
 def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: Path, cell: str | None = None,
-                bearings: int = 12, standoffs=(250.0, 400.0), size: int = 320, grid: int = 10, fov: float = 65.0,
+                bearings: int = 12, standoffs=(150.0, 250.0, 400.0), size: int = 320, grid: int = 10, fov: float = 65.0,
                 min_depth: int = 2, synthetic: bool = False, aspect: str = "16:9", shotplan=None) -> dict:
     """The points document `capture_acquire.py` reads, or Unpickable with one plain sentence."""
     S = shotplan or _load_shotplan()
