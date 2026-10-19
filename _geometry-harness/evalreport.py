@@ -2041,7 +2041,9 @@ def build_prediction(ctx: dict) -> dict:
             mod_ = e["A"] if e["A"].lower() in pt_lower else e["B"]
             c_ = base_geo.setdefault(mod_, collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"], "pairs": set()})
             # a pair of objects is one clash however many world states show it (Pilgrim's second review, S5)
-            pair_ = (state_split(e["kind"])[0], str(e["formKey"]), tuple(sorted(map(str, e.get("other") or ()))))
+            base_k, in_st = state_split(e["kind"])
+            pair_ = ((base_k, str(e["formKey"]), tuple(sorted(map(str, e.get("other") or ())))) if in_st is not None
+                     else (e["kind"], str(e["formKey"]), e.get("summary"), tuple(map(str, e.get("other") or ()))))
             if pair_ in c_["pairs"]:
                 continue
             c_["pairs"].add(pair_)
