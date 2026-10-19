@@ -660,8 +660,9 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
                 per[key.split(".")[0].split("[")[0]].append(key + val)
             per_node.append({k: tuple(sorted(v)) for k, v in per.items()})
         tops = sorted(set().union(*[set(v) for v in per_node]))
+        # a field no provider differs in is absent: every provider holds the winner's value (`allListed`)
         out[fk] = {"type": rtype, "editorId": r.get("editorid"), "providers": [n.get("plugin") for n in nodes],
-                   "values": {t: [v.get(t, ()) for v in per_node] for t in tops}, "reads": {}}
+                   "values": {t: [v.get(t, ()) for v in per_node] for t in tops}, "reads": {}, "allListed": True}
     return out
 
 
