@@ -19,5 +19,7 @@
     "Worldspace": ["LargeReferences"]
   },
   "runtimeMergedRecords": ["NavigationMeshInfoMap"],
-  "anglesRadians": ["Placement.Rotation"]
+  "anglesRadians": ["Placement.Rotation"],
+  "integerMasksAbout": "Integer fields the game reads only in part, by record type and field path, with the mask of the bytes it reads; a change outside the mask is no change in game. A cell's XCLC grid holds one byte of land flags (hide quads 1-4) and three unused bytes; Mutagen reads the four bytes as one CellGrid.Flag value (Quad1-Quad4 = 0-3, not bit flags), so its Grid.Flags carries the unused bytes too. Mutagen lags xEdit here (xEdit names the three bytes Unused).",
+  "integerMasks": {"Cell": {"Grid.Flags": 255}}
 }

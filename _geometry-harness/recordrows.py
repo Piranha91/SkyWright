@@ -15,7 +15,8 @@ identity field is not compared; file bookkeeping, group bookkeeping and runtime-
 (.claude/skills/world-edit-compatibility/references/record-field-scope.json) by their schema names. A field the
 capture did not read, a field the schema does not know and a record whose read failed are unjudged with the reason,
 never treated as equal, and listed (`Unjudged`: the record, field, reason and the plugins whose versions were compared).
-Generated bookkeeping (a worldspace's LargeReferences) is named in the same skill data and not compared. Lists are compared as multisets; numbers at four decimals with -0 equal to 0.
+Generated bookkeeping (a worldspace's LargeReferences) is named in the same skill data and not compared. Lists are compared as multisets; numbers at four decimals with -0 equal to 0; an integer
+field the game reads only in part (a cell's Grid flags) on the bytes it reads, by a mask named in the same skill data.
 """
 from __future__ import annotations
 
@@ -71,6 +72,9 @@ class Scope:
         self.merged = {k: set(v) for k, v in (self.data.get("runtimeMerged") or {}).items()}
         self.merged_records = set(self.data.get("runtimeMergedRecords") or [])
         self.angles = set(self.data.get("anglesRadians") or [])
+        # integer fields the game reads only in part: {record type: {field path: mask of the bytes it reads}}
+        self.masks = {t: {k: int(m) for k, m in (v or {}).items()}
+                      for t, v in (self.data.get("integerMasks") or {}).items() if isinstance(v, dict)}
         self._contains = {}
 
     def _type(self, name):
@@ -133,6 +137,10 @@ class Scope:
                 out += [f"{kind} names {rtype}.{n}, which the schema does not have" for n in sorted(names - have)]
         out += [f"runtimeMergedRecords names {n}, which the schema does not have"
                 for n in sorted(self.merged_records - set(self.records))]
+        for t, ms in sorted(self.masks.items()):
+            for k in sorted(ms):
+                if self.classify(t, k) != "compared":
+                    out.append(f"integerMasks names {t}.{k}, which is not a compared field of that record type in the schema")
         for a in sorted(self.angles):
             if not any(self.classify(t, a) == "compared" for t in self.records):
                 out.append(f"anglesRadians names {a}, which is a compared field of no record type in the schema")
@@ -302,7 +310,15 @@ def _angle(v: str) -> str:
     return ",".join(out)
 
 
-def _keyed(fields: dict, angles=frozenset()) -> dict[str, tuple]:
+def _masked(v: str, mask: int) -> str:
+    """An integer field compared on the bytes the game reads (a value that is not an integer, as read)."""
+    try:
+        return str(int(str(v).strip()) & mask)
+    except ValueError:
+        return _norm(v)
+
+
+def _keyed(fields: dict, angles=frozenset(), masks=None) -> dict[str, tuple]:
     """Stripped field path -> the multiset of its normalised leaf values (list order and summary lines ignored)."""
     parents = set()
     for p in fields:
@@ -316,7 +332,7 @@ def _keyed(fields: dict, angles=frozenset()) -> dict[str, tuple]:
         if p in parents:
             continue  # a struct's or list's own summary line; its leaves are compared
         k = INDEX.sub("", p)
-        out[k].append(_angle(v) if k in angles else _norm(v))
+        out[k].append(_angle(v) if k in angles else _masked(v, masks[k]) if masks and k in masks else _norm(v))
     return {k: tuple(sorted(v)) for k, v in out.items()}
 
 
@@ -340,9 +356,10 @@ class _View:
     was not cut off before it (a text dump prints every top-level field, absent ones included, so a read cut off at its line limit
     covers every name it printed in full, that is every name but the one it was cut off in). A field is taken from the narrowest covering read."""
 
-    def __init__(self, reads, angles=frozenset()):
+    def __init__(self, reads, angles=frozenset(), masks=None):
         self.reads = reads
         self.angles = angles
+        self.masks = masks or {}
         self._k = {}
         self.cut = {}
         for r in reads:
@@ -356,7 +373,7 @@ class _View:
 
     def keyed(self, r):
         if id(r) not in self._k:
-            self._k[id(r)] = _keyed({k: v for k, v in r["fields"].items() if k != TRUNCATED}, self.angles)
+            self._k[id(r)] = _keyed({k: v for k, v in r["fields"].items() if k != TRUNCATED}, self.angles, self.masks)
         return self._k[id(r)]
 
     def covers(self, r, top) -> bool:
@@ -426,7 +443,7 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
             c["SetAside"][CONTAINER] += 1
             continue
         c["Judged"] += 1
-        views = [_View(rs, scope.angles) for _, _, rs in chain]
+        views = [_View(rs, scope.angles, scope.masks.get(rtype)) for _, _, rs in chain]
         keys = sorted(set().union(*[set(v.keys) for v in views]))
         # The unit is one top-level field of the record, as the schema names it: a struct or list is one field whose
         # value is all of its compared leaves (the accepted scorecard's unit, 2026-09-28).
