@@ -26,6 +26,9 @@
 " }}{% endfor %}{% for h in pred.get("historyLossLines") or [] %}{% if loop.first %}{{ "
 " }}{% endif %}- {{ h.text }}{% for fid in h.findingIds[:1] %} [Evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
+{% endfor %}{% for o in pred.get("orderRiskLines") or [] %}{% if loop.first %}{{ "
+" }}{% endif %}- {{ o }}
+
 {% endfor %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}{{ "
 " }}**{{ pred.singleModHeading }}**
 

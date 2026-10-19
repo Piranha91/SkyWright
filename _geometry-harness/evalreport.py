@@ -1054,6 +1054,19 @@ def build_prediction(ctx: dict) -> dict:
     ident_of = {}
     by_object = set(words.get("identityByObject") or [])
 
+    # A world-state row's kind names its state ("STATE-CONTACT@<state>@Triggered", skill data `stateKinds`): the same
+    # object in the same clash in several states is one clash (Pilgrim review: one cairn counted once per state), and
+    # a contact or empty-space row there is the object's own state, as geometry.placement-contact and
+    # geometry.fixture-empty-space rows are (P72)
+    state_words = words.get("stateKinds") or {}
+    state_kind_re = re.compile(state_words["pattern"]) if state_words.get("pattern") else None
+    state_by_object = set(state_words.get("byObject") or [])
+
+    def state_split(kind):
+        """(the kind without its world state, the state), or (kind, None) for a row of no world state."""
+        m_ = state_kind_re.match(str(kind or "")) if state_kind_re else None
+        return (m_.group("kind"), m_.group("state")) if m_ else (kind, None)
+
     def identity(check_id, kind, a, b, r):
         """What makes two rows on two setups the same clash. A record lost edit is one plugin's change to one field
         of one record lost to another plugin: the pair and the field belong to it. A geometry row with a partner
@@ -1063,6 +1076,13 @@ def build_prediction(ctx: dict) -> dict:
         alone if that one removes enough. Any other row keeps its plugin pair."""
         if kind == "LOST-EDIT":
             return (check_id, kind, a, b, r.get("formKey"), r.get("field"))
+        base_kind, in_state = state_split(kind)
+        if in_state is not None:
+            if base_kind in state_by_object:
+                return (check_id, base_kind, r.get("formKey"))
+            if r.get("other") is not None:
+                return (check_id, base_kind, r.get("formKey"), tuple(r.get("other") or ()))
+            return (check_id, base_kind, a, b, r.get("formKey"))
         if check_id in by_object:
             return (check_id, kind, r.get("formKey"))
         if r.get("other") is not None:
@@ -1451,12 +1471,30 @@ def build_prediction(ctx: dict) -> dict:
     for (check_id, arm_id), rs in rows_by.items():
         if arm_id == p_of(check_id):
             p_rows.update(rs)
+    state_rep = {}                             # a world-state clash's identity -> its one counted entry (P72)
     for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
         hit = p_rows[rk]
         adm = admission(rk, hit["history"], hit["row"].get("other"))
+        base_kind, in_state = state_split(rk[1])
+        if adm == "admitted" and in_state is not None:
+            rep_ = state_rep.get(ident_of.get(rk, tuple(rk[:5])))
+            if rep_ is not None:
+                # the same object in the same clash in another world state: counted once, its states listed on it
+                rep_["states"].append(in_state)
+                rep_["stateRows"].append([rk[1], rk[2], rk[3], (hit["row"].get("other") or [None])[0]])
+                record.append({"checkId": rk[0], "kind": rk[1], "A": rk[2], "B": rk[3], "formKey": rk[4],
+                               "summary": rk[5], "admission": "otherState", "findingId": hit["finding"].get("id"),
+                               "sameAs": rep_.get("findingId")})
+                set_aside["otherState"] += 1
+                continue
         entry = {"checkId": rk[0], "kind": rk[1], "A": rk[2], "B": rk[3], "formKey": rk[4], "summary": rk[5],
                  "admission": adm,
                  "findingId": hit["finding"].get("id")}
+        if in_state is not None:
+            entry.update({"itemKind": base_kind, "states": [in_state],
+                          "stateRows": [[rk[1], rk[2], rk[3], (hit["row"].get("other") or [None])[0]]]})
+            if adm == "admitted":
+                state_rep[ident_of.get(rk, tuple(rk[:5]))] = entry
         if rk[0] in sib_only:
             # its finding lives in the sibling's plan, not this one: named, never linked as if it were here
             entry["source"] = "sibling"
@@ -1492,12 +1530,14 @@ def build_prediction(ctx: dict) -> dict:
             continue
         record.append(entry)
         mods = sorted([rk[2], rk[3]], key=str.lower)
-        gk = (rk[0], rk[1], tuple(mods), attr, attr_mod, why)
-        g = groups.setdefault(gk, {"checkId": rk[0], "kind": rk[1], "mods": mods, "count": 0, "attribution": attr,
+        gk = (rk[0], base_kind, tuple(mods), attr, attr_mod, why)
+        g = groups.setdefault(gk, {"checkId": rk[0], "kind": base_kind, "mods": mods, "count": 0, "attribution": attr,
                                    "attributionMod": attr_mod, "attributionWhy": why, "findingIds": [], "examples": [],
                                    "_subjects": set()})
         g["count"] += 1
         g["_subjects"].add(rk[4] if rk[4] is not None else ("row", rk[5]))
+        if in_state is not None:
+            g.setdefault("_stateEntries", []).append(entry)
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
             # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
             g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
@@ -1613,6 +1653,12 @@ def build_prediction(ctx: dict) -> dict:
                                                         "more": (bind(words["itemPlacesMore"], {"count": len(places) - len(top)})
                                                                  if len(places) > len(top) else "")}))
         g.pop("_records", None)
+        st_entries = g.pop("_stateEntries", None)
+        several = [len(e_["states"]) for e_ in st_entries or [] if len(e_["states"]) > 1]
+        if several and words.get("itemStates"):
+            # one object in several world states is one clash, and the item says in how many (P72)
+            detail.append(bind(words["itemStates"][0 if g["count"] == 1 else 1],
+                               {"states": fmt_n(max(several)), "count": fmt_n(len(several))}))
         n_dis = g.pop("_disables", 0)
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
@@ -1909,7 +1955,17 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
-             "ownMaster": set_aside["ownMaster"]}
+             "ownMaster": set_aside["ownMaster"], "otherState": set_aside["otherState"]}
+    def describe_setup(arm_id):
+        """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
+        plugs = all_orders.get(arm_id) or []
+        low = {x.lower() for x in plugs}
+        kept = [x for x in plugs if not is_base_game(x, words)]
+        removed = [x for x in all_orders.get(p_arm) or [] if x.lower() not in low]
+        return (words["setupBaseGameAlone"] if not kept else
+                bind(words["setupOnly"], {"plugins": " and ".join(kept)}) if len(kept) <= len(removed) else
+                bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
+
     def sibling_source():
         """Which setups the separate evaluation measured and this report uses, in plugins (blind review of the BPT
         report: "each mod on its own" claimed setups that were never measured)."""
@@ -1927,6 +1983,56 @@ def build_prediction(ctx: dict) -> dict:
                   bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
             descs.append(d_)
         return bind(words["siblingSetups"], {"setups": "; ".join(descs)})
+    # A load-order risk the record lane measured: the setup without the patch with its plugins in another order (same
+    # plugins, same bytes), whose record rows hold changes lost between a pair whose order differs, that the measured
+    # order does not lose. Said as a measured record fact, one line per pair; no claim of how it shows in game.
+    order_lines, order_record = [], []
+    if ctx.get("orderSetups"):
+        main_b = ctx.get("mainBundle")
+        p_req = next((x for x in (main_b.plan.get("arms") if main_b else None) or [] if x.get("armId") == p_arm), {})
+        p_plugs = [(str(x.get("name")), str(x.get("sha256") or "")) for x in (p_req.get("requested") or {}).get("plugins") or []]
+        p_pos = {n.lower(): i for i, (n, _) in enumerate(p_plugs)}
+        p_lost = {(c_, k_[2].lower(), k_[3].lower(), str(k_[4]), h_["row"].get("field"))
+                  for (c_, a_), rs in rows_by.items() if a_ == p_of(c_) for k_, h_ in rs.items() if k_[1] == "LOST-EDIT"}
+        for o_ in ctx["orderSetups"]:
+            o_plugs = [(str(x.get("name")), str(x.get("sha256") or "")) for x in o_.get("plugins") or []]
+            if sorted(o_plugs) != sorted(p_plugs):
+                raise InputRefused(f"order-setup-foreign: the order setup {o_.get('armId')} ({o_.get('planPath')}) does "
+                                   f"not hold the same plugins with the same bytes as the setup without the patch, so it "
+                                   f"was not used.")
+            if o_plugs == p_plugs:
+                raise InputRefused(f"order-setup-same-order: the order setup {o_.get('armId')} ({o_.get('planPath')}) "
+                                   f"loads the plugins in the measured order, so it shows no order risk.")
+            o_pos = {n.lower(): i for i, (n, _) in enumerate(o_plugs)}
+            per_pair = collections.OrderedDict()
+            for r_ in o_.get("rows") or []:
+                a_, b_ = str(r_.get("A")), str(r_.get("B"))
+                al, bl = a_.lower(), b_.lower()
+                if (r_.get("Kind") != "LOST-EDIT" or not ({al, bl} & pt_lower) or al not in p_pos or bl not in p_pos
+                        or (p_pos[al] < p_pos[bl]) == (o_pos[al] < o_pos[bl])):
+                    continue                   # a pair whose order did not change, or no evaluated mod in it
+                for n_ in r_.get("Necessary") or []:
+                    v_ = n_.get("Values") or {}
+                    if same_but_path_case(v_.get("lost"), v_.get("winner")):
+                        continue
+                    if (str(r_.get("_check")), al, bl, str(n_.get("FormKey")), r_.get("Field")) in p_lost:
+                        continue               # the measured order loses it too
+                    g_ = per_pair.setdefault((a_, b_), {"n": 0, "records": {}, "fields": collections.Counter()})
+                    g_["n"] += 1
+                    g_["records"].setdefault(str(n_.get("FormKey")), r_.get("_type"))
+                    g_["fields"][str(r_.get("Field"))] += 1
+            for (a_, b_), g_ in sorted(per_pair.items(), key=lambda kv: -kv[1]["n"]):
+                types_ = collections.Counter(t_ for t_ in g_["records"].values() if t_)
+                n_rec = len(g_["records"])
+                order_lines.append(bind(words["orderRiskLine"], {
+                    "loser": a_, "winner": b_, "count": fmt_n(g_["n"]),
+                    "noun": words["fieldNoun"][0 if g_["n"] == 1 else 1],
+                    "records": f"{fmt_n(n_rec)} {'record' if n_rec == 1 else 'records'}" + (
+                        " (" + ", ".join(f"{t_} {fmt_n(c_)}" for t_, c_ in types_.most_common()) + ")" if types_ else ""),
+                    "fields": fields_text(g_["fields"])}))
+                order_record.append({"armId": o_.get("armId"), "planPath": o_.get("planPath"),
+                                     "rowsPath": o_.get("rowsPath"), "loser": a_, "winner": b_, "fields": g_["n"],
+                                     "records": n_rec})
     if sibling_record:
         # Snazzy review 1: the sibling's setup that decided "needs both" for a partner mod is named with the others
         for m_, a_ in partner_arms.items():
@@ -1963,7 +2069,8 @@ def build_prediction(ctx: dict) -> dict:
                       "subject": subject}),
                   "record": record, "detailAsideWords": words.get("detailAside") or {},
                   "sibling": sibling_record, "withoutPartnerArms": dict(partner_arms),
-                  "siblingSource": sibling_source()}
+                  "siblingSource": sibling_source(),
+                  "orderRiskLines": order_lines, "orderRisks": order_record}
 
     # --- coverage: what the checks could not judge, by named reason and count
     reasons = words["coverageReasons"]
@@ -2234,8 +2341,12 @@ def build_prediction(ctx: dict) -> dict:
                 # own re-measure (Gone), never from its absence from a list (coordinator, D3)
                 return "cannot-tell" if not multi and e.get("attribution") == "single-mod" else "resolved"
             other = e.get("other") or []
-            physical = preds.get((e["kind"], e["A"], e["B"], e["formKey"], other[0] if other else None))
-            return {"Gone": "resolved", "Holds": "left"}.get(physical, "cannot-tell")
+            # an object in several world states is judged in each: still there in any is left (P72)
+            outs = [{"Gone": "resolved", "Holds": "left"}.get(preds.get((k_, a_, b_, fk_, o_)), "cannot-tell")
+                    for k_, a_, b_, fk_, o_ in ([(x[0], x[1], x[2], e["formKey"], x[3]) for x in e["stateRows"]]
+                                                if e.get("stateRows") else
+                                                [(e["kind"], e["A"], e["B"], e["formKey"], other[0] if other else None)])]
+            return "left" if "left" in outs else "cannot-tell" if "cannot-tell" in outs else "resolved"
 
         outcome = {id(e): lost_outcome(e) if e["kind"] == "LOST-EDIT" else geometry_outcome(e) for e in judged}
 
@@ -2273,6 +2384,11 @@ def build_prediction(ctx: dict) -> dict:
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
+        # a clash a setup without the patch already has (here or in the sibling) is not new with the patch, whichever
+        # plugins the rows name (Pilgrim review, P73: Grand Solitude alone splits the same aliases the patch restores)
+        no_patch_arms = [a_ for a_, pl_ in all_orders.items() if a_ != p_arm and not replaced_by.get(a_)
+                         and not ({str(x).lower() for x in pl_} & patch_lower)]
+        not_new = []
         master_idents = set()
         # a field a patch's value now wins over a mod's change, where no change to that field was lost without the patch:
         # a record change the patch newly undoes, a new clash (fifth blind review, W-S3 / S-S1)
@@ -2302,10 +2418,14 @@ def build_prediction(ctx: dict) -> dict:
                 continue                       # the base game, or a record value over the plugin's own master (P63)
             if (rk[0], p_of(rk[0])) in measured and ident_ not in problem_seen:
                 problem_seen.add(ident_)
+                where_ = next((a_ for a_ in no_patch_arms if (rk[0], a_) in measured and present(a_, rk)), None)
+                if where_ is not None:
+                    not_new.append((rk, where_))
+                    continue
                 problems.append(rk)
 
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
-        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat")
+        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "otherState")
                      and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
         spots = collections.Counter(e["admission"] for e in spot_rows)
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
@@ -2357,6 +2477,16 @@ def build_prediction(ctx: dict) -> dict:
                      bind(words["validationPatchProblems"], {"patch": patch, "count": by_unit(
                          [{"checkId": rk[0], "kind": rk[1]} for rk in problems]), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
+        not_new_sentence = None
+        if not_new:
+            by_setup = collections.OrderedDict()
+            for rk, a_ in not_new:
+                by_setup.setdefault((rk[0], a_), []).append(rk)
+            sentences.append(bind(words["validationNotNew"], {"patch": patch, "parts": "; ".join(
+                bind(words["validationNotNewPart"], {
+                    "count": by_unit([{"checkId": c_, "kind": rk_[1]} for rk_ in rks]), "title": title_of(c_),
+                    "setup": describe_setup(a_)}) for (c_, a_), rks in by_setup.items())}))
+            not_new_sentence = sentences[-1]
         undone_sentence = None
         if undone:
             # changes the patches undo are the patch author's choices, said in their own neutral line, never as new
@@ -2397,7 +2527,7 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": by_unit(not_measured)}))
         # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
         def item_of(e):
-            return (e["checkId"], e["kind"], tuple(sorted([e["A"], e["B"]], key=str.lower)),
+            return (e["checkId"], e.get("itemKind") or e["kind"], tuple(sorted([e["A"], e["B"]], key=str.lower)),
                     e.get("attribution"), e.get("attributionMod"))
         by_item = []
         for g in prediction["items"]:
@@ -2546,6 +2676,7 @@ def build_prediction(ctx: dict) -> dict:
                       "cannotTell": len(untold) + len(untold_value), "valueUnrecorded": len(untold_value),
                       "falseAlarms": None,
                       "patchProblems": len(problems),
+                      "notNewWithPatch": len(not_new), "notNewSentence": not_new_sentence,
                       "patchChoices": choices,
                       "notMeasured": len(not_measured), "blindSpots": blind, "sentences": sentences,
                       "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],
@@ -2556,9 +2687,11 @@ def build_prediction(ctx: dict) -> dict:
 
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
                  location_scopes: dict | None = None, sibling_dir: Path | None = None,
-                 sibling_as_given: str | None = None) -> dict:
+                 sibling_as_given: str | None = None, order_setups: list | None = None) -> dict:
     """sibling_dir: a verified bundle of the same order without the patch; its single-mod setups stand in for the ones
-    this bundle lacks (build_prediction's join). Raises InputRefused when it cannot be joined at all."""
+    this bundle lacks (build_prediction's join). Raises InputRefused when it cannot be joined at all.
+    order_setups: the record lane's rows measured on the setup without the patch with its plugins in another order
+    [{armId, planPath, rowsPath, plugins [{name, sha256}], rows [conflict rows, each with its `_check`]}]."""
     b = Bundle(bundle_dir)
     # the names enrichment, where the bundle carries one: each placed object's base and the base's model, so every
     # section that counts objects leaves out an object with no body (round 4)
@@ -4135,7 +4268,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
-        "names": names_early, "masters": plugin_masters_doc})
+        "names": names_early, "masters": plugin_masters_doc, "orderSetups": list(order_setups or [])})
     verdict = lead["prediction"]["verdict"]
     # The scope line names the evaluated pair when the counted clashes need both of them, never the third mod with
     # the most rows; the third mods of single-mod clashes shown are named after it.
@@ -4790,6 +4923,30 @@ def cmd_plan(a) -> int:
             if requested_states and config.get("state") not in requested_states:
                 return refuse(r, f"location-scope-foreign: {source} state does not match arm {arm_id}")
             location_scopes[arm_id] = doc
+        # the record lane's rows on the setup without the patch with its plugins in another order (an order risk): the
+        # plan that describes that setup and the rows measured there; build_prediction checks the plugins and bytes
+        order_setups = []
+        for binding in list(getattr(a, "order_setup", None) or []):
+            if "@" not in binding or "=" not in binding.split("@", 1)[1]:
+                return refuse(r, f"order-setup-invalid: {binding!r} must be ARM@PLAN=ROWS")
+            o_arm, rest = binding.split("@", 1)
+            plan_src, rows_src = rest.split("=", 1)
+            o_plan, o_rows = load_json(Path(plan_src)), load_json(Path(rows_src))
+            o_desc = next((x for x in (o_plan.get("arms") if isinstance(o_plan, dict) else None) or []
+                           if x.get("armId") == o_arm), None)
+            if o_desc is None:
+                return refuse(r, f"order-setup-invalid: {plan_src} is not an evaluation plan with an arm {o_arm!r}")
+            if isinstance(o_rows, dict) and isinstance(o_rows.get("rows"), list):
+                rows_ = o_rows["rows"]
+            elif isinstance(o_rows, dict) and isinstance(o_rows.get("Conflicts"), list):
+                rows_ = [dict(c, _check=c.get("_check") or o_rows.get("Population")) for c in o_rows["Conflicts"]]
+            else:
+                return refuse(r, f"order-setup-invalid: {rows_src} holds no record rows (a `rows` or `Conflicts` list)")
+            if any(not x.get("_check") for x in rows_):
+                return refuse(r, f"order-setup-invalid: {rows_src} has rows that name no check")
+            order_setups.append({"armId": o_arm, "planId": o_plan.get("planId"), "planPath": plan_src,
+                                 "rowsPath": rows_src, "plugins": (o_desc.get("requested") or {}).get("plugins") or [],
+                                 "rows": rows_})
         r.advance(1)
         r.stage("compile", total=1, unit="plans")
         conc = pr.get("concise") or {}
@@ -4818,7 +4975,8 @@ def cmd_plan(a) -> int:
                                  f"({serr or 'see sibling-verify/verify.json'}), so nothing was joined.")
         try:
             plan = compile_plan(bundle, verify, settings, pr, str(a.bundle), location_scopes,
-                                sibling_dir=sibling, sibling_as_given=getattr(a, "sibling_bundle", None))
+                                sibling_dir=sibling, sibling_as_given=getattr(a, "sibling_bundle", None),
+                                order_setups=order_setups)
         except InputRefused as ex:
             return refuse(r, str(ex))
         for arm_id, doc in location_scopes.items():
@@ -4829,6 +4987,17 @@ def cmd_plan(a) -> int:
                                      "path": dest.relative_to(out).as_posix(), "sha256": location_sha,
                                      "bytes": dest.stat().st_size, "checkId": None, "armId": arm_id,
                                      "part": None, "strength": "measured-scope", "recordedBy": "scopeprobe",
+                                     "storage": "presentation"})
+        for o_ in order_setups:
+            # what the order risk lines rest on, kept with the report and hashed like every other evidence file
+            dest = out / "evidence" / f"order-setup-{o_['armId']}.json"
+            write_json(dest, {"planId": o_["planId"], "armId": o_["armId"], "planPath": o_["planPath"],
+                              "rowsPath": o_["rowsPath"], "plugins": o_["plugins"], "rows": o_["rows"]})
+            o_sha = sha256_file(dest)
+            plan["evidence"].append({"id": "E-" + o_sha[:16], "kind": "order-setup",
+                                     "path": dest.relative_to(out).as_posix(), "sha256": o_sha,
+                                     "bytes": dest.stat().st_size, "checkId": None, "armId": o_["armId"],
+                                     "part": None, "strength": "measured-records", "recordedBy": "record lane",
                                      "storage": "presentation"})
         stamp(plan)
         write_json(out / "presentation.json", plan)
@@ -5398,6 +5567,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="verify a temporary copy of the bundle so the bundle directory itself is never written to")
     p.add_argument("--location-scope", action="append", default=[], metavar="ARM=FILE",
                    help="bind a scopeprobe location-contributor document to an arm; repeat for multiple arms")
+    p.add_argument("--order-setup", action="append", default=[], metavar="ARM@PLAN=ROWS",
+                   help="the record lane's rows (ROWS: a `rows` list or a `Conflicts` emit, each row naming its check) "
+                        "measured on the plan PLAN's arm ARM: the setup without the patch with its plugins in another "
+                        "order, same plugins and bytes. Changes lost there between a pair whose order differs, that "
+                        "the measured order does not lose, are said as a load-order risk; repeat for several")
     p.add_argument("--single-mod", choices=("show", "aside"), default=None,
                    help="a clash one evaluated mod has with a third mod on its own: shown under its own heading (show) "
                         "or set aside with a count (aside); never counted in the verdict. Default: the reporting "
