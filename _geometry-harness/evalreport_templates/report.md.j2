@@ -92,7 +92,9 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {% for a in p.scope.arms %}
 **{{ a.readerLabel }}**
 
-{% if a.locationPluginOrder %}{{ a.locationPluginOrder|join(", ") }}.
+{% if a.get("sameListAs") %}{{ a.locationPluginScope.missingInput }}
+
+{% else %}{% if a.locationPluginOrder %}{{ a.locationPluginOrder|join(", ") }}.
 {% else %}{{ p.reader.locationOrder.empty or "No evidenced plugin was identified." }}
 {% endif %}
 
@@ -107,7 +109,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {% endif %}
 {% endif %}
 Coverage: {{ "all contributors to the listed locations identified" if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}{% if a.locationPluginScope.get("note") %} {{ a.locationPluginScope.note }}{% endif %}
-
+{% endif %}
 {% endfor %}
 
 {% set regressions = p.findings|selectattr("kind", "equalto", "regression")|selectattr("readerRelevant")|list %}

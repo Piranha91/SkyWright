@@ -2636,8 +2636,10 @@ def main():
                   row("SPLIT", OTHER, PATCH, R3, other=R4, label="Temple (int)")]
         arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
                 arm("without-patch", [BASE, OTHER, MOD_A, MOD_B]), arm("without-a", [BASE, OTHER, MOD_B])]
-        results = {(ALIAS, "baseline"): w_rows, (ALIAS, "without-patch"): [],
-                   (ALIAS, "without-a"): [row("SPLIT", OTHER, MOD_B, R1, other=R2, label="Temple (int)")]}
+        a_rows = [row("SPLIT", OTHER, MOD_B, R1, other=R2, label="Temple (int)")]
+        for r_ in w_rows + a_rows:      # the probe's words name the quest and aliases, never the plugins
+            r_["Summary"] = f"quest 'Q' aliases 'X' and 'Y' were 137u apart, now 1,800u apart ({r_['Alternative'][0]['FormKey']})"
+        results = {(ALIAS, "baseline"): w_rows, (ALIAS, "without-patch"): [], (ALIAS, "without-a"): a_rows}
         plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
         val = reader(plan).get("validation") or {}
         line = next((ln for ln in md.splitlines() if "brings back" in ln), "")

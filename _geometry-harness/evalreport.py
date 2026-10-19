@@ -1053,6 +1053,7 @@ def build_prediction(ctx: dict) -> dict:
     rows_by, prefixes, measured, count_only = {}, {}, set(), {}
     ident_of = {}
     by_object = set(words.get("identityByObject") or [])
+    by_summary = set(words.get("identityBySummary") or [])
 
     # A world-state row's kind names its state ("STATE-CONTACT@<state>@Triggered", skill data `stateKinds`): the same
     # object in the same clash in several states is one clash (Pilgrim review: one cairn counted once per state), and
@@ -1085,6 +1086,10 @@ def build_prediction(ctx: dict) -> dict:
             return (check_id, base_kind, a, b, r.get("formKey"))
         if check_id in by_object:
             return (check_id, kind, r.get("formKey"))
+        if check_id in by_summary:
+            # one conflict the probe lists once per object it names (two aliases split in one quest): the conflict is
+            # its words and its partner record, whichever of its objects the row names (Pilgrim review: 2 splits, 4 rows)
+            return (check_id, kind, tuple(r.get("other") or ()), str(r.get("summary") or ""))
         if r.get("other") is not None:
             return (check_id, kind, r.get("formKey"), tuple(r.get("other") or ()))
         return (check_id, kind, a, b, r.get("formKey"))
@@ -2160,6 +2165,7 @@ def build_prediction(ctx: dict) -> dict:
                   "siblingSource": sibling_source(),
                   "orderRiskLines": order_lines, "orderRisks": order_record}
 
+    sib_counted = {e["checkId"] for e in record if e.get("source") == "sibling" and e["admission"] == "admitted"}
     # --- coverage: what the checks could not judge, by named reason and count
     reasons = words["coverageReasons"]
     lines = []
@@ -2185,7 +2191,8 @@ def build_prediction(ctx: dict) -> dict:
                 label = labels.get(a)
                 # it follows "for" / "of" mid-sentence: lower-cased, with its article
                 label = ("the " + label[:1].lower() + label[1:]) if label else "a tested setup"
-                if part not in ("diff", "reverse") and a == p_arm and check_id in sib_only and words.get("missingFromSibling"):
+                if (part not in ("diff", "reverse") and a == p_arm and check_id in sib_counted
+                        and words.get("missingFromSibling")):
                     # its result for this setup is taken from the separate evaluation, said here too (P95)
                     label += words["missingFromSibling"]
                 return (f"the comparison of {label} with the measured load order" if part in ("diff", "reverse")
@@ -2193,7 +2200,7 @@ def build_prediction(ctx: dict) -> dict:
             setups = sorted({(a, part) for a, part in arms_ if a}, key=lambda x: (str(x[0]), str(x[1])))
             where = ("" if len({a for a, _ in setups}) >= all_relevant and all(pt not in ("diff", "reverse")
                                                                                 for _, pt in setups)
-                     and not (check_id in sib_only and any(a == p_arm for a, _ in setups)) else
+                     and not (check_id in sib_counted and any(a == p_arm for a, _ in setups)) else
                      " (for " + "; ".join(place(a, part) for a, part in setups) + ")")
             subjects.append(title_of(check_id) + where)
         lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(by_check),
@@ -3741,12 +3748,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             extra_ = [n for n in a_names if n and n.lower() in diff_]
             gone_ = [n for n in m_names if n and n.lower() in diff_]
             a["locationPluginOrder"] = [n for n in a_names if n and (n.lower() in m_list or n.lower() in diff_)]
+            a["sameListAs"] = measured_["displayLabel"]      # said in one sentence, not printed again (page budget)
             a["locationPluginScope"] = dict(measured_["locationPluginScope"], complete=False, note=None,
                                             basis="the measured load order's per-location contributors",
                                             missingInput=("This setup loads the same plugins as the measured load order"
                                                           + (", with " + ", ".join(extra_) if extra_ else "")
                                                           + (", without " + ", ".join(gone_) if gone_ else "")
-                                                          + ", so its list is the measured one"
+                                                          + ", so its list is the one shown for the measured load order"
                                                           + (" with " + ", ".join(extra_) + " where it loads; whether "
                                                              + ", ".join(extra_) + " changes these locations was not measured."
                                                              if extra_ else ".")))
