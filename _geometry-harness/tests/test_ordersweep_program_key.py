@@ -92,6 +92,25 @@ def symbols_do_not_change_key():
     assert ka == kb, (ka, kb)
 
 
+def same_folder_same_key_twice():
+    # rejects: a key that is not a function of the folder's content (two calls on one unchanged folder must agree)
+    with tempfile.TemporaryDirectory() as t:
+        h = harness(t, BASE)
+        assert O.program_key(h, "fakeprobe", {}) == O.program_key(h, "fakeprobe", {})
+
+
+def run_time_subfolder_does_not_change_key():
+    # rejects: a key that a probe's own run-time output changes (viewprobe writes shots/ into its bin folder)
+    ka, kb = keys(BASE, dict(BASE, **{"shots/view-fp.png": b"a picture", "extract-123/x.nif": b"scratch"}))
+    assert ka == kb, (ka, kb)
+
+
+def copied_data_file_changes_key():
+    # rejects: a key over code only (overlapprobe reads load-settle-exemptions.json from its own folder)
+    ka, kb = keys(dict(BASE, **{"load-settle-exemptions.json": b"[1]"}), dict(BASE, **{"load-settle-exemptions.json": b"[2]"}))
+    assert ka != kb, "a different data file copied to output gave the same program key"
+
+
 def override_keeps_its_text_key():
     # rejects: a --probe-cmd fixture keyed by a Release folder it does not run
     k = O.program_key(Path("."), "fakeprobe", {"fakeprobe": "python fake.py"})
@@ -104,6 +123,9 @@ for name, fn in [("same build in two folders: same key", same_build_same_key),
                  ("different dll under runtimes/: different keys", nested_dll_changes_key),
                  ("an added dll: different keys", added_dll_changes_key),
                  ("symbols only differ: same key", symbols_do_not_change_key),
+                 ("one unchanged folder keyed twice: same key", same_folder_same_key_twice),
+                 ("files a run writes in a subfolder: same key", run_time_subfolder_does_not_change_key),
+                 ("a different copied data file: different keys", copied_data_file_changes_key),
                  ("a --probe-cmd override keys by its text", override_keeps_its_text_key)]:
     check(name, fn)
 
