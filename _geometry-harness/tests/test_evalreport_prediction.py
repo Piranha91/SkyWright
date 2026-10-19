@@ -3206,7 +3206,30 @@ def main():
         v = reader(plan).get("validation") or {}
         return v.get("patchProblems") == 0, f"new with the patch {v.get('patchProblems')}"
 
-    for name, fn in [("w2-core/C660-masters-value-is-no-own-change", c660_masters_value_is_no_own_change),
+    # C676 (Missives review, blocking 2). Whose change a water seam is: the probe names the two cells' plugins as a pair,
+    # but where only one side differs from the base game's water (attributed to side A or B), the other side's plugin
+    # carries the base game's value and made no change there: the seam is one mod against the base game, said in the
+    # base-game line, never a clash between the two mods. A seam both sides make stays a clash between mods.
+    def c676_one_sided_water_seam_is_base_game():
+        WB = "environment.water-boundaries"
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
+
+        def seam(fk, other, side):
+            r_ = row("WATER-SEAM", OTHER, MOD_A, fk, other=other)
+            r_["Summary"] = (f"Tamriel (1,1) E Tamriel (2,1): joined under the truth (001232:Update.esm z -14000), apart "
+                             f"under the winner (105CC3:Skyrim.esm z -14000 | 001232:Update.esm z -14000) — "
+                             f"attributed to {side}")
+            return r_
+        p = [seam(f"009301:{BASE}", f"009302:{BASE}", "side A"), seam(f"009303:{BASE}", f"009304:{BASE}", "both sides")]
+        plan, md, _ = compile_and_render(arms, {(WB, "baseline"): p, (WB, "without-a"): []}, [MOD_A])
+        got = {e["formKey"][:6]: e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
+               if e["checkId"] == WB}
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        ok = got == {"009301": "baseGame", "009303": "admitted"} and MOD_A in top and "1 clash" in top
+        return ok, f"{got}; base-game line {top[:200]!r}"
+
+    for name, fn in [("w2-core/C676-one-sided-water-seam-is-base-game", c676_one_sided_water_seam_is_base_game),
+                     ("w2-core/C660-masters-value-is-no-own-change", c660_masters_value_is_no_own_change),
                      ("w2-core/C661-nearest-master-decides", c661_nearest_master_decides),
                      ("w2-core/C662-dropped-only-an-own-change", c662_dropped_only_an_own_change),
                      ("w2-core/C663-undone-counts-own-changes", c663_undone_counts_own_changes),
