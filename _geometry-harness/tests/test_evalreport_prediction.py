@@ -91,7 +91,7 @@ def lost_row(a, b, form_key, field, lost, winner, overridden, label=None, before
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
-                diff_logs=None, states_not_explored=None, transcripts=None):
+                diff_logs=None, states_not_explored=None, transcripts=None, masters=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -111,6 +111,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     diff_logs: {(checkId, armId): text} -- the log of that arm's comparison with the baseline (a `diff` receipt).
     transcripts: {(checkId, armId): (request lines, response lines)} -- an MCP import's two transcripts for a check
     `count_only` names, written as `NN-request.jsonl` / `NN-response.jsonl` emits its receipt records.
+    masters: {plugin: [its masters]} -- each emit's configuration lists every plugin of its setup with these master
+    lists (none listed: no masters); False writes no configuration, as an emit that records no master lists.
     missing rows may carry a fourth element, the part (default `arm`)."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
@@ -142,7 +144,10 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                                 "configuration": {"plugins": config_of(check_id, arm_id)}}}
         emit = {"Population": "placed references", "State": "baseline", "Conflicts": rows,
                 "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}],
-                **({"Predicates": predicates[(check_id, arm_id)]} if (check_id, arm_id) in (predicates or {}) else {})}
+                **({"Predicates": predicates[(check_id, arm_id)]} if (check_id, arm_id) in (predicates or {}) else {}),
+                **({} if masters is False else {"Configuration": {"Plugins": [
+                    {"Name": x["name"], "Sha256": x["sha256"], "Masters": list((masters or {}).get(x["name"]) or [])}
+                    for x in config_of(check_id, arm_id)]}})}
         (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipt), encoding="utf-8")
         (root / "evidence" / f"{rid}.json").write_text(json.dumps(emit), encoding="utf-8")
         evidence.append({"id": f"{2 * n:016x}", "kind": "receipt", "path": f"receipts/{rid}.json", "sha256": "0" * 64,
@@ -1667,7 +1672,8 @@ def main():
         line = next((x for x in val.get("itemLines") or [] if "Objects" in x or OVERLAP in x), "")
         ok = (bi.get("open") == 3 and bi.get("openListed") == 1 and bi.get("openPatchHeld") == 1
               and bi.get("openNotAttributed") == 1 and "1 still intersect, not attributed" in line
-              and "1 still reported as a clash between two mods" in line and line in md)
+              # the page says an item line that repeats its kind line at the top once, at the top (last round)
+              and "1 still reported as a clash between two mods" in line and line.split("): ", 1)[-1] in md)
         return ok, f"by item {bi}; line {line!r}"
 
     # C485. The navmesh one evaluated mod's navmesh replaces with a measured loss of ground is stated in the prediction
@@ -2019,7 +2025,10 @@ def main():
         plan, md, html = record_validation_bundle()
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         line = (reader(plan).get("prediction") or {}).get("withPatchLine") or ""
-        ok = (bool(line) and line in sec and PATCH in line and "still lost" not in md)
+        # the summary is a head, one line per kind and what stays (last round, units apart); each is on the page
+        pr_ = reader(plan).get("prediction") or {}
+        parts_ = [pr_.get("withPatchHead") or "\0", *(pr_.get("withPatchLines") or ["\0"])]
+        ok = (bool(line) and all(x in sec for x in parts_) and PATCH in line and "still lost" not in md)
         return ok, f"with-patch line {line!r}; in the prediction section {bool(line) and line in sec}"
 
     # ------------------------------------------- report polish: the fourth blind review
@@ -2243,7 +2252,9 @@ def main():
         plan, md, html = record_validation_bundle()
         p = reader(plan).get("prediction") or {}
         v, line = p.get("verdict") or "", p.get("withPatchLine") or ""
-        ok = "(3 record fields)" in v and "of the 3 clashes counted above" in line
+        # coordinator's last round: no total across units; each kind's line states its own total
+        ok = ("(3 record fields)" in v and "clashes counted above" not in line
+              and any("(3 record fields)" in x for x in p.get("withPatchLines") or []))
         return ok, f"verdict {v!r}; with-patch line {line!r}"
 
     for name, fn in [("w2-polish/C528-navmesh-still-lost-only-from-remeasure", c528_navmesh_still_lost_only_from_remeasure),
@@ -2276,6 +2287,282 @@ def main():
                      ("w2-round4/C496-untouched-excludes-patch-edited", c496_untouched_excludes_patch_edited),
                      ("w2-round4/C497-headline-candidates-and-scope", c497_headline_candidates_and_scope),
                      ("w2-round4/C498-patch-wins-and-refusal-in-summary", c498_patch_wins_and_refusal_in_summary)]:
+        cell(name, fn)
+
+    # ------------------------------------------- P63/P64: the first new mod on the deployed tools (blind review)
+    def own_master_bundle(masters=None):
+        """C540/C541. One evaluated mod, ModA, whose plugin lists OtherMod as a master, added to an order holding
+        OtherMod and ModB; a patch for ModA and ModB. OtherMod's value of record 701 is lost to ModA's, and OtherMod's
+        object S1 is left without support by ModA (ModA building on its master); ModA's value of 702 is lost to ModB's,
+        and ModB's object H2 is left without support by ModA (two different mods)."""
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A], kind="baseline"),
+                arm("without-a", [BASE, OTHER, MOD_B]),
+                arm("with-patch", [BASE, OTHER, MOD_B, MOD_A, PATCH])]
+        p_rec = [lost_row(OTHER, MOD_A, f"000701:{BASE}", "Name", "o1", "a1", "v1"),
+                 lost_row(MOD_A, MOD_B, f"000702:{BASE}", "Name", "a2", "b2", "v2")]
+        w_rec = [lost_row(OTHER, MOD_A, f"000701:{BASE}", "Name", "o1", "a1", "v1")]
+        enr = {(RECORDS, "baseline"): p_rec, (RECORDS, "without-a"): [], (RECORDS, "with-patch"): w_rec}
+        count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
+        results = {(CONTACT, "baseline"): [row("CONTACT", OTHER, MOD_A, f"000S01:{OTHER}", other=f"000G01:{MOD_A}"),
+                                           row("CONTACT", MOD_B, MOD_A, f"000H02:{MOD_B}", other=f"000G02:{MOD_A}")],
+                   (CONTACT, "without-a"): [], (CONTACT, "with-patch"): []}
+        m = {MOD_A: [BASE, OTHER], PATCH: [BASE, MOD_A, MOD_B]} if masters is None else masters
+        return compile_and_render(arms, results, [MOD_A], patches=[PATCH], count_only=count_only, enrichment=enr,
+                                  masters=m)
+
+    # C540. A mod changing a record value of a plugin it lists as a master builds on it as intended: never a clash
+    # between mods, never in a clash count or the patch tally; said as "<mod> changes <master>'s value (its master)".
+    # Coordinator ruling (edict): the rule is for record values only; the geometry clash S01 stays counted (C548)
+    def c540_own_master_override_is_not_a_clash():
+        plan, md, html = own_master_bundle()
+        p = reader(plan).get("prediction") or {}
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in p.get("record") or [])
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        counted = sum(i["count"] for i in p.get("items") or [])
+        ok = (adm == [("000701", "ownMaster"), ("000702", "admitted"), ("000H02", "admitted"), ("000S01", "admitted")]
+              and counted == 3 and "clashes counted above" not in (p.get("withPatchLine") or "")
+              and f"{MOD_A} changes {OTHER}'s value (its master) in 1 record field (" in sec
+              and f"{MOD_A} changes {OTHER}'s value (its master)" in _html.unescape(html)
+              and "Objects left without their supporting surface)" not in sec.split("(its master)", 1)[-1].split(".")[0]
+              and (p.get("setAside") or {}).get("ownMaster") == 1)
+        return ok, f"admission {adm}; counted {counted}; prediction {sec[:400]!r}"
+
+    # C541. Decided from the plugins' master lists, never their names: a plugin that does not list the other is a
+    # clash; with no master list recorded at all the report says it cannot tell, and counts the clash as found
+    def c541_master_lists_decide_never_names():
+        plan, md, html = own_master_bundle(masters={})
+        adm = sorted(((e.get("formKey") or "")[:6], e.get("admission"))
+                     for e in (reader(plan).get("prediction") or {}).get("record") or [])
+        plan2, md2, html2 = own_master_bundle(masters=False)
+        adm2 = sorted(((e.get("formKey") or "")[:6], e.get("admission"))
+                      for e in (reader(plan2).get("prediction") or {}).get("record") or [])
+        cov2 = section_text(md2, headings(plan2).get("coverage") or "\0")
+        want = [("000701", "admitted"), ("000702", "admitted"), ("000H02", "admitted"), ("000S01", "admitted")]
+        ok = (adm == want and adm2 == want and "its master" not in md
+              and "the bundle records no plugin's master list" in cov2 and "master list" not in md)
+        return ok, f"no master listed {adm}; no lists recorded {adm2}; coverage {cov2[-300:]!r}"
+
+    def new_by_object_bundle(names=None, repaired=0):
+        """C542/C543/C545. With the patch, object X1 is left without support against three hosts (three rows) and X2
+        against two; without the patch only G0 is. The comparison counts the five rows as created."""
+        X1, X2, G0 = f"000X01:{MOD_A}", f"000X02:{MOD_A}", f"000G00:{MOD_A}"
+        base = [row("CONTACT", MOD_B, MOD_A, G0, other=f"000H00:{MOD_B}")]
+        new = ([row("CONTACT", MOD_B, MOD_A, X1, other=f"000H1{i}:{MOD_B}") for i in (1, 2, 3)]
+               + [row("CONTACT", MOD_B, MOD_A, X2, other=f"000H2{i}:{MOD_B}") for i in (1, 2)])
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=repaired, reclassified=0,
+                                                     created=5, newDefect=5, attributed=0, unmeasured=0)}}
+        log = (f"NEW     CONTACT    {MOD_B}  x  {MOD_A}   +5 record(s): created 5\n"
+               + (f"SHRANK  CONTACT    {OTHER}  x  {MOD_A}   -{repaired} record(s): repaired {repaired}\n"
+                  if repaired else ""))
+        return compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): base, (CONTACT, "with-patch"): base + new},
+                                  [MOD_A, MOD_B], patches=[PATCH], order=order, names=names,
+                                  diff_logs={(CONTACT, "with-patch"): log})
+
+    # C542. New problems with the patch count objects, not rows: an object left without support against three hosts is
+    # one new problem, in the patch section, the comparison and the verdict alike
+    def c542_new_problems_count_objects():
+        plan, md, html = new_by_object_bundle()
+        val = reader(plan).get("validation") or {}
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        nb = [n.get("count") for n in val.get("newByCheck") or []]
+        created = (reg.get("counts") or {}).get("readerCreated")
+        ok = (val.get("patchProblems") == 2 and nb == [2] and created == 2
+              and "introduces 2 new problems in the check" in md and "New clashes in the setup with" in md
+              and not re.search(r"\b5 new problems\b", md))
+        return ok, f"new with patch {val.get('patchProblems')}; by check {nb}; comparison {created}"
+
+    # C543. The body rule applies to the new problems by object: an object whose base has no model is left out once,
+    # however many rows name it; a base with a model (an opaque plane included) stays counted
+    def c543_new_problems_no_body_by_object():
+        refs = {f"000X01:{MOD_A}": {"base": f"0B0L01:{MOD_A}"}, f"000X02:{MOD_A}": {"base": f"0B0P01:{MOD_A}"},
+                f"000G00:{MOD_A}": {"base": f"0B0P01:{MOD_A}"},
+                **{f"000H{i}:{MOD_B}": {"base": f"0B0S01:{MOD_B}"} for i in ("00", "11", "12", "13", "21", "22")}}
+        bases = {f"0B0L01:{MOD_A}": {"type": "Light", "model": ""},
+                 f"0B0P01:{MOD_A}": {"type": "Static", "model": "plane.nif"},
+                 f"0B0S01:{MOD_B}": {"type": "Static", "model": "wall.nif"}}
+        plan, md, html = new_by_object_bundle(names={"refs": refs, "bases": bases})
+        val = reader(plan).get("validation") or {}
+        c = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {}).get("counts") or {}
+        ok = (val.get("patchProblems") == 1 and c.get("readerCreated") == 1 and c.get("readerNoBody") == 1
+              and "1 whose object's record has no model" in md and "introduces 1 new problem in the check" in md)
+        return ok, (f"new with patch {val.get('patchProblems')}; comparison {c.get('readerCreated')} "
+                    f"(no body {c.get('readerNoBody')})")
+
+    # C544. A fixture listed once against each of two plugins with the patch is one object left hanging
+    def c544_fixture_listed_twice_is_one_object():
+        F = f"000F01:{MOD_A}"
+        new = [row("EMPTY-SPACE", MOD_A, MOD_B, F, other=f"000H01:{BASE}"),
+               row("EMPTY-SPACE", MOD_A, PATCH, F, other=f"000H02:{BASE}")]
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(FIXTURE, "baseline"): [], (FIXTURE, "with-patch"): new},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        val = reader(plan).get("validation") or {}
+        nb = [n.get("count") for n in val.get("newByCheck") or []]
+        ok = val.get("patchProblems") == 1 and nb == [1]
+        return ok, f"new with patch {val.get('patchProblems')}; by check {nb}"
+
+    # C545. A comparison that also repaired problems says its repairs do not cancel the new problems, in its own number
+    def c545_repairs_sentence_agrees_in_number():
+        plan, md, html = new_by_object_bundle(repaired=2)
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        rp = reg.get("readerPlain") or ""
+        ok = "do not cancel the new problems." in rp and "introduced 2 new problems" in rp
+        return ok, f"comparison {rp!r}"
+
+    # C546. The changes the patch undoes are linked to their evidence, like every other count in the patch section
+    def c546_undone_changes_linked():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]
+        w_rows = [lost_row(MOD_A, PATCH, f"000702:{BASE}", "Name", "a2", "p2", "v2")]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
+        count_only = {(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 1}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}
+        plan, md, html, index = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                                   count_only=count_only, enrichment=enr, want_index=True)
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
+        fids = re.findall(r"\(evidence-index\.md#(F-\d+)\)", line)
+        anchors = set(re.findall(r'id="(F-\d+)"', index)) | set(re.findall(r"\{#(F-\d+)\}", index)) | set(
+            re.findall(r"^#+ .*?(F-\d+)", index, re.M))
+        ok = bool(fids) and set(fids) <= anchors
+        return ok, f"undone line {line!r}; anchors {sorted(anchors)[:6]}"
+
+    # C547. The page states a fact once: the set-aside sentence names only the kinds that occur (a list of zeros read as a
+    # contradiction beside a clash counted elsewhere), and a check clean on several setups is one line naming them
+    def c547_no_zero_set_aside_and_one_clean_line():
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        plan, md, html = compile_and_render(arms, {(WATER, "baseline"): [], (WATER, "with-patch"): [],
+                                                   (CONTACT, "baseline"): [row("CONTACT", MOD_B, MOD_A, f"000G01:{MOD_A}"),
+                                                                           row("CONTACT", BASE, MOD_A, f"000G02:{MOD_A}")],
+                                                   (CONTACT, "with-patch"): []}, [MOD_A, MOD_B], patches=[PATCH])
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        water = priorities()["reader"]["checkTitles"][WATER]
+        clean = [ln for ln in section_text(md, "Checks that found no problem").splitlines() if water in ln]
+        ok = ("1 with the base game" in line and not re.search(r"(?<![\d,])0 (with|of|already|overwrite|not|between|repeated)", line)
+              and len(clean) == 1 and "Measured load order" in clean[0] and " and " in clean[0])
+        return ok, f"set-aside line {line[:200]!r}; clean lines {clean}"
+
+    # C548. A geometry clash is never set aside for a master relationship (coordinator ruling, edict): objects that
+    # intersect, lose their support or hang show in game whoever built on whom. In the prediction the clash between ModA
+    # and its master's object is counted and labelled; with the patch, the patch's object left without support by its
+    # master ModA is a counted new problem, labelled as between a plugin's object and its own master's
+    def c548_geometry_clash_never_excluded_for_master():
+        plan, md, html = own_master_bundle()
+        p = reader(plan).get("prediction") or {}
+        item = next((i for i in p.get("items") or [] if OTHER in i["mods"]), {})
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        new = [row("CONTACT", PATCH, MOD_A, f"000P01:{PATCH}", other=f"000G05:{MOD_A}"),
+               row("EMPTY-SPACE", PATCH, MOD_A, f"000P02:{PATCH}", other=f"000G06:{MOD_A}")]
+        plan2, md2, html2 = compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): new[:1],
+                                                      (FIXTURE, "baseline"): [], (FIXTURE, "with-patch"): new[1:]},
+                                               [MOD_A, MOD_B], patches=[PATCH], masters={PATCH: [BASE, MOD_A, MOD_B]})
+        val = reader(plan2).get("validation") or {}
+        nb = {n["title"]: (n["count"], n.get("masterNote")) for n in val.get("newByCheck") or []}
+        line = next((ln for ln in md2.splitlines() if ln.startswith("- New clashes with the patch, by check")), "")
+        ok = (item.get("count") == 1 and "lists OtherMod.esp as a master, but these are clashes between their objects"
+              in item.get("plain", "") and val.get("patchProblems") == 2
+              and all(v[0] == 1 and v[1] for v in nb.values()) and len(nb) == 2
+              and "between a plugin's object and its own master's" in line
+              and "between a plugin's object and its own master's" in _html.unescape(html2))
+        return ok, f"item {item.get('plain', '')[:200]!r}; new {val.get('patchProblems')} {nb}; line {line!r}"
+
+    for name, fn in [("w2-p63/C540-own-master-override-is-not-a-clash", c540_own_master_override_is_not_a_clash),
+                     ("w2-p63/C548-geometry-clash-never-excluded-for-master", c548_geometry_clash_never_excluded_for_master),
+                     ("w2-p64/C547-no-zero-set-aside-and-one-clean-line", c547_no_zero_set_aside_and_one_clean_line),
+                     ("w2-p63/C541-master-lists-decide-never-names", c541_master_lists_decide_never_names),
+                     ("w2-p64/C542-new-problems-count-objects", c542_new_problems_count_objects),
+                     ("w2-p64/C543-new-problems-no-body-by-object", c543_new_problems_no_body_by_object),
+                     ("w2-p64/C544-fixture-listed-twice-is-one-object", c544_fixture_listed_twice_is_one_object),
+                     ("w2-p64/C545-repairs-sentence-agrees-in-number", c545_repairs_sentence_agrees_in_number),
+                     ("w2-p64/C546-undone-changes-linked", c546_undone_changes_linked)]:
+        cell(name, fn)
+
+    # ------------------------------------------- last round: blind review of the regenerated BPT report
+    # C549. The report says which setups the separate evaluation measured, in plugins, never "each mod on its own"
+    def c549_sibling_setups_named():
+        plan, md, html, index = patched_with_sibling("same")
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        ok = ("each mod on its own" not in md.lower() and f"only {MOD_A} besides the base game" in sec
+              and f"only {MOD_B} besides the base game" in sec and "the base game alone" in sec)
+        return ok, f"prediction {[ln for ln in sec.splitlines() if 'separate evaluation' in ln]}"
+
+    def stays_bundle():
+        """C551/C553/C554. One evaluated mod (ModA) and ModB; a patch. Overlaps: X x Y1, X x Y2, Z x Y1 with both
+        loaded; with the patch X x Y1 and X x Y2 still hold, Z x Y1 is gone. Record fields: ModA's change to 701 is lost
+        to ModB's, with the patch too; ModA's removal of 702 (initially disabled) is undone by ModB's value, with the
+        patch too; ModA's change to 703 is resolved by the patch."""
+        X, Z, Y1, Y2 = f"000X01:{MOD_A}", f"000Z01:{MOD_A}", f"000Y01:{MOD_B}", f"000Y02:{MOD_B}"
+        p_ov = [row("OVERLAP", MOD_B, MOD_A, X, other=Y1, label="Hall (int)"),
+                row("OVERLAP", MOD_B, MOD_A, X, other=Y2, label="Hall (int)"),
+                row("OVERLAP", MOD_B, MOD_A, Z, other=Y1, label="Hall (int)")]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": fk, "Other": o, "Physical": ph}
+                 for fk, o, ph in ((X, Y1, "Holds"), (X, Y2, "Holds"), (Z, Y1, "Gone"))]
+        p_rec = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "Name", "a1", "b1", "v1"),
+                 lost_row(MOD_A, MOD_B, f"000702:{BASE}", "SkyrimMajorRecordFlags", "InitiallyDisabled", "0", "0"),
+                 lost_row(MOD_A, MOD_B, f"000703:{BASE}", "Name", "a3", "b3", "v3")]
+        w_rec = p_rec[:2]
+        enr = {(RECORDS, "baseline"): p_rec, (RECORDS, "with-patch"): w_rec}
+        count_only = {(RECORDS, "baseline"): 3, (RECORDS, "with-patch"): 2}
+        results = {(OVERLAP, "baseline"): p_ov, (OVERLAP, "with-patch"): p_ov[:2]}
+        return compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A], patches=[PATCH], count_only=count_only,
+                                  enrichment=enr, predicates={(OVERLAP, "with-patch"): preds})
+
+    # C550. Overlaps in the headline are counted as objects too: 3 overlap pairs between 4 objects
+    def c550_headline_overlaps_as_objects():
+        plan, md, html = stays_bundle()
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        ok = "3 overlap candidates found by the check" in v and "(4 objects)" in v
+        return ok, f"verdict {v!r}"
+
+    # C551. No total adds overlap pairs to record fields: the with-patch summary gives each kind its own line in its own
+    # unit, and the patch section's totals give one count per unit
+    def c551_no_total_across_units():
+        plan, md, html = stays_bundle()
+        p = reader(plan).get("prediction") or {}
+        lines = p.get("withPatchLines") or []
+        hits = next((ln for ln in md.splitlines() if ln.startswith("- Predicted and resolved by")), "")
+        ok = ("clashes counted above" not in md and len(lines) == 2
+              and any("(3 overlap pairs)" in x and "resolved 1" in x and "left 2" in x for x in lines)
+              and any("(3 record fields)" in x and "resolved 1" in x for x in lines)
+              and all(x in md for x in lines) and "1 overlap pair, 1 record field" in hits)
+        return ok, f"lines {lines}; totals {hits!r}"
+
+    # C552. Cell-setting clashes are named by the fields they are, never "lighting, water" for fields that are neither
+    def c552_cell_fields_named():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000C01:{BASE}", "Grid", ["Grid.Flags=8"], ["Grid.Flags=2"], ["Grid.Flags=0"]),
+                  lost_row(MOD_A, MOD_B, f"000C02:{BASE}", "Grid", ["Grid.Flags=8"], ["Grid.Flags=2"], ["Grid.Flags=0"]),
+                  lost_row(MOD_A, MOD_B, f"000C02:{BASE}", "OcclusionData", ["OcclusionData=1"], ["OcclusionData=2"], ["v"])]
+        enr = {(CELLATTR, "baseline"): p_rows}
+        results = {(CONTACT, "baseline"): []}
+        plan, md, html = compile_and_render([arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline")], results, [MOD_A],
+                                            count_only={(CELLATTR, "baseline"): 3}, enrichment=enr)
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        ok = ("Grid.Flags 2" in v and "OcclusionData 1" in v and "lighting, water" not in v
+              and sec.count("Grid.Flags 2") >= 2)
+        return ok, f"verdict {v!r}"
+
+    # C553. What stays with the patch is said at the top in plain words, each with its count and unit: the overlaps
+    # still there with their objects and place, the record changes still lost and to whom
+    def c553_what_stays_at_top():
+        plan, md, html = stays_bundle()
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        st = next((ln for ln in sec.splitlines() if "Still there with" in ln), "")
+        ok = (f"2 overlap pairs between {MOD_A} and {MOD_B} (3 objects, all in Hall (int))" in st
+              and f"2 of {MOD_A}'s changes lost to {MOD_B}" in st)
+        return ok, f"stays line {st!r}"
+
+    # C554. An object one mod removes that the other still brings back with the patch is said at the top, named
+    def c554_restored_object_named_at_top():
+        plan, md, html = stays_bundle()
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        st = next((ln for ln in sec.splitlines() if "Still there with" in ln), "")
+        ok = f"{MOD_B} still brings back 1 object {MOD_A} removes (for example 000702:{BASE})" in st
+        return ok, f"stays line {st!r}"
+
+    for name, fn in [("w2-last/C549-sibling-setups-named", c549_sibling_setups_named),
+                     ("w2-last/C550-headline-overlaps-as-objects", c550_headline_overlaps_as_objects),
+                     ("w2-last/C551-no-total-across-units", c551_no_total_across_units),
+                     ("w2-last/C552-cell-fields-named", c552_cell_fields_named),
+                     ("w2-last/C553-what-stays-at-top", c553_what_stays_at_top),
+                     ("w2-last/C554-restored-object-named-at-top", c554_restored_object_named_at_top)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
