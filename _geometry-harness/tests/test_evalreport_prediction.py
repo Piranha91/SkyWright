@@ -2703,7 +2703,10 @@ def main():
                   dict(lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell"),
                   # Early's change, lost to OtherMod in the measured order, is lost to ModA in the other: lost either way,
                   # and the order of Early and ModA did not change, so it is no order risk
-                  dict(lost_row(O2, MOD_A, f"000C04:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell")]
+                  dict(lost_row(O2, MOD_A, f"000C04:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell"),
+                  # (lane core) Early's change lost to ModA in the other order only, but Early and ModA kept their order:
+                  # no order risk, decided by the order rule alone (000C04 is now also caught as lost either way)
+                  dict(lost_row(O2, MOD_A, f"000C06:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell")]
         setup = {"armId": "lux-first", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
                  "plugins": plugins(BASE, O2, OTHER, MOD_A), "rows": o_rows}
         plan, md, html = compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 3},
