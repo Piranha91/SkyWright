@@ -2915,11 +2915,18 @@ def main():
         X2 = f"000X02:{MOD_A}"
         p_rows = [state_row("S1", BASE, MOD_A, X, S0), state_row("S2", BASE, MOD_A, X, S0),
                   state_row("S1", BASE, MOD_A, X2, S0)]
+        # two broken links in one navmesh are two links (rows of a check that is not by world state stay rows)
+        links = [row("NAV-LINK", BASE, MOD_A, f"000N01:{BASE}"), row("NAV-LINK", BASE, MOD_A, f"000N01:{BASE}")]
+        for i_, r_ in enumerate(links):
+            r_["Summary"] = f"navmesh 000N01 triangle {i_} links to a removed triangle"
         results = {(STATE, "baseline"): [], (STATE, "without-patch"): p_rows, (STATE, "without-b"): [],
-                   (STATE, "without-a"): []}
+                   (STATE, "without-a"): [], (NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): links,
+                   (NAVOWN, "without-b"): [], (NAVOWN, "without-a"): []}
         plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
         ln = next((x for x in md.splitlines() if "against base-game objects" in x), "")
-        ok = "2 clashes" in ln and "3 clashes" not in ln
+        title_ = (priorities()["reader"]["checkTitles"].get(STATE) or STATE)
+        ok = (f"2 clashes ({title_})" in ln and "3 clashes" not in ln
+              and re.search(r"(?<![\d,])2 [^;]*\((Navmesh|geometry\.navmesh)", ln) is not None)
         return ok, f"line {ln[:200]!r}"
 
     # C630 (Clockwork review 5, P53). "Whether it also needs X was not measured" on every item is said once on the page,
