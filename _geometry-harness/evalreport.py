@@ -955,6 +955,12 @@ def master_of(masters: dict | None, a, b) -> tuple[str, str] | None:
     return None
 
 
+def is_geometry_check(check_id, words: dict) -> bool:
+    """A check whose rows are objects in the world (they intersect, lose their support, hang): a clash there is physical
+    and shows in game whoever built on whom, so the own-master rule, which is about record values, never applies."""
+    return str(check_id or "").startswith("geometry.") or str(check_id) in set(words.get("bodyChecks") or [])
+
+
 class InputRefused(Exception):
     """An input the compiler will not use, with the one-sentence reason; `plan` exits 2 with it."""
 
@@ -1360,8 +1366,8 @@ def build_prediction(ctx: dict) -> dict:
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
             return "notInvolving"
-        if master_of(masters, a, b):
-            return "ownMaster"                 # a plugin building on its own master: its change wins as intended
+        if master_of(masters, a, b) and not is_geometry_check(rk[0], words):
+            return "ownMaster"                 # a plugin's record value over its own master's: it wins as intended
         if no_body(rk, other):
             return "noBody"                    # a clash between the mods but for an object with no model (no body)
         if body_unread(rk, other):
@@ -1500,6 +1506,8 @@ def build_prediction(ctx: dict) -> dict:
             pool = g.setdefault("_recordPool", ([], []))[rank]
             if len(pool) < 2 and ex not in pool:
                 pool.append(ex)
+        if master_of(masters, rk[2], rk[3]):
+            g["_ownMaster"] = master_of(masters, rk[2], rk[3])  # a geometry clash with its master's objects (P63)
         if label and rk[1] != "LOST-EDIT":
             # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
             # part of its place
@@ -1572,6 +1580,9 @@ def build_prediction(ctx: dict) -> dict:
         n_dis = g.pop("_disables", 0)
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
+        om_ = g.pop("_ownMaster", None)
+        if om_:
+            detail.append(bind(words["itemOwnMasterGeometry"], {"mod": om_[0], "master": om_[1]}))
         provenance = g.pop("_provenance", None)
         g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else "")
@@ -2197,6 +2208,7 @@ def build_prediction(ctx: dict) -> dict:
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
+        problem_master = collections.Counter()
         # a field a patch's value now wins over a mod's change, where no change to that field was lost without the patch:
         # a record change the patch newly undoes, a new clash (fifth blind review, W-S3 / S-S1)
         p_fields = {(str(k_[4]), (h_["row"].get("field"))) for k_, h_ in p_rows.items() if k_[1] == "LOST-EDIT"}
@@ -2218,11 +2230,14 @@ def build_prediction(ctx: dict) -> dict:
             if no_body(rk, hit["row"].get("other")):
                 no_body_new.add(ident_)        # an object with no model: no body, not a clash
                 continue
-            if is_base_game(rk[2], words) or is_base_game(rk[3], words) or master_of(masters, rk[2], rk[3]):
-                continue                       # the base game, or a plugin building on its own master (P63)
+            if is_base_game(rk[2], words) or is_base_game(rk[3], words) or (
+                    master_of(masters, rk[2], rk[3]) and not is_geometry_check(rk[0], words)):
+                continue                       # the base game, or a record value over the plugin's own master (P63)
             if (rk[0], p_of(rk[0])) in measured and ident_ not in problem_seen:
                 problem_seen.add(ident_)
                 problems.append(rk)
+                if master_of(masters, rk[2], rk[3]):
+                    problem_master[rk[0]] += 1     # a geometry clash between a plugin's object and its master's: counted
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat")
                      and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
@@ -2324,6 +2339,8 @@ def build_prediction(ctx: dict) -> dict:
                                for n in ("listed", "patchHeld", "notAttributed")},
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
+                         "masterNote": (bind(words["newByCheckOwnMaster"], {"count": fmt_n(problem_master[c])})
+                                        if problem_master.get(c) else None),
                          "findingIds": [x for x in dict.fromkeys(fids) if x]}
                         for c, fids in sorted(problem_finding.items(), key=lambda kv: title_of(kv[0]))]
         ow = words["itemOutcomeWords"]
@@ -3501,7 +3518,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # a difference with the base game is set aside, never a conflict partner named in the opening; nor is a plugin an
     # evaluated mod lists as a master (it builds on it, P63)
     plugin_masters_doc = plugin_masters(b)
-    target_masters = {m for t in target_set for m in (plugin_masters_doc or {}).get(t, ())}
+    pw_ = reader_data.get("prediction") or {}
+    geometry_partners = {str(x).lower() for f in findings if is_geometry_check(f.get("checkId"), pw_)
+                         for x in ((f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")) if x}
+    # a master named only by record values is not a conflict partner; one whose objects clash with the mod's still is
+    target_masters = {m for t in target_set for m in (plugin_masters_doc or {}).get(t, ())} - geometry_partners
     base_game_partners = [n for n in comparison_weight if is_base_game(n, reader_data.get("prediction") or {})]
     comparison_names = [n for n, _ in sorted(comparison_weight.items(), key=lambda x: (-x[1], x[0].lower()))
                         if n not in base_game_partners and n.lower() not in target_masters]
@@ -3525,6 +3546,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                  "noBody" if f.get("rowsNoBody") and not f.get("readerRows") else
                  # an evaluated mod building on its own master (P63); a declared patch's own choices stay listed
                  "ownMaster" if (master_of(plugin_masters_doc, a_, b_)
+                                 and not is_geometry_check(f.get("checkId"), reader_data.get("prediction") or {})
                                  and {str(a_).lower(), str(b_).lower()} & target_set
                                  and not {str(a_).lower(), str(b_).lower()} & declared_patches) else None)
         f["readerDetail"] = aside is None

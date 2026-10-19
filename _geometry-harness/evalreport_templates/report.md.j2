@@ -56,7 +56,7 @@
 {% else %}{{ val.headline }}
 
 {% for s in val.sentences %}- {{ s }}{% if s == val.get("undoneSentence") %}{% for fid in val.undoneFindingIds[:1] %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% endif %}{{ "" }}
-{% endfor %}{% if val.get("newByCheck") %}- {{ val.newByCheckHeading }}: {% for n in val.newByCheck %}{{ n.title }} {{ n.count|n }}{% for fid in n.findingIds %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% if not loop.last %}; {% endif %}{% endfor %}.
+{% endfor %}{% if val.get("newByCheck") %}- {{ val.newByCheckHeading }}: {% for n in val.newByCheck %}{{ n.title }} {{ n.count|n }}{% if n.get("masterNote") %} ({{ n.masterNote }}){% endif %}{% for fid in n.findingIds %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% if not loop.last %}; {% endif %}{% endfor %}.
 {% endif %}
 {% for s in val.get("itemLines") or [] %}{% if loop.first %}
 {% endif %}- {{ s }}

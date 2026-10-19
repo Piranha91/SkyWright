@@ -2304,22 +2304,21 @@ def main():
         return compile_and_render(arms, results, [MOD_A], patches=[PATCH], count_only=count_only, enrichment=enr,
                                   masters=m)
 
-    # C540. A mod changing a value of a plugin it lists as a master builds on it as intended: never a clash between
-    # mods, never in a clash count or the patch tally; said as "<mod> changes <master>'s value (its master)"
+    # C540. A mod changing a record value of a plugin it lists as a master builds on it as intended: never a clash
+    # between mods, never in a clash count or the patch tally; said as "<mod> changes <master>'s value (its master)".
+    # Coordinator ruling (edict): the rule is for record values only; the geometry clash S01 stays counted (C548)
     def c540_own_master_override_is_not_a_clash():
         plan, md, html = own_master_bundle()
         p = reader(plan).get("prediction") or {}
         adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in p.get("record") or [])
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         counted = sum(i["count"] for i in p.get("items") or [])
-        ok = (adm == [("000701", "ownMaster"), ("000702", "admitted"), ("000H02", "admitted"), ("000S01", "ownMaster")]
-              and counted == 2 and OTHER not in (p.get("verdict") or "")
-              and "of the 2 clashes" in (p.get("withPatchLine") or "")
-              and f"{MOD_A} changes {OTHER}'s value (its master)" in sec
+        ok = (adm == [("000701", "ownMaster"), ("000702", "admitted"), ("000H02", "admitted"), ("000S01", "admitted")]
+              and counted == 3 and "of the 3 clashes" in (p.get("withPatchLine") or "")
+              and f"{MOD_A} changes {OTHER}'s value (its master) in 1 record field (" in sec
               and f"{MOD_A} changes {OTHER}'s value (its master)" in _html.unescape(html)
-              and "(its master) in 1 clash (Objects left without their supporting surface), 1 record field" in sec
-              and (p.get("setAside") or {}).get("ownMaster") == 2
-              and OTHER not in (reader(plan).get("scopeLine") or ""))
+              and "Objects left without their supporting surface)" not in sec.split("(its master)", 1)[-1].split(".")[0]
+              and (p.get("setAside") or {}).get("ownMaster") == 1)
         return ok, f"admission {adm}; counted {counted}; prediction {sec[:400]!r}"
 
     # C541. Decided from the plugins' master lists, never their names: a plugin that does not list the other is a
@@ -2434,7 +2433,32 @@ def main():
               and len(clean) == 1 and "Measured load order" in clean[0] and " and " in clean[0])
         return ok, f"set-aside line {line[:200]!r}; clean lines {clean}"
 
+    # C548. A geometry clash is never set aside for a master relationship (coordinator ruling, edict): objects that
+    # intersect, lose their support or hang show in game whoever built on whom. In the prediction the clash between ModA
+    # and its master's object is counted and labelled; with the patch, the patch's object left without support by its
+    # master ModA is a counted new problem, labelled as between a plugin's object and its own master's
+    def c548_geometry_clash_never_excluded_for_master():
+        plan, md, html = own_master_bundle()
+        p = reader(plan).get("prediction") or {}
+        item = next((i for i in p.get("items") or [] if OTHER in i["mods"]), {})
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        new = [row("CONTACT", PATCH, MOD_A, f"000P01:{PATCH}", other=f"000G05:{MOD_A}"),
+               row("EMPTY-SPACE", PATCH, MOD_A, f"000P02:{PATCH}", other=f"000G06:{MOD_A}")]
+        plan2, md2, html2 = compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): new[:1],
+                                                      (FIXTURE, "baseline"): [], (FIXTURE, "with-patch"): new[1:]},
+                                               [MOD_A, MOD_B], patches=[PATCH], masters={PATCH: [BASE, MOD_A, MOD_B]})
+        val = reader(plan2).get("validation") or {}
+        nb = {n["title"]: (n["count"], n.get("masterNote")) for n in val.get("newByCheck") or []}
+        line = next((ln for ln in md2.splitlines() if ln.startswith("- New clashes with the patch, by check")), "")
+        ok = (item.get("count") == 1 and "lists OtherMod.esp as a master, but these are clashes between their objects"
+              in item.get("plain", "") and val.get("patchProblems") == 2
+              and all(v[0] == 1 and v[1] for v in nb.values()) and len(nb) == 2
+              and "between a plugin's object and its own master's" in line
+              and "between a plugin's object and its own master's" in _html.unescape(html2))
+        return ok, f"item {item.get('plain', '')[:200]!r}; new {val.get('patchProblems')} {nb}; line {line!r}"
+
     for name, fn in [("w2-p63/C540-own-master-override-is-not-a-clash", c540_own_master_override_is_not_a_clash),
+                     ("w2-p63/C548-geometry-clash-never-excluded-for-master", c548_geometry_clash_never_excluded_for_master),
                      ("w2-p64/C547-no-zero-set-aside-and-one-clean-line", c547_no_zero_set_aside_and_one_clean_line),
                      ("w2-p63/C541-master-lists-decide-never-names", c541_master_lists_decide_never_names),
                      ("w2-p64/C542-new-problems-count-objects", c542_new_problems_count_objects),
