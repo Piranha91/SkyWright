@@ -7,9 +7,14 @@ order by direct path. Every record is named "Fixture <first six of its FormID>";
 When `Base` is asked for, a placed object's base is "0BB0<last two of its FormID>:<its master>"; when `Model.File` is
 asked for, a base whose FormID ends in "0E" is a Light with no model (the field reads "(absent)"), any other base a
 Static with the model "fixture.nif". Anything else gets a JSON-RPC error. Nothing is read from disk.
+
+`--unread PREFIX` (repeatable): a FormID starting with PREFIX is answered as not found in the file, so the names
+enrichment cannot read it (a partial read, case 564).
 """
 import json
 import sys
+
+UNREAD = [sys.argv[i + 1].upper() for i, a in enumerate(sys.argv[:-1]) if a == "--unread"]
 
 
 def record(fk, wanted=()):
@@ -41,7 +46,8 @@ for line in sys.stdin:
         src = str(args.get("source") or "")
         name = src.replace("\\", "/").rsplit("/", 1)[-1]
         wanted = ((args.get("project") or {}).get("fields")) or []
-        recs = [dict(record(fk, wanted), source=name) for fk in args.get("formids") or []]
+        recs = [{"formid": fk, "error": "not found in this file"} if any(fk.upper().startswith(u) for u in UNREAD)
+                else dict(record(fk, wanted), source=name) for fk in args.get("formids") or []]
         body = {"form": "fields", "source": f"{name} — on disk, outside the load order (direct path {src})",
                 "count": len(recs), "epoch": "fake", "records": recs, "truncated": False}
         out = {"jsonrpc": "2.0", "id": msg["id"],

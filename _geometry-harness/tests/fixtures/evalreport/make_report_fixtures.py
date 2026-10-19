@@ -242,7 +242,8 @@ def run_case(root: Path, case: str, fixture_case: str, media: Path | None = None
     f = T.evalrun(["finalize", "--run", run], scen)
     if media is None and case.startswith("R5"):
         media = write_media(run, root / "media" / case)
-    bargs = ["bundle", "--run", run] + (["--media", media] if media else [])
+    # the report fixtures' expectations are written without names: the names step is skipped (stated in the manifest)
+    bargs = ["bundle", "--run", run, "--no-names"] + (["--media", media] if media else [])
     b = T.evalrun(bargs, scen)
     if b.returncode != 0:
         raise SystemExit(f"{case}: evalrun bundle exited {b.returncode}\n{b.stdout[-2000:]}\n{b.stderr[-2000:]}")
@@ -362,7 +363,7 @@ def make_import_origin_case(root: Path) -> dict:
         if exits[f"import-{tag}"] != 0:
             raise SystemExit(f"{case}: the {tag} import exited {exits[f'import-{tag}']}")
     for verb in ("resume", "finalize", "bundle"):
-        r = T.evalrun([verb, "--run", run], scen)
+        r = T.evalrun([verb, "--run", run] + (["--no-names"] if verb == "bundle" else []), scen)
         exits[verb] = r.returncode
         if r.returncode != 0:
             raise SystemExit(f"{case}: evalrun {verb} exited {r.returncode}\n{r.stdout[-2000:]}\n{r.stderr[-2000:]}")

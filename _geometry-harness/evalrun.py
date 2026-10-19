@@ -5687,6 +5687,9 @@ def cmd_bundle(a) -> int:
     if plan is None:
         return refuse(why)
     out = Path(a.out) if a.out else run / "bundle"
+    bad_name = next((x for x in a.mod_name or [] if "=" not in x), None)
+    if bad_name is not None:
+        return refuse(f"--mod-name takes PLUGIN=NAME, got {bad_name!r}")
     ledger = Ledger(run, plan)
     if ledger.refusal():
         return refuse(ledger.refusal())
@@ -5864,8 +5867,32 @@ def cmd_bundle(a) -> int:
         }
         write_json(out / "manifest.json", manifest)
         r.advance()
+        # The names step (bundle standard §8): each row's objects, their bases and models, read by default so the
+        # report's body rule has what it needs; a skip, a refusal or a partial read is stated in the manifest.
+        r.stage("names", total=1, unit="enrichments")
+        if a.no_names:
+            st = write_names_status(out, {"status": "skipped", "reader": None,
+                                          "sentence": "The names enrichment was skipped by request (--no-names), so "
+                                                      "the report cannot tell which objects have a body until "
+                                                      "`evalrun enrich --kind names` adds it."})
+        elif verify_quiet(out) != EXIT_OK:
+            st = write_names_status(out, {"status": "refused", "reader": None,
+                                          "sentence": "The names enrichment was not run because the bundle does not "
+                                                      "verify (see its verify.json)."})
+        else:
+            cmd, source = default_reader_cmd(a.reader_cmd)
+            st = names_step(out, cmd, source, mod_names(a.mod_name), reader_env(a.reader_env))
+            write_names_status(out, st)
+            if st["status"] in ("enriched", "partial") and verify_quiet(out) != EXIT_OK:
+                msg = "the names enrichment was written but the bundle no longer verifies; see its verify.json"
+                print(f"REFUSED: {msg}", file=sys.stderr)
+                r.refuse(msg, EXIT_REFUSED_RESULT)
+                return EXIT_REFUSED_RESULT
+        r.advance()
     print(f"bundle: {len(evidence)} evidence file(s) under {out}"
           + (f"; {len(unassessed_media)} media item(s) unassessed" if unassessed_media else ""))
+    print(f"names: {st['status']}: {st['sentence']}",
+          file=sys.stderr if st["status"] in ("refused", "skipped", "partial") else sys.stdout)
     return EXIT_OK
 
 
@@ -6074,25 +6101,27 @@ def cmd_enrich(a) -> int:
             print(f"REFUSED: {msg}", file=sys.stderr)
             r.refuse(msg, EXIT_REFUSED_INPUT)
             return EXIT_REFUSED_INPUT
-        mods = {}
-        for x in a.mod_name or []:
-            if "=" not in x:
-                return refuse(f"--mod-name takes PLUGIN=NAME, got {x!r}")
-            k, v = x.split("=", 1)
-            mods[k.strip()] = v.strip()
-        env = dict(x.split("=", 1) for x in a.reader_env or [] if "=" in x)
-        try:
-            if a.kind == "record-rows":
+        bad = next((x for x in a.mod_name or [] if "=" not in x), None)
+        if bad is not None:
+            return refuse(f"--mod-name takes PLUGIN=NAME, got {bad!r}")
+        if a.kind == "names":
+            cmd, source = default_reader_cmd(a.reader_cmd)
+            st = names_step(d, cmd, source, mod_names(a.mod_name), reader_env(a.reader_env))
+            if st["status"] == "refused":
+                msg = f"enrich refused: {st['sentence']}"
+                print(f"REFUSED: {msg}", file=sys.stderr)
+                r.refuse(msg, EXIT_REFUSED_INPUT)
+                return EXIT_REFUSED_INPUT
+            write_names_status(d, st)            # a bundle made with the step skipped or refused now says enriched
+            out = st["result"]
+        else:
+            try:
                 out = bundleenrich.enrich_record_rows(d)
-            else:
-                if not a.reader_cmd:
-                    raise bundleenrich.Refused("--kind names needs --reader-cmd, the houseCARL MCP server to read with")
-                out = bundleenrich.enrich_names(d, a.reader_cmd, mods, env)
-        except bundleenrich.Refused as ex:
-            msg = f"enrich refused: {ex}"
-            print(f"REFUSED: {msg}", file=sys.stderr)
-            r.refuse(msg, EXIT_REFUSED_INPUT)
-            return EXIT_REFUSED_INPUT
+            except bundleenrich.Refused as ex:
+                msg = f"enrich refused: {ex}"
+                print(f"REFUSED: {msg}", file=sys.stderr)
+                r.refuse(msg, EXIT_REFUSED_INPUT)
+                return EXIT_REFUSED_INPUT
         if verify_quiet(d) != EXIT_OK:
             msg = f"enrich wrote {a.kind} but the bundle no longer verifies; see its verify.json"
             print(f"REFUSED: {msg}", file=sys.stderr)
@@ -6108,6 +6137,72 @@ def verify_quiet(d: Path) -> int:
     import io
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         return cmd_verify_bundle(SimpleNamespace(dir=str(d)))
+
+
+#: The names enrichment's record reader when --reader-cmd names none (a command line, as --reader-cmd takes).
+READER_ENV = "HOUSECARL_RECORD_READER_CMD"
+
+
+def default_reader_cmd(explicit: str | None) -> tuple[str | None, str]:
+    """The record reader the names enrichment starts: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else this
+    checkout's built houseCARL server. Returns (command, where it came from), or (None, one sentence why none)."""
+    if explicit:
+        return explicit, "--reader-cmd"
+    env = (os.environ.get(READER_ENV) or "").strip()
+    if env:
+        return env, READER_ENV
+    exe = HERE.parent / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / exe_name("housecarl-mcp")
+    if exe.is_file():
+        return f'"{exe}"', "checkout"
+    return None, (f"no record reader was given (--reader-cmd or {READER_ENV}) and this checkout's houseCARL server is "
+                  f"not built at {exe}.")
+
+
+def mod_names(pairs) -> dict:
+    """--mod-name PLUGIN=NAME pairs (the caller has refused a pair without '=')."""
+    return {k.strip(): v.strip() for k, v in (x.split("=", 1) for x in pairs or [] if "=" in x)}
+
+
+def reader_env(pairs) -> dict:
+    return dict(x.split("=", 1) for x in pairs or [] if "=" in x)
+
+
+def names_step(d: Path, cmd: str | None, source: str, mods: dict, env: dict) -> dict:
+    """Run the names enrichment on bundle d and say what happened in one sentence: enriched, partial (something the
+    rows name could not be read) or refused. Never raises for a refusal; nothing of the names is written on one."""
+    import bundleenrich
+    t0 = time.monotonic()
+
+    def done(status, sentence, result=None, counts=None):
+        return {"status": status, "sentence": " ".join(str(sentence).split()), "reader": source if cmd else None,
+                "counts": counts, "seconds": round(time.monotonic() - t0, 1), "result": result}
+
+    if cmd is None:
+        return done("refused", "The names enrichment was not run because " + source)
+    try:
+        out = bundleenrich.enrich_names(d, cmd, mods, env or None)
+    except bundleenrich.Refused as ex:
+        return done("refused", f"The names enrichment was refused: {str(ex).rstrip('.')}.")
+    except (OSError, ValueError) as ex:
+        return done("refused", f"The names enrichment could not start or read with its record reader ({cmd}): "
+                               f"{str(ex).rstrip('.') or type(ex).__name__}.")
+    c = out.get("counts") or {}
+    if c.get("objectsUnread") or c.get("basesUnread"):
+        return done("partial", f"The names enrichment could not read {c.get('objectsUnread')} of the "
+                               f"{c.get('objectsNamed')} objects the rows name and {c.get('basesUnread')} of their "
+                               f"{c.get('bases')} base records (listed under unread in enrichment/names/names.json), so "
+                               f"the report counts their clashes as cannot-tell.", out, c)
+    return done("enriched", f"The names enrichment read all {c.get('objectsNamed')} objects the rows name and their "
+                            f"{c.get('bases')} base records.", out, c)
+
+
+def write_names_status(d: Path, st: dict) -> dict:
+    """Record the names step's statement in the bundle's manifest (`enrichmentStatus.names`), which verify-bundle
+    checks against the files."""
+    m = load_json(d / "manifest.json") or {}
+    m.setdefault("enrichmentStatus", {})["names"] = {k: v for k, v in st.items() if k != "result"}
+    write_json(d / "manifest.json", m)
+    return st
 
 
 # ------------------------------------------------------------------------------------ status --
@@ -6215,6 +6310,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run", required=True)
     p.add_argument("--out")
     p.add_argument("--media")
+    p.add_argument("--no-names", action="store_true",
+                   help="skip the names step (each row's objects, their bases and models, read with the record reader); "
+                        "the manifest says it was skipped, and `enrich --kind names` can add it later")
+    p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with (default: "
+                                        f"{READER_ENV}, else this checkout's built server)")
+    p.add_argument("--reader-env", action="append", metavar="KEY=VALUE",
+                   help="names: an environment variable for the reader, such as a private HOUSECARL_DATA_DIR")
+    p.add_argument("--mod-name", action="append", metavar="PLUGIN=NAME", help="names: a mod's declared ordinary name")
     p.set_defaults(fn=cmd_bundle)
 
     p = sub.add_parser("verify-bundle", help="recompute every hash from the bundle-relative paths")
@@ -6224,7 +6327,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("enrich", help="add evidence derived after measurement to a bundle (record rows, names)")
     p.add_argument("--bundle", required=True)
     p.add_argument("--kind", required=True, choices=("record-rows", "names"))
-    p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with")
+    p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with (default: "
+                                        f"{READER_ENV}, else this checkout's built server)")
     p.add_argument("--reader-env", action="append", metavar="KEY=VALUE",
                    help="names: an environment variable for the reader, such as a private HOUSECARL_DATA_DIR")
     p.add_argument("--mod-name", action="append", metavar="PLUGIN=NAME", help="names: a mod's declared ordinary name")
