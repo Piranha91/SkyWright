@@ -199,8 +199,10 @@ def test_this_checkout_default():
         check("this checkout has a built viewprobe to prefer", False,
               "not built: %s - this case cannot decide anything here" % built)
         return
-    src, when = S.newest_source(S.VIEWPROBE_DIR)
-    stale = when > os.stat(built).st_mtime
+    # stale by the resolver's own rule (the newest of the exe and the dlls a deploy replaces, P75)
+    resolved, why = S.viewprobe_exe(S.VIEWPROBE_DIR)
+    stale = resolved is None
+    src = why.split(" is newer than", 1)[0] if stale else None
     cmd, out, err = call_vp_command(None)
     print("       vp_command(None) here -> %r" % (cmd,))
     if err.strip():

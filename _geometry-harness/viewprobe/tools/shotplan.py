@@ -729,12 +729,12 @@ def _source_roots(root: str) -> list[str]:
     return [root, os.path.join(harness, "_shared"), os.path.join(repo, "src", "housecarl-core")]
 
 
-def newest_source(root: str) -> tuple[str | None, float]:
-    """(path, mtime) of the newest source under those projects. Build output is skipped: `bin/`
-    holds generated .cs files that are newer than the executable by construction, and counting
-    them would make every executable stale and the preference pointless."""
+def newest_source(root: str, roots: list[str] | None = None) -> tuple[str | None, float]:
+    """(path, mtime) of the newest source under those projects (or under `roots`). Build output is
+    skipped: `bin/` holds generated .cs files that are newer than the executable by construction,
+    and counting them would make every executable stale and the preference pointless."""
     newest, when = None, 0.0
-    for r in _source_roots(root):
+    for r in (roots if roots is not None else _source_roots(root)):
         for dirpath, dirnames, filenames in os.walk(r):
             dirnames[:] = [d for d in dirnames if d.lower() not in SKIP_DIRS]
             for name in filenames:
@@ -761,11 +761,24 @@ def viewprobe_exe(root: str | None = None) -> tuple[str | None, str]:
     if not found:
         return None, "no built viewprobe.exe under %s" % built.replace("\\", "/")
     exe = max(found, key=lambda p: os.stat(p).st_mtime)
-    src, when = newest_source(root)
-    if src is not None and when > os.stat(exe).st_mtime:
-        rel = os.path.relpath(src, os.path.dirname(os.path.dirname(root))).replace("\\", "/")
-        return None, "%s is newer than the built viewprobe.exe" % rel
-    return exe, "the built viewprobe.exe is newer than every source in this repository it is built from"
+    # A deploy replaces the managed viewprobe.dll (and housecarl-core.dll) beside the exe and leaves
+    # the apphost exe with its first build's time (P75): the build that runs is the newest of them.
+    # The renderer's own and shared sources compile into viewprobe.dll; the core library's into
+    # housecarl-core.dll, which a viewprobe build also writes.
+    out = os.path.dirname(exe)
+
+    def newest(names):
+        got = [(os.stat(os.path.join(out, n)).st_mtime, n) for n in names if os.path.isfile(os.path.join(out, n))]
+        return max(got) if got else (0.0, None)
+    roots = _source_roots(root)
+    for src_roots, built in ((roots[:2], newest(["viewprobe.exe", "viewprobe.dll"])),
+                             (roots[2:], newest(["viewprobe.exe", "viewprobe.dll", "housecarl-core.dll"]))):
+        src, when = newest_source(root, src_roots)
+        if src is not None and when > built[0]:
+            rel = os.path.relpath(src, os.path.dirname(os.path.dirname(root))).replace("\\", "/")
+            return None, "%s is newer than the built %s, the newest of its built files" % (rel, built[1])
+    return exe, ("the built viewprobe (judged by %s, the newest of viewprobe.exe and viewprobe.dll) is newer than "
+                 "every source in this repository it is built from" % newest(["viewprobe.exe", "viewprobe.dll"])[1])
 
 
 def vp_command(vp: str | None = None, root: str | None = None) -> list[str]:
