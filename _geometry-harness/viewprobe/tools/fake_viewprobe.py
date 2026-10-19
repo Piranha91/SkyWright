@@ -44,7 +44,18 @@ Scene JSON:
                                      # viewprobe's unreadable census; exit 3 unless the call
                                      # carries --allow-unreadable-assets (then SUPPRESSED, exit 0)
      "unreadableEnvOptOut": false,   # exit 0 without the flag, as VP_ALLOW_UNREADABLE_ASSETS=1 would
-     "notDrawnByRule": ["meshes\\water.nif"]}   # the not-drawn-by-rule block; never fails
+     "notDrawnByRule": ["meshes\\water.nif"],  # the not-drawn-by-rule block; never fails
+     "waterZ": -100.0}               # a cell water surface, printed as viewprobe's `water z` line
+
+Boxes may also carry "pos": [x,y,z] (the placement --eye-ref/--look-ref resolve to; default the
+box's bottom centre) and "drawn": "NOT DRAWN: base carries no model" (the --refs-at verdict).
+
+Also answered, for the capture point picker: --eye-ref/--look-ref/--eye-height (the resolved
+`eye ... -> look ...` line), --ref KEY=colour with --ref-surface (each pixel whose first depth-writing
+hit is a highlighted box is painted that colour, in the renderer's measured report-mode values; a
+highlighted alpha box prints `subject-surface-refused`), and --worklist FILE with --out DIR: every shot
+prints `=== worklist cell 1/1 shot K/N: label ===`, answers the run's queries and picks at its own
+camera, and writes `<cell>-c1sK-<label>-fp.png`.
 """
 from __future__ import annotations
 
@@ -93,12 +104,17 @@ def ray_box(eye, d, lo, hi):
 
 
 def trace(scene, eye, d, cull=None):
+    got = trace_owner(scene, eye, d, cull)
+    return None if got is None else got[:2]
+
+
+def trace_owner(scene, eye, d, cull=None):
     """(hit point, distance) for the first DEPTH-WRITING surface along the ray, or None.
 
     Alpha-blended boxes are skipped exactly as viewprobe's depth probe skips them -- that is the
     known limit the planner has to keep reporting, so the stand-in has to reproduce it.
     """
-    best = None
+    best, owner = None, None
     for b in scene.get("boxes", []):
         if b.get("alpha"):
             continue
@@ -108,15 +124,15 @@ def trace(scene, eye, d, cull=None):
             continue
         t = ray_box(eye, d, b["min"], b["max"])
         if t is not None and (best is None or t < best):
-            best = t
+            best, owner = t, b
     fz = scene.get("floorZ")
     if fz is not None and d[2] < -1e-12:
         t = (fz - eye[2]) / d[2]
         if t > 1e-6 and (best is None or t < best):
-            best = t
+            best, owner = t, None
     if best is None:
         return None
-    return (eye[0] + d[0] * best, eye[1] + d[1] * best, eye[2] + d[2] * best), best
+    return (eye[0] + d[0] * best, eye[1] + d[1] * best, eye[2] + d[2] * best), best, owner
 
 
 def parse_args(argv):
@@ -125,9 +141,10 @@ def parse_args(argv):
     out = {"pick": [], "nav_at": [], "inside_at": [], "refs_at": [], "clear_at": [],
            "clear_reach": 512.0,
            "eye": None, "yaw": 0.0, "pitch": 0.0, "fov": 65.0, "size": 320, "look": None,
-           "cell": None, "cull": None}
+           "cell": None, "cull": None, "eye_ref": None, "look_ref": None, "eye_height": 120.0,
+           "refs": [], "ref_surface": False, "worklist": None, "out": None}
     takes = {"--eye", "--yaw", "--pitch", "--fov", "--size", "--look", "--msaa", "--nav",
-             "--out", "--instance", "--profile", "--game", "--order"}
+             "--instance", "--profile", "--game", "--order"}
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -141,6 +158,20 @@ def parse_args(argv):
             out["refs_at"].append(argv[i + 1]); i += 2
         elif a == "--clear-at":
             out["clear_at"].append(argv[i + 1]); i += 2
+        elif a == "--eye-ref":
+            out["eye_ref"] = argv[i + 1]; i += 2
+        elif a == "--look-ref":
+            out["look_ref"] = argv[i + 1]; i += 2
+        elif a == "--eye-height":
+            out["eye_height"] = float(argv[i + 1]); i += 2
+        elif a == "--ref":
+            out["refs"].append(argv[i + 1]); i += 2
+        elif a == "--ref-surface":
+            out["ref_surface"] = True; i += 1
+        elif a == "--worklist":
+            out["worklist"] = argv[i + 1]; i += 2
+        elif a == "--out":
+            out["out"] = argv[i + 1]; i += 2
         elif a == "--clear-reach":
             out["clear_reach"] = float(argv[i + 1]); i += 2
         elif a in ("--eye", "--look"):
@@ -175,6 +206,54 @@ def main(argv):
     if a["cull"] is not None and scene.get("failOnCullAbove"):
         print("fake_viewprobe: failing on --cull-above as the scene asks", file=sys.stderr)
         return 1
+    if a["worklist"]:
+        with open(a["worklist"], "r", encoding="utf-8") as fh:
+            wl = json.load(fh)
+        cells = wl.get("cells") or []
+        rc = 0
+        for ci, cell in enumerate(cells):
+            shots = cell.get("shots") or []
+            for si, shot in enumerate(shots):
+                print(f"=== worklist cell {ci + 1}/{len(cells)} shot {si + 1}/{len(shots)}: {shot.get('label', '')} ===")
+                b = dict(a)
+                b["cell"] = cell.get("cell")
+                b["eye"] = tuple(float(v) for v in shot["eye"])
+                b["look"] = tuple(float(v) for v in shot["look"]) if shot.get("look") else None
+                b["yaw"], b["pitch"] = float(shot.get("yaw", 0.0)), float(shot.get("pitch", 0.0))
+                if shot.get("fov") is not None:
+                    b["fov"] = float(shot["fov"])
+                label = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(shot.get("label", "")))
+                png = (os.path.join(b["out"], f"{b['cell']}-c{ci + 1}s{si + 1}-{label}-fp.png")
+                       if b["out"] else None)
+                rc = max(rc, one_shot(scene, b, argv, png))
+        return rc
+    if a["eye_ref"] or a["look_ref"]:
+        def ref_pos(key, lift):
+            for bx in scene.get("boxes", []):
+                if bx["id"] == key:
+                    p0 = bx.get("pos") or [(bx["min"][0] + bx["max"][0]) / 2.0,
+                                           (bx["min"][1] + bx["max"][1]) / 2.0, bx["min"][2]]
+                    return (p0[0], p0[1], p0[2] + lift)
+            print(f"'{key}' is not a placed ref in this cell's winning state.", file=sys.stderr)
+            return None
+        if a["eye_ref"]:
+            a["eye"] = ref_pos(a["eye_ref"], a["eye_height"])
+            if a["eye"] is None:
+                print("first-person mode needs --eye X,Y,Z or --eye-ref FORMID", file=sys.stderr)
+                return 1
+        if a["look_ref"]:
+            a["look"] = ref_pos(a["look_ref"], 96.0)
+    png = (os.path.join(a["out"], f"{a['cell']}-fp.png") if a["out"] and a["refs"] else None)
+    return one_shot(scene, a, argv, png)
+
+
+# The report-mode values the renderer's --ref-surface marks measure at (2026-10-19, flat overlay
+# after tone mapping): what a frame of the real renderer carries, so a picker reads the same pixels.
+SURFACE_RGB = {"cyan": (19, 255, 255), "magenta": (255, 76, 255), "orange": (255, 89, 26),
+               "yellow": (255, 255, 0), "green": (0, 255, 0), "blue": (0, 0, 255)}
+
+
+def one_shot(scene, a, argv, png):
     eye = a["eye"] or (0.0, 0.0, 0.0)
     yaw, pitch = a["yaw"], a["pitch"]
     if a["look"]:
@@ -187,6 +266,9 @@ def main(argv):
     size = a["size"]
 
     print(f"cell {a['cell']} (interior)  000000:Test.esm")
+    if scene.get("waterZ") is not None:
+        print(f"      water z {scene['waterZ']:.0f}: 1 cell(s) - 1 from the cell's own XCLW, 0 inherited "
+              "from the worldspace default")
     print(f"winning state: {len(scene.get('boxes', []))} refs, 1 navmeshes  (0.1s)")
     # Match the renderer's identity request gate: a candidate configuration or an explicit
     # profile-identity request. An unrequested identity must not make a binding test pass.
@@ -226,6 +308,19 @@ def main(argv):
             # viewprobe rounds the printed position and distance to whole units. The planner's
             # tolerances are sized for exactly this, so the stand-in must round the same way.
             print(f"   pick {ix},{iy}: {hx:.0f},{hy:.0f},{hz:.0f}  cell (0,0)  {dist:.0f} u from the eye")
+
+    hl = {}
+    for spec in a["refs"]:
+        key, _, col = spec.partition("=")
+        hl[key] = col or "orange"
+    if a["ref_surface"] and hl:
+        print("subject-surface-mode: exact placed opaque triangles; depth-tested; no inflated hull or occluded ghost")
+        for bx in sorted(scene.get("boxes", []), key=lambda b: b["id"]):
+            if bx["id"] in hl and bx.get("alpha"):
+                print(f"subject-surface-refused: {bx['id']}: alpha, effect, marker or non-depth-writing shape; "
+                      "participant coverage incomplete")
+    if png:
+        write_frame(scene, eye, f, r, u, t, size, hl if a["ref_surface"] else {}, a["cull"], png)
 
     silent_nav = {tuple(p) for p in scene.get("navSilent", [])}
     for spec in a["nav_at"]:
@@ -365,9 +460,13 @@ def main(argv):
         print(f"   ---- refs within {rad} u of {x},{y}: {len(rows)} ----")
         for dd, b, c in sorted(rows, key=lambda t: t[0]):
             print(f"      {dd:.0f} u  {b['id']}  at {c[0]:.0f},{c[1]:.0f},{c[2]:.0f}  scale 1.00  "
-                  f"[drawn]  base {b.get('type', 'Static')} 000002:Test.esp {b.get('edid', '-')}")
+                  f"[{b.get('drawn', 'drawn')}]  base {b.get('type', 'Static')} 000002:Test.esp {b.get('edid', '-')}")
 
     print("   textured: 1 shapes (1 with a real diffuse)")
+    if a["eye"] is not None:
+        lk = a["look"] or tuple(eye[k] + f[k] * 512.0 for k in range(3))
+        print(f"   eye {eye[0]:.0f},{eye[1]:.0f},{eye[2]:.0f} -> look {lk[0]:.0f},{lk[1]:.0f},{lk[2]:.0f}  "
+              f"yaw {yaw:.1f} pitch {pitch:.1f} fov {a['fov']:.0f}  (1 shapes)")
     # The census in UnreadableAssets.PrintCensus's shape, with the separator a redirected .NET
     # console actually delivers (" - "), and PrintNotDrawnByRule's block after it.
     unread = scene.get("unreadable") or []
@@ -392,6 +491,27 @@ def main(argv):
     if unread and not allowed and not env_opt:
         return 3
     return 0
+
+
+def write_frame(scene, eye, f, r, u, t, size, hl, cull, path):
+    """The frame a --ref-surface render would show: a highlighted box's colour where it is the first
+    depth-writing hit, a neutral grey elsewhere. Pixel centres and axes are the --pick convention."""
+    from PIL import Image
+    img = Image.new("RGB", (size, size), (128, 128, 128))
+    px = img.load()
+    for iy in range(size):
+        ny = ((size - 1 - iy) + 0.5) / size * 2.0 - 1.0
+        for ix in range(size):
+            nx = (ix + 0.5) / size * 2.0 - 1.0
+            d = tuple(f[k] + r[k] * nx * t + u[k] * ny * t for k in range(3))
+            n = math.sqrt(sum(c * c for c in d))
+            got = trace_owner(scene, eye, tuple(c / n for c in d), cull)
+            if got is not None and got[2] is not None and got[2]["id"] in hl:
+                px[ix, iy] = SURFACE_RGB.get(hl[got[2]["id"]], (255, 255, 255))
+            elif got is None:
+                px[ix, iy] = (179, 209, 235)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    img.save(path)
 
 
 if __name__ == "__main__":
