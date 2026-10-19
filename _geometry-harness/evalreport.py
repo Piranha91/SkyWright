@@ -917,6 +917,44 @@ def is_base_game(name: str, words: dict) -> bool:
     return n in listed or bool(prefix and n.startswith(prefix) and n.endswith((".esm", ".esp", ".esl")))
 
 
+def plugin_masters(b: "Bundle") -> dict | None:
+    """Each plugin's own master list (lower case), read from the configuration the probes record in their emits
+    (`Configuration.Plugins[].Masters`): a fact of the plugin file, the same in every setup that loads it. Per setup the
+    smallest emit that records the lists is read. None when no emit records any."""
+    out, seen_arms = {}, set()
+    emits = [e for e in b.evidence if e.get("kind") == "emit" and str(e.get("path", "")).endswith(".json")]
+
+    def size(e):
+        try:
+            return (b.dir / e["path"]).stat().st_size
+        except OSError:
+            return float("inf")
+    for e in sorted(emits, key=size):
+        if e.get("armId") in seen_arms:
+            continue
+        em = load_json(b.dir / e["path"])
+        cfg = em.get("Configuration") if isinstance(em, dict) else None
+        plugs = [x for x in (cfg or {}).get("Plugins") or [] if isinstance(x, dict) and isinstance(x.get("Masters"), list)]
+        if not plugs:
+            continue
+        seen_arms.add(e.get("armId"))
+        for x in plugs:
+            out.setdefault(str(x.get("Name")).lower(), {str(m).lower() for m in x["Masters"]})
+    return out or None
+
+
+def master_of(masters: dict | None, a, b) -> tuple[str, str] | None:
+    """(dependent, master) when one of the two plugins lists the other as a master, by the plugins' own master lists."""
+    if not masters:
+        return None
+    al, bl = str(a or "").lower(), str(b or "").lower()
+    if bl in masters.get(al, ()):
+        return a, b
+    if al in masters.get(bl, ()):
+        return b, a
+    return None
+
+
 class InputRefused(Exception):
     """An input the compiler will not use, with the one-sentence reason; `plan` exits 2 with it."""
 
@@ -939,6 +977,9 @@ def build_prediction(ctx: dict) -> dict:
     kinds = ctx["comparisonKinds"]
     changes = ctx["armChanges"]
     declared = ctx["declared"]
+    # each plugin's own master list (P63): a plugin that lists another as a master is built on it deliberately, so its
+    # change to that master's value is no clash between mods; None when the bundle records no master list
+    masters = ctx.get("masters")
 
     # --- which setup is P, and which (if any) carries the patch
     patched_arm, p_arm, patch_names = None, "baseline", []
@@ -1319,6 +1360,8 @@ def build_prediction(ctx: dict) -> dict:
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
             return "notInvolving"
+        if master_of(masters, a, b):
+            return "ownMaster"                 # a plugin building on its own master: its change wins as intended
         if no_body(rk, other):
             return "noBody"                    # a clash between the mods but for an object with no model (no body)
         if body_unread(rk, other):
@@ -1668,6 +1711,31 @@ def build_prediction(ctx: dict) -> dict:
             text += " " + bind(words["missingAssetWithPatch"], {"patch": patch_text, "count": fmt_n(len(got_w))})
         loss_lines.append({"text": text, "findingIds": [f_.get("id") for f_ in findings if f_.get("checkId") == check_id
                                                         and f_.get("armId") == p_arm and f_.get("id")][:1]})
+    # P63: a mod changing a value of a plugin it lists as a master is said as that, one line per mod and master, with
+    # the count by check, never as a clash between mods
+    own_master = collections.OrderedDict()
+    for e in record:
+        if e["admission"] != "ownMaster":
+            continue
+        dep, mas = master_of(masters, e["A"], e["B"])
+        by_check = own_master.setdefault((dep, mas), collections.OrderedDict())
+        c_ = by_check.setdefault((e["checkId"], e["kind"]), {"n": 0, "findingIds": []})
+        c_["n"] += 1
+        if e.get("findingId") and e["findingId"] not in c_["findingIds"]:
+            c_["findingIds"].append(e["findingId"])
+    for (dep, mas), by_check in own_master.items():
+        parts = []
+        for (check_id, kind), c_ in sorted(by_check.items(), key=lambda kv: (-kv[1]["n"], title_of(kv[0][0]))):
+            ph = phrases.get(kind) or {}
+            noun_ = ((words["fieldNoun"][0 if c_["n"] == 1 else 1]) if kind == "LOST-EDIT" else
+                     (ph.get("unitSingular") if c_["n"] == 1 else ph.get("unitPlural"))
+                     or ("clash" if c_["n"] == 1 else "clashes"))
+            parts.append(bind(words["ownMasterPart"], {"count": fmt_n(c_["n"]), "noun": noun_,
+                                                       "title": title_of(check_id)}))
+        loss_lines.append({"text": bind(words["ownMasterLine"], {
+            "mod": dep, "master": mas, "count": fmt_n(sum(c_["n"] for c_ in by_check.values())),
+            "parts": "; ".join(parts)}),
+            "findingIds": list(dict.fromkeys(f_ for c_ in by_check.values() for f_ in c_["findingIds"]))})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
     alone_lines = collections.OrderedDict()
@@ -1780,7 +1848,8 @@ def build_prediction(ctx: dict) -> dict:
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
-             "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"]}
+             "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
+             "ownMaster": set_aside["ownMaster"]}
     if sibling_record:
         # Snazzy review 1: the sibling's setup that decided "needs both" for a partner mod is named with the others
         for m_, a_ in partner_arms.items():
@@ -1797,6 +1866,7 @@ def build_prediction(ctx: dict) -> dict:
                   "setAsideLine": (bind(words["setAsideLine"], aside) + (" " + bind(words["setAsideNoBody"], aside)
                                                                          if aside["noBody"] else "")
                                    + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
+                                   + (" " + bind(words["setAsideOwnMaster"], aside) if aside["ownMaster"] else "")
                                    + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
                                    + (" " + bind(words["setAsideBothDisabled"], aside) if aside["bothDisabled"] else "")
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
@@ -1980,6 +2050,12 @@ def build_prediction(ctx: dict) -> dict:
                                    for x in un["scopeUnmeasured"] if isinstance(x, dict)))
         lines.append({"reason": reasons["scopeUnmeasured"], "count": len(un["scopeUnmeasured"]),
                       "subject": "; ".join(areas)})
+    if masters is None:
+        # no emit recorded the plugins' master lists: a mod building on its master cannot be told apart (P63)
+        pair_rows = [e for e in record if e["admission"] == "admitted"]
+        if pair_rows:
+            lines.append({"reason": reasons["mastersNotRead"], "count": len(pair_rows),
+                          "subject": "; ".join(sorted({title_of(e["checkId"]) for e in pair_rows}))})
     if not bases_read:
         body_rows = [e for e in record if e["admission"] == "admitted" and e["checkId"] in body_checks]
         if body_rows:
@@ -2114,7 +2190,7 @@ def build_prediction(ctx: dict) -> dict:
                                                                                      untold, untold_value))
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
-        problems, choices, problem_finding, no_body_new = [], 0, {}, 0
+        problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
         # a field a patch's value now wins over a mod's change, where no change to that field was lost without the patch:
         # a record change the patch newly undoes, a new clash (fifth blind review, W-S3 / S-S1)
         p_fields = {(str(k_[4]), (h_["row"].get("field"))) for k_, h_ in p_rows.items() if k_[1] == "LOST-EDIT"}
@@ -2130,12 +2206,16 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             if present(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
                 continue
+            # counted by what the clash is (an object of a by-object check, once however many rows name it), never
+            # by rows (P64): an object left without support against three hosts is one new problem
+            ident_ = ident_of.get(rk, tuple(rk[:5]))
             if no_body(rk, hit["row"].get("other")):
-                no_body_new += 1               # an object with no model: no body, not a clash
+                no_body_new.add(ident_)        # an object with no model: no body, not a clash
                 continue
-            if is_base_game(rk[2], words) or is_base_game(rk[3], words):
-                continue
-            if (rk[0], p_of(rk[0])) in measured:
+            if is_base_game(rk[2], words) or is_base_game(rk[3], words) or master_of(masters, rk[2], rk[3]):
+                continue                       # the base game, or a plugin building on its own master (P63)
+            if (rk[0], p_of(rk[0])) in measured and ident_ not in problem_seen:
+                problem_seen.add(ident_)
                 problems.append(rk)
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat")
@@ -2179,6 +2259,7 @@ def build_prediction(ctx: dict) -> dict:
                           if edited else ""}),
                      bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
+        undone_sentence = None
         if undone:
             # changes the patches undo are the patch author's choices, said in their own neutral line, never as new
             # clashes (coordinator, item 3 of the fifth review; P52): the objects switched back on are the examples
@@ -2188,6 +2269,7 @@ def build_prediction(ctx: dict) -> dict:
                                                                           key=lambda kv: (-kv[1], kv[0].lower()))),
                 "enables": bind(words["validationUndoneEnables"], {
                     "count": fmt_n(n_enable), "examples": "; ".join(enable_examples)}) if n_enable else ""}))
+            undone_sentence = sentences[-1]
         if len(blind) > 1 and words.get("validationBlindSpots"):
             # several reasons in one sentence, each with its count (P53: one line each took a third of a page)
             sentences.append(bind(words["validationBlindSpots"], {"patch": patch, "parts": "; ".join(
@@ -2203,9 +2285,10 @@ def build_prediction(ctx: dict) -> dict:
             if n_persist:
                 sentences[-1] += " " + bind(words["validationHistoryPersists"], {"patch": patch, "count": fmt_n(n_persist),
                                                                                  "examples": persist_ex})
+        no_body_new -= problem_seen            # an object a bodied row of another check counts is not set aside
         if no_body_new:
             # said with the new clashes it is set aside from (page budget)
-            sentences[new_idx] += " " + bind(words["validationNoBody"], {"patch": patch, "count": no_body_new})
+            sentences[new_idx] += " " + bind(words["validationNoBody"], {"patch": patch, "count": len(no_body_new)})
         if problems and not bases_read and any(rk[0] in body_checks for rk in problems):
             sentences.append(bind(words["validationBodyNotRead"], {"patch": patch}))
         if untold:
@@ -2299,6 +2382,9 @@ def build_prediction(ctx: dict) -> dict:
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "undone": len(undone), "undoneBy": dict(undone_by),
+                      "undoneSentence": undone_sentence,
+                      "undoneFindingIds": list(dict.fromkeys(h_["finding"].get("id") for _, h_ in undone
+                                                             if h_["finding"].get("id"))),
                       "cannotTell": len(untold) + len(untold_value), "valueUnrecorded": len(untold_value),
                       "falseAlarms": None,
                       "patchProblems": len(problems),
@@ -2321,6 +2407,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     names_row0 = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
     names_doc0 = load_json(bundle_dir / names_row0["path"]) if names_row0 else None
     body_checks = set(((pr.get("reader") or {}).get("prediction") or {}).get("bodyChecks") or [])
+    by_object_checks = set(((pr.get("reader") or {}).get("prediction") or {}).get("identityByObject") or [])
     sibling = None
     if sibling_dir is not None:
         sib_plan = compile_plan(Path(sibling_dir), verify, settings, pr, str(sibling_dir))
@@ -2724,7 +2811,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 # the created rows whose object has no model (no body) are not new problems (round 4): counted only
                 # where the created rows are known, the group's rows on this setup less those the setup compared with
                 # already had, and only when that is exactly the comparison's own count
-                no_body_created = 0
+                known_rows, known_count = [], 0
                 base_path = b.output_emit_path(check_id, "baseline", "arm") if arm_id != "baseline" else None
                 base_emit = b.emit(base_path) if base_path else None
                 for d in created_groups:
@@ -2739,7 +2826,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                 created_rows.extend(group_rows)
                                 if not context_only(check_id, d.get("kind")):
                                     reader_form_keys.update(x.get("formKey") for x in group_rows if x.get("formKey"))
-                    if (check_id in body_checks and names_doc0 is not None and not context_only(check_id, d.get("kind"))
+                    if (check_id in body_checks and not context_only(check_id, d.get("kind"))
                             and len(created_rows) != int(d.get("created") or 0) and isinstance(base_emit, dict)):
                         had = {(x.get("formKey"), tuple(x.get("other") or ())) for c in base_emit.get("Conflicts") or []
                                if (c.get("Kind"), c.get("A"), c.get("B")) == (d["kind"], d["A"], d["B"])
@@ -2747,12 +2834,24 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                         created_rows = [x for x in created_rows if (x.get("formKey"), tuple(x.get("other") or ())) not in had]
                     if (check_id in body_checks and not context_only(check_id, d.get("kind"))
                             and len(created_rows) == int(d.get("created") or 0)):
-                        no_body_created += sum(1 for x in created_rows if row_has_no_body(names_doc0, x))
+                        known_rows.extend(created_rows)
+                        known_count += len(created_rows)
+                # where the created rows are known, a check whose row is a state of its own object counts objects,
+                # each once however many rows (and pairs) name it (P64); an object with no body is left out
+                def what(x):
+                    return (x.get("formKey") if check_id in by_object_checks else
+                            (x.get("formKey"), tuple(x.get("other") or ())))
+                # an object the compared setup already lists (with any partner) is no new object
+                had_objects = ({x.get("formKey") for c in base_emit.get("Conflicts") or [] for x in conflict_rows(c, None)}
+                               if check_id in by_object_checks and isinstance(base_emit, dict) else set())
+                known_objects = {what(x) for x in known_rows} - had_objects
+                bodied = {what(x) for x in known_rows if not row_has_no_body(names_doc0, x)} - had_objects
+                no_body_created = len(known_objects - bodied)
                 first = created_groups[0] if created_groups else {}
                 gated = bool(context_only_by_check.get(str(check_id)))
                 reader_groups = [d for d in created_groups if not context_only(check_id, d.get("kind"))]
                 reader_shrank = [d for d in shrank_groups if not context_only(check_id, d.get("kind"))]
-                reader_created = (sum(int(d.get("created") or 0) for d in reader_groups) - no_body_created
+                reader_created = (sum(int(d.get("created") or 0) for d in reader_groups) - known_count + len(bodied)
                                   if created_groups else (0 if gated else int(p.get("newDefect") or p.get("created") or 0)))
                 reader_repaired = (sum(int(d.get("repaired") or 0) for d in reader_shrank) if shrank_groups
                                    else (0 if gated else int(p.get("repaired") or 0)))
@@ -3034,7 +3133,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                        if no_body_n else "")
                                     + "." +
                                     (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
-                                     "those repairs do not cancel the new problem." if repaired_count else ""))
+                                     f"those repairs do not cancel the new {noun(new_count, 'problem')}." if repaired_count else ""))
         elif f["kind"] == "finding" and c.get("A") and c.get("B"):
             sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
                            and not (f.get("rowsNoBody") and row_has_no_body(names_doc0, r))
@@ -3393,10 +3492,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         for name in pair:
             if name.lower() not in target_set and name not in supplied:
                 comparison_weight[name] += max(1, int(f.get("rowsTotal") or 0))
-    # a difference with the base game is set aside, never a conflict partner named in the opening
+    # a difference with the base game is set aside, never a conflict partner named in the opening; nor is a plugin an
+    # evaluated mod lists as a master (it builds on it, P63)
+    plugin_masters_doc = plugin_masters(b)
+    target_masters = {m for t in target_set for m in (plugin_masters_doc or {}).get(t, ())}
     base_game_partners = [n for n in comparison_weight if is_base_game(n, reader_data.get("prediction") or {})]
     comparison_names = [n for n, _ in sorted(comparison_weight.items(), key=lambda x: (-x[1], x[0].lower()))
-                        if n not in base_game_partners]
+                        if n not in base_game_partners and n.lower() not in target_masters]
     reader_scope_names = target_set | {x.lower() for x in supplied}
     for f in findings:
         c = f.get("counts") or {}
@@ -3414,6 +3516,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         aside = ("countOnly" if not (a_ and b_) else "sameMod" if str(a_).lower() == str(b_).lower() else
                  "baseGame" if (is_base_game(a_, reader_data.get("prediction") or {})
                                 or is_base_game(b_, reader_data.get("prediction") or {})) else
+                 "ownMaster" if master_of(plugin_masters_doc, a_, b_) else
                  "noBody" if f.get("rowsNoBody") and not f.get("readerRows") else None)
         f["readerDetail"] = aside is None
         f["readerDetailAside"] = aside
@@ -3863,7 +3966,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
-        "names": names_early})
+        "names": names_early, "masters": plugin_masters_doc})
     verdict = lead["prediction"]["verdict"]
     # The scope line names the evaluated pair when the counted clashes need both of them, never the third mod with
     # the most rows; the third mods of single-mod clashes shown are named after it.
@@ -3918,7 +4021,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     reader["detailAsideLine"] = (bind(pw["detailAsideLine"], {
         "count": fmt_n(aside_total), "resultNoun": "result" if aside_total == 1 else "results",
         "parts": "; ".join(f"{fmt_n(aside_counts[k])} {pw['detailAside'][k]}"
-                           for k in ("baseGame", "sameMod", "countOnly", "noBody") if aside_counts.get(k))})
+                           for k in ("baseGame", "ownMaster", "sameMod", "countOnly", "noBody") if aside_counts.get(k))})
                                  if aside_total else None)
     reader["detailSingleModLine"] = (bind(pw["detailSingleModLine"], {
         "count": fmt_n(single_mod_count), "resultNoun": "result" if single_mod_count == 1 else "results",
