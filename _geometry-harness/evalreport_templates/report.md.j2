@@ -108,8 +108,8 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {{ a.locationPluginScope.moreLine }} [Evidence index](evidence-index.md#scope).
 {% endif %}
 {% endif %}
-Coverage: {{ "all contributors to the listed locations identified" if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}{% if a.locationPluginScope.get("note") %} {{ a.locationPluginScope.note }}{% endif %}
-{% endif %}
+Coverage: {{ "all contributors to the listed locations identified." if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}{% if a.locationPluginScope.get("note") %} {{ a.locationPluginScope.note }}{% endif %}{% endif %}
+
 {% endfor %}
 
 {% set regressions = p.findings|selectattr("kind", "equalto", "regression")|selectattr("readerRelevant")|list %}

@@ -2584,7 +2584,7 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationBroughtBack"], {"patch": patch, "parts": "; ".join(
                 bind(words["validationBroughtBackPart"], {
                     "count": by_unit([{"checkId": c_, "kind": rk_[1]} for rk_ in rks]), "title": title_of(c_),
-                    "setup": describe_setup(a_), "mods": " and ".join(
+                    "setup": describe_setup(a_), "patch": patch, "mods": " and ".join(
                         x for x in all_orders.get(p_arm) or [] if x.lower() not in {y.lower() for y in all_orders.get(a_) or []}
                         and x.lower() in pt_lower) or "the evaluated mod"}) for (c_, a_), rks in by_setup.items())}))
             not_new_sentence = sentences[-1]
