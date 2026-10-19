@@ -4302,7 +4302,8 @@ def once_on_page(reader: dict, pr: dict) -> dict:
     # per setup)
     labels, by_check, other = [], collections.OrderedDict(), []
     for x in out.get("nullSummary") or []:
-        m = re.match(r"^(.+?) — (.+?): (.+)$", str(x))
+        # a setup's label can hold ": " itself (a named alternative), the result is after the last one
+        m = re.match(r"^(.+?) — (.+): (.+)$", str(x))
         if not m:
             other.append(x)
             continue

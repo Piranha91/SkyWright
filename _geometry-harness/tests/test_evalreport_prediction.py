@@ -2419,7 +2419,23 @@ def main():
         ok = bool(fids) and set(fids) <= anchors
         return ok, f"undone line {line!r}; anchors {sorted(anchors)[:6]}"
 
+    # C547. The page states a fact once: the set-aside sentence names only the kinds that occur (a list of zeros read as a
+    # contradiction beside a clash counted elsewhere), and a check clean on several setups is one line naming them
+    def c547_no_zero_set_aside_and_one_clean_line():
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        plan, md, html = compile_and_render(arms, {(WATER, "baseline"): [], (WATER, "with-patch"): [],
+                                                   (CONTACT, "baseline"): [row("CONTACT", MOD_B, MOD_A, f"000G01:{MOD_A}"),
+                                                                           row("CONTACT", BASE, MOD_A, f"000G02:{MOD_A}")],
+                                                   (CONTACT, "with-patch"): []}, [MOD_A, MOD_B], patches=[PATCH])
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        water = priorities()["reader"]["checkTitles"][WATER]
+        clean = [ln for ln in section_text(md, "Checks that found no problem").splitlines() if water in ln]
+        ok = ("1 with the base game" in line and not re.search(r"(?<![\d,])0 (with|of|already|overwrite|not|between|repeated)", line)
+              and len(clean) == 1 and "Measured load order" in clean[0] and " and " in clean[0])
+        return ok, f"set-aside line {line[:200]!r}; clean lines {clean}"
+
     for name, fn in [("w2-p63/C540-own-master-override-is-not-a-clash", c540_own_master_override_is_not_a_clash),
+                     ("w2-p64/C547-no-zero-set-aside-and-one-clean-line", c547_no_zero_set_aside_and_one_clean_line),
                      ("w2-p63/C541-master-lists-decide-never-names", c541_master_lists_decide_never_names),
                      ("w2-p64/C542-new-problems-count-objects", c542_new_problems_count_objects),
                      ("w2-p64/C543-new-problems-no-body-by-object", c543_new_problems_no_body_by_object),
