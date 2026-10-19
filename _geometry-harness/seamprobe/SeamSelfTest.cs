@@ -82,6 +82,33 @@ static class SeamSelfTest
         t.Check("PD2-E4 a row of another kind over a measured pair: Unmeasured",
                 blind is not null && P("WATER-SEAM", blind) == PhysicalState.Unmeasured, blind is null ? "absent" : $"{P("WATER-SEAM", blind)}");
         t.Check("PD2-E3 every arm-1 row and the foreign row get one predicate", preds.Count == cls.Count + 1, $"{preds.Count}");
+
+        // SS-3: a restatement that repeats a plugin outside the restater's closure (LandRepeatFixture). RepC (3) masters
+        // Skyrim and RepA, not RepB (2), and restates RepB's (0,0) byte for byte. RepC's own record is the ground it
+        // authored: its view of (0,0) is its own statement (flat, texB), not RepA's raised edge, and it wins the cell.
+        var orderR = LandRepeatFixture.Write(Path.Combine(t.Root, "repeat")).ToList();
+        var (idxR, closureR, landCellsR) = Index(orderR);
+        var r00 = idxR.Cells[LandRepeatFixture.C(0)];
+        var viewC = CellBoundaryIndex.LandAsSeenBy(r00.Land, 3, closureR);
+        string texB = LandRepeatFixture.TexB.ToString();
+        t.Check("SS-3 R00 as RepC sees it is RepC's own statement: flat east edge (0 u), texB",
+                viewC is not null && viewC.Plugin == 3 && viewC.Heights[32, 5] == 0f && viewC.QuadBase.All(q => q == texB),
+                viewC is null ? "null" : $"{idxR.PluginName(viewC.Plugin)}, east edge {viewC.Heights[32, 5]} u, base {viewC.QuadBase[0]}");
+        var beforeC = CellBoundaryIndex.LandBefore(r00.Land, 3, closureR);
+        t.Check("SS-3 R00 before RepC's edit is RepA's: east edge 16 u",
+                beforeC is not null && beforeC.Plugin == 1 && beforeC.Heights[32, 5] == 16f,
+                beforeC is null ? "null" : $"{idxR.PluginName(beforeC.Plugin)}, east edge {beforeC.Heights[32, 5]} u");
+        t.Check("SS-3 R00's winning statement is RepC's", r00.Land[^1].Plugin == 3,
+                $"statements {string.Join(", ", r00.Land.Select(l => idxR.PluginName(l.Plugin)))}");
+        var pairsR = SeamFindings.MeasurePairs(idxR, landCellsR, closureR, Eps, p => idxR.KindOf(p)).Pairs;
+        var rep = pairsR.FirstOrDefault(p => p.A.Key == LandRepeatFixture.C(0) && p.B.Key == LandRepeatFixture.C(1));
+        t.Check("SS-3 R00|R10 is Introduced+Seen, later RepC, 16 u",
+                rep is { Origin: SeamOrigin.Introduced, Sight: SeamSight.Seen } && rep.MaxDelta == 16f && rep.Later == 3,
+                rep is null ? "absent" : $"{rep.Origin}/{rep.Sight} {rep.MaxDelta} later {idxR.PluginName(rep.Later)}");
+        var r30 = idxR.Cells[LandRepeatFixture.C(3)];
+        t.Check("SS-3 control: RepD's exact forward of its master RepB's R30 adds no statement (Skyrim, RepB)",
+                r30.Land.Count == 2 && r30.Land[^1].Plugin == 2,
+                $"statements {string.Join(", ", r30.Land.Select(l => idxR.PluginName(l.Plugin)))}");
     });
 
     static string Name(FormKey k)

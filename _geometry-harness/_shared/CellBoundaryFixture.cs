@@ -293,3 +293,101 @@ public static class SeamFixture
         finally { foreach (var d in opened) d.Dispose(); }
     }
 }
+
+/// <summary>The repeat order: Skyrim, RepA, RepB, RepC, RepD. RepC masters Skyrim and RepA but not RepB, and restates
+/// RepB's LAND at (0,0) byte for byte; RepD masters RepB and restates RepB's (3,0) — the ordinary forward.</summary>
+public static class LandRepeatFixture
+{
+    static readonly SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
+    public static readonly ModKey SkyK = new("Skyrim", ModType.Master);
+    public static readonly ModKey AK = new("RepA", ModType.Plugin);
+    public static readonly ModKey BK = new("RepB", ModType.Plugin);
+    public static readonly ModKey CK = new("RepC", ModType.Plugin);
+    public static readonly ModKey DK = new("RepD", ModType.Plugin);
+    static FormKey S(uint id) => new(SkyK, id);
+    public static readonly FormKey World = S(0x800), Top = S(0x801);
+    public static readonly FormKey TexA = S(0x810), TexB = S(0x811);
+    /// <summary>Grid cell (x, 0) and its LAND.</summary>
+    public static FormKey C(int x) => S((uint)(0x900 + x));
+    public static FormKey L(int x) => S((uint)(0xA00 + x));
+
+    static Landscape Land(FormKey key, FormKey tex, Action<sbyte[,]>? shape = null)
+    {
+        var g = new sbyte[33, 33];
+        shape?.Invoke(g);
+        var land = new Landscape(key, Rel) { VertexHeightMap = new LandscapeVertexHeightMap { Offset = 0f, HeightMap = new Array2d<sbyte>(g) } };
+        foreach (var q in new[] { Quadrant.BottomLeft, Quadrant.BottomRight, Quadrant.TopLeft, Quadrant.TopRight })
+        { var bl = new BaseLayer { Header = new LayerHeader { Quadrant = q, LayerNumber = 0 } }; bl.Header.Texture.SetTo(tex); land.Layers.Add(bl); }
+        return land;
+    }
+    static Cell Grid(int x, Landscape land)
+        => new(C(x), Rel) { EditorID = $"R{x}0", Flags = default, Grid = new CellGrid { Point = new P2Int(x, 0) }, Landscape = land };
+    static Worldspace WorldWith(params Cell[] cells)
+    {
+        var ws = new Worldspace(World, Rel) { EditorID = "RepeatWorld" };
+        ws.TopCell = new Cell(Top, Rel) { Flags = default };
+        var blk = new WorldspaceBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellBlock };
+        var sub = new WorldspaceSubBlock { BlockNumberX = 0, BlockNumberY = 0, GroupType = GroupTypeEnum.ExteriorCellSubBlock };
+        foreach (var c in cells) sub.Items.Add(c);
+        blk.Items.Add(sub); ws.SubCells.Add(blk);
+        return ws;
+    }
+    // The interior of the east edge (rows 1..31) and of the west edge raised by `units`; corners untouched (see SeamFixture).
+    static Action<sbyte[,]> EastEdge(sbyte units) => g => { for (int y = 1; y < 32; y++) g[32, y] = units; };
+    static Action<sbyte[,]> WestEdge(sbyte units) => g => { g[0, 1] = units; g[0, 32] = (sbyte)-units; for (int y = 1; y < 32; y++) g[1, y] = (sbyte)-units; };
+
+    /// <summary>Write the five plugins into <paramref name="dir"/> (created); the paths in load order.</summary>
+    public static IReadOnlyList<string> Write(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        var opened = new List<IDisposable>();
+        // Every listed master is declared even when no record references it (the writer drops it otherwise): the closure
+        // is what the cases are about.
+        string Save(SkyrimMod mod, params ISkyrimModGetter[] masters)
+        {
+            var path = Path.Combine(dir, mod.ModKey.FileName.String);
+            mod.BeginWrite.ToPath(path).WithLoadOrder(masters).WithExtraIncludedMasters(masters.Select(m => m.ModKey).ToArray()).Write();
+            return path;
+        }
+        ISkyrimModGetter Open(string path)
+        {
+            var m = SkyrimMod.CreateFromBinaryOverlay(path, Rel);
+            opened.Add((IDisposable)m);
+            return m;
+        }
+        try
+        {
+            // Skyrim.esm: (0,0), (1,0) and (3,0) flat at 0, texA.
+            var sky = new SkyrimMod(SkyK, Rel);
+            sky.Worldspaces.Add(WorldWith(Grid(0, Land(L(0), TexA)), Grid(1, Land(L(1), TexA)), Grid(3, Land(L(3), TexA))));
+            var skyPath = Save(sky);
+            var skyOv = Open(skyPath);
+
+            // RepA (masters Skyrim): raises the shared edge of (0,0) and (1,0) by 2 units (16 u) on both sides: joined.
+            var a = new SkyrimMod(AK, Rel);
+            a.Worldspaces.Add(WorldWith(Grid(0, Land(L(0), TexA, EastEdge(2))), Grid(1, Land(L(1), TexA, WestEdge(2)))));
+            var aPath = Save(a, skyOv);
+            var aOv = Open(aPath);
+
+            // RepB (masters Skyrim only): (0,0) flat with texB (vanilla heights, new texture); (3,0) the same.
+            var b = new SkyrimMod(BK, Rel);
+            b.Worldspaces.Add(WorldWith(Grid(0, Land(L(0), TexB)), Grid(3, Land(L(3), TexB))));
+            var bPath = Save(b, skyOv);
+            var bOv = Open(bPath);
+
+            // RepC (masters Skyrim and RepA, blind to RepB): (0,0) flat with texB, byte for byte RepB's. RepC saw RepA's
+            // raised (1,0) and flattened its own side: a 16 u seam RepC introduced, Seen.
+            var c = new SkyrimMod(CK, Rel);
+            c.Worldspaces.Add(WorldWith(Grid(0, Land(L(0), TexB))));
+            var cPath = Save(c, skyOv, aOv);
+
+            // RepD (masters Skyrim and RepB): (3,0) restated exactly as RepB left it — an ordinary forward, no new statement.
+            var d = new SkyrimMod(DK, Rel);
+            d.Worldspaces.Add(WorldWith(Grid(3, Land(L(3), TexB))));
+            var dPath = Save(d, skyOv, bOv);
+
+            return new[] { skyPath, aPath, bPath, cPath, dPath };
+        }
+        finally { foreach (var o in opened) o.Dispose(); }
+    }
+}
