@@ -348,8 +348,12 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             for fk in targets_fk if fk in found}
     base_rows = {fk: {"type": (found.get(fk) or {}).get("type"), "editorId": (found.get(fk) or {}).get("editorId"),
                       "model": (found.get(fk) or {}).get("model")} for fk in sorted(set(bases.values())) if fk in found}
+    # what could not be read: an object no plugin read carries, a base no plugin read carries (the report counts their
+    # clashes as cannot-tell); the names step states the counts
+    unread = {"objects": sorted(fk for fk in fks if fk not in found),
+              "bases": sorted(fk for fk in set(bases.values()) if not (found.get(fk) or {}).get("type"))}
     _write(d / out_rel, {"schema": "names-v1", "places": places, "objects": objects, "mods": mods,
-                         "refs": refs, "bases": base_rows, "readOrder": [x["name"] for x in order],
+                         "refs": refs, "bases": base_rows, "unread": unread, "readOrder": [x["name"] for x in order],
                          "missing": missing, "derivedFrom": derived,
                          "capture": [{"path": req_rel, "sha256": sha(d / req_rel)},
                                      {"path": resp_rel, "sha256": sha(d / resp_rel)}],
@@ -360,7 +364,9 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                _row(resp_rel, d, "names", role="capture", checkId=None, armId=None)]
     _commit(d, manifest, "names", outputs, [HERE / "bundleenrich.py"])
     return {"kind": "names", "places": len(places), "objects": len(objects), "missing": len(missing),
-            "mods": {m: v["source"] for m, v in mods.items()}}
+            "mods": {m: v["source"] for m, v in mods.items()},
+            "counts": {"objectsNamed": len(fks), "objectsUnread": len(unread["objects"]),
+                       "bases": len(set(bases.values())), "basesUnread": len(unread["bases"])}}
 
 
 # --------------------------------------------------------------------------------------------- verify
@@ -401,3 +407,48 @@ def verify(d: Path, manifest: dict, plan: dict, defect, memo_sha) -> None:
                 if str(x.get("sha256") or "").lower() not in plan_shas:
                     defect("enrichment-source-foreign", e["path"],
                            f"names were read from {x.get('plugin')} with bytes the plan does not record")
+    verify_names_status(d, manifest, defect)
+
+
+#: The names step's statuses (evalrun bundle, bundle standard §8): what the bundle's manifest says about its names.
+NAMES_STATUSES = ("enriched", "partial", "refused", "skipped")
+
+
+def verify_names_status(d: Path, manifest: dict, defect) -> None:
+    """The names step's statement against the files: a status from the closed set with one sentence; enriched or
+    partial only with the names files, refused or skipped only without them; partial exactly when names.json lists
+    something unread, with the statement's counts equal to its lists. A manifest with no statement predates the step."""
+    st = (manifest.get("enrichmentStatus") or {}).get("names")
+    if st is None:
+        return
+    sentence = str((st or {}).get("sentence") or "") if isinstance(st, dict) else ""
+    status = st.get("status") if isinstance(st, dict) else None
+    if status not in NAMES_STATUSES or not sentence.strip() or "\n" in sentence:
+        defect("enrichment-status-unstated", "manifest.json",
+               f"the names step's statement has status {status!r} and no one-sentence reason, so a reader cannot tell "
+               f"why the bundle has or lacks names")
+        return
+    row = next((e for e in manifest.get("evidence") or []
+                if e.get("kind") == "enrichment" and e.get("enrichment") == "names" and not e.get("role")), None)
+    if (status in ("enriched", "partial")) != (row is not None):
+        defect("enrichment-status-contradiction", "manifest.json",
+               f"the names step says {status} but the bundle {'lists' if row else 'does not list'} the names files")
+        return
+    if row is None:
+        return
+    doc = _load(d / row["path"]) or {}
+    unread = doc.get("unread") if isinstance(doc, dict) else None
+    counts = st.get("counts") or {}
+    if not isinstance(unread, dict):
+        defect("enrichment-status-mismatch", row["path"], "names.json does not list what it could not read")
+        return
+    got = {"objectsUnread": len(unread.get("objects") or []), "basesUnread": len(unread.get("bases") or [])}
+    want_status = "partial" if any(got.values()) else "enriched"
+    if status != want_status or any(counts.get(k) != v for k, v in got.items()):
+        defect("enrichment-status-mismatch", "manifest.json",
+               f"the names step says {status} with {canonical_counts(counts)}, names.json lists "
+               f"{got['objectsUnread']} unread object(s) and {got['basesUnread']} unread base record(s)")
+
+
+def canonical_counts(counts: dict) -> str:
+    return ", ".join(f"{k} {counts.get(k)}" for k in ("objectsUnread", "basesUnread"))

@@ -6656,8 +6656,9 @@ def record_import_doc(folder: Path, plan: dict, cid: str, arm: dict, rows: Path 
     return manifest, names
 
 
-def recorded_bundle(tmp: Path, tag: str):
-    """case-01's evaluation with one record import credited on its first mcp-only arm, finalized and bundled."""
+def recorded_bundle(tmp: Path, tag: str, bundle_args=("--no-names",)):
+    """case-01's evaluation with one record import credited on its first mcp-only arm, finalized and bundled (by
+    default without the names step, for the cases that enrich by hand)."""
     case = "case-01-geometry-and-quest"
     run = tmp / f"{tag}-run"
     expect(do_plan(run, case).returncode, 0, f"{tag}: plan exit", "setup")
@@ -6674,7 +6675,8 @@ def recorded_bundle(tmp: Path, tag: str):
     expect(evalrun(["import-results", "--run", run, "--file", m]).returncode, 0, f"{tag}: record import", "setup")
     expect(evalrun(["finalize", "--run", run]).returncode, 0, f"{tag}: finalize", "setup")
     bundle = tmp / f"{tag}-bundle"
-    expect(evalrun(["bundle", "--run", run, "--out", bundle]).returncode, 0, f"{tag}: bundle", "setup")
+    expect(evalrun(["bundle", "--run", run, "--out", bundle] + list(bundle_args)).returncode, 0, f"{tag}: bundle",
+           "setup")
     return bundle, plan, cid, arm, names
 
 
@@ -7857,6 +7859,235 @@ CASES["case-429"] = case_429
 CASES["case-430"] = case_430
 
 
+# ------------------------------------------------------------------ the names step of `bundle` (cases 560-569)
+
+NAMES_STATUSES = ("enriched", "partial", "refused", "skipped")
+
+
+def names_status(bundle: Path) -> dict:
+    """The names step's statement in a bundle's manifest ({} when the bundle carries none)."""
+    return (((load(bundle / "manifest.json") or {}).get("enrichmentStatus") or {}).get("names")) or {}
+
+
+def names_doc(bundle: Path) -> dict | None:
+    row = next((e for e in manifest_rows(bundle, "names") if not e.get("role")), None)
+    return load(bundle / row["path"]) if row else None
+
+
+def stated_or_enriched(bundle: Path, case: str, rule: str) -> None:
+    """The step's one promise: a bundle carries the names enrichment, or one plain sentence saying why not."""
+    st = names_status(bundle)
+    sentence = str(st.get("sentence") or "")
+    check(bool(manifest_rows(bundle, "names")) or (st.get("status") in ("refused", "skipped") and sentence),
+          f"{case}: the bundle carries the names enrichment or a sentence saying why not ({rule}; status {st!r})")
+    check(st.get("status") in NAMES_STATUSES and sentence.strip() and "\n" not in sentence
+          and sentence.rstrip().endswith("."),
+          f"{case}: the names step is stated as one plain sentence ({rule}; {sentence[:160]!r})")
+
+
+def names_run(tmp: Path, tag: str):
+    """recorded_bundle's run, bundled once without the names step; the cases bundle it again as they need."""
+    bundle, plan, cid, arm, names = recorded_bundle(tmp, tag)
+    return tmp / f"{tag}-run", plan, arm
+
+
+def case_560(tmp):
+    """C560: `bundle` runs the names enrichment by default with the configured reader: the bundle carries names.json
+    with each object's base and each base's model, says so in one sentence, and verifies."""
+    case = "case-560-bundle-runs-names"
+    bundle, plan, cid, arm, names = recorded_bundle(tmp, case, bundle_args=())
+    stated_or_enriched(bundle, case, "C560")
+    st = names_status(bundle)
+    expect(st.get("status"), "enriched", f"{case}: the names step read every object and base", "C560")
+    doc = names_doc(bundle) or {}
+    check(bool(doc.get("refs")) and bool(doc.get("bases")),
+          f"{case}: names.json carries refs and bases, what the body rule needs ({list(doc)[:10]})")
+    check(doc.get("unread") == {"objects": [], "bases": []},
+          f"{case}: names.json lists nothing unread ({doc.get('unread')!r})")
+    expect(st.get("reader"), "HOUSECARL_RECORD_READER_CMD", f"{case}: the statement says where the reader came from",
+           "C560")
+    expect(evalrun(["verify-bundle", bundle]).returncode, 0, f"{case}: the bundle verifies", "C560")
+    # C567: the report then needs no hand step: its plan finds the names in the bundle as made
+    out = tmp / f"{case}-report"
+    r = subprocess.run([sys.executable, str(HARNESS / "evalreport.py"), "plan", "--bundle", str(bundle), "--out",
+                        str(out), "--verify-copy"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    plans = [p for p in out.glob("*.json") if (load(p) or {}).get("reader") is not None] if out.is_dir() else []
+    reader = (load(plans[0]) or {}).get("reader") if plans else {}
+    check(r.returncode == 0 and isinstance((reader or {}).get("names"), dict),
+          f"{case}: evalreport plan reads the names from the bundle with no hand step (C567; exit {r.returncode}, "
+          f"{r.stderr.strip()[-200:]!r})")
+
+
+def case_561(tmp):
+    """C561: `--no-names` skips the step and says so in one sentence; `enrich --kind names` later adds it and the
+    statement then says enriched; both bundles verify."""
+    case = "case-561-bundle-no-names"
+    run, plan, arm = names_run(tmp, case)
+    b = tmp / f"{case}-b"
+    r = evalrun(["bundle", "--run", run, "--out", b, "--no-names"])
+    expect(r.returncode, 0, f"{case}: bundle exit", "C561")
+    stated_or_enriched(b, case, "C561")
+    st = names_status(b)
+    expect(st.get("status"), "skipped", f"{case}: the skip is stated", "C561")
+    check("--no-names" in str(st.get("sentence")), f"{case}: the sentence names the flag ({st.get('sentence')!r})")
+    check(not manifest_rows(b, "names"), f"{case}: no names rows when skipped")
+    expect(evalrun(["verify-bundle", b]).returncode, 0, f"{case}: the skipped bundle verifies", "C561")
+    e = evalrun(["enrich", "--bundle", b, "--kind", "names"])
+    expect(e.returncode, 0, f"{case}: enrich by hand with the configured reader ({e.stderr.strip()[-200:]})", "C561")
+    expect(names_status(b).get("status"), "enriched", f"{case}: the statement follows the hand enrichment", "C561")
+    expect(evalrun(["verify-bundle", b]).returncode, 0, f"{case}: the enriched bundle verifies", "C561")
+
+
+def case_562(tmp):
+    """C562: a reader that cannot start: the bundle is still made and verifies, carries no names, and states the
+    refusal in one sentence in the manifest and on stderr."""
+    case = "case-562-bundle-reader-absent"
+    run, plan, arm = names_run(tmp, case)
+    b = tmp / f"{case}-b"
+    absent = tmp / "no-such-reader" / "housecarl-mcp.exe"
+    r = evalrun(["bundle", "--run", run, "--out", b, "--reader-cmd", str(absent)])
+    expect(r.returncode, 0, f"{case}: the bundle is made ({r.stderr.strip()[-200:]})", "C562")
+    stated_or_enriched(b, case, "C562")
+    st = names_status(b)
+    expect(st.get("status"), "refused", f"{case}: the refusal is stated", "C562")
+    check("could not start" in str(st.get("sentence")) and str(absent.name) in str(st.get("sentence")),
+          f"{case}: the sentence says the reader could not start and names it ({st.get('sentence')!r})")
+    check(str(st.get("sentence")) in r.stderr, f"{case}: the same sentence is on stderr ({r.stderr.strip()[-200:]!r})")
+    check(not manifest_rows(b, "names"), f"{case}: no names rows on refusal")
+    expect(evalrun(["verify-bundle", b]).returncode, 0, f"{case}: the bundle verifies", "C562")
+
+
+def case_563(tmp):
+    """C563: a plugin whose bytes differ from the plan's: the names step is refused naming the plugin, nothing of it
+    is written, and the bundle still verifies."""
+    case = "case-563-bundle-plugin-changed"
+    run, plan, arm = names_run(tmp, case)
+    target_name = (plan.get("targets") or [{}])[0].get("name")
+    target = next(Path(p["path"]) for p in arm["requested"]["plugins"]
+                  if p.get("name") == target_name and p.get("path") and Path(p["path"]).is_file())
+    original = target.read_bytes()
+    b = tmp / f"{case}-b"
+    try:
+        target.write_bytes(original + b"\0")
+        r = evalrun(["bundle", "--run", run, "--out", b])
+    finally:
+        target.write_bytes(original)
+    check(sha_of(target) == hashlib.sha256(original).hexdigest(), f"{case}: the plugin was restored by content")
+    expect(r.returncode, 0, f"{case}: the bundle is made ({r.stderr.strip()[-200:]})", "C563")
+    stated_or_enriched(b, case, "C563")
+    st = names_status(b)
+    expect(st.get("status"), "refused", f"{case}: the refusal is stated", "C563")
+    check(target.name in str(st.get("sentence")), f"{case}: the sentence names the plugin ({st.get('sentence')!r})")
+    check(not manifest_rows(b, "names"), f"{case}: nothing of the names step was written")
+    expect(evalrun(["verify-bundle", b]).returncode, 0, f"{case}: the bundle verifies", "C563")
+
+
+def case_564(tmp):
+    """C564: a partial read (every base record unread): the names are kept, the statement says partial with the
+    counts, names.json lists what was not read, and the bundle verifies."""
+    case = "case-564-bundle-partial-read"
+    run, plan, arm = names_run(tmp, case)
+    b = tmp / f"{case}-b"
+    reader = f"{sys.executable} {FIXT / 'fake_records_mcp.py'} --unread 0BB0"
+    r = evalrun(["bundle", "--run", run, "--out", b, "--reader-cmd", reader])
+    expect(r.returncode, 0, f"{case}: bundle exit ({r.stderr.strip()[-200:]})", "C564")
+    stated_or_enriched(b, case, "C564")
+    st = names_status(b)
+    doc = names_doc(b) or {}
+    unread = doc.get("unread") or {}
+    expect(st.get("status"), "partial", f"{case}: a partial read is stated as partial", "C564")
+    check(bool(unread.get("bases")) and all(str(x).startswith("0BB0") for x in unread["bases"]),
+          f"{case}: names.json lists the unread bases ({unread!r})")
+    expect((st.get("counts") or {}).get("basesUnread"), len(unread.get("bases") or []),
+           f"{case}: the statement counts the unread bases", "C564")
+    check(str(len(unread.get("bases") or [])) in str(st.get("sentence")),
+          f"{case}: the sentence carries the count ({st.get('sentence')!r})")
+    check(str(st.get("sentence")) in r.stderr + r.stdout, f"{case}: the sentence is printed")
+    expect(evalrun(["verify-bundle", b]).returncode, 0, f"{case}: the bundle verifies", "C564")
+
+
+def case_565(tmp):
+    """C565: verify-bundle covers the statement and the new names fields: a statement contradicting the files, counts
+    that disagree with names.json, an unknown status and a sentence-less statement each fail verification."""
+    case = "case-565-verify-names-statement"
+    run, plan, arm = names_run(tmp, case)
+    good = tmp / f"{case}-good"
+    expect(evalrun(["bundle", "--run", run, "--out", good]).returncode, 0, f"{case}: bundle", "setup")
+    expect(evalrun(["verify-bundle", good]).returncode, 0, f"{case}: the untouched bundle verifies", "C565")
+    skipped = tmp / f"{case}-skipped"
+    expect(evalrun(["bundle", "--run", run, "--out", skipped, "--no-names"]).returncode, 0, f"{case}: bundle", "setup")
+
+    def arm_(label, src, edit, want_kind):
+        b = tmp / f"{case}-{label}"
+        shutil.copytree(src, b)
+        m = load(b / "manifest.json")
+        if not isinstance((m.get("enrichmentStatus") or {}).get("names"), dict):
+            check(False, f"{case}: {label}: the bundle carries no names statement to tamper with")
+            return
+        edit(m, b)
+        (b / "manifest.json").write_text(json.dumps(m, indent=1), encoding="utf-8")
+        v = evalrun(["verify-bundle", b])
+        kinds = [x.get("kind") for x in ((load(b / "verify.json") or {}).get("bundle") or {}).get("defects") or []]
+        check(v.returncode == 3 and want_kind in kinds,
+              f"{case}: {label} fails verification as {want_kind} (exit {v.returncode}, defects {kinds})")
+
+    def st(m):
+        return m["enrichmentStatus"]["names"]
+
+    def drop_rows(m, b):
+        m["evidence"] = [e for e in m["evidence"] if e.get("enrichment") != "names"]
+        m["required"] = [p for p in m["required"] if not p.startswith("enrichment/names/")]
+    arm_("enriched-without-names", good, drop_rows, "enrichment-status-contradiction")
+    arm_("skipped-with-names", good, lambda m, b: st(m).update(status="skipped"), "enrichment-status-contradiction")
+    arm_("partial-counts-differ", good, lambda m, b: st(m).update(status="partial",
+                                                                    counts={**st(m)["counts"], "basesUnread": 3}),
+         "enrichment-status-mismatch")
+    arm_("unknown-status", skipped, lambda m, b: st(m).update(status="maybe"), "enrichment-status-unstated")
+    arm_("no-sentence", skipped, lambda m, b: st(m).update(sentence=""), "enrichment-status-unstated")
+
+
+def case_566(tmp):
+    """C566: the reader default: --reader-cmd, else HOUSECARL_RECORD_READER_CMD, else this checkout's built server;
+    with none, one sentence naming where the server was looked for."""
+    import importlib.util
+    case = "case-566-reader-default"
+    spec = importlib.util.spec_from_file_location("evalrun_case566", EVALRUN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    saved = os.environ.get("HOUSECARL_RECORD_READER_CMD")
+    try:
+        os.environ["HOUSECARL_RECORD_READER_CMD"] = "from-env"
+        expect(mod.default_reader_cmd("from-flag"), ("from-flag", "--reader-cmd"), f"{case}: the flag wins", "C566")
+        expect(mod.default_reader_cmd(None), ("from-env", "HOUSECARL_RECORD_READER_CMD"),
+               f"{case}: the variable is next", "C566")
+        os.environ.pop("HOUSECARL_RECORD_READER_CMD")
+        fake_root = tmp / f"{case}-checkout"
+        mod.HERE = fake_root / "_geometry-harness"
+        cmd, why = mod.default_reader_cmd(None)
+        exe = fake_root / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / mod.exe_name("housecarl-mcp")
+        check(cmd is None and str(exe) in why and why.endswith("."),
+              f"{case}: with no server built, one sentence naming where it was looked for ({cmd!r}, {why!r})")
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        exe.write_bytes(b"")
+        cmd, why = mod.default_reader_cmd(None)
+        check(cmd is not None and str(exe) in cmd and why == "checkout",
+              f"{case}: the checkout's built server is the default ({cmd!r}, {why!r})")
+    finally:
+        if saved is None:
+            os.environ.pop("HOUSECARL_RECORD_READER_CMD", None)
+        else:
+            os.environ["HOUSECARL_RECORD_READER_CMD"] = saved
+
+
+CASES["case-560"] = case_560
+CASES["case-561"] = case_561
+CASES["case-562"] = case_562
+CASES["case-563"] = case_563
+CASES["case-564"] = case_564
+CASES["case-565"] = case_565
+CASES["case-566"] = case_566
+
+
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""
     tmp = Path(tempfile.mkdtemp(prefix="hc-evalrun-test-"))
@@ -7874,6 +8105,8 @@ def main() -> int:
         return 1
     os.environ.setdefault("HOUSECARL_RUNLOG_DIR", str(tmp / "runlog"))
     os.environ["PYTHONIOENCODING"] = "utf-8"
+    # every bundle the suite makes runs its names step with the stand-in reader, never a built houseCARL server
+    os.environ["HOUSECARL_RECORD_READER_CMD"] = f"{sys.executable} {FIXT / 'fake_records_mcp.py'}"
     try:
         use_conflictdiff(tmp)
     except SystemExit as ex:
