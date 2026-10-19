@@ -285,11 +285,9 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
         flags += ["--nav-at", f"{st['xy'][0]},{st['xy'][1]}", "--clear-at", f"{st['xy'][0]},{st['xy'][1]},{zq}"]
     rc, text = R.call("p1-floor", [cell], flags)
     ensure_ok(rc, text, "floor")
+    # A participant with any alpha, effect or marker shape is reported by the renderer; its opaque shapes, if it has
+    # any, are still marked. Only a participant with no marked face anywhere is refused for it (below).
     refused = sorted({mm[1] for ln in text.splitlines() if (mm := SURFACE_REFUSED.match(ln))} & {A, B})
-    if refused:
-        raise Unpickable("points-no-opaque-face",
-                         f"{refused[0]} draws only alpha, effect or marker geometry, so no opaque face of it can be "
-                         "measured and the planner could not confirm one; choose another request")
     p1 = R.parsed(text)
     near = p1.refs_near()
     for k in (A, B):
@@ -398,6 +396,12 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
 
     valid = [st for st in ring if st["valid"]]
     if not valid:
+        bare = [k for k in refused if seen.get(k, 0) == 0]
+        if bare:
+            raise Unpickable("points-no-opaque-face",
+                             f"{bare[0]} draws only alpha-tested, effect or marker shapes, which the renderer cannot "
+                             "mark, and no opaque face of it appeared from any station, so no point on it can be "
+                             "measured; choose another request")
         placed = [st for st in ring if not st.get("placement") and "participants" in st]
         if not placed:
             raise Unpickable("points-no-station",
@@ -443,6 +447,7 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
            "witness": {"station": {k: chosen[k] for k in ("id", "bearing", "standoff", "eye", "frame")},
                        "placements": {k: list(v) for k, v in pos.items()},
                        "floor": {"z": floor, "source": floor_src, "water": water},
+                       "partlyUnmarked": refused,
                        "stations": [{"id": st["id"], "bearing": st["bearing"], "standoff": st["standoff"],
                                      "eye": st.get("eye"), "valid": st["valid"], "why": st.get("why"),
                                      "participants": {k: {"pixels": v["pixels"], "maxDepth": v["maxDepth"]}
