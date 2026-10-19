@@ -1480,9 +1480,35 @@ def build_prediction(ctx: dict) -> dict:
     # object between the same two mods is counted once, its states listed on it (P72); each further state's row is kept
     # in the record as the same clash. Rows against different objects stay separate clashes (P93).
     obj_rep = {}
+    # The same lost value carried by two plugins (a patch carrying its master's change forward) is one change lost:
+    # counted once, under the plugin loaded first (Pilgrim review S1); the other row stays in the record
+    p_order_low = [x.lower() for x in all_orders.get(p_arm) or []]
+    carried, by_value = set(), collections.defaultdict(list)
+    for rk_, h_ in p_rows.items():
+        if rk_[1] == "LOST-EDIT":
+            v_ = (h_["row"].get("values") or {}).get("lost")
+            if value_recorded(v_):
+                by_value[(rk_[0], rk_[3].lower(), str(rk_[4]), h_["row"].get("field"), path_folded(v_))].append(rk_)
+    for rks_ in by_value.values():
+        if len({r_[2].lower() for r_ in rks_}) > 1:
+            keep = min(rks_, key=lambda r_: (p_order_low.index(r_[2].lower()) if r_[2].lower() in p_order_low else 10 ** 6,
+                                             str(r_)))
+            carried.update(r_ for r_ in rks_ if r_ != keep)
+    # An object pair one check counts is not counted again by a later check that finds the same two objects (Sewers
+    # review S1: a scaffold in 13 Sewers objects was 13 overlaps and 13 world-state clashes); the first check's item
+    # says the other found it too
+    pair_owner = {}
     for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
         hit = p_rows[rk]
         adm = admission(rk, hit["history"], hit["row"].get("other"))
+        if adm == "admitted" and rk in carried:
+            adm = "sameValue"
+        pair_ = (frozenset([str(rk[4]), str((hit["row"].get("other") or [None])[0])])
+                 if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other") else None)
+        if adm == "admitted" and pair_ is not None and pair_ in pair_owner and pair_owner[pair_][0] != rk[0]:
+            g_owner = pair_owner[pair_][1]
+            g_owner.setdefault("_alsoFoundBy", collections.Counter())[rk[0]] += 1
+            adm = "samePair"
         base_kind, in_state = state_split(rk[1])
         ident_ = ident_of.get(rk, tuple(rk[:5]))
         other0 = (hit["row"].get("other") or [None])[0]
@@ -1526,6 +1552,8 @@ def build_prediction(ctx: dict) -> dict:
             lost_seen.add(same)
         if adm != "admitted":
             set_aside[adm] += 1
+            if adm == "samePair":
+                entry["sameAsCheck"] = pair_owner[pair_][0]
             if adm == "notOwnEdit":
                 entry["undoes"], earlier_wins = undoes_earlier(rk)
                 set_aside["notOwnEditEarlierWins"] += 1 if earlier_wins else 0
@@ -1547,10 +1575,15 @@ def build_prediction(ctx: dict) -> dict:
                                    "_subjects": set()})
         g["count"] += 1
         g["_subjects"].add(rk[4] if rk[4] is not None else ("row", rk[5]))
+        if pair_ is not None and pair_ not in pair_owner:
+            pair_owner[pair_] = (rk[0], g)
         if in_state is not None:
             g.setdefault("_stateEntries", []).append(entry)
         if rk[0] in sib_only:
             g["_fromSibling"] = True
+        if rk[1] != "LOST-EDIT" and hit["row"].get("other"):
+            g.setdefault("_partners", []).extend(o_ for o_ in [str(rk[4])] + [str(x_) for x_ in hit["row"]["other"]]
+                                                 if o_.split(":", 1)[-1].lower() not in pt_lower)
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
             # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
             g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
@@ -1623,6 +1656,10 @@ def build_prediction(ctx: dict) -> dict:
 
     def fields_text(counter):
         return ", ".join(f"{n_} {fmt_n(c_)}" for n_, c_ in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
+    def pair_objects_of_base(g):
+        """Every partner object of the item's rows is a base-game record (the other mod only edits it)."""
+        others_ = [o_ for o_ in g.get("_partners") or []]
+        return bool(others_) and all(is_base_game(str(o_).split(":", 1)[-1], words) for o_ in others_)
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
@@ -1633,6 +1670,9 @@ def build_prediction(ctx: dict) -> dict:
         if not multi and attr_key in ("needs-both", "single-mod", "with-target") and g["attributionMod"]:
             attr_key = {"needs-both": "needs-both-other", "single-mod": "single-mod-target",
                         "with-target": "with-target"}[attr_key]
+        if (attr_key == "single-mod-target" and g["kind"] != "LOST-EDIT" and pair_objects_of_base(g)
+                and words["attribution"].get("single-mod-target-base")):
+            attr_key = "single-mod-target-base"       # its partners are base-game objects the other mod edits
         elif (attr_key == "single-mod" and g["attributionMod"]
                 and str(g["attributionMod"]).lower() not in {m.lower() for m in g["mods"]}):
             attr_key = "single-mod-elsewhere"       # the same object is broken with the other evaluated mod alone
@@ -1676,6 +1716,10 @@ def build_prediction(ctx: dict) -> dict:
             detail.append(bind(words["itemStates"][0 if g["count"] == 1 else 1],
                                {"states": fmt_n(max(several)), "count": fmt_n(len(several))}))
 
+        also_ = g.pop("_alsoFoundBy", None)
+        if also_ and words.get("itemAlsoFoundBy"):
+            for c_, n_ in also_.items():
+                detail.append(bind(words["itemAlsoFoundBy"], {"count": fmt_n(n_), "title": title_of(c_)}))
         n_dis = g.pop("_disables", 0)
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
@@ -1692,6 +1736,7 @@ def build_prediction(ctx: dict) -> dict:
                       if s_b is not None else None)
             detail.append(bind(words["itemFromSibling"], {"bundle": sibling_record.get("pathAsGiven") or "",
                                                           "file": s_file or ""}))
+        g.pop("_partners", None)
         provenance = g.pop("_provenance", None)
         g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else "")
@@ -1831,6 +1876,22 @@ def build_prediction(ctx: dict) -> dict:
             text += " " + bind(words["missingAssetWithPatch"], {"patch": patch_text, "count": fmt_n(len(got_w))})
         loss_lines.append({"text": text, "findingIds": [f_.get("id") for f_ in findings if f_.get("checkId") == check_id
                                                         and f_.get("armId") == p_arm and f_.get("id")][:1]})
+    # Sewers review S2: an evaluated mod's own geometry clashes with base-game objects no other mod edits are not
+    # clashes between mods, but they are measured problems of that mod: said by check, never only in a set-aside count
+    base_geo = collections.OrderedDict()
+    for e in record:
+        if (e["admission"] == "baseGame" and e["kind"] != "LOST-EDIT" and is_geometry_check(e["checkId"], words)
+                and {e["A"].lower(), e["B"].lower()} & pt_lower and e["A"].lower() != e["B"].lower()):
+            mod_ = e["A"] if e["A"].lower() in pt_lower else e["B"]
+            c_ = base_geo.setdefault(mod_, collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"]})
+            c_["n"] += 1
+            if e.get("findingId") and e["findingId"] not in c_["fids"]:
+                c_["fids"].append(e["findingId"])
+    for mod_, by_c in base_geo.items():
+        if words.get("baseGameGeometryLine"):
+            loss_lines.append({"text": bind(words["baseGameGeometryLine"], {"mod": mod_, "parts": "; ".join(
+                f"{fmt_n(c_['n'])} {unit_noun(cid_, c_['kind'], c_['n'])} ({title_of(cid_)})" for cid_, c_ in by_c.items())}),
+                "findingIds": [f_ for c_ in by_c.values() for f_ in c_["fids"]][:1]})
     # P63: a mod changing a value of a plugin it lists as a master is said as that, one line per mod and master, with
     # the count by check, never as a clash between mods (its count is in `setAside`, said by this line alone)
     own_master = collections.OrderedDict()
@@ -1980,7 +2041,8 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
-             "ownMaster": set_aside["ownMaster"], "sameClash": set_aside["sameClash"]}
+             "ownMaster": set_aside["ownMaster"], "sameClash": set_aside["sameClash"],
+             "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"]}
     def describe_setup(arm_id):
         """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
         plugs = all_orders.get(arm_id) or []
@@ -2049,12 +2111,13 @@ def build_prediction(ctx: dict) -> dict:
             for (a_, b_), g_ in sorted(per_pair.items(), key=lambda kv: -kv[1]["n"]):
                 types_ = collections.Counter(t_ for t_ in g_["records"].values() if t_)
                 n_rec = len(g_["records"])
-                order_lines.append(bind(words["orderRiskLine"], {
+                order_lines.append({"path": "evidence/order-setup-" + str(o_.get("armId")) + ".json",
+                                    "text": bind(words["orderRiskLine"], {
                     "loser": a_, "winner": b_, "count": fmt_n(g_["n"]),
                     "noun": words["fieldNoun"][0 if g_["n"] == 1 else 1],
                     "records": f"{fmt_n(n_rec)} {'record' if n_rec == 1 else 'records'}" + (
                         " (" + ", ".join(f"{t_} {fmt_n(c_)}" for t_, c_ in types_.most_common()) + ")" if types_ else ""),
-                    "fields": fields_text(g_["fields"])}))
+                    "fields": fields_text(g_["fields"])})})
                 order_record.append({"armId": o_.get("armId"), "planPath": o_.get("planPath"),
                                      "rowsPath": o_.get("rowsPath"), "loser": a_, "winner": b_, "fields": g_["n"],
                                      "records": n_rec})
@@ -2413,8 +2476,9 @@ def build_prediction(ctx: dict) -> dict:
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
-        # a clash a setup without the patch already has (here or in the sibling) is not new with the patch, whichever
-        # plugins the rows name (Pilgrim review, P73: Grand Solitude alone splits the same aliases the patch restores)
+        # new with the patch is decided by the same setup with and without the patch alone (coordinator ruling on
+        # Pilgrim's blind review); a new clash another setup without the patch also has (Grand Solitude alone splits
+        # the aliases the patch restores) is said as brought back from there
         no_patch_arms = [a_ for a_, pl_ in all_orders.items() if a_ != p_arm and not replaced_by.get(a_)
                          and not ({str(x).lower() for x in pl_} & patch_lower)]
         not_new = []
@@ -2449,12 +2513,11 @@ def build_prediction(ctx: dict) -> dict:
                 problem_seen.add(ident_)
                 where_ = next((a_ for a_ in no_patch_arms if (rk[0], a_) in measured and present(a_, rk)), None)
                 if where_ is not None:
-                    not_new.append((rk, where_))
-                    continue
+                    not_new.append((rk, where_))     # still new with the patch; said where else it is measured
                 problems.append(rk)
 
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
-        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash")
+        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash", "sameValue", "samePair")
                      and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
         spots = collections.Counter(e["admission"] for e in spot_rows)
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
@@ -2511,10 +2574,12 @@ def build_prediction(ctx: dict) -> dict:
             by_setup = collections.OrderedDict()
             for rk, a_ in not_new:
                 by_setup.setdefault((rk[0], a_), []).append(rk)
-            sentences.append(bind(words["validationNotNew"], {"patch": patch, "parts": "; ".join(
-                bind(words["validationNotNewPart"], {
+            sentences.append(bind(words["validationBroughtBack"], {"patch": patch, "parts": "; ".join(
+                bind(words["validationBroughtBackPart"], {
                     "count": by_unit([{"checkId": c_, "kind": rk_[1]} for rk_ in rks]), "title": title_of(c_),
-                    "setup": describe_setup(a_)}) for (c_, a_), rks in by_setup.items())}))
+                    "setup": describe_setup(a_), "mods": " and ".join(
+                        x for x in all_orders.get(p_arm) or [] if x.lower() not in {y.lower() for y in all_orders.get(a_) or []}
+                        and x.lower() in pt_lower) or "the evaluated mod"}) for (c_, a_), rks in by_setup.items())}))
             not_new_sentence = sentences[-1]
         undone_sentence = None
         if undone:
@@ -3491,8 +3556,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 clauses.append(reader_comparison_templates["overlapQualification"])
                 f["readerPlain"] = " ".join(clauses)
             else:
+                ru_ = ((pr.get("reader") or {}).get("regressionUnitsRepaired") or {}).get(f.get("checkId"))
                 f["readerPlain"] = (f"{arm_subject(f.get('armId'))} repaired {fmt_n(repaired_count)} existing "
-                                    f"{noun(repaired_count, 'problem')} and changed which mod owns "
+                                    f"{(ru_[0 if repaired_count == 1 else 1]) if ru_ else noun(repaired_count, 'problem')} and changed which mod owns "
                                     f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
         elif f["kind"] == "null":
             diff_null = ((pr.get("reader") or {}).get("differentialNullPhrases") or {}).get(f.get("checkId"))
@@ -3649,6 +3715,41 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                                                for x in supplied_locations if isinstance(x, dict)] or scope_locations},
                          "orderEvaluation": da.get("orderEvaluation"),
                          "identity": {"pluginCount": len(names), "unstatedRows": unstated, "identityLimits": limits}})
+    # Setups that differ only by a declared patch load the same plugins at these locations: one without its own
+    # measured list shows the measured setup's list, with the patch where it loads, and says so (blind reviews of the
+    # Pilgrim and Sewers reports: the fallback list of conflict partners read as a different load order). The measured
+    # list names any plugin the findings name that it does not cover.
+    plugins_of_arm = {aid: [p.get("name") for p in ((plan_arms.get(aid) or {}).get("requested") or {}).get("plugins") or []]
+                      for aid in arm_ids}
+    measured_ = next((a for a in arms_out if a["locationPluginScope"]["basis"] == "measured per-location contributors"), None)
+    if measured_ is not None:
+        m_names = plugins_of_arm.get(measured_["armId"]) or []
+        m_low = {str(n).lower() for n in m_names}
+        m_list = {str(n).lower() for n in measured_["locationPluginOrder"]}
+        uncovered = [n for n in m_names if n and n.lower() in {x.lower() for x in evidence_plugins_by_arm.get(measured_["armId"], set()) if x}
+                     and n.lower() not in m_list]
+        if uncovered:
+            measured_["locationPluginScope"]["note"] = ("The findings above also name " + ", ".join(uncovered)
+                                                        + ", at locations this list does not cover.")
+        for a in arms_out:
+            if a is measured_ or a["locationPluginScope"]["basis"] == "measured per-location contributors":
+                continue
+            a_names = plugins_of_arm.get(a["armId"]) or []
+            diff_ = {str(n).lower() for n in a_names} ^ m_low
+            if not diff_ or not diff_ <= {str(x).lower() for x in supplied}:
+                continue
+            extra_ = [n for n in a_names if n and n.lower() in diff_]
+            gone_ = [n for n in m_names if n and n.lower() in diff_]
+            a["locationPluginOrder"] = [n for n in a_names if n and (n.lower() in m_list or n.lower() in diff_)]
+            a["locationPluginScope"] = dict(measured_["locationPluginScope"], complete=False, note=None,
+                                            basis="the measured load order's per-location contributors",
+                                            missingInput=("This setup loads the same plugins as the measured load order"
+                                                          + (", with " + ", ".join(extra_) if extra_ else "")
+                                                          + (", without " + ", ".join(gone_) if gone_ else "")
+                                                          + ", so its list is the measured one"
+                                                          + (" with " + ", ".join(extra_) + " where it loads; whether "
+                                                             + ", ".join(extra_) + " changes these locations was not measured."
+                                                             if extra_ else ".")))
     # Several alternatives can share one display label (every removal-only arm is "Tested alternative setup").
     # A per-setup sentence then names WHICH one in the setups-compared list's own words, so a result on one
     # alternative is never read as another's and no-problem lines are never merged across them. A label no other

@@ -1695,7 +1695,7 @@ def main():
         line = next((x for x in sec.splitlines() if "navmesh replaces" in x), "")
         ok = (f"without the patch, {MOD_B}'s navmesh replaces {MOD_A}'s in 2 navmesh records, and in 2 of them" in line
               and "CityExterior02 (ext) 689 -> 5 triangles" in line
-              and f"The 2 broken navmesh links counted above point to triangles of a navmesh this replacement cut "
+              and f"2 of the broken navmesh links counted above point to triangles of a navmesh this replacement cut "
                   f"down: {n1} (689 -> 5 triangles)" in line
               and "NPC" not in line and "navmesh replaces" in html)
         return ok, f"line {line!r}"
@@ -2603,15 +2603,17 @@ def main():
               and "3 world states" in md)
         return ok, f"items {[(i['count'], i['plain'][:160]) for i in its]}; verdict {p.get('verdict')!r}"
 
-    # C581. A world-state clash is attributed from the single-mod setup's own rows by object, as a contact row is: with
-    # ModB removed, ModA's object X is already sunk (into a base-game object), so it does not need ModB
-    def c581_state_attribution_by_object():
+    # C581 (coordinator ruling on Pilgrim's blind review). A world-state clash is the pair of objects: with ModB removed,
+    # ModA's object X sunk into a base-game object is a different clash, so X sunk into ModB's Y needs ModB; with ModB
+    # removed and X still in Y's place (the same pair), it does not
+    def c581_state_attribution_by_pair():
         plan, md, html = state_bundle(alone=[state_row("S1", BASE, MOD_A, X, S0)])
-        p = reader(plan).get("prediction") or {}
-        its = [i for i in p.get("items") or [] if i["checkId"] == STATE]
-        ok = (len(its) == 1 and its[0]["attribution"] == "single-mod" and "needs both" not in its[0]["plain"].lower()
-              and f"does not need {MOD_B}" in its[0]["plain"])
-        return ok, f"items {[(i['attribution'], i['plain'][:200]) for i in its]}"
+        its = [i for i in (reader(plan).get("prediction") or {}).get("items") or [] if i["checkId"] == STATE]
+        plan2, md2, html2 = state_bundle(alone=[state_row("S2", MOD_A, MOD_B, X, Y)])
+        its2 = [i for i in (reader(plan2).get("prediction") or {}).get("items") or [] if i["checkId"] == STATE]
+        ok = (len(its) == 1 and its[0]["attribution"] == "needs-both" and f"needs both {MOD_A} and {MOD_B}" in its[0]["plain"]
+              and len(its2) == 1 and its2[0]["attribution"] == "single-mod")
+        return ok, f"items {[(i['attribution'], i['plain'][:160]) for i in its + its2]}"
 
     # C582. With the patch the object is judged once across its states: still in one state is left 1; gone in all is
     # resolved 1, never once per state
@@ -2666,7 +2668,7 @@ def main():
                  "plugins": plugins(BASE, O2, OTHER, MOD_A), "rows": o_rows}
         plan, md, html = compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 3},
                                             enrichment=enr, order_setups=[setup])
-        lines = (reader(plan).get("prediction") or {}).get("orderRiskLines") or []
+        lines = [x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or []]
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         refused = ""
         try:
@@ -2680,7 +2682,7 @@ def main():
         return ok, f"lines {lines}; refused {refused[:80]!r}"
 
     for name, fn in [("w2-p72/C580-state-object-counted-once", c580_state_object_counted_once),
-                     ("w2-p72/C581-state-attribution-by-object", c581_state_attribution_by_object),
+                     ("w2-p72/C581-state-attribution-by-pair", c581_state_attribution_by_pair),
                      ("w2-p72/C582-state-patch-outcome-once", c582_state_patch_outcome_once),
                      ("w2-p73/C593-new-with-patch-same-setup-only", c593_new_with_patch_same_setup_only),
                      ("w2-order/C584-order-risk-said", c584_order_risk_said)]:
