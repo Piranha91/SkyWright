@@ -1672,7 +1672,8 @@ def main():
         line = next((x for x in val.get("itemLines") or [] if "Objects" in x or OVERLAP in x), "")
         ok = (bi.get("open") == 3 and bi.get("openListed") == 1 and bi.get("openPatchHeld") == 1
               and bi.get("openNotAttributed") == 1 and "1 still intersect, not attributed" in line
-              and "1 still reported as a clash between two mods" in line and line in md)
+              # the page says an item line that repeats its kind line at the top once, at the top (last round)
+              and "1 still reported as a clash between two mods" in line and line.split("): ", 1)[-1] in md)
         return ok, f"by item {bi}; line {line!r}"
 
     # C485. The navmesh one evaluated mod's navmesh replaces with a measured loss of ground is stated in the prediction
@@ -2024,7 +2025,10 @@ def main():
         plan, md, html = record_validation_bundle()
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         line = (reader(plan).get("prediction") or {}).get("withPatchLine") or ""
-        ok = (bool(line) and line in sec and PATCH in line and "still lost" not in md)
+        # the summary is a head, one line per kind and what stays (last round, units apart); each is on the page
+        pr_ = reader(plan).get("prediction") or {}
+        parts_ = [pr_.get("withPatchHead") or "\0", *(pr_.get("withPatchLines") or ["\0"])]
+        ok = (bool(line) and all(x in sec for x in parts_) and PATCH in line and "still lost" not in md)
         return ok, f"with-patch line {line!r}; in the prediction section {bool(line) and line in sec}"
 
     # ------------------------------------------- report polish: the fourth blind review
@@ -2248,7 +2252,9 @@ def main():
         plan, md, html = record_validation_bundle()
         p = reader(plan).get("prediction") or {}
         v, line = p.get("verdict") or "", p.get("withPatchLine") or ""
-        ok = "(3 record fields)" in v and "of the 3 clashes counted above" in line
+        # coordinator's last round: no total across units; each kind's line states its own total
+        ok = ("(3 record fields)" in v and "clashes counted above" not in line
+              and any("(3 record fields)" in x for x in p.get("withPatchLines") or []))
         return ok, f"verdict {v!r}; with-patch line {line!r}"
 
     for name, fn in [("w2-polish/C528-navmesh-still-lost-only-from-remeasure", c528_navmesh_still_lost_only_from_remeasure),
@@ -2314,7 +2320,7 @@ def main():
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         counted = sum(i["count"] for i in p.get("items") or [])
         ok = (adm == [("000701", "ownMaster"), ("000702", "admitted"), ("000H02", "admitted"), ("000S01", "admitted")]
-              and counted == 3 and "of the 3 clashes" in (p.get("withPatchLine") or "")
+              and counted == 3 and "clashes counted above" not in (p.get("withPatchLine") or "")
               and f"{MOD_A} changes {OTHER}'s value (its master) in 1 record field (" in sec
               and f"{MOD_A} changes {OTHER}'s value (its master)" in _html.unescape(html)
               and "Objects left without their supporting surface)" not in sec.split("(its master)", 1)[-1].split(".")[0]

@@ -6,7 +6,14 @@
 ## {{ p.reader.sectionHeadings.prediction }}
 
 > **{{ pred.verdict }}**
-{% if pred.get("withPatchLine") %}
+{% if pred.get("withPatchLines") %}
+
+{{ pred.withPatchHead }}
+
+{% for ln in pred.withPatchLines %}- {{ ln }}
+{% endfor %}{% if pred.get("withPatchStays") %}
+{{ pred.withPatchStays }}
+{% endif %}{% elif pred.get("withPatchLine") %}
 
 {{ pred.withPatchLine }}
 {% endif %}

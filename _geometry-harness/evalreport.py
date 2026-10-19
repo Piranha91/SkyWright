@@ -957,6 +957,14 @@ def master_of(masters: dict | None, a, b) -> tuple[str, str] | None:
     return None
 
 
+def field_name(row: dict) -> str:
+    """A lost edit's field as its value names it ("Grid.Flags=8" is Grid.Flags), else the row's field."""
+    v = (row.get("values") or {}).get("lost")
+    first = (v[0] if isinstance(v, list) and v else v) or ""
+    m = re.match(r"^([A-Za-z][\w.]*)=", str(first))
+    return m.group(1) if m else str(row.get("field"))
+
+
 def is_geometry_check(check_id, words: dict) -> bool:
     """A check whose rows are objects in the world (they intersect, lose their support, hang): a clash there is physical
     and shows in game whoever built on whom, so the own-master rule, which is about record values, never applies."""
@@ -1093,6 +1101,7 @@ def build_prediction(ctx: dict) -> dict:
     #     hash for hash, and a check is used only where both ran the same adapter and probe build and measured the
     #     same rows on that shared setup. Otherwise nothing is joined (refusal) or the check stays unseparated.
     sibling, sib_ok, sibling_record = ctx.get("sibling"), {}, None
+    sib_setup_plugins, p_plugin_names = {}, []
     sib_role_ref = []
     sib_only, anchor = set(), None
     all_orders = {a_: [str(x) for x in v_] for a_, v_ in orders.items()}      # every setup's plugins, sibling's prefixed
@@ -1176,6 +1185,8 @@ def build_prediction(ctx: dict) -> dict:
             sib_ok[check_id] = why is None
             checks_record.append({"checkId": check_id, "joined": why is None, "why": why,
                                   **({"how": how} if how else {})})
+        sib_setup_plugins = {a_: [x[0] for x in v_[0]] for a_, v_ in sib_idents.items()}
+        p_plugin_names = [x[0] for x in p_plugs]
         sibling_record = {"pathAsGiven": sibling.get("pathAsGiven"), "planId": sibling.get("planId"),
                           "manifestSha256": sibling.get("manifestSha256"), "anchorArm": anchor,
                           "roles": {k: v.split(":", 1)[1] for k, v in roles.items()}, "checks": checks_record}
@@ -1487,6 +1498,11 @@ def build_prediction(ctx: dict) -> dict:
                                    "_subjects": set()})
         g["count"] += 1
         g["_subjects"].add(rk[4] if rk[4] is not None else ("row", rk[5]))
+        if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
+            # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
+            g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
+        if rk[1] == "LOST-EDIT":
+            g.setdefault("_fieldNames", collections.Counter())[field_name(hit["row"])] += 1
         g.setdefault("_subjectRows", collections.Counter())[rk[4] if rk[4] is not None else ("row", rk[5])] += 1
         fid = hit["finding"].get("id") if rk[0] not in sib_only else None
         if fid and fid not in g["findingIds"]:
@@ -1523,6 +1539,16 @@ def build_prediction(ctx: dict) -> dict:
     def title_of(check_id):
         return titles.get(str(check_id)) or ctx["checkTitle"](check_id)
 
+    def unit_noun(check_id, kind, n):
+        """The unit a kind of clash is counted in: record fields, the objects of a by-object check, the kind's own unit."""
+        one = int(n) == 1
+        if kind == "LOST-EDIT":
+            return words["fieldNoun"][0 if one else 1]
+        if check_id in by_object:
+            return "object" if one else "objects"
+        ph_ = phrases.get(kind) or {}
+        return (ph_.get("unitSingular") if one else ph_.get("unitPlural")) or ("clash" if one else "clashes")
+
     def reason_words(code, check_id=None):
         # a probe's reason in the skill's words; a reason already written in words passes through; a code the skill
         # does not name gets one generic phrase, never the code (the code stays in the evidence index). A count the
@@ -1536,7 +1562,11 @@ def build_prediction(ctx: dict) -> dict:
         if " " in code:
             return code
         return words["unjudgeableUnnamed"]
-    items, subjects_of, subject_rows_of = [], {}, {}
+    items, subjects_of, subject_rows_of, pair_objects_of, field_names_of = [], {}, {}, {}, {}
+    names_fields = set(words.get("verdictNamesFields") or [])
+
+    def fields_text(counter):
+        return ", ".join(f"{n_} {fmt_n(c_)}" for n_, c_ in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
@@ -1553,6 +1583,10 @@ def build_prediction(ctx: dict) -> dict:
         attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "other": other_mod,
                                                           "why": g["attributionWhy"] or ""})
         subjects_of[id(g)] = g.pop("_subjects")
+        pair_objects_of[id(g)] = g.pop("_pairObjects", set())
+        field_names_of[id(g)] = g.pop("_fieldNames", collections.Counter())
+        if g["checkId"] in names_fields and field_names_of[id(g)]:
+            g["_fieldsLine"] = fields_text(field_names_of[id(g)])
         subject_rows_of[id(g)] = g.pop("_subjectRows")
         g["relationships"] = g["count"]
         g["objects"] = len(subjects_of[id(g)])
@@ -1582,6 +1616,9 @@ def build_prediction(ctx: dict) -> dict:
         n_dis = g.pop("_disables", 0)
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
+        fl_ = g.pop("_fieldsLine", None)
+        if fl_:
+            detail.append(bind(words["itemFields"], {"fields": fl_}))
         om_ = g.pop("_ownMaster", None)
         if om_:
             detail.append(bind(words["itemOwnMasterGeometry"], {"mod": om_[0], "master": om_[1]}))
@@ -1786,10 +1823,14 @@ def build_prediction(ctx: dict) -> dict:
         out = collections.OrderedDict()
         for g in gs:
             e = out.setdefault((g["checkId"], g["kind"]), {"checkId": g["checkId"], "kind": g["kind"],
-                                                           "relationships": 0, "_s": set()})
+                                                           "relationships": 0, "_s": set(), "_po": set(),
+                                                           "_f": collections.Counter()})
             e["relationships"] += g["relationships"]
             e["_s"] |= subjects_of[id(g)]
-        return [{**{k: v for k, v in e.items() if k != "_s"}, "objects": len(e["_s"])} for e in out.values()]
+            e["_po"] |= pair_objects_of[id(g)]
+            e["_f"].update(field_names_of[id(g)])
+        return [{**{k: v for k, v in e.items() if k not in ("_s", "_po", "_f")}, "objects": len(e["_s"]),
+                 "pairObjects": len(e["_po"]), "fieldNames": dict(e["_f"])} for e in out.values()]
 
     def stated(entries):
         out = []
@@ -1801,9 +1842,14 @@ def build_prediction(ctx: dict) -> dict:
             phrase = f"{fmt_n(n)} " + bind(nouns[0] if n == 1 else nouns[1], {"title": title_of(e["checkId"])})
             if e["kind"] == "LOST-EDIT" and u != "relationships" and words.get("verdictFieldsToo"):
                 # records in the headline, record fields in the patch tally: both units said (fifth blind review, W-S4)
-                phrase += " " + bind(words["verdictFieldsToo"], {
+                phrase += " " + bind(words["verdictFieldsNamed" if e["checkId"] in names_fields and e.get("fieldNames")
+                                           else "verdictFieldsToo"], {
                     "count": fmt_n(e["relationships"]),
-                    "noun": words["fieldNoun"][0 if e["relationships"] == 1 else 1]})
+                    "noun": words["fieldNoun"][0 if e["relationships"] == 1 else 1],
+                    "fields": fields_text(collections.Counter(e.get("fieldNames") or {}))})
+            elif (e["kind"] != "LOST-EDIT" and e.get("pairObjects") and words.get("verdictObjectsToo")
+                  and e["checkId"] in set(words.get("verdictObjectsChecks") or [])):
+                phrase += " " + bind(words["verdictObjectsToo"], {"count": fmt_n(e["pairObjects"])})
             out.append({**e, "unit": u, "count": n, "phrase": phrase})
         return sorted(out, key=lambda e: (-e["count"], e["checkId"], e["kind"]))
 
@@ -1864,6 +1910,23 @@ def build_prediction(ctx: dict) -> dict:
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
              "ownMaster": set_aside["ownMaster"]}
+    def sibling_source():
+        """Which setups the separate evaluation measured and this report uses, in plugins (blind review of the BPT
+        report: "each mod on its own" claimed setups that were never measured)."""
+        if not (sibling_record and sibling_record["roles"]):
+            return None
+        p_low = [x.lower() for x in p_plugin_names]
+        descs = []
+        for a_ in dict.fromkeys(sibling_record["roles"].values()):
+            plugs = sib_setup_plugins.get(a_) or []
+            low = {x.lower() for x in plugs}
+            kept = [x for x in plugs if not is_base_game(x, words)]
+            removed = [x for x, xl in zip(p_plugin_names, p_low) if xl not in low]
+            d_ = (words["setupBaseGameAlone"] if not kept else
+                  bind(words["setupOnly"], {"plugins": " and ".join(kept)}) if len(kept) <= len(removed) else
+                  bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
+            descs.append(d_)
+        return bind(words["siblingSetups"], {"setups": "; ".join(descs)})
     if sibling_record:
         # Snazzy review 1: the sibling's setup that decided "needs both" for a partner mod is named with the others
         for m_, a_ in partner_arms.items():
@@ -1900,7 +1963,7 @@ def build_prediction(ctx: dict) -> dict:
                       "subject": subject}),
                   "record": record, "detailAsideWords": words.get("detailAside") or {},
                   "sibling": sibling_record, "withoutPartnerArms": dict(partner_arms),
-                  "siblingSource": words.get("siblingSource") if sibling_record and sibling_record["roles"] else None}
+                  "siblingSource": sibling_source()}
 
     # --- coverage: what the checks could not judge, by named reason and count
     reasons = words["coverageReasons"]
@@ -2259,7 +2322,17 @@ def build_prediction(ctx: dict) -> dict:
                        and not disables((h_["row"].get("values") or {}).get("winner"))]
         n_enable = len(switched_on)
         enable_examples = list(dict.fromkeys(str(rk[4]) for rk in switched_on))[:3]
-        sentences = [bind(words["validationHits"], {"patch": patch, "count": len(hits)})]
+        def by_unit(xs):
+            """A count given once per unit when its clashes are of several (never pairs added to record fields)."""
+            c_ = collections.Counter()
+            for e in xs:
+                c_[(unit_noun(e["checkId"], e["kind"], 1), unit_noun(e["checkId"], e["kind"], 2))] += 1
+            if len(c_) <= 1:
+                return fmt_n(sum(c_.values()))
+            return ", ".join(f"{fmt_n(n_)} {u_[0] if n_ == 1 else u_[1]}" for u_, n_ in
+                             sorted(c_.items(), key=lambda kv: (-kv[1], kv[0])))
+
+        sentences = [bind(words["validationHits"], {"patch": patch, "count": by_unit(hits)})]
 
         def pair_by(xs):
             return sorted(collections.Counter(f"{e['A']}|{e['B']}" for e in xs).items(), key=lambda kv: (-kv[1], kv[0].lower()))
@@ -2278,10 +2351,11 @@ def build_prediction(ctx: dict) -> dict:
                 else ""}))
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
         edited = sum(1 for e in open_ if left_split.get(id(e)) == "patchHeld")
-        sentences += [bind(words["validationOpen"], {"patch": patch, "count": len(open_), "split": bind(
+        sentences += [bind(words["validationOpen"], {"patch": patch, "count": by_unit(open_), "split": bind(
                           words["validationOpenSplit"], {"untouched": fmt_n(len(open_) - edited), "edited": fmt_n(edited)})
                           if edited else ""}),
-                     bind(words["validationPatchProblems"], {"patch": patch, "count": len(problems), "undone": ""})]
+                     bind(words["validationPatchProblems"], {"patch": patch, "count": by_unit(
+                         [{"checkId": rk[0], "kind": rk[1]} for rk in problems]), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
         undone_sentence = None
         if undone:
@@ -2316,11 +2390,11 @@ def build_prediction(ctx: dict) -> dict:
         if problems and not bases_read and any(rk[0] in body_checks for rk in problems):
             sentences.append(bind(words["validationBodyNotRead"], {"patch": patch}))
         if untold:
-            sentences.append(bind(words["validationCannotTell"], {"patch": patch, "count": len(untold)}))
+            sentences.append(bind(words["validationCannotTell"], {"patch": patch, "count": by_unit(untold)}))
         if untold_value:
             sentences.append(bind(words["validationValueUnrecorded"], {"patch": patch, "count": len(untold_value)}))
         if not_measured:
-            sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": len(not_measured)}))
+            sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": by_unit(not_measured)}))
         # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
         def item_of(e):
             return (e["checkId"], e["kind"], tuple(sorted([e["A"], e["B"]], key=str.lower)),
@@ -2396,14 +2470,70 @@ def build_prediction(ctx: dict) -> dict:
         # what stays with the patch, said at the top under the prediction (third blind review, W-S6 / S-S5)
         # the clashes the totals divide: every item credit() keeps (the counted ones and those not separated)
         counted_items = [g for g in prediction["items"] if not multi or g.get("attribution") != "single-mod"]
-        prediction["withPatchLine"] = bind(words["withPatchLine"], {
-            "patch": patch, "total": fmt_n(sum(g["count"] for g in counted_items)),
-            "units": words["withPatchUnits"] if any(g["kind"] == "LOST-EDIT" for g in counted_items) else "",
-            "outcomes": outcome_text({
-            "hits": len(hits), "switched": len(switched), "switchedBy": dict(pair_by(switched)),
-            "own": len(own), "kept": len(kept), "keptBy": collections.Counter(e["A"] for e in kept),
-            "open": len(open_),
-            "cannotTell": len(untold) + len(untold_value), "notMeasured": len(credit(not_measured))})})
+        # each kind in its own unit (blind review of the BPT report: overlap pairs were added to record fields in one
+        # total): one line per check and kind with its total and outcomes, then what stays, in plain words
+        kind_lines, by_kind = [], collections.OrderedDict()
+        for g, bi in zip(prediction["items"], by_item):
+            if g in counted_items:
+                by_kind.setdefault((g["checkId"], g["kind"]), []).append((g, bi))
+        for (check_id, kind), gs in by_kind.items():
+            agg = collections.Counter()
+            sw_by, kp_by = collections.Counter(), collections.Counter()
+            for g, bi in gs:
+                agg.update({k_: v_ for k_, v_ in bi.items() if isinstance(v_, int)})
+                sw_by.update(bi.get("switchedBy") or {})
+                kp_by.update(bi.get("keptBy") or {})
+            total = sum(g["count"] for g, _ in gs)
+            kind_lines.append(bind(words["withPatchKindLine"], {
+                "title": title_of(check_id), "total": fmt_n(total), "unit": unit_noun(check_id, kind, total),
+                "outcomes": outcome_text({**agg, "switchedBy": dict(sw_by), "keptBy": kp_by})}))
+        stays_parts, back = [], collections.OrderedDict()
+        stay_groups = collections.OrderedDict()
+        for g in counted_items:
+            k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
+            stay_groups.setdefault((g["checkId"], g["kind"], tuple(g["mods"])), (g, []))[1].extend(
+                e for e in all_["open"] + all_["kept"] if item_of(e) == k)
+        for g, es in stay_groups.values():
+            if not es:
+                continue
+            if g["kind"] == "LOST-EDIT":
+                for (loser, winner), n_ in collections.Counter((e["A"], e["B"]) for e in es).items():
+                    stays_parts.append((n_, bind(words["stillThereLost"], {"count": fmt_n(n_), "loser": loser,
+                                                                           "winner": winner})))
+                for e in es:
+                    v_ = e.get("values") or {}
+                    if disables(v_.get("lost")) and not disables(v_.get("winner")):
+                        back.setdefault((e["B"], e["A"]), []).append(str(e["formKey"]))
+                continue
+            objs = {str(e["formKey"]) for e in es} | {str(o_) for e in es for o_ in e.get("other") or []}
+            places = collections.Counter(str((p_rows.get(keyof(e)) or {}).get("row", {}).get("label") or "") for e in es)
+            places.pop("", None)
+            where = ""
+            if places:
+                pl_, n_pl = places.most_common(1)[0]
+                where = ", " + bind(words["stillThereAllIn" if len(places) == 1 else "stillThereMostIn"],
+                                    {"place": re.sub(r"\s+\d+ tris -> \d+$", "", pl_), "count": fmt_n(n_pl)})
+            stays_parts.append((len(es), bind(words["stillThereGeometry"], {
+                "count": fmt_n(len(es)), "unit": unit_noun(g["checkId"], g["kind"], len(es)), "modA": g["mods"][0],
+                "modB": g["mods"][1], "objects": fmt_n(len(objs)) if g["checkId"] not in by_object else "",
+                "where": where}).replace(" (, ", " (").replace(" ()", "")))
+        stays_parts.sort(key=lambda x: -x[0])
+        limit = int(words.get("stillThereMax") or 3)
+        shown = [t_ for _, t_ in stays_parts[:limit]]
+        if len(stays_parts) > limit:
+            shown.append(bind(words["stillThereMore"][0 if len(stays_parts) - limit == 1 else 1], {"count": fmt_n(sum(n_ for n_, _ in stays_parts[limit:])),
+                                                        "items": fmt_n(len(stays_parts) - limit)}))
+        for (winner, loser), fks in back.items():
+            fks = list(dict.fromkeys(fks))
+            shown.append(bind(words["stillThereBringsBack"], {
+                "winner": winner, "loser": loser, "count": fmt_n(len(fks)),
+                "noun": "object" if len(fks) == 1 else "objects", "examples": "; ".join(fks[:2])}))
+        prediction["withPatchHead"] = bind(words["withPatchHead"], {"patch": patch})
+        prediction["withPatchLines"] = kind_lines
+        prediction["withPatchStays"] = (bind(words["stillThereLine"], {"patch": patch, "parts": "; ".join(shown)})
+                                        if shown else None)
+        prediction["withPatchLine"] = " ".join([prediction["withPatchHead"], *kind_lines]
+                                               + ([prediction["withPatchStays"]] if shown else []))
         validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
@@ -4327,6 +4457,17 @@ def once_on_page(reader: dict, pr: dict) -> dict:
     out["prediction"] = pred
     if conc.get("nullLong") and conc.get("nullShort"):
         out["nullSummary"] = [x.replace(conc["nullLong"], conc["nullShort"]) for x in reader.get("nullSummary") or []]
+    # a patch item line that only repeats the kind line at the top (its kind has this one counted item) is said once,
+    # at the top; the plan keeps every item line
+    val_ = reader.get("validation") or {}
+    kls = pred.get("withPatchLines") or []
+    if kls and val_.get("itemLines"):
+        kind_titles = {re.sub(r" \([\d,]+ [^)]*\): .*$", "", k_) for k_ in kls}
+        per_title = collections.Counter(t_ for x in val_["itemLines"] for t_ in kind_titles if str(x).startswith(t_ + ", "))
+        keep = [x for x in val_["itemLines"]
+                if not any(str(x).startswith(t_ + ", ") and per_title.get(t_) == 1 for t_ in kind_titles)]
+        if len(keep) < len(val_["itemLines"]):
+            out["validation"] = {**val_, "itemLines": keep}
     # a check with the same no-problem result on several setups is said once with those setups named, and checks
     # with the same result on the same setups share one line (the page states each fact once; the plan keeps one line
     # per setup)
