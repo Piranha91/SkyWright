@@ -36,7 +36,8 @@ except ImportError:  # the file still runs standalone; see the __main__ block be
     pytest = None
 
 HARNESS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-EXE = os.path.join(HARNESS, "overlapprobe", "bin", "Release", "net9.0", "overlapprobe.exe")
+# HOUSECARL_TEST_OVERLAPPROBE runs the cases against another build (a baseline or a sabotage arm).
+EXE = os.environ.get("HOUSECARL_TEST_OVERLAPPROBE") or os.path.join(HARNESS, "overlapprobe", "bin", "Release", "net9.0", "overlapprobe.exe")
 CANDIDATE = os.environ.get("HOUSECARL_TEST_CANDIDATE")
 
 SKIP_REASON = ("needs a built overlapprobe and HOUSECARL_TEST_CANDIDATE pointing at a real "
@@ -60,12 +61,29 @@ NO_BOUND_CARRIED = "scene scope resolved no seed references"
 
 
 def unusable_cell_refusal(scope_path, cell):
-    """A synthetic cell is not a cell of the evaluated order, so once the bound reaches scoping
-    the capture refuses on it with this text. That refusal is the PROOF the bound arrived: it
-    names the cell and the scope file that declared it. A bound parsed and then dropped produces
-    NO_BOUND_CARRIED instead, and a scope rejected outright produces a "could not read" line."""
+    """A cell whose owner IS loaded but which holds no placement gives no bounded footprint, so once the
+    bound reaches scoping the capture refuses on it with this text, naming the cell and the scope file
+    that declared it. (A cell whose owner the order neither loads nor masters is skipped instead; see
+    absent_cell_skip.)"""
     return (f"--scene-scope-from '{os.path.abspath(scope_path)}' declares cell {cell}, "
             "which has no placed reference from which to derive a bounded exterior footprint")
+
+
+OWNER = "TestScope.esm"   # loaded by no real order and mastered by none: its cells cannot exist there
+LOADED_UNKNOWN_CELL = "FFFFF0:Skyrim.esm"   # an owner every order loads, an id no cell uses
+
+
+def absent_cell_skip(scope_path, cell):
+    """An imported cell whose owning plugin the setup neither loads nor masters does not exist in that
+    setup, so it bounds nothing there. The skip line is the proof the bound arrived: it names the cell,
+    its owner and the scope file that declared it."""
+    return (f"--scene-scope-from '{os.path.abspath(scope_path)}' declares cell {cell}, owned by {OWNER}, "
+            "which this setup neither loads nor masters: the cell does not exist here and bounds nothing")
+
+
+def _absent_declared(tmp_path):
+    with open(tmp_path / "out.json", encoding="utf-8") as f:
+        return json.load(f)["scene"]["discovery"]["absentDeclaredCells"]
 
 
 def _record(formid, cell=CELL_LOW, interior=True):
@@ -141,15 +159,17 @@ def _assert_exact(code, text, *, expect_code, expect_contains):
 # --- the bound contract: a declared cell is a bound -----------------------------------------
 
 def test_cell_only_scope_is_accepted_and_its_bound_is_carried(tmp_path):
-    """A capture declared by --scene-cell carries cells[] and an empty seedReferences[]. Refusing
-    it was the defect. Accepting the file is only half the fix, so this asserts the exact refusal
-    that can ONLY be reached once the imported cell has joined the capture's own cell set -- it
-    names both the cell and the scope file that declared it."""
+    """C608. A capture declared by --scene-cell carries cells[] and an empty seedReferences[]. Refusing
+    it was the defect. The imported cell's owner is in no plugin list of the evaluated order, so the
+    cell does not exist there (P111): the capture completes, prints the skip line that can ONLY be
+    reached once the imported cell has joined the capture's own cell set, and names the cell in
+    absentDeclaredCells with the scope that declared it."""
     scope = _write(tmp_path, "cell-only.json", _manifest(seeds=[], cells=[CELL_LOW]))
     code, text = _run(tmp_path, scope)
     assert _scope_refusal(text) is None, f"the scope must not be refused: {_scope_refusal(text)}"
-    _assert_exact(code, text, expect_code=2,
-                  expect_contains=unusable_cell_refusal(scope, CELL_LOW))
+    _assert_exact(code, text, expect_code=0, expect_contains=absent_cell_skip(scope, CELL_LOW))
+    assert _absent_declared(tmp_path) == [{"cell": CELL_LOW, "owningPlugin": OWNER,
+        "declaredBy": f"--scene-scope-from '{os.path.abspath(scope)}'", "basis": "owning-plugin-not-loaded"}]
 
 
 def test_seed_referenced_scope_still_captures(tmp_path):
@@ -172,36 +192,56 @@ def test_cell_bounded_scope_with_empty_population_is_accepted(tmp_path):
                    _manifest(seeds=[], cells=[CELL_LOW], records=[], pairs=[]))
     code, text = _run(tmp_path, scope)
     assert _scope_refusal(text) is None, f"the scope must not be refused: {_scope_refusal(text)}"
-    _assert_exact(code, text, expect_code=2,
-                  expect_contains=unusable_cell_refusal(scope, CELL_LOW))
+    assert NO_BOUND_CARRIED not in text, "an absent declared cell is still a bound"
+    _assert_exact(code, text, expect_code=0, expect_contains=absent_cell_skip(scope, CELL_LOW))
 
 
 # --- two scopes: both contributions must independently reach the bound ----------------------
 #
-# The capture stops at the first unusable cell, so one run can only witness one contribution.
-# These two cases are a matched pair: two scopes are supplied both times, and only which scope
-# owns the ordinally-lowest cell changes. Each run must name that scope's own cell and its own
-# path. If either scope's cells were dropped from the merge, the run in which that scope owns the
-# lowest cell would refuse on the other scope's cell instead -- so the pair fails.
+# Both scopes' cells are owned by a plugin the order does not load, so each is skipped with its own
+# line. If either scope's cells were dropped from the merge, that scope's line would be missing.
 
 def test_two_scopes_first_contribution_reaches_the_bound(tmp_path):
+    """C609."""
     a = _write(tmp_path, "scope-a.json", _manifest(seeds=[], cells=[CELL_LOW]))
     b = _write(tmp_path, "scope-b.json", _manifest(seeds=[], cells=[CELL_MID]))
     code, text = _run(tmp_path, a, b)
-    _assert_exact(code, text, expect_code=2,
-                  expect_contains=unusable_cell_refusal(a, CELL_LOW))
-    assert CELL_MID not in text, "the refusal must name the ordinally-lowest declared cell"
+    _assert_exact(code, text, expect_code=0, expect_contains=absent_cell_skip(a, CELL_LOW))
+    assert absent_cell_skip(b, CELL_MID) in text, "the second scope's cell never reached the bound"
+    assert [r["cell"] for r in _absent_declared(tmp_path)] == [CELL_LOW, CELL_MID]
 
 
 def test_two_scopes_second_contribution_reaches_the_bound(tmp_path):
-    """Same shape, but now the SECOND scope owns the lowest cell. Its bound must be the one
-    reported, which the first case cannot show."""
+    """C610. Same shape with the scopes' cells swapped in order, so each scope's line is checked
+    against its own path whichever owns the lower cell."""
     a = _write(tmp_path, "scope-a.json", _manifest(seeds=[], cells=[CELL_HIGH]))
     b = _write(tmp_path, "scope-b.json", _manifest(seeds=[], cells=[CELL_MID]))
     code, text = _run(tmp_path, a, b)
+    _assert_exact(code, text, expect_code=0, expect_contains=absent_cell_skip(b, CELL_MID))
+    assert absent_cell_skip(a, CELL_HIGH) in text, "the first scope's cell never reached the bound"
+    declared_by = {r["cell"]: r["declaredBy"] for r in _absent_declared(tmp_path)}
+    assert declared_by == {CELL_MID: f"--scene-scope-from '{os.path.abspath(b)}'",
+                           CELL_HIGH: f"--scene-scope-from '{os.path.abspath(a)}'"}
+
+
+# --- a cell that can exist keeps the guard ---------------------------------------------------
+
+def test_loaded_owner_cell_without_placement_is_still_refused(tmp_path):
+    """C611. The owner is loaded, so the cell could exist; with no placed reference it gives no
+    bounded footprint, and the capture refuses as before. Deleting the guard turns this green-to-red."""
+    scope = _write(tmp_path, "loaded-owner.json", _manifest(seeds=[], cells=[LOADED_UNKNOWN_CELL]))
+    code, text = _run(tmp_path, scope)
     _assert_exact(code, text, expect_code=2,
-                  expect_contains=unusable_cell_refusal(b, CELL_MID))
-    assert CELL_HIGH not in text, "the refusal must name the ordinally-lowest declared cell"
+                  expect_contains=unusable_cell_refusal(scope, LOADED_UNKNOWN_CELL))
+
+
+def test_typed_scene_cell_with_absent_owner_is_refused(tmp_path):
+    """C612. A typed --scene-cell is the operator's own bound; naming a plugin the order does not load
+    is refused with the owner named, never skipped."""
+    code, text = _run(tmp_path, extra=("--scene-cell", CELL_LOW))
+    _assert_exact(code, text, expect_code=2,
+                  expect_contains=f"--scene-cell declares cell {CELL_LOW}, owned by {OWNER}, which this setup "
+                                  "neither loads nor masters")
 
 
 # --- an undeclared or malformed scope is still refused --------------------------------------
