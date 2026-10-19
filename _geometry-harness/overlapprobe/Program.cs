@@ -85,11 +85,15 @@ overlapprobe: bounded strict render-surface scene capture
   --contact-evidence-pairs INPUT --surface-tolerance N --max-triangle-pairs N --pair-seconds N
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
   --self-check-imported-accounting FIXTURE.json (no load order; prints the accounting receipt)
+  --self-check-declared-cells FIXTURE.json (no load order; prints each declared cell's presence outcome)
 Scene candidates require explicit Mods asset priority; preflight checks MO2 names and relative priority.
 An exterior persistent cell cannot define a bounded scope. Unknown geometry remains explicit.
 --scene-scope-from accepts any scope declaring a bound: a non-empty scene.discovery.seedReferences[]
 or a non-empty scene.discovery.cells[]. An imported declared cell joins this capture's --scene-cell
 set, so a bounded cell scope and its pair/reference identities carry across configurations.
+An imported cell whose owning plugin this setup neither loads nor masters does not exist here: it
+bounds nothing, is named in scene.discovery.absentDeclaredCells and is not refused. A typed
+--scene-cell with such an owner is refused.
 Every imported reference identity -- every records[] formid AND both endpoints of every pairs[]
 row -- then receives exactly one disposition in scene.discovery.importedReferenceAccounting:
 emitted (a record row enumerates it), no_placement_history (missingImportedReferences, unchanged,
@@ -204,6 +208,8 @@ bool scenePreflight = false;
 // it takes a fixture naming the identities and their history/pose/row state and prints the receipt
 // the real capture would emit. Handled before any target work, so a test can drive it anywhere.
 string? accountingFixture = null;
+// The same for the declared-cell presence rule (DeclaredCellPresence.cs).
+string? declaredCellsFixture = null;
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
@@ -268,6 +274,7 @@ try
         else if (flag == "--scene-space") throw new ArgumentException("--scene-space is refused because an exterior worldspace is unbounded; use bounded --scene-cell FormKey values");
         else if (flag == "--scene-preflight") scenePreflight = true;
         else if (flag == "--self-check-imported-accounting") { accountingFixture = NeedValue(i, flag); i++; }
+        else if (flag == "--self-check-declared-cells") { declaredCellsFixture = NeedValue(i, flag); i++; }
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
         else if (flag == "--population") { populationPath = NeedValue(i, flag); i++; }
         else if (flag == "--population-audit")
@@ -292,6 +299,7 @@ try
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
 if (accountingFixture is not null) return ImportedReferenceAccounting.SelfCheck(accountingFixture);
+if (declaredCellsFixture is not null) return DeclaredCellPresence.SelfCheck(declaredCellsFixture);
 
 bool sceneCapture = sceneId is not null;
 if (sceneCapture && orderFile is null)
@@ -572,14 +580,20 @@ foreach (var key in sceneReferenceSeeds)
         bool interior = idx.CellName.TryGetValue(pose.Cell, out var ci) && ci.Interior;
         sceneSeedPoses.Add((key, pose.Cell, pose.Space, (double)pose.Pos.X, (double)pose.Pos.Y, (double)pose.Pos.Z, interior, (Aabb?)null, (string?)null, "current-candidate-or-imported", false));
     }
+// A declared cell exists here only when this setup loads or masters its owning plugin (DeclaredCellPresence.cs).
+var declarableOwners = DeclaredCellPresence.Declarable(cfg.Plugins.Select(p => (p.Name, p.Masters)));
+var absentDeclaredCells = new List<DeclaredCellPresence.Row>();
 // Ordered so a scope carrying several unusable cells always refuses on the same one. Without it
 // the refusal depends on set-insertion order, which is a different message run to run for the same
 // inputs — and a guard whose refusal is not reproducible cannot be asserted on.
 foreach (var cell in explicitCellKeys.OrderBy(c => c.ToString(), StringComparer.Ordinal))
 {
+    string cellOrigin = cellBoundOrigin.TryGetValue(cell, out var declaredBy) ? declaredBy : "--scene-cell";
+    var presence = DeclaredCellPresence.Classify(cell, cellOrigin, declarableOwners);
+    if (presence.Outcome == DeclaredCellPresence.Refuse) { Console.Error.WriteLine(DeclaredCellPresence.RefuseLine(presence)); return 2; }
+    if (presence.Outcome == DeclaredCellPresence.Absent) { absentDeclaredCells.Add(presence); Console.WriteLine("   " + DeclaredCellPresence.SkipLine(presence)); continue; }
     bool interior = idx.CellName.TryGetValue(cell, out var ci) && ci.Interior;
     if (interior) { sceneCells.Add(cell); continue; }
-    string cellOrigin = cellBoundOrigin.TryGetValue(cell, out var declaredBy) ? declaredBy : "--scene-cell";
     if (idx.PersistentCells.Contains(cell))
     { Console.Error.WriteLine($"{cellOrigin} declares cell {cell}, which is an exterior persistent cell and has no bounded spatial footprint; supply --scene-scope-from or candidate seeds"); return 2; }
     var filed = idx.History.Refs.Select(kv => (kv.Key, Pose: idx.WinningGeometryPose(kv.Key)))
@@ -1983,6 +1997,8 @@ if (geometryManifestPath is not null)
                     referenceCount = s.References.Count, pairCount = s.PairKeys.Count, cellCount = s.Cells.Count,
                     declaredCellCount = s.DeclaredCells.Count }).ToArray(),
                 importedDeclaredCells = importedDeclaredCells.Select(c => c.ToString()).OrderBy(c => c, StringComparer.Ordinal).ToArray(),
+                // Imported cells whose owning plugin this setup neither loads nor masters: they do not exist here.
+                absentDeclaredCells = absentDeclaredCells.Select(DeclaredCellPresence.AbsentRow).ToArray(),
                 // Unchanged in meaning: the imported identities the evaluated order has no winner
                 // history for. DERIVED from the partition below rather than recomputed beside it, so
                 // the two can no longer answer differently for the same reference.
