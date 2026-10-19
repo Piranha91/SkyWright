@@ -456,6 +456,35 @@ def case_41_a_tree_value_differing_from_the_winner_only_in_path_case_is_the_winn
     assert own == [False, True], (own, vals)
 
 
+def case_43_a_list_change_the_winner_keeps_item_by_item_is_not_lost():
+    """Window 2, lane final (Pilgrim review B1): ModA adds a condition and marks the first OR; ModB's winning list keeps
+    both and adds one of its own, so ModA's change is not lost (no row); where ModB's list drops ModA's added condition,
+    ModA's change is lost (a row). Lists are compared item by item, an item being all of its leaves."""
+    def conds(*items):
+        return {f"Conditions[{i}].{k}": v for i, (fn_, fl) in enumerate(items)
+                for k, v in (("Data.Function", fn_), ("Flags", fl))}
+    base_, a_ = conds(("HasKeyword", "0")), conds(("HasKeyword", "OR"), ("IsUndead", "0"))
+    rows = {}
+    for name, b_ in (("kept", conds(("HasKeyword", "OR"), ("HasPerk", "OR"), ("IsUndead", "0"))),
+                     ("dropped", conds(("HasKeyword", "OR"), ("HasPerk", "0")))):
+        with tempfile.TemporaryDirectory() as td:
+            req, resp = records_transcript(Path(td) / name, [(BASE, base_), (A, a_), (B, b_)], "00C743:Skyrim.esm",
+                                           "MagicEffect", "fields")
+            lines = [json.loads(x) for x in req.read_text(encoding="utf-8").splitlines() if x.strip()]
+            for m in lines:
+                proj = ((m.get("params") or {}).get("arguments") or {}).get("project") or {}
+                if proj.get("fields"):
+                    proj["fields"] = ["Conditions"]          # the read selects the field, as the imports do
+            req.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+            order = [{"name": n, "path": f"X:/Lab/{n}", "sha256": "0" * 64} for n in (BASE, A, B)]
+            got = RR.read_chains(req, resp, order, RR.load_scope())["00C743:Skyrim.esm"]
+            its = (got.get("items") or {}).get("Conditions")
+            emit = RR.rows_for_setup(RR.reads_of(req, resp, order), order, RR.load_scope())
+            rows[name] = (RR.list_change_kept(its[0], its[1], its[2]) if its and hasattr(RR, "list_change_kept") else None,
+                          [(c["A"], c["Field"]) for c in emit["Conflicts"]])
+    assert rows == {"kept": (True, []), "dropped": (False, [(A, "Conditions")])}, rows
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

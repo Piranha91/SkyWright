@@ -15,7 +15,7 @@ identity field is not compared; file bookkeeping, group bookkeeping and runtime-
 (.claude/skills/world-edit-compatibility/references/record-field-scope.json) by their schema names. A field the
 capture did not read, a field the schema does not know and a record whose read failed are unjudged with the reason,
 never treated as equal, and listed (`Unjudged`: the record, field, reason and the plugins whose versions were compared).
-Generated bookkeeping (a worldspace's LargeReferences) is named in the same skill data and not compared. Lists are compared as multisets; numbers at four decimals with -0 equal to 0; an integer
+Generated bookkeeping (a worldspace's LargeReferences) is named in the same skill data and not compared. Lists are compared as multisets, and a plugin's change to a list is lost only where the winning list does not keep it item by item (`list_change_kept`); numbers at four decimals with -0 equal to 0; an integer
 field the game reads only in part (a cell's Grid flags) on the bytes it reads, by a mask named in the same skill data.
 """
 from __future__ import annotations
@@ -350,6 +350,40 @@ def _keyed(fields: dict, angles=frozenset(), masks=None) -> dict[str, tuple]:
     return {k: tuple(sorted(v)) for k, v in out.items()}
 
 
+ITEM = re.compile(r"^([A-Za-z0-9_]+)\[(\d+)\](.*)$")
+
+
+def _items(fields: dict, angles=frozenset(), masks=None) -> dict[str, collections.Counter]:
+    """Each list field's items as wholes: field -> the multiset of its items, an item being all of its normalised leaves
+    (`Conditions[1].Data.Function = IsUndead` and its siblings are one item). Only fields read as a list."""
+    parents = {p[:i] for p in fields for i, ch in enumerate(p) if ch in ".[" and i}
+    per = collections.defaultdict(list)
+    for p, v in fields.items():
+        if p in parents or LIST_SUMMARY.match(str(v).strip()):
+            continue
+        m = ITEM.match(p)
+        if not m:
+            continue
+        k = INDEX.sub("", p)
+        nv = _angle(v) if k in angles else _masked(v, masks[k]) if masks and k in masks else _norm(v)
+        per[(m.group(1), m.group(2))].append(INDEX.sub("", m.group(3)) + "=" + nv)
+    out = collections.defaultdict(collections.Counter)
+    for (top, _), leaves in per.items():
+        out[top][tuple(sorted(leaves))] += 1
+    return dict(out)
+
+
+def list_change_kept(inherited, mine, winner) -> bool | None:
+    """Whether a plugin's change to a list survives in the winning list, item by item (Pilgrim's review B1): every item
+    it added (against the list it inherits) the winner still holds as often, every item it removed the winner still
+    lacks as much. A changed item is one removed and one added. None where it changed no item."""
+    inherited, mine, winner = (collections.Counter(x or {}) for x in (inherited, mine, winner))
+    changed = [x for x in set(inherited) | set(mine) if inherited[x] != mine[x]]
+    if not changed:
+        return None
+    return all(winner[x] >= mine[x] if mine[x] > inherited[x] else winner[x] <= mine[x] for x in changed)
+
+
 def _show(vals) -> str:
     return "; ".join(vals) if vals else "(absent)"
 
@@ -512,6 +546,10 @@ def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, contain
                 continue
             rec["values"][top] = [tuple((k, g.get(k, ())) for k in leaves) for g in got]
             rec["reads"][top] = picked
+            its = [_items({k: v for k, v in x["fields"].items() if k.startswith(top + "[")}, scope.angles,
+                          scope.masks.get(rtype)).get(top) for x in picked]
+            if any(its):
+                rec.setdefault("items", {})[top] = [i or collections.Counter() for i in its]
         out[fk] = rec
     return out
 
@@ -538,7 +576,10 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
         for top, vals in rec["values"].items():
             picked = rec["reads"][top]
             for i in range(1, win_i):
-                changed, _ = own_change(names, vals, i, (masters or {}).get(names[i].lower()) if masters else None)
+                changed, j = own_change(names, vals, i, (masters or {}).get(names[i].lower()) if masters else None)
+                its = (rec.get("items") or {}).get(top)
+                if its and j is not None and list_change_kept(its[j], its[i], its[win_i]):
+                    continue           # every item it added or removed the winning list keeps so: nothing of it is lost
                 if changed and vals[win_i] != vals[i]:
                     reads_ = [{"batch": picked[k]["batch"], "id": picked[k]["id"], "plugin": names[k]}
                               for k in (i - 1, i, win_i)]
