@@ -1471,8 +1471,11 @@ def build_prediction(ctx: dict) -> dict:
         row_ = ((rows_by.get((rk[0], arm_id)) or {}).get(rk) or {}).get("row") or {}
         field = row_.get("field")
         ch = (chains_of(rk[0], arm_id) or {}).get(str(rk[4]))
-        if ch and field in ch["values"] and str(plugin).lower() in [str(x).lower() for x in ch["providers"]]:
-            provs, vals = list(ch["providers"]), list(ch["values"][field])
+        if ch and str(plugin).lower() in [str(x).lower() for x in ch["providers"]] and (
+                field in ch["values"] or ch.get("allListed")):
+            # a tree answer lists every difference from the winner: a field it does not list, every provider holds
+            provs = list(ch["providers"])
+            vals = list(ch["values"].get(field) or [()] * len(provs))
         else:
             reads, v = row_.get("reads") or [], row_.get("values") or {}
             before = reads[0].get("plugin") if reads and isinstance(reads[0], dict) else None
