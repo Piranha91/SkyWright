@@ -48,7 +48,8 @@ FIXTURE = "geometry.fixture-empty-space"
 OVERLAP = "geometry.object-overlap"
 PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None, CELLATTR: None,
          FIXTURE: None, OVERLAP: "overlapprobe", "geometry.navmesh-ownership": "navownprobe",
-         "loadability.missing-assets": None}
+         "loadability.missing-assets": None, "state.conditional-geometry": "stateprobe",
+         "functional.quest-alias-split": "aliasprobe"}
 NAVOWN = "geometry.navmesh-ownership"
 MOD_A, MOD_B = "ModA.esp", "ModB.esp"
 OTHER = "OtherMod.esp"                       # a mod already in the order, not evaluated
@@ -239,7 +240,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     return root
 
 
-def compile_and_render(arms, results, targets, want_index=False, sibling=None, settings_extra=None, **kw):
+def compile_and_render(arms, results, targets, want_index=False, sibling=None, settings_extra=None, order_setups=None,
+                       **kw):
     """The real compiler and the real templates: (plan, report.md, report.html).
 
     sibling: (arms, results, targets, kw) -- a second bundle (the evaluation without the patch) built beside this one
@@ -259,6 +261,8 @@ def compile_and_render(arms, results, targets, want_index=False, sibling=None, s
         if sibling is not None:
             s_arms, s_results, s_targets, s_kw = sibling
             extra["sibling_dir"] = make_bundle(Path(td) / "sibling", s_arms, s_results, s_targets, **s_kw)
+        if order_setups is not None:
+            extra["order_setups"] = order_setups
         plan = R.compile_plan(bdir, {"bundle": {"complete": True}}, settings, pr, str(bdir), **extra)
         view = R.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], pr, "normal")
         out = R.render_all(plan, view, Path(td) / "out", "")
@@ -1691,7 +1695,7 @@ def main():
         line = next((x for x in sec.splitlines() if "navmesh replaces" in x), "")
         ok = (f"without the patch, {MOD_B}'s navmesh replaces {MOD_A}'s in 2 navmesh records, and in 2 of them" in line
               and "CityExterior02 (ext) 689 -> 5 triangles" in line
-              and f"The 2 broken navmesh links counted above point to triangles of a navmesh this replacement cut "
+              and f"2 of the broken navmesh links counted above point to triangles of a navmesh this replacement cut "
                   f"down: {n1} (689 -> 5 triangles)" in line
               and "NPC" not in line and "navmesh replaces" in html)
         return ok, f"line {line!r}"
@@ -2563,6 +2567,190 @@ def main():
                      ("w2-last/C552-cell-fields-named", c552_cell_fields_named),
                      ("w2-last/C553-what-stays-at-top", c553_what_stays_at_top),
                      ("w2-last/C554-restored-object-named-at-top", c554_restored_object_named_at_top)]:
+        cell(name, fn)
+
+    # ------------------------------------------- window 2, lane p72: Pilgrim's blind review (P72, P73, order risk)
+    STATE, ALIAS = "state.conditional-geometry", "functional.quest-alias-split"
+    X, Y, S0 = f"000X01:{MOD_A}", f"000Y01:{MOD_B}", f"000S01:{BASE}"
+    STATE_ARMS = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                  arm("without-patch", [BASE, MOD_A, MOD_B]), arm("without-b", [BASE, MOD_A]),
+                  arm("without-a", [BASE, MOD_B])]
+
+    def state_row(state, a, b, fk, other):
+        r_ = row(f"STATE-CONTACT@{state}@Triggered", a, b, fk, label="Camp (ext)", other=other)
+        r_["Summary"] = f"Contact StateConditional under CampEnable: {fk} arrives - Sunk: sits 9u inside something"
+        return r_
+
+    def state_bundle(alone=(), patched=()):
+        """One evaluated mod (ModA) with partner ModB and a patch. ModA's object X sits inside ModB's Y in three world
+        states (S1, S2, S3) with both loaded. `alone`: the rows of the setup without ModB; `patched`: the rows with the
+        patch."""
+        p_rows = [state_row(st, MOD_A, MOD_B, X, Y) for st in ("S1", "S2", "S3")]
+        results = {(STATE, "baseline"): list(patched), (STATE, "without-patch"): p_rows,
+                   (STATE, "without-b"): list(alone), (STATE, "without-a"): []}
+        return compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
+
+    # C580. A world-state clash is one object: an object found in three world states is counted once, in one item, and
+    # the item says in how many states it is found (Pilgrim: one cairn listed three times, "resolved 3" for one fix)
+    def c580_state_object_counted_once():
+        plan, md, html = state_bundle()
+        p = reader(plan).get("prediction") or {}
+        its = [i for i in p.get("items") or [] if i["checkId"] == STATE]
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        rec = [e for e in p.get("record") or [] if e["checkId"] == STATE]
+        ok = (len(its) == 1 and its[0]["count"] == 1 and "3 world states" in its[0]["plain"]
+              and (p.get("verdict") or "").count(title) == 1 and sum(e["admission"] == "admitted" for e in rec) == 1
+              and "3 world states" in md)
+        return ok, f"items {[(i['count'], i['plain'][:160]) for i in its]}; verdict {p.get('verdict')!r}"
+
+    # C581 (coordinator ruling on Pilgrim's blind review). A world-state clash is the pair of objects: with ModB removed,
+    # ModA's object X sunk into a base-game object is a different clash, so X sunk into ModB's Y needs ModB; with ModB
+    # removed and X still in Y's place (the same pair), it does not
+    def c581_state_attribution_by_pair():
+        plan, md, html = state_bundle(alone=[state_row("S1", BASE, MOD_A, X, S0)])
+        its = [i for i in (reader(plan).get("prediction") or {}).get("items") or [] if i["checkId"] == STATE]
+        plan2, md2, html2 = state_bundle(alone=[state_row("S2", MOD_A, MOD_B, X, Y)])
+        its2 = [i for i in (reader(plan2).get("prediction") or {}).get("items") or [] if i["checkId"] == STATE]
+        ok = (len(its) == 1 and its[0]["attribution"] == "needs-both" and f"needs both {MOD_A} and {MOD_B}" in its[0]["plain"]
+              and len(its2) == 1 and its2[0]["attribution"] == "single-mod")
+        return ok, f"items {[(i['attribution'], i['plain'][:160]) for i in its + its2]}"
+
+    # C582. With the patch the object is judged once across its states: still in one state is left 1; gone in all is
+    # resolved 1, never once per state
+    def c582_state_patch_outcome_once():
+        plan, md, html = state_bundle(patched=[state_row("S2", MOD_A, MOD_B, X, Y)])
+        lines = [x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or [] if "(1 clash)" in x]
+        plan2, md2, html2 = state_bundle()
+        lines2 = [x for x in (reader(plan2).get("prediction") or {}).get("withPatchLines") or [] if "clash" in x]
+        ok = (len(lines) == 1 and "left 1" in lines[0] and "resolved" not in lines[0]
+              and len(lines2) == 1 and "(1 clash): resolved 1" in lines2[0])
+        return ok, f"still in S2: {lines}; gone: {lines2}"
+
+    # C593 (coordinator ruling on Pilgrim's blind review, replacing C583). New with the patch is decided only by the same
+    # setup with and without the patch: both splits the patched setup has and the setup without the patch lacks are new.
+    # One of them a setup without the evaluated mod also has: the report says the patch brings it back from there, and
+    # never calls it already there.
+    def c593_new_with_patch_same_setup_only():
+        R1, R2, R3, R4 = (f"00{i}A01:{BASE}" for i in range(1, 5))
+        w_rows = [row("SPLIT", OTHER, PATCH, R1, other=R2, label="Temple (int)"),
+                  row("SPLIT", OTHER, PATCH, R3, other=R4, label="Temple (int)")]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, MOD_A, MOD_B]), arm("without-a", [BASE, OTHER, MOD_B])]
+        a_rows = [row("SPLIT", OTHER, MOD_B, R1, other=R2, label="Temple (int)")]
+        for r_ in w_rows + a_rows:      # the probe's words name the quest and aliases, never the plugins
+            r_["Summary"] = f"quest 'Q' aliases 'X' and 'Y' were 137u apart, now 1,800u apart ({r_['Alternative'][0]['FormKey']})"
+        results = {(ALIAS, "baseline"): w_rows, (ALIAS, "without-patch"): [], (ALIAS, "without-a"): a_rows}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        val = reader(plan).get("validation") or {}
+        line = next((ln for ln in md.splitlines() if "brings back" in ln), "")
+        ok = (val.get("patchProblems") == 2 and [n["count"] for n in val.get("newByCheck") or []] == [2]
+              and f"without {MOD_A}" in line and "1 " in line and "already there" not in md.lower()
+              and "not counted as new" not in md.lower())
+        return ok, f"new {val.get('patchProblems')} {val.get('newByCheck')}; line {line!r}"
+
+    # C584. A load-order risk the record lane measured on the same plugins in another order is said as a measured fact:
+    # with OtherMod loaded before ModA, OtherMod's changes are lost to ModA's; rows the measured order has too, or of a
+    # pair whose order did not change, are not; an order setup with other plugins or bytes is refused
+    def c584_order_risk_said():
+        O2 = "Early.esp"
+        p_rec = [lost_row(MOD_A, OTHER, f"000C01:{BASE}", "Lighting", "a", "o", "v"),
+                 lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v"),
+                 lost_row(O2, OTHER, f"000C04:{BASE}", "Music", "e", "o", "v")]
+        arms = [arm("baseline", [BASE, O2, MOD_A, OTHER], kind="baseline")]
+        enr = {(CELLATTR, "baseline"): p_rec}
+        results = {(CONTACT, "baseline"): []}
+        o_rows = [dict(lost_row(OTHER, MOD_A, f"000C01:{BASE}", "Lighting", "o", "a", "v"), _check=CELLATTR, _type="Cell"),
+                  dict(lost_row(OTHER, MOD_A, f"000C01:{BASE}", "ImageSpace", "o", "a", "v"), _check=CELLATTR, _type="Cell"),
+                  dict(lost_row(OTHER, MOD_A, f"000C02:{BASE}", "Lighting", "o", "a", "v"), _check=CELLATTR, _type="Cell"),
+                  dict(lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell"),
+                  # Early's change, lost to OtherMod in the measured order, is lost to ModA in the other: lost either way,
+                  # and the order of Early and ModA did not change, so it is no order risk
+                  dict(lost_row(O2, MOD_A, f"000C04:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell")]
+        setup = {"armId": "lux-first", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
+                 "plugins": plugins(BASE, O2, OTHER, MOD_A), "rows": o_rows}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 3},
+                                            enrichment=enr, order_setups=[setup])
+        lines = [x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or []]
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        refused = ""
+        try:
+            compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 3}, enrichment=enr,
+                               order_setups=[dict(setup, plugins=plugins(BASE, O2, OTHER, MOD_A, shas={MOD_A: "a" * 64}))])
+        except R.InputRefused as ex:
+            refused = str(ex)
+        ok = (len(lines) == 1 and f"3 of {OTHER}'s record fields are lost to {MOD_A}" in lines[0]
+              and "2 records" in lines[0] and lines[0] in sec and O2 not in lines[0]
+              and refused.startswith("order-setup-foreign"))
+        return ok, f"lines {lines}; refused {refused[:80]!r}"
+
+    for name, fn in [("w2-p72/C580-state-object-counted-once", c580_state_object_counted_once),
+                     ("w2-p72/C581-state-attribution-by-pair", c581_state_attribution_by_pair),
+                     ("w2-p72/C582-state-patch-outcome-once", c582_state_patch_outcome_once),
+                     ("w2-p73/C593-new-with-patch-same-setup-only", c593_new_with_patch_same_setup_only),
+                     ("w2-order/C584-order-risk-said", c584_order_risk_said)]:
+        cell(name, fn)
+
+    # ------------------------------------------- window 2, lane p72: Sewers' blind review (P93, P94, P95)
+    # C585. Two world-state rows of one object against two different objects, whose words are the same, are two clashes:
+    # none is lost to an identical summary (Sewers: a tower base against 13 objects was shown as 12)
+    def c585_identical_words_other_partner_kept():
+        Y2 = f"000Y02:{MOD_B}"
+        p_rows = [state_row("S1", MOD_A, MOD_B, X, Y), state_row("S1", MOD_A, MOD_B, X, Y2)]
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): p_rows, (STATE, "without-b"): [],
+                   (STATE, "without-a"): []}
+        plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
+        p = reader(plan).get("prediction") or {}
+        its = [i for i in p.get("items") or [] if i["checkId"] == STATE]
+        rec = [e for e in p.get("record") or [] if e["checkId"] == STATE]
+        ok = len(its) == 1 and its[0]["count"] == 2 and len(rec) == 2 and "2 inconsistencies" in (p.get("verdict") or "")
+        return ok, f"items {[i['count'] for i in its]}; record rows {len(rec)}; verdict {p.get('verdict')!r}"
+
+    # C586. One object left without two supports is two clashes, never "2 objects" (Sewers: one object printed as 2 and
+    # 4 objects); the headline's shared-object phrase is in the singular for one object
+    def c586_one_object_two_supports_unit():
+        Z1, H1, H2 = f"000Z11:{MOD_A}", f"000H11:{MOD_B}", f"000H12:{MOD_B}"
+        p_c = [row("CONTACT", MOD_B, MOD_A, Z1, other=H1, label="Temple (int)"),
+               row("CONTACT", MOD_B, MOD_A, Z1, other=H2, label="Temple (int)")]
+        p_f = [row("EMPTY-SPACE", MOD_B, MOD_A, Z1, other=H1, label="Temple (int)")]
+        preds = [{"Kind": "CONTACT", "A": MOD_B, "B": MOD_A, "FormKey": Z1, "Other": h, "Physical": "Gone"} for h in (H1, H2)]
+        results = {(CONTACT, "baseline"): p_c, (CONTACT, "with-patch"): [], (FIXTURE, "baseline"): p_f,
+                   (FIXTURE, "with-patch"): []}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A], patches=[PATCH],
+                                            predicates={(CONTACT, "with-patch"): preds})
+        p = reader(plan).get("prediction") or {}
+        lines = [x for x in p.get("withPatchLines") or [] if x.startswith("Objects left without")]
+        hits = next((ln for ln in md.splitlines() if ln.startswith("- Predicted and resolved by")), "")
+        v = p.get("verdict") or ""
+        ok = (len(lines) == 1 and "(2 object-and-support pairs)" in lines[0] and "(2 objects)" not in lines[0]
+              and "objects" not in hits and "the same object also found by the check" in v and "the same 1 objects" not in v)
+        return ok, f"lines {lines}; resolved {hits!r}; verdict {v[-160:]!r}"
+
+    # C587. A check this evaluation could not run on the measured order, counted from the separate evaluation without the
+    # patch, is said as such where it is counted (with its file) and where the failure is listed (Sewers R20 vs R46)
+    def c587_sibling_only_check_said():
+        p_rows = [state_row("S1", MOD_A, MOD_B, X, Y)]
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B])]
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+        s_arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("plus-a", [BASE, MOD_A]),
+                  arm("plus-b", [BASE, MOD_B]), arm("dependency-only", [BASE])]
+        s_results = {(STATE, "baseline"): p_rows, (STATE, "plus-a"): [], (STATE, "plus-b"): [],
+                     (STATE, "dependency-only"): [], (CONTACT, "baseline"): [], (CONTACT, "plus-a"): [],
+                     (CONTACT, "plus-b"): [], (CONTACT, "dependency-only"): []}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH],
+                                            missing=[(STATE, "without-patch", "failed"), (STATE, "baseline", "failed")],
+                                            sibling=(s_arms, s_results, [MOD_A], {"plan_id": "sibl00000000"}))
+        p = reader(plan).get("prediction") or {}
+        its = [i for i in p.get("items") or [] if i["checkId"] == STATE]
+        miss = [ln for ln in md.splitlines() if "No result" in ln and STATE in ln or
+                ("No result" in ln and (priorities()["reader"]["checkTitles"].get(STATE) or "\0") in ln)]
+        ok = (len(its) == 1 and "Measured in the separate evaluation without the patch" in its[0]["plain"]
+              and "state.conditional-geometry" in its[0]["plain"]
+              and len(miss) == 1 and "come from the separate evaluation without the patch" in miss[0])
+        return ok, f"items {[i['plain'][-260:] for i in its]}; missing {miss}"
+
+    for name, fn in [("w2-p93/C585-identical-words-other-partner-kept", c585_identical_words_other_partner_kept),
+                     ("w2-p94/C586-one-object-two-supports-unit", c586_one_object_two_supports_unit),
+                     ("w2-p95/C587-sibling-only-check-said", c587_sibling_only_check_said)]:
         cell(name, fn)
 
     for name, ok, detail in cells:

@@ -26,6 +26,9 @@
 " }}{% endfor %}{% for h in pred.get("historyLossLines") or [] %}{% if loop.first %}{{ "
 " }}{% endif %}- {{ h.text }}{% for fid in h.findingIds[:1] %} [Evidence](evidence-index.md#{{ fid }}).{% endfor %}
 
+{% endfor %}{% for o in pred.get("orderRiskLines") or [] %}{% if loop.first %}{{ "
+" }}{% endif %}- {{ o.text }} [Evidence]({{ o.path }}).
+
 {% endfor %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}{{ "
 " }}**{{ pred.singleModHeading }}**
 
@@ -89,7 +92,9 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {% for a in p.scope.arms %}
 **{{ a.readerLabel }}**
 
-{% if a.locationPluginOrder %}{{ a.locationPluginOrder|join(", ") }}.
+{% if a.get("sameListAs") %}{{ a.locationPluginScope.missingInput }}
+
+{% else %}{% if a.locationPluginOrder %}{{ a.locationPluginOrder|join(", ") }}.
 {% else %}{{ p.reader.locationOrder.empty or "No evidenced plugin was identified." }}
 {% endif %}
 
@@ -103,7 +108,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {{ a.locationPluginScope.moreLine }} [Evidence index](evidence-index.md#scope).
 {% endif %}
 {% endif %}
-Coverage: {{ "all contributors to the listed locations identified" if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}
+Coverage: {{ "all contributors to the listed locations identified." if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}{% if a.locationPluginScope.get("note") %} {{ a.locationPluginScope.note }}{% endif %}{% endif %}
 
 {% endfor %}
 
