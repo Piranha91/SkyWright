@@ -1598,9 +1598,10 @@ def build_prediction(ctx: dict) -> dict:
         if kind == "LOST-EDIT":
             return words["fieldNoun"][0 if one else 1]
         if check_id in by_object:
-            # a row is the object against one host or support: one object can be several (P94), so the unit is the
-            # clash; the objects are counted apart where it matters (the headline)
-            return "clash" if one else "clashes"
+            # a row is the object against one host or support: one object can be several (P94), so the unit is that
+            # pair, named for its check (skill data `byObjectUnits`); the objects are counted apart in the headline
+            u_ = (words.get("byObjectUnits") or {}).get(str(check_id)) or ["clash", "clashes"]
+            return u_[0] if one else u_[1]
         ph_ = phrases.get(kind) or {}
         return (ph_.get("unitSingular") if one else ph_.get("unitPlural")) or ("clash" if one else "clashes")
 

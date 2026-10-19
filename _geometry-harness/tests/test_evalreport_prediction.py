@@ -2716,7 +2716,7 @@ def main():
         lines = [x for x in p.get("withPatchLines") or [] if x.startswith("Objects left without")]
         hits = next((ln for ln in md.splitlines() if ln.startswith("- Predicted and resolved by")), "")
         v = p.get("verdict") or ""
-        ok = (len(lines) == 1 and "(2 clashes)" in lines[0] and "objects)" not in lines[0]
+        ok = (len(lines) == 1 and "(2 object-and-support pairs)" in lines[0] and "(2 objects)" not in lines[0]
               and "objects" not in hits and "the same object also found by the check" in v and "the same 1 objects" not in v)
         return ok, f"lines {lines}; resolved {hits!r}; verdict {v[-160:]!r}"
 
