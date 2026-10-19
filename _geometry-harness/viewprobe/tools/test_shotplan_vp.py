@@ -242,6 +242,80 @@ def test_cell_is_still_the_first_argument_viewprobe_sees():
               cmd == [exe], repr(cmd))
 
 
+# --------------------------------------------------- P75: a deploy replaces the dll, not the exe (window 2, 2026-10-19)
+
+T0 = time.time() - 9000                          # an old executable, from the first build
+
+
+def deployed(base, *, exe=T0, dll=None, core=None, sources=None):
+    """A repository whose built viewprobe was later DEPLOYED: the managed viewprobe.dll (and the core library's
+    housecarl-core.dll) replaced in place, the apphost viewprobe.exe left with its first build's time.
+    sources: {"viewprobe" | "shared" | "core": mtime}."""
+    root = os.path.join(base, "_geometry-harness", "viewprobe")
+    files = {"viewprobe": os.path.join(root, "Program.cs"),
+             "shared": os.path.join(base, "_geometry-harness", "_shared", "CellBoundaryIndex.cs"),
+             "core": os.path.join(base, "src", "housecarl-core", "Progress", "RunLog.cs")}
+    for key, path in files.items():
+        write(path, "// %s\n" % key, (sources or {}).get(key, T0 - 1000))
+    out = os.path.join(root, "bin", "Release", "net9.0-windows10.0.19041.0")
+    os.makedirs(out, exist_ok=True)
+    made = {}
+    for name, when in (("viewprobe.exe", exe), ("viewprobe.dll", dll), ("housecarl-core.dll", core)):
+        if when is None:
+            continue
+        path = os.path.join(out, name)
+        with open(path, "wb") as f:
+            f.write(b"MZ")
+        os.utime(path, (when, when))
+        made[name] = path
+    return root, made
+
+
+def test_c590_dll_only_deploy_is_current():
+    """C590. Pilgrim's video pilot (P75): the deploy replaced viewprobe.dll after a source change, the exe kept its
+    first build's time, and shotplan refused the production renderer as stale. The build that runs is the dll's."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root, made = deployed(tmp, exe=T0, dll=T0 + 6000, core=T0 + 6000, sources={"shared": T0 + 3000})
+        cmd, out, err = call_vp_command(None, root=root)
+        check("C590 a source newer than the exe but older than the deployed dll is not stale",
+              cmd == [made["viewprobe.exe"]], repr(cmd) + " " + repr(err[:200]))
+        got = S.viewprobe_exe(root)
+        check("C590 ...and the reason names the file it judged (viewprobe.dll)", "viewprobe.dll" in got[1], repr(got[1]))
+
+
+def test_c591_stale_renderer_still_refused():
+    """C591. A source newer than every built file (exe and dll) is a stale renderer: still refused, naming the source
+    and the file it was judged against."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root, made = deployed(tmp, exe=T0, dll=T0 + 3000, core=T0 + 3000, sources={"shared": T0 + 6000})
+        cmd, out, err = call_vp_command(None, root=root)
+        check("C591 a source newer than the exe and the dll is refused", cmd is None, repr(cmd))
+        check("C591 ...naming the source", "CellBoundaryIndex.cs" in err, repr(err[:200]))
+        check("C591 ...and the built file it was judged against", "viewprobe.dll" in err, repr(err[:200]))
+        check("C591 ...on stderr", out == "", repr(out))
+
+
+def test_c592_core_library_judged_against_its_dll():
+    """C592. The core library's sources are judged against the newest of the renderer's build and housecarl-core.dll:
+    a core source older than a deployed core dll is current; one newer than every built file is refused. A renderer
+    source is never excused by a newer core dll alone."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root, made = deployed(tmp, exe=T0, dll=T0 + 1000, core=T0 + 6000, sources={"core": T0 + 3000})
+        cmd, _out, err = call_vp_command(None, root=root)
+        check("C592 a core source older than the deployed core dll is current", cmd == [made["viewprobe.exe"]],
+              repr(cmd) + " " + repr(err[:200]))
+    with tempfile.TemporaryDirectory() as tmp:
+        root, made = deployed(tmp, exe=T0, dll=T0 + 1000, core=T0 + 3000, sources={"core": T0 + 6000})
+        cmd, _out, err = call_vp_command(None, root=root)
+        check("C592 a core source newer than every built file is refused", cmd is None and "RunLog.cs" in err,
+              repr(cmd) + " " + repr(err[:200]))
+    with tempfile.TemporaryDirectory() as tmp:
+        root, made = deployed(tmp, exe=T0, dll=T0 + 1000, core=T0 + 6000, sources={"viewprobe": T0 + 3000})
+        cmd, _out, err = call_vp_command(None, root=root)
+        check("C592 a renderer source newer than viewprobe.dll is refused even when the core dll is newer",
+              cmd is None and "Program.cs" in err, repr(cmd) + " " + repr(err[:200]))
+
+
 def main():
     for fn in (test_explicit_vp_is_unchanged,
                test_built_exe_is_preferred,
@@ -253,7 +327,10 @@ def main():
                test_a_build_output_is_not_a_source,
                test_resolver_reports_both_halves,
                test_this_checkout_default,
-               test_cell_is_still_the_first_argument_viewprobe_sees):
+               test_cell_is_still_the_first_argument_viewprobe_sees,
+               test_c590_dll_only_deploy_is_current,
+               test_c591_stale_renderer_still_refused,
+               test_c592_core_library_judged_against_its_dll):
         print(fn.__name__)
         try:
             fn()
