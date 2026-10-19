@@ -308,6 +308,15 @@ def c709_c710(fx):
     check("C709 the measured points are kept with their provenance, witness and synthetic label",
           doc.get("synthetic") is True and "SYNTHETIC" in doc.get("provenance", "")
           and doc.get("witness", {}).get("station") and len(doc.get("points", [])) == 2)
+    if doc.get("points"):
+        import math
+        cx = sum(r["point"][0] for r in doc["points"]) / 2
+        cy = sum(r["point"][1] for r in doc["points"]) / 2
+        eye = doc["witness"]["station"]["eye"]
+        ws = math.hypot(eye[0] - cx, eye[1] - cy)
+        check("C709 the planner's standoff range includes the witness's own distance from the points",
+              doc["camera"]["standoffMin"] <= ws <= doc["camera"]["standoffMax"],
+              f"{ws:.0f} in {doc['camera']['standoffMin']}-{doc['camera']['standoffMax']}")
     if acq and acq.get("suppliedPoints"):
         check("C710 the result binds the points file it measured (path and hash)",
               Path(acq["suppliedPoints"]["path"]) == pp.resolve() and acq["suppliedPoints"]["sha256"] == TCA.sha(pp))
