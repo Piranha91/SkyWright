@@ -2922,6 +2922,22 @@ def main():
         ok = "2 clashes" in ln and "3 clashes" not in ln
         return ok, f"line {ln[:200]!r}"
 
+    # C630 (Clockwork review 5, P53). "Whether it also needs X was not measured" on every item is said once on the page,
+    # for the items it applies to; the plan keeps each item's full sentence
+    def c630_with_target_said_once():
+        O2 = "Second.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A, MOD_B])]
+        p_rows = [lost_row(OTHER, MOD_A, f"00C301:{BASE}", "Owner", "o", "a", "v"),
+                  lost_row(O2, MOD_A, f"00C302:{BASE}", "Owner", "s", "a", "v")]
+        plan, md, html = cw_bundle(p_rows, arms=arms)
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        its = (reader(plan).get("prediction") or {}).get("items") or []
+        n_md = sec.count("was not measured, because no setup without")
+        ok = (len(its) == 2 and n_md == 1 and all("was not measured" in i["plain"] for i in its)
+              and "For every item above" in sec)
+        return ok, f"said {n_md} times on the page; items {len(its)}"
+
     for name, fn in [("w2-cw/C620-no-change-never-dropped", c620_no_change_never_dropped),
                      ("w2-cw/C621-neither-lost-is-resolved", c621_neither_lost_is_resolved),
                      ("w2-cw/C622-navmesh-data-judged-by-navmesh-check", c622_navmesh_data_judged_by_navmesh_check),
@@ -2931,7 +2947,8 @@ def main():
                      ("w2-cw/C626-unused-bits-not-lost", c626_unused_bits_not_lost),
                      ("w2-cw/C627-order-line-names-the-move", c627_order_line_names_the_move),
                      ("w2-cw/C628-patch-wins-fields-once", c628_patch_wins_fields_once),
-                     ("w2-cw/C629-base-game-state-pairs-once", c629_base_game_state_pairs_once)]:
+                     ("w2-cw/C629-base-game-state-pairs-once", c629_base_game_state_pairs_once),
+                     ("w2-cw/C630-with-target-said-once", c630_with_target_said_once)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
