@@ -2624,10 +2624,11 @@ def main():
               and len(lines2) == 1 and "(1 clash): resolved 1" in lines2[0])
         return ok, f"still in S2: {lines}; gone: {lines2}"
 
-    # C583. A clash the setup with the patch has is not new with the patch when a setup without the patch already has it
-    # (Pilgrim: GS alone gives the same alias split); one no setup without the patch has stays new, and the report says
-    # which clashes it does not count as new and where they are already measured
-    def c583_new_with_patch_absent_without_patch():
+    # C593 (coordinator ruling on Pilgrim's blind review, replacing C583). New with the patch is decided only by the same
+    # setup with and without the patch: both splits the patched setup has and the setup without the patch lacks are new.
+    # One of them a setup without the evaluated mod also has: the report says the patch brings it back from there, and
+    # never calls it already there.
+    def c593_new_with_patch_same_setup_only():
         R1, R2, R3, R4 = (f"00{i}A01:{BASE}" for i in range(1, 5))
         w_rows = [row("SPLIT", OTHER, PATCH, R1, other=R2, label="Temple (int)"),
                   row("SPLIT", OTHER, PATCH, R3, other=R4, label="Temple (int)")]
@@ -2637,10 +2638,10 @@ def main():
                    (ALIAS, "without-a"): [row("SPLIT", OTHER, MOD_B, R1, other=R2, label="Temple (int)")]}
         plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
         val = reader(plan).get("validation") or {}
-        sec = section_text(md, headings(plan).get("validation") or "\0") or md
-        line = next((ln for ln in md.splitlines() if "not counted as new" in ln.lower()), "")
-        ok = (val.get("patchProblems") == 1 and [n["count"] for n in val.get("newByCheck") or []] == [1]
-              and f"without {MOD_A}" in line and "1 " in line)
+        line = next((ln for ln in md.splitlines() if "brings back" in ln), "")
+        ok = (val.get("patchProblems") == 2 and [n["count"] for n in val.get("newByCheck") or []] == [2]
+              and f"without {MOD_A}" in line and "1 " in line and "already there" not in md.lower()
+              and "not counted as new" not in md.lower())
         return ok, f"new {val.get('patchProblems')} {val.get('newByCheck')}; line {line!r}"
 
     # C584. A load-order risk the record lane measured on the same plugins in another order is said as a measured fact:
@@ -2681,7 +2682,7 @@ def main():
     for name, fn in [("w2-p72/C580-state-object-counted-once", c580_state_object_counted_once),
                      ("w2-p72/C581-state-attribution-by-object", c581_state_attribution_by_object),
                      ("w2-p72/C582-state-patch-outcome-once", c582_state_patch_outcome_once),
-                     ("w2-p73/C583-new-with-patch-absent-without-patch", c583_new_with_patch_absent_without_patch),
+                     ("w2-p73/C593-new-with-patch-same-setup-only", c593_new_with_patch_same_setup_only),
                      ("w2-order/C584-order-risk-said", c584_order_risk_said)]:
         cell(name, fn)
 
