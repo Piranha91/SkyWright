@@ -1893,6 +1893,7 @@ def build_prediction(ctx: dict) -> dict:
                                                           "file": s_file or ""}))
         g.pop("_partners", None)
         provenance = g.pop("_provenance", None)
+        g["attributionKey"], g["attributionText"] = attr_key, attr_text
         g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else "")
                       + "".join(" " + d for d in detail) + (f" {provenance}" if provenance else ""))
@@ -4901,6 +4902,17 @@ def once_on_page(reader: dict, pr: dict) -> dict:
         for g in shown:
             g["plain"] = (g["plain"] + " ").replace(f" {nb} ", " ", 1).rstrip()
         lead_once.append(conc["onceNeedsBoth"])
+    # "whether it also needs X was not measured" repeated on every item (Clockwork review 5, P53): said once, for the
+    # items it applies to; an item with any other attribution keeps its own sentence
+    wt = [g for g in shown if g.get("attributionKey") == "with-target" and g.get("attributionText")
+          and f" {g['attributionText']} " in g.get("plain", "") + " "]
+    if len(wt) > 1 and conc.get("onceWithTarget"):
+        for g in wt:
+            g["plain"] = (g["plain"] + " ").replace(f" {g['attributionText']} ", " ", 1).rstrip()
+        lead_once.append(bind(conc["onceWithTarget"], {"mod": wt[0].get("attributionMod") or "",
+                                                       "count": fmt_n(len(wt)),
+                                                       "all": "every item" if len(wt) == len(shown) else
+                                                       bind(conc.get("onceWithTargetSome") or "{count} items", {"count": fmt_n(len(wt))})}))
 
     def titles(xs):
         xs = list(dict.fromkeys(f'"{x}"' for x in xs if x))
