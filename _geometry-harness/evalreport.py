@@ -1453,7 +1453,7 @@ def build_prediction(ctx: dict) -> dict:
             # Two record checks read overlapping populations (a cell's fields are in both the contested-fields and
             # the cell-attributes check): the same lost edit is one relationship, counted under the first check.
             same = (rk[2].lower(), rk[3].lower(), rk[4], entry["field"])
-            if adm == "admitted" and same in lost_seen:
+            if adm in ("admitted", "ownMaster") and same in lost_seen:
                 adm = entry["admission"] = "repeat"
             lost_seen.add(same)
         if adm != "admitted":
@@ -1712,7 +1712,7 @@ def build_prediction(ctx: dict) -> dict:
         loss_lines.append({"text": text, "findingIds": [f_.get("id") for f_ in findings if f_.get("checkId") == check_id
                                                         and f_.get("armId") == p_arm and f_.get("id")][:1]})
     # P63: a mod changing a value of a plugin it lists as a master is said as that, one line per mod and master, with
-    # the count by check, never as a clash between mods
+    # the count by check, never as a clash between mods (its count is in `setAside`, said by this line alone)
     own_master = collections.OrderedDict()
     for e in record:
         if e["admission"] != "ownMaster":
@@ -1724,8 +1724,9 @@ def build_prediction(ctx: dict) -> dict:
         if e.get("findingId") and e["findingId"] not in c_["findingIds"]:
             c_["findingIds"].append(e["findingId"])
     for (dep, mas), by_check in own_master.items():
-        parts = []
+        parts, fids = [], []
         for (check_id, kind), c_ in sorted(by_check.items(), key=lambda kv: (-kv[1]["n"], title_of(kv[0][0]))):
+            fids += c_["findingIds"]
             ph = phrases.get(kind) or {}
             noun_ = ((words["fieldNoun"][0 if c_["n"] == 1 else 1]) if kind == "LOST-EDIT" else
                      (ph.get("unitSingular") if c_["n"] == 1 else ph.get("unitPlural"))
@@ -1734,8 +1735,8 @@ def build_prediction(ctx: dict) -> dict:
                                                        "title": title_of(check_id)}))
         loss_lines.append({"text": bind(words["ownMasterLine"], {
             "mod": dep, "master": mas, "count": fmt_n(sum(c_["n"] for c_ in by_check.values())),
-            "parts": "; ".join(parts)}),
-            "findingIds": list(dict.fromkeys(f_ for c_ in by_check.values() for f_ in c_["findingIds"]))})
+            "parts": ", ".join(parts)}),
+            "findingIds": list(dict.fromkeys(fids))})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
     alone_lines = collections.OrderedDict()
@@ -1863,10 +1864,14 @@ def build_prediction(ctx: dict) -> dict:
                   "singleModMode": single_mode, "singleModHeading": words.get("singleModHeading"),
                   "missingFacts": list(dict.fromkeys(missing_facts)),
                   "setAside": aside,
-                  "setAsideLine": (bind(words["setAsideLine"], aside) + (" " + bind(words["setAsideNoBody"], aside)
+                  # only the kinds that occur are named (a list of zeros says nothing and read as a contradiction
+                  # beside a clash counted elsewhere, P64 lane / review 17)
+                  "setAsideLine": ((bind(words["setAsideLine"], {"parts": ", ".join(
+                      bind(t_, {"n": fmt_n(aside[k_])}) for k_, t_ in words["setAsideParts"].items() if aside.get(k_))})
+                      if any(aside.get(k_) for k_ in words["setAsideParts"]) else "")
+                                   + (" " + bind(words["setAsideNoBody"], aside)
                                                                          if aside["noBody"] else "")
                                    + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
-                                   + (" " + bind(words["setAsideOwnMaster"], aside) if aside["ownMaster"] else "")
                                    + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
                                    + (" " + bind(words["setAsideBothDisabled"], aside) if aside["bothDisabled"] else "")
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
@@ -2065,6 +2070,7 @@ def build_prediction(ctx: dict) -> dict:
     if cannot_run:
         lines.append({"reason": reasons["checksCannotRun"], "count": len(cannot_run),
                       "subject": "; ".join(sorted(title_of(c) for c in cannot_run))})
+    prediction["setAsideLine"] = (prediction["setAsideLine"] or "").strip() or None
     coverage = {"lines": lines, "notes": list(ctx["limitations"]), "setAsideLine": prediction["setAsideLine"],
                 "checksOnPrediction": len(checks_on_p), "relevantArms": sorted(relevant_arms)}
 
@@ -3516,8 +3522,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         aside = ("countOnly" if not (a_ and b_) else "sameMod" if str(a_).lower() == str(b_).lower() else
                  "baseGame" if (is_base_game(a_, reader_data.get("prediction") or {})
                                 or is_base_game(b_, reader_data.get("prediction") or {})) else
-                 "ownMaster" if master_of(plugin_masters_doc, a_, b_) else
-                 "noBody" if f.get("rowsNoBody") and not f.get("readerRows") else None)
+                 "noBody" if f.get("rowsNoBody") and not f.get("readerRows") else
+                 # an evaluated mod building on its own master (P63); a declared patch's own choices stay listed
+                 "ownMaster" if (master_of(plugin_masters_doc, a_, b_)
+                                 and {str(a_).lower(), str(b_).lower()} & target_set
+                                 and not {str(a_).lower(), str(b_).lower()} & declared_patches) else None)
         f["readerDetail"] = aside is None
         f["readerDetailAside"] = aside
         if aside and f.get("readerRelevant"):
@@ -4288,6 +4297,29 @@ def once_on_page(reader: dict, pr: dict) -> dict:
     out["prediction"] = pred
     if conc.get("nullLong") and conc.get("nullShort"):
         out["nullSummary"] = [x.replace(conc["nullLong"], conc["nullShort"]) for x in reader.get("nullSummary") or []]
+    # a check with the same no-problem result on several setups is said once with those setups named, and checks
+    # with the same result on the same setups share one line (the page states each fact once; the plan keeps one line
+    # per setup)
+    labels, by_check, other = [], collections.OrderedDict(), []
+    for x in out.get("nullSummary") or []:
+        m = re.match(r"^(.+?) — (.+?): (.+)$", str(x))
+        if not m:
+            other.append(x)
+            continue
+        if m.group(2) not in labels:
+            labels.append(m.group(2))
+        by_check.setdefault(m.group(1), collections.OrderedDict())[m.group(2)] = m.group(3)
+    if conc.get("nullSetups"):
+        merged = collections.OrderedDict()
+        for check, per in by_check.items():
+            ctxs = set(per.values())
+            if len(per) > 1 and len(ctxs) == 1:
+                merged.setdefault((tuple(lab for lab in labels if lab in per), next(iter(ctxs))), []).append(check)
+            else:
+                other += [f"{check} — {lab}: {c}" for lab, c in per.items()]
+        out["nullSummary"] = sorted(other) + [
+            bind(conc["nullSetups"], {"checks": "; ".join(cs), "setups": " and ".join(labs), "result": c})
+            for (labs, c), cs in merged.items()]
     return out
 
 

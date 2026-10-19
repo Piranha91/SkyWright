@@ -1082,10 +1082,17 @@ def check_alternative_identity(bundle: Path):
     masters = [x.replace(conc_.get("nullLong") or "\0", conc_.get("nullShort") or "") for x in masters]
     md_null = section(md, "## Checks that found no problem", "## Reference information collected")
     html_null = section(html, "<h2>Checks that found no problem</h2>", "</ul>")
-    check(md_null and "Tested alternative setup:" not in md_null and all(x in md_null for x in links + masters),
+    def on_page(text, x, esc=lambda v: v):
+        # the page states a check's result once for the setups it shares (P64 lane, page budget): each plan line's
+        # check, setup and result are on one line of the page, the setup named in full
+        check_, rest = x.split(" — ", 1)
+        setup_, result_ = rest.split(": ", 1)
+        return any(esc(check_) in ln and esc(setup_) in ln and esc(result_) in ln
+                   for ln in re.split(r"\n|</li>", text))
+    check(md_null and "Tested alternative setup:" not in md_null and all(on_page(md_null, x) for x in links + masters),
           f"{label}: report.md's no-problem section carries the identified lines and no bare shared label")
     check(html_null and "Tested alternative setup:" not in html_null
-          and all(html_escape(x) in html_null for x in links + masters),
+          and all(on_page(html_null, x, html_escape) for x in links + masters),
           f"{label}: report.html's no-problem section carries the identified lines and no bare shared label")
     contact = [str(x) for x in reader.get("comparisonSummary") or []
                if str(x).startswith("Objects left without their supporting surface — ")]

@@ -2317,7 +2317,8 @@ def main():
               and "of the 2 clashes" in (p.get("withPatchLine") or "")
               and f"{MOD_A} changes {OTHER}'s value (its master)" in sec
               and f"{MOD_A} changes {OTHER}'s value (its master)" in _html.unescape(html)
-              and "2 where a mod changes the value of a plugin it lists as a master" in md
+              and "(its master) in 1 clash (Objects left without their supporting surface), 1 record field" in sec
+              and (p.get("setAside") or {}).get("ownMaster") == 2
               and OTHER not in (reader(plan).get("scopeLine") or ""))
         return ok, f"admission {adm}; counted {counted}; prediction {sec[:400]!r}"
 
