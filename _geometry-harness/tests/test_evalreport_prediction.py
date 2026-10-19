@@ -2945,6 +2945,19 @@ def main():
               and "For every item above" in sec)
         return ok, f"said {n_md} times on the page; items {len(its)}"
 
+    # C631 (Pilgrim's second blind review, S1). The scope line's "main recorded conflicts" names only mods with a counted
+    # clash; a mod whose only rows are set aside (here two values naming the same file) is not named there
+    def c631_scope_names_counted_partners():
+        CASE = "CaseOnly.esp"
+        arms = [arm("baseline", [BASE, OTHER, CASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, CASE, MOD_A, MOD_B])]
+        p_rows = [lost_row(OTHER, MOD_A, f"00C311:{BASE}", "Owner", "o", "a", "v")] + [
+            lost_row(CASE, MOD_A, f"00C31{i}:{BASE}", "Model", "Meshes\X\A.nif", "meshes/x/a.nif", "v") for i in (2, 3)]
+        plan, md, html = cw_bundle(p_rows, arms=arms)
+        line = reader(plan).get("scopeLine") or ""
+        ok = OTHER in line and CASE not in line and "main recorded conflicts" in line
+        return ok, f"scope {line[:200]!r}"
+
     for name, fn in [("w2-cw/C620-no-change-never-dropped", c620_no_change_never_dropped),
                      ("w2-cw/C621-neither-lost-is-resolved", c621_neither_lost_is_resolved),
                      ("w2-cw/C622-navmesh-data-judged-by-navmesh-check", c622_navmesh_data_judged_by_navmesh_check),
@@ -2955,7 +2968,8 @@ def main():
                      ("w2-cw/C627-order-line-names-the-move", c627_order_line_names_the_move),
                      ("w2-cw/C628-patch-wins-fields-once", c628_patch_wins_fields_once),
                      ("w2-cw/C629-base-game-state-pairs-once", c629_base_game_state_pairs_once),
-                     ("w2-cw/C630-with-target-said-once", c630_with_target_said_once)]:
+                     ("w2-cw/C630-with-target-said-once", c630_with_target_said_once),
+                     ("w2-cw/C631-scope-names-counted-partners", c631_scope_names_counted_partners)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
