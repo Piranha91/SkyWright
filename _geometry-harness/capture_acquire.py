@@ -12,13 +12,15 @@ adapter is the step that turns one such request into a camera, and it does so by
 verification and the renderer-configuration identity all come from there, verbatim. No scoring,
 no projection, no camera convention and no depth acceptance is reimplemented here.
 
-WHAT IT IS NOT. It does not find feature points. The measured world points for both participants
-are supplied EXPLICITLY, by the operator, out of a source this adapter then re-binds to the
-request (id, participants, source path + sha256, measured configuration fingerprint). Automatic
-feature extraction, room discovery and guessing a contact-envelope centre are out of scope --
-the last one is a known wrong answer: an overlap envelope's centre lies INSIDE the volume where
-the two solids interpenetrate, so a camera aimed there is blocked from every position by
-construction. A missing point or placement input is a prerequisite failure, never a default.
+WHERE THE POINTS COME FROM. The measured world points for both participants are supplied as a
+file this adapter then re-binds to the request (id, participants, source path + sha256, measured
+configuration fingerprint), or, with `--points auto`, measured first by `capture_points.py`: a
+point per participant on a face an eye-level camera around the pair sees, from the renderer's own
+participant marks and depth picks, plus the floor and the witnessed bearing window. Guessing a
+contact-envelope centre stays out of scope -- a known wrong answer: an overlap envelope's centre
+lies INSIDE the volume where the two solids interpenetrate, so a camera aimed there is blocked from
+every position by construction. A missing point or placement input is a prerequisite failure, never
+a default, and a picker that cannot find a visible face refuses in one sentence.
 
 WHAT "READY" MEANS HERE, and what it does not. A result reaches `camera-ready` only when the
 planner returned `verified` AND the verification render reported its own configuration
@@ -76,6 +78,14 @@ EXIT_OK, EXIT_REFUSED = 0, 2
 # how the two drift apart.
 def _load_shotplan():
     spec = importlib.util.spec_from_file_location("housecarl_shotplan", SHOTPLAN)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_points():
+    """The point picker beside this file, loaded only for `--points auto`."""
+    spec = importlib.util.spec_from_file_location("housecarl_capture_points", HERE / "capture_points.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -292,7 +302,8 @@ POINTS_DOC = """Supplied feature points -- the schema this adapter accepts:
     ],
     "camera": {"fov": 65.0, "aspect": "16:9", "eyeHeight": 120.0, "size": 320,
                "surfaceExtent": 0.0, "standoffMin": 250.0, "standoffMax": 1200.0,
-               "verifyCandidates": 3, "aim": [x, y, z]}   # every key optional
+               "verifyCandidates": 3, "aim": [x, y, z],
+               "bearingWindow": [centre, half]}   # every key optional
   }
 
 One point per highlighted participant, no extras. Each point is a measured point ON an opaque
@@ -302,7 +313,7 @@ proved by a ray that STOPS there. An overlap envelope's centre is not such a poi
 CAMERA_KEYS = {"fov": float, "aspect": str, "eyeHeight": float, "size": int,
                "surfaceExtent": float, "standoffMin": float, "standoffMax": float,
                "verifyCandidates": int, "bearingStep": float, "sightMargin": float,
-               "surfaceTol": float, "aim": list}
+               "surfaceTol": float, "aim": list, "bearingWindow": list}
 
 
 def read_points(path: Path, request: dict, parts: list[dict], source: dict) -> dict:
@@ -436,6 +447,8 @@ def plan_argv(points: dict, parts: list[dict], receipts: Path, vp: str | None,
             argv += [flag, str(cam[k])]
     if "aim" in cam:
         argv += ["--aim=" + ",".join(f"{float(v):g}" for v in cam["aim"])]
+    if "bearingWindow" in cam:
+        argv += ["--bearing-window=" + ",".join(f"{float(v):g}" for v in cam["bearingWindow"])]
     if vp:
         argv += ["--vp", vp]
     if passthrough:
@@ -712,6 +725,10 @@ def cmd_acquire(a) -> int:
             packet_path = Path(a.packet).resolve()
             packet = load_json(packet_path)
             request, _plan = find_request(packet, a.request)
+            support = (request.get("camera") or {}).get("support") or {}
+            if support.get("supported") is False:
+                raise Refused("request-type-unsupported", str(support.get("reason") or
+                              f"the storyboard marks {request.get('requestType')!r} requests as having no camera path"))
             if request.get("requestType") not in SUPPORTED_REQUEST_TYPES:
                 raise Refused("request-type-unsupported",
                               f"{request.get('requestType')!r} is not one of "
@@ -720,7 +737,19 @@ def cmd_acquire(a) -> int:
             parts = participants(request)
             bundle = Path(a.bundle).resolve() if a.bundle else packet_path.parent
             source = verify_source(request, bundle)
-            points = read_points(Path(a.points).resolve(), request, parts, source)
+            if a.points == "auto":
+                CP = _load_points()
+                try:
+                    doc = CP.pick_points(request, vp=a.vp, passthrough=a.passthrough,
+                                         work=receipts_dir / "points-work", synthetic=a.synthetic_points,
+                                         size=a.points_size, grid=a.points_grid, shotplan=shotplan_mod)
+                except CP.Unpickable as exc:
+                    raise Refused("points-unpickable", exc.detail, pickerCode=exc.code, **exc.extra)
+                points_path = receipts_dir / "points.json"
+                write_json(points_path, doc)
+            else:
+                points_path = Path(a.points).resolve()
+            points = read_points(points_path, request, parts, source)
 
             argv, _pj, _wl = plan_argv(points, parts, receipts_dir, a.vp, a.passthrough)
             call = call_planner(argv, receipts_dir)
@@ -783,7 +812,13 @@ def main(argv=None) -> int:
     p.add_argument("--packet", required=True,
                    help="storyboard packet (evalreel storyboard-packet --out) or a bare capture plan")
     p.add_argument("--request", required=True, help="the capture request id to acquire")
-    p.add_argument("--points", required=True, help="supplied measured feature points (see below)")
+    p.add_argument("--points", required=True,
+                   help="supplied measured feature points (see below), or `auto` to measure them with "
+                        "capture_points.py first (written to <receipts>/points.json)")
+    p.add_argument("--synthetic-points", action="store_true",
+                   help="with --points auto: the renderer is a stand-in, so the measured points are labelled synthetic")
+    p.add_argument("--points-size", type=int, default=320, help="with --points auto: witness frame size (default 320)")
+    p.add_argument("--points-grid", type=int, default=10, help="with --points auto: pick every N px (default 10)")
     p.add_argument("--out", required=True, help="where the acquisition result is written")
     p.add_argument("--bundle", default=None,
                    help="where the request's source path resolves (default: the packet's directory)")
