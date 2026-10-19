@@ -2649,23 +2649,27 @@ def main():
     def c584_order_risk_said():
         O2 = "Early.esp"
         p_rec = [lost_row(MOD_A, OTHER, f"000C01:{BASE}", "Lighting", "a", "o", "v"),
-                 lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v")]
+                 lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v"),
+                 lost_row(O2, OTHER, f"000C04:{BASE}", "Music", "e", "o", "v")]
         arms = [arm("baseline", [BASE, O2, MOD_A, OTHER], kind="baseline")]
         enr = {(CELLATTR, "baseline"): p_rec}
         results = {(CONTACT, "baseline"): []}
         o_rows = [dict(lost_row(OTHER, MOD_A, f"000C01:{BASE}", "Lighting", "o", "a", "v"), _check=CELLATTR, _type="Cell"),
                   dict(lost_row(OTHER, MOD_A, f"000C01:{BASE}", "ImageSpace", "o", "a", "v"), _check=CELLATTR, _type="Cell"),
                   dict(lost_row(OTHER, MOD_A, f"000C02:{BASE}", "Lighting", "o", "a", "v"), _check=CELLATTR, _type="Cell"),
-                  dict(lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell")]
+                  dict(lost_row(O2, MOD_A, f"000C03:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell"),
+                  # Early's change, lost to OtherMod in the measured order, is lost to ModA in the other: lost either way,
+                  # and the order of Early and ModA did not change, so it is no order risk
+                  dict(lost_row(O2, MOD_A, f"000C04:{BASE}", "Music", "e", "a", "v"), _check=CELLATTR, _type="Cell")]
         setup = {"armId": "lux-first", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
                  "plugins": plugins(BASE, O2, OTHER, MOD_A), "rows": o_rows}
-        plan, md, html = compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 2},
+        plan, md, html = compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 3},
                                             enrichment=enr, order_setups=[setup])
         lines = (reader(plan).get("prediction") or {}).get("orderRiskLines") or []
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         refused = ""
         try:
-            compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 2}, enrichment=enr,
+            compile_and_render(arms, results, [MOD_A], count_only={(CELLATTR, "baseline"): 3}, enrichment=enr,
                                order_setups=[dict(setup, plugins=plugins(BASE, O2, OTHER, MOD_A, shas={MOD_A: "a" * 64}))])
         except R.InputRefused as ex:
             refused = str(ex)
