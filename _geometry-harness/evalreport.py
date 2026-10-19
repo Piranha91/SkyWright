@@ -4621,6 +4621,19 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         reader["scopeLine"] = scope_line
         reader["scopePair"] = pair
         reader["comparisonMods"] = alone_mods
+    elif comparison_names and pred_["items"]:
+        # the main conflicts named are the mods with a counted clash, by how many; a mod whose rows are all set aside
+        # (a value it only carries, the same file in other letters) is not one (Pilgrim's second review, S1)
+        counted_ = collections.Counter()
+        for i in pred_["items"]:
+            for m in i["mods"]:
+                if str(m).lower() not in target_set:
+                    counted_[m] += int(i.get("count") or 0)
+        old_ = f"The main recorded conflicts involving the target are with {compared}. "
+        if counted_ and old_ in scope_line:
+            names_ = ", ".join(m for m, _ in sorted(counted_.items(), key=lambda x: (-x[1], str(x[0]).lower())))
+            scope_line = scope_line.replace(old_, f"The main recorded conflicts involving the target are with {names_}. ")
+            reader["scopeLine"] = scope_line
     reader["verdict"] = verdict
     reader["refusedSummary"] = refused_lines       # said again where the page reports no new problem
     reader["prediction"] = lead["prediction"]
