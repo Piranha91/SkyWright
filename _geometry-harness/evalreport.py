@@ -922,7 +922,9 @@ def plugin_masters(b: "Bundle") -> dict | None:
     (`Configuration.Plugins[].Masters`): a fact of the plugin file, the same in every setup that loads it. Per setup the
     smallest emit that records the lists is read. None when no emit records any."""
     out, seen_arms = {}, set()
-    emits = [e for e in b.evidence if e.get("kind") == "emit" and str(e.get("path", "")).endswith(".json")]
+    # a reverse emit records the configuration it was measured against, not its own setup's
+    emits = [e for e in b.evidence if e.get("kind") == "emit" and str(e.get("path", "")).endswith(".json")
+             and ".reverse." not in str(e.get("path"))]
 
     def size(e):
         try:
@@ -2208,7 +2210,7 @@ def build_prediction(ctx: dict) -> dict:
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
-        problem_master = collections.Counter()
+        master_idents = set()
         # a field a patch's value now wins over a mod's change, where no change to that field was lost without the patch:
         # a record change the patch newly undoes, a new clash (fifth blind review, W-S3 / S-S1)
         p_fields = {(str(k_[4]), (h_["row"].get("field"))) for k_, h_ in p_rows.items() if k_[1] == "LOST-EDIT"}
@@ -2230,14 +2232,15 @@ def build_prediction(ctx: dict) -> dict:
             if no_body(rk, hit["row"].get("other")):
                 no_body_new.add(ident_)        # an object with no model: no body, not a clash
                 continue
+            if master_of(masters, rk[2], rk[3]) and is_geometry_check(rk[0], words):
+                master_idents.add(ident_)      # any row of it is between a plugin's object and its master's
             if is_base_game(rk[2], words) or is_base_game(rk[3], words) or (
                     master_of(masters, rk[2], rk[3]) and not is_geometry_check(rk[0], words)):
                 continue                       # the base game, or a record value over the plugin's own master (P63)
             if (rk[0], p_of(rk[0])) in measured and ident_ not in problem_seen:
                 problem_seen.add(ident_)
                 problems.append(rk)
-                if master_of(masters, rk[2], rk[3]):
-                    problem_master[rk[0]] += 1     # a geometry clash between a plugin's object and its master's: counted
+
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat")
                      and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
@@ -2338,6 +2341,8 @@ def build_prediction(ctx: dict) -> dict:
                                                                  and left_split.get(id(e)) == n)
                                for n in ("listed", "patchHeld", "notAttributed")},
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
+        # a geometry clash between a plugin's object and its master's is counted and labelled (coordinator ruling)
+        problem_master = collections.Counter(rk[0] for rk in problems if ident_of.get(rk, tuple(rk[:5])) in master_idents)
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
                          "masterNote": (bind(words["newByCheckOwnMaster"], {"count": fmt_n(problem_master[c])})
                                         if problem_master.get(c) else None),
@@ -3519,8 +3524,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # evaluated mod lists as a master (it builds on it, P63)
     plugin_masters_doc = plugin_masters(b)
     pw_ = reader_data.get("prediction") or {}
-    geometry_partners = {str(x).lower() for f in findings if is_geometry_check(f.get("checkId"), pw_)
-                         for x in ((f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")) if x}
+    geometry_partners = set()
+    for f in findings:
+        pair_ = {str(x).lower() for x in ((f.get("counts") or {}).get("A"), (f.get("counts") or {}).get("B")) if x}
+        if is_geometry_check(f.get("checkId"), pw_) and pair_ & target_set:
+            geometry_partners |= pair_ - target_set
     # a master named only by record values is not a conflict partner; one whose objects clash with the mod's still is
     target_masters = {m for t in target_set for m in (plugin_masters_doc or {}).get(t, ())} - geometry_partners
     base_game_partners = [n for n in comparison_weight if is_base_game(n, reader_data.get("prediction") or {})]
