@@ -7,7 +7,7 @@ using Mutagen.Bethesda.Plugins;
 // of an earlier emit with it. Held in its own class so --self-test runs exactly the predicate a real run computes.
 sealed record OverlapCredit(OverlapIndex Index, PopulationMode Mode, EnableArms? Arms,
                             Func<FormKey, (TriangleSoup? Soup, char Source, string? Reason)> Geometry,
-                            double Tolerance, long MaxTrianglePairs, double PairSeconds)
+                            double Tolerance, long MaxTrianglePairs, double PairSeconds, PairTimer? Timer = null)
 {
     public (PhysicalState State, string Detail) Predicate(FormKey laterKey, FormKey otherKey)
     {
@@ -32,7 +32,7 @@ sealed record OverlapCredit(OverlapIndex Index, PopulationMode Mode, EnableArms?
         var worldL = SpatialOverlap.TransformSoup(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale);
         var worldO = SpatialOverlap.TransformSoup(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale);
         var q = SurfaceQueryOutcome.QueryPlaced(worldL, new(modelL, sl.Value.Pos, sl.Value.Rot, sl.Value.Scale),
-            worldO, new(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale), Tolerance, MaxTrianglePairs, TimeSpan.FromSeconds(PairSeconds));
+            worldO, new(modelO, so.Value.Pos, so.Value.Rot, so.Value.Scale), Tolerance, MaxTrianglePairs, TimeSpan.FromSeconds(PairSeconds), default, Timer);
         if (q.Intersects == true)
             return (PhysicalState.Holds, $"actual render surfaces: {q.SurfaceRelation}; containment {q.Containment}; {q.TrianglePairsTested:N0} triangle pairs [{srcL}{srcO}]");
         if (q.Intersects == false)

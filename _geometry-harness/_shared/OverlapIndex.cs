@@ -98,28 +98,49 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
     /// triangle. Containment and the relation do not change under the shared translation. <paramref name="worldA"/> and
     /// <paramref name="worldB"/> are the members' models placed at their poses; a member given without its model keeps the world query.</summary>
     public static SurfaceQueryOutcome QueryPlaced(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
-                                                  long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken = default)
+                                                  long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken = default,
+                                                  PairTimer? timer = null)
     {
+        if (timer is null) return QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, null);
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { return QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer); }
+        finally { timer.Pairs++; timer.WallTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started; }
+    }
+
+    static SurfaceQueryOutcome QueryPlacedCore(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
+                                               long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken, PairTimer? timer)
+    {
+        long t0 = timer is null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();
         var p = PairFrame.PreparePlaced(worldA, a?.Member, worldB, b?.Member);
-        if (p is null) return Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken);
+        if (timer is not null)
+        {
+            timer.PairFrameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - t0;
+            timer.LastPath = p is null ? PairPath.World : p.Refusal is not null ? PairPath.Refused
+                : p.Frame is not null ? PairPath.Shifted : PairPath.WorldSkip;
+            timer.Paths[(int)timer.LastPath]++;
+        }
+        if (p is null) return Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer);
         if (p.Refusal is { } why)
             return new SurfaceQueryOutcome("unknown", why, "unknown", "unknown", null, 0) { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
-        return Query(p.A, p.B, tolerance, maxTrianglePairs, pairTimeout, cancellationToken) with { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
+        return Query(p.A, p.B, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer) with { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
     }
 
     public static SurfaceQueryOutcome Query(TriangleSoup a, TriangleSoup b, double tolerance, long maxTrianglePairs,
-                                            TimeSpan pairTimeout, CancellationToken cancellationToken = default)
+                                            TimeSpan pairTimeout, CancellationToken cancellationToken = default,
+                                            PairTimer? timer = null)
     {
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(pairTimeout);
-            var result = MeshIntersection.Query(a, b, tolerance, maxTrianglePairs, timeout.Token);
+            var result = MeshIntersection.Query(a, b, tolerance, maxTrianglePairs, timeout.Token, timer?.Core);
+            if (timer is not null && result.Reason == "cancelled") timer.Timeouts++;
             return new(Normalize(result.Status), result.Reason, Normalize(result.SurfaceRelation),
                        Normalize(result.Containment), result.Intersects, result.TrianglePairsTested);
         }
         catch (OperationCanceledException)
         {
+            if (timer is not null) timer.Timeouts++;
             return new("unknown", "pair time budget exhausted", "unknown", "unknown", null, 0);
         }
         catch (Exception ex)
@@ -140,6 +161,33 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
             b.Append(char.ToLowerInvariant(c));
         }
         return b.ToString();
+    }
+}
+
+/// <summary>Which preparation a placed pair took (PairFrame): the world soups unchanged, the world frame with zero-area-in-model
+/// triangles left out, a shifted pair frame, or a refusal naming a collapse.</summary>
+public enum PairPath { World, WorldSkip, Shifted, Refused }
+
+/// <summary>Cumulative time and counts of placed-pair queries for one class of pairs (overlap acceleration P0). Observation only;
+/// not thread-safe.</summary>
+public sealed class PairTimer
+{
+    public readonly MeshQueryTimer Core = new();
+    /// <summary>Stopwatch ticks in the PairFrame check, and whole-pair wall time as the caller measured it.</summary>
+    public long PairFrameTicks, WallTicks;
+    public long Pairs, Timeouts;
+    public readonly long[] Paths = new long[4];
+    public PairPath LastPath;
+    /// <summary>The slowest pairs seen, longest first, at most <see cref="Keep"/>.</summary>
+    public readonly List<(double Seconds, string A, string B, SurfaceQueryOutcome Query, PairPath Path)> Slowest = new();
+    public const int Keep = 20;
+
+    public void Note(double seconds, string a, string b, SurfaceQueryOutcome q)
+    {
+        if (Slowest.Count == Keep && seconds <= Slowest[^1].Seconds) return;
+        Slowest.Add((seconds, a, b, q, LastPath));
+        Slowest.Sort((x, y) => y.Seconds.CompareTo(x.Seconds));
+        if (Slowest.Count > Keep) Slowest.RemoveAt(Keep);
     }
 }
 
@@ -567,7 +615,9 @@ public sealed class OverlapIndex
         IReadOnlyList<HashSet<int>> closure, double tolerance = 1e-5, long maxTrianglePairs = 2_000_000,
         TimeSpan? pairTimeout = null, Func<int, int, bool>? includeResponsiblePair = null,
         Action<long>? onProgress = null, float tile = 256f, CancellationToken cancellationToken = default,
-        bool retainSameResults = false, Func<SurfaceOverlapCandidate, SurfaceOverlapCandidate, bool>? includePair = null)
+        bool retainSameResults = false, Func<SurfaceOverlapCandidate, SurfaceOverlapCandidate, bool>? includePair = null,
+        PairTimer? sameTimer = null, PairTimer? crossTimer = null,
+        Action<SurfaceOverlapCandidate, SurfaceOverlapCandidate, SurfaceQueryOutcome, PairPath?, double>? onPair = null)
     {
         var timeout = pairTimeout ?? TimeSpan.FromSeconds(120);
         var sweep = new SurfacePairSweep();
@@ -590,7 +640,12 @@ public sealed class OverlapIndex
                     // --population (P25): a pair neither of whose references is in the plan's population is not measured.
                     if (includePair is not null && !includePair(a, b)) continue;
                     sweep.PairsChecked++;
-                    var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken);
+                    var timer = a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer;
+                    long started = System.Diagnostics.Stopwatch.GetTimestamp();
+                    var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken, timer);
+                    double seconds = MeshQueryTimer.Seconds(System.Diagnostics.Stopwatch.GetTimestamp() - started);
+                    timer?.Note(seconds, a.Key.ToString(), b.Key.ToString(), query);
+                    onPair?.Invoke(a, b, query, timer?.LastPath, seconds);
                     bool intersects = query.Intersects == true;
                     bool unknown = query.Unknown;
 
@@ -633,7 +688,7 @@ public sealed class OverlapIndex
     public SurfaceOverlapRow JudgeSurface(SurfaceOverlapHit hit, IReadOnlyList<HashSet<int>> closure,
         Func<FormKey, (TriangleSoup? Soup, char Src, string? Reason)> geometryOf, double tolerance = 1e-5,
         long maxTrianglePairs = 2_000_000, TimeSpan? pairTimeout = null, EnableArms? arms = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, PairTimer? timer = null)
     {
         var (later, other) = hit.A.Win.Plugin > hit.B.Win.Plugin ? (hit.A, hit.B) : (hit.B, hit.A);
         int mover = later.Win.Plugin;
@@ -668,7 +723,7 @@ public sealed class OverlapIndex
                 var world = SpatialOverlap.TransformSoup(model, previous!.Value.Pos, previous.Value.Rot, previous.Value.Scale);
                 counterfactual = SurfaceQueryOutcome.QueryPlaced(world, new(model, previous.Value.Pos, previous.Value.Rot, previous.Value.Scale),
                     other.WorldSoup, other.Placed, tolerance, maxTrianglePairs,
-                    pairTimeout ?? TimeSpan.FromSeconds(120), cancellationToken);
+                    pairTimeout ?? TimeSpan.FromSeconds(120), cancellationToken, timer);
                 counterfactualStatus = counterfactual.Unknown ? "unknown" : "measured";
                 counterfactualReason = counterfactual.Reason;
             }

@@ -46,7 +46,7 @@ using HousecarlCore.Progress;
 //   - These relations are geometry evidence, not compatibility severity, intent or a game verdict.
 //
 // usage: overlapprobe [--list N] [--surface-tolerance U] [--max-triangle-pairs N] [--pair-seconds S]
-//                     [--emit path] [--base emit.json] [--dump path] [--json path]
+//                     [--emit path] [--base emit.json] [--dump path] [--json path] [--pair-ledger path]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
 //                     [--motion swept [--motion-delta U]]
@@ -192,6 +192,9 @@ string? basePath = null;
 // and what meshes they were — not part of the report. --json: every judged row, for spot-checks.
 string? dumpPath = null;
 string? jsonPath = null;
+// --pair-ledger FILE: one JSON line per pair the actual-shape sweep measured, in sweep order (both FormKeys, same/cross, the
+// PairFrame path, every result field, and the pair's seconds), plus FILE.slowest.json; for comparing two builds pair by pair.
+string? pairLedgerPath = null;
 string? geometryManifestPath = null;
 string? historicalPairsPath = null;
 string? contactEvidencePairsPath = null;
@@ -256,6 +259,7 @@ try
         else if (flag == "--base") { basePath = NeedValue(i, flag); i++; }
         else if (flag == "--dump") { dumpPath = NeedValue(i, flag); i++; }
         else if (flag == "--json") { jsonPath = NeedValue(i, flag); i++; }
+        else if (flag == "--pair-ledger") { pairLedgerPath = NeedValue(i, flag); i++; }
         else if (flag == "--geometry-manifest") { geometryManifestPath = NeedValue(i, flag); i++; }
         else if (flag == "--historical-pairs") { historicalPairsPath = NeedValue(i, flag); i++; }
         else if (flag == "--contact-evidence-pairs") { contactEvidencePairsPath = NeedValue(i, flag); i++; }
@@ -1262,8 +1266,32 @@ IReadOnlyList<SettledGravity> SettledGravities()
     return settledGravities = list;
 }
 
+// Pair-loop timers (P0): observation only; the console and the run record carry them after each stage.
+var sameTimer = new PairTimer(); var crossTimer = new PairTimer(); var provenanceTimer = new PairTimer(); var reconcileTimer = new PairTimer();
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)   // overlapprobe/OverlapCredit.cs
-    => new OverlapCredit(idx, popMode, resolvedArms, SurfaceGeometryOf, surfaceTolerance, maxTrianglePairs, pairSeconds).Predicate(laterKey, otherKey);
+    => new OverlapCredit(idx, popMode, resolvedArms, SurfaceGeometryOf, surfaceTolerance, maxTrianglePairs, pairSeconds, reconcileTimer).Predicate(laterKey, otherKey);
+void ReportTimer(string name, PairTimer t, double? stageSeconds)
+{
+    var c = t.Core;
+    double S(long ticks) => MeshQueryTimer.Seconds(ticks);
+    double wall = stageSeconds ?? S(t.WallTicks);
+    double phases = S(t.PairFrameTicks + c.PrepareTicks + c.BvhTicks + c.SurfaceTicks + c.ValidateTicks + c.ContainmentTicks);
+    Console.WriteLine($"   pair-loop timers {name}: {t.Pairs:N0} pairs ({c.Queries:N0} mesh queries), {wall:0.0}s; "
+        + $"pairframe {S(t.PairFrameTicks):0.0}s, prepare {S(c.PrepareTicks):0.0}s, bvh {S(c.BvhTicks):0.0}s, surface {S(c.SurfaceTicks):0.0}s "
+        + $"({c.SurfaceUnits:N0} u), validate {S(c.ValidateTicks):0.0}s ({c.ValidateUnits:N0} u), containment {S(c.ContainmentTicks):0.0}s "
+        + $"({c.ContainmentUnits:N0} u), unaccounted {wall - phases:0.0}s; paths world {t.Paths[0]:N0} / zero-area skip {t.Paths[1]:N0} / "
+        + $"shifted {t.Paths[2]:N0} / refused {t.Paths[3]:N0}; budget-exhausted {c.BudgetExhausted:N0}, time-outs {t.Timeouts:N0}, "
+        + $"preparation refusals {c.PrepareRefused:N0}");
+    string f = $"actual-shape-queries.{name}";
+    foreach (var (k, v, u) in new (string, double, string)[] {
+        ("pairs", t.Pairs, "pairs"), ("queries", c.Queries, "queries"), ("wall.seconds", wall, "seconds"),
+        ("pairframe.seconds", S(t.PairFrameTicks), "seconds"), ("prepare.seconds", S(c.PrepareTicks), "seconds"),
+        ("bvh.seconds", S(c.BvhTicks), "seconds"), ("surface.seconds", S(c.SurfaceTicks), "seconds"),
+        ("validate.seconds", S(c.ValidateTicks), "seconds"), ("containment.seconds", S(c.ContainmentTicks), "seconds"),
+        ("surface.units", c.SurfaceUnits, "units"), ("validate.units", c.ValidateUnits, "units"), ("containment.units", c.ContainmentUnits, "units"),
+        ("timeouts", t.Timeouts, "pairs"), ("budget-exhausted", c.BudgetExhausted, "pairs") })
+        __run.Feature($"{f}.{k}", v, u, FeatureAt.Final);
+}
 
 // ---------------------------------------------------------------------------------------
 // Pass 3 — candidates, placed triangle soups, conservative bounds sweep, actual-shape pairs.
@@ -1379,6 +1407,24 @@ Console.WriteLine($"                                  {skips.InvalidTransform:N0
 
 long lastPairProgress = 0;
 __run.Stage("actual-shape-queries", "querying candidate render surfaces", total: null, unit: "pairs");
+StreamWriter? ledger = null;
+if (pairLedgerPath is not null)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(pairLedgerPath))!);
+    ledger = new StreamWriter(pairLedgerPath, false, new System.Text.UTF8Encoding(false), 1 << 20);
+}
+void LedgerLine(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b, SurfaceQueryOutcome q, PairPath? path, double seconds)
+{
+    if (ledger is null) return;
+    ledger.WriteLine(JsonSerializer.Serialize(new
+    {
+        a = a.Key.ToString(), b = b.Key.ToString(), same = a.Win.Plugin == b.Win.Plugin, path = path?.ToString(),
+        q.Status, q.Reason, q.SurfaceRelation, q.Containment, q.Intersects, q.TrianglePairsTested, q.Frame, q.ZeroAreaSkipped,
+        seconds = Math.Round(seconds, 6),
+    }));
+}
+long bvhNodesBefore = MeshIntersection.BvhNodesBuilt;
+double sweepStarted = sw.Elapsed.TotalSeconds;
 var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, maxTrianglePairs,
     TimeSpan.FromSeconds(pairSeconds), responsiblePairs.Count > 0 ? ScopedPair : null,
     checkedPairs =>
@@ -1387,8 +1433,29 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
         if (checkedPairs - lastPairProgress < 250) return;
         lastPairProgress = checkedPairs;
         Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
-    }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation);
+    }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation,
+    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine);
+double sweepSeconds = sw.Elapsed.TotalSeconds - sweepStarted;
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
+ReportTimer("same", sameTimer, null);
+ReportTimer("cross", crossTimer, null);
+Console.WriteLine($"   pair-loop stage: {sweepSeconds:0.0}s for {sweep.PairsChecked:N0} pairs; same + cross pair wall "
+    + $"{MeshQueryTimer.Seconds(sameTimer.WallTicks + crossTimer.WallTicks):0.0}s; BVH nodes built in the sweep "
+    + $"{MeshIntersection.BvhNodesBuilt - bvhNodesBefore:N0} (process {MeshIntersection.BvhNodesBuilt:N0})");
+__run.Feature("actual-shape-queries.stage.seconds", sweepSeconds, "seconds", FeatureAt.Final)
+     .Feature("actual-shape-queries.bvh-nodes", MeshIntersection.BvhNodesBuilt - bvhNodesBefore, "nodes", FeatureAt.Final);
+if (ledger is not null)
+{
+    ledger.Dispose();
+    var slow = new[] { ("same", sameTimer), ("cross", crossTimer) }.ToDictionary(x => x.Item1, x => x.Item2.Slowest.Select(s => new
+    {
+        seconds = Math.Round(s.Seconds, 6), a = s.A, b = s.B, path = s.Path.ToString(), s.Query.Status, s.Query.Reason,
+        s.Query.SurfaceRelation, s.Query.Containment, s.Query.TrianglePairsTested,
+    }).ToList());
+    File.WriteAllText(pairLedgerPath + ".slowest.json", JsonSerializer.Serialize(slow, new JsonSerializerOptions { WriteIndented = true }));
+    __run.Artifact(pairLedgerPath!);
+    Console.WriteLine($"   pair ledger: {sweep.PairsChecked:N0} line(s) -> {pairLedgerPath}");
+}
 
 // A published, ACTIVE patch mastering both sides is the community saying "these two are known to
 // meet" — the pair is a LABELLED conflict, and its residual overlaps are what the patch did not
@@ -1424,9 +1491,10 @@ var rows = new List<SurfaceOverlapRow>(sweep.CrossHits.Count);
 foreach (var h in sweep.CrossHits)
 {
     rows.Add(idx.JudgeSurface(h, closure, SurfaceGeometryOf, surfaceTolerance,
-        maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms));
+        maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms, default, provenanceTimer));
     __run.Advance();
 }
+ReportTimer("provenance", provenanceTimer, null);
 var split = OverlapClass.Of(rows, PopOf);   // overlapprobe/OverlapClass.cs
 var provenanceUnknown = split.ProvenanceUnknown;
 var provenanceRows = split.Provenance;
@@ -1543,6 +1611,7 @@ if (emitPath is not null)
             $"pairs measured only where a reference is in the plan's population; {population.Describe()}"));
     }
     var identity = cfg.Identity(populationIdentity, pop.StateName);
+    ReportTimer("reconciliation", reconcileTimer, null);
     __run.ReviseTotal(reconciliationPredicates, "the current class and optional base emit established the exact predicate count");
     __run.Stage("emit-artifact", "writing overlap conflict artifact", 1, "artifacts");
     ConflictIo.Write(emitPath, new ConflictFile("overlapprobe", Instance,
