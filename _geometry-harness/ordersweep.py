@@ -110,12 +110,19 @@ def probe_program(harness: Path, probe: str, overrides: dict[str, str]) -> list[
 
 
 def program_key(harness: Path, probe: str, overrides: dict[str, str]) -> str:
-    """What the cache must key a program by: the binary's hash, or the override's own text when a
-    fixture stood a program in (a fake probe's identity is the command line, not a Release build)."""
+    """What the cache must key a program by: every file of its Release folder that runs (the exe apphost, every dll,
+    under runtimes/ too, and the runtime json), by relative path and hash; debug symbols are left out. The exe alone is
+    the same launcher for every build of a project, so a deploy that replaces only the dlls must still change the key.
+    A fixture that stood a program in is keyed by the override's own text (its identity is the command line)."""
     override = overrides.get(probe)
     if override:
         return "probe-cmd:" + hashlib.sha256(override.encode("utf-8")).hexdigest()
-    return sha256_file(probe_exe(harness, probe))
+    folder = probe_exe(harness, probe).parent
+    h = hashlib.sha256()
+    for p in sorted((q for q in folder.rglob("*") if q.is_file() and q.suffix.lower() != ".pdb"),
+                    key=lambda q: q.relative_to(folder).as_posix().lower()):
+        h.update(f"{p.relative_to(folder).as_posix().lower()}\0{sha256_file(p)}\n".encode("utf-8"))
+    return "folder:" + h.hexdigest()
 
 
 def load_json(p: Path):
