@@ -1539,6 +1539,14 @@ def build_prediction(ctx: dict) -> dict:
             return "unusedBits"
         return None
 
+    one_sided_res = {k: re.compile(v) for k, v in (words.get("oneSidedKinds") or {}).items() if k != "about"}
+
+    def one_sided(rk):
+        """Whose change a seam row is: only one side differs from the base game, so the plugin on the other side
+        carries the base game's value and made no change of its own there (skill data `oneSidedKinds`)."""
+        r_ = one_sided_res.get(state_split(rk[1])[0])
+        return bool(r_ and r_.search(str(rk[5])))
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -1547,6 +1555,9 @@ def build_prediction(ctx: dict) -> dict:
             return "sameMod"
         if there(w_arm, rk):
             return "alreadyPresent"
+        if one_sided(rk):
+            # new with the evaluated mods and only one side differs: their side against the base game's value
+            return "baseGame"
         if is_base_game(a, words) or is_base_game(b, words):
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
@@ -2034,10 +2045,12 @@ def build_prediction(ctx: dict) -> dict:
     # clashes between mods, but they are measured problems of that mod: said by check, never only in a set-aside count
     base_geo = collections.OrderedDict()
     for e in record:
-        if (e["admission"] == "baseGame" and e["kind"] != "LOST-EDIT" and is_geometry_check(e["checkId"], words)
+        if (e["admission"] == "baseGame" and e["kind"] != "LOST-EDIT"
+                and (is_geometry_check(e["checkId"], words) or state_split(e["kind"])[0] in one_sided_res)
                 and {e["A"].lower(), e["B"].lower()} & pt_lower and e["A"].lower() != e["B"].lower()):
             mod_ = e["A"] if e["A"].lower() in pt_lower else e["B"]
-            c_ = base_geo.setdefault(mod_, collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"], "pairs": set()})
+            side_ = state_split(e["kind"])[0] in one_sided_res     # the other side carries the base game's value
+            c_ = base_geo.setdefault((mod_, side_), collections.OrderedDict()).setdefault(e["checkId"], {"n": 0, "fids": [], "kind": e.get("itemKind") or e["kind"], "pairs": set()})
             # a pair of objects is one clash however many world states show it (Pilgrim's second review, S5)
             base_k, in_st = state_split(e["kind"])
             pair_ = ((base_k, str(e["formKey"]), tuple(sorted(map(str, e.get("other") or ())))) if in_st is not None
@@ -2048,9 +2061,10 @@ def build_prediction(ctx: dict) -> dict:
             c_["n"] += 1
             if e.get("findingId") and e["findingId"] not in c_["fids"]:
                 c_["fids"].append(e["findingId"])
-    for mod_, by_c in base_geo.items():
-        if words.get("baseGameGeometryLine"):
-            loss_lines.append({"text": bind(words["baseGameGeometryLine"], {"mod": mod_, "parts": "; ".join(
+    for (mod_, side_), by_c in base_geo.items():
+        line_ = words.get("baseGameSideLine" if side_ else "baseGameGeometryLine")
+        if line_:
+            loss_lines.append({"text": bind(line_, {"mod": mod_, "parts": "; ".join(
                 f"{fmt_n(c_['n'])} {unit_noun(cid_, c_['kind'], c_['n'])} ({title_of(cid_)})" for cid_, c_ in by_c.items())}),
                 "findingIds": [f_ for c_ in by_c.values() for f_ in c_["fids"]][:1]})
     # P63: a mod changing a value of a plugin it lists as a master is said as that, one line per mod and master, with
