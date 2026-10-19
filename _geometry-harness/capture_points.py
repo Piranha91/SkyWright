@@ -239,7 +239,7 @@ def choose_floor(levels: list[float], minz: float, maxz: float, below: float, ab
 
 def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: Path, cell: str | None = None,
                 bearings: int = 12, standoffs=(250.0, 400.0), size: int = 320, grid: int = 10, fov: float = 65.0,
-                min_depth: int = 2, synthetic: bool = False, shotplan=None) -> dict:
+                min_depth: int = 2, synthetic: bool = False, aspect: str = "16:9", shotplan=None) -> dict:
     """The points document `capture_acquire.py` reads, or Unpickable with one plain sentence."""
     S = shotplan or _load_shotplan()
     ap = argparse.ArgumentParser()
@@ -438,7 +438,7 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
                           f"{floor_src} at z {floor:.0f}." + (" SYNTHETIC renderer stand-in." if synthetic else "")),
            "cell": cell, "floorZ": floor,
            "points": rows,
-           "camera": {"bearingWindow": [round(wb, 1), half], "standoffMin": float(max(150, int(ws // 50) * 50 - 50)),
+           "camera": {"fov": float(fov), "aspect": aspect, "bearingWindow": [round(wb, 1), half], "standoffMin": float(max(150, int(ws // 50) * 50 - 50)),
                       "standoffMax": float(int(ws // 50) * 50 + 200)},
            "witness": {"station": {k: chosen[k] for k in ("id", "bearing", "standoff", "eye", "frame")},
                        "placements": {k: list(v) for k, v in pos.items()},
