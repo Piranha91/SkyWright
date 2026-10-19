@@ -437,6 +437,25 @@ def case_39_the_tree_and_the_by_name_reads_give_one_answer():
     assert answers == {"fields": [False, True], "tree": [False, True]}, answers
 
 
+def case_41_a_tree_value_differing_from_the_winner_only_in_path_case_is_the_winners():
+    """Window 2, lane core (Clockwork review B1): a tree answer lists Grand Solitude's LOD texture as a difference from
+    the winner's, only in letter case and slashes. The game reads one file: ModA holds the value it inherits (no change
+    of its own), ModB its own."""
+    fk = "00003C:Skyrim.esm"
+    win = "Data\\Textures\\Landscape\\Mountains\\MountainSlab02.dds"
+    chain = [(BASE, {"HdLodDiffuseTexture": win}), (C, {"HdLodDiffuseTexture": win}),
+             (A, {"HdLodDiffuseTexture": "data/textures/landscape/mountains/mountainslab02.dds"}),
+             (B, {"HdLodDiffuseTexture": "data/textures/other.dds"}), ("ModD.esp", {"HdLodDiffuseTexture": win})]
+    order = ORDER_C + [{"name": "ModD.esp", "path": "X:/Lab/ModD.esp", "sha256": "0" * 64}]
+    masters = {A.lower(): {C.lower()}, B.lower(): {C.lower()}}
+    with tempfile.TemporaryDirectory() as td:
+        req, resp = records_transcript(Path(td), chain, fk, "Worldspace", "tree")
+        got = RR.read_chains(req, resp, order, RR.load_scope())[fk]
+    vals = got["values"]["HdLodDiffuseTexture"]
+    own = [RR.own_change(got["providers"], vals, got["providers"].index(p), masters.get(p.lower()))[0] for p in (A, B)]
+    assert own == [False, True], (own, vals)
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

@@ -652,12 +652,11 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
                 if val.startswith("="):
                     k = INDEX.sub("", key)
                     v = val[1:]
-                    if k in masks:
-                        if won is not None and _masked(v, masks[k]) == _masked(won, masks[k]):
-                            continue           # differs from the winner only in bytes the game does not read
-                        val = "=" + _masked(v, masks[k])
-                    else:
-                        val = "=" + (_angle(v) if k in scope.angles else _norm(v))
+                    def norm(x):
+                        return _masked(x, masks[k]) if k in masks else _angle(x) if k in scope.angles else _norm(x)
+                    if won is not None and norm(v) == norm(won):
+                        continue               # the winner's value as the game reads it (unread bytes, path case)
+                    val = "=" + norm(v)
                 per[key.split(".")[0].split("[")[0]].append(key + val)
             per_node.append({k: tuple(sorted(v)) for k, v in per.items()})
         tops = sorted(set().union(*[set(v) for v in per_node]))
