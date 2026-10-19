@@ -2468,6 +2468,97 @@ def main():
                      ("w2-p64/C546-undone-changes-linked", c546_undone_changes_linked)]:
         cell(name, fn)
 
+    # ------------------------------------------- last round: blind review of the regenerated BPT report
+    # C549. The report says which setups the separate evaluation measured, in plugins, never "each mod on its own"
+    def c549_sibling_setups_named():
+        plan, md, html, index = patched_with_sibling("same")
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        ok = ("each mod on its own" not in md.lower() and f"only {MOD_A} besides the base game" in sec
+              and f"only {MOD_B} besides the base game" in sec and "the base game alone" in sec)
+        return ok, f"prediction {[ln for ln in sec.splitlines() if 'separate evaluation' in ln]}"
+
+    def stays_bundle():
+        """C551/C553/C554. One evaluated mod (ModA) and ModB; a patch. Overlaps: X x Y1, X x Y2, Z x Y1 with both
+        loaded; with the patch X x Y1 and X x Y2 still hold, Z x Y1 is gone. Record fields: ModA's change to 701 is lost
+        to ModB's, with the patch too; ModA's removal of 702 (initially disabled) is undone by ModB's value, with the
+        patch too; ModA's change to 703 is resolved by the patch."""
+        X, Z, Y1, Y2 = f"000X01:{MOD_A}", f"000Z01:{MOD_A}", f"000Y01:{MOD_B}", f"000Y02:{MOD_B}"
+        p_ov = [row("OVERLAP", MOD_B, MOD_A, X, other=Y1, label="Hall (int)"),
+                row("OVERLAP", MOD_B, MOD_A, X, other=Y2, label="Hall (int)"),
+                row("OVERLAP", MOD_B, MOD_A, Z, other=Y1, label="Hall (int)")]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": fk, "Other": o, "Physical": ph}
+                 for fk, o, ph in ((X, Y1, "Holds"), (X, Y2, "Holds"), (Z, Y1, "Gone"))]
+        p_rec = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "Name", "a1", "b1", "v1"),
+                 lost_row(MOD_A, MOD_B, f"000702:{BASE}", "SkyrimMajorRecordFlags", "InitiallyDisabled", "0", "0"),
+                 lost_row(MOD_A, MOD_B, f"000703:{BASE}", "Name", "a3", "b3", "v3")]
+        w_rec = p_rec[:2]
+        enr = {(RECORDS, "baseline"): p_rec, (RECORDS, "with-patch"): w_rec}
+        count_only = {(RECORDS, "baseline"): 3, (RECORDS, "with-patch"): 2}
+        results = {(OVERLAP, "baseline"): p_ov, (OVERLAP, "with-patch"): p_ov[:2]}
+        return compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A], patches=[PATCH], count_only=count_only,
+                                  enrichment=enr, predicates={(OVERLAP, "with-patch"): preds})
+
+    # C550. Overlaps in the headline are counted as objects too: 3 overlap pairs between 4 objects
+    def c550_headline_overlaps_as_objects():
+        plan, md, html = stays_bundle()
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        ok = "3 overlap candidates found by the check" in v and "(4 objects)" in v
+        return ok, f"verdict {v!r}"
+
+    # C551. No total adds overlap pairs to record fields: the with-patch summary gives each kind its own line in its own
+    # unit, and the patch section's totals give one count per unit
+    def c551_no_total_across_units():
+        plan, md, html = stays_bundle()
+        p = reader(plan).get("prediction") or {}
+        lines = p.get("withPatchLines") or []
+        hits = next((ln for ln in md.splitlines() if ln.startswith("- Predicted and resolved by")), "")
+        ok = ("clashes counted above" not in md and len(lines) == 2
+              and any("(3 overlap pairs)" in x and "resolved 1" in x and "left 2" in x for x in lines)
+              and any("(3 record fields)" in x and "resolved 1" in x for x in lines)
+              and all(x in md for x in lines) and "1 overlap pair, 1 record field" in hits)
+        return ok, f"lines {lines}; totals {hits!r}"
+
+    # C552. Cell-setting clashes are named by the fields they are, never "lighting, water" for fields that are neither
+    def c552_cell_fields_named():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000C01:{BASE}", "Grid", ["Grid.Flags=8"], ["Grid.Flags=2"], ["Grid.Flags=0"]),
+                  lost_row(MOD_A, MOD_B, f"000C02:{BASE}", "Grid", ["Grid.Flags=8"], ["Grid.Flags=2"], ["Grid.Flags=0"]),
+                  lost_row(MOD_A, MOD_B, f"000C02:{BASE}", "OcclusionData", ["OcclusionData=1"], ["OcclusionData=2"], ["v"])]
+        enr = {(CELLATTR, "baseline"): p_rows}
+        results = {(CONTACT, "baseline"): []}
+        plan, md, html = compile_and_render([arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline")], results, [MOD_A],
+                                            count_only={(CELLATTR, "baseline"): 3}, enrichment=enr)
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        ok = ("Grid.Flags 2" in v and "OcclusionData 1" in v and "lighting, water" not in v
+              and sec.count("Grid.Flags 2") >= 2)
+        return ok, f"verdict {v!r}"
+
+    # C553. What stays with the patch is said at the top in plain words, each with its count and unit: the overlaps
+    # still there with their objects and place, the record changes still lost and to whom
+    def c553_what_stays_at_top():
+        plan, md, html = stays_bundle()
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        st = next((ln for ln in sec.splitlines() if "Still there with" in ln), "")
+        ok = (f"2 overlap pairs between {MOD_A} and {MOD_B} (3 objects, all in Hall (int))" in st
+              and f"2 of {MOD_A}'s changes lost to {MOD_B}" in st)
+        return ok, f"stays line {st!r}"
+
+    # C554. An object one mod removes that the other still brings back with the patch is said at the top, named
+    def c554_restored_object_named_at_top():
+        plan, md, html = stays_bundle()
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        st = next((ln for ln in sec.splitlines() if "Still there with" in ln), "")
+        ok = f"{MOD_B} still brings back 1 object {MOD_A} removes (for example 000702:{BASE})" in st
+        return ok, f"stays line {st!r}"
+
+    for name, fn in [("w2-last/C549-sibling-setups-named", c549_sibling_setups_named),
+                     ("w2-last/C550-headline-overlaps-as-objects", c550_headline_overlaps_as_objects),
+                     ("w2-last/C551-no-total-across-units", c551_no_total_across_units),
+                     ("w2-last/C552-cell-fields-named", c552_cell_fields_named),
+                     ("w2-last/C553-what-stays-at-top", c553_what_stays_at_top),
+                     ("w2-last/C554-restored-object-named-at-top", c554_restored_object_named_at_top)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
