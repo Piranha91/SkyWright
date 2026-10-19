@@ -98,7 +98,7 @@ def records_transcript(chains):
             n += 1
             req.append({"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {
                 "name": "housecarl_records", "arguments": {"formids": [fk], "source": plugin, "format": "json",
-                                                           "project": {"form": "fields", "fields": sorted({k.split(".")[0] for k in fields})}}}})
+                                                           "project": {"form": "fields", "fields": sorted({k.split(".")[0].split("[")[0] for k in fields})}}}})
             body = {"records": [{"formid": fk, "type": rtype, "editorid": None, "source": plugin,
                                  "fields": [{"path": k, "value": v} for k, v in fields.items()]}]}
             resp.append({"jsonrpc": "2.0", "id": n, "result": {"content": [{"type": "text",
@@ -3230,6 +3230,151 @@ def main():
         top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
         ok = got == {"009301": "baseGame", "009303": "admitted"} and MOD_A in top and "1 clash" in top
         return ok, f"{got}; base-game line {top[:200]!r}"
+
+    # ------------------------------------------- window 2, lane final: Pilgrim B1, Missives B2 and B1, Clockwork S6
+    UPD = "Update.esm"
+
+    def cond(fn_, flags="0"):
+        return {"Data.Function": fn_, "Flags": flags, "CompareOperator": "EqualTo", "ComparisonValue": "1"}
+
+    def conditions(*items):
+        return {f"Conditions[{i}].{k}": v for i, it in enumerate(items) for k, v in it.items()}
+
+    # C720 (Pilgrim review B1). A list is compared item by item: OtherMod adds IsUndead (and sets OR on the first
+    # condition); ModA's winning list keeps both and adds its own HasPerk, so nothing of OtherMod's is lost (set aside,
+    # said); where ModA's list drops OtherMod's IsUndead, OtherMod's change is lost and counted.
+    def c720_list_item_kept_is_not_lost():
+        K1, K2 = f"00C720:{BASE}", f"00C721:{BASE}"
+        base_, other_ = conditions(cond("HasKeyword")), conditions(cond("HasKeyword", "OR"), cond("IsUndead"))
+        chains = [(K1, "MagicEffect", [(BASE, base_), (OTHER, other_),
+                                       (MOD_A, conditions(cond("HasKeyword", "OR"), cond("HasPerk", "OR"), cond("IsUndead")))]),
+                  (K2, "MagicEffect", [(BASE, base_), (OTHER, other_),
+                                       (MOD_A, conditions(cond("HasKeyword", "OR"), cond("HasPerk")))])]
+        p_rows = [lost_row(OTHER, MOD_A, fk, "Conditions", "o", "a", "v", before=BASE) for fk in (K1, K2)]
+        plan, md, _ = core_bundle(p_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        got = (rec_of(plan, K1)[0]["admission"], rec_of(plan, K2)[0]["admission"])
+        said = "item by item" in md
+        return got == ("listKept", "admitted") and said, f"K1, K2 {got}; said {said}"
+
+    # C721 (Pilgrim review B1). A counted lost change whose winner changed the field itself too says so, with what each
+    # side has, never only "lost to"; one the winner did not change (it carries the earlier value) is not said so.
+    def c721_winner_also_changed_says_both_values():
+        D1, D2 = f"00C722:{BASE}", f"00C723:{BASE}"
+        chains = [(D1, "MagicEffect", [(BASE, {"Description": "v1"}), (OTHER, {"Description": "o1"}),
+                                       (MOD_A, {"Description": "a1"})]),
+                  (D2, "MagicEffect", [(BASE, {"Description": "v2"}), (OTHER, {"Description": "o2"}),
+                                       (MOD_A, {"Description": "v2"})])]
+        p_rows = [lost_row(OTHER, MOD_A, D1, "Description", "o1", "a1", "v1", before=BASE),
+                  lost_row(OTHER, MOD_A, D2, "Description", "o2", "v2", "v2", before=BASE)]
+        plan, md, _ = core_bundle(p_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if ln.startswith("- **") and "OtherMod.esp's value is lost" in ln), "")
+        ok = (f"In 1 of them {MOD_A} changed the field itself too" in line and '"o1"' in line and '"a1"' in line
+              and '"o2"' not in line)
+        return ok, line[-300:]
+
+    # C722 (Missives review B2). Whose change a value is, against the nearest master that carries the record: ModA lists
+    # Update.esm, which sets the water type; ModA's value is the one from before Update.esm's change, so ModA changed it
+    # (it puts the earlier value back): counted and said so, not set aside as the base game's. ModA's water set to a value
+    # of its own is a change to the base game's value, set aside as before.
+    def c722_putting_back_masters_earlier_value_is_counted():
+        W1, W2 = f"00C724:{BASE}", f"00C725:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        chains = [(W1, "Cell", [(BASE, {"Water": "000018:Skyrim.esm"}), (UPD, {"Water": "001232:Update.esm"}),
+                                (MOD_A, {"Water": "000018:Skyrim.esm"})]),
+                  (W2, "Cell", [(BASE, {"Water": "000018:Skyrim.esm"}), (UPD, {"Water": "001232:Update.esm"}),
+                                (MOD_A, {"Water": "0AAAAA:ModA.esp"})])]
+        p_rows = [lost_row(UPD, MOD_A, W1, "Water", ["Water=001232:Update.esm"], PH, PH),
+                  lost_row(UPD, MOD_A, W2, "Water", ["Water=001232:Update.esm"], PH, PH)]
+        w_rows = list(p_rows)
+        plan, md, _ = core_bundle(p_rows, w_rows, check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE]})
+        got = (rec_of(plan, W1)[0]["admission"], rec_of(plan, W2)[0]["admission"])
+        top = md.split("\n## ", 2)[1] if "\n## " in md else md
+        said = f"{MOD_A} puts back the value from before {UPD}'s change" in md and "Still there" in top and \
+            f"of {UPD}'s changes lost to {MOD_A}" in top
+        return got == ("admitted", "baseGame") and said, f"W1, W2 {got}; said {said}"
+
+    # C723 (Missives review B2, the same rule for a mod's master that is not the base game): ModA lists OtherMod as a
+    # master and puts back the value from before OtherMod's fix: counted, not "a plugin's value over its own master's".
+    def c723_putting_back_mod_masters_earlier_value_is_counted():
+        M1 = f"00C726:{BASE}"
+        chains = [(M1, "PlacedObject", [(BASE, {"Placement": "v"}), (OTHER, {"Placement": "o"}),
+                                        (MOD_A, {"Placement": "v"})])]
+        p_rows = [lost_row(OTHER, MOD_A, M1, "Placement", "o", "v", "v", before=BASE)]
+        plan, md, _ = core_bundle(p_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE, OTHER], MOD_B: [BASE]})
+        got = [e["admission"] for e in rec_of(plan, M1)]
+        said = f"{MOD_A} puts back the value from before {OTHER}'s change" in md
+        return got == ["admitted"] and said, f"{got}; said {said}"
+
+    # C724 (Missives review B2). A one-sided water seam on a cell where the mod puts back the water from before its
+    # master's change is said as that, never as the mod against the base game's value on the other side.
+    def c724_seam_on_put_back_cell_said_so():
+        WB = "environment.water-boundaries"
+        W1 = f"009311:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        chains = [(W1, "Cell", [(BASE, {"Water": "000018:Skyrim.esm"}), (UPD, {"Water": "001232:Update.esm"}),
+                                (MOD_A, {"Water": "000018:Skyrim.esm"})])]
+        p_rows = [lost_row(UPD, MOD_A, W1, "Water", ["Water=001232:Update.esm"], PH, PH)]
+        s_ = row("WATER-SEAM", OTHER, MOD_A, W1, other=f"009312:{BASE}")
+        s_["Summary"] = ("Tamriel (1,1) E Tamriel (2,1): joined under the truth (001232:Update.esm z -14000), apart under "
+                         "the winner (000018:Skyrim.esm z -14000 | 001232:Update.esm z -14000) — attributed to side B")
+        extra = {(WB, "without-patch"): [s_], (WB, "baseline"): [s_]}
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains, extra_results=extra,
+                                  masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if "cell boundar" in ln.lower() and ln.startswith("- Measured")), "")
+        ok = f"puts back the value from before {UPD}'s change" in line and "base game's value on the other side" not in line
+        return ok, line[:300]
+
+    # C725 (Missives review B1). Each row's status is decided before rows with the same lost value are counted once:
+    # the base game's Location (HearthFires) and OtherMod's own Location, both lost to ModA, are not folded into the
+    # base-game row and set aside with it: OtherMod's change is counted, and said still there with the patch.
+    def c725_status_before_counting_once():
+        HF = "HearthFires.esm"
+        L1 = f"00C727:{BASE}"
+        arms = [arm("baseline", [BASE, HF, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF, OTHER, MOD_A, MOD_B])]
+        chains = [(L1, "Cell", [(BASE, {"Location": ""}), (HF, {"Location": "018A59:Skyrim.esm"}),
+                                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": ""})])]
+        p_rows = [lost_row(HF, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        got = {e["A"]: e["admission"] for e in rec_of(plan, L1)}
+        top = md.split("\n## ", 2)[1] if "\n## " in md else md
+        still = next((ln for ln in top.splitlines() if ln.startswith("Still there")), "")
+        ok = got == {HF: "baseGame", OTHER: "admitted"} and f"{OTHER}'s change" in still
+        return ok, f"{got}; {still[:200]!r}"
+
+    # C726 (Clockwork review S6). "Undone by the patch" applies the same set-aside rules and counts a field once: a list
+    # whose items the patch only reorders is no change undone, and a field two record checks both list is one field.
+    def c726_undone_same_set_asides_once():
+        U1, U2 = f"00C728:{BASE}", f"00C729:{BASE}"
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        reg = lost_row(OTHER, PATCH, U1, "Regions", ["Regions: same 2 item(s), ORDER DIFFERS from ModA - ModB patch.esp"],
+                       PH, PH)
+        own_ = lost_row(OTHER, PATCH, U2, "Owner", "o", "p", "v")
+        enr = {(RECORDS, "without-patch"): [lost_row(MOD_B, MOD_A, f"00C72A:{BASE}", "Owner", "b", "a", "v")],
+               (RECORDS, "baseline"): [reg, own_], (CELLATTR, "without-patch"): [], (CELLATTR, "baseline"): [reg, own_]}
+        count_only = {k: max(1, len(v)) for k, v in enr.items()}
+        results = {(CONTACT, a_): [] for a_ in ("baseline", "without-patch")}
+        plan, md, _ = compile_and_render(arms, results, [MOD_A], patches=[PATCH], count_only=count_only, enrichment=enr,
+                                         masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]})
+        v = reader(plan).get("validation") or {}
+        return v.get("undone") == 1 and v.get("undoneBy") == {OTHER: 1}, f"undone {v.get('undone')} {v.get('undoneBy')}"
+
+    for name, fn in [("w2-final/C720-list-item-kept-is-not-lost", c720_list_item_kept_is_not_lost),
+                     ("w2-final/C721-winner-also-changed-says-both-values", c721_winner_also_changed_says_both_values),
+                     ("w2-final/C722-putting-back-masters-earlier-value-is-counted",
+                      c722_putting_back_masters_earlier_value_is_counted),
+                     ("w2-final/C723-putting-back-mod-masters-earlier-value-is-counted",
+                      c723_putting_back_mod_masters_earlier_value_is_counted),
+                     ("w2-final/C724-seam-on-put-back-cell-said-so", c724_seam_on_put_back_cell_said_so),
+                     ("w2-final/C725-status-before-counting-once", c725_status_before_counting_once),
+                     ("w2-final/C726-undone-same-set-asides-once", c726_undone_same_set_asides_once)]:
+        cell(name, fn)
 
     for name, fn in [("w2-core/C676-one-sided-water-seam-is-base-game", c676_one_sided_water_seam_is_base_game),
                      ("w2-core/C660-masters-value-is-no-own-change", c660_masters_value_is_no_own_change),
