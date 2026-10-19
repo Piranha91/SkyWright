@@ -3365,6 +3365,54 @@ def main():
         v = reader(plan).get("validation") or {}
         return v.get("undone") == 1 and v.get("undoneBy") == {OTHER: 1}, f"undone {v.get('undone')} {v.get('undoneBy')}"
 
+    # C727 (coordinator D1, with the P63 ruling). A mod putting back the value from before its OWN master's change undoes
+    # that master's fix: a measured effect said on its own line ("ModA.esp undoes its master Update.esm's fix", the
+    # count, examples, and whether it is still so with the patch), never a clash between mods in the headline or the
+    # still-there line. Putting back the value from before a NON-master's change stays a clash between mods.
+    def c727_undoing_own_masters_fix_is_its_own_line():
+        W1, N1 = f"00C730:{BASE}", f"00C731:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        chains = [(W1, "Cell", [(BASE, {"Water": "000018:Skyrim.esm"}), (UPD, {"Water": "001232:Update.esm"}),
+                                (MOD_A, {"Water": "000018:Skyrim.esm"})]),
+                  (N1, "Cell", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (MOD_A, {"Owner": "v"})])]
+        p_rows = [lost_row(UPD, MOD_A, W1, "Water", ["Water=001232:Update.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, N1, "Owner", "o", "v", "v", before=BASE)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE]})
+        got = (rec_of(plan, W1)[0]["admission"], rec_of(plan, N1)[0]["admission"])
+        pred = reader(plan).get("prediction") or {}
+        top = md.split("\n## ", 2)[1] if "\n## " in md else md
+        line = next((ln for ln in top.splitlines() if f"{MOD_A} undoes its master {UPD}'s fix" in ln), "")
+        ok = (got == ("undoesMaster", "admitted") and "Water" not in pred.get("verdict", "") and "Owner" in pred.get("verdict", "")
+              and "1 record field" in line and "00C730" in line and "still" in line
+              and f"of {UPD}'s changes lost to {MOD_A}" not in top)
+        return ok, f"{got}; {line[:240]!r}"
+
+    # C728 (coordinator D1). A one-sided water seam on a cell where the mod undoes its master's fix is said with that
+    # line's words (the master named, the fix undone), never as counted above.
+    def c728_seam_on_undone_cell_names_the_undone_fix():
+        WB = "environment.water-boundaries"
+        W1 = f"009321:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        chains = [(W1, "Cell", [(BASE, {"Water": "000018:Skyrim.esm"}), (UPD, {"Water": "001232:Update.esm"}),
+                                (MOD_A, {"Water": "000018:Skyrim.esm"})])]
+        p_rows = [lost_row(UPD, MOD_A, W1, "Water", ["Water=001232:Update.esm"], PH, PH)]
+        s_ = row("WATER-SEAM", OTHER, MOD_A, W1, other=f"009322:{BASE}")
+        s_["Summary"] = ("Tamriel (1,1) E Tamriel (2,1): joined under the truth (001232:Update.esm z -14000), apart under "
+                         "the winner (000018:Skyrim.esm z -14000 | 001232:Update.esm z -14000) — attributed to side B")
+        extra = {(WB, "without-patch"): [s_], (WB, "baseline"): [s_]}
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains, extra_results=extra,
+                                  masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if "cell boundar" in ln.lower() and ln.startswith("- Measured")), "")
+        ok = f"{MOD_A} undoes its master {UPD}'s fix" in line and "counted above" not in line
+        return ok, line[:300]
+
+    for name, fn in [("w2-final/C727-undoing-own-masters-fix-is-its-own-line", c727_undoing_own_masters_fix_is_its_own_line),
+                     ("w2-final/C728-seam-on-undone-cell-names-the-undone-fix", c728_seam_on_undone_cell_names_the_undone_fix)]:
+        cell(name, fn)
+
     for name, fn in [("w2-final/C720-list-item-kept-is-not-lost", c720_list_item_kept_is_not_lost),
                      ("w2-final/C721-winner-also-changed-says-both-values", c721_winner_also_changed_says_both_values),
                      ("w2-final/C722-putting-back-masters-earlier-value-is-counted",
