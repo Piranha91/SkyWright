@@ -1109,6 +1109,11 @@ def build_prediction(ctx: dict) -> dict:
                     # on the record and its pair, the first five parts of the key
                     rk = (f.get("checkId"), str(c.get("groupKind") or ""), str(c.get("A")), str(c.get("B")),
                           r.get("formKey"), str(r.get("summary") or ""))
+                    prior = rows_by.get(key, {}).get(rk)
+                    if prior is not None and (prior["row"].get("other") or None) != (r.get("other") or None):
+                        # two rows whose words are the same but whose partner objects differ are two rows (Sewers
+                        # review, P93: a tower base against 13 objects lost one to an identical summary)
+                        rk = rk[:5] + (rk[5] + " [" + ", ".join(map(str, r.get("other") or [])) + "]",)
                     rows_by.setdefault(key, {})[rk] = {"finding": f, "row": r,
                                                        "history": f.get("readerEvidenceReason") == "context-only-kind"}
                     ident = identity(rk[0], rk[1], rk[2], rk[3], r)
@@ -1471,30 +1476,36 @@ def build_prediction(ctx: dict) -> dict:
     for (check_id, arm_id), rs in rows_by.items():
         if arm_id == p_of(check_id):
             p_rows.update(rs)
-    state_rep = {}                             # a world-state clash's identity -> its one counted entry (P72)
+    # A world-state row is one clash however many world states show it: the same object against the same other
+    # object between the same two mods is counted once, its states listed on it (P72); each further state's row is kept
+    # in the record as the same clash. Rows against different objects stay separate clashes (P93).
+    obj_rep = {}
     for rk in sorted(p_rows, key=lambda k: tuple(str(x) for x in k)):
         hit = p_rows[rk]
         adm = admission(rk, hit["history"], hit["row"].get("other"))
         base_kind, in_state = state_split(rk[1])
+        ident_ = ident_of.get(rk, tuple(rk[:5]))
+        other0 = (hit["row"].get("other") or [None])[0]
+        obj_key = (ident_, tuple(hit["row"].get("other") or ()), rk[2].lower(), rk[3].lower())
         if adm == "admitted" and in_state is not None:
-            rep_ = state_rep.get(ident_of.get(rk, tuple(rk[:5])))
+            rep_ = obj_rep.get(obj_key)
             if rep_ is not None:
-                # the same object in the same clash in another world state: counted once, its states listed on it
-                rep_["states"].append(in_state)
-                rep_["stateRows"].append([rk[1], rk[2], rk[3], (hit["row"].get("other") or [None])[0]])
+                if in_state is not None and in_state not in rep_["states"]:
+                    rep_["states"].append(in_state)
+                rep_["rows"].append([rk[1], rk[2], rk[3], other0])
                 record.append({"checkId": rk[0], "kind": rk[1], "A": rk[2], "B": rk[3], "formKey": rk[4],
-                               "summary": rk[5], "admission": "otherState", "findingId": hit["finding"].get("id"),
-                               "sameAs": rep_.get("findingId")})
-                set_aside["otherState"] += 1
+                               "summary": rk[5], "admission": "sameClash", "findingId": hit["finding"].get("id"),
+                               "sameAs": rep_.get("findingId"), **({"other": list(hit["row"]["other"])}
+                                                                   if hit["row"].get("other") is not None else {})})
+                set_aside["sameClash"] += 1
                 continue
         entry = {"checkId": rk[0], "kind": rk[1], "A": rk[2], "B": rk[3], "formKey": rk[4], "summary": rk[5],
                  "admission": adm,
                  "findingId": hit["finding"].get("id")}
         if in_state is not None:
-            entry.update({"itemKind": base_kind, "states": [in_state],
-                          "stateRows": [[rk[1], rk[2], rk[3], (hit["row"].get("other") or [None])[0]]]})
+            entry.update({"itemKind": base_kind, "states": [in_state], "rows": [[rk[1], rk[2], rk[3], other0]]})
             if adm == "admitted":
-                state_rep[ident_of.get(rk, tuple(rk[:5]))] = entry
+                obj_rep[obj_key] = entry
         if rk[0] in sib_only:
             # its finding lives in the sibling's plan, not this one: named, never linked as if it were here
             entry["source"] = "sibling"
@@ -1538,6 +1549,8 @@ def build_prediction(ctx: dict) -> dict:
         g["_subjects"].add(rk[4] if rk[4] is not None else ("row", rk[5]))
         if in_state is not None:
             g.setdefault("_stateEntries", []).append(entry)
+        if rk[0] in sib_only:
+            g["_fromSibling"] = True
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
             # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
             g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
@@ -1585,7 +1598,9 @@ def build_prediction(ctx: dict) -> dict:
         if kind == "LOST-EDIT":
             return words["fieldNoun"][0 if one else 1]
         if check_id in by_object:
-            return "object" if one else "objects"
+            # a row is the object against one host or support: one object can be several (P94), so the unit is the
+            # clash; the objects are counted apart where it matters (the headline)
+            return "clash" if one else "clashes"
         ph_ = phrases.get(kind) or {}
         return (ph_.get("unitSingular") if one else ph_.get("unitPlural")) or ("clash" if one else "clashes")
 
@@ -1659,6 +1674,7 @@ def build_prediction(ctx: dict) -> dict:
             # one object in several world states is one clash, and the item says in how many (P72)
             detail.append(bind(words["itemStates"][0 if g["count"] == 1 else 1],
                                {"states": fmt_n(max(several)), "count": fmt_n(len(several))}))
+
         n_dis = g.pop("_disables", 0)
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
@@ -1668,6 +1684,13 @@ def build_prediction(ctx: dict) -> dict:
         om_ = g.pop("_ownMaster", None)
         if om_:
             detail.append(bind(words["itemOwnMasterGeometry"], {"mod": om_[0], "master": om_[1]}))
+        if g.pop("_fromSibling", False) and sibling_record and words.get("itemFromSibling"):
+            # counted from the separate evaluation without the patch: said where it is counted, with its file (P95)
+            s_b = (sibling or {}).get("bundle")
+            s_file = (s_b.output_emit_path(g["checkId"], anchor, "arm") or s_b.output_emit_path(g["checkId"], anchor, None)
+                      if s_b is not None else None)
+            detail.append(bind(words["itemFromSibling"], {"bundle": sibling_record.get("pathAsGiven") or "",
+                                                          "file": s_file or ""}))
         provenance = g.pop("_provenance", None)
         g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else "")
@@ -1934,7 +1957,8 @@ def build_prediction(ctx: dict) -> dict:
         total = e["count"]
         phrase = (f"{fmt_n(total)} " + bind(nouns[0] if total == 1 else nouns[1], {"title": title_of(e["checkId"])})
                   + " " + bind(words["verdictSharedObjects"], {"count": fmt_n(shared)}) if new else
-                  bind(words["verdictSameObjects"], {"count": fmt_n(shared), "title": title_of(e["checkId"])}))
+                  bind(words["verdictSameObjects"][0 if shared == 1 else 1], {
+                      "count": fmt_n(shared), "title": title_of(e["checkId"])}))
         verdict_counts[i] = {**e, "count": total, "newObjects": new, "sharedObjects": shared, "phrase": phrase}
     unseparated = stated(counts["notSeparable"]) if multi else []
     checks_on_p = sorted({c for (c, a) in measured if a == p_of(c)})
@@ -1955,7 +1979,7 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
-             "ownMaster": set_aside["ownMaster"], "otherState": set_aside["otherState"]}
+             "ownMaster": set_aside["ownMaster"], "sameClash": set_aside["sameClash"]}
     def describe_setup(arm_id):
         """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
         plugs = all_orders.get(arm_id) or []
@@ -2097,11 +2121,15 @@ def build_prediction(ctx: dict) -> dict:
                 label = labels.get(a)
                 # it follows "for" / "of" mid-sentence: lower-cased, with its article
                 label = ("the " + label[:1].lower() + label[1:]) if label else "a tested setup"
+                if part not in ("diff", "reverse") and a == p_arm and check_id in sib_only and words.get("missingFromSibling"):
+                    # its result for this setup is taken from the separate evaluation, said here too (P95)
+                    label += words["missingFromSibling"]
                 return (f"the comparison of {label} with the measured load order" if part in ("diff", "reverse")
                         else label)
             setups = sorted({(a, part) for a, part in arms_ if a}, key=lambda x: (str(x[0]), str(x[1])))
             where = ("" if len({a for a, _ in setups}) >= all_relevant and all(pt not in ("diff", "reverse")
-                                                                                for _, pt in setups) else
+                                                                                for _, pt in setups)
+                     and not (check_id in sib_only and any(a == p_arm for a, _ in setups)) else
                      " (for " + "; ".join(place(a, part) for a, part in setups) + ")")
             subjects.append(title_of(check_id) + where)
         lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(by_check),
@@ -2343,8 +2371,8 @@ def build_prediction(ctx: dict) -> dict:
             other = e.get("other") or []
             # an object in several world states is judged in each: still there in any is left (P72)
             outs = [{"Gone": "resolved", "Holds": "left"}.get(preds.get((k_, a_, b_, fk_, o_)), "cannot-tell")
-                    for k_, a_, b_, fk_, o_ in ([(x[0], x[1], x[2], e["formKey"], x[3]) for x in e["stateRows"]]
-                                                if e.get("stateRows") else
+                    for k_, a_, b_, fk_, o_ in ([(x[0], x[1], x[2], e["formKey"], x[3]) for x in e["rows"]]
+                                                if e.get("rows") else
                                                 [(e["kind"], e["A"], e["B"], e["formKey"], other[0] if other else None)])]
             return "left" if "left" in outs else "cannot-tell" if "cannot-tell" in outs else "resolved"
 
@@ -2425,7 +2453,7 @@ def build_prediction(ctx: dict) -> dict:
                 problems.append(rk)
 
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
-        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "otherState")
+        spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash")
                      and (e["checkId"], patched_arm) in measured and not present(patched_arm, keyof(e))]
         spots = collections.Counter(e["admission"] for e in spot_rows)
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
