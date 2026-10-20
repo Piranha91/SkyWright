@@ -123,7 +123,7 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
         // P2: in the world frame the soups are the candidates' own, so each is prepared once (PreparedMeshCache); the pair
         // frame's re-placed and zero-area-skipped soups are made for this pair and are prepared here, as before.
         if (p is null) return prepared is null ? Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer)
-            : Query(prepared.Get(worldA, timer?.Core), prepared.Get(worldB, timer?.Core), tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer);
+            : QueryViaCache(prepared, worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer);
         if (p.Refusal is { } why)
             return new SurfaceQueryOutcome("unknown", why, "unknown", "unknown", null, 0) { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
         return Query(p.A, p.B, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer) with { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
@@ -151,6 +151,26 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
         {
             return new("unknown", $"mesh query failed: {ex.GetType().Name}: {ex.Message}", "unknown", "unknown", null, 0);
         }
+    }
+
+    /// <summary>The world-frame query through the prepared-mesh cache, in the soup query's order and with its outcomes: A is
+    /// prepared first, and a refusal of A answers without touching B; an exception while preparing either side is this pair's
+    /// "mesh query failed" outcome, exactly as when the soup query prepares, and the cache keeps nothing for that soup.</summary>
+    static SurfaceQueryOutcome QueryViaCache(PreparedMeshCache cache, TriangleSoup worldA, TriangleSoup worldB, double tolerance,
+                                             long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken, PairTimer? timer)
+    {
+        MeshIntersection.PreparedMesh pa, pb;
+        try
+        {
+            pa = cache.Get(worldA, timer?.Core);
+            // A refused: the query answers A's refusal before reading B (B stands in for itself unread, as the soup query never prepares it).
+            pb = pa.Refused ? pa : cache.Get(worldB, timer?.Core);
+        }
+        catch (Exception ex)
+        {
+            return new("unknown", $"mesh query failed: {ex.GetType().Name}: {ex.Message}", "unknown", "unknown", null, 0);
+        }
+        return Query(pa, pb, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer);
     }
 
     /// <summary><see cref="Query(TriangleSoup, TriangleSoup, double, long, TimeSpan, CancellationToken, PairTimer?)"/> on two
@@ -226,6 +246,9 @@ public sealed class PreparedMeshCache(long maxBytes)
         }
         return prepared;
     }
+
+    /// <summary>Whether a prepared mesh for this soup object is held.</summary>
+    public bool Holds(TriangleSoup soup) => _map.ContainsKey(soup);
 
     public bool AnyZeroArea(TriangleSoup soup) => _zero.TryGetValue(soup, out var z) ? z : _zero[soup] = PairFrame.AnyZeroArea(soup);
 }

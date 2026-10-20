@@ -154,5 +154,27 @@ static class AccelSelfTest
         t.Check("P2-2 a prepared-mesh cache, evicting every mesh or reusing each, leaves every placed pair's result unchanged",
                 compared3 == 4 * pairs.Count && mismatched3 == 0 && tiny.Evictions >= 2 * pairs.Count && roomy.Hits > 0 && roomy.Evictions == 0,
                 $"{compared3} compared, {mismatched3} mismatched; tiny hits {tiny.Hits}, evictions {tiny.Evictions}; roomy hits {roomy.Hits}, misses {roomy.Misses}");
+
+        // P2-3: a soup whose preparation throws gives the soup path's own outcome through the cache, on either side and after a
+        // refusing side, and the cache keeps nothing for it (the next pair prepares it again).
+        var thrower = Box(new(50, 50, 50), new(51, 51, 51));
+        var good = Box(new(50.5f, 50.5f, 50.5f), new(52, 52, 52));
+        var refusing = Pairs().Last().A;   // the degenerate-triangle soup
+        var cache4 = new PreparedMeshCache(1L << 30);
+        int compared4 = 0, mismatched4 = 0; var bad4 = new List<string>();
+        MeshIntersection.TestPrepareHook = s => { if (ReferenceEquals(s, thrower)) throw new InvalidOperationException("test: preparation throws"); };
+        try
+        {
+            foreach (var (x, y) in new[] { (thrower, good), (good, thrower), (refusing, thrower), (thrower, good) })
+            {
+                var plain = SurfaceQueryOutcome.QueryPlaced(x, null, y, null, 1e-5, 2_000_000, TimeSpan.FromSeconds(60));
+                var viaCache = SurfaceQueryOutcome.QueryPlaced(x, null, y, null, 1e-5, 2_000_000, TimeSpan.FromSeconds(60), default, null, cache4);
+                compared4++; if (plain != viaCache) { mismatched4++; bad4.Add($"{plain} vs {viaCache}"); }
+            }
+        }
+        finally { MeshIntersection.TestPrepareHook = null; }
+        t.Check("P2-3 a preparation that throws is the pair's own 'mesh query failed' outcome through the cache too, and is not kept",
+                compared4 == 4 && mismatched4 == 0 && !cache4.Holds(thrower) && cache4.Holds(good) && cache4.Misses == 5,
+                $"{compared4} compared, {mismatched4} mismatched, misses {cache4.Misses}, holds thrower {cache4.Holds(thrower)}; {string.Join("; ", bad4)}");
     }
 }
