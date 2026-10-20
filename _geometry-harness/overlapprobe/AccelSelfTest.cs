@@ -108,5 +108,51 @@ static class AccelSelfTest
         MeshIntersection.Query(Box(Vector3.Zero, Vector3.One), Box(new(3, 0, 0), new(4, 1, 1)));
         t.Check("P0-4 BVH nodes built are counted (two 12-triangle meshes: at least 6 nodes)",
                 MeshIntersection.BvhNodesBuilt - before >= 6, $"{MeshIntersection.BvhNodesBuilt - before}");
+
+        // P2-1: a prepared pair decides exactly what the soup pair does at every cap, with each side's validation memo filled
+        // first by a full-budget query (so a hit must charge the units the validation consumed) and with it empty.
+        int compared2 = 0, mismatched2 = 0, memoHits = 0;
+        var bad2 = new List<string>();
+        foreach (var (name, a, b) in Pairs())
+        {
+            var full = MeshIntersection.Query(a, b);
+            var pa = MeshIntersection.PreparedMesh.Create(a); var pb = MeshIntersection.PreparedMesh.Create(b);
+            var warm = MeshIntersection.Query(pa, pb);
+            compared2++; if (warm != full) { mismatched2++; if (bad2.Count < 3) bad2.Add($"{name} full: {full} vs {warm}"); }
+            if (pa.MemoisedValidations > 0) memoHits++;
+            // and one prepared pair queried from the smallest cap up, so a validation the budget cut short comes first
+            var ua = MeshIntersection.PreparedMesh.Create(a); var ub = MeshIntersection.PreparedMesh.Create(b);
+            for (long cap = 1; cap <= full.TrianglePairsTested + 1; cap = cap < 64 ? cap + 1 : cap + Math.Max(1, cap / 8))
+            {
+                var soup = MeshIntersection.Query(a, b, 1e-5, cap);
+                var hit = MeshIntersection.Query(pa, pb, 1e-5, cap);
+                var cold = MeshIntersection.Query(MeshIntersection.PreparedMesh.Create(a), MeshIntersection.PreparedMesh.Create(b), 1e-5, cap);
+                var up = MeshIntersection.Query(ua, ub, 1e-5, cap);
+                compared2 += 3;
+                if (up != soup) { mismatched2++; if (bad2.Count < 3) bad2.Add($"{name} cap {cap} ascending: {soup} vs {up}"); }
+                if (hit != soup) { mismatched2++; if (bad2.Count < 3) bad2.Add($"{name} cap {cap} memo: {soup} vs {hit}"); }
+                if (cold != soup) { mismatched2++; if (bad2.Count < 3) bad2.Add($"{name} cap {cap} cold: {soup} vs {cold}"); }
+            }
+        }
+        t.Check("P2-1 a prepared pair decides exactly what the soup pair does (memo filled first, empty, and filled from the smallest cap up; every pair, caps 1..tested+1)",
+                compared2 > 200 && mismatched2 == 0 && memoHits >= 3, $"{compared2} compared, {mismatched2} mismatched, {memoHits} pairs with a memo; {string.Join("; ", bad2)}");
+
+        // P2-2: the sweep's cache, bounded so small it evicts, gives each placed pair the soup query's result.
+        // One cache so small it evicts every mesh, one large enough to reuse each: both must leave every result unchanged.
+        var tiny = new PreparedMeshCache(1); var roomy = new PreparedMeshCache(1L << 30);
+        int compared3 = 0, mismatched3 = 0;
+        var pairs = Pairs();
+        foreach (var (_, a, b) in pairs.Concat(pairs))
+        {
+            var plain = SurfaceQueryOutcome.QueryPlaced(a, null, b, null, 1e-5, 2_000_000, TimeSpan.FromSeconds(60));
+            foreach (var cache in new[] { tiny, roomy })
+            {
+                var viaCache = SurfaceQueryOutcome.QueryPlaced(a, null, b, null, 1e-5, 2_000_000, TimeSpan.FromSeconds(60), default, null, cache);
+                compared3++; if (plain != viaCache) mismatched3++;
+            }
+        }
+        t.Check("P2-2 a prepared-mesh cache, evicting every mesh or reusing each, leaves every placed pair's result unchanged",
+                compared3 == 4 * pairs.Count && mismatched3 == 0 && tiny.Evictions >= 2 * pairs.Count && roomy.Hits > 0 && roomy.Evictions == 0,
+                $"{compared3} compared, {mismatched3} mismatched; tiny hits {tiny.Hits}, evictions {tiny.Evictions}; roomy hits {roomy.Hits}, misses {roomy.Misses}");
     }
 }

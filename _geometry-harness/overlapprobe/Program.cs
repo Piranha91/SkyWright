@@ -47,6 +47,7 @@ using HousecarlCore.Progress;
 //
 // usage: overlapprobe [--list N] [--surface-tolerance U] [--max-triangle-pairs N] [--pair-seconds S]
 //                     [--emit path] [--base emit.json] [--reverse-of baseline.json] [--dump path] [--json path] [--pair-ledger path]
+//                     [--prepared-cache-mib N]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
 //                     [--motion swept [--motion-delta U]]
@@ -195,6 +196,9 @@ string? jsonPath = null;
 // --pair-ledger FILE: one JSON line per pair the actual-shape sweep measured, in sweep order (both FormKeys, same/cross, the
 // PairFrame path, every result field, and the pair's seconds), plus FILE.slowest.json; for comparing two builds pair by pair.
 string? pairLedgerPath = null;
+// --prepared-cache-mib N: the pair sweep prepares each candidate's world soup once and keeps it, least recently used first out,
+// within about N MiB (default 2,048; 0 prepares every pair's soups afresh, as before). Results do not depend on it.
+long preparedCacheMib = 2048;
 // --reverse-of BASELINE_EMIT (with --base): a reverse run that takes this order's baseline emit's rows, coverage and class
 // instead of sweeping again, and re-measures only the --base rows (ReverseFromBaseline.cs); refused unless the baseline emit
 // is this run's own (configuration, population, state, policy, instance and the stage-independent coverage).
@@ -264,6 +268,7 @@ try
         else if (flag == "--dump") { dumpPath = NeedValue(i, flag); i++; }
         else if (flag == "--json") { jsonPath = NeedValue(i, flag); i++; }
         else if (flag == "--pair-ledger") { pairLedgerPath = NeedValue(i, flag); i++; }
+        else if (flag == "--prepared-cache-mib") { if (!long.TryParse(NeedValue(i, flag), out preparedCacheMib) || preparedCacheMib < 0) throw new ArgumentException("--prepared-cache-mib requires a whole number of MiB, 0 or more"); i++; }
         else if (flag == "--reverse-of") { reverseOfPath = NeedValue(i, flag); i++; }
         else if (flag == "--geometry-manifest") { geometryManifestPath = NeedValue(i, flag); i++; }
         else if (flag == "--historical-pairs") { historicalPairsPath = NeedValue(i, flag); i++; }
@@ -1527,6 +1532,7 @@ void LedgerLine(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b, SurfaceQue
     }));
 }
 long bvhNodesBefore = MeshIntersection.BvhNodesBuilt;
+var preparedCache = preparedCacheMib > 0 ? new PreparedMeshCache(preparedCacheMib * 1024 * 1024) : null;
 double sweepStarted = sw.Elapsed.TotalSeconds;
 var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, maxTrianglePairs,
     TimeSpan.FromSeconds(pairSeconds), responsiblePairs.Count > 0 ? ScopedPair : null,
@@ -1537,7 +1543,7 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
         lastPairProgress = checkedPairs;
         Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
     }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation,
-    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine);
+    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache);
 double sweepSeconds = sw.Elapsed.TotalSeconds - sweepStarted;
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
 ReportTimer("same", sameTimer, null);
@@ -1545,6 +1551,16 @@ ReportTimer("cross", crossTimer, null);
 Console.WriteLine($"   pair-loop stage: {sweepSeconds:0.0}s for {sweep.PairsChecked:N0} pairs; same + cross pair wall "
     + $"{MeshQueryTimer.Seconds(sameTimer.WallTicks + crossTimer.WallTicks):0.0}s; BVH nodes built in the sweep "
     + $"{MeshIntersection.BvhNodesBuilt - bvhNodesBefore:N0} (process {MeshIntersection.BvhNodesBuilt:N0})");
+if (preparedCache is not null)
+{
+    Console.WriteLine($"   prepared meshes: {preparedCache.Misses:N0} prepared, {preparedCache.Hits:N0} reused, {preparedCache.Evictions:N0} evicted; "
+        + $"peak {preparedCache.PeakBytes / 1048576.0:N0} MiB of {preparedCacheMib:N0}");
+    __run.Feature("actual-shape-queries.prepared.misses", preparedCache.Misses, "meshes", FeatureAt.Final)
+         .Feature("actual-shape-queries.prepared.hits", preparedCache.Hits, "meshes", FeatureAt.Final)
+         .Feature("actual-shape-queries.prepared.evictions", preparedCache.Evictions, "meshes", FeatureAt.Final)
+         .Feature("actual-shape-queries.prepared.peak-mib", preparedCache.PeakBytes / 1048576.0, "MiB", FeatureAt.Final);
+}
+preparedCache = null;   // released before provenance: nothing after the sweep reads it
 __run.Feature("actual-shape-queries.stage.seconds", sweepSeconds, "seconds", FeatureAt.Final)
      .Feature("actual-shape-queries.bvh-nodes", MeshIntersection.BvhNodesBuilt - bvhNodesBefore, "nodes", FeatureAt.Final);
 if (ledger is not null)

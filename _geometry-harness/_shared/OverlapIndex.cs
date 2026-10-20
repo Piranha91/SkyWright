@@ -99,19 +99,20 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
     /// <paramref name="worldB"/> are the members' models placed at their poses; a member given without its model keeps the world query.</summary>
     public static SurfaceQueryOutcome QueryPlaced(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
                                                   long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken = default,
-                                                  PairTimer? timer = null)
+                                                  PairTimer? timer = null, PreparedMeshCache? prepared = null)
     {
-        if (timer is null) return QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, null);
+        if (timer is null) return QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, null, prepared);
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
-        try { return QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer); }
+        try { return QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer, prepared); }
         finally { timer.Pairs++; timer.WallTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started; }
     }
 
     static SurfaceQueryOutcome QueryPlacedCore(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
-                                               long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken, PairTimer? timer)
+                                               long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken, PairTimer? timer,
+                                               PreparedMeshCache? prepared)
     {
         long t0 = timer is null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();
-        var p = PairFrame.PreparePlaced(worldA, a?.Member, worldB, b?.Member);
+        var p = PairFrame.PreparePlaced(worldA, a?.Member, worldB, b?.Member, prepared is null ? null : prepared.AnyZeroArea);
         if (timer is not null)
         {
             timer.PairFrameTicks += System.Diagnostics.Stopwatch.GetTimestamp() - t0;
@@ -119,7 +120,10 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
                 : p.Frame is not null ? PairPath.Shifted : PairPath.WorldSkip;
             timer.Paths[(int)timer.LastPath]++;
         }
-        if (p is null) return Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer);
+        // P2: in the world frame the soups are the candidates' own, so each is prepared once (PreparedMeshCache); the pair
+        // frame's re-placed and zero-area-skipped soups are made for this pair and are prepared here, as before.
+        if (p is null) return prepared is null ? Query(worldA, worldB, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer)
+            : Query(prepared.Get(worldA, timer?.Core), prepared.Get(worldB, timer?.Core), tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer);
         if (p.Refusal is { } why)
             return new SurfaceQueryOutcome("unknown", why, "unknown", "unknown", null, 0) { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
         return Query(p.A, p.B, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer) with { Frame = p.Frame, ZeroAreaSkipped = p.ZeroAreaSkipped };
@@ -128,6 +132,31 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
     public static SurfaceQueryOutcome Query(TriangleSoup a, TriangleSoup b, double tolerance, long maxTrianglePairs,
                                             TimeSpan pairTimeout, CancellationToken cancellationToken = default,
                                             PairTimer? timer = null)
+    {
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(pairTimeout);
+            var result = MeshIntersection.Query(a, b, tolerance, maxTrianglePairs, timeout.Token, timer?.Core);
+            if (timer is not null && result.Reason == "cancelled") timer.Timeouts++;
+            return new(Normalize(result.Status), result.Reason, Normalize(result.SurfaceRelation),
+                       Normalize(result.Containment), result.Intersects, result.TrianglePairsTested);
+        }
+        catch (OperationCanceledException)
+        {
+            if (timer is not null) timer.Timeouts++;
+            return new("unknown", "pair time budget exhausted", "unknown", "unknown", null, 0);
+        }
+        catch (Exception ex)
+        {
+            return new("unknown", $"mesh query failed: {ex.GetType().Name}: {ex.Message}", "unknown", "unknown", null, 0);
+        }
+    }
+
+    /// <summary><see cref="Query(TriangleSoup, TriangleSoup, double, long, TimeSpan, CancellationToken, PairTimer?)"/> on two
+    /// prepared meshes: the same result, the same time limit over the phases that read the clock.</summary>
+    public static SurfaceQueryOutcome Query(MeshIntersection.PreparedMesh a, MeshIntersection.PreparedMesh b, double tolerance, long maxTrianglePairs,
+                                            TimeSpan pairTimeout, CancellationToken cancellationToken = default, PairTimer? timer = null)
     {
         try
         {
@@ -162,6 +191,43 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
         }
         return b.ToString();
     }
+}
+
+/// <summary>Candidates' world soups prepared once each for the pair sweep (overlap acceleration P2), least recently used first
+/// out, bounded by estimated bytes; and each soup's zero-area answer, which PairFrame asks of every pair. Keyed by the soup
+/// object: a candidate's world soup is made once and kept for the run. Nothing a time limit cut short is kept: preparation
+/// reads no clock, and a prepared mesh keeps only completed validations. Not thread-safe.</summary>
+public sealed class PreparedMeshCache(long maxBytes)
+{
+    readonly Dictionary<TriangleSoup, LinkedListNode<MeshIntersection.PreparedMesh>> _map = new(ReferenceEqualityComparer.Instance);
+    readonly LinkedList<MeshIntersection.PreparedMesh> _lru = new();
+    readonly Dictionary<TriangleSoup, bool> _zero = new(ReferenceEqualityComparer.Instance);
+    public long Bytes, PeakBytes, Hits, Misses, Evictions;
+    public long MaxBytes => maxBytes;
+
+    public MeshIntersection.PreparedMesh Get(TriangleSoup soup, MeshQueryTimer? timer)
+    {
+        if (_map.TryGetValue(soup, out var node))
+        {
+            Hits++;
+            _lru.Remove(node); _lru.AddFirst(node);
+            return node.Value;
+        }
+        Misses++;
+        var prepared = MeshIntersection.PreparedMesh.Create(soup, timer);
+        _map[soup] = _lru.AddFirst(prepared);
+        Bytes += prepared.EstimatedBytes;
+        PeakBytes = Math.Max(PeakBytes, Bytes);
+        while (Bytes > maxBytes && _lru.Count > 1)
+        {
+            var last = _lru.Last!;
+            _lru.RemoveLast(); _map.Remove(last.Value.Source);
+            Bytes -= last.Value.EstimatedBytes; Evictions++;
+        }
+        return prepared;
+    }
+
+    public bool AnyZeroArea(TriangleSoup soup) => _zero.TryGetValue(soup, out var z) ? z : _zero[soup] = PairFrame.AnyZeroArea(soup);
 }
 
 /// <summary>Which preparation a placed pair took (PairFrame): the world soups unchanged, the world frame with zero-area-in-model
@@ -617,7 +683,8 @@ public sealed class OverlapIndex
         Action<long>? onProgress = null, float tile = 256f, CancellationToken cancellationToken = default,
         bool retainSameResults = false, Func<SurfaceOverlapCandidate, SurfaceOverlapCandidate, bool>? includePair = null,
         PairTimer? sameTimer = null, PairTimer? crossTimer = null,
-        Action<SurfaceOverlapCandidate, SurfaceOverlapCandidate, SurfaceQueryOutcome, PairPath?, double>? onPair = null)
+        Action<SurfaceOverlapCandidate, SurfaceOverlapCandidate, SurfaceQueryOutcome, PairPath?, double>? onPair = null,
+        PreparedMeshCache? prepared = null)
     {
         var timeout = pairTimeout ?? TimeSpan.FromSeconds(120);
         var sweep = new SurfacePairSweep();
@@ -642,7 +709,7 @@ public sealed class OverlapIndex
                     sweep.PairsChecked++;
                     var timer = a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer;
                     long started = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken, timer);
+                    var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken, timer, prepared);
                     double seconds = MeshQueryTimer.Seconds(System.Diagnostics.Stopwatch.GetTimestamp() - started);
                     timer?.Note(seconds, a.Key.ToString(), b.Key.ToString(), query);
                     onPair?.Invoke(a, b, query, timer?.LastPath, seconds);
