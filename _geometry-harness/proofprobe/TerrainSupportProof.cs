@@ -24,7 +24,7 @@ static class TerrainSupportProof
     static FormKey L(int k) => S((uint)(0xA00 + k));
     // bases (model space: centred on x, y; z from 0 up)
     static readonly FormKey BoxC = S(0xB01), RockC = S(0xB02), RockR = S(0xB03), Plank = S(0xB04), Sign = S(0xB05), Crate = S(0xB06),
-                            Small = S(0xB07), Wide = S(0xB08), MarkerP = S(0xB09);
+                            Small = S(0xB07), Wide = S(0xB08), MarkerP = S(0xB09), Big = S(0xB0A), EffectR = S(0xB0B), FoliageR = S(0xB0C);
     static readonly Dictionary<FormKey, (Vector3 Half, float Height, char Src, string Motion)> Shapes = new()
     {
         [BoxC] = (new(16, 16, 0), 32, 'c', "MO_SYS_FIXED"),
@@ -35,7 +35,13 @@ static class TerrainSupportProof
         [Crate] = (new(16, 16, 0), 32, 'c', "MO_SYS_BOX_INERTIA"),
         [Small] = (new(4, 4, 0), 8, 'c', "MO_SYS_FIXED"),
         [Wide] = (new(100, 16, 0), 32, 'c', "MO_SYS_FIXED"),
+        [Big] = (new(1024, 1024, 0), 256, 'c', "MO_SYS_FIXED"),
+        [EffectR] = (new(16, 16, 0), 32, 'r', ""),
+        [FoliageR] = (new(16, 16, 0), 32, 'r', ""),
     };
+    // the drawn render shapes' material classes of the render-only bases (what MeshSurface.ModelSurface reports for a real mesh)
+    static readonly Dictionary<FormKey, string[]> Classes = new() { [RockR] = new[] { "opaque" }, [EffectR] = new[] { "effect" }, [FoliageR] = new[] { "alpha_test" } };
+    static IReadOnlyCollection<string>? ClassesOf(FormKey b) => Classes.TryGetValue(b, out var c) ? c : null;
     static float CX(int k) => k * 4096f + 2048f;
     const float CY = 2048f;
     static readonly Vec3 PlankRot = new(20f * MathF.PI / 180f, 0f, 30f * MathF.PI / 180f);
@@ -71,11 +77,24 @@ static class TerrainSupportProof
         var rest = new DetectorModel.TerrainDiagonal(true, 0f, true, 0f, 0f);
         DetectorModel.TerrainSupportFacts F(DetectorModel.TerrainDiagonal a, DetectorModel.TerrainDiagonal b, bool onRef = false, float refGap = float.PositiveInfinity, string? refusal = null)
             => new(a, b, onRef, refGap, refusal);
-        (TerrainVerdict V, float G, float B, string W) V(DetectorModel.TerrainSupportFacts f) => DetectorModel.TerrainSupport(f, 4f, 8f, 8f);
+        (TerrainVerdict V, float G, float B, string W) V(DetectorModel.TerrainSupportFacts f) => DetectorModel.TerrainSupport(f, 4f, 8f, 8f, 0.25f);
         var fl = rest with { WinningClearance = 64f };
         Check("TS-facts: 64 u over the ground under both diagonals -> Floating 64", V(F(fl, fl)) is { V: TerrainVerdict.Floating } r1 && MathF.Abs(r1.G - 64f) < 0.01f, V(F(fl, fl)).W);
-        var bu = rest with { WinningClearance = -64f, Burial = 64f };
+        var bu = rest with { WinningClearance = -64f, Burial = 64f, Cover = DetectorModel.TerrainCover.Uniform(64f) };
         Check("TS-facts: covered 64 u deeper -> Buried 64", V(F(bu, bu)) is { V: TerrainVerdict.Buried } r2 && MathF.Abs(r2.B - 64f) < 0.01f, V(F(bu, bu)).W);
+        var part = new DetectorModel.TerrainCover(); part.Add(0.1, 64f); part.Add(0.9, 0f);
+        var bp = rest with { WinningClearance = -64f, Burial = 64f, Cover = part };
+        Check("TS-facts: covered 64 u deep over 0.10 of the surface in view, share 0.25 -> not Buried", V(F(bp, bp)).V != TerrainVerdict.Buried, V(F(bp, bp)).W);
+        string Throws(Action a) { try { a(); return "no refusal"; } catch (Exception ex) { return ex.GetType().Name; } }
+        var noProfile = rest with { WinningClearance = -64f, Burial = 64f };
+        Check("TS-facts: a burial over the threshold without its surface profile -> refused, never guessed",
+              Throws(() => V(F(noProfile, noProfile))) == nameof(InvalidOperationException), Throws(() => V(F(noProfile, noProfile))));
+        Check("TS-facts: the burial share is never defaulted (NaN refused)",
+              Throws(() => DetectorModel.TerrainSupport(F(bu, bu), 4f, 8f, 8f, float.NaN)) == nameof(ArgumentOutOfRangeException), "");
+        Check("TS-facts: effect only -> not an object; effect + opaque, alpha test, nothing -> an object",
+              DetectorModel.TerrainEffectOnly(new[] { "effect" }) && DetectorModel.TerrainEffectOnly(new[] { "alpha_blend", "no_depth_write" })
+              && !DetectorModel.TerrainEffectOnly(new[] { "effect", "opaque" }) && !DetectorModel.TerrainEffectOnly(new[] { "alpha_test" })
+              && !DetectorModel.TerrainEffectOnly(Array.Empty<string>()), "");
         var sunk = rest with { WinningClearance = -20f, Burial = 0f };
         Check("TS-facts: below the ground but no deeper than authored -> Resting", V(F(sunk, sunk)).V == TerrainVerdict.Resting, V(F(sunk, sunk)).W);
         Check("TS-facts: the diagonals disagree -> CannotTell", V(F(rest, fl)).V == TerrainVerdict.CannotTell, V(F(rest, fl)).W);
@@ -212,12 +231,12 @@ static class TerrainSupportProof
         {
             // Skyrim.esm: the world, cells 1..24 flat at z 0, the bases; K7's box placed by Bethesda itself.
             var sky = new SkyrimMod(SkyK, Rel);
-            foreach (var (b, e) in new[] { (BoxC, "TsBox"), (RockC, "TsRock"), (RockR, "TsRockRender"), (Plank, "TsPlank"), (Sign, "TsSign"), (Small, "TsSmall"), (Wide, "TsWide") })
+            foreach (var (b, e) in new[] { (BoxC, "TsBox"), (RockC, "TsRock"), (RockR, "TsRockRender"), (Plank, "TsPlank"), (Sign, "TsSign"), (Small, "TsSmall"), (Wide, "TsWide"), (Big, "TsBig"), (EffectR, "TsEffectPlane"), (FoliageR, "TsFoliage") })
                 sky.Statics.Add(new Static(b, Rel) { EditorID = e });
             sky.Statics.Add(new Static(MarkerP, Rel) { EditorID = "TsMarker", MajorRecordFlagsRaw = (int)EnableState.IsMarkerFlag });
             sky.MiscItems.Add(new MiscItem(Crate, Rel) { EditorID = "TsCrate" });
             var k7box = S(0xC07); keys["K7"] = k7box;
-            var cells = Enumerable.Range(1, 24).Select(k => Cell(k, Flat(L(k), 0f), k == 10 ? new[] { Ref(k7box, BoxC, CX(10), CY, 0) } : Array.Empty<PlacedObject>())).ToArray();
+            var cells = Enumerable.Range(1, 28).Select(k => Cell(k, Flat(L(k), 0f), k == 10 ? new[] { Ref(k7box, BoxC, CX(10), CY, 0) } : Array.Empty<PlacedObject>())).ToArray();
             sky.Worldspaces.Add(WorldOf(cells));
             Save(sky);
 
@@ -347,6 +366,24 @@ static class TerrainSupportProof
             int marked = MarkDeletedInPlace(k17dPath, keys["K17"]);
             Check("K17 (fixture): D's override of the box is flagged deleted in place, placement kept", marked == 1, $"{marked} marked");
 
+            // K18 (F0 try 5, PLAN §6): a 2048 x 2048 x 256 body sunk 128 u on A's flat ground; unrelated B raises only the ground
+            // vertices at least one inside its plan edges by 64 u. Nothing in view as authored is covered: the top stays 64 u clear,
+            // the ground at its sides is unchanged. Expected StillResting (no row); the try 4 reading: Buried 64.
+            var k18a = Mod("TsK18A"); keys["K18"] = K(k18a, 1);
+            k18a.Worldspaces.Add(WorldOf(Cell(25, Flat(L(25), 0f), Ref(keys["K18"], Big, CX(25), CY, -128f)))); Save(k18a, SkyK);
+            var k18b = Mod("TsK18B"); k18b.Worldspaces.Add(WorldOf(Cell(25, LandFrom(L(25), (x, y) => x >= 9 && x <= 23 && y >= 9 && y <= 23 ? 64f : 0f)))); Save(k18b, SkyK);
+            // K18-b: the same body resting on A's flat ground; unrelated B raises one ground vertex on its west edge by 64 u: a sliver of
+            // one side, far under a quarter of what is in view, is covered. Expected StillResting; the try 4 reading: Buried 64.
+            var k18ba = Mod("TsK18bA"); keys["K18b"] = K(k18ba, 1);
+            k18ba.Worldspaces.Add(WorldOf(Cell(26, Flat(L(26), 0f), Ref(keys["K18b"], Big, CX(26), CY, 0f)))); Save(k18ba, SkyK);
+            var k18bb = Mod("TsK18bB"); k18bb.Worldspaces.Add(WorldOf(Cell(26, LandFrom(L(26), (x, y) => x == 8 && y == 16 ? 64f : 0f)))); Save(k18bb, SkyK);
+            // K19 (Gate B review H1): a render-only body whose only shape is an effect shader (a smoke or cloud card) rests on A's ground;
+            // unrelated B raises it 64 u. Expected NoBody (not an object standing on the ground). K19-b: the same with an alpha-TEST
+            // shape (a flower's cut-out) is an object: Introduced Blind, Buried 64.
+            var k19a = Mod("TsK19A"); keys["K19"] = K(k19a, 1); keys["K19b"] = K(k19a, 2);
+            k19a.Worldspaces.Add(WorldOf(Cell(27, Flat(L(27), 0f), Ref(keys["K19"], EffectR, CX(27), CY, 0f)),
+                                         Cell(28, Flat(L(28), 0f), Ref(keys["K19b"], FoliageR, CX(28), CY, 0f)))); Save(k19a, SkyK);
+            var k19b = Mod("TsK19B"); k19b.Worldspaces.Add(WorldOf(Cell(27, Flat(L(27), 64f)), Cell(28, Flat(L(28), 64f)))); Save(k19b, SkyK);
             foreach (var o in opened.Values) ((IDisposable)o).Dispose();
             opened.Clear();
 
@@ -361,7 +398,7 @@ static class TerrainSupportProof
     static void Cases(Action<string, bool, string> Check, Read r, Dictionary<string, FormKey> keys, Func<Read, string, int> P, float F, float B,
                       List<string> withoutK16E)
     {
-        var tci = new TerrainContactIndex(r.Cidx, r.Land, r.Closure) { Epsilon = 4f, FloatThreshold = F, BurialThreshold = B };
+        var tci = new TerrainContactIndex(r.Cidx, r.Land, r.Closure) { Epsilon = 4f, FloatThreshold = F, BurialThreshold = B, BurialShare = 0.25f, RenderClasses = ClassesOf };
         string T = $" [F {F:0}, B {B:0}]";
         string D(TerrainRow x) => $"{x.Status} {x.Verdict} gap {x.Gap:0.##} burial {x.Burial:0.##} sight {x.Sight} pop {x.Population} owner {(x.Owner >= 0 && x.Owner < r.Names.Count ? r.Names[x.Owner] : "-")} W {(x.Winner >= 0 && x.Winner < r.Names.Count ? r.Names[x.Winner] : "-")} motion {x.Motion} auth {x.Authored} ({x.AuthoredD0:0.##}/{x.AuthoredD1:0.##}) win ({x.WinningD0:0.##}/{x.WinningD1:0.##}) — {x.Why}";
         bool Near(float a, float b, float tol) => MathF.Abs(a - b) <= tol;
@@ -437,13 +474,25 @@ static class TerrainSupportProof
         var k16 = E("K16"); var k16p = E("K16p");
         Check("K16: disabled at load by its flag -> absent from the population" + T, k16.Status == TerrainStatus.DisabledAtLoad, "expected DisabledAtLoad; got " + D(k16));
         Check("K16: disabled at load through its enable parent -> absent from the population" + T, k16p.Status == TerrainStatus.DisabledAtLoad, "expected DisabledAtLoad; got " + D(k16p));
+        var k18 = E("K18");
+        Check("K18: a body sunk 128 u; B raises the ground only under its hidden part -> no row (nothing in view is covered)" + T,
+              k18.Status == TerrainStatus.StillResting, "expected StillResting; got " + D(k18));
+        var k18b = E("K18b");
+        Check("K18-b: a 2048 u body; B raises one edge vertex 64 u -> no row (a sliver of what is in view is covered)" + T,
+              k18b.Status == TerrainStatus.StillResting, "expected StillResting; got " + D(k18b));
+        var k19 = E("K19");
+        Check("K19: a render body made only of an effect shape -> NoBody, never judged" + T,
+              k19.Status == TerrainStatus.NoBody && k19.Why.Contains("effect"), "expected NoBody; got " + D(k19));
+        var k19b = E("K19b");
+        Check("K19-b: a render body of an alpha-test shape is an object -> Introduced Blind, Buried 64" + T,
+              k19b is { Status: TerrainStatus.Row, Verdict: TerrainVerdict.Buried, Sight: TerrainSight.Blind } && Near(k19b.Burial, 64f, 0.01f), "expected Buried 64 Blind; got " + D(k19b));
         var k17 = E("K17");
         Check("K17: the owner's record is deleted with its placement kept -> unjudgeable, counted" + T,
               k17.Status == TerrainStatus.DeletedWithPlacement, "expected DeletedWithPlacement; got " + D(k17));
 
         // the class emit: exactly the Blind Fixed Floating/Buried rows of the cases above
         var emitted = tci.Judge(keepAll: false).Where(TerrainContactIndex.Emitted).Select(x => x.Key).ToHashSet();
-        var wantEmit = new[] { "K1", "K2", "K4", "K6b", "K8", "K10", "K14", "K15", "K15b" }.Select(k => keys[k]).ToHashSet();
+        var wantEmit = new[] { "K1", "K2", "K4", "K6b", "K8", "K10", "K14", "K15", "K15b", "K19b" }.Select(k => keys[k]).ToHashSet();
         // the rocks of K3/K4 float too once the ground drops (32 u: a row at F 8, not at F 32); they are not case subjects
         var caseKeys = keys.Where(kv => kv.Key != "K3rock").Select(kv => kv.Value).ToHashSet();
         var otherRows = emitted.Where(k => !caseKeys.Contains(k)).ToList();
@@ -454,7 +503,7 @@ static class TerrainSupportProof
         // TS-cost (2026-10-20, the work limit): K3's box needs its rock read; with a limit of 1 triangle pair it is not judged
         if (F == 8f)
         {
-            var tight = new TerrainContactIndex(r.Cidx, r.Land, r.Closure) { Epsilon = 4f, FloatThreshold = F, BurialThreshold = B, WorkLimit = 1 };
+            var tight = new TerrainContactIndex(r.Cidx, r.Land, r.Closure) { Epsilon = 4f, FloatThreshold = F, BurialThreshold = B, BurialShare = 0.25f, RenderClasses = ClassesOf, WorkLimit = 1 };
             var c3 = tight.Explain(keys["K3"]);
             Check("TS-cost: a support reading past the work limit -> UnjudgedCost, counted, never a verdict",
                   c3.Status == TerrainStatus.UnjudgedCost && c3.Why.Contains("work limit"), "expected UnjudgedCost; got " + D(c3));
@@ -466,7 +515,7 @@ static class TerrainSupportProof
         if (F == 8f)
         {
             var arm = ReadOrder(withoutK16E);
-            var tci2 = new TerrainContactIndex(arm.Cidx, arm.Land, arm.Closure) { Epsilon = 4f, FloatThreshold = F, BurialThreshold = B };
+            var tci2 = new TerrainContactIndex(arm.Cidx, arm.Land, arm.Closure) { Epsilon = 4f, FloatThreshold = F, BurialThreshold = B, BurialShare = 0.25f, RenderClasses = ClassesOf };
             var a16 = tci2.Explain(keys["K16"]); var a16p = tci2.Explain(keys["K16p"]);
             Check("K16: in the arm without the disabling plugins both boxes are Floating rows",
                   a16 is { Status: TerrainStatus.Row, Verdict: TerrainVerdict.Floating } && a16p is { Status: TerrainStatus.Row, Verdict: TerrainVerdict.Floating },

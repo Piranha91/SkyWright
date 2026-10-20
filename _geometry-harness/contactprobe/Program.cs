@@ -170,7 +170,7 @@ HashSet<string>? only = null;
 bool bosOn = true;
 long? cacheBudget = null;   // --cache-budget: null = CacheBudget.Auto()
 bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (default on; off = the core reading as before)
-bool terrain = false; float? floatThreshold = null, burialThreshold = null; int terrainSample = 1;   // --terrain (TerrainReview.cs)
+bool terrain = false; float? floatThreshold = null, burialThreshold = null, burialShare = null; int terrainSample = 1;   // --terrain (TerrainReview.cs)
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
@@ -220,6 +220,7 @@ try
         else if (flag == "--absolute") absolute = true;
         else if (flag == "--terrain") terrain = true;
         else if (flag == "--float-threshold") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ft)) throw new ArgumentException("--float-threshold requires a number"); floatThreshold = ft; i++; }
+        else if (flag == "--burial-share") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bs) || bs < 0f || bs > 1f) throw new ArgumentException("--burial-share requires a number from 0 to 1"); burialShare = bs; i++; }
         else if (flag == "--burial-threshold") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bt)) throw new ArgumentException("--burial-threshold requires a number"); burialThreshold = bt; i++; }
         else if (flag == "--terrain-sample") { if (!int.TryParse(NeedValue(i, flag), out terrainSample) || terrainSample < 1) throw new ArgumentException("--terrain-sample requires a positive integer"); i++; }
         else if (flag == "--vanilla-assets") vanillaAssets = true;
@@ -299,8 +300,8 @@ if (contactEvidence && overlapJson is null)
 }
 int selectedModes = (overlapJson is null ? 0 : 1) + (absolute && !terrain ? 1 : 0) + (labelledMover is null ? 0 : 1) + (emptySpaceOut is null ? 0 : 1) + (terrain ? 1 : 0);
 if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute, --labelled-mover, --empty-space and --terrain select different modes; pass only one (--absolute with --terrain is the terrain floor)"); return 2; }
-if (terrain && (floatThreshold is null || burialThreshold is null)) { Console.Error.WriteLine("--terrain requires --float-threshold U and --burial-threshold U: the thresholds are frozen in a run plan, never defaulted"); return 2; }
-if (!terrain && (floatThreshold is not null || burialThreshold is not null || terrainSample != 1)) { Console.Error.WriteLine("--float-threshold, --burial-threshold and --terrain-sample are valid only with --terrain"); return 2; }
+if (terrain && (floatThreshold is null || burialThreshold is null || burialShare is null)) { Console.Error.WriteLine("--terrain requires --float-threshold U, --burial-threshold U and --burial-share S: the thresholds are frozen in a run plan, never defaulted"); return 2; }
+if (!terrain && (floatThreshold is not null || burialThreshold is not null || burialShare is not null || terrainSample != 1)) { Console.Error.WriteLine("--float-threshold, --burial-threshold, --burial-share and --terrain-sample are valid only with --terrain"); return 2; }
 if (terrain && (traceOut is not null || populationPath is not null)) { Console.Error.WriteLine("--terrain takes no --trace or --population: it reads the whole order"); return 2; }
 if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--volume is valid only with --overlap-json INPUT"); return 2; }
 if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--surface is valid only with --overlap-json INPUT"); return 2; }
@@ -534,6 +535,25 @@ RefGeometry? GeomOf(FormKey baseKey)
     }
     return g;
 }
+// The material classes of a base's drawn render shapes, for --terrain's effect-only rule (Gate B review H1): read once per mesh
+// through MeshSurface.ModelSurface (the one classifier, MeshVolume.ShapeMaterials); null when the surface is refused (a live
+// pose, an unreadable shape) or the base has no mesh, and the body is then kept and counted.
+var renderClassMemo = new Dictionary<string, IReadOnlyCollection<string>?>(StringComparer.OrdinalIgnoreCase);
+IReadOnlyCollection<string>? RenderClasses(FormKey baseKey)
+{
+    if (!cidx!.Index.BaseMesh.TryGetValue(baseKey, out var rel)) return null;
+    var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
+    if (renderClassMemo.TryGetValue(full, out var known)) return known;
+    IReadOnlyCollection<string>? classes = null;
+    var bytes = ReadMesh(full);
+    if (bytes is not null)
+    {
+        var surf = MeshSurface.ModelSurface(bytes, VolumeGeometry.Render);
+        if (surf.Status == "measured" && surf.Tags is { } tags)
+            classes = tags.Where(t => t != SurfaceMaterial.NotDrawn).Distinct().ToList();
+    }
+    return renderClassMemo[full] = classes;
+}
 try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 meshReader.Store(boundedGeometry, cidx.Budget);
@@ -624,7 +644,7 @@ if (terrain)
 {
     try
     {
-        return TerrainReview.Run(cidx, landIndex!, closure, PluginName, BaseLabel, eps, floatThreshold!.Value, burialThreshold!.Value, absolute, terrainSample,
+        return TerrainReview.Run(cidx, landIndex!, closure, PluginName, BaseLabel, eps, floatThreshold!.Value, burialThreshold!.Value, burialShare!.Value, RenderClasses, absolute, terrainSample,
                                  emitPath, basePath, jsonPath, Instance, cfg.Identity(TerrainReview.Population, cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw);
     }
     catch (Exception ex) { Console.Error.WriteLine($"contactprobe --terrain refused: {ex.GetType().Name}: {ex.Message}"); return 2; }

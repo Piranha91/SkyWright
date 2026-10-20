@@ -17,10 +17,12 @@ static class TerrainReview
     static readonly float[] AbsoluteColumns = { 4f, 8f, 32f, 96f };
 
     public static int Run(ContactIndex cidx, CellBoundaryIndex land, IReadOnlyList<HashSet<int>> closure, Func<int, string> pluginName,
-                          Func<FormKey, string> baseLabel, float eps, float floatThreshold, float burialThreshold, bool absolute, int sample,
+                          Func<FormKey, string> baseLabel, float eps, float floatThreshold, float burialThreshold, float burialShare,
+                          Func<FormKey, IReadOnlyCollection<string>?>? renderClasses, bool absolute, int sample,
                           string? emitPath, string? basePath, string? jsonPath, string instance, ConfigurationIdentity identity, int listN, Stopwatch sw)
     {
-        var tci = new TerrainContactIndex(cidx, land, closure) { Epsilon = eps, FloatThreshold = floatThreshold, BurialThreshold = burialThreshold };
+        var tci = new TerrainContactIndex(cidx, land, closure) { Epsilon = eps, FloatThreshold = floatThreshold, BurialThreshold = burialThreshold, BurialShare = burialShare, RenderClasses = renderClasses };
+        s_share = burialShare; string note = NoteFor(burialShare);
         tci.Progress = (pass, n) => Console.WriteLine($"   ... {pass}: {n:N0} references, {sw.Elapsed.TotalSeconds:0}s");
         tci.SlowNote = line => Console.WriteLine($"   ... {line} (at {sw.Elapsed.TotalSeconds:0}s)");
         string Name(int p) => pluginName(p);
@@ -50,7 +52,8 @@ static class TerrainReview
         var none = ext.SelectMany(c => c.LandStatements).Where(s => s.Kind != LandHeight.LandKind.Heights).GroupBy(s => (Name(s.Plugin), s.Kind))
                       .Select(g => $"{g.Key.Item1} {g.Key.Kind} {g.Count():N0}").ToList();
         Console.WriteLine($"   LAND statements without heights (no ground / unreadable), by plugin: {(none.Count == 0 ? "none" : string.Join(", ", none))}");
-        Console.WriteLine($"   thresholds: ε {eps:0.#} u (contact shell); float {floatThreshold:0.#} u; burial {burialThreshold:0.#} u (frozen in the run plan)  ({sw.Elapsed.TotalSeconds:0.0}s)");
+        Console.WriteLine($"   thresholds: ε {eps:0.#} u (contact shell); float {floatThreshold:0.#} u; burial {burialThreshold:0.#} u over a share {burialShare:0.##} of the surface in view (frozen in the run plan)  ({sw.Elapsed.TotalSeconds:0.0}s)");
+        Console.WriteLine($"   {note}");
 
         // ---- 2. the absolute floor ----------------------------------------------------------------------------------------------
         if (absolute)
@@ -106,6 +109,14 @@ static class TerrainReview
                           + (share > 1f ? "  — OVER the stated 1 % line: the freeze must say the floor lost its expensive references" : " (at or under the stated 1 % line)"));
         PrintDistribution("Inherited", inh, eps);
         PrintDistribution("Inherited without CC", inh.Except(inhCc).ToList(), eps);
+        PrintDistribution("Inherited Fixed only", inh.Where(r => r.Motion == DependentMotion.Fixed).ToList(), eps);
+        Console.WriteLine($"   burial share sensitivity (Inherited; the registered share is {burialShare:0.##}, {note}):");
+        foreach (var col in Columns)
+            Console.WriteLine($"      buried at ≥{col:0} u by share: " + string.Join("   ", new[] { 0.10f, 0.25f, 0.50f }.Select(sh =>
+            {
+                int bu = inh.Count(r => r.Facts is { } f && DetectorModel.TerrainSupport(f, eps, col, col, sh).Verdict == TerrainVerdict.Buried);
+                return $"S {sh:0.00}: {bu:N0} ({(inh.Count == 0 ? 0f : 100f * bu / inh.Count):0.00}%)";
+            })) + $"   of {inh.Count:N0}");
         Console.WriteLine($"   ({sw.Elapsed.TotalSeconds:0.0}s)");
 
         Console.WriteLine($"\n==== 4. THE CLASS — at float {floatThreshold:0.#} u / burial {burialThreshold:0.#} u ====");
@@ -165,7 +176,7 @@ static class TerrainReview
                         ["OverWorkLimit"] = C(TerrainStatus.UnjudgedCost) },
                     new Dictionary<string, long> { ["NotAPlacedObject"] = C(TerrainStatus.NotObject), ["Marker"] = C(TerrainStatus.Marker), ["NoBody"] = C(TerrainStatus.NoBody),
                         ["DisabledAtLoad"] = C(TerrainStatus.DisabledAtLoad), ["DeletedAtLoad"] = C(TerrainStatus.DeletedAtLoad) },
-                    $"float {floatThreshold:0.#} u, burial {burialThreshold:0.#} u, ε {eps:0.#} u; rows {rowSet.Count:N0}, class {cls.Count:N0}; burial is exact for a uniform shift, a lower bound otherwise"),
+                    $"float {floatThreshold:0.#} u, burial {burialThreshold:0.#} u over share {burialShare:0.##} ({note}), ε {eps:0.#} u; rows {rowSet.Count:N0}, class {cls.Count:N0}; burial reads the surface in view on an area-weighted sampling"),
             };
             ConflictIo.Write(emitPath, new ConflictFile("contactprobe", instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
                                                         Population, EnablePopulation.BaselineStateName, identity));
@@ -195,21 +206,27 @@ static class TerrainReview
                 cells = r.Cells?.Select(c => new { c.GX, c.GY, authored = Name(c.AuthoredPlugin), c.AuthoredKind, winner = Name(c.WinnerPlugin), c.WinnerKind, delta = F(c.MaxDelta), c.Changed, sight = c.Sight.ToString(), population = c.Population.ToString() }),
             });
             File.WriteAllText(jsonPath, JsonSerializer.Serialize(new { probe = "contactprobe", mode = "terrain", population = Population, epsilon = eps, floatThreshold, burialThreshold,
-                                                                        counts = tci.Counts, rows = keep, others = brief }, new JsonSerializerOptions { WriteIndented = false }));
+                                                                        burialShare, burialShareNote = note, counts = tci.Counts, rows = keep, others = brief }, new JsonSerializerOptions { WriteIndented = false }));
             Console.WriteLine($"wrote {jsonPath}");
         }
         Console.WriteLine($"\nLimits: the body is the reference's collision (or render when it has none), posed with the winning record's rotation in both views " +
                           "(a later rotation-only override is not attributed); the engine's terrain triangulation is not in the file, so both diagonals are read and a " +
-                          "disagreement is CannotTell; burial is exact for a uniform shift and a lower bound otherwise; nothing here is verified in game.");
+                          "disagreement is CannotTell; burial reads the surface at or above the authored ground, its share on an area-weighted sampling of the body " +
+                          "(at least 16 u spacing, about 250,000 points a body, 1 u depth bins); a render body made only of effect, alpha-blend or no-depth-write shapes is " +
+                          "no body, and one whose shapes cannot be read is kept and counted; nothing here is verified in game.");
         Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
         return 0;
     }
 
     static float? F(float v) => float.IsFinite(v) ? MathF.Round(v, 2) : null;
+    static float s_share = float.NaN;
+    /// <summary>The registered share's provenance, printed with it and written on the emit (Gate B review H2).</summary>
+    public const string ShareNote = "share 0.25 chosen after inspection of the F0 try 4 rows";
+    static string NoteFor(float share) => MathF.Abs(share - 0.25f) < 1e-6f ? ShareNote : $"share {share:0.##} as passed; not the registered value";
 
     /// <summary>Floating at a threshold: neither diagonal within ε of the ground, no reference holding it, the least gap over it.</summary>
     static bool Floating(DetectorModel.TerrainSupportFacts f, float eps, float col)
-        => DetectorModel.TerrainSupport(f, eps, col, float.PositiveInfinity).Verdict == TerrainVerdict.Floating;
+        => DetectorModel.TerrainSupport(f, eps, col, float.PositiveInfinity, s_share).Verdict == TerrainVerdict.Floating;
 
     static void PrintDistribution(string label, List<TerrainRow> set, float eps)
     {
@@ -220,7 +237,7 @@ static class TerrainReview
             foreach (var r in set)
             {
                 if (r.Facts is not { } f) continue;
-                var v = DetectorModel.TerrainSupport(f, eps, col, col).Verdict;
+                var v = DetectorModel.TerrainSupport(f, eps, col, col, s_share).Verdict;
                 if (v == TerrainVerdict.Floating) fl++; else if (v == TerrainVerdict.Buried) bu++; else if (v == TerrainVerdict.CannotTell) ct++;
             }
             Console.WriteLine($"   {label} at ≥{col:0} u: floating {fl:N0} ({100f * fl / set.Count:0.00}%), buried {bu:N0} ({100f * bu / set.Count:0.00}%), cannot tell {ct:N0} ({100f * ct / set.Count:0.00}%) of {set.Count:N0}");

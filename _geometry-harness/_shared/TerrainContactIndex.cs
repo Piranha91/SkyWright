@@ -12,14 +12,16 @@ namespace HarnessShared;
 // contactprobe already chooses and labels: collision, else render), the footprint cells, and in each cell the authored LAND
 // (the last statement the owner or its masters made) and the winning LAND. Where the two agree within one heightmap unit over
 // the footprint there is no row. Otherwise the body's signed vertical clearance against each view's terrain, under both of the
-// heightmap's possible triangulations, and the burial (the increase in covered depth), feed DetectorModel.TerrainSupport with
+// heightmap's possible triangulations, and the burial (how deep the winning ground covers the surface that was in view, and over
+// what share of it), feed DetectorModel.TerrainSupport with
 // the winning arm's reference supports (collision only; render never supports). Sight and population per changed cell are
 // DetectorModel.TerrainProvenance / TerrainPopulationOf; the worst changed cell names the row.
 //
 // Geometry here, not in core: the clearance between a triangle soup and a heightmap is exact for two piecewise-linear surfaces
 // at the critical points — body vertices, heightmap vertices under a body triangle, and body edges crossing the heightmap's
-// grid lines and the chosen diagonal. Burial reads the same points; where the ground meets the body inside a triangle the
-// kink is not added, so burial is exact for a uniform shift and a lower bound otherwise (stated on the mode's limits line).
+// grid lines and the chosen diagonal. Burial (F0 try 5) reads the surface at or above the authored ground: its depth is the
+// larger of those critical points' reading and an area-weighted sampling of the body's triangles, and its share comes from
+// that sampling (to its spacing and a 1 u depth bin; stated on the mode's limits line).
 
 /// <summary>What became of one exterior reference in the terrain pass.</summary>
 public enum TerrainStatus
@@ -57,6 +59,12 @@ public sealed class TerrainContactIndex
     public float Epsilon { get; init; } = 4f;
     public float FloatThreshold { get; init; } = 8f;
     public float BurialThreshold { get; init; } = 8f;
+    /// <summary>S: the share of the surface in view the winning ground must cover by more than the burial threshold (F0 try 5,
+    /// PLAN §6). Frozen in the run plan; NaN until set, and the rule refuses NaN.</summary>
+    public float BurialShare { get; init; } = float.NaN;
+    /// <summary>The material classes of a base's drawn render shapes (null: not read). A render body made only of effect,
+    /// alpha-blend or no-depth-write shapes is NoBody (Gate B review H1, DetectorModel.TerrainEffectOnly).</summary>
+    public Func<FormKey, IReadOnlyCollection<string>?>? RenderClasses { get; init; }
     /// <summary>How far from the body a reference support is looked for (u).</summary>
     public float Reach { get; init; } = 256f;
     /// <summary>The most triangle pairs (body × support, summed over the supports read) one reference's support reading may cost;
@@ -301,6 +309,13 @@ public sealed class TerrainContactIndex
         var g = _cidx.GeomOf(b);
         if (g is null || !g.CanDepend || g.DepSrc is not ('c' or 'r'))
             return R(TerrainStatus.NoBody, g is null ? "no geometry" : g.DepSrc == 'o' ? "an OBND box only, not a body" : "no body soup", owner);
+        if (g.DepSrc == 'r' && RenderClasses is { } rc)
+        {
+            var classes = rc(b);
+            if (classes is null) Count("render body kept: its shapes' material classes could not be read");
+            else if (DetectorModel.TerrainEffectOnly(classes))
+                return R(TerrainStatus.NoBody, $"a render body made only of {string.Join(" / ", classes.Distinct().OrderBy(c => c))} shapes: not an object standing on the ground", owner);
+        }
         var motion = _cidx.MotionOf(b);
         var pose = Idx.WinningGeometryPose(key) ?? win;
         var bodyModel = g.DepShell ?? g.DepSoup;
@@ -347,8 +362,8 @@ public sealed class TerrainContactIndex
         var r1 = Reading(body, views, 1);
         float coreGap = core is null ? float.NaN : MathF.Min(Reading(core, views, 0).Win.Clearance, Reading(core, views, 1).Win.Clearance);
         bool authGround = views.Any(v => v.A.Ground), winGround = views.Any(v => v.W.Ground);
-        var d0 = new DetectorModel.TerrainDiagonal(authGround, r0.Auth.Clearance, winGround, r0.Win.Clearance, r0.Burial);
-        var d1 = new DetectorModel.TerrainDiagonal(authGround, r1.Auth.Clearance, winGround, r1.Win.Clearance, r1.Burial);
+        var d0 = new DetectorModel.TerrainDiagonal(authGround, r0.Auth.Clearance, winGround, r0.Win.Clearance, r0.Burial, r0.Cover);
+        var d1 = new DetectorModel.TerrainDiagonal(authGround, r1.Auth.Clearance, winGround, r1.Win.Clearance, r1.Burial, r1.Cover);
         var facts0 = new DetectorModel.TerrainSupportFacts(d0, d1, false, float.PositiveInfinity);
         var auth = DetectorModel.TerrainAuthoredRest(facts0, Epsilon);
         TerrainRow Readings(TerrainRow x) => x with
@@ -362,7 +377,7 @@ public sealed class TerrainContactIndex
         var (held, by, refGap, overCost, readN, work) = groundHolds ? (false, (FormKey?)null, float.PositiveInfinity, false, 0, 0L) : ReferenceSupport(key, win.Space, body, bodyBox);
         if (overCost) return B(TerrainStatus.UnjudgedCost, $"not judged: its support reading passed the work limit ({work:N0} > {WorkLimit:N0} triangle pairs after {readN} supports; body {body.TriangleCount:N0} triangles)") with { Cells = readings, Authored = auth };
         var facts = facts0 with { OnReference = held, ReferenceGap = refGap };
-        var (verdict, gap, burial, why) = DetectorModel.TerrainSupport(facts, Epsilon, FloatThreshold, BurialThreshold);
+        var (verdict, gap, burial, why) = DetectorModel.TerrainSupport(facts, Epsilon, FloatThreshold, BurialThreshold, BurialShare);
         float saddle = Saddle(views, r0.Win);
         var physical = Readings(B(TerrainStatus.Row, why)) with { Verdict = verdict, Gap = gap, Burial = burial, Saddle = saddle, Support = by, Facts = facts };
         if (absolute) return physical with { Why = "as shipped: " + why };
@@ -452,12 +467,12 @@ public sealed class TerrainContactIndex
 
     /// <summary>One view's clearance: the least body-minus-ground height over the samples, and where (cell, world x, y).</summary>
     readonly record struct Side(float Clearance, int GX, int GY, float X, float Y);
-    readonly record struct DiagonalReading(Side Auth, Side Win, float Burial);
+    readonly record struct DiagonalReading(Side Auth, Side Win, float Burial, DetectorModel.TerrainCover? Cover);
 
     /// <summary>Both views under one diagonal (0: the 00–11 cut, 1: the 10–01 cut), over every footprint cell.</summary>
     static DiagonalReading Reading(TriangleSoup body, List<(int GX, int GY, View A, View W)> views, int diag)
     {
-        var auth = new Side(float.PositiveInfinity, 0, 0, 0, 0); var win = auth; float burial = 0f;
+        var auth = new Side(float.PositiveInfinity, 0, 0, 0, 0); var win = auth; float burial = 0f; bool rose = false;
         foreach (var (gx, gy, a, w) in views)
         {
             if (!a.Ground && !w.Ground) continue;
@@ -468,10 +483,57 @@ public sealed class TerrainContactIndex
                 float tw = w.Ground ? TerrainClearance.HeightAt(w.Heights!, lx, ly, diag) : float.NegativeInfinity;
                 if (a.Ground && z - ta < auth.Clearance) auth = new Side(z - ta, gx, gy, lx + ox, ly + oy);
                 if (w.Ground && z - tw < win.Clearance) win = new Side(z - tw, gx, gy, lx + ox, ly + oy);
-                burial = MathF.Max(burial, MathF.Max(0f, tw - z) - MathF.Max(0f, ta - z));
+                float nc = InView(z, ta, tw);
+                if (!float.IsNaN(nc)) burial = MathF.Max(burial, nc);   // the surface in view as authored, newly covered (try 5)
+                if (tw > ta && tw > z) rose = true;
             }
         }
-        return new DiagonalReading(auth, win, burial);
+        // the profile of the surface in view: read only where the winning ground rose under the body at a critical point
+        var cover = rose ? CoverOf(body, views, diag) : (Profile: new DetectorModel.TerrainCover(), MaxDepth: 0f);
+        burial = MathF.Max(burial, cover.MaxDepth);
+        return new DiagonalReading(auth, win, burial, cover.Profile);
+    }
+
+    /// <summary>How deep the winning ground covers a point of the body that was in view as authored (at or above the authored
+    /// ground); NaN for a point already below it, which counts nothing (F0 try 5, K18).</summary>
+    static float InView(float z, float ta, float tw) => z >= ta ? tw - z : float.NaN;
+
+    /// <summary>The body's surface at or above the authored ground, sampled by area: each triangle on a barycentric grid whose step
+    /// is at least 16 u and at most 64 per edge, the spacing widened so a body reads at most about 250,000 points; each point
+    /// weighs its triangle's area over its point count. Points over a cell with no ground in either view are left out.</summary>
+    static (DetectorModel.TerrainCover Profile, float MaxDepth) CoverOf(TriangleSoup body, List<(int GX, int GY, View A, View W)> views, int diag)
+    {
+        var cover = new DetectorModel.TerrainCover(); float max = 0f;
+        var v = body.Vertices; var ix = body.Indices;
+        double total = 0;
+        for (int t = 0; t + 2 < ix.Length; t += 3) total += Vector3.Cross(v[ix[t + 1]] - v[ix[t]], v[ix[t + 2]] - v[ix[t]]).Length() * 0.5;
+        float step = MathF.Max(16f, (float)Math.Sqrt(total / 250_000.0));
+        for (int t = 0; t + 2 < ix.Length; t += 3)
+        {
+            var A = v[ix[t]]; var B = v[ix[t + 1]]; var C = v[ix[t + 2]];
+            double area = Vector3.Cross(B - A, C - A).Length() * 0.5; if (area <= 0) continue;
+            float le = MathF.Max((B - A).Length(), MathF.Max((C - B).Length(), (A - C).Length()));
+            int m = Math.Clamp((int)MathF.Ceiling(le / step), 1, 64);
+            double w = area / ((m + 1) * (m + 2) / 2);
+            for (int i = 0; i <= m; i++)
+                for (int j = 0; j <= m - i; j++)
+                {
+                    var P = A + (float)i / m * (B - A) + (float)j / m * (C - A);
+                    int gx = Grid(P.X), gy = Grid(P.Y);
+                    int k = views.FindIndex(q => q.GX == gx && q.GY == gy);
+                    if (k < 0) continue;
+                    var (_, _, a, wv) = views[k];
+                    if (!a.Ground && !wv.Ground) continue;
+                    float lx = P.X - gx * 4096f, ly = P.Y - gy * 4096f;
+                    float ta = a.Ground ? TerrainClearance.HeightAt(a.Heights!, lx, ly, diag) : float.NegativeInfinity;
+                    float tw = wv.Ground ? TerrainClearance.HeightAt(wv.Heights!, lx, ly, diag) : float.NegativeInfinity;
+                    float depth = InView(P.Z, ta, tw);
+                    if (float.IsNaN(depth)) continue;
+                    cover.Add(w, depth);
+                    if (depth > max) max = depth;
+                }
+        }
+        return (cover, max);
     }
 
     static float Saddle(List<(int GX, int GY, View A, View W)> views, Side at)

@@ -1594,9 +1594,41 @@ public static class DetectorModel
          : TerrainPopulation.Mod;
 
     /// <summary>One diagonal's readings for a body over its footprint: whether each view has ground under it, the signed vertical
-    /// clearance (body above ground; negative below it), and the burial (the largest increase in covered depth, winning over
-    /// authored, never negative). <c>WinningClearance</c> is +∞ where the winning view has no ground under the body.</summary>
-    public readonly record struct TerrainDiagonal(bool AuthoredGround, float AuthoredClearance, bool WinningGround, float WinningClearance, float Burial);
+    /// clearance (body above ground; negative below it), and the burial: the largest depth by which the winning ground covers the
+    /// body's surface that was at or above the authored ground (a part already below it counts nothing; F0 try 5, PLAN §6).
+    /// <c>Cover</c> is that surface's profile (area by newly covered depth); a burial over the threshold needs it.
+    /// <c>WinningClearance</c> is +∞ where the winning view has no ground under the body.</summary>
+    public readonly record struct TerrainDiagonal(bool AuthoredGround, float AuthoredClearance, bool WinningGround, float WinningClearance, float Burial,
+                                                  TerrainCover? Cover = null);
+
+    /// <summary>The body's surface at or above the authored ground, by how deep the winning ground covers it: area per 1 u bin of
+    /// depth (the last bin holds everything deeper). <see cref="ShareOver"/> is the share of that surface covered by more than t
+    /// (to the bin's 1 u). Read on an area-weighted sampling of the body's triangles.</summary>
+    public sealed class TerrainCover
+    {
+        public const int Bins = 1024;
+        public double VisibleArea { get; private set; }
+        readonly double[] _hist = new double[Bins + 1];
+        public void Add(double area, float depth)
+        {
+            VisibleArea += area;
+            if (depth > 0f) _hist[Math.Min(Bins, (int)MathF.Floor(depth))] += area;
+        }
+        public float ShareOver(float t)
+        {
+            if (VisibleArea <= 0) return 0f;
+            double a = 0; for (int k = Math.Max(0, (int)MathF.Ceiling(t)); k <= Bins; k++) a += _hist[k];
+            return (float)(a / VisibleArea);
+        }
+        /// <summary>A stated fact for the proof: the whole surface in view covered <paramref name="depth"/> u deep.</summary>
+        public static TerrainCover Uniform(float depth) { var c = new TerrainCover(); c.Add(1.0, depth); return c; }
+    }
+
+    /// <summary>The material classes that make a render shape not an object standing on the ground (Gate B review H1): alpha blend,
+    /// an effect shader, a lighting shader that does not write depth — clouds, smoke, mist and light cards. Alpha TEST is not one:
+    /// it draws opaque cut-outs (leaves, flowers, grass). Classes from <c>MeshVolume.ShapeMaterials</c> via <c>MeshSurface.ModelSurface</c>.</summary>
+    public static bool TerrainEffectOnly(IReadOnlyCollection<string> drawnClasses)
+        => drawnClasses.Count > 0 && drawnClasses.All(c => c is "alpha_blend" or "effect" or "no_depth_write");
 
     /// <summary>A body's facts for §5: both diagonals, whether a reference support holds it in the winning arm (within ε, or
     /// penetrated), the least downward gap to one (+∞ when none below), and a refusal naming an unreadable LAND.</summary>
@@ -1614,12 +1646,18 @@ public static class DetectorModel
     /// <summary>§5's winning verdict per diagonal, then folded: burial over the threshold → Buried; held by a reference → Resting;
     /// within ε of the ground → Resting; least gap over the float threshold → Floating; otherwise Resting. The diagonals
     /// disagreeing → CannotTell. A refusal (an unreadable LAND) → Refused by name.</summary>
-    public static (TerrainVerdict Verdict, float Gap, float Burial, string Why) TerrainSupport(TerrainSupportFacts f, float eps, float floatThreshold, float burialThreshold)
+    public static (TerrainVerdict Verdict, float Gap, float Burial, string Why) TerrainSupport(TerrainSupportFacts f, float eps, float floatThreshold, float burialThreshold,
+                                                                                            float burialShare)
     {
+        if (!(burialShare is >= 0f and <= 1f)) throw new ArgumentOutOfRangeException(nameof(burialShare), "the burial share is frozen in a run plan, never defaulted");
         if (f.Refusal is { } why) return (TerrainVerdict.Refused, float.NaN, float.NaN, why);
         (TerrainVerdict V, float Gap) One(TerrainDiagonal d)
         {
-            if (d.Burial > burialThreshold) return (TerrainVerdict.Buried, float.NaN);
+            if (d.Burial > burialThreshold)
+            {
+                if (d.Cover is null) throw new InvalidOperationException("a burial reading over the threshold without its surface profile");
+                if (d.Cover.ShareOver(burialThreshold) >= burialShare) return (TerrainVerdict.Buried, float.NaN);
+            }
             if (f.OnReference) return (TerrainVerdict.Resting, 0f);
             if (d.WinningGround && d.WinningClearance <= eps) return (TerrainVerdict.Resting, MathF.Max(0f, d.WinningClearance));
             float gap = MathF.Min(d.WinningGround ? d.WinningClearance : float.PositiveInfinity, f.ReferenceGap);
@@ -1628,12 +1666,13 @@ public static class DetectorModel
         var a = One(f.D0); var b = One(f.D1);
         float burial = MathF.Max(f.D0.Burial, f.D1.Burial);
         string G(float g) => float.IsPositiveInfinity(g) ? "no ground" : $"{g:0.#} u";
+        float Share(TerrainDiagonal d) => d.Cover?.ShareOver(burialThreshold) ?? 0f;
         if (a.V != b.V)
             return (TerrainVerdict.CannotTell, MathF.Min(a.Gap, b.Gap), burial,
                     $"the two diagonals disagree: 00-11 reads {a.V}{(a.V == TerrainVerdict.Floating ? " " + G(a.Gap) : "")}, 10-01 reads {b.V}{(b.V == TerrainVerdict.Floating ? " " + G(b.Gap) : "")}");
         return a.V switch
         {
-            TerrainVerdict.Buried => (TerrainVerdict.Buried, float.NaN, burial, $"the winning ground covers {f.D0.Burial:0.#}–{f.D1.Burial:0.#} u more of it than the authored ground did"),
+            TerrainVerdict.Buried => (TerrainVerdict.Buried, float.NaN, burial, $"the winning ground covers what was in view {f.D0.Burial:0.#}–{f.D1.Burial:0.#} u deep, over {Share(f.D0):0.00}–{Share(f.D1):0.00} of it"),
             TerrainVerdict.Floating => (TerrainVerdict.Floating, MathF.Min(a.Gap, b.Gap), burial,
                                         float.IsPositiveInfinity(a.Gap) && float.IsPositiveInfinity(b.Gap) ? "no ground under it and nothing else below within reach"
                                         : $"nothing within {eps:0.#} u holds it; the nearest support is {G(MathF.Min(a.Gap, b.Gap))} below ({G(a.Gap)} / {G(b.Gap)} by diagonal)"),
