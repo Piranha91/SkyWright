@@ -88,7 +88,7 @@ static class TerrainSupportProof
         string Throws(Action a) { try { a(); return "no refusal"; } catch (Exception ex) { return ex.GetType().Name; } }
         var noProfile = rest with { WinningClearance = -64f, Burial = 64f };
         Check("TS-facts: a burial over the threshold without its surface profile -> refused, never guessed",
-              Throws(() => V(F(noProfile, noProfile))) == nameof(InvalidOperationException), Throws(() => V(F(noProfile, noProfile))));
+              Throws(() => V(F(noProfile, noProfile))) == nameof(InvalidOperationException), Throws(() => V(F(noProfile, noProfile))) == nameof(InvalidOperationException) ? "refused" : "not refused");
         Check("TS-facts: the burial share is never defaulted (NaN refused)",
               Throws(() => DetectorModel.TerrainSupport(F(bu, bu), 4f, 8f, 8f, float.NaN)) == nameof(ArgumentOutOfRangeException), "");
         Check("TS-facts: effect only -> not an object; effect + opaque, alpha test, nothing -> an object",
