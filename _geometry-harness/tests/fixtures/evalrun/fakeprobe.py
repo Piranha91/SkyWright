@@ -424,9 +424,11 @@ def parse(argv):
     while i < len(argv):
         t = argv[i]
         if t in ("--order", "--emit", "--base", "--json", "--out", "--instance", "--profile", "--game",
-                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population", "--reverse-of") and i + 1 < len(argv):
+                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population", "--reverse-of", "--pair-cache-write", "--pair-cache-read") and i + 1 < len(argv):
             if t == "--target":
                 a["target"].append(argv[i + 1])
+            elif t == "--pair-cache-read":
+                a.setdefault("pair-cache-read", []).append(argv[i + 1])
             else:
                 a[t[2:]] = argv[i + 1]
             i += 2
@@ -599,6 +601,15 @@ def main(probe: str, argv=None) -> int:
 
     text = json.dumps(doc, indent=1)
     emit.parent.mkdir(parents=True, exist_ok=True)
+    if a.get("pair-cache-write"):
+        # overlapprobe's placed-pair results (P3): the fixture keeps none, but writes the file the next job is told to read
+        import gzip
+        for f in a.get("pair-cache-read", []):
+            if not Path(f).is_file():
+                print(f"fakeprobe {probe}: --pair-cache-read input does not exist: {f}", file=sys.stderr)
+                return 2
+        with gzip.open(a["pair-cache-write"], "wt", encoding="utf-8") as g:
+            g.write(json.dumps({"Format": "fixture"}) + "\n")
 
     if behaviour == "crash-after":
         n = int(entry.get("bytes", max(1, len(text) // 3)))

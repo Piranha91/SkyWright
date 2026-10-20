@@ -114,6 +114,13 @@ def probe_program(harness: Path, probe: str, overrides: dict[str, str]) -> list[
 #: row under the baseline order; the probe refuses by name unless the baseline emit is its own on this configuration.
 RECONCILE_REVERSE = {"overlapprobe": "--reverse-of"}
 
+#: Probes that keep placed-pair results across runs of one build (overlap acceleration P3). Each job writes the results it
+#: measured to <out>/<probe>/<job>.pair-results.jsonl.gz and reads every such file written before it in this launch and in
+#: the earlier launches --reuse-cache names. The probe reads a file only when it was written by the same build under the
+#: same pair time limit, and keys each result by every argument that can change it, so reading one never changes an emit.
+PAIR_RESULTS = {"overlapprobe"}
+PAIR_RESULTS_SUFFIX = ".pair-results.jsonl.gz"
+
 
 def program_key(harness: Path, probe: str, overrides: dict[str, str]) -> str:
     """What the cache must key a program by: the files a build puts in its Release folder, by relative path and hash:
@@ -404,6 +411,8 @@ def main() -> int:
     ap.add_argument("--max-candidates", type=int)
     ap.add_argument("--diff-tolerance", default=None, help="conflictdiff --tolerance (points)")
     ap.add_argument("--no-reverse", action="store_true", help="skip the reverse measurement (created rows then read unmeasured)")
+    ap.add_argument("--no-pair-results", action="store_true",
+                    help="run every probe without the placed-pair results of earlier jobs (PAIR_RESULTS): each measures every pair")
     ap.add_argument("--full-reverse", action="store_true",
                     help="measure every reverse by sweeping the baseline order again, even for a probe that can take the "
                          "baseline emit's rows (RECONCILE_REVERSE)")
@@ -519,6 +528,13 @@ def main() -> int:
         argv = exes[probe] + ["--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
         if reverse_of is not None:
             argv += [RECONCILE_REVERSE[probe], str(reverse_of)]
+        if probe in PAIR_RESULTS and not a.no_pair_results:
+            mine = out / probe / f"{job_id}{PAIR_RESULTS_SUFFIX}"
+            earlier = [f for d in [out] + [Path(c).resolve().parent for c in a.reuse_cache]
+                       for f in sorted((d / probe).glob("*" + PAIR_RESULTS_SUFFIX)) if f.resolve() != mine.resolve()]
+            for f in earlier:
+                argv += ["--pair-cache-read", str(f)]
+            argv += ["--pair-cache-write", str(mine)]
         if probe in pop_probes:
             argv += ["--population", str(pop_file)]
         # An earlier run's emit may already be at this path when --out is reused by hand (evalrun gives every launch
