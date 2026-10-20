@@ -1579,12 +1579,19 @@ public static class DetectorModel
     /// <summary>§4: Unchanged view when R is W or W is in R's closure; Seen when R is in W's closure or a carrier could see W's
     /// LAND; Blind otherwise — the combination nobody saw.</summary>
     public static TerrainSight TerrainProvenance(TerrainSightFacts f)
-        => TerrainSight.Unchanged;   // stub: not built
+    {
+        if (f.Owner == f.Winner || f.WinnerInOwnerClosure) return TerrainSight.Unchanged;
+        if (f.OwnerInWinnerClosure) return TerrainSight.Seen;
+        if (f.CarrierSawWinner) return TerrainSight.Seen;
+        return TerrainSight.Blind;
+    }
 
     /// <summary>§4's populations, decided before sight: both sides Bethesda family → Inherited (the floor); either side the
     /// unofficial patch → Ussep (counted apart); otherwise Mod.</summary>
     public static TerrainPopulation TerrainPopulationOf(bool ownerBethesda, bool winnerBethesda, bool ownerUssep, bool winnerUssep)
-        => TerrainPopulation.Mod;
+        => ownerBethesda && winnerBethesda ? TerrainPopulation.Inherited
+         : ownerUssep || winnerUssep ? TerrainPopulation.Ussep
+         : TerrainPopulation.Mod;
 
     /// <summary>One diagonal's readings for a body over its footprint: whether each view has ground under it, the signed vertical
     /// clearance (body above ground; negative below it), and the burial (the largest increase in covered depth, winning over
@@ -1597,13 +1604,42 @@ public static class DetectorModel
 
     /// <summary>§5's population gate: the body rested on the authored terrain (clearance ≤ ε under both diagonals) — or it did
     /// not (both above ε, or no authored ground) — or the diagonals disagree.</summary>
-    public static TerrainAuthored TerrainAuthoredRest(TerrainSupportFacts f, float eps) => TerrainAuthored.NotResting;
+    public static TerrainAuthored TerrainAuthoredRest(TerrainSupportFacts f, float eps)
+    {
+        static bool Rests(TerrainDiagonal d, float e) => d.AuthoredGround && d.AuthoredClearance <= e;
+        bool r0 = Rests(f.D0, eps), r1 = Rests(f.D1, eps);
+        return r0 && r1 ? TerrainAuthored.Resting : !r0 && !r1 ? TerrainAuthored.NotResting : TerrainAuthored.CannotTell;
+    }
 
     /// <summary>§5's winning verdict per diagonal, then folded: burial over the threshold → Buried; held by a reference → Resting;
     /// within ε of the ground → Resting; least gap over the float threshold → Floating; otherwise Resting. The diagonals
     /// disagreeing → CannotTell. A refusal (an unreadable LAND) → Refused by name.</summary>
     public static (TerrainVerdict Verdict, float Gap, float Burial, string Why) TerrainSupport(TerrainSupportFacts f, float eps, float floatThreshold, float burialThreshold)
-        => (TerrainVerdict.Refused, float.NaN, float.NaN, "not built");
+    {
+        if (f.Refusal is { } why) return (TerrainVerdict.Refused, float.NaN, float.NaN, why);
+        (TerrainVerdict V, float Gap) One(TerrainDiagonal d)
+        {
+            if (d.Burial > burialThreshold) return (TerrainVerdict.Buried, float.NaN);
+            if (f.OnReference) return (TerrainVerdict.Resting, 0f);
+            if (d.WinningGround && d.WinningClearance <= eps) return (TerrainVerdict.Resting, MathF.Max(0f, d.WinningClearance));
+            float gap = MathF.Min(d.WinningGround ? d.WinningClearance : float.PositiveInfinity, f.ReferenceGap);
+            return gap > floatThreshold ? (TerrainVerdict.Floating, gap) : (TerrainVerdict.Resting, gap);
+        }
+        var a = One(f.D0); var b = One(f.D1);
+        float burial = MathF.Max(f.D0.Burial, f.D1.Burial);
+        string G(float g) => float.IsPositiveInfinity(g) ? "no ground" : $"{g:0.#} u";
+        if (a.V != b.V)
+            return (TerrainVerdict.CannotTell, MathF.Min(a.Gap, b.Gap), burial,
+                    $"the two diagonals disagree: 00-11 reads {a.V}{(a.V == TerrainVerdict.Floating ? " " + G(a.Gap) : "")}, 10-01 reads {b.V}{(b.V == TerrainVerdict.Floating ? " " + G(b.Gap) : "")}");
+        return a.V switch
+        {
+            TerrainVerdict.Buried => (TerrainVerdict.Buried, float.NaN, burial, $"the winning ground covers {f.D0.Burial:0.#}–{f.D1.Burial:0.#} u more of it than the authored ground did"),
+            TerrainVerdict.Floating => (TerrainVerdict.Floating, MathF.Min(a.Gap, b.Gap), burial,
+                                        float.IsPositiveInfinity(a.Gap) && float.IsPositiveInfinity(b.Gap) ? "no ground under it and nothing else below within reach"
+                                        : $"nothing within {eps:0.#} u holds it; the nearest support is {G(MathF.Min(a.Gap, b.Gap))} below ({G(a.Gap)} / {G(b.Gap)} by diagonal)"),
+            _ => (TerrainVerdict.Resting, MathF.Min(a.Gap, b.Gap), burial, f.OnReference ? "held by a reference" : "rests on the winning ground"),
+        };
+    }
 }
 
 /// <summary>Who a plugin is, for the truth rule. Bethesda and USSEP are filenames; Generated is the fixed filenames

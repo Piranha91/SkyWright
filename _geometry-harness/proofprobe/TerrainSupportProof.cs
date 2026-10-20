@@ -444,10 +444,12 @@ static class TerrainSupportProof
         // the class emit: exactly the Blind Fixed Floating/Buried rows of the cases above
         var emitted = tci.Judge(keepAll: false).Where(TerrainContactIndex.Emitted).Select(x => x.Key).ToHashSet();
         var wantEmit = new[] { "K1", "K2", "K4", "K6b", "K8", "K10", "K14", "K15", "K15b" }.Select(k => keys[k]).ToHashSet();
-        var rockRows = emitted.Where(k => !keys.Values.Contains(k)).ToList();   // the rocks themselves float once the ground drops
+        // the rocks of K3/K4 float too once the ground drops (32 u: a row at F 8, not at F 32); they are not case subjects
+        var caseKeys = keys.Where(kv => kv.Key != "K3rock").Select(kv => kv.Value).ToHashSet();
+        var otherRows = emitted.Where(k => !caseKeys.Contains(k)).ToList();
         Check("TS-emit: the emit holds every Blind Fixed case row and no other case's" + T,
-              wantEmit.All(emitted.Contains) && emitted.Where(k => keys.Values.Contains(k)).All(wantEmit.Contains),
-              $"emitted {emitted.Count} (case rows {emitted.Count(k => keys.Values.Contains(k))}, other {rockRows.Count}); missing {string.Join(",", keys.Where(kv => wantEmit.Contains(kv.Value) && !emitted.Contains(kv.Value)).Select(kv => kv.Key))}");
+              wantEmit.All(emitted.Contains) && emitted.Where(caseKeys.Contains).All(wantEmit.Contains) && otherRows.Count == (F < 32f ? 2 : 0),
+              $"emitted {emitted.Count} (case rows {emitted.Count(caseKeys.Contains)}, the two rocks' rows {otherRows.Count}, expected {(F < 32f ? 2 : 0)}); missing {string.Join(",", keys.Where(kv => wantEmit.Contains(kv.Value) && !emitted.Contains(kv.Value)).Select(kv => kv.Key))}");
 
         // K16, the other arm: without E and E2 both boxes are judged rows
         if (F == 8f)
