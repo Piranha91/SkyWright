@@ -424,7 +424,7 @@ def parse(argv):
     while i < len(argv):
         t = argv[i]
         if t in ("--order", "--emit", "--base", "--json", "--out", "--instance", "--profile", "--game",
-                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population") and i + 1 < len(argv):
+                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population", "--reverse-of") and i + 1 < len(argv):
             if t == "--target":
                 a["target"].append(argv[i + 1])
             else:
@@ -572,6 +572,15 @@ def main(probe: str, argv=None) -> int:
         if base.exists():
             doc["Predicates"] = predicates_from(base, entry)
             doc["BaseEmit"] = str(base).replace("\\", "/")
+    if a.get("reverse-of"):
+        # overlapprobe's --reverse-of (P1): the baseline emit's rows and coverage, refused unless it is this order's.
+        bdoc = json.loads(Path(a["reverse-of"]).read_text(encoding="utf-8"))
+        theirs = (bdoc.get("Configuration") or {}).get("Fingerprint")
+        if theirs != cfg.get("Fingerprint") or bdoc.get("BaseEmit") is not None:
+            print(f"fakeprobe {probe}: --reverse-of {Path(a['reverse-of']).name} is not this order's baseline emit "
+                  f"(fingerprint {str(theirs)[:12]}, this run {str(cfg.get('Fingerprint'))[:12]})", file=sys.stderr)
+            return 2
+        doc["Conflicts"], doc["Coverage"] = bdoc.get("Conflicts", []), bdoc.get("Coverage", [])
     if behaviour == "wrong-state":
         cfg["State"] = doc["State"]
         cfg["Fingerprint"] = fingerprint(cfg["Plugins"], cfg["Providers"], cfg["Overlays"], cfg["Population"], cfg["State"])
