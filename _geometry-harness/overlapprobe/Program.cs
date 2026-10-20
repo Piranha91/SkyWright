@@ -474,8 +474,11 @@ foreach (var input in new[] { (Flag: "--base", Path: basePath), (Flag: "--switch
 if (pairCacheReads.Count > 0 || pairCacheWrite is not null)
 {
     pairResults = PairResultCache.ForThisBuild(pairSeconds);
+    var readClock = System.Diagnostics.Stopwatch.StartNew();
     foreach (var f in pairCacheReads) pairResults.Read(f);
-    Console.WriteLine($"pair cache: read {pairResults.ReadEntries:N0} result(s) from {pairResults.FilesRead.Count} file(s)"
+    __run.Feature("pair-cache.read.seconds", readClock.Elapsed.TotalSeconds, "seconds", FeatureAt.Final)
+         .Feature("pair-cache.read.entries", pairResults.ReadEntries, "results", FeatureAt.Final);
+    Console.WriteLine($"pair cache: read {pairResults.ReadEntries:N0} result(s) from {pairResults.FilesRead.Count} file(s) in {readClock.Elapsed.TotalSeconds:0.0}s"
         + (pairResults.FilesSkipped.Count == 0 ? "" : $"; not read: {string.Join("; ", pairResults.FilesSkipped)}"));
 }
 
@@ -1312,7 +1315,12 @@ void WritePairCache()
     Console.WriteLine($"pair cache: {pairResults.Hits:N0} served, {pairResults.Misses:N0} measured, {pairResults.NotStored:N0} not kept (time-outs or failures)"
         + (pairCacheWrite is null ? "" : $"; {pairResults.Stored:N0} written -> {pairCacheWrite}"));
     __run.Feature("pair-cache.hits", pairResults.Hits, "pairs", FeatureAt.Final).Feature("pair-cache.misses", pairResults.Misses, "pairs", FeatureAt.Final);
-    if (pairCacheWrite is not null) { pairResults.Write(pairCacheWrite); __run.Artifact(pairCacheWrite); }
+    if (pairCacheWrite is not null)
+    {
+        var writeClock = System.Diagnostics.Stopwatch.StartNew();
+        pairResults.Write(pairCacheWrite); __run.Artifact(pairCacheWrite);
+        Console.WriteLine($"pair cache: written in {writeClock.Elapsed.TotalSeconds:0.0}s");
+    }
 }
 void ReportTimer(string name, PairTimer t, double? stageSeconds)
 {
