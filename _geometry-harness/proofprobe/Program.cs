@@ -26,7 +26,7 @@ using HousecarlCore.Progress;
 // The same goes for the synthetic load order: it is now the thing every other finding will be
 // validated against, so its own precedence and refusal rules had better be nailed down first.
 //
-// usage: proofprobe
+// usage: proofprobe [--only terrain]
 
 // lane M (2026-10-11): the reach-memory child process (MotionProof.ReachMemory.cs), run by R1/R1b under a heap cap
 if (args.Length > 0 && args[0] == "--reach-memory-child") return MotionProof.ReachMemoryChild(args);
@@ -47,6 +47,15 @@ void Check(string name, bool ok, string detail)
     else if (!ok && canary) { canariesRed++; Console.WriteLine($"   FAIL  {name,-56} {detail}   [canary: red as designed]"); }
     else if (ok) { fail++; failures.Add(name); Console.WriteLine($"   FAIL  canary PASSED: {name,-56} {detail}   [a canary must fail]"); }
     else { fail++; failures.Add(name); Console.WriteLine($"   FAIL  {name,-56} {detail}"); }
+}
+// --only terrain (2026-10-20): the terrain-support section alone, for its red runs and sabotage arms; the full suite runs at each gate.
+if (args.Length >= 2 && args[0] == "--only" && args[1] == "terrain")
+{
+    TerrainSupportProof.Run(Check);
+    Console.WriteLine();
+    Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
+    if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
+    return fail == 0 ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -3479,6 +3488,7 @@ MotionProof.RunFollowUps(Check);
 ContactEvidenceProof.Run(Check);
 ContactDifferentialProof.Run(Check);
 EmptySpaceProof.Run(Check);
+TerrainSupportProof.Run(Check);
 DirectionalCoverageProof.Run(Check);
 ShallowCoverageProof.Run(Check);
 CoverageSelectionProof.Run(Check);

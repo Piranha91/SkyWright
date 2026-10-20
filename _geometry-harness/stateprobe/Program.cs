@@ -72,6 +72,7 @@ string dataDir = Path.Combine(GamePath, "Data");
 
 int listN = 25;
 string? jsonPath = null, emitPath = null, mapPath = null, emptySpaceOut = null;
+string? phaseTimersPath = null;   // --phase-timers FILE: per-phase seconds and one line per state (lane O P0); changes no decision
 bool all = false, routeOn = true;
 var stateSpecs = new List<string>(); var cellFilters = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
@@ -100,6 +101,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--population" && i + 1 < args.Length) populationPath = args[++i];
+    else if (args[i] == "--phase-timers" && i + 1 < args.Length) phaseTimersPath = args[++i];
     else if (args[i] == "--population-audit" && i + 2 < args.Length) { populationAuditEmit = args[++i]; populationAuditOut = args[++i]; }
 }
 if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
@@ -118,6 +120,7 @@ if (populationPath is not null)
 if (stateSpecs.Count == 0 && cellFilters.Count == 0 && !all) { Console.Error.WriteLine("nothing to evaluate: give --state, --cell or --all"); return 2; }
 
 var sw = Stopwatch.StartNew();
+var phase = new PhaseClock(phaseTimersPath is not null);
 // WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
 // what-if, or a --order candidate file - and, in the same step, the ASSET VIEW that configuration implies, so a run
 // whose plugins changed no longer reads the profile's meshes and BSAs regardless. The identity it produces is written
@@ -170,6 +173,7 @@ for (int p = 0; p < paths.Count; p++)
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {idx.Placements:N0} placements, {sw.Elapsed.TotalSeconds:0}s");
 }
 Console.WriteLine($"indexed {idx.Placements:N0} placements over {idx.History.Count:N0} refs  ({sw.Elapsed.TotalSeconds:0.0}s); unreadable plugins {unreadable.Count}");
+phase.Mark("configuration+index");
 string PluginName(int p) => p < 0 ? "(none)" : pluginKey[p].FileName.String;
 bool IsVanilla(int p) => p >= 0 && PluginKinds.IsBethesda(PluginName(p));
 bool IsUssep(int p) => p >= 0 && PluginKinds.IsUssep(PluginName(p));
@@ -209,6 +213,7 @@ try
 }
 catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 Console.WriteLine($"states to evaluate: {arms.Count:N0} ({arms.Count(a => a.Flips.Count == 1):N0} single switches, {arms.Count(a => a.Flips.Count > 1):N0} joint)");
+phase.Mark("switches+states");
 
 // ---------------------------------------------------------------------------------------
 // The route oracle — blockprobe's obstacle step over the cells a changed reference stands in.
@@ -401,7 +406,11 @@ else Console.WriteLine("route oracle: off (--route on to measure the route half)
 // Evaluate.
 // ---------------------------------------------------------------------------------------
 sw.Restart();
+phase.Mark("route-oracle");
 var ev = new StateEvaluator(cidx, sx) { Route = oracle };
+var stateTimer = phaseTimersPath is not null ? new StatePhaseTimer() : null;
+ev.Timer = stateTimer;
+var stateLines = new List<string>();
 // The population rule (window 2, task 1), decided once per changed reference and the same in every state.
 var keyRule = new Dictionary<FormKey, string?>();
 bool RefInPopulation(FormKey key) => population!.Seeds.Contains(key) || (idx.History.Of(key) is { } hs && hs.Any(population.PlaceInScope));
@@ -437,10 +446,12 @@ var tally = new StateTally();
 var rows = new List<StateRow>();
 var perState = new List<(StateArm Arm, int Changes, int Rows, int Conditional, double Ms)>();
 int done = 0;
+phase.Mark("evaluator-boxing");
 foreach (var arm in arms)
 {
     var t = new StateTally();
     var r = ev.Evaluate(arm, IsVanilla, IsUssep, t);
+    if (phaseTimersPath is not null) stateLines.Add(PhaseClock.StateLine("state", arm.Name, t.ElapsedMs, t.Changes, r.Count, PhaseClock.Digest(r.Select(x => x.ToString())), PhaseClock.TallyDigest(t)));
     rows.AddRange(r);
     perState.Add((arm, t.Changes, r.Count, r.Count(x => x.Verdict == StateVerdict.StateConditional && !x.SameSet), t.ElapsedMs));
     Merge(tally, t);
@@ -455,6 +466,7 @@ static void Merge(StateTally a, StateTally b)
     a.OutsidePopulation += b.OutsidePopulation;
 }
 double totalS = sw.Elapsed.TotalSeconds;
+phase.Mark("state-loop");
 var cellStates = perState.Sum(p => arms.First(a => a == p.Arm).Changes(sx).Select(c => idx.History.Winning(c.Key)?.Cell ?? FormKey.Null).Distinct().Count());
 Console.WriteLine($"\n==== COST ====");
 Console.WriteLine($"   {arms.Count:N0} states over {tally.Changes:N0} changed references ({tally.Arrivals:N0} arrivals, {tally.Departures:N0} departures) in {totalS:0.0}s — {(arms.Count == 0 ? 0 : 1000 * totalS / arms.Count):0} ms per state; "
@@ -491,7 +503,11 @@ if (emptySpaceOut is not null)
     foreach (var arm in arms)
     {
         if (++esDone % 250 == 0) Console.WriteLine($"   ... empty space: {esDone:N0}/{arms.Count:N0} states, {esRows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
+        long esT0 = Stopwatch.GetTimestamp();
         var judgedHere = es.JudgeArrivals(arm, sx, esScope, out var o1, out var o2);
+        if (phaseTimersPath is not null)
+            stateLines.Add(PhaseClock.StateLine("empty-space", arm.Name, Stopwatch.GetElapsedTime(esT0).TotalMilliseconds, 0, judgedHere.Count,
+                PhaseClock.Digest(judgedHere.Select(x => x.Item1.ToString() + "|" + x.Item2)), ""));
         esOutside += o1; esJudgedDropped += o2;
         foreach (var (r, sk) in judgedHere)
         {
@@ -502,6 +518,7 @@ if (emptySpaceOut is not null)
             esRows.Add(r); esTrigger[r] = map?.TriggerOf(sk).Status ?? "(no map)";
         }
     }
+    phase.Mark("empty-space");
     var esCls = esRows.Where(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace).ToList();
     Console.WriteLine($"\n==== EMPTY SPACE per state - {esPairs:N0} arriving-fixture x mover pairs (absent {esAbsent:N0}, no relation {esNoRelation:N0}, falls {esFalls:N0}; counted, not listed) in {sw.Elapsed.TotalSeconds:0.0}s; touch tests {es.TouchTests:N0} ====");
     foreach (var g in esRows.GroupBy(r => r.Verdict).OrderBy(g => g.Key))
@@ -669,6 +686,51 @@ Console.WriteLine();
 Console.WriteLine("A StateConditional row exists only once its switch is flipped — a quest stage, a scene or a trigger the records name, or one they do not (Unknown");
 Console.WriteLine("triggers are flipped all the same). Records only; contact/route geometry, not the game. STATE-OVERLAP is withheld until strict placed render surfaces are wired. Part D flips one marker by console and reads the sets back.");
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
+if (phaseTimersPath is not null)
+{
+    phase.Mark("listing+emit");
+    phase.Report(__run, stateTimer!, phaseTimersPath, stateLines);
+}
 return 0;
 
 static string Short(string s, int n) => s.Length <= n ? s : s[..(n - 3)] + "...";
+
+/// <summary>stateprobe --phase-timers (lane O P0): wall seconds per top-level phase, the state evaluator's own phase split, and one
+/// JSON line per state (its milliseconds, changes, row count and a digest of its rows and tally) so two arms' states can be
+/// compared offline. Off: no marks are kept. Changes no decision and nothing in --emit, --json or --empty-space.</summary>
+sealed class PhaseClock(bool on)
+{
+    readonly Stopwatch _sw = Stopwatch.StartNew();
+    double _last;
+    readonly List<(string Name, double Seconds)> _marks = new();
+    public void Mark(string name)
+    {
+        if (!on) return;
+        double now = _sw.Elapsed.TotalSeconds; _marks.Add((name, now - _last)); _last = now;
+    }
+    public static string Digest(IEnumerable<string> items)
+    {
+        using var h = System.Security.Cryptography.SHA256.Create();
+        foreach (var it in items) { var b = System.Text.Encoding.UTF8.GetBytes(it + "\n"); h.TransformBlock(b, 0, b.Length, null, 0); }
+        h.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+        return Convert.ToHexString(h.Hash!).ToLowerInvariant();
+    }
+    public static string TallyDigest(StateTally t)
+        => Digest(typeof(StateTally).GetFields().Where(f => f.Name != nameof(StateTally.ElapsedMs)).OrderBy(f => f.Name, StringComparer.Ordinal)
+                  .Select(f => $"{f.Name}={f.GetValue(t)}"));
+    public static string StateLine(string pass, string state, double ms, int changes, int rows, string rowsDigest, string tallyDigest)
+        => JsonSerializer.Serialize(new { pass, state, ms = Math.Round(ms, 3), changes, rows, rowsDigest, tallyDigest });
+    public void Report(Run run, StatePhaseTimer t, string path, List<string> stateLines)
+    {
+        Console.WriteLine("\n==== PHASE TIMERS (--phase-timers) ====");
+        foreach (var (n, s) in _marks) { Console.WriteLine($"   phase {n,-22} {s,9:0.0}s"); run.Feature($"phase.{n}.seconds", s, "seconds", FeatureAt.Final); }
+        var inner = new (string, long)[] { ("setup", t.Setup), ("route", t.Route), ("host-leaving", t.HostLeaving), ("host-arriving", t.HostArriving), ("dependent-arriving", t.DependentArriving), ("other", t.Other) };
+        foreach (var (n, ticks) in inner) { var s = StatePhaseTimer.Seconds(ticks); Console.WriteLine($"   state-loop {n,-19} {s,9:0.0}s"); run.Feature($"state-loop.{n}.seconds", s, "seconds", FeatureAt.Final); }
+        Console.WriteLine($"   route calls {t.RouteCalls:N0}, route memo hits {t.RouteMemoHits:N0}");
+        run.Feature("state-loop.route.calls", t.RouteCalls, "calls", FeatureAt.Final).Feature("state-loop.route.memo-hits", t.RouteMemoHits, "calls", FeatureAt.Final);
+        var dir = Path.GetDirectoryName(Path.GetFullPath(path));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        File.WriteAllLines(path, stateLines);
+        Console.WriteLine($"   wrote {stateLines.Count:N0} per-state lines -> {path}");
+    }
+}
