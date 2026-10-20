@@ -442,6 +442,46 @@
       "manualDecisionAllowed": false
     },
     {
+      "id": "geometry.terrain-support",
+      "family": "geometry",
+      "title": "Placed references left floating or buried after another mod reshaped the terrain under them",
+      "required": true,
+      "applicability": {
+        "trigger": {
+          "anyOf": [
+            {
+              "land": true
+            },
+            {
+              "exterior": true
+            }
+          ]
+        },
+        "note": "A clash needs a LAND edit on one side and an exterior reference on the other; either in the target is enough to have to look."
+      },
+      "prerequisites": [
+        "loadability.masters-and-order"
+      ],
+      "inputs": {
+        "arms": "all",
+        "states": "baseline"
+      },
+      "adapter": {
+        "kind": "unsupported",
+        "exe": null,
+        "args": [],
+        "reverse": false,
+        "output": null
+      },
+      "evidence": {
+        "strength": "calibrated-inference",
+        "claim": "TERRAIN SUPPORT",
+        "limits": "Built (contactprobe --terrain) and measured, not yet admitted. The Bethesda-on-Bethesda burial floor passes the run plan's 2 % line at 32 u only at the registered surface share (0.25), which was chosen after inspecting the floor; at share 0.10 it fails. In game, the stations confirmed that a Fixed static keeps its position and that the ground follows the winning heightmap, and showed real-pair rows buried, but the positive-control stations did not settle a probe item in the arm with the control terrain."
+      },
+      "manualDecisionAllowed": false,
+      "unsupportedReason": "terrain support is built and measured but not admitted: its burial floor passes only at a share chosen after inspecting it, and the in-game positive controls did not confirm."
+    },
+    {
       "id": "geometry.declared-dependencies",
       "family": "geometry",
       "title": "Declared host edges (XESP / XLKR / XAPR) over the movement census",
