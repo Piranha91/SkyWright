@@ -360,7 +360,7 @@ public sealed class TerrainContactIndex
         // the winning arm's reference supports, read only when the ground alone does not hold it
         bool groundHolds = winGround && r0.Win.Clearance <= Epsilon && r1.Win.Clearance <= Epsilon;
         var (held, by, refGap, overCost, readN, work) = groundHolds ? (false, (FormKey?)null, float.PositiveInfinity, false, 0, 0L) : ReferenceSupport(key, win.Space, body, bodyBox);
-        if (overCost) return B(TerrainStatus.UnjudgedCost, $"not judged: its support reading passed the work limit ({work:N0} > {WorkLimit:N0} triangle pairs after {readN} supports; body {body.TriangleCount:N0} triangles)") with { Cells = readings };
+        if (overCost) return B(TerrainStatus.UnjudgedCost, $"not judged: its support reading passed the work limit ({work:N0} > {WorkLimit:N0} triangle pairs after {readN} supports; body {body.TriangleCount:N0} triangles)") with { Cells = readings, Authored = auth };
         var facts = facts0 with { OnReference = held, ReferenceGap = refGap };
         var (verdict, gap, burial, why) = DetectorModel.TerrainSupport(facts, Epsilon, FloatThreshold, BurialThreshold);
         float saddle = Saddle(views, r0.Win);

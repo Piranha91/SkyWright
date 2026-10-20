@@ -88,6 +88,22 @@ static class TerrainReview
         var inh = judged.Where(r => r.Population == TerrainPopulation.Inherited).ToList();
         var inhCc = inh.Where(r => Cc(r.Owner) || Cc(r.Winner)).ToList();
         Console.WriteLine($"   denominator: Inherited references in the population (rested on the authored ground) in a cell whose LAND changed by more than one heightmap unit under them: {inh.Count:N0} (of which a CC plugin on either side {inhCc.Count:N0})");
+        // references the work limit left unjudged (UnjudgedCost): by whether they rested as authored and by population, so a floor
+        // that loses its expensive references (large architecture, cliffs) says so before the freeze reads it
+        TerrainPopulation PopOf(TerrainRow r)
+        {
+            var w = (r.Cells ?? Array.Empty<TerrainCellReading>()).FirstOrDefault(c => c.Changed)?.WinnerPlugin ?? -1;
+            string o = Name(r.Owner), wn = w >= 0 ? Name(w) : "";
+            return DetectorModel.TerrainPopulationOf(PluginKinds.IsBethesda(o), w >= 0 && PluginKinds.IsBethesda(wn), PluginKinds.IsUssep(o), w >= 0 && PluginKinds.IsUssep(wn));
+        }
+        var unj = rows.Where(r => r.Status == TerrainStatus.UnjudgedCost).ToList();
+        foreach (var g in unj.GroupBy(r => (PopOf(r), r.Authored)).OrderBy(g => g.Key.Item1).ThenBy(g => g.Key.Authored))
+            Console.WriteLine($"   unjudged (work limit): {g.Key.Item1,-9} rested as authored: {g.Key.Authored,-10} {g.Count():N0}");
+        if (unj.Count == 0) Console.WriteLine("   unjudged (work limit): none");
+        int inhUnj = unj.Count(r => PopOf(r) == TerrainPopulation.Inherited && r.Authored == TerrainAuthored.Resting);
+        float share = inh.Count + inhUnj == 0 ? 0f : 100f * inhUnj / (inh.Count + inhUnj);
+        Console.WriteLine($"   Inherited denominator without the unjudged {inh.Count:N0}; with them {inh.Count + inhUnj:N0}; unjudged share {share:0.00}%"
+                          + (share > 1f ? "  — OVER the stated 1 % line: the freeze must say the floor lost its expensive references" : " (at or under the stated 1 % line)"));
         PrintDistribution("Inherited", inh, eps);
         PrintDistribution("Inherited without CC", inh.Except(inhCc).ToList(), eps);
         Console.WriteLine($"   ({sw.Elapsed.TotalSeconds:0.0}s)");
