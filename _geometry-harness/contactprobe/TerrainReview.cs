@@ -159,7 +159,14 @@ static class TerrainReview
         {
             var dir = Path.GetDirectoryName(Path.GetFullPath(jsonPath));
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            var keep = rows.Where(r => r.Status is TerrainStatus.Row or TerrainStatus.StillResting or TerrainStatus.Refused or TerrainStatus.AuthoredCannotTell).Select(r => new
+            bool Full(TerrainRow r) => r.Status is TerrainStatus.Row or TerrainStatus.StillResting or TerrainStatus.Refused or TerrainStatus.AuthoredCannotTell or TerrainStatus.NotRestingAsAuthored;
+            // every other status as a short record (key, status, why, footprint cells), so a reader can account for each reference
+            var brief = rows.Where(r => !Full(r)).Select(r => new
+            {
+                key = r.Key.ToString(), status = r.Status.ToString(), owner = r.Owner >= 0 ? Name(r.Owner) : null, why = r.Why,
+                cells = r.Cells?.Select(c => new { c.GX, c.GY, c.Changed, authored = Name(c.AuthoredPlugin), winner = Name(c.WinnerPlugin) }),
+            });
+            var keep = rows.Where(Full).Select(r => new
             {
                 key = r.Key.ToString(), @base = baseLabel(r.Base), status = r.Status.ToString(), verdict = r.Verdict.ToString(), sight = r.Sight.ToString(),
                 population = r.Population.ToString(), motion = r.Motion.ToString(), body = r.BodySrc.ToString(), owner = Name(r.Owner), step = Name(r.StepPlugin),
@@ -170,7 +177,7 @@ static class TerrainReview
                 cells = r.Cells?.Select(c => new { c.GX, c.GY, authored = Name(c.AuthoredPlugin), c.AuthoredKind, winner = Name(c.WinnerPlugin), c.WinnerKind, delta = F(c.MaxDelta), c.Changed, sight = c.Sight.ToString(), population = c.Population.ToString() }),
             });
             File.WriteAllText(jsonPath, JsonSerializer.Serialize(new { probe = "contactprobe", mode = "terrain", population = Population, epsilon = eps, floatThreshold, burialThreshold,
-                                                                        counts = tci.Counts, rows = keep }, new JsonSerializerOptions { WriteIndented = false }));
+                                                                        counts = tci.Counts, rows = keep, others = brief }, new JsonSerializerOptions { WriteIndented = false }));
             Console.WriteLine($"wrote {jsonPath}");
         }
         Console.WriteLine($"\nLimits: the body is the reference's collision (or render when it has none), posed with the winning record's rotation in both views " +
