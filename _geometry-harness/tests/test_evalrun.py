@@ -7694,9 +7694,35 @@ def case_416(tmp):
         order = j["inputs"]["order"]
         base = j["inputs"].get("base")
         parts = [probe, prog, sha(order), sha(base) if base else "-", ""]
+        if j["inputs"].get("baselineEmit"):
+            # a reverse measured from the baseline emit's rows (overlapprobe --reverse-of) keys that emit too, by design
+            parts.append("reverse-of:" + sha(j["inputs"]["baselineEmit"]))
         want.add(hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest())
     check(cache and set(cache) <= want and len(cache) == len([j for j in jobs if j.get("kind") == "probe"]),
           f"{case}: every request key is the pre-P25 formula's ({len(set(cache) & want)} of {len(cache)} match)")
+    # Overlap acceleration P1: overlapprobe's reverse takes the measured baseline emit's rows (--reverse-of); no other probe's does.
+    revs = [j for j in jobs if j.get("kind") == "probe" and j["job"].endswith("-reverse")]
+    base_emit = {j["job"].split("-")[0]: j.get("emit") for j in jobs if j.get("kind") == "probe" and j["job"].endswith("-baseline")}
+    ovl = [j for j in revs if j["job"].startswith("overlapprobe-")]
+    check(ovl and all(j["inputs"].get("baselineEmit") == base_emit.get("overlapprobe")
+                      and "--reverse-of" in _p25_cmd(sweep / "logs" / f"{j['job']}.txt") for j in ovl)
+          and not any(j["inputs"].get("baselineEmit") for j in revs if not j["job"].startswith("overlapprobe-")),
+          f"{case}: overlapprobe's {len(ovl)} reverse job(s) name the baseline emit and pass --reverse-of; the other "
+          f"{len(revs) - len(ovl)} reverse job(s) do not")
+    # Overlap acceleration P3: every overlapprobe job writes its pair results and reads those of the jobs before it.
+    ojobs = [j for j in jobs if j.get("kind") == "probe" and j["job"].startswith("overlapprobe-")]
+    cmds = {j["job"]: _p25_cmd(sweep / "logs" / f"{j['job']}.txt") for j in ojobs}
+    written = []
+    ok_reads = True
+    for j in ojobs:
+        cmd = cmds[j["job"]]
+        ok_reads = ok_reads and f"{j['job']}.pair-results.jsonl.gz" in cmd and all(w in cmd for w in written)
+        written.append(f"{j['job']}.pair-results.jsonl.gz")
+    others = [c for f in sorted((sweep / "logs").glob("*probe-*.txt")) if not f.name.startswith("overlapprobe-")
+              for c in [_p25_cmd(f)]]
+    check(len(ojobs) >= 3 and ok_reads and not any("--pair-cache" in c for c in others),
+          f"{case}: each of overlapprobe's {len(ojobs)} jobs writes its pair results and reads every earlier job's; no other "
+          f"probe's command line names a pair cache")
 
 
 CASES["case-412"] = case_412

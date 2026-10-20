@@ -95,6 +95,8 @@ public sealed record CoverageLine(string Population, long Judged,
 /// builds it, keyed with this emit's own Population and State. Null in an emit written before 4.20, and a reader must treat
 /// that as UNKNOWN rather than "the same": every verdict in this file is true of ONE configuration, and comparing two emits
 /// whose configurations are not both named compares two unnamed things. <see cref="ConfigurationGate"/> is that rule.</param>
+/// <param name="PairLimits">The per-pair work and time limits the probe measured under (overlapprobe, 2026-10-19); null in an emit
+/// of another probe or written before then. overlapprobe --reverse-of carries a baseline's rows only under the same limits.</param>
 public sealed record ConflictFile(string Probe, string Instance, string GeneratedUtc, IReadOnlyList<Conflict> Conflicts,
                                   IReadOnlyList<CoverageLine>? Coverage = null,
                                   IReadOnlyList<Predicate>? Predicates = null,
@@ -102,13 +104,17 @@ public sealed record ConflictFile(string Probe, string Instance, string Generate
                                   string? Population = null,
                                   string? State = null,
                                   ConfigurationIdentity? Configuration = null,
-                                  string? MeasurementPolicy = null)
+                                  string? MeasurementPolicy = null,
+                                  PairLimits? PairLimits = null)
 {
     /// <summary>How this emit's population and state read for a human, and for the diff's refusal message. "unknown"
     /// is a real answer: an emit written before Q27 says nothing about either, and pretending otherwise is the silent
     /// certification the credit rule exists to stop.</summary>
     public string PopulationIdentity => $"{Population ?? "unknown"} / state {State ?? "unknown"}";
 }
+
+/// <summary>The per-pair limits an actual-shape query ran under: the triangle-pair work cap and the seconds per pair.</summary>
+public sealed record PairLimits(long MaxTrianglePairs, double PairSeconds);
 
 public static class ConflictIo
 {

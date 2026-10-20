@@ -36,5 +36,8 @@ static class OverlapSelfTest
 
         // P25: the plan's population (_shared/PopulationScope.cs) on its own fixture.
         PopulationSelfTest.Run(t);
+
+        // Track P: the pair-loop timers and the acceleration's identity cases (AccelSelfTest.cs).
+        AccelSelfTest.Run(t);
     });
 }

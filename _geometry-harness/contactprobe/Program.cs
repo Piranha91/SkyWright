@@ -380,7 +380,8 @@ long meshesMeasured = 0, hostColl = 0, hostRender = 0, depColl = 0, depRender = 
 
 // The default pass keeps no decoded mesh beyond the shared contact cache budget (MeshGeometryReader.cs): ContactIndex keeps a summary
 // per base, and a mesh evicted from the budget is decoded again from the same bytes. The run's mesh counters, the wind labels and
-// --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, as before.
+// --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, and their
+// mesh store decodes each mesh once and keeps it, so bases sharing a mesh share one copy, as before.
 bool boundedGeometry = selectedModes == 0;
 // One archive reader per archive for the default pass (housecarl-core ArchiveReadScope.cs): each archive's table is read once in the
 // pass, not on every mesh read; disposed when the program ends (try/finally through using). The other modes read as before.
@@ -519,7 +520,7 @@ RefGeometry? GeomOf(FormKey baseKey)
 }
 try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
-meshReader.Attach(cidx.Budget);
+meshReader.Store(boundedGeometry, cidx.Budget);
 var idx = cidx.Index;
 // --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
 // game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one

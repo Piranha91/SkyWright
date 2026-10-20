@@ -3,7 +3,7 @@ using HarnessShared;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 
-/// <summary>The default pass's decoded meshes, bounded: the decoded geometry is held in the shared contact cache budget (least
+/// <summary>Decoded meshes. In the default pass bounded: the decoded geometry is held in the shared contact cache budget (least
 /// recently used) and decoded again from the mesh's bytes when it was evicted. The first decode of each mesh is the only one
 /// the decoder is told is first (it does the run's bookkeeping then), and it records the bytes' length and SHA-256; a later
 /// decode of different bytes refuses (<see cref="MeshChangedOnDiskException"/>) rather than mix two versions of a mesh.</summary>
@@ -16,6 +16,7 @@ sealed class MeshGeometryReader
     readonly Dictionary<string, First> _first = new(StringComparer.OrdinalIgnoreCase);
     readonly Dictionary<string, int> _ids = new(StringComparer.OrdinalIgnoreCase);
     PlacementCache<RefGeometry>? _cache;
+    Dictionary<string, RefGeometry?>? _all;   // the memoising modes' store: every mesh decoded once and kept for the run
 
     /// <summary>Decodes run (first decodes plus re-decodes) and re-decodes of an evicted mesh.</summary>
     public long Decodes { get; private set; }
@@ -29,9 +30,25 @@ sealed class MeshGeometryReader
     /// <summary>Hold decoded meshes in <paramref name="budget"/> as the "meshGeoms" cache. Required before <see cref="Get"/>.</summary>
     public void Attach(CacheBudget budget) => _cache = new PlacementCache<RefGeometry>(budget, "meshGeoms", GeometryBytes);
 
+    /// <summary>Choose the store for a run: <paramref name="bounded"/> (the default pass) holds decoded meshes in the shared budget;
+    /// otherwise (the modes whose index memoises every base) each mesh is decoded once and kept, so bases sharing it share one object.</summary>
+    public void Store(bool bounded, CacheBudget budget)
+    {
+        if (bounded) Attach(budget);
+        else _all = new Dictionary<string, RefGeometry?>(StringComparer.OrdinalIgnoreCase);
+    }
+
     public RefGeometry? Get(string path)
     {
-        var cache = _cache ?? throw new InvalidOperationException("MeshGeometryReader.Attach must be called before Get");
+        if (_all is not null)
+        {
+            if (_all.TryGetValue(path, out var kept)) return kept;
+            var b = _read(path);
+            RefGeometry? g1 = null;
+            if (b is not null) { Decodes++; g1 = _decode(path, b, true); }
+            return _all[path] = g1;
+        }
+        var cache = _cache ?? throw new InvalidOperationException("MeshGeometryReader.Store must be called before Get");
         if (!_ids.TryGetValue(path, out int id)) _ids[path] = id = _ids.Count;
         var key = (FormKey.Null, id, FormKey.Null);
         if (_first.TryGetValue(path, out var f))

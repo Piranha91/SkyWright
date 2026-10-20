@@ -109,13 +109,36 @@ def probe_program(harness: Path, probe: str, overrides: dict[str, str]) -> list[
     return [str(probe_exe(harness, probe))]
 
 
+#: Probes whose reverse run can take the measured baseline emit's rows instead of sweeping the baseline order again
+#: (overlap acceleration P1): probe -> the flag that names the baseline emit. The reverse still re-measures every --base
+#: row under the baseline order; the probe refuses by name unless the baseline emit is its own on this configuration.
+RECONCILE_REVERSE = {"overlapprobe": "--reverse-of"}
+
+#: Probes that keep placed-pair results across runs of one build (overlap acceleration P3). Each job writes the results it
+#: measured to <out>/<probe>/<job>.pair-results.jsonl.gz and reads every such file written before it in this launch and in
+#: the earlier launches --reuse-cache names. The probe reads a file only when it was written by the same build under the
+#: same pair time limit, and keys each result by every argument that can change it, so reading one never changes an emit.
+PAIR_RESULTS = {"overlapprobe"}
+PAIR_RESULTS_SUFFIX = ".pair-results.jsonl.gz"
+
+
 def program_key(harness: Path, probe: str, overrides: dict[str, str]) -> str:
-    """What the cache must key a program by: the binary's hash, or the override's own text when a
-    fixture stood a program in (a fake probe's identity is the command line, not a Release build)."""
+    """What the cache must key a program by: the files a build puts in its Release folder, by relative path and hash:
+    every top-level file (the exe apphost, the dlls, the runtime json, data files the project copies to output) and the
+    runtimes/ tree; debug symbols are left out. Other subfolders are not build output (viewprobe writes shots/ there at
+    run time), so a run never changes its own key. The exe alone is the same launcher for every build of a project, so a
+    deploy that replaces only the dlls must still change the key. A fixture that stood a program in is keyed by the
+    override's own text (its identity is the command line)."""
     override = overrides.get(probe)
     if override:
         return "probe-cmd:" + hashlib.sha256(override.encode("utf-8")).hexdigest()
-    return sha256_file(probe_exe(harness, probe))
+    folder = probe_exe(harness, probe).parent
+    h = hashlib.sha256()
+    built = [q for q in folder.iterdir() if q.is_file()] + [q for q in (folder / "runtimes").rglob("*") if q.is_file()]
+    for p in sorted((q for q in built if q.suffix.lower() != ".pdb"),
+                    key=lambda q: q.relative_to(folder).as_posix().lower()):
+        h.update(f"{p.relative_to(folder).as_posix().lower()}\0{sha256_file(p)}\n".encode("utf-8"))
+    return "folder:" + h.hexdigest()
 
 
 def load_json(p: Path):
@@ -388,6 +411,11 @@ def main() -> int:
     ap.add_argument("--max-candidates", type=int)
     ap.add_argument("--diff-tolerance", default=None, help="conflictdiff --tolerance (points)")
     ap.add_argument("--no-reverse", action="store_true", help="skip the reverse measurement (created rows then read unmeasured)")
+    ap.add_argument("--no-pair-results", action="store_true",
+                    help="run every probe without the placed-pair results of earlier jobs (PAIR_RESULTS): each measures every pair")
+    ap.add_argument("--full-reverse", action="store_true",
+                    help="measure every reverse by sweeping the baseline order again, even for a probe that can take the "
+                         "baseline emit's rows (RECONCILE_REVERSE)")
     ap.add_argument("--deadline-seconds", type=float,
                     help="the caller's remaining deadline: each probe is then finished only when its whole process "
                          "tree is empty, and a probe is cached only after that (evalrun passes it under a budget)")
@@ -465,11 +493,14 @@ def main() -> int:
     diff_exe = probe_program(harness, "conflictdiff", overrides)
     logs = out / "logs"
 
-    def key_for(probe: str, order_file: Path, base_emit: Path | None) -> str:
+    def key_for(probe: str, order_file: Path, base_emit: Path | None, reverse_of: Path | None = None) -> str:
         parts = [probe, exe_sha[probe], sha256_file(order_file), sha256_file(base_emit) if base_emit else "-", " ".join(common + extra)]
         if probe in pop_probes:
             # Only a scoped probe's key gains a term, so a sweep without --population keys exactly as before.
             parts.append("population:" + pop_sha)
+        if reverse_of is not None:
+            # A reverse measured from the baseline emit's rows is its own request: never served a full reverse's emit.
+            parts.append("reverse-of:" + sha256_file(reverse_of))
         return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
     # Under a caller's deadline the Runner's tree semantics apply: a probe whose launched process exits while
@@ -478,20 +509,32 @@ def main() -> int:
     deadline = None if a.deadline_seconds is None else time.perf_counter() + max(0.0, a.deadline_seconds)
     runner = Runner("ordersweep", out_dir=logs, retries=0, deadline=deadline)
 
-    def run_probe(job_id: str, probe: str, order_file: Path, base_emit: Path | None, emit: Path) -> tuple[int, bool, bool, Path, bool]:
+    def run_probe(job_id: str, probe: str, order_file: Path, base_emit: Path | None, emit: Path,
+                  reverse_of: Path | None = None) -> tuple[int, bool, bool, Path, bool]:
         """Run (or reuse) one probe arm. Returns (exit, refused, illegal, emit path, measured).
 
         `measured` is True only for an emit this launch wrote or a cache entry it verified. A zero exit over a file
         this launch did not write is not a measurement: nothing downstream (reverse, diff, classification) is built
         on it, and it is never cached."""
-        k = key_for(probe, order_file, base_emit)
+        k = key_for(probe, order_file, base_emit, reverse_of)
         hit = cache.lookup(k, job_id)
         inputs = {"order": order_file, "base": base_emit}
+        if reverse_of is not None:
+            inputs["baselineEmit"] = reverse_of
         if hit:
             reused, src = hit
             record_job(job_id, "probe", "reused", 0, reused, written=False, reused_from=src, inputs=inputs)
             return 0, False, False, reused, True
         argv = exes[probe] + ["--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
+        if reverse_of is not None:
+            argv += [RECONCILE_REVERSE[probe], str(reverse_of)]
+        if probe in PAIR_RESULTS and not a.no_pair_results:
+            mine = out / probe / f"{job_id}{PAIR_RESULTS_SUFFIX}"
+            earlier = [f for d in [out] + [Path(c).resolve().parent for c in a.reuse_cache]
+                       for f in sorted((d / probe).glob("*" + PAIR_RESULTS_SUFFIX)) if f.resolve() != mine.resolve()]
+            for f in earlier:
+                argv += ["--pair-cache-read", str(f)]
+            argv += ["--pair-cache-write", str(mine)]
         if probe in pop_probes:
             argv += ["--population", str(pop_file)]
         # An earlier run's emit may already be at this path when --out is reused by hand (evalrun gives every launch
@@ -554,7 +597,8 @@ def main() -> int:
                     reverse = None
                     if not a.no_reverse:
                         rev_emit = out / p / f"{cand.stem}.reverse.json"
-                        rcode, _, _, rgot, rmeasured = run_probe(f"{p}-{cand.stem}-reverse", p, baseline, got, rev_emit)
+                        rof = base_emit if p in RECONCILE_REVERSE and not a.full_reverse else None
+                        rcode, _, _, rgot, rmeasured = run_probe(f"{p}-{cand.stem}-reverse", p, baseline, got, rev_emit, rof)
                         reverse = rgot if rmeasured else None
                         row["reverseExit"] = rcode
                         row["reverseEmit"] = str(rgot)

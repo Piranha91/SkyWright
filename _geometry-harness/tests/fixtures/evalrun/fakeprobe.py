@@ -424,9 +424,11 @@ def parse(argv):
     while i < len(argv):
         t = argv[i]
         if t in ("--order", "--emit", "--base", "--json", "--out", "--instance", "--profile", "--game",
-                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population") and i + 1 < len(argv):
+                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population", "--reverse-of", "--pair-cache-write", "--pair-cache-read") and i + 1 < len(argv):
             if t == "--target":
                 a["target"].append(argv[i + 1])
+            elif t == "--pair-cache-read":
+                a.setdefault("pair-cache-read", []).append(argv[i + 1])
             else:
                 a[t[2:]] = argv[i + 1]
             i += 2
@@ -572,6 +574,15 @@ def main(probe: str, argv=None) -> int:
         if base.exists():
             doc["Predicates"] = predicates_from(base, entry)
             doc["BaseEmit"] = str(base).replace("\\", "/")
+    if a.get("reverse-of"):
+        # overlapprobe's --reverse-of (P1): the baseline emit's rows and coverage, refused unless it is this order's.
+        bdoc = json.loads(Path(a["reverse-of"]).read_text(encoding="utf-8"))
+        theirs = (bdoc.get("Configuration") or {}).get("Fingerprint")
+        if theirs != cfg.get("Fingerprint") or bdoc.get("BaseEmit") is not None or bdoc.get("PairLimits") != {"MaxTrianglePairs": 2000000, "PairSeconds": 120.0}:
+            print(f"fakeprobe {probe}: --reverse-of {Path(a['reverse-of']).name} is not this order's baseline emit "
+                  f"(fingerprint {str(theirs)[:12]}, this run {str(cfg.get('Fingerprint'))[:12]})", file=sys.stderr)
+            return 2
+        doc["Conflicts"], doc["Coverage"] = bdoc.get("Conflicts", []), bdoc.get("Coverage", [])
     if behaviour == "wrong-state":
         cfg["State"] = doc["State"]
         cfg["Fingerprint"] = fingerprint(cfg["Plugins"], cfg["Providers"], cfg["Overlays"], cfg["Population"], cfg["State"])
@@ -582,11 +593,23 @@ def main(probe: str, argv=None) -> int:
     if policy is not None:
         doc["MeasurementPolicy"] = policy
     doc["PopulationIdentity"] = f"{doc['Population']} / state {doc['State']}"
+    if probe == "overlapprobe":
+        # the real overlapprobe records its pair limits (2026-10-19); --reverse-of refuses a baseline under other limits
+        doc["PairLimits"] = {"MaxTrianglePairs": 2000000, "PairSeconds": 120.0}
     # an entry's `emitFields` overwrite top-level emit fields as written (e.g. a mistyped field conflictdiff cannot read)
     doc.update(entry.get("emitFields") or {})
 
     text = json.dumps(doc, indent=1)
     emit.parent.mkdir(parents=True, exist_ok=True)
+    if a.get("pair-cache-write"):
+        # overlapprobe's placed-pair results (P3): the fixture keeps none, but writes the file the next job is told to read
+        import gzip
+        for f in a.get("pair-cache-read", []):
+            if not Path(f).is_file():
+                print(f"fakeprobe {probe}: --pair-cache-read input does not exist: {f}", file=sys.stderr)
+                return 2
+        with gzip.open(a["pair-cache-write"], "wt", encoding="utf-8") as g:
+            g.write(json.dumps({"Format": "fixture"}) + "\n")
 
     if behaviour == "crash-after":
         n = int(entry.get("bytes", max(1, len(text) // 3)))
