@@ -711,8 +711,7 @@ sealed class PhaseClock(bool on)
     public static string Digest(IEnumerable<string> items)
     {
         using var h = System.Security.Cryptography.SHA256.Create();
-        foreach (var it in items) { var b = System.Text.Encoding.UTF8.GetBytes(it + "
-"); h.TransformBlock(b, 0, b.Length, null, 0); }
+        foreach (var it in items) { var b = System.Text.Encoding.UTF8.GetBytes(it + "\n"); h.TransformBlock(b, 0, b.Length, null, 0); }
         h.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
         return Convert.ToHexString(h.Hash!).ToLowerInvariant();
     }
@@ -723,8 +722,7 @@ sealed class PhaseClock(bool on)
         => JsonSerializer.Serialize(new { pass, state, ms = Math.Round(ms, 3), changes, rows, rowsDigest, tallyDigest });
     public void Report(Run run, StatePhaseTimer t, string path, List<string> stateLines)
     {
-        Console.WriteLine("
-==== PHASE TIMERS (--phase-timers) ====");
+        Console.WriteLine("\n==== PHASE TIMERS (--phase-timers) ====");
         foreach (var (n, s) in _marks) { Console.WriteLine($"   phase {n,-22} {s,9:0.0}s"); run.Feature($"phase.{n}.seconds", s, "seconds", FeatureAt.Final); }
         var inner = new (string, long)[] { ("setup", t.Setup), ("route", t.Route), ("host-leaving", t.HostLeaving), ("host-arriving", t.HostArriving), ("dependent-arriving", t.DependentArriving), ("other", t.Other) };
         foreach (var (n, ticks) in inner) { var s = StatePhaseTimer.Seconds(ticks); Console.WriteLine($"   state-loop {n,-19} {s,9:0.0}s"); run.Feature($"state-loop.{n}.seconds", s, "seconds", FeatureAt.Final); }
