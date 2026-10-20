@@ -60,6 +60,15 @@ public sealed class StateTally
     public int OutsidePopulation;
 }
 
+/// <summary>Opt-in phase timers for <see cref="StateEvaluator.Evaluate"/> (stateprobe --phase-timers): ticks of
+/// <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/> per phase, summed over every state. Null on the evaluator: no clock reads.</summary>
+public sealed class StatePhaseTimer
+{
+    public long Setup, Route, HostLeaving, HostArriving, DependentArriving, Other;
+    public long RouteCalls, RouteMemoHits;
+    public static double Seconds(long ticks) => ticks / (double)System.Diagnostics.Stopwatch.Frequency;
+}
+
 /// <summary>The probe's route measurement for one reference IN ONE STATE — the route-cut verdict of its obstacle (its
 /// actor-solid collision, or its navcut box) against its cell's winning navmesh — or null when it cannot be measured,
 /// with why. The arm is a parameter (Q27, 2026-09-06) because the floor the band stands on and the band's own top
@@ -85,6 +94,8 @@ public sealed class StateEvaluator
     /// computed from its own changed reference and the whole-order index, so the rows of a processed one are the whole-order
     /// run's. Null: every changed reference.</summary>
     public Func<FormKey, bool>? KeyInScope { get; set; }
+    /// <summary>Opt-in phase timers (null: none, and no clock reads beyond the existing per-state stopwatch).</summary>
+    public StatePhaseTimer? Timer { get; set; }
 
     [Flags] enum Role { None = 0, Obstructing = 1, Dependent = 2, Physical = 4, Host = 8, Navcut = 16 }
     readonly BoxHash<FormKey> _boxes = new();
@@ -159,6 +170,9 @@ public sealed class StateEvaluator
     public List<StateRow> Evaluate(StateArm arm, Func<int, bool> isVanilla, Func<int, bool> isUssep, StateTally tally)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        var tm = Timer;
+        long t0 = tm is null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();
+        long Lap(ref long bucket) { long now = System.Diagnostics.Stopwatch.GetTimestamp(); bucket += now - t0; t0 = now; return now; }
         var rows = new List<StateRow>();
         var sx = Switches;
         var facts = arm.Wrap(sx.WinnerFacts, sx.Baseline);
@@ -182,6 +196,7 @@ public sealed class StateEvaluator
             return r;
         }
 
+        if (tm is not null) Lap(ref tm.Setup);
         foreach (var (key, before, after, root, member) in changes)
         {
             if (KeyInScope is not null && !KeyInScope(key)) { tally.OutsidePopulation++; continue; }
@@ -221,13 +236,15 @@ public sealed class StateEvaluator
                 }
             }
 
+            if (tm is not null) Lap(ref tm.Other);
             // ---- ROUTE ----
             if (Route is not null && ((f.Role & Role.Navcut) != 0 || (f.Role & Role.Physical) != 0))
             {
                 bool navcut = (f.Role & Role.Navcut) != 0;
                 // Memoised per (state, reference): the same reference measured in two different states can differ, because
                 // each state has its own floor and band (Q27). Before then the memo was keyed on the reference alone.
-                if (!_routeMemo.TryGetValue((arm.Name, key), out var rm)) { var v0 = Route(arm, key, navcut, out var w0); _routeMemo[(arm.Name, key)] = rm = (v0, w0); }
+                if (!_routeMemo.TryGetValue((arm.Name, key), out var rm)) { var v0 = Route(arm, key, navcut, out var w0); _routeMemo[(arm.Name, key)] = rm = (v0, w0); if (tm is not null) tm.RouteCalls++; }
+                else if (tm is not null) tm.RouteMemoHits++;
                 tally.RouteAsked++;
                 if (rm.V is null || rm.V == RouteCutVerdict.Unjudgeable) tally.RouteUnjudged++;
                 else if (rm.V == RouteCutVerdict.NoLine) tally.RouteNoLine++;
@@ -244,6 +261,7 @@ public sealed class StateEvaluator
                 }
             }
 
+            if (tm is not null) Lap(ref tm.Route);
             // ---- CONTACT: a host leaves or arrives ----
             if ((f.Role & Role.Host) != 0)
             {
@@ -252,6 +270,7 @@ public sealed class StateEvaluator
                 if (before && !after)
                 {
                     tally.HostsLeaving++;
+                    try {
                     foreach (var (d, dbox, _) in _boxes.Near(win.Space, f.Box, Contact.Reach))
                     {
                         if (d == key) continue;
@@ -284,10 +303,12 @@ public sealed class StateEvaluator
                             ContactVerdict: r.Verdict, Relation: r.Relation, Distance: f1.WinnerDistance, Penetration: f1.WinnerPenetration, RawDistance: best?.RawDistance ?? float.NaN, Motion: motion,
                             Physical: PhysicalState.Holds, PhysicalDetail: r.Verdict == ContactVerdict.Sunk ? $"{f1.WinnerPenetration:0.#}u inside something in the state" : $"touches nothing within {Contact.Epsilon:0.#}u in the state (nearest {f1.WinnerDistance:0.#}u)"));
                     }
+                    } finally { if (tm is not null) Lap(ref tm.HostLeaving); }
                 }
                 else if (!before && after)
                 {
                     tally.HostsArriving++;
+                    try {
                     foreach (var (d, dbox, _) in _boxes.Near(win.Space, f.Box, Contact.BoxBand))
                     {
                         if (d == key) continue;
@@ -311,13 +332,16 @@ public sealed class StateEvaluator
                         }
                         else if (c.Contact.FacingDistance <= Contact.Epsilon) tally.ReSupported++;
                     }
+                    } finally { if (tm is not null) Lap(ref tm.HostArriving); }
                 }
             }
 
             // ---- CONTACT: a dependent arrives ----
+            if (tm is not null) Lap(ref tm.Other);
             if ((f.Role & Role.Dependent) != 0 && !before && after)
             {
                 tally.DepsArriving++;
+                try {
                 var dsnaps = Index.History.Of(key)!;
                 var best = Contact.BestContact(key, dsnaps.Count - 1, f.Base, win, f.Box, _boxes,
                     k => k != key && (_facts[k].Role & Role.Physical) != 0 && Placed(k) && InState(k) ? (Index.History.Winning(k)!.Value, Index.History.Of(k)!.Count - 1) : null,
@@ -356,7 +380,9 @@ public sealed class StateEvaluator
                                 Physical: PhysicalState.Holds, PhysicalDetail: $"touches nothing within {Contact.Epsilon:0.#}u in the state (nearest {nearD:0.#}u)"));
                     }
                 }
+                } finally { if (tm is not null) Lap(ref tm.DependentArriving); }
             }
+            if (tm is not null) Lap(ref tm.Other);
         }
         tally.ElapsedMs += sw.Elapsed.TotalMilliseconds;
         return rows;
