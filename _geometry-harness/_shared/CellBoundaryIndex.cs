@@ -115,6 +115,10 @@ public sealed class CellInfo
     public bool LandWinnerDeclaresNone { get; set; }
     /// <summary>Some LAND statement for this cell exists: heights, or one that declares none.</summary>
     public bool HasLandStatement => Land.Count > 0 || LandDeclaresNone > 0;
+    /// <summary>Every LAND provision for this cell in load order, with what it says (heights, none, unreadable) and why when
+    /// unreadable. <see cref="Land"/> keeps only the heights and drops repeats; this keeps who declared no ground and who wrote a
+    /// map no reader can trust, which the terrain-support pass attributes (TerrainContactIndex). Nothing else reads it.</summary>
+    public List<(int Plugin, LandHeight.LandKind Kind, string? Reason)> LandStatements { get; } = new(1);
 }
 
 public sealed class CellBoundaryIndex
@@ -259,11 +263,12 @@ public sealed class CellBoundaryIndex
 
         if (!land || info.Interior) return;
         ILandscapeGetter? ls;
-        try { ls = c.Landscape; } catch { info.LandUnreadable++; return; }
+        try { ls = c.Landscape; } catch (Exception ex) { info.LandUnreadable++; info.LandStatements.Add((p, LandHeight.LandKind.Unreadable, "LAND unreadable: " + ex.GetType().Name)); return; }
         if (ls is null) return;   // no LAND in this provision: the earlier statement stands
         // The one rule every terrain reader uses (LandHeight.Classify): heights, declares none, or unreadable. Each is a
         // state the reader can see; none is dropped.
         var lc = LandHeight.Classify(ls);
+        info.LandStatements.Add((p, lc.Kind, lc.Reason));
         if (lc.Kind == LandHeight.LandKind.DeclaresNone)
         { info.LandDeclaresNone++; info.LandWinnerDeclaresNone = true; LandDeclaresNoneProvisions++; return; }
         if (lc.Kind != LandHeight.LandKind.Heights) { info.LandUnreadable++; return; }
