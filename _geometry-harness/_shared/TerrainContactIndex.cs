@@ -31,7 +31,7 @@ public enum TerrainStatus
 /// <summary>One footprint cell: who the owner saw there, who won, how far the two terrains differ under the body, and the cell's
 /// sight and population.</summary>
 public sealed record TerrainCellReading(int GX, int GY, int AuthoredPlugin, int WinnerPlugin, string AuthoredKind, string WinnerKind,
-                                        float MaxDelta, bool Changed, TerrainSight Sight, TerrainPopulation Population);
+                                        float MaxDelta, bool Changed, TerrainSight Sight, TerrainPopulation Population, FormKey Cell = default);
 
 /// <summary>One reference judged. <c>Gap</c>/<c>Burial</c> are the folded winning readings; the per-diagonal clearances ride along.</summary>
 public sealed record TerrainRow(FormKey Key, FormKey Base, FormKey Worldspace, Snap Pose, int StepPlugin, int Owner, TerrainStatus Status, string Why,
@@ -41,7 +41,8 @@ public sealed record TerrainRow(FormKey Key, FormKey Base, FormKey Worldspace, S
                                 TerrainSight Sight = TerrainSight.Unchanged, TerrainPopulation Population = TerrainPopulation.Mod, int Winner = -1,
                                 IReadOnlyList<TerrainCellReading>? Cells = null, FormKey? Support = null,
                                 float AuthoredD0 = float.NaN, float AuthoredD1 = float.NaN, float WinningD0 = float.NaN, float WinningD1 = float.NaN,
-                                float BurialD0 = float.NaN, float BurialD1 = float.NaN, float CoreGap = float.NaN, float? Landing = null);
+                                float BurialD0 = float.NaN, float BurialD1 = float.NaN, float CoreGap = float.NaN, float? Landing = null,
+                                DetectorModel.TerrainSupportFacts? Facts = null);
 
 public sealed class TerrainContactIndex
 {
@@ -209,6 +210,22 @@ public sealed class TerrainContactIndex
         return rows;
     }
 
+    /// <summary>The absolute floor (§7): every exterior placed reference against the winning ground as shipped, Row status only;
+    /// <paramref name="inSample"/> narrows it (a deterministic sample by FormKey, stated by the caller).</summary>
+    public List<TerrainRow> JudgeAbsolute(Func<FormKey, bool>? inSample = null)
+    {
+        var rows = new List<TerrainRow>();
+        foreach (var (key, snaps) in Idx.History.Refs)
+        {
+            if (snaps[^1].Interior) continue;
+            if (inSample is not null && !inSample(key)) { Count("absolute: outside the sample"); continue; }
+            var r = Explain(key, absolute: true);
+            Count("absolute: " + r.Status);
+            if (r.Status == TerrainStatus.Row) rows.Add(r with { Cells = null });
+        }
+        return rows;
+    }
+
     /// <summary>The broad filter: the OBND box at the winning pose (else the measured box; else the position), 64 u wider, against the
     /// candidate cells.</summary>
     bool TouchesCandidate(FormKey key, Snap w, HashSet<(FormKey, int, int)> cand)
@@ -229,8 +246,9 @@ public sealed class TerrainContactIndex
 
     static int Grid(float v) => (int)MathF.Floor(v / 4096f);
 
-    /// <summary>One reference, every status.</summary>
-    public TerrainRow Explain(FormKey key)
+    /// <summary>One reference, every status. <paramref name="absolute"/>: the absolute floor (§7) — the body against the winning
+    /// ground and the winning arm's supports alone, as shipped; no owner view, no gate on change, no sight.</summary>
+    public TerrainRow Explain(FormKey key, bool absolute = false)
     {
         var snaps = Idx.History.Of(key);
         if (snaps is null || snaps.Count == 0) return new(key, FormKey.Null, FormKey.Null, default, -1, -1, TerrainStatus.NotObject, "not placed in this order");
@@ -264,32 +282,35 @@ public sealed class TerrainContactIndex
         // the footprint cells, each with its own authored and winning ground (K14)
         var cells = FootprintCells(bodyBox);
         var views = new List<(int GX, int GY, View A, View W)>();
+        var cellKeys = new List<FormKey>();
         foreach (var (gx, gy) in cells)
         {
             var at = _land.AtGrid(win.Worldspace, gx, gy);
             if (at is { Count: > 1 }) return B(TerrainStatus.DuplicateGrid, $"more than one CELL record at ({gx},{gy})");
-            if (at is not { Count: 1 }) { views.Add((gx, gy, NoStatement, NoStatement)); continue; }
+            if (at is not { Count: 1 }) { views.Add((gx, gy, NoStatement, NoStatement)); cellKeys.Add(FormKey.Null); continue; }
             var ci = _land.Cells[at[0]];
-            var a = Authored(ci, owner); var wv = Winning(ci);
+            var wv = Winning(ci);
+            var a = absolute ? wv : Authored(ci, owner);
             if (a.Kind == LandHeight.LandKind.Unreadable || wv.Kind == LandHeight.LandKind.Unreadable)
             {
                 var u = a.Kind == LandHeight.LandKind.Unreadable ? a : wv;
                 return B(TerrainStatus.Refused, $"the {(u == a ? "authored" : "winning")} LAND of ({gx},{gy}) by {_land.PluginName(u.Plugin)} is unreadable: {u.Reason}");
             }
-            views.Add((gx, gy, a, wv));
+            views.Add((gx, gy, a, wv)); cellKeys.Add(ci.Key);
         }
 
         // §6 step 3: the two terrains agree within one heightmap unit under the footprint → no row
         var readings = new List<TerrainCellReading>();
         bool anyChanged = false;
-        foreach (var (gx, gy, a, wv) in views)
+        for (int k = 0; k < views.Count; k++)
         {
+            var (gx, gy, a, wv) = views[k];
             float maxDelta = Delta(a, wv, gx, gy, bodyBox);
             bool changed = maxDelta > LandHeight.Unit;
             anyChanged |= changed;
-            readings.Add(new TerrainCellReading(gx, gy, a.Plugin, wv.Plugin, a.Label, wv.Label, maxDelta, changed, TerrainSight.Unchanged, TerrainPopulation.Mod));
+            readings.Add(new TerrainCellReading(gx, gy, a.Plugin, wv.Plugin, a.Label, wv.Label, maxDelta, changed, TerrainSight.Unchanged, TerrainPopulation.Mod, cellKeys[k]));
         }
-        if (!anyChanged) return B(TerrainStatus.TerrainAgrees, "the authored and winning ground agree within one heightmap unit under it") with { Cells = readings };
+        if (!anyChanged && !absolute) return B(TerrainStatus.TerrainAgrees, "the authored and winning ground agree within one heightmap unit under it") with { Cells = readings };
 
         // the readings, both diagonals
         var r0 = Reading(body, views, 0);
@@ -312,13 +333,12 @@ public sealed class TerrainContactIndex
         var facts = facts0 with { OnReference = held, ReferenceGap = refGap };
         var (verdict, gap, burial, why) = DetectorModel.TerrainSupport(facts, Epsilon, FloatThreshold, BurialThreshold);
         float saddle = Saddle(views, r0.Win);
-        var physical = Readings(B(TerrainStatus.Row, why)) with { Verdict = verdict, Gap = gap, Burial = burial, Saddle = saddle, Support = by };
+        var physical = Readings(B(TerrainStatus.Row, why)) with { Verdict = verdict, Gap = gap, Burial = burial, Saddle = saddle, Support = by, Facts = facts };
+        if (absolute) return physical with { Why = "as shipped: " + why };
 
         if (!authGround) return physical with { Status = TerrainStatus.NoAuthoredGround, Why = "no ground in the owner's view: it rested on none" };
         if (auth == TerrainAuthored.NotResting) return physical with { Status = TerrainStatus.NotRestingAsAuthored, Why = $"not resting on the authored ground ({r0.Auth.Clearance:0.#} / {r1.Auth.Clearance:0.#} u by diagonal)" };
         if (auth == TerrainAuthored.CannotTell) return physical with { Status = TerrainStatus.AuthoredCannotTell, Why = $"the diagonals disagree on the authored ground ({r0.Auth.Clearance:0.#} / {r1.Auth.Clearance:0.#} u)" };
-        if (verdict == TerrainVerdict.Resting) return physical with { Status = TerrainStatus.StillResting };
-
         // whose clash: per changed cell, the worst names the row
         var carriers = (Idx.Touchers.GetValueOrDefault(key) ?? new List<int>()).Where(t => t > owner).ToList();
         string ownerName = _land.PluginName(owner);
@@ -337,6 +357,7 @@ public sealed class TerrainContactIndex
             readings[i] = cr = cr with { Sight = sight, Population = pop };
             if (worst is null || sight > worst.Sight) worst = cr;
         }
+        if (verdict == TerrainVerdict.Resting) return physical with { Status = TerrainStatus.StillResting, Sight = worst!.Sight, Population = worst.Population, Winner = worst.WinnerPlugin, Cells = readings };
         float? landing = motion == DependentMotion.Movable ? (verdict == TerrainVerdict.Floating ? gap : 0f) : null;
         return physical with
         {

@@ -25,7 +25,8 @@ using HousecarlCore.Progress;
 // FIXED rows are the class until an in-game arm says otherwise, and movable rows are a context list. The
 // motion class reads the record type and, for a MoveableStatic, the NIF's own motion system (the decoder
 // now reports it), never a guess from the type alone. INTERIOR / EXTERIOR: terrain is not a reference,
-// so an exterior dependent may be standing on the ground and read Stranded; counts are read on interiors.
+// so an exterior dependent may be standing on the ground and read Stranded; counts are read on interiors. The terrain as a
+// support is the --terrain mode's question (TerrainReview.cs).
 //
 // The rule is DetectorModel.PlacementContact (proofprobe-owned, a synthetic order behind it); the arms
 // and the pairing are _shared/ContactIndex.cs over OverlapIndex's history — the same changed-only
@@ -74,6 +75,13 @@ using HousecarlCore.Progress;
 //                          around its path (never / cannot_tell, never a witness). A pair whose world placement collapses a triangle
 //                          is measured centred on B, on the geometry or on A (pairFrame); particle systems set aside from a render surface are
 //                          labelled particlesA / particlesB.
+//   --terrain              TERRAIN SUPPORT (2026-10-20): every exterior placed reference that rested on the ground in its placement
+//                          owner's view, against the winning LAND (both heightmap diagonals) and the winning arm's collision supports:
+//                          floating or buried where a plugin the owner could not see reshaped the ground (TerrainReview.cs,
+//                          _shared/TerrainContactIndex.cs, DetectorModel.TerrainSupport). Requires --float-threshold U and
+//                          --burial-threshold U (frozen in a run plan; no default). With --absolute: the absolute floor as shipped first;
+//                          --terrain-sample N reads one reference in N of that floor (deterministic by FormKey). --emit writes the class
+//                          as TERRAIN rows, --base re-measures an emit's rows, --json writes every judged row.
 //   --box-contact FILE     with --overlap-json: each input boxContact row's world boxes against the other member's render surface;
 //                          with --motion swept a member refused for its live pose is tested through its swept region (witness / never /
 //                          cannot_tell per box; opaqueMeets true / false / null)
@@ -162,6 +170,7 @@ HashSet<string>? only = null;
 bool bosOn = true;
 long? cacheBudget = null;   // --cache-budget: null = CacheBudget.Auto()
 bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (default on; off = the core reading as before)
+bool terrain = false; float? floatThreshold = null, burialThreshold = null; int terrainSample = 1;   // --terrain (TerrainReview.cs)
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
 string? orderFile = null;
@@ -209,6 +218,10 @@ try
         }
         else if (flag == "--all-rows") allRows = true;
         else if (flag == "--absolute") absolute = true;
+        else if (flag == "--terrain") terrain = true;
+        else if (flag == "--float-threshold") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ft)) throw new ArgumentException("--float-threshold requires a number"); floatThreshold = ft; i++; }
+        else if (flag == "--burial-threshold") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var bt)) throw new ArgumentException("--burial-threshold requires a number"); burialThreshold = bt; i++; }
+        else if (flag == "--terrain-sample") { if (!int.TryParse(NeedValue(i, flag), out terrainSample) || terrainSample < 1) throw new ArgumentException("--terrain-sample requires a positive integer"); i++; }
         else if (flag == "--vanilla-assets") vanillaAssets = true;
         else if (flag == "--interior-only") interiorOnly = true;
         else if (flag == "--order") { orderFile = NeedValue(i, flag); i++; }
@@ -284,8 +297,11 @@ if (contactEvidence && overlapJson is null)
     Console.Error.WriteLine("--contact-evidence is valid only with --overlap-json FILE.");
     return 2;
 }
-int selectedModes = (overlapJson is null ? 0 : 1) + (absolute ? 1 : 0) + (labelledMover is null ? 0 : 1) + (emptySpaceOut is null ? 0 : 1);
-if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute, --labelled-mover and --empty-space select different modes; pass only one"); return 2; }
+int selectedModes = (overlapJson is null ? 0 : 1) + (absolute && !terrain ? 1 : 0) + (labelledMover is null ? 0 : 1) + (emptySpaceOut is null ? 0 : 1) + (terrain ? 1 : 0);
+if (selectedModes > 1) { Console.Error.WriteLine("--overlap-json, --absolute, --labelled-mover, --empty-space and --terrain select different modes; pass only one (--absolute with --terrain is the terrain floor)"); return 2; }
+if (terrain && (floatThreshold is null || burialThreshold is null)) { Console.Error.WriteLine("--terrain requires --float-threshold U and --burial-threshold U: the thresholds are frozen in a run plan, never defaulted"); return 2; }
+if (!terrain && (floatThreshold is not null || burialThreshold is not null || terrainSample != 1)) { Console.Error.WriteLine("--float-threshold, --burial-threshold and --terrain-sample are valid only with --terrain"); return 2; }
+if (terrain && (traceOut is not null || populationPath is not null)) { Console.Error.WriteLine("--terrain takes no --trace or --population: it reads the whole order"); return 2; }
 if (volumeOut is not null && overlapJson is null) { Console.Error.WriteLine("--volume is valid only with --overlap-json INPUT"); return 2; }
 if (surfaceOut is not null && overlapJson is null) { Console.Error.WriteLine("--surface is valid only with --overlap-json INPUT"); return 2; }
 if (anchorOut is not null && overlapJson is null) { Console.Error.WriteLine("--anchor is valid only with --overlap-json INPUT"); return 2; }
@@ -382,7 +398,7 @@ long meshesMeasured = 0, hostColl = 0, hostRender = 0, depColl = 0, depRender = 
 // per base, and a mesh evicted from the budget is decoded again from the same bytes. The run's mesh counters, the wind labels and
 // --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, and their
 // mesh store decodes each mesh once and keeps it, so bases sharing a mesh share one copy, as before.
-bool boundedGeometry = selectedModes == 0;
+bool boundedGeometry = selectedModes == 0 || terrain;
 // One archive reader per archive for the default pass (housecarl-core ArchiveReadScope.cs): each archive's table is read once in the
 // pass, not on every mesh read; disposed when the program ends (try/finally through using). The other modes read as before.
 using var archiveScope = boundedGeometry ? new ArchiveReadScope() : null;
@@ -534,6 +550,7 @@ var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count + (bosOn ? 1 : 0)];
 var lightness = new List<(ModKey, bool)>();
 var unreadable = new List<string>();
+var landIndex = terrain ? new CellBoundaryIndex() : null;   // --terrain: every plugin's LAND, in the same pass
 __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
 
 for (int p = 0; p < paths.Count; p++)
@@ -555,6 +572,7 @@ for (int p = 0; p < paths.Count; p++)
         catch { }
         masterIdx[p] = mset;
         idx.Ingest(p, mod);
+        landIndex?.Ingest(p, mod);
     }
     if ((p + 1) % 150 == 0) Console.WriteLine($"   ... {p + 1}/{paths.Count} plugins, {sw.Elapsed.TotalSeconds:0}s");
 }
@@ -601,6 +619,15 @@ if (population is not null)
 {
     population.Bind(idx);
     Console.WriteLine("   " + population.Describe());
+}
+if (terrain)
+{
+    try
+    {
+        return TerrainReview.Run(cidx, landIndex!, closure, PluginName, BaseLabel, eps, floatThreshold!.Value, burialThreshold!.Value, absolute, terrainSample,
+                                 emitPath, basePath, jsonPath, Instance, cfg.Identity(TerrainReview.Population, cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw);
+    }
+    catch (Exception ex) { Console.Error.WriteLine($"contactprobe --terrain refused: {ex.GetType().Name}: {ex.Message}"); return 2; }
 }
 // The contact population rule: a host or a dependent that is a seed, or any placement either ever takes inside the region
 // (an interior cell of the population, the 3x3 ring of a seed's exterior cell, a large delta placement's box). The ring is
@@ -864,7 +891,7 @@ if (absolute)
     Console.WriteLine($"   ---- sunk, deepest first ----");
     foreach (var s in sunk.OrderByDescending(s => s.Pen).Take(Math.Min(listN, 12))) Console.WriteLine($"   {s.Text}");
     Console.WriteLine($"\n{GeometryLine()}");
-    Console.WriteLine($"Limits: 'floating' means no physical reference within ε — terrain is not a reference, so exterior refs on the ground read floating; interiors are the floor.");
+    Console.WriteLine($"Limits: 'floating' means no physical reference within ε — terrain is not a reference, so exterior refs on the ground read floating; interiors are the floor (the terrain's own floor is --terrain --absolute).");
     Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
     return 0;
 }
