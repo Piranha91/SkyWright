@@ -66,6 +66,12 @@ static class AccelSelfTest
 
     public static void Run(ProbeSelfTest t)
     {
+        // RF-F0: the --reverse-of fallback fixture (ReverseFallbackFixture.cs) that tests/test_reverse_reconcile.py runs on.
+        var rf = ReverseFallbackFixture.Write(t.Root);
+        t.Check("RF-F0 the fixture writes Skyrim.esm, CrA.esp and the render box under rf",
+                rf.Count == 2 && rf.All(File.Exists) && File.Exists(Path.Combine(t.Root, "rf", "mods", "Skyrim", "meshes", ReverseFallbackFixture.MeshRel)),
+                string.Join(", ", rf.Select(Path.GetFileName)));
+
         // P0-1: a timed query returns exactly what an untimed one does, at every cap that changes the outcome.
         var timer = new MeshQueryTimer();
         int compared = 0, mismatched = 0; long queries = 0;

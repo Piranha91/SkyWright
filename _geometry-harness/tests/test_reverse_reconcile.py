@@ -9,7 +9,11 @@ test_population_scope.py does), with the REAL overlapprobe, whole-order and with
   - the two reverse emits must be equal in every field but GeneratedUtc, row for row and in order;
   - a baseline emit that is not this run's own must be refused by name, for each check: another configuration (the other
     order's emit, and B with its fingerprint changed), another population, another policy, another instance, an emit that
-    was itself run with --base, and a sweep-independent coverage line that differs.
+    was itself run with --base, a sweep-independent coverage line that differs, other pair limits (recorded, and a run
+    given another --pair-seconds), and an emit recording no pair limits;
+  - the fallback (ReverseFallbackFixture, written by the same self-test under rf/): a --base row naming a base-game
+    reference whose base no candidate uses makes the --reverse-of run measure the full reverse, and its emit equals a plain
+    full reverse.
 Each test names the wrong answer it rejects. Probes come from this checkout's Release build unless HC_REVERSE_HARNESS names
 another harness folder (the sabotage run points it at a build whose refusal checks are short-circuited).
 """
@@ -169,6 +173,66 @@ def other_order_refused(scope):
     return t
 
 
+def hand_run_other_limits(scope):
+    """Rejects: a hand-run --reverse-of under other pair limits than the baseline's, carrying rows measured under those."""
+    def t():
+        L = lab()
+        b, c, full, fast, pop = L.runs[(scope, "paths")]
+        r = L.probe("with", ["--emit", L.tmp / f"{scope}-limits.json", "--base", c, "--reverse-of", b, "--pair-seconds", "60"] + pop)
+        assert r.returncode == 2 and "measured under pair limits" in r.stderr, f"exit {r.returncode}: {r.stderr[-400:]}"
+    return t
+
+
+def fallback_equals_full_reverse():
+    """Rejects: carrying the baseline's base-record count when the --base rows reach a base the candidates did not (the full
+    reverse's count includes that base, so a carried count would differ); and a fallback that differs from a full reverse.
+    On ReverseFallbackFixture (rf): the --base row V1 x A1, where V1 is base-game-responsible (set aside before its base is
+    looked up) and its base RfOther is no candidate's."""
+    L = lab()
+    rf = L.tmp / "fixture" / "rf"
+    inst, game = L.tmp / "rf-instance", L.tmp / "rf-game"
+    prof = inst / "profiles" / "P"
+    prof.mkdir(parents=True)
+    (inst / "overwrite").mkdir()
+    (game / "Data").mkdir(parents=True)
+    shutil.copytree(rf / "mods" / "Skyrim", inst / "mods" / "Skyrim")
+    shutil.copyfile(rf / "Skyrim.esm", inst / "mods" / "Skyrim" / "Skyrim.esm")
+    (inst / "mods" / "CrA").mkdir(parents=True)
+    shutil.copyfile(rf / "CrA.esp", inst / "mods" / "CrA" / "CrA.esp")
+    order = ["Skyrim.esm", "CrA.esp"]
+    (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in order), encoding="utf-8")
+    (prof / "loadorder.txt").write_text("".join(n + "\n" for n in order), encoding="utf-8")
+    (prof / "modlist.txt").write_text("+CrA\n+Skyrim\n", encoding="utf-8")
+    cand = L.tmp / "rf-candidate.json"
+    cand.write_text(json.dumps({"SchemaVersion": 1, "Name": "rf", "BaseProfile": "P", "Plugins": order, "Mods": ["CrA", "Skyrim"],
+                                "Changes": []}), encoding="utf-8")
+
+    def probe(extra):
+        return run([exe(PROBES, "overlapprobe"), "--order", cand, "--instance", inst, "--game", game, "--profile", "P"] + extra)
+    b = L.tmp / "rf-baseline.json"
+    r0 = probe(["--emit", b])
+    assert r0.returncode == 0, f"rf baseline: exit {r0.returncode}: {r0.stderr[-400:]} {r0.stdout[-400:]}"
+    base_rows = L.tmp / "rf-base-rows.json"
+    base_rows.write_text(json.dumps({"Probe": "fixture", "Instance": "fixture", "GeneratedUtc": "2026-10-19 00:00:00Z", "Conflicts": [
+        {"Kind": "OVERLAP", "A": "Skyrim.esm", "B": "CrA.esp", "Summary": "fixture: V1 against A1",
+         "Necessary": [{"FormKey": "000901:Skyrim.esm", "Role": "placed-ref", "Label": "fixture"}],
+         "Alternative": [{"FormKey": "000901:CrA.esp", "Role": "placed-ref"}]}]}, indent=1), encoding="utf-8")
+    plain, viaof = L.tmp / "rf.reverse.json", L.tmp / "rf.reverse-of.json"
+    r1 = probe(["--emit", plain, "--base", base_rows])
+    r2 = probe(["--emit", viaof, "--base", base_rows, "--reverse-of", b])
+    assert r1.returncode == 0 and r2.returncode == 0, f"exits {r1.returncode} {r2.returncode}: {r1.stderr[-300:]} {r2.stderr[-300:]}"
+    assert "measuring the full reverse" in r2.stdout, "the --base row reaching RfOther did not make the run measure the full reverse"
+    f, g = load(plain), load(viaof)
+    f.pop("GeneratedUtc"); g.pop("GeneratedUtc")
+    assert list(f) == list(g), f"keys {list(f)} vs {list(g)}"
+    for k in f:
+        assert f[k] == g[k], f"{k} differs: full {json.dumps(f[k])[:500]} vs fallback {json.dumps(g[k])[:500]}"
+    preds = g.get("Predicates") or []
+    assert len(preds) == 1 and preds[0]["Physical"] == "Holds", f"the V1 x A1 row re-measured as {preds}: the case proves nothing unless it measured"
+    bases = next(c for c in load(b)["Coverage"] if c["Population"].startswith("base records"))
+    assert next(c for c in g["Coverage"] if c["Population"].startswith("base records"))["Judged"] == bases["Judged"] + 1,         "the full reverse's base-record count is not the baseline's plus RfOther: the fallback was not needed here"
+
+
 def fp(doc):
     doc["Configuration"]["Fingerprint"] = "0" * 64
 
@@ -190,6 +254,11 @@ for scope in ("whole", "scoped"):
     check(f"{scope}: another instance is refused", refused(scope, lambda d: d.__setitem__("Instance", "X:/elsewhere"), "measured on instance"))
     check(f"{scope}: an emit that was itself run with --base is refused", refused(scope, lambda d: None, "itself run with --base", source="candidate"))
     check(f"{scope}: a differing candidate-refs coverage line is refused", refused(scope, coverage_line("candidate refs"), "'candidate refs' coverage differs"))
+    check(f"{scope}: a baseline recorded under other pair limits is refused", refused(scope, lambda d: d["PairLimits"].__setitem__("PairSeconds", 1.0), "measured under pair limits"))
+    check(f"{scope}: a baseline recording no pair limits is refused", refused(scope, lambda d: d.pop("PairLimits"), "does not record the pair limits"))
+    check(f"{scope}: a hand-run reverse under another --pair-seconds is refused", hand_run_other_limits(scope))
+
+check("whole: --base rows reaching a base the candidates did not: the full reverse is measured, equal to a plain one", fallback_equals_full_reverse)
 
 print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
 sys.exit(1 if FAILURES else 0)

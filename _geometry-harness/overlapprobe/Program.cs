@@ -1484,7 +1484,8 @@ if (reverseOfPath is not null)
     var own = new List<CoverageLine> { PluginsLine(), CandidateRefsLine() };
     if (PopulationScopeLine() is { } scopeLine) own.Add(scopeLine);
     var baseRecords = BaseRecordsLine();
-    string? refusal = ReverseFromBaseline.Refusal(baseline, reverseOfPath, Instance, identity, populationIdentity, pop.StateName, policy, own)
+    var limits = new PairLimits(maxTrianglePairs, pairSeconds);
+    string? refusal = ReverseFromBaseline.Refusal(baseline, reverseOfPath, Instance, identity, populationIdentity, pop.StateName, policy, limits, own)
         ?? ReverseFromBaseline.BaseRecordsRefusal(baseline, reverseOfPath, baseRecords.Judged, baseRecords.Unjudgeable!);
     if (refusal is not null) { Console.Error.WriteLine(refusal); return 2; }
     // The baseline's base-record count also holds the bases its provenance stage looked up; a full reverse adds the bases
@@ -1500,7 +1501,7 @@ if (reverseOfPath is not null)
         __run.Stage("emit-artifact", "writing overlap conflict artifact", 1, "artifacts");
         ConflictIo.Write(emitPath!, new ConflictFile("overlapprobe", Instance,
             DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), baseline.Conflicts, baseline.Coverage, basePredicatesMeasured, basePath,
-            populationIdentity, pop.StateName, identity, MeasurementPolicy: policy));
+            populationIdentity, pop.StateName, identity, MeasurementPolicy: policy, PairLimits: limits));
         __run.Advance().Artifact(emitPath!);
         Console.WriteLine($"configuration: {identity.Short}");
         Console.WriteLine($"\nreverse of {Path.GetFileName(reverseOfPath)}: its {baseline.Conflicts.Count:N0} Introduced + Blind conflicts and coverage "
@@ -1697,7 +1698,8 @@ if (emitPath is not null)
     __run.Stage("emit-artifact", "writing overlap conflict artifact", 1, "artifacts");
     ConflictIo.Write(emitPath, new ConflictFile("overlapprobe", Instance,
         DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-        populationIdentity, pop.StateName, identity, MeasurementPolicy: NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance)));
+        populationIdentity, pop.StateName, identity, MeasurementPolicy: NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance),
+        PairLimits: new PairLimits(maxTrianglePairs, pairSeconds)));
     __run.Advance().Artifact(emitPath);
     Console.WriteLine($"configuration: {identity.Short}");
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Introduced + Blind conflicts -> {emitPath}");

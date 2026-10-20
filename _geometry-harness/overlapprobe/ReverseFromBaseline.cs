@@ -16,7 +16,7 @@ static class ReverseFromBaseline
     /// <paramref name="ownLines"/> are this run's coverage lines that do not depend on the sweep, provenance or reconciliation
     /// (plugins, candidate refs, population scope): each must equal the baseline's line of the same name.</summary>
     public static string? Refusal(ConflictFile baseline, string baselinePath, string instance, ConfigurationIdentity identity,
-                                  string population, string? state, string policy, IEnumerable<CoverageLine> ownLines)
+                                  string population, string? state, string policy, PairLimits limits, IEnumerable<CoverageLine> ownLines)
     {
         string name = Path.GetFileName(baselinePath);
         if (baseline.Probe != "overlapprobe")
@@ -33,6 +33,10 @@ static class ReverseFromBaseline
             return $"--reverse-of {name} judged population {baseline.Population ?? "unknown"} / state {baseline.State ?? "unknown"}, this run {population} / state {state ?? "unknown"}; give the baseline emit of this population and state.";
         if (baseline.MeasurementPolicy != policy)
             return $"--reverse-of {name} was measured under policy '{baseline.MeasurementPolicy ?? "unknown"}', this run under '{policy}'; run the reverse without --reverse-of.";
+        if (baseline.PairLimits is null)
+            return $"--reverse-of {name} does not record the pair limits it was measured under, so it cannot be shown to be this run's baseline; run the reverse without --reverse-of.";
+        if (baseline.PairLimits != limits)
+            return $"--reverse-of {name} was measured under pair limits of {baseline.PairLimits.MaxTrianglePairs:N0} triangle pairs and {baseline.PairLimits.PairSeconds:R} s, this run under {limits.MaxTrianglePairs:N0} and {limits.PairSeconds:R} s; give the baseline emit measured under this run's limits.";
         if (baseline.Instance != instance)
             return $"--reverse-of {name} was measured on instance {baseline.Instance}, this run on {instance}; give the baseline emit of this instance.";
         var theirs = (baseline.Coverage ?? Array.Empty<CoverageLine>()).ToDictionary(c => c.Population, StringComparer.Ordinal);
