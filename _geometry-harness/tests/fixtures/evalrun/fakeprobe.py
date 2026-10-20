@@ -576,7 +576,7 @@ def main(probe: str, argv=None) -> int:
         # overlapprobe's --reverse-of (P1): the baseline emit's rows and coverage, refused unless it is this order's.
         bdoc = json.loads(Path(a["reverse-of"]).read_text(encoding="utf-8"))
         theirs = (bdoc.get("Configuration") or {}).get("Fingerprint")
-        if theirs != cfg.get("Fingerprint") or bdoc.get("BaseEmit") is not None:
+        if theirs != cfg.get("Fingerprint") or bdoc.get("BaseEmit") is not None or bdoc.get("PairLimits") != {"MaxTrianglePairs": 2000000, "PairSeconds": 120.0}:
             print(f"fakeprobe {probe}: --reverse-of {Path(a['reverse-of']).name} is not this order's baseline emit "
                   f"(fingerprint {str(theirs)[:12]}, this run {str(cfg.get('Fingerprint'))[:12]})", file=sys.stderr)
             return 2
@@ -591,6 +591,9 @@ def main(probe: str, argv=None) -> int:
     if policy is not None:
         doc["MeasurementPolicy"] = policy
     doc["PopulationIdentity"] = f"{doc['Population']} / state {doc['State']}"
+    if probe == "overlapprobe":
+        # the real overlapprobe records its pair limits (2026-10-19); --reverse-of refuses a baseline under other limits
+        doc["PairLimits"] = {"MaxTrianglePairs": 2000000, "PairSeconds": 120.0}
     # an entry's `emitFields` overwrite top-level emit fields as written (e.g. a mistyped field conflictdiff cannot read)
     doc.update(entry.get("emitFields") or {})
 
