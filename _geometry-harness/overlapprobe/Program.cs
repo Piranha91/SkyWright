@@ -46,7 +46,7 @@ using HousecarlCore.Progress;
 //   - These relations are geometry evidence, not compatibility severity, intent or a game verdict.
 //
 // usage: overlapprobe [--list N] [--surface-tolerance U] [--max-triangle-pairs N] [--pair-seconds S]
-//                     [--emit path] [--base emit.json] [--dump path] [--json path] [--pair-ledger path]
+//                     [--emit path] [--base emit.json] [--reverse-of baseline.json] [--dump path] [--json path] [--pair-ledger path]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
 //                     [--motion swept [--motion-delta U]]
@@ -195,6 +195,10 @@ string? jsonPath = null;
 // --pair-ledger FILE: one JSON line per pair the actual-shape sweep measured, in sweep order (both FormKeys, same/cross, the
 // PairFrame path, every result field, and the pair's seconds), plus FILE.slowest.json; for comparing two builds pair by pair.
 string? pairLedgerPath = null;
+// --reverse-of BASELINE_EMIT (with --base): a reverse run that takes this order's baseline emit's rows, coverage and class
+// instead of sweeping again, and re-measures only the --base rows (ReverseFromBaseline.cs); refused unless the baseline emit
+// is this run's own (configuration, population, state, policy, instance and the stage-independent coverage).
+string? reverseOfPath = null;
 string? geometryManifestPath = null;
 string? historicalPairsPath = null;
 string? contactEvidencePairsPath = null;
@@ -260,6 +264,7 @@ try
         else if (flag == "--dump") { dumpPath = NeedValue(i, flag); i++; }
         else if (flag == "--json") { jsonPath = NeedValue(i, flag); i++; }
         else if (flag == "--pair-ledger") { pairLedgerPath = NeedValue(i, flag); i++; }
+        else if (flag == "--reverse-of") { reverseOfPath = NeedValue(i, flag); i++; }
         else if (flag == "--geometry-manifest") { geometryManifestPath = NeedValue(i, flag); i++; }
         else if (flag == "--historical-pairs") { historicalPairsPath = NeedValue(i, flag); i++; }
         else if (flag == "--contact-evidence-pairs") { contactEvidencePairsPath = NeedValue(i, flag); i++; }
@@ -439,7 +444,17 @@ if (historicalPairsPath is not null)
     { Console.Error.WriteLine("--historical-pairs must be a complete crosswalk with pairs[]"); return 2; }
     historicalCrosswalkSha256 = Convert.ToHexString(SHA256.HashData(crosswalkBytes)).ToLowerInvariant();
 }
-foreach (var input in new[] { (Flag: "--base", Path: basePath), (Flag: "--switch-map", Path: switchMapPath) })
+if (reverseOfPath is not null)
+{
+    string? clash = basePath is null ? "--reverse-of needs --base (the candidate emit whose rows the reverse re-measures)"
+        : emitPath is null ? "--reverse-of needs --emit"
+        : jsonPath is not null || dumpPath is not null || pairLedgerPath is not null ? "--reverse-of writes no judged rows, dump or pair ledger (it runs no sweep); drop --json, --dump and --pair-ledger"
+        : sceneCapture || geometryManifestPath is not null || responsiblePairNames.Count > 0 || populationAuditEmit is not null
+            ? "--reverse-of combines only with a plain emit run; drop scene capture, --geometry-manifest, --responsible-pair and --population-audit"
+        : null;
+    if (clash is not null) { Console.Error.WriteLine(clash); return 2; }
+}
+foreach (var input in new[] { (Flag: "--base", Path: basePath), (Flag: "--switch-map", Path: switchMapPath), (Flag: "--reverse-of", Path: reverseOfPath) })
     if (input.Path is not null && !File.Exists(input.Path))
     { Console.Error.WriteLine($"{input.Flag} input does not exist: {input.Path}"); return 2; }
 
@@ -1405,6 +1420,94 @@ Console.WriteLine($"   skipped (counted, per rule 6): {skips.Deleted:N0} deleted
 Console.WriteLine($"                                  {skips.InvalidTransform:N0} invalid transforms, {skips.DegenerateGeometry:N0} zero-scale transforms, {skips.MarkerMesh:N0} editor markers (no rendered mesh, cannot obstruct), "
                 + $"{skips.EnableStateUnresolved:N0} unresolved enable state, {skips.BosUnresolved:N0} unresolved BOS outcome");
 
+// The emit's coverage lines that the candidate stage settles, and the --base re-measurement: one definition each, used by
+// the emit below and by --reverse-of.
+long reconciliationPredicates = 0;
+CoverageLine PluginsLine() => new("plugins", paths.Count - unreadablePlugins.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count });
+CoverageLine BaseRecordsLine()
+{
+    long measuredBases = geometryCounts.GetValueOrDefault("measured") + geometryCounts.GetValueOrDefault("degenerate_geometry");
+    var geometryUnknown = geometryCounts.Where(k => k.Key is not ("measured" or "degenerate_geometry") && k.Value > 0)
+        .ToDictionary(k => k.Key, k => k.Value, StringComparer.Ordinal);
+    return new("base records (strict render geometry)", measuredBases, geometryUnknown, null,
+        $"policy {NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance)}; record ObjectBounds unused");
+}
+// The unresolved enable chains join NoGeometry as unjudgeable: a candidate whose chain could not be read to the
+// end is in the population on EnableState's stated fallback, not on a measurement, and conflictdiff's coverage
+// test must be able to see that share rise (Q27).
+CoverageLine CandidateRefsLine() => new("candidate refs", candidates.Count,
+    new Dictionary<string, long>(pop.Unjudgeable) { ["NoGeometry"] = skips.NoGeometry,
+        ["InvalidTransform"] = skips.InvalidTransform, ["DegenerateTransform"] = skips.DegenerateGeometry },
+    new Dictionary<string, long> { ["Deleted"] = skips.Deleted, ["NotPresentAtLoad"] = skips.Disabled, ["NonObstructingType"] = skips.NonObstructingType,
+                                   ["BaseGameResponsible"] = skips.ExcludedResponsible, ["EditorMarker"] = skips.MarkerMesh },
+    $"population {pop.Identity} / state {pop.StateName}");
+CoverageLine? PopulationScopeLine()
+{
+    if (population is null) return null;
+    long inScope = candidates.Count(c => population.KeyInScope(c.Key, c.Win.Cell));
+    return new("population scope", inScope, new Dictionary<string, long>(),
+        new Dictionary<string, long> { ["OutsidePopulation"] = candidates.Count - inScope },
+        $"pairs measured only where a reference is in the plan's population; {population.Describe()}");
+}
+string populationIdentity = population?.Identity(pop.Identity) ?? pop.Identity;
+List<Predicate> MeasureBasePredicates(string path)
+{
+    var baseFile = ConflictIo.Read(path);
+    var list = new List<Predicate>();
+    foreach (var c in baseFile.Conflicts)
+    {
+        string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+        foreach (var rec in c.Necessary)
+        {
+            reconciliationPredicates++;
+            __run.Advance();
+            if (c.Kind != "OVERLAP" || other is null) { list.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not an overlap row with two refs")); continue; }
+            var (st, why) = OverlapPredicate(FormKey.Factory(rec.FormKey), FormKey.Factory(other));
+            list.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
+        }
+    }
+    Console.WriteLine($"\n   --base {Path.GetFileName(path)}: {list.Count:N0} base-row predicate(s) re-measured under this order — "
+                    + string.Join(", ", list.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
+    return list;
+}
+List<Predicate>? basePredicatesMeasured = null;
+if (reverseOfPath is not null)
+{
+    var baseline = ConflictIo.Read(reverseOfPath);
+    var identity = cfg.Identity(populationIdentity, pop.StateName);
+    string policy = NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance);
+    var own = new List<CoverageLine> { PluginsLine(), CandidateRefsLine() };
+    if (PopulationScopeLine() is { } scopeLine) own.Add(scopeLine);
+    var baseRecords = BaseRecordsLine();
+    string? refusal = ReverseFromBaseline.Refusal(baseline, reverseOfPath, Instance, identity, populationIdentity, pop.StateName, policy, own)
+        ?? ReverseFromBaseline.BaseRecordsRefusal(baseline, reverseOfPath, baseRecords.Judged, baseRecords.Unjudgeable!);
+    if (refusal is not null) { Console.Error.WriteLine(refusal); return 2; }
+    // The baseline's base-record count also holds the bases its provenance stage looked up; a full reverse adds the bases
+    // its --base rows reach. Carried only when those rows reach no base outside the candidates', so the two sets are equal.
+    var candidateBases = geometryByBase.Keys.ToHashSet();
+    __run.Stage("reconciliation", "remeasuring prior overlap predicates", total: null, unit: "predicates");
+    basePredicatesMeasured = MeasureBasePredicates(basePath!);
+    int reached = geometryByBase.Keys.Count(k => !candidateBases.Contains(k));
+    ReportTimer("reconciliation", reconcileTimer, null);
+    if (reached == 0)
+    {
+        __run.ReviseTotal(reconciliationPredicates, "the base emit established the exact predicate count");
+        __run.Stage("emit-artifact", "writing overlap conflict artifact", 1, "artifacts");
+        ConflictIo.Write(emitPath!, new ConflictFile("overlapprobe", Instance,
+            DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), baseline.Conflicts, baseline.Coverage, basePredicatesMeasured, basePath,
+            populationIdentity, pop.StateName, identity, MeasurementPolicy: policy));
+        __run.Advance().Artifact(emitPath!);
+        Console.WriteLine($"configuration: {identity.Short}");
+        Console.WriteLine($"\nreverse of {Path.GetFileName(reverseOfPath)}: its {baseline.Conflicts.Count:N0} Introduced + Blind conflicts and coverage "
+                        + $"carried (no sweep run), {basePredicatesMeasured.Count:N0} --base predicate(s) measured -> {emitPath}");
+        __run.Stage("finalize", "finalizing overlap run", 1, "runs").Advance();
+        Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
+        return 0;
+    }
+    Console.WriteLine($"   --reverse-of: the --base rows reach {reached:N0} base record(s) the candidates did not, so the baseline's base-record "
+                    + "count cannot stand for this run's; measuring the full reverse");
+}
+
 long lastPairProgress = 0;
 __run.Stage("actual-shape-queries", "querying candidate render surfaces", total: null, unit: "pairs");
 StreamWriter? ledger = null;
@@ -1544,7 +1647,6 @@ foreach (var r in floorRows.OrderBy(r => r.Hit.A.Key.ToString(), StringComparer.
 // re-measured under this arm too (2026-09-03).
 if (emitPath is not null)
 {
-    long reconciliationPredicates = 0;
     __run.Stage("reconciliation", "remeasuring emitted and prior overlap predicates", total: null, unit: "predicates");
     var conflicts = new List<Conflict>();
     foreach (var r in cls)
@@ -1557,44 +1659,14 @@ if (emitPath is not null)
         reconciliationPredicates++;
         __run.Advance();
     }
-    List<Predicate>? predicates = null;
-    if (basePath is not null)
-    {
-        var baseFile = ConflictIo.Read(basePath);
-        predicates = new List<Predicate>();
-        foreach (var c in baseFile.Conflicts)
-        {
-            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
-            foreach (var rec in c.Necessary)
-            {
-                reconciliationPredicates++;
-                __run.Advance();
-                if (c.Kind != "OVERLAP" || other is null) { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not an overlap row with two refs")); continue; }
-                var (st, why) = OverlapPredicate(FormKey.Factory(rec.FormKey), FormKey.Factory(other));
-                predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
-            }
-        }
-        Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
-                        + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
-    }
+    // --reverse-of measured the --base rows before deciding it had to sweep: those are the rows, measured once.
+    List<Predicate>? predicates = basePredicatesMeasured ?? (basePath is not null ? MeasureBasePredicates(basePath) : null);
     int notRebuilt = rows.Count(r => r.CounterfactualStatus == "unknown");
-    long measuredBases = geometryCounts.GetValueOrDefault("measured") + geometryCounts.GetValueOrDefault("degenerate_geometry");
-    var geometryUnknown = geometryCounts.Where(k => k.Key is not ("measured" or "degenerate_geometry") && k.Value > 0)
-        .ToDictionary(k => k.Key, k => k.Value, StringComparer.Ordinal);
     var coverage = new List<CoverageLine>
     {
-        new("plugins", paths.Count - unreadablePlugins.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
-        new("base records (strict render geometry)", measuredBases, geometryUnknown, null,
-            $"policy {NifOverlapGeometry.SurfaceMeasurementIdentity(surfaceTolerance)}; record ObjectBounds unused"),
-        // The unresolved enable chains join NoGeometry as unjudgeable: a candidate whose chain could not be read to the
-        // end is in the population on EnableState's stated fallback, not on a measurement, and conflictdiff's coverage
-        // test must be able to see that share rise (Q27).
-        new("candidate refs", candidates.Count,
-            new Dictionary<string, long>(pop.Unjudgeable) { ["NoGeometry"] = skips.NoGeometry,
-                ["InvalidTransform"] = skips.InvalidTransform, ["DegenerateTransform"] = skips.DegenerateGeometry },
-            new Dictionary<string, long> { ["Deleted"] = skips.Deleted, ["NotPresentAtLoad"] = skips.Disabled, ["NonObstructingType"] = skips.NonObstructingType,
-                                           ["BaseGameResponsible"] = skips.ExcludedResponsible, ["EditorMarker"] = skips.MarkerMesh },
-            $"population {pop.Identity} / state {pop.StateName}"),
+        PluginsLine(),
+        BaseRecordsLine(),
+        CandidateRefsLine(),
         new("cross-responsible actual-shape queries", sweep.CrossResults.Count - sweep.CrossUnknown,
             sweep.CrossUnknown == 0 ? new Dictionary<string, long>() : new Dictionary<string, long> { ["MeshQueryUnknown"] = sweep.CrossUnknown }, null,
             $"intersections {rows.Count:N0}; separated results remain measured and are not conflicts"),
@@ -1602,14 +1674,7 @@ if (emitPath is not null)
             notRebuilt == 0 ? new Dictionary<string, long>() : new Dictionary<string, long> { ["CounterfactualGeometryUnmeasurable"] = notRebuilt }, null,
             $"class {cls.Count:N0}; unknown counterfactual rows have null provenance and are withheld from the class"),
     };
-    string populationIdentity = population?.Identity(pop.Identity) ?? pop.Identity;
-    if (population is not null)
-    {
-        long inScope = candidates.Count(c => population.KeyInScope(c.Key, c.Win.Cell));
-        coverage.Add(new("population scope", inScope, new Dictionary<string, long>(),
-            new Dictionary<string, long> { ["OutsidePopulation"] = candidates.Count - inScope },
-            $"pairs measured only where a reference is in the plan's population; {population.Describe()}"));
-    }
+    if (PopulationScopeLine() is { } scopeLine) coverage.Add(scopeLine);
     var identity = cfg.Identity(populationIdentity, pop.StateName);
     ReportTimer("reconciliation", reconcileTimer, null);
     __run.ReviseTotal(reconciliationPredicates, "the current class and optional base emit established the exact predicate count");
