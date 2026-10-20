@@ -26,6 +26,8 @@ public enum TerrainStatus
 {
     NotObject, DeletedAtLoad, DeletedWithPlacement, DeletedInOwnerView, EnableUnresolved, DisabledAtLoad, Marker, NoBody,
     DuplicateGrid, TerrainAgrees, NoAuthoredGround, NotRestingAsAuthored, AuthoredCannotTell, StillResting, Row, Refused, NotBuilt,
+    /// <summary>Not judged: reading its reference supports would exceed <see cref="TerrainContactIndex.WorkLimit"/>; counted, never a verdict.</summary>
+    UnjudgedCost,
 }
 
 /// <summary>One footprint cell: who the owner saw there, who won, how far the two terrains differ under the body, and the cell's
@@ -57,6 +59,11 @@ public sealed class TerrainContactIndex
     public float BurialThreshold { get; init; } = 8f;
     /// <summary>How far from the body a reference support is looked for (u).</summary>
     public float Reach { get; init; } = 256f;
+    /// <summary>The most triangle pairs (body × support, summed over the supports read) one reference's support reading may cost;
+    /// past it the reference is UnjudgedCost, counted by name, never judged (stated limit, 2026-10-20: 200 million).</summary>
+    public long WorkLimit { get; init; } = 200_000_000;
+    /// <summary>Called with a line for every reference whose judgement took more than 2 s (its key, body triangles, cells, supports).</summary>
+    public Action<string>? SlowNote { get; set; }
     /// <summary>The cos of the steepest contact normal that still holds a body up (60°).</summary>
     public float HoldCos { get; init; } = 0.5f;
     public Dictionary<string, long> Counts { get; } = new();
@@ -167,25 +174,31 @@ public sealed class TerrainContactIndex
 
     /// <summary>The winning arm's reference supports near a body: held by one (a face within ε under it pointing up within 60°, or
     /// the drop reading pushes it up out of an overlap), and the least downward gap to any (PhysicsReach.Contact, +∞ when none below).</summary>
-    (bool Held, FormKey? By, float Gap) ReferenceSupport(FormKey self, FormKey space, TriangleSoup body, Aabb bodyBox)
+    (bool Held, FormKey? By, float Gap, bool OverCost, int Read, long Work) ReferenceSupport(FormKey self, FormKey space, TriangleSoup body, Aabb bodyBox)
     {
-        bool held = false; FormKey? by = null; float gap = float.PositiveInfinity;
+        bool held = false; FormKey? by = null; float gap = float.PositiveInfinity; long work = 0; int read = 0;
         foreach (var (other, otherBox, _) in SupportHash().Near(space, bodyBox, Reach))
         {
             if (other == self) continue;
             if (otherBox.Min.Z >= bodyBox.Min.Z) continue;   // a support reaches below the body's lowest point; what sits on it holds nothing up
+            // a vertical drop and an upward-facing hold both need the support under the body: its plan box within ε of the body's
+            if (otherBox.Max.X < bodyBox.Min.X - Epsilon || otherBox.Min.X > bodyBox.Max.X + Epsilon
+                || otherBox.Max.Y < bodyBox.Min.Y - Epsilon || otherBox.Min.Y > bodyBox.Max.Y + Epsilon) continue;
             var b = _cidx.WinnerBase(other);
             if (_cidx.GeomOf(b) is not { } g) continue;
             var pose = Idx.WinningGeometryPose(other) ?? Idx.History.Winning(other)!.Value;
-            var soup = SpatialOverlap.TransformSoup(g.HostShell ?? g.HostSoup, pose.Pos, pose.Rot, pose.Scale);
+            var model = g.HostShell ?? g.HostSoup;
+            work += (long)body.TriangleCount * model.TriangleCount; read++;
+            if (work > WorkLimit) return (false, null, float.NaN, true, read, work);
+            var soup = SpatialOverlap.TransformSoup(model, pose.Pos, pose.Rot, pose.Scale);
             var c = SpatialOverlap.Contact(body, soup, Reach, Epsilon);
-            if (c.FacingDistance <= Epsilon && c.NormalUp >= HoldCos) { if (!held) { held = true; by = other; } continue; }
+            if (c.FacingDistance <= Epsilon && c.NormalUp >= HoldCos) return (true, other, 0f, false, read, work);   // held: decisive
             // overlapping or below: the drop reading (PhysicsReach.Contact) — held when it pushes the body up, else its first contact
             var drop = PhysicsReach.Contact(body, soup);
-            if (drop.Held || drop.D == 0) { if (!held) { held = true; by = other; } continue; }
-            if (drop.D is { } d && d < gap) { gap = (float)d; if (!held) by = other; }
+            if (drop.Held || drop.D == 0) return (true, other, 0f, false, read, work);
+            if (drop.D is { } d && d < gap) { gap = (float)d; by = other; }
         }
-        return (held, by, gap);
+        return (held, by, gap, false, read, work);
     }
 
     // ---- the pass -------------------------------------------------------------------------------------------------------------
@@ -257,6 +270,15 @@ public sealed class TerrainContactIndex
     /// <summary>One reference, every status. <paramref name="absolute"/>: the absolute floor (§7) — the body against the winning
     /// ground and the winning arm's supports alone, as shipped; no owner view, no gate on change, no sight.</summary>
     public TerrainRow Explain(FormKey key, bool absolute = false)
+    {
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        var r = ExplainCore(key, absolute);
+        double s = System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalSeconds;
+        if (s > 2.0) SlowNote?.Invoke($"slow reference {key}: {s:0.0} s, status {r.Status}, cells {r.Cells?.Count ?? 0}, base {r.Base}");
+        return r;
+    }
+
+    TerrainRow ExplainCore(FormKey key, bool absolute)
     {
         var snaps = Idx.History.Of(key);
         if (snaps is null || snaps.Count == 0) return new(key, FormKey.Null, FormKey.Null, default, -1, -1, TerrainStatus.NotObject, "not placed in this order");
@@ -337,7 +359,8 @@ public sealed class TerrainContactIndex
 
         // the winning arm's reference supports, read only when the ground alone does not hold it
         bool groundHolds = winGround && r0.Win.Clearance <= Epsilon && r1.Win.Clearance <= Epsilon;
-        var (held, by, refGap) = groundHolds ? (false, (FormKey?)null, float.PositiveInfinity) : ReferenceSupport(key, win.Space, body, bodyBox);
+        var (held, by, refGap, overCost, readN, work) = groundHolds ? (false, (FormKey?)null, float.PositiveInfinity, false, 0, 0L) : ReferenceSupport(key, win.Space, body, bodyBox);
+        if (overCost) return B(TerrainStatus.UnjudgedCost, $"not judged: its support reading passed the work limit ({work:N0} > {WorkLimit:N0} triangle pairs after {readN} supports; body {body.TriangleCount:N0} triangles)") with { Cells = readings };
         var facts = facts0 with { OnReference = held, ReferenceGap = refGap };
         var (verdict, gap, burial, why) = DetectorModel.TerrainSupport(facts, Epsilon, FloatThreshold, BurialThreshold);
         float saddle = Saddle(views, r0.Win);
@@ -492,6 +515,9 @@ public static class TerrainClearance
         for (int t = 0; t + 2 < idx.Length; t += 3)
         {
             var a = v[idx[t]] - new Vector3(ox, oy, 0); var b = v[idx[t + 1]] - new Vector3(ox, oy, 0); var c = v[idx[t + 2]] - new Vector3(ox, oy, 0);
+            // a triangle whose plan box misses this cell adds no point inside it (every sample is kept only inside the cell)
+            if (MathF.Max(a.X, MathF.Max(b.X, c.X)) < -tol || MathF.Min(a.X, MathF.Min(b.X, c.X)) > Side + tol
+                || MathF.Max(a.Y, MathF.Max(b.Y, c.Y)) < -tol || MathF.Min(a.Y, MathF.Min(b.Y, c.Y)) > Side + tol) continue;
             // heightmap vertices under the triangle
             float minX = MathF.Min(a.X, MathF.Min(b.X, c.X)), maxX = MathF.Max(a.X, MathF.Max(b.X, c.X));
             float minY = MathF.Min(a.Y, MathF.Min(b.Y, c.Y)), maxY = MathF.Max(a.Y, MathF.Max(b.Y, c.Y));

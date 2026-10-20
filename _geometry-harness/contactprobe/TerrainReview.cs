@@ -22,6 +22,7 @@ static class TerrainReview
     {
         var tci = new TerrainContactIndex(cidx, land, closure) { Epsilon = eps, FloatThreshold = floatThreshold, BurialThreshold = burialThreshold };
         tci.Progress = (pass, n) => Console.WriteLine($"   ... {pass}: {n:N0} references, {sw.Elapsed.TotalSeconds:0}s");
+        tci.SlowNote = line => Console.WriteLine($"   ... {line} (at {sw.Elapsed.TotalSeconds:0}s)");
         string Name(int p) => pluginName(p);
         bool Beth(int p) => PluginKinds.IsBethesda(Name(p));
         bool Cc(int p) => Name(p).StartsWith("cc", StringComparison.OrdinalIgnoreCase);
@@ -144,7 +145,8 @@ static class TerrainReview
                     C(TerrainStatus.Row) + C(TerrainStatus.StillResting) + C(TerrainStatus.TerrainAgrees) + C(TerrainStatus.NotRestingAsAuthored) + C(TerrainStatus.NoAuthoredGround),
                     new Dictionary<string, long> { ["UnreadableLand"] = C(TerrainStatus.Refused), ["DeletedWithPlacement"] = C(TerrainStatus.DeletedWithPlacement),
                         ["DeletedInOwnerView"] = C(TerrainStatus.DeletedInOwnerView), ["EnableChainUnresolved"] = C(TerrainStatus.EnableUnresolved),
-                        ["DuplicateGrid"] = C(TerrainStatus.DuplicateGrid), ["AuthoredDiagonalsDisagree"] = C(TerrainStatus.AuthoredCannotTell) },
+                        ["DuplicateGrid"] = C(TerrainStatus.DuplicateGrid), ["AuthoredDiagonalsDisagree"] = C(TerrainStatus.AuthoredCannotTell),
+                        ["OverWorkLimit"] = C(TerrainStatus.UnjudgedCost) },
                     new Dictionary<string, long> { ["NotAPlacedObject"] = C(TerrainStatus.NotObject), ["Marker"] = C(TerrainStatus.Marker), ["NoBody"] = C(TerrainStatus.NoBody),
                         ["DisabledAtLoad"] = C(TerrainStatus.DisabledAtLoad), ["DeletedAtLoad"] = C(TerrainStatus.DeletedAtLoad) },
                     $"float {floatThreshold:0.#} u, burial {burialThreshold:0.#} u, ε {eps:0.#} u; rows {rowSet.Count:N0}, class {cls.Count:N0}; burial is exact for a uniform shift, a lower bound otherwise"),

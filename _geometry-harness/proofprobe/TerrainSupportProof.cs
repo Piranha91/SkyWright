@@ -451,6 +451,17 @@ static class TerrainSupportProof
               wantEmit.All(emitted.Contains) && emitted.Where(caseKeys.Contains).All(wantEmit.Contains) && otherRows.Count == (F < 32f ? 2 : 0),
               $"emitted {emitted.Count} (case rows {emitted.Count(caseKeys.Contains)}, the two rocks' rows {otherRows.Count}, expected {(F < 32f ? 2 : 0)}); missing {string.Join(",", keys.Where(kv => wantEmit.Contains(kv.Value) && !emitted.Contains(kv.Value)).Select(kv => kv.Key))}");
 
+        // TS-cost (2026-10-20, the work limit): K3's box needs its rock read; with a limit of 1 triangle pair it is not judged
+        if (F == 8f)
+        {
+            var tight = new TerrainContactIndex(r.Cidx, r.Land, r.Closure) { Epsilon = 4f, FloatThreshold = F, BurialThreshold = B, WorkLimit = 1 };
+            var c3 = tight.Explain(keys["K3"]);
+            Check("TS-cost: a support reading past the work limit -> UnjudgedCost, counted, never a verdict",
+                  c3.Status == TerrainStatus.UnjudgedCost && c3.Why.Contains("work limit"), "expected UnjudgedCost; got " + D(c3));
+            var k1t = tight.Explain(keys["K1"]);
+            Check("TS-cost: a body the ground decides needs no support reading -> judged as before", k1t is { Status: TerrainStatus.Row, Verdict: TerrainVerdict.Buried },
+                  "expected Buried; got " + D(k1t));
+        }
         // K16, the other arm: without E and E2 both boxes are judged rows
         if (F == 8f)
         {
