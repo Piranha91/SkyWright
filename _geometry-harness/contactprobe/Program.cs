@@ -380,7 +380,8 @@ long meshesMeasured = 0, hostColl = 0, hostRender = 0, depColl = 0, depRender = 
 
 // The default pass keeps no decoded mesh beyond the shared contact cache budget (MeshGeometryReader.cs): ContactIndex keeps a summary
 // per base, and a mesh evicted from the budget is decoded again from the same bytes. The run's mesh counters, the wind labels and
-// --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, as before.
+// --geom-report lines are written on a mesh's first decode only. The other modes memoise every base's geometry, and their
+// mesh store decodes each mesh once and keeps it, so bases sharing a mesh share one copy, as before.
 bool boundedGeometry = selectedModes == 0;
 // One archive reader per archive for the default pass (housecarl-core ArchiveReadScope.cs): each archive's table is read once in the
 // pass, not on every mesh read; disposed when the program ends (try/finally through using). The other modes read as before.
