@@ -68,6 +68,35 @@ static class MeshIntersectionProof
         return Soup(v, 0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3);
     }
 
+    // A closed square pyramid on the x axis: base square at x = baseX (half-width half), apex at (apexX, 0, 0); consistently wound.
+    static TriangleSoup Pyramid(float baseX, float half, float apexX)
+    {
+        var v = new[]
+        {
+            new Vector3(baseX, -half, -half), new Vector3(baseX, half, -half),
+            new Vector3(baseX, half, half), new Vector3(baseX, -half, half),
+            new Vector3(apexX, 0, 0)
+        };
+        return Soup(v, 0, 1, 2, 0, 2, 3, 1, 0, 4, 2, 1, 4, 3, 2, 4, 0, 3, 4);
+    }
+
+    // A closed n-sided prism along z (radius 1, height 2): n bottom-fan, n top-fan and 2n side triangles; consistently wound.
+    static TriangleSoup Prism(int n)
+    {
+        var v = new List<Vector3>();
+        for (int k = 0; k < n; k++) v.Add(new(MathF.Cos(2 * MathF.PI * k / n), MathF.Sin(2 * MathF.PI * k / n), 0));
+        for (int k = 0; k < n; k++) v.Add(new(MathF.Cos(2 * MathF.PI * k / n), MathF.Sin(2 * MathF.PI * k / n), 2));
+        int cb = v.Count; v.Add(new(0, 0, 0));
+        int ct = v.Count; v.Add(new(0, 0, 2));
+        var idx = new List<int>();
+        for (int k = 0; k < n; k++)
+        {
+            int b0 = k, b1 = (k + 1) % n, t0 = n + k, t1 = n + (k + 1) % n;
+            idx.AddRange(new[] { cb, b1, b0, ct, t0, t1, b0, b1, t1, b0, t1, t0 });
+        }
+        return Soup(v.ToArray(), idx.ToArray());
+    }
+
     static TriangleSoup Frame()
     {
         static TriangleSoup Quad(float x0, float y0, float x1, float y1) =>
@@ -369,6 +398,72 @@ static class MeshIntersectionProof
         catch (Exception ex)
         {
             check("mesh: self-intersecting closed-indexed soup never gains a solid containment answer",
+                  false, $"threw {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // ValidateSolid's self-scan across BVH leaves (lane V, 2026-10-20). Two crossing pyramids, 6 triangles each, split 6/6
+        // along x: the left leaf holds P (base x=0, apex x=3), the right leaf Q (base x=4, apex x=1). V1 gives P the lower
+        // triangle indices, the orientation the old scan never tested; V1c gives Q the lower indices and must agree.
+        var farSolid = Tetra(new(100, 0, 0), 1);
+        var pyramidP = Pyramid(0, 1, 3);
+        var pyramidQ = Pyramid(4, 1.5f, 1);
+        const string selfReason = "self_intersecting_or_self_touching_mesh";
+        bool IsSelfIntersecting(MeshIntersectionResult r) =>
+            Norm(r.Status) == "unknown" && r.Reason == selfReason && Norm(r.SurfaceRelation) == "separated"
+            && Norm(r.Containment) == "unknown" && r.Intersects is null;
+        string Show(MeshIntersectionResult r) =>
+            $"status={r.Status} reason={r.Reason} surface={r.SurfaceRelation} containment={r.Containment} intersects={r.Intersects} pairs={r.TrianglePairsTested}";
+        foreach (var (name, soup) in new[]
+        {
+            ("mesh: V1 crossing components whose lower indices sit in the left leaf are self-intersecting", Combine(pyramidP, pyramidQ)),
+            ("mesh: V1c crossing components whose lower indices sit in the right leaf are self-intersecting", Combine(pyramidQ, pyramidP)),
+        })
+        {
+            try
+            {
+                var fresh = MeshIntersection.Query(soup, farSolid);
+                var pa = MeshIntersection.PreparedMesh.Create(soup);
+                var pb = MeshIntersection.PreparedMesh.Create(farSolid);
+                var filling = MeshIntersection.Query(pa, pb);
+                var memoHit = MeshIntersection.Query(pa, pb);
+                check(name,
+                      IsSelfIntersecting(fresh) && filling == fresh && memoHit == fresh,
+                      $"soup: {Show(fresh)}; prepared: {Show(filling)}; memo hit: {Show(memoHit)}");
+            }
+            catch (Exception ex)
+            {
+                check(name, false, $"threw {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
+        // V2: the self-scan tests every unordered triangle pair whose bounds meet exactly once. A closed 32-triangle prism (four
+        // leaves) against a far open triangle: the surface traversal and the open side consume nothing, so the query's units are
+        // the prism's scan alone, counted here by brute force.
+        try
+        {
+            var prism = Prism(8);
+            var farOpen = Triangle(new(100, 0, 0), new(101, 0, 0), new(100, 1, 0));
+            int expected = 0;
+            var boxes = Enumerable.Range(0, prism.Indices.Length / 3).Select(t =>
+            {
+                var v = new[] { prism.Vertices[prism.Indices[t * 3]], prism.Vertices[prism.Indices[t * 3 + 1]], prism.Vertices[prism.Indices[t * 3 + 2]] };
+                return (Min: Vector3.Min(Vector3.Min(v[0], v[1]), v[2]), Max: Vector3.Max(Vector3.Max(v[0], v[1]), v[2]));
+            }).ToArray();
+            for (int i = 0; i < boxes.Length; i++)
+            for (int j = i + 1; j < boxes.Length; j++)
+                if (boxes[i].Min.X <= boxes[j].Max.X && boxes[j].Min.X <= boxes[i].Max.X &&
+                    boxes[i].Min.Y <= boxes[j].Max.Y && boxes[j].Min.Y <= boxes[i].Max.Y &&
+                    boxes[i].Min.Z <= boxes[j].Max.Z && boxes[j].Min.Z <= boxes[i].Max.Z)
+                    expected++;
+            var counted = MeshIntersection.Query(prism, farOpen);
+            check("mesh: V2 a valid solid's self-scan tests each overlapping triangle pair exactly once",
+                  Norm(counted.Status) == "ok" && Norm(counted.Containment) == "not_applicable_open_mesh"
+                  && counted.TrianglePairsTested == expected,
+                  $"pairs={counted.TrianglePairsTested} expected={expected} triangles={boxes.Length} {Show(counted)}");
+        }
+        catch (Exception ex)
+        {
+            check("mesh: V2 a valid solid's self-scan tests each overlapping triangle pair exactly once",
                   false, $"threw {ex.GetType().Name}: {ex.Message}");
         }
 
