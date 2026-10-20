@@ -21,6 +21,7 @@ static class TerrainReview
                           string? emitPath, string? basePath, string? jsonPath, string instance, ConfigurationIdentity identity, int listN, Stopwatch sw)
     {
         var tci = new TerrainContactIndex(cidx, land, closure) { Epsilon = eps, FloatThreshold = floatThreshold, BurialThreshold = burialThreshold };
+        tci.Progress = (pass, n) => Console.WriteLine($"   ... {pass}: {n:N0} references, {sw.Elapsed.TotalSeconds:0}s");
         string Name(int p) => pluginName(p);
         bool Beth(int p) => PluginKinds.IsBethesda(Name(p));
         bool Cc(int p) => Name(p).StartsWith("cc", StringComparison.OrdinalIgnoreCase);
