@@ -110,6 +110,9 @@ static class TerrainReview
         PrintDistribution("Inherited", inh, eps);
         PrintDistribution("Inherited without CC", inh.Except(inhCc).ToList(), eps);
         PrintDistribution("Inherited Fixed only", inh.Where(r => r.Motion == DependentMotion.Fixed).ToList(), eps);
+        // the sensitivity at the run's own burial threshold, carried onto the emit and the limits line (Gate B review: the pass is fragile)
+        string Pct2(float sh) { int bu = inh.Count(r => r.Facts is { } f && DetectorModel.TerrainSupport(f, eps, burialThreshold, burialThreshold, sh).Verdict == TerrainVerdict.Buried); return inh.Count == 0 ? "n/a" : $"{100f * bu / inh.Count:0.00}%"; }
+        string fragility = $"the Inherited burial floor at {burialThreshold:0.#} u reads {Pct2(0.10f)} / {Pct2(0.25f)} / {Pct2(0.50f)} at shares 0.10 / 0.25 / 0.50, and the registered share {burialShare:0.##} is {note}";
         Console.WriteLine($"   burial share sensitivity (Inherited; the registered share is {burialShare:0.##}, {note}):");
         foreach (var col in Columns)
             Console.WriteLine($"      buried at ≥{col:0} u by share: " + string.Join("   ", new[] { 0.10f, 0.25f, 0.50f }.Select(sh =>
@@ -176,7 +179,7 @@ static class TerrainReview
                         ["OverWorkLimit"] = C(TerrainStatus.UnjudgedCost) },
                     new Dictionary<string, long> { ["NotAPlacedObject"] = C(TerrainStatus.NotObject), ["Marker"] = C(TerrainStatus.Marker), ["NoBody"] = C(TerrainStatus.NoBody),
                         ["DisabledAtLoad"] = C(TerrainStatus.DisabledAtLoad), ["DeletedAtLoad"] = C(TerrainStatus.DeletedAtLoad) },
-                    $"float {floatThreshold:0.#} u, burial {burialThreshold:0.#} u over share {burialShare:0.##} ({note}), ε {eps:0.#} u; rows {rowSet.Count:N0}, class {cls.Count:N0}; burial reads the surface in view on an area-weighted sampling"),
+                    $"float {floatThreshold:0.#} u, burial {burialThreshold:0.#} u over share {burialShare:0.##} ({note}), ε {eps:0.#} u; rows {rowSet.Count:N0}, class {cls.Count:N0}; burial reads the surface in view on an area-weighted sampling; {fragility}"),
             };
             ConflictIo.Write(emitPath, new ConflictFile("contactprobe", instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
                                                         Population, EnablePopulation.BaselineStateName, identity));
@@ -213,7 +216,7 @@ static class TerrainReview
                           "(a later rotation-only override is not attributed); the engine's terrain triangulation is not in the file, so both diagonals are read and a " +
                           "disagreement is CannotTell; burial reads the surface at or above the authored ground, its share on an area-weighted sampling of the body " +
                           "(at least 16 u spacing, about 250,000 points a body, 1 u depth bins); a render body made only of effect, alpha-blend or no-depth-write shapes is " +
-                          "no body, and one whose shapes cannot be read is kept and counted; nothing here is verified in game.");
+                          "no body, and one whose shapes cannot be read is kept and counted; " + fragility + "; nothing here is verified in game.");
         Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
         return 0;
     }
