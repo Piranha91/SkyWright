@@ -60,7 +60,8 @@ public sealed class TerrainContactIndex
     /// <summary>The cos of the steepest contact normal that still holds a body up (60°).</summary>
     public float HoldCos { get; init; } = 0.5f;
     public Dictionary<string, long> Counts { get; } = new();
-    /// <summary>Called every 10,000 references judged, with the pass's name and the count (a progress line; never a verdict).</summary>
+    /// <summary>Called every 1,000 references judged, with the pass's name and the count, and once when the support index is
+    /// built (a progress line; never a verdict).</summary>
     public Action<string, int>? Progress { get; set; }
 
     public TerrainContactIndex(ContactIndex cidx, CellBoundaryIndex land, IReadOnlyList<HashSet<int>> closure)
@@ -158,6 +159,7 @@ public sealed class TerrainContactIndex
             var box = _cidx.WorldBox(b, pose);
             if (!box.IsEmpty) _supports.Add(w.Space, box, key);
         }
+        Progress?.Invoke("support index built, references", _supports.Count);
         return _supports;
     }
 
@@ -207,7 +209,7 @@ public sealed class TerrainContactIndex
             if (inScope is not null && !inScope(key)) continue;
             if (!TouchesCandidate(key, w, cand)) { Count("footprint outside a cell with 2+ LAND statements"); continue; }
             var r = Explain(key);
-            if (++seen % 10000 == 0) Progress?.Invoke("differential pass", seen);
+            if (++seen % 1000 == 0) Progress?.Invoke("differential pass", seen);
             Count(r.Status.ToString());
             if (keepAll || r.Status is TerrainStatus.Row or TerrainStatus.Refused) rows.Add(r);
         }
@@ -226,7 +228,7 @@ public sealed class TerrainContactIndex
             if (inSample is not null && !inSample(key)) { Count("absolute: outside the sample"); continue; }
             var r = Explain(key, absolute: true);
             Count("absolute: " + r.Status);
-            if (++seen % 10000 == 0) Progress?.Invoke("absolute floor", seen);
+            if (++seen % 1000 == 0) Progress?.Invoke("absolute floor", seen);
             if (r.Status == TerrainStatus.Row) rows.Add(r with { Cells = null });
         }
         return rows;
