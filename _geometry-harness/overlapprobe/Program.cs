@@ -47,7 +47,7 @@ using HousecarlCore.Progress;
 //
 // usage: overlapprobe [--list N] [--surface-tolerance U] [--max-triangle-pairs N] [--pair-seconds S]
 //                     [--emit path] [--base emit.json] [--reverse-of baseline.json] [--dump path] [--json path] [--pair-ledger path]
-//                     [--prepared-cache-mib N]
+//                     [--prepared-cache-mib N] [--pair-cache-read FILE]* [--pair-cache-write FILE]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
 //                     [--motion swept [--motion-delta U]]
@@ -199,6 +199,12 @@ string? pairLedgerPath = null;
 // --prepared-cache-mib N: the pair sweep prepares each candidate's world soup once and keeps it, least recently used first out,
 // within about N MiB (default 2,048; 0 prepares every pair's soups afresh, as before). Results do not depend on it.
 long preparedCacheMib = 2048;
+// --pair-cache-read FILE (repeatable) / --pair-cache-write FILE (P3): placed-pair results from earlier runs of this same build,
+// keyed by every argument of the query (PairResultCache in _shared/OverlapIndex.cs); this run's own results are written to the
+// write file. A file of another build or pair time limit is not read, and says so. Results do not depend on it.
+var pairCacheReads = new List<string>();
+string? pairCacheWrite = null;
+PairResultCache? pairResults = null;
 // --reverse-of BASELINE_EMIT (with --base): a reverse run that takes this order's baseline emit's rows, coverage and class
 // instead of sweeping again, and re-measures only the --base rows (ReverseFromBaseline.cs); refused unless the baseline emit
 // is this run's own (configuration, population, state, policy, instance and the stage-independent coverage).
@@ -270,6 +276,8 @@ try
         else if (flag == "--pair-ledger") { pairLedgerPath = NeedValue(i, flag); i++; }
         else if (flag == "--prepared-cache-mib") { if (!long.TryParse(NeedValue(i, flag), out preparedCacheMib) || preparedCacheMib < 0) throw new ArgumentException("--prepared-cache-mib requires a whole number of MiB, 0 or more"); i++; }
         else if (flag == "--reverse-of") { reverseOfPath = NeedValue(i, flag); i++; }
+        else if (flag == "--pair-cache-read") { pairCacheReads.Add(NeedValue(i, flag)); i++; }
+        else if (flag == "--pair-cache-write") { pairCacheWrite = NeedValue(i, flag); i++; }
         else if (flag == "--geometry-manifest") { geometryManifestPath = NeedValue(i, flag); i++; }
         else if (flag == "--historical-pairs") { historicalPairsPath = NeedValue(i, flag); i++; }
         else if (flag == "--contact-evidence-pairs") { contactEvidencePairsPath = NeedValue(i, flag); i++; }
@@ -459,9 +467,17 @@ if (reverseOfPath is not null)
         : null;
     if (clash is not null) { Console.Error.WriteLine(clash); return 2; }
 }
-foreach (var input in new[] { (Flag: "--base", Path: basePath), (Flag: "--switch-map", Path: switchMapPath), (Flag: "--reverse-of", Path: reverseOfPath) })
+foreach (var input in new[] { (Flag: "--base", Path: basePath), (Flag: "--switch-map", Path: switchMapPath), (Flag: "--reverse-of", Path: reverseOfPath) }
+                      .Concat(pairCacheReads.Select(p => (Flag: "--pair-cache-read", Path: (string?)p))))
     if (input.Path is not null && !File.Exists(input.Path))
     { Console.Error.WriteLine($"{input.Flag} input does not exist: {input.Path}"); return 2; }
+if (pairCacheReads.Count > 0 || pairCacheWrite is not null)
+{
+    pairResults = PairResultCache.ForThisBuild(pairSeconds);
+    foreach (var f in pairCacheReads) pairResults.Read(f);
+    Console.WriteLine($"pair cache: read {pairResults.ReadEntries:N0} result(s) from {pairResults.FilesRead.Count} file(s)"
+        + (pairResults.FilesSkipped.Count == 0 ? "" : $"; not read: {string.Join("; ", pairResults.FilesSkipped)}"));
+}
 
 var sw = Stopwatch.StartNew();
 // WHAT THIS RUN EVALUATES, decided in one place (_shared/HarnessOrderCli.cs): the real profile, a --enable/--disable
@@ -1289,7 +1305,15 @@ IReadOnlyList<SettledGravity> SettledGravities()
 // Pair-loop timers (P0): observation only; the console and the run record carry them after each stage.
 var sameTimer = new PairTimer(); var crossTimer = new PairTimer(); var provenanceTimer = new PairTimer(); var reconcileTimer = new PairTimer();
 (PhysicalState State, string Detail) OverlapPredicate(FormKey laterKey, FormKey otherKey)   // overlapprobe/OverlapCredit.cs
-    => new OverlapCredit(idx, popMode, resolvedArms, SurfaceGeometryOf, surfaceTolerance, maxTrianglePairs, pairSeconds, reconcileTimer).Predicate(laterKey, otherKey);
+    => new OverlapCredit(idx, popMode, resolvedArms, SurfaceGeometryOf, surfaceTolerance, maxTrianglePairs, pairSeconds, reconcileTimer, pairResults).Predicate(laterKey, otherKey);
+void WritePairCache()
+{
+    if (pairResults is null) return;
+    Console.WriteLine($"pair cache: {pairResults.Hits:N0} served, {pairResults.Misses:N0} measured, {pairResults.NotStored:N0} not kept (time-outs or failures)"
+        + (pairCacheWrite is null ? "" : $"; {pairResults.Stored:N0} written -> {pairCacheWrite}"));
+    __run.Feature("pair-cache.hits", pairResults.Hits, "pairs", FeatureAt.Final).Feature("pair-cache.misses", pairResults.Misses, "pairs", FeatureAt.Final);
+    if (pairCacheWrite is not null) { pairResults.Write(pairCacheWrite); __run.Artifact(pairCacheWrite); }
+}
 void ReportTimer(string name, PairTimer t, double? stageSeconds)
 {
     var c = t.Core;
@@ -1301,7 +1325,7 @@ void ReportTimer(string name, PairTimer t, double? stageSeconds)
         + $"({c.SurfaceUnits:N0} u), validate {S(c.ValidateTicks):0.0}s ({c.ValidateUnits:N0} u), containment {S(c.ContainmentTicks):0.0}s "
         + $"({c.ContainmentUnits:N0} u), unaccounted {wall - phases:0.0}s; paths world {t.Paths[0]:N0} / zero-area skip {t.Paths[1]:N0} / "
         + $"shifted {t.Paths[2]:N0} / refused {t.Paths[3]:N0}; budget-exhausted {c.BudgetExhausted:N0}, time-outs {t.Timeouts:N0}, "
-        + $"preparation refusals {c.PrepareRefused:N0}");
+        + $"preparation refusals {c.PrepareRefused:N0}; served from the pair cache {t.CacheHits:N0}");
     string f = $"actual-shape-queries.{name}";
     foreach (var (k, v, u) in new (string, double, string)[] {
         ("pairs", t.Pairs, "pairs"), ("queries", c.Queries, "queries"), ("wall.seconds", wall, "seconds"),
@@ -1506,6 +1530,7 @@ if (reverseOfPath is not null)
         Console.WriteLine($"configuration: {identity.Short}");
         Console.WriteLine($"\nreverse of {Path.GetFileName(reverseOfPath)}: its {baseline.Conflicts.Count:N0} Introduced + Blind conflicts and coverage "
                         + $"carried (no sweep run), {basePredicatesMeasured.Count:N0} --base predicate(s) measured -> {emitPath}");
+        WritePairCache();
         __run.Stage("finalize", "finalizing overlap run", 1, "runs").Advance();
         Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
         return 0;
@@ -1544,7 +1569,7 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
         lastPairProgress = checkedPairs;
         Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
     }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation,
-    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache);
+    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache, results: pairResults);
 double sweepSeconds = sw.Elapsed.TotalSeconds - sweepStarted;
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
 ReportTimer("same", sameTimer, null);
@@ -1611,7 +1636,7 @@ var rows = new List<SurfaceOverlapRow>(sweep.CrossHits.Count);
 foreach (var h in sweep.CrossHits)
 {
     rows.Add(idx.JudgeSurface(h, closure, SurfaceGeometryOf, surfaceTolerance,
-        maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms, default, provenanceTimer));
+        maxTrianglePairs, TimeSpan.FromSeconds(pairSeconds), popMode == PopulationMode.Flags ? null : arms, default, provenanceTimer, pairResults));
     __run.Advance();
 }
 ReportTimer("provenance", provenanceTimer, null);
@@ -2243,6 +2268,7 @@ if (geometryManifestPath is not null)
     Console.WriteLine($"wrote geometry manifest: {recordRows.Count:N0} records, {pairRows.Count:N0} union pairs -> {geometryManifestPath}");
 }
 
+WritePairCache();
 __run.Stage("finalize", "finalizing overlap run", 1, "runs").Advance();
 Console.WriteLine($"\nActual render-surface relations are geometry evidence, not compatibility severity, intent or a game-verified defect.");
 Console.WriteLine($"Limits: this measures static render surfaces; collision and runtime animation are unassessed; rotation- and scale-only re-placements are not provenance steps ({idx.SilentRePlacements:N0} counted above);");

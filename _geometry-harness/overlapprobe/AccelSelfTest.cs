@@ -182,5 +182,75 @@ static class AccelSelfTest
         t.Check("P2-3 a preparation that throws is the pair's own 'mesh query failed' outcome through the cache too, and is not kept",
                 compared4 == 4 && mismatched4 == 0 && !cache4.Holds(thrower) && cache4.Holds(good) && cache4.Misses == 5,
                 $"{compared4} compared, {mismatched4} mismatched, misses {cache4.Misses}, holds thrower {cache4.Holds(thrower)}; {string.Join("; ", bad4)}");
+
+        P3(t);
+    }
+
+    // P3: the pair-result cache (PairResultCache in _shared/OverlapIndex.cs).
+    static void P3(ProbeSelfTest t)
+    {
+        // P3-1: every parameter of the cached call is keyed, recorded in the header, or named as unable to change a stored result.
+        var parameters = typeof(SurfaceQueryOutcome).GetMethods().Where(m => m.Name == "QueryPlaced").SelectMany(m => m.GetParameters())
+            .Select(p => p.Name!).Distinct().ToList();
+        var accounted = PairResultCache.KeyedParameters.Concat(PairResultCache.HeaderParameters).Concat(PairResultCache.Unkeyed.Keys).ToList();
+        t.Check("P3-1 every QueryPlaced parameter is in the key, the file header or the named unkeyed list (and nothing else is listed)",
+                parameters.Count > 0 && parameters.ToHashSet().SetEquals(accounted) && accounted.Count == accounted.Distinct().Count(),
+                $"parameters [{string.Join(", ", parameters)}]; accounted [{string.Join(", ", accounted)}]");
+
+        // Placed members: each fixture soup as a model, placed at a pose; the world soup is that model transformed.
+        var rot = new Vec3(0.1f, 0.2f, 0.3f);
+        var placed = Pairs().Select(p => (p.Name,
+            A: new SurfaceQueryOutcome.Placed(p.A, new Vec3(1000, 2000, 30), rot, 1f), B: new SurfaceQueryOutcome.Placed(p.B, new Vec3(1000, 2000, 30), rot, 1f))).ToList();
+        SurfaceQueryOutcome Q(SurfaceQueryOutcome.Placed a, SurfaceQueryOutcome.Placed b, TriangleSoup wa, TriangleSoup wb, PairResultCache? c, PairTimer? timer = null)
+            => SurfaceQueryOutcome.QueryPlaced(wa, a, wb, b, 1e-5, 2_000_000, TimeSpan.FromSeconds(60), default, timer, null, c);
+        var worlds = placed.Select(p => (p.Name, p.A, p.B, WA: SpatialOverlap.TransformSoup(p.A.Model, p.A.Pos, p.A.Rot, p.A.Scale),
+                                         WB: SpatialOverlap.TransformSoup(p.B.Model, p.B.Pos, p.B.Rot, p.B.Scale))).ToList();
+
+        // P3-2: results written by one run and read by the next give every pair the computed outcome and path.
+        const string probe = "self-test-probe", core = "self-test-core";
+        var cold = new PairResultCache(probe, core, 60);
+        var file = Path.Combine(Path.GetTempPath(), $"pd-p3-{Environment.ProcessId}.pair-results.jsonl.gz");
+        int compared = 0, mismatched = 0; var bad = new List<string>();
+        foreach (var w in worlds) Q(w.A, w.B, w.WA, w.WB, cold);
+        cold.Write(file);
+        var warm = new PairResultCache(probe, core, 60);
+        string? why = warm.Read(file);
+        foreach (var w in worlds)
+        {
+            var tp = new PairTimer(); var tw = new PairTimer();
+            var plain = Q(w.A, w.B, w.WA, w.WB, null, tp);
+            var hit = Q(w.A, w.B, w.WA, w.WB, warm, tw);
+            compared++;
+            if (plain != hit || tp.LastPath != tw.LastPath) { mismatched++; if (bad.Count < 3) bad.Add($"{w.Name}: {plain}/{tp.LastPath} vs {hit}/{tw.LastPath}"); }
+        }
+        t.Check("P3-2 a result written by one run and read by the next equals the computed outcome and path for every pair",
+                why is null && compared == worlds.Count && mismatched == 0 && warm.Hits == worlds.Count && warm.Misses == 0 && cold.Stored == worlds.Count,
+                $"read {(why ?? "ok")}; {compared} compared, {mismatched} mismatched, hits {warm.Hits}, misses {warm.Misses}, stored {cold.Stored}; {string.Join("; ", bad)}");
+
+        // P3-3..5: the key moves with the mesh bytes and with the pose; a file of another core build is not read.
+        var w0 = worlds[0];
+        string k0 = warm.Key(w0.WA, w0.A, w0.WB, w0.B, 1e-5, 2_000_000);
+        var moved = w0.WA with { Vertices = w0.WA.Vertices.Select((v, i) => i == 0 ? v + new Vector3(0.001f, 0, 0) : v).ToArray() };
+        t.Check("P3-3 changing one vertex of a world soup (the mesh bytes as placed) changes the key",
+                warm.Key(moved, w0.A, w0.WB, w0.B, 1e-5, 2_000_000) != k0 && warm.Key(w0.WA, w0.A, w0.WB, w0.B, 1e-5, 2_000_000) == k0, "");
+        var otherPose = w0.A with { Pos = w0.A.Pos with { X = w0.A.Pos.X + 1 } };
+        t.Check("P3-4 changing a member's pose, with the same world soup object, changes the key (PairFrame re-places from the pose)",
+                warm.Key(w0.WA, otherPose, w0.WB, w0.B, 1e-5, 2_000_000) != k0, "");
+        var otherCore = new PairResultCache(probe, "another-core", 60);
+        string? coreWhy = otherCore.Read(file);
+        var otherLimit = new PairResultCache(probe, core, 120);
+        string? limitWhy = otherLimit.Read(file);
+        t.Check("P3-5 a file written by another housecarl-core build, or under another pair time limit, is not read, and says why",
+                coreWhy == "another housecarl-core build" && otherCore.ReadEntries == 0 && limitWhy is not null && limitWhy.StartsWith("pair time limit")
+                && otherLimit.ReadEntries == 0 && otherCore.Key(w0.WA, w0.A, w0.WB, w0.B, 1e-5, 2_000_000) != k0,
+                $"core: {coreWhy}; limit: {limitWhy}");
+
+        // P3-6: a result a time limit cut short is never kept.
+        var timed = new PairResultCache(probe, core, 60);
+        var big = worlds.First(w => w.Name == "nested grid");
+        var cut = SurfaceQueryOutcome.QueryPlaced(big.WA, big.A, big.WB, big.B, 1e-5, 2_000_000, TimeSpan.Zero, default, null, null, timed);
+        t.Check("P3-6 a result cut short by the pair time limit is not kept",
+                cut.Reason is "cancelled" or "pair time budget exhausted" && timed.NotStored == 1 && timed.Stored == 0, $"{cut.Reason}, not stored {timed.NotStored}");
+        try { File.Delete(file); } catch { }
     }
 }
