@@ -1567,6 +1567,43 @@ public static class DetectorModel
 
     /// <summary>Rule 12's split for a pair: who the later winner is.</summary>
     public static WaterPopulation ClassifyLandSeamPopulation(PluginKind later) => ClassifyWaterPopulation(later);
+
+    // ---- TERRAIN SUPPORT (Research/TERRAIN-SUPPORT-DESIGN-2026-10-18.md §4, §5) --------------------------------------------
+    // A Fixed exterior reference that rested on the terrain in its placement owner's view floats over, or is buried in, the
+    // winning terrain. The pairing (owner, views, clearances, supports) is _shared/TerrainContactIndex.cs; these are the decisions.
+
+    /// <summary>One footprint cell's sight facts: the placement owner R, the winning LAND's plugin W, and whether a later plugin
+    /// whose record carries the winning position (a carrier, R excluded) could see W's LAND.</summary>
+    public readonly record struct TerrainSightFacts(int Owner, int Winner, bool WinnerInOwnerClosure, bool OwnerInWinnerClosure, bool CarrierSawWinner);
+
+    /// <summary>§4: Unchanged view when R is W or W is in R's closure; Seen when R is in W's closure or a carrier could see W's
+    /// LAND; Blind otherwise — the combination nobody saw.</summary>
+    public static TerrainSight TerrainProvenance(TerrainSightFacts f)
+        => TerrainSight.Unchanged;   // stub: not built
+
+    /// <summary>§4's populations, decided before sight: both sides Bethesda family → Inherited (the floor); either side the
+    /// unofficial patch → Ussep (counted apart); otherwise Mod.</summary>
+    public static TerrainPopulation TerrainPopulationOf(bool ownerBethesda, bool winnerBethesda, bool ownerUssep, bool winnerUssep)
+        => TerrainPopulation.Mod;
+
+    /// <summary>One diagonal's readings for a body over its footprint: whether each view has ground under it, the signed vertical
+    /// clearance (body above ground; negative below it), and the burial (the largest increase in covered depth, winning over
+    /// authored, never negative). <c>WinningClearance</c> is +∞ where the winning view has no ground under the body.</summary>
+    public readonly record struct TerrainDiagonal(bool AuthoredGround, float AuthoredClearance, bool WinningGround, float WinningClearance, float Burial);
+
+    /// <summary>A body's facts for §5: both diagonals, whether a reference support holds it in the winning arm (within ε, or
+    /// penetrated), the least downward gap to one (+∞ when none below), and a refusal naming an unreadable LAND.</summary>
+    public readonly record struct TerrainSupportFacts(TerrainDiagonal D0, TerrainDiagonal D1, bool OnReference, float ReferenceGap, string? Refusal = null);
+
+    /// <summary>§5's population gate: the body rested on the authored terrain (clearance ≤ ε under both diagonals) — or it did
+    /// not (both above ε, or no authored ground) — or the diagonals disagree.</summary>
+    public static TerrainAuthored TerrainAuthoredRest(TerrainSupportFacts f, float eps) => TerrainAuthored.NotResting;
+
+    /// <summary>§5's winning verdict per diagonal, then folded: burial over the threshold → Buried; held by a reference → Resting;
+    /// within ε of the ground → Resting; least gap over the float threshold → Floating; otherwise Resting. The diagonals
+    /// disagreeing → CannotTell. A refusal (an unreadable LAND) → Refused by name.</summary>
+    public static (TerrainVerdict Verdict, float Gap, float Burial, string Why) TerrainSupport(TerrainSupportFacts f, float eps, float floatThreshold, float burialThreshold)
+        => (TerrainVerdict.Refused, float.NaN, float.NaN, "not built");
 }
 
 /// <summary>Who a plugin is, for the truth rule. Bethesda and USSEP are filenames; Generated is the fixed filenames
@@ -1729,3 +1766,12 @@ public enum DependentMotion { Fixed, Movable, Unknown }
 /// it, so it cannot be the class; the order without the mover is not walked for it), RePlacedGrounded / RePlacedStillEmpty (the
 /// mover's side moved it), ReGrounded (another floor or wall holds it now; read only when the order without the mover was walked).</summary>
 public enum EmptySpaceVerdict { Absent, Falls, Refused, NoRelation, FloatsAsShipped, FloorPopulation, MoverOnBaseGame, Grounded, RePlacedGrounded, RePlacedStillEmpty, ReGrounded, LeftInEmptySpace }
+
+/// <summary>Terrain support (§5): the winning verdict for a body that rested on its owner's terrain.</summary>
+public enum TerrainVerdict { Resting, Floating, Buried, CannotTell, Refused }
+/// <summary>The population gate (§5): rested on the authored terrain, did not, or the two diagonals disagree.</summary>
+public enum TerrainAuthored { Resting, NotResting, CannotTell }
+/// <summary>Whose clash (§4): Unchanged (the owner saw the winning ground), Seen (one mod's own defect), Blind (the class).</summary>
+public enum TerrainSight { Unchanged, Seen, Blind }
+/// <summary>Rule 12's split for a terrain row (§4): Mod (the class), Inherited (Bethesda on Bethesda, the floor), Ussep.</summary>
+public enum TerrainPopulation { Mod, Inherited, Ussep }
