@@ -1464,7 +1464,19 @@ def build_prediction(ctx: dict) -> dict:
 
     def path_case_only(rk):
         v = (p_rows.get(rk) or {}).get("row", {}).get("values") or {}
-        return same_but_path_case(v.get("lost"), v.get("winner"))
+        return same_but_path_case(v.get("lost"), v.get("winner")) or same_in_chain(p_of(rk[0]), rk)
+
+    def same_in_chain(arm_id, rk):
+        """The losing plugin's value of the row's field reads equal to the winner's in the record import's own chain
+        (path case and unused bytes folded, as recordrows compares): no change the game sees."""
+        got_ = field_chain(arm_id, rk, rk[2])
+        if got_ is None:
+            return False
+        provs_, vals_, _ = got_
+        low_ = [str(x).lower() for x in provs_]
+        if rk[2].lower() not in low_ or rk[3].lower() not in low_:
+            return False
+        return vals_[low_.index(rk[2].lower())] == vals_[low_.index(rk[3].lower())]
 
     # Whose edit a value is (window 2, lane core; Pilgrim's review B1): the one rule, recordrows.own_change, asked of
     # the record's provider chain in that setup, read from the record import's own transcripts. A plugin changed a field
@@ -1968,7 +1980,7 @@ def build_prediction(ctx: dict) -> dict:
             o0_ = str(hit["row"]["other"][0])
             g.setdefault("_partnerSet", set()).add(o0_)
             pairs_ = g.setdefault("_objPairs", [])
-            if len(pairs_) < 2 and (object_name(rk[4]) or object_name(o0_)):
+            if not pairs_ and (object_name(rk[4]) or object_name(o0_)):
                 pairs_.append(bind(words["itemObjectPair"], {"a": named(rk[4]), "b": named(o0_)}))
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
             # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
@@ -1998,7 +2010,8 @@ def build_prediction(ctx: dict) -> dict:
                 g["_winnerOwn"] = g.get("_winnerOwn", 0) + 1
                 v_ = hit["row"].get("values") or {}
                 if value_recorded(v_.get("lost")) and value_recorded(v_.get("winner")):
-                    ex_ = (named(rk[4], rk[5]), hit["row"].get("field"), shown_value(v_.get("lost")),
+                    nm_ = object_name(rk[4], rk[5])
+                    ex_ = (rk[4], (nm_ + ", " if nm_ else "") + str(hit["row"].get("field")), shown_value(v_.get("lost")),
                            shown_value(v_.get("winner")))
                     best_ = g.get("_winnerOwnExample")
                     if best_ is None or len(ex_[2]) + len(ex_[3]) < len(best_[2]) + len(best_[3]):
@@ -3092,6 +3105,7 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             if rk[1] == "LOST-EDIT" and (same_but_path_case((hit["row"].get("values") or {}).get("lost"),
                                                             (hit["row"].get("values") or {}).get("winner"))
+                                         or same_in_chain(patched_arm, rk)
                                          or lost_edit_noise(rk, patched_rows, patched_arm)):
                 continue                       # two values naming the same file, or no change the game sees (BPT S1)
             # counted by what the clash is (an object of a by-object check, once however many rows name it), never
