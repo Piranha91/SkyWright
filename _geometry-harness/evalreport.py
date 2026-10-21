@@ -1405,6 +1405,19 @@ def build_prediction(ctx: dict) -> dict:
     names = ctx.get("names") if isinstance(ctx.get("names"), dict) else {}
     name_refs, name_bases = names.get("refs") or {}, names.get("bases") or {}
 
+    def object_name(fk, summary=None):
+        """What a record is, for a modder: its editor ID from the row's summary, else a placed object's base editor ID
+        from the names enrichment ("a <base>"); "" when neither is read (Pilgrim review S3, Missives review 6)."""
+        m_ = re.match(r"^\S+ (\S+?):", str(summary or ""))
+        if m_ and not re.match(r"^[0-9A-Fa-f]{6}$", m_.group(1)) and not str(fk).startswith(m_.group(1)):
+            return m_.group(1)
+        base_ = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
+        return f"a {base_['editorId']}" if base_.get("editorId") else ""
+
+    def named(fk, summary=None):
+        n_ = object_name(fk, summary)
+        return f"{fk} ({n_})" if n_ else str(fk)
+
     def bodiless(fk):
         """An object whose base record has no model has no body to clash, whatever its type (W-B3, round 4): decided
         from the record's model field, never a name."""
@@ -1950,6 +1963,13 @@ def build_prediction(ctx: dict) -> dict:
         if rk[1] != "LOST-EDIT" and hit["row"].get("other"):
             g.setdefault("_partners", []).extend(o_ for o_ in [str(rk[4])] + [str(x_) for x_ in hit["row"]["other"]]
                                                  if o_.split(":", 1)[-1].lower() not in pt_lower)
+        if rk[1] != "LOST-EDIT" and hit["row"].get("other"):
+            # the objects by name (Missives review 6) and whether every row is against one object (BPT review S6)
+            o0_ = str(hit["row"]["other"][0])
+            g.setdefault("_partnerSet", set()).add(o0_)
+            pairs_ = g.setdefault("_objPairs", [])
+            if len(pairs_) < 2 and (object_name(rk[4]) or object_name(o0_)):
+                pairs_.append(bind(words["itemObjectPair"], {"a": named(rk[4]), "b": named(o0_)}))
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
             # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
             g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
@@ -1978,14 +1998,17 @@ def build_prediction(ctx: dict) -> dict:
                 g["_winnerOwn"] = g.get("_winnerOwn", 0) + 1
                 v_ = hit["row"].get("values") or {}
                 if value_recorded(v_.get("lost")) and value_recorded(v_.get("winner")):
-                    ex_ = (rk[4], hit["row"].get("field"), shown_value(v_.get("lost")), shown_value(v_.get("winner")))
+                    ex_ = (named(rk[4], rk[5]), hit["row"].get("field"), shown_value(v_.get("lost")),
+                           shown_value(v_.get("winner")))
                     best_ = g.get("_winnerOwnExample")
                     if best_ is None or len(ex_[2]) + len(ex_[3]) < len(best_[2]) + len(best_[3]):
                         g["_winnerOwnExample"] = ex_
         if rk[1] == "LOST-EDIT" and rk[4]:
             # examples: a field skill data prefers (a placed object's position) before any other (Snazzy review 3:
             # a worldspace texture path is no example a modder can act on)
-            ex = f"{rk[4]} ({hit['row'].get('field')})" if hit["row"].get("field") else str(rk[4])
+            nm_ = object_name(rk[4], rk[5])
+            ex = (f"{rk[4]} ({nm_ + ', ' if nm_ else ''}{hit['row'].get('field')})" if hit["row"].get("field")
+                  else named(rk[4], rk[5]))
             rank = 0 if hit["row"].get("field") in preferred_example_fields else 1
             pool = g.setdefault("_recordPool", ([], []))[rank]
             if len(pool) < 2 and ex not in pool:
@@ -2097,10 +2120,17 @@ def build_prediction(ctx: dict) -> dict:
             if len(places) == 1:
                 detail.append(bind(words["itemPlaceOne" if g["count"] == 1 else "itemPlaceAll"], {"place": top[0][0]}))
             else:
-                detail.append(bind(words["itemPlaces"], {"places": "; ".join(f"{pl} ({fmt_n(n)})" for pl, n in top),
+                detail.append(bind(words["itemPlaces" if top[0][1] * 2 > sum(places.values()) else "itemPlacesSpread"],
+                                   {"places": "; ".join(f"{pl} ({fmt_n(n)})" for pl, n in top),
                                                         "more": (bind(words["itemPlacesMore"], {"count": len(places) - len(top)})
                                                                  if len(places) > len(top) else "")}))
         g.pop("_records", None)
+        partners_ = g.pop("_partnerSet", set())
+        obj_pairs_ = g.pop("_objPairs", [])
+        if g["count"] > 1 and len(partners_) == 1:
+            detail.append(bind(words["itemOnePartner"], {"count": fmt_n(g["count"]), "object": named(next(iter(partners_)))}))
+        elif obj_pairs_:
+            detail.append(bind(words["itemObjectPairs"], {"pairs": "; ".join(obj_pairs_)}))
         st_entries = g.pop("_stateEntries", None)
         several = [len(e_["states"]) for e_ in st_entries or [] if len(e_["states"]) > 1]
         if several and words.get("itemStates"):
@@ -2272,6 +2302,7 @@ def build_prediction(ctx: dict) -> dict:
     # Sewers review S2: an evaluated mod's own geometry clashes with base-game objects no other mod edits are not
     # clashes between mods, but they are measured problems of that mod: said by check, never only in a set-aside count
     base_geo = collections.OrderedDict()
+    type_only_re = re.compile(words["seamHeightsPattern"]) if words.get("seamHeightsPattern") else None
     # a cell whose counted lost edit is its mod putting back the value from before its master's change: a one-sided
     # seam there is that change seen at the cell's boundary, said as that (Missives review B2)
     put_cells = {str(rk_[4]): (rk_[3].lower(), rk_[2]) for rk_ in put_back if adm_of.get(rk_) == "undoesMaster"}
@@ -2297,6 +2328,9 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             c_["pairs"].add(pair_)
             c_["n"] += 1
+            if type_only_re is not None and type_only_re.search(str(e.get("summary") or "")):
+                m_ = type_only_re.search(str(e.get("summary") or ""))
+                c_["typeOnly"] = c_.get("typeOnly", 0) + (1 if m_.group("h1") == m_.group("h2") else 0)
             if e.get("findingId") and e["findingId"] not in c_["fids"]:
                 c_["fids"].append(e["findingId"])
     for (mod_, side_), by_c in base_geo.items():
@@ -2306,6 +2340,8 @@ def build_prediction(ctx: dict) -> dict:
             loss_lines.append({"text": bind(line_, {
                 "mod": mod_, "master": side_[1] if isinstance(side_, tuple) else "",
                 "cells": fmt_n(len(seam_cells.get((mod_, side_)) or ())), "parts": "; ".join(
+                bind(words["seamTypeOnlyPart"], {"count": fmt_n(c_["n"])}) if c_.get("typeOnly") == c_["n"] and
+                words.get("seamTypeOnlyPart") else
                 f"{fmt_n(c_['n'])} {unit_noun(cid_, c_['kind'], c_['n'])} ({title_of(cid_)})" for cid_, c_ in by_c.items())}),
                 "findingIds": [f_ for c_ in by_c.values() for f_ in c_["fids"]][:1]})
     # P63: a mod changing a value of a plugin it lists as a master is said as that, one line per mod and master, with
@@ -3283,8 +3319,10 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             if g["kind"] == "LOST-EDIT":
                 for (loser, winner), n_ in collections.Counter((e["A"], e["B"]) for e in es).items():
+                    u_ = (words.get("stillThereLostUnits") or {}).get(g["checkId"]) or words["fieldNoun"]
                     stays_parts.append((n_, bind(words["stillThereLost"], {"count": fmt_n(n_), "loser": loser,
-                                                                           "winner": winner})))
+                                                                           "winner": winner,
+                                                                           "unit": u_[0 if n_ == 1 else 1]})))
                 for e in es:
                     v_ = e.get("values") or {}
                     if (disables(v_.get("lost")) and not disables(v_.get("winner"))
@@ -3295,17 +3333,23 @@ def build_prediction(ctx: dict) -> dict:
             objs = {str(e["formKey"]) for e in es} | {str(o_) for e in es for o_ in e.get("other") or []}
             places = collections.Counter(str((p_rows.get(keyof(e)) or {}).get("row", {}).get("label") or "") for e in es)
             places.pop("", None)
-            where = ""
+            where_ = []
+            if g["checkId"] not in by_object:
+                where_.append(bind(words["stillThereObjects"], {"count": fmt_n(len(objs)),
+                                                                 "noun": "object" if len(objs) == 1 else "objects"}))
             if places:
                 pl_, n_pl = places.most_common(1)[0]
-                where = ", " + bind(words["stillThereAllIn" if len(places) == 1 else "stillThereMostIn"],
-                                    {"place": re.sub(r"\s+\d+ tris -> \d+$", "", pl_), "count": fmt_n(n_pl)})
+                w_key = ("stillThereAllIn" if len(places) == 1 else "stillThereMostIn" if n_pl * 2 > sum(places.values())
+                         else "stillThereSomeIn")
+                where_.append(bind(words[w_key], {"place": re.sub(r"\s+\d+ tris -> \d+$", "", pl_),
+                                                  "count": fmt_n(n_pl), "more": fmt_n(len(places) - 1)}))
             stays_parts.append((len(es), bind(words["stillThereGeometry"], {
                 "count": fmt_n(len(es)), "unit": unit_noun(g["checkId"], g["kind"], len(es)), "modA": g["mods"][0],
-                "modB": g["mods"][1], "objects": fmt_n(len(objs)) if g["checkId"] not in by_object else "",
-                "where": where}).replace(" (, ", " (").replace(" ()", "")))
+                "modB": g["mods"][1], "where": (" (" + ", ".join(where_) + ")") if where_ else ""})))
         stays_parts.sort(key=lambda x: -x[0])
         limit = int(words.get("stillThereMax") or 3)
+        if len(stays_parts) == limit + 1:
+            limit += 1                         # one more item is said, never "1 more in 1 other item" (BPT review S5)
         shown = [t_ for _, t_ in stays_parts[:limit]]
         if len(stays_parts) > limit:
             shown.append(bind(words["stillThereMore"][0 if len(stays_parts) - limit == 1 else 1], {"count": fmt_n(sum(n_ for n_, _ in stays_parts[limit:])),
