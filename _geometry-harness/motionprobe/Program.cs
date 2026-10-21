@@ -148,6 +148,15 @@ int Emit(object o, bool ok)
 static float[] V(Vector3 v) => new[] { v.X, v.Y, v.Z };
 static float[] Q(Quaternion q) => new[] { q.X, q.Y, q.Z, q.W };
 static float[] M(Matrix4x4 m) => new[] { m.M11, m.M12, m.M13, m.M21, m.M22, m.M23, m.M31, m.M32, m.M33 };
+// Bounds of every sample's vertices together, as Bounds of their concatenation gives them, in one pass with no copy.
+static object SampleBounds(IReadOnlyList<SweptSample> samples)
+{
+    long n = samples.Sum(x => (long)x.Soup.Vertices.Length);
+    if (n == 0) return new { empty = true };
+    Vector3 lo = new(float.MaxValue), hi = new(float.MinValue);
+    foreach (var x in samples) foreach (var v in x.Soup.Vertices) { lo = Vector3.Min(lo, v); hi = Vector3.Max(hi, v); }
+    return new { min = V(lo), max = V(hi), vertices = n, triangles = 0 };
+}
 static object Bounds(TriangleSoup? s)
 {
     if (s is null || s.Vertices.Length == 0) return new { empty = true };
@@ -307,7 +316,7 @@ try
             }
             return Emit(new { verb, rel, policy = SweptGeometry.PolicyVersion, r.Status, r.Reason, r.Geometry, r.MaxDelta, r.Converged, r.Solid,
                               animations = r.Animations, samples = r.Samples.Count,
-                              outerBounds = Bounds(r.Samples.Count == 0 ? null : new TriangleSoup(r.Samples.SelectMany(x => x.Soup.Vertices).ToArray(), Array.Empty<int>())),
+                              outerBounds = SampleBounds(r.Samples),
                               volume = v }, r.Status == "built");
         }
         default:
