@@ -106,6 +106,9 @@ using HousecarlCore.Progress;
 //                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
 //                   hard limit), 40 % of (memory free before the host loop - live data) and 1 GiB (an explicit size may exceed it).
 //                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
+//   --phase-timers FILE  the contact code's own time split (ContactIndex BestContact / PairContact / Judge, their caches and the core
+//                   contact steps; _shared/ContactIndex.cs ContactTimer) printed after the run, recorded as run features and written to
+//                   FILE as JSON; for measuring where the time goes. Changes no output
 //   --bos on|off    apply the Base Object Swapper layer (*_SWAP.ini) so every ref is judged by the base the game loads
 //                   (default on; _shared/BosHook.cs); off = the record bases
 //   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
@@ -164,6 +167,7 @@ string? stateSpec = null, switchMapPath = null;
 var forceEnable = new List<string>();   // --force-enable: singletons read as enabled after load (EnableArms.Force)
 float eps = 4f;            // touching: surfaces within ε and no vertex deeper than ε inside. A chosen number, stated.
 float reach = 128f;        // how far from a moved host a dependent is looked for (the records pass's contact-plausible radius).
+string? phaseTimersPath = null;   // --phase-timers FILE: the contact code's own time split (changes no output)
 string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, labelledMover = null, geomReport = null;
 bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false, contactEvidence = false;
 HashSet<string>? only = null;
@@ -199,6 +203,7 @@ try
         else if (flag == "--eps") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out eps)) throw new ArgumentException("--eps requires a number"); i++; }
         else if (flag == "--reach") { if (!float.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out reach)) throw new ArgumentException("--reach requires a number"); i++; }
         else if (flag == "--json") { jsonPath = NeedValue(i, flag); i++; }
+        else if (flag == "--phase-timers") { phaseTimersPath = NeedValue(i, flag); i++; }
         else if (flag == "--emit") { emitPath = NeedValue(i, flag); i++; }
         else if (flag == "--base") { basePath = NeedValue(i, flag); i++; }
         else if (flag == "--overlap-json") { overlapJson = NeedValue(i, flag); i++; }
@@ -557,6 +562,7 @@ IReadOnlyCollection<string>? RenderClasses(FormKey baseKey)
 try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 meshReader.Store(boundedGeometry, cidx.Budget);
+if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();
 var idx = cidx.Index;
 // --bos on (default): the Base Object Swapper reader replaces each reference's record base with the base the
 // game loads, and a moving override becomes a placement step under a pseudo-plugin after the last real one
@@ -960,6 +966,7 @@ Console.WriteLine($"   winner arm: {winHash.Count:N0} physical refs placed, unde
 
 var rows = new List<ContactRow>();
 int done = 0, hostsOutsidePopulation = 0, rowsOutsidePopulation = 0;
+long hostLoop0 = Stopwatch.GetTimestamp();
 foreach (var h in hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.Previous.Cell.ToString()))
 {
     if (population is not null && !RefInPopulation(h.Key))
@@ -980,6 +987,7 @@ foreach (var h in hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.
     if (++done % 2000 == 0) Console.WriteLine($"   ... {done:N0}/{hosts.Count:N0} hosts, {rows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
     if (done % 500 == 0) MemStages.Print("host loop", cidx, rows.Count, done);
 }
+double hostLoopSeconds = Stopwatch.GetElapsedTime(hostLoop0).TotalSeconds;
 Console.WriteLine($"   pairs within the box band: {rows.Count + skips.BoxesApart:N0} tested; set aside: {skips.BoxesApart:N0} boxes further apart than {cidx.BoxBand:0}u, "
                 + $"{skips.DepIntroducedByMover:N0} dependents the mover introduced, {skips.DepOtherSpace:N0} in another space, "
                 + $"{skips.DepAbsentInArm:N0} dependents disabled at runtime in the arm without the mover (R1), {skips.DepEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
@@ -1347,5 +1355,17 @@ Console.WriteLine($"        terrain is not a reference (exterior rows are split 
 Console.WriteLine($"        runtime existence is the enable chain as the records state it (R1) — a script that enables or disables a reference is invisible here; a marker is the Is-Marker flag (R2).");
 WriteGeomReport();
 MemStages.Print("end", cidx, rows.Count, done);
+if (cidx.Timer is { } contactTimer)
+{
+    Console.WriteLine("\n==== CONTACT TIMERS (--phase-timers) ====");
+    Console.WriteLine($"   host loop {hostLoopSeconds:0.0}s");
+    foreach (var ln in contactTimer.Lines()) Console.WriteLine(ln);
+    __run.Feature("host-loop.seconds", hostLoopSeconds, "seconds", FeatureAt.Final);
+    foreach (var (n, v, u) in contactTimer.Features()) __run.Feature(n, v, u, FeatureAt.Final);
+    var timerDir = Path.GetDirectoryName(Path.GetFullPath(phaseTimersPath!));
+    if (!string.IsNullOrEmpty(timerDir)) Directory.CreateDirectory(timerDir);
+    File.WriteAllText(phaseTimersPath!, contactTimer.ToJson(new Dictionary<string, object> { ["hostLoopSeconds"] = hostLoopSeconds }));
+    Console.WriteLine($"   wrote the contact timer table -> {phaseTimersPath}");
+}
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;
