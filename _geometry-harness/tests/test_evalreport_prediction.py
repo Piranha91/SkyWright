@@ -3897,6 +3897,20 @@ def main():
 
     for name, fn in [("after-final/C825-ground-still-lost-said-at-the-top", c825_ground_still_lost_said_at_the_top)]:
         cell(name, fn)
+    # C826 (Missives review 4): a further evaluation supplied with the report is named, with the setups it measured.
+    def c826_further_evaluation_named():
+        with tempfile.TemporaryDirectory() as td:
+            other_ = make_bundle(Path(td) / "eval-small", [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"),
+                                                           arm("without-a", [BASE, OTHER])],
+                                 {(CONTACT, "baseline"): [], (CONTACT, "without-a"): []}, [MOD_A])
+            plan, md, _ = compile_and_render(WP_ARMS, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch")}, [MOD_A],
+                                             patches=[PATCH], settings_extra={"alsoBundles": [str(other_)]})
+        line = next((ln for ln in md.splitlines() if ln.startswith("Also supplied with this report")), "")
+        ok = "eval-small" in line and f"baseline ({OTHER}, {MOD_A})" in line and f"without-a ({OTHER})" in line
+        return ok, line[:300]
+
+    for name, fn in [("after-final/C826-further-evaluation-named", c826_further_evaluation_named)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
