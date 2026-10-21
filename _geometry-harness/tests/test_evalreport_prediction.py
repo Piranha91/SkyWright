@@ -3638,6 +3638,89 @@ def main():
                      ("after-final/C809-winner-within-object-size-stays-counted",
                       c809_winner_within_object_size_stays_counted)]:
         cell(name, fn)
+    # ---------------------------------------- after the final round, group A: whose change a row is, and what disables
+    HF_, CC_ = "HearthFires.esm", "ccFish.esm"
+
+    # C810 (Clockwork review S1): OtherMod carries Update.esm's Location fix (a CC master before it had put the vanilla
+    # value back); ModA puts back the vanilla value over its master Update.esm. One value is lost: said once, on the
+    # line about undoing its master's fix, never also counted as OtherMod's clash.
+    def c810_value_carried_from_undone_master_is_said_once():
+        L = f"00C810:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, CC_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, CC_, OTHER, MOD_A, MOD_B])]
+        chains = [(L, "Cell", [(BASE, {"Location": "022646:Skyrim.esm"}), (UPD, {"Location": "018A58:Skyrim.esm"}),
+                               (CC_, {"Location": "022646:Skyrim.esm"}), (OTHER, {"Location": "018A58:Skyrim.esm"}),
+                               (MOD_A, {"Location": "022646:Skyrim.esm"})])]
+        p_rows = [lost_row(UPD, MOD_A, L, "Location", ["Location=018A58:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L, "Location", ["Location=018A58:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={UPD: [BASE], CC_: [BASE], OTHER: [BASE, UPD, CC_], MOD_A: [BASE, UPD],
+                                           MOD_B: [BASE]})
+        got = {e["A"]: e["admission"] for e in rec_of(plan, L)}
+        pred = reader(plan).get("prediction") or {}
+        ok = got == {UPD: "undoesMaster", OTHER: "sameValue"} and "Location" not in pred.get("verdict", "")
+        return ok, f"{got}; verdict {pred.get('verdict', '')[:160]!r}"
+
+    # C811 (Clockwork review S2/S3, coordinator D on S3): what disables an object is read from each side's whole
+    # record, not only the row's field. Both sides disable it (the winner by its flags): set aside, and never "still
+    # brings back". Only the winner disables it: counted, with the sentence that the winning version disables it.
+    def c811_disabled_by_the_whole_record():
+        D1, D2 = f"00C811:{BASE}", f"00C812:{BASE}"
+        base_ = {"Placement.Position": "100,100,0", "Placement.Rotation": "0,0,0", "SkyrimMajorRecordFlags": "0"}
+        gone_ = dict(base_, **{"Placement.Position": "100,100,-30000"})
+        moved_ = dict(base_, **{"Placement.Position": "300,100,0"})
+        off_ = dict(base_, **{"Placement.Position": "100,100,-14095", "SkyrimMajorRecordFlags": "InitiallyDisabled"})
+        chains = [(D1, "PlacedObject", [(BASE, base_), (OTHER, gone_), (MOD_A, off_)]),
+                  (D2, "PlacedObject", [(BASE, base_), (OTHER, moved_), (MOD_A, off_)])]
+
+        def txt(v):
+            return f"Position={v['Placement.Position']}; Rotation=0,0,0"
+        p_rows = [lost_row(OTHER, MOD_A, D1, "Placement", txt(gone_), txt(off_), txt(base_), before=BASE),
+                  lost_row(OTHER, MOD_A, D2, "Placement", txt(moved_), txt(off_), txt(base_), before=BASE)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = (rec_of(plan, D1)[0]["admission"], rec_of(plan, D2)[0]["admission"])
+        said = "winning value disables the object" in md and "brings back" not in md
+        return got == ("bothDisabled", "admitted") and said, f"{got}; said {said}"
+
+    # C812 (BPT review S1): a patch's value lost to another mod's that names the same file in other letter case is no
+    # new clash with the patch; a different file is.
+    def c812_path_case_is_no_new_clash_with_the_patch():
+        N0, W1, W2 = f"00C813:{BASE}", f"00C814:{BASE}", f"00C815:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, N0, "Owner", "o", "a", "v")]
+        same_ = lost_row(PATCH, OTHER, W1, "HdLodDiffuseTexture", "data\\textures\\landscape\\a.dds",
+                         "Data\\Textures\\Landscape\\A.dds", "Data\\Textures\\Landscape\\A.dds")
+        diff_ = lost_row(PATCH, OTHER, W2, "HdLodDiffuseTexture", "data\\textures\\landscape\\b.dds",
+                         "Data\\Textures\\Landscape\\A.dds", "Data\\Textures\\Landscape\\A.dds")
+        plan, md, _ = core_bundle(p_rows, list(p_rows) + [same_, diff_])
+        v = reader(plan).get("validation") or {}
+        return v.get("patchProblems") == 1, f"new with the patch {v.get('patchProblems')}"
+
+    # C813 (Missives review 3): OtherMod's value is HearthFires.esm's, which it only carries (no edit of its own), and
+    # ModA's winning value is ThirdMod's: the earlier HearthFires change is still lost, so the value in game changes.
+    # Never "nothing is lost in game"; said with the field.
+    def c813_carried_value_still_changes_in_game():
+        W = f"00C816:{BASE}"
+        arms = [arm("baseline", [BASE, HF_, THIRD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, THIRD, OTHER, MOD_A, MOD_B])]
+        chains = [(W, "Cell", [(BASE, {"WaterHeight": "0"}), (HF_, {"WaterHeight": "3.4028235E+38"}),
+                               (THIRD, {"WaterHeight": "-2147483648"}), (OTHER, {"WaterHeight": "3.4028235E+38"}),
+                               (MOD_A, {"WaterHeight": "-2147483648"})])]
+        p_rows = [lost_row(HF_, MOD_A, W, "WaterHeight", ["WaterHeight=3.4028235E+38"], PH, PH),
+                  lost_row(OTHER, MOD_A, W, "WaterHeight", ["WaterHeight=3.4028235E+38"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], THIRD: [BASE], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE]})
+        got = {e["A"]: e["admission"] for e in rec_of(plan, W)}
+        line = next((ln for ln in md.splitlines() if "only undoes the change" in ln), "")
+        ok = (got == {HF_: "baseGame", OTHER: "notOwnEdit"} and "the value in game does change" in line
+              and "00C816" in line and "nothing is lost in game" not in line)
+        return ok, f"{got}; {line[-260:]!r}"
+
+    for name, fn in [("after-final/C810-value-carried-from-undone-master-is-said-once",
+                      c810_value_carried_from_undone_master_is_said_once),
+                     ("after-final/C811-disabled-by-the-whole-record", c811_disabled_by_the_whole_record),
+                     ("after-final/C812-path-case-is-no-new-clash-with-the-patch", c812_path_case_is_no_new_clash_with_the_patch),
+                     ("after-final/C813-carried-value-still-changes-in-game", c813_carried_value_still_changes_in_game)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
