@@ -2064,7 +2064,9 @@ def main():
         item = next((i for i in p.get("items") or [] if i["checkId"] == RECORDS), {})
         ok = (adm == [("000801", "EnableParent", "bothDisabled"), ("000801", "Placement", "bothDisabled"),
                       ("000802", "Placement", "admitted")]
-              and "disables the object" in item.get("plain", "") and "2 record fields on objects both mods disable" in md)
+              # blind review (0A0315): said as off for good
+              and "sets the object off for good" in item.get("plain", "")
+              and "2 record fields on objects both mods set off for good" in md)
         return ok, f"admission {adm}; item {item.get('plain', '')[:200]!r}"
 
     # C504. What stays with the patch is said at the top, in the prediction section; a value a patch sets or keeps is
@@ -3565,10 +3567,12 @@ def main():
     def c805_winner_disables_stays_counted():
         P1, P2 = f"00C805:{BASE}", f"00C806:{BASE}"
         b_, o_ = pl(100, 100, 0), pl(100, 100, -0.5)
-        a1, a2 = pl(400, 100, -30000), dict(pl(400, 100, 0), SkyrimMajorRecordFlags="InitiallyDisabled")
+        NOPARENT = {"EnableParent.Reference": "has no EnableParent.Reference", "EnableParent.Flags": "has no EnableParent.Flags"}
+        # blind review (0A0315): off for good is below the world, or enabled opposite to the player
+        a1, a2 = pl(400, 100, -30000), dict(pl(400, 100, 0), **{"EnableParent.Reference": "000014:Skyrim.esm",
+                                                                 "EnableParent.Flags": "SetEnableStateToOppositeOfParent"})
         chains = [(P1, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a1)]),
-                  (P2, "PlacedObject", [(BASE, dict(b_, SkyrimMajorRecordFlags="0")),
-                                        (OTHER, dict(o_, SkyrimMajorRecordFlags="0")), (MOD_A, a2)])]
+                  (P2, "PlacedObject", [(BASE, dict(b_, **NOPARENT)), (OTHER, dict(o_, **NOPARENT)), (MOD_A, a2)])]
         p_rows = [pl_row(P1, OTHER, MOD_A, b_, o_, a1), pl_row(P2, OTHER, MOD_A, b_, o_, a2)]
         plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
         got = [rec_of(plan, x)[0]["admission"] for x in (P1, P2)]

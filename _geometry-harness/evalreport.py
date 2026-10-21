@@ -1445,9 +1445,22 @@ def build_prediction(ctx: dict) -> dict:
     # both mods disable has no lost change that shows in game (third blind review, W-S1)
     disabled_res = [re.compile(x) for x in words.get("disabledValuePatterns") or []]
 
+    always_on = {str(x).lower() for x in (words.get("disabledRecord") or {}).get("alwaysEnabledParents") or []}
+    dis_flag = (words.get("disabledRecord") or {}).get("flag") or "InitiallyDisabled"
+
     def disables(v):
+        """A value that sets its object off for good (blind review, Winterhold 0A0315): moved below the world, or enabled
+        opposite to a parent that is always enabled (the player). A bare initially-disabled flag only starts it off."""
         text = " ".join(str(x) for x in v) if isinstance(v, list) else str(v or "")
-        return any(r_.search(text) for r_ in disabled_res)
+        if any(r_.search(text) for r_ in disabled_res):
+            return True
+        return "OppositeOfParent" in text and any(p_ in text.lower() for p_ in always_on)
+
+    def off_at_load(v):
+        """A value that has its object off when the game loads: off for good (disables), or only initially disabled.
+        What a load-time statement reads ("brings back", "switches back on"); never what has no effect in game."""
+        text = " ".join(str(x) for x in v) if isinstance(v, list) else str(v or "")
+        return disables(v) or dis_flag in text
     both_disabled_cache = []
 
     def both_disabled(rk):
@@ -1600,24 +1613,35 @@ def build_prediction(ctx: dict) -> dict:
             return max(abs(hi_[0] - lo_[0]), abs(hi_[1] - lo_[1])) / 2
         return SEAT_SPOT_UNITS
 
-    dis_flag = (words.get("disabledRecord") or {}).get("flag") or "InitiallyDisabled"
-    always_on = {str(x).lower() for x in (words.get("disabledRecord") or {}).get("alwaysEnabledParents") or []}
+    def provider_fields_all(ch, i):
+        return {k_: v_ for top_ in ch.get("values") or {} for k_, v_ in recordrows.provider_fields(ch, top_, i).items()}
 
     def provider_disables(ch, i):
-        """Whether provider i's version of the record disables the object at load, from its whole record: moved below
-        the world, or initially disabled with no enable parent, or enabled opposite to a parent that is always
-        enabled (the player). An initially disabled object with another enable parent follows that parent: not
-        decided here (False)."""
-        f_ = {k_: v_ for top_ in ch.get("values") or {} for k_, v_ in recordrows.provider_fields(ch, top_, i).items()}
+        """Whether provider i's version of the record sets the object off for good, from its whole record: moved below
+        the world, or enabled opposite to a parent that is always enabled (the player). An initially disabled object
+        with no parent or another parent only starts off: a script or quest may enable it (blind review, 0A0315)."""
+        f_ = provider_fields_all(ch, i)
         if disables("; ".join(f"{k_}={v_}" for k_, v_ in f_.items() if k_.endswith("Position"))):
             return True
         ref_ = str(f_.get("EnableParent.Reference") or "").strip()
         has_parent = bool(re.match(r"^[0-9A-Fa-f]{6}:", ref_))     # a form key; absent in any wording is none
         opposite_ = "Opposite" in str(f_.get("EnableParent.Flags") or "")
-        if has_parent and ref_.lower() in always_on and opposite_:
-            return True
-        return dis_flag in " ".join(str(v_) for k_, v_ in f_.items() if k_.endswith("Flags") and not
-                                    k_.startswith("EnableParent")) and not has_parent
+        return bool(has_parent and ref_.lower() in always_on and opposite_)
+
+    def side_starts_off(rk, plugin):
+        """`plugin`'s version is initially disabled but not off for good: it starts off, and a script or quest may
+        enable it, so its position and values still matter then."""
+        ch = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch:
+            return False
+        low_ = [str(x).lower() for x in ch["providers"]]
+        if str(plugin).lower() not in low_:
+            return False
+        i_ = low_.index(str(plugin).lower())
+        f_ = provider_fields_all(ch, i_)
+        return (dis_flag in " ".join(str(v_) for k_, v_ in f_.items() if k_.endswith("Flags")
+                                     and not k_.startswith("EnableParent"))
+                and not provider_disables(ch, i_))
 
     def side_disables(rk, plugin, arm_id=None):
         """Whether `plugin`'s version of the row's record disables the object (provider_disables); None where the
@@ -2010,6 +2034,8 @@ def build_prediction(ctx: dict) -> dict:
                                      or side_disables(rk, rk[3])) and not (
                 disables((hit["row"].get("values") or {}).get("lost")) or side_disables(rk, rk[2])):
             g["_disables"] = g.get("_disables", 0) + 1
+        if rk[1] == "LOST-EDIT" and (side_starts_off(rk, rk[2]) or side_starts_off(rk, rk[3])):
+            g["_startsOff"] = g.get("_startsOff", 0) + 1
         if rk[1] == "LOST-EDIT":
             # what each side has (Pilgrim review B1): the winner put back its master's earlier value, or changed the
             # field itself too; said in the item, never only "lost to"
@@ -2189,6 +2215,9 @@ def build_prediction(ctx: dict) -> dict:
         n_dis = g.pop("_disables", 0)
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
+        n_off = g.pop("_startsOff", 0)
+        if n_off and words.get("itemStartsOff"):
+            detail.append(bind(words["itemStartsOff"], {"count": fmt_n(n_off)}))
         fl_ = g.pop("_fieldsLine", None)
         if fl_:
             detail.append(bind(words["itemFields"], {"fields": fl_}))
@@ -3175,8 +3204,8 @@ def build_prediction(ctx: dict) -> dict:
                      and e["checkId"] == "geometry.navmesh-ownership"]
         history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds")
         undone_by = collections.Counter(rk[2] for rk, _ in undone)
-        switched_on = [rk for rk, h_ in undone if disables((h_["row"].get("values") or {}).get("lost"))
-                       and not disables((h_["row"].get("values") or {}).get("winner"))]
+        switched_on = [rk for rk, h_ in undone if off_at_load((h_["row"].get("values") or {}).get("lost"))
+                       and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
         n_enable = len(switched_on)
         enable_examples = list(dict.fromkeys(str(rk[4]) for rk in switched_on))[:3]
         def problems_text(with_checks=False):
@@ -3394,9 +3423,10 @@ def build_prediction(ctx: dict) -> dict:
                                                                            "unit": u_[0 if n_ == 1 else 1]})))
                 for e in es:
                     v_ = e.get("values") or {}
-                    if (disables(v_.get("lost")) and not disables(v_.get("winner"))
-                            and not side_disables(keyof(e), e["B"])):
-                        # the winner disables it too, by another field: nothing comes back (Clockwork review S2)
+                    if (off_at_load(v_.get("lost")) and not off_at_load(v_.get("winner"))
+                            and not side_disables(keyof(e), e["B"]) and not side_starts_off(keyof(e), e["B"])):
+                        # brings back is said of the load: the winner's version, by any field, has the object on at
+                        # load (Clockwork review S2; a version only initially disabled does not bring it back)
                         back.setdefault((e["B"], e["A"]), []).append(str(e["formKey"]))
                 continue
             objs = {str(e["formKey"]) for e in es} | {str(o_) for e in es for o_ in e.get("other") or []}
