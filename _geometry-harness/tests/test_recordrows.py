@@ -485,6 +485,27 @@ def case_43_a_list_change_the_winner_keeps_item_by_item_is_not_lost():
     assert rows == {"kept": (True, []), "dropped": (False, [(A, "Conditions")])}, rows
 
 
+def case_45_both_capture_forms_give_every_providers_field_values():
+    """After the final round (Pilgrim review B1): a rule that reads a record's values (where an object stands, which
+    actor value an effect has) gets each provider's full value of a field from either capture form. A tree answer lists
+    a provider's value only where it differs from the winner's, so the winner's value (in each difference's
+    parenthesis) fills the rest."""
+    fk = "0825F7:Skyrim.esm"
+    chain = [(BASE, {"Placement.Position": "-9153.301,5547.0957,-241.0651", "Placement.Rotation": "0,0,0"}),
+             (C, {"Placement.Position": "-9153.301,5547.0957,-241.395", "Placement.Rotation": "0,0,0"}),
+             (A, {"Placement.Position": "-9170.188,5452.2637,-227.8473", "Placement.Rotation": "0,0,0"}),
+             (B, {"Placement.Position": "-9170.188,5452.2637,-227.8473", "Placement.Rotation": "0,0,0"})]
+    answers = {}
+    for form in ("fields", "tree"):
+        with tempfile.TemporaryDirectory() as td:
+            req, resp = records_transcript(Path(td), chain, fk, "PlacedObject", form)
+            got = RR.read_chains(req, resp, ORDER_C, RR.load_scope())[fk]
+            answers[form] = [RR.provider_fields(got, "Placement", got["providers"].index(p)) for p in (BASE, C, A, B)]
+    assert answers["fields"] == answers["tree"], answers
+    assert answers["tree"][1]["Placement.Position"] == "-9153.301,5547.0957,-241.395", answers["tree"][1]
+    assert answers["tree"][2]["Placement.Rotation"] == answers["fields"][2]["Placement.Rotation"], answers
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

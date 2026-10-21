@@ -106,6 +106,29 @@ def records_transcript(chains):
     return req, resp
 
 
+def tree_transcript(chains):
+    """chains: [(formKey, record type, [(plugin, {field: value})])] in load order: one 2.0 tree answer per record
+    (`housecarl_records` form tree), each provider's differences from the winner with the winner's value in
+    parentheses, as the record imports capture them."""
+    req = [{"batchMarker": "b1"}, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "housecarl_records", "arguments": {"formids": [c[0] for c in chains], "project": {"form": "tree"}}}}]
+    resp = [{"batchMarker": "b1"}]
+    rows = []
+    for fk, rtype, chain in chains:
+        win_p, win = chain[-1]
+        nodes = []
+        for plugin, fields in chain[:-1]:
+            deltas = [f"{k}={v} ({win_p} {win[k]})" if k in win else f"{k}={v}" for k, v in fields.items()
+                      if win.get(k) != v]
+            nodes.append({"plugin": plugin, "is_winner": False, "is_reference": False, "complete": True,
+                          "deltas": deltas})
+        nodes.append({"plugin": win_p, "is_winner": True, "is_reference": True})
+        rows.append({"formid": fk, "type": rtype, "editorid": None, "reference": win_p,
+                     "touchers": [p for p, _ in chain], "nodes": nodes})
+    resp.append({"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": json.dumps({"rows": rows})}]}})
+    return req, resp
+
+
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
@@ -2815,9 +2838,12 @@ def main():
     THIRD = "ThirdMod.esp"
 
     def core_bundle(p_rows, w_rows=(), check=RECORDS, arms=None, masters=None, p_chains=(), w_chains=(),
-                    extra_results=None, targets=(MOD_A,), patches=(PATCH,), p_arm="without-patch", w_arm="baseline"):
+                    extra_results=None, targets=(MOD_A,), patches=(PATCH,), p_arm="without-patch", w_arm="baseline",
+                    p_tr=None, names=None):
         enr = {(check, p_arm): list(p_rows)}
         tr = {(check, p_arm): records_transcript(p_chains)} if p_chains else {}
+        if p_tr is not None:
+            tr[(check, p_arm)] = p_tr
         if w_arm:
             enr[(check, w_arm)] = list(w_rows)
             if w_chains:
@@ -3437,6 +3463,179 @@ def main():
                      ("w2-core/C673-needs-partner-whoever-wins", c673_needs_partner_whoever_wins),
                      ("w2-core/C674-order-risk-whoever-wins", c674_order_risk_whoever_wins),
                      ("w2-core/C675-new-with-patch-whoever-wins", c675_new_with_patch_whoever_wins)]:
+        cell(name, fn)
+
+    # ---------------------------------------- after the final round: a rebuilt record supersedes the loser's small fix
+    # (Pilgrim final review B1). Decided from the record data alone: (a) the winner changed what the record is (a kind
+    # field, skill data per record type) that the loser left alone; (b) the loser only seated the object (moved it
+    # straight up or down, not turned) and the winner moved it across to another spot, at least ten times as far and at
+    # least the object's size (64 u when its bounds are not read), without burying or disabling it.
+    MASTERS_ = {OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]}
+
+    def mgef(av, desc, name):
+        return {"Archetype.ActorValue": av, "Archetype.Type": "PeakValueModifier", "Description": desc, "Name": name}
+
+    def pl(x, y, z, rz="0"):
+        return {"Placement.Position": f"{x},{y},{z}", "Placement.Rotation": f"0,0,{rz}"}
+
+    def pl_row(fk, a, b, before, lost, win):
+        def txt(v):
+            return f"Position={v['Placement.Position']}; Rotation={v['Placement.Rotation']}"
+        return lost_row(a, b, fk, "Placement", txt(lost), txt(win), txt(before), before=BASE)
+
+    def superseded_line(md):
+        top = md.split("\n## ", 2)[1] if "\n## " in md else md
+        return next((ln for ln in top.splitlines() if "rebuilt" in ln), "")
+
+    # C800: the winner turned the effect into another one (new actor value) that OtherMod left alone: OtherMod's text
+    # describes the old effect. Set aside, out of the headline, said in plain words with the record facts.
+    def c800_kind_change_supersedes():
+        M = f"00C800:{BASE}"
+        chains = [(M, "MagicEffect", [(BASE, mgef("Speech", "+<mag> Speechcraft.", "Fortify Persuasion")),
+                                      (OTHER, mgef("Speech", "Increases Speech by <mag>.", "Fortify Persuasion")),
+                                      (MOD_A, mgef("StaminaRateMult", "Stamina regenerates <mag>% faster.",
+                                                   "Fortify Stamina Regeneration"))])]
+        p_rows = [lost_row(OTHER, MOD_A, M, "Description", "Increases Speech by <mag>.",
+                           "Stamina regenerates <mag>% faster.", "+<mag> Speechcraft.", before=BASE)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, M)]
+        pred = reader(plan).get("prediction") or {}
+        line = superseded_line(md)
+        ok = (got == ["superseded"] and "Description" not in pred.get("verdict", "") and "00C800" in line
+              and "Speech" in line and "StaminaRateMult" in line and "Fortify Stamina Regeneration" in line
+              and "old effect" in line)
+        return ok, f"{got}; {line[:300]!r}"
+
+    # C801: the winner rewrote the text but kept what the effect is: the records cannot decide whether OtherMod's text
+    # still fits, so the row stays counted and the report says why.
+    def c801_kind_kept_stays_counted_and_says_why():
+        M = f"00C801:{BASE}"
+        chains = [(M, "MagicEffect", [(BASE, mgef("Speech", "+<mag> Speechcraft.", "Fortify Persuasion")),
+                                      (OTHER, mgef("Speech", "Increases Speech by <mag>.", "Fortify Persuasion")),
+                                      (MOD_A, mgef("Speech", "Speech rises by <mag>.", "Fortify Speech"))])]
+        p_rows = [lost_row(OTHER, MOD_A, M, "Description", "Increases Speech by <mag>.", "Speech rises by <mag>.",
+                           "+<mag> Speechcraft.", before=BASE)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, M)]
+        said = "not decided from the records" in md and "still fits" in md
+        return got == ["admitted"] and said, f"{got}; said {said}"
+
+    # C802: OtherMod seats a candle 0.33 u lower; ModA moves it 97 u across to another spot (text reads).
+    def c802_seat_then_relocation_supersedes():
+        P = f"00C802:{BASE}"
+        b_, o_, a_ = pl(-9153.3, 5547.1, -241.065), pl(-9153.3, 5547.1, -241.395), pl(-9170.2, 5452.3, -227.85)
+        chains = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_)])]
+        p_rows = [pl_row(P, OTHER, MOD_A, b_, o_, a_)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, P)]
+        line = superseded_line(md)
+        ok = got == ["superseded"] and "00C802" in line and "0.33 u" in line and "96 u" in line
+        return ok, f"{got}; {line[:300]!r}"
+
+    # C803: the same in a tree capture, where the winner's value is only in each difference's parenthesis.
+    def c803_seat_then_relocation_tree_capture():
+        P = f"00C803:{BASE}"
+        b_, o_, a_ = pl(-9153.3, 5547.1, -241.065), pl(-9153.3, 5547.1, -241.395), pl(-9170.2, 5452.3, -227.85)
+        p_rows = [lost_row(OTHER, MOD_A, P, "Placement", [f"Placement.Position={o_['Placement.Position']}"], PH,
+                           [f"Placement.Position={b_['Placement.Position']}"])]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), masters=MASTERS_,
+                                  p_tr=tree_transcript([(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_)])]))
+        got = [e["admission"] for e in rec_of(plan, P)]
+        return got == ["superseded"], f"{got}"
+
+    # C804 (the counter-example): the winner only flags the record and carries the earlier position; OtherMod's move is
+    # a real lost change on a record the winner barely touched. Counted.
+    def c804_winner_barely_touched_stays_counted():
+        P = f"00C804:{BASE}"
+        b_, o_ = pl(1561.1, 133.0, 0), pl(1561.1, 133.0, 12.0)
+        a_ = dict(b_, SkyrimMajorRecordFlags="1024")
+        chains = [(P, "PlacedObject", [(BASE, dict(b_, SkyrimMajorRecordFlags="0")),
+                                       (OTHER, dict(o_, SkyrimMajorRecordFlags="0")), (MOD_A, a_)])]
+        p_rows = [pl_row(P, OTHER, MOD_A, b_, o_, b_)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, P)]
+        return got == ["admitted"], f"{got}"
+
+    # C805: the winner disables the object (below the world, or initially disabled): not a relocation. Counted.
+    def c805_winner_disables_stays_counted():
+        P1, P2 = f"00C805:{BASE}", f"00C806:{BASE}"
+        b_, o_ = pl(100, 100, 0), pl(100, 100, -0.5)
+        a1, a2 = pl(400, 100, -30000), dict(pl(400, 100, 0), SkyrimMajorRecordFlags="InitiallyDisabled")
+        chains = [(P1, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a1)]),
+                  (P2, "PlacedObject", [(BASE, dict(b_, SkyrimMajorRecordFlags="0")),
+                                        (OTHER, dict(o_, SkyrimMajorRecordFlags="0")), (MOD_A, a2)])]
+        p_rows = [pl_row(P1, OTHER, MOD_A, b_, o_, a1), pl_row(P2, OTHER, MOD_A, b_, o_, a2)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [rec_of(plan, x)[0]["admission"] for x in (P1, P2)]
+        return got == ["admitted", "admitted"], f"{got}"
+
+    # C806: OtherMod's change is no seat: it turns the object, or moves it sideways. Counted.
+    def c806_turned_or_sideways_stays_counted():
+        P1, P2 = f"00C807:{BASE}", f"00C808:{BASE}"
+        b_ = pl(100, 100, 0)
+        o1, o2, a_ = pl(100, 100, -0.5, rz="0.3"), pl(103, 100, 0), pl(600, 100, 0)
+        chains = [(P1, "PlacedObject", [(BASE, b_), (OTHER, o1), (MOD_A, a_)]),
+                  (P2, "PlacedObject", [(BASE, b_), (OTHER, o2), (MOD_A, a_)])]
+        p_rows = [pl_row(P1, OTHER, MOD_A, b_, o1, a_), pl_row(P2, OTHER, MOD_A, b_, o2, a_)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [rec_of(plan, x)[0]["admission"] for x in (P1, P2)]
+        return got == ["admitted", "admitted"], f"{got}"
+
+    # C807: the winner moves the object under ten times as far as OtherMod's seat: it stands near the spot OtherMod
+    # fixed. Counted.
+    def c807_winner_under_ten_times_stays_counted():
+        P = f"00C809:{BASE}"
+        b_, o_, a_ = pl(100, 100, 0), pl(100, 100, -12.6), pl(186, 100, 0)
+        chains = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_)])]
+        p_rows = [pl_row(P, OTHER, MOD_A, b_, o_, a_)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, P)]
+        return got == ["admitted"], f"{got}"
+
+    # C808: the winner buries the object (moved down farther than across): hiding it, not a new spot. Counted.
+    def c808_winner_buries_stays_counted():
+        P = f"00C80A:{BASE}"
+        b_, o_, a_ = pl(100, 100, -9027), pl(100, 100, -9046.6), pl(2375, 0, -29576)
+        chains = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_)])]
+        p_rows = [pl_row(P, OTHER, MOD_A, b_, o_, a_)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, P)]
+        return got == ["admitted"], f"{got}"
+
+    # C809 (coordinator, plan gate): an object moved less than its own size sits on the same spot, so the seat may still
+    # apply: a 0.04 u seat against a 0.5 u move stays counted (64 u when the object's bounds are not read); with its
+    # bounds read (half-extent 200 u) a 150 u move stays counted, and a 300 u move supersedes.
+    def c809_winner_within_object_size_stays_counted():
+        P1, P2, P3 = f"00C80B:{BASE}", f"00C80C:{BASE}", f"00C80D:{BASE}"
+        b_, o_ = pl(100, 100, 0), pl(100, 100, -0.04)
+        a1 = pl(100.5, 100, 0)
+        b2, o2 = pl(100, 100, 0), pl(100, 100, -10)
+        a2, a3 = pl(250, 100, 0), pl(400, 100, 0)
+        chains = [(P1, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a1)]),
+                  (P2, "PlacedObject", [(BASE, b2), (OTHER, o2), (MOD_A, a2)]),
+                  (P3, "PlacedObject", [(BASE, b2), (OTHER, o2), (MOD_A, a3)])]
+        p_rows = [pl_row(P1, OTHER, MOD_A, b_, o_, a1), pl_row(P2, OTHER, MOD_A, b2, o2, a2),
+                  pl_row(P3, OTHER, MOD_A, b2, o2, a3)]
+        big = f"0BB001:{BASE}"
+        names = {"schema": "names-v1", "places": {}, "objects": {}, "mods": {}, "missing": [],
+                 "refs": {P2: {"base": big, "carriedBy": [BASE]}, P3: {"base": big, "carriedBy": [BASE]}},
+                 "bases": {big: {"type": "Static", "editorId": "BigRock", "model": "rock.nif",
+                                 "bounds": {"first": "-200,-150,-50", "second": "200,150,50"}}}}
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_, names=names)
+        got = [rec_of(plan, x)[0]["admission"] for x in (P1, P2, P3)]
+        return got == ["admitted", "admitted", "superseded"], f"{got}"
+
+    for name, fn in [("after-final/C800-kind-change-supersedes", c800_kind_change_supersedes),
+                     ("after-final/C801-kind-kept-stays-counted-and-says-why", c801_kind_kept_stays_counted_and_says_why),
+                     ("after-final/C802-seat-then-relocation-supersedes", c802_seat_then_relocation_supersedes),
+                     ("after-final/C803-seat-then-relocation-tree-capture", c803_seat_then_relocation_tree_capture),
+                     ("after-final/C804-winner-barely-touched-stays-counted", c804_winner_barely_touched_stays_counted),
+                     ("after-final/C805-winner-disables-stays-counted", c805_winner_disables_stays_counted),
+                     ("after-final/C806-turned-or-sideways-stays-counted", c806_turned_or_sideways_stays_counted),
+                     ("after-final/C807-winner-under-ten-times-stays-counted", c807_winner_under_ten_times_stays_counted),
+                     ("after-final/C808-winner-buries-stays-counted", c808_winner_buries_stays_counted),
+                     ("after-final/C809-winner-within-object-size-stays-counted",
+                      c809_winner_within_object_size_stays_counted)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
