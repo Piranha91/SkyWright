@@ -128,6 +128,37 @@ static class ShallowCoverageProof
         var off = Load(false); var os = new ContactSkips(); var oh = off.MovedHosts(os, closure); var od = off.DependentSnaps(os); var ow = off.PhysicalWinners(null, os);
         var orow = oh.Where(h=>h.Key==H(1)).SelectMany(h=>off.Judge(h,od,ow,closure,os)).FirstOrDefault(r=>r.Dependent==D(1));
         Check("CI-10: radius off retains its prior differential contact", orow?.Verdict == ContactVerdict.ReSupported, $"{orow?.Verdict}: {orow?.Why}");
+
+        // CT-1: the contact timers change nothing. The same fixture judged on two fresh indexes, timers off then on, radius on (both
+        // callbacks, the coverage branch) and off; every row, a default BestContact, a PairContact and the skips serialised field for
+        // field; and the timer must have run (its Measure count equals the core step timer's calls, each entry point was seen).
+        var opts = new System.Text.Json.JsonSerializerOptions { IncludeFields = true,
+            NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+        foreach (bool radius in new[] { true, false })
+        {
+            string Judged(ContactTimer? timer)
+            {
+                var ix = Load(radius); ix.Timer = timer; var sk = new ContactSkips();
+                var h = ix.MovedHosts(sk, closure); var d = ix.DependentSnaps(sk); var w = ix.PhysicalWinners(null, sk);
+                var rr = h.SelectMany(x => ix.Judge(x, d, w, closure, sk, keepNoRelation: true)).ToList();
+                var dsn = ix.Index.History.Of(D(1))!; var dwn = dsn[^1];
+                var b1 = ix.BestContact(D(1), dsn.Count - 1, rugK, dwn, ix.WorldBox(rugK, dwn), w, ix.WinnerPlacement, (k, _) => ix.WinnerBase(k), out int nt);
+                var hs1 = ix.Index.History.Of(H(1))!; var rs1 = ix.Index.History.Of(D(1))!;
+                var pc = ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, floorK, hs1[0]);
+                return System.Text.Json.JsonSerializer.Serialize(new { rows = rr, best = b1, nt, pair = pc, skips = sk }, opts);
+            }
+            var tmr = new ContactTimer();
+            string off0 = Judged(null), on1 = Judged(tmr);
+            long measured = tmr.Entries().Sum(x => x.E.Measured);
+            bool ran = measured > 0 && tmr.CoreMeasure.Calls == measured && (radius ? tmr.CoreShell.Calls == measured : tmr.CoreShell.Calls == 0)
+                && tmr.Best.Calls == 1 && tmr.Pair.Calls == 1 && tmr.BestInJudge.Calls > 0 && tmr.PairInJudge.Calls > 0 && tmr.JudgeCalls > 0
+                && tmr.Entries().All(x => x.E.CallTicks <= x.E.WallTicks);
+            int at = Enumerable.Range(0, Math.Min(off0.Length, on1.Length)).FirstOrDefault(i => off0[i] != on1[i], -1);
+            Check($"CT-1 (radius {(radius ? "on" : "off")}): timers on leave every judged row, BestContact, PairContact and skip count unchanged, and the timer ran",
+                off0 == on1 && ran,
+                off0 == on1 ? $"{off0.Length} chars equal; measured {measured}, core {tmr.CoreMeasure.Calls}, shell {tmr.CoreShell.Calls}, best {tmr.Best.Calls}/{tmr.BestInJudge.Calls}, pair {tmr.Pair.Calls}/{tmr.PairInJudge.Calls}, judge {tmr.JudgeCalls}"
+                            : $"serialisations differ at char {at} (lengths {off0.Length} vs {on1.Length}): ...{off0.Substring(Math.Max(0, at - 60), Math.Min(120, off0.Length - Math.Max(0, at - 60)))}");
+        }
         mo.Dispose();
         Directory.Delete(root, true);
     }

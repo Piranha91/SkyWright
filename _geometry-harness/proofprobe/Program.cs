@@ -48,10 +48,11 @@ void Check(string name, bool ok, string detail)
     else if (ok) { fail++; failures.Add(name); Console.WriteLine($"   FAIL  canary PASSED: {name,-56} {detail}   [a canary must fail]"); }
     else { fail++; failures.Add(name); Console.WriteLine($"   FAIL  {name,-56} {detail}"); }
 }
-// --only terrain (2026-10-20): the terrain-support section alone, for its red runs and sabotage arms; the full suite runs at each gate.
-if (args.Length >= 2 && args[0] == "--only" && args[1] == "terrain")
+// --only terrain|shallow (2026-10-20): the terrain-support section, or the shallow-coverage section with the contact timer cases
+// (CT-1), alone, for red runs and sabotage arms; the full suite runs at each gate.
+if (args.Length >= 2 && args[0] == "--only" && args[1] is "terrain" or "shallow")
 {
-    TerrainSupportProof.Run(Check);
+    if (args[1] == "terrain") TerrainSupportProof.Run(Check); else ShallowCoverageProof.Run(Check);
     Console.WriteLine();
     Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
     if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
