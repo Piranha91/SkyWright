@@ -3734,7 +3734,7 @@ def main():
         p_rows = [lost_row(OTHER, MOD_A, R1, "Owner", "o", "a", "v")]
         plan, md, _ = core_bundle(p_rows, [])
         val = reader(plan).get("validation") or {}
-        ok = (str(val.get("summary", "")).startswith(f"In short, with {PATCH}: 1 record field of the predicted")
+        ok = (str(val.get("summary", "")).startswith(f"In short, with {PATCH}: resolved 1 record field")
               and "do not establish" not in md and "did not report a newly introduced" not in md
               and "No measured repair or ownership change was recorded." not in md
               and f"Removing {PATCH} brings back the 1 record field it resolves" in md)
@@ -3926,6 +3926,24 @@ def main():
         return got == ["pathCase"], f"{got}"
 
     for name, fn in [("after-final/C827-chain-equal-is-path-case", c827_chain_equal_is_path_case)]:
+        cell(name, fn)
+    # C828 (Clockwork review S5): with no names read, the record rows of the setup with the patch, where the patch's
+    # placement of an object wins, say a still-there overlap crosses at the patch's position.
+    def c828_patch_placement_from_record_rows():
+        X = f"000X01:{MOD_A}"
+        ys = [f"000Y0{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        enr = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [
+            lost_row(MOD_A, PATCH, X, "Placement", "Position=1,1,1; Rotation=0,0,0", "Position=9,9,9; Rotation=0,0,0",
+                     "Position=0,0,0; Rotation=0,0,0")]}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): p_rows},
+                                         [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                         enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()})
+        st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
+        return "in 2 a patch places one of the two objects" in st, st[:300]
+
+    for name, fn in [("after-final/C828-patch-placement-from-record-rows", c828_patch_placement_from_record_rows)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
