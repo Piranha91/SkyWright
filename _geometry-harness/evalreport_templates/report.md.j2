@@ -39,7 +39,9 @@
 
 {{ pred.siblingSource }}
 
-{% endif %}{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
+{% endif %}{% for x in pred.get("alsoEvaluations") or [] %}{{ x }}
+
+{% endfor %}{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
 
 {% endif %}
 {% for item in pred.missingFacts %}{{ item }}

@@ -5118,6 +5118,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     reader["verdict"] = verdict
     reader["refusedSummary"] = refused_lines       # said again where the page reports no new problem
     reader["prediction"] = lead["prediction"]
+    # further evaluations supplied with the report are named with what each measured, never left unsaid (Missives
+    # review 4); they are not joined into the counts
+    pw_also = reader_data.get("prediction") or {}
+    also_lines = []
+    for x_ in settings.get("alsoBundles") or []:
+        ab_ = Bundle(Path(x_))
+        setups_ = []
+        for arm_ in ab_.plan.get("arms") or []:
+            names_ = [str(q.get("name")) for q in ((arm_.get("requested") or {}).get("plugins") or [])
+                      if isinstance(q, dict) and not is_base_game(str(q.get("name")), pw_also)]
+            shown_ = ", ".join(names_[:6]) + (f" and {len(names_) - 6} more" if len(names_) > 6 else "")
+            setups_.append(bind(pw_also["alsoEvaluationSetup"], {
+                "arm": arm_.get("armId"), "plugins": shown_ or pw_also.get("alsoEvaluationBaseOnly") or "the base game only"}))
+        also_lines.append(bind(pw_also["alsoEvaluation"], {"name": Path(x_).name, "setups": "; ".join(setups_)}))
+    reader["prediction"]["alsoEvaluations"] = also_lines
     # Evidence derived after measurement (bundle standard §8, enrichment): listed in the evidence index with what
     # it was derived from; names reach the plan so a reader's page needs no side input.
     reader["enrichment"] = [{k: e.get(k) for k in ("path", "sha256", "enrichment", "checkId", "armId", "derivedFrom")}
@@ -5832,9 +5847,15 @@ def cmd_plan(a) -> int:
                     "rowsPerGroup": (a.rows_per_group if a.rows_per_group is not None else conc.get("rowsPerGroup", 3)),
                     "figuresPerFinding": (a.figures_per_finding if a.figures_per_finding is not None else conc.get("figuresPerFinding", 1)),
                     "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height")},
-                    "singleMod": a.single_mod, "headlineUnit": a.headline_unit}
+                    "singleMod": a.single_mod, "headlineUnit": a.headline_unit,
+                    "alsoBundles": list(getattr(a, "also_bundle", None) or [])}
         if a.mode == "exhaustive":
             settings["maxPages"] = None
+        for x_ in settings["alsoBundles"]:
+            aman = load_json(Path(x_) / "manifest.json")
+            if not isinstance(aman, dict) or aman.get("bundleSchema") != BUNDLE_SCHEMA:
+                return refuse(r, f"also-bundle-unreadable: {Path(x_) / 'manifest.json'} is not a schema-{BUNDLE_SCHEMA} "
+                                 f"bundle manifest, so it is not named.")
         sibling = Path(a.sibling_bundle) if getattr(a, "sibling_bundle", None) else None
         if sibling is not None:
             sman = load_json(sibling / "manifest.json")
@@ -6453,6 +6474,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--headline-unit", choices=("relationships", "objects"), default=None,
                    help="what the verdict counts: the check's relationships (rows) or the objects they name. Default: "
                         "the reporting skill's headlineUnit")
+    p.add_argument("--also-bundle", action="append", default=[], metavar="DIR",
+                   help="a further evaluation of the same mods, named in the report with the setups it measured; its "
+                        "results are not joined into the counts")
     p.add_argument("--sibling-bundle", default=None, metavar="DIR",
                    help="a bundle of the same order without the patch; its single-mod setups attribute this report's "
                         "prediction when its setup matches this bundle's setup without the patch plugin for plugin")
