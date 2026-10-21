@@ -299,7 +299,7 @@ public sealed class ContactTimer
         public long Calls, WallTicks;
         public long DepSoupTicks, BroadTicks, PlacementOfTicks, BaseOfTicks, HostGridTicks, MeasureCoreTicks, ShellPrepTicks, ShellMeasureTicks,
                     ExtentTicks, PreexistingTicks, CoverPlausibleTicks, CoverMeasureTicks, CoverAuthoredTicks, CoverCompareTicks, OtherTicks;
-        public long Neighbours, SelfSkips, PlacementNulls, RadiusRejects, GridNulls, SoupNulls, Measured, ExtentCalls, PreexistingCalls,
+        public long Neighbours, SelfSkips, PlacementNulls, RadiusRejects, GridNulls, SoupNulls, Measured, MemoHits, ExtentCalls, PreexistingCalls,
                     CoverPlausibleCalls, CoverMeasureCalls, CoverAuthoredCalls, CoverCompareCalls;
         internal void Lap(ref long bucket) { long now = Now(); bucket += now - Stamp; Stamp = now; }
         public IEnumerable<(string Name, long Ticks)> Buckets() => new[]
@@ -314,7 +314,7 @@ public sealed class ContactTimer
         public IEnumerable<(string Name, long Count)> Counts() => new[]
         {
             ("calls", Calls), ("neighbours", Neighbours), ("self-skips", SelfSkips), ("placementOf-null", PlacementNulls), ("radius-rejects", RadiusRejects),
-            ("grid-null", GridNulls), ("soup-null", SoupNulls), ("measured", Measured), ("extent", ExtentCalls), ("preexisting", PreexistingCalls),
+            ("grid-null", GridNulls), ("soup-null", SoupNulls), ("measured", Measured), ("memo-hits", MemoHits), ("extent", ExtentCalls), ("preexisting", PreexistingCalls),
             ("coverage.plausible", CoverPlausibleCalls), ("coverage.measure", CoverMeasureCalls), ("coverage.authored", CoverAuthoredCalls),
             ("coverage.compare", CoverCompareCalls),
         };
@@ -555,14 +555,58 @@ public sealed class ContactIndex
     readonly PlacementCache<TriangleGrid> _shellGrids;
     readonly PlacementCache<TriangleSoup> _shellDeps;
 
+    /// <summary>A snap's fields as bits, so a memo key tells −0 from +0 and any NaN apart, as the arithmetic would.</summary>
+    readonly record struct SnapBits(int Plugin, int PosX, int PosY, int PosZ, FormKey Cell, bool Disabled, bool Deleted, FormKey Worldspace,
+                                    int RotX, int RotY, int RotZ, int Scale)
+    {
+        static int B(float f) => BitConverter.SingleToInt32Bits(f);
+        public static SnapBits Of(Snap s) => new(s.Plugin, B(s.Pos.X), B(s.Pos.Y), B(s.Pos.Z), s.Cell, s.Disabled, s.Deleted, s.Worldspace,
+                                                 B(s.Rot.X), B(s.Rot.Y), B(s.Rot.Z), B(s.Scale));
+    }
+
+    /// <summary>The key of one <see cref="Measure"/>: every parameter that is not derived from the others (the soup and the grid are
+    /// built from the placements by <see cref="DepSoup"/> and <see cref="HostGrid"/>; the timer entry changes nothing). Field names are
+    /// the parameter names, so a reflection test can hold the two lists equal.</summary>
+    readonly record struct MeasureKey(FormKey DepKey, int DepSnap, FormKey DepBase, SnapBits DepS, FormKey HostKey, int HostSnap, FormKey HostBase,
+                                      SnapBits HostS, bool AnySurface);
+
+    /// <summary>Measure's answers on this index. A pair's answer is a function of its key and of this index's init-only settings
+    /// (<see cref="Reach"/>, <see cref="NearBand"/>, <see cref="ReadRadius"/>), so it is computed once per index; a grid rebuilt after
+    /// eviction, at whatever bucket target, answers the same (storage only: proof CT-7). Unbounded: one small entry per distinct pair.
+    /// Not locked: every probe uses an index from one thread.</summary>
+    readonly Dictionary<MeasureKey, (SoupContact Contact, float CoreGap)> _measureMemo = new();
+    /// <summary>Distinct pairs memoised, and their approximate bytes (entry structs plus the dictionary's own arrays).</summary>
+    public int MeasureMemoCount => _measureMemo.Count;
+    public long MeasureMemoApproxBytes => (long)_measureMemo.Count * (System.Runtime.CompilerServices.Unsafe.SizeOf<MeasureKey>()
+        + System.Runtime.CompilerServices.Unsafe.SizeOf<(SoupContact, float)>() + 12) + (long)_measureMemo.EnsureCapacity(0) * 4;
+
     /// <summary>One pair measured: the core contact (normal, penetration, enclosed depth — the rule's reading), and with
-    /// <see cref="ReadRadius"/> its facing gap replaced by the gap between the grown soups. The core gap rides beside it.</summary>
+    /// <see cref="ReadRadius"/> its facing gap replaced by the gap between the grown soups. The core gap rides beside it. Memoised
+    /// per index (<see cref="_measureMemo"/>).</summary>
     (SoupContact Contact, float CoreGap) Measure(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
-                                                 FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS, ContactTimer.Entry? e = null)
+                                                 FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS, bool anySurface, ContactTimer.Entry? e = null)
     {
         var tm = e is null ? null : Timer;
         long m0 = 0;
         if (e is not null) { e.Lap(ref e.OtherTicks); m0 = e.Stamp; }
+        var key = new MeasureKey(depKey, depSnap, depBase, SnapBits.Of(depS), hostKey, hostSnap, hostBase, SnapBits.Of(hostS), anySurface);
+        if (_measureMemo.TryGetValue(key, out var known))
+        {
+            if (e is not null)
+            {
+                e.Lap(ref e.MeasureCoreTicks); e.Measured++; e.MemoHits++;
+                tm!.Account(e, e.Stamp - m0, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, soup.TriangleCount, grid.TriangleCount);
+            }
+            return known;
+        }
+        var result = MeasureOnce(soup, grid, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, e, tm, m0);
+        _measureMemo[key] = result;
+        return result;
+    }
+
+    (SoupContact Contact, float CoreGap) MeasureOnce(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
+                                                     FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS, ContactTimer.Entry? e, ContactTimer? tm, long m0)
+    {
         var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand, default, tm?.CoreMeasure);
         if (e is not null) { e.Lap(ref e.MeasureCoreTicks); e.Measured++; }
         if (!ReadRadius)
@@ -1179,7 +1223,7 @@ public sealed class ContactIndex
             if (e is not null) e.Lap(ref e.HostGridTicks);
             if (grid is null) { if (e is not null) e.GridNulls++; continue; }
             neighboursTested++;
-            var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, nKey, np.SnapIndex, nBase, np.Snap, e);
+            var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, nKey, np.SnapIndex, nBase, np.Snap, false, e);
             if (c.Distance < bestRaw) { bestRaw = c.Distance; rawAgainst = nKey; }
             float pen = c.EffectivePenetration, pre = 0f;
             float pd;
@@ -1319,7 +1363,7 @@ public sealed class ContactIndex
             if (e is not null) { if (soup is null) e.SoupNulls++; else e.GridNulls++; e.WallTicks += ContactTimer.Now() - wall0; }
             return null;
         }
-        var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, hostKey, hostSnapIndex, hostBase, hostSnap, e);
+        var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, hostKey, hostSnapIndex, hostBase, hostSnap, anySurface, e);
         if (e is not null) e.Lap(ref e.OtherTicks);
         float extent;
         if (c.Normal.LengthSquared() > 1e-12f)

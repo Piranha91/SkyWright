@@ -150,13 +150,14 @@ static class ShallowCoverageProof
             var tmr = new ContactTimer();
             string off0 = Judged(null), on1 = Judged(tmr);
             long measured = tmr.Entries().Sum(x => x.E.Measured);
-            bool ran = measured > 0 && tmr.CoreMeasure.Calls == measured && (radius ? tmr.CoreShell.Calls == measured : tmr.CoreShell.Calls == 0)
+            long hits = tmr.Entries().Sum(x => x.E.MemoHits);   // a memo hit is a Measure call that runs no core contact
+            bool ran = measured > 0 && tmr.CoreMeasure.Calls + hits == measured && (radius ? tmr.CoreShell.Calls + hits == measured : tmr.CoreShell.Calls == 0)
                 && tmr.Best.Calls == 1 && tmr.Pair.Calls == 1 && tmr.BestInJudge.Calls > 0 && tmr.PairInJudge.Calls > 0 && tmr.JudgeCalls > 0
                 && tmr.Entries().All(x => x.E.CallTicks <= x.E.WallTicks);
             int at = Enumerable.Range(0, Math.Min(off0.Length, on1.Length)).FirstOrDefault(i => off0[i] != on1[i], -1);
             Check($"CT-1 (radius {(radius ? "on" : "off")}): timers on leave every judged row, BestContact, PairContact and skip count unchanged, and the timer ran",
                 off0 == on1 && ran,
-                off0 == on1 ? $"{off0.Length} chars equal; measured {measured}, core {tmr.CoreMeasure.Calls}, shell {tmr.CoreShell.Calls}, best {tmr.Best.Calls}/{tmr.BestInJudge.Calls}, pair {tmr.Pair.Calls}/{tmr.PairInJudge.Calls}, judge {tmr.JudgeCalls}"
+                off0 == on1 ? $"{off0.Length} chars equal; measured {measured}, memo hits {hits}, core {tmr.CoreMeasure.Calls}, shell {tmr.CoreShell.Calls}, best {tmr.Best.Calls}/{tmr.BestInJudge.Calls}, pair {tmr.Pair.Calls}/{tmr.PairInJudge.Calls}, judge {tmr.JudgeCalls}"
                             : $"serialisations differ at char {at} (lengths {off0.Length} vs {on1.Length}): ...{off0.Substring(Math.Max(0, at - 60), Math.Min(120, off0.Length - Math.Max(0, at - 60)))}");
         }
 
@@ -273,6 +274,25 @@ static class ShallowCoverageProof
             Check("CT-7: one pair on grids built at different bucket targets gives a bit-identical contact and facing gap (coarsening seen)",
                 bucketPairs > 0 && bucketEqual == bucketPairs && powers.Count(x => x > 0) > 0 && powers.Contains(0),
                 $"{bucketEqual} of {bucketPairs} equal; grouping powers built {string.Join(",", powers)}{(firstBucket is null ? "" : "; first difference " + firstBucket)}");
+        }
+        // CT-6 (memo key, by reflection): the memo key's fields are exactly Measure's parameters minus a reviewed list of derived
+        // or inert ones, and every public setting of ContactIndex Measure could read is init-only (fixed for an index's life), except a
+        // reviewed list Measure does not read. A new Measure parameter, or a new mutable setting, fails here rather than in the memo.
+        {
+            const System.Reflection.BindingFlags Np = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            var measure = typeof(ContactIndex).GetMethod("Measure", Np);
+            var keyType = typeof(ContactIndex).GetNestedType("MeasureKey", System.Reflection.BindingFlags.NonPublic);
+            var derived = new[] { "soup", "grid", "e" };   // built from the key by DepSoup / HostGrid; the timer entry changes nothing
+            var parms = measure?.GetParameters().Select(x => x.Name!).Where(n => !derived.Contains(n)).Select(n => n.ToLowerInvariant()).OrderBy(n => n).ToList() ?? new();
+            var fields = keyType?.GetProperties().Select(x => x.Name.ToLowerInvariant()).Where(n => n != "equalitycontract").OrderBy(n => n).ToList() ?? new();
+            var mutableAllowed = new[] { nameof(ContactIndex.Timer), nameof(ContactIndex.Trace), nameof(ContactIndex.StageProbe), nameof(ContactIndex.State) };
+            static bool InitOnly(System.Reflection.PropertyInfo pi) => pi.SetMethod!.ReturnParameter.GetRequiredCustomModifiers()
+                .Any(m => m.FullName == "System.Runtime.CompilerServices.IsExternalInit");
+            var mutable = typeof(ContactIndex).GetProperties().Where(pi => pi.SetMethod is { IsPublic: true } && !InitOnly(pi)).Select(pi => pi.Name).OrderBy(n => n).ToList();
+            var unexpected = mutable.Except(mutableAllowed).ToList();
+            Check("CT-6: the Measure memo key is exactly Measure's non-derived parameters, and no unreviewed ContactIndex setting can change after construction",
+                measure is not null && keyType is not null && parms.Count > 0 && parms.SequenceEqual(fields) && unexpected.Count == 0,
+                $"parameters [{string.Join(",", parms)}]; key [{string.Join(",", fields)}]; mutable settings [{string.Join(",", mutable)}]; unreviewed [{string.Join(",", unexpected)}]");
         }
         mo.Dispose();
         Directory.Delete(root, true);

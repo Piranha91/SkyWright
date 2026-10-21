@@ -1360,6 +1360,8 @@ if (cidx.Timer is { } contactTimer)
     Console.WriteLine("\n==== CONTACT TIMERS (--phase-timers) ====");
     Console.WriteLine($"   host loop {hostLoopSeconds:0.0}s");
     foreach (var ln in contactTimer.Lines()) Console.WriteLine(ln);
+    Console.WriteLine($"   measure memo: {cidx.MeasureMemoCount:N0} entries, about {cidx.MeasureMemoApproxBytes / 1e6:0.0} MB");
+    __run.Feature("contact.memo.entries", cidx.MeasureMemoCount, "count", FeatureAt.Final).Feature("contact.memo.bytes", cidx.MeasureMemoApproxBytes, "bytes", FeatureAt.Final);
     __run.Feature("host-loop.seconds", hostLoopSeconds, "seconds", FeatureAt.Final);
     foreach (var (n, v, u) in contactTimer.Features()) __run.Feature(n, v, u, FeatureAt.Final);
     var timerDir = Path.GetDirectoryName(Path.GetFullPath(phaseTimersPath!));

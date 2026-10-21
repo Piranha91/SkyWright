@@ -690,7 +690,7 @@ Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 if (phaseTimersPath is not null)
 {
     phase.Mark("listing+emit");
-    phase.Report(__run, stateTimer!, phaseTimersPath, stateLines, cidx.Timer);
+    phase.Report(__run, stateTimer!, phaseTimersPath, stateLines, cidx.Timer, (cidx.MeasureMemoCount, cidx.MeasureMemoApproxBytes));
 }
 return 0;
 
@@ -721,7 +721,7 @@ sealed class PhaseClock(bool on)
                   .Select(f => $"{f.Name}={f.GetValue(t)}"));
     public static string StateLine(string pass, string state, double ms, int changes, int rows, string rowsDigest, string tallyDigest)
         => JsonSerializer.Serialize(new { pass, state, ms = Math.Round(ms, 3), changes, rows, rowsDigest, tallyDigest });
-    public void Report(Run run, StatePhaseTimer t, string path, List<string> stateLines, ContactTimer? contact = null)
+    public void Report(Run run, StatePhaseTimer t, string path, List<string> stateLines, ContactTimer? contact = null, (int Count, long Bytes) memo = default)
     {
         Console.WriteLine("\n==== PHASE TIMERS (--phase-timers) ====");
         foreach (var (n, s) in _marks) { Console.WriteLine($"   phase {n,-22} {s,9:0.0}s"); run.Feature($"phase.{n}.seconds", s, "seconds", FeatureAt.Final); }
@@ -737,6 +737,8 @@ sealed class PhaseClock(bool on)
         {
             Console.WriteLine("\n==== CONTACT TIMERS (--phase-timers) ====");
             foreach (var ln in contact.Lines()) Console.WriteLine(ln);
+            Console.WriteLine($"   measure memo: {memo.Count:N0} entries, about {memo.Bytes / 1e6:0.0} MB");
+            run.Feature("contact.memo.entries", memo.Count, "count", FeatureAt.Final).Feature("contact.memo.bytes", memo.Bytes, "bytes", FeatureAt.Final);
             foreach (var (n, v, u) in contact.Features()) run.Feature(n, v, u, FeatureAt.Final);
             File.WriteAllText(path + ".contact.json", contact.ToJson());
             Console.WriteLine($"   wrote the contact timer table -> {path}.contact.json");
