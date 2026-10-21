@@ -3821,6 +3821,19 @@ def main():
                      ("after-final/C819-still-there-units-and-last-item", c819_still_there_units_and_last_item),
                      ("after-final/C820-further-results-said-set-aside", c820_further_results_said_set_aside)]:
         cell(name, fn)
+    # C821 (Clockwork review S6): with no names enrichment, an overlap measured as crossing mesh triangles still has
+    # bodies on both sides: it is not under "cannot tell whether the object has a body"; one not measured on meshes is.
+    def c821_mesh_crossing_has_bodies():
+        a_ = row("OVERLAP", OTHER, MOD_A, f"000X51:{MOD_A}", other=f"000Y51:{OTHER}")
+        a_["Summary"] = "Static from ModA.esp / Static from OtherMod.esp: crossing, 13 triangle pairs in Hall (int)"
+        b_ = row("OVERLAP", OTHER, MOD_A, f"000X52:{MOD_A}", other=f"000Y52:{OTHER}")
+        extra = {(OVERLAP, "without-patch"): [a_, b_], (OVERLAP, "baseline"): []}
+        plan, md, _ = core_bundle([], [], extra_results=extra)
+        line = next((ln for ln in md.splitlines() if "Cannot tell whether the object has a body" in ln), "")
+        return "** 1 " in line or ":** 1 " in line, line[:240]
+
+    for name, fn in [("after-final/C821-mesh-crossing-has-bodies", c821_mesh_crossing_has_bodies)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
