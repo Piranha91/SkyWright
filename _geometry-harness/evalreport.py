@@ -2003,6 +2003,21 @@ def build_prediction(ctx: dict) -> dict:
                     best_ = g.get("_winnerOwnExample")
                     if best_ is None or len(ex_[2]) + len(ex_[3]) < len(best_[2]) + len(best_[3]):
                         g["_winnerOwnExample"] = ex_
+            # where the lost value was first set (Missives review 2): a value several plugins carry is named with the
+            # plugin that introduced it, so a reader does not take it for the loser's alone
+            if "_carriedFrom" not in g:
+                got_ = field_chain(p_of(rk[0]), rk, rk[2])
+                if got_ is not None:
+                    provs_, vals_, _ = got_
+                    low_ = [str(x).lower() for x in provs_]
+                    if rk[2].lower() in low_:
+                        i_ = k_ = low_.index(rk[2].lower())
+                        while k_ > 0 and vals_[k_ - 1] == vals_[i_]:
+                            k_ -= 1
+                        if k_ != i_ and k_ > 0:
+                            g["_carriedFrom"] = (named(rk[4], rk[5]), hit["row"].get("field"),
+                                                 shown_value((hit["row"].get("values") or {}).get("lost")),
+                                                 provs_[k_], [p_ for p_ in provs_[k_ + 1:i_ + 1]])
         if rk[1] == "LOST-EDIT" and rk[4]:
             # examples: a field skill data prefers (a placed object's position) before any other (Snazzy review 3:
             # a worldspace texture path is no example a modder can act on)
@@ -2105,6 +2120,12 @@ def build_prediction(ctx: dict) -> dict:
                                                             "record": ex_own[0], "field": ex_own[1], "lost": ex_own[2],
                                                             "won": ex_own[3], "loser": loser, "winner": winner})
                                                         if ex_own else ""}))
+        carried_from = g.pop("_carriedFrom", None)
+        if carried_from and words.get("itemCarriedFrom"):
+            detail.append(bind(words["itemCarriedFrom"], {
+                "record": carried_from[0], "field": carried_from[1], "origin": carried_from[3],
+                "value": re.sub("^" + re.escape(str(carried_from[1])) + "=", "", str(carried_from[2])),
+                "carriers": " and ".join(carried_from[4][-3:])}))
         n_undecided = g.pop("_notDecided", 0)
         if n_undecided and len(directions) == 1:
             loser, winner = next(iter(directions))
