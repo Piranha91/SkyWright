@@ -1490,6 +1490,12 @@ def build_prediction(ctx: dict) -> dict:
     chain_cache, chain_scope, needed_fks = {}, [], collections.defaultdict(set)
     for (c_, a_), rs in rows_by.items():
         needed_fks[(c_, a_)].update(str(k_[4]) for k_ in rs if k_[1] == "LOST-EDIT")
+    # the objects of geometry rows too, wherever a record import was measured: whose version of an object loads last
+    # (a patch's placement, Clockwork review S5) is read from the same chains
+    geo_fks = {str(x) for rs in rows_by.values() for k_, h_ in rs.items() if k_[1] != "LOST-EDIT"
+               for x in [k_[4], *((h_.get("row") or {}).get("other") or [])] if x}
+    for key_ in [k for k in list(needed_fks) if needed_fks[k]]:
+        needed_fks[key_] |= geo_fks
 
     def chains_of(check_id, arm_id):
         key = (check_id, arm_id)
@@ -3061,9 +3067,20 @@ def build_prediction(ctx: dict) -> dict:
         patch_placed = {str(k_[4]) for k_, h_ in patched_rows.items()
                         if k_[1] == "LOST-EDIT" and k_[3].lower() in patch_lower and h_["row"].get("field") == "Placement"}
 
+        def chain_patch_places(fk):
+            """A declared patch's version of the object loads last in a record import's chain of the setup with the
+            patch and moves it from the version before it."""
+            for (c_, a_) in [k for k in needed_fks if k[1] == patched_arm]:
+                ch_ = (chains_of(c_, a_) or {}).get(str(fk))
+                if ch_ and str(ch_["providers"][-1]).lower() in patch_lower and len(ch_["providers"]) > 1:
+                    v_ = (ch_.get("values") or {}).get("Placement")
+                    if v_ and v_[-1] != v_[-2]:
+                        return True
+            return False
+
         def patch_places(e):
             return (left_split.get(id(e)) == "patchHeld"
-                    or any(str(x) in patch_placed for x in [e["formKey"], *(e.get("other") or [])]))
+                    or any(str(x) in patch_placed or chain_patch_places(x) for x in [e["formKey"], *(e.get("other") or [])]))
         hits = [e for e in judged if outcome[id(e)] == "resolved"]
         switched = [e for e in judged if outcome[id(e)] == "switched"]
         own = [e for e in judged if outcome[id(e)] == "own"]
