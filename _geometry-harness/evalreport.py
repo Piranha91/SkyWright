@@ -2314,38 +2314,50 @@ def build_prediction(ctx: dict) -> dict:
             "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
                 "patch": patch_text, "left": fmt_n(left_), "count": fmt_n(n_)})}),
             "findingIds": u_["findingIds"][:1]})
-    # a rebuilt record supersedes the loser's small fix (Pilgrim final review B1): one line per pair, with the record
-    # facts in plain words, never in the clash counts
+    # a rebuilt record supersedes the loser's small fix (Pilgrim final review B1): one line per winning mod, with the
+    # record facts in plain words, never in the clash counts
     sup_ = collections.OrderedDict()
     for e in record:
         if e["admission"] == "superseded":
-            s_ = sup_.setdefault((e["A"], e["B"]), {"rows": [], "findingIds": []})
+            s_ = sup_.setdefault(e["B"], {"rows": [], "findingIds": []})
             s_["rows"].append(e)
             if e.get("findingId") and e["findingId"] not in s_["findingIds"]:
                 s_["findingIds"].append(e["findingId"])
-    for (loser_, winner_), s_ in sup_.items():
-        facts_ = []
+
+    def u_range(xs):
+        lo_, hi_ = fmt_units(min(xs)), fmt_units(max(xs))
+        return lo_ if lo_ == hi_ else f"{lo_[:-2]}-{hi_}"
+    for winner_, s_ in sup_.items():
+        losers_ = collections.Counter(e["A"] for e in s_["rows"])
+        facts_, kind_rows, place_rows = [], [], []
         for e in s_["rows"]:
             f_ = supersede((e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])) or {}
+            (kind_rows if f_.get("kind") == "kind" else place_rows).append((e, f_))
+        shown_n = int(words.get("supersededExamples") or 3)
+        for e, f_ in kind_rows[:shown_n]:
             eid_ = re.match(r"^\S+ (\S+):", str(e.get("summary") or ""))
-            rec_ = f"{e['formKey']}" + (f" ({eid_.group(1)})" if eid_ and not eid_.group(1).startswith(
-                str(e["formKey"])[:6]) else "")
-            if f_.get("kind") == "kind":
-                changes_ = "; ".join(bind(words["supersededChange"], {"what": w_, "old": o_ or "none", "new": n_ or "none"})
-                                     for w_, o_, n_ in f_["changes"][:3])
-                facts_.append(bind(words["supersededKind"], {"record": rec_, "winner": winner_, "loser": loser_,
-                                                              "noun": f_["noun"], "changes": changes_,
-                                                              "field": f_["field"]}))
-            elif f_.get("kind") == "place":
-                facts_.append(bind(words["supersededPlace"], {
-                    "record": rec_, "winner": winner_, "loser": loser_, "across": fmt_units(f_["across"]),
-                    "seat": fmt_units(f_["seat"]), "way": words["supersededUp" if f_["up"] else "supersededDown"]}))
+            rec_ = f"{e['formKey']}" + (f" ({eid_.group(1)})" if eid_ and not str(e["formKey"]).startswith(eid_.group(1)) else "")
+            changes_ = "; ".join(bind(words["supersededChange"], {"what": w_, "old": o_ or "none", "new": n_ or "none"})
+                                 for w_, o_, n_ in f_["changes"][:3])
+            facts_.append(bind(words["supersededKind"], {"record": rec_, "winner": winner_, "loser": e["A"],
+                                                          "noun": f_["noun"], "changes": changes_, "field": f_["field"]}))
+        if len(kind_rows) > shown_n:
+            facts_.append(bind(words["supersededKindMore"], {
+                "count": fmt_n(len(kind_rows) - shown_n), "records": ", ".join(str(e["formKey"]) for e, _ in kind_rows[shown_n:])}))
+        if place_rows:
+            n_ = len(place_rows)
+            facts_.append(bind(words["supersededPlace"], {
+                "winner": winner_, "count": fmt_n(n_), "objects": "object" if n_ == 1 else "objects",
+                "across": u_range([f_["across"] for _, f_ in place_rows]),
+                "seat": u_range([f_["seat"] for _, f_ in place_rows]),
+                "way": words["supersededUp" if all(f_["up"] for _, f_ in place_rows) else
+                             "supersededDown" if not any(f_["up"] for _, f_ in place_rows) else "supersededSeat"],
+                "examples": ", ".join(str(e["formKey"]) for e, _ in place_rows[:2])}))
         n_ = len(s_["rows"])
-        shown_ = facts_[:int(words.get("supersededExamples") or 3)]
         loss_lines.append({"text": bind(words["supersededLine"], {
-            "loser": loser_, "winner": winner_, "count": fmt_n(n_),
-            "noun": words["fieldNoun"][0 if n_ == 1 else 1], "facts": " ".join(shown_),
-            "more": bind(words["supersededMore"], {"count": fmt_n(n_ - len(shown_))}) if n_ > len(shown_) else ""}),
+            "winner": winner_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
+            "losers": ", ".join(m_ if len(losers_) == 1 else f"{m_} {fmt_n(c_)}" for m_, c_ in losers_.most_common()),
+            "facts": " ".join(facts_)}),
             "findingIds": s_["findingIds"][:1]})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
