@@ -2165,7 +2165,7 @@ def build_prediction(ctx: dict) -> dict:
         obj_pairs_ = g.pop("_objPairs", [])
         if g["count"] > 1 and len(partners_) == 1:
             detail.append(bind(words["itemOnePartner"], {"count": fmt_n(g["count"]), "object": named(next(iter(partners_)))}))
-        elif obj_pairs_:
+        elif obj_pairs_ and g["count"] <= int(words.get("itemObjectPairsMax") or 5):
             detail.append(bind(words["itemObjectPairs"], {"pairs": "; ".join(obj_pairs_)}))
         st_entries = g.pop("_stateEntries", None)
         several = [len(e_["states"]) for e_ in st_entries or [] if len(e_["states"]) > 1]
@@ -3054,6 +3054,14 @@ def build_prediction(ctx: dict) -> dict:
                     return "patchHeld"
             return "notAttributed"
         left_split = {id(e): left_kind(e) for e in judged if outcome[id(e)] == "left" and e["kind"] != "LOST-EDIT"}
+        # objects whose placement a declared patch's value sets in the setup with the patch (its record rows): a clash
+        # still there between them crosses at the patch's position (Clockwork review S5)
+        patch_placed = {str(k_[4]) for k_, h_ in patched_rows.items()
+                        if k_[1] == "LOST-EDIT" and k_[3].lower() in patch_lower and h_["row"].get("field") == "Placement"}
+
+        def patch_places(e):
+            return (left_split.get(id(e)) == "patchHeld"
+                    or any(str(x) in patch_placed for x in [e["formKey"], *(e.get("other") or [])]))
         hits = [e for e in judged if outcome[id(e)] == "resolved"]
         switched = [e for e in judged if outcome[id(e)] == "switched"]
         own = [e for e in judged if outcome[id(e)] == "own"]
@@ -3386,7 +3394,7 @@ def build_prediction(ctx: dict) -> dict:
                          else "stillThereSomeIn")
                 where_.append(bind(words[w_key], {"place": re.sub(r"\s+\d+ tris -> \d+$", "", pl_),
                                                   "count": fmt_n(n_pl), "more": fmt_n(len(places) - 1)}))
-            held_ = sum(1 for e in es if left_split.get(id(e)) == "patchHeld")
+            held_ = sum(1 for e in es if patch_places(e))
             if held_ and words.get("stillTherePatchMoves"):
                 # a patch places one of the objects and they still cross there (Clockwork review S5)
                 where_.append(bind(words["stillTherePatchMoves"], {"count": fmt_n(held_)}))
