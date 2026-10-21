@@ -2611,7 +2611,8 @@ def main():
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         st = next((ln for ln in sec.splitlines() if "Still there with" in ln), "")
         ok = (f"2 overlap pairs between {MOD_A} and {MOD_B} (3 objects, all in Hall (int))" in st
-              and f"2 of {MOD_A}'s changes lost to {MOD_B}" in st)
+              # after the final round (BPT review S5): each lost item says its unit
+              and f"{MOD_A}'s changes to 2 record fields lost to {MOD_B}" in st)
         return ok, f"stays line {st!r}"
 
     # C554. An object one mod removes that the other still brings back with the patch is said at the top, named
@@ -3255,7 +3256,9 @@ def main():
         got = {e["formKey"][:6]: e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
                if e["checkId"] == WB}
         top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
-        ok = got == {"009301": "baseGame", "009303": "admitted"} and MOD_A in top and "1 clash" in top
+        # after the final round (Missives review 1): heights equal on both sides, so it is said as the water type
+        ok = (got == {"009301": "baseGame", "009303": "admitted"} and MOD_A in top
+              and "1 cell boundaries where the water type no longer matches" in top)
         return ok, f"{got}; base-game line {top[:200]!r}"
 
     # ------------------------------------------- window 2, lane final: Pilgrim B1, Missives B2 and B1, Clockwork S6
@@ -3748,6 +3751,75 @@ def main():
 
     for name, fn in [("after-final/C814-patch-summary-never-undercuts-its-lines", c814_patch_summary_never_undercuts_its_lines),
                      ("after-final/C815-new-problems-named-per-check-in-objects", c815_new_problems_named_per_check_in_objects)]:
+        cell(name, fn)
+    # ---------------------------------------- after the final round, group B: item lines, units and naming
+    # C816 (Pilgrim review S3): a record is named by what it is: its editor ID, or a placed object's base.
+    def c816_examples_name_the_record():
+        R1, R2 = f"00C830:{BASE}", f"00C831:{BASE}"
+        r1 = lost_row(OTHER, MOD_A, R1, "Placement", "o1", "a1", "v1")
+        r1["Summary"] = f"PlacedNpc RorlundREF: Placement - {OTHER}'s value lost to {MOD_A}'s"
+        r2 = lost_row(OTHER, MOD_A, R2, "Placement", "o2", "a2", "v2")
+        names = {"schema": "names-v1", "places": {}, "objects": {}, "mods": {}, "missing": [],
+                 "refs": {R2: {"base": f"0BC001:{BASE}", "carriedBy": [BASE]}},
+                 "bases": {f"0BC001:{BASE}": {"type": "Static", "editorId": "COCMarkerHeading", "model": "m.nif"}}}
+        plan, md, _ = core_bundle([r1, r2], [], names=names)
+        ok = f"{R1} (RorlundREF, Placement)" in md and f"{R2} (a COCMarkerHeading, Placement)" in md
+        return ok, next((ln for ln in md.splitlines() if "For example" in ln), "")[-220:]
+
+    # C817 (Missives review 6, BPT review S6): an overlap item names its objects by their bases, and rows that are all
+    # against one object say so once.
+    def c817_objects_named_and_one_partner_said():
+        X1, X2, Y = f"000X31:{MOD_A}", f"000X32:{MOD_A}", f"000Y31:{OTHER}"
+        rows_ = [row("OVERLAP", OTHER, MOD_A, X1, other=Y), row("OVERLAP", OTHER, MOD_A, X2, other=Y)]
+        names = {"schema": "names-v1", "places": {}, "objects": {}, "mods": {}, "missing": [],
+                 "refs": {X1: {"base": f"0BC011:{BASE}", "carriedBy": [MOD_A]},
+                          X2: {"base": f"0BC011:{BASE}", "carriedBy": [MOD_A]},
+                          Y: {"base": f"0BC012:{BASE}", "carriedBy": [OTHER]}},
+                 "bases": {f"0BC011:{BASE}": {"type": "Container", "editorId": "BarrelFood", "model": "b.nif"},
+                           f"0BC012:{BASE}": {"type": "Static", "editorId": "WallPiece", "model": "w.nif"}}}
+        extra = {(OVERLAP, "without-patch"): rows_, (OVERLAP, "baseline"): []}
+        plan, md, _ = core_bundle([], [], extra_results=extra, names=names)
+        line = next((ln for ln in md.splitlines() if ln.startswith("- **") and "overlap pair" in ln), "")
+        ok = f"All 2 are against one object, {Y} (a WallPiece)" in line
+        return ok, line[-260:]
+
+    # C818 (Pilgrim review M1, Missives review 6): "most" only where one place holds more than half.
+    def c818_most_only_over_half():
+        rows_ = [row("OVERLAP", OTHER, MOD_A, f"000X4{i}:{MOD_A}", other=f"000Y4{i}:{OTHER}", label=lab)
+                 for i, lab in enumerate(["Hall (int)", "Hall (int)", "Yard (ext)", "Yard (ext)", "Gate (ext)"])]
+        extra = {(OVERLAP, "without-patch"): rows_, (OVERLAP, "baseline"): rows_[:4]}
+        plan, md, _ = core_bundle([], [], extra_results=extra)
+        line = next((ln for ln in md.splitlines() if ln.startswith("- **") and "overlap pair" in ln), "")
+        ok = "Most are in" not in line and "They are in" in line
+        return ok, line[-200:]
+
+    # C819 (BPT review S5): the still-there line gives each lost item its unit, and a single remaining item is said
+    # rather than "1 more in 1 other item".
+    def c819_still_there_units_and_last_item():
+        recs = [lost_row(OTHER, MOD_A, f"00C84{i}:{BASE}", "Owner", "o", "a", "v") for i in range(3)]
+        cells = [lost_row(OTHER, MOD_A, f"00C85{i}:{BASE}", "OcclusionData", "o", "a", "v") for i in range(2)]
+        enr = {(RECORDS, "without-patch"): recs, (RECORDS, "baseline"): recs,
+               (CELLATTR, "without-patch"): cells, (CELLATTR, "baseline"): cells}
+        count_only = {k: len(v) for k, v in enr.items()}
+        results = {(CONTACT, a_): [] for a_ in ("baseline", "without-patch")}
+        plan, md, _ = compile_and_render(WP_ARMS, results, [MOD_A], patches=[PATCH], count_only=count_only,
+                                         enrichment=enr)
+        st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
+        ok = (f"{OTHER}'s changes to 3 record fields lost to {MOD_A}" in st
+              and f"{OTHER}'s changes to 2 cell fields lost to {MOD_A}" in st)
+        return ok, st[:300]
+
+    # C820 (Missives review 5): the pointer to further record results says they were measured and set aside.
+    def c820_further_results_said_set_aside():
+        pr = json.loads(PRIORITIES.read_text(encoding="utf-8"))
+        w_ = (pr.get("reader") or {}).get("prediction", {}).get("detailSingleModLine", "")
+        return "set aside" in w_ and "hidden clash" in w_, w_
+
+    for name, fn in [("after-final/C816-examples-name-the-record", c816_examples_name_the_record),
+                     ("after-final/C817-objects-named-and-one-partner-said", c817_objects_named_and_one_partner_said),
+                     ("after-final/C818-most-only-over-half", c818_most_only_over_half),
+                     ("after-final/C819-still-there-units-and-last-item", c819_still_there_units_and_last_item),
+                     ("after-final/C820-further-results-said-set-aside", c820_further_results_said_set_aside)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
