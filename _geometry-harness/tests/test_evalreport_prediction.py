@@ -3863,6 +3863,22 @@ def main():
 
     for name, fn in [("after-final/C823-detail-count-reconciled-with-the-top", c823_detail_count_reconciled_with_the_top)]:
         cell(name, fn)
+    # C824 (Clockwork review S5): a still-there overlap where a patch places one of the two objects says so, never only
+    # the two mods' names.
+    def c824_still_there_says_the_patch_places_it():
+        X = f"000X01:{MOD_A}"
+        ys = [f"000Y0{i}:{MOD_B}" for i in (1, 2, 3)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        refs = {ys[1]: {"carriedBy": [MOD_B, PATCH]}, ys[2]: {"carriedBy": [MOD_B]}, X: {"carriedBy": [MOD_A]}}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): [
+            row("OVERLAP", MOD_B, MOD_A, X, other=ys[0])]}, [MOD_A, MOD_B], patches=[PATCH],
+            predicates={(OVERLAP, "with-patch"): preds}, names={"refs": refs})
+        st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
+        return "in 1 a patch places one of the two objects" in st, st[:300]
+
+    for name, fn in [("after-final/C824-still-there-says-the-patch-places-it", c824_still_there_says_the_patch_places_it)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
