@@ -3834,6 +3834,23 @@ def main():
 
     for name, fn in [("after-final/C821-mesh-crossing-has-bodies", c821_mesh_crossing_has_bodies)]:
         cell(name, fn)
+    # C822 (Missives review 2): a lost value several plugins carry names the plugin that first set it.
+    def c822_carried_value_names_its_origin():
+        L1 = f"00C860:{BASE}"
+        arms = [arm("baseline", [BASE, HF_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, OTHER, MOD_A, MOD_B])]
+        chains = [(L1, "Cell", [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}),
+                                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": ""})])]
+        p_rows = [lost_row(HF_, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if ln.startswith("- **") and "OtherMod.esp's value is lost" in ln), "")
+        ok = f"was first set by {HF_} and is carried by {OTHER}" in line and "018A59" in line
+        return ok, line[-260:]
+
+    for name, fn in [("after-final/C822-carried-value-names-its-origin", c822_carried_value_names_its_origin)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
