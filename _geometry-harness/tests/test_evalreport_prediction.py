@@ -3914,7 +3914,7 @@ def main():
     for name, fn in [("after-final/C826-further-evaluation-named", c826_further_evaluation_named)]:
         cell(name, fn)
     # C827 (BPT review S1): a row whose two values the record import's own chain reads as the same file (letter case
-    # and slashes folded), though the row was written without that rule, is set aside as path case, not counted.
+    # and slashes folded), though the row was written without that rule, is set aside as read the same, not counted.
     def c827_chain_equal_is_path_case():
         W = f"00C870:{BASE}"
         low_, up_ = "data\\textures\\landscape\\a.dds", "Data\\Textures\\Landscape\\A.dds"
@@ -3923,7 +3923,7 @@ def main():
                                                   (MOD_A, {"HdLodDiffuseTexture": up_})])])
         plan, md, _ = core_bundle(p_rows, list(p_rows), masters=MASTERS_, p_tr=tr_)
         got = [e["admission"] for e in rec_of(plan, W)]
-        return got == ["pathCase"], f"{got}"
+        return got == ["sameAsRead"], f"{got}"
 
     for name, fn in [("after-final/C827-chain-equal-is-path-case", c827_chain_equal_is_path_case)]:
         cell(name, fn)

@@ -988,7 +988,7 @@ def field_name(row: dict) -> str:
 
 
 # lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
-NOISE_ADMISSIONS = ("navmeshCheck", "orderOnly", "carriedList", "listKept", "unusedBits")
+NOISE_ADMISSIONS = ("navmeshCheck", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead")
 FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
                     / "references" / "record-field-scope.json")
 _field_masks = []
@@ -1464,7 +1464,7 @@ def build_prediction(ctx: dict) -> dict:
 
     def path_case_only(rk):
         v = (p_rows.get(rk) or {}).get("row", {}).get("values") or {}
-        return same_but_path_case(v.get("lost"), v.get("winner")) or same_in_chain(p_of(rk[0]), rk)
+        return same_but_path_case(v.get("lost"), v.get("winner"))
 
     def same_in_chain(arm_id, rk):
         """The losing plugin's value of the row's field reads equal to the winner's in the record import's own chain
@@ -1739,6 +1739,8 @@ def build_prediction(ctx: dict) -> dict:
             return "carriedList"
         if masked_same(lost, v.get("overridden"), rtype, top):
             return "unusedBits"
+        if same_in_chain(arm or p_of(rk[0]), rk):
+            return "sameAsRead"                # the import's chain reads both values the same (case, bytes, rounding)
         return None
 
     one_sided_res = {k: re.compile(v) for k, v in (words.get("oneSidedKinds") or {}).items() if k != "about"}
