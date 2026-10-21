@@ -3367,6 +3367,10 @@ def build_prediction(ctx: dict) -> dict:
                          else "stillThereSomeIn")
                 where_.append(bind(words[w_key], {"place": re.sub(r"\s+\d+ tris -> \d+$", "", pl_),
                                                   "count": fmt_n(n_pl), "more": fmt_n(len(places) - 1)}))
+            held_ = sum(1 for e in es if left_split.get(id(e)) == "patchHeld")
+            if held_ and words.get("stillTherePatchMoves"):
+                # a patch places one of the objects and they still cross there (Clockwork review S5)
+                where_.append(bind(words["stillTherePatchMoves"], {"count": fmt_n(held_)}))
             stays_parts.append((len(es), bind(words["stillThereGeometry"], {
                 "count": fmt_n(len(es)), "unit": unit_noun(g["checkId"], g["kind"], len(es)), "modA": g["mods"][0],
                 "modB": g["mods"][1], "where": (" (" + ", ".join(where_) + ")") if where_ else ""})))
