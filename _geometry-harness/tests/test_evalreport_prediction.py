@@ -3732,7 +3732,7 @@ def main():
         p_rows = [lost_row(OTHER, MOD_A, R1, "Owner", "o", "a", "v")]
         plan, md, _ = core_bundle(p_rows, [])
         val = reader(plan).get("validation") or {}
-        ok = (str(val.get("summary", "")).startswith(f"In short, {PATCH} resolves 1 record field")
+        ok = (str(val.get("summary", "")).startswith(f"In short, with {PATCH}: 1 record field of the predicted")
               and "do not establish" not in md and "did not report a newly introduced" not in md
               and "No measured repair or ownership change was recorded." not in md
               and f"Removing {PATCH} brings back the 1 record field it resolves" in md)
@@ -3859,7 +3859,7 @@ def main():
         plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rows_, (OVERLAP, "without-a"): rows_[:1]}, [MOD_A])
         found = section_text(md, "What the checks found")
         line = next((ln for ln in found.splitlines() if "3 overlap pairs" in ln), "")
-        return "2 of them counted at the top; the other 1" in line, line[:260]
+        return "(2 counted at the top; 1 already present" in line, line[:260]
 
     for name, fn in [("after-final/C823-detail-count-reconciled-with-the-top", c823_detail_count_reconciled_with_the_top)]:
         cell(name, fn)
@@ -3910,6 +3910,20 @@ def main():
         return ok, line[:300]
 
     for name, fn in [("after-final/C826-further-evaluation-named", c826_further_evaluation_named)]:
+        cell(name, fn)
+    # C827 (BPT review S1): a row whose two values the record import's own chain reads as the same file (letter case
+    # and slashes folded), though the row was written without that rule, is set aside as path case, not counted.
+    def c827_chain_equal_is_path_case():
+        W = f"00C870:{BASE}"
+        low_, up_ = "data\\textures\\landscape\\a.dds", "Data\\Textures\\Landscape\\A.dds"
+        p_rows = [lost_row(OTHER, MOD_A, W, "HdLodDiffuseTexture", [f"HdLodDiffuseTexture={low_}"], PH, PH)]
+        tr_ = tree_transcript([(W, "Worldspace", [(BASE, {"HdLodDiffuseTexture": up_}), (OTHER, {"HdLodDiffuseTexture": low_}),
+                                                  (MOD_A, {"HdLodDiffuseTexture": up_})])])
+        plan, md, _ = core_bundle(p_rows, list(p_rows), masters=MASTERS_, p_tr=tr_)
+        got = [e["admission"] for e in rec_of(plan, W)]
+        return got == ["pathCase"], f"{got}"
+
+    for name, fn in [("after-final/C827-chain-equal-is-path-case", c827_chain_equal_is_path_case)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
