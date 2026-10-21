@@ -677,7 +677,7 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
             continue
         winner = str(nodes[-1].get("plugin"))
         masks = scope.masks.get(rtype) or {}
-        per_node = []
+        per_node, won_vals = [], {}
         for n in nodes:
             per = collections.defaultdict(list)
             for d in ([] if n.get("is_winner") else n.get("deltas") or []):
@@ -695,6 +695,8 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
                     v = val[1:]
                     def norm(x):
                         return _masked(x, masks[k]) if k in masks else _angle(x) if k in scope.angles else _norm(x)
+                    if won is not None:
+                        won_vals.setdefault(key, norm(won))
                     if won is not None and norm(v) == norm(won):
                         continue               # the winner's value as the game reads it (unread bytes, path case)
                     val = "=" + norm(v)
@@ -703,7 +705,27 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
         tops = sorted(set().union(*[set(v) for v in per_node]))
         # a field no provider differs in is absent: every provider holds the winner's value (`allListed`)
         out[fk] = {"type": rtype, "editorId": r.get("editorid"), "providers": [n.get("plugin") for n in nodes],
-                   "values": {t: [v.get(t, ()) for v in per_node] for t in tops}, "reads": {}, "allListed": True}
+                   "values": {t: [v.get(t, ()) for v in per_node] for t in tops}, "reads": {}, "allListed": True,
+                   "winnerValues": won_vals}
+    return out
+
+
+def provider_fields(rec: dict, top: str, i: int) -> dict:
+    """Provider i's full value of one top-level field as {leaf path: value}, from either capture form: a by-name read's
+    compared leaves, or a tree answer's differences from the winner laid over the winner's values (each difference's
+    parenthesis). A leaf the capture gives no value for is absent."""
+    vals = (rec.get("values") or {}).get(top)
+    if not vals or i >= len(vals):
+        return {}
+    if not rec.get("allListed"):
+        return {k: ",".join(str(x) for x in v) for k, v in vals[i]}
+    out = {k: v for k, v in (rec.get("winnerValues") or {}).items() if k.split(".")[0].split("[")[0] == top}
+    for d in vals[i]:
+        m = TREE_KEY.match(d)
+        if m and m.group(2) == "=":
+            out[m.group(1)] = d[len(m.group(1)) + 1:]
+        elif m:
+            out.pop(m.group(1), None)
     return out
 
 

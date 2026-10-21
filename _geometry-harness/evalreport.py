@@ -34,6 +34,7 @@ import datetime as dt
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import shutil
@@ -442,6 +443,12 @@ def path_folded(v) -> str:
 def same_but_path_case(a, b) -> bool:
     """Two values that differ only in the letter case or slashes of a file path are the same value to the game."""
     return a is not None and b is not None and str(a) != str(b) and path_folded(a) == path_folded(b)
+
+
+def fmt_units(v: float) -> str:
+    """A distance in game units, as a modder reads it: two decimals below 1, one below 10, whole numbers above."""
+    v = abs(float(v))
+    return f"{v:.2f} u" if v < 1 else f"{v:.1f} u" if v < 10 else f"{fmt_n(round(v))} u"
 
 
 def fmt_n(v) -> str:
@@ -1529,6 +1536,109 @@ def build_prediction(ctx: dict) -> dict:
         _, ja = recordrows.own_change(provs, vals, ia, (masters or {}).get(a.lower()))
         return bool(changed_b and jb == ia and ja is not None and vals[ib] == vals[ja])
 
+    # A rebuilt record supersedes the loser's small fix (Pilgrim final review B1): the losing value describes a record
+    # or a spot that no longer exists in that form, so forwarding it would undo the winner's rebuild. Decided from the
+    # record import's own chain; the fields that say what a record is are skill data per record type.
+    sup_data = words.get("supersede") or {}
+    sup_kinds = sup_data.get("kindFields") or {}
+    sup_factor = float(sup_data.get("relocateFactor") or 10)
+    sup_place = sup_data.get("placementField") or "Placement"
+    # An object moved less than its own size still stands on the spot a seat fix adjusted; where the names enrichment
+    # carries no bounds for its base, 64 u (one navmesh sample spacing, a small object's size) stands in for it
+    SEAT_SPOT_UNITS = 64.0
+    sup_cache = {}
+
+    def _vec(s_):
+        xs = [float(x) for x in re.findall(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", str(s_ or ""))]
+        return xs[:3] if len(xs) >= 3 else None
+
+    def _turn(a_, b_):
+        d_ = abs(a_ - b_) % (2 * math.pi)
+        return min(d_, 2 * math.pi - d_)
+
+    def spot_size(fk):
+        """The object's horizontal half-extent from its base's bounds in the names enrichment, else SEAT_SPOT_UNITS."""
+        base_ = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
+        bd_ = base_.get("bounds") if isinstance(base_.get("bounds"), dict) else {}
+        lo_, hi_ = _vec(bd_.get("first")), _vec(bd_.get("second"))
+        if lo_ and hi_:
+            return max(abs(hi_[0] - lo_[0]), abs(hi_[1] - lo_[1])) / 2
+        return SEAT_SPOT_UNITS
+
+    def provider_disables(ch, i):
+        text_ = "; ".join(f"{k_}={v_}" for top_ in ch.get("values") or {}
+                          for k_, v_ in recordrows.provider_fields(ch, top_, i).items())
+        return disables(text_)
+
+    def supersede(rk):
+        """The record facts that make the row's losing value superseded ({kind, ...}), or None. (a) kind: the winner
+        changed a field that says what the record is, the loser left it as it inherited it, and the lost field is not
+        one of those fields. (b) place: the loser only seated the object (moved it straight up or down, not turned,
+        not disabled) and the winner moved it across to another spot: horizontally at least `relocateFactor` times the
+        seat and at least the object's size, more across than down, and without disabling it. Also {kind: undecided}
+        where the lost field describes the record and the winner rewrote it but kept the record's kind."""
+        if rk in sup_cache:
+            return sup_cache[rk]
+        sup_cache[rk] = None
+        if rk[1] != "LOST-EDIT":
+            return None
+        row_ = (p_rows.get(rk) or {}).get("row") or {}
+        field_ = str(row_.get("field") or "")
+        ch = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch:
+            return None
+        provs = [str(x).lower() for x in ch["providers"]]
+        if rk[2].lower() not in provs or rk[3].lower() not in provs:
+            return None
+        ia, ib = provs.index(rk[2].lower()), provs.index(rk[3].lower())
+        _, j = recordrows.own_change(ch["providers"], [0] * len(provs), ia,
+                                             (masters or {}).get(rk[2].lower()) if masters is not None else None)
+        if j is None or ib <= ia:
+            return None
+        spec = sup_kinds.get(ch.get("type")) or {}
+        kinds = [k_ for k_ in spec.get("fields") or [] if k_ in (ch.get("values") or {})]
+        if spec and field_ not in (spec.get("fields") or []):
+            moved = [k_ for k_ in kinds if ch["values"][k_][ib] != ch["values"][k_][j]]
+            kept = all(ch["values"][k_][ia] == ch["values"][k_][j] for k_ in kinds)
+            if moved and kept:
+                changes = []
+                for k_ in moved + [x for x in spec.get("alsoSay") or [] if x in (ch.get("values") or {})]:
+                    old_, new_ = (recordrows.provider_fields(ch, k_, j), recordrows.provider_fields(ch, k_, ib))
+                    for leaf_ in sorted(set(old_) | set(new_)):
+                        if old_.get(leaf_) != new_.get(leaf_):
+                            changes.append(((spec.get("leaves") or {}).get(leaf_, leaf_), old_.get(leaf_),
+                                            new_.get(leaf_)))
+                sup_cache[rk] = {"kind": "kind", "noun": spec.get("noun") or "record", "changes": changes,
+                                 "field": field_}
+                return sup_cache[rk]
+            if (not moved and field_ in (spec.get("describing") or [])
+                    and (own_edit(p_of(rk[0]), rk, rk[3]) or {}).get("changed")):
+                sup_cache[rk] = {"kind": "undecided"}
+            return sup_cache[rk]
+        if field_ != sup_place or sup_place not in (ch.get("values") or {}):
+            return None
+        f_ = [recordrows.provider_fields(ch, sup_place, k_) for k_ in (j, ia, ib)]
+        pos = [_vec(next((v_ for k_, v_ in x.items() if k_.endswith("Position")), None)) for x in f_]
+        rot = [_vec(next((v_ for k_, v_ in x.items() if k_.endswith("Rotation")), None)) for x in f_]
+        if not all(pos):
+            return None
+        (o_, l_, w_) = pos
+        if max(abs(l_[0] - o_[0]), abs(l_[1] - o_[1])) > 0.01 or abs(l_[2] - o_[2]) <= 0:
+            return None                        # the loser's change is no seat: it moves the object sideways
+        if rot[0] and rot[1] and max(_turn(a_, b_) for a_, b_ in zip(rot[0], rot[1])) > 0.001:
+            return None                        # the loser's change turns the object
+        if rot[0] is None and rot[1] is not None or rot[1] is None and rot[0] is not None:
+            return None
+        if provider_disables(ch, ia) or provider_disables(ch, ib):
+            return None                        # a disabled object is no new spot; said by the disabled rules
+        seat = abs(l_[2] - o_[2])
+        across = math.dist(o_[:2], w_[:2])
+        down = abs(w_[2] - o_[2])
+        if across >= sup_factor * seat and across >= down and across >= spot_size(rk[4]):
+            sup_cache[rk] = {"kind": "place", "seat": seat, "up": l_[2] > o_[2], "across": across,
+                             "moved": math.dist(o_, w_)}
+        return sup_cache[rk]
+
     lv_words = words.get("lostEditValuePatterns") or {}
     order_only_re = re.compile(lv_words["orderOnly"]) if lv_words.get("orderOnly") else None
     list_diff_re = re.compile(lv_words["listDiff"]) if lv_words.get("listDiff") else None
@@ -1627,6 +1737,8 @@ def build_prediction(ctx: dict) -> dict:
                 return "notOwnEdit"            # the losing value is the one it inherits: no edit of that mod's
             if oe is not None and oe.get("listKept"):
                 return "listKept"              # every item it added or removed the winning list keeps so
+            if (supersede(rk) or {}).get("kind") in ("kind", "place"):
+                return "superseded"            # the winner rebuilt the record after the loser's small fix
         if (rk[0] == "geometry.fixture-empty-space" and anchor_unclear_re is not None
                 and anchor_unclear_re.search(rk[5])):
             return "anchorUnclear"             # a floor or wall's box reaches it though no touch was found: cannot tell
@@ -1761,7 +1873,7 @@ def build_prediction(ctx: dict) -> dict:
             # Two record checks read overlapping populations (a cell's fields are in both the contested-fields and
             # the cell-attributes check): the same lost edit is one relationship, counted under the first check.
             same = (rk[2].lower(), rk[3].lower(), rk[4], entry["field"])
-            if adm in ("admitted", "ownMaster", "undoesMaster", *NOISE_ADMISSIONS) and same in lost_seen:
+            if adm in ("admitted", "ownMaster", "undoesMaster", "superseded", *NOISE_ADMISSIONS) and same in lost_seen:
                 adm = entry["admission"] = "repeat"
             lost_seen.add(same)
         if adm != "admitted":
@@ -1820,6 +1932,8 @@ def build_prediction(ctx: dict) -> dict:
         if rk[1] == "LOST-EDIT":
             # what each side has (Pilgrim review B1): the winner put back its master's earlier value, or changed the
             # field itself too; said in the item, never only "lost to"
+            if (supersede(rk) or {}).get("kind") == "undecided":
+                g["_notDecided"] = g.get("_notDecided", 0) + 1
             if (own_edit(p_of(rk[0]), rk, rk[3]) or {}).get("changed"):
                 g["_winnerOwn"] = g.get("_winnerOwn", 0) + 1
                 v_ = hit["row"].get("values") or {}
@@ -1928,6 +2042,10 @@ def build_prediction(ctx: dict) -> dict:
                                                             "record": ex_own[0], "field": ex_own[1], "lost": ex_own[2],
                                                             "won": ex_own[3], "loser": loser, "winner": winner})
                                                         if ex_own else ""}))
+        n_undecided = g.pop("_notDecided", 0)
+        if n_undecided and len(directions) == 1:
+            loser, winner = next(iter(directions))
+            detail.append(bind(words["itemNotDecided"], {"count": fmt_n(n_undecided), "loser": loser, "winner": winner}))
         pool = g.pop("_recordPool", None)
         if pool:
             g["_records"] = (pool[0] + pool[1])[:2]
@@ -2196,6 +2314,39 @@ def build_prediction(ctx: dict) -> dict:
             "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
                 "patch": patch_text, "left": fmt_n(left_), "count": fmt_n(n_)})}),
             "findingIds": u_["findingIds"][:1]})
+    # a rebuilt record supersedes the loser's small fix (Pilgrim final review B1): one line per pair, with the record
+    # facts in plain words, never in the clash counts
+    sup_ = collections.OrderedDict()
+    for e in record:
+        if e["admission"] == "superseded":
+            s_ = sup_.setdefault((e["A"], e["B"]), {"rows": [], "findingIds": []})
+            s_["rows"].append(e)
+            if e.get("findingId") and e["findingId"] not in s_["findingIds"]:
+                s_["findingIds"].append(e["findingId"])
+    for (loser_, winner_), s_ in sup_.items():
+        facts_ = []
+        for e in s_["rows"]:
+            f_ = supersede((e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])) or {}
+            eid_ = re.match(r"^\S+ (\S+):", str(e.get("summary") or ""))
+            rec_ = f"{e['formKey']}" + (f" ({eid_.group(1)})" if eid_ and not eid_.group(1).startswith(
+                str(e["formKey"])[:6]) else "")
+            if f_.get("kind") == "kind":
+                changes_ = "; ".join(bind(words["supersededChange"], {"what": w_, "old": o_ or "none", "new": n_ or "none"})
+                                     for w_, o_, n_ in f_["changes"][:3])
+                facts_.append(bind(words["supersededKind"], {"record": rec_, "winner": winner_, "loser": loser_,
+                                                              "noun": f_["noun"], "changes": changes_,
+                                                              "field": f_["field"]}))
+            elif f_.get("kind") == "place":
+                facts_.append(bind(words["supersededPlace"], {
+                    "record": rec_, "winner": winner_, "loser": loser_, "across": fmt_units(f_["across"]),
+                    "seat": fmt_units(f_["seat"]), "way": words["supersededUp" if f_["up"] else "supersededDown"]}))
+        n_ = len(s_["rows"])
+        shown_ = facts_[:int(words.get("supersededExamples") or 3)]
+        loss_lines.append({"text": bind(words["supersededLine"], {
+            "loser": loser_, "winner": winner_, "count": fmt_n(n_),
+            "noun": words["fieldNoun"][0 if n_ == 1 else 1], "facts": " ".join(shown_),
+            "more": bind(words["supersededMore"], {"count": fmt_n(n_ - len(shown_))}) if n_ > len(shown_) else ""}),
+            "findingIds": s_["findingIds"][:1]})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
     # comes from; the check's in-game sentence once
     alone_lines = collections.OrderedDict()
@@ -2320,7 +2471,7 @@ def build_prediction(ctx: dict) -> dict:
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
              "ownMaster": set_aside["ownMaster"], "undoesMaster": set_aside["undoesMaster"],
-             "sameClash": set_aside["sameClash"],
+             "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
              "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
              **{k_: set_aside[k_] for k_ in NOISE_ADMISSIONS}}
     def describe_setup(arm_id):
@@ -2839,7 +2990,7 @@ def build_prediction(ctx: dict) -> dict:
 
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash", "sameValue", "samePair",
-                                                                 "undoesMaster",
+                                                                 "undoesMaster", "superseded",
                                                                  *NOISE_ADMISSIONS)
                      and (e["checkId"], patched_arm) in measured
                      # overwrite history is said by whether it is still flagged; its measured loss, apart (W-S1)

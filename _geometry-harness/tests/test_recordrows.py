@@ -375,7 +375,8 @@ def records_transcript(folder: Path, chain, fk, rtype, form):
         for i, (plugin, fields) in enumerate(chain, start=1):
             req.append({"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": "housecarl_records",
                         "arguments": {"formids": [fk], "source": plugin, "format": "json",
-                                      "project": {"form": "fields", "fields": sorted(fields)}}}})
+                                      "project": {"form": "fields",
+                                                  "fields": sorted({k.split(".")[0] for k in fields})}}}})
             body = {"records": [{"formid": fk, "type": rtype, "editorid": None, "source": plugin,
                                  "fields": [{"path": k, "value": v} for k, v in fields.items()]}]}
             resp.append({"jsonrpc": "2.0", "id": i, "result": {"content": [{"type": "text", "text": json.dumps(body)}]}})
@@ -489,10 +490,10 @@ def case_45_both_capture_forms_give_every_providers_field_values():
     """After the final round (Pilgrim review B1): a rule that reads a record's values (where an object stands, which
     actor value an effect has) gets each provider's full value of a field from either capture form. A tree answer lists
     a provider's value only where it differs from the winner's, so the winner's value (in each difference's
-    parenthesis) fills the rest."""
+    parenthesis) fills the rest. A tree answer omits a leaf no provider differs in (it is the same throughout)."""
     fk = "0825F7:Skyrim.esm"
     chain = [(BASE, {"Placement.Position": "-9153.301,5547.0957,-241.0651", "Placement.Rotation": "0,0,0"}),
-             (C, {"Placement.Position": "-9153.301,5547.0957,-241.395", "Placement.Rotation": "0,0,0"}),
+             (C, {"Placement.Position": "-9153.301,5547.0957,-241.395", "Placement.Rotation": "0,0,0.5"}),
              (A, {"Placement.Position": "-9170.188,5452.2637,-227.8473", "Placement.Rotation": "0,0,0"}),
              (B, {"Placement.Position": "-9170.188,5452.2637,-227.8473", "Placement.Rotation": "0,0,0"})]
     answers = {}

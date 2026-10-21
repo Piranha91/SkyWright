@@ -2852,7 +2852,8 @@ def main():
         results = {(CONTACT, a_): [] for (_, a_) in enr}
         results.update(extra_results or {})
         return compile_and_render(arms or WP_ARMS, results, list(targets), patches=list(patches),
-                                  count_only=count_only, enrichment=enr, transcripts=tr, masters=masters)
+                                  count_only=count_only, enrichment=enr, transcripts=tr, masters=masters,
+                                  **({"names": names} if names is not None else {}))
 
     # C620 (Pilgrim's second blind review, B1). Where the winning mod's value equals the value the losing mod changed
     # (winner = overridden: it carries the earlier value, no change of its own), a patch that takes the losing mod's
