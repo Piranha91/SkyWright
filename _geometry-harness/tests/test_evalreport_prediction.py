@@ -3721,6 +3721,34 @@ def main():
                      ("after-final/C812-path-case-is-no-new-clash-with-the-patch", c812_path_case_is_no_new_clash_with_the_patch),
                      ("after-final/C813-carried-value-still-changes-in-game", c813_carried_value_still_changes_in_game)]:
         cell(name, fn)
+    # ---------------------------------------- after the final round, group C: the patch comparison's own sentences
+    # C814 (Pilgrim review S1): the patch section opens with what the patch does, from the same counts as its lines;
+    # no sentence undercuts it ("do not establish", "did not report a newly introduced", "No measured repair").
+    def c814_patch_summary_never_undercuts_its_lines():
+        R1 = f"00C820:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, R1, "Owner", "o", "a", "v")]
+        plan, md, _ = core_bundle(p_rows, [])
+        val = reader(plan).get("validation") or {}
+        ok = (str(val.get("summary", "")).startswith(f"In short, {PATCH} resolves 1 record field")
+              and "do not establish" not in md and "did not report a newly introduced" not in md
+              and "No measured repair or ownership change was recorded." not in md
+              and f"Removing {PATCH} brings back the 1 record field it resolves" in md)
+        return ok, f"summary {val.get('summary')!r}; headline {val.get('headline')!r}"
+
+    # C815 (BPT review S2/S3): the summary names every check with new problems; a by-object check counts objects, with
+    # its pairs beside them.
+    def c815_new_problems_named_per_check_in_objects():
+        plan, md, _ = new_by_object_bundle()
+        val = reader(plan).get("validation") or {}
+        head = str(val.get("summary", ""))
+        line = next((ln for ln in md.splitlines() if ln.startswith("- New clashes in the setup with")), "")
+        ok = ("2 objects (5 object-and-support pairs)" in head and "Objects left without their supporting surface" in head
+              and "2 objects (5 object-and-support pairs)" in line)
+        return ok, f"{head[:200]!r}; {line[:160]!r}"
+
+    for name, fn in [("after-final/C814-patch-summary-never-undercuts-its-lines", c814_patch_summary_never_undercuts_its_lines),
+                     ("after-final/C815-new-problems-named-per-check-in-objects", c815_new_problems_named_per_check_in_objects)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
