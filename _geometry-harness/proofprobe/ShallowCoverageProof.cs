@@ -159,6 +159,63 @@ static class ShallowCoverageProof
                 off0 == on1 ? $"{off0.Length} chars equal; measured {measured}, core {tmr.CoreMeasure.Calls}, shell {tmr.CoreShell.Calls}, best {tmr.Best.Calls}/{tmr.BestInJudge.Calls}, pair {tmr.Pair.Calls}/{tmr.PairInJudge.Calls}, judge {tmr.JudgeCalls}"
                             : $"serialisations differ at char {at} (lengths {off0.Length} vs {on1.Length}): ...{off0.Substring(Math.Max(0, at - 60), Math.Min(120, off0.Length - Math.Max(0, at - 60)))}");
         }
+
+        // ---- Gate B red-first cases for the chosen changes (GATE-B.md §5) ----
+        // CT-2 (shell facing-only): with the radius read, the shell contact is read for its facing gap alone, so it must run no
+        // penetration and no enclosed-depth queries (the core contact still runs them). RED until the facing-only path exists.
+        {
+            var ix = Load(true); var tmr = new ContactTimer(); ix.Timer = tmr; var sk = new ContactSkips();
+            var h = ix.MovedHosts(sk, closure); var d = ix.DependentSnaps(sk); var w = ix.PhysicalWinners(null, sk);
+            foreach (var x in h) ix.Judge(x, d, w, closure, sk, keepNoRelation: true);
+            Check("CT-2: the radius shell contact is read for its facing gap only (no penetration or enclosed queries on the shell)",
+                tmr.CoreShell.Calls > 0 && tmr.CoreShell.PenetrationQueries == 0 && tmr.CoreShell.EnclosedQueries == 0 && tmr.CoreMeasure.EnclosedQueries > 0,
+                $"shell calls {tmr.CoreShell.Calls}, shell penetration queries {tmr.CoreShell.PenetrationQueries}, shell enclosed queries {tmr.CoreShell.EnclosedQueries}, core enclosed {tmr.CoreMeasure.EnclosedQueries}");
+        }
+        // CT-4 (Measure memo): each distinct pair is measured once per index: the core contact runs once per distinct Measure key,
+        // radius on and off. RED until the memo exists (the fixture repeats pairs: Judge, then a default BestContact and PairContact).
+        foreach (bool radius in new[] { true, false })
+        {
+            var ix = Load(radius); var tmr = new ContactTimer(); ix.Timer = tmr; var sk = new ContactSkips();
+            var h = ix.MovedHosts(sk, closure); var d = ix.DependentSnaps(sk); var w = ix.PhysicalWinners(null, sk);
+            foreach (var x in h) ix.Judge(x, d, w, closure, sk, keepNoRelation: true);
+            var dsn = ix.Index.History.Of(D(1))!; var dwn = dsn[^1];
+            ix.BestContact(D(1), dsn.Count - 1, rugK, dwn, ix.WorldBox(rugK, dwn), w, ix.WinnerPlacement, (k, _) => ix.WinnerBase(k), out _);
+            var hs1 = ix.Index.History.Of(H(1))!; var rs1 = ix.Index.History.Of(D(1))!;
+            ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, floorK, hs1[0]);
+            Check($"CT-4 (radius {(radius ? "on" : "off")}): a pair already measured on this index is not measured again",
+                tmr.MeasureRepeats > 0 && tmr.CoreMeasure.Calls == tmr.MeasureDistinct,
+                $"Measure calls {tmr.MeasureDistinct + tmr.MeasureRepeats} ({tmr.MeasureRepeats} repeats), core contacts {tmr.CoreMeasure.Calls}, distinct pairs {tmr.MeasureDistinct}");
+        }
+        // CT-5 (Measure memo correctness; green on the base, the memo's sabotage arms must turn them red). Precondition shared with
+        // the per-placement caches: a snap index names one placement (callers pass the snap at that index). On ONE index, a pair
+        // measured again with the host at another placement, the host under another base at the same snap, or the dependent under
+        // another base, must equal that call made on a FRESH index; and an index with another Reach must equal a fresh one with it.
+        {
+            string Key(ArmContact? a) => a is null ? "null" : System.Text.Json.JsonSerializer.Serialize(new { a.Contact, a.CoreGap, a.AgainstExtent, a.Against }, opts);
+            var hs1 = ci.Index.History.Of(H(1))!; var rs1 = ci.Index.History.Of(D(1))!;
+            var one = Load(true);
+            var calls = new (string Name, Func<ContactIndex, ArmContact?> Call)[]
+            {
+                ("host at its authored placement", ix => ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, floorK, hs1[0])),
+                ("host moved (its next snap)", ix => ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 1, floorK, hs1[1])),
+                ("host under another base at the same snap", ix => ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, blockK, hs1[0])),
+                ("dependent under another base", ix => ix.PairContact(D(1), 0, coverK, rs1[0], H(1), 0, floorK, hs1[0])),
+            };
+            foreach (var (name, call) in calls)
+            {
+                string onShared = Key(call(one)), onFresh = Key(call(Load(true)));
+                Check($"CT-5: {name}: the same index answers as a fresh index", onShared == onFresh, onShared == onFresh ? onShared[..Math.Min(140, onShared.Length)] : $"shared {onShared[..Math.Min(140, onShared.Length)]} vs fresh {onFresh[..Math.Min(140, onFresh.Length)]}");
+            }
+            var near = new ContactIndex(Geometry) { ReadRadius = true, Reach = 16f };
+            for (int pp = 0; pp < 2; pp++) { using var mod = SkyrimMod.CreateFromBinaryOverlay(pp == 0 ? mp : ap, SkyrimRelease.SkyrimSE); near.Index.Ingest(pp, mod); }
+            var nearFresh = new ContactIndex(Geometry) { ReadRadius = true, Reach = 16f };
+            for (int pp = 0; pp < 2; pp++) { using var mod = SkyrimMod.CreateFromBinaryOverlay(pp == 0 ? mp : ap, SkyrimRelease.SkyrimSE); nearFresh.Index.Ingest(pp, mod); }
+            // the block host is 19 u away: within the default reach (128), beyond 16, so the two reaches give different answers
+            calls[2].Call(one); calls[2].Call(near);
+            string a1 = Key(calls[2].Call(near)), b1 = Key(calls[2].Call(nearFresh)), c1 = Key(calls[2].Call(one));
+            Check("CT-5: an index with another Reach answers as a fresh index with that Reach, not as one with the default",
+                a1 == b1 && a1 != c1, $"reach 16 shared {a1[..Math.Min(100, a1.Length)]}; fresh {b1[..Math.Min(100, b1.Length)]}; default {c1[..Math.Min(100, c1.Length)]}");
+        }
         mo.Dispose();
         Directory.Delete(root, true);
     }
