@@ -2196,6 +2196,7 @@ def build_prediction(ctx: dict) -> dict:
     # a measured loss of ground (its predicate holds) is a measured fact of this setup: said here, with the largest
     # losses, and tied to the broken links counted above that point into a replaced navmesh. No claim about NPCs.
     loss_lines = []
+    ground_still = []                  # (loser, winner, navmesh records) whose lost ground the patch setup still loses
     by_pair = collections.OrderedDict()
     for rk, hit in sorted(p_rows.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
         if not (hit["history"] and rk[0] == "geometry.navmesh-ownership" and rk[2].lower() != rk[3].lower()):
@@ -2287,6 +2288,8 @@ def build_prediction(ctx: dict) -> dict:
             "examples": "; ".join(f"{d[1]} {fmt_n(d[2])} -> {fmt_n(d[3])} triangles" for d in drops[:3])})
         if links:
             text += " " + bind(words["historyLossLinks"], {"links": fmt_n(len(links)), "targets": ", ".join(tdesc)})
+        if n_measured and n_persist:
+            ground_still.append((loser, winner, n_persist))
         if n_measured:
             text += " " + (bind(words["historyLossPersists"][0 if n_persist == 1 else 1], {
                 "patch": patch_text, "count": fmt_n(n_persist), "examples": persist_ex}) if n_persist else
@@ -3382,6 +3385,12 @@ def build_prediction(ctx: dict) -> dict:
         if len(stays_parts) > limit:
             shown.append(bind(words["stillThereMore"][0 if len(stays_parts) - limit == 1 else 1], {"count": fmt_n(sum(n_ for n_, _ in stays_parts[limit:])),
                                                         "items": fmt_n(len(stays_parts) - limit)}))
+        if ground_still and words.get("stillThereGround"):
+            # navmesh ground still lost with the patches is said at the top too, in its own unit (Clockwork review S4)
+            shown.append(bind(words["stillThereGround"], {"parts": "; ".join(
+                bind(words["stillThereGroundPart"], {"loser": l_, "winner": w_, "count": fmt_n(n_),
+                                                     "noun": "navmesh record" if n_ == 1 else "navmesh records"})
+                for l_, w_, n_ in sorted(ground_still, key=lambda x: (-x[2], x[0].lower())))}))
         for (winner, loser), fks in back.items():
             fks = list(dict.fromkeys(fks))
             shown.append(bind(words["stillThereBringsBack"], {
