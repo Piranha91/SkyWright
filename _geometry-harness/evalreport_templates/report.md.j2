@@ -63,7 +63,7 @@
 {% if val.status == "no-patch" %}{{ val.sentence }}
 
 {{ val.other }}
-{% else %}{{ val.headline }}
+{% else %}{% if val.get("summary") %}{{ val.summary }}{% if val.headline %} {% endif %}{% endif %}{{ val.headline }}
 
 {% for s in val.sentences %}- {{ s }}{% if s == val.get("undoneSentence") %}{% for fid in val.undoneFindingIds[:1] %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% endif %}{{ "" }}
 {% endfor %}{% if val.get("newByCheck") %}- {{ val.newByCheckHeading }}: {% for n in val.newByCheck %}{{ n.title }} {{ n.count|n }}{% if n.get("masterNote") %} ({{ n.masterNote }}){% endif %}{% for fid in n.findingIds %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% if not loop.last %}; {% endif %}{% endfor %}.
@@ -123,7 +123,7 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 {% for m in f.figures %}{% if m.reportPath %}![{{ (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
 
 *Evidence image.* [Image provenance](evidence-index.md#{{ m.id }}).
-{% endif %}{% endfor %}{% endfor %}{% else %}The completed comparisons did not report a newly introduced physical defect.{% for x in p.reader.get('refusedSummary') or [] %} {{ x }}{% endfor %}
+{% endif %}{% endfor %}{% endfor %}{% else %}{{ val.get("noRegressionLine") or "The completed comparisons did not report a newly introduced physical defect." }}{% for x in p.reader.get('refusedSummary') or [] %} {{ x }}{% endfor %}
 {% endif %}
 
 ## What the checks found
@@ -151,7 +151,7 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 ## {{ p.reader.sectionHeadings.changes }}
 
 {% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{{ f.readerArmLabel }} — {{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
-{% endfor %}{% else %}No measured repair or ownership change was recorded.
+{% endfor %}{% else %}{{ val.get("noChangeLine") or "No measured repair or ownership change was recorded." }}
 {% endif %}
 {% for item in p.reader.comparisonSummary %}- {{ item }}
 {% endfor %}

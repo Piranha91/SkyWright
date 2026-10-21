@@ -2997,6 +2997,7 @@ def build_prediction(ctx: dict) -> dict:
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
+        problem_rows = collections.Counter()          # rows per new problem: an object's pairs (BPT review S3)
         # new with the patch is decided by the same setup with and without the patch alone (coordinator ruling on
         # Pilgrim's blind review); a new clash another setup without the patch also has (Grand Solitude alone splits
         # the aliases the patch restores) is said as brought back from there
@@ -3041,6 +3042,8 @@ def build_prediction(ctx: dict) -> dict:
             if is_base_game(rk[2], words) or is_base_game(rk[3], words) or (
                     master_of(masters, rk[2], rk[3]) and not is_geometry_check(rk[0], words)):
                 continue                       # the base game, or a record value over the plugin's own master (P63)
+            if (rk[0], p_of(rk[0])) in measured:
+                problem_rows[ident_] += 1
             if (rk[0], p_of(rk[0])) in measured and ident_ not in problem_seen:
                 problem_seen.add(ident_)
                 where_ = next((a_ for a_ in no_patch_arms if (rk[0], a_) in measured and there(a_, rk)), None)
@@ -3070,12 +3073,33 @@ def build_prediction(ctx: dict) -> dict:
                        and not disables((h_["row"].get("values") or {}).get("winner"))]
         n_enable = len(switched_on)
         enable_examples = list(dict.fromkeys(str(rk[4]) for rk in switched_on))[:3]
-        def by_unit(xs):
-            """A count given once per unit when its clashes are of several (never pairs added to record fields)."""
+        def problems_text(with_checks=False):
+            """The new problems with the patch in their units: an object of a by-object check is counted as an object,
+            with its pairs beside it (BPT review S3); with_checks names each check."""
+            per = collections.OrderedDict()
+            for rk_ in problems:
+                ident_ = ident_of.get(rk_, tuple(rk_[:5]))
+                c_ = per.setdefault((rk_[0], rk_[1] if rk_[0] not in by_object else ""), [0, 0])
+                c_[0] += 1
+                c_[1] += problem_rows.get(ident_, 1)
+            parts_ = []
+            for (check_, kind_), (n_, rows_) in sorted(per.items(), key=lambda kv: -kv[1][0]):
+                if check_ in by_object:
+                    t_ = f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}" + (
+                        f" ({fmt_n(rows_)} {unit_noun(check_, kind_, rows_)})" if rows_ != n_ else "")
+                else:
+                    t_ = f"{fmt_n(n_)} {unit_noun(check_, kind_, n_)}"
+                parts_.append(bind(words["validationProblemInCheck"], {"count": t_, "title": title_of(check_)})
+                              if with_checks else t_)
+            return ", ".join(parts_) if parts_ else "0"
+
+        def by_unit(xs, named=False):
+            """A count given once per unit when its clashes are of several (never pairs added to record fields); named:
+            the unit is said even when there is one."""
             c_ = collections.Counter()
             for e in xs:
                 c_[(unit_noun(e["checkId"], e["kind"], 1), unit_noun(e["checkId"], e["kind"], 2))] += 1
-            if len(c_) <= 1:
+            if len(c_) <= 1 and not named:
                 return fmt_n(sum(c_.values()))
             return ", ".join(f"{fmt_n(n_)} {u_[0] if n_ == 1 else u_[1]}" for u_, n_ in
                              sorted(c_.items(), key=lambda kv: (-kv[1], kv[0])))
@@ -3105,6 +3129,7 @@ def build_prediction(ctx: dict) -> dict:
                      bind(words["validationPatchProblems"], {"patch": patch, "count": by_unit(
                          [{"checkId": rk[0], "kind": rk[1]} for rk in problems]), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
+        sentences[new_idx] = bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})
         not_new_sentence = None
         if not_new:
             by_setup = collections.OrderedDict()
@@ -3296,7 +3321,38 @@ def build_prediction(ctx: dict) -> dict:
                                         if shown else None)
         prediction["withPatchLine"] = " ".join([prediction["withPatchHead"], *kind_lines]
                                                + ([prediction["withPatchStays"]] if shown else []))
-        validation = {"status": "compared", "headline": ctx["oldVerdict"], "patches": patch_names,
+        # one plain summary of what the patch does, from the same counts as the lines below, never a sentence that
+        # undercuts them (Pilgrim review S1; BPT review S2: every check with new problems is named)
+        sum_parts = [bind(words["validationSummaryResolved"], {"count": by_unit(hits, True)}) if hits
+                     else words["validationSummaryNoneResolved"]]
+        if switched:
+            sum_parts.append(bind(words["validationSummarySwitched"], {"count": by_unit(switched, True)}))
+        if own:
+            sum_parts.append(bind(words["validationSummaryOwn"], {"count": by_unit(own, True)}))
+        if open_ or kept:
+            sum_parts.append(bind(words["validationSummaryLeft"], {"count": by_unit(open_ + kept, True)}))
+        sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True)}) if problems
+                         else words["validationSummaryNoNew"])
+        summary_ = bind(words["validationSummary"], {"patch": patch, "parts": (", ".join(sum_parts[:-1]) + ", and "
+                                                                               + sum_parts[-1]) if len(sum_parts) > 1
+                                                     else sum_parts[0]})
+        removing_ = patched_arm == "baseline"
+        side_lines = ({"noRegressionLine": bind(words["validationRemovingNoRegression"], {
+                           "patch": patch, "count": by_unit(hits, True)}) if hits else None,
+                       "noChangeLine": bind(words["validationRemovingNoChange"], {
+                           "patch": patch, "count": problems_text()}) if problems else
+                       bind(words["validationRemovingNoChangeNone"], {"patch": patch}) if hits else None}
+                      if removing_ else
+                      {"noRegressionLine": None,
+                       "noChangeLine": bind(words["validationAddingNoChange"], {
+                           "patch": patch, "count": by_unit(hits, True)}) if hits else None})
+        # the comparison's own sentence follows where it says more (a new defect, a refused comparison), never the
+        # generic "do not establish", which the summary answers
+        old_ = str(ctx.get("oldVerdict") or "")
+        if ctx.get("genericVerdict"):
+            old_ = old_.replace(ctx["genericVerdict"], "").strip()
+        validation = {"status": "compared", "summary": summary_, "headline": old_,
+                      "patches": patch_names, **side_lines,
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
@@ -4608,6 +4664,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 parts[-1] += cmp_words["verdictNotAccepted"]
         return " and ".join(parts) if parts else "a new defect in a check that ran"
 
+    generic_verdict = None
     if has_regression:
         if has_other_regression:
             change_subject = setup_subject({f.get("armId") for f in reader_regressions
@@ -4672,7 +4729,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     elif claim == "no-findings-in-completed-checks":
         verdict = "The completed checks found no problem in what they examined."
     elif has_alternative:
-        verdict = f"The completed checks do not establish that {lower_first(setup_subject(alternative_arms))} improves the target mod."
+        verdict = generic_verdict = (f"The completed checks do not establish that "
+                                     f"{lower_first(setup_subject(alternative_arms))} improves the target mod.")
     elif any(f.get("kind") == "finding" and f.get("readerRelevant") for f in findings):
         verdict = "The completed checks found conflicts involving the target mod; no alternative setup was supplied for comparison."
     elif has_completed_result:
@@ -4934,7 +4992,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
         "cannotRunChecks": [str(c.get("checkId")) for c in b.plan.get("checks") or []
                             if isinstance(c, dict) and c.get("status") in ("unsupported", "manual")],
-        "oldVerdict": verdict, "limitations": limitations, "words": reader_data["prediction"],
+        "oldVerdict": verdict, "genericVerdict": generic_verdict, "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
