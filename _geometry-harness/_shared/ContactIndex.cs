@@ -281,6 +281,200 @@ public sealed class BoxHash<T>
     }
 }
 
+/// <summary>Opt-in timers for <see cref="ContactIndex.BestContact"/>, <see cref="ContactIndex.PairContact"/> and
+/// <see cref="ContactIndex.Judge"/> (stateprobe and contactprobe <c>--phase-timers</c>): <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/>
+/// ticks and counts per sub-phase. Null on the index (the default): no clock is read and nothing here is touched. Never read by a
+/// decision. Each entry's buckets partition its calls' wall exactly (a running stamp, every segment assigned to one bucket); the
+/// repeat accounting's own work is kept out of every bucket and counted in <see cref="AccountingTicks"/>. Not thread-safe: the
+/// index is used from one thread in every probe.</summary>
+public sealed class ContactTimer
+{
+    public static long Now() => System.Diagnostics.Stopwatch.GetTimestamp();
+    public static double Seconds(long ticks) => ticks / (double)System.Diagnostics.Stopwatch.Frequency;
+
+    /// <summary>One entry point's buckets. <see cref="Lap"/> charges the time since the last stamp to one bucket.</summary>
+    public sealed class Entry
+    {
+        internal long Stamp;
+        public long Calls, WallTicks;
+        public long DepSoupTicks, BroadTicks, PlacementOfTicks, BaseOfTicks, HostGridTicks, MeasureCoreTicks, ShellPrepTicks, ShellMeasureTicks,
+                    ExtentTicks, PreexistingTicks, CoverPlausibleTicks, CoverMeasureTicks, CoverAuthoredTicks, CoverCompareTicks, OtherTicks;
+        public long Neighbours, SelfSkips, PlacementNulls, RadiusRejects, GridNulls, SoupNulls, Measured, MemoHits, ExtentCalls, PreexistingCalls,
+                    CoverPlausibleCalls, CoverMeasureCalls, CoverAuthoredCalls, CoverCompareCalls;
+        internal void Lap(ref long bucket) { long now = Now(); bucket += now - Stamp; Stamp = now; }
+        public IEnumerable<(string Name, long Ticks)> Buckets() => new[]
+        {
+            ("dep-soup", DepSoupTicks), ("broad", BroadTicks), ("placementOf", PlacementOfTicks), ("baseOf", BaseOfTicks), ("host-grid", HostGridTicks),
+            ("measure.core", MeasureCoreTicks), ("measure.shell-prep", ShellPrepTicks), ("measure.shell", ShellMeasureTicks), ("extent", ExtentTicks),
+            ("preexisting", PreexistingTicks), ("coverage.plausible", CoverPlausibleTicks), ("coverage.measure", CoverMeasureTicks),
+            ("coverage.authored", CoverAuthoredTicks), ("coverage.compare", CoverCompareTicks), ("other", OtherTicks),
+        };
+        /// <summary>Σ buckets: the calls' wall with the repeat accounting taken out.</summary>
+        public long CallTicks => Buckets().Sum(b => b.Ticks);
+        public IEnumerable<(string Name, long Count)> Counts() => new[]
+        {
+            ("calls", Calls), ("neighbours", Neighbours), ("self-skips", SelfSkips), ("placementOf-null", PlacementNulls), ("radius-rejects", RadiusRejects),
+            ("grid-null", GridNulls), ("soup-null", SoupNulls), ("measured", Measured), ("memo-hits", MemoHits), ("extent", ExtentCalls), ("preexisting", PreexistingCalls),
+            ("coverage.plausible", CoverPlausibleCalls), ("coverage.measure", CoverMeasureCalls), ("coverage.authored", CoverAuthoredCalls),
+            ("coverage.compare", CoverCompareCalls),
+        };
+    }
+
+    /// <summary>One per-placement cache: hits, misses, and a miss's time split into fetching the base's geometry (<c>GeomOf</c>: a
+    /// memo read or a decode), placing it (<c>TransformSoup</c>), building the grid, and the rest (cache insert and eviction). A
+    /// rebuild is a miss on a key this cache built before (it was evicted).</summary>
+    public sealed class CacheTiming
+    {
+        public long Hits, Misses, MissTicks, GeomTicks, TransformTicks, BuildTicks, Rebuilds, RebuildTicks, NullValues, Coarsened, Overflowed;
+        readonly HashSet<(FormKey, int, FormKey)> _built = new();
+        internal void Miss((FormKey, int, FormKey) key, long m0, long m1, long m2, long m3, object? value)
+        {
+            long now = Now();
+            Misses++; MissTicks += now - m0;
+            if (m3 > m0) { GeomTicks += m1 - m0; TransformTicks += m2 - m1; BuildTicks += m3 - m2; }
+            else if (m2 > m0) { GeomTicks += m1 - m0; TransformTicks += m2 - m1; }
+            if (value is null) NullValues++;
+            if (value is TriangleGrid g) { if (g.Sizing is { GroupingPower: > 0 }) Coarsened++; if (g.OverflowTriangleCount > 0) Overflowed++; }
+            if (!_built.Add(key)) { Rebuilds++; RebuildTicks += now - m0; }
+        }
+    }
+
+    public Entry Best { get; } = new();
+    public Entry BestInJudge { get; } = new();
+    public Entry Pair { get; } = new();
+    public Entry PairInJudge { get; } = new();
+    public CacheTiming DepSoups { get; } = new();
+    public CacheTiming HostGrids { get; } = new();
+    public CacheTiming ShellDeps { get; } = new();
+    public CacheTiming ShellGrids { get; } = new();
+    public CacheTiming ArmGrids { get; } = new();
+    /// <summary>The core step timers, one per call site of <see cref="SpatialOverlap.Contact(TriangleSoup, TriangleGrid, float, float, CancellationToken, ContactStepTimer)"/>.</summary>
+    public ContactStepTimer CoreMeasure { get; } = new();
+    public ContactStepTimer CoreShell { get; } = new();
+    public ContactStepTimer CorePreexisting { get; } = new();
+    /// <summary>Judge: calls, and wall with the repeat accounting taken out.</summary>
+    public long JudgeCalls, JudgeTicks;
+    /// <summary>The grid bucket targets grids were built with (bytes; more than one when the budget was lowered mid-run).</summary>
+    public SortedSet<long> BucketTargets { get; } = new();
+
+    // ---- repeat accounting: the ceiling of a per-index Measure memo (its own cost is AccountingTicks, outside every bucket) ----
+    public long AccountingTicks, MeasureDistinct, MeasureRepeats, MeasureRepeatTicks;
+    readonly HashSet<(FormKey, int, FormKey, Snap, FormKey, int, FormKey, Snap)> _measureKeys = new();
+    readonly List<(long Ticks, FormKey Dep, FormKey DepBase, FormKey Host, FormKey HostBase, int DepTris, int HostTris)> _slowest = new();
+    public IReadOnlyList<(long Ticks, FormKey Dep, FormKey DepBase, FormKey Host, FormKey HostBase, int DepTris, int HostTris)> Slowest => _slowest;
+
+    internal void Account(Entry e, long measureTicks, FormKey depKey, int depSnap, FormKey depBase, Snap depS, FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS,
+                          int depTris, int hostTris)
+    {
+        if (_measureKeys.Add((depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS))) MeasureDistinct++;
+        else { MeasureRepeats++; MeasureRepeatTicks += measureTicks; }
+        if (_slowest.Count < 20 || measureTicks > _slowest[^1].Ticks)
+        {
+            _slowest.Add((measureTicks, depKey, depBase, hostKey, hostBase, depTris, hostTris));
+            _slowest.Sort((a, b) => b.Ticks.CompareTo(a.Ticks));
+            if (_slowest.Count > 20) _slowest.RemoveAt(20);
+        }
+        long now = Now(); AccountingTicks += now - e.Stamp; e.Stamp = now;
+    }
+
+    /// <summary>The printed block (one line per bucket with seconds and its share of the entry's calls).</summary>
+    public IEnumerable<string> Lines()
+    {
+        foreach (var (name, e) in Entries())
+        {
+            if (e.Calls == 0) continue;
+            long call = e.CallTicks;
+            yield return $"   {name}: {e.Calls:N0} calls, {Seconds(call):0.0}s (wall {Seconds(e.WallTicks):0.0}s with the accounting)";
+            foreach (var (b, t) in e.Buckets())
+                yield return $"      {b,-20} {Seconds(t),9:0.0}s {(call > 0 ? 100.0 * t / call : 0),6:0.0}%";
+            yield return "      counts: " + string.Join(", ", e.Counts().Where(c => c.Count != 0).Select(c => $"{c.Name} {c.Count:N0}"));
+        }
+        if (JudgeCalls > 0) yield return $"   judge: {JudgeCalls:N0} calls, {Seconds(JudgeTicks):0.0}s";
+        foreach (var (name, c) in Caches())
+            yield return $"   cache {name}: {c.Hits:N0} hit / {c.Misses:N0} miss ({Seconds(c.MissTicks):0.0}s: geometry {Seconds(c.GeomTicks):0.0}s, transform {Seconds(c.TransformTicks):0.0}s, "
+                       + $"build {Seconds(c.BuildTicks):0.0}s); rebuilt after eviction {c.Rebuilds:N0} ({Seconds(c.RebuildTicks):0.0}s); null {c.NullValues:N0}; coarsened {c.Coarsened:N0}; overflow {c.Overflowed:N0}";
+        foreach (var (name, t) in Cores())
+            yield return $"   core {name}: {t.Calls:N0} calls ({t.EmptyCalls:N0} empty), {ContactStepTimer.Seconds(t.CallTicks):0.0}s: nearest {ContactStepTimer.Seconds(t.NearestTicks):0.0}s "
+                       + $"({t.NearestQueries:N0}), band {ContactStepTimer.Seconds(t.BandTicks):0.0}s ({t.BandQueries:N0}, {t.BandCandidates:N0} candidates), "
+                       + $"candidates {ContactStepTimer.Seconds(t.CandidateTicks):0.0}s, penetration {ContactStepTimer.Seconds(t.PenetrationTicks):0.0}s ({t.PenetrationQueries:N0}), "
+                       + $"enclosed {ContactStepTimer.Seconds(t.EnclosedTicks):0.0}s ({t.EnclosedQueries:N0}); triangles dep {t.DependentTriangles:N0} host {t.HostTriangles:N0}";
+        yield return $"   repeats: Measure {MeasureDistinct:N0} distinct, {MeasureRepeats:N0} repeated ({Seconds(MeasureRepeatTicks):0.0}s); accounting {Seconds(AccountingTicks):0.0}s (outside every bucket); "
+                   + $"grid bucket targets {string.Join(", ", BucketTargets)}";
+    }
+
+    public IEnumerable<(string Name, Entry E)> Entries() => new[] { ("best", Best), ("best-in-judge", BestInJudge), ("pair", Pair), ("pair-in-judge", PairInJudge) };
+    public IEnumerable<(string Name, CacheTiming C)> Caches() => new[] { ("depSoups", DepSoups), ("hostGrids", HostGrids), ("shellDeps", ShellDeps), ("shellGrids", ShellGrids), ("armGrids", ArmGrids) };
+    public IEnumerable<(string Name, ContactStepTimer T)> Cores() => new[] { ("measure", CoreMeasure), ("shell", CoreShell), ("preexisting", CorePreexisting) };
+
+    /// <summary>Run features (name, value, unit) for RunLog's Final features: per entry its calls, seconds and bucket seconds; per
+    /// cache misses, rebuilds and miss seconds; core seconds per site; the repeat ceiling and the accounting.</summary>
+    public IEnumerable<(string Name, double Value, string Unit)> Features()
+    {
+        foreach (var (n, e) in Entries())
+        {
+            if (e.Calls == 0) continue;
+            yield return ($"contact.{n}.calls", e.Calls, "calls");
+            yield return ($"contact.{n}.seconds", Seconds(e.CallTicks), "seconds");
+            foreach (var (b, t) in e.Buckets()) yield return ($"contact.{n}.{b}.seconds", Seconds(t), "seconds");
+        }
+        yield return ("contact.judge.seconds", Seconds(JudgeTicks), "seconds");
+        foreach (var (n, c) in Caches())
+        {
+            yield return ($"contact.cache.{n}.misses", c.Misses, "count");
+            yield return ($"contact.cache.{n}.rebuilds", c.Rebuilds, "count");
+            yield return ($"contact.cache.{n}.miss-seconds", Seconds(c.MissTicks), "seconds");
+        }
+        foreach (var (n, t) in Cores()) yield return ($"contact.core.{n}.seconds", ContactStepTimer.Seconds(t.CallTicks), "seconds");
+        yield return ("contact.repeats.measure", MeasureRepeats, "calls");
+        yield return ("contact.repeats.measure-seconds", Seconds(MeasureRepeatTicks), "seconds");
+        yield return ("contact.accounting-seconds", Seconds(AccountingTicks), "seconds");
+    }
+
+    /// <summary>The table as JSON (seconds and counts), for the gate files.</summary>
+    public string ToJson(IReadOnlyDictionary<string, object>? extra = null)
+    {
+        static Dictionary<string, object> Core(ContactStepTimer t) => new()
+        {
+            ["calls"] = t.Calls, ["empty"] = t.EmptyCalls, ["seconds"] = ContactStepTimer.Seconds(t.CallTicks), ["nearest.seconds"] = ContactStepTimer.Seconds(t.NearestTicks),
+            ["nearest.queries"] = t.NearestQueries, ["band.seconds"] = ContactStepTimer.Seconds(t.BandTicks), ["band.queries"] = t.BandQueries,
+            ["band.candidates"] = t.BandCandidates, ["candidates.seconds"] = ContactStepTimer.Seconds(t.CandidateTicks),
+            ["penetration.seconds"] = ContactStepTimer.Seconds(t.PenetrationTicks), ["penetration.queries"] = t.PenetrationQueries,
+            ["enclosed.seconds"] = ContactStepTimer.Seconds(t.EnclosedTicks), ["enclosed.queries"] = t.EnclosedQueries,
+            ["dependentTriangles"] = t.DependentTriangles, ["hostTriangles"] = t.HostTriangles,
+        };
+        var doc = new Dictionary<string, object>
+        {
+            ["entries"] = Entries().ToDictionary(x => x.Name, x => (object)new Dictionary<string, object>
+            {
+                ["calls"] = x.E.Calls, ["seconds"] = Seconds(x.E.CallTicks), ["wallSeconds"] = Seconds(x.E.WallTicks),
+                ["buckets"] = x.E.Buckets().ToDictionary(b => b.Name, b => Seconds(b.Ticks)),
+                ["counts"] = x.E.Counts().ToDictionary(c => c.Name, c => c.Count),
+            }),
+            ["judge"] = new Dictionary<string, object> { ["calls"] = JudgeCalls, ["seconds"] = Seconds(JudgeTicks) },
+            ["caches"] = Caches().ToDictionary(x => x.Name, x => (object)new Dictionary<string, object>
+            {
+                ["hits"] = x.C.Hits, ["misses"] = x.C.Misses, ["missSeconds"] = Seconds(x.C.MissTicks), ["geometrySeconds"] = Seconds(x.C.GeomTicks),
+                ["transformSeconds"] = Seconds(x.C.TransformTicks), ["buildSeconds"] = Seconds(x.C.BuildTicks), ["rebuilds"] = x.C.Rebuilds,
+                ["rebuildSeconds"] = Seconds(x.C.RebuildTicks), ["nullValues"] = x.C.NullValues, ["coarsened"] = x.C.Coarsened, ["overflowed"] = x.C.Overflowed,
+            }),
+            ["core"] = Cores().ToDictionary(x => x.Name, x => (object)Core(x.T)),
+            ["repeats"] = new Dictionary<string, object>
+            {
+                ["measureDistinct"] = MeasureDistinct, ["measureRepeats"] = MeasureRepeats, ["measureRepeatSeconds"] = Seconds(MeasureRepeatTicks),
+                ["accountingSeconds"] = Seconds(AccountingTicks),
+            },
+            ["gridBucketTargets"] = BucketTargets.ToList(),
+            ["slowestMeasure"] = _slowest.Select(x => new Dictionary<string, object>
+            {
+                ["seconds"] = Seconds(x.Ticks), ["dependent"] = x.Dep.ToString(), ["dependentBase"] = x.DepBase.ToString(), ["host"] = x.Host.ToString(),
+                ["hostBase"] = x.HostBase.ToString(), ["dependentTriangles"] = x.DepTris, ["hostTriangles"] = x.HostTris,
+            }).ToList(),
+        };
+        if (extra is not null) foreach (var (k, v) in extra) doc[k] = v;
+        return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+    }
+}
+
 public sealed class ContactIndex
 {
     public OverlapIndex Index { get; } = new();
@@ -290,6 +484,9 @@ public sealed class ContactIndex
     public IProbeTraceSink? Trace { get; set; }
     /// <summary>Diagnostic (contactprobe HC_MEMSTAGES): called every 10,000 references inside the two hashes. Null: nothing is called.</summary>
     public Action<string, int>? StageProbe { get; set; }
+    /// <summary>Opt-in timers (<see cref="ContactTimer"/>). Null by default: no clock is read. Never read by a decision.</summary>
+    public ContactTimer? Timer { get; set; }
+    int _judgeDepth;                                                           // > 0 while Judge runs: a timer files nested calls apart
 
     /// <summary>Whether the attached sink wants events for this key (false with no sink — the untraced path does no work).</summary>
     bool Tw(FormKey key) => Trace is { } t && t.Wants(key);
@@ -358,16 +555,76 @@ public sealed class ContactIndex
     readonly PlacementCache<TriangleGrid> _shellGrids;
     readonly PlacementCache<TriangleSoup> _shellDeps;
 
-    /// <summary>One pair measured: the core contact (normal, penetration, enclosed depth — the rule's reading), and with
-    /// <see cref="ReadRadius"/> its facing gap replaced by the gap between the grown soups. The core gap rides beside it.</summary>
-    (SoupContact Contact, float CoreGap) Measure(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
-                                                 FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS)
+    /// <summary>A snap's fields as bits, so a memo key tells −0 from +0 and any NaN apart, as the arithmetic would.</summary>
+    readonly record struct SnapBits(int Plugin, int PosX, int PosY, int PosZ, FormKey Cell, bool Disabled, bool Deleted, FormKey Worldspace,
+                                    int RotX, int RotY, int RotZ, int Scale)
     {
-        var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand);
-        if (!ReadRadius) return (c, c.FacingDistance);
+        static int B(float f) => BitConverter.SingleToInt32Bits(f);
+        public static SnapBits Of(Snap s) => new(s.Plugin, B(s.Pos.X), B(s.Pos.Y), B(s.Pos.Z), s.Cell, s.Disabled, s.Deleted, s.Worldspace,
+                                                 B(s.Rot.X), B(s.Rot.Y), B(s.Rot.Z), B(s.Scale));
+    }
+
+    /// <summary>The key of one <see cref="Measure"/>: every parameter that is not derived from the others (the soup and the grid are
+    /// built from the placements by <see cref="DepSoup"/> and <see cref="HostGrid"/>; the timer entry changes nothing). Field names are
+    /// the parameter names, so a reflection test can hold the two lists equal.</summary>
+    readonly record struct MeasureKey(FormKey DepKey, int DepSnap, FormKey DepBase, SnapBits DepS, FormKey HostKey, int HostSnap, FormKey HostBase,
+                                      SnapBits HostS, bool AnySurface);
+
+    /// <summary>Measure's answers on this index. A pair's answer is a function of its key and of this index's init-only settings
+    /// (<see cref="Reach"/>, <see cref="NearBand"/>, <see cref="ReadRadius"/>), so it is computed once per index; a grid rebuilt after
+    /// eviction, at whatever bucket target, answers the same (storage only: proof CT-7). Unbounded: one small entry per distinct pair.
+    /// Not locked: every probe uses an index from one thread.</summary>
+    readonly Dictionary<MeasureKey, (SoupContact Contact, float CoreGap)> _measureMemo = new();
+    /// <summary>Distinct pairs memoised, and their approximate bytes (entry structs plus the dictionary's own arrays).</summary>
+    public int MeasureMemoCount => _measureMemo.Count;
+    public long MeasureMemoApproxBytes => (long)_measureMemo.Count * (System.Runtime.CompilerServices.Unsafe.SizeOf<MeasureKey>()
+        + System.Runtime.CompilerServices.Unsafe.SizeOf<(SoupContact, float)>() + 12) + (long)_measureMemo.EnsureCapacity(0) * 4;
+
+    /// <summary>One pair measured: the core contact (normal, penetration, enclosed depth — the rule's reading), and with
+    /// <see cref="ReadRadius"/> its facing gap replaced by the gap between the grown soups. The core gap rides beside it. Memoised
+    /// per index (<see cref="_measureMemo"/>).</summary>
+    (SoupContact Contact, float CoreGap) Measure(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
+                                                 FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS, bool anySurface, ContactTimer.Entry? e = null)
+    {
+        var tm = e is null ? null : Timer;
+        long m0 = 0;
+        if (e is not null) { e.Lap(ref e.OtherTicks); m0 = e.Stamp; }
+        var key = new MeasureKey(depKey, depSnap, depBase, SnapBits.Of(depS), hostKey, hostSnap, hostBase, SnapBits.Of(hostS), anySurface);
+        if (_measureMemo.TryGetValue(key, out var known))
+        {
+            if (e is not null)
+            {
+                e.Lap(ref e.MeasureCoreTicks); e.Measured++; e.MemoHits++;
+                tm!.Account(e, e.Stamp - m0, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, soup.TriangleCount, grid.TriangleCount);
+            }
+            return known;
+        }
+        var result = MeasureOnce(soup, grid, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, e, tm, m0);
+        _measureMemo[key] = result;
+        return result;
+    }
+
+    (SoupContact Contact, float CoreGap) MeasureOnce(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
+                                                     FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS, ContactTimer.Entry? e, ContactTimer? tm, long m0)
+    {
+        var c = SpatialOverlap.Contact(soup, grid, Reach, NearBand, default, tm?.CoreMeasure);
+        if (e is not null) { e.Lap(ref e.MeasureCoreTicks); e.Measured++; }
+        if (!ReadRadius)
+        {
+            if (e is not null) tm!.Account(e, e.Stamp - m0, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, soup.TriangleCount, grid.TriangleCount);
+            return (c, c.FacingDistance);
+        }
         var ss = ShellDep(depKey, depSnap, depBase, depS); var sg = ShellGrid(hostKey, hostSnap, hostBase, hostS);
-        var cs = ss is not null && sg is not null ? SpatialOverlap.Contact(ss, sg, Reach, NearBand) : c;
-        return (c with { FacingDistance = cs.FacingDistance }, c.FacingDistance);
+        if (e is not null) e.Lap(ref e.ShellPrepTicks);
+        // Only the shell's facing gap is read: ContactFacing runs Contact's own steps 1-2 and returns that gap, skipping the shell's
+        // penetration and enclosed-depth steps, whose results were discarded here.
+        float shellFacing = ss is not null && sg is not null ? SpatialOverlap.ContactFacing(ss, sg, Reach, NearBand, default, tm?.CoreShell) : c.FacingDistance;
+        if (e is not null)
+        {
+            e.Lap(ref e.ShellMeasureTicks);
+            tm!.Account(e, e.Stamp - m0, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, soup.TriangleCount, grid.TriangleCount);
+        }
+        return (c with { FacingDistance = shellFacing }, c.FacingDistance);
     }
 
     /// <summary>The bucket-storage target for one host grid: half the contact cache budget, never below 64 MiB. With memory
@@ -377,20 +634,38 @@ public sealed class ContactIndex
 
     TriangleGrid? ShellGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        if (_shellGrids.TryGetValue((key, snapIndex, baseKey), out var g)) return g;
+        var ct = Timer?.ShellGrids;
+        if (_shellGrids.TryGetValue((key, snapIndex, baseKey), out var g)) { if (ct is not null) ct.Hits++; return g; }
+        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
         TriangleGrid? grid = null;
         if (Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom)
-            grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget);
-        return _shellGrids[(key, snapIndex, baseKey)] = grid;
+        {
+            if (ct is not null) m1 = ContactTimer.Now();
+            var w = SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale);
+            if (ct is not null) m2 = ContactTimer.Now();
+            grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
+            if (ct is not null) { m3 = ContactTimer.Now(); Timer!.BucketTargets.Add(GridBucketTarget); }
+        }
+        _shellGrids[(key, snapIndex, baseKey)] = grid;
+        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
+        return grid;
     }
 
     TriangleSoup? ShellDep(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        if (_shellDeps.TryGetValue((key, snapIndex, baseKey), out var so)) return so;
+        var ct = Timer?.ShellDeps;
+        if (_shellDeps.TryGetValue((key, snapIndex, baseKey), out var so)) { if (ct is not null) ct.Hits++; return so; }
+        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0;
         TriangleSoup? soup = null;
         if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
+        {
+            if (ct is not null) m1 = ContactTimer.Now();
             soup = SpatialOverlap.TransformSoup(geom.DepShell ?? geom.DepSoup, s.Pos, s.Rot, s.Scale);
-        return _shellDeps[(key, snapIndex, baseKey)] = soup;
+            if (ct is not null) m2 = ContactTimer.Now();
+        }
+        _shellDeps[(key, snapIndex, baseKey)] = soup;
+        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m0, soup);
+        return soup;
     }
 
     readonly bool _automaticBudget;
@@ -637,12 +912,22 @@ public sealed class ContactIndex
     /// asks whether two SURFACES meet (the overlap ranker), not whether one HOLDS the other.</param>
     TriangleGrid? HostGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s, bool anySurface = false)
     {
-        if (_hostGrids.TryGetValue((key, snapIndex, baseKey), out var g) && (g is not null || !anySurface)) return g;
+        var ct = Timer?.HostGrids;
+        if (_hostGrids.TryGetValue((key, snapIndex, baseKey), out var g) && (g is not null || !anySurface)) { if (ct is not null) ct.Hits++; return g; }
+        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
         var sum = Summary(baseKey);
         TriangleGrid? grid = null;
         if ((sum is { CanHost: true } || (anySurface && sum is { HasGeometry: true } && sum.HostTriangles > 0)) && GeomOf(baseKey) is { } geom)
-            grid = TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget);
-        return _hostGrids[(key, snapIndex, baseKey)] = grid;
+        {
+            if (ct is not null) m1 = ContactTimer.Now();
+            var w = SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale);
+            if (ct is not null) m2 = ContactTimer.Now();
+            grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
+            if (ct is not null) { m3 = ContactTimer.Now(); Timer!.BucketTargets.Add(GridBucketTarget); }
+        }
+        _hostGrids[(key, snapIndex, baseKey)] = grid;
+        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
+        return grid;
     }
 
     /// <summary>A neighbour's host grid at its AUTHORING placement, for the differential Sunk rule. Keyed by base as well as snap: the
@@ -650,19 +935,39 @@ public sealed class ContactIndex
     /// budget (<see cref="Budget"/>), counted and evicted with the other four.</summary>
     TriangleGrid? ArmGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        if (_armGrids.TryGetValue((key, snapIndex, baseKey), out var g)) return g;
-        TriangleGrid? grid = Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom ? TriangleGrid.BuildAdaptive(SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale), targetBucketApproxBytes: GridBucketTarget) : null;
-        return _armGrids[(key, snapIndex, baseKey)] = grid;
+        var ct = Timer?.ArmGrids;
+        if (_armGrids.TryGetValue((key, snapIndex, baseKey), out var g)) { if (ct is not null) ct.Hits++; return g; }
+        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
+        TriangleGrid? grid = null;
+        if (Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom)
+        {
+            if (ct is not null) m1 = ContactTimer.Now();
+            var w = SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale);
+            if (ct is not null) m2 = ContactTimer.Now();
+            grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
+            if (ct is not null) { m3 = ContactTimer.Now(); Timer!.BucketTargets.Add(GridBucketTarget); }
+        }
+        _armGrids[(key, snapIndex, baseKey)] = grid;
+        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
+        return grid;
     }
     readonly PlacementCache<TriangleGrid> _armGrids;
 
     TriangleSoup? DepSoup(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        if (_depSoups.TryGetValue((key, snapIndex, baseKey), out var so)) return so;
+        var ct = Timer?.DepSoups;
+        if (_depSoups.TryGetValue((key, snapIndex, baseKey), out var so)) { if (ct is not null) ct.Hits++; return so; }
+        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0;
         TriangleSoup? soup = null;
         if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
+        {
+            if (ct is not null) m1 = ContactTimer.Now();
             soup = SpatialOverlap.TransformSoup(geom.DepSoup, s.Pos, s.Rot, s.Scale);
-        return _depSoups[(key, snapIndex, baseKey)] = soup;
+            if (ct is not null) m2 = ContactTimer.Now();
+        }
+        _depSoups[(key, snapIndex, baseKey)] = soup;
+        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m0, soup);
+        return soup;
     }
 
     // ---- the moved hosts -------------------------------------------------------------------------
@@ -885,9 +1190,14 @@ public sealed class ContactIndex
                                    Func<FormKey, DirectionalCoverageResult, CoverageInputs, AuthoredCoverageReading>? authoredCoverage = null,
                                    bool coverageMaySelect = true)
     {
+        var tm = Timer;
+        var e = tm is null ? null : _judgeDepth > 0 ? tm.BestInJudge : tm.Best;
+        long wall0 = 0;
+        if (e is not null) { e.Calls++; e.Stamp = wall0 = ContactTimer.Now(); }
         neighboursTested = 0;
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
-        if (soup is null) return null;
+        if (e is not null) e.Lap(ref e.DepSoupTicks);
+        if (soup is null) { if (e is not null) { e.SoupNulls++; e.WallTicks += ContactTimer.Now() - wall0; } return null; }
         var depGeom = Summary(depBase)!;
         ArmContact? best = null; float bestRank = 0f;          // the best contact that is not a pre-existing overlap, ranked by new depth
         ArmContact? bestPre = null;                            // the deepest pre-existing overlap
@@ -897,42 +1207,80 @@ public sealed class ContactIndex
         bool readCover = ReadRadius && preexistingDepth is not null && authoredCoverage is not null && depBox.Size.Z <= Epsilon;
         float bestRaw = float.PositiveInfinity; FormKey rawAgainst = default;
         float depPad = DepPadW(depBase, depSnap);
+        if (e is not null) e.Lap(ref e.OtherTicks);
         foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand + depPad + (ReadRadius ? _maxHostRadiusW : 0f)))
         {
-            if (nKey == depKey) continue;
-            if (placementOf(nKey) is not { } np) continue;
+            if (e is not null) { e.Lap(ref e.BroadTicks); e.Neighbours++; }
+            if (nKey == depKey) { if (e is not null) e.SelfSkips++; continue; }
+            var npq = placementOf(nKey);
+            if (e is not null) e.Lap(ref e.PlacementOfTicks);
+            if (npq is not { } np) { if (e is not null) e.PlacementNulls++; continue; }
             var nBase = baseOf(nKey, np.Snap.Plugin);
-            if (ReadRadius && SpatialOverlap.BoxDistance(depBox, nBox) > BoxBand + depPad + HostPadW(nBase, np.Snap)) continue;
+            if (e is not null) e.Lap(ref e.BaseOfTicks);
+            if (ReadRadius && SpatialOverlap.BoxDistance(depBox, nBox) > BoxBand + depPad + HostPadW(nBase, np.Snap)) { if (e is not null) { e.Lap(ref e.OtherTicks); e.RadiusRejects++; } continue; }
+            if (e is not null) e.Lap(ref e.OtherTicks);
             var grid = HostGrid(nKey, np.SnapIndex, nBase, np.Snap);
-            if (grid is null) continue;
+            if (e is not null) e.Lap(ref e.HostGridTicks);
+            if (grid is null) { if (e is not null) e.GridNulls++; continue; }
             neighboursTested++;
-            var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, nKey, np.SnapIndex, nBase, np.Snap);
+            var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, nKey, np.SnapIndex, nBase, np.Snap, false, e);
             if (c.Distance < bestRaw) { bestRaw = c.Distance; rawAgainst = nKey; }
             float pen = c.EffectivePenetration, pre = 0f;
-            float pd = preexistingDepth is not null && pen > Epsilon ? preexistingDepth(nKey) : float.NaN;
+            float pd;
+            if (preexistingDepth is not null && pen > Epsilon)
+            {
+                if (e is not null) e.Lap(ref e.OtherTicks);
+                pd = preexistingDepth(nKey);
+                if (e is not null) { e.Lap(ref e.PreexistingTicks); e.PreexistingCalls++; }
+            }
+            else pd = float.NaN;
             if (pd > 0f) pre = pd;
             if (!float.IsNaN(pd)) (deep ??= new()).Add((nKey, pen, pd));
             float rank = pen - pre;
             bool isPre = pre > 0f && rank <= Epsilon;
             var hg = Summary(nBase)!;
-            float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : MaxDim(nBox);
+            if (e is not null) e.Lap(ref e.OtherTicks);
+            float extent;
+            if (c.Normal.LengthSquared() > 1e-12f)
+            {
+                extent = grid.ExtentAlong(Vector3.Normalize(c.Normal));
+                if (e is not null) { e.Lap(ref e.ExtentTicks); e.ExtentCalls++; }
+            }
+            else extent = MaxDim(nBox);
             var arm = new ArmContact(c, nKey, depGeom.DepSrc, hg.HostSrc, extent, MaxDim(nBox)) { CoreGap = coreGap, PreexistingDepth = pre, PreexistingOnly = isPre };
-            if (readCover && PlausibleShallowCover(depBox, grid, Epsilon, SupportCos))
+            bool plausible = false;
+            if (readCover)
+            {
+                if (e is not null) e.Lap(ref e.OtherTicks);
+                plausible = PlausibleShallowCover(depBox, grid, Epsilon, SupportCos);
+                if (e is not null) { e.Lap(ref e.CoverPlausibleTicks); e.CoverPlausibleCalls++; }
+            }
+            if (readCover && plausible)
             {
                 var input = new CoverageInputs(depBase, nBase, depGeom.DepSrc, hg.HostSrc,
                     depSnap, np.Snap, WinnerEnable(depKey), WinnerEnable(nKey), soup, grid, Vector3.UnitZ, Epsilon, SupportCos);
+                if (e is not null) e.Lap(ref e.OtherTicks);
                 var cover = DirectionalCoverage.Measure(soup, grid, input.Direction, input.MaxGap, input.FaceCos,
                     input.MaxTrianglePairs, input.MaxPieces, input.Tolerance);
+                if (e is not null) { e.Lap(ref e.CoverMeasureTicks); e.CoverMeasureCalls++; }
                 AuthoredCoverageReading? reading = null;
                 if (WholeCover(cover) || !cover.Complete || cover.FullCoverReading == "numerically_uncertain")
+                {
+                    if (e is not null) e.Lap(ref e.OtherTicks);
                     reading = authoredCoverage!(nKey, cover, input);
+                    if (e is not null) { e.Lap(ref e.CoverAuthoredTicks); e.CoverAuthoredCalls++; }
+                }
                 var authored = reading?.Result;
                 CoverageInputComparison? comparison = null;
                 if (reading is not null)
+                {
+                    if (e is not null) e.Lap(ref e.OtherTicks);
                     comparison = !cover.Complete ? CoverageInputComparison.Unknown("winner_coverage_incomplete: " + cover.RefusalReason)
                         : !reading.Result.Complete ? CoverageInputComparison.Unknown("authored_coverage_incomplete: " + reading.Result.RefusalReason)
                         : reading.KnownAbsence is not null ? new("different", reading.KnownAbsence, 0)
                         : CoverageInputComparisonReader.CompareExact(input, reading.Inputs);
+                    if (e is not null) { e.Lap(ref e.CoverCompareTicks); e.CoverCompareCalls++; }
+                }
                 bool unchanged = cover.Complete && authored is { Complete: true } && comparison?.ExactlyEqual == true;
                 (covers ??= new()).Add(new(nKey, cover, authored) { InputComparison = comparison });
                 var witness = arm with { Coverage = cover, AuthoredCoverage = authored, CoverageInputsExactlyUnchanged = unchanged };
@@ -950,10 +1298,14 @@ public sealed class ContactIndex
             if (isPre ? bestPre is not null && pen <= bestPre.Contact.EffectivePenetration
                       : best is not null && !Better(rank, c.FacingDistance, bestRank, best.Contact.FacingDistance)) continue;
             if (isPre) bestPre = arm; else { best = arm; bestRank = rank; }
+            if (e is not null) e.Lap(ref e.OtherTicks);
         }
+        if (e is not null) e.Lap(ref e.BroadTicks);
         var chosen = best is not null && bestRank > Epsilon ? best
                    : (coverageMaySelect ? bestCover ?? incompleteCover : null) ?? ChooseContact(best, bestRank, bestPre, Epsilon);
-        return chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst, DeepNeighbours = deep, CoverageNeighbours = covers };
+        var result = chosen is null ? null : chosen with { RawDistance = bestRaw, RawAgainst = rawAgainst, DeepNeighbours = deep, CoverageNeighbours = covers };
+        if (e is not null) { e.Lap(ref e.OtherTicks); e.WallTicks += ContactTimer.Now() - wall0; }
+        return result;
     }
 
     static DetectorModel.CoverageFacts? CoverFacts(DirectionalCoverageResult? c) => c is null ? null
@@ -998,12 +1350,31 @@ public sealed class ContactIndex
     public ArmContact? PairContact(FormKey depKey, int depSnapIndex, FormKey depBase, Snap depSnap,
                                    FormKey hostKey, int hostSnapIndex, FormKey hostBase, Snap hostSnap, bool anySurface = false)
     {
+        var tm = Timer;
+        var e = tm is null ? null : _judgeDepth > 0 ? tm.PairInJudge : tm.Pair;
+        long wall0 = 0;
+        if (e is not null) { e.Calls++; e.Stamp = wall0 = ContactTimer.Now(); }
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
+        if (e is not null) e.Lap(ref e.DepSoupTicks);
         var grid = HostGrid(hostKey, hostSnapIndex, hostBase, hostSnap, anySurface);
-        if (soup is null || grid is null) return null;
-        var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, hostKey, hostSnapIndex, hostBase, hostSnap);
-        float extent = c.Normal.LengthSquared() > 1e-12f ? grid.ExtentAlong(Vector3.Normalize(c.Normal)) : float.NaN;
-        return new ArmContact(c, hostKey, Summary(depBase)!.DepSrc, Summary(hostBase)!.HostSrc, extent, RawDistance: c.Distance, RawAgainst: hostKey) { CoreGap = coreGap };
+        if (e is not null) e.Lap(ref e.HostGridTicks);
+        if (soup is null || grid is null)
+        {
+            if (e is not null) { if (soup is null) e.SoupNulls++; else e.GridNulls++; e.WallTicks += ContactTimer.Now() - wall0; }
+            return null;
+        }
+        var (c, coreGap) = Measure(soup, grid, depKey, depSnapIndex, depBase, depSnap, hostKey, hostSnapIndex, hostBase, hostSnap, anySurface, e);
+        if (e is not null) e.Lap(ref e.OtherTicks);
+        float extent;
+        if (c.Normal.LengthSquared() > 1e-12f)
+        {
+            extent = grid.ExtentAlong(Vector3.Normalize(c.Normal));
+            if (e is not null) { e.Lap(ref e.ExtentTicks); e.ExtentCalls++; }
+        }
+        else extent = float.NaN;
+        var result = new ArmContact(c, hostKey, Summary(depBase)!.DepSrc, Summary(hostBase)!.HostSrc, extent, RawDistance: c.Distance, RawAgainst: hostKey) { CoreGap = coreGap };
+        if (e is not null) { e.Lap(ref e.OtherTicks); e.WallTicks += ContactTimer.Now() - wall0; }
+        return result;
     }
 
     // ---- judge one host ------------------------------------------------------------------------------
@@ -1014,6 +1385,20 @@ public sealed class ContactIndex
     /// near it under the winner.</summary>
     public List<ContactRow> Judge(MovedHost host, BoxHash<(FormKey Key, int Snap)> depSnaps, BoxHash<FormKey> winners,
                                   IReadOnlyList<HashSet<int>> closure, ContactSkips skips, bool keepNoRelation = false)
+    {
+        var tmJ = Timer;
+        long j0 = tmJ is null ? 0 : ContactTimer.Now(), a0 = tmJ?.AccountingTicks ?? 0;
+        _judgeDepth++;
+        try { return JudgeBody(host, depSnaps, winners, closure, skips, keepNoRelation); }
+        finally
+        {
+            _judgeDepth--;
+            if (tmJ is not null) { tmJ.JudgeCalls++; tmJ.JudgeTicks += ContactTimer.Now() - j0 - (tmJ.AccountingTicks - a0); }
+        }
+    }
+
+    List<ContactRow> JudgeBody(MovedHost host, BoxHash<(FormKey Key, int Snap)> depSnaps, BoxHash<FormKey> winners,
+                               IReadOnlyList<HashSet<int>> closure, ContactSkips skips, bool keepNoRelation)
     {
         var rows = new List<ContactRow>();
         var hostBox = WorldBox(host.PrevBase, host.Previous);
@@ -1113,7 +1498,7 @@ public sealed class ContactIndex
                 if (nBase.IsNull) return 0f;
                 var grid = ArmGrid(nKey, ni, nBase, nAuth);
                 if (grid is null) return 0f;
-                return SpatialOverlap.Contact(depAuthSoup, grid, Reach, NearBand).EffectivePenetration;   // the core depth, as Measure reads it
+                return SpatialOverlap.Contact(depAuthSoup, grid, Reach, NearBand, default, Timer?.CorePreexisting).EffectivePenetration;   // the core depth, as Measure reads it
             }
             AuthoredCoverageReading AuthoredCover(FormKey nKey, DirectionalCoverageResult winner, CoverageInputs winnerInput)
             {

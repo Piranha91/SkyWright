@@ -128,6 +128,213 @@ static class ShallowCoverageProof
         var off = Load(false); var os = new ContactSkips(); var oh = off.MovedHosts(os, closure); var od = off.DependentSnaps(os); var ow = off.PhysicalWinners(null, os);
         var orow = oh.Where(h=>h.Key==H(1)).SelectMany(h=>off.Judge(h,od,ow,closure,os)).FirstOrDefault(r=>r.Dependent==D(1));
         Check("CI-10: radius off retains its prior differential contact", orow?.Verdict == ContactVerdict.ReSupported, $"{orow?.Verdict}: {orow?.Why}");
+
+        // CT-1: the contact timers change nothing. The same fixture judged on two fresh indexes, timers off then on, radius on (both
+        // callbacks, the coverage branch) and off; every row, a default BestContact, a PairContact and the skips serialised field for
+        // field; and the timer must have run (its Measure count equals the core step timer's calls, each entry point was seen).
+        var opts = new System.Text.Json.JsonSerializerOptions { IncludeFields = true,
+            NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals };
+        foreach (bool radius in new[] { true, false })
+        {
+            string Judged(ContactTimer? timer)
+            {
+                var ix = Load(radius); ix.Timer = timer; var sk = new ContactSkips();
+                var h = ix.MovedHosts(sk, closure); var d = ix.DependentSnaps(sk); var w = ix.PhysicalWinners(null, sk);
+                var rr = h.SelectMany(x => ix.Judge(x, d, w, closure, sk, keepNoRelation: true)).ToList();
+                var dsn = ix.Index.History.Of(D(1))!; var dwn = dsn[^1];
+                var b1 = ix.BestContact(D(1), dsn.Count - 1, rugK, dwn, ix.WorldBox(rugK, dwn), w, ix.WinnerPlacement, (k, _) => ix.WinnerBase(k), out int nt);
+                var hs1 = ix.Index.History.Of(H(1))!; var rs1 = ix.Index.History.Of(D(1))!;
+                var pc = ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, floorK, hs1[0]);
+                return System.Text.Json.JsonSerializer.Serialize(new { rows = rr, best = b1, nt, pair = pc, skips = sk }, opts);
+            }
+            var tmr = new ContactTimer();
+            string off0 = Judged(null), on1 = Judged(tmr);
+            long measured = tmr.Entries().Sum(x => x.E.Measured);
+            long hits = tmr.Entries().Sum(x => x.E.MemoHits);   // a memo hit is a Measure call that runs no core contact
+            bool ran = measured > 0 && tmr.CoreMeasure.Calls + hits == measured && (radius ? tmr.CoreShell.Calls + hits == measured : tmr.CoreShell.Calls == 0)
+                && tmr.Best.Calls == 1 && tmr.Pair.Calls == 1 && tmr.BestInJudge.Calls > 0 && tmr.PairInJudge.Calls > 0 && tmr.JudgeCalls > 0
+                && tmr.Entries().All(x => x.E.CallTicks <= x.E.WallTicks);
+            int at = Enumerable.Range(0, Math.Min(off0.Length, on1.Length)).FirstOrDefault(i => off0[i] != on1[i], -1);
+            Check($"CT-1 (radius {(radius ? "on" : "off")}): timers on leave every judged row, BestContact, PairContact and skip count unchanged, and the timer ran",
+                off0 == on1 && ran,
+                off0 == on1 ? $"{off0.Length} chars equal; measured {measured}, memo hits {hits}, core {tmr.CoreMeasure.Calls}, shell {tmr.CoreShell.Calls}, best {tmr.Best.Calls}/{tmr.BestInJudge.Calls}, pair {tmr.Pair.Calls}/{tmr.PairInJudge.Calls}, judge {tmr.JudgeCalls}"
+                            : $"serialisations differ at char {at} (lengths {off0.Length} vs {on1.Length}): ...{off0.Substring(Math.Max(0, at - 60), Math.Min(120, off0.Length - Math.Max(0, at - 60)))}");
+        }
+
+        // ---- Gate B red-first cases for the chosen changes (GATE-B.md §5) ----
+        // CT-2 (shell facing-only): with the radius read, the shell contact is read for its facing gap alone, so it must run no
+        // penetration and no enclosed-depth queries (the core contact still runs them). RED until the facing-only path exists.
+        {
+            var ix = Load(true); var tmr = new ContactTimer(); ix.Timer = tmr; var sk = new ContactSkips();
+            var h = ix.MovedHosts(sk, closure); var d = ix.DependentSnaps(sk); var w = ix.PhysicalWinners(null, sk);
+            foreach (var x in h) ix.Judge(x, d, w, closure, sk, keepNoRelation: true);
+            Check("CT-2: the radius shell contact is read for its facing gap only (no penetration or enclosed queries on the shell)",
+                tmr.CoreShell.Calls > 0 && tmr.CoreShell.PenetrationQueries == 0 && tmr.CoreShell.EnclosedQueries == 0 && tmr.CoreMeasure.EnclosedQueries > 0,
+                $"shell calls {tmr.CoreShell.Calls}, shell penetration queries {tmr.CoreShell.PenetrationQueries}, shell enclosed queries {tmr.CoreShell.EnclosedQueries}, core enclosed {tmr.CoreMeasure.EnclosedQueries}");
+        }
+        // CT-4 (Measure memo): each distinct pair is measured once per index: the core contact runs once per distinct Measure key,
+        // radius on and off. RED until the memo exists (the fixture repeats pairs: Judge, then a default BestContact and PairContact).
+        foreach (bool radius in new[] { true, false })
+        {
+            var ix = Load(radius); var tmr = new ContactTimer(); ix.Timer = tmr; var sk = new ContactSkips();
+            var h = ix.MovedHosts(sk, closure); var d = ix.DependentSnaps(sk); var w = ix.PhysicalWinners(null, sk);
+            foreach (var x in h) ix.Judge(x, d, w, closure, sk, keepNoRelation: true);
+            var dsn = ix.Index.History.Of(D(1))!; var dwn = dsn[^1];
+            ix.BestContact(D(1), dsn.Count - 1, rugK, dwn, ix.WorldBox(rugK, dwn), w, ix.WinnerPlacement, (k, _) => ix.WinnerBase(k), out _);
+            var hs1 = ix.Index.History.Of(H(1))!; var rs1 = ix.Index.History.Of(D(1))!;
+            ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, floorK, hs1[0]);
+            Check($"CT-4 (radius {(radius ? "on" : "off")}): a pair already measured on this index is not measured again",
+                tmr.MeasureRepeats > 0 && tmr.CoreMeasure.Calls == tmr.MeasureDistinct,
+                $"Measure calls {tmr.MeasureDistinct + tmr.MeasureRepeats} ({tmr.MeasureRepeats} repeats), core contacts {tmr.CoreMeasure.Calls}, distinct pairs {tmr.MeasureDistinct}");
+        }
+        // CT-5 (Measure memo correctness; green on the base, the memo's sabotage arms must turn them red). Precondition shared with
+        // the per-placement caches: a snap index names one placement (callers pass the snap at that index). On ONE index, a pair
+        // measured again with the host at another placement, the host under another base at the same snap, or the dependent under
+        // another base, must equal that call made on a FRESH index; and an index with another Reach must equal a fresh one with it.
+        {
+            string Key(ArmContact? a) => a is null ? "null" : System.Text.Json.JsonSerializer.Serialize(new { a.Contact, a.CoreGap, a.AgainstExtent, a.Against }, opts);
+            var hs1 = ci.Index.History.Of(H(1))!; var rs1 = ci.Index.History.Of(D(1))!;
+            var one = Load(true);
+            var calls = new (string Name, Func<ContactIndex, ArmContact?> Call)[]
+            {
+                ("host at its authored placement", ix => ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, floorK, hs1[0])),
+                ("host moved (its next snap)", ix => ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 1, floorK, hs1[1])),
+                ("host under another base at the same snap", ix => ix.PairContact(D(1), 0, rugK, rs1[0], H(1), 0, blockK, hs1[0])),
+                ("dependent under another base", ix => ix.PairContact(D(1), 0, coverK, rs1[0], H(1), 0, floorK, hs1[0])),
+            };
+            foreach (var (name, call) in calls)
+            {
+                string onShared = Key(call(one)), onFresh = Key(call(Load(true)));
+                Check($"CT-5: {name}: the same index answers as a fresh index", onShared == onFresh, onShared == onFresh ? onShared[..Math.Min(140, onShared.Length)] : $"shared {onShared[..Math.Min(140, onShared.Length)]} vs fresh {onFresh[..Math.Min(140, onFresh.Length)]}");
+            }
+            var near = new ContactIndex(Geometry) { ReadRadius = true, Reach = 16f };
+            for (int pp = 0; pp < 2; pp++) { using var mod = SkyrimMod.CreateFromBinaryOverlay(pp == 0 ? mp : ap, SkyrimRelease.SkyrimSE); near.Index.Ingest(pp, mod); }
+            var nearFresh = new ContactIndex(Geometry) { ReadRadius = true, Reach = 16f };
+            for (int pp = 0; pp < 2; pp++) { using var mod = SkyrimMod.CreateFromBinaryOverlay(pp == 0 ? mp : ap, SkyrimRelease.SkyrimSE); nearFresh.Index.Ingest(pp, mod); }
+            // the block host is 19 u away: within the default reach (128), beyond 16, so the two reaches give different answers
+            calls[2].Call(one); calls[2].Call(near);
+            string a1 = Key(calls[2].Call(near)), b1 = Key(calls[2].Call(nearFresh)), c1 = Key(calls[2].Call(one));
+            Check("CT-5: an index with another Reach answers as a fresh index with that Reach, not as one with the default",
+                a1 == b1 && a1 != c1, $"reach 16 shared {a1[..Math.Min(100, a1.Length)]}; fresh {b1[..Math.Min(100, b1.Length)]}; default {c1[..Math.Min(100, c1.Length)]}");
+        }
+        // CT-3 (shell facing read): ContactFacing returns, bit for bit, the FacingDistance Contact returns for the same arguments:
+        // every pair of this fixture's soups at several offsets, and a seeded set of random soups (open and closed, touching, crossing,
+        // apart, empty), at the radius path's band (8) and the default (4).
+        // CT-7 (memo across bucket targets, GATE-B review G2): the same pair measured on grids built at different bucket targets
+        // (coarsened and not) gives a bit-identical SoupContact and facing gap, so a memo that keeps a pair's first answer cannot
+        // disagree with a later rebuild of that grid at another target.
+        {
+            static string Bits(SoupContact c) => string.Join(",", new[] { c.Distance, c.Penetration, c.Normal.X, c.Normal.Y, c.Normal.Z, c.EnclosedDepth, c.FacingDistance }
+                .Select(f => BitConverter.SingleToInt32Bits(f).ToString("x8"))) + $"|{c.ContactPairs},{c.PenetratingVertices},{c.DependentTriangles},{c.HostTriangles},{c.EnclosedVertices},{c.HostClosed},{c.CrossedFaces}";
+            var rnd = new Random(20261021);
+            TriangleSoup RandomSoup(int tris, float span, Vector3 at)
+            {
+                var v = new Vector3[tris * 3]; var ix = new int[tris * 3];
+                for (int i = 0; i < v.Length; i++) { v[i] = at + new Vector3((float)rnd.NextDouble() * span, (float)rnd.NextDouble() * span, (float)rnd.NextDouble() * span * 0.5f); ix[i] = i; }
+                return new TriangleSoup(v, ix);
+            }
+            static TriangleSoup Move(TriangleSoup s, Vector3 d) => new(s.Vertices.Select(x => x + d).ToArray(), s.Indices);
+            var shapes = new List<TriangleSoup>
+            {
+                Plane(-100, -100, 100, 100), Plane(-20, -20, 20, 20), Ring(), TriangleSoup.Empty,
+                ContactIndex.BoxSoup(new Aabb(new Vec3(-100, -100, -20), new Vec3(100, 100, 20), false)),
+                ContactIndex.BoxSoup(new Aabb(new Vec3(-10, -10, -10), new Vec3(10, 10, 10), false)),
+            };
+            for (int k = 0; k < 6; k++) shapes.Add(RandomSoup(8 + 6 * k, 40f + 30f * k, new Vector3(-20f * k, -15f * k, -10f)));
+            var offsets = new[] { Vector3.Zero, new Vector3(0, 0, 1), new Vector3(0, 0, 3.5f), new Vector3(0, 0, 9), new Vector3(7, -3, -2), new Vector3(30, 0, 0), new Vector3(0, 0, -15) };
+            int pairs = 0, facingEqual = 0, bucketPairs = 0, bucketEqual = 0; string? firstFacing = null, firstBucket = null;
+            var powers = new SortedSet<int>();
+            foreach (var host in shapes)
+            {
+                var g0 = TriangleGrid.BuildAdaptive(host, targetBucketApproxBytes: 64L << 20);
+                var coarse = new[] { 4096L, 256L, 0L }.Select(tb => TriangleGrid.BuildAdaptive(host, targetBucketApproxBytes: tb)).ToList();
+                foreach (var gg in coarse.Prepend(g0)) powers.Add(gg.Sizing?.GroupingPower ?? -1);
+                foreach (var dep0 in shapes)
+                    foreach (var shift in offsets)
+                        foreach (float band in new[] { 8f, 4f })
+                        {
+                            var dep = Move(dep0, shift);
+                            var full = SpatialOverlap.Contact(dep, g0, 128f, band);
+                            float facing = SpatialOverlap.ContactFacing(dep, g0, 128f, band, default, null);
+                            pairs++;
+                            if (BitConverter.SingleToInt32Bits(full.FacingDistance) == BitConverter.SingleToInt32Bits(facing)) facingEqual++;
+                            else firstFacing ??= $"pair {pairs}: Contact {full.FacingDistance} vs ContactFacing {facing}";
+                            foreach (var gc in coarse)
+                            {
+                                bucketPairs++;
+                                var cc = SpatialOverlap.Contact(dep, gc, 128f, band);
+                                float fc = SpatialOverlap.ContactFacing(dep, gc, 128f, band, default, null);
+                                if (Bits(cc) == Bits(full) && BitConverter.SingleToInt32Bits(fc) == BitConverter.SingleToInt32Bits(facing)) bucketEqual++;
+                                else firstBucket ??= $"pair {bucketPairs} at grouping power {gc.Sizing?.GroupingPower}: {Bits(cc)} vs {Bits(full)}";
+                            }
+                        }
+            }
+            Check("CT-3: ContactFacing equals Contact's FacingDistance bit for bit (fixture soups and seeded random soups, bands 8 and 4)",
+                pairs > 0 && facingEqual == pairs, $"{facingEqual} of {pairs} equal{(firstFacing is null ? "" : "; first difference " + firstFacing)}");
+            Check("CT-7: one pair on grids built at different bucket targets gives a bit-identical contact and facing gap (coarsening seen)",
+                bucketPairs > 0 && bucketEqual == bucketPairs && powers.Count(x => x > 0) > 0 && powers.Contains(0),
+                $"{bucketEqual} of {bucketPairs} equal; grouping powers built {string.Join(",", powers)}{(firstBucket is null ? "" : "; first difference " + firstBucket)}");
+        }
+        // CT-8 (step 2's "behind and not crossed" rule, a gap the first S-A1b arm found: no proof saw it). A box hanging 1 u under a
+        // one-sided shelf top (collision on the top face only) sits behind that face without crossing it: no contact, the facing gap
+        // stays at the reach. Controls: the same box resting 1 u above the face touches at 1 u; a box through the face crosses it (gap 0),
+        // and there the crossed face rescues the box's bottom, which lies behind it: 10 contact pairs = 8 crossing side triangles + the
+        // 2 bottom triangles behind the crossed top (the top's 2 are parallel to it and never count). Without the rescue: 8.
+        {
+            var shelf = TriangleGrid.Build(Plane(-50, -50, 50, 50));
+            SoupContact At(float z0, float z1) => SpatialOverlap.Contact(ContactIndex.BoxSoup(new Aabb(new Vec3(-5, -5, z0), new Vec3(5, 5, z1), false)), shelf, 128f, 4f);
+            var under = At(-3f, -1f); var above = At(1f, 3f); var through = At(-2f, 2f);
+            Check("CT-8: a box hanging just under a one-sided shelf top is not in contact with it; resting on it and passing through it are",
+                under.FacingDistance == 128f && !under.InContact && above.FacingDistance == 1f && above.InContact && through.FacingDistance == 0f && through.Crosses && through.ContactPairs == 10,
+                $"under: gap {under.FacingDistance}, pairs {under.ContactPairs}; above: gap {above.FacingDistance}, pairs {above.ContactPairs}; through: gap {through.FacingDistance}, crossed faces {through.CrossedFaces}, pairs {through.ContactPairs}");
+        }
+        // CT-6 (memo key, by reflection): the memo key's fields are exactly Measure's parameters minus a reviewed list of derived
+        // or inert ones, and every public setting of ContactIndex Measure could read is init-only (fixed for an index's life), except a
+        // reviewed list Measure does not read. A new Measure parameter, or a new mutable setting, fails here rather than in the memo.
+        {
+            const System.Reflection.BindingFlags Np = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+            var measure = typeof(ContactIndex).GetMethod("Measure", Np);
+            var keyType = typeof(ContactIndex).GetNestedType("MeasureKey", System.Reflection.BindingFlags.NonPublic);
+            var derived = new[] { "soup", "grid", "e" };   // built from the key by DepSoup / HostGrid; the timer entry changes nothing
+            var parms = measure?.GetParameters().Select(x => x.Name!).Where(n => !derived.Contains(n)).Select(n => n.ToLowerInvariant()).OrderBy(n => n).ToList() ?? new();
+            var fields = keyType?.GetProperties().Select(x => x.Name.ToLowerInvariant()).Where(n => n != "equalitycontract").OrderBy(n => n).ToList() ?? new();
+            var mutableAllowed = new[] { nameof(ContactIndex.Timer), nameof(ContactIndex.Trace), nameof(ContactIndex.StageProbe), nameof(ContactIndex.State) };
+            static bool InitOnly(System.Reflection.PropertyInfo pi) => pi.SetMethod!.ReturnParameter.GetRequiredCustomModifiers()
+                .Any(m => m.FullName == "System.Runtime.CompilerServices.IsExternalInit");
+            var mutable = typeof(ContactIndex).GetProperties().Where(pi => pi.SetMethod is { IsPublic: true } && !InitOnly(pi)).Select(pi => pi.Name).OrderBy(n => n).ToList();
+            var unexpected = mutable.Except(mutableAllowed).ToList();
+            // H1 (Gate C review): the key's snaps. For every member of Snap's constructor (a Vec3 member by each component), two snaps
+            // that differ in that member alone must give different SnapBits: a member Snap gains, or one SnapBits.Of drops, fails here.
+            var snapBits = typeof(ContactIndex).GetNestedType("SnapBits", System.Reflection.BindingFlags.NonPublic);
+            var of = snapBits?.GetMethod("Of", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            var ctor = typeof(Snap).GetConstructors().OrderByDescending(c => c.GetParameters().Length).First();
+            var ps = ctor.GetParameters();
+            object[] Baseline() => ps.Select(x => x.ParameterType == typeof(int) ? (object)3 : x.ParameterType == typeof(float) ? 1.5f
+                : x.ParameterType == typeof(bool) ? false : x.ParameterType == typeof(FormKey) ? FormKey.Factory("000100:A.esm")
+                : x.ParameterType == typeof(Vec3) ? new Vec3(1f, 2f, 3f) : throw new InvalidOperationException("Snap member type " + x.ParameterType)).ToArray();
+            object Varied(System.Reflection.ParameterInfo x, object v, int comp) => v switch
+            {
+                int i => i + 1, float f => f + 0.25f, bool bb => !bb, FormKey => FormKey.Factory("000200:A.esm"),
+                Vec3 v3 => comp == 0 ? new Vec3(v3.X + 0.25f, v3.Y, v3.Z) : comp == 1 ? new Vec3(v3.X, v3.Y + 0.25f, v3.Z) : new Vec3(v3.X, v3.Y, v3.Z + 0.25f),
+                _ => throw new InvalidOperationException(x.Name),
+            };
+            var unseen = new List<string>(); int variants = 0;
+            if (of is not null)
+            {
+                var b0 = of.Invoke(null, new[] { ctor.Invoke(Baseline()) });
+                for (int k = 0; k < ps.Length; k++)
+                    for (int comp = 0; comp < (ps[k].ParameterType == typeof(Vec3) ? 3 : 1); comp++)
+                    {
+                        var args = Baseline(); args[k] = Varied(ps[k], args[k], comp); variants++;
+                        if (Equals(of.Invoke(null, new[] { ctor.Invoke(args) }), b0)) unseen.Add(ps[k].Name + (ps[k].ParameterType == typeof(Vec3) ? "." + "XYZ"[comp] : ""));
+                    }
+            }
+            unexpected.AddRange(unseen.Select(u => "SnapBits ignores Snap." + u));
+            if (of is null || variants == 0) unexpected.Add("SnapBits.Of not found");
+            Check("CT-6: the Measure memo key is exactly Measure's non-derived parameters, it tells every Snap member apart, and no unreviewed ContactIndex setting can change after construction",
+                measure is not null && keyType is not null && parms.Count > 0 && parms.SequenceEqual(fields) && unexpected.Count == 0,
+                $"parameters [{string.Join(",", parms)}]; key [{string.Join(",", fields)}]; mutable settings [{string.Join(",", mutable)}]; snap members varied {variants}; unreviewed [{string.Join(",", unexpected)}]");
+        }
         mo.Dispose();
         Directory.Delete(root, true);
     }
