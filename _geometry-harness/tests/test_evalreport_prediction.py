@@ -3879,6 +3879,24 @@ def main():
 
     for name, fn in [("after-final/C824-still-there-says-the-patch-places-it", c824_still_there_says_the_patch_places_it)]:
         cell(name, fn)
+    # C825 (Clockwork review S4): navmesh ground still lost with the patch is said in the still-there line at the top,
+    # in its own unit, not only further down.
+    def c825_ground_still_lost_said_at_the_top():
+        n1, n2 = f"000N01:{BASE}", f"000N02:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  689 tris -> 5")]
+        w_rows = [row("CLOBBERED", OTHER, PATCH, n1, label="CityExterior01 (ext)  465 tris -> 345")]
+        preds = [{"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n1, "Other": None, "Physical": "Gone",
+                  "Detail": "no point of the loser's mesh is farther than 120u from the winner's"},
+                 {"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n2, "Other": None, "Physical": "Holds",
+                  "Detail": "victim-only ground: 22597 sample(s) of the loser's mesh farther than 120u from the winner's"}]
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): w_rows},
+                                         [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
+        st = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+        return "navmesh ground still lost" in st and "in 1 navmesh record under" in st, st[:300]
+
+    for name, fn in [("after-final/C825-ground-still-lost-said-at-the-top", c825_ground_still_lost_said_at_the_top)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
