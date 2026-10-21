@@ -58,6 +58,15 @@ if (args.Length >= 2 && args[0] == "--only" && args[1] is "terrain" or "shallow"
     if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
     return fail == 0 ? 0 : 1;
 }
+// --only solidscan: the self-intersection scan's sweep and anchor consumers alone, for their red runs.
+if (args.Length >= 2 && args[0] == "--only" && args[1] == "solidscan")
+{
+    SolidScanConsumerProof.Run(Check);
+    Console.WriteLine();
+    Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
+    if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
+    return fail == 0 ? 0 : 1;
+}
 
 // ---------------------------------------------------------------------------------------
 // Helpers — a FOMOD in a string, and the two predicates the model needs.
@@ -3480,6 +3489,7 @@ NifChainProof.Run(Check);
 NifBoundProof.Run(Check);
 OverlapGeometryProof.Run(Check);
 MeshIntersectionProof.Run(Check);
+SolidScanConsumerProof.Run(Check);
 OverlapVolumeProof.Run(Check);
 CacheBudgetProof.Run(Check);
 GeometryRetentionProof.Run(Check);
