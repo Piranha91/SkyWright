@@ -1888,7 +1888,7 @@ def main():
         bad = [x for x in md.splitlines() if re.search(r"\b2 (new problems|records|clashes|cases)\b", x)]
         ok = (adm == [("000S01", "admitted"), ("000T01", "noBody")]
               and val.get("patchProblems") == 1 and (reg.get("counts") or {}).get("readerCreated") == 1
-              and "introduces 1 new problem in the check" in md and "introduced 1 new problem in the" in md
+              and "introduces 1 new problem in the check" in str((reader(plan).get("validation") or {}).get("headline", "")) and "introduced 1 new problem in the" in md
               and found.count("1 record shows") == 2 and not bad)
         return ok, (f"admission {adm}; new with patch {val.get('patchProblems')}; comparison "
                     f"{(reg.get('counts') or {}).get('readerCreated')}; lines still counting 2: {bad}")
@@ -2423,6 +2423,7 @@ def main():
                                   [MOD_A, MOD_B], patches=[PATCH], order=order, names=names,
                                   diff_logs={(CONTACT, "with-patch"): log})
 
+    # (after the final round: the comparison's sentence stays in the plan; the page shows the patch summary instead)
     # C542. New problems with the patch count objects, not rows: an object left without support against three hosts is
     # one new problem, in the patch section, the comparison and the verdict alike
     def c542_new_problems_count_objects():
@@ -2432,7 +2433,7 @@ def main():
         nb = [n.get("count") for n in val.get("newByCheck") or []]
         created = (reg.get("counts") or {}).get("readerCreated")
         ok = (val.get("patchProblems") == 2 and nb == [2] and created == 2
-              and "introduces 2 new problems in the check" in md and "New clashes in the setup with" in md
+              and "introduces 2 new problems in the check" in str((reader(plan).get("validation") or {}).get("headline", "")) and "New clashes in the setup with" in md
               and not re.search(r"\b5 new problems\b", md))
         return ok, f"new with patch {val.get('patchProblems')}; by check {nb}; comparison {created}"
 
@@ -2449,7 +2450,7 @@ def main():
         val = reader(plan).get("validation") or {}
         c = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {}).get("counts") or {}
         ok = (val.get("patchProblems") == 1 and c.get("readerCreated") == 1 and c.get("readerNoBody") == 1
-              and "1 whose object's record has no model" in md and "introduces 1 new problem in the check" in md)
+              and "1 whose object's record has no model" in md and "introduces 1 new problem in the check" in str((reader(plan).get("validation") or {}).get("headline", "")))
         return ok, (f"new with patch {val.get('patchProblems')}; comparison {c.get('readerCreated')} "
                     f"(no body {c.get('readerNoBody')})")
 
@@ -3861,7 +3862,7 @@ def main():
         plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rows_, (OVERLAP, "without-a"): rows_[:1]}, [MOD_A])
         found = section_text(md, "What the checks found")
         line = next((ln for ln in found.splitlines() if "3 overlap pairs" in ln), "")
-        return "(2 counted at the top; 1 already present" in line, line[:260]
+        return "(2 counted at the top; 1 set aside)" in line, line[:260]
 
     for name, fn in [("after-final/C823-detail-count-reconciled-with-the-top", c823_detail_count_reconciled_with_the_top)]:
         cell(name, fn)
@@ -3877,7 +3878,7 @@ def main():
             row("OVERLAP", MOD_B, MOD_A, X, other=ys[0])]}, [MOD_A, MOD_B], patches=[PATCH],
             predicates={(OVERLAP, "with-patch"): preds}, names={"refs": refs})
         st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
-        return "in 1 a patch places one of the two objects" in st, st[:300]
+        return "1 still crossing where a patch places one of them" in st, st[:300]
 
     for name, fn in [("after-final/C824-still-there-says-the-patch-places-it", c824_still_there_says_the_patch_places_it)]:
         cell(name, fn)
@@ -3941,7 +3942,7 @@ def main():
                                          [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
                                          enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()})
         st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
-        return "in 2 a patch places one of the two objects" in st, st[:300]
+        return "2 still crossing where a patch places one of them" in st, st[:300]
 
     for name, fn in [("after-final/C828-patch-placement-from-record-rows", c828_patch_placement_from_record_rows)]:
         cell(name, fn)

@@ -3458,7 +3458,10 @@ def build_prediction(ctx: dict) -> dict:
         old_ = str(ctx.get("oldVerdict") or "")
         if ctx.get("genericVerdict"):
             old_ = old_.replace(ctx["genericVerdict"], "").strip()
+        # on the page the summary stands for the comparison's sentence, which repeats it, except a refused comparison,
+        # which is said beside it (round 4); the sentence stays in the plan
         validation = {"status": "compared", "summary": summary_, "headline": old_,
+                      "headlineShown": " ".join(ctx.get("refusedLines") or []),
                       "patches": patch_names, **side_lines,
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
@@ -5099,7 +5102,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
         "cannotRunChecks": [str(c.get("checkId")) for c in b.plan.get("checks") or []
                             if isinstance(c, dict) and c.get("status") in ("unsupported", "manual")],
-        "oldVerdict": verdict, "genericVerdict": generic_verdict, "limitations": limitations, "words": reader_data["prediction"],
+        "oldVerdict": verdict, "genericVerdict": generic_verdict, "refusedLines": list(refused_lines),
+        "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
