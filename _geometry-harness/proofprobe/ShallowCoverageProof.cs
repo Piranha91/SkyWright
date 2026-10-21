@@ -275,6 +275,19 @@ static class ShallowCoverageProof
                 bucketPairs > 0 && bucketEqual == bucketPairs && powers.Count(x => x > 0) > 0 && powers.Contains(0),
                 $"{bucketEqual} of {bucketPairs} equal; grouping powers built {string.Join(",", powers)}{(firstBucket is null ? "" : "; first difference " + firstBucket)}");
         }
+        // CT-8 (step 2's "behind and not crossed" rule, a gap the first S-A1b arm found: no proof saw it). A box hanging 1 u under a
+        // one-sided shelf top (collision on the top face only) sits behind that face without crossing it: no contact, the facing gap
+        // stays at the reach. Controls: the same box resting 1 u above the face touches at 1 u; a box through the face crosses it (gap 0),
+        // and there the crossed face rescues the box's bottom, which lies behind it: 10 contact pairs = 8 crossing side triangles + the
+        // 2 bottom triangles behind the crossed top (the top's 2 are parallel to it and never count). Without the rescue: 8.
+        {
+            var shelf = TriangleGrid.Build(Plane(-50, -50, 50, 50));
+            SoupContact At(float z0, float z1) => SpatialOverlap.Contact(ContactIndex.BoxSoup(new Aabb(new Vec3(-5, -5, z0), new Vec3(5, 5, z1), false)), shelf, 128f, 4f);
+            var under = At(-3f, -1f); var above = At(1f, 3f); var through = At(-2f, 2f);
+            Check("CT-8: a box hanging just under a one-sided shelf top is not in contact with it; resting on it and passing through it are",
+                under.FacingDistance == 128f && !under.InContact && above.FacingDistance == 1f && above.InContact && through.FacingDistance == 0f && through.Crosses && through.ContactPairs == 10,
+                $"under: gap {under.FacingDistance}, pairs {under.ContactPairs}; above: gap {above.FacingDistance}, pairs {above.ContactPairs}; through: gap {through.FacingDistance}, crossed faces {through.CrossedFaces}, pairs {through.ContactPairs}");
+        }
         // CT-6 (memo key, by reflection): the memo key's fields are exactly Measure's parameters minus a reviewed list of derived
         // or inert ones, and every public setting of ContactIndex Measure could read is init-only (fixed for an index's life), except a
         // reviewed list Measure does not read. A new Measure parameter, or a new mutable setting, fails here rather than in the memo.
