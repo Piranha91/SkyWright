@@ -290,9 +290,37 @@ static class ShallowCoverageProof
                 .Any(m => m.FullName == "System.Runtime.CompilerServices.IsExternalInit");
             var mutable = typeof(ContactIndex).GetProperties().Where(pi => pi.SetMethod is { IsPublic: true } && !InitOnly(pi)).Select(pi => pi.Name).OrderBy(n => n).ToList();
             var unexpected = mutable.Except(mutableAllowed).ToList();
-            Check("CT-6: the Measure memo key is exactly Measure's non-derived parameters, and no unreviewed ContactIndex setting can change after construction",
+            // H1 (Gate C review): the key's snaps. For every member of Snap's constructor (a Vec3 member by each component), two snaps
+            // that differ in that member alone must give different SnapBits: a member Snap gains, or one SnapBits.Of drops, fails here.
+            var snapBits = typeof(ContactIndex).GetNestedType("SnapBits", System.Reflection.BindingFlags.NonPublic);
+            var of = snapBits?.GetMethod("Of", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+            var ctor = typeof(Snap).GetConstructors().OrderByDescending(c => c.GetParameters().Length).First();
+            var ps = ctor.GetParameters();
+            object[] Baseline() => ps.Select(x => x.ParameterType == typeof(int) ? (object)3 : x.ParameterType == typeof(float) ? 1.5f
+                : x.ParameterType == typeof(bool) ? false : x.ParameterType == typeof(FormKey) ? FormKey.Factory("000100:A.esm")
+                : x.ParameterType == typeof(Vec3) ? new Vec3(1f, 2f, 3f) : throw new InvalidOperationException("Snap member type " + x.ParameterType)).ToArray();
+            object Varied(System.Reflection.ParameterInfo x, object v, int comp) => v switch
+            {
+                int i => i + 1, float f => f + 0.25f, bool bb => !bb, FormKey => FormKey.Factory("000200:A.esm"),
+                Vec3 v3 => comp == 0 ? new Vec3(v3.X + 0.25f, v3.Y, v3.Z) : comp == 1 ? new Vec3(v3.X, v3.Y + 0.25f, v3.Z) : new Vec3(v3.X, v3.Y, v3.Z + 0.25f),
+                _ => throw new InvalidOperationException(x.Name),
+            };
+            var unseen = new List<string>(); int variants = 0;
+            if (of is not null)
+            {
+                var b0 = of.Invoke(null, new[] { ctor.Invoke(Baseline()) });
+                for (int k = 0; k < ps.Length; k++)
+                    for (int comp = 0; comp < (ps[k].ParameterType == typeof(Vec3) ? 3 : 1); comp++)
+                    {
+                        var args = Baseline(); args[k] = Varied(ps[k], args[k], comp); variants++;
+                        if (Equals(of.Invoke(null, new[] { ctor.Invoke(args) }), b0)) unseen.Add(ps[k].Name + (ps[k].ParameterType == typeof(Vec3) ? "." + "XYZ"[comp] : ""));
+                    }
+            }
+            unexpected.AddRange(unseen.Select(u => "SnapBits ignores Snap." + u));
+            if (of is null || variants == 0) unexpected.Add("SnapBits.Of not found");
+            Check("CT-6: the Measure memo key is exactly Measure's non-derived parameters, it tells every Snap member apart, and no unreviewed ContactIndex setting can change after construction",
                 measure is not null && keyType is not null && parms.Count > 0 && parms.SequenceEqual(fields) && unexpected.Count == 0,
-                $"parameters [{string.Join(",", parms)}]; key [{string.Join(",", fields)}]; mutable settings [{string.Join(",", mutable)}]; unreviewed [{string.Join(",", unexpected)}]");
+                $"parameters [{string.Join(",", parms)}]; key [{string.Join(",", fields)}]; mutable settings [{string.Join(",", mutable)}]; snap members varied {variants}; unreviewed [{string.Join(",", unexpected)}]");
         }
         mo.Dispose();
         Directory.Delete(root, true);
