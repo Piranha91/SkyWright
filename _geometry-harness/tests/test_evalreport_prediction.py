@@ -3896,7 +3896,7 @@ def main():
         plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): w_rows},
                                          [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
         st = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
-        return "navmesh ground still lost" in st and "in 1 navmesh record under" in st, st[:300]
+        return "navmesh ground left uncovered" in st and "in 1 navmesh record under" in st, st[:300]
 
     for name, fn in [("after-final/C825-ground-still-lost-said-at-the-top", c825_ground_still_lost_said_at_the_top)]:
         cell(name, fn)
