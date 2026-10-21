@@ -3232,10 +3232,9 @@ def build_prediction(ctx: dict) -> dict:
         sentences += [bind(words["validationOpen"], {"patch": patch, "count": by_unit(open_), "split": bind(
                           words["validationOpenSplit"], {"untouched": fmt_n(len(open_) - edited), "edited": fmt_n(edited)})
                           if edited else ""}),
-                     bind(words["validationPatchProblems"], {"patch": patch, "count": by_unit(
-                         [{"checkId": rk[0], "kind": rk[1]} for rk in problems]), "undone": ""})]
+                     # new problems in their units, an object of a by-object check with its pairs (BPT review S3)
+                     bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
-        sentences[new_idx] = bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})
         not_new_sentence = None
         if not_new:
             by_setup = collections.OrderedDict()
