@@ -14,6 +14,7 @@ static class EmptySpaceReview
                           Func<int, bool> isFloorPlugin, Func<string, bool> isBethesdaFile, Func<FormKey, string, bool?> nodeCheck,
                           string outPath, string? emitPath, string? basePath, string instance, int pluginsRead, int pluginsUnreadable,
                           ConfigurationIdentity identity, int listN, Stopwatch sw,
+                          bool radius, bool bos, IReadOnlyList<string> forceEnable,
                           PopulationScope? population = null, string? auditEmit = null, string? auditOut = null)
     {
         var search = new EmptySpaceSearch(cidx, closure, pluginName, nodeCheck, isBethesdaFile, isFloorPlugin);
@@ -108,8 +109,10 @@ static class EmptySpaceReview
                 coverage.Add(new("population scope", rows.Count + absent, new Dictionary<string, long>(),
                     new Dictionary<string, long> { ["PairOutsidePopulation"] = outsidePairs, ["JudgedForExteriorMemo"] = judgedDropped },
                     $"fixtures judged only in the population's {scope.Cells.Count:N0} interior cells (closed over relocations and rack links); {population!.Describe()}"));
+            string policy = ContactCredit.EmptySpacePolicy(cidx.Epsilon, search.Reach, search.MinAnchorDim, search.MaxMembers, search.AnchorReport, radius, bos, forceEnable);
             ConflictIo.Write(emitPath, new ConflictFile("contactprobe", instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-                                                        population?.Identity("load-time") ?? "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity));
+                                                        population?.Identity("load-time") ?? "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity, MeasurementPolicy: policy));
+            Console.WriteLine($"measurement policy: {policy}");
             Console.WriteLine($"emitted {conflicts.Count:N0} EMPTY-SPACE conflicts -> {emitPath}");
         }
         if (scope is not null && auditEmit is not null)

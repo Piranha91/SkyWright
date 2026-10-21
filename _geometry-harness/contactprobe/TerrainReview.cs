@@ -19,7 +19,8 @@ static class TerrainReview
     public static int Run(ContactIndex cidx, CellBoundaryIndex land, IReadOnlyList<HashSet<int>> closure, Func<int, string> pluginName,
                           Func<FormKey, string> baseLabel, float eps, float floatThreshold, float burialThreshold, float burialShare,
                           Func<FormKey, IReadOnlyCollection<string>?>? renderClasses, bool absolute, int sample,
-                          string? emitPath, string? basePath, string? jsonPath, string instance, ConfigurationIdentity identity, int listN, Stopwatch sw)
+                          string? emitPath, string? basePath, string? jsonPath, string instance, ConfigurationIdentity identity, int listN, Stopwatch sw,
+                          bool radius, bool bos, IReadOnlyList<string> forceEnable)
     {
         var tci = new TerrainContactIndex(cidx, land, closure) { Epsilon = eps, FloatThreshold = floatThreshold, BurialThreshold = burialThreshold, BurialShare = burialShare, RenderClasses = renderClasses };
         s_share = burialShare; string note = NoteFor(burialShare);
@@ -181,8 +182,10 @@ static class TerrainReview
                         ["DisabledAtLoad"] = C(TerrainStatus.DisabledAtLoad), ["DeletedAtLoad"] = C(TerrainStatus.DeletedAtLoad) },
                     $"float {floatThreshold:0.#} u, burial {burialThreshold:0.#} u over share {burialShare:0.##} ({note}), ε {eps:0.#} u; rows {rowSet.Count:N0}, class {cls.Count:N0}; burial reads the surface in view on an area-weighted sampling; {fragility}"),
             };
+            string policy = ContactCredit.TerrainPolicy(eps, floatThreshold, burialThreshold, burialShare, sample, absolute, tci.Reach, radius, bos, forceEnable);
             ConflictIo.Write(emitPath, new ConflictFile("contactprobe", instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-                                                        Population, EnablePopulation.BaselineStateName, identity));
+                                                        Population, EnablePopulation.BaselineStateName, identity, MeasurementPolicy: policy));
+            Console.WriteLine($"measurement policy: {policy}");
             Console.WriteLine($"configuration: {identity.Short}");
             Console.WriteLine($"\nemitted {conflicts.Count:N0} terrain-support conflicts -> {emitPath}");
         }

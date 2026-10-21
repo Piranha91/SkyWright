@@ -13,7 +13,9 @@ test_reverse_reconcile.py does), with the REAL contactprobe, whole-order and wit
     run given another --eps), another instance, an emit that was itself run with --base, each coverage line fixed before the
     host loop differing, and an emit recording pair limits;
   - --reverse-of outside a plain default-pass emit run is refused;
-  - conflictdiff refuses two contactprobe emits whose policies differ, or where one records none, and accepts equal ones.
+  - conflictdiff refuses two contactprobe emits whose policies differ, or where one records none, and accepts equal ones;
+  - the same for the --terrain and --empty-space emits (task 2026-10-21-contactprobe-terrain-empty-space-policy): each records
+    its own policy, a run under one changed option records another, and either mode's emit is refused against the sweep's.
 Each test names the wrong answer it rejects. Probes come from this checkout's Release build unless HC_REVERSE_HARNESS names
 another harness folder (the sabotage run points it at a build whose refusal checks are short-circuited).
 """
@@ -216,6 +218,66 @@ def diff_gate_policy():
         assert r.returncode == 3 and "measurement policies cannot establish repair credit" in r.stdout, f"{name}: exit {r.returncode}: {r.stdout[-400:]}"
 
 
+TERRAIN_FLAGS = ["--terrain", "--float-threshold", "8", "--burial-threshold", "8", "--burial-share", "0.5"]
+MODE_POLICY = {
+    "terrain": "terrain_support_v1|eps 4|float 8|burial 8|burial-share 0.5|sample 1|absolute off|support-reach 256|radius on|bos on|force-enable none",
+    "empty-space": "empty_space_v1|eps 4|reach 128|min-anchor 64|max-members 256|anchor-report 512|radius on|bos on|force-enable none",
+}
+# a real run under one changed option per mode, and the words its policy then carries
+MODE_OTHER = {"terrain": (["--float-threshold", "16"], "|float 16|"), "empty-space": (["--eps", "6"], "|eps 6|")}
+
+
+def mode_emit(mode, arm, extra=()):
+    """The --terrain or --empty-space emit of one arm, run once and kept."""
+    L = lab()
+    key = (mode, arm, tuple(map(str, extra)))
+    if key not in L.runs:
+        tag = f"{mode}-{arm}-{len(L.runs)}"
+        out = L.tmp / f"{tag}.emit.json"
+        flags = TERRAIN_FLAGS if mode == "terrain" else ["--empty-space", L.tmp / f"{tag}.side.json"]
+        r = L.probe(arm, flags + ["--emit", out] + list(extra))
+        assert r.returncode == 0, f"{mode} {arm} {list(extra)}: exit {r.returncode}: {r.stderr[-600:]} {r.stdout[-400:]}"
+        L.runs[key] = out
+    return L.runs[key]
+
+
+def mode_policy_recorded(mode):
+    """Rejects: a --terrain / --empty-space emit with no policy, or one that leaves out an option that changes its rows."""
+    def t():
+        doc = load(mode_emit(mode, "with"))
+        assert doc.get("MeasurementPolicy") == MODE_POLICY[mode], f"recorded {doc.get('MeasurementPolicy')!r}, wanted {MODE_POLICY[mode]!r}"
+        extra, words = MODE_OTHER[mode]
+        other = load(mode_emit(mode, "with", extra)).get("MeasurementPolicy", "")
+        assert words in other and other != MODE_POLICY[mode], f"{extra}: the policy did not change: {other!r}"
+    return t
+
+
+def mode_diff_gate(mode):
+    """Rejects: conflictdiff crediting repair across two emits of one mode measured under different or unknown rules, or across modes."""
+    def t():
+        L = lab()
+        cd = exe(PROBES, "conflictdiff")
+        a, b = mode_emit(mode, "with"), mode_emit(mode, "without")
+        same = run([cd, a, b])
+        version = MODE_POLICY[mode].split("|")[0]
+        assert same.returncode == 0 and f"measurement policy: {version}|" in same.stdout, f"equal policies: exit {same.returncode}: {same.stdout[-500:]}"
+        refusal = "measurement policies cannot establish repair credit"
+        # another rule measured for real (one option changed), and an emit written before the policy existed
+        r = run([cd, mode_emit(mode, "with", MODE_OTHER[mode][0]), b])
+        assert r.returncode == 3 and refusal in r.stdout, f"other option: exit {r.returncode}: {r.stdout[-500:]}"
+        doc = load(b); doc.pop("MeasurementPolicy")
+        bad = L.tmp / f"{mode}-no-policy.json"
+        bad.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        for pair in ((a, bad), (bad, a)):
+            r = run([cd, *pair])
+            assert r.returncode == 3 and refusal in r.stdout and "'unknown'" in r.stdout, f"missing: exit {r.returncode}: {r.stdout[-500:]}"
+        # against the sweep emit, past the population gate: the policy alone refuses it
+        sweep = L.runs[("whole", "paths")][0]
+        r = run([cd, sweep, a, "--compare-states"])
+        assert r.returncode == 3 and refusal in r.stdout, f"against the sweep: exit {r.returncode}: {r.stdout[-500:]}"
+    return t
+
+
 def fp(doc):
     doc["Configuration"]["Fingerprint"] = "0" * 64
 
@@ -245,6 +307,9 @@ for scope in ("whole", "scoped"):
 
 check("--reverse-of outside a plain default-pass emit run is refused by name", flag_clashes)
 check("conflictdiff: equal contactprobe policies accepted; another or a missing policy refused", diff_gate_policy)
+for mode in ("terrain", "empty-space"):
+    check(f"--{mode}: the emit records its policy, and a changed option changes it", mode_policy_recorded(mode))
+    check(f"--{mode}: conflictdiff accepts equal policies, refuses another, a missing one and the sweep's", mode_diff_gate(mode))
 
 print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")
 sys.exit(1 if FAILURES else 0)

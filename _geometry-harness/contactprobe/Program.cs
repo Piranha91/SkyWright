@@ -667,7 +667,8 @@ if (terrain)
     try
     {
         return TerrainReview.Run(cidx, landIndex!, closure, PluginName, BaseLabel, eps, floatThreshold!.Value, burialThreshold!.Value, burialShare!.Value, RenderClasses, absolute, terrainSample,
-                                 emitPath, basePath, jsonPath, Instance, cfg.Identity(TerrainReview.Population, cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw);
+                                 emitPath, basePath, jsonPath, Instance, cfg.Identity(TerrainReview.Population, cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw,
+                                 radiusOn, bosOn, forceEnable);
     }
     catch (Exception ex) { Console.Error.WriteLine($"contactprobe --terrain refused: {ex.GetType().Name}: {ex.Message}"); return 2; }
 }
@@ -970,7 +971,7 @@ if (emptySpaceOut is not null)
     return EmptySpaceReview.Run(cidx, closure, hosts, PluginName, BaseLabel, CellOf, p => IsVanilla(p) || IsUssep(p), f => Vanilla.Contains(f),
                                 EmptySpaceOutput.NodeCheck(idx, assets), emptySpaceOut, emitPath, basePath, Instance, paths.Count - unreadable.Count, unreadable.Count,
                                 cfg.Identity(population?.Identity("load-time") ?? "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw,
-                                population, populationAuditEmit, populationAuditOut);
+                                radiusOn, bosOn, forceEnable, population, populationAuditEmit, populationAuditOut);
 var depHash = cidx.DependentSnaps(skips);
 MemStages.Print("dependents hashed", cidx, 0, 0);
 if (FitCheck() is { } fitRefusal) { Console.Error.WriteLine("contactprobe: " + fitRefusal); return 2; }

@@ -22,6 +22,34 @@ static class ContactCredit
                            "force-enable " + (forced.Count == 0 ? "none" : string.Join(",", forced)));
     }
 
+    /// <summary>The rule the --terrain emit was measured under (task 2026-10-21-contactprobe-terrain-empty-space-policy). Its own
+    /// version, so conflictdiff never compares a terrain emit with a sweep or empty-space one.</summary>
+    public const string TerrainPolicyVersion = "terrain_support_v1";
+
+    public static string TerrainPolicy(float eps, float floatThreshold, float burialThreshold, float burialShare, int sample, bool absolute,
+                                       float supportReach, bool radius, bool bos, IEnumerable<string> forceEnable)
+        => string.Join("|", TerrainPolicyVersion, "eps " + R(eps), "float " + R(floatThreshold), "burial " + R(burialThreshold),
+                       "burial-share " + R(burialShare), "sample " + sample.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                       "absolute " + OnOff(absolute), "support-reach " + R(supportReach), "radius " + OnOff(radius), "bos " + OnOff(bos), Forced(forceEnable));
+
+    /// <summary>The rule the --empty-space emit was measured under: its version, the contact and search options, and the anchor
+    /// gate's stated parameters.</summary>
+    public const string EmptySpacePolicyVersion = "empty_space_v1";
+
+    public static string EmptySpacePolicy(float eps, float reach, float minAnchorDim, int maxMembers, float anchorReport, bool radius, bool bos,
+                                          IEnumerable<string> forceEnable)
+        => string.Join("|", EmptySpacePolicyVersion, "eps " + R(eps), "reach " + R(reach), "min-anchor " + R(minAnchorDim),
+                       "max-members " + maxMembers.ToString(System.Globalization.CultureInfo.InvariantCulture), "anchor-report " + R(anchorReport),
+                       "radius " + OnOff(radius), "bos " + OnOff(bos), Forced(forceEnable));
+
+    static string R(float v) => v.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+    static string OnOff(bool v) => v ? "on" : "off";
+    static string Forced(IEnumerable<string> forceEnable)
+    {
+        var forced = forceEnable.Select(f => f.ToLowerInvariant()).OrderBy(f => f, StringComparer.Ordinal).ToList();
+        return "force-enable " + (forced.Count == 0 ? "none" : string.Join(",", forced));
+    }
+
     /// <summary>The emit's class: a Fixed dependent left Stranded or Orphaned, the Bethesda floor withheld.</summary>
     public static bool Emitted(DependentMotion motion, ContactVerdict verdict, DependencyPopulation population)
         => motion == DependentMotion.Fixed && verdict is ContactVerdict.Stranded or ContactVerdict.Orphaned && population != DependencyPopulation.BethesdaFloor;
