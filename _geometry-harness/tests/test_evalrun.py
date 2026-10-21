@@ -7700,15 +7700,18 @@ def case_416(tmp):
         want.add(hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest())
     check(cache and set(cache) <= want and len(cache) == len([j for j in jobs if j.get("kind") == "probe"]),
           f"{case}: every request key is the pre-P25 formula's ({len(set(cache) & want)} of {len(cache)} match)")
-    # Overlap acceleration P1: overlapprobe's reverse takes the measured baseline emit's rows (--reverse-of); no other probe's does.
+    # Overlap acceleration P1 (and contactprobe since 2026-10-21): each RECONCILE_REVERSE probe's reverse takes the measured
+    # baseline emit's rows (--reverse-of); no other probe's does.
+    taking = ("overlapprobe", "contactprobe")
     revs = [j for j in jobs if j.get("kind") == "probe" and j["job"].endswith("-reverse")]
     base_emit = {j["job"].split("-")[0]: j.get("emit") for j in jobs if j.get("kind") == "probe" and j["job"].endswith("-baseline")}
-    ovl = [j for j in revs if j["job"].startswith("overlapprobe-")]
-    check(ovl and all(j["inputs"].get("baselineEmit") == base_emit.get("overlapprobe")
-                      and "--reverse-of" in _p25_cmd(sweep / "logs" / f"{j['job']}.txt") for j in ovl)
-          and not any(j["inputs"].get("baselineEmit") for j in revs if not j["job"].startswith("overlapprobe-")),
-          f"{case}: overlapprobe's {len(ovl)} reverse job(s) name the baseline emit and pass --reverse-of; the other "
-          f"{len(revs) - len(ovl)} reverse job(s) do not")
+    ovl = [j for j in revs if j["job"].split("-")[0] in taking]
+    check(ovl and {j["job"].split("-")[0] for j in ovl} == set(taking)
+          and all(j["inputs"].get("baselineEmit") == base_emit.get(j["job"].split("-")[0])
+                  and "--reverse-of" in _p25_cmd(sweep / "logs" / f"{j['job']}.txt") for j in ovl)
+          and not any(j["inputs"].get("baselineEmit") for j in revs if j["job"].split("-")[0] not in taking),
+          f"{case}: overlapprobe's and contactprobe's {len(ovl)} reverse job(s) name the baseline emit and pass --reverse-of; the "
+          f"other {len(revs) - len(ovl)} reverse job(s) do not")
     # Overlap acceleration P3: every overlapprobe job writes its pair results and reads those of the jobs before it.
     ojobs = [j for j in jobs if j.get("kind") == "probe" and j["job"].startswith("overlapprobe-")]
     cmds = {j["job"]: _p25_cmd(sweep / "logs" / f"{j['job']}.txt") for j in ojobs}

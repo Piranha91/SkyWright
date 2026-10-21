@@ -65,6 +65,9 @@ from pathlib import Path
 SCHEMA = 1
 # overlapprobe's emits carry a measurement policy; conflictdiff refuses overlap repair credit without one (3c9432e3)
 FIXTURE_OVERLAP_POLICY = "fixture-overlap-v1"
+FIXTURE_CONTACT_POLICY = "fixture-contact-v1"
+#: the pair limits each probe records in its emit (the real overlapprobe since 2026-10-19; contactprobe records none)
+PAIR_LIMITS = {"overlapprobe": {"MaxTrianglePairs": 2000000, "PairSeconds": 120.0}}
 DEFAULT_UNKNOWN = {
     "installerChoices": "not modelled: MO2 keeps no per-mod record of the FOMOD options taken; the installed files are the evidence",
     "gameBuild": "not read: the executable version and SKSE/plugin set are not part of a records run",
@@ -575,10 +578,10 @@ def main(probe: str, argv=None) -> int:
             doc["Predicates"] = predicates_from(base, entry)
             doc["BaseEmit"] = str(base).replace("\\", "/")
     if a.get("reverse-of"):
-        # overlapprobe's --reverse-of (P1): the baseline emit's rows and coverage, refused unless it is this order's.
+        # overlapprobe's and contactprobe's --reverse-of: the baseline emit's rows and coverage, refused unless it is this order's.
         bdoc = json.loads(Path(a["reverse-of"]).read_text(encoding="utf-8"))
         theirs = (bdoc.get("Configuration") or {}).get("Fingerprint")
-        if theirs != cfg.get("Fingerprint") or bdoc.get("BaseEmit") is not None or bdoc.get("PairLimits") != {"MaxTrianglePairs": 2000000, "PairSeconds": 120.0}:
+        if theirs != cfg.get("Fingerprint") or bdoc.get("BaseEmit") is not None or bdoc.get("PairLimits") != PAIR_LIMITS.get(probe):
             print(f"fakeprobe {probe}: --reverse-of {Path(a['reverse-of']).name} is not this order's baseline emit "
                   f"(fingerprint {str(theirs)[:12]}, this run {str(cfg.get('Fingerprint'))[:12]})", file=sys.stderr)
             return 2
@@ -589,13 +592,13 @@ def main(probe: str, argv=None) -> int:
     if behaviour != "no-configuration":
         doc["Configuration"] = cfg
     # an entry's `measurementPolicy` overrides the default; None leaves the field out, as an emit before 3c9432e3 did
-    policy = entry.get("measurementPolicy", FIXTURE_OVERLAP_POLICY if probe == "overlapprobe" else None)
+    policy = entry.get("measurementPolicy", {"overlapprobe": FIXTURE_OVERLAP_POLICY, "contactprobe": FIXTURE_CONTACT_POLICY}.get(probe))
     if policy is not None:
         doc["MeasurementPolicy"] = policy
     doc["PopulationIdentity"] = f"{doc['Population']} / state {doc['State']}"
-    if probe == "overlapprobe":
+    if probe in PAIR_LIMITS:
         # the real overlapprobe records its pair limits (2026-10-19); --reverse-of refuses a baseline under other limits
-        doc["PairLimits"] = {"MaxTrianglePairs": 2000000, "PairSeconds": 120.0}
+        doc["PairLimits"] = PAIR_LIMITS[probe]
     # an entry's `emitFields` overwrite top-level emit fields as written (e.g. a mistyped field conflictdiff cannot read)
     doc.update(entry.get("emitFields") or {})
 

@@ -206,7 +206,7 @@ var pairCacheReads = new List<string>();
 string? pairCacheWrite = null;
 PairResultCache? pairResults = null;
 // --reverse-of BASELINE_EMIT (with --base): a reverse run that takes this order's baseline emit's rows, coverage and class
-// instead of sweeping again, and re-measures only the --base rows (ReverseFromBaseline.cs); refused unless the baseline emit
+// instead of sweeping again, and re-measures only the --base rows (_shared/ReverseFromBaseline.cs); refused unless the baseline emit
 // is this run's own (configuration, population, state, policy, instance and the stage-independent coverage).
 string? reverseOfPath = null;
 string? geometryManifestPath = null;
@@ -1517,7 +1517,7 @@ if (reverseOfPath is not null)
     if (PopulationScopeLine() is { } scopeLine) own.Add(scopeLine);
     var baseRecords = BaseRecordsLine();
     var limits = new PairLimits(maxTrianglePairs, pairSeconds);
-    string? refusal = ReverseFromBaseline.Refusal(baseline, reverseOfPath, Instance, identity, populationIdentity, pop.StateName, policy, limits, own)
+    string? refusal = ReverseFromBaseline.Refusal("overlapprobe", baseline, reverseOfPath, Instance, identity, populationIdentity, pop.StateName, policy, limits, own)
         ?? ReverseFromBaseline.BaseRecordsRefusal(baseline, reverseOfPath, baseRecords.Judged, baseRecords.Unjudgeable!);
     if (refusal is not null) { Console.Error.WriteLine(refusal); return 2; }
     // The baseline's base-record count also holds the bases its provenance stage looked up; a full reverse adds the bases

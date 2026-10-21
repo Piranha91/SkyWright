@@ -113,6 +113,10 @@ using HousecarlCore.Progress;
 //                   (default on; _shared/BosHook.cs); off = the record bases
 //   --base EMIT     re-measure every record of that emit's rows under THIS order and carry the results in the emit as
 //                   Predicates — the changed arm of a differential (conflictdiff reads both). See ConflictReport.cs.
+//   --reverse-of BASELINE_EMIT  (default pass, with --base and --emit) a reverse run: carry the baseline emit's rows and
+//                   coverage instead of judging every moved host again, and re-measure only the --base rows. Refused by name unless
+//                   the baseline is this run's own: probe, configuration, population, state, measurement policy, instance and the
+//                   coverage lines fixed before the host loop (_shared/ReverseFromBaseline.cs). The emit equals a full reverse's.
 //   --only          keep only the named plugins of the profile's order (the vanilla masters, or vanilla + USSEP)
 //   --vanilla-assets resolve meshes from the game's own archives only — no mod folder, no replacer — so a
 //                   labelled set authored against vanilla meshes is tested against vanilla meshes
@@ -167,6 +171,7 @@ string? stateSpec = null, switchMapPath = null;
 var forceEnable = new List<string>();   // --force-enable: singletons read as enabled after load (EnableArms.Force)
 float eps = 4f;            // touching: surfaces within ε and no vertex deeper than ε inside. A chosen number, stated.
 float reach = 128f;        // how far from a moved host a dependent is looked for (the records pass's contact-plausible radius).
+string? reverseOfPath = null;   // --reverse-of BASELINE_EMIT: carry the baseline's rows in a reverse run
 string? phaseTimersPath = null;   // --phase-timers FILE: the contact code's own time split (changes no output)
 string? jsonPath = null, emitPath = null, basePath = null, overlapJson = null, labelledMover = null, geomReport = null;
 bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = false, contactEvidence = false;
@@ -206,6 +211,7 @@ try
         else if (flag == "--phase-timers") { phaseTimersPath = NeedValue(i, flag); i++; }
         else if (flag == "--emit") { emitPath = NeedValue(i, flag); i++; }
         else if (flag == "--base") { basePath = NeedValue(i, flag); i++; }
+        else if (flag == "--reverse-of") { reverseOfPath = NeedValue(i, flag); i++; }
         else if (flag == "--overlap-json") { overlapJson = NeedValue(i, flag); i++; }
         else if (flag == "--contact-evidence") contactEvidence = true;
         else if (flag == "--contact-budget-seconds") { if (!double.TryParse(NeedValue(i, flag), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out contactBudgetSeconds)) throw new ArgumentException("--contact-budget-seconds requires a number"); i++; }
@@ -327,6 +333,16 @@ if (traceOut is not null && selectedModes > 0) { Console.Error.WriteLine("--trac
 if (populationPath is not null && selectedModes > 0 && emptySpaceOut is null) { Console.Error.WriteLine("--population is valid only in the default moved-host pass and with --empty-space"); return 2; }
 if (populationPath is not null && emptySpaceOut is not null && basePath is not null) { Console.Error.WriteLine("--population with --empty-space takes no --base: the physical half of a row outside the population is not computed; run the predicate pass on the whole order"); return 2; }
 if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
+if (reverseOfPath is not null)
+{
+    string? clash = basePath is null ? "--reverse-of needs --base (the candidate emit whose rows the reverse re-measures)"
+        : emitPath is null ? "--reverse-of needs --emit"
+        : selectedModes > 0 ? "--reverse-of is valid only in the default moved-host pass"
+        : jsonPath is not null || traceOut is not null || populationAuditEmit is not null || phaseTimersPath is not null
+            ? "--reverse-of writes no judged rows, trace, population audit or contact timers (it judges no host); drop --json, --trace, --population-audit and --phase-timers"
+        : null;
+    if (clash is not null) { Console.Error.WriteLine(clash); return 2; }
+}
 List<FormKey>? traceKeys = null;
 if (traceKeysPath is not null && File.Exists(traceKeysPath))
 {
@@ -335,7 +351,7 @@ if (traceKeysPath is not null && File.Exists(traceKeysPath))
 }
 foreach (var input in new[] { (Flag: "--overlap-json", Path: overlapJson), (Flag: "--base", Path: basePath),
     (Flag: "--switch-map", Path: switchMapPath), (Flag: "--order", Path: orderFile), (Flag: "--trace-keys", Path: traceKeysPath),
-    (Flag: "--population-audit", Path: populationAuditEmit) })
+    (Flag: "--population-audit", Path: populationAuditEmit), (Flag: "--reverse-of", Path: reverseOfPath) })
     if (input.Path is not null && !File.Exists(input.Path))
     { Console.Error.WriteLine($"{input.Flag} input does not exist: {input.Path}"); return 2; }
 PopulationScope? population = null;
@@ -964,6 +980,63 @@ MemStages.Print("winner arm hashed", cidx, 0, 0);
 Console.WriteLine($"   dependents hashed: {depHash.Count:N0} undeleted snaps of clutter- and furniture-scale physical refs — the arm decides which exist at runtime ({skips.DepNoGeometry:N0} winning refs without geometry, {skips.DepVolume:N0} over {cidx.MaxDependentDim:0}u set aside)");
 Console.WriteLine($"   winner arm: {winHash.Count:N0} physical refs placed, undeleted and enabled at runtime under the winner, any size (R3); left out: {skips.WinnerRuntimeDisabled:N0} disabled at runtime (R1), {skips.WinnerEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
+// The emit's coverage lines fixed before the host loop: a --reverse-of baseline must carry these equal to this run's own.
+List<CoverageLine> PreLoopLines() => new()
+{
+    new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
+    // A host without solid collision is SET ASIDE by definition — the engine rests nothing on it either (the plumbing line
+    // above says the same) — not unjudgeable: the coverage rule's first real case (2026-09-03, the lab's JK's–OCW patch, which
+    // moves ~490 more collision-less hosts than the order without it) refused its verdict on this line until it was classed so.
+    // A host whose mesh could not be read at all stays unjudgeable.
+    new("moved hosts", hosts.Count,
+        new Dictionary<string, long> { ["NoGeometry"] = skips.HostNoGeometry, ["EnableChainUnresolved"] = skips.HostEnableUnresolved },
+        new Dictionary<string, long> { ["NoSolidCollision"] = skips.HostNoCollision, ["VolumeScale"] = skips.HostVolume, ["TooSmallToHost"] = skips.HostTooSmall, ["RuntimeDisabledInArm"] = skips.HostRuntimeDisabled }),
+    new("dependent snaps hashed", depHash.Count, new Dictionary<string, long> { ["NoGeometry"] = skips.DepNoGeometry }, new Dictionary<string, long> { ["OverDependentSize"] = skips.DepVolume }),
+    new("winner-arm physical refs", winHash.Count, new Dictionary<string, long> { ["EnableChainUnresolved"] = skips.WinnerEnableUnresolved }, new Dictionary<string, long> { ["RuntimeDisabled"] = skips.WinnerRuntimeDisabled }),
+};
+
+// --base: every record of the named emit re-measured under this arm (2026-09-03); a full run and --reverse-of share it.
+List<Predicate> MeasureBasePredicates(string path)
+{
+    var baseFile = ConflictIo.Read(path);
+    var list = new List<Predicate>();
+    foreach (var c in baseFile.Conflicts)
+    {
+        string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+        foreach (var rec in c.Necessary)
+        {
+            if (c.Kind != "CONTACT") { list.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not a contact row")); continue; }
+            var (st, why) = ContactPredicate(FormKey.Factory(rec.FormKey));
+            list.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
+        }
+    }
+    Console.WriteLine($"\n   --base {Path.GetFileName(path)}: {list.Count:N0} base-row predicate(s) re-measured under this order — "
+                    + string.Join(", ", list.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
+    return list;
+}
+
+string sweepPopulation = population?.Identity("load-time") ?? "load-time";
+string sweepState = cidx.State?.Name ?? EnablePopulation.BaselineStateName;
+string sweepPolicy = ContactCredit.SweepPolicy(eps, reach, radiusOn, bosOn, allRows, forceEnable);
+// --reverse-of: the baseline order's rows and coverage are the baseline emit's, once it is shown to be this run's own; only the
+// --base rows are measured, with the code a full reverse uses.
+if (reverseOfPath is not null)
+{
+    var baseline = ConflictIo.Read(reverseOfPath);
+    var identity = cfg.Identity(sweepPopulation, sweepState);
+    string? refusal = ReverseFromBaseline.Refusal("contactprobe", baseline, reverseOfPath, Instance, identity, sweepPopulation, sweepState,
+                                                  sweepPolicy, null, PreLoopLines());
+    if (refusal is not null) { Console.Error.WriteLine(refusal); return 2; }
+    var carried = MeasureBasePredicates(basePath!);
+    ConflictIo.Write(emitPath!, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), baseline.Conflicts,
+                                                 baseline.Coverage, carried, basePath, sweepPopulation, sweepState, identity, MeasurementPolicy: sweepPolicy));
+    Console.WriteLine($"configuration: {identity.Short}");
+    Console.WriteLine($"\nreverse of {Path.GetFileName(reverseOfPath)}: its {baseline.Conflicts.Count:N0} Fixed Stranded + Orphaned conflicts and coverage "
+                    + $"carried (no host judged), {carried.Count:N0} --base predicate(s) measured -> {emitPath}");
+    Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
+    return 0;
+}
+
 var rows = new List<ContactRow>();
 int done = 0, hostsOutsidePopulation = 0, rowsOutsidePopulation = 0;
 long hostLoop0 = Stopwatch.GetTimestamp();
@@ -1205,24 +1278,7 @@ if (emitPath is not null)
             new List<ConflictRecord> { new(r.Dependent.ToString(), "placed-ref", CellOf(r.DepAuthoring.Cell), st, why, Wind: WindNoteOf(r.DepBase)) },
             new List<ConflictRecord> { new(r.Host.Key.ToString(), "placed-ref", null) }));
     }
-    List<Predicate>? predicates = null;
-    if (basePath is not null)
-    {
-        var baseFile = ConflictIo.Read(basePath);
-        predicates = new List<Predicate>();
-        foreach (var c in baseFile.Conflicts)
-        {
-            string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
-            foreach (var rec in c.Necessary)
-            {
-                if (c.Kind != "CONTACT") { predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, PhysicalState.Unmeasured, "not a contact row")); continue; }
-                var (st, why) = ContactPredicate(FormKey.Factory(rec.FormKey));
-                predicates.Add(new Predicate(c.Kind, c.A, c.B, rec.FormKey, other, st, why));
-            }
-        }
-        Console.WriteLine($"\n   --base {Path.GetFileName(basePath)}: {predicates.Count:N0} base-row predicate(s) re-measured under this order — "
-                        + string.Join(", ", predicates.GroupBy(p => p.Physical).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}")));
-    }
+    List<Predicate>? predicates = basePath is not null ? MeasureBasePredicates(basePath) : null;
     var coverage = new List<CoverageLine>
     {
         // The population this run judged, and the chains it could not read to the end — the contact pass has resolved
@@ -1232,29 +1288,20 @@ if (emitPath is not null)
             cidx.Arms.WinnerUnresolved > 0 ? new Dictionary<string, long> { ["EnableChainUnresolved"] = cidx.Arms.WinnerUnresolved } : new Dictionary<string, long>(),
             new Dictionary<string, long> { ["NotPresentAtLoad"] = cidx.Arms.WinnerAbsent },
             $"population load-time / state {cidx.State?.Name ?? EnablePopulation.BaselineStateName}"),
-        new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
-        // A host without solid collision is SET ASIDE by definition — the engine rests nothing on it either (the plumbing line
-        // above says the same) — not unjudgeable: the coverage rule's first real case (2026-09-03, the lab's JK's–OCW patch, which
-        // moves ~490 more collision-less hosts than the order without it) refused its verdict on this line until it was classed so.
-        // A host whose mesh could not be read at all stays unjudgeable.
-        new("moved hosts", hosts.Count,
-            new Dictionary<string, long> { ["NoGeometry"] = skips.HostNoGeometry, ["EnableChainUnresolved"] = skips.HostEnableUnresolved },
-            new Dictionary<string, long> { ["NoSolidCollision"] = skips.HostNoCollision, ["VolumeScale"] = skips.HostVolume, ["TooSmallToHost"] = skips.HostTooSmall, ["RuntimeDisabledInArm"] = skips.HostRuntimeDisabled }),
-        new("dependent snaps hashed", depHash.Count, new Dictionary<string, long> { ["NoGeometry"] = skips.DepNoGeometry }, new Dictionary<string, long> { ["OverDependentSize"] = skips.DepVolume }),
-        new("winner-arm physical refs", winHash.Count, new Dictionary<string, long> { ["EnableChainUnresolved"] = skips.WinnerEnableUnresolved }, new Dictionary<string, long> { ["RuntimeDisabled"] = skips.WinnerRuntimeDisabled }),
         new("dependent-host pairs", rows.Count - unj.Count,
             unj.GroupBy(r => r.Reason.ToString()).ToDictionary(g => g.Key, g => (long)g.Count()).Concat(new[] { new KeyValuePair<string, long>("DepEnableChainUnresolved", skips.DepEnableUnresolved) }).ToDictionary(kv => kv.Key, kv => kv.Value),
             new Dictionary<string, long> { ["BoxesApart"] = skips.BoxesApart, ["DepIntroducedByMover"] = skips.DepIntroducedByMover, ["DepOtherSpace"] = skips.DepOtherSpace, ["DepAbsentInArm"] = skips.DepAbsentInArm },
             $"relationships {rel.Count:N0}, class {classRows.Count:N0}"),
     };
-    string populationIdentity = population?.Identity("load-time") ?? "load-time";
+    coverage.InsertRange(1, PreLoopLines());
+    string populationIdentity = sweepPopulation;
     if (population is not null)
         coverage.Add(new("population scope", hosts.Count - hostsOutsidePopulation, new Dictionary<string, long>(),
             new Dictionary<string, long> { ["HostOutsidePopulation"] = hostsOutsidePopulation, ["RowOutsidePopulation"] = rowsOutsidePopulation },
             $"hosts judged only where a host or a dependent is in the plan's population; {population.Describe()}"));
     var identity = cfg.Identity(populationIdentity, cidx.State?.Name ?? EnablePopulation.BaselineStateName);
     ConflictIo.Write(emitPath, new ConflictFile("contactprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage, predicates, basePath,
-                                                populationIdentity, cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity));
+                                                populationIdentity, cidx.State?.Name ?? EnablePopulation.BaselineStateName, identity, MeasurementPolicy: sweepPolicy));
     Console.WriteLine($"configuration: {identity.Short}");
     Console.WriteLine($"\nemitted {conflicts.Count:N0} Fixed Stranded + Orphaned conflicts -> {emitPath}");
 }

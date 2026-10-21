@@ -1,11 +1,11 @@
 using System.Text.Json;
 using HarnessShared;
 
-// --reverse-of BASELINE_EMIT (overlap acceleration P1). A reverse run measures the BASELINE order with a candidate's emit as
-// --base. Its sweep, provenance and class are the baseline run's own, recomputed: the same order, the same code, the same
-// rows. This mode takes those sections from the baseline emit instead, after checking it was made on the same configuration,
-// population, state and measurement policy, and re-measures only the --base rows (Predicates), with the code a full reverse
-// uses. Any check that fails refuses by name; nothing is carried from an emit this run cannot show is its own baseline.
+// --reverse-of BASELINE_EMIT (overlap acceleration P1; contactprobe 2026-10-21). A reverse run measures the BASELINE order with a
+// candidate's emit as --base. Its sweep, provenance and class are the baseline run's own, recomputed: the same order, the same code,
+// the same rows. This mode takes those sections from the baseline emit instead, after checking it was made by the same probe on the
+// same configuration, population, state and measurement policy, and re-measures only the --base rows (Predicates), with the code a
+// full reverse uses. Any check that fails refuses by name; nothing is carried from an emit this run cannot show is its own baseline.
 static class ReverseFromBaseline
 {
     static readonly JsonSerializerOptions Canon = new() { Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
@@ -14,13 +14,14 @@ static class ReverseFromBaseline
 
     /// <summary>Null when <paramref name="baseline"/> may stand for this run's own sweep; otherwise the refusal sentence.
     /// <paramref name="ownLines"/> are this run's coverage lines that do not depend on the sweep, provenance or reconciliation
-    /// (plugins, candidate refs, population scope): each must equal the baseline's line of the same name.</summary>
-    public static string? Refusal(ConflictFile baseline, string baselinePath, string instance, ConfigurationIdentity identity,
-                                  string population, string? state, string policy, PairLimits limits, IEnumerable<CoverageLine> ownLines)
+    /// (plugins, candidate refs, population scope): each must equal the baseline's line of the same name. <paramref name="limits"/>
+    /// is null for a probe that records no pair limits (contactprobe); the baseline must then record none either.</summary>
+    public static string? Refusal(string probe, ConflictFile baseline, string baselinePath, string instance, ConfigurationIdentity identity,
+                                  string population, string? state, string policy, PairLimits? limits, IEnumerable<CoverageLine> ownLines)
     {
         string name = Path.GetFileName(baselinePath);
-        if (baseline.Probe != "overlapprobe")
-            return $"--reverse-of {name} was written by {baseline.Probe}, not overlapprobe; give overlapprobe's baseline emit, or run the reverse without --reverse-of.";
+        if (baseline.Probe != probe)
+            return $"--reverse-of {name} was written by {baseline.Probe}, not {probe}; give {probe}'s baseline emit, or run the reverse without --reverse-of.";
         if (baseline.BaseEmit is not null || baseline.Predicates is not null)
             return $"--reverse-of {name} was itself run with --base ({baseline.BaseEmit}); give the baseline emit, which has no --base.";
         if (baseline.Configuration is null)
@@ -33,10 +34,12 @@ static class ReverseFromBaseline
             return $"--reverse-of {name} judged population {baseline.Population ?? "unknown"} / state {baseline.State ?? "unknown"}, this run {population} / state {state ?? "unknown"}; give the baseline emit of this population and state.";
         if (baseline.MeasurementPolicy != policy)
             return $"--reverse-of {name} was measured under policy '{baseline.MeasurementPolicy ?? "unknown"}', this run under '{policy}'; run the reverse without --reverse-of.";
-        if (baseline.PairLimits is null)
+        if (limits is null && baseline.PairLimits is not null)
+            return $"--reverse-of {name} records pair limits, which {probe} does not measure under; it is not this run's baseline.";
+        if (limits is not null && baseline.PairLimits is null)
             return $"--reverse-of {name} does not record the pair limits it was measured under, so it cannot be shown to be this run's baseline; run the reverse without --reverse-of.";
-        if (baseline.PairLimits != limits)
-            return $"--reverse-of {name} was measured under pair limits of {baseline.PairLimits.MaxTrianglePairs:N0} triangle pairs and {baseline.PairLimits.PairSeconds:R} s, this run under {limits.MaxTrianglePairs:N0} and {limits.PairSeconds:R} s; give the baseline emit measured under this run's limits.";
+        if (limits is not null && baseline.PairLimits != limits)
+            return $"--reverse-of {name} was measured under pair limits of {baseline.PairLimits!.MaxTrianglePairs:N0} triangle pairs and {baseline.PairLimits.PairSeconds:R} s, this run under {limits.MaxTrianglePairs:N0} and {limits.PairSeconds:R} s; give the baseline emit measured under this run's limits.";
         if (baseline.Instance != instance)
             return $"--reverse-of {name} was measured on instance {baseline.Instance}, this run on {instance}; give the baseline emit of this instance.";
         var theirs = (baseline.Coverage ?? Array.Empty<CoverageLine>()).ToDictionary(c => c.Population, StringComparer.Ordinal);

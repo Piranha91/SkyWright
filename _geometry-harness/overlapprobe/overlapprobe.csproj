@@ -18,6 +18,7 @@
   <ItemGroup>
     <Compile Include="..\_shared\HarnessTarget.cs" Link="HarnessTarget.cs" />
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
+    <Compile Include="..\_shared\ReverseFromBaseline.cs" Link="ReverseFromBaseline.cs" />
     <Compile Include="..\_shared\PopulationScope.cs" Link="PopulationScope.cs" />
     <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\PopulationFixture.cs" Link="PopulationFixture.cs" />

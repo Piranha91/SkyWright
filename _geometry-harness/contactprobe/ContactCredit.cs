@@ -8,6 +8,20 @@ using Mutagen.Bethesda.Plugins;
 // ct-synth ContactIndex.
 static class ContactCredit
 {
+    /// <summary>The rule the default pass's emit was measured under (task 2026-10-20-contactprobe-sweep-emit-policy): the rule's
+    /// version and every option that changes the emit's rows or coverage. conflictdiff refuses two emits whose policies differ, and
+    /// --reverse-of refuses a baseline measured under another. Bump the version when the sweep's contact rule changes.</summary>
+    public const string SweepPolicyVersion = "placement_contact_v1";
+
+    public static string SweepPolicy(float eps, float reach, bool radius, bool bos, bool allRows, IEnumerable<string> forceEnable)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        var forced = forceEnable.Select(f => f.ToLowerInvariant()).OrderBy(f => f, StringComparer.Ordinal).ToList();
+        return string.Join("|", SweepPolicyVersion, "eps " + eps.ToString("R", inv), "reach " + reach.ToString("R", inv),
+                           "radius " + (radius ? "on" : "off"), "bos " + (bos ? "on" : "off"), "all-rows " + (allRows ? "on" : "off"),
+                           "force-enable " + (forced.Count == 0 ? "none" : string.Join(",", forced)));
+    }
+
     /// <summary>The emit's class: a Fixed dependent left Stranded or Orphaned, the Bethesda floor withheld.</summary>
     public static bool Emitted(DependentMotion motion, ContactVerdict verdict, DependencyPopulation population)
         => motion == DependentMotion.Fixed && verdict is ContactVerdict.Stranded or ContactVerdict.Orphaned && population != DependencyPopulation.BethesdaFloor;

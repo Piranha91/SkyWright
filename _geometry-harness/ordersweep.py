@@ -111,9 +111,10 @@ def probe_program(harness: Path, probe: str, overrides: dict[str, str]) -> list[
 
 
 #: Probes whose reverse run can take the measured baseline emit's rows instead of sweeping the baseline order again
-#: (overlap acceleration P1): probe -> the flag that names the baseline emit. The reverse still re-measures every --base
-#: row under the baseline order; the probe refuses by name unless the baseline emit is its own on this configuration.
-RECONCILE_REVERSE = {"overlapprobe": "--reverse-of"}
+#: (overlap acceleration P1; contactprobe 2026-10-21): probe -> the flag that names the baseline emit. The reverse still
+#: re-measures every --base row under the baseline order; the probe refuses by name unless the baseline emit is its own on this
+#: configuration.
+RECONCILE_REVERSE = {"overlapprobe": "--reverse-of", "contactprobe": "--reverse-of"}
 
 #: Probes that keep placed-pair results across runs of one build (overlap acceleration P3). Each job writes the results it
 #: measured to <out>/<probe>/<job>.pair-results.jsonl.gz and reads every such file written before it in this launch and in
