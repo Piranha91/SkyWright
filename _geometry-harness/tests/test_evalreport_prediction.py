@@ -3851,6 +3851,18 @@ def main():
 
     for name, fn in [("after-final/C822-carried-value-names-its-origin", c822_carried_value_names_its_origin)]:
         cell(name, fn)
+    # C823 (BPT review S4): a detail line on the prediction setup whose rows the top counts only in part says how many
+    # it counts and why the rest are not.
+    def c823_detail_count_reconciled_with_the_top():
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
+        rows_ = [row("OVERLAP", OTHER, MOD_A, f"000X6{i}:{BASE}", other=f"000Y6{i}:{OTHER}") for i in range(3)]
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rows_, (OVERLAP, "without-a"): rows_[:1]}, [MOD_A])
+        found = section_text(md, "What the checks found")
+        line = next((ln for ln in found.splitlines() if "3 overlap pairs" in ln), "")
+        return "2 of them counted at the top; the other 1" in line, line[:260]
+
+    for name, fn in [("after-final/C823-detail-count-reconciled-with-the-top", c823_detail_count_reconciled_with_the_top)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
