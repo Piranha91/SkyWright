@@ -3946,6 +3946,28 @@ def main():
 
     for name, fn in [("after-final/C828-patch-placement-from-record-rows", c828_patch_placement_from_record_rows)]:
         cell(name, fn)
+    # C829 (Clockwork review S5): where no record row names it (the patch overrides an object the evaluated mod adds),
+    # the record import's chain of the setup with the patch shows the patch's version of the object loads last and
+    # moves it: a still-there overlap says so.
+    def c829_patch_placement_from_the_chain():
+        X = f"000X01:{MOD_A}"
+        ys = [f"000Y0{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        other_ = f"00C890:{BASE}"
+        enr = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")]}
+        tr = {(RECORDS, "with-patch"): tree_transcript([
+            (X, "PlacedObject", [(MOD_A, {"Placement.Position": "1,1,1"}), (PATCH, {"Placement.Position": "9,9,9"})]),
+            (other_, "PlacedObject", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (PATCH, {"Owner": "p"})])])}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): p_rows},
+                                         [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                         enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                         transcripts=tr)
+        st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
+        return "2 still crossing where a patch places one of them" in st, st[:300]
+
+    for name, fn in [("after-final/C829-patch-placement-from-the-chain", c829_patch_placement_from_the_chain)]:
+        cell(name, fn)
 
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
