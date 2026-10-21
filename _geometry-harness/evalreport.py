@@ -1443,7 +1443,10 @@ def build_prediction(ctx: dict) -> dict:
                                         if k_[1] == "LOST-EDIT"
                                         and disables((h_["row"].get("values") or {}).get("lost"))
                                         and disables((h_["row"].get("values") or {}).get("winner"))})
-        return (rk[2].lower(), rk[3].lower(), rk[4]) in both_disabled_cache[0]
+        if (rk[2].lower(), rk[3].lower(), rk[4]) in both_disabled_cache[0]:
+            return True
+        # judged from each side's whole record, not only the row's field (Clockwork review S3)
+        return bool(side_disables(rk, rk[2]) and side_disables(rk, rk[3]))
     anchor_unclear_re = re.compile(words["fixtureAnchorUnclearPattern"]) if words.get("fixtureAnchorUnclearPattern") else None
 
     def path_case_only(rk):
@@ -1513,7 +1516,8 @@ def build_prediction(ctx: dict) -> dict:
                 if items and j is not None and len(items) == len(provs) else None)
         return {"changed": changed, "inherits": provs[j] if j is not None else None,
                 "before": provs[i - 1] if i > 0 else None,
-                "beforeWins": i > 0 and vals[-1] == vals[i - 1], "listKept": bool(kept)}
+                "beforeWins": i > 0 and vals[-1] == vals[i - 1], "listKept": bool(kept),
+                "lostIsOriginal": vals[i] == vals[0]}
 
     def puts_back(arm_id, rk):
         """Whose change, against the nearest master that carries the record (Missives' review B2): the winning plugin
@@ -1565,10 +1569,33 @@ def build_prediction(ctx: dict) -> dict:
             return max(abs(hi_[0] - lo_[0]), abs(hi_[1] - lo_[1])) / 2
         return SEAT_SPOT_UNITS
 
+    dis_flag = (words.get("disabledRecord") or {}).get("flag") or "InitiallyDisabled"
+    always_on = {str(x).lower() for x in (words.get("disabledRecord") or {}).get("alwaysEnabledParents") or []}
+
     def provider_disables(ch, i):
-        text_ = "; ".join(f"{k_}={v_}" for top_ in ch.get("values") or {}
-                          for k_, v_ in recordrows.provider_fields(ch, top_, i).items())
-        return disables(text_)
+        """Whether provider i's version of the record disables the object at load, from its whole record: moved below
+        the world, or initially disabled with no enable parent, or enabled opposite to a parent that is always
+        enabled (the player). An initially disabled object with another enable parent follows that parent: not
+        decided here (False)."""
+        f_ = {k_: v_ for top_ in ch.get("values") or {} for k_, v_ in recordrows.provider_fields(ch, top_, i).items()}
+        if disables("; ".join(f"{k_}={v_}" for k_, v_ in f_.items() if k_.endswith("Position"))):
+            return True
+        ref_ = str(f_.get("EnableParent.Reference") or "").strip()
+        has_parent = bool(ref_) and ref_ not in ("(absent)", "(null link)", "()")
+        opposite_ = "Opposite" in str(f_.get("EnableParent.Flags") or "")
+        if has_parent and ref_.lower() in always_on and opposite_:
+            return True
+        return dis_flag in " ".join(str(v_) for k_, v_ in f_.items() if k_.endswith("Flags") and not
+                                    k_.startswith("EnableParent")) and not has_parent
+
+    def side_disables(rk, plugin, arm_id=None):
+        """Whether `plugin`'s version of the row's record disables the object (provider_disables); None where the
+        record import's chain does not hold it."""
+        ch = (chains_of(rk[0], arm_id or p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch:
+            return None
+        low_ = [str(x).lower() for x in ch["providers"]]
+        return provider_disables(ch, low_.index(str(plugin).lower())) if str(plugin).lower() in low_ else None
 
     def supersede(rk):
         """The record facts that make the row's losing value superseded ({kind, ...}), or None. (a) kind: the winner
@@ -1789,7 +1816,7 @@ def build_prediction(ctx: dict) -> dict:
             return "single-mod", alone[0], None
         return "needs-both", None, None
 
-    record, set_aside = [], collections.Counter()
+    record, set_aside, carried_notown = [], collections.Counter(), []
     lost_seen = set()
     groups = collections.OrderedDict()
     multi = len(p_targets) > 1
@@ -1811,11 +1838,17 @@ def build_prediction(ctx: dict) -> dict:
     adm_of = {rk_: admission(rk_, h_["history"], h_["row"].get("other")) for rk_, h_ in p_rows.items()}
     carried, by_value = set(), collections.defaultdict(list)
     for rk_, h_ in p_rows.items():
-        if rk_[1] == "LOST-EDIT" and adm_of[rk_] == "admitted":
+        if rk_[1] == "LOST-EDIT" and adm_of[rk_] in ("admitted", "undoesMaster"):
             v_ = (h_["row"].get("values") or {}).get("lost")
             if value_recorded(v_):
                 by_value[(rk_[0], rk_[3].lower(), str(rk_[4]), h_["row"].get("field"), path_folded(v_))].append(rk_)
     for rks_ in by_value.values():
+        if any(adm_of[r_] == "undoesMaster" for r_ in rks_):
+            # the value a mod's own-master undo loses, carried by another plugin too, is one change lost: said once, on
+            # the undo line (Clockwork review S1: USSEP carries Update.esm's Location)
+            carried.update(r_ for r_ in rks_ if adm_of[r_] == "admitted")
+            continue
+        rks_ = [r_ for r_ in rks_ if adm_of[r_] == "admitted"]
         if len({r_[2].lower() for r_ in rks_}) > 1:
             keep = min(rks_, key=lambda r_: (p_order_low.index(r_[2].lower()) if r_[2].lower() in p_order_low else 10 ** 6,
                                              str(r_)))
@@ -1873,7 +1906,8 @@ def build_prediction(ctx: dict) -> dict:
             # Two record checks read overlapping populations (a cell's fields are in both the contested-fields and
             # the cell-attributes check): the same lost edit is one relationship, counted under the first check.
             same = (rk[2].lower(), rk[3].lower(), rk[4], entry["field"])
-            if adm in ("admitted", "ownMaster", "undoesMaster", "superseded", *NOISE_ADMISSIONS) and same in lost_seen:
+            if (adm in ("admitted", "ownMaster", "undoesMaster", "superseded", "notOwnEdit", *NOISE_ADMISSIONS)
+                    and same in lost_seen):
                 adm = entry["admission"] = "repeat"
             lost_seen.add(same)
         if adm != "admitted":
@@ -1883,7 +1917,12 @@ def build_prediction(ctx: dict) -> dict:
             if adm == "notOwnEdit":
                 oe = own_edit(p_of(rk[0]), rk, rk[2]) or {}
                 entry["undoes"], entry["inherits"] = oe.get("before"), oe.get("inherits")
-                set_aside["notOwnEditEarlierWins"] += 1 if oe.get("beforeWins") else 0
+                if oe.get("beforeWins") and oe.get("lostIsOriginal"):
+                    set_aside["notOwnEditEarlierWins"] += 1
+                elif not oe.get("lostIsOriginal"):
+                    # the value lost is still an earlier plugin's change the losing mod carries, so the game's value
+                    # does change (Missives review 3): said, never "nothing is lost"
+                    carried_notown.append(f"{rk[4]} {entry.get('field')}")
             record.append(entry)
             continue
         attr, attr_mod, why = attribution(rk)
@@ -1926,8 +1965,9 @@ def build_prediction(ctx: dict) -> dict:
         # what makes the item actionable: the direction a lost edit goes, example records, the places it is in,
         # and whether its count rests on a result reused from another evaluation
         g.setdefault("_directions", set()).add((rk[2], rk[3]))
-        if rk[1] == "LOST-EDIT" and disables((hit["row"].get("values") or {}).get("winner")) and not disables(
-                (hit["row"].get("values") or {}).get("lost")):
+        if rk[1] == "LOST-EDIT" and (disables((hit["row"].get("values") or {}).get("winner"))
+                                     or side_disables(rk, rk[3])) and not (
+                disables((hit["row"].get("values") or {}).get("lost")) or side_disables(rk, rk[2])):
             g["_disables"] = g.get("_disables", 0) + 1
         if rk[1] == "LOST-EDIT":
             # what each side has (Pilgrim review B1): the winner put back its master's earlier value, or changed the
@@ -2603,9 +2643,13 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsideNotOwnEdit"], {
                                        "count": fmt_n(aside["notOwnEdit"]),
                                        "noun": words["fieldNoun"][0 if aside["notOwnEdit"] == 1 else 1],
-                                       "earlier": bind(words["setAsideNotOwnEditEarlier"], {
+                                       "earlier": (bind(words["setAsideNotOwnEditEarlier"], {
                                            "count": fmt_n(set_aside["notOwnEditEarlierWins"])})
-                                       if set_aside["notOwnEditEarlierWins"] else ""}) if aside["notOwnEdit"] else "")
+                                           if set_aside["notOwnEditEarlierWins"] else "") + (bind(
+                                           words["setAsideNotOwnEditCarried"], {
+                                               "count": fmt_n(len(set(carried_notown))),
+                                               "examples": "; ".join(sorted(set(carried_notown))[:2])})
+                                           if carried_notown else "")}) if aside["notOwnEdit"] else "")
                                    + "".join(" " + bind(words["setAsideNoise"][k_], {
                                        "count": fmt_n(aside[k_]), "noun": words["fieldNoun"][0 if aside[k_] == 1 else 1]})
                                        for k_ in NOISE_ADMISSIONS if aside[k_] and (words.get("setAsideNoise") or {}).get(k_))
@@ -2982,6 +3026,10 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             if there(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
                 continue
+            if rk[1] == "LOST-EDIT" and (same_but_path_case((hit["row"].get("values") or {}).get("lost"),
+                                                            (hit["row"].get("values") or {}).get("winner"))
+                                         or lost_edit_noise(rk, patched_rows, patched_arm)):
+                continue                       # two values naming the same file, or no change the game sees (BPT S1)
             # counted by what the clash is (an object of a by-object check, once however many rows name it), never
             # by rows (P64): an object left without support against three hosts is one new problem
             ident_ = ident_of.get(rk, tuple(rk[:5]))
@@ -3214,7 +3262,9 @@ def build_prediction(ctx: dict) -> dict:
                                                                            "winner": winner})))
                 for e in es:
                     v_ = e.get("values") or {}
-                    if disables(v_.get("lost")) and not disables(v_.get("winner")):
+                    if (disables(v_.get("lost")) and not disables(v_.get("winner"))
+                            and not side_disables(keyof(e), e["B"])):
+                        # the winner disables it too, by another field: nothing comes back (Clockwork review S2)
                         back.setdefault((e["B"], e["A"]), []).append(str(e["formKey"]))
                 continue
             objs = {str(e["formKey"]) for e in es} | {str(o_) for e in es for o_ in e.get("other") or []}
