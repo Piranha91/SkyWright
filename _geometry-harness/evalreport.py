@@ -1606,7 +1606,7 @@ def build_prediction(ctx: dict) -> dict:
         if disables("; ".join(f"{k_}={v_}" for k_, v_ in f_.items() if k_.endswith("Position"))):
             return True
         ref_ = str(f_.get("EnableParent.Reference") or "").strip()
-        has_parent = bool(ref_) and ref_ not in ("(absent)", "(null link)", "()")
+        has_parent = bool(re.match(r"^[0-9A-Fa-f]{6}:", ref_))     # a form key; absent in any wording is none
         opposite_ = "Opposite" in str(f_.get("EnableParent.Flags") or "")
         if has_parent and ref_.lower() in always_on and opposite_:
             return True
@@ -1657,7 +1657,8 @@ def build_prediction(ctx: dict) -> dict:
                 for k_ in moved + [x for x in spec.get("alsoSay") or [] if x in (ch.get("values") or {})]:
                     old_, new_ = (recordrows.provider_fields(ch, k_, j), recordrows.provider_fields(ch, k_, ib))
                     for leaf_ in sorted(set(old_) | set(new_)):
-                        if old_.get(leaf_) != new_.get(leaf_):
+                        # only the leaves the skill data names in plain words are said (an association key is not)
+                        if old_.get(leaf_) != new_.get(leaf_) and leaf_ in (spec.get("leaves") or {}):
                             changes.append(((spec.get("leaves") or {}).get(leaf_, leaf_), old_.get(leaf_),
                                             new_.get(leaf_)))
                 sup_cache[rk] = {"kind": "kind", "noun": spec.get("noun") or "record", "changes": changes,

@@ -3672,7 +3672,9 @@ def main():
         base_ = {"Placement.Position": "100,100,0", "Placement.Rotation": "0,0,0", "SkyrimMajorRecordFlags": "0"}
         gone_ = dict(base_, **{"Placement.Position": "100,100,-30000"})
         moved_ = dict(base_, **{"Placement.Position": "300,100,0"})
-        off_ = dict(base_, **{"Placement.Position": "100,100,-14095", "SkyrimMajorRecordFlags": "InitiallyDisabled"})
+        # the 2.0 tree answers say an absent enable parent in words ("has no EnableParent.Reference")
+        off_ = dict(base_, **{"Placement.Position": "100,100,-14095", "SkyrimMajorRecordFlags": "InitiallyDisabled",
+                              "EnableParent.Reference": "has no EnableParent.Reference"})
         chains = [(D1, "PlacedObject", [(BASE, base_), (OTHER, gone_), (MOD_A, off_)]),
                   (D2, "PlacedObject", [(BASE, base_), (OTHER, moved_), (MOD_A, off_)])]
 
