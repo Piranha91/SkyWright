@@ -2877,7 +2877,10 @@ def build_prediction(ctx: dict) -> dict:
             lines.append({"reason": reasons["mastersNotRead"], "count": len(pair_rows),
                           "subject": "; ".join(sorted({title_of(e["checkId"]) for e in pair_rows}))})
     if not bases_read:
-        body_rows = [e for e in record if e["admission"] == "admitted" and e["checkId"] in body_checks]
+        # a row measured as crossing mesh triangles has bodies on both sides, whatever names were read (Clockwork S6)
+        mesh_re = re.compile(words["meshCrossingPattern"]) if words.get("meshCrossingPattern") else None
+        body_rows = [e for e in record if e["admission"] == "admitted" and e["checkId"] in body_checks
+                     and not (mesh_re and mesh_re.search(str(e.get("summary") or "")))]
         if body_rows:
             lines.append({"reason": reasons["bodyNotRead"], "count": len(body_rows),
                           "subject": "; ".join(sorted({title_of(e["checkId"]) for e in body_rows}))})
