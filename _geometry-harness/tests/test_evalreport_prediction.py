@@ -3685,8 +3685,10 @@ def main():
                   lost_row(OTHER, MOD_A, D2, "Placement", txt(moved_), txt(off_), txt(base_), before=BASE)]
         plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
         got = (rec_of(plan, D1)[0]["admission"], rec_of(plan, D2)[0]["admission"])
-        said = "winning value disables the object" in md and "brings back" not in md
-        return got == ("bothDisabled", "admitted") and said, f"{got}; said {said}"
+        # blind review (Winterhold 0A0315): ModA's version is only initially disabled, with no parent: it starts off and
+        # a script or quest may enable it, so neither row is set aside and the items say it starts disabled
+        said = "starts disabled" in md
+        return got == ("admitted", "admitted") and said, f"{got}; said {said}"
 
     # C812 (BPT review S1): a patch's value lost to another mod's that names the same file in other letter case is no
     # new clash with the patch; a different file is.
@@ -3967,6 +3969,49 @@ def main():
         return "2 still crossing where a patch places one of them" in st, st[:300]
 
     for name, fn in [("after-final/C829-patch-placement-from-the-chain", c829_patch_placement_from_the_chain)]:
+        cell(name, fn)
+    # ---------------------------------------- after the final round, blind review (Winterhold, 0A0315): what is gone
+    # in game. A side disables an object only when it is off for good: moved below the world, or enabled opposite to
+    # the player. A bare initially-disabled flag (no parent, or any other parent) starts it off; a script or quest may
+    # enable it, so its position still matters.
+    def offs(z, flags="0", parent=None):
+        d_ = {"Placement.Position": f"100,100,{z}", "Placement.Rotation": "0,0,0", "SkyrimMajorRecordFlags": flags,
+              "EnableParent.Reference": "has no EnableParent.Reference", "EnableParent.Flags": "has no EnableParent.Flags"}
+        if parent:
+            d_.update({"EnableParent.Reference": parent, "EnableParent.Flags": "SetEnableStateToOppositeOfParent"})
+        return d_
+
+    def off_txt(v):
+        return f"Position={v['Placement.Position']}; Rotation=0,0,0"
+
+    # C830: initially disabled with no parent on both sides: counted, and the item says it starts disabled and may be
+    # enabled by a script or quest.
+    def c830_initially_disabled_without_parent_stays_counted():
+        D = f"00C830:{BASE}"
+        b_, o_, a_ = offs(0), offs(5, "InitiallyDisabled"), offs(40, "InitiallyDisabled")
+        o_["Placement.Position"], a_["Placement.Position"] = "300,100,5", "900,100,40"
+        chains = [(D, "PlacedObject", [(BASE, offs(0, "InitiallyDisabled")), (OTHER, o_), (MOD_A, a_)])]
+        p_rows = [lost_row(OTHER, MOD_A, D, "Placement", off_txt(o_), off_txt(a_), off_txt(b_), before=BASE)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, D)]
+        said = "starts disabled" in md and "script or quest" in md
+        return got == ["admitted"] and said, f"{got}; said {said}"
+
+    # C831: enabled opposite to the player on both sides: off for good, set aside.
+    def c831_opposite_of_player_on_both_sides_is_set_aside():
+        D = f"00C831:{BASE}"
+        o_, a_ = offs(5, "0", "000014:Skyrim.esm"), offs(40, "0", "000014:Skyrim.esm")
+        o_["Placement.Position"], a_["Placement.Position"] = "300,100,5", "900,100,40"
+        chains = [(D, "PlacedObject", [(BASE, offs(0)), (OTHER, o_), (MOD_A, a_)])]
+        p_rows = [lost_row(OTHER, MOD_A, D, "Placement", off_txt(o_), off_txt(a_), off_txt(offs(0)), before=BASE)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        got = [e["admission"] for e in rec_of(plan, D)]
+        return got == ["bothDisabled"], f"{got}"
+
+    for name, fn in [("after-final/C830-initially-disabled-without-parent-stays-counted",
+                      c830_initially_disabled_without_parent_stays_counted),
+                     ("after-final/C831-opposite-of-player-on-both-sides-is-set-aside",
+                      c831_opposite_of_player_on_both_sides_is_set_aside)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
