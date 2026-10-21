@@ -572,13 +572,15 @@ public sealed class ContactIndex
         }
         var ss = ShellDep(depKey, depSnap, depBase, depS); var sg = ShellGrid(hostKey, hostSnap, hostBase, hostS);
         if (e is not null) e.Lap(ref e.ShellPrepTicks);
-        var cs = ss is not null && sg is not null ? SpatialOverlap.Contact(ss, sg, Reach, NearBand, default, tm?.CoreShell) : c;
+        // Only the shell's facing gap is read: ContactFacing runs Contact's own steps 1-2 and returns that gap, skipping the shell's
+        // penetration and enclosed-depth steps, whose results were discarded here.
+        float shellFacing = ss is not null && sg is not null ? SpatialOverlap.ContactFacing(ss, sg, Reach, NearBand, default, tm?.CoreShell) : c.FacingDistance;
         if (e is not null)
         {
             e.Lap(ref e.ShellMeasureTicks);
             tm!.Account(e, e.Stamp - m0, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, soup.TriangleCount, grid.TriangleCount);
         }
-        return (c with { FacingDistance = cs.FacingDistance }, c.FacingDistance);
+        return (c with { FacingDistance = shellFacing }, c.FacingDistance);
     }
 
     /// <summary>The bucket-storage target for one host grid: half the contact cache budget, never below 64 MiB. With memory

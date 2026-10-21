@@ -216,6 +216,64 @@ static class ShallowCoverageProof
             Check("CT-5: an index with another Reach answers as a fresh index with that Reach, not as one with the default",
                 a1 == b1 && a1 != c1, $"reach 16 shared {a1[..Math.Min(100, a1.Length)]}; fresh {b1[..Math.Min(100, b1.Length)]}; default {c1[..Math.Min(100, c1.Length)]}");
         }
+        // CT-3 (shell facing read): ContactFacing returns, bit for bit, the FacingDistance Contact returns for the same arguments:
+        // every pair of this fixture's soups at several offsets, and a seeded set of random soups (open and closed, touching, crossing,
+        // apart, empty), at the radius path's band (8) and the default (4).
+        // CT-7 (memo across bucket targets, GATE-B review G2): the same pair measured on grids built at different bucket targets
+        // (coarsened and not) gives a bit-identical SoupContact and facing gap, so a memo that keeps a pair's first answer cannot
+        // disagree with a later rebuild of that grid at another target.
+        {
+            static string Bits(SoupContact c) => string.Join(",", new[] { c.Distance, c.Penetration, c.Normal.X, c.Normal.Y, c.Normal.Z, c.EnclosedDepth, c.FacingDistance }
+                .Select(f => BitConverter.SingleToInt32Bits(f).ToString("x8"))) + $"|{c.ContactPairs},{c.PenetratingVertices},{c.DependentTriangles},{c.HostTriangles},{c.EnclosedVertices},{c.HostClosed},{c.CrossedFaces}";
+            var rnd = new Random(20261021);
+            TriangleSoup RandomSoup(int tris, float span, Vector3 at)
+            {
+                var v = new Vector3[tris * 3]; var ix = new int[tris * 3];
+                for (int i = 0; i < v.Length; i++) { v[i] = at + new Vector3((float)rnd.NextDouble() * span, (float)rnd.NextDouble() * span, (float)rnd.NextDouble() * span * 0.5f); ix[i] = i; }
+                return new TriangleSoup(v, ix);
+            }
+            static TriangleSoup Move(TriangleSoup s, Vector3 d) => new(s.Vertices.Select(x => x + d).ToArray(), s.Indices);
+            var shapes = new List<TriangleSoup>
+            {
+                Plane(-100, -100, 100, 100), Plane(-20, -20, 20, 20), Ring(), TriangleSoup.Empty,
+                ContactIndex.BoxSoup(new Aabb(new Vec3(-100, -100, -20), new Vec3(100, 100, 20), false)),
+                ContactIndex.BoxSoup(new Aabb(new Vec3(-10, -10, -10), new Vec3(10, 10, 10), false)),
+            };
+            for (int k = 0; k < 6; k++) shapes.Add(RandomSoup(8 + 6 * k, 40f + 30f * k, new Vector3(-20f * k, -15f * k, -10f)));
+            var offsets = new[] { Vector3.Zero, new Vector3(0, 0, 1), new Vector3(0, 0, 3.5f), new Vector3(0, 0, 9), new Vector3(7, -3, -2), new Vector3(30, 0, 0), new Vector3(0, 0, -15) };
+            int pairs = 0, facingEqual = 0, bucketPairs = 0, bucketEqual = 0; string? firstFacing = null, firstBucket = null;
+            var powers = new SortedSet<int>();
+            foreach (var host in shapes)
+            {
+                var g0 = TriangleGrid.BuildAdaptive(host, targetBucketApproxBytes: 64L << 20);
+                var coarse = new[] { 4096L, 256L, 0L }.Select(tb => TriangleGrid.BuildAdaptive(host, targetBucketApproxBytes: tb)).ToList();
+                foreach (var gg in coarse.Prepend(g0)) powers.Add(gg.Sizing?.GroupingPower ?? -1);
+                foreach (var dep0 in shapes)
+                    foreach (var shift in offsets)
+                        foreach (float band in new[] { 8f, 4f })
+                        {
+                            var dep = Move(dep0, shift);
+                            var full = SpatialOverlap.Contact(dep, g0, 128f, band);
+                            float facing = SpatialOverlap.ContactFacing(dep, g0, 128f, band, default, null);
+                            pairs++;
+                            if (BitConverter.SingleToInt32Bits(full.FacingDistance) == BitConverter.SingleToInt32Bits(facing)) facingEqual++;
+                            else firstFacing ??= $"pair {pairs}: Contact {full.FacingDistance} vs ContactFacing {facing}";
+                            foreach (var gc in coarse)
+                            {
+                                bucketPairs++;
+                                var cc = SpatialOverlap.Contact(dep, gc, 128f, band);
+                                float fc = SpatialOverlap.ContactFacing(dep, gc, 128f, band, default, null);
+                                if (Bits(cc) == Bits(full) && BitConverter.SingleToInt32Bits(fc) == BitConverter.SingleToInt32Bits(facing)) bucketEqual++;
+                                else firstBucket ??= $"pair {bucketPairs} at grouping power {gc.Sizing?.GroupingPower}: {Bits(cc)} vs {Bits(full)}";
+                            }
+                        }
+            }
+            Check("CT-3: ContactFacing equals Contact's FacingDistance bit for bit (fixture soups and seeded random soups, bands 8 and 4)",
+                pairs > 0 && facingEqual == pairs, $"{facingEqual} of {pairs} equal{(firstFacing is null ? "" : "; first difference " + firstFacing)}");
+            Check("CT-7: one pair on grids built at different bucket targets gives a bit-identical contact and facing gap (coarsening seen)",
+                bucketPairs > 0 && bucketEqual == bucketPairs && powers.Count(x => x > 0) > 0 && powers.Contains(0),
+                $"{bucketEqual} of {bucketPairs} equal; grouping powers built {string.Join(",", powers)}{(firstBucket is null ? "" : "; first difference " + firstBucket)}");
+        }
         mo.Dispose();
         Directory.Delete(root, true);
     }
