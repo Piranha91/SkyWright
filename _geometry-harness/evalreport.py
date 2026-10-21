@@ -5526,6 +5526,18 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
     conc = pr.get("concise") or {}
     phrases = (pr.get("reader") or {}).get("kindPhrases") or {}
     compact_over = int(conc.get("compactGroupsOver", 3))
+    # a detail line on the prediction setup says how many of its rows the prediction counts, so a larger number here
+    # never reads as a different count from the one at the top (BPT review S4)
+    pred_ = (plan.get("reader") or {}).get("prediction") or {}
+    counted_by_fid = collections.Counter(e.get("findingId") for e in pred_.get("record") or []
+                                         if e.get("admission") == "admitted" and e.get("findingId"))
+    pred_arm_ = pred_.get("predictionArm")
+
+    def counted_note(fids, n_rows):
+        k_ = sum(counted_by_fid.get(x, 0) for x in fids)
+        if not pred_arm_ or not k_ or k_ >= n_rows or not conc.get("countedAboveNote"):
+            return ""
+        return bind(conc["countedAboveNote"], {"counted": fmt_n(k_), "rest": fmt_n(n_rows - k_)})
     for cb in blocks.values():
         parts = sorted(cb["parts"].values(), key=lambda x: (arm_sort_key(x["armId"] or "", arm_kinds), PART_ORDER.get(x["part"], 9)))
         if mode != "exhaustive":
@@ -5583,11 +5595,18 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                         n_, ph = e_["n"], e_["ph"]
                         unit = (ph.get("unitSingular") if n_ == 1 else ph.get("unitPlural")) or ("record" if n_ == 1 else "records")
                         entries.append({"id": e_["ids"][0], "more": e_["ids"][1:],
-                                        "text": f"{fmt_n(n_)} {unit} between {e_['A']} and {e_['B']}"})
+                                        "text": f"{fmt_n(n_)} {unit} between {e_['A']} and {e_['B']}"
+                                                + counted_note(e_["ids"], n_)})
                     compact.append({"id": relevant[0]["id"], "readerArmLabel": relevant[0].get("readerArmLabel"),
                                     "entries": entries,
                                     "note": next((f.get("readerProvenance") for f in relevant if f.get("readerProvenance")), None)})
                     rest = [f for f in rest if not f.get("readerRelevant")]
+                for f in rest:
+                    if f.get("readerRelevant") and f.get("armId") == pred_arm_ and f.get("readerPlain"):
+                        note_ = counted_note([f["id"]], int(f.get("readerRows", f.get("rowsTotal")) or 0))
+                        if note_:
+                            head_, _, tail_ = str(f["readerPlain"]).partition(". ")
+                            f["readerPlain"] = head_.rstrip(".") + note_ + "." + (" " + tail_ if tail_ else "")
                 part["groups"] = rest
                 part["compact"] = compact
         finding_blocks.append({**cb, "parts": parts})
