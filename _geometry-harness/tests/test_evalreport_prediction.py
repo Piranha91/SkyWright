@@ -5601,7 +5601,9 @@ def main():
         import pluginread
         X, Y = f"000F48:{MOD_A}", f"000F49:{MOD_B}"
         f_ = plugin_file_of(MOD_A, [BASE], [("REFR", 0x01000F48, [("DATA", struct.pack("<6f", -31410.25, -88133.7, -3187.5,
-                                                                                         0.0, 0.0, 6.18))], False)],
+                                                                                         0.0, 0.0, 6.18))], False),
+                                            # (reviewer on ff85663c) another placed type in the same file
+                                            ("ACHR", 0x01000F4A, [("DATA", struct.pack("<6f", 1.0, 2.0, 3.0, 0.0, 0.0, 0.0))], True)],
                             group="CELL")
         got_ = pluginread.placements(f_, [X])["records"][X]
         r_ = row("OVERLAP", MOD_B, MOD_A, X, other=Y, label="000D74:Skyrim.esm (ext)")
@@ -5613,6 +5615,24 @@ def main():
         ok = (got_ and [round(x, 1) for x in got_["position"]] == [-31410.2, -88133.7, -3187.5]
               and "grid cell -8, -22" in it)
         return ok, f"{got_}; {it[-300:]}"
+
+    # C1065 (reviewer on ff85663c): pluginread.placements' known answers, as C975 gives the other readers': a plain REFR
+    # and a compressed ACHR (the reader indexes every placed type), FormIDs through the master list (the plugin's own
+    # record written 01..., a master's 00...), and a record the plugin does not hold is None.
+    def c1065_placements_known_answers():
+        import pluginread
+        f_ = plugin_file_of(MOD_A, [BASE], [
+            ("REFR", 0x01000F65, [("NAME", struct.pack("<I", 0x00000101)), ("DATA", struct.pack("<6f", 10.5, -20.25, 30.0, 0.0, 0.0, 1.5))], False),
+            ("ACHR", 0x00000F66, [("NAME", struct.pack("<I", 0x00000102)), ("DATA", struct.pack("<6f", -4096.0, 8192.5, -1.0, 0.0, 0.0, 3.0))], True)],
+            group="CELL")
+        got_ = pluginread.placements(f_, [f"000F65:{MOD_A}", f"000F66:{BASE}", f"000F67:{BASE}"])["records"]
+        ok = (got_[f"000F65:{MOD_A}"] == {"position": [10.5, -20.25, 30.0], "rotation": [0.0, 0.0, 1.5]}
+              and got_[f"000F66:{BASE}"] == {"position": [-4096.0, 8192.5, -1.0], "rotation": [0.0, 0.0, 3.0]}
+              and got_[f"000F67:{BASE}"] is None)
+        return ok, f"{got_}"
+
+    for name, fn in [("fourth-review/C1065-placements-known-answers", c1065_placements_known_answers)]:
+        cell(name, fn)
 
     for name, fn in [("fourth-review/C1048-persistent-place-located-by-grid", c1048_persistent_place_located_by_grid)]:
         cell(name, fn)

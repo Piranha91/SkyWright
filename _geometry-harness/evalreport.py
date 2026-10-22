@@ -1800,7 +1800,8 @@ def build_prediction(ctx: dict) -> dict:
                     sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
                 if sha_cache[path_] == sha_:
                     try:
-                        res_ = (pluginread.navmesh_links if what == "navmesh" else pluginread.cell_flags)(path_, [str(fk)])
+                        res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements}.get(
+                            what, pluginread.cell_flags)(path_, [str(fk)])
                         got_ = res_["records"].get(str(fk))
                         plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
                                              "found": got_ is not None})
@@ -1811,6 +1812,24 @@ def build_prediction(ctx: dict) -> dict:
                                              "error": str(e_)})
             pread_cache[key_] = got_
         return pread_cache[key_]
+
+    persistent_re = re.compile(words["persistentPlacePattern"]) if words.get("persistentPlacePattern") else None
+
+    def located_place(fk, label):
+        """(fourth review, Missives S3) a place that is only a worldspace's persistent cell (a bare form key) says the grid
+        cell of the object's position, read from the plugin file of the version that loads last (its recorded bytes)."""
+        if persistent_re is None or not persistent_re.match(str(label)) or not words.get("persistentPlaceGrid"):
+            return label
+        order_ = [str(x) for x in all_orders.get(p_arm) or []]
+        carriers_ = {str(x).lower() for x in (name_refs.get(str(fk)) or {}).get("carriedBy") or []}
+        origin_ = str(fk).split(":", 1)[-1]
+        cands_ = [x for x in reversed(order_) if x.lower() in carriers_] or [origin_]
+        got_ = plugin_record(cands_[0], "placement", str(fk))
+        pos_ = (got_ or {}).get("position")
+        if not pos_:
+            return label
+        return bind(words["persistentPlaceGrid"], {"label": label, "x": fmt_n(math.floor(pos_[0] / 4096)),
+                                                   "y": fmt_n(math.floor(pos_[1] / 4096))})
 
     def winner_on_at_load(rk):
         """"on": the winner's whole version has the object on when the game loads; "parent": its own record does not
@@ -2537,7 +2556,7 @@ def build_prediction(ctx: dict) -> dict:
         if label and rk[1] != "LOST-EDIT":
             # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
             # part of its place
-            g.setdefault("_places", collections.Counter())[re.sub(r"\s+\d+ tris -> \d+$", "", str(label))] += 1
+            g.setdefault("_places", collections.Counter())[located_place(rk[4], re.sub(r"\s+\d+ tris -> \d+$", "", str(label)))] += 1
         if hit["finding"].get("readerProvenance"):
             # the full sentence is in the limits and beside the finding; the item says it in short
             g["_provenance"] = words.get("itemReused") or hit["finding"]["readerProvenance"]
@@ -4588,7 +4607,8 @@ def build_prediction(ctx: dict) -> dict:
                             back.setdefault((e["B"], e["A"]), []).append(str(e["formKey"]))
                 continue
             objs = {str(e["formKey"]) for e in es} | {str(o_) for e in es for o_ in e.get("other") or []}
-            places = collections.Counter(str((p_rows.get(keyof(e)) or {}).get("row", {}).get("label") or "") for e in es)
+            places = collections.Counter(located_place(e["formKey"], str((p_rows.get(keyof(e)) or {}).get("row", {}).get("label") or ""))
+                                         if (p_rows.get(keyof(e)) or {}).get("row", {}).get("label") else "" for e in es)
             places.pop("", None)
             where_ = []
             if g["checkId"] not in by_object:
