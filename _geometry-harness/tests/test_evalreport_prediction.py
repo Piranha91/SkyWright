@@ -4513,6 +4513,24 @@ def main():
     for name, fn in [("after-review/C917-navmeshes-not-called-objects", c917_navmeshes_not_called_objects)]:
         cell(name, fn)
 
+
+    # C919 (Winterhold review 5): fields are named in plain words (skill data) and a flag number is decoded (1024 on a
+    # placed object is Persistent), never the record's raw field name or the bare number.
+    def c919_fields_and_flags_in_plain_words():
+        R1 = f"00C919:{BASE}"
+        chains = [(R1, "PlacedObject", [(BASE, {"SkyrimMajorRecordFlags": "0"}),
+                                        (OTHER, {"SkyrimMajorRecordFlags": "InitiallyDisabled"}),
+                                        (MOD_A, {"SkyrimMajorRecordFlags": "1024"})])]
+        p_rows = [lost_row(OTHER, MOD_A, R1, "SkyrimMajorRecordFlags", "InitiallyDisabled", "1024", "0", before=BASE)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chains, masters=MASTERS_)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        ok = ("record flags" in it and "SkyrimMajorRecordFlags" not in it and "Persistent" in it
+              and '"1024"' not in it)
+        return ok, it[-300:]
+
+    for name, fn in [("after-review/C919-fields-and-flags-in-plain-words", c919_fields_and_flags_in_plain_words)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
