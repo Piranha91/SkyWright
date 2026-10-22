@@ -4244,6 +4244,35 @@ def main():
     for name, fn in [("after-review/C908-undone-link-holds-examples", c908_undone_link_holds_examples)]:
         cell(name, fn)
 
+
+    # C909 (Missives review 2): in the detail list, water seams on cells where the mod undoes its master's water fix are
+    # said as that undo, not as clashes with the mod owning the neighbouring cell, and the water check is not headed as
+    # height changes alone (here only the type differs).
+    def c909_water_seam_detail_names_the_undo():
+        WB = "environment.water-boundaries"
+        W1 = f"009331:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        chains = [(W1, "Cell", [(BASE, {"Water": "000018:Skyrim.esm"}), (UPD, {"Water": "001232:Update.esm"}),
+                                (MOD_A, {"Water": "000018:Skyrim.esm"})])]
+        p_rows = [lost_row(UPD, MOD_A, W1, "Water", ["Water=001232:Update.esm"], PH, PH)]
+        s_ = row("WATER-SEAM", OTHER, MOD_A, W1, other=f"009332:{BASE}")
+        s_["Summary"] = ("Tamriel (1,1) E Tamriel (2,1): joined under the truth (001232:Update.esm z -14000), apart under "
+                         "the winner (000018:Skyrim.esm z -14000 | 001232:Update.esm z -14000) — attributed to side B")
+        extra = {(WB, "without-patch"): [s_], (WB, "baseline"): [s_]}
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains, extra_results=extra,
+                                  masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE]})
+        found = md.split("## What the checks found", 1)[-1].split("\n## ", 1)[0]
+        heads = [ln for ln in found.splitlines() if ln.startswith("### ") and "Water" in ln]
+        sec_ = found.split(heads[0], 1)[1].split("###", 1)[0] if heads else ""
+        lines = [ln for ln in sec_.splitlines() if ln.startswith("- **")]
+        ok = (bool(heads) and "Water height changes" not in heads[0] and lines
+              and all(f"{MOD_A} undoes its master {UPD}'s fix" in ln and f"between {OTHER}" not in ln for ln in lines))
+        return ok, f"{heads}; {lines[:2]}"
+
+    for name, fn in [("after-review/C909-water-seam-detail-names-the-undo", c909_water_seam_detail_names_the_undo)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
