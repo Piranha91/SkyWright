@@ -4910,11 +4910,11 @@ def main():
     # the patch: its setup without ModA lacks the patch too, so it is "the measured load order without the patch and
     # ModA", never "without ModA" alone.
     def c948_sibling_setups_against_measured_order():
-        O2 = "Neighbour.esp"
-        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
-                arm("without-patch", [BASE, OTHER, O2, MOD_A])]
+        O2, O3, O4 = "Neighbour.esp", "Third.esp", "Fourth.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, O3, O4, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, O3, O4, MOD_A])]
         rows_ = [row("CONTACT", OTHER, MOD_A, f"000C48:{MOD_A}")]
-        s_arms = [arm("baseline", [BASE, OTHER, O2, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER, O2])]
+        s_arms = [arm("baseline", [BASE, OTHER, O2, O3, O4, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER, O2, O3, O4])]
         s_results = {(CONTACT, "baseline"): rows_, (CONTACT, "without-a"): []}
         plan, md, _ = compile_and_render(arms, {(CONTACT, "baseline"): rows_, (CONTACT, "without-patch"): rows_},
                                          [MOD_A], patches=[PATCH],
