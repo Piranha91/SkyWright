@@ -4647,6 +4647,18 @@ def main():
     for name, fn in [("after-review/C929-base-game-line-links-every-state", c929_base_game_line_links_every_state)]:
         cell(name, fn)
 
+
+    # C930 (reviewer on regen-1: BPT's summary read as "left 0"): the summary's parts read as a list; a note inside one
+    # part never carries a colon, so "left N record fields" is read as N where carried fields and notes come before it.
+    def c930_summary_left_reads_with_notes():
+        plan, md, _ = offwin_bundle()
+        summ = str((reader(plan).get("validation") or {}).get("summary") or "")
+        parts_ = summ.split(": ", 1)[-1]
+        return left_said(summ) == 2 and ":" not in parts_, summ[:300]
+
+    for name, fn in [("after-review/C930-summary-left-reads-with-notes", c930_summary_left_reads_with_notes)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
