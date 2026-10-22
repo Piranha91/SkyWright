@@ -3458,6 +3458,20 @@ def build_prediction(ctx: dict) -> dict:
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
              "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
              **{k_: set_aside[k_] for k_ in NOISE_ADMISSIONS}}
+    def unread_examples():
+        """(fourth review, Sewers S5) the objects whose base record was not read, with the place their row gives."""
+        ex_ = []
+        for e in record:
+            if e["admission"] != "bodyUnread":
+                continue
+            lab_ = str(((p_rows.get((e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])) or {})
+                        .get("row") or {}).get("label") or "")
+            for o_ in [e["formKey"], *(e.get("other") or [])]:
+                if base_unknown(o_):
+                    ex_.append(f"{o_}" + (f" in {lab_}" if lab_ else ""))
+        ex_ = list(dict.fromkeys(ex_))
+        return (" (" + "; ".join(ex_[:3]) + (f"; and {fmt_n(len(ex_) - 3)} more" if len(ex_) > 3 else "") + ")") if ex_ else ""
+
     def describe_setup(arm_id):
         """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
         plugs = all_orders.get(arm_id) or []
@@ -3579,7 +3593,8 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsideNoBody"], aside)
                                                                          if aside["noBody"] else "")
                                    + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
-                                   + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
+                                   + (" " + bind(words["setAsideBodyUnread"], {**aside, "examples": unread_examples()})
+                                      if aside["bodyUnread"] else "")
                                    + (" " + bind(words["setAsideBothDisabled"], aside) if aside["bothDisabled"] else "")
                                    + (" " + bind(words["setAsideOffUnreferenced"], aside) if aside["offUnreferenced"] else "")
                                    + (" " + bind(words["setAsideOffUnreferencedWinner"], {**aside, "winners": " and ".join(unref_winners)})
