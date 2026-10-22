@@ -2267,7 +2267,11 @@ def build_prediction(ctx: dict) -> dict:
                         g.setdefault("_winnerBase", collections.Counter())[field_word(hit["row"].get("field"))] += 1
             lost_txt_ = " ".join(map(str, (hit["row"].get("values") or {}).get("lost") or [])) if isinstance(
                 (hit["row"].get("values") or {}).get("lost"), list) else str((hit["row"].get("values") or {}).get("lost") or "")
-            if re.search(r"\bonly in " + re.escape(rk[3]), lost_txt_):
+            lost_ls_ = (hit["row"].get("values") or {}).get("lost")
+            lost_ls_ = [str(x) for x in (lost_ls_ if isinstance(lost_ls_, list) else [lost_ls_]) if x not in (None, "")]
+            # (round 2, BPT S1) an absence only where the losing mod has none of the field: every line of its lost value is
+            # one only the winner has, never a value with some entries of the loser's own beside others only the winner has
+            if lost_ls_ and all(re.search(r"\bonly in " + re.escape(rk[3]), x) for x in lost_ls_) and lost_txt_:
                 g.setdefault("_loserAbsent", collections.Counter())[field_word(hit["row"].get("field"))] += 1
             if "_carriedFrom" not in g:
                 got_ = field_chain(p_of(rk[0]), rk, rk[2])
