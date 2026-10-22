@@ -2524,6 +2524,9 @@ def build_prediction(ctx: dict) -> dict:
             base_k, in_st = state_split(e["kind"])
             pair_ = ((base_k, str(e["formKey"]), tuple(sorted(map(str, e.get("other") or ())))) if in_st is not None
                      else (e["kind"], str(e["formKey"]), e.get("summary"), tuple(map(str, e.get("other") or ()))))
+            # every finding is linked, also a world state of an object counted once (Pilgrim review 4, C929)
+            if e.get("findingId") and e["findingId"] not in c_["fids"]:
+                c_["fids"].append(e["findingId"])
             if pair_ in c_["pairs"]:
                 continue
             c_["pairs"].add(pair_)
@@ -2531,8 +2534,6 @@ def build_prediction(ctx: dict) -> dict:
             if type_only_re is not None and type_only_re.search(str(e.get("summary") or "")):
                 m_ = type_only_re.search(str(e.get("summary") or ""))
                 c_["typeOnly"] = c_.get("typeOnly", 0) + (1 if m_.group("h1") == m_.group("h2") else 0)
-            if e.get("findingId") and e["findingId"] not in c_["fids"]:
-                c_["fids"].append(e["findingId"])
             # (Pilgrim review 4) the object, by kind and editor ID from the probe's own words, and its place
             ob_ = re.search(r"\[(\w+) ([^\]\s]+)\]", str(e.get("summary") or ""))
             if ob_:
