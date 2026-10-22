@@ -155,12 +155,12 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 {% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{{ f.readerArmLabel }} — {{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
 {% endfor %}{% else %}{{ val.get("noChangeLine") or "No measured repair or ownership change was recorded." }}
 {% endif %}
-{% for item in p.reader.comparisonSummary %}- {{ item }}
-{% endfor %}
+{% if "tail" not in (p.layout or "").split() %}{% for item in p.reader.comparisonSummary %}- {{ item }}
+{% endfor %}{% endif %}
 
 {% if "tail" in (p.layout or "").split() %}## Further notes
 
-{{ p.reader.get("tailMovedLine") or "What still needs checking, the checks that found no problem, the reference information collected and the evidence notes are in the evidence index." }} [Further notes](evidence-index.md#further-notes).
+{{ p.reader.get("tailMovedLine") or "The comparisons' other results, what still needs checking, the checks that found no problem, the reference information collected and the evidence notes are in the evidence index." }} [Further notes](evidence-index.md#further-notes).
 {% else %}## What still needs checking
 
 {% if p.scope.completion.missingRequired %}{% if p.reader.get("missingCoveredLine") %}{{ p.reader.missingCoveredLine }}

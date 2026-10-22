@@ -168,6 +168,11 @@ No media row: nothing was supplied to this bundle under `--media`, and no unasse
 <a id="further-notes"></a>
 ## Further notes
 
+### The comparisons' other results
+
+{% for item in (p.reader.get("comparisonSummary") or []) %}- {{ item }}
+{% endfor %}
+
 ### What still needs checking
 
 {% if (p.scope.get("completion") or {}).get("missingRequired") %}{% if p.reader.get("missingCoveredLine") %}{{ p.reader.get("missingCoveredLine") }}
