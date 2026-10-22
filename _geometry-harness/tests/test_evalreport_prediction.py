@@ -4824,6 +4824,31 @@ def main():
     for name, fn in [("third-review/C966-inherited-base-fix-loss-said", c966_inherited_base_fix_loss_said)]:
         cell(name, fn)
 
+    # C940 (Winterhold review S4, Clockwork S2, BPT S4): a detail line on the setup with the patch says how many of its
+    # rows the top counts and how many were set aside, joined to the prediction's rows by identity, as the prediction
+    # setup's lines do: D1 (counted, still lost with the patch) and D2 (both mods set the object off for good: set aside).
+    def c940_patched_detail_split_by_identity():
+        D1, D2 = f"00C940:{BASE}", f"00C941:{BASE}"
+        a_ = offs(0)
+        a_["Placement.Position"] = "300,100,0"
+        b_ = offs(0)
+        b_["Placement.Position"] = "500,100,0"
+        a_low, b_low = offs(-30000), offs(-30000)
+        a_low["Placement.Position"] = "300,100,-30000"
+        rows_ = [lost_row(MOD_A, MOD_B, D1, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE),
+                 lost_row(MOD_A, MOD_B, D2, "Placement", off_txt(a_low), off_txt(b_low), off_txt(offs(0)), before=BASE)]
+        ch_ = [(D1, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)]),
+               (D2, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_low), (MOD_B, b_low)])]
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        adm = sorted((e["formKey"][:6], e["admission"]) for e in (reader(plan).get("prediction") or {}).get("record") or [])
+        found = md.split("## What the checks found", 1)[-1].split("\n## ", 1)[0]
+        line = next((ln for ln in found.splitlines() if "2 record fields" in ln and "Measured load order" in ln), "")
+        return "(1 counted at the top; 1 set aside)" in line, f"{adm}; {line[:300]}"
+
+    for name, fn in [("third-review/C940-patched-detail-split-by-identity", c940_patched_detail_split_by_identity)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
