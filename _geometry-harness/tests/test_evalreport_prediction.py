@@ -5151,6 +5151,102 @@ def main():
                      ("third-review/C941c-referenced-or-unread-stays-counted", c941c_referenced_or_unread_stays_counted)]:
         cell(name, fn)
 
+    # ------------------------------------------------ third review, in-game meaning and the BPT re-review (C955-C964, C969)
+    # C955 (BPT review S2, Gate A finding 2): ModB's lost value switches the object off (below the world) and ModA's whole
+    # version has it on when the game loads (not initially disabled, not deleted, no enable parent, not below the world):
+    # the item says that without a patch the object is drawn. C969 (guard): where ModA's version has an enable parent
+    # whose state the record data does not give, only that ModA's own record does not switch it off is said.
+    def switch_off_bundle(win_parent=None):
+        D1 = f"00C955:{BASE}"
+        lost_ = offs(-30000)
+        win_ = offs(0, "0", win_parent)
+        if win_parent:
+            win_["EnableParent.Flags"] = "0"
+        rows_ = [lost_row(MOD_B, MOD_A, D1, "Placement", off_txt(lost_), off_txt(win_), off_txt(offs(0)), before=BASE)]
+        ch_ = [(D1, "PlacedObject", [(BASE, offs(0)), (MOD_B, lost_), (MOD_A, win_)])]
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        return plan, md
+
+    def c955_switched_off_drawn_without_patch():
+        plan, md = switch_off_bundle()
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return f"{MOD_B}'s value switches the object off" in it and "is drawn" in it, it[-400:]
+
+    def c969_enable_parent_not_said_drawn():
+        plan, md = switch_off_bundle(win_parent=f"000P69:{OTHER}")
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return ("is drawn" not in md and f"{MOD_B}'s value switches the object off" in it
+                and f"{MOD_A}'s own record does not switch it off" in it), it[-400:]
+
+    # C958 (Snazzy review S1): a record item that is mostly one field gives that field's in-game meaning from skill data
+    # (position: where the object stands).
+    def c958_main_field_in_game():
+        plan, md, _ = offwin_bundle()
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return "where the object stands" in it, it[-300:]
+
+    # C961 (Pilgrim review S4): the load-order risk line says what its main fields do in game (lighting, image space).
+    def c961_order_risk_fields_in_game():
+        O2 = "Early.esp"
+        p_rec = [lost_row(MOD_A, OTHER, f"000C61:{BASE}", "Lighting", "a", "o", "v")]
+        arms = [arm("baseline", [BASE, O2, MOD_A, OTHER], kind="baseline")]
+        o_rows = [dict(lost_row(OTHER, MOD_A, f"000C61:{BASE}", f_, "o", "a", "v"), _check=CELLATTR, _type="Cell")
+                  for f_ in ("Lighting", "ImageSpace")]
+        setup = {"armId": "lux-first", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
+                 "plugins": plugins(BASE, O2, OTHER, MOD_A), "rows": o_rows}
+        plan, md, html = compile_and_render(arms, {(CONTACT, "baseline"): []}, [MOD_A],
+                                            count_only={(CELLATTR, "baseline"): 1},
+                                            enrichment={(CELLATTR, "baseline"): p_rec}, order_setups=[setup])
+        ln = next((x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or []), "")
+        return "light and fog" in ln and "colour grading" in ln and "how it shows in game is not described" not in ln, ln[-300:]
+
+    # C962 (BPT re-review S1): rows on a with-patch detail line whose two values name the same file but for letter case
+    # are said so, never as new clashes with the patch.
+    def c962_case_only_rows_said_on_detail_line():
+        T1 = f"00C962:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, f"00C963:{BASE}", "Owner", "a", "b", "v")]
+        w_rows = list(p_rows) + [lost_row(PATCH, OTHER, T1, "HdLodDiffuseTexture", ["HdLodDiffuseTexture=Textures\\Land\\A.dds"],
+                                          ["HdLodDiffuseTexture=textures\\land\\a.dds"], "v")]
+        plan, md, _ = core_bundle(p_rows, w_rows, targets=(MOD_A, MOD_B))
+        ln = next((x for x in md.splitlines() if OTHER in x and PATCH in x and "whose change is lost" in x), "")
+        return "letter case" in ln and "new with the patch" not in ln, ln[:300]
+
+    # C963 (BPT re-review S2): a quest or switch item whose rows sink objects to different depths gives the range and
+    # the deepest, never one row's depth for all.
+    def c963_state_depth_range():
+        rows_ = []
+        for i_, d_ in ((1, "11.2"), (2, "83.1")):
+            r_ = row(f"STATE-CONTACT@S1@Triggered", MOD_A, MOD_B, f"000X6{i_}:{MOD_A}", label="Camp (ext)", other=Y)
+            r_["Summary"] = f"Contact StateConditional under CampEnable: 000X6{i_}:{MOD_A} arrives - Sunk: sits {d_}u inside something"
+            rows_.append(r_)
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): rows_, (STATE, "without-b"): [], (STATE, "without-a"): []}
+        plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects that change with quests or switches")), "")
+        return "11.2" in it and "83.1" in it, it[-300:]
+
+    # C964 (BPT re-review S3): an object of a light base with no model has no body, against a base-game object too: it
+    # is set aside as no body, never counted on the base-game line.
+    def c964_bodiless_light_against_base_game():
+        L1, H1 = f"000L64:{MOD_A}", f"000H64:{BASE}"
+        rows_ = [row("CONTACT", BASE, MOD_A, L1, other=H1)]
+        refs = {L1: {"base": f"0B0L64:{MOD_A}"}, H1: {"base": f"0B0H64:{BASE}"}}
+        bases = {f"0B0L64:{MOD_A}": {"type": "Light", "model": ""}, f"0B0H64:{BASE}": {"type": "Static", "model": "rock.nif"}}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): rows_}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): rows_, (CONTACT, "with-patch"): rows_},
+                                            [MOD_A, MOD_B], patches=[PATCH], names={"refs": refs, "bases": bases})
+        adm = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or [] if e["formKey"] == L1]
+        return adm == ["noBody"], f"{adm}"
+
+    for name, fn in [("third-review/C955-switched-off-drawn-without-patch", c955_switched_off_drawn_without_patch),
+                     ("third-review/C969-enable-parent-not-said-drawn", c969_enable_parent_not_said_drawn),
+                     ("third-review/C958-main-field-in-game", c958_main_field_in_game),
+                     ("third-review/C961-order-risk-fields-in-game", c961_order_risk_fields_in_game),
+                     ("third-review/C962-case-only-rows-said-on-detail-line", c962_case_only_rows_said_on_detail_line),
+                     ("third-review/C963-state-depth-range", c963_state_depth_range),
+                     ("third-review/C964-bodiless-light-against-base-game", c964_bodiless_light_against_base_game)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
