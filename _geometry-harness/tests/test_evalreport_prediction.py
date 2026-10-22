@@ -4320,6 +4320,30 @@ def main():
     for name, fn in [("after-review/C924-patch-places-said-alike", c924_patch_places_said_alike)]:
         cell(name, fn)
 
+
+    # C911 (BPT review 2): the new problems with the patch name each new object by its base and model (from the
+    # names enrichment) and give the measured gap to the nearest surface (from the row), never a role guessed from a name.
+    def c911_new_problem_objects_named_with_gap():
+        S1, S2 = f"000P11:{MOD_A}", f"000P12:{MOD_A}"
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        new = [row("CONTACT", PATCH, MOD_A, S1, other=f"000G11:{MOD_B}"),
+               row("CONTACT", PATCH, MOD_A, S2, other=f"000G12:{MOD_B}")]
+        for r_, gap_ in zip(new, ("4.9", "128")):
+            r_["Necessary"][0]["PhysicalDetail"] = f"touches nothing within 4u (nearest {gap_}u)"
+        refs = {S1: {"base": f"0B0P11:{MOD_A}"}, S2: {"base": f"0B0P11:{MOD_A}"},
+                f"000G11:{MOD_B}": {"base": f"0B0G11:{MOD_B}"}, f"000G12:{MOD_B}": {"base": f"0B0G11:{MOD_B}"}}
+        bases = {f"0B0P11:{MOD_A}": {"type": "Static", "editorId": "TestCard", "model": "test_card.nif"},
+                 f"0B0G11:{MOD_B}": {"type": "Static", "editorId": "TestBeam", "model": "test_beam.nif"}}
+        plan, md, html = compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): new},
+                                            [MOD_A, MOD_B], patches=[PATCH], names={"refs": refs, "bases": bases})
+        line = next((ln for ln in md.splitlines() if ln.startswith("- New clashes with the patch, by check")), "")
+        ok = ("TestCard" in line and "test_card.nif" in line and "4.9" in line and "128" in line
+              and "nearest" in line)
+        return ok, line[:300]
+
+    for name, fn in [("after-review/C911-new-problem-objects-named-with-gap", c911_new_problem_objects_named_with_gap)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
