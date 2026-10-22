@@ -5068,7 +5068,8 @@ def main():
         # (reviewer on faa9ce47) the counted line names the pair as the evaluated mod against the base game's navmesh,
         # never as a clash with the mod that only carries it
         head_ = it.split(". ", 1)[0]
-        ok = ("base-game navmesh" in it and f"{OTHER} carries" in it and "not in the record data" in it
+        # (round 2, B1) no plugin file is named here, so the links were not read: said so, never "not in the record data"
+        ok = ("base-game navmesh" in it and f"{OTHER} carries" in it and "not read for this report" in it
               and f"the base game's navmesh records {OTHER} carries" in head_ and f"and {OTHER}" not in head_
               and f"between {OTHER}" not in head_)
         return ok, it[:300]

@@ -1952,6 +1952,30 @@ def build_prediction(ctx: dict) -> dict:
         r_ = one_sided_res.get(state_split(rk[1])[0])
         return bool(r_ and r_.search(str(rk[5])))
 
+    link_re = re.compile(r"^navmesh (\S+) in .* edge-links (\S+) triangle (\d+) of \d+\s+\[record provided by: ([^\]]+)\]")
+
+    def link_origin(rk):
+        """(round 2, Sewers B1 and Clockwork S1) Who made a broken link of a base-game navmesh record that another,
+        not evaluated, mod carries (the probe's provider chain: a base-game plugin first, that mod last): read from the
+        edge links of each provider's version in its plugin file, the link being (linking navmesh, target navmesh, target
+        triangle). ("base", None): a base-game version holds it; ("added", plugin): the first other provider whose version
+        holds it; ("unread", None): a version needed was not read; None: not such a row."""
+        m_ = link_re.match(str(rk[5] or "")) if rk[1] == "EDGE-IDX" else None
+        if not m_:
+            return None
+        provs_ = [x.strip() for x in m_.group(4).split(" -> ")]
+        if (len(provs_) < 2 or not is_base_game(provs_[0], words) or provs_[-1].lower() != str(rk[2]).lower()
+                or str(rk[2]).lower() in pt_lower or is_base_game(rk[2], words)):
+            return None
+        link_ = (m_.group(2).upper(), int(m_.group(3)))
+        for pv_ in provs_:
+            got_ = plugin_record(pv_, "navmesh", m_.group(1))
+            if got_ is None:
+                return ("unread", None)
+            if link_ in {(str(t_).upper(), int(n_)) for _, t_, n_ in got_.get("links") or []}:
+                return ("base", None) if is_base_game(pv_, words) else ("added", pv_)
+        return ("unread", None)
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -1960,6 +1984,10 @@ def build_prediction(ctx: dict) -> dict:
             return "sameMod"
         if there(w_arm, rk):
             return "alreadyPresent"
+        if rk[1] == "EDGE-IDX" and (link_origin(rk) or ("",))[0] == "base":
+            # (round 2, Sewers B1) the base game's own version of the linking navmesh holds the link and the other mod
+            # only carries it: the evaluated mod against the base game, not a clash with the mod that carries the record
+            return "baseLink"
         if one_sided(rk):
             # new with the evaluated mods and only one side differs: their side against the base game's value
             return "baseGame"
@@ -2060,7 +2088,7 @@ def build_prediction(ctx: dict) -> dict:
             return "single-mod", alone[0], None
         return "needs-both", None, None
 
-    record, set_aside, carried_notown = [], collections.Counter(), []
+    record, set_aside, carried_notown, base_link_by = [], collections.Counter(), [], []
     lost_seen = set()
     groups = collections.OrderedDict()
     multi = len(p_targets) > 1
@@ -2161,6 +2189,8 @@ def build_prediction(ctx: dict) -> dict:
             lost_seen.add(same)
         if adm != "admitted":
             set_aside[adm] += 1
+            if adm == "baseLink" and rk[2] not in base_link_by:
+                base_link_by.append(rk[2])
             if adm == "samePair":
                 entry["sameAsCheck"] = pair_owner[pair_][0]
             if adm == "notOwnEdit":
@@ -2243,14 +2273,14 @@ def build_prediction(ctx: dict) -> dict:
             g.setdefault("_startsOffLoser", {}).setdefault(rk[2], set()).add(str(rk[4]))
         elif rk[1] == "LOST-EDIT" and (side_starts_off(rk, rk[2]) or side_starts_off(rk, rk[3])):
             g.setdefault("_startsOff", set()).add(str(rk[4]))
-        # (third review, Sewers S1) a broken link from a base-game navmesh record the other mod only carries (the probe's
-        # provider chain): whether that mod changed the link is not in the record data, so it is not said as its doing
-        pm_ = re.search(r"\[record provided by: ([^\]]+)\]", str(rk[5] or "")) if rk[1] == "EDGE-IDX" else None
-        if pm_:
-            provs_ = [x.strip() for x in pm_.group(1).split(" -> ")]
-            if (len(provs_) > 1 and is_base_game(provs_[0], words) and provs_[-1].lower() == rk[2].lower()
-                    and rk[2].lower() not in pt_lower):
-                g.setdefault("_baseNavCarried", collections.Counter())[rk[2]] += 1
+        # (round 2, Sewers B1 and Clockwork S1) a broken link of a base-game navmesh record the other mod carries, decided
+        # by the edge links themselves (link_origin): one that mod (or an earlier one) added is said as its own; one whose
+        # versions were not read keeps the pair named against the base game's navmesh and says the links were not read
+        org_ = link_origin(rk)
+        if org_ is not None and org_[0] == "added":
+            g.setdefault("_navAdded", collections.Counter())[(org_[1], rk[2])] += 1
+        elif org_ is not None and org_[0] == "unread":
+            g.setdefault("_baseNavCarried", collections.Counter())[rk[2]] += 1
         if rk[1] == "LOST-EDIT":
             # what each side has (Pilgrim review B1): the winner put back its master's earlier value, or changed the
             # field itself too; said in the item, never only "lost to"
@@ -2547,6 +2577,11 @@ def build_prediction(ctx: dict) -> dict:
             if words.get("itemBaseNavCarried"):
                 detail.append(bind(words["itemBaseNavCarried"], {
                     "lead": f"All {fmt_n(n_)} are" if n_ == g["count"] else f"{fmt_n(n_)} of them are", "mod": m_}))
+        for (by_, m_), n_ in (g.pop("_navAdded", None) or {}).items():
+            if words.get("itemNavAdded"):
+                detail.append(bind(words["itemNavAdded"], {
+                    "lead": f"All {fmt_n(n_)} are" if n_ == g["count"] else f"{fmt_n(n_)} of them are", "by": by_,
+                    "carried": "" if by_.lower() == m_.lower() else bind(words.get("itemNavAddedCarried") or "", {"mod": m_})}))
         def objs_(n_):
             return "object" if n_ == 1 else "objects"
         for (lo_, wi_, how_), ex_ in (g.pop("_switchOff", None) or {}).items():
@@ -3107,7 +3142,7 @@ def build_prediction(ctx: dict) -> dict:
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
-             "offUnreferenced": set_aside["offUnreferenced"],
+             "offUnreferenced": set_aside["offUnreferenced"], "baseLink": set_aside["baseLink"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
              "ownMaster": set_aside["ownMaster"], "undoesMaster": set_aside["undoesMaster"],
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
@@ -3237,6 +3272,11 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
                                    + (" " + bind(words["setAsideBothDisabled"], aside) if aside["bothDisabled"] else "")
                                    + (" " + bind(words["setAsideOffUnreferenced"], aside) if aside["offUnreferenced"] else "")
+                                   + (" " + bind(words["setAsideBaseLink"], {
+                                       "count": fmt_n(aside["baseLink"]), "carriers": " and ".join(base_link_by),
+                                       "noun": "link" if aside["baseLink"] == 1 else "links",
+                                       "verb": "carries" if len(base_link_by) == 1 else "carry"})
+                                      if aside["baseLink"] else "")
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
                                    + (" " + bind(words["setAsideNotOwnEdit"], {
                                        "count": fmt_n(aside["notOwnEdit"]),
