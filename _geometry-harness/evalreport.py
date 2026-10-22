@@ -1412,14 +1412,30 @@ def build_prediction(ctx: dict) -> dict:
     names = ctx.get("names") if isinstance(ctx.get("names"), dict) else {}
     name_refs, name_bases = names.get("refs") or {}, names.get("bases") or {}
 
+    kinds_ = words.get("objectKinds") or {}
+    kind_models_ = [(re.compile(x["pattern"], re.I), x["word"]) for x in kinds_.get("models") or [] if isinstance(x, dict)]
+
+    def object_kind(base_):
+        """What kind of thing a base is, in plain words (Pilgrim review 3): by its model's folder or name, else its
+        record type (skill data `objectKinds`); "" when neither is known."""
+        model_ = str(base_.get("model") or "")
+        for re_, word_ in kind_models_:
+            if model_ and re_.search(model_):
+                return word_
+        return (kinds_.get("types") or {}).get(str(base_.get("type") or ""), "")
+
     def object_name(fk, summary=None):
-        """What a record is, for a modder: its editor ID from the row's summary, else a placed object's base editor ID
-        from the names enrichment ("a <base>"); "" when neither is read (Pilgrim review S3, Missives review 6)."""
+        """What a record is, for a modder: its kind and editor ID from the row's summary, else a placed object's base
+        kind and editor ID from the names enrichment ("a visual effect <base>"); "" when neither is read (Pilgrim review
+        S3 and 3, Missives review 6)."""
+        base_ = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
+        kind_ = object_kind(base_) if base_ else ""
         m_ = re.match(r"^\S+ (\S+?):", str(summary or ""))
         if m_ and not re.match(r"^[0-9A-Fa-f]{6}$", m_.group(1)) and not str(fk).startswith(m_.group(1)):
-            return m_.group(1)
-        base_ = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
-        return f"a {base_['editorId']}" if base_.get("editorId") else ""
+            return f"{kind_} {m_.group(1)}" if kind_ else m_.group(1)
+        if not base_.get("editorId"):
+            return ""
+        return f"{kind_} {base_['editorId']}" if kind_ else f"a {base_['editorId']}"
 
     def named(fk, summary=None):
         n_ = object_name(fk, summary)
