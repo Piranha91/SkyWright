@@ -6247,6 +6247,21 @@ def main():
         adm = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or [] if e["checkId"] == OVERLAP]
         return ("1 of these" in it and "visual effect" in it and adm == ["admitted", "admitted"]), f"{adm}; {it[-400:]}"
 
+    # C1056 (Missives S5): a winner's own change to a cell's land flags says whether the setup with the patch still has it
+    # (the patch leaves the cell to ModA: still so in 1 of the 1).
+    def c1056_land_flags_with_patch_status():
+        C1 = f"00CA56:{BASE}"
+        r_ = lost_row(OTHER, MOD_A, C1, "Grid", ["Grid.Flags=-412494080"], PH, ["Grid.Flags=-499936256"], label="TestCellLand")
+        r_["Summary"] = f"Cell TestCellLand: Grid - {OTHER}'s value lost to {MOD_A}'s"
+        ch_ = [(BASE, {"Grid.Flags": "5504256"}), (OTHER, {"Grid.Flags": "-412494080"}), (MOD_A, {"Grid.Flags": "-1223611121"})]
+        tr_ = tree_transcript([(C1, "Cell", ch_)])
+        plan, md, _ = core_bundle([r_], [r_], check=CELLATTR, masters=MASTERS_, p_tr=tr_, w_chains=[(C1, "Cell", ch_)])
+        line = next((ln for ln in md.splitlines() if "land flags" in ln and MOD_A in ln), "")
+        return f"with {PATCH}, still so in 1 of the 1" in line, line[-300:]
+
+    for name, fn in [("fourth-review/C1056-land-flags-with-patch-status", c1056_land_flags_with_patch_status)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1050-effect-model-pairs-said", c1050_effect_model_pairs_said),
                      ("fourth-review/C1051-height-difference-said", c1051_height_difference_said)]:
         cell(name, fn)
