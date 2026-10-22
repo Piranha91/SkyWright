@@ -3422,6 +3422,14 @@ def build_prediction(ctx: dict) -> dict:
         patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
         # the patched setup's lost edits a declared patch wins whose values show no change in game, by the same rules
         # as the prediction's (coordinator D2): the detail's patch-wins line does not count them
+        # (BPT re-review S1) lost edits of the setup with the patch whose two values the record chain reads as the same file
+        # but for letter case: no change in game, said so on the detail lines (the row's own winner value may be a
+        # placeholder, so the chain decides)
+        case_only_rows = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
+                                for rk, h_ in patched_rows.items() if rk[1] == "LOST-EDIT"
+                                and (same_but_path_case((h_["row"].get("values") or {}).get("lost"),
+                                                        (h_["row"].get("values") or {}).get("winner"))
+                                     or same_in_chain(patched_arm, rk)))
         patch_noise = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
                              for rk, h_ in patched_rows.items()
                              if rk[1] == "LOST-EDIT" and str(rk[3]).lower() in {str(x).lower() for x in patch_names}
@@ -4106,7 +4114,7 @@ def build_prediction(ctx: dict) -> dict:
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
-                      "patchChoiceNoise": patch_noise,
+                      "patchChoiceNoise": patch_noise, "caseOnlyRows": case_only_rows,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "undone": len(undone), "undoneBy": dict(undone_by),
                       "undoneSentence": undone_sentence,
@@ -6324,6 +6332,8 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         pred_ident[k_] = pred_ident.get(k_, False) or (e_.get("admission") == "admitted"
                                                        and not (multi_ and e_.get("attribution") == "single-mod"))
 
+    case_rows_ = {tuple(x) for x in ((plan.get("reader") or {}).get("validation") or {}).get("caseOnlyRows") or []}
+
     def with_patch_note(fids, n_rows):
         got_ = collections.Counter()
         for x in fids:
@@ -6334,7 +6344,9 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                 v_ = r_.get("values") or {}
                 # (BPT re-review S1) two values naming the same file but for letter case are no change in game
                 lv_, wv_ = ("; ".join(map(str, x_)) if isinstance(x_, list) else x_ for x_ in (v_.get("lost"), v_.get("winner")))
-                case_ = k_ not in pred_ident and same_but_path_case(lv_, wv_)
+                case_ = k_ not in pred_ident and (same_but_path_case(lv_, wv_) or (
+                    str(f_.get("checkId")), str(r_.get("formKey")), str(r_.get("field")), str(c_.get("A")), str(c_.get("B")))
+                    in case_rows_)
                 got_["counted" if pred_ident.get(k_) else "aside" if k_ in pred_ident else "case" if case_ else "new"] += 1
         if sum(got_.values()) != n_rows or got_["counted"] == n_rows or not conc.get("withPatchSplitParts"):
             return ""
