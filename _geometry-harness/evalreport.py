@@ -2338,7 +2338,8 @@ def build_prediction(ctx: dict) -> dict:
         provenance = g.pop("_provenance", None)
         g["attributionKey"], g["attributionText"] = attr_key, attr_text
         g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
-                      + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else "")
+                      + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification")
+                                     and not (ph.get("qualificationInInGame") and g.get("inGame")) else "")
                       + "".join(" " + d for d in detail) + (f" {provenance}" if provenance else ""))
         # (Pilgrim review 6) a quest or switch clash: its in-game effect from the probe's own row (switch, depth)
         summaries_ = g.pop("_rowSummaries", [])
@@ -6128,7 +6129,9 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                             entries.append({"id": e_["ids"][0], "more": e_["ids"][1:],
                                             "text": bind(conc["detailStateObjects"], {
                                                 "count": fmt_n(no_), "noun": "object" if no_ == 1 else "objects",
-                                                "A": e_["A"], "B": e_["B"], "states": fmt_n(len(e_["ids"]))})})
+                                                "A": e_["A"], "B": e_["B"], "states": bind(conc.get("detailStateObjectsStates") or "",
+                                                                                           {"states": fmt_n(len(e_["ids"]))})
+                                                if len(e_["ids"]) > 1 else ""})})
                             continue
                         unit = (ph.get("unitSingular") if n_ == 1 else ph.get("unitPlural")) or ("record" if n_ == 1 else "records")
                         entries.append({"id": e_["ids"][0], "more": e_["ids"][1:],
