@@ -2247,8 +2247,14 @@ def build_prediction(ctx: dict) -> dict:
             # (third review, Sewers S3) what the other check found: the switch under which an object leaves or arrives
             sw_m = re.search(r"under (\S+)(?: \(([^)]*)\))?: (\S+) \[[^\]]*\] (leaves|arrives)", str(rk[5] or ""))
             if sw_m:
-                g_owner.setdefault("_alsoSwitch", collections.Counter())[
-                    (sw_m.group(1), sw_m.group(2) or "", named(sw_m.group(3), ""), sw_m.group(4))] += 1
+                k_sw_ = (sw_m.group(1), sw_m.group(2) or "", named(sw_m.group(3), ""), sw_m.group(4))
+                g_owner.setdefault("_alsoSwitch", collections.Counter())[k_sw_] += 1
+                # (fourth review, Sewers r2 S1) what the check finds after the flip, and whether its trigger was found
+                dp_ = re.search(r"sits (\d+(?:\.\d+)?)\s*u inside something else", str(rk[5] or ""))
+                if dp_:
+                    g_owner.setdefault("_alsoSwitchDepth", {}).setdefault(k_sw_, []).append(float(dp_.group(1)))
+                if str(rk[1]).endswith("@Unknown"):
+                    g_owner.setdefault("_alsoSwitchUnknown", set()).add(k_sw_)
             adm = "samePair"
         base_kind, in_state = state_split(rk[1])
         ident_ = ident_of.get(rk, tuple(rk[:5]))
@@ -2678,11 +2684,21 @@ def build_prediction(ctx: dict) -> dict:
         if also_ and words.get("itemAlsoFoundBy"):
             for c_, n_ in also_.items():
                 detail.append(bind(words["itemAlsoFoundBy"], {"count": fmt_n(n_), "title": title_of(c_)}))
+        sw_depth_, sw_unknown_ = g.pop("_alsoSwitchDepth", None) or {}, g.pop("_alsoSwitchUnknown", None) or set()
         for (sw_, by_, obj_, how_), n_ in (g.pop("_alsoSwitch", None) or {}).items():
             key_ = "itemAlsoSwitchLeaves" if how_ == "leaves" else "itemAlsoSwitchArrives"
+            dps_ = sw_depth_.get((sw_, by_, obj_, how_)) or []
+            if how_ == "leaves" and dps_ and words.get("itemAlsoSwitchLeavesSunk"):
+                # (fourth review, Sewers r2 S1) the overlap with the object that leaves ends, but the check finds the
+                # other objects sunk in something else afterwards: said, never "hold only until then"
+                key_ = "itemAlsoSwitchLeavesSunk"
             if words.get(key_):
-                detail.append(bind(words[key_], {"count": fmt_n(n_), "switch": sw_, "by": f" ({by_})" if by_ else "",
-                                                 "object": obj_}))
+                lo_, hi_ = (min(dps_), max(dps_)) if dps_ else (0, 0)
+                detail.append(bind(words[key_], {
+                    "count": fmt_n(n_), "switch": sw_, "by": f" ({by_})" if by_ else "", "object": obj_,
+                    "sunk": fmt_n(len(dps_)), "range": f"{lo_:.1f} u" if lo_ == hi_ else f"{lo_:.1f} u to {hi_:.1f} u",
+                    "trigger": words.get("itemAlsoSwitchTriggerUnknown") or ""
+                    if (sw_, by_, obj_, how_) in sw_unknown_ else ""}))
         n_dis = g.pop("_disables", 0)
         dis_of[id(g)] = n_dis                  # (third review, BPT S1) the headline carries the same count
         if n_dis and words.get("itemDisables"):
