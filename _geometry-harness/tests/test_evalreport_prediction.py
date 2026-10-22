@@ -6176,6 +6176,29 @@ def main():
     for name, fn in [("fourth-review/C1041-carried-clause-counts-fields", c1041_carried_clause_counts_fields)]:
         cell(name, fn)
 
+    # C1044 (Clockwork r3 S1): a base-game value the winner drops, carried by a later Creation Club plugin as well, is the
+    # change of the base-game plugin that introduced it (Update.esm), never the later carrier's; the line says what the
+    # setup with the patch has (the patch keeps Update.esm's value).
+    def c1044_base_value_named_by_its_origin():
+        W, CC1 = f"00CA44:{BASE}", "ccTestCarrier.esl"
+        arms = [arm("baseline", [BASE, UPD, CC1, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, CC1, OTHER, MOD_A, MOD_B])]
+        p_ch = [(W, "Cell", [(BASE, {"Owner": "v"}), (UPD, {"Owner": "u"}), (CC1, {"Owner": "u"}), (OTHER, {"Owner": "u"}),
+                             (MOD_A, {"Owner": "v"})])]
+        w_ch = [(W, "Cell", [(BASE, {"Owner": "v"}), (UPD, {"Owner": "u"}), (CC1, {"Owner": "u"}), (OTHER, {"Owner": "u"}),
+                             (MOD_A, {"Owner": "v"}), (PATCH, {"Owner": "u"})])]
+        p_rows = [lost_row(x_, MOD_A, W, "Owner", ["Owner=u"], PH, PH) for x_ in (UPD, CC1, OTHER)]
+        w_rows = [lost_row(MOD_A, PATCH, W, "Owner", ["Owner=v"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, w_rows, check=CELLATTR, arms=arms, p_chains=p_ch, w_chains=w_ch,
+                                  masters={UPD: [BASE], CC1: [BASE], OTHER: [BASE, UPD], MOD_A: [BASE], MOD_B: [BASE],
+                                           PATCH: [BASE, UPD, MOD_A]})
+        line = next((ln for ln in md.splitlines() if "own change of" in ln), "")
+        return (f"wins over {UPD}'s own change" in line and f"{CC1}'s own change" not in line
+                and f"with {PATCH}" in line and f"{UPD}'s value" in line.split(f"with {PATCH}", 1)[-1]), line[-400:]
+
+    for name, fn in [("fourth-review/C1044-base-value-named-by-its-origin", c1044_base_value_named_by_its_origin)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1045-earlier-fix-names-loser-and-winner", c1045_earlier_fix_names_loser_and_winner),
                      ("fourth-review/C1046-patch-removal-own-line", c1046_patch_removal_own_line)]:
         cell(name, fn)
