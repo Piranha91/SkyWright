@@ -2267,7 +2267,12 @@ def build_prediction(ctx: dict) -> dict:
                                      or side_disables(rk, rk[3])) and not (
                 disables((hit["row"].get("values") or {}).get("lost")) or side_disables(rk, rk[2])):
             g["_disables"] = g.get("_disables", 0) + 1
-        if rk[1] == "LOST-EDIT" and off_at_load((hit["row"].get("values") or {}).get("lost")):
+        lost_v_ = (hit["row"].get("values") or {}).get("lost")
+        lost_n_ = re.fullmatch(r"\s*(?:\w*MajorRecordFlags=)?(\d+)\s*", " ".join(map(str, lost_v_)) if isinstance(lost_v_, list)
+                               else str(lost_v_ or ""))
+        if rk[1] == "LOST-EDIT" and (off_at_load(lost_v_) or (
+                str(hit["row"].get("field") or "").endswith("MajorRecordFlags") and lost_n_ and int(lost_n_.group(1)) & 0x800)):
+            # (round 2, B2) record flags written as a number: bit 2048 is the initially-disabled flag
             # (third review, BPT S2) the loser's value switches the object off; whether the winner's whole version has it
             # on when the game loads: not initially disabled, not deleted, not below the world, and no enable parent
             # (whose state the record data does not give: then only that its own record does not switch it off)
