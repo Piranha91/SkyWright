@@ -1525,7 +1525,6 @@ def build_prediction(ctx: dict) -> dict:
         return not base.get("type") or (base.get("type") == "Light" and base.get("model") is None)
 
     body_checks = set(words.get("bodyChecks") or [])   # checks whose rows name placed objects, which have a base
-    symmetric_checks = set(words.get("symmetricPairChecks") or [])
     effect_model_re = re.compile(words["effectModelPattern"], re.I) if words.get("effectModelPattern") else None
 
     def body_unread(rk, other):
@@ -4142,11 +4141,6 @@ def build_prediction(ctx: dict) -> dict:
             # counted by what the clash is (an object of a by-object check, once however many rows name it), never
             # by rows (P64): an object left without support against three hosts is one new problem
             ident_ = ident_of.get(rk, tuple(rk[:5]))
-            if rk[0] in symmetric_checks:
-                # (fourth review, Pilgrim S3) the clash is the scene its rows name as the other record (the quest), one
-                # row per actor (skill data symmetricPairChecks)
-                ident_ = (rk[0], frozenset(map(str, hit["row"].get("other") or ())),
-                          frozenset([rk[2].lower(), rk[3].lower()]))
             if no_body(rk, hit["row"].get("other")):
                 no_body_new.add(ident_)        # an object with no model: no body, not a clash
                 continue

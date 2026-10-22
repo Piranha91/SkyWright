@@ -4182,7 +4182,8 @@ def main():
     # forwarded, so only that is said: D1 (enabled opposite to the player, its Placement lost) has no effect in game.
     def part_le_whole(text):
         bad = []
-        for m_ in re.finditer(r"\((\d[\d,]*) on objects set off for good", text):
+        # (fourth review) the note names the losing version's state before "sets off for good": the same notes read
+        for m_ in re.finditer(r"\((\d[\d,]*) on objects [^;()]*?sets? off for good", text):
             before = re.findall(r"(?<![\w.])(\d[\d,]*)(?!\w)", text[:m_.start()])
             whole = int(before[-1].replace(",", "")) if before else -1
             if int(m_.group(1).replace(",", "")) > whole:
