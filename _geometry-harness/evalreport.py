@@ -1413,6 +1413,33 @@ def build_prediction(ctx: dict) -> dict:
     name_refs, name_bases = names.get("refs") or {}, names.get("bases") or {}
 
     kinds_ = words.get("objectKinds") or {}
+    field_words_ = words.get("fieldWords") or {}
+    flag_bits_ = words.get("flagBits") or {}
+
+    def field_word(f):
+        """A field in plain words (Winterhold review 5, skill data `fieldWords`); the record's name where none is set."""
+        return field_words_.get(str(f), str(f)) if f is not None else ""
+
+    def plain_value(field, v):
+        """A value as a modder reads it: a flag field's numbers decoded bit by bit (skill data `flagBits`; 1024 on a
+        placed object is Persistent), any bit not listed left as its number."""
+        bits_ = flag_bits_.get(str(field))
+        t = shown_value(v)
+        if not bits_:
+            return t
+        out_ = []
+        for tok_ in [x.strip() for x in t.split(",") if x.strip()]:
+            if re.fullmatch(r"\d+", tok_):
+                n_ = int(tok_)
+                for b_, name_ in sorted(((int(k_), w_) for k_, w_ in bits_.items() if k_.isdigit()), reverse=True):
+                    if n_ & b_:
+                        out_.append(name_)
+                        n_ &= ~b_
+                if n_ or not int(tok_):
+                    out_.append(str(n_))
+            else:
+                out_.append(tok_)
+        return ", ".join(out_)
 
     def object_kind(base_):
         """What kind of thing a base is, in plain words (Pilgrim review 3): its record type, a fact the record states
@@ -2088,8 +2115,9 @@ def build_prediction(ctx: dict) -> dict:
                 v_ = hit["row"].get("values") or {}
                 if value_recorded(v_.get("lost")) and value_recorded(v_.get("winner")):
                     nm_ = object_name(rk[4], rk[5])
-                    ex_ = (rk[4], (nm_ + ", " if nm_ else "") + str(hit["row"].get("field")), shown_value(v_.get("lost")),
-                           shown_value(v_.get("winner")))
+                    f_ = hit["row"].get("field")
+                    ex_ = (rk[4], (nm_ + ", " if nm_ else "") + field_word(f_), plain_value(f_, v_.get("lost")),
+                           plain_value(f_, v_.get("winner")))
                     best_ = g.get("_winnerOwnExample")
                     if best_ is None or len(ex_[2]) + len(ex_[3]) < len(best_[2]) + len(best_[3]):
                         g["_winnerOwnExample"] = ex_
@@ -2113,7 +2141,7 @@ def build_prediction(ctx: dict) -> dict:
             # examples: a field skill data prefers (a placed object's position) before any other (Snazzy review 3:
             # a worldspace texture path is no example a modder can act on)
             nm_ = object_name(rk[4], rk[5])
-            ex = (f"{rk[4]} ({nm_ + ', ' if nm_ else ''}{hit['row'].get('field')})" if hit["row"].get("field")
+            ex = (f"{rk[4]} ({nm_ + ', ' if nm_ else ''}{field_word(hit['row'].get('field'))})" if hit["row"].get("field")
                   else named(rk[4], rk[5]))
             rank = 0 if hit["row"].get("field") in preferred_example_fields else 1
             pool = g.setdefault("_recordPool", ([], []))[rank]

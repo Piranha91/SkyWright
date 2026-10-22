@@ -1809,7 +1809,8 @@ def main():
         count_only = {(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()}
         results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
         plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B], count_only=count_only, enrichment=enr)
-        ok = f"For example: 000702:{BASE} (Placement); 00003C:{BASE} (HdLodDiffuseTexture)" in md
+        # after-review (Winterhold review 5): the field in plain words; the preference is unchanged
+        ok = f"For example: 000702:{BASE} (position); 00003C:{BASE} (HdLodDiffuseTexture)" in md
         return ok, f"examples line: {[x for x in md.splitlines() if 'For example' in x][:1]}"
 
     def body_rows():
@@ -3775,7 +3776,7 @@ def main():
                  "bases": {f"0BC001:{BASE}": {"type": "Static", "editorId": "COCMarkerHeading", "model": "MarkerCOCHeading.nif"}}}
         plan, md, _ = core_bundle([r1, r2], [], names=names)
         # after-review (Pilgrim review 3): the base's kind, from its record type, is said before its editor ID
-        ok = f"{R1} (RorlundREF, Placement)" in md and f"{R2} (a static object COCMarkerHeading, Placement)" in md
+        ok = f"{R1} (RorlundREF, position)" in md and f"{R2} (a static object COCMarkerHeading, position)" in md
         return ok, next((ln for ln in md.splitlines() if "For example" in ln), "")[-220:]
 
     # C817 (Missives review 6, BPT review S6): an overlap item names its objects by their bases, and rows that are all
