@@ -4193,6 +4193,30 @@ def main():
     for name, fn in [("after-review/C906-further-results-counted-at-top-said", c906_further_results_counted_at_top_said)]:
         cell(name, fn)
 
+
+    # C907 (Winterhold review 2): a lost change already there with one evaluated mod alone names the plugin that wins
+    # it in that mod's own setup (Late.esp), not the other evaluated mod it loses to when both are loaded.
+    def c907_alone_line_names_alone_winner():
+        LATE = "Late.esp"
+        R1 = f"00C907:{BASE}"
+        arms = [arm("baseline", [BASE, MOD_A, LATE, MOD_B], kind="baseline"), arm("dependency-only", [BASE, LATE]),
+                arm("plus-a", [BASE, MOD_A, LATE]), arm("plus-b", [BASE, LATE, MOD_B])]
+        enr = {(RECORDS, "baseline"): [lost_row(MOD_A, MOD_B, R1, "Placement", "Position=1,1,1", "Position=3,3,3",
+                                                "Position=0,0,0")],
+               (RECORDS, "plus-a"): [lost_row(MOD_A, LATE, R1, "Placement", "Position=1,1,1", "Position=2,2,2",
+                                              "Position=0,0,0")],
+               (RECORDS, "plus-b"): [], (RECORDS, "dependency-only"): []}
+        results = {(CONTACT, a_["armId"]): [] for a_ in arms}
+        plan, md, _ = compile_and_render(arms, results, [MOD_A, MOD_B], enrichment=enr,
+                                         count_only={k: max(1, len(v)) for k, v in enr.items()})
+        rec_ = [(e["admission"], e.get("attribution")) for e in rec_of(plan, R1)]
+        line = next((ln for ln in md.splitlines() if "Record fields changed by more than one mod** (" in ln), "")
+        ok = (f"from {MOD_A}, with {LATE} 1" in line and f"objects {MOD_B} also edits, still there without it" not in line)
+        return ok, f"{rec_}; {line[:300]}"
+
+    for name, fn in [("after-review/C907-alone-line-names-alone-winner", c907_alone_line_names_alone_winner)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
