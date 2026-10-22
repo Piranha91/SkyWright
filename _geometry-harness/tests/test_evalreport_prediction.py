@@ -6305,16 +6305,18 @@ def main():
         return (f"wins over {UPD}'s own change" in line and f"{CC1}'s own change" not in line
                 and f"with {PATCH}" in line and f"{UPD}'s value in 1 of the 1" in line), line[-400:]
 
-    # C1038 (Pilgrim S3): an alias split is one clash whichever direction its rows name it: two rows (X with Y, Y with X)
-    # of one quest scene, new with the patch and already there without the evaluated mod, are 1 clash brought back; the
+    # C1038 (Pilgrim S3): an alias split is one clash, the quest scene: its two rows (one per actor, the quest as the other
+    # record), new with the patch and already there without the evaluated mod, are 1 clash brought back; the
     # detail line's split counts 1, as its scene count does; the summary says nothing ELSE new.
     def c1038_alias_pair_one_clash():
         O2 = "Neighbour.esp"
         arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
                 arm("without-patch", [BASE, OTHER, O2, MOD_A]), arm("without-a", [BASE, OTHER, O2])]
-        A1, A2 = f"000A38:{BASE}", f"000B38:{BASE}"
-        rows_ = [row("SPLIT", OTHER, PATCH, x_, other=y_, label="Temple (int)") for x_, y_ in ((A1, A2), (A2, A1))]
-        nb_ = [row("SPLIT", OTHER, O2, x_, other=y_, label="Temple (int)") for x_, y_ in ((A1, A2), (A2, A1))]
+        # (fixture corrected on regen-r4a: the probe's alias rows name an actor, with the quest as the other record; one
+        # quest scene of two actors is two rows)
+        A1, A2, Q = f"000A38:{BASE}", f"000B38:{BASE}", f"000Q38:{BASE}"
+        rows_ = [row("SPLIT", OTHER, PATCH, x_, other=Q, label="Temple (int)") for x_ in (A1, A2)]
+        nb_ = [row("SPLIT", OTHER, O2, x_, other=Q, label="Temple (int)") for x_ in (A1, A2)]
         for r_ in rows_ + nb_:
             r_["Summary"] = "quest 'Q1' aliases 'X' and 'Y' were 137u apart in Temple (int), now 1,800u apart"
         plan, md, _ = compile_and_render(arms, {(ALIAS, "baseline"): rows_, (ALIAS, "without-patch"): [],
