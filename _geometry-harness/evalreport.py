@@ -451,6 +451,12 @@ def fmt_units(v: float) -> str:
     return f"{v:.2f} u" if v < 1 else f"{v:.1f} u" if v < 10 else f"{fmt_n(round(v))} u"
 
 
+def and_list(xs) -> str:
+    """Names as one phrase: "a", "a and b", "a, b and c"."""
+    xs = [str(x) for x in xs]
+    return "" if not xs else xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
 def fmt_n(v) -> str:
     if isinstance(v, bool) or v is None:
         return str(v)
@@ -5788,7 +5794,12 @@ def once_on_page(reader: dict, pr: dict) -> dict:
         lead_once.append(bind(conc["onceWithTarget"], {"mod": wt[0].get("attributionMod") or "",
                                                        "count": fmt_n(len(wt)),
                                                        "all": "every item" if len(wt) == len(shown) else
-                                                       bind(conc.get("onceWithTargetSome") or "{count} items", {"count": fmt_n(len(wt))})}))
+                                                       bind(conc.get("onceWithTargetSome") or "{count} items", {
+                                                           "count": fmt_n(len(wt)),
+                                                           # (Pilgrim review 2) the items named by their other mods
+                                                           "others": and_list(list(dict.fromkeys(
+                                                               m_ for g in wt for m_ in g.get("mods") or []
+                                                               if m_.lower() != str(g.get("attributionMod") or "").lower())))})}))
 
     def titles(xs):
         xs = list(dict.fromkeys(f'"{x}"' for x in xs if x))

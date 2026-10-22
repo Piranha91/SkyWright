@@ -2285,7 +2285,8 @@ def main():
         plan, md, html = record_validation_bundle()
         p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
         line, items = p.get("withPatchLine") or "", " ".join(val.get("itemLines") or [])
-        want = f"the patch keeps {MOD_A}'s value; {MOD_B}'s change is dropped 1"
+        # after-review (Pilgrim review 2): reworded as one phrase; the outcome and its count are unchanged
+        want = f"the patch keeps {MOD_A}'s value over {MOD_B}'s change on 1"
         ok = want in line and want in items and "resolved" not in line and val.get("hits") == 0
         return ok, f"with-patch line {line!r}; items {items[:240]!r}"
 
@@ -2878,9 +2879,10 @@ def main():
                                      masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         w1 = [e.get("withPatch") for e in rec_of(plan, R1)]
         w2 = [e.get("withPatch") for e in rec_of(plan, R2)]
-        dropped = [ln for ln in md.splitlines() if "change is dropped" in ln]
+        # after-review (Pilgrim review 2): "X's change is dropped N" reads "keeps Y's value over X's change on N"
+        dropped = [ln for ln in md.splitlines() if "'s change on " in ln]
         ok = (w1 == ["resolved"] and w2 == ["switched"] and dropped
-              and all("dropped 1" in ln and "dropped 2" not in ln for ln in dropped))
+              and all("change on 1" in ln and "change on 2" not in ln for ln in dropped))
         return ok, f"R1 {w1}, R2 {w2}; dropped lines {[ln[:140] for ln in dropped]}"
 
     # C621 (Clockwork P101). With the patch winning and neither mod's value lost to it (a third plugin's is), the patch
@@ -3138,8 +3140,8 @@ def main():
         masters = {OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]}
         plan, md, _ = core_bundle(p_rows, w_rows, masters=masters, p_chains=chains)
         w1, w2 = [e.get("withPatch") for e in rec_of(plan, S1)], [e.get("withPatch") for e in rec_of(plan, S2)]
-        dropped = [ln for ln in md.splitlines() if "change is dropped" in ln]
-        ok = w1 == ["resolved"] and w2 == ["switched"] and dropped and all("dropped 2" not in ln for ln in dropped)
+        dropped = [ln for ln in md.splitlines() if "'s change on " in ln]     # after-review: reworded (Pilgrim 2)
+        ok = w1 == ["resolved"] and w2 == ["switched"] and dropped and all("change on 2" not in ln for ln in dropped)
         return ok, f"S1 {w1}, S2 {w2}; {[ln[:120] for ln in dropped]}"
 
     # C663. "Undone by the patch: N changes the mods made" counts only changes a mod made: ModA's value lost to the patch
