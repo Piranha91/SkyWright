@@ -6259,6 +6259,25 @@ def main():
         line = next((ln for ln in md.splitlines() if "land flags" in ln and MOD_A in ln), "")
         return f"with {PATCH}, still so in 1 of the 1" in line, line[-300:]
 
+    # C1049 (Missives S4): a lost value that differs from the winner's only in a flags leaf names that leaf and both
+    # values; and where the plugin whose value is used without the winner is not the loser named, the item names it.
+    def c1049_flags_leaf_and_previous_winner():
+        W, O2 = f"00CA49:{BASE}", "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A, MOD_B])]
+        par_ = lambda f_: {"Parent.Worldspace": "00003C:Skyrim.esm", "Parent.Flags": f_}  # noqa: E731
+        chains = [(W, "Worldspace", [(BASE, par_("UseImageSpaceData")), (OTHER, par_("0")), (O2, par_("0")),
+                                     (MOD_A, par_("UseImageSpaceData"))])]
+        p_rows = [lost_row(OTHER, MOD_A, W, "Parent", ["Parent.Flags=0"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains,
+                                  masters={**MASTERS_, O2: [BASE], PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return ("differ only in its flags" in it and "UseImageSpaceData" in it and f"Without {MOD_A}" in it
+                and O2 in it), it[-500:]
+
+    for name, fn in [("fourth-review/C1049-flags-leaf-and-previous-winner", c1049_flags_leaf_and_previous_winner)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1056-land-flags-with-patch-status", c1056_land_flags_with_patch_status)]:
         cell(name, fn)
 
