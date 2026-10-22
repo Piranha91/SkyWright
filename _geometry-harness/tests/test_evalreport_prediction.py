@@ -5267,6 +5267,25 @@ def main():
     for name, fn in [("third-review/C956-new-problem-names-mover", c956_new_problem_names_mover)]:
         cell(name, fn)
 
+    # C957 (Sewers review S3): an overlap the quest-or-switch check also finds says what that check found: the other
+    # mod's object leaves when its switch is set, so the overlap holds only until then.
+    def c957_also_found_switch_said():
+        X, Yo = f"000X57:{MOD_A}", f"000Y57:{MOD_B}"
+        ov_ = row("OVERLAP", MOD_B, MOD_A, X, other=Yo)
+        st_ = row("STATE-CONTACT@000S57:ModB.esp@Unknown", MOD_B, MOD_A, Yo, label="Camp (ext)", other=X)
+        st_["Summary"] = (f"Contact StateConditional under PlankSwitch ({MOD_B}): {Yo} [Static Scaffold] leaves - Sunk: the "
+                          f"host leaves with the flip")
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A]), arm("without-a", [BASE, MOD_B])]
+        results = {(OVERLAP, a_): ([ov_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch", "without-b", "without-a")}
+        results.update({(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch", "without-b", "without-a")})
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        return "PlankSwitch" in it and "leaves" in it, it[-400:]
+
+    for name, fn in [("third-review/C957-also-found-switch-said", c957_also_found_switch_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
