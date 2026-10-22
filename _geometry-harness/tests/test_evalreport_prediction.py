@@ -5544,14 +5544,14 @@ def main():
         cell(name, fn)
 
     # C981 (round 2, B3: Snazzy review Blocking 2): the headline's shared objects are every object of the entry that any
-    # entry counted before it holds. The record-field entry (3 records, first) holds 000F01; the contact entry holds
-    # 000F02; the fixture entry (000F01, 000F02) shares both.
+    # entry counted before it holds. The record-field entry (4 records, first) holds 000F01; the contact entry (3 objects,
+    # second) holds 000F02; the fixture entry (000F01, 000F02, third) shares both.
     def c981_shared_objects_complete():
         F1, F2 = f"000F01:{MOD_A}", f"000F02:{MOD_A}"
         rec_rows = [lost_row(MOD_B, MOD_A, fk_, "Placement", "b", "a", "v") for fk_ in (F1, f"000F03:{MOD_A}",
                                                                                          f"000F04:{MOD_A}", f"000F05:{MOD_A}")]
         fx = [row("EMPTY-SPACE", MOD_B, MOD_A, fk_, other=f"000H0{i}:{MOD_B}") for i, fk_ in ((1, F1), (2, F2))]
-        ct = [row("CONTACT", MOD_B, MOD_A, F2, other=f"000H09:{MOD_B}")]
+        ct = [row("CONTACT", MOD_B, MOD_A, fk_, other=f"000H09:{MOD_B}") for fk_ in (F2, f"000F06:{MOD_A}", f"000F07:{MOD_A}")]
         results = {(c, a): [] for c in (FIXTURE, CONTACT) for a in ("dependency-only", "plus-a", "plus-b")}
         results.update({(FIXTURE, "baseline"): fx, (CONTACT, "baseline"): ct})
         arms_ = four_arms()
