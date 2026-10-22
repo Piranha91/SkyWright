@@ -3019,14 +3019,18 @@ def build_prediction(ctx: dict) -> dict:
     # Snazzy review 2: an object a check names as a state of its own (identityByObject: a fixture left hanging, an
     # object left without support) is counted once in the headline, in the first such check that names it; a later
     # one counts only its other objects and says how many it shares
+    # (round 2, Snazzy B2) every entry counted before holds its objects: a record entry its records, a pair check both
+    # objects of each pair, a by-object check its objects; the shared ones are all of them, by construction
     seen_objects = set()
     for i, e in enumerate(verdict_counts):
-        if e["checkId"] not in by_object:
-            continue
-        rows_of = collections.Counter()
+        rows_of, held_ = collections.Counter(), set()
         for g in counted:
             if (g["checkId"], g["kind"]) == (e["checkId"], e["kind"]):
                 rows_of.update(subject_rows_of[id(g)])
+                held_ |= pair_objects_of.get(id(g)) or set()
+        if e["checkId"] not in by_object:
+            seen_objects |= {str(x) for x in rows_of if isinstance(x, str)} | {str(x) for x in held_}
+            continue
         subj = set(rows_of)
         shared_objects = subj & seen_objects
         seen_objects |= subj
