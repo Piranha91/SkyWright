@@ -5321,6 +5321,35 @@ def main():
     for name, fn in [("third-review/C970-case-only-from-chain", c970_case_only_from_chain)]:
         cell(name, fn)
 
+    # C971 (Winterhold page limit, a generator rule for every report): the abridgement ladder's tail step moves the four
+    # closing sections (what still needs checking, checks with no problem, reference information, evidence and limits)
+    # into the evidence index, with a line in the report that says where they went; nothing is dropped. The ladder in
+    # skill data has this step before any step that shows fewer rows or figures.
+    def c971_tail_step_moves_closing_sections():
+        plan, md0, html0 = record_validation_bundle()
+        pr_ = R.load_priorities()
+        ladder_ = pr_.get("abridgementLadder") or []
+        tail_ = next((s_ for s_ in ladder_ if "tail" in str(s_.get("layout")).split()), None)
+        if tail_ is None:
+            return False, "no tail step in the ladder"
+        out_ = Path(tempfile.mkdtemp(prefix="c971-"))
+        v_ = R.effective_view(plan, tail_["rowsPerGroup"], tail_["figuresPerFinding"], pr_, tail_["layout"])
+        got_ = R.render_all(plan, v_, out_, "")
+        md_, idx_, html_, hidx_ = got_["report.md"], got_["evidence-index.md"], got_["report.html"], got_["evidence-index.html"]
+        heads_ = ("What still needs checking", "Checks that found no problem", "Reference information collected",
+                  "Evidence and limits")
+        before_ = [i_ for i_, s_ in enumerate(ladder_) if s_ is tail_][0]
+        ok = (all(f"## {h_}" not in md_ for h_ in heads_) and all(h_ in idx_ for h_ in heads_)
+              and all(f"<h2>{h_}</h2>" not in html_ for h_ in heads_) and all(h_ in hidx_ for h_ in heads_)
+              and "evidence-index.md#further-notes" in md_
+              and all(s_["rowsPerGroup"] >= tail_["rowsPerGroup"] and s_["figuresPerFinding"] >= tail_["figuresPerFinding"]
+                      for s_ in ladder_[:before_])
+              and all(f"## {h_}" in md0 for h_ in heads_))
+        return ok, md_[-400:]
+
+    for name, fn in [("third-review/C971-tail-step-moves-closing-sections", c971_tail_step_moves_closing_sections)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
