@@ -2235,6 +2235,7 @@ def build_prediction(ctx: dict) -> dict:
         """Every partner object of the item's rows is a base-game record (the other mod only edits it)."""
         others_ = [o_ for o_ in g.get("_partners") or []]
         return bool(others_) and all(is_base_game(str(o_).split(":", 1)[-1], words) for o_ in others_)
+    dis_of = {}
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
@@ -2364,6 +2365,7 @@ def build_prediction(ctx: dict) -> dict:
             for c_, n_ in also_.items():
                 detail.append(bind(words["itemAlsoFoundBy"], {"count": fmt_n(n_), "title": title_of(c_)}))
         n_dis = g.pop("_disables", 0)
+        dis_of[id(g)] = n_dis                  # (third review, BPT S1) the headline carries the same count
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
         n_off = g.pop("_startsOff", 0)
@@ -2804,8 +2806,9 @@ def build_prediction(ctx: dict) -> dict:
         for g in gs:
             e = out.setdefault((g["checkId"], g["kind"]), {"checkId": g["checkId"], "kind": g["kind"],
                                                            "relationships": 0, "_s": set(), "_po": set(),
-                                                           "_f": collections.Counter()})
+                                                           "_f": collections.Counter(), "offForGood": 0})
             e["relationships"] += g["relationships"]
+            e["offForGood"] += dis_of.get(id(g), 0)
             e["_s"] |= subjects_of[id(g)]
             e["_po"] |= pair_objects_of[id(g)]
             e["_f"].update(field_names_of[id(g)])
@@ -2825,7 +2828,9 @@ def build_prediction(ctx: dict) -> dict:
                 phrase += " " + bind(words["verdictFieldsNamed" if e["checkId"] in names_fields and e.get("fieldNames")
                                            else "verdictFieldsToo"], {
                     "count": fmt_n(e["relationships"]),
-                    "noun": words["fieldNoun"][0 if e["relationships"] == 1 else 1],
+                    "noun": words["fieldNoun"][0 if e["relationships"] == 1 else 1]
+                    + (bind(words["verdictFieldsOff"], {"count": fmt_n(e["offForGood"])})
+                       if e.get("offForGood") and words.get("verdictFieldsOff") else ""),
                     "fields": fields_text(collections.Counter(e.get("fieldNames") or {}))})
             elif (e["kind"] != "LOST-EDIT" and e.get("pairObjects") and words.get("verdictObjectsToo")
                   and e["checkId"] in set(words.get("verdictObjectsChecks") or [])):
