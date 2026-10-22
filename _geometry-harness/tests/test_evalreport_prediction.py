@@ -3774,8 +3774,8 @@ def main():
                  "refs": {R2: {"base": f"0BC001:{BASE}", "carriedBy": [BASE]}},
                  "bases": {f"0BC001:{BASE}": {"type": "Static", "editorId": "COCMarkerHeading", "model": "MarkerCOCHeading.nif"}}}
         plan, md, _ = core_bundle([r1, r2], [], names=names)
-        # after-review (Pilgrim review 3): the base's kind is said before its editor ID (a marker by its model's name)
-        ok = f"{R1} (RorlundREF, Placement)" in md and f"{R2} (an editor marker COCMarkerHeading, Placement)" in md
+        # after-review (Pilgrim review 3): the base's kind, from its record type, is said before its editor ID
+        ok = f"{R1} (RorlundREF, Placement)" in md and f"{R2} (a static object COCMarkerHeading, Placement)" in md
         return ok, next((ln for ln in md.splitlines() if "For example" in ln), "")[-220:]
 
     # C817 (Missives review 6, BPT review S6): an overlap item names its objects by their bases, and rows that are all
@@ -4390,7 +4390,8 @@ def main():
                            f"0BC093:{BASE}": {"type": "Npc", "editorId": "TestPriest", "model": None}}}
         extra = {(OVERLAP, "without-patch"): rows_, (OVERLAP, "baseline"): []}
         plan, md, _ = core_bundle([r1], [], extra_results=extra, names=names)
-        ok = ("a visual effect TestMist01" in md and "a container TestChest" in md
+        # (reviewer) the kind is the record type, never a role read from a model's path
+        ok = ("a movable static TestMist01" in md and "a container TestChest" in md
               and "the NPC TestPriestREF" in md)
         lines = [ln for ln in md.splitlines() if "TestMist01" in ln or "TestPriestREF" in ln]
         return ok, " | ".join(x[-160:] for x in lines[:2])
@@ -4419,6 +4420,26 @@ def main():
 
     for name, fn in [("after-review/C914-base-game-line-names-objects-and-places",
                       c914_base_game_line_names_objects_and_places)]:
+        cell(name, fn)
+
+
+    # C925 (reviewer on objectKinds): no role word comes from a model's file name or folder; a Static whose model is
+    # named like a marker or sits under effects is said as a static object.
+    def c925_no_role_from_model_name():
+        R1, R2 = f"00C925:{BASE}", f"00C926:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, R1, "Placement", "o1", "a1", "v1"),
+                  lost_row(OTHER, MOD_A, R2, "Placement", "o2", "a2", "v2")]
+        names = {"schema": "names-v1", "places": {}, "objects": {}, "mods": {}, "missing": [],
+                 "refs": {R1: {"base": f"0BC095:{BASE}", "carriedBy": [BASE]},
+                          R2: {"base": f"0BC096:{BASE}", "carriedBy": [BASE]}},
+                 "bases": {f"0BC095:{BASE}": {"type": "Static", "editorId": "TestPost", "model": "Marker_Post.nif"},
+                           f"0BC096:{BASE}": {"type": "Static", "editorId": "TestGlow", "model": "Effects\\TestGlow.nif"}}}
+        plan, md, _ = core_bundle(p_rows, [], names=names)
+        ok = ("editor marker" not in md and "visual effect" not in md and "a static object TestPost" in md
+              and "a static object TestGlow" in md)
+        return ok, next((ln for ln in md.splitlines() if "For example" in ln), "")[-220:]
+
+    for name, fn in [("after-review/C925-no-role-from-model-name", c925_no_role_from_model_name)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
