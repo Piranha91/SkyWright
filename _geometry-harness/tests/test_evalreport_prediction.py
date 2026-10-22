@@ -5617,29 +5617,45 @@ def main():
     # distinct changes in game: one field lost by two plugins is one; a Grid change only in bytes the game does not read
     # is none. Where the patch has no such field at all, the clash is said as the patch removing it, not as a fix.
     def earlier_fix_bundle(patch_has_field):
-        """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight 5, ModA 9, the patch 5. Removal: OtherMod and
-        Neighbour have no MaxHeight, ModA has 9, the patch has none. Without ModA both lose to Later.esp too (already
+        """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight's cell data 05, ModA 09, the patch 05. Removal:
+        OtherMod and Neighbour have no MaxHeight, ModA has 09, the patch has none. Without ModA both lose to Later.esp too (already
         there). A Grid row differing only in unused bytes is lost the same way and fixed too."""
         O2, O3 = "Neighbour.esp", "Later.esp"
         W1, C2 = f"00C985:{BASE}", f"00C986:{BASE}"
         arms_ = [arm("baseline", [BASE, OTHER, O2, O3, MOD_A, PATCH], kind="baseline"),
                  arm("without-patch", [BASE, OTHER, O2, O3, MOD_A]), arm("without-a", [BASE, OTHER, O2, O3])]
-        mh_ = lambda x: {"MaxHeight.Offset": x} if x else {}                          # noqa: E731
-        lose_ = "5" if patch_has_field else None
-        chain_ = [(BASE, mh_("0")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), (O3, mh_("7")), (MOD_A, mh_("9"))]
+        mh_ = lambda x: {"MaxHeight.CellData": x, "MaxHeight.Offset": "0"} if x else {}  # noqa: E731
+        lose_ = "05" if patch_has_field else None
+        chain_ = [(BASE, mh_("00")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), (O3, mh_("07")), (MOD_A, mh_("09"))]
         p_ch = [(W1, "Worldspace", chain_)]
         w_ch = [(W1, "Worldspace", chain_ + [(PATCH, mh_(lose_))])]
-        lost_ = ["MaxHeight.Offset=5"] if patch_has_field else [f"MaxHeight.Offset only in {MOD_A}: 9"]
-        mh_row = lambda a_, b_: lost_row(a_, b_, W1, "MaxHeight", lost_, PH, ["MaxHeight.Offset=0"])  # noqa: E731
-        grid_ = lambda a_, b_: lost_row(a_, b_, C2, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"])  # noqa: E731
+        lost_ = ["MaxHeight.CellData=05"] if patch_has_field else [f"MaxHeight.CellData only in {MOD_A}: 09"]
+        mh_row = lambda a_, b_: lost_row(a_, b_, W1, "MaxHeight", lost_, PH, ["MaxHeight.CellData=00"])  # noqa: E731
+        def grid_(a_, b_):
+            r_ = lost_row(a_, b_, C2, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"])
+            r_["Summary"] = f"Cell TestCellGrid: Grid - {a_}'s value lost to {b_}'s"
+            return r_
         p_rows = [mh_row(OTHER, MOD_A), mh_row(O2, MOD_A), grid_(OTHER, MOD_A)]
         n_rows = [mh_row(OTHER, O3), mh_row(O2, O3), grid_(OTHER, O3)]
         enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "without-a"): n_rows, (RECORDS, "baseline"): []}
-        tr = {(RECORDS, "without-patch"): records_transcript(p_ch), (RECORDS, "baseline"): records_transcript(w_ch)}
+        def absent_too(tr_):
+            """A tree answer also lists a field the winner has and a provider lacks, as the record imports capture it."""
+            req_, resp_ = tr_
+            body_ = json.loads(resp_[1]["result"]["content"][0]["text"])
+            for r_, (_, _, chain__) in zip(body_["rows"], [c for c in (p_ch if tr_ is p_tr_ else w_ch)]):
+                win__ = chain__[-1][1]
+                for n_, (_, f__) in zip(r_["nodes"], chain__):
+                    if not n_["is_winner"]:
+                        n_["deltas"] += [f"{k}: ABSENT here" for k in win__ if k not in f__]
+            resp_[1]["result"]["content"][0]["text"] = json.dumps(body_)
+            return req_, resp_
+        p_tr_ = tree_transcript(p_ch)
+        tr = {(RECORDS, "without-patch"): absent_too(p_tr_), (RECORDS, "baseline"): tree_transcript(w_ch)}
         plan, md, _ = compile_and_render(arms_, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch", "without-a")},
                                          [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
                                          enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE], O3: [BASE],
                                                                                   PATCH: [BASE]})
+        print("DBG3", [x for x in md.splitlines() if "redict" in x or "Resolved" in x][:6], file=sys.stderr)
         return next((x for x in md.splitlines() if "but not predicted" in x), "")
 
     def c985_earlier_fixes_counted_once():
