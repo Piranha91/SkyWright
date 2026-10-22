@@ -2051,7 +2051,7 @@ def build_prediction(ctx: dict) -> dict:
             if adm == "notOwnEdit":
                 oe = own_edit(p_of(rk[0]), rk, rk[2]) or {}
                 entry["undoes"], entry["inherits"] = oe.get("before"), oe.get("inherits")
-                if oe.get("changed") and oe.get("restoresBaseFix"):
+                if oe.get("restoresBaseFix"):     # carried or restored: the winner drops it either way (C966)
                     entry["baseValueOf"] = oe["restoresBase"]    # the loss is the winner's against that plugin
                 if oe.get("beforeWins") and oe.get("lostIsOriginal"):
                     set_aside["notOwnEditEarlierWins"] += 1
