@@ -4442,6 +4442,21 @@ def main():
     for name, fn in [("after-review/C925-no-role-from-model-name", c925_no_role_from_model_name)]:
         cell(name, fn)
 
+
+    # C915 (Pilgrim review 6): a quest or switch clash gives its in-game effect from the probe's own row (the switch
+    # and the measured depth), and is not listed among the checks whose in-game effect is not described.
+    def c915_state_clash_in_game_from_row():
+        plan, md, html = state_bundle()
+        sec = section_text(md, headings(plan).get("prediction") or "\0")
+        it = next((ln for ln in sec.splitlines() if ln.startswith("- **Objects that change with quests or switches")), "")
+        miss = next((ln for ln in sec.splitlines() if "show in game is not described" in ln), "")
+        ok = ("In game:" in it and "CampEnable" in it and "9 u inside" in it
+              and "Objects that change with quests or switches" not in miss)
+        return ok, f"{it[-220:]} | {miss[:160]}"
+
+    for name, fn in [("after-review/C915-state-clash-in-game-from-row", c915_state_clash_in_game_from_row)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
