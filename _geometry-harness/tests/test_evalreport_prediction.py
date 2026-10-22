@@ -5344,7 +5344,10 @@ def main():
               and "evidence-index.md#further-notes" in md_
               and all(s_["rowsPerGroup"] >= tail_["rowsPerGroup"] and s_["figuresPerFinding"] >= tail_["figuresPerFinding"]
                       for s_ in ladder_[:before_])
-              and all(f"## {h_}" in md0 for h_ in heads_))
+              and all(f"## {h_}" in md0 for h_ in heads_)
+              # (found on regen-q5) the comparisons' summary lines move with them, said in the pointer and kept in the index
+              and all(f"- {x_}" not in md_ and x_ in idx_ for x_ in (reader(plan).get("comparisonSummary") or []))
+              and "other results" in md_)
         return ok, md_[-400:]
 
     for name, fn in [("third-review/C971-tail-step-moves-closing-sections", c971_tail_step_moves_closing_sections)]:
