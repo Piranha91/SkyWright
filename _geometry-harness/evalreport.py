@@ -4171,6 +4171,16 @@ def build_prediction(ctx: dict) -> dict:
             if n_persist:
                 sentences[-1] += " " + bind(words["validationHistoryPersists"], {"patch": patch, "count": fmt_n(n_persist),
                                                                                  "examples": persist_ex})
+            # (fourth review, Winterhold S4) the navmesh lines at the top count every record still losing ground with
+            # the patch; the ones still flagged are not in this line: said, so the two figures reconcile
+            still_total_ = sum(n_ for _, _, n_ in ground_still)
+            gone_pair_ = {(str(e["A"]).lower(), str(e["B"]).lower()) for e in held_gone}
+            n_gone_pair_ = persisting([(e["kind"], e["A"], e["B"], e["formKey"], None) for e in held_gone
+                                       if any((str(e["A"]).lower(), str(e["B"]).lower()) == (l_.lower(), w_.lower())
+                                              for l_, w_, _ in ground_still)])[0] if gone_pair_ else 0
+            if still_total_ > n_gone_pair_ and words.get("validationHistoryStillFlagged"):
+                sentences[-1] += " " + bind(words["validationHistoryStillFlagged"], {
+                    "count": fmt_n(still_total_ - n_gone_pair_), "total": fmt_n(still_total_), "patch": patch})
         no_body_new -= problem_seen            # an object a bodied row of another check counts is not set aside
         if no_body_new:
             # said with the new clashes it is set aside from (page budget)
