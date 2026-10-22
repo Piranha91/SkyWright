@@ -3389,10 +3389,11 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
                                   masters={HF: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         got = {e["A"]: e["admission"] for e in rec_of(plan, L1)}
-        top = md.split("\n## ", 2)[1] if "\n## " in md else md
-        still = next((ln for ln in top.splitlines() if ln.startswith("Still there")), "")
-        ok = got == {HF: "baseGame", OTHER: "admitted"} and f"{OTHER}'s change" in still
-        return ok, f"{got}; {still[:200]!r}"
+        # (third review, Missives S1) OtherMod only carries HearthFires' own fix (it is built without HearthFires): the
+        # loss is ModA's against HearthFires, said once on its own line, not OtherMod's change counted as a clash
+        line = next((ln for ln in md.splitlines() if f"wins over {HF}'s own fix" in ln), "")
+        ok = got == {HF: "baseGame", OTHER: "notOwnEdit"} and OTHER in line and MOD_A in line
+        return ok, f"{got}; {line[:200]!r}"
 
     # C726 (Clockwork review S6). "Undone by the patch" applies the same set-aside rules and counts a field once: a list
     # whose items the patch only reorders is no change undone, and a field two record checks both list is one field.
@@ -3678,7 +3679,10 @@ def main():
                                            MOD_B: [BASE]})
         got = {e["A"]: e["admission"] for e in rec_of(plan, L)}
         pred = reader(plan).get("prediction") or {}
-        ok = got == {UPD: "undoesMaster", OTHER: "sameValue"} and "Location" not in pred.get("verdict", "")
+        # (third review, Missives S1) OtherMod's value is Update.esm's own fix it carries: no edit of OtherMod's; the
+        # loss is still said once, on the undoes-its-master line, and no base-fix line repeats it
+        ok = (got == {UPD: "undoesMaster", OTHER: "notOwnEdit"} and "Location" not in pred.get("verdict", "")
+              and "own fix of" not in md and f"undoes its master {UPD}'s fix" in md)
         return ok, f"{got}; verdict {pred.get('verdict', '')[:160]!r}"
 
     # C811 (Clockwork review S2/S3, coordinator D on S3): what disables an object is read from each side's whole
@@ -3867,8 +3871,10 @@ def main():
                   lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
                                   masters={HF_: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
-        line = next((ln for ln in md.splitlines() if ln.startswith("- **") and "OtherMod.esp's value is lost" in ln), "")
-        ok = f"was first set by {HF_} and is carried by {OTHER}" in line and "018A59" in line
+        # (third review, Missives S1) the value's origin is said on the base-fix line: ModA drops HearthFires' fix, which
+        # OtherMod only carries
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own fix" in ln), "")
+        ok = f"{OTHER} only carry" in line and "Location" in line and MOD_A in line
         return ok, line[-260:]
 
     for name, fn in [("after-final/C822-carried-value-names-its-origin", c822_carried_value_names_its_origin)]:

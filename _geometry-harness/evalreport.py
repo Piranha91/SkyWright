@@ -1603,7 +1603,14 @@ def build_prediction(ctx: dict) -> dict:
         changed, j = recordrows.own_change(provs, vals, i, ms)
         kept = (recordrows.list_change_kept(items[j], items[i], items[-1])
                 if items and j is not None and len(items) == len(provs) else None)
+        # (third review, Missives S1) a value equal to the one an earlier base-game plugin set itself is that plugin's
+        # change carried or restored, not the plugin's own: the latest such base-game provider, and whether it is the
+        # record's first (the base game's original value) or a later fix
+        base_k = next((k for k in range(i - 1, -1, -1) if is_base_game(provs[k], words) and vals[k] == vals[i]
+                       and recordrows.own_change(provs, vals, k, (masters or {}).get(str(provs[k]).lower())
+                                                 if masters is not None else None)[0]), None)
         return {"changed": changed, "inherits": provs[j] if j is not None else None,
+                "restoresBase": provs[base_k] if base_k is not None else None, "restoresBaseFix": bool(base_k),
                 "before": provs[i - 1] if i > 0 else None,
                 "beforeWins": i > 0 and vals[-1] == vals[i - 1], "listKept": bool(kept),
                 "lostIsOriginal": vals[i] == vals[0]}
@@ -1887,6 +1894,8 @@ def build_prediction(ctx: dict) -> dict:
             oe = own_edit(p_of(rk[0]), rk, rk[2])
             if oe is not None and not oe["changed"]:
                 return "notOwnEdit"            # the losing value is the one it inherits: no edit of that mod's
+            if oe is not None and oe.get("restoresBase"):
+                return "notOwnEdit"            # a base-game plugin's own value it carries or restores (Missives S1)
             if oe is not None and oe.get("listKept"):
                 return "listKept"              # every item it added or removed the winning list keeps so
             if (supersede(rk) or {}).get("kind") in ("kind", "place"):
@@ -2042,6 +2051,8 @@ def build_prediction(ctx: dict) -> dict:
             if adm == "notOwnEdit":
                 oe = own_edit(p_of(rk[0]), rk, rk[2]) or {}
                 entry["undoes"], entry["inherits"] = oe.get("before"), oe.get("inherits")
+                if oe.get("changed") and oe.get("restoresBaseFix"):
+                    entry["baseValueOf"] = oe["restoresBase"]    # the loss is the winner's against that plugin
                 if oe.get("beforeWins") and oe.get("lostIsOriginal"):
                     set_aside["notOwnEditEarlierWins"] += 1
                 elif not oe.get("lostIsOriginal"):
@@ -2604,6 +2615,27 @@ def build_prediction(ctx: dict) -> dict:
             "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
                 "patch": patch_text, "left": fmt_n(left_), "count": fmt_n(n_)})}),
             "findingIds": u_["findingIds"][:1]})
+    # (third review, Missives S1) a base-game plugin's own fix that the winner's value drops, where the losing mod only
+    # carries or restores it: one line per winner and base-game plugin, naming the plugins that carry the value
+    base_drop = collections.OrderedDict()
+    undone_once = {(str(e["formKey"]), e.get("field"), e["B"]) for e in record if e["admission"] == "undoesMaster"}
+    for e in record:
+        # a winner putting back the value from before its own master's fix is said on that line, once (C810)
+        if (e["admission"] == "notOwnEdit" and e.get("baseValueOf")
+                and (str(e["formKey"]), e.get("field"), e["B"]) not in undone_once):
+            d_ = base_drop.setdefault((e["B"], e["baseValueOf"]), {"fields": collections.OrderedDict(),
+                                                                   "carriers": [], "findingIds": []})
+            d_["fields"].setdefault((str(e["formKey"]), e.get("field")), e.get("label") or "")
+            if e["A"] not in d_["carriers"]:
+                d_["carriers"].append(e["A"])
+            if e.get("findingId") and e["findingId"] not in d_["findingIds"]:
+                d_["findingIds"].append(e["findingId"])
+    for (mod_, base_), d_ in base_drop.items():
+        n_ = len(d_["fields"])
+        loss_lines.append({"text": bind(words["baseValueDroppedLine"], {
+            "mod": mod_, "base": base_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
+            "examples": "; ".join(f"{fk_} ({f_})" for fk_, f_ in list(d_["fields"])[:2]),
+            "carriers": " and ".join(d_["carriers"])}), "findingIds": d_["findingIds"][:1]})
     # (Missives review 1) the winner's own change to the bits the game reads of a field whose losing change is only in
     # unread bytes: one line per winning mod, with each record and what the read bits mean (skill data)
     own_ = collections.OrderedDict()
@@ -3518,9 +3550,11 @@ def build_prediction(ctx: dict) -> dict:
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
         edited = sum(1 for e in open_ if left_split.get(id(e)) == "patchHeld")
         n_open_ = by_unit_note(open_, False)
-        sentences += [bind(words["validationOpen"], {"patch": patch, "count": n_open_, "split": (bind(
+        # (third review, Clockwork S1) where every clash still intersecting is a patch's placement, nothing is said as
+        # still present: no "still present: 0"
+        sentences += ([bind(words["validationOpen"], {"patch": patch, "count": n_open_, "split": (bind(
                           words["validationOpenSplit"], {"untouched": fmt_n(len(open_) - edited), "edited": fmt_n(edited)})
-                          if edited else "")}),
+                          if edited else "")})] if open_ or not placed else []) + [
                      # new problems in their units, an object of a by-object check with its pairs (BPT review S3)
                      bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
