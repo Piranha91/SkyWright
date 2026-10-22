@@ -2391,6 +2391,10 @@ def build_prediction(ctx: dict) -> dict:
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
         for m_, n_ in (g.pop("_baseNavCarried", None) or {}).items():
+            if n_ == g["count"] and words.get("baseNavCarriedName"):
+                # (reviewer on faa9ce47) every row is a link of a base-game navmesh the mod only carries: the pair is
+                # named as the evaluated mod against the base game's navmesh records, not as that mod's clash
+                g.setdefault("pairNames", {})[m_] = bind(words["baseNavCarriedName"], {"mod": m_})
             if words.get("itemBaseNavCarried"):
                 detail.append(bind(words["itemBaseNavCarried"], {
                     "lead": f"All {fmt_n(n_)} are" if n_ == g["count"] else f"{fmt_n(n_)} of them are", "mod": m_}))
@@ -2413,7 +2417,8 @@ def build_prediction(ctx: dict) -> dict:
         g.pop("_partners", None)
         provenance = g.pop("_provenance", None)
         g["attributionKey"], g["attributionText"] = attr_key, attr_text
-        g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
+        pn_ = [(g.get("pairNames") or {}).get(m_, m_) for m_ in g["mods"]]
+        g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {pn_[0]} and {pn_[1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification")
                                      and not (ph.get("qualificationInInGame") and g.get("inGame")) else "")
                       + "".join(" " + d for d in detail) + (f" {provenance}" if provenance else ""))
@@ -3791,7 +3796,8 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             from_one = not multi and g.get("attribution") == "single-mod" and g.get("attributionMod")
             item_lines.append(bind(words["validationItemLineFrom" if from_one else "validationItemLine"], {
-                "title": g["title"], "modA": g["mods"][0], "modB": g["mods"][1], "count": fmt_n(g["count"]),
+                "title": g["title"], "modA": (g.get("pairNames") or {}).get(g["mods"][0], g["mods"][0]),
+                "modB": (g.get("pairNames") or {}).get(g["mods"][1], g["mods"][1]), "count": fmt_n(g["count"]),
                 "mod": g.get("attributionMod"), "other": next((m_ for m_ in g["mods"] if m_.lower() != str(
                     g.get("attributionMod")).lower()), ""), "outcomes": outcome_text(bi)}))
         if alone_total.get("count"):
@@ -3870,8 +3876,10 @@ def build_prediction(ctx: dict) -> dict:
                 # a patch places one of the objects and they still cross there (Clockwork review S5)
                 where_.append(bind(words["stillTherePatchMoves"], {"count": fmt_n(held_)}))
             stays_parts.append((len(es), bind(words["stillThereGeometry"], {
-                "count": fmt_n(len(es)), "unit": unit_noun(g["checkId"], g["kind"], len(es)), "modA": g["mods"][0],
-                "modB": g["mods"][1], "where": (" (" + ", ".join(where_) + ")") if where_ else ""})))
+                "count": fmt_n(len(es)), "unit": unit_noun(g["checkId"], g["kind"], len(es)),
+                "modA": (g.get("pairNames") or {}).get(g["mods"][0], g["mods"][0]),
+                "modB": (g.get("pairNames") or {}).get(g["mods"][1], g["mods"][1]),
+                "where": (" (" + ", ".join(where_) + ")") if where_ else ""})))
         stays_parts.sort(key=lambda x: -x[0])
         limit = int(words.get("stillThereMax") or 3)
         if len(stays_parts) == limit + 1:
