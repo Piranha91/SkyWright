@@ -2875,6 +2875,7 @@ def build_prediction(ctx: dict) -> dict:
     # losses, and tied to the broken links counted above that point into a replaced navmesh. No claim about NPCs.
     loss_lines = []
     ground_still = []                  # (loser, winner, navmesh records) whose lost ground the patch setup still loses
+    ground_lost = []                   # (loser, winner, navmesh records losing ground, still so with the patch or None)
     by_pair = collections.OrderedDict()
     for rk, hit in sorted(p_rows.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
         if not (hit["history"] and rk[0] == "geometry.navmesh-ownership" and rk[2].lower() != rk[3].lower()):
@@ -2990,6 +2991,7 @@ def build_prediction(ctx: dict) -> dict:
             text += " " + bind(words["historyLossLinks"], {"links": fmt_n(len(links)), "targets": ", ".join(tdesc)})
         if n_measured and n_persist:
             ground_still.append((loser, winner, n_persist))
+        ground_lost.append((loser, winner, len(held), n_persist if n_measured else None))
         if n_measured:
             text += " " + (bind(words["historyLossPersists"][0 if n_persist == 1 else 1], {
                 "patch": patch_text, "count": fmt_n(n_persist), "examples": persist_ex}) if n_persist else
@@ -3418,6 +3420,21 @@ def build_prediction(ctx: dict) -> dict:
         verdict = bind(words["verdictNone"], {"subject": subject})
     if unseparated:
         verdict += " " + bind(words["verdictNotSeparable"], {"kinds": listed([e["phrase"] for e in unseparated])})
+    if ground_lost and words.get("verdictNavmeshLoss"):
+        # (fourth review, Clockwork S4) the largest measured navmesh effect is said at the top too, not counted
+        by_w_ = collections.OrderedDict()
+        for l_, w_, n_, st_ in ground_lost:
+            x_ = by_w_.setdefault(w_, {"losers": [], "n": 0, "still": 0, "measured": True})
+            x_["losers"].append(l_)
+            x_["n"] += n_
+            x_["still"] += st_ or 0
+            x_["measured"] = x_["measured"] and st_ is not None
+        verdict += " " + " ".join(bind(words["verdictNavmeshLoss"], {
+            "winner": w_, "losers": (and_list([f"{l_}'s" for l_ in x_["losers"]]) if len(x_["losers"]) <= 2
+                       else f"{fmt_n(len(x_['losers']))} other mods'"),
+            "count": fmt_n(x_["n"]), "noun": "navmesh record" if x_["n"] == 1 else "navmesh records",
+            "still": bind(words["verdictNavmeshLossStill"], {"count": fmt_n(x_["still"])})
+            if x_["measured"] and words.get("verdictNavmeshLossStill") else ""}) for w_, x_ in by_w_.items())
     missing_facts = []
     if not p_targets:
         missing_facts.append(words["noModInSetup"])

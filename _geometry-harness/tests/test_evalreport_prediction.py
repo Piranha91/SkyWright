@@ -1737,7 +1737,8 @@ def main():
         plan, md, html = compile_and_render(PATCHED_ARMS, {(NAVOWN, "without-patch"): p_rows, (NAVOWN, "baseline"): []},
                                             [MOD_A, MOD_B], patches=[PATCH])
         sec = section_text(md, headings(plan).get("prediction") or "\0")
-        line = next((x for x in sec.splitlines() if "navmesh replaces" in x), "")
+        # (fourth review, Clockwork S4) the headline now says the replacement too: the measured line is the one read here
+        line = next((x for x in sec.splitlines() if "navmesh replaces" in x and not x.startswith(">")), "")
         ok = (f"without the patch, {MOD_B}'s navmesh replaces {MOD_A}'s in 2 navmesh records, and in 2 of them" in line
               and "CityExterior02 (ext) 689 -> 5 triangles" in line
               and f"2 of the broken navmesh links counted above point to triangles of a navmesh this replacement cut "
