@@ -4553,6 +4553,21 @@ def main():
     for name, fn in [("after-review/C920-small-record-item-values-and-meaning", c920_small_record_item_values_and_meaning)]:
         cell(name, fn)
 
+
+    # C921 (Pilgrim review, earlier S6): in the detail list, one object found in three world states is said as one
+    # object in 3 world states, never "3 records".
+    def c921_state_detail_counts_objects():
+        plan, md, html = state_bundle()
+        found = md.split("## What the checks found", 1)[-1].split("\n## ", 1)[0]
+        sec_ = found.split("### Objects that change with quests or switches", 1)[-1].split("###", 1)[0]
+        lines = [ln for ln in sec_.splitlines() if ln.startswith("- **")]
+        ok = (any("1 object between" in ln and "in 3 world states" in ln for ln in lines)
+              and not any("3 records" in ln for ln in lines))
+        return ok, " | ".join(x[:200] for x in lines)
+
+    for name, fn in [("after-review/C921-state-detail-counts-objects", c921_state_detail_counts_objects)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
