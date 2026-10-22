@@ -4766,6 +4766,39 @@ def main():
                      ("third-review/C936-listed-overlap-stays-left", c936_listed_overlap_stays_left)]:
         cell(name, fn)
 
+    # C937 (Missives review S1): OtherMod's value of a cell's Location equals HearthFires' own fix, which OtherMod (built
+    # on Skyrim.esm only) only carries; ModA, also built without HearthFires, has the earlier value and wins. The loss is
+    # ModA's against HearthFires', not a clash with OtherMod: set aside as no edit of OtherMod's and said once as ModA
+    # dropping HearthFires' fix. C965 (guard): where OtherMod's value is its own (not HearthFires'), it stays counted.
+    def base_fix_bundle(other_value):
+        L1 = f"00C937:{BASE}"
+        arms = [arm("baseline", [BASE, HF_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, OTHER, MOD_A, MOD_B])]
+        chains = [(L1, "Cell", [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}),
+                                (OTHER, {"Location": other_value}), (MOD_A, {"Location": ""})])]
+        p_rows = [lost_row(HF_, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", [f"Location={other_value}"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        return plan, md, L1
+
+    def c937_base_fix_carried_is_not_a_clash():
+        plan, md, L1 = base_fix_bundle("018A59:Skyrim.esm")
+        adm = [(e["A"], e["admission"]) for e in rec_of(plan, L1)]
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own fix" in ln), "")
+        ok = ((OTHER, "notOwnEdit") in adm and OTHER in line and MOD_A in line and "Location" in line
+              and not any(ln.startswith("- **Cell settings") for ln in md.splitlines()))
+        return ok, f"{adm}; {line[:300]}"
+
+    def c965_own_value_stays_counted():
+        plan, md, L1 = base_fix_bundle("0AAAAA:Skyrim.esm")
+        adm = [(e["A"], e["admission"]) for e in rec_of(plan, L1)]
+        return (OTHER, "admitted") in adm, f"{adm}"
+
+    for name, fn in [("third-review/C937-base-fix-carried-is-not-a-clash", c937_base_fix_carried_is_not_a_clash),
+                     ("third-review/C965-own-value-stays-counted", c965_own_value_stays_counted)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
