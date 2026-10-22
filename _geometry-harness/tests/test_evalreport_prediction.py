@@ -5247,6 +5247,26 @@ def main():
                      ("third-review/C964-bodiless-light-against-base-game", c964_bodiless_light_against_base_game)]:
         cell(name, fn)
 
+    # C956 (BPT review S3): a new problem with the patch names who moved the support, from the probe's own rows of the
+    # setup with the patch ("which X Moved"), so a support the patch moved is not read as the evaluated mod's doing.
+    def c956_new_problem_names_mover():
+        fk_ = f"000S56:{OTHER}"
+        r1 = row("STRANDED", MOD_A, OTHER, fk_, other=f"000H56:{BASE}")
+        r1["Summary"] = (f"Stranded: Static Shade Supported on Static Cap01 which {MOD_A} Moved; nearest thing now 128u  "
+                         f"{fk_} / 000H56:{BASE} in Hall (int)")
+        r2 = row("STRANDED", PATCH, OTHER, fk_, other=f"000H57:{BASE}")
+        r2["Summary"] = (f"Stranded: Static Shade Supported on Static Win02 which {PATCH} Moved; nearest thing now 128u  "
+                         f"{fk_} / 000H57:{BASE} in Hall (int)")
+        refs = {fk_: {"base": f"0B0S56:{OTHER}"}}
+        bases = {f"0B0S56:{OTHER}": {"type": "Static", "editorId": "Shade", "model": "shade.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): [r1, r2]},
+                                            [MOD_A, MOD_B], patches=[PATCH], names={"refs": refs, "bases": bases})
+        ln = next((x for x in md.splitlines() if x.startswith("- New clashes with the patch, by check")), "")
+        return f"moved by {MOD_A} and {PATCH}" in ln or f"moved by {PATCH} and {MOD_A}" in ln, ln[:300]
+
+    for name, fn in [("third-review/C956-new-problem-names-mover", c956_new_problem_names_mover)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
