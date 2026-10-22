@@ -4273,6 +4273,27 @@ def main():
     for name, fn in [("after-review/C909-water-seam-detail-names-the-undo", c909_water_seam_detail_names_the_undo)]:
         cell(name, fn)
 
+
+    # C910 (Clockwork review 1): removing the patch, the overlap comparison counts as new only the crossings its probe
+    # calls a new defect (1 of the 2 rows that entered the class); the other crosses in both setups and is said so.
+    def c910_removing_patch_counts_new_defects():
+        X1, X2 = f"000X11:{MOD_A}", f"000X12:{MOD_A}"
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X1, other=f"000Y11:{MOD_B}"),
+                  row("OVERLAP", MOD_B, MOD_A, X2, other=f"000Y12:{MOD_B}")]
+        w_rows = []
+        order = {"without-patch": {"overlapprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                         created=2, newDefect=1, attributed=1, unmeasured=0)}}
+        log = f"NEW     OVERLAP    {MOD_B}  x  {MOD_A}   +2 record(s): created 2\n"
+        plan, md, html = compile_and_render(PATCHED_ARMS, {(OVERLAP, "without-patch"): p_rows, (OVERLAP, "baseline"): w_rows},
+                                            [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                            diff_logs={(OVERLAP, "without-patch"): log})
+        line = next((ln for ln in md.splitlines() if "new overlap candidate" in ln and "introduced" in ln), "")
+        ok = "introduced 1 new overlap candidate " in line and re.search(r"\b1 more\b", line) is not None
+        return ok, line[:300]
+
+    for name, fn in [("after-review/C910-removing-patch-counts-new-defects", c910_removing_patch_counts_new_defects)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
