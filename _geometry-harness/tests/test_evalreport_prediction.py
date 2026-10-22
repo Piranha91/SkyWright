@@ -4965,6 +4965,16 @@ def main():
     for name, fn in [("third-review/C949-index-record-one-row-per-line", c949_index_record_one_row_per_line)]:
         cell(name, fn)
 
+    # C950 (BPT review S1): the headline's record-field count carries the split its item gives: how many of the fields
+    # are on objects the winning version sets off for good (offwin_bundle: D1 and D3 of 3).
+    def c950_headline_says_off_for_good():
+        plan, md, _ = offwin_bundle()
+        verdict = str((reader(plan).get("prediction") or {}).get("verdict") or "")
+        return re.search(r"\(3 record fields, 2 of them on objects the winning version sets off for good\)", verdict) is not None, verdict[:300]
+
+    for name, fn in [("third-review/C950-headline-says-off-for-good", c950_headline_says_off_for_good)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
