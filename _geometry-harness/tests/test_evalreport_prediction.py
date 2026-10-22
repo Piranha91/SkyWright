@@ -5655,7 +5655,6 @@ def main():
                                          [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
                                          enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE], O3: [BASE],
                                                                                   PATCH: [BASE]})
-        print("DBG3", [x for x in md.splitlines() if "redict" in x or "Resolved" in x][:6], file=sys.stderr)
         return next((x for x in md.splitlines() if "but not predicted" in x), "")
 
     def c985_earlier_fixes_counted_once():
