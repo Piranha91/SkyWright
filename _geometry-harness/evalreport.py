@@ -6249,11 +6249,15 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
             c_ = f_.get("counts") or {}
             for r_ in f_.get("allRows") or f_.get("rows") or []:       # every row, not only the ones shown
                 k_ = ident_(f_.get("checkId"), r_.get("formKey"), r_.get("field"), r_.get("other"), c_.get("A"), c_.get("B"))
-                got_["counted" if pred_ident.get(k_) else "aside" if k_ in pred_ident else "new"] += 1
+                v_ = r_.get("values") or {}
+                # (BPT re-review S1) two values naming the same file but for letter case are no change in game
+                lv_, wv_ = ("; ".join(map(str, x_)) if isinstance(x_, list) else x_ for x_ in (v_.get("lost"), v_.get("winner")))
+                case_ = k_ not in pred_ident and same_but_path_case(lv_, wv_)
+                got_["counted" if pred_ident.get(k_) else "aside" if k_ in pred_ident else "case" if case_ else "new"] += 1
         if sum(got_.values()) != n_rows or got_["counted"] == n_rows or not conc.get("withPatchSplitParts"):
             return ""
         return " (" + "; ".join(bind(conc["withPatchSplitParts"][w_], {"count": fmt_n(got_[w_])})
-                                for w_ in ("counted", "aside", "new") if got_[w_]) + ")"
+                                for w_ in ("counted", "aside", "case", "new") if got_[w_]) + ")"
 
     def counted_note(fids, n_rows):
         if with_arm_ and with_arm_ != pred_arm_ and fids and all((f_by_id.get(x) or {}).get("armId") == with_arm_
