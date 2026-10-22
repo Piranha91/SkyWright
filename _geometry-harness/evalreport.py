@@ -3880,6 +3880,7 @@ def build_prediction(ctx: dict) -> dict:
             n_ = len(rows_)
             f_["readerPlain"] = bind(sd_, {"count": fmt_n(n_), "noun": "boundary" if n_ == 1 else "boundaries",
                                            "mod": mods_[mod_l], "master": master_})
+            f_["readerSeamPutBack"] = [mods_[mod_l], master_]   # the folded detail line says it the same way (C928)
     # (Pilgrim review 1) a split of quest aliases is said by scene, with the probe's own distance sentence, naming the
     # plugin that first set the actors' winning placement (the record import's chain of that setup), never as records
     # "between" the probe's plugin pair
@@ -6096,6 +6097,13 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     for f in relevant:
                         c = f.get("counts") or {}
                         ph = phrases.get(str(c.get("groupKind") or "")) or {}
+                        if f.get("readerSeamPutBack"):
+                            # seams on cells a mod undoes its master's fix on: one entry per undo, never by neighbour
+                            m_, ms_ = f["readerSeamPutBack"]
+                            e_ = by_pair.setdefault(("putBack", m_, ms_), {"n": 0, "ids": [], "putBack": (m_, ms_)})
+                            e_["n"] += int(f.get("readerRows", f.get("rowsTotal")) or 0)
+                            e_["ids"].append(f["id"])
+                            continue
                         st_ = str(c.get("groupKind") or "").startswith("STATE-")
                         e_ = by_pair.setdefault((c.get("A"), c.get("B"), ph.get("unitPlural"), st_),
                                                 {"n": 0, "ids": [], "ph": ph, "A": c.get("A"), "B": c.get("B"),
@@ -6107,6 +6115,12 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                        for r_ in f.get("allRows") or [] if isinstance(r_, dict)}
                     entries = []
                     for e_ in by_pair.values():
+                        if e_.get("putBack"):
+                            sd_ = ((pr.get("reader") or {}).get("prediction") or {}).get("seamPutBackDetail") or ""
+                            entries.append({"id": e_["ids"][0], "more": e_["ids"][1:], "text": bind(sd_, {
+                                "count": fmt_n(e_["n"]), "noun": "boundary" if e_["n"] == 1 else "boundaries",
+                                "mod": e_["putBack"][0], "master": e_["putBack"][1]}).rstrip(".")})
+                            continue
                         n_, ph = e_["n"], e_["ph"]
                         if e_["state"] and e_["objs"] and conc.get("detailStateObjects"):
                             no_ = len(e_["objs"])
