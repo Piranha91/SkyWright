@@ -3523,11 +3523,11 @@ def build_prediction(ctx: dict) -> dict:
                        and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
         n_enable = len(switched_on)
         enable_examples = list(dict.fromkeys(str(rk[4]) for rk in switched_on))[:3]
-        def problems_text(with_checks=False):
+        def problems_text(with_checks=False, xs=None):
             """The new problems with the patch in their units: an object of a by-object check is counted as an object,
-            with its pairs beside it (BPT review S3); with_checks names each check."""
+            with its pairs beside it (BPT review S3); with_checks names each check. xs: a subset of the problems."""
             per = collections.OrderedDict()
-            for rk_ in problems:
+            for rk_ in (problems if xs is None else xs):
                 ident_ = ident_of.get(rk_, tuple(rk_[:5]))
                 c_ = per.setdefault((rk_[0], rk_[1] if rk_[0] not in by_object else ""), [0, 0])
                 c_[0] += 1
@@ -3868,8 +3868,15 @@ def build_prediction(ctx: dict) -> dict:
         if placed:
             # (third review, Clockwork S1) the patch's own placement, never folded into left
             sum_parts.append(bind(words["validationSummaryPlaced"], {"count": by_unit(placed, True)}))
-        sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True)}) if problems
+        # (third review, Pilgrim S2) a new clash a setup without the evaluated mod already has is the patch bringing that
+        # setup's state back: said apart, never counted against the patch as new
+        back_ids = {id(rk_) for rk_, _ in not_new}
+        new_rest = [rk_ for rk_ in problems if id(rk_) not in back_ids]
+        sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True, new_rest)}) if new_rest
                          else words["validationSummaryNoNew"])
+        if not_new:
+            sum_parts.insert(len(sum_parts) - 1, bind(words["validationSummaryBroughtBack"], {
+                "count": problems_text(False, [rk_ for rk_, _ in not_new])}))
         summary_ = bind(words["validationSummary"], {"patch": patch, "parts": ((", ".join(sum_parts[:-1]) + ", and "
                                                                                 + sum_parts[-1]) if len(sum_parts) > 1
                                                                                else sum_parts[0])})
