@@ -3389,9 +3389,9 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
                                   masters={HF: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         got = {e["A"]: e["admission"] for e in rec_of(plan, L1)}
-        # (third review, Missives S1) OtherMod only carries HearthFires' own fix (it is built without HearthFires): the
+        # (third review, Missives S1) OtherMod only carries HearthFires' own change (it is built without HearthFires): the
         # loss is ModA's against HearthFires, said once on its own line, not OtherMod's change counted as a clash
-        line = next((ln for ln in md.splitlines() if f"wins over {HF}'s own fix" in ln), "")
+        line = next((ln for ln in md.splitlines() if f"wins over {HF}'s own change of" in ln), "")
         ok = got == {HF: "baseGame", OTHER: "notOwnEdit"} and OTHER in line and MOD_A in line
         return ok, f"{got}; {line[:200]!r}"
 
@@ -3679,10 +3679,10 @@ def main():
                                            MOD_B: [BASE]})
         got = {e["A"]: e["admission"] for e in rec_of(plan, L)}
         pred = reader(plan).get("prediction") or {}
-        # (third review, Missives S1) OtherMod's value is Update.esm's own fix it carries: no edit of OtherMod's; the
+        # (third review, Missives S1) OtherMod's value is Update.esm's own change it carries: no edit of OtherMod's; the
         # loss is still said once, on the undoes-its-master line, and no base-fix line repeats it
         ok = (got == {UPD: "undoesMaster", OTHER: "notOwnEdit"} and "Location" not in pred.get("verdict", "")
-              and "own fix of" not in md and f"undoes its master {UPD}'s fix" in md)
+              and "own change of" not in md and f"undoes its master {UPD}'s fix" in md)
         return ok, f"{got}; verdict {pred.get('verdict', '')[:160]!r}"
 
     # C811 (Clockwork review S2/S3, coordinator D on S3): what disables an object is read from each side's whole
@@ -3873,7 +3873,7 @@ def main():
                                   masters={HF_: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         # (third review, Missives S1) the value's origin is said on the base-fix line: ModA drops HearthFires' fix, which
         # OtherMod only carries
-        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own fix" in ln), "")
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
         ok = f"{OTHER} only carry" in line and "Location" in line and MOD_A in line
         return ok, line[-260:]
 
@@ -4772,7 +4772,7 @@ def main():
                      ("third-review/C936-listed-overlap-stays-left", c936_listed_overlap_stays_left)]:
         cell(name, fn)
 
-    # C937 (Missives review S1): OtherMod's value of a cell's Location equals HearthFires' own fix, which OtherMod (built
+    # C937 (Missives review S1): OtherMod's value of a cell's Location equals HearthFires' own change, which OtherMod (built
     # on Skyrim.esm only) only carries; ModA, also built without HearthFires, has the earlier value and wins. The loss is
     # ModA's against HearthFires', not a clash with OtherMod: set aside as no edit of OtherMod's and said once as ModA
     # dropping HearthFires' fix. C965 (guard): where OtherMod's value is its own (not HearthFires'), it stays counted.
@@ -4791,7 +4791,7 @@ def main():
     def c937_base_fix_carried_is_not_a_clash():
         plan, md, L1 = base_fix_bundle("018A59:Skyrim.esm")
         adm = [(e["A"], e["admission"]) for e in rec_of(plan, L1)]
-        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own fix" in ln), "")
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
         ok = ((OTHER, "notOwnEdit") in adm and OTHER in line and MOD_A in line and "Location" in line
               and not any(ln.startswith("- **Cell settings") for ln in md.splitlines()))
         return ok, f"{adm}; {line[:300]}"
@@ -4818,7 +4818,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
                                   masters={HF_: [BASE], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE]})
         adm = [(e["A"], e["admission"]) for e in rec_of(plan, L1)]
-        lines = [ln for ln in md.splitlines() if f"wins over {HF_}'s own fix" in ln]
+        lines = [ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln]
         return (OTHER, "notOwnEdit") in adm and len(lines) == 1 and OTHER in lines[0], f"{adm}; {lines[:1]}"
 
     for name, fn in [("third-review/C966-inherited-base-fix-loss-said", c966_inherited_base_fix_loss_said)]:
