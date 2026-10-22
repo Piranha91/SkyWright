@@ -49,6 +49,7 @@ from runlog import Run  # noqa: E402
 sys.path.insert(0, str(HERE))
 import evalsettings  # noqa: E402
 import recordrows  # noqa: E402
+import refscan  # noqa: E402
 
 try:
     import jinja2
@@ -1699,6 +1700,45 @@ def build_prediction(ctx: dict) -> dict:
                                      and not k_.startswith("EnableParent"))
                 and not provider_disables(ch, i_))
 
+    # (third review, Pilgrim S1) whether the losing plugin refers to an object at all: a read-only scan of the plugin
+    # file the bundle's prediction setup names, only where its bytes are the recorded ones (sha256); None where there is
+    # no such read. Every read is recorded in the prediction (referenceReads).
+    ref_reads, ref_cache, sha_cache = [], {}, {}
+
+    def plugin_file(name):
+        main_b = ctx.get("mainBundle")
+        arm_ = next((x for x in (main_b.plan.get("arms") if main_b else None) or [] if x.get("armId") == p_arm), {})
+        return next(((str(x.get("path") or ""), str(x.get("sha256") or "").lower())
+                     for x in (arm_.get("requested") or {}).get("plugins") or []
+                     if str(x.get("name")).lower() == str(name).lower()), ("", ""))
+
+    def refers_to(plugin, fk):
+        key_ = (str(plugin).lower(), str(fk))
+        if key_ not in ref_cache:
+            got_, path_, sha_ = None, *plugin_file(plugin)
+            if path_ and sha_ and Path(path_).is_file():
+                if path_ not in sha_cache:
+                    sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+                if sha_cache[path_] == sha_:
+                    try:
+                        res_ = refscan.scan(path_, [str(fk)])
+                        got_ = bool(res_["refs"].get(str(fk)))
+                        ref_reads.append({"plugin": plugin, "sha256": sha_, "object": str(fk),
+                                          "references": res_["refs"].get(str(fk)) or []})
+                    except refscan.RefScanError as e_:
+                        ref_reads.append({"plugin": plugin, "sha256": sha_, "object": str(fk), "error": str(e_)})
+            ref_cache[key_] = got_
+        return ref_cache[key_]
+
+    def bare_start_off(rk, plugin):
+        """`plugin`'s version only starts the object disabled, with no enable parent at all."""
+        if not side_starts_off(rk, plugin):
+            return False
+        ch = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+        low_ = [str(x).lower() for x in ch["providers"]]
+        f_ = provider_fields_all(ch, low_.index(str(plugin).lower()))
+        return not re.match(r"^[0-9A-Fa-f]{6}:", str(f_.get("EnableParent.Reference") or "").strip())
+
     def side_disables(rk, plugin, arm_id=None):
         """Whether `plugin`'s version of the row's record disables the object (provider_disables); None where the
         record import's chain does not hold it."""
@@ -1891,6 +1931,11 @@ def build_prediction(ctx: dict) -> dict:
             return "pathCase"                  # the two values name the same file (Snazzy review 3)
         if rk[1] == "LOST-EDIT" and both_disabled(rk):
             return "bothDisabled"              # both mods disable the object: no effect in game
+        if (rk[1] == "LOST-EDIT" and bare_start_off(rk, rk[2]) and side_disables(rk, rk[3])
+                and refers_to(rk[2], rk[4]) is False):
+            # (third review, Pilgrim S1) the loser only starts it disabled and nothing in the loser refers to it, so it
+            # stays off in the loser's game too; the winner sets it off for good: no effect in game
+            return "offUnreferenced"
         if rk[1] == "LOST-EDIT":
             noise = lost_edit_noise(rk)
             if noise:
@@ -2120,7 +2165,10 @@ def build_prediction(ctx: dict) -> dict:
                                      or side_disables(rk, rk[3])) and not (
                 disables((hit["row"].get("values") or {}).get("lost")) or side_disables(rk, rk[2])):
             g["_disables"] = g.get("_disables", 0) + 1
-        if rk[1] == "LOST-EDIT" and (side_starts_off(rk, rk[2]) or side_starts_off(rk, rk[3])):
+        if rk[1] == "LOST-EDIT" and side_starts_off(rk, rk[2]) and side_disables(rk, rk[3]):
+            # (third review, Pilgrim S1) only the loser's version starts it disabled; the winner's sets it off for good
+            g.setdefault("_startsOffLoser", collections.Counter())[rk[2]] += 1
+        elif rk[1] == "LOST-EDIT" and (side_starts_off(rk, rk[2]) or side_starts_off(rk, rk[3])):
             g["_startsOff"] = g.get("_startsOff", 0) + 1
         # (third review, Sewers S1) a broken link from a base-game navmesh record the other mod only carries (the probe's
         # provider chain): whether that mod changed the link is not in the record data, so it is not said as its doing
@@ -2398,6 +2446,9 @@ def build_prediction(ctx: dict) -> dict:
             if words.get("itemBaseNavCarried"):
                 detail.append(bind(words["itemBaseNavCarried"], {
                     "lead": f"All {fmt_n(n_)} are" if n_ == g["count"] else f"{fmt_n(n_)} of them are", "mod": m_}))
+        for m_, n_ in (g.pop("_startsOffLoser", None) or {}).items():
+            if words.get("itemStartsOffLoser"):
+                detail.append(bind(words["itemStartsOffLoser"], {"count": fmt_n(n_), "loser": m_}))
         n_off = g.pop("_startsOff", 0)
         if n_off and words.get("itemStartsOff"):
             detail.append(bind(words["itemStartsOff"], {"count": fmt_n(n_off)}))
@@ -2927,6 +2978,7 @@ def build_prediction(ctx: dict) -> dict:
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
+             "offUnreferenced": set_aside["offUnreferenced"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
              "ownMaster": set_aside["ownMaster"], "undoesMaster": set_aside["undoesMaster"],
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
@@ -3031,6 +3083,7 @@ def build_prediction(ctx: dict) -> dict:
             if str(a_).startswith("sibling:"):
                 sibling_record["roles"].setdefault(f"without {m_}", a_.split(":", 1)[1])
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
+                  "referenceReads": ref_reads,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
                   "items": items, "historyLossLines": loss_lines, "aloneLines": [{**v, "groups": [{"from": k, "entries": e} for k, e in v["groups"].items()]}
                                                  for v in alone_lines.values()],
@@ -3048,6 +3101,7 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
                                    + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
                                    + (" " + bind(words["setAsideBothDisabled"], aside) if aside["bothDisabled"] else "")
+                                   + (" " + bind(words["setAsideOffUnreferenced"], aside) if aside["offUnreferenced"] else "")
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
                                    + (" " + bind(words["setAsideNotOwnEdit"], {
                                        "count": fmt_n(aside["notOwnEdit"]),
