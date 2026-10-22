@@ -1417,6 +1417,10 @@ def build_prediction(ctx: dict) -> dict:
     field_words_ = words.get("fieldWords") or {}
     flag_bits_ = words.get("flagBits") or {}
 
+    def field_meaning(rtypes, f):
+        fig_ = words.get("fieldInGame") or {}
+        return next((fig_[f"{t_}|{f}"] for t_ in rtypes if f"{t_}|{f}" in fig_), None) or fig_.get(str(f))
+
     def field_word(f):
         """A field in plain words (Winterhold review 5, skill data `fieldWords`); the record's name where none is set."""
         return field_words_.get(str(f), str(f)) if f is not None else ""
@@ -2211,6 +2215,7 @@ def build_prediction(ctx: dict) -> dict:
             # (third review, Missives S2) other plugins holding the same lost value as their own change; a lost value that
             # is an absence (the loser has no such data); a winner keeping the base game's value
             g.setdefault("_fieldRows", collections.Counter())[field_word(hit["row"].get("field"))] += 1
+            g.setdefault("_rawFields", collections.Counter())[str(hit["row"].get("field"))] += 1
             got3_ = field_chain(p_of(rk[0]), rk, rk[2])
             if got3_ is not None:
                 provs3, vals3, _ = got3_
@@ -2458,6 +2463,14 @@ def build_prediction(ctx: dict) -> dict:
         n_off = g.pop("_startsOff", 0)
         if n_off and words.get("itemStartsOff"):
             detail.append(bind(words["itemStartsOff"], {"count": fmt_n(n_off)}))
+        fn_ = g.pop("_rawFields", None) or {}
+        if g["kind"] == "LOST-EDIT" and fn_ and words.get("itemMainFieldInGame"):
+            top_f, top_n = collections.Counter(fn_).most_common(1)[0]
+            mean_ = field_meaning([], top_f)
+            if top_n * 2 > sum(fn_.values()) and mean_ and not any(mean_ in d_ for d_ in detail):
+                detail.append(bind(words["itemMainFieldInGame"], {
+                    "count": fmt_n(top_n), "field": field_word(top_f), "meaning": mean_,
+                    "lead": "All" if top_n == sum(fn_.values()) else "Most"}))
         fl_ = g.pop("_fieldsLine", None)
         if fl_:
             detail.append(bind(words["itemFields"], {"fields": fl_}))
@@ -3087,7 +3100,12 @@ def build_prediction(ctx: dict) -> dict:
                     "noun": words["fieldNoun"][1], "verb": "is" if g_["n"] == 1 else "are",
                     "records": f"{fmt_n(n_rec)} {'record' if n_rec == 1 else 'records'}" + (
                         " (" + ", ".join(f"{t_} {fmt_n(c_)}" for t_, c_ in types_.most_common()) + ")" if types_ else ""),
-                    "fields": fields_text(g_["fields"])})})
+                    "fields": fields_text(g_["fields"]),
+                    "inGame": (bind(words["orderRiskInGame"], {"meanings": "; ".join(
+                        f"{field_word(f_)}: {m_}" for f_, m_ in ((f_, field_meaning(list(types_), f_))
+                                                                 for f_, _ in collections.Counter(g_["fields"]).most_common())
+                        if m_)}) if any(field_meaning(list(types_), f_) for f_ in g_["fields"])
+                        else words["orderRiskInGameMissing"])})})
                 order_record.append({"armId": o_.get("armId"), "planPath": o_.get("planPath"),
                                      "rowsPath": o_.get("rowsPath"), "loser": a_, "winner": b_, "fields": g_["n"],
                                      "records": n_rec})
