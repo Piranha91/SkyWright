@@ -2349,7 +2349,7 @@ def build_prediction(ctx: dict) -> dict:
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
         ph = phrases.get(g["kind"]) or {}
         noun = (ph.get("unitSingular") if g["count"] == 1 else ph.get("unitPlural")) or ("clash" if g["count"] == 1 else "clashes")
-        attr_key = g["attribution"]
+        attr_key, replaced_ = g["attribution"], 0
         other_mod = next((m for m in g["mods"] if str(m).lower() != str(g["attributionMod"] or "").lower()), "")
         if not multi and attr_key in ("needs-both", "single-mod", "with-target") and g["attributionMod"]:
             attr_key = {"needs-both": "needs-both-other", "single-mod": "single-mod-target",
@@ -2357,10 +2357,18 @@ def build_prediction(ctx: dict) -> dict:
         if (attr_key == "single-mod-target" and g["kind"] != "LOST-EDIT" and pair_objects_of_base(g)
                 and words["attribution"].get("single-mod-target-base")):
             attr_key = "single-mod-target-base"       # its partners are base-game objects the other mod edits
+            # (third review, Snazzy S3) where the other mod's version of a partner uses a base record of its own (the
+            # names enrichment's winning base), it replaces the model there: never "only edits"
+            replaced_ = sum(1 for o_ in g.get("_partners") or []
+                            if str((name_refs.get(str(o_)) or {}).get("base") or "").split(":", 1)[-1].lower()
+                            == str(other_mod).lower())
+            if replaced_ and words["attribution"].get("single-mod-target-base-replaced"):
+                attr_key = "single-mod-target-base-replaced"
         elif (attr_key == "single-mod" and g["attributionMod"]
                 and str(g["attributionMod"]).lower() not in {m.lower() for m in g["mods"]}):
             attr_key = "single-mod-elsewhere"       # the same object is broken with the other evaluated mod alone
         attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "other": other_mod,
+                                                          "replaced": fmt_n(replaced_) if attr_key.endswith("replaced") else "",
                                                           "why": g["attributionWhy"] or ""})
         subjects_of[id(g)] = g.pop("_subjects")
         pair_objects_of[id(g)] = g.pop("_pairObjects", set())
