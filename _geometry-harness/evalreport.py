@@ -2250,6 +2250,29 @@ def build_prediction(ctx: dict) -> dict:
         if n_undecided and len(directions) == 1:
             loser, winner = next(iter(directions))
             detail.append(bind(words["itemNotDecided"], {"count": fmt_n(n_undecided), "loser": loser, "winner": winner}))
+        # (Missives review 3) a small record item says each side's value (what a patch would forward) and, where
+        # skill data has it, what the field does in game
+        lk_ = lost_keys_of.get(id(g)) or []
+        if g["kind"] == "LOST-EDIT" and lk_ and len(lk_) <= int(words.get("itemValuesMax") or 0):
+            for rk_, f_ in lk_:
+                ch_ = (chains_of(rk_[0], p_of(rk_[0])) or {}).get(str(rk_[4]))
+                low_ = [str(x).lower() for x in (ch_ or {}).get("providers") or []]
+                if not f_ or rk_[2].lower() not in low_ or rk_[3].lower() not in low_:
+                    continue
+                if ex_own and str(ex_own[0]) == str(rk_[4]):
+                    continue                   # its values are already quoted where the winner changed it too
+                vs_ = []
+                for p_ in (rk_[2], rk_[3]):
+                    lv_ = recordrows.provider_fields(ch_, f_, low_.index(p_.lower()))
+                    vs_.append(plain_value(f_, lv_[f_]) if list(lv_) == [f_] else
+                               "; ".join(f"{k_.split('.', 1)[-1]}={v_}" for k_, v_ in sorted(lv_.items())))
+                if vs_[0] == vs_[1] or not all(vs_):
+                    continue
+                detail.append(bind(words["itemValues"], {"record": named(rk_[4], rk_[5]), "field": field_word(f_),
+                                                         "loser": rk_[2], "lost": vs_[0], "winner": rk_[3], "won": vs_[1]}))
+                mean_ = (words.get("fieldInGame") or {}).get(f"{record_type_of(rk_[5])}|{f_}")
+                if mean_:
+                    detail.append(bind(words["itemFieldInGame"], {"field": field_word(f_), "meaning": mean_}))
         pool = g.pop("_recordPool", None)
         if pool:
             g["_records"] = (pool[0] + pool[1])[:2]

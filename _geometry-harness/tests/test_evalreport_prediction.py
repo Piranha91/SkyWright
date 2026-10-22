@@ -3304,8 +3304,11 @@ def main():
                   lost_row(OTHER, MOD_A, D2, "Description", "o2", "v2", "v2", before=BASE)]
         plan, md, _ = core_bundle(p_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         line = next((ln for ln in md.splitlines() if ln.startswith("- **") and "OtherMod.esp's value is lost" in ln), "")
-        ok = (f"In 1 of them {MOD_A} changed the field itself too" in line and '"o1"' in line and '"a1"' in line
-              and '"o2"' not in line)
+        # after-review (Missives review 3): a small item also states each side's value per record in its own sentence;
+        # the winner-changed-it-too sentence is the one that must not quote the row the winner did not change
+        own_ = next((x for x in line.split(". ") if "changed the field itself too" in x), "")
+        ok = (f"In 1 of them {MOD_A} changed the field itself too" in line and '"o1"' in own_ and '"a1"' in own_
+              and '"o2"' not in own_)
         return ok, line[-300:]
 
     # C722 (Missives review B2). Whose change a value is, against the nearest master that carries the record: ModA lists
