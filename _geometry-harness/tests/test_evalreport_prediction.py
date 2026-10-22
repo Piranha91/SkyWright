@@ -3027,6 +3027,20 @@ def main():
         ok = "1 record field, in 2 plugin pairs" in ln
         return ok, f"line {ln[:160]!r}"
 
+    # C1043 (Clockwork review S3 / Minor 4): the patch-wins line says the pairs are the plugin pairs that lose its fields,
+    # all told, so "4 record fields, in 6 plugin pairs" does not read as impossible.
+    def c1043_patch_wins_pairs_read():
+        F2 = f"00929C:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, F2, "OcclusionData", "o", "a", "v")]
+        w_rows = [lost_row(OTHER, PATCH, F2, "OcclusionData", "o", "p", "v"),
+                  lost_row(MOD_A, PATCH, F2, "OcclusionData", "a", "p", "o")]
+        plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
+        ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
+        return "1 record field, lost by 2 plugin pairs in all," in ln, f"line {ln[:200]!r}"
+
+    for name, fn in [("fourth-review/C1043-patch-wins-pairs-read", c1043_patch_wins_pairs_read)]:
+        cell(name, fn)
+
     # C629 (Pilgrim's second blind review, S5). The base-game geometry line counts a pair of objects once however many
     # world states show it.
     def c629_base_game_state_pairs_once():
