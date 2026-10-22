@@ -4484,9 +4484,18 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             check_phrase = ((pr.get("reader") or {}).get("regressionCheckPhrases") or {}).get(
                 f.get("checkId"), "completed check")
             if f.get("checkId") == "geometry.object-overlap":
+                # (Clockwork review 1) only the crossings the probe calls a new defect are new; the others that entered
+                # the class cross in both setups and are said apart
+                nd_, cr_ = c.get("newDefect"), c.get("created")
+                held_ = (int(cr_) - int(nd_) if isinstance(nd_, int) and isinstance(cr_, int) and 0 <= nd_ < cr_
+                         else 0)
+                new_count = max(0, new_count - held_)
                 f["readerPlain"] = bind(reader_comparison_templates["overlapRegression"],
                                         {"newCount": new_count, **subject_values([f.get("armId")]),
                                          "candidateNoun": overlap_candidate_noun(new_count)})
+                if held_:
+                    f["readerPlain"] += bind(reader_comparison_templates["overlapRegressionHeld"],
+                                             {"heldCount": fmt_n(held_)})
                 if repaired_count:
                     f["readerPlain"] += bind(reader_comparison_templates["overlapRegressionReduction"],
                                              {"repairedCount": repaired_count,
