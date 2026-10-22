@@ -4496,6 +4496,23 @@ def main():
                      ("after-review/C918-sample-said-as-test-point", c918_sample_said_as_test_point)]:
         cell(name, fn)
 
+
+    # C917 (Clockwork review 4, Winterhold minor 5): broken navmesh links are between navmesh records, never "objects",
+    # in the still-there line and in "all are against one ...".
+    def c917_navmeshes_not_called_objects():
+        T1 = f"000N71:{BASE}"
+        rows_ = [row("EDGE-IDX", MOD_B, MOD_A, f"000N7{i}:{MOD_A}", other=T1, label="Town (ext)") for i in (2, 3)]
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): rows_, (NAVOWN, "with-patch"): rows_},
+                                         [MOD_A, MOD_B], patches=[PATCH])
+        st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **") and "navmesh link" in ln), "")
+        ok = ("navmesh records" in st and " objects" not in st and "against one navmesh record" in it
+              and "against one object" not in it)
+        return ok, f"{st[:250]} | {it[-200:]}"
+
+    for name, fn in [("after-review/C917-navmeshes-not-called-objects", c917_navmeshes_not_called_objects)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
