@@ -6217,6 +6217,40 @@ def main():
               and "(1 new with the patch)" in det)
         return ok, f"{summ[:200]} || {det[-200:]}"
 
+    # C1051 (Pilgrim S4): Placement rows where the winner puts the objects far lower than the loser (a straight vertical
+    # difference) say the height difference, and that what it puts them inside or below was not measured.
+    def c1051_height_difference_said():
+        rows_ = []
+        for i_ in (1, 2):
+            D_ = f"00CA5{i_}:{BASE}"
+            rows_.append(lost_row(MOD_A, MOD_B, D_, "Placement", f"Position=100,{i_}00,1424; Rotation=0,0,0",
+                                  f"Position=100,{i_}00,0; Rotation=0,0,0", f"Position=100,{i_}00,0; Rotation=0,0,0",
+                                  before=BASE))
+        plan, md, _ = core_bundle(rows_, list(rows_), targets=(MOD_A, MOD_B), masters={**MASTERS_, PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return ("1,424 u lower" in it and "not measured" in it), it[-400:]
+
+    # C1050 (Pilgrim S2): an overlap pair one of whose objects has a model in the effects folder (mist, fog, light beams)
+    # is said as a visual effect, not a solid body, whose crossing may not show; the pair stays counted.
+    def c1050_effect_model_pairs_said():
+        X, Y, Z = f"000X50:{MOD_A}", f"000Y50:{MOD_B}", f"000Z50:{MOD_B}"
+        rows_ = [row("OVERLAP", MOD_B, MOD_A, X, other=Y), row("OVERLAP", MOD_B, MOD_A, X, other=Z)]
+        refs = {X: {"base": f"0B0X50:{MOD_A}"}, Y: {"base": f"0B0Y50:{MOD_B}"}, Z: {"base": f"0B0Z50:{MOD_B}"}}
+        bases = {f"0B0X50:{MOD_A}": {"type": "Static", "editorId": "Rock", "model": "Landscape\\Rock01.nif"},
+                 f"0B0Y50:{MOD_B}": {"type": "MoveableStatic", "editorId": "FXMistLow01", "model": "Effects\\Ambient\\FXMistLow01.nif"},
+                 f"0B0Z50:{MOD_B}": {"type": "Static", "editorId": "Wall", "model": "Architecture\\Wall01.nif"}}
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        results = {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): rows_, (OVERLAP, "without-b"): []}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH], names={"refs": refs, "bases": bases})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        adm = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or [] if e["checkId"] == OVERLAP]
+        return ("1 of these" in it and "visual effect" in it and adm == ["admitted", "admitted"]), f"{adm}; {it[-400:]}"
+
+    for name, fn in [("fourth-review/C1050-effect-model-pairs-said", c1050_effect_model_pairs_said),
+                     ("fourth-review/C1051-height-difference-said", c1051_height_difference_said)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1038-alias-pair-one-clash", c1038_alias_pair_one_clash)]:
         cell(name, fn)
 
