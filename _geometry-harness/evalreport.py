@@ -3197,6 +3197,11 @@ def build_prediction(ctx: dict) -> dict:
         # credited with it too (fourth blind review, S1): the totals add up to the headline.
         all_ = {"hits": hits, "switched": switched, "own": own, "kept": kept, "open": open_,
                 "untold": untold + untold_value}
+        # (Clockwork review 1) one reading of who places the objects: where the record chain shows a patch placing one of
+        # them, every line says so, never "not attributed" beside a still-there line that attributes them
+        for e in judged:
+            if left_split.get(id(e)) == "notAttributed" and patch_places(e):
+                left_split[id(e)] = "patchHeld"
 
         def credit(xs):
             return [e for e in xs if not multi or e.get("attribution") != "single-mod"]
