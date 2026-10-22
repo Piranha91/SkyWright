@@ -2266,8 +2266,8 @@ def build_prediction(ctx: dict) -> dict:
                     lv_ = recordrows.provider_fields(ch_, f_, low_.index(p_.lower()))
                     vs_.append(plain_value(f_, lv_[f_]) if list(lv_) == [f_] else
                                "; ".join(f"{k_.split('.', 1)[-1]}={v_}" for k_, v_ in sorted(lv_.items())))
-                if vs_[0] == vs_[1] or not all(vs_):
-                    continue
+                if vs_[0] == vs_[1] or not all(vs_) or max(map(len, vs_)) > int(words.get("itemValueMaxChars") or 80):
+                    continue                   # no value, the same reading, or a table too long to quote (C926)
                 detail.append(bind(words["itemValues"], {"record": named(rk_[4], rk_[5]), "field": field_word(f_),
                                                          "loser": rk_[2], "lost": vs_[0], "winner": rk_[3], "won": vs_[1]}))
                 mean_ = (words.get("fieldInGame") or {}).get(f"{record_type_of(rk_[5])}|{f_}")
