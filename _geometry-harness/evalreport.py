@@ -2084,6 +2084,11 @@ def build_prediction(ctx: dict) -> dict:
         if adm == "admitted" and pair_ is not None and pair_ in pair_owner and pair_owner[pair_][0] != rk[0]:
             g_owner = pair_owner[pair_][1]
             g_owner.setdefault("_alsoFoundBy", collections.Counter())[rk[0]] += 1
+            # (third review, Sewers S3) what the other check found: the switch under which an object leaves or arrives
+            sw_m = re.search(r"under (\S+)(?: \(([^)]*)\))?: (\S+) \[[^\]]*\] (leaves|arrives)", str(rk[5] or ""))
+            if sw_m:
+                g_owner.setdefault("_alsoSwitch", collections.Counter())[
+                    (sw_m.group(1), sw_m.group(2) or "", named(sw_m.group(3), ""), sw_m.group(4))] += 1
             adm = "samePair"
         base_kind, in_state = state_split(rk[1])
         ident_ = ident_of.get(rk, tuple(rk[:5]))
@@ -2475,6 +2480,11 @@ def build_prediction(ctx: dict) -> dict:
         if also_ and words.get("itemAlsoFoundBy"):
             for c_, n_ in also_.items():
                 detail.append(bind(words["itemAlsoFoundBy"], {"count": fmt_n(n_), "title": title_of(c_)}))
+        for (sw_, by_, obj_, how_), n_ in (g.pop("_alsoSwitch", None) or {}).items():
+            key_ = "itemAlsoSwitchLeaves" if how_ == "leaves" else "itemAlsoSwitchArrives"
+            if words.get(key_):
+                detail.append(bind(words[key_], {"count": fmt_n(n_), "switch": sw_, "by": f" ({by_})" if by_ else "",
+                                                 "object": obj_}))
         n_dis = g.pop("_disables", 0)
         dis_of[id(g)] = n_dis                  # (third review, BPT S1) the headline carries the same count
         if n_dis and words.get("itemDisables"):
