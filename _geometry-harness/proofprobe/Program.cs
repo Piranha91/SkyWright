@@ -68,6 +68,16 @@ if (args.Length >= 2 && args[0] == "--only" && args[1] == "solidscan")
     return fail == 0 ? 0 : 1;
 }
 
+// --only sweptnear (2026-10-21): the instanced swept near test (MV4-MV6) and the volume identity cases beside it, alone.
+if (args.Length >= 2 && args[0] == "--only" && args[1] == "sweptnear")
+{
+    MotionProof.RunSweptNear(Check);
+    Console.WriteLine();
+    Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
+    if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
+    return fail == 0 ? 0 : 1;
+}
+
 // ---------------------------------------------------------------------------------------
 // Helpers — a FOMOD in a string, and the two predicates the model needs.
 // ---------------------------------------------------------------------------------------
@@ -3558,6 +3568,8 @@ MotionProof.RunContactEvidencePlaced(Check);
 // Surface crossing envelope on the curve (2026-10-05): interior-segment endpoints lie on the intersection line.
 MotionProof.RunEnvelopeOffset(Check);
 MotionProof.RunSampleTopology(Check);
+// 2026-10-21 (task 2026-10-21-swept-instanced-pose-storage): instanced swept near test, MV4-MV6 (red until implemented).
+MotionProof.RunSweptNear(Check);
 // Lane M (2026-10-09): the shared reader of members under motion, K-M1..K-M13 (red until implemented).
 MotionProof.RunMemberMotion(Check);
 // Lane M (2026-10-11): reach memory on non-converging clips (R1/R1b red until reach stops retaining samples), R2/R3 guards.
