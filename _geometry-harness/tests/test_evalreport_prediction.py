@@ -4018,6 +4018,101 @@ def main():
                       c831_opposite_of_player_on_both_sides_is_set_aside)]:
         cell(name, fn)
 
+
+    # ---------------------------------------- after the review round (2026-10-21): the blind reviews of regen-14
+    def off_said(text):
+        """The numbers a sentence gives next to "off for good" (the counts of lost changes on objects set off for good)."""
+        return sum(int(m_.group(1).replace(",", "")) for m_ in re.finditer(r"(\d[\d,]*) [^;()]*?off for good", text))
+
+    def left_said(summary):
+        """The record fields the summary's "left" part counts (0 when it names none, None when there is no such part)."""
+        lp_ = re.search(r"\bleft ([^:]*?)(?:, and new|\.$|$)", str(summary or ""))
+        m_ = re.search(r"(\d[\d,]*) record fields?\b", lp_.group(1)) if lp_ else None
+        return int(m_.group(1).replace(",", "")) if m_ else (0 if lp_ else None)
+
+    def pair_parts(stays, a_, b_):
+        return [x for x in re.split(r";\s+(?![^()]*\))", stays or "") if a_ in x and b_ in x]
+
+    # C900, C901 (BPT review 1): ModA's changes still lost to ModB with the patch, on objects ModB's version (in the
+    # setup with the patch) sets off for good, have no effect in game, and forwarding them brings back an object ModB
+    # removes. D1: ModB enables it opposite to the player, nothing patches it (left); D2: ModB only moves it (left, not
+    # off); D3: ModB moves it below the world and the patch carries ModB's version (kept). Two are off for good.
+    def offwin_bundle():
+        D1, D2, D3 = f"00C900:{BASE}", f"00C901:{BASE}", f"00C902:{BASE}"
+        a_ = offs(0)
+        a_["Placement.Position"] = "300,100,0"
+        b_off, b_mv, b_low = offs(0, "0", "000014:Skyrim.esm"), offs(0), offs(-30000)
+        b_mv["Placement.Position"] = "500,100,0"
+        p_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)
+                  for D, b_ in ((D1, b_off), (D2, b_mv), (D3, b_low))]
+        w_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)
+                  for D, b_ in ((D1, b_off), (D2, b_mv))]
+        w_rows.append(lost_row(MOD_A, PATCH, D3, "Placement", off_txt(a_), off_txt(b_low), off_txt(offs(0)), before=BASE))
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])
+                for D, b_ in ((D1, b_off), (D2, b_mv), (D3, b_low))]
+        w_ch = [(D1, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_off)]),
+                (D2, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_mv)]),
+                (D3, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_low), (PATCH, b_low)])]
+        return core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+
+    def c900_offwin_said_where_still_there():
+        plan, md, _ = offwin_bundle()
+        st = pair_parts((reader(plan).get("prediction") or {}).get("withPatchStays"), MOD_A, MOD_B)
+        return off_said(" ".join(st)) == 2, f"{st}"
+
+    def c901_offwin_said_on_comparison_and_summary():
+        plan, md, _ = offwin_bundle()
+        val = reader(plan).get("validation") or {}
+        il_ = [x for x in val.get("itemLines") or [] if x.startswith("Record fields") and MOD_B in x]
+        summ = str(val.get("summary") or "")
+        return off_said(" ".join(il_)) == 2 and off_said(summ) == 2, f"{il_}; {summ[:240]}"
+
+    # C902 (Winterhold review 1, BPT review 3): "left" is one number everywhere: a lost change no patch touches. Where
+    # the patch carries the winning value (000703), the losing mod's change stays lost by the patch's choice or copy, and
+    # it is said apart in the still-there line and the summary, never counted as left.
+    def c902_left_is_untouched_only():
+        plan, md, html = record_validation_bundle()
+        val, pr_ = reader(plan).get("validation") or {}, reader(plan).get("prediction") or {}
+        st = pair_parts(pr_.get("withPatchStays"), MOD_A, MOD_B)
+        n_left = left_said(val.get("summary"))
+        left_part = any(re.search(re.escape(MOD_A) + r"'s changes to 1 record field\b", x) for x in st)
+        carried = any(re.search(r"(?<![\d,])1(?![\d,])", x) and "carr" in x for x in st if not
+                      re.search(re.escape(MOD_A) + r"'s changes to 1 record field\b", x)) or any(
+                      "carr" in x and re.search(r"(?<![\d,])1(?![\d,])", x.split("record field", 1)[-1]) for x in st)
+        return n_left == 1 and left_part and carried, f"summary left {n_left}; {st}"
+
+    # C903, C904 (Missives review 1): a cell's Grid row set aside because the losing mod changed only the three unused
+    # bytes. Where the winner changed the land-flag byte (hiding land quarters), that is the winner's own change: not a
+    # clash between mods, and not "a change the game does not read"; it is said on its own line, with the cell, the
+    # winning mod and the land. Where the winner's land byte is the losing value's, the row stays "unused bytes".
+    def land_bundle(win_flags):
+        C1 = f"00C903:{BASE}"
+        r_ = lost_row(OTHER, MOD_A, C1, "Grid", ["Grid.Flags=-412494080"], PH, ["Grid.Flags=-499936256"],
+                      label="TestCellNorth")
+        r_["Summary"] = f"Cell TestCellNorth: Grid - {OTHER}'s value lost to {MOD_A}'s"
+        tr_ = tree_transcript([(C1, "Cell", [(BASE, {"Grid.Flags": "5504256"}), (OTHER, {"Grid.Flags": "-412494080"}),
+                                             (MOD_A, {"Grid.Flags": win_flags})])])
+        plan, md, _ = core_bundle([r_], [], check=CELLATTR, masters=MASTERS_, p_tr=tr_)
+        return plan, md, C1
+
+    def c903_winner_land_byte_said_not_unused():
+        plan, md, C1 = land_bundle("-1223611121")           # low byte 0x0F: all four land quarters hidden
+        adm = [e["admission"] for e in rec_of(plan, C1)]
+        said = any("TestCellNorth" in ln and "land" in ln.lower() and MOD_A in ln for ln in md.splitlines())
+        return adm and adm[0] not in ("unusedBits", "admitted") and said, f"{adm}; said {said}"
+
+    def c904_same_land_byte_stays_unused():
+        plan, md, C1 = land_bundle("-1223611136")           # low byte 0x00: the land flags the losing value has
+        adm = [e["admission"] for e in rec_of(plan, C1)]
+        return adm == ["unusedBits"], f"{adm}"
+
+    for name, fn in [("after-review/C900-offwin-said-where-still-there", c900_offwin_said_where_still_there),
+                     ("after-review/C901-offwin-said-on-comparison-and-summary", c901_offwin_said_on_comparison_and_summary),
+                     ("after-review/C902-left-is-untouched-only", c902_left_is_untouched_only),
+                     ("after-review/C903-winner-land-byte-said-not-unused", c903_winner_land_byte_said_not_unused),
+                     ("after-review/C904-same-land-byte-stays-unused", c904_same_land_byte_stays_unused)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
