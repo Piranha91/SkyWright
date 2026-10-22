@@ -2367,13 +2367,19 @@ def build_prediction(ctx: dict) -> dict:
         held = [h for h in hits if h["row"].get("physical") == "Holds"]
         if not held:
             continue
-        drops = []
+        drops, lost_ = [], []
         for h in held:
             m = re.match(r"^(.*?)\s+(\d+) tris -> (\d+)$", str(h["row"].get("label") or ""))
             if m:
                 drops.append((int(m.group(2)) - int(m.group(3)), m.group(1), int(m.group(2)), int(m.group(3)),
                               h["row"].get("formKey")))
+            # (Clockwork review 3) the largest losses by the row's own measured samples of lost ground
+            s_ = re.search(r"(\d+) sample", str(h["row"].get("physicalDetail") or ""))
+            if s_:
+                lost_.append((int(s_.group(1)), re.sub(r"\s+\d+ tris -> \d+$", "", str(h["row"].get("label") or
+                                                                                      h["row"].get("formKey"))).strip()))
         drops.sort(key=lambda d: (-d[0], str(d[4])))
+        lost_.sort(key=lambda x: (-x[0], x[1]))
         replaced = {str(h["row"].get("formKey")) for h in hits}
         links = [r_ for k_, r_ in p_rows.items() if k_[0] == "geometry.navmesh-ownership" and not r_["history"]
                  and {k_[2].lower(), k_[3].lower()} == {loser.lower(), winner.lower()}
@@ -2387,12 +2393,15 @@ def build_prediction(ctx: dict) -> dict:
             [(str((h["finding"].get("counts") or {}).get("groupKind") or "CLOBBERED"), loser, winner, h["row"].get("formKey"),
               h["row"].get("label")) for h in held])
         # with a re-measure the largest losses are named by its lost ground (below), not by triangles (fifth review, M2)
-        text = bind(words["historyLossLineMeasured" if n_persist and words.get("historyLossLineMeasured")
+        ex_ = ("; ".join(bind(words["historyPersistsExample"], {"place": pl_, "samples": fmt_n(n_)})
+                         for n_, pl_ in lost_[:3]) if len(lost_) == len(held) else
+               "; ".join(f"{d[1]} {fmt_n(d[2])} -> {fmt_n(d[3])} triangles" for d in drops[:3] if d[0] > 0))
+        text = bind(words["historyLossLineMeasured" if (n_persist or not ex_) and words.get("historyLossLineMeasured")
                           else "historyLossLine"], {
             "setup": words["historyLossSetup"][("withoutPatches" if len(patch_names) > 1 else "withoutPatch")
                                                if patched_arm else "together"],
             "winner": winner, "loser": loser, "count": fmt_n(len(hits)), "holds": fmt_n(len(held)),
-            "examples": "; ".join(f"{d[1]} {fmt_n(d[2])} -> {fmt_n(d[3])} triangles" for d in drops[:3])})
+            "examples": ex_})
         if links:
             text += " " + bind(words["historyLossLinks"], {"links": fmt_n(len(links)), "targets": ", ".join(tdesc)})
         if n_measured and n_persist:
