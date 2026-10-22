@@ -5402,6 +5402,257 @@ def main():
                      ("third-review/C974-carried-value-origin-mod-master", c974_carried_value_origin_mod_master)]:
         cell(name, fn)
 
+    # ------------------------------------------------ third review, round 2 (C975-C986): the blind reviews of regen-final
+    def plugin_file_of(name, masters, records, group="WRLD"):
+        """A minimal plugin in its own folder: a TES4 header with its masters, then one top-level group (`group`) holding
+        (type, formId, [(sig, data)], compressed) records."""
+        def sub(sig, data):
+            return sig.encode() + struct.pack("<H", len(data)) + data
+        hdr = sub("HEDR", struct.pack("<fII", 1.7, len(records), 0x800)) + b"".join(
+            sub("MAST", m.encode() + b"\x00") + sub("DATA", b"\x00" * 8) for m in masters)
+        body = b""
+        for typ, fid, subs, comp in records:
+            data = b"".join(sub(s_, d_) for s_, d_ in subs)
+            flags = 0
+            if comp:
+                data, flags = struct.pack("<I", len(data)) + zlib.compress(data), 0x00040000
+            body += typ.encode() + struct.pack("<IIIIHH", len(data), flags, fid, 0, 44, 0) + data
+        out = (b"TES4" + struct.pack("<IIIIHH", len(hdr), 0, 0, 0, 44, 0) + hdr
+               + b"GRUP" + struct.pack("<I4sIIHH", 24 + len(body), group.encode(), 0, 0, 0, 0) + body)
+        p_ = Path(tempfile.mkdtemp(prefix="r2-")) / name
+        p_.write_bytes(out)
+        return p_
+
+    def nvnm(n_tris, links):
+        """A navmesh's geometry: no vertices, n_tris empty triangles, then its edge links [(navmesh FormID, triangle)]."""
+        return (struct.pack("<IIII", 12, 0xA5E9A03C, 0x3C, 0) + struct.pack("<I", 0) + struct.pack("<I", n_tris)
+                + b"\x00" * 16 * n_tris + struct.pack("<I", len(links))
+                + b"".join(struct.pack("<IIh", 0, m_, t_) for m_, t_ in links) + struct.pack("<I", 0))
+
+    def with_files(arms_, files):
+        """Point each named plugin of every setup at its file, with that file's sha256."""
+        for a__ in arms_:
+            for pl_ in a__["requested"]["plugins"]:
+                if pl_["name"] in files:
+                    pl_["path"] = str(files[pl_["name"]])
+                    pl_["sha256"] = hashlib.sha256(Path(files[pl_["name"]]).read_bytes()).hexdigest()
+        return arms_
+
+    # C975 (round 2, B1 and R): the plugin reader's known answers. Navmesh edge links from a compressed and a plain NAVM
+    # record, FormIDs through the plugin's master list (Skyrim.esm's 000D43 written 00000D43 by a plugin whose first
+    # master it is, the plugin's own 000E99 written 01000E99); a cell's DATA flags by name; a record the plugin does not
+    # hold is None.
+    def c975_pluginread_known_answers():
+        import pluginread
+        f_ = plugin_file_of(OTHER, [BASE], [
+            ("NAVM", 0x00000E41, [("NVNM", nvnm(3, [(0x00000D43, 501), (0x01000E99, 7)]))], True),
+            ("NAVM", 0x00000E42, [("NVNM", nvnm(2, [(0x00000D43, 9)]))], False),
+            ("CELL", 0x00000C11, [("DATA", struct.pack("<H", 0x0081))], False),
+            ("CELL", 0x00000C12, [("DATA", struct.pack("<H", 0x0083))], True)])
+        nv_ = pluginread.navmesh_links(f_, [f"000E41:{BASE}", f"000E42:{BASE}", f"000E43:{BASE}"])["records"]
+        cf_ = pluginread.cell_flags(f_, [f"000C11:{BASE}", f"000C12:{BASE}"])["records"]
+        ok = (nv_[f"000E41:{BASE}"] == {"triangles": 3, "links": [[0, f"000D43:{BASE}", 501], [0, f"000E99:{OTHER}", 7]]}
+              and nv_[f"000E42:{BASE}"] == {"triangles": 2, "links": [[0, f"000D43:{BASE}", 9]]}
+              and nv_[f"000E43:{BASE}"] is None
+              and cf_[f"000C11:{BASE}"]["flags"] == ["IsInteriorCell", "ShowSky"]
+              and cf_[f"000C12:{BASE}"]["flags"] == ["IsInteriorCell", "HasWater", "ShowSky"])
+        return ok, f"{nv_}; {cf_}"
+
+    # C976-C979 (round 2, B1: Sewers review Blocking 1, Clockwork review S1): a broken link is decided by the edge links
+    # themselves, read from the plugin files the setup names. OtherMod.esp carries the base-game navmesh 000E41 (provider
+    # chain Skyrim.esm -> OtherMod.esp); ModA, the evaluated mod, cut the target navmesh 000D43 to fewer triangles.
+    N_LINK, N_TGT = f"000E41:{BASE}", f"000D43:{BASE}"
+
+    def link_bundle(base_has, other_has=True, files=True, linker=OTHER):
+        rows_ = []
+        for t_ in (501, 502):
+            r_ = row("EDGE-IDX", linker, MOD_A if linker == OTHER else OTHER, N_LINK, label="CityExterior04 (ext)",
+                     other=N_TGT)
+            r_["Summary"] = (f"navmesh {N_LINK} in CityExterior04 (ext) edge-links {N_TGT} triangle {t_} of 432   "
+                             f"[record provided by: {BASE} -> {linker}]")
+            rows_.append(r_)
+        links_ = [(0x00000D43, 501), (0x00000D43, 502)]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
+        if files:
+            fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_ if base_has else []))],
+                                                    True)]),
+                   linker: plugin_file_of(linker, [BASE], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_ if other_has
+                                                                                             else []))], False)])}
+            with_files(arms, fs_)
+        plan, md, _ = compile_and_render(arms, {(NAVOWN, "baseline"): rows_, (NAVOWN, "without-a"): []}, [MOD_A])
+        return plan, md
+
+    def c976_base_link_carried_set_aside():
+        plan, md = link_bundle(base_has=True)
+        adm = [e["admission"] for e in rec_of(plan, N_LINK)]
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Navmesh")), "")
+        aside = str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+        ok = (adm == ["baseLink", "baseLink"] and not it and "2 broken navmesh links" in aside
+              and f"{OTHER} carries" in aside and "base game's own" in aside)
+        return ok, f"{adm}; item {it[:120]!r}; aside {aside[-300:]!r}"
+
+    def c977_carrier_added_links_named():
+        plan, md = link_bundle(base_has=False)
+        adm = [e["admission"] for e in rec_of(plan, N_LINK)]
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Navmesh")), "")
+        head_ = it.split(". ", 1)[0]
+        ok = (adm == ["admitted", "admitted"] and f"{OTHER} added" in it and "not in the record data" not in it
+              and "base game's navmesh records" not in head_ and OTHER in head_)
+        return ok, f"{adm}; {it[:400]}"
+
+    def c978_unread_links_said_not_read():
+        plan, md = link_bundle(base_has=True, files=False)
+        adm = [e["admission"] for e in rec_of(plan, N_LINK)]
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Navmesh")), "")
+        ok = (adm == ["admitted", "admitted"] and "not read for this report" in it and "not in the record data" not in it
+              and f"the base game's navmesh records {OTHER} carries" in it.split(". ", 1)[0])
+        return ok, f"{adm}; {it[:400]}"
+
+    def c979_evaluated_linker_base_link_counted():
+        plan, md = link_bundle(base_has=True, linker=MOD_A)
+        adm = [e["admission"] for e in rec_of(plan, N_LINK)]
+        return adm == ["admitted", "admitted"], f"{adm}"
+
+    for name, fn in [("round-2/C975-pluginread-known-answers", c975_pluginread_known_answers),
+                     ("round-2/C976-base-link-carried-set-aside", c976_base_link_carried_set_aside),
+                     ("round-2/C977-carrier-added-links-named", c977_carrier_added_links_named),
+                     ("round-2/C978-unread-links-said-not-read", c978_unread_links_said_not_read),
+                     ("round-2/C979-evaluated-linker-base-link-counted", c979_evaluated_linker_base_link_counted)]:
+        cell(name, fn)
+
+    # C980 (round 2, B2: Snazzy review Blocking 1, Clockwork review S3): the switch-off sentence counts objects, as it
+    # names them. ModB switches 2 objects off with three fields each (record flags, enable parent, position below the
+    # world); ModA's versions have them on: 2 objects, not 6.
+    def c980_switch_off_counts_objects():
+        p_rows, chs = [], []
+        full_ = offs(-30000, "InitiallyDisabled", "000014:Skyrim.esm")
+        for D in (f"00C980:{BASE}", f"00C981:{BASE}"):
+            p_rows += [lost_row(MOD_B, MOD_A, D, "Placement", off_txt(full_), PH, off_txt(offs(0)), before=BASE),
+                       lost_row(MOD_B, MOD_A, D, "SkyrimMajorRecordFlags", ["SkyrimMajorRecordFlags=InitiallyDisabled"], PH,
+                                ["SkyrimMajorRecordFlags=0"], before=BASE),
+                       lost_row(MOD_B, MOD_A, D, "EnableParent", ["EnableParent.Flags=SetEnableStateToOppositeOfParent",
+                                                                  "EnableParent.Reference=000014:Skyrim.esm"], PH, PH,
+                                before=BASE)]
+            chs.append((D, "PlacedObject", [(BASE, offs(0)), (MOD_B, full_), (MOD_A, offs(0))]))
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chs, w_chains=chs, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        ok = f"On 2 objects, {MOD_B}'s value switches the object off" in it and "In 6 of them" not in it
+        return ok, it[-500:]
+
+    for name, fn in [("round-2/C980-switch-off-counts-objects", c980_switch_off_counts_objects)]:
+        cell(name, fn)
+
+    # C981 (round 2, B3: Snazzy review Blocking 2): the headline's shared objects are every object of the entry that any
+    # entry counted before it holds. The record-field entry (3 records, first) holds 000F01; the contact entry holds
+    # 000F02; the fixture entry (000F01, 000F02) shares both.
+    def c981_shared_objects_complete():
+        F1, F2 = f"000F01:{MOD_A}", f"000F02:{MOD_A}"
+        rec_rows = [lost_row(MOD_B, MOD_A, fk_, "Placement", "b", "a", "v") for fk_ in (F1, f"000F03:{MOD_A}",
+                                                                                         f"000F04:{MOD_A}", f"000F05:{MOD_A}")]
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, fk_, other=f"000H0{i}:{MOD_B}") for i, fk_ in ((1, F1), (2, F2))]
+        ct = [row("CONTACT", MOD_B, MOD_A, F2, other=f"000H09:{MOD_B}")]
+        results = {(c, a): [] for c in (FIXTURE, CONTACT) for a in ("dependency-only", "plus-a", "plus-b")}
+        results.update({(FIXTURE, "baseline"): fx, (CONTACT, "baseline"): ct})
+        arms_ = four_arms()
+        enr = {(RECORDS, a): ([] if a != "baseline" else rec_rows) for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+        plan, md, html = compile_and_render(arms_, results, [MOD_A, MOD_B], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                            enrichment=enr)
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        fx_part = next((x for x in re.split(r";\s+(?:and\s+)?", v) if "Fixtures left hanging" in x), "")
+        ok = (F1 in fx_part and F2 in fx_part) or "the same 2 objects" in fx_part
+        return ok, f"fixture part {fx_part!r}; verdict {v[:500]!r}"
+
+    for name, fn in [("round-2/C981-shared-objects-complete", c981_shared_objects_complete)]:
+        cell(name, fn)
+
+    # C982, C983 (round 2, R: Snazzy review S1): a water height's dependence on the cell's HasWater flag is read from the
+    # winning plugin's own cell record (its DATA flags) where the setup names that file; never "not in the record data".
+    # Without a read, the item says the flag was not read for this report.
+    def water_bundle(flags):
+        C1 = f"000C82:{BASE}"
+        tr_ = tree_transcript([(C1, "Cell", [(BASE, {"WaterHeight": "-2147483600"}), (OTHER, {"WaterHeight": "0"}),
+                                             (MOD_A, {"WaterHeight": "-2147483600"})])])
+        r_ = lost_row(OTHER, MOD_A, C1, "WaterHeight", ["WaterHeight=0"], PH, PH, label="TestCellWet")
+        r_["Summary"] = f"Cell TestCellWet: WaterHeight - {OTHER}'s value lost to {MOD_A}'s"
+        arms_ = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        if flags is not None:
+            with_files(arms_, {MOD_A: plugin_file_of(MOD_A, [BASE], [("CELL", 0x00000C82, [("DATA", struct.pack(
+                "<H", flags))], False)], group="CELL")})
+        plan, md, _ = core_bundle([r_], [r_], check=CELLATTR, masters=MASTERS_, p_tr=tr_, arms=arms_)
+        return next((ln for ln in md.splitlines() if ln.startswith("- **Cell settings")), "")
+
+    def c982_water_flag_read_from_plugin():
+        it = water_bundle(0x0081)
+        ok = ("do not include HasWater" in it and "not in the record data" not in it and "read from" in it)
+        return ok, it[-400:]
+
+    def c983_water_flag_unread_said_not_read():
+        it = water_bundle(None)
+        ok = "not read for this report" in it and "not in the record data" not in it
+        return ok, it[-400:]
+
+    for name, fn in [("round-2/C982-water-flag-read-from-plugin", c982_water_flag_read_from_plugin),
+                     ("round-2/C983-water-flag-unread-said-not-read", c983_water_flag_unread_said_not_read)]:
+        cell(name, fn)
+
+    # C984 (round 2, R1: BPT review S1): "the value lost is an absence" only where the losing mod has none of the field:
+    # OtherMod's lost Data holds an entry of its own (a location it points at) beside entries only ModA has.
+    def c984_absence_only_when_whole_value_absent():
+        W1 = f"00C984:{BASE}"
+        r_ = lost_row(OTHER, MOD_A, W1, "Data", [f"Data[0].Location.Target.Link=000984:{OTHER}",
+                                                 f"Data[10] only in {MOD_A}: [APackageData] Name=Destination"], PH, PH)
+        r_["Summary"] = f"Package TestPackage: Data - {OTHER}'s value lost to {MOD_A}'s"
+        plan, md, _ = core_bundle([r_], [r_], masters=MASTERS_)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return f"{OTHER} has no" not in it and "absence" not in it, it[-400:]
+
+    for name, fn in [("round-2/C984-absence-only-when-whole-value-absent", c984_absence_only_when_whole_value_absent)]:
+        cell(name, fn)
+
+    # C985, C986 (round 2, R2: Missives review S1, Snazzy review S2): the earlier clashes a patch also fixes are counted as
+    # distinct changes in game: one field lost by two plugins is one; a Grid change only in bytes the game does not read
+    # is none. Where the patch has no such field at all, the clash is said as the patch removing it, not as a fix.
+    def earlier_fix_bundle(patch_has_field):
+        """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight 5, ModA 9, the patch 5. Removal: OtherMod and
+        Neighbour have no MaxHeight, ModA has 9, the patch has none. Without ModA both lose to Later.esp too (already
+        there). A Grid row differing only in unused bytes is lost the same way and fixed too."""
+        O2, O3 = "Neighbour.esp", "Later.esp"
+        W1, C2 = f"00C985:{BASE}", f"00C986:{BASE}"
+        arms_ = [arm("baseline", [BASE, OTHER, O2, O3, MOD_A, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, OTHER, O2, O3, MOD_A]), arm("without-a", [BASE, OTHER, O2, O3])]
+        mh_ = lambda x: {"MaxHeight.Offset": x} if x else {}                          # noqa: E731
+        lose_ = "5" if patch_has_field else None
+        chain_ = [(BASE, mh_("0")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), (O3, mh_("7")), (MOD_A, mh_("9"))]
+        p_ch = [(W1, "Worldspace", chain_)]
+        w_ch = [(W1, "Worldspace", chain_ + [(PATCH, mh_(lose_))])]
+        lost_ = ["MaxHeight.Offset=5"] if patch_has_field else [f"MaxHeight.Offset only in {MOD_A}: 9"]
+        mh_row = lambda a_, b_: lost_row(a_, b_, W1, "MaxHeight", lost_, PH, ["MaxHeight.Offset=0"])  # noqa: E731
+        grid_ = lambda a_, b_: lost_row(a_, b_, C2, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"])  # noqa: E731
+        p_rows = [mh_row(OTHER, MOD_A), mh_row(O2, MOD_A), grid_(OTHER, MOD_A)]
+        n_rows = [mh_row(OTHER, O3), mh_row(O2, O3), grid_(OTHER, O3)]
+        enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "without-a"): n_rows, (RECORDS, "baseline"): []}
+        tr = {(RECORDS, "without-patch"): records_transcript(p_ch), (RECORDS, "baseline"): records_transcript(w_ch)}
+        plan, md, _ = compile_and_render(arms_, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch", "without-a")},
+                                         [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                         enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE], O3: [BASE],
+                                                                                  PATCH: [BASE]})
+        return next((x for x in md.splitlines() if "but not predicted" in x), "")
+
+    def c985_earlier_fixes_counted_once():
+        ln = earlier_fix_bundle(True)
+        m_ = re.search(r"not predicted[^:]*: (\d+)", ln)
+        return bool(m_) and m_.group(1) == "1" and "also fix" in ln, ln[:400]
+
+    def c986_patch_removal_said_as_removal():
+        ln = earlier_fix_bundle(False)
+        return "removes" in ln and "also fixes" not in ln, ln[:400]
+
+    for name, fn in [("round-2/C985-earlier-fixes-counted-once", c985_earlier_fixes_counted_once),
+                     ("round-2/C986-patch-removal-said-as-removal", c986_patch_removal_said_as_removal)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
