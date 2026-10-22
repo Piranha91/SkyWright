@@ -1917,6 +1917,8 @@ def build_prediction(ctx: dict) -> dict:
             # (P63; coordinator D1): said on its own line as undoing that master's fix, never in the clash counts
             put_back.add(rk)
             return lost_edit_noise(rk) or "undoesMaster"
+        if (is_base_game(a, words) or is_base_game(b, words)) and rk[1] != "LOST-EDIT" and no_body(rk, other):
+            return "noBody"                    # (BPT re-review S3) no body, against a base-game object too
         if is_base_game(a, words) or is_base_game(b, words):
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
