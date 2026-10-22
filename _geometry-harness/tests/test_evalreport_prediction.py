@@ -5353,6 +5353,55 @@ def main():
     for name, fn in [("third-review/C971-tail-step-moves-closing-sections", c971_tail_step_moves_closing_sections)]:
         cell(name, fn)
 
+    # C972-C974 (Gate C review, finding 1): the paths C725, C810 and C822 guarded, reached by a master that is a mod, not
+    # a base-game plugin, so the base-change rule (C937) does not set the rows aside first. Fix.esp changes the cell's
+    # Location; OtherMod.esp (built on Skyrim.esm only) sets the same value as its own change.
+    FIX_ = "Fix.esp"
+
+    def mod_master_bundle(win_value, win_masters):
+        L1 = f"00C972:{BASE}"
+        arms = [arm("baseline", [BASE, FIX_, MID_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, FIX_, MID_, OTHER, MOD_A, MOD_B])]
+        chains = [(L1, "Cell", [(BASE, {"Location": "011111:Skyrim.esm"}), (FIX_, {"Location": "022222:Skyrim.esm"}),
+                                (MID_, {"Location": "011111:Skyrim.esm"}), (OTHER, {"Location": "022222:Skyrim.esm"}),
+                                (MOD_A, {"Location": win_value})])]
+        p_rows = [lost_row(FIX_, MOD_A, L1, "Location", ["Location=022222:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=022222:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={FIX_: [BASE], MID_: [BASE], OTHER: [BASE, FIX_, MID_], MOD_A: win_masters,
+                                           MOD_B: [BASE]})
+        return plan, md, L1
+    MID_ = "Mid.esp"
+
+    # C972 (was C725's arm): ModA builds on Fix.esp with a value of its own, so Fix.esp's row is a value over its own
+    # master (set aside); OtherMod's same value is its own change and stays counted, never folded into the set-aside row.
+    def c972_status_before_fold_mod_master():
+        plan, md, L1 = mod_master_bundle("033333:Skyrim.esm", [BASE, FIX_])
+        got = {e["A"]: e["admission"] for e in rec_of(plan, L1)}
+        return got.get(OTHER) == "admitted" and got.get(FIX_) not in (None, "admitted"), f"{got}"
+
+    # C973 (was C810's arm): ModA puts back the value from before its master Fix.esp's change; OtherMod carries Fix.esp's
+    # value as its own change (its nearest master Mid.esp restored the old one). One value is lost: said once, on the
+    # undoes-its-master line; OtherMod's row is not counted again.
+    def c973_carried_master_fix_said_once_mod_master():
+        plan, md, L1 = mod_master_bundle("011111:Skyrim.esm", [BASE, FIX_])
+        got = {e["A"]: e["admission"] for e in rec_of(plan, L1)}
+        ok = (got.get(FIX_) == "undoesMaster" and got.get(OTHER) == "sameValue"
+              and f"undoes its master {FIX_}'s fix" in md)
+        return ok, f"{got}"
+
+    # C974 (was C822's arm): the counted item says where OtherMod's lost value was first set (Fix.esp, a mod).
+    def c974_carried_value_origin_mod_master():
+        plan, md, L1 = mod_master_bundle("033333:Skyrim.esm", [BASE, FIX_])
+        line = next((ln for ln in md.splitlines() if ln.startswith("- **") and f"{OTHER}'s value is lost" in ln), "")
+        return f"was first set by {FIX_}" in line, line[-300:]
+
+    for name, fn in [("third-review/C972-status-before-fold-mod-master", c972_status_before_fold_mod_master),
+                     ("third-review/C973-carried-master-fix-said-once-mod-master",
+                      c973_carried_master_fix_said_once_mod_master),
+                     ("third-review/C974-carried-value-origin-mod-master", c974_carried_value_origin_mod_master)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
