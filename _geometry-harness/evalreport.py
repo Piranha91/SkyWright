@@ -2208,13 +2208,14 @@ def build_prediction(ctx: dict) -> dict:
             # (whose state the record data does not give: then only that its own record does not switch it off)
             won_ = winner_on_at_load(rk)
             if won_ in ("on", "parent"):
-                sw_ = g.setdefault("_switchOff", {}).setdefault((rk[2], rk[3], won_), [])
-                sw_.append(named(rk[4], rk[5]))
+                # (round 2, Snazzy B1) counted by object, as the sentence names them: one object's fields count once
+                sw_ = g.setdefault("_switchOff", {}).setdefault((rk[2], rk[3], won_), {})
+                sw_.setdefault(str(rk[4]), named(rk[4], rk[5]))
         if rk[1] == "LOST-EDIT" and side_starts_off(rk, rk[2]) and side_disables(rk, rk[3]):
             # (third review, Pilgrim S1) only the loser's version starts it disabled; the winner's sets it off for good
-            g.setdefault("_startsOffLoser", collections.Counter())[rk[2]] += 1
+            g.setdefault("_startsOffLoser", {}).setdefault(rk[2], set()).add(str(rk[4]))
         elif rk[1] == "LOST-EDIT" and (side_starts_off(rk, rk[2]) or side_starts_off(rk, rk[3])):
-            g["_startsOff"] = g.get("_startsOff", 0) + 1
+            g.setdefault("_startsOff", set()).add(str(rk[4]))
         # (third review, Sewers S1) a broken link from a base-game navmesh record the other mod only carries (the probe's
         # provider chain): whether that mod changed the link is not in the record data, so it is not said as its doing
         pm_ = re.search(r"\[record provided by: ([^\]]+)\]", str(rk[5] or "")) if rk[1] == "EDGE-IDX" else None
@@ -2509,17 +2510,20 @@ def build_prediction(ctx: dict) -> dict:
             if words.get("itemBaseNavCarried"):
                 detail.append(bind(words["itemBaseNavCarried"], {
                     "lead": f"All {fmt_n(n_)} are" if n_ == g["count"] else f"{fmt_n(n_)} of them are", "mod": m_}))
+        def objs_(n_):
+            return "object" if n_ == 1 else "objects"
         for (lo_, wi_, how_), ex_ in (g.pop("_switchOff", None) or {}).items():
             key_ = "itemSwitchOffDrawn" if how_ == "on" else "itemSwitchOffParent"
             if words.get(key_):
-                detail.append(bind(words[key_], {"count": fmt_n(len(ex_)), "loser": lo_, "winner": wi_,
-                                                 "examples": "; ".join(list(dict.fromkeys(ex_))[:2])}))
-        for m_, n_ in (g.pop("_startsOffLoser", None) or {}).items():
+                detail.append(bind(words[key_], {"count": fmt_n(len(ex_)), "objects": objs_(len(ex_)), "loser": lo_,
+                                                 "winner": wi_, "examples": "; ".join(list(ex_.values())[:2])}))
+        for m_, s_ in (g.pop("_startsOffLoser", None) or {}).items():
             if words.get("itemStartsOffLoser"):
-                detail.append(bind(words["itemStartsOffLoser"], {"count": fmt_n(n_), "loser": m_}))
-        n_off = g.pop("_startsOff", 0)
-        if n_off and words.get("itemStartsOff"):
-            detail.append(bind(words["itemStartsOff"], {"count": fmt_n(n_off)}))
+                detail.append(bind(words["itemStartsOffLoser"], {"count": fmt_n(len(s_)), "objects": objs_(len(s_)),
+                                                                 "loser": m_}))
+        s_off = g.pop("_startsOff", None) or set()
+        if s_off and words.get("itemStartsOff"):
+            detail.append(bind(words["itemStartsOff"], {"count": fmt_n(len(s_off)), "objects": objs_(len(s_off))}))
         fn_ = g.pop("_rawFields", None) or {}
         if g["kind"] == "LOST-EDIT" and fn_ and words.get("itemMainFieldInGame"):
             top_f, top_n = collections.Counter(fn_).most_common(1)[0]
