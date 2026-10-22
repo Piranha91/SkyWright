@@ -4953,6 +4953,18 @@ def main():
     for name, fn in [("third-review/C946-patch-wins-line-links-every-pair", c946_patch_wins_line_links_every_pair)]:
         cell(name, fn)
 
+    # C949 (Clockwork review S4): the Markdown evidence index lists each prediction record row on its own line (the row
+    # ends in a block tag, whose newline the template engine trims, so the rows ran together into one bullet).
+    def c949_index_record_one_row_per_line():
+        plan, md, html, index = patched_with_sibling("same")
+        n_rec = len((reader(plan).get("prediction") or {}).get("record") or [])
+        sec = index.split('<a id="prediction-record"></a>', 1)[-1].split("\n## ", 2)[1] if "prediction-record" in index else ""
+        bullets = [ln for ln in sec.splitlines() if ln.startswith("- ")]
+        return n_rec > 1 and len(bullets) == n_rec, f"{n_rec} rows, {len(bullets)} bullets"
+
+    for name, fn in [("third-review/C949-index-record-one-row-per-line", c949_index_record_one_row_per_line)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
