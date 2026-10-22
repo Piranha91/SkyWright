@@ -21,12 +21,15 @@ Exit 0 all pass, 1 a cell failed.
 """
 from __future__ import annotations
 
+import hashlib
 import html as _html
 import json
 import re
 import sys
 import tempfile
 import traceback
+import struct
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -5070,6 +5073,82 @@ def main():
         return ok, it[:300]
 
     for name, fn in [("third-review/C943-base-navmesh-carried-said", c943_base_navmesh_carried_said)]:
+        cell(name, fn)
+
+    # C941 (Pilgrim review S1, Gate A answer 2): a losing mod whose version only starts an object disabled (no enable
+    # parent), where no record of the losing plugin refers to the object, keeps it off in its own game too; with the
+    # winner's version off for good, the lost change has no effect: set aside. Decided by a read-only scan of the losing
+    # plugin file the bundle names (its recorded bytes), FormIDs through the plugin's master list, compressed records
+    # decompressed, script properties included. Any reference keeps the row counted; no read keeps it counted, with the
+    # "may enable" clause said of the losing mod's version only.
+    def plugin_bytes(masters, records):
+        """A minimal plugin: a TES4 header with its masters, then one group holding (type, formId, [(sig, data)], compressed)."""
+        def sub(sig, data):
+            return sig.encode() + struct.pack("<H", len(data)) + data
+        hdr = sub("HEDR", struct.pack("<fII", 1.7, len(records), 0x800)) + b"".join(
+            sub("MAST", m.encode() + b"\x00") + sub("DATA", b"\x00" * 8) for m in masters)
+        out = b"TES4" + struct.pack("<IIIIHH", len(hdr), 0, 0, 0, 44, 0) + hdr
+        body = b""
+        for typ, fid, subs, comp in records:
+            data = b"".join(sub(s_, d_) for s_, d_ in subs)
+            flags = 0
+            if comp:
+                data, flags = struct.pack("<I", len(data)) + zlib.compress(data), 0x00040000
+            body += typ.encode() + struct.pack("<IIIIHH", len(data), flags, fid, 0, 44, 0) + data
+        return out + b"GRUP" + struct.pack("<I4sIIHH", 24 + len(body), b"QUST", 0, 0, 0, 0) + body
+
+    def write_plugin(name, referenced):
+        d_ = Path(tempfile.mkdtemp(prefix="c941-"))
+        recs = [("REFR", 0x0000C941, [("NAME", struct.pack("<I", 0x00000101)), ("XESP", b"")], False)]
+        if referenced:   # a quest script's object property pointing at the light, in a compressed record
+            recs.append(("QUST", 0x01000801, [("VMAD", b"\x05\x00\x02\x00\x01\x00" + struct.pack("<I", 0x0000C941))], True))
+        path_ = d_ / name
+        path_.write_bytes(plugin_bytes([BASE], recs))
+        return path_
+
+    def c941a_refscan_known_answers():
+        import refscan
+        yes_ = refscan.scan(write_plugin(OTHER, True), [f"00C941:{BASE}"])["refs"][f"00C941:{BASE}"]
+        no_ = refscan.scan(write_plugin(OTHER, False), [f"00C941:{BASE}"])["refs"][f"00C941:{BASE}"]
+        ok = [r_["sub"] for r_ in yes_] == ["VMAD"] and no_ == []
+        return ok, f"with {yes_}; without {no_}"
+
+    def start_off_bundle(plugin_path):
+        D1 = f"00C941:{BASE}"
+        a_ = offs(-3904, "InitiallyDisabled")
+        b_ = offs(-30000)
+        b_["Placement.Position"] = "100,100,-30000"
+        p_rows = [lost_row(OTHER, MOD_A, D1, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        ch_ = [(D1, "PlacedObject", [(BASE, offs(0)), (OTHER, a_), (MOD_A, b_)])]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        if plugin_path is not None:
+            sha_ = hashlib.sha256(Path(plugin_path).read_bytes()).hexdigest()
+            for a__ in arms:
+                for pl_ in a__["requested"]["plugins"]:
+                    if pl_["name"] == OTHER:
+                        pl_["path"], pl_["sha256"] = str(plugin_path), sha_
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=ch_, w_chains=ch_, arms=arms,
+                                  masters={**MASTERS_, PATCH: [BASE]})
+        return plan, md, D1
+
+    def c941b_unreferenced_start_off_set_aside():
+        plan, md, D1 = start_off_bundle(write_plugin(OTHER, False))
+        adm = [e["admission"] for e in rec_of(plan, D1)]
+        return adm == ["offUnreferenced"], f"{adm}"
+
+    def c941c_referenced_or_unread_stays_counted():
+        plan1, md1, D1 = start_off_bundle(write_plugin(OTHER, True))
+        plan2, md2, _ = start_off_bundle(None)
+        a1, a2 = [e["admission"] for e in rec_of(plan1, D1)], [e["admission"] for e in rec_of(plan2, D1)]
+        it = next((ln for ln in md2.splitlines() if ln.startswith("- **Record fields")), "")
+        ok = (a1 == ["admitted"] and a2 == ["admitted"] and f"{OTHER}'s version only starts the object disabled" in it
+              and "In 1 of them the object starts disabled" not in it)
+        return ok, f"{a1} {a2}; {it[-300:]}"
+
+    for name, fn in [("third-review/C941a-refscan-known-answers", c941a_refscan_known_answers),
+                     ("third-review/C941b-unreferenced-start-off-set-aside", c941b_unreferenced_start_off_set_aside),
+                     ("third-review/C941c-referenced-or-unread-stays-counted", c941c_referenced_or_unread_stays_counted)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
