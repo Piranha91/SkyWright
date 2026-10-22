@@ -6009,6 +6009,36 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
         return ("hold only until" not in it and "18.6 u inside something else" in it and "was not found" in it), it[-400:]
 
+    # C1064 (Winterhold page limit, fourth review): the ladder step after the tail step also moves the location load
+    # order section into the evidence index's further notes, says so in the pointer line, and comes before any step
+    # that shows fewer rows or figures; the tail step itself keeps the section.
+    def c1064_order_step_moves_location_order():
+        plan, md0, html0 = record_validation_bundle()
+        pr_ = R.load_priorities()
+        ladder_ = pr_.get("abridgementLadder") or []
+        st_ = next((s_ for s_ in ladder_ if {"tail", "order"} <= set(str(s_.get("layout")).split())), None)
+        tail_ = next((s_ for s_ in ladder_ if str(s_.get("layout")).split()[-1:] == ["tail"]), None)
+        if st_ is None or tail_ is None:
+            return False, "no order step after the tail step in the ladder"
+        out_ = Path(tempfile.mkdtemp(prefix="c1064-"))
+        v_ = R.effective_view(plan, st_["rowsPerGroup"], st_["figuresPerFinding"], pr_, st_["layout"])
+        got_ = R.render_all(plan, v_, out_, "")
+        out2_ = Path(tempfile.mkdtemp(prefix="c1064t-"))
+        v2_ = R.effective_view(plan, tail_["rowsPerGroup"], tail_["figuresPerFinding"], pr_, tail_["layout"])
+        got2_ = R.render_all(plan, v2_, out2_, "")
+        head_ = "Load order for these locations"
+        i_ = ladder_.index(st_)
+        ok = (f"## {head_}" not in got_["report.md"] and f"<h2>{head_}</h2>" not in got_["report.html"]
+              and f"### {head_}" in got_["evidence-index.md"] and f"<h3>{head_}</h3>" in got_["evidence-index.html"]
+              and "load order for these locations" in got_["report.md"].lower().split("## further notes", 1)[-1]
+              and f"## {head_}" in got2_["report.md"] and ladder_.index(tail_) < i_
+              and all(s_["rowsPerGroup"] >= st_["rowsPerGroup"] and s_["figuresPerFinding"] >= st_["figuresPerFinding"]
+                      for s_ in ladder_[:i_]))
+        return ok, got_["report.md"][-300:]
+
+    for name, fn in [("fourth-review/C1064-order-step-moves-location-order", c1064_order_step_moves_location_order)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1035-switch-after-flip-said", c1035_switch_after_flip_said)]:
         cell(name, fn)
 
