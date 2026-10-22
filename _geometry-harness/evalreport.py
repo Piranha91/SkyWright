@@ -4131,8 +4131,9 @@ def build_prediction(ctx: dict) -> dict:
             # by rows (P64): an object left without support against three hosts is one new problem
             ident_ = ident_of.get(rk, tuple(rk[:5]))
             if rk[0] in symmetric_checks:
-                # (fourth review, Pilgrim S3) both directions of one pair are one clash (skill data symmetricPairChecks)
-                ident_ = (rk[0], frozenset([str(rk[4]), *map(str, hit["row"].get("other") or ())]),
+                # (fourth review, Pilgrim S3) the clash is the scene its rows name as the other record (the quest), one
+                # row per actor (skill data symmetricPairChecks)
+                ident_ = (rk[0], frozenset(map(str, hit["row"].get("other") or ())),
                           frozenset([rk[2].lower(), rk[3].lower()]))
             if no_body(rk, hit["row"].get("other")):
                 no_body_new.add(ident_)        # an object with no model: no body, not a clash
@@ -7016,8 +7017,8 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
             c_ = f_.get("counts") or {}
             for r_ in f_.get("allRows") or f_.get("rows") or []:       # every row, not only the ones shown
                 if f_.get("checkId") in sym_ and r_.get("other"):
-                    # (fourth review, Pilgrim S3) both directions of one pair are one clash, as the line counts them
-                    pk_ = (frozenset([str(r_.get("formKey")), *map(str, r_.get("other") or ())]),
+                    # (fourth review, Pilgrim S3) the rows of one scene (the other record) are one clash, as the line counts
+                    pk_ = (frozenset(map(str, r_.get("other") or ())),
                            frozenset((str(c_.get("A")).lower(), str(c_.get("B")).lower())))
                     if pk_ in seen_pairs_:
                         n_dup_ += 1
