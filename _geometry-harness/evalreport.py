@@ -2413,8 +2413,12 @@ def build_prediction(ctx: dict) -> dict:
                 if chh_ and rk[2].lower() in lowh_ and rk[3].lower() in lowh_:
                     lp_, wp_ = (_vec(next((v_ for k_, v_ in recordrows.provider_fields(chh_, sup_place, lowh_.index(x_.lower())).items()
                                            if k_.endswith("Position")), None)) for x_ in (rk[2], rk[3]))
-            if lp_ and wp_ and math.dist(lp_[:2], wp_[:2]) <= 1.0 and abs(wp_[2] - lp_[2]) >= SEAT_SPOT_UNITS:
+            # (regen-r4c) every Placement row of the pair is kept (a level difference is said only where every one
+            # is 64 u or more the same way, at render); a value below the world is a switch-off, said apart
+            if lp_ and wp_ and lp_[2] > -29000 and wp_[2] > -29000:
                 g.setdefault("_heightDiff", {}).setdefault((rk[3], rk[2]), []).append(wp_[2] - lp_[2])
+            else:
+                g.setdefault("_heightDiff", {}).setdefault((rk[3], rk[2]), []).append(None)
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
             # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
             g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
@@ -2838,7 +2842,8 @@ def build_prediction(ctx: dict) -> dict:
         if n_eff_ and words.get("itemEffectPairs"):
             detail.append(bind(words["itemEffectPairs"], {"count": fmt_n(n_eff_), "all": "All" if n_eff_ == g["count"] else ""}))
         for (wi_, lo_), dzs_ in (g.pop("_heightDiff", None) or {}).items():
-            if words.get("itemHeightDiff"):
+            if words.get("itemHeightDiff") and all(x_ is not None and abs(x_) >= SEAT_SPOT_UNITS for x_ in dzs_) and (
+                    all(x_ < 0 for x_ in dzs_) or all(x_ > 0 for x_ in dzs_)):
                 lo_d, hi_d = min(abs(x_) for x_ in dzs_), max(abs(x_) for x_ in dzs_)
                 dir_ = ("lower" if all(x_ < 0 for x_ in dzs_) else "higher" if all(x_ > 0 for x_ in dzs_)
                         else "lower or higher")
