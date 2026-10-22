@@ -4927,6 +4927,22 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                for x in conflict_rows(c, None) if x.get("formKey") and row_identity(x) not in had}
         return len(got) if got or not groups else None
 
+    def repaired_objects(check_id, groups, from_emit, against_emit):
+        """(fourth review, BPT r3 S3) A by-object check's repairs in the unit of its new problems: (objects with a body,
+        objects with no model) of the rows `from_emit` lists in `groups` that `against_emit` no longer lists; None where
+        the check is not by object, the emits are not read or no names enrichment says which objects have a body."""
+        if (check_id not in by_object_checks or check_id not in body_checks or not isinstance(from_emit, dict)
+                or not isinstance(against_emit, dict) or not isinstance(names_doc0, dict)):
+            return None
+        keys = {(d["kind"], d["A"], d["B"]) for d in groups}
+        still = {x.get("formKey") for c in against_emit.get("Conflicts") or [] for x in conflict_rows(c, None)}
+        rows_ = [x for c in from_emit.get("Conflicts") or [] if (c.get("Kind"), c.get("A"), c.get("B")) in keys
+                 for x in conflict_rows(c, None) if x.get("formKey") and x.get("formKey") not in still]
+        if not rows_:
+            return None
+        bodied_ = {x.get("formKey") for x in rows_ if not row_has_no_body(names_doc0, x)}
+        return len(bodied_), len({x.get("formKey") for x in rows_} - bodied_)
+
     def context_only(check_id, group_kind) -> bool:
         return str(group_kind or "") in set(context_only_by_check.get(str(check_id), []) or [])
 
@@ -5037,7 +5053,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                     reader_created = unit_n
                 reader_repaired = (sum(int(d.get("repaired") or 0) for d in reader_shrank) if shrank_groups
                                    else (0 if gated else int(p.get("repaired") or 0)))
-                counts_r = {**counts, "groups": [{"kind": d["kind"], "A": d["A"], "B": d["B"], "created": d.get("created", 0)}
+                rep_obj_ = repaired_objects(check_id, reader_shrank, base_emit, emit) if reader_shrank else None
+                if rep_obj_ is not None:
+                    reader_repaired = rep_obj_[0]
+                counts_r = {**counts, "readerRepairedNoBody": rep_obj_[1] if rep_obj_ else 0, "groups": [{"kind": d["kind"], "A": d["A"], "B": d["B"], "created": d.get("created", 0)}
                                                  for d in created_groups], "readerCreated": reader_created,
                             "readerUnitCounted": unit_n is not None,
                             "readerNoBody": no_body_created,
@@ -5072,12 +5091,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                           if reader_shrank else None)
                 if unit_r is not None:
                     reader_repaired = unit_r
+                rep_obj_ = (repaired_objects(check_id, reader_shrank, b.emit(base_path_r) if base_path_r else None, emit)
+                            if reader_shrank else None)
+                if rep_obj_ is not None:
+                    reader_repaired = rep_obj_[0]
                 f = add({"id": None, "kind": kind, "priority": 4, "checkId": check_id,
                          "family": b.check_family(check_id), "armId": arm_id, "part": "diff",
                          "title": b.check_title(check_id), "strength": strength, "verdict": p.get("verdict"),
                          "plain": bind(templates.get(kind, ""), {**counts, "armId": arm_id}),
                          "counts": {**counts, "diffLines": [d["line"] for d in shrank],
                                     "readerRepaired": reader_repaired, "readerReclassified": reader_reclassified,
+                                    "readerRepairedNoBody": rep_obj_[1] if rep_obj_ else 0,
                                     "readerUnitCounted": unit_r is not None},
                          "evidenceIds": eids_for(check_id, arm_id, "diff"), "rows": []})
                 f["readerRelevant"] = bool(reader_shrank) if shrank else not gated
@@ -5331,8 +5355,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                     + (bind((reader_data.get("comparisonState") or {})["noBodyCreated"], {"count": fmt_n(no_body_n)})
                                        if no_body_n else "")
                                     + "." +
-                                    (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}; "
-                                     f"those repairs do not cancel the new {noun(new_count, 'problem')}." if repaired_count else ""))
+                                    (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}"
+                                     + (bind((reader_data.get("comparisonState") or {})["noBodyCreated"],
+                                             {"count": fmt_n(c.get("readerRepairedNoBody"))})
+                                        if c.get("readerRepairedNoBody") else "")
+                                     + f"; those repairs do not cancel the new {noun(new_count, 'problem')}."
+                                     if repaired_count else ""))
         elif f["kind"] == "finding" and c.get("A") and c.get("B"):
             sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
                            and not (f.get("rowsNoBody") and row_has_no_body(names_doc0, r))
@@ -5373,7 +5401,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 ru_ = (((pr.get("reader") or {}).get("regressionUnitsRepaired") or {}).get(f.get("checkId"))
                        if c.get("readerUnitCounted") else None)
                 f["readerPlain"] = (f"{arm_subject(f.get('armId'))} repaired {fmt_n(repaired_count)} existing "
-                                    f"{(ru_[0 if repaired_count == 1 else 1]) if ru_ else noun(repaired_count, 'problem')} and changed which mod owns "
+                                    f"{(ru_[0 if repaired_count == 1 else 1]) if ru_ else noun(repaired_count, 'problem')}"
+                                    + (bind((reader_data.get("comparisonState") or {})["noBodyCreated"],
+                                            {"count": fmt_n(c.get("readerRepairedNoBody"))})
+                                       if c.get("readerRepairedNoBody") else "")
+                                    + " and changed which mod owns "
                                     f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
         elif f["kind"] == "null":
             diff_null = ((pr.get("reader") or {}).get("differentialNullPhrases") or {}).get(f.get("checkId"))
