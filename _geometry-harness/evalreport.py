@@ -2062,6 +2062,7 @@ def build_prediction(ctx: dict) -> dict:
             g.setdefault("_fieldNames", collections.Counter())[field_name(hit["row"])] += 1
             g.setdefault("_lostKeys", []).append((rk, hit["row"].get("field")))
         g.setdefault("_subjectRows", collections.Counter())[rk[4] if rk[4] is not None else ("row", rk[5])] += 1
+        g.setdefault("_rowSummaries", []).append(str(rk[5] or ""))
         fid = hit["finding"].get("id") if rk[0] not in sib_only else None
         if fid and fid not in g["findingIds"]:
             g["findingIds"].append(fid)
@@ -2279,6 +2280,18 @@ def build_prediction(ctx: dict) -> dict:
         g["plain"] = (f"{fmt_n(g['count'])} {noun}{on} between {g['mods'][0]} and {g['mods'][1]}. "
                       + attr_text + (f" {ph['readerQualification']}" if ph.get("readerQualification") else "")
                       + "".join(" " + d for d in detail) + (f" {provenance}" if provenance else ""))
+        # (Pilgrim review 6) a quest or switch clash: its in-game effect from the probe's own row (switch, depth)
+        summaries_ = g.pop("_rowSummaries", [])
+        st_words = words.get("stateInGame") or {}
+        if not g["inGame"] and st_words.get("pattern"):
+            for sm_ in summaries_:
+                m_ = re.search(st_words["pattern"], sm_)
+                what_ = (st_words.get("states") or {}).get(m_.group("state")) if m_ else None
+                if what_:
+                    dm_ = re.search(r"(\d+(?:\.\d+)?)\s*u inside", sm_)
+                    g["inGame"] = bind(st_words["line"], {"switch": m_.group("switch"), "what": bind(what_, {
+                        "depth": f"{dm_.group(1)} u" if dm_ else ""})})
+                    break
         g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else words["inGameMissing"])
         g["shownAs"] = ("pair" if not multi or g["attribution"] == "needs-both" else
                         "alone" if g["attribution"] == "single-mod" else "unseparated")
