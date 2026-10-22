@@ -2935,6 +2935,20 @@ def main():
         ok = adm == ["navmeshCheck"] and "navmesh" in line and adm2 == ["admitted"]
         return ok, f"with navmesh check {adm}; without {adm2}; line {line[-260:]!r}"
 
+    # C1054 (Clockwork r2 S1): the set-aside line for navmesh geometry says what the navmesh check does not judge: its
+    # door connections (door triangles), so a reader does not take lost doors as covered by the navmesh lines.
+    def c1054_navmesh_doors_not_checked_said():
+        N1 = f"0C3954:{BASE}"
+        r_ = lost_row(MOD_B, MOD_A, N1, "Data", ["Data.Max=1,2,3"], PH, ["Data.Max=0,0,0"])
+        r_["Summary"] = f"NavigationMesh {N1}: Data - {MOD_B}'s value lost to {MOD_A}'s"
+        measured = {(NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): []}
+        plan, md, _ = cw_bundle([r_], extra_results=measured)
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        return "door" in line and "not checked" in line, line[-300:]
+
+    for name, fn in [("fourth-review/C1054-navmesh-doors-not-checked-said", c1054_navmesh_doors_not_checked_said)]:
+        cell(name, fn)
+
     # C623 (Clockwork P104). A losing value equal to a base-game plugin's own value of the same field (its row in the
     # same setup) is no edit of that mod's: set aside as such, never "the same lost value carried by a second plugin"
     def c623_base_value_not_own_edit():
