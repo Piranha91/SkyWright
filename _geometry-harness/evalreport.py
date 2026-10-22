@@ -3416,11 +3416,22 @@ def build_prediction(ctx: dict) -> dict:
             if not es:
                 continue
             if g["kind"] == "LOST-EDIT":
-                for (loser, winner), n_ in collections.Counter((e["A"], e["B"]) for e in es).items():
+                pairs_ = collections.OrderedDict()
+                for e in es:
+                    pairs_.setdefault((e["A"], e["B"]), []).append(e)
+                for (loser, winner), pes_ in pairs_.items():
                     u_ = (words.get("stillThereLostUnits") or {}).get(g["checkId"]) or words["fieldNoun"]
-                    stays_parts.append((n_, bind(words["stillThereLost"], {"count": fmt_n(n_), "loser": loser,
-                                                                           "winner": winner,
-                                                                           "unit": u_[0 if n_ == 1 else 1]})))
+                    # "left" is a lost change no patch touches; one a patch carries the winning value on is said apart
+                    # (Winterhold review 1, BPT review 3)
+                    n_open = sum(1 for e in pes_ if outcome.get(id(e)) == "left")
+                    n_kept = len(pes_) - n_open
+                    text_ = (bind(words["stillThereLost"], {"count": fmt_n(n_open), "loser": loser, "winner": winner,
+                                                            "unit": u_[0 if n_open == 1 else 1]}) if n_open else "")
+                    if n_kept:
+                        text_ += bind(words["stillThereCarriedMore" if n_open else "stillThereCarried"], {
+                            "count": fmt_n(n_kept), "loser": loser, "winner": winner,
+                            "unit": u_[0 if n_kept == 1 else 1]})
+                    stays_parts.append((len(pes_), text_))
                 for e in es:
                     v_ = e.get("values") or {}
                     if (off_at_load(v_.get("lost")) and not off_at_load(v_.get("winner"))
@@ -3482,8 +3493,11 @@ def build_prediction(ctx: dict) -> dict:
             sum_parts.append(bind(words["validationSummarySwitched"], {"count": by_unit(switched, True)}))
         if own:
             sum_parts.append(bind(words["validationSummaryOwn"], {"count": by_unit(own, True)}))
-        if open_ or kept:
-            sum_parts.append(bind(words["validationSummaryLeft"], {"count": by_unit(open_ + kept, True)}))
+        if kept:
+            # a patch carrying the winning value is said apart, never as left (Winterhold review 1, BPT review 3)
+            sum_parts.append(bind(words["validationSummaryCarried"], {"count": by_unit(kept, True)}))
+        if open_:
+            sum_parts.append(bind(words["validationSummaryLeft"], {"count": by_unit(open_, True)}))
         sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True)}) if problems
                          else words["validationSummaryNoNew"])
         summary_ = bind(words["validationSummary"], {"patch": patch, "parts": (", ".join(sum_parts[:-1]) + ", and "
