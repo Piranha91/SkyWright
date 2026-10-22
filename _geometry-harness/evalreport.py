@@ -1642,7 +1642,9 @@ def build_prediction(ctx: dict) -> dict:
         # (third review, Missives S1) a value equal to the one an earlier base-game plugin set itself is that plugin's
         # change carried or restored, not the plugin's own: the latest such base-game provider, and whether it is the
         # record's first (the base game's original value) or a later fix
-        base_k = next((k for k in range(i - 1, -1, -1) if is_base_game(provs[k], words) and vals[k] == vals[i]
+        # (fourth review, Clockwork r3 S1) the EARLIEST such provider: the plugin that set the value; a later base-game
+        # plugin holding the same value (a Creation Club plugin carrying an update's value) only carries it
+        base_k = next((k for k in range(0, i) if is_base_game(provs[k], words) and vals[k] == vals[i]
                        and recordrows.own_change(provs, vals, k, (masters or {}).get(str(provs[k]).lower())
                                                  if masters is not None else None)[0]), None)
         return {"changed": changed, "inherits": provs[j] if j is not None else None,
@@ -3062,15 +3064,34 @@ def build_prediction(ctx: dict) -> dict:
             d_ = base_drop.setdefault((e["B"], e["baseValueOf"]), {"fields": collections.OrderedDict(),
                                                                    "carriers": [], "findingIds": []})
             d_["fields"].setdefault((str(e["formKey"]), e.get("field")), e.get("label") or "")
+            d_.setdefault("rows", {}).setdefault((str(e["formKey"]), e.get("field")),
+                                                 (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"]))
             if e["A"] not in d_["carriers"]:
                 d_["carriers"].append(e["A"])
             if e.get("findingId") and e["findingId"] not in d_["findingIds"]:
                 d_["findingIds"].append(e["findingId"])
     for (mod_, base_), d_ in base_drop.items():
         n_ = len(d_["fields"])
+        # (fourth review, Clockwork r3 S1) what the setup with the patch has: whether its winner holds the base-game
+        # plugin's value, read by the record chain's read-same rule
+        kept_ = None
+        if patched_arm and words.get("baseValueDroppedPatch"):
+            kept_ = 0
+            for rk_ in (d_.get("rows") or {}).values():
+                ch_ = (chains_of(rk_[0], patched_arm) or {}).get(str(rk_[4]))
+                f_ = str(((p_rows.get(rk_) or {}).get("row") or {}).get("field") or "")
+                low_ = [str(x).lower() for x in (ch_ or {}).get("providers") or []]
+                if ch_ and str(base_).lower() in low_ and (f_ in (ch_.get("values") or {}) or ch_.get("allListed")):
+                    vs_ = (ch_.get("values") or {}).get(f_) or [()] * len(low_)
+                    kept_ += int(vs_[low_.index(str(base_).lower())] == vs_[-1])  # the chain's read-same values
+            if not any((chains_of(rk_[0], patched_arm) or {}).get(str(rk_[4])) for rk_ in (d_.get("rows") or {}).values()):
+                kept_ = None
         loss_lines.append({"text": bind(words["baseValueDroppedLine"], {
             "mod": mod_, "base": base_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
             "examples": "; ".join(f"{fk_} ({f_})" for fk_, f_ in list(d_["fields"])[:2]),
+            "verb": "carries" if len(d_["carriers"]) == 1 else "carry",
+            "patch": "" if kept_ is None else bind(words["baseValueDroppedPatch"], {
+                "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_}),
             "carriers": " and ".join(d_["carriers"])}), "findingIds": d_["findingIds"][:1]})
     # (Missives review 1) the winner's own change to the bits the game reads of a field whose losing change is only in
     # unread bytes: one line per winning mod, with each record and what the read bits mean (skill data)

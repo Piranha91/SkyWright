@@ -3884,7 +3884,8 @@ def main():
         # (third review, Missives S1) the value's origin is said on the base-fix line: ModA drops HearthFires' fix, which
         # OtherMod only carries
         line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
-        ok = f"{OTHER} only carry" in line and "Location" in line and MOD_A in line
+        # (fourth review) one carrier: "only carries" (the verb agrees; Snazzy r3 minor 7)
+        ok = f"{OTHER} only carries" in line and "Location" in line and MOD_A in line
         return ok, line[-260:]
 
     for name, fn in [("after-final/C822-carried-value-names-its-origin", c822_carried_value_names_its_origin)]:
@@ -6194,7 +6195,7 @@ def main():
                                            PATCH: [BASE, UPD, MOD_A]})
         line = next((ln for ln in md.splitlines() if "own change of" in ln), "")
         return (f"wins over {UPD}'s own change" in line and f"{CC1}'s own change" not in line
-                and f"with {PATCH}" in line and f"{UPD}'s value" in line.split(f"with {PATCH}", 1)[-1]), line[-400:]
+                and f"with {PATCH}" in line and f"{UPD}'s value in 1 of the 1" in line), line[-400:]
 
     for name, fn in [("fourth-review/C1044-base-value-named-by-its-origin", c1044_base_value_named_by_its_origin)]:
         cell(name, fn)
