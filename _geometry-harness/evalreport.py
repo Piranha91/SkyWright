@@ -2121,6 +2121,12 @@ def build_prediction(ctx: dict) -> dict:
             # (third review, Pilgrim S1) the loser only starts it disabled and nothing in the loser refers to it, so it
             # stays off in the loser's game too; the winner sets it off for good: no effect in game
             return "offUnreferenced"
+        if (rk[1] == "LOST-EDIT" and bare_start_off(rk, rk[3]) and side_disables(rk, rk[2])
+                and refers_to(rk[3], rk[4]) is False):
+            # (fourth review, Clockwork r3 S3) the mirror: the winner only starts it disabled and no record of the winning
+            # plugin refers to it; the loser sets it off for good: off in both versions, as far as their records show
+            unref_winners.setdefault(rk[3], None)
+            return "offUnreferencedWinner"
         if rk[1] == "LOST-EDIT":
             noise = lost_edit_noise(rk)
             if noise:
@@ -2142,6 +2148,7 @@ def build_prediction(ctx: dict) -> dict:
         return "admitted"
 
     without_cache, partner_arms, put_back = {}, {}, set()
+    unref_winners = collections.OrderedDict()
 
     def without_other(m_lower):
         """The setup equal to P without one other mod (and its companions), in this bundle or the sibling."""
@@ -2376,6 +2383,11 @@ def build_prediction(ctx: dict) -> dict:
         if rk[1] == "LOST-EDIT" and side_starts_off(rk, rk[2]) and side_disables(rk, rk[3]):
             # (third review, Pilgrim S1) only the loser's version starts it disabled; the winner's sets it off for good
             g.setdefault("_startsOffLoser", {}).setdefault(rk[2], set()).add(str(rk[4]))
+        elif (rk[1] == "LOST-EDIT" and bare_start_off(rk, rk[3]) and not side_starts_off(rk, rk[2])
+              and refers_to(rk[3], rk[4]) is False):
+            # (fourth review, Clockwork r3 S3) the winner only starts it disabled and its own records never refer to it:
+            # named, with the read's scope, never "a script or quest may enable it"
+            g.setdefault("_winnerStartsOffUnref", {}).setdefault((rk[3], rk[2]), {}).setdefault(str(rk[4]), named(rk[4], rk[5]))
         elif rk[1] == "LOST-EDIT" and (side_starts_off(rk, rk[2]) or side_starts_off(rk, rk[3])):
             g.setdefault("_startsOff", set()).add(str(rk[4]))
         # (round 2, Sewers B1 and Clockwork S1) a broken link of a base-game navmesh record the other mod carries, decided
@@ -2699,6 +2711,11 @@ def build_prediction(ctx: dict) -> dict:
             if words.get("itemStartsOffLoser"):
                 detail.append(bind(words["itemStartsOffLoser"], {"count": fmt_n(len(s_)), "objects": objs_(len(s_)),
                                                                  "loser": m_}))
+        for (wi_, lo_), ex_ in (g.pop("_winnerStartsOffUnref", None) or {}).items():
+            if words.get("itemWinnerStartsOffUnref"):
+                detail.append(bind(words["itemWinnerStartsOffUnref"], {
+                    "count": fmt_n(len(ex_)), "objects": objs_(len(ex_)), "winner": wi_, "loser": lo_,
+                    "examples": "; ".join(list(ex_.values())[:2])}))
         s_off = g.pop("_startsOff", None) or set()
         if s_off and words.get("itemStartsOff"):
             detail.append(bind(words["itemStartsOff"], {"count": fmt_n(len(s_off)), "objects": objs_(len(s_off))}))
@@ -3261,6 +3278,7 @@ def build_prediction(ctx: dict) -> dict:
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
              "offUnreferenced": set_aside["offUnreferenced"], "baseLink": set_aside["baseLink"],
+             "offUnreferencedWinner": set_aside["offUnreferencedWinner"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
              "ownMaster": set_aside["ownMaster"], "undoesMaster": set_aside["undoesMaster"],
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
@@ -3390,6 +3408,8 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsideBodyUnread"], aside) if aside["bodyUnread"] else "")
                                    + (" " + bind(words["setAsideBothDisabled"], aside) if aside["bothDisabled"] else "")
                                    + (" " + bind(words["setAsideOffUnreferenced"], aside) if aside["offUnreferenced"] else "")
+                                   + (" " + bind(words["setAsideOffUnreferencedWinner"], {**aside, "winners": " and ".join(unref_winners)})
+                                      if aside["offUnreferencedWinner"] else "")
                                    + (" " + bind(words["setAsideBaseLink"], {
                                        "count": fmt_n(aside["baseLink"]), "carriers": " and ".join(base_link_by),
                                        "noun": "link" if aside["baseLink"] == 1 else "links",
