@@ -4165,8 +4165,9 @@ def main():
         line = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
         bad = part_le_whole(md)
         # (blind reviews of regen-2) the forwarding clause is gone: no line says what forwarding would do (C931)
-        ok = (not bad and "off for good" in md and "no effect in game" in line and "on/off field" not in md
-              and "brings them back" not in md)
+        # (fourth review, Winterhold S2) ModA has D1 on: its loss to ModB's removal is "not drawn", never "no effect"
+        ok = (not bad and "off for good" in md and "so not drawn" in line and "no effect in game" not in line
+              and "on/off field" not in md and "brings them back" not in md)
         return ok, f"bad {bad}; {line[:400]}"
 
     for name, fn in [("after-review/C923-off-count-part-of-its-count-and-true-effect",
@@ -4685,8 +4686,9 @@ def main():
     # may remove it on purpose. The off-for-good note keeps only its count and "no effect in game".
     def c931_no_forwarding_claim():
         plan, md, html = offwin_bundle()
+        # (fourth review, Winterhold S2) the note says what holds for ModA's own version (on): "so not drawn"
         ok = ("would bring" not in md and "would bring" not in _html.unescape(html) and "on/off field" not in md
-              and "on objects set off for good" in md and "no effect in game" in md)
+              and "sets off for good, so not drawn" in md and "no effect in game" not in md)
         hits = [ln[:160] for ln in md.splitlines() if "would bring" in ln]
         return ok, f"{hits[:2]}"
 
@@ -4714,8 +4716,9 @@ def main():
     # 00C933 is said as an object ModB still brings back; 00C934 is the patch's choice and is not in the still-there line.
     def c933_brings_back_only_untouched():
         D1, D2 = f"00C933:{BASE}", f"00C934:{BASE}"
+        # (fourth review, Winterhold S1) ModB keeps the object at its spot: a move across its size would make it ModB's
+        # own placement (C1020), not the object ModA removes brought back
         a_, b_ = offs(-30000), offs(0)
-        b_["Placement.Position"] = "500,100,0"
         p_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)
                   for D in (D1, D2)]
         w_rows = [lost_row(MOD_A, MOD_B, D1, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE),

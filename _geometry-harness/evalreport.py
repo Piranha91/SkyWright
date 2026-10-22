@@ -1809,6 +1809,78 @@ def build_prediction(ctx: dict) -> dict:
             return "parent"
         return "on"
 
+    # (fourth review) What a lost value means in game is read once, from the whole records: each side's state at load,
+    # whether the winner placed the object itself, and whether a mod undoing its master's fix changed the record itself.
+    # Every sentence about a lost value's meaning takes its words from these (Winterhold S1, S2; Snazzy r3 S2; BPT r3 S2).
+    lm_words = words.get("lostMeaning") or {}
+
+    def version_state(ch, i):
+        """Provider i's whole version: "off" (off for good), "starts" (only initially disabled), "parent" (on in its own
+        record, under an enable parent), or "on"."""
+        if provider_disables(ch, i):
+            return "off"
+        f_ = provider_fields_all(ch, i)
+        flags_ = " ".join(str(v_) for k_, v_ in f_.items() if k_.endswith("Flags") and not k_.startswith("EnableParent"))
+        if dis_flag in flags_ or any(int(x_) & 0x800 for x_ in re.findall(r"(?<![\w.])(\d+)(?![\w.])", flags_)):
+            return "starts"
+        if re.match(r"^[0-9A-Fa-f]{6}:", str(f_.get("EnableParent.Reference") or "").strip()):
+            return "parent"
+        return "on"
+
+    def side_state(rk, plugin, arm_id=None):
+        """version_state of `plugin`'s version of the row's record in that setup; None where the chain does not hold it."""
+        ch = (chains_of(rk[0], arm_id or p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch:
+            return None
+        low_ = [str(x).lower() for x in ch["providers"]]
+        return version_state(ch, low_.index(str(plugin).lower())) if str(plugin).lower() in low_ else None
+
+    def winner_placed(rk):
+        """{across, rebased} where the winner's version is its own placement of the object: another base than the one the
+        losing plugin inherits, or moved across at least the object's size (the supersede measure) from where the losing
+        plugin inherits it; None otherwise or where the chain cannot tell."""
+        ch = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch:
+            return None
+        provs = [str(x).lower() for x in ch["providers"]]
+        if rk[2].lower() not in provs or rk[3].lower() not in provs:
+            return None
+        ia, ib = provs.index(rk[2].lower()), provs.index(rk[3].lower())
+        _, j = recordrows.own_change(ch["providers"], [0] * len(provs), ia,
+                                     (masters or {}).get(rk[2].lower()) if masters is not None else None)
+        if j is None:
+            return None
+        bases_ = (ch.get("values") or {}).get(lm_words.get("baseField") or "Base")
+        rebased = bool(bases_) and bases_[ib] != bases_[j]
+        pj = _vec(next((v_ for k_, v_ in recordrows.provider_fields(ch, sup_place, j).items() if k_.endswith("Position")), None))
+        pb = _vec(next((v_ for k_, v_ in recordrows.provider_fields(ch, sup_place, ib).items() if k_.endswith("Position")), None))
+        across = math.dist(pj[:2], pb[:2]) if pj and pb else None
+        moved = across is not None and across >= spot_size(rk[4])
+        return {"across": across if moved else None, "rebased": rebased} if (rebased or moved) else None
+
+    def reworked(arm_id, rk):
+        """The fields of skill data `reworkFields` (other than the row's own) the winner changed itself: its value differs,
+        as the record chain reads it (path case, unused bytes and rounding folded), from the one it inherits and from the
+        value before that plugin's change. Where a mod undoes its master's fix, such a change says it rebuilt the object."""
+        ch = (chains_of(rk[0], arm_id) or {}).get(str(rk[4]))
+        if not ch:
+            return []
+        provs = [str(x).lower() for x in ch["providers"]]
+        if rk[2].lower() not in provs or rk[3].lower() not in provs:
+            return []
+        ia, ib = provs.index(rk[2].lower()), provs.index(rk[3].lower())
+        field_ = str(((p_rows.get(rk) or {}).get("row") or {}).get("field") or "")
+        _, ja = recordrows.own_change(ch["providers"], [0] * len(provs), ia,
+                                      (masters or {}).get(rk[2].lower()) if masters is not None else None)
+        out_ = []
+        for t_ in lm_words.get("reworkFields") or []:
+            vals_ = (ch.get("values") or {}).get(t_)
+            if t_ == field_ or not vals_:
+                continue
+            if vals_[ib] != vals_[ia] and (ja is None or vals_[ib] != vals_[ja]):
+                out_.append(t_)
+        return out_
+
     def bare_start_off(rk, plugin):
         """`plugin`'s version only starts the object disabled, with no enable parent at all."""
         if not side_starts_off(rk, plugin):
@@ -2922,7 +2994,19 @@ def build_prediction(ctx: dict) -> dict:
         n_ = len(u_["fields"])
         left_ = (sum(1 for rk_ in u_["fields"].values() if there(patched_arm, rk_))
                  if patched_arm and any((rk_[0], patched_arm) in measured for rk_ in u_["fields"].values()) else None)
+        # (fourth review, BPT r3 S2) where the mod also changed the same record's base or position itself, read by the
+        # chain's read-same rule, the undone fix is on an object it rebuilt: said with its count, as likely deliberate
+        rw_ = collections.OrderedDict((k_, reworked(p_of(rk_[0]), rk_)) for k_, rk_ in u_["fields"].items())
+        rw_ = collections.OrderedDict((k_, v_) for k_, v_ in rw_.items() if v_)
+        by_what_ = collections.Counter(t_ for v_ in rw_.values() for t_ in dict.fromkeys(v_))
+        what_ = ", ".join(f"{lm_words.get('baseWords' if t_ == (lm_words.get('baseField') or 'Base') else 'positionWords') or t_}"
+                          f" on {fmt_n(n__)}" for t_, n__ in by_what_.most_common())
+        rework_ = (bind(words["undoesMasterRework"], {
+            "count": fmt_n(len(rw_)), "what": what_,
+            "examples": "; ".join(fk_ for fk_ in dict.fromkeys(k_[0] for k_ in rw_))}) if rw_ and words.get(
+            "undoesMasterRework") else "")
         loss_lines.append({"text": bind(words["undoesMasterLine"], {
+            "rework": rework_,
             "mod": mod_, "master": mas_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
             "examples": "; ".join(f"{fk_} ({f_})" for fk_, f_ in list(u_["fields"])[:2]),
             "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
@@ -3745,13 +3829,39 @@ def build_prediction(ctx: dict) -> dict:
                 off_cache[id(e)] = r_
             return off_cache[id(e)]
 
-        def off_text(n_, wrap=True):
-            if not n_:
+        OFF_STATES = ("on", "parent", "starts", "off", "unknown")
+
+        def off_state(e):
+            """(fourth review, Winterhold S2) None, or the losing plugin's own version's state (version_state) in the
+            setup with the patch, for a row still_off covers: 'no effect in game' only where it is off for good too."""
+            if not still_off(e):
+                return None
+            return side_state(keyof(e), e["A"], patched_arm) or "unknown"
+
+        def off_counts(es_):
+            return collections.Counter(off_state(e) for e in es_ if off_state(e))
+
+        def off_text(c_, wrap=True):
+            """The off-for-good note: a Counter by the losing version's state (an int is an unknown state)."""
+            if isinstance(c_, int):
+                c_ = collections.Counter({"unknown": c_}) if c_ else collections.Counter()
+            notes_ = words.get("offGoodNotes") or {}
+            parts_ = [bind(notes_.get(s_) or words["offGoodNote"], {"count": fmt_n(c_[s_])}) for s_ in OFF_STATES
+                      if (c_ or {}).get(s_)]
+            if not parts_:
                 return ""
-            return (" ({})" if wrap else "{}").format(bind(words["offGoodNote"], {"count": fmt_n(n_)}))
+            return (" ({})" if wrap else "{}").format("; ".join(parts_))
 
         def off_note(es_):
-            return off_text(sum(1 for e in es_ if still_off(e)))
+            return off_text(off_counts(es_))
+
+        def off_keys(prefix, es_):
+            """Per-state counts as int keys of a by-item dict ({prefix}_{state}), so they add up across items."""
+            c_ = off_counts(es_)
+            return {f"{prefix}_{s_}": c_.get(s_, 0) for s_ in OFF_STATES}
+
+        def off_from(bi, prefix):
+            return collections.Counter({s_: bi.get(f"{prefix}_{s_}") or 0 for s_ in OFF_STATES})
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
         problem_objects, problem_movers = {}, {}
         gap_re = (words.get("newObjects") or {}).get("gapPattern")
@@ -4039,10 +4149,11 @@ def build_prediction(ctx: dict) -> dict:
                             "placed": sum(1 for e in all_["placed"] if item_of(e) == k),
                             # (third review, Winterhold S1) by loser and winner: the patch keeps the winner's value
                             "keptBy": collections.Counter(f"{e['A']}|{e['B']}" for e in all_["kept"] if item_of(e) == k),
-                            "offKeptBy": collections.Counter(f"{e['A']}|{e['B']}" for e in all_["kept"] if item_of(e) == k
-                                                             and still_off(e)),
-                            **{f"off{n_}": sum(1 for e in all_[x_] if item_of(e) == k and still_off(e))
-                               for n_, x_ in (("Open", "open"), ("Kept", "kept"))},
+                            # (fourth review) each off-for-good count by the losing version's own state
+                            "offKeptBy": collections.Counter(f"{e['A']}|{e['B']}|{off_state(e)}" for e in all_["kept"]
+                                                             if item_of(e) == k and off_state(e)),
+                            **{k2_: v2_ for n_, x_ in (("Open", "open"), ("Kept", "kept"))
+                               for k2_, v2_ in off_keys(f"off{n_}", [e for e in all_[x_] if item_of(e) == k]).items()},
                             "cannotTell": sum(1 for e in all_["untold"] if item_of(e) == k),
                             **{f"open{n[0].upper()}{n[1:]}": sum(1 for e in all_["open"] if item_of(e) == k
                                                                  and left_split.get(id(e)) == n)
@@ -4095,19 +4206,20 @@ def build_prediction(ctx: dict) -> dict:
                                                            "count": fmt_n(n_)})
                                      for k_, n_ in sorted(by_.items(), key=lambda kv: (-kv[1], kv[0].lower())))
                 if k == "open":
-                    return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + off_text(bi.get("offOpen"))
+                    return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + off_text(off_from(bi, "offOpen"))
                 if k != "kept":
                     return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
                 # whose change stays lost, as without the patch (fourth blind review, W1): never "kept" alone
                 by = bi.get("keptBy") or {}
                 if sum(by.values()) != bi.get("kept"):
                     return (bind(ow["keptUnnamed"], {"count": fmt_n(bi.get(k) or 0)})
-                            + off_text(bi.get("offKept")))
+                            + off_text(off_from(bi, "offKept")))
                 # each pair's off-for-good count beside its own count (reviewer, BPT 1); the patch keeps the winner's
                 # value: the patch's resolution, said as switched is (third review, Winterhold S1)
                 return ", ".join(bind(ow["kept"], {"loser": m_.split("|")[0], "winner": m_.split("|")[1],
                                                    "count": fmt_n(n_)})
-                                 + off_text((bi.get("offKeptBy") or {}).get(m_))
+                                 + off_text(collections.Counter({s_: (bi.get("offKeptBy") or {}).get(f"{m_}|{s_}", 0)
+                                                                 for s_ in OFF_STATES}))
                                  for m_, n_ in sorted(by.items(), key=lambda kv: (-kv[1], kv[0].lower())))
             parts = [part(k) for k in keys if bi.get(k)]
             if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed")):
@@ -4116,7 +4228,7 @@ def build_prediction(ctx: dict) -> dict:
                 split = [bind(ow["openSplit"][n], {"count": fmt_n(bi[f"open{n[0].upper()}{n[1:]}"])})
                          for n in ("listed", "patchHeld", "notAttributed") if bi.get(f"open{n[0].upper()}{n[1:]}")]
                 # the off-for-good count goes first, beside the count it is part of (reviewer, BPT 1)
-                off_ = off_text(bi.get("offOpen"), wrap=False)
+                off_ = off_text(off_from(bi, "offOpen"), wrap=False)
                 parts[[k for k in keys if bi.get(k)].index("open")] = (
                     bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(([off_] if off_ else []) + split)
                     + ")")
@@ -4160,6 +4272,7 @@ def build_prediction(ctx: dict) -> dict:
                 "outcomes": outcome_text({**agg, "switchedBy": dict(sw_by), "keptBy": kp_by,
                                          "offKeptBy": ok_by})}))
         stays_parts, back = [], collections.OrderedDict()
+        reused_moved, reused_base = collections.OrderedDict(), collections.OrderedDict()
         stay_groups = collections.OrderedDict()
         for g in counted_items:
             k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
@@ -4187,7 +4300,15 @@ def build_prediction(ctx: dict) -> dict:
                             and not side_disables(keyof(e), e["B"]) and not side_starts_off(keyof(e), e["B"])):
                         # brings back is said of the load: the winner's version, by any field, has the object on at
                         # load (Clockwork review S2; a version only initially disabled does not bring it back)
-                        back.setdefault((e["B"], e["A"]), []).append(str(e["formKey"]))
+                        # (fourth review, Winterhold S1) an object the winner placed itself (moved across at least its
+                        # size, or another base) is the winner's own placement, not the object the loser removed
+                        wp_ = winner_placed(keyof(e))
+                        if wp_ and wp_.get("across") is not None:
+                            reused_moved.setdefault((e["B"], e["A"]), {}).setdefault(str(e["formKey"]), wp_["across"])
+                        elif wp_:
+                            reused_base.setdefault((e["B"], e["A"]), []).append(str(e["formKey"]))
+                        else:
+                            back.setdefault((e["B"], e["A"]), []).append(str(e["formKey"]))
                 continue
             objs = {str(e["formKey"]) for e in es} | {str(o_) for e in es for o_ in e.get("other") or []}
             places = collections.Counter(str((p_rows.get(keyof(e)) or {}).get("row", {}).get("label") or "") for e in es)
@@ -4233,6 +4354,16 @@ def build_prediction(ctx: dict) -> dict:
             shown.append(bind(words["stillThereBringsBack"], {
                 "winner": winner, "loser": loser, "count": fmt_n(len(fks)),
                 "noun": "object" if len(fks) == 1 else "objects", "examples": "; ".join(fks[:2])}))
+        for (winner, loser), d_ in reused_moved.items():
+            shown.append(bind(words["stillThereMovedOwn"], {
+                "winner": winner, "loser": loser, "count": fmt_n(len(d_)), "noun": "object" if len(d_) == 1 else "objects",
+                "it": "it" if len(d_) == 1 else "them",
+                "examples": "; ".join(f"{fk_} {fmt_units(u_)} away" for fk_, u_ in list(d_.items())[:2])}))
+        for (winner, loser), fks in reused_base.items():
+            fks = list(dict.fromkeys(fks))
+            shown.append(bind(words["stillThereRebased"], {
+                "winner": winner, "loser": loser, "count": fmt_n(len(fks)), "noun": "object" if len(fks) == 1 else "objects",
+                "examples": "; ".join(fks[:2])}))
         prediction["withPatchHead"] = bind(words["withPatchHead"], {"patch": patch})
         prediction["withPatchLines"] = kind_lines
         prediction["withPatchStays"] = (bind(words["stillThereLine"], {"patch": patch, "parts": "; ".join(shown)})
