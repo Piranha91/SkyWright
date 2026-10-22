@@ -4665,6 +4665,95 @@ def main():
     for name, fn in [("after-review/C931-no-forwarding-claim", c931_no_forwarding_claim)]:
         cell(name, fn)
 
+
+    # ------------------------------------------------ after the third review round (C932-C999)
+    # C932 (Winterhold review S1): a lost change a declared patch wins, keeping the value that wins without it (000703),
+    # is the patch's resolution of that record: it is not in the still-there line, which holds only what no patch
+    # touches (000702), and the with-patch line says the patch keeps ModB's value over ModA's change.
+    def c932_patch_kept_value_not_still_there():
+        plan, md, html = record_validation_bundle()
+        pr_ = reader(plan).get("prediction") or {}
+        st = pair_parts(pr_.get("withPatchStays"), MOD_A, MOD_B)
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        only_left = (any(re.search(re.escape(MOD_A) + r"'s changes to 1 record field lost to " + re.escape(MOD_B) + r"$",
+                                   re.sub(r"^Still there with [^:]*: ", "", x).rstrip(".")) for x in st)
+                     and not any("carr" in x for x in st))
+        said = f"the patch keeps {MOD_B}'s value over {MOD_A}'s change on 1" in kl and f"{MOD_A}'s change stays lost" not in kl
+        return only_left and said, f"{st}; {kl[:240]}"
+
+    # C933 (Snazzy review S2): ModA moves two objects below the world and ModB keeps them in place. On 00C933 nothing
+    # patches the record (left); on 00C934 the patch carries ModB's version (kept: the patch keeps the object on). Only
+    # 00C933 is said as an object ModB still brings back; 00C934 is the patch's choice and is not in the still-there line.
+    def c933_brings_back_only_untouched():
+        D1, D2 = f"00C933:{BASE}", f"00C934:{BASE}"
+        a_, b_ = offs(-30000), offs(0)
+        b_["Placement.Position"] = "500,100,0"
+        p_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)
+                  for D in (D1, D2)]
+        w_rows = [lost_row(MOD_A, MOD_B, D1, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE),
+                  lost_row(MOD_A, PATCH, D2, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)]) for D in (D1, D2)]
+        w_ch = [(D1, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)]),
+                (D2, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+        line = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+        ok = (re.search(r"still brings back 1 object\b", line) is not None and D1 in line and D2 not in line
+              and "carr" not in line)
+        return ok, line[:400]
+
+    # C934 (Clockwork review S1): an overlap pair still crossing with the patch, which the setup with the patch does not
+    # list between two mods, where the patch places one of the objects (the record chain: the patch's version of X loads
+    # last and moves it), is the patch's placement: not "left", not in the still-there line, said apart.
+    def placed_overlap_bundle(patch_moves=True, listed=False):
+        X = f"000X34:{MOD_A}"
+        ys = [f"000Y3{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        other_ = f"00C93A:{BASE}"
+        enr = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")]}
+        x_chain = [(MOD_A, {"Placement.Position": "1,1,1"})] + ([(PATCH, {"Placement.Position": "9,9,9"})]
+                                                                if patch_moves else [])
+        tr = {(RECORDS, "with-patch"): tree_transcript([
+            (X, "PlacedObject", x_chain),
+            (other_, "PlacedObject", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (PATCH, {"Owner": "p"})])])}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows,
+                                                            (OVERLAP, "with-patch"): list(p_rows) if listed else []},
+                                         [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                         enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                         transcripts=tr)
+        return plan, md, X
+
+    def c934_patch_placed_not_left():
+        plan, md, X = placed_overlap_bundle()
+        pr_ = reader(plan).get("prediction") or {}
+        wp = sorted(str(e.get("withPatch")) for e in pr_.get("record") or [] if e.get("formKey") == X)
+        kl = next((x for x in pr_.get("withPatchLines") or [] if "overlap pairs)" in x), "")
+        st = str(pr_.get("withPatchStays") or "")
+        ok = (wp == ["patchPlaced", "patchPlaced"] and not re.search(r"\bleft \d", kl)
+              and re.search(r"\b2\b[^;]*a patch places", kl) is not None and "overlap pairs between" not in st)
+        return ok, f"{wp}; {kl[:200]}; {st[:200]}"
+
+    # C935, C936 (guards for C934): the same pair stays left where no patch places either object (C935) and where the
+    # setup with the patch still lists it between the two mods (C936).
+    def c935_unplaced_overlap_stays_left():
+        plan, md, X = placed_overlap_bundle(patch_moves=False)
+        wp = sorted(str(e.get("withPatch")) for e in (reader(plan).get("prediction") or {}).get("record") or []
+                    if e.get("formKey") == X)
+        return wp == ["left", "left"], f"{wp}"
+
+    def c936_listed_overlap_stays_left():
+        plan, md, X = placed_overlap_bundle(listed=True)
+        wp = sorted(str(e.get("withPatch")) for e in (reader(plan).get("prediction") or {}).get("record") or []
+                    if e.get("formKey") == X)
+        return wp == ["left", "left"], f"{wp}"
+
+    for name, fn in [("third-review/C932-patch-kept-value-not-still-there", c932_patch_kept_value_not_still_there),
+                     ("third-review/C933-brings-back-only-untouched", c933_brings_back_only_untouched),
+                     ("third-review/C934-patch-placed-not-left", c934_patch_placed_not_left),
+                     ("third-review/C935-unplaced-overlap-stays-left", c935_unplaced_overlap_stays_left),
+                     ("third-review/C936-listed-overlap-stays-left", c936_listed_overlap_stays_left)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
