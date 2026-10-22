@@ -2012,7 +2012,13 @@ def main():
     # C500. A navmesh comparison counts navmesh records, the prediction broken links: the comparison says its unit
     def c500_navmesh_comparison_names_its_unit():
         n1 = f"000N01:{BASE}"
-        p_rows = [row("EDGE-IDX", MOD_A, MOD_B, f"000E0{i}:{BASE}", label="CityExterior03 (ext)", other=n1) for i in (1, 2, 3)]
+        # (round 3, Clockwork re-review B1) the three rows are of one navmesh record (three links to one target), so the
+        # comparison, which counts distinct records from its rows, says 1; until round 3 the rows were three records and
+        # the 1 came from the probe's group count
+        p_rows = [row("EDGE-IDX", MOD_A, MOD_B, f"000E01:{BASE}", label="CityExterior03 (ext)", other=n1) for i in (1, 2, 3)]
+        for i_, r_ in enumerate(p_rows):
+            r_["Summary"] = (f"navmesh 000E01:{BASE} in CityExterior03 (ext) edge-links {n1} triangle {20 + i_} of 10   "
+                             f"[record provided by: {BASE} -> {MOD_A}]")
         order = {"without-patch": {"navownprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
                                                        created=1, newDefect=1, attributed=0, unmeasured=0)}}
         log = f"NEW     EDGE-IDX    {MOD_A}  x  {MOD_B}   +1 record(s): created 1\n"

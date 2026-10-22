@@ -759,6 +759,19 @@ def row_has_no_body(names: dict | None, r: dict) -> bool:
     return any(base_has_no_model(names, x) for x in [r.get("formKey"), *(r.get("other") or ())] if x)
 
 
+NAV_LINK_ID = re.compile(r"navmesh ([0-9A-Fa-f]{6}:.+?) in .*? edge-links ([0-9A-Fa-f]{6}:.+?) triangle (\d+)")
+
+
+def row_identity(row: dict) -> tuple:
+    """A comparison row as one thing in both setups: a broken navmesh link by its linking navmesh, target navmesh and
+    target triangle (the provider chain and the target's triangle count it is written with differ between setups); any
+    other row by its object, its partner objects and its summary."""
+    m = NAV_LINK_ID.search(str(row.get("summary") or ""))
+    if m:
+        return ("link", m.group(1).upper(), m.group(2).upper(), int(m.group(3)))
+    return ("row", row.get("formKey"), tuple(row.get("other") or ()), row.get("summary"))
+
+
 def conflict_rows(conflict: dict, evidence_id: str | None) -> list[dict]:
     rows = []
     # the partner objects a geometry row is measured against (an overlap's other object, a fixture's removed host):
@@ -4697,6 +4710,24 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     reverse_rule = (pr.get("concise") or {}).get("reversePartRows", "index-only")
     context_only_by_check = ((pr.get("reader") or {}).get("contextOnlyKinds") or {})
 
+    # (round 3, Clockwork re-review B1) a comparison whose sentence names its unit (skill data `regressionUnits`: records
+    # with new broken links) counts that unit from the two setups' own rows: the distinct records holding a row one setup
+    # lists and the other does not, never the probe's per-group count (which counts (record, target) pairs)
+    unit_checks = {k for k in ((pr.get("reader") or {}).get("regressionUnits") or {}) if k != "about"}
+
+    def records_changed(check_id, groups, from_emit, against_emit):
+        """The distinct records (formKey) of the rows `from_emit` lists in `groups` ((kind, A, B)) whose identity no group
+        of `against_emit` lists, leaving out kinds kept as context only; None where an emit is not read or no such row
+        is found though the groups count some (the count is then not in that unit)."""
+        if check_id not in unit_checks or not isinstance(from_emit, dict) or not isinstance(against_emit, dict):
+            return None
+        had = {row_identity(x) for c in against_emit.get("Conflicts") or [] if not context_only(check_id, c.get("Kind"))
+               for x in conflict_rows(c, None)}
+        keys = {(d["kind"], d["A"], d["B"]) for d in groups}
+        got = {x.get("formKey") for c in from_emit.get("Conflicts") or [] if (c.get("Kind"), c.get("A"), c.get("B")) in keys
+               for x in conflict_rows(c, None) if x.get("formKey") and row_identity(x) not in had}
+        return len(got) if got or not groups else None
+
     def context_only(check_id, group_kind) -> bool:
         return str(group_kind or "") in set(context_only_by_check.get(str(check_id), []) or [])
 
@@ -4802,10 +4833,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 reader_shrank = [d for d in shrank_groups if not context_only(check_id, d.get("kind"))]
                 reader_created = (sum(int(d.get("created") or 0) for d in reader_groups) - known_count + len(bodied)
                                   if created_groups else (0 if gated else int(p.get("newDefect") or p.get("created") or 0)))
+                unit_n = records_changed(check_id, reader_groups, emit, base_emit) if reader_groups else None
+                if unit_n is not None:
+                    reader_created = unit_n
                 reader_repaired = (sum(int(d.get("repaired") or 0) for d in reader_shrank) if shrank_groups
                                    else (0 if gated else int(p.get("repaired") or 0)))
                 counts_r = {**counts, "groups": [{"kind": d["kind"], "A": d["A"], "B": d["B"], "created": d.get("created", 0)}
                                                  for d in created_groups], "readerCreated": reader_created,
+                            "readerUnitCounted": unit_n is not None,
                             "readerNoBody": no_body_created,
                             "readerRepaired": reader_repaired}
                 f = add({"id": None, "kind": "regression", "priority": 1, "checkId": check_id,
@@ -4833,12 +4868,18 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                    else (0 if gated else int(p.get("repaired") or 0)))
                 reader_reclassified = (sum(int(d.get("reclassified") or 0) for d in reader_shrank) if shrank
                                        else (0 if gated else int(p.get("reclassified") or 0)))
+                base_path_r = b.output_emit_path(check_id, "baseline", "arm") if arm_id != "baseline" else None
+                unit_r = (records_changed(check_id, reader_shrank, b.emit(base_path_r) if base_path_r else None, emit)
+                          if reader_shrank else None)
+                if unit_r is not None:
+                    reader_repaired = unit_r
                 f = add({"id": None, "kind": kind, "priority": 4, "checkId": check_id,
                          "family": b.check_family(check_id), "armId": arm_id, "part": "diff",
                          "title": b.check_title(check_id), "strength": strength, "verdict": p.get("verdict"),
                          "plain": bind(templates.get(kind, ""), {**counts, "armId": arm_id}),
                          "counts": {**counts, "diffLines": [d["line"] for d in shrank],
-                                    "readerRepaired": reader_repaired, "readerReclassified": reader_reclassified},
+                                    "readerRepaired": reader_repaired, "readerReclassified": reader_reclassified,
+                                    "readerUnitCounted": unit_r is not None},
                          "evidenceIds": eids_for(check_id, arm_id, "diff"), "rows": []})
                 f["readerRelevant"] = bool(reader_shrank) if shrank else not gated
                 if not f["readerRelevant"] and gated:
@@ -5083,7 +5124,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             else:
                 no_body_n = int(c.get("readerNoBody") or 0)
                 # a comparison counting in another unit than the prediction says its unit (navmesh: records)
-                ru = ((pr.get("reader") or {}).get("regressionUnits") or {}).get(f.get("checkId"))
+                ru = (((pr.get("reader") or {}).get("regressionUnits") or {}).get(f.get("checkId"))
+                      if c.get("readerUnitCounted") else None)
                 f["readerPlain"] = (f"{arm_subject(f.get('armId'))} introduced {fmt_n(new_count)} "
                                     + (ru[0 if new_count == 1 else 1] if ru else f"new {noun(new_count, 'problem')}")
                                     + f" in the {check_phrase}"
@@ -5129,7 +5171,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 clauses.append(reader_comparison_templates["overlapQualification"])
                 f["readerPlain"] = " ".join(clauses)
             else:
-                ru_ = ((pr.get("reader") or {}).get("regressionUnitsRepaired") or {}).get(f.get("checkId"))
+                ru_ = (((pr.get("reader") or {}).get("regressionUnitsRepaired") or {}).get(f.get("checkId"))
+                       if c.get("readerUnitCounted") else None)
                 f["readerPlain"] = (f"{arm_subject(f.get('armId'))} repaired {fmt_n(repaired_count)} existing "
                                     f"{(ru_[0 if repaired_count == 1 else 1]) if ru_ else noun(repaired_count, 'problem')} and changed which mod owns "
                                     f"{fmt_n(reclassified_count)} still-present {noun(reclassified_count, 'problem')}.")
@@ -5629,7 +5672,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         parts = []
         for check_id, (f, ns, unacc, nbs) in per_check.items():
             title_ = (reader_data.get("checkTitles") or {}).get(check_id, f.get("title"))
-            ru = (reader_data.get("regressionUnits") or {}).get(check_id)
+            ru = ((reader_data.get("regressionUnits") or {}).get(check_id)
+                  if (f.get("counts") or {}).get("readerUnitCounted") else None)
             if len(ns) == 1:
                 parts.append(f"{fmt_n(ns[0])} " + (ru[0 if ns[0] == 1 else 1] if ru else
                                                    f"new {'problem' if ns[0] == 1 else 'problems'}")
