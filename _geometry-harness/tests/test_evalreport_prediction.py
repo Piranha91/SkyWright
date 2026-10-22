@@ -4849,6 +4849,23 @@ def main():
     for name, fn in [("third-review/C940-patched-detail-split-by-identity", c940_patched_detail_split_by_identity)]:
         cell(name, fn)
 
+    # C967 (Clockwork review S2): a detail entry on the prediction setup whose rows are all set aside says so, so the
+    # list adds up with the top (32 listed against 31 counted, the extra one set aside as already there).
+    def c967_all_set_aside_entry_marked():
+        D2 = f"00C967:{BASE}"
+        a_low, b_low = offs(-30000), offs(-30000)
+        a_low["Placement.Position"] = "300,100,-30000"
+        rows_ = [lost_row(MOD_A, MOD_B, D2, "Placement", off_txt(a_low), off_txt(b_low), off_txt(offs(0)), before=BASE)]
+        ch_ = [(D2, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_low), (MOD_B, b_low)])]
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        found = md.split("## What the checks found", 1)[-1].split("\n## ", 1)[0]
+        line = next((ln for ln in found.splitlines() if "Tested alternative setup" in ln and "record field" in ln), "")
+        return "(1 set aside)" in line, line[:300]
+
+    for name, fn in [("third-review/C967-all-set-aside-entry-marked", c967_all_set_aside_entry_marked)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
