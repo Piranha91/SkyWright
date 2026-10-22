@@ -5991,6 +5991,27 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         return (f"{MOD_B}'s value switches the object off" in it and "is drawn" not in it and "no model" in it), it[-400:]
 
+    # C1035 (Sewers r2 S1, S4): the switch the other check finds is said with what that check found after the flip: the
+    # overlap with the object that leaves ends, but the other object then sits N u inside something else; the trigger
+    # was not found (the row's state is Unknown). Never "hold only until then".
+    def c1035_switch_after_flip_said():
+        X, Yo = f"000X35:{MOD_A}", f"000Y35:{MOD_B}"
+        ov_ = row("OVERLAP", MOD_B, MOD_A, X, other=Yo)
+        st_ = row("STATE-CONTACT@000S35:ModB.esp@Unknown", MOD_B, MOD_A, Yo, label="Camp (ext)", other=X)
+        st_["Summary"] = (f"Contact StateConditional under PlankSwitch ({MOD_B}): {Yo} [Static Scaffold] leaves - Sunk: the "
+                          f"host leaves with the flip - hung from the host as authored (0u gap); under the winner it sits "
+                          f"18.6u inside something else in Camp (ext)")
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A]), arm("without-a", [BASE, MOD_B])]
+        results = {(OVERLAP, a_): ([ov_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch", "without-b", "without-a")}
+        results.update({(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch", "without-b", "without-a")})
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        return ("hold only until" not in it and "18.6 u inside something else" in it and "was not found" in it), it[-400:]
+
+    for name, fn in [("fourth-review/C1035-switch-after-flip-said", c1035_switch_after_flip_said)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1029-no-model-switched-on-not-drawn", c1029_no_model_switched_on_not_drawn)]:
         cell(name, fn)
 
