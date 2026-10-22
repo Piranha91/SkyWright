@@ -5061,8 +5061,13 @@ def main():
         arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
         plan, md, _ = compile_and_render(arms, {(NAVOWN, "baseline"): rows_, (NAVOWN, "without-a"): []}, [MOD_A])
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Navmesh")), "")
-        ok = ("base-game navmesh" in it and f"{OTHER} carries" in it and "not in the record data" in it)
-        return ok, it[-400:]
+        # (reviewer on faa9ce47) the counted line names the pair as the evaluated mod against the base game's navmesh,
+        # never as a clash with the mod that only carries it
+        head_ = it.split(". ", 1)[0]
+        ok = ("base-game navmesh" in it and f"{OTHER} carries" in it and "not in the record data" in it
+              and f"the base game's navmesh records {OTHER} carries" in head_ and f"and {OTHER}" not in head_
+              and f"between {OTHER}" not in head_)
+        return ok, it[:300]
 
     for name, fn in [("third-review/C943-base-navmesh-carried-said", c943_base_navmesh_carried_said)]:
         cell(name, fn)
