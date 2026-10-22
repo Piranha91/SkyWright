@@ -5174,7 +5174,7 @@ def main():
         return f"{MOD_B}'s value switches the object off" in it and "is drawn" in it, it[-400:]
 
     def c969_enable_parent_not_said_drawn():
-        plan, md = switch_off_bundle(win_parent=f"000P69:{OTHER}")
+        plan, md = switch_off_bundle(win_parent=f"000F69:{OTHER}")
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         return ("is drawn" not in md and f"{MOD_B}'s value switches the object off" in it
                 and f"{MOD_A}'s own record does not switch it off" in it), it[-400:]
