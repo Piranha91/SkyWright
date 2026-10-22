@@ -6182,9 +6182,10 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     fields_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices for r_ in kept_rows(f)}
                     n_aside = len(all_ - fields_)
                     n_fields = len(fields_) if all_ else sum(int(f.get("rowsTotal") or 0) for f in choices)
-                    ids_ = [f["id"] for f in choices]
                     if n_aside:
                         choices = [f for f in choices if kept_rows(f)]
+                    # (third review, Clockwork S3) every pair counted is linked, so the count recomputes from the rows
+                    ids_ = [f["id"] for f in choices] or [f["id"] for f in part["groups"] if f.get("readerPatchChoice")][:1]
                     compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
                                     "text": bind(conc.get("patchChoicesCollapsed" if n_fields else "patchChoicesNone")
                                                  or "{count} record fields in {pairs} pairs where a patch wins{aside}", {
