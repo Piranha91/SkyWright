@@ -1917,8 +1917,12 @@ def build_prediction(ctx: dict) -> dict:
             # (P63; coordinator D1): said on its own line as undoing that master's fix, never in the clash counts
             put_back.add(rk)
             return lost_edit_noise(rk) or "undoesMaster"
-        if (is_base_game(a, words) or is_base_game(b, words)) and rk[1] != "LOST-EDIT" and no_body(rk, other):
-            return "noBody"                    # (BPT re-review S3) no body, against a base-game object too
+        if ((is_base_game(a, words) or is_base_game(b, words)) and rk[1] != "LOST-EDIT"
+                and any(bodiless(o_) and (name_bases.get((name_refs.get(str(o_)) or {}).get("base") or "") or {}).get("type")
+                        in set(words.get("bodilessTypes") or []) for o_ in [rk[4], *(other or [])])):
+            # (BPT re-review S3) an object of a type that has no body without a model (skill data: a light), against a
+            # base-game object too; a marker without a model may still block by a collision primitive, so not by type
+            return "noBody"
         if is_base_game(a, words) or is_base_game(b, words):
             return "baseGame"
         if not ({a.lower(), b.lower()} & pt_lower):
