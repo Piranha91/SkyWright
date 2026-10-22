@@ -5286,6 +5286,25 @@ def main():
     for name, fn in [("third-review/C957-also-found-switch-said", c957_also_found_switch_said)]:
         cell(name, fn)
 
+    # C959 (Snazzy review S3): where the other mod's version of the base-game partner object uses a model of its own (the
+    # names enrichment: the winning base is the other mod's record), the item does not say the other mod "only edits"
+    # it: it says it replaces the model, and that the objects clash without it too.
+    def c959_replaced_model_not_only_edits():
+        X, H = f"000X59:{MOD_A}", f"000H59:{BASE}"
+        r_ = row("OVERLAP", MOD_B, MOD_A, X, other=H)
+        arms = [arm("baseline", [BASE, MOD_B, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_B, MOD_A]),
+                arm("without-b", [BASE, MOD_A])]
+        results = {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [r_], (OVERLAP, "without-b"): [r_]}
+        refs = {X: {"base": f"0B0X59:{MOD_A}"}, H: {"base": f"0B0H59:{MOD_B}"}}
+        bases = {f"0B0X59:{MOD_A}": {"type": "Static", "editorId": "Shelf", "model": "shelf.nif"},
+                 f"0B0H59:{MOD_B}": {"type": "Static", "editorId": "NewWall", "model": "newwall.nif"}}
+        plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH], names={"refs": refs, "bases": bases})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        return "only edits" not in it and "model" in it and MOD_B in it, it[:400]
+
+    for name, fn in [("third-review/C959-replaced-model-not-only-edits", c959_replaced_model_not_only_edits)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
