@@ -5701,7 +5701,9 @@ def main():
         return bool(m_) and m_.group(1) == "1" and "also fix" in ln, ln[:400]
 
     def c986_patch_removal_said_as_removal():
-        ln = earlier_fix_bundle(False)
+        # (fourth review, Snazzy r2/r3 S1) the removal is its own line now, never under "but not predicted" (C1046)
+        md_ = earlier_fix_bundle(False, whole=True)
+        ln = next((x for x in md_.splitlines() if "removes" in x and "max height data" in x), "")
         return "removes" in ln and "also fixes" not in ln, ln[:400]
 
     for name, fn in [("round-2/C985-earlier-fixes-counted-once", c985_earlier_fixes_counted_once),

@@ -4032,12 +4032,33 @@ def build_prediction(ctx: dict) -> dict:
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
         # (third review, Clockwork S5) a clash already there without the evaluated mods that the patch resolves is named by
         # its pairs, so the sentence says which earlier clashes the patch also fixes; a record change by its field
+        # (fourth review, Clockwork S5, BPT r2 S4) an earlier loss is named by whose change it is and the plugin it is
+        # lost to in the setup without the evaluated mods (that setup's own rows), never as a pair naming the evaluated mod
+        losers_of_unit = collections.defaultdict(list)
+        for e in spot_rows:
+            if e["kind"] == "LOST-EDIT" and e["A"] not in losers_of_unit[spot_unit(e)]:
+                losers_of_unit[spot_unit(e)].append(e["A"])
+        w_wins = collections.defaultdict(list)
+        for (c2_, a2_), rs2_ in rows_by.items():
+            if a2_ != w_arm:
+                continue
+            for rk2_, h2_ in rs2_.items():
+                if rk2_[1] == "LOST-EDIT":
+                    w_wins[(str(rk2_[4]), h2_["row"].get("field"), str(rk2_[2]).lower())].append(rk2_[3])
+
         def spot_pairs(k):
             c_, change_ = collections.Counter(), set()
             for u_, e in spot_units.get(k, {}).items():
                 if u_[0] == "change":
                     nm_ = object_name(e["formKey"], e.get("summary"))
                     key_ = f"{field_word(e.get('field'))} on {e['formKey']}" + (f" ({nm_})" if nm_ else "")
+                    if k == "alreadyPresent" and words.get("blindSpotLostTo"):
+                        ls_ = losers_of_unit.get(u_) or [e["A"]]
+                        ws_ = list(dict.fromkeys(w_ for l_ in ls_ for w_ in w_wins.get(
+                            (str(e["formKey"]), e.get("field"), str(l_).lower()), [])))
+                        if ws_:
+                            key_ += bind(words["blindSpotLostTo"], {"losers": and_list([f"{l_}'s" for l_ in ls_[:2]]) + (
+                                f" and {fmt_n(len(ls_) - 2)} more" if len(ls_) > 2 else ""), "winners": and_list(ws_[:2])})
                     change_.add(key_)
                 else:
                     key_ = f"{e['A']} and {e['B']}"
@@ -4046,9 +4067,15 @@ def build_prediction(ctx: dict) -> dict:
                     for pr_, n_ in sorted(c_.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:3]]
             more_ = words["blindSpotMorePairs"] if len(change_) < len(c_) else words.get("blindSpotMoreChanges") or "; and {count} more"
             return "; ".join(top_) + (bind(more_, {"count": fmt_n(len(c_) - 3)}) if len(c_) > 3 else "")
+        # (fourth review, Snazzy r2/r3 S1) a field the patch removes is a loss the patch introduces: its own sentence,
+        # never under "resolved"
         blind = [{"admission": k, "count": n, "why": bind(words["blindSpotWhy"][k], {"patch": patch, "pairs": spot_pairs(k),
                                                                                      "fixes": fixes_})}
-                 for k, n in sorted(spots.items()) if k != "history"]
+                 for k, n in sorted(spots.items()) if k not in ("history", "patchRemoves")]
+        removes_sentence = (bind(words["validationPatchRemoves"], {
+            "patch": patch, "count": fmt_n(spots["patchRemoves"]),
+            "noun": words["fieldNoun"][0 if spots["patchRemoves"] == 1 else 1], "pairs": spot_pairs("patchRemoves")})
+            if spots.get("patchRemoves") and words.get("validationPatchRemoves") else None)
         # overwrite history is not a predicted clash, but a row no longer flagged with the patch whose physical test held
         # (the overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted), and
         # a navmesh whose loss still holds with the patch under another pair is named as persisting (fourth review, W3)
@@ -4163,6 +4190,8 @@ def build_prediction(ctx: dict) -> dict:
         else:
             sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]})
                           for s in blind]
+        if removes_sentence:
+            sentences.append(removes_sentence)
         if spots.get("history"):
             sentences.append(bind(words["validationHistoryHolds"], {"count": fmt_n(history_holds), "patch": patch,
                                                                     "total": fmt_n(spots.get("history", 0))}))
