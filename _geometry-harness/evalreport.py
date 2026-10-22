@@ -1547,17 +1547,22 @@ def build_prediction(ctx: dict) -> dict:
         v = (p_rows.get(rk) or {}).get("row", {}).get("values") or {}
         return same_but_path_case(v.get("lost"), v.get("winner"))
 
+    def chain_same(arm_id, rk, a, b):
+        """Plugin a's and plugin b's values of the row's field read equal in that setup's record import chain (path case,
+        unused bytes and rounding folded, as recordrows compares); None where the chain does not hold both."""
+        got_ = field_chain(arm_id, rk, a)
+        if got_ is None:
+            return None
+        provs_, vals_, _ = got_
+        low_ = [str(x).lower() for x in provs_]
+        if str(a).lower() not in low_ or str(b).lower() not in low_:
+            return None
+        return vals_[low_.index(str(a).lower())] == vals_[low_.index(str(b).lower())]
+
     def same_in_chain(arm_id, rk):
         """The losing plugin's value of the row's field reads equal to the winner's in the record import's own chain
         (path case and unused bytes folded, as recordrows compares): no change the game sees."""
-        got_ = field_chain(arm_id, rk, rk[2])
-        if got_ is None:
-            return False
-        provs_, vals_, _ = got_
-        low_ = [str(x).lower() for x in provs_]
-        if rk[2].lower() not in low_ or rk[3].lower() not in low_:
-            return False
-        return vals_[low_.index(rk[2].lower())] == vals_[low_.index(rk[3].lower())]
+        return bool(chain_same(arm_id, rk, rk[2], rk[3]))
 
     # Whose edit a value is (window 2, lane core; Pilgrim's review B1): the one rule, recordrows.own_change, asked of
     # the record's provider chain in that setup, read from the record import's own transcripts. A plugin changed a field
@@ -3568,7 +3573,7 @@ def build_prediction(ctx: dict) -> dict:
         lost_w = collections.defaultdict(list)
         for rk, hit in patched_rows.items():
             if rk[1] == "LOST-EDIT" and not reads_same_patched(rk, hit):
-                lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"winnerPlugin": rk[3],
+                lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"_rk": rk, "winnerPlugin": rk[3],
                                                                                     "loserPlugin": rk[2]})
 
         unrecorded = {str(x) for x in words.get("unrecordedValues") or []}
@@ -3608,8 +3613,13 @@ def build_prediction(ctx: dict) -> dict:
                 # neither side's value loses to the patch: the losing mod's change, lost without it, is no longer lost,
                 # so the patch carries that value, and the winning mod had no change of its own there (Clockwork P101)
                 return "resolved"
-            return ("kept" if path_folded(with_patch) == path_folded(without) else
-                    "resolved" if path_folded(with_patch) == path_folded(lost_v) else "own")
+            # (round 3b, review finding 1) the patch's value against each side's by the one read-same rule: the chain
+            # of the setup with the patch where it holds both, else the recorded values with path case folded
+            def same_as_patch(side, v_side):
+                c_ = chain_same(patched_arm, w["_rk"], side, w["_rk"][3])
+                return c_ if c_ is not None else path_folded(with_patch) == path_folded(v_side)
+            return ("kept" if same_as_patch(e["B"], without) else
+                    "resolved" if same_as_patch(e["A"], lost_v) else "own")
         # A geometry row is judged by its own predicate re-measured with the patch, where the probe carries one (an
         # emit's `Predicates`: every row of the setup it was measured against, measured again in this setup): Gone is
         # resolved, Holds is left (whoever owns the objects now), anything else cannot be told. Presence of the row
@@ -3767,7 +3777,7 @@ def build_prediction(ctx: dict) -> dict:
                 once_ = (str(rk[4]), hit["row"].get("field"), rk[2].lower())
                 if (rk[2].lower() not in patch_lower and not is_base_game(rk[2], words)
                         and (str(rk[4]), hit["row"].get("field")) not in p_fields
-                        and not same_but_path_case(v_.get("lost"), v_.get("winner"))
+                        and not reads_same_patched(rk, hit)
                         and oe_["changed"] and not oe_.get("listKept")
                         and not lost_edit_noise(rk, patched_rows, patched_arm) and once_ not in undone_seen):
                     undone_seen.add(once_)
@@ -3775,10 +3785,7 @@ def build_prediction(ctx: dict) -> dict:
                 continue
             if there(p_arm, rk) or hit["history"] or rk[2].lower() == rk[3].lower():
                 continue
-            if rk[1] == "LOST-EDIT" and (same_but_path_case((hit["row"].get("values") or {}).get("lost"),
-                                                            (hit["row"].get("values") or {}).get("winner"))
-                                         or same_in_chain(patched_arm, rk)
-                                         or lost_edit_noise(rk, patched_rows, patched_arm)):
+            if rk[1] == "LOST-EDIT" and (reads_same_patched(rk, hit) or lost_edit_noise(rk, patched_rows, patched_arm)):
                 continue                       # two values naming the same file, or no change the game sees (BPT S1)
             # counted by what the clash is (an object of a by-object check, once however many rows name it), never
             # by rows (P64): an object left without support against three hosts is one new problem
