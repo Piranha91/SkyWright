@@ -2043,6 +2043,7 @@ def build_prediction(ctx: dict) -> dict:
             g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
         if rk[1] == "LOST-EDIT":
             g.setdefault("_fieldNames", collections.Counter())[field_name(hit["row"])] += 1
+            g.setdefault("_lostKeys", []).append((rk, hit["row"].get("field")))
         g.setdefault("_subjectRows", collections.Counter())[rk[4] if rk[4] is not None else ("row", rk[5])] += 1
         fid = hit["finding"].get("id") if rk[0] not in sib_only else None
         if fid and fid not in g["findingIds"]:
@@ -2141,7 +2142,7 @@ def build_prediction(ctx: dict) -> dict:
         if " " in code:
             return code
         return words["unjudgeableUnnamed"]
-    items, subjects_of, subject_rows_of, pair_objects_of, field_names_of = [], {}, {}, {}, {}
+    items, subjects_of, subject_rows_of, pair_objects_of, field_names_of, lost_keys_of = [], {}, {}, {}, {}, {}
     names_fields = set(words.get("verdictNamesFields") or [])
 
     def fields_text(counter):
@@ -2171,6 +2172,7 @@ def build_prediction(ctx: dict) -> dict:
         subjects_of[id(g)] = g.pop("_subjects")
         pair_objects_of[id(g)] = g.pop("_pairObjects", set())
         field_names_of[id(g)] = g.pop("_fieldNames", collections.Counter())
+        lost_keys_of[id(g)] = g.pop("_lostKeys", [])
         if g["checkId"] in names_fields and field_names_of[id(g)]:
             g["_fieldsLine"] = fields_text(field_names_of[id(g)])
         subject_rows_of[id(g)] = g.pop("_subjectRows")
@@ -2581,10 +2583,26 @@ def build_prediction(ctx: dict) -> dict:
         line = alone_lines.setdefault(g["checkId"], {"title": g["title"], "inGameText": g["inGameText"],
                                                      "unit": ph.get("unitPlural") or "clashes", "groups": {}})
         key = bind(words["aloneFrom" + ("Elsewhere" if elsewhere else "")], {"mod": mod})
+        # (Winterhold review 2) a lost change already there with this mod alone is lost, in that mod's own setup, to
+        # the plugin that wins it there: named from that setup's own rows (by record, field and losing plugin)
+        alone_win = collections.Counter()
+        if g["kind"] == "LOST-EDIT" and not elsewhere and s_arms.get(mod):
+            idx_ = {}
+            for rk2_, h2_ in (rows_by.get((g["checkId"], s_arms[mod])) or {}).items():
+                if rk2_[1] == "LOST-EDIT":
+                    idx_.setdefault((str(rk2_[4]), h2_["row"].get("field"), str(rk2_[2]).lower()), set()).add(rk2_[3])
+            for rk_, f_ in lost_keys_of.get(id(g)) or []:
+                for w_ in idx_.get((str(rk_[4]), f_, str(rk_[2]).lower())) or ():
+                    alone_win[w_] += 1
+        win_ = next(iter(alone_win)) if len(alone_win) == 1 else None
         # the pair's other side is the other evaluated mod: the objects it edits, crossed with this mod alone too
-        text_ = (bind(words["aloneAgainstEvaluated"], {"other": third, "count": fmt_n(g["count"])})
-                 if not elsewhere and third.lower() in pt_lower and words.get("aloneAgainstEvaluated")
-                 else f"{third} {fmt_n(g['count'])}")
+        if (win_ and win_.lower() != third.lower() and not elsewhere and third.lower() in pt_lower
+                and words.get("aloneAgainstOther")):
+            text_ = bind(words["aloneAgainstOther"], {"other": win_, "evaluated": third, "count": fmt_n(g["count"])})
+        else:
+            text_ = (bind(words["aloneAgainstEvaluated"], {"other": third, "count": fmt_n(g["count"])})
+                     if not elsewhere and third.lower() in pt_lower and words.get("aloneAgainstEvaluated")
+                     else f"{third} {fmt_n(g['count'])}")
         line["groups"].setdefault(key, []).append({"text": text_,
                                                    "findingIds": list(g["findingIds"])})
 
