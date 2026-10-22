@@ -4140,6 +4140,41 @@ def main():
                       c923_off_count_part_of_its_count_and_true_effect)]:
         cell(name, fn)
 
+
+    # C905 (Pilgrim review 1): a quest-alias split is said by scene, with the probe's own distance sentence, and names
+    # the plugin that first set the winning placement of the actors (SecondMod.esp, carried by the patch), never as
+    # "records ... between" the probe's plugin pair.
+    def c905_alias_split_names_placement_origin():
+        A1, A2, B1, B2 = (f"00C9{i}5:{BASE}" for i in range(4))
+        arms = [arm("baseline", [BASE, OTHER2, OTHER, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER2, OTHER, MOD_A])]
+        w_rows = [row("SPLIT", OTHER, PATCH, x_, other=y_, label="Temple (int)") for x_, y_ in ((A1, A2), (A2, A1))]
+        w_rows += [row("SPLIT", OTHER, PATCH, x_, other=y_, label="Temple (int)") for x_, y_ in ((B1, B2), (B2, B1))]
+        for r_, q_ in zip(w_rows, ("Q1", "Q1", "Q2", "Q2")):
+            r_["Summary"] = f"quest '{q_}' aliases 'X' and 'Y' were 137u apart in Temple (int), now 1,800u apart"
+        results = {(ALIAS, "baseline"): w_rows, (ALIAS, "without-patch"): []}
+        place = {fk_: [(BASE, {"Placement.Position": "0,0,0"}), (OTHER2, {"Placement.Position": "5,5,900"}),
+                       (MOD_A, {"Placement.Position": "0,0,0"}), (PATCH, {"Placement.Position": "5,5,900"})]
+                 for fk_ in (A1, A2, B1, B2)}
+        other_ = f"00C9F5:{BASE}"
+        enr = {(RECORDS, "baseline"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")],
+               (RECORDS, "without-patch"): []}
+        tr = {(RECORDS, "baseline"): tree_transcript([(fk_, "PlacedObject", ch_) for fk_, ch_ in place.items()]
+                                                     + [(other_, "PlacedObject", [(BASE, {"Owner": "v"}),
+                                                                                  (OTHER, {"Owner": "o"}),
+                                                                                  (PATCH, {"Owner": "p"})])])}
+        plan, md, html = compile_and_render(arms, {**results, (CONTACT, "baseline"): [], (CONTACT, "without-patch"): []},
+                                            [MOD_A], patches=[PATCH], enrichment=enr,
+                                            count_only={k: max(1, len(v)) for k, v in enr.items()}, transcripts=tr)
+        sec_ = md.split("### Quest aliases split between mods", 1)[-1].split("###", 1)[0]
+        line = next((ln for ln in sec_.splitlines() if "Measured load order" in ln), "")
+        ok = ("2 quest scenes" in line and "first set by " + OTHER2 in line and "carried by " + PATCH in line
+              and "1,800u apart" in line and "records show" not in line)
+        return ok, line[:400]
+
+    for name, fn in [("after-review/C905-alias-split-names-placement-origin", c905_alias_split_names_placement_origin)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
