@@ -53,8 +53,11 @@ def _subrecords(data):
         i += size
 
 
-def _offsets(buf, start, end, rtype, want, out):
-    """Offsets of the `rtype` records whose FormID is in `want`, through the cell and worldspace groups only."""
+_INDEX = {}
+
+
+def _offsets(buf, start, end, out):
+    """(type, FormID) -> (offset, size, flags) of every navmesh and cell record, through the cell and worldspace groups."""
     i = start
     while i + 24 <= end:
         typ = buf[i:i + 4]
@@ -64,54 +67,74 @@ def _offsets(buf, start, end, rtype, want, out):
                 raise PluginReadError("a group whose size does not fit the file")
             gtype = struct.unpack_from("<I", buf, i + 12)[0]
             if gtype != 0 or buf[i + 8:i + 12] in (b"CELL", b"WRLD"):
-                _offsets(buf, i + 24, i + size, rtype, want, out)
+                _offsets(buf, i + 24, i + size, out)
             i += size
             continue
-        if typ == rtype:
-            fid = struct.unpack_from("<I", buf, i + 12)[0]
-            if fid in want:
-                out[fid] = i
+        if typ in (b"NAVM", b"CELL"):
+            flags, fid = struct.unpack_from("<II", buf, i + 8)
+            if i + 24 + size > end:
+                raise PluginReadError(f"a {typ.decode()} record runs past the end of its group")
+            out[(typ, fid)] = (i + 24, size, flags)
         i += 24 + size
+
+
+def _index(p):
+    """The plugin's masters and its navmesh and cell records' places, built once per file state (size, modified time);
+    the file is read once and no handle is kept."""
+    try:
+        st = p.stat()
+    except OSError as e:
+        raise PluginReadError(f"cannot read {p}: {e}") from e
+    key = (str(p).lower(), st.st_size, st.st_mtime_ns)
+    if key not in _INDEX:
+        try:
+            buf = p.read_bytes()
+        except OSError as e:
+            raise PluginReadError(f"cannot read {p}: {e}") from e
+        if buf[:4] != b"TES4":
+            raise PluginReadError(f"{p.name} is not a plugin file (no TES4 header)")
+        hsize = struct.unpack_from("<I", buf, 4)[0]
+        masters = [d.rstrip(b"\x00").decode("latin-1") for s, d in _subrecords(buf[24:24 + hsize]) if s == "MAST"]
+        places = {}
+        _offsets(buf, 24 + hsize, len(buf), places)
+        _INDEX[key] = (masters, places)
+    return _INDEX[key]
 
 
 def _read(path, rtype, form_keys, decode):
     p = Path(path)
-    try:
-        buf = p.read_bytes()
-    except OSError as e:
-        raise PluginReadError(f"cannot read {p}: {e}") from e
-    if buf[:4] != b"TES4":
-        raise PluginReadError(f"{p.name} is not a plugin file (no TES4 header)")
-    hsize = struct.unpack_from("<I", buf, 4)[0]
-    masters = [d.rstrip(b"\x00").decode("latin-1") for s, d in _subrecords(buf[24:24 + hsize]) if s == "MAST"]
+    masters, places = _index(p)
     low = [m.lower() for m in masters]
 
     def global_(fid):
         idx = fid >> 24
         return f"{fid & 0xFFFFFF:06X}:{masters[idx] if idx < len(masters) else p.name}"
 
+    out = {str(fk): None for fk in form_keys}
     want = {}
     for fk in form_keys:
         obj, _, origin = str(fk).partition(":")
         idx = low.index(origin.lower()) if origin.lower() in low else (
             len(masters) if origin.lower() == p.name.lower() else None)
-        if idx is not None:
-            want[(idx << 24) | (int(obj, 16) & 0xFFFFFF)] = str(fk)
-    found = {}
-    _offsets(buf, 24 + hsize, len(buf), rtype, set(want), found)
-    out = {str(fk): None for fk in form_keys}
-    for fid, at in found.items():
-        fk = want[fid]
-        size, flags = struct.unpack_from("<II", buf, at + 4)
-        data = buf[at + 24:at + 24 + size]
-        if len(data) != size:
-            raise PluginReadError(f"record {fk} runs past the end of the file")
-        if flags & COMPRESSED:
-            try:
-                data = zlib.decompress(data[4:])
-            except zlib.error as e:
-                raise PluginReadError(f"record {fk}: a compressed record does not decompress: {e}") from e
-        out[fk] = decode(dict(_subrecords(data)), fk, global_)
+        if idx is not None and len(obj) == 6 and all(c in "0123456789abcdefABCDEF" for c in obj):
+            fid = (idx << 24) | int(obj, 16)
+            if (rtype, fid) in places:
+                want[str(fk)] = places[(rtype, fid)]
+    if not want:
+        return {"plugin": p.name, "masters": masters, "records": out}
+    try:
+        with p.open("rb") as fh:
+            for fk, (at, size, flags) in want.items():
+                fh.seek(at)
+                data = fh.read(size)
+                if flags & COMPRESSED:
+                    try:
+                        data = zlib.decompress(data[4:])
+                    except zlib.error as e:
+                        raise PluginReadError(f"record {fk}: a compressed record does not decompress: {e}") from e
+                out[fk] = decode(dict(_subrecords(data)), fk, global_)
+    except OSError as e:
+        raise PluginReadError(f"cannot read {p}: {e}") from e
     return {"plugin": p.name, "masters": masters, "records": out}
 
 
