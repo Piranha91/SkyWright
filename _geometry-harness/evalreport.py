@@ -3452,7 +3452,7 @@ def build_prediction(ctx: dict) -> dict:
                                            "count": fmt_n(set_aside["notOwnEditEarlierWins"])})
                                            if set_aside["notOwnEditEarlierWins"] else "") + (bind(
                                            words["setAsideNotOwnEditCarried"], {
-                                               "count": fmt_n(len(set(carried_notown))),
+                                               "count": fmt_n(len(carried_notown)),   # fields, as its sentence counts (fourth review, Clockwork r3 S2)
                                                "examples": "; ".join(sorted(set(carried_notown))[:2])})
                                            if carried_notown else "")}) if aside["notOwnEdit"] else "")
                                    + "".join(" " + bind(words["setAsideNoise"][k_], {
@@ -4238,13 +4238,18 @@ def build_prediction(ctx: dict) -> dict:
             if not groups_ or not nw_.get("group"):
                 return None
             parts_ = []
+            # (fourth review, BPT r2/r3 S5) a gap at the probe's search limit is the limit, not a distance (skill data)
+            lim_ = (nw_.get("searchLimit") or {}).get(c)
             for (ed_, model_), gaps_ in groups_.items():
-                known_ = [g_ for g_ in gaps_ if g_ is not None]
+                known_ = [g_ for g_ in gaps_ if g_ is not None and (lim_ is None or g_ < lim_)]
+                far_ = sum(1 for g_ in gaps_ if g_ is not None and lim_ is not None and g_ >= lim_)
+                gtext_ = (bind(nw_["gaps"], {"gaps": ", ".join(fmt_units(g_) for g_ in sorted(known_, reverse=True))})
+                          if known_ else "") + (bind(nw_["gapsBeyond"], {"count": fmt_n(far_), "limit": fmt_units(lim_)})
+                                                if far_ and nw_.get("gapsBeyond") else "")
                 parts_.append(bind(nw_["group"], {
                     "count": fmt_n(len(gaps_)), "base": ed_, "model": bind(nw_["model"], {"model": model_}) if model_ else "",
-                    "gaps": bind(nw_["gaps"], {"gaps": ", ".join(fmt_units(g_) for g_ in sorted(known_, reverse=True))})
-                    if known_ else ""}) + (bind(nw_["movers"], {"movers": " and ".join(movers_[(ed_, model_)])})
-                                           if movers_.get((ed_, model_)) and nw_.get("movers") else ""))
+                    "gaps": gtext_}) + (bind(nw_["movers"], {"movers": " and ".join(movers_[(ed_, model_)])})
+                                        if movers_.get((ed_, model_)) and nw_.get("movers") else ""))
             return "; ".join(parts_)
 
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
