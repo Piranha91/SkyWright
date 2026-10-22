@@ -2367,7 +2367,9 @@ def build_prediction(ctx: dict) -> dict:
             # on when the game loads: not initially disabled, not deleted, not below the world, and no enable parent
             # (whose state the record data does not give: then only that its own record does not switch it off)
             won_ = winner_on_at_load(rk)
-            if won_ in ("on", "parent"):
+            if won_ == "on" and base_has_no_model(names, rk[4]):
+                won_ = "onNoModel"             # (fourth review, BPT S1) a marker: enabled, nothing drawn
+            if won_ in ("on", "parent", "onNoModel"):
                 # (round 2, Snazzy B1) counted by object, as the sentence names them: one object's fields count once
                 sw_ = g.setdefault("_switchOff", {}).setdefault((rk[2], rk[3], won_), {})
                 sw_.setdefault(str(rk[4]), named(rk[4], rk[5]))
@@ -2689,7 +2691,7 @@ def build_prediction(ctx: dict) -> dict:
         def objs_(n_):
             return "object" if n_ == 1 else "objects"
         for (lo_, wi_, how_), ex_ in (g.pop("_switchOff", None) or {}).items():
-            key_ = "itemSwitchOffDrawn" if how_ == "on" else "itemSwitchOffParent"
+            key_ = {"on": "itemSwitchOffDrawn", "onNoModel": "itemSwitchOffNoModel"}.get(how_, "itemSwitchOffParent")
             if words.get(key_):
                 detail.append(bind(words[key_], {"count": fmt_n(len(ex_)), "objects": objs_(len(ex_)), "loser": lo_,
                                                  "winner": wi_, "examples": "; ".join(list(ex_.values())[:2])}))
