@@ -1734,6 +1734,28 @@ def build_prediction(ctx: dict) -> dict:
             ref_cache[key_] = got_
         return ref_cache[key_]
 
+    def winner_on_at_load(rk):
+        """"on": the winner's whole version has the object on when the game loads; "parent": its own record does not
+        switch it off but it has an enable parent; "off": it switches it off itself; None: the chain does not hold it."""
+        ch = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch:
+            return None
+        low_ = [str(x).lower() for x in ch["providers"]]
+        if str(rk[3]).lower() not in low_:
+            return None
+        f_ = provider_fields_all(ch, low_.index(str(rk[3]).lower()))
+        flags_ = " ".join(str(v_) for k_, v_ in f_.items() if k_.endswith("Flags") and not k_.startswith("EnableParent"))
+        nums_ = [int(x_) for x_ in re.findall(r"(?<![\w.])(\d+)(?![\w.])", flags_)]
+        if (dis_flag in flags_ or "Deleted" in flags_ or any(n_ & 0x820 for n_ in nums_)
+                or disables("; ".join(f"{k_}={v_}" for k_, v_ in f_.items() if k_.endswith("Position")))):
+            return "off"
+        pos_ = re.findall(r"-?\d+(?:\.\d+)?", str(f_.get("Placement.Position") or ""))
+        if len(pos_) >= 3 and float(pos_[2]) <= -30000:
+            return "off"
+        if re.match(r"^[0-9A-Fa-f]{6}:", str(f_.get("EnableParent.Reference") or "").strip()):
+            return "parent"
+        return "on"
+
     def bare_start_off(rk, plugin):
         """`plugin`'s version only starts the object disabled, with no enable parent at all."""
         if not side_starts_off(rk, plugin):
@@ -2175,6 +2197,14 @@ def build_prediction(ctx: dict) -> dict:
                                      or side_disables(rk, rk[3])) and not (
                 disables((hit["row"].get("values") or {}).get("lost")) or side_disables(rk, rk[2])):
             g["_disables"] = g.get("_disables", 0) + 1
+        if rk[1] == "LOST-EDIT" and off_at_load((hit["row"].get("values") or {}).get("lost")):
+            # (third review, BPT S2) the loser's value switches the object off; whether the winner's whole version has it
+            # on when the game loads: not initially disabled, not deleted, not below the world, and no enable parent
+            # (whose state the record data does not give: then only that its own record does not switch it off)
+            won_ = winner_on_at_load(rk)
+            if won_ in ("on", "parent"):
+                sw_ = g.setdefault("_switchOff", {}).setdefault((rk[2], rk[3], won_), [])
+                sw_.append(named(rk[4], rk[5]))
         if rk[1] == "LOST-EDIT" and side_starts_off(rk, rk[2]) and side_disables(rk, rk[3]):
             # (third review, Pilgrim S1) only the loser's version starts it disabled; the winner's sets it off for good
             g.setdefault("_startsOffLoser", collections.Counter())[rk[2]] += 1
@@ -2457,6 +2487,11 @@ def build_prediction(ctx: dict) -> dict:
             if words.get("itemBaseNavCarried"):
                 detail.append(bind(words["itemBaseNavCarried"], {
                     "lead": f"All {fmt_n(n_)} are" if n_ == g["count"] else f"{fmt_n(n_)} of them are", "mod": m_}))
+        for (lo_, wi_, how_), ex_ in (g.pop("_switchOff", None) or {}).items():
+            key_ = "itemSwitchOffDrawn" if how_ == "on" else "itemSwitchOffParent"
+            if words.get(key_):
+                detail.append(bind(words[key_], {"count": fmt_n(len(ex_)), "loser": lo_, "winner": wi_,
+                                                 "examples": "; ".join(list(dict.fromkeys(ex_))[:2])}))
         for m_, n_ in (g.pop("_startsOffLoser", None) or {}).items():
             if words.get("itemStartsOffLoser"):
                 detail.append(bind(words["itemStartsOffLoser"], {"count": fmt_n(n_), "loser": m_}))
