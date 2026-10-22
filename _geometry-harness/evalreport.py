@@ -1413,15 +1413,10 @@ def build_prediction(ctx: dict) -> dict:
     name_refs, name_bases = names.get("refs") or {}, names.get("bases") or {}
 
     kinds_ = words.get("objectKinds") or {}
-    kind_models_ = [(re.compile(x["pattern"], re.I), x["word"]) for x in kinds_.get("models") or [] if isinstance(x, dict)]
 
     def object_kind(base_):
-        """What kind of thing a base is, in plain words (Pilgrim review 3): by its model's folder or name, else its
-        record type (skill data `objectKinds`); "" when neither is known."""
-        model_ = str(base_.get("model") or "")
-        for re_, word_ in kind_models_:
-            if model_ and re_.search(model_):
-                return word_
+        """What kind of thing a base is, in plain words (Pilgrim review 3): its record type, a fact the record states
+        (skill data `objectKinds`); never a role read from its model's name (reviewer); "" when the type is not listed."""
         return (kinds_.get("types") or {}).get(str(base_.get("type") or ""), "")
 
     def object_name(fk, summary=None):
