@@ -4925,6 +4925,22 @@ def main():
     for name, fn in [("third-review/C948-sibling-setups-against-measured-order", c948_sibling_setups_against_measured_order)]:
         cell(name, fn)
 
+    # C947 (Clockwork review S5): a clash the patch resolves that is already there without the evaluated mods is named
+    # by its pair and said as an earlier clash the patch also fixes, never a bare count that reads as unrelated.
+    def c947_unpredicted_fix_names_pairs():
+        O2 = "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A]), arm("without-a", [BASE, OTHER, O2])]
+        r_ = row("OVERLAP", OTHER, O2, f"000X47:{OTHER}", other=f"000Y47:{O2}")
+        results = {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [r_], (OVERLAP, "without-a"): [r_]}
+        plan, md, _ = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        ln = next((x for x in md.splitlines() if "but not predicted" in x), "")
+        ok = f"{OTHER} and {O2}" in ln and "also" in ln
+        return ok, ln[:300]
+
+    for name, fn in [("third-review/C947-unpredicted-fix-names-pairs", c947_unpredicted_fix_names_pairs)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

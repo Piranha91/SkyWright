@@ -3513,8 +3513,14 @@ def build_prediction(ctx: dict) -> dict:
                      and not (present if e["admission"] == "history" else there)(patched_arm, keyof(e))]
         spots = collections.Counter(e["admission"] for e in spot_rows)
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
-        blind = [{"admission": k, "count": n, "why": words["blindSpotWhy"][k]} for k, n in sorted(spots.items())
-                 if k != "history"]
+        # (third review, Clockwork S5) a clash already there without the evaluated mods that the patch resolves is named by
+        # its pairs, so the sentence says which earlier clashes the patch also fixes
+        def spot_pairs(k):
+            c_ = collections.Counter(f"{e['A']} and {e['B']}" for e in spot_rows if e["admission"] == k)
+            top_ = [f"{pr_} {fmt_n(n_)}" for pr_, n_ in sorted(c_.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:3]]
+            return "; ".join(top_) + (bind(words["blindSpotMorePairs"], {"count": fmt_n(len(c_) - 3)}) if len(c_) > 3 else "")
+        blind = [{"admission": k, "count": n, "why": bind(words["blindSpotWhy"][k], {"patch": patch, "pairs": spot_pairs(k)})}
+                 for k, n in sorted(spots.items()) if k != "history"]
         # overwrite history is not a predicted clash, but a row no longer flagged with the patch whose physical test held
         # (the overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted), and
         # a navmesh whose loss still holds with the patch under another pair is named as persisting (fourth review, W3)
@@ -3624,7 +3630,8 @@ def build_prediction(ctx: dict) -> dict:
         if len(blind) > 1 and words.get("validationBlindSpots"):
             # several reasons in one sentence, each with its count (P53: one line each took a third of a page)
             sentences.append(bind(words["validationBlindSpots"], {"patch": patch, "parts": "; ".join(
-                f"{fmt_n(s['count'])} {words['blindSpotShort'].get(s['admission'], s['why'])}" for s in blind)}))
+                f"{fmt_n(s['count'])} " + bind(words['blindSpotShort'].get(s['admission'], s['why']), {
+                    "patch": patch, "pairs": spot_pairs(s['admission'])}) for s in blind)}))
         else:
             sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]})
                           for s in blind]
