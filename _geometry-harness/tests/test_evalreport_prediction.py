@@ -4941,6 +4941,18 @@ def main():
     for name, fn in [("third-review/C947-unpredicted-fix-names-pairs", c947_unpredicted_fix_names_pairs)]:
         cell(name, fn)
 
+    # C946 (Clockwork review S3): a patch-wins line counts fields over several plugin pairs; it links the evidence of
+    # every pair it counts (here two: ModB's change lost to the patch on 000701, ModA's on 000703), so its count can be
+    # recomputed from the linked rows, never from the first pair's alone.
+    def c946_patch_wins_line_links_every_pair():
+        plan, md, html = record_validation_bundle()
+        ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
+        links = re.findall(r"\(evidence-index\.md#(F-\d+)\)", ln)
+        return len(set(links)) == 2 and "2 plugin pairs" in ln, ln[:300]
+
+    for name, fn in [("third-review/C946-patch-wins-line-links-every-pair", c946_patch_wins_line_links_every_pair)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
