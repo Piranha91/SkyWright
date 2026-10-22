@@ -4805,6 +4805,25 @@ def main():
                      ("third-review/C965-own-value-stays-counted", c965_own_value_stays_counted)]:
         cell(name, fn)
 
+    # C966 (Missives review S1, consistency with 01A27A): OtherMod is built on HearthFires and only inherits its fix (no
+    # change of its own, set aside as before); ModA drops that fix. The loss is said on the same base-fix line as C937's.
+    def c966_inherited_base_fix_loss_said():
+        L1 = f"00C966:{BASE}"
+        arms = [arm("baseline", [BASE, HF_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, OTHER, MOD_A, MOD_B])]
+        chains = [(L1, "Cell", [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}),
+                                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": ""})])]
+        p_rows = [lost_row(HF_, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE]})
+        adm = [(e["A"], e["admission"]) for e in rec_of(plan, L1)]
+        lines = [ln for ln in md.splitlines() if f"wins over {HF_}'s own fix" in ln]
+        return (OTHER, "notOwnEdit") in adm and len(lines) == 1 and OTHER in lines[0], f"{adm}; {lines[:1]}"
+
+    for name, fn in [("third-review/C966-inherited-base-fix-loss-said", c966_inherited_base_fix_loss_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
