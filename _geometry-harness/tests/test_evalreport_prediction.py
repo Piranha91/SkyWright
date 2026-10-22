@@ -6275,6 +6275,24 @@ def main():
         return ("differ only in its flags" in it and "UseImageSpaceData" in it and f"Without {MOD_A}" in it
                 and O2 in it), it[-500:]
 
+    # C1055 (Missives S2): a record import whose own tool note says it narrowed a field out of the comparison gives a
+    # coverage fact naming the check and the field, so a reader does not take the field as judged.
+    def c1055_import_narrowing_said():
+        fn_ = getattr(R, "import_narrowed_facts", None)
+        if fn_ is None:
+            return False, "no rule reads an import's narrowing note"
+        rows_ = [{"checkId": CELLATTR, "armId": "baseline", "tool": {"name": "housecarl_records tree over the 21 CELL "
+                  "records narrowed to their compared fields without MaxHeightData (N11), composed by a script"}},
+                 {"checkId": CELLATTR, "armId": "with-patch", "tool": {"name": "housecarl_records tree over the 21 CELL "
+                  "records narrowed to their compared fields without MaxHeightData (N11), composed by a script"}},
+                 {"checkId": RECORDS, "armId": "baseline", "tool": {"name": "housecarl_records tree"}}]
+        facts = fn_(rows_, R.load_priorities(), lambda c_: "Cell settings" if c_ == CELLATTR else c_)
+        return (len(facts) == 1 and "MaxHeightData" in facts[0] and "Cell settings" in facts[0]
+                and "not judged" in facts[0]), f"{facts}"
+
+    for name, fn in [("fourth-review/C1055-import-narrowing-said", c1055_import_narrowing_said)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1049-flags-leaf-and-previous-winner", c1049_flags_leaf_and_previous_winner)]:
         cell(name, fn)
 
