@@ -4294,6 +4294,32 @@ def main():
     for name, fn in [("after-review/C910-removing-patch-counts-new-defects", c910_removing_patch_counts_new_defects)]:
         cell(name, fn)
 
+
+    # C924 (Clockwork review 1): where the still-there line says a patch places one of the two objects (read from the
+    # record chain), the with-patch and comparison lines say the same, never "not attributed".
+    def c924_patch_places_said_alike():
+        X = f"000X01:{MOD_A}"
+        ys = [f"000Y0{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        other_ = f"00C924:{BASE}"
+        enr = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")]}
+        tr = {(RECORDS, "with-patch"): tree_transcript([
+            (X, "PlacedObject", [(MOD_A, {"Placement.Position": "1,1,1"}), (PATCH, {"Placement.Position": "9,9,9"})]),
+            (other_, "PlacedObject", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (PATCH, {"Owner": "p"})])])}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): []},
+                                         [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                         enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                         transcripts=tr)
+        st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
+        kl = [ln for ln in md.splitlines() if "overlap pairs)" in ln and "left 2" in ln]
+        ok = ("2 still crossing where a patch places one of them" in st and kl
+              and all("not attributed" not in ln and "where a patch places one of them" in ln for ln in kl))
+        return ok, f"{st[:200]}; {kl}"
+
+    for name, fn in [("after-review/C924-patch-places-said-alike", c924_patch_places_said_alike)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
