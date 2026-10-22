@@ -1504,6 +1504,7 @@ def build_prediction(ctx: dict) -> dict:
         return not base.get("type") or (base.get("type") == "Light" and base.get("model") is None)
 
     body_checks = set(words.get("bodyChecks") or [])   # checks whose rows name placed objects, which have a base
+    symmetric_checks = set(words.get("symmetricPairChecks") or [])
 
     def body_unread(rk, other):
         return (bases_read and rk[0] in body_checks
@@ -3972,6 +3973,10 @@ def build_prediction(ctx: dict) -> dict:
             # counted by what the clash is (an object of a by-object check, once however many rows name it), never
             # by rows (P64): an object left without support against three hosts is one new problem
             ident_ = ident_of.get(rk, tuple(rk[:5]))
+            if rk[0] in symmetric_checks:
+                # (fourth review, Pilgrim S3) both directions of one pair are one clash (skill data symmetricPairChecks)
+                ident_ = (rk[0], frozenset([str(rk[4]), *map(str, hit["row"].get("other") or ())]),
+                          frozenset([rk[2].lower(), rk[3].lower()]))
             if no_body(rk, hit["row"].get("other")):
                 no_body_new.add(ident_)        # an object with no model: no body, not a clash
                 continue
@@ -4507,6 +4512,7 @@ def build_prediction(ctx: dict) -> dict:
         back_ids = {id(rk_) for rk_, _ in not_new}
         new_rest = [rk_ for rk_ in problems if id(rk_) not in back_ids]
         sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True, new_rest)}) if new_rest
+                         else words["validationSummaryNoNewBeyond"] if not_new and words.get("validationSummaryNoNewBeyond")
                          else words["validationSummaryNoNew"])
         if not_new:
             sum_parts.insert(len(sum_parts) - 1, bind(words["validationSummaryBroughtBack"], {
@@ -6819,13 +6825,24 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                                        and not (multi_ and e_.get("attribution") == "single-mod"))
 
     case_rows_ = {tuple(x) for x in ((plan.get("reader") or {}).get("validation") or {}).get("caseOnlyRows") or []}
+    sym_checks_ = set(((pr.get("reader") or {}).get("prediction") or {}).get("symmetricPairChecks") or [])
 
     def with_patch_note(fids, n_rows):
         got_ = collections.Counter()
+        sym_ = sym_checks_
+        seen_pairs_, n_dup_ = set(), 0
         for x in fids:
             f_ = f_by_id.get(x) or {}
             c_ = f_.get("counts") or {}
             for r_ in f_.get("allRows") or f_.get("rows") or []:       # every row, not only the ones shown
+                if f_.get("checkId") in sym_ and r_.get("other"):
+                    # (fourth review, Pilgrim S3) both directions of one pair are one clash, as the line counts them
+                    pk_ = (frozenset([str(r_.get("formKey")), *map(str, r_.get("other") or ())]),
+                           frozenset((str(c_.get("A")).lower(), str(c_.get("B")).lower())))
+                    if pk_ in seen_pairs_:
+                        n_dup_ += 1
+                        continue
+                    seen_pairs_.add(pk_)
                 k_ = ident_(f_.get("checkId"), r_.get("formKey"), r_.get("field"), r_.get("other"), c_.get("A"), c_.get("B"))
                 v_ = r_.get("values") or {}
                 # (BPT re-review S1) two values naming the same file but for letter case are no change in game
@@ -6834,6 +6851,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     str(f_.get("checkId")), str(r_.get("formKey")), str(r_.get("field")), str(c_.get("A")), str(c_.get("B")))
                     in case_rows_)
                 got_["counted" if pred_ident.get(k_) else "aside" if k_ in pred_ident else "case" if case_ else "new"] += 1
+        n_rows -= n_dup_
         if sum(got_.values()) != n_rows or got_["counted"] == n_rows or not conc.get("withPatchSplitParts"):
             return ""
         return " (" + "; ".join(bind(conc["withPatchSplitParts"][w_], {"count": fmt_n(got_[w_])})
