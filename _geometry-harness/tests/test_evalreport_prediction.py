@@ -4889,6 +4889,23 @@ def main():
     for name, fn in [("third-review/C938-carriers-absence-and-base-value-said", c938_carriers_absence_and_base_value_said)]:
         cell(name, fn)
 
+    # C942 (Pilgrim review S2): a clash new with the patch that the setup without the evaluated mod already has (the
+    # patch brings back that setup's own state) is not counted against the patch in the summary: "new" there counts only
+    # what no setup without the patch has; the brought-back clash is said apart.
+    def c942_summary_new_excludes_brought_back():
+        O2 = "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A]), arm("without-a", [BASE, OTHER, O2])]
+        r_ = row("OVERLAP", OTHER, O2, f"000X42:{OTHER}", other=f"000Y42:{O2}")
+        results = {(OVERLAP, "baseline"): [r_], (OVERLAP, "without-patch"): [], (OVERLAP, "without-a"): [r_]}
+        plan, md, _ = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
+        summ = str((reader(plan).get("validation") or {}).get("summary") or "")
+        ok = "new 1" not in summ and "brought back" in summ
+        return ok, summ[:300]
+
+    for name, fn in [("third-review/C942-summary-new-excludes-brought-back", c942_summary_new_excludes_brought_back)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
