@@ -6039,6 +6039,76 @@ def main():
     for name, fn in [("fourth-review/C1064-order-step-moves-location-order", c1064_order_step_moves_location_order)]:
         cell(name, fn)
 
+    # C1036 (Winterhold S3): two clashes of the quest-or-switch check already there with one mod alone, of different
+    # kinds (ModA's object sunk in another; ModB's fixture left in empty space): the line gives each mod's clashes their
+    # own meaning, never the first one's for both.
+    def c1036_alone_state_meaning_per_mod():
+        arms = [arm("baseline", [BASE, THIRD, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, THIRD, MOD_A, MOD_B]), arm("without-b", [BASE, THIRD, MOD_A]),
+                arm("without-a", [BASE, THIRD, MOD_B])]
+        r1 = row("STATE-CONTACT@000S36:ThirdMod.esp@Triggered", THIRD, MOD_A, f"000X36:{THIRD}", label="Hall (int)",
+                 other=f"000Y36:{MOD_A}")
+        r1["Summary"] = f"Contact StateConditional under GuardSwitch ({THIRD}): 000X36:{THIRD} arrives - Sunk: sits 9u inside something"
+        r2 = row("STATE-EMPTY@000S36:ThirdMod.esp@Triggered", THIRD, MOD_B, f"000Z36:{THIRD}", label="Hall (int)")
+        r2["Summary"] = (f"LeftInEmptySpace: Furniture Cot (fixed) in Hall (int); {MOD_B} removed or moved 000H36:Skyrim.esm; "
+                         f"its assembly of 1 touches no floor or wall now (nearest floor or wall 0u) @ 000S36:ThirdMod.esp")
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): [r1, r2], (STATE, "without-b"): [r1],
+                   (STATE, "without-a"): [r2]}
+        plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], patches=[PATCH])
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- **{title}**")), "")
+        ok = (re.search(r"from ModA\.esp: when GuardSwitch is set, an object sits 9 u inside another", line) is not None
+              and "In game: when" not in line)
+        return ok, line[-400:]
+
+    # C1037 (Winterhold S4): the top says 2 navmesh records still lose ground with the patch (both re-measured Holds); the
+    # patch section's history line counts only the 1 no longer flagged. It says the other 1 is still flagged, so the two
+    # figures reconcile in one sentence.
+    def c1037_history_counts_reconciled():
+        n1, n2 = f"000N71:{BASE}", f"000N72:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  689 tris -> 5")]
+        w_rows = [row("CLOBBERED", OTHER, PATCH, n1, label="CityExterior01 (ext)  465 tris -> 345")]
+        preds = [{"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n_, "Other": None, "Physical": "Holds",
+                  "Detail": "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u from the winner's"}
+                 for n_ in (n1, n2)]
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): w_rows},
+                                            [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
+        val_sec = section_text(md, headings(plan).get("validation") or "\0")
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        ok = ("2 of these navmesh records still lose" in top and "The other 1 of the 2 navmesh records" in val_sec)
+        return ok, f"{top[-200:]!r}; {[ln[-300:] for ln in val_sec.splitlines() if 'flagged' in ln]}"
+
+    # C1039 (BPT r3 S3): a by-object comparison's repairs count in the unit of its new problems: objects with a body. Of
+    # the 2 problems the patch repairs, one is an object whose base has no model: "repaired 1", the other said apart.
+    def c1039_repairs_count_bodied_objects():
+        G0, R1, R2, X1 = f"000G39:{MOD_A}", f"000R39:{MOD_A}", f"000L39:{MOD_A}", f"000X39:{MOD_A}"
+        base = [row("CONTACT", MOD_B, MOD_A, x_, other=f"000H{i}9:{MOD_B}") for i, x_ in enumerate((G0, R1, R2))]
+        withp = [base[0], row("CONTACT", MOD_B, MOD_A, X1, other=f"000H49:{MOD_B}")]
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=2, reclassified=0,
+                                                     created=1, newDefect=1, attributed=0, unmeasured=0)}}
+        log = (f"NEW     CONTACT    {MOD_B}  x  {MOD_A}   +1 record(s): created 1\n"
+               f"SHRANK  CONTACT    {MOD_B}  x  {MOD_A}   -2 record(s): repaired 2\n")
+        refs = {**{x_: {"base": f"0B0S39:{MOD_A}"} for x_ in (G0, R1, X1)}, R2: {"base": f"0B0L39:{MOD_A}"},
+                **{f"000H{i}9:{MOD_B}": {"base": f"0B0W39:{MOD_B}"} for i in range(5)}}
+        bases = {f"0B0S39:{MOD_A}": {"type": "Static", "model": "lantern.nif"}, f"0B0L39:{MOD_A}": {"type": "Light", "model": ""},
+                 f"0B0W39:{MOD_B}": {"type": "Static", "model": "table.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): base, (CONTACT, "with-patch"): withp},
+                                            [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                            names={"refs": refs, "bases": bases}, diff_logs={(CONTACT, "with-patch"): log})
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        pl_ = str(reg.get("readerPlain") or "")
+        return ("repaired 1 existing problem" in pl_ and "repaired 2" not in pl_ and "no model" in pl_), pl_[-300:]
+
+    for name, fn in [("fourth-review/C1039-repairs-count-bodied-objects", c1039_repairs_count_bodied_objects)]:
+        cell(name, fn)
+
+    for name, fn in [("fourth-review/C1037-history-counts-reconciled", c1037_history_counts_reconciled)]:
+        cell(name, fn)
+
+    for name, fn in [("fourth-review/C1036-alone-state-meaning-per-mod", c1036_alone_state_meaning_per_mod)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1035-switch-after-flip-said", c1035_switch_after_flip_said)]:
         cell(name, fn)
 
