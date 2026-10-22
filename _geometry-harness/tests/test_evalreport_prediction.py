@@ -4127,15 +4127,14 @@ def main():
         return bad
 
     def c923_off_count_part_of_its_count_and_true_effect():
+        # (reviewer on regen-q4) the on/off clause is said once per line, against the line's own notes
         plan, md, _ = offwin_bundle()
-        st = pair_parts((reader(plan).get("prediction") or {}).get("withPatchStays"), MOD_A, MOD_B)
-        st_ = " ".join(st)
-        left_part, _, kept_part = st_.partition(", and ")
+        line = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
         bad = part_le_whole(md)
-        ok = (not bad and "off for good" in md and "forwarding" not in left_part
-              and re.search(r"forwarding the 1 on/off field\b", kept_part) is not None
+        ok = (not bad and "off for good" in md and len(re.findall(r"forwarding the \d+ on/off field", line)) == 1
+              and re.search(r"forwarding the 1 on/off field among these\b", line) is not None
               and "brings them back" not in md)
-        return ok, f"bad {bad}; {st}"
+        return ok, f"bad {bad}; {line[:400]}"
 
     for name, fn in [("after-review/C923-off-count-part-of-its-count-and-true-effect",
                       c923_off_count_part_of_its_count_and_true_effect)]:
