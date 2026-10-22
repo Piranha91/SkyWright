@@ -3524,16 +3524,20 @@ def build_prediction(ctx: dict) -> dict:
         not_measured = [e for e in admitted if (e["checkId"], patched_arm) not in measured]
         judged = [e for e in admitted if (e["checkId"], patched_arm) in measured]
         patched_rows = {k: v for (c, a), rs in rows_by.items() if a == patched_arm for k, v in rs.items()}
+
+        def reads_same_patched(rk, h_):
+            """(round 3, BPT re-review B1) The one rule by which two values of a lost edit read the same (the prediction's
+            sameAsRead: the import's chain reads them equal, path case, unused bytes and rounding folded; or they differ
+            only in a path's case), asked of a row of the setup with the patch."""
+            v_ = h_["row"].get("values") or {}
+            return same_but_path_case(v_.get("lost"), v_.get("winner")) or same_in_chain(patched_arm, rk)
         # the patched setup's lost edits a declared patch wins whose values show no change in game, by the same rules
         # as the prediction's (coordinator D2): the detail's patch-wins line does not count them
         # (BPT re-review S1) lost edits of the setup with the patch whose two values the record chain reads as the same file
         # but for letter case: no change in game, said so on the detail lines (the row's own winner value may be a
         # placeholder, so the chain decides)
         case_only_rows = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
-                                for rk, h_ in patched_rows.items() if rk[1] == "LOST-EDIT"
-                                and (same_but_path_case((h_["row"].get("values") or {}).get("lost"),
-                                                        (h_["row"].get("values") or {}).get("winner"))
-                                     or same_in_chain(patched_arm, rk)))
+                                for rk, h_ in patched_rows.items() if rk[1] == "LOST-EDIT" and reads_same_patched(rk, h_))
         patch_noise = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
                              for rk, h_ in patched_rows.items()
                              if rk[1] == "LOST-EDIT" and str(rk[3]).lower() in {str(x).lower() for x in patch_names}
@@ -3546,10 +3550,11 @@ def build_prediction(ctx: dict) -> dict:
         # side's loses (the patch carries the value that wins without it: kept, with no claim about why). No change
         # lost with the patch is resolved; a winner that is not a patch is left (nothing touched it). Where neither
         # side loses to the patch, the recorded values decide, and with a placeholder value it cannot be told.
+        # (round 3, BPT re-review B1) a plugin whose value reads the same as the patch's by that one rule loses nothing to
+        # the patch: rounding in the last float digit is no value of the patch's own
         lost_w = collections.defaultdict(list)
         for rk, hit in patched_rows.items():
-            if rk[1] == "LOST-EDIT" and not same_but_path_case((hit["row"].get("values") or {}).get("lost"),
-                                                               (hit["row"].get("values") or {}).get("winner")):
+            if rk[1] == "LOST-EDIT" and not reads_same_patched(rk, hit):
                 lost_w[(rk[0], rk[4], hit["row"].get("field"))].append(hit["row"] | {"winnerPlugin": rk[3],
                                                                                     "loserPlugin": rk[2]})
 
