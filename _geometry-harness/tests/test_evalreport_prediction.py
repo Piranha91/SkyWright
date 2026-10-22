@@ -1714,8 +1714,10 @@ def main():
         val = reader(plan).get("validation") or {}
         bi = (val.get("byItem") or [{}])[0]
         line = next((x for x in val.get("itemLines") or [] if "Objects" in x or OVERLAP in x), "")
-        ok = (bi.get("open") == 3 and bi.get("openListed") == 1 and bi.get("openPatchHeld") == 1
+        # (third review, Clockwork S1) the pair a patch's version holds is the patch's placement, said apart, not left
+        ok = (bi.get("open") == 2 and bi.get("openListed") == 1 and bi.get("placed") == 1
               and bi.get("openNotAttributed") == 1 and "1 still intersect, not attributed" in line
+              and "1 still intersecting where a patch places one of them" in line
               # the page says an item line that repeats its kind line at the top once, at the top (last round)
               and "1 still reported as a clash between two mods" in line and line.split("): ", 1)[-1] in md)
         return ok, f"by item {bi}; line {line!r}"
@@ -1945,9 +1947,12 @@ def main():
             row("OVERLAP", MOD_B, MOD_A, X, other=ys[0])]}, [MOD_A, MOD_B], patches=[PATCH],
             predicates={(OVERLAP, "with-patch"): preds}, names={"refs": refs})
         text = section_text(md, headings(plan).get("validation") or "\0")
-        line = next((x for x in text.splitlines() if "untouched" in x), "")
-        ok = ("untouched" in line and re.search(r"\b2 left untouched\b", line) is not None
-              and re.search(r"\b1 where a patch edits one of the two objects\b", line) is not None
+        # (third review, Clockwork S1) the clash a patch edited is no longer in "still present": it is the patch's
+        # placement, its own sentence; still present counts the 2 no patch places
+        line = next((x for x in text.splitlines() if "Predicted and still present" in x), "")
+        placed_ = next((x for x in text.splitlines() if "where a patch places one of the two objects" in x), "")
+        ok = (re.search(r"Predicted and still present with [^:]*: 2\b", line) is not None and "untouched" not in line
+              and "they still intersect there: 1" in placed_
               and not re.search(r"left untouched by [^:]*: 3\b", text))
         return ok, f"line {line!r}"
 
@@ -2090,8 +2095,9 @@ def main():
         p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
         line = p.get("withPatchLine") or ""
         items = " ".join(val.get("itemLines") or [])
-        ok = (f"{MOD_A}'s change stays lost" in line and f"{MOD_A}'s change stays lost" in items
-              and "keeps the winning value" not in md and f"{MOD_A}'s change stays lost" in md)
+        # (third review, Winterhold S1) the patch keeping the winner's value is its resolution, said with both mods named
+        said_ = f"the patch keeps {MOD_B}'s value over {MOD_A}'s change on 1"
+        ok = (said_ in line and said_ in items and "keeps the winning value" not in md and "stays lost 1" not in line)
         return ok, f"with-patch line {line!r}; item lines {items[:240]!r}"
 
     # C521. A lost value that is the base game's own value is no edit of that mod's: it only undoes the change of the mod
@@ -3891,7 +3897,11 @@ def main():
             row("OVERLAP", MOD_B, MOD_A, X, other=ys[0])]}, [MOD_A, MOD_B], patches=[PATCH],
             predicates={(OVERLAP, "with-patch"): preds}, names={"refs": refs})
         st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
-        return "1 still crossing where a patch places one of them" in st, st[:300]
+        # (third review, Clockwork S1) the pair a patch places is not still there; the with-patch line says it apart
+        wl = str((reader(plan).get("prediction") or {}).get("withPatchLine") or "")
+        ok = ("2 overlap pairs between" in st and "a patch places" not in st
+              and "1 still intersecting where a patch places one of them" in wl)
+        return ok, st[:300] + " | " + wl[:300]
 
     for name, fn in [("after-final/C824-still-there-says-the-patch-places-it", c824_still_there_says_the_patch_places_it)]:
         cell(name, fn)
@@ -4065,7 +4075,8 @@ def main():
     def c900_offwin_said_where_still_there():
         plan, md, _ = offwin_bundle()
         st = pair_parts((reader(plan).get("prediction") or {}).get("withPatchStays"), MOD_A, MOD_B)
-        return off_said(" ".join(st)) == 2, f"{st}"
+        # (third review, Winterhold S1) D3, kept by the patch, is the patch's resolution and not still there: only D1
+        return off_said(" ".join(st)) == 1, f"{st}"
 
     def c901_offwin_said_on_comparison_and_summary():
         plan, md, _ = offwin_bundle()
@@ -4083,10 +4094,9 @@ def main():
         st = pair_parts(pr_.get("withPatchStays"), MOD_A, MOD_B)
         n_left = left_said(val.get("summary"))
         left_part = any(re.search(re.escape(MOD_A) + r"'s changes to 1 record field\b", x) for x in st)
-        carried = any(re.search(r"(?<![\d,])1(?![\d,])", x) and "carr" in x for x in st if not
-                      re.search(re.escape(MOD_A) + r"'s changes to 1 record field\b", x)) or any(
-                      "carr" in x and re.search(r"(?<![\d,])1(?![\d,])", x.split("record field", 1)[-1]) for x in st)
-        return n_left == 1 and left_part and carried, f"summary left {n_left}; {st}"
+        # (third review, Winterhold S1) the carried field is the patch's resolution: in the summary, not still there
+        carried = "carried by a patch on 1" in str(val.get("summary") or "") and not any("carr" in x for x in st)
+        return n_left == 1 and left_part and carried, f"summary left {n_left}; {st}; {val.get('summary')}"
 
     # C903, C904 (Missives review 1): a cell's Grid row set aside because the losing mod changed only the three unused
     # bytes. Where the winner changed the land-flag byte (hiding land quarters), that is the winner's own change: not a
@@ -4319,9 +4329,11 @@ def main():
                                          enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()},
                                          transcripts=tr)
         st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
-        kl = [ln for ln in md.splitlines() if "overlap pairs)" in ln and "left 2" in ln]
-        ok = ("2 still crossing where a patch places one of them" in st and kl
-              and all("not attributed" not in ln and "where a patch places one of them" in ln for ln in kl))
+        # (third review, Clockwork S1) the patch's placement: not left and not still there, said alike on every line
+        kl = [ln for ln in md.splitlines() if "overlap pairs)" in ln and "where a patch places" in ln]
+        ok = ("overlap pairs between" not in st and kl and not any("left 2" in ln for ln in kl)
+              and all("not attributed" not in ln and "2 still intersecting where a patch places one of them" in ln
+                      for ln in kl))
         return ok, f"{st[:200]}; {kl}"
 
     for name, fn in [("after-review/C924-patch-places-said-alike", c924_patch_places_said_alike)]:

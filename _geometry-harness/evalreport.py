@@ -3297,29 +3297,35 @@ def build_prediction(ctx: dict) -> dict:
         def patch_places(e):
             return (left_split.get(id(e)) == "patchHeld"
                     or any(str(x) in patch_placed or chain_patch_places(x) for x in [e["formKey"], *(e.get("other") or [])]))
+        # (Clockwork review 1) one reading of who places the objects: where the record chain shows a patch placing one of
+        # them, every line says so, never "not attributed" beside a still-there line that attributes them
+        for e in judged:
+            if left_split.get(id(e)) == "notAttributed" and patch_places(e):
+                left_split[id(e)] = "patchHeld"
+        # (third review, Clockwork S1) a clash still there that the setup with the patch does not list between two mods,
+        # where a declared patch places one of the objects, is the patch's own placement: not left, said apart
+        for e in judged:
+            if outcome[id(e)] == "left" and left_split.get(id(e)) == "patchHeld":
+                outcome[id(e)] = "patchPlaced"
         hits = [e for e in judged if outcome[id(e)] == "resolved"]
         switched = [e for e in judged if outcome[id(e)] == "switched"]
         own = [e for e in judged if outcome[id(e)] == "own"]
         kept = [e for e in judged if outcome[id(e)] == "kept"]
         open_ = [e for e in judged if outcome[id(e)] == "left"]
+        placed = [e for e in judged if outcome[id(e)] == "patchPlaced"]
         untold = [e for e in judged if outcome[id(e)] == "cannot-tell"]
         untold_value = [e for e in judged if outcome[id(e)] == "cannot-tell-value"]
         # by item: every judged clash; the totals: only the clashes the prediction counts. With two evaluated mods, a
         # clash already there with one mod alone is not credited to the patch (third blind review): it has its own
         # line. With one evaluated mod, a clash that comes from it alone is counted in the headline, so the patch is
         # credited with it too (fourth blind review, S1): the totals add up to the headline.
-        all_ = {"hits": hits, "switched": switched, "own": own, "kept": kept, "open": open_,
+        all_ = {"hits": hits, "switched": switched, "own": own, "kept": kept, "open": open_, "placed": placed,
                 "untold": untold + untold_value}
-        # (Clockwork review 1) one reading of who places the objects: where the record chain shows a patch placing one of
-        # them, every line says so, never "not attributed" beside a still-there line that attributes them
-        for e in judged:
-            if left_split.get(id(e)) == "notAttributed" and patch_places(e):
-                left_split[id(e)] = "patchHeld"
 
         def credit(xs):
             return [e for e in xs if not multi or e.get("attribution") != "single-mod"]
-        hits, switched, own, kept, open_, untold, untold_value = (credit(x) for x in (hits, switched, own, kept, open_,
-                                                                                     untold, untold_value))
+        hits, switched, own, kept, open_, placed, untold, untold_value = (credit(x) for x in (
+            hits, switched, own, kept, open_, placed, untold, untold_value))
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         # (BPT review 1) a lost change still there with the patch, on an object the winning version in the setup with
@@ -3507,6 +3513,8 @@ def build_prediction(ctx: dict) -> dict:
                 for m_, n_ in sorted(kept_by.items(), key=lambda kv: (-kv[1], kv[0].lower()))) + ")") if len(kept_by) > 1 else ""
             n_kept_ = fmt_n(len(kept)) + off_note(kept)
             sentences.append(bind(words["validationKept"], {"patch": patch, "count": n_kept_, "by": by_}))
+        if placed:
+            sentences.append(bind(words["validationPlaced"], {"patch": patch, "count": by_unit(placed)}))
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
         edited = sum(1 for e in open_ if left_split.get(id(e)) == "patchHeld")
         n_open_ = by_unit_note(open_, False)
@@ -3580,8 +3588,10 @@ def build_prediction(ctx: dict) -> dict:
                             "own": sum(1 for e in all_["own"] if item_of(e) == k),
                             "open": sum(1 for e in all_["open"] if item_of(e) == k),
                             "kept": sum(1 for e in all_["kept"] if item_of(e) == k),
-                            "keptBy": collections.Counter(e["A"] for e in all_["kept"] if item_of(e) == k),
-                            "offKeptBy": collections.Counter(e["A"] for e in all_["kept"] if item_of(e) == k
+                            "placed": sum(1 for e in all_["placed"] if item_of(e) == k),
+                            # (third review, Winterhold S1) by loser and winner: the patch keeps the winner's value
+                            "keptBy": collections.Counter(f"{e['A']}|{e['B']}" for e in all_["kept"] if item_of(e) == k),
+                            "offKeptBy": collections.Counter(f"{e['A']}|{e['B']}" for e in all_["kept"] if item_of(e) == k
                                                              and still_off(e)),
                             **{f"off{n_}": sum(1 for e in all_[x_] if item_of(e) == k and still_off(e))
                                for n_, x_ in (("Open", "open"), ("Kept", "kept"))},
@@ -3621,7 +3631,7 @@ def build_prediction(ctx: dict) -> dict:
         ow = words["itemOutcomeWords"]
 
         def outcome_text(bi):
-            keys = ("hits", "switched", "own", "kept", "open", "cannotTell", "notMeasured")
+            keys = ("hits", "switched", "own", "kept", "open", "placed", "cannotTell", "notMeasured")
 
             def part(k):
                 if k == "switched":
@@ -3640,8 +3650,10 @@ def build_prediction(ctx: dict) -> dict:
                 if sum(by.values()) != bi.get("kept"):
                     return (bind(ow["keptUnnamed"], {"count": fmt_n(bi.get(k) or 0)})
                             + off_text(bi.get("offKept")))
-                # each loser's off-for-good count beside its own count (reviewer, BPT 1)
-                return ", ".join(bind(ow["kept"], {"loser": m_, "count": fmt_n(n_)})
+                # each pair's off-for-good count beside its own count (reviewer, BPT 1); the patch keeps the winner's
+                # value: the patch's resolution, said as switched is (third review, Winterhold S1)
+                return ", ".join(bind(ow["kept"], {"loser": m_.split("|")[0], "winner": m_.split("|")[1],
+                                                   "count": fmt_n(n_)})
                                  + off_text((bi.get("offKeptBy") or {}).get(m_))
                                  for m_, n_ in sorted(by.items(), key=lambda kv: (-kv[1], kv[0].lower())))
             parts = [part(k) for k in keys if bi.get(k)]
@@ -3698,7 +3710,9 @@ def build_prediction(ctx: dict) -> dict:
         for g in counted_items:
             k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
             stay_groups.setdefault((g["checkId"], g["kind"], tuple(g["mods"])), (g, []))[1].extend(
-                e for e in all_["open"] + all_["kept"] if item_of(e) == k)
+                e for e in all_["open"] if item_of(e) == k)
+        # (third review, Winterhold S1, Snazzy S2) still there is what no patch touches: a value a patch keeps is the
+        # patch's resolution (said in the with-patch lines), so neither its fields nor what it brings back are here
         for g, es in stay_groups.values():
             if not es:
                 continue
@@ -3708,18 +3722,10 @@ def build_prediction(ctx: dict) -> dict:
                     pairs_.setdefault((e["A"], e["B"]), []).append(e)
                 for (loser, winner), pes_ in pairs_.items():
                     u_ = (words.get("stillThereLostUnits") or {}).get(g["checkId"]) or words["fieldNoun"]
-                    # "left" is a lost change no patch touches; one a patch carries the winning value on is said apart
-                    # (Winterhold review 1, BPT review 3)
-                    n_open = sum(1 for e in pes_ if outcome.get(id(e)) == "left")
-                    n_kept = len(pes_) - n_open
+                    # "left" is a lost change no patch touches (Winterhold review 1, BPT review 3)
+                    n_open = len(pes_)
                     text_ = (bind(words["stillThereLost"], {"count": fmt_n(n_open), "loser": loser, "winner": winner,
-                                                            "unit": u_[0 if n_open == 1 else 1]})
-                             + off_note([e for e in pes_ if outcome.get(id(e)) == "left"]) if n_open else "")
-                    if n_kept:
-                        text_ += bind(words["stillThereCarriedMore" if n_open else "stillThereCarried"], {
-                            "count": fmt_n(n_kept), "loser": loser, "winner": winner,
-                            "unit": u_[0 if n_kept == 1 else 1]}) + off_note(
-                            [e for e in pes_ if outcome.get(id(e)) == "kept"])
+                                                            "unit": u_[0 if n_open == 1 else 1]}) + off_note(pes_))
                     stays_parts.append((len(pes_), text_))
                 for e in es:
                     v_ = e.get("values") or {}
@@ -3788,6 +3794,9 @@ def build_prediction(ctx: dict) -> dict:
             sum_parts.append(bind(words["validationSummaryCarried"], {"count": by_unit_note(kept)}))
         if open_:
             sum_parts.append(bind(words["validationSummaryLeft"], {"count": by_unit_note(open_)}))
+        if placed:
+            # (third review, Clockwork S1) the patch's own placement, never folded into left
+            sum_parts.append(bind(words["validationSummaryPlaced"], {"count": by_unit(placed, True)}))
         sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True)}) if problems
                          else words["validationSummaryNoNew"])
         summary_ = bind(words["validationSummary"], {"patch": patch, "parts": ((", ".join(sum_parts[:-1]) + ", and "
