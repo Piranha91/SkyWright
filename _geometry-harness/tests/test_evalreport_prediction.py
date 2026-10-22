@@ -5047,6 +5047,26 @@ def main():
                       c968_restoring_first_value_over_master_stays_counted)]:
         cell(name, fn)
 
+    # C943 (Sewers review S1, Gate A answer 3 option b): a broken link from a base-game navmesh record that the other mod
+    # only carries (the probe's provider chain: Skyrim.esm -> OtherMod) is not said as that mod's doing: the item says the
+    # navmesh is the base game's, carried by it, and that whether it changed the link is not in the record data.
+    def c943_base_navmesh_carried_said():
+        n1 = f"000N43:{BASE}"
+        rows_ = []
+        for i in (1, 2):
+            r_ = row("EDGE-IDX", OTHER, MOD_A, f"000E4{i}:{BASE}", label="CityExterior04 (ext)", other=n1)
+            r_["Summary"] = (f"navmesh 000E4{i}:{BASE} in CityExterior04 (ext) edge-links {n1} triangle 50{i} of 432   "
+                             f"[record provided by: {BASE} -> {OTHER}]")
+            rows_.append(r_)
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
+        plan, md, _ = compile_and_render(arms, {(NAVOWN, "baseline"): rows_, (NAVOWN, "without-a"): []}, [MOD_A])
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Navmesh")), "")
+        ok = ("base-game navmesh" in it and f"{OTHER} carries" in it and "not in the record data" in it)
+        return ok, it[-400:]
+
+    for name, fn in [("third-review/C943-base-navmesh-carried-said", c943_base_navmesh_carried_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
