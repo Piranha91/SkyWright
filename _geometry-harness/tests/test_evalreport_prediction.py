@@ -4586,6 +4586,17 @@ def main():
     for name, fn in [("after-review/C926-long-values-not-quoted", c926_long_values_not_quoted)]:
         cell(name, fn)
 
+
+    # C927 (found in regen-1: a kind line's on/off count larger than its notes): every line's on/off clause counts the
+    # one field (D3's position below the world) once, however the line names the losing mods.
+    def c927_on_off_clause_counted_once():
+        plan, md, _ = offwin_bundle()
+        got = re.findall(r"forwarding the (\d+) on/off field", md)
+        return bool(got) and set(got) == {"1"}, f"{got}"
+
+    for name, fn in [("after-review/C927-on-off-clause-counted-once", c927_on_off_clause_counted_once)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
