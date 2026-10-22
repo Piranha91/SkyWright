@@ -5994,6 +5994,50 @@ def main():
     for name, fn in [("fourth-review/C1029-no-model-switched-on-not-drawn", c1029_no_model_switched_on_not_drawn)]:
         cell(name, fn)
 
+    # C1031, C1032 (Clockwork r3 S3, Gate A answer 5 and condition 4): the mirror of C941. The WINNER's version only
+    # starts the object disabled (no enable parent) and no record of the winning plugin refers to it (read from its file).
+    # C1031: the losing version sets it off for good too: both off, set aside, the reason saying its reference check
+    # covered the winning plugin's own records only. C1032: the losing version has it on: counted, the item names the
+    # winner as the one that starts it disabled, and says the read found no reference, with no "may enable" hedge.
+    def winner_start_off_bundle(loser_off, plugin_path):
+        D1 = f"00C941:{BASE}"
+        a_ = offs(-30000) if loser_off else offs(0)
+        if not loser_off:
+            a_["Placement.Position"] = "300,100,0"
+        b_ = offs(-155, "InitiallyDisabled")
+        p_rows = [lost_row(OTHER, MOD_A, D1, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        ch_ = [(D1, "PlacedObject", [(BASE, offs(0)), (OTHER, a_), (MOD_A, b_)])]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        if plugin_path is not None:
+            sha_ = hashlib.sha256(Path(plugin_path).read_bytes()).hexdigest()
+            for a__ in arms:
+                for pl_ in a__["requested"]["plugins"]:
+                    if pl_["name"] == MOD_A:
+                        pl_["path"], pl_["sha256"] = str(plugin_path), sha_
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=ch_, w_chains=ch_, arms=arms,
+                                  masters={**MASTERS_, PATCH: [BASE]})
+        return plan, md, D1
+
+    def c1031_both_off_winner_unreferenced_set_aside():
+        plan, md, D1 = winner_start_off_bundle(True, write_plugin(MOD_A, False))
+        adm = [e["admission"] for e in rec_of(plan, D1)]
+        line = next((ln for ln in md.splitlines() if "only starts" in ln and "Also not counted" in ln), "")
+        return (adm == ["offUnreferencedWinner"] and f"no record of {MOD_A} refers to" in line
+                and "nothing in the load order" not in line), f"{adm}; {line[-300:]}"
+
+    def c1032_winner_start_off_named_no_hedge():
+        plan, md, D1 = winner_start_off_bundle(False, write_plugin(MOD_A, False))
+        adm = [e["admission"] for e in rec_of(plan, D1)]
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return (adm == ["admitted"] and f"{MOD_A} only starts" in it and f"no record of {MOD_A} refers to" in it
+                and "a script or quest may enable it" not in it), f"{adm}; {it[-400:]}"
+
+    for name, fn in [("fourth-review/C1031-both-off-winner-unreferenced-set-aside",
+                      c1031_both_off_winner_unreferenced_set_aside),
+                     ("fourth-review/C1032-winner-start-off-named-no-hedge", c1032_winner_start_off_named_no_hedge)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1061-parent-loser-worded-apart", c1061_parent_loser_worded_apart),
                      ("fourth-review/C1062-starts-off-loser-worded-apart", c1062_starts_off_loser_worded_apart),
                      ("fourth-review/C1063-rounding-is-no-rework", c1063_rounding_is_no_rework)]:
