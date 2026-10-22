@@ -4022,7 +4022,7 @@ def main():
     # ---------------------------------------- after the review round (2026-10-21): the blind reviews of regen-14
     def off_said(text):
         """The numbers a sentence gives next to "off for good" (the counts of lost changes on objects set off for good)."""
-        return sum(int(m_.group(1).replace(",", "")) for m_ in re.finditer(r"(\d[\d,]*) [^;()]*?off for good", text))
+        return sum(int(m_.group(1).replace(",", "")) for m_ in re.finditer(r"(\d[\d,]*) [^;(),]*?off for good", text))
 
     def left_said(summary):
         """The record fields the summary's "left" part counts (0 when it names none, None when there is no such part)."""
