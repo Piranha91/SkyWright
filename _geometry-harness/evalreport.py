@@ -2269,6 +2269,9 @@ def build_prediction(ctx: dict) -> dict:
         if adm == "admitted" and pair_ is not None and pair_ in pair_owner and pair_owner[pair_][0] != rk[0]:
             g_owner = pair_owner[pair_][1]
             g_owner.setdefault("_alsoFoundBy", collections.Counter())[rk[0]] += 1
+            if rk[0] in sib_only:
+                # (fourth review, Sewers S2) that check's rows come only from the separate evaluation: said where used
+                g_owner.setdefault("_alsoFromSibling", set()).add(rk[0])
             # (third review, Sewers S3) what the other check found: the switch under which an object leaves or arrives
             sw_m = re.search(r"under (\S+)(?: \(([^)]*)\))?: (\S+) \[[^\]]*\] (leaves|arrives)", str(rk[5] or ""))
             if sw_m:
@@ -2731,9 +2734,12 @@ def build_prediction(ctx: dict) -> dict:
                                {"states": fmt_n(max(several)), "count": fmt_n(len(several))}))
 
         also_ = g.pop("_alsoFoundBy", None)
+        also_sib_ = g.pop("_alsoFromSibling", None) or set()
         if also_ and words.get("itemAlsoFoundBy"):
             for c_, n_ in also_.items():
-                detail.append(bind(words["itemAlsoFoundBy"], {"count": fmt_n(n_), "title": title_of(c_)}))
+                detail.append(bind(words["itemAlsoFoundBy"], {"count": fmt_n(n_), "title": title_of(c_)})
+                              + (" " + words["itemAlsoFromSibling"] if c_ in also_sib_ and words.get("itemAlsoFromSibling")
+                                 else ""))
         sw_depth_, sw_unknown_ = g.pop("_alsoSwitchDepth", None) or {}, g.pop("_alsoSwitchUnknown", None) or set()
         for (sw_, by_, obj_, how_), n_ in (g.pop("_alsoSwitch", None) or {}).items():
             key_ = "itemAlsoSwitchLeaves" if how_ == "leaves" else "itemAlsoSwitchArrives"
