@@ -3186,6 +3186,15 @@ def build_prediction(ctx: dict) -> dict:
                      else f"{third} {fmt_n(g['count'])}")
         line["groups"].setdefault(key, []).append({"text": text_,
                                                    "findingIds": list(g["findingIds"])})
+        # (fourth review, Winterhold S3) each mod's clashes keep their own in-game meaning
+        line.setdefault("_inGameBy", collections.OrderedDict()).setdefault(mod, g["inGameText"])
+    for line in alone_lines.values():
+        by_ = line.pop("_inGameBy", None) or {}
+        if len(set(by_.values())) > 1 and words.get("aloneInGamePart"):
+            line["inGameText"] = words.get("aloneInGameLead", "In game, ") + "; ".join(
+                bind(words["aloneInGamePart"], {"mod": m_, "text": (re.sub(r"^In game: ", "", t_).rstrip(".")[:1].lower()
+                                                                     + re.sub(r"^In game: ", "", t_).rstrip(".")[1:])})
+                for m_, t_ in by_.items()) + "."
 
     subject_mods = p_targets or list(ctx["targets"])
     subject = (" and ".join([", ".join(subject_mods[:-1]), subject_mods[-1]]) + " together"
