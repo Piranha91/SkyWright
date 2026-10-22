@@ -3595,7 +3595,7 @@ def build_prediction(ctx: dict) -> dict:
         def off_note(es_):
             return off_text(sum(1 for e in es_ if still_off(e)))
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
-        problem_objects = {}
+        problem_objects, problem_movers = {}, {}
         gap_re = (words.get("newObjects") or {}).get("gapPattern")
         problem_rows = collections.Counter()          # rows per new problem: an object's pairs (BPT review S3)
         # new with the patch is decided by the same setup with and without the patch alone (coordinator ruling on
@@ -3661,6 +3661,12 @@ def build_prediction(ctx: dict) -> dict:
                     if m_:
                         gap_ = float(m_.group(1))
                         break
+                # (third review, BPT S3) who moved the support, as the probe's own row says
+                mv_ = re.search(r"which (.+?) Moved\b", str(hit["row"].get("summary") or ""))
+                if mv_:
+                    problem_movers.setdefault(str(rk[4]), [])
+                    if mv_.group(1) not in problem_movers[str(rk[4])]:
+                        problem_movers[str(rk[4])].append(mv_.group(1))
                 o_ = problem_objects.setdefault(rk[0], collections.OrderedDict()).setdefault(str(rk[4]), None)
                 if gap_ is not None and (o_ is None or gap_ < o_):
                     problem_objects[rk[0]][str(rk[4])] = gap_
@@ -3845,12 +3851,16 @@ def build_prediction(ctx: dict) -> dict:
         def objects_note(c):
             """The new objects of a check grouped by base: the base's editor ID, its model and the measured gaps."""
             nw_ = words.get("newObjects") or {}
-            groups_ = collections.OrderedDict()
+            groups_, movers_ = collections.OrderedDict(), {}
             for fk_, gap_ in (problem_objects.get(c) or {}).items():
                 base_ = name_bases.get((name_refs.get(fk_) or {}).get("base") or "") or {}
                 if not base_.get("editorId"):
                     return None                # a new object whose base was not read: no partial naming
                 groups_.setdefault((base_["editorId"], base_.get("model") or ""), []).append(gap_)
+                for m_ in problem_movers.get(fk_) or []:
+                    movers_.setdefault((base_["editorId"], base_.get("model") or ""), [])
+                    if m_ not in movers_[(base_["editorId"], base_.get("model") or "")]:
+                        movers_[(base_["editorId"], base_.get("model") or "")].append(m_)
             if not groups_ or not nw_.get("group"):
                 return None
             parts_ = []
@@ -3859,7 +3869,8 @@ def build_prediction(ctx: dict) -> dict:
                 parts_.append(bind(nw_["group"], {
                     "count": fmt_n(len(gaps_)), "base": ed_, "model": bind(nw_["model"], {"model": model_}) if model_ else "",
                     "gaps": bind(nw_["gaps"], {"gaps": ", ".join(fmt_units(g_) for g_ in sorted(known_, reverse=True))})
-                    if known_ else ""}))
+                    if known_ else ""}) + (bind(nw_["movers"], {"movers": " and ".join(movers_[(ed_, model_)])})
+                                           if movers_.get((ed_, model_)) and nw_.get("movers") else ""))
             return "; ".join(parts_)
 
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
