@@ -2032,7 +2032,8 @@ def main():
         plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
         v = (reader(plan).get("prediction") or {}).get("verdict") or ""
         title = priorities()["reader"]["checkTitles"].get(FIXTURE)
-        ok = (f"3 inconsistencies found by the check \"{title}\" (2 of them objects already counted above)" in v)
+        # (Snazzy re-review on regen-3) the same total and shared count, the shared objects now named
+        ok = (f"3 inconsistencies found by the check \"{title}\" (sharing 2 objects already counted above: " in v)
         return ok, f"verdict {v!r}"
 
     # C502. A fixture whose nearest floor or wall's box reaches it (0u) although the contact walk finds no touch is not

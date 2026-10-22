@@ -2884,7 +2884,9 @@ def build_prediction(ctx: dict) -> dict:
         # (third blind review, S-S2: a smaller number than the bullet read as a contradiction)
         total = e["count"]
         phrase = (f"{fmt_n(total)} " + bind(nouns[0] if total == 1 else nouns[1], {"title": title_of(e["checkId"])})
-                  + " " + bind(words["verdictSharedObjects"], {"count": fmt_n(shared)}) if new else
+                  # (Snazzy re-review on regen-3) the shared objects are named, so "of them" is not read as the check's own
+                  + " " + bind(words["verdictSharedObjects"], {"count": fmt_n(shared), "noun": "object" if shared == 1 else "objects", "examples": ", ".join(
+                      sorted(str(x) for x in shared_objects)[:3]) + (", ..." if shared > 3 else "")}) if new else
                   bind(words["verdictSameObjects"][0 if shared == 1 else 1], {
                       "count": fmt_n(shared), "title": title_of(e["checkId"])}))
         verdict_counts[i] = {**e, "count": total, "newObjects": new, "sharedObjects": shared, "phrase": phrase}
