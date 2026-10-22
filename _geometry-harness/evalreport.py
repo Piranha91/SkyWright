@@ -2718,11 +2718,15 @@ def build_prediction(ctx: dict) -> dict:
                     "carried": "" if by_.lower() == m_.lower() else bind(words.get("itemNavAddedCarried") or "", {"mod": m_})}))
         def objs_(n_):
             return "object" if n_ == 1 else "objects"
-        for (lo_, wi_, how_), ex_ in (g.pop("_switchOff", None) or {}).items():
+        sw_all_ = g.pop("_switchOff", None) or {}
+        for (lo_, wi_, how_), ex_ in sorted(sw_all_.items(), key=lambda kv: ("on", "onNoModel", "parent").index(kv[0][2])):
             key_ = {"on": "itemSwitchOffDrawn", "onNoModel": "itemSwitchOffNoModel"}.get(how_, "itemSwitchOffParent")
+            n_ex_ = 2
+            if how_ == "onNoModel" and (lo_, wi_, "on") in sw_all_ and words.get("itemSwitchOffNoModelMore"):
+                key_, n_ex_ = "itemSwitchOffNoModelMore", 1     # said after the drawn ones, short (page budget)
             if words.get(key_):
                 detail.append(bind(words[key_], {"count": fmt_n(len(ex_)), "objects": objs_(len(ex_)), "loser": lo_,
-                                                 "winner": wi_, "examples": "; ".join(list(ex_.values())[:2])}))
+                                                 "winner": wi_, "examples": "; ".join(list(ex_.values())[:n_ex_])}))
         for m_, s_ in (g.pop("_startsOffLoser", None) or {}).items():
             if words.get("itemStartsOffLoser"):
                 detail.append(bind(words["itemStartsOffLoser"], {"count": fmt_n(len(s_)), "objects": objs_(len(s_)),

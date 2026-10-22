@@ -4166,7 +4166,7 @@ def main():
         bad = part_le_whole(md)
         # (blind reviews of regen-2) the forwarding clause is gone: no line says what forwarding would do (C931)
         # (fourth review, Winterhold S2) ModA has D1 on: its loss to ModB's removal is "not drawn", never "no effect"
-        ok = (not bad and "off for good" in md and "so not drawn" in line and "no effect in game" not in line
+        ok = (not bad and "off for good" in md and ", not drawn" in line and "no effect in game" not in line
               and "on/off field" not in md and "brings them back" not in md)
         return ok, f"bad {bad}; {line[:400]}"
 
@@ -4688,7 +4688,7 @@ def main():
         plan, md, html = offwin_bundle()
         # (fourth review, Winterhold S2) the note says what holds for ModA's own version (on): "so not drawn"
         ok = ("would bring" not in md and "would bring" not in _html.unescape(html) and "on/off field" not in md
-              and "sets off for good, so not drawn" in md and "no effect in game" not in md)
+              and "sets off for good, not drawn" in md and "no effect in game" not in md)
         hits = [ln[:160] for ln in md.splitlines() if "would bring" in ln]
         return ok, f"{hits[:2]}"
 
