@@ -5026,6 +5026,27 @@ def main():
     for name, fn in [("third-review/C954-shared-objects-named", c954_shared_objects_named)]:
         cell(name, fn)
 
+    # C968 (guard for C937, the lane-core ruling on 077E16/17): OtherMod is built on Update.esm and puts the record's
+    # original (Skyrim.esm) value back over Update.esm's change; ModA, which wins, carries Update.esm's value. Restoring
+    # the base game's first value over one's own master is that mod's own change: it stays counted. Only a later
+    # base-game plugin's own change (a DLC or update value) is set aside as carried (C937).
+    def c968_restoring_first_value_over_master_stays_counted():
+        L1 = f"00C968:{BASE}"
+        UPD_ = "Update.esm"
+        arms = [arm("baseline", [BASE, UPD_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD_, OTHER, MOD_A, MOD_B])]
+        chains = [(L1, "Cell", [(BASE, {"Location": "011111:Skyrim.esm"}), (UPD_, {"Location": "022222:Skyrim.esm"}),
+                                (OTHER, {"Location": "011111:Skyrim.esm"}), (MOD_A, {"Location": "022222:Skyrim.esm"})])]
+        p_rows = [lost_row(OTHER, MOD_A, L1, "Location", ["Location=011111:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={UPD_: [BASE], OTHER: [BASE, UPD_], MOD_A: [BASE, UPD_], MOD_B: [BASE]})
+        adm = [(e["A"], e["admission"]) for e in rec_of(plan, L1)]
+        return (OTHER, "admitted") in adm, f"{adm}"
+
+    for name, fn in [("third-review/C968-restoring-first-value-over-master-stays-counted",
+                      c968_restoring_first_value_over_master_stays_counted)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
