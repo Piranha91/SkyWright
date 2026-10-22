@@ -6408,6 +6408,24 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
         return ("also found by the check" in it and "separate evaluation" in it.split("also found by the check", 1)[-1]), it[-400:]
 
+    # C1059 (Sewers S3): the patch comparison says which other mods the patch covers (its masters besides the base game
+    # and the evaluated mod), so what is still there with a mod it does not cover reads as outside what it set out to fix.
+    def c1059_patch_scope_said():
+        O2 = "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A])]
+        r_ = row("OVERLAP", O2, MOD_A, f"000X59:{MOD_A}", other=f"000Y59:{O2}")
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r_], (OVERLAP, "without-patch"): [r_]}, [MOD_A],
+                                         patches=[PATCH], masters={OTHER: [BASE], O2: [BASE], MOD_A: [BASE],
+                                                                   PATCH: [BASE, OTHER, MOD_A]})
+        val = reader(plan).get("validation") or {}
+        txt = " ".join(val.get("sentences") or [])
+        ln = next((x for x in (val.get("sentences") or []) if "masters" in x), "")
+        return (OTHER in ln and O2 in ln and "outside" in ln), ln[:400] or txt[:300]
+
+    for name, fn in [("fourth-review/C1059-patch-scope-said", c1059_patch_scope_said)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1058-also-found-from-sibling-said", c1058_also_found_from_sibling_said)]:
         cell(name, fn)
 
