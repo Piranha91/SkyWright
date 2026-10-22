@@ -4659,6 +4659,20 @@ def main():
     for name, fn in [("after-review/C930-summary-left-reads-with-notes", c930_summary_left_reads_with_notes)]:
         cell(name, fn)
 
+
+    # C931 (blind reviews of regen-2, BPT and Snazzy blocking): no line says that forwarding a lost change would bring
+    # an object back. The records cannot tell: the winner may switch the object off by other fields as well, or a patch
+    # may remove it on purpose. The off-for-good note keeps only its count and "no effect in game".
+    def c931_no_forwarding_claim():
+        plan, md, html = offwin_bundle()
+        ok = ("would bring" not in md and "would bring" not in _html.unescape(html) and "on/off field" not in md
+              and "on objects set off for good" in md and "no effect in game" in md)
+        hits = [ln[:160] for ln in md.splitlines() if "would bring" in ln]
+        return ok, f"{hits[:2]}"
+
+    for name, fn in [("after-review/C931-no-forwarding-claim", c931_no_forwarding_claim)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
