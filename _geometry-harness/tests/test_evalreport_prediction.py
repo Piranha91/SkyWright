@@ -5741,6 +5741,36 @@ def main():
                      ("round-3/C1002-patch-value-really-different-stays-own", c1002_patch_value_really_different_stays_own)]:
         cell(name, fn)
 
+    # C1005, C1006 (round 3b, review finding 1): where neither side's value loses to the patch (only a third plugin's
+    # does), the recorded values decide by the same read-same rule: the patch's value read the same as the losing mod's
+    # (rounding in the last digit) is resolved, as the winning mod's is kept; a real difference stays the patch's own.
+    def fallback_bundle(patch_rz):
+        P, T3 = f"00CA05:{BASE}", "ThirdMod.esp"
+        b_ = pl(100, 100, 0, "0")
+        t_ = pl(100, 100, 0, "0.5")
+        o_ = pl(160, 100, 0, "1.5707963")
+        a_ = pl(100, 40, 0, "0")
+        w_ = pl(160, 100, 0, patch_rz)
+        p_ch = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_)])]
+        w_ch = [(P, "PlacedObject", [(BASE, b_), (T3, t_), (OTHER, o_), (MOD_A, a_), (PATCH, w_)])]
+        p_rows = [pl_row(P, OTHER, MOD_A, b_, o_, a_)]
+        w_rows = [pl_row(P, T3, PATCH, b_, t_, w_)]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch,
+                                  masters={**MASTERS_, T3: [BASE], PATCH: [BASE, T3, OTHER, MOD_A]})
+        return [e.get("withPatch") for e in rec_of(plan, P) if e.get("admission") == "admitted"]
+
+    def c1005_fallback_rounding_only_resolves():
+        got = fallback_bundle("1.5707964")
+        return got == ["resolved"], f"{got}"
+
+    def c1006_fallback_real_difference_stays_own():
+        got = fallback_bundle("1.6")
+        return got == ["own"], f"{got}"
+
+    for name, fn in [("round-3b/C1005-fallback-rounding-only-resolves", c1005_fallback_rounding_only_resolves),
+                     ("round-3b/C1006-fallback-real-difference-stays-own", c1006_fallback_real_difference_stays_own)]:
+        cell(name, fn)
+
     # C1003, C1004 (round 3, B2: Clockwork re-review Blocking 1): a navmesh comparison counts what its sentence names,
     # distinct navmesh records with new (or repaired) broken links, from the comparison's own rows, never the probe's
     # (record, target navmesh) pairs. N1 links two targets (three links), N2 one: the probe counts 3 pairs, there are
