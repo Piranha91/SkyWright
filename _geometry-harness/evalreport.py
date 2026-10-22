@@ -884,6 +884,27 @@ IMPORT_ORIGINS = ("fresh", "reused")
 PREREQUISITE_STATUS = re.compile(r"^blocked\(prerequisite:([^)]+)\)$")
 
 
+def import_narrowed_facts(rows: list, pr: dict, title_of) -> list:
+    """(fourth review, Missives S2) A record import whose own tool note says it left a field out of the comparison
+    (skill data `importNarrowedPattern`): one coverage fact per check and fields, so the field is not taken as judged."""
+    w_ = ((pr.get("reader") or {}).get("prediction") or {})
+    pat_ = w_.get("importNarrowedPattern")
+    if not pat_ or not w_.get("importNarrowedFact"):
+        return []
+    out_ = collections.OrderedDict()
+    for r_ in rows or []:
+        name_ = str(((r_.get("tool") or {}) if isinstance(r_.get("tool"), dict) else {}).get("name") or "")
+        m_ = re.search(pat_, name_)
+        if not m_:
+            continue
+        n_ = re.search(r"over the (\d+) ", name_)
+        key_ = (r_.get("checkId"), m_.group("fields").strip())
+        out_.setdefault(key_, bind(w_["importNarrowedFact"], {
+            "title": title_of(r_.get("checkId")), "fields": key_[1],
+            "records": f" on the {n_.group(1)} records it read" if n_ else ""}))
+    return list(out_.values())
+
+
 def imported_evidence(b: Bundle) -> dict:
     """Where each credited MCP import's evidence came from.
 
@@ -6378,6 +6399,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
         "names": names_early, "masters": plugin_masters_doc, "orderSetups": list(order_setups or [])})
+    # (fourth review, Missives S2) fields a record import narrowed out of its comparison, said with what was not judged
+    for fact_ in import_narrowed_facts(imports["rows"], pr, lambda c_: check_titles.get(c_) or b.check_title(c_)):
+        if fact_ not in (lead["prediction"].get("missingFacts") or []):
+            lead["prediction"].setdefault("missingFacts", []).append(fact_)
     verdict = lead["prediction"]["verdict"]
     # The scope line names the evaluated pair when the counted clashes need both of them, never the third mod with
     # the most rows; the third mods of single-mod clashes shown are named after it.
