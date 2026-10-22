@@ -2909,13 +2909,16 @@ def build_prediction(ctx: dict) -> dict:
         report: "each mod on its own" claimed setups that were never measured)."""
         if not (sibling_record and sibling_record["roles"]):
             return None
-        p_low = [x.lower() for x in p_plugin_names]
+        # (third review, Clockwork S6) named against the measured load order (the bundle's baseline), which a "measured load
+        # order without ..." phrase names: the plugins the setup lacks include any patch the measured order holds
+        measured_ = all_orders.get("baseline") or p_plugin_names
+        p_low = [x.lower() for x in measured_]
         descs = []
         for a_ in dict.fromkeys(sibling_record["roles"].values()):
             plugs = sib_setup_plugins.get(a_) or []
             low = {x.lower() for x in plugs}
             kept = [x for x in plugs if not is_base_game(x, words)]
-            removed = [x for x, xl in zip(p_plugin_names, p_low) if xl not in low]
+            removed = [x for x, xl in zip(measured_, p_low) if xl not in low]
             d_ = (words["setupBaseGameAlone"] if not kept else
                   bind(words["setupOnly"], {"plugins": " and ".join(kept)}) if len(kept) <= len(removed) else
                   bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
