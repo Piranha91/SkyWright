@@ -1898,8 +1898,10 @@ def build_prediction(ctx: dict) -> dict:
             oe = own_edit(p_of(rk[0]), rk, rk[2])
             if oe is not None and not oe["changed"]:
                 return "notOwnEdit"            # the losing value is the one it inherits: no edit of that mod's
-            if oe is not None and oe.get("restoresBase"):
-                return "notOwnEdit"            # a base-game plugin's own value it carries or restores (Missives S1)
+            if oe is not None and oe.get("restoresBaseFix"):
+                # a later base-game plugin's own change (a DLC, update or CC value) it carries or restores (Missives S1);
+                # the record's first value put back over one's own master stays that mod's change (C968, lane core)
+                return "notOwnEdit"
             if oe is not None and oe.get("listKept"):
                 return "listKept"              # every item it added or removed the winning list keeps so
             if (supersede(rk) or {}).get("kind") in ("kind", "place"):
