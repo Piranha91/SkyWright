@@ -2122,6 +2122,14 @@ def build_prediction(ctx: dict) -> dict:
             g["_disables"] = g.get("_disables", 0) + 1
         if rk[1] == "LOST-EDIT" and (side_starts_off(rk, rk[2]) or side_starts_off(rk, rk[3])):
             g["_startsOff"] = g.get("_startsOff", 0) + 1
+        # (third review, Sewers S1) a broken link from a base-game navmesh record the other mod only carries (the probe's
+        # provider chain): whether that mod changed the link is not in the record data, so it is not said as its doing
+        pm_ = re.search(r"\[record provided by: ([^\]]+)\]", str(rk[5] or "")) if rk[1] == "EDGE-IDX" else None
+        if pm_:
+            provs_ = [x.strip() for x in pm_.group(1).split(" -> ")]
+            if (len(provs_) > 1 and is_base_game(provs_[0], words) and provs_[-1].lower() == rk[2].lower()
+                    and rk[2].lower() not in pt_lower):
+                g.setdefault("_baseNavCarried", collections.Counter())[rk[2]] += 1
         if rk[1] == "LOST-EDIT":
             # what each side has (Pilgrim review B1): the winner put back its master's earlier value, or changed the
             # field itself too; said in the item, never only "lost to"
@@ -2382,6 +2390,10 @@ def build_prediction(ctx: dict) -> dict:
         dis_of[id(g)] = n_dis                  # (third review, BPT S1) the headline carries the same count
         if n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
+        for m_, n_ in (g.pop("_baseNavCarried", None) or {}).items():
+            if words.get("itemBaseNavCarried"):
+                detail.append(bind(words["itemBaseNavCarried"], {
+                    "lead": f"All {fmt_n(n_)} are" if n_ == g["count"] else f"{fmt_n(n_)} of them are", "mod": m_}))
         n_off = g.pop("_startsOff", 0)
         if n_off and words.get("itemStartsOff"):
             detail.append(bind(words["itemStartsOff"], {"count": fmt_n(n_off)}))
