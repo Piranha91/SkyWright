@@ -6082,7 +6082,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         for x in fids:
             f_ = f_by_id.get(x) or {}
             c_ = f_.get("counts") or {}
-            for r_ in f_.get("rows") or []:
+            for r_ in f_.get("allRows") or f_.get("rows") or []:       # every row, not only the ones shown
                 k_ = ident_(f_.get("checkId"), r_.get("formKey"), r_.get("field"), r_.get("other"), c_.get("A"), c_.get("B"))
                 got_["counted" if pred_ident.get(k_) else "aside" if k_ in pred_ident else "new"] += 1
         if sum(got_.values()) != n_rows or got_["counted"] == n_rows or not conc.get("withPatchSplitParts"):
