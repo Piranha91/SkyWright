@@ -5933,6 +5933,52 @@ def main():
         adm, line = undo_rework_bundle("plain")
         return (adm == ["undoesMaster"] and "is lost in game" in line and "deliberate" not in line), f"{adm}; {line[:300]}"
 
+    # C1061, C1062 (Gate A condition 1): the losing version's own state words the note. ModA's version under an enable
+    # parent (C1061) is drawn when that parent is enabled, never "has on"; ModA's version only initially disabled (C1062)
+    # may be enabled by a script or quest. Both: not drawn with ModB's removal, never "no effect in game".
+    def off_state_bundle(loser):
+        D = f"00CA61:{BASE}"
+        a_ = offs(0, "InitiallyDisabled") if loser == "starts" else offs(0)
+        a_["Placement.Position"] = "300,100,0"
+        if loser == "parent":
+            a_.update({"EnableParent.Reference": f"000F61:{OTHER}", "EnableParent.Flags": "0"})
+        b_ = offs(-30000)
+        rows_ = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        ch_ = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]})
+        return str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+
+    def c1061_parent_loser_worded_apart():
+        st = off_state_bundle("parent")
+        return ("under an enable parent" in st and "has on" not in st and "no effect in game" not in st), st[:400]
+
+    def c1062_starts_off_loser_worded_apart():
+        st = off_state_bundle("starts")
+        return ("only starts disabled" in st and "has on" not in st and "no effect in game" not in st), st[:400]
+
+    # C1063 (Gate A condition 2, guard): ModA undoes Update.esm's switch-off and its position differs from Update.esm's
+    # only in the seventh decimal: no change of its own as the record chain reads it, so nothing is "likely deliberate".
+    def c1063_rounding_is_no_rework():
+        R = f"00CA63:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        b0, a0 = offs(0), offs(0)
+        u0 = offs(0, "0", "000014:Skyrim.esm")
+        a0["Placement.Position"] = "100.0000001,100,0"
+        chains = [(R, "PlacedObject", [(BASE, b0), (UPD, u0), (MOD_A, a0)])]
+        p_rows = [lost_row(UPD, MOD_A, R, "EnableParent", ["EnableParent.Reference=000014:Skyrim.esm",
+                                                            "EnableParent.Flags=SetEnableStateToOppositeOfParent"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
+                                  masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE], PATCH: [BASE]})
+        adm = [e["admission"] for e in rec_of(plan, R)]
+        line = next((ln for ln in md.splitlines() if f"{MOD_A} undoes its master {UPD}'s fix" in ln), "")
+        return adm == ["undoesMaster"] and "deliberate" not in line and "is lost in game" in line, f"{adm}; {line[:300]}"
+
+    for name, fn in [("fourth-review/C1061-parent-loser-worded-apart", c1061_parent_loser_worded_apart),
+                     ("fourth-review/C1062-starts-off-loser-worded-apart", c1062_starts_off_loser_worded_apart),
+                     ("fourth-review/C1063-rounding-is-no-rework", c1063_rounding_is_no_rework)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1020-moved-by-winner-not-brought-back", c1020_moved_by_winner_not_brought_back),
                      ("fourth-review/C1021-same-spot-still-brought-back", c1021_same_spot_still_brought_back),
                      ("fourth-review/C1022-nudged-still-brought-back", c1022_nudged_still_brought_back),
