@@ -2500,7 +2500,8 @@ def build_prediction(ctx: dict) -> dict:
         rb_ = read_bits(p_of(e["checkId"]), rk_, str(e.get("field") or ""))
         if rb_ is None:
             continue
-        o_ = own_.setdefault(e["B"], {"parts": collections.OrderedDict(), "findingIds": [], "noun": None})
+        o_ = own_.setdefault(e["B"], {"parts": collections.OrderedDict(), "findingIds": [], "noun": None,
+                                      "records": (rb_words.get(record_type_of(e["summary"])) or {}).get("records")})
         lab_ = re.match(r"^\S+ (\S+):", str(e.get("summary") or ""))
         for leaf_ in sorted(rb_[1]):
             w_ = (rb_words.get(record_type_of(e["summary"])) or {}).get(leaf_) or {}
@@ -2519,7 +2520,7 @@ def build_prediction(ctx: dict) -> dict:
         if o_["parts"]:
             n_ = len(o_["parts"])
             loss_lines.append({"text": bind(words["winnerOwnChangeLine"], {
-                "mod": mod_, "noun": o_["noun"], "count": fmt_n(n_), "records": "record" if n_ == 1 else "records",
+                "mod": mod_, "noun": o_["noun"], "count": fmt_n(n_), "records": (o_["records"] or ["record", "records"])[0 if n_ == 1 else 1],
                 "parts": "; ".join(o_["parts"].values())}), "findingIds": o_["findingIds"][:1]})
     # a rebuilt record supersedes the loser's small fix (Pilgrim final review B1): one line per winning mod, with the
     # record facts in plain words, never in the clash counts
@@ -3186,25 +3187,46 @@ def build_prediction(ctx: dict) -> dict:
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         # (BPT review 1) a lost change still there with the patch, on an object the winning version in the setup with
-        # the patch sets off for good: it has no effect in game, and forwarding it brings back an object the winner
-        # removes for good. Read from the record import's chain of that setup (the one off-for-good rule)
+        # the patch sets off for good: it has no effect in game while the object is off. Only the losing value of the
+        # field that sets it off (the enable parent, or the below-the-world position: skill data `offGoodFields`) would
+        # bring the object back if forwarded. Read from the record import's chain of that setup (the one off-for-good
+        # rule). Every count of these sits next to the count it is a part of.
         off_cache = {}
+        off_fields = words.get("offGoodFields") or {}
+
+        def off_why(ch_, i_):
+            """How provider i's version sets the object off for good: "position" (below the world), "parent" (enabled
+            opposite to the player), or None; provider_disables' rule, with its reason."""
+            f_ = provider_fields_all(ch_, i_)
+            if disables("; ".join(f"{k_}={v_}" for k_, v_ in f_.items() if k_.endswith("Position"))):
+                return "position"
+            return "parent" if provider_disables(ch_, i_) else None
 
         def still_off(e):
+            """None, or the reason the winning version with the patch sets the row's object off for good."""
             if id(e) not in off_cache:
                 r_ = None
                 if e["kind"] == "LOST-EDIT" and outcome.get(id(e)) in ("left", "kept"):
                     ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
                     if ch_ and ch_.get("providers"):
-                        r_ = provider_disables(ch_, len(ch_["providers"]) - 1)
-                    elif outcome.get(id(e)) == "left":
-                        r_ = side_disables(keyof(e), e["B"])
-                off_cache[id(e)] = bool(r_)
+                        r_ = off_why(ch_, len(ch_["providers"]) - 1)
+                    elif outcome.get(id(e)) == "left" and side_disables(keyof(e), e["B"]):
+                        r_ = "unknown"
+                off_cache[id(e)] = r_
             return off_cache[id(e)]
 
-        def off_note(es_, winner=None):
-            n_ = sum(1 for e in es_ if still_off(e))
-            return bind(words["offGoodNote"], {"count": fmt_n(n_), "winner": winner or words["offGoodWinner"]}) if n_ else ""
+        def brings_back(e):
+            return str(e.get("field") or "") in (off_fields.get(still_off(e) or "") or [])
+
+        def off_text(n_, back_):
+            if not n_:
+                return ""
+            return bind(words["offGoodNote"], {"count": fmt_n(n_), "back": bind(words["offGoodBack"], {
+                "count": fmt_n(back_), "s": "" if back_ == 1 else "s"}) if back_ else ""})
+
+        def off_note(es_):
+            es_ = [e for e in es_ if still_off(e)]
+            return off_text(len(es_), sum(1 for e in es_ if brings_back(e)))
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
         problem_rows = collections.Counter()          # rows per new problem: an object's pairs (BPT review S3)
         # new with the patch is decided by the same setup with and without the patch alone (coordinator ruling on
@@ -3314,6 +3336,16 @@ def build_prediction(ctx: dict) -> dict:
             return ", ".join(f"{fmt_n(n_)} {u_[0] if n_ == 1 else u_[1]}" for u_, n_ in
                              sorted(c_.items(), key=lambda kv: (-kv[1], kv[0])))
 
+        def by_unit_note(xs, named=True):
+            """by_unit, each unit's count followed by how many of its lost changes are on objects set off for good."""
+            c_ = collections.defaultdict(list)
+            for e in xs:
+                c_[(unit_noun(e["checkId"], e["kind"], 1), unit_noun(e["checkId"], e["kind"], 2))].append(e)
+            if len(c_) <= 1 and not named:
+                return fmt_n(len(xs)) + off_note(xs)
+            return ", ".join(f"{fmt_n(len(es_))} {u_[0] if len(es_) == 1 else u_[1]}" + off_note(es_) for u_, es_ in
+                             sorted(c_.items(), key=lambda kv: (-len(kv[1]), kv[0])))
+
         sentences = [bind(words["validationHits"], {"patch": patch, "count": by_unit(hits)})]
 
         def pair_by(xs):
@@ -3330,13 +3362,13 @@ def build_prediction(ctx: dict) -> dict:
             by_ = (" (" + "; ".join(
                 bind(words["validationKeptBy"], {"loser": m_, "count": fmt_n(n_)})
                 for m_, n_ in sorted(kept_by.items(), key=lambda kv: (-kv[1], kv[0].lower()))) + ")") if len(kept_by) > 1 else ""
-            sentences.append(bind(words["validationKept"], {"patch": patch, "count": fmt_n(len(kept)),
-                                                            "by": by_ + off_note(kept)}))
+            sentences.append(bind(words["validationKept"], {"patch": patch, "count": fmt_n(len(kept)) + off_note(kept),
+                                                            "by": by_}))
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
         edited = sum(1 for e in open_ if left_split.get(id(e)) == "patchHeld")
-        sentences += [bind(words["validationOpen"], {"patch": patch, "count": by_unit(open_), "split": (bind(
+        sentences += [bind(words["validationOpen"], {"patch": patch, "count": by_unit_note(open_, False), "split": bind(
                           words["validationOpenSplit"], {"untouched": fmt_n(len(open_) - edited), "edited": fmt_n(edited)})
-                          if edited else "") + off_note(open_)}),
+                          if edited else ""}),
                      # new problems in their units, an object of a by-object check with its pairs (BPT review S3)
                      bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
@@ -3405,7 +3437,9 @@ def build_prediction(ctx: dict) -> dict:
                             "open": sum(1 for e in all_["open"] if item_of(e) == k),
                             "kept": sum(1 for e in all_["kept"] if item_of(e) == k),
                             "keptBy": collections.Counter(e["A"] for e in all_["kept"] if item_of(e) == k),
-                            "offGood": sum(1 for e in all_["open"] + all_["kept"] if item_of(e) == k and still_off(e)),
+                            **{f"off{n_}{b_}": sum(1 for e in all_[x_] if item_of(e) == k and still_off(e)
+                                                    and (not b_ or brings_back(e)))
+                               for n_, x_ in (("Open", "open"), ("Kept", "kept")) for b_ in ("", "Back")},
                             "cannotTell": sum(1 for e in all_["untold"] if item_of(e) == k),
                             **{f"open{n[0].upper()}{n[1:]}": sum(1 for e in all_["open"] if item_of(e) == k
                                                                  and left_split.get(id(e)) == n)
@@ -3431,14 +3465,17 @@ def build_prediction(ctx: dict) -> dict:
                     return ", ".join(bind(ow["switched"], {"keeper": k_.split("|")[0], "dropped": k_.split("|")[1],
                                                            "count": fmt_n(n_)})
                                      for k_, n_ in sorted(by_.items(), key=lambda kv: (-kv[1], kv[0].lower())))
+                if k == "open":
+                    return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + off_text(bi.get("offOpen"), bi.get("offOpenBack"))
                 if k != "kept":
                     return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
                 # whose change stays lost, as without the patch (fourth blind review, W1): never "kept" alone
                 by = bi.get("keptBy") or {}
+                note_ = off_text(bi.get("offKept"), bi.get("offKeptBack"))
                 if sum(by.values()) != bi.get("kept"):
-                    return bind(ow["keptUnnamed"], {"count": fmt_n(bi.get(k) or 0)})
+                    return bind(ow["keptUnnamed"], {"count": fmt_n(bi.get(k) or 0)}) + note_
                 return ", ".join(bind(ow["kept"], {"loser": m_, "count": fmt_n(n_)})
-                                 for m_, n_ in sorted(by.items(), key=lambda kv: (-kv[1], kv[0].lower())))
+                                 for m_, n_ in sorted(by.items(), key=lambda kv: (-kv[1], kv[0].lower()))) + note_
             parts = [part(k) for k in keys if bi.get(k)]
             if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed")):
                 # the objects still intersect: say how many are still reported between two mods and why the rest
@@ -3446,12 +3483,9 @@ def build_prediction(ctx: dict) -> dict:
                 split = [bind(ow["openSplit"][n], {"count": fmt_n(bi[f"open{n[0].upper()}{n[1:]}"])})
                          for n in ("listed", "patchHeld", "notAttributed") if bi.get(f"open{n[0].upper()}{n[1:]}")]
                 parts[[k for k in keys if bi.get(k)].index("open")] = (
-                    bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(split) + ")")
-            if not parts:
-                return ow["none"]
-            return ", ".join(parts) + (bind(words["offGoodNote"], {"count": fmt_n(bi["offGood"]),
-                                                                   "winner": words["offGoodWinner"]})
-                                       if bi.get("offGood") else "")
+                    bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(split) + ")"
+                    + off_text(bi.get("offOpen"), bi.get("offOpenBack")))
+            return ", ".join(parts) if parts else ow["none"]
         item_lines, alone_total = [], collections.Counter()
         for g, bi in zip(prediction["items"], by_item):
             if g.get("shownAs") == "alone" or (multi and g.get("attribution") == "single-mod"):
@@ -3508,12 +3542,12 @@ def build_prediction(ctx: dict) -> dict:
                     n_kept = len(pes_) - n_open
                     text_ = (bind(words["stillThereLost"], {"count": fmt_n(n_open), "loser": loser, "winner": winner,
                                                             "unit": u_[0 if n_open == 1 else 1]})
-                             + off_note([e for e in pes_ if outcome.get(id(e)) == "left"], winner) if n_open else "")
+                             + off_note([e for e in pes_ if outcome.get(id(e)) == "left"]) if n_open else "")
                     if n_kept:
                         text_ += bind(words["stillThereCarriedMore" if n_open else "stillThereCarried"], {
                             "count": fmt_n(n_kept), "loser": loser, "winner": winner,
                             "unit": u_[0 if n_kept == 1 else 1]}) + off_note(
-                            [e for e in pes_ if outcome.get(id(e)) == "kept"], winner)
+                            [e for e in pes_ if outcome.get(id(e)) == "kept"])
                     stays_parts.append((len(pes_), text_))
                 for e in es:
                     v_ = e.get("values") or {}
@@ -3578,12 +3612,9 @@ def build_prediction(ctx: dict) -> dict:
             sum_parts.append(bind(words["validationSummaryOwn"], {"count": by_unit(own, True)}))
         if kept:
             # a patch carrying the winning value is said apart, never as left (Winterhold review 1, BPT review 3)
-            sum_parts.append(bind(words["validationSummaryCarried"], {"count": by_unit(kept, True)}))
+            sum_parts.append(bind(words["validationSummaryCarried"], {"count": by_unit_note(kept)}))
         if open_:
-            sum_parts.append(bind(words["validationSummaryLeft"], {"count": by_unit(open_, True)}))
-        off_n = sum(1 for e in open_ + kept if still_off(e))
-        if off_n:
-            sum_parts.append(bind(words["validationSummaryOffGood"], {"count": fmt_n(off_n)}))
+            sum_parts.append(bind(words["validationSummaryLeft"], {"count": by_unit_note(open_)}))
         sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True)}) if problems
                          else words["validationSummaryNoNew"])
         summary_ = bind(words["validationSummary"], {"patch": patch, "parts": (", ".join(sum_parts[:-1]) + ", and "
