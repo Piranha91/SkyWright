@@ -1425,6 +1425,10 @@ def build_prediction(ctx: dict) -> dict:
         placed object is Persistent), any bit not listed left as its number."""
         bits_ = flag_bits_.get(str(field))
         t = shown_value(v)
+        # (third review, Snazzy S4) a value skill data names in words (the base game's no-water height)
+        named_ = ((words.get("valueWords") or {}).get(str(field)) or {}).get(t.strip())
+        if named_:
+            return named_
         if not bits_:
             return t
         out_ = []
@@ -2328,6 +2332,14 @@ def build_prediction(ctx: dict) -> dict:
                 mean_ = (words.get("fieldInGame") or {}).get(f"{record_type_of(rk_[5])}|{f_}")
                 if mean_:
                     detail.append(bind(words["itemFieldInGame"], {"field": field_word(f_), "meaning": mean_}))
+                # (third review, Snazzy S4) a field whose effect depends on a flag of the record: whether the winning
+                # version sets that flag, where the record data shows it, else that it does not show it
+                dep_ = (words.get("fieldDependsOnFlag") or {}).get(f"{record_type_of(rk_[5])}|{f_}")
+                if dep_:
+                    fv_ = recordrows.provider_fields(ch_, dep_["field"], low_.index(rk_[3].lower())) \
+                        if dep_["field"] in (ch_.get("values") or {}) else {}
+                    txt_ = " ".join(str(x) for x in fv_.values())
+                    detail.append(dep_["unread"] if not fv_ else dep_["set"] if dep_["flag"] in txt_ else dep_["unset"])
         pool = g.pop("_recordPool", None)
         if pool:
             g["_records"] = (pool[0] + pool[1])[:2]
