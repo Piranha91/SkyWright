@@ -158,7 +158,10 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 {% for item in p.reader.comparisonSummary %}- {{ item }}
 {% endfor %}
 
-## What still needs checking
+{% if "tail" in (p.layout or "").split() %}## Further notes
+
+{{ p.reader.get("tailMovedLine") or "What still needs checking, the checks that found no problem, the reference information collected and the evidence notes are in the evidence index." }} [Further notes](evidence-index.md#further-notes).
+{% else %}## What still needs checking
 
 {% if p.scope.completion.missingRequired %}{% if p.reader.get("missingCoveredLine") %}{{ p.reader.missingCoveredLine }}
 
@@ -188,3 +191,4 @@ The exact missing checks and recorded reasons are in the [evidence index](eviden
 {% endfor %}
 
 The [evidence index](evidence-index.md) contains the exact check names, setup identifiers, result codes, confidence labels, record keys, hashes, omitted rows, and compiler provenance. The bundle remains the authority for every statement in this report.
+{% endif %}

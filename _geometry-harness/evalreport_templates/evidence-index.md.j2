@@ -164,3 +164,37 @@ No media row: nothing was supplied to this bundle under `--media`, and no unasse
 {% for c in p.chapters %}
 | {{ c.id }} | {{ c.kind }} | {{ c.title|md }} | {{ c.findingIds|join(", ") }} | {{ c.mediaIds|join(", ") }} | {{ c.plannedSeconds }} |
 {% endfor %}
+
+<a id="further-notes"></a>
+## Further notes
+
+### What still needs checking
+
+{% if (p.scope.get("completion") or {}).get("missingRequired") %}{% if p.reader.get("missingCoveredLine") %}{{ p.reader.get("missingCoveredLine") }}
+
+{% endif %}{% for row in ((p.reader.missingShown if p.reader.get("missingShown") is not none else p.reader.get("missingSummary")) or []) %}- **{{ row.reason[:1]|upper }}{{ row.reason[1:] }}:** {{ row.subjects|join("; ") }}.{{ " " ~ row.explanation if row.explanation else "" }}
+
+{% endfor %}
+The exact missing checks and recorded reasons are in the [evidence index](#missing-results).
+{% else %}Every required comparison has an accepted result.
+{% endif %}
+
+### Checks that found no problem
+
+{% if (p.reader.get("nullSummary") or []) %}{% for item in (p.reader.get("nullSummary") or []) %}- {{ item }}.
+{% endfor %}
+{% else %}No completed no-finding check is recorded.
+{% endif %}
+
+### Reference information collected
+
+{% if p.reader.get("catalogueSummary") %}These checks collected reference information rather than reporting defects: {{ (p.reader.get("catalogueSummary") or [])|join("; ") }}.
+{% else %}No catalogue-only result is recorded.
+{% endif %}
+
+### Evidence and limits
+
+{% for item in (p.reader.get('otherLimits') or []) %}- {{ item }}
+{% endfor %}
+
+The evidence index contains the exact check names, setup identifiers, result codes, confidence labels, record keys, hashes, omitted rows, and compiler provenance. The bundle remains the authority for every statement in this report.
