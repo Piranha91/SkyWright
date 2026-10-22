@@ -4138,8 +4138,8 @@ def main():
         plan, md, _ = offwin_bundle()
         line = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
         bad = part_le_whole(md)
-        ok = (not bad and "off for good" in md and len(re.findall(r"forwarding the \d+ on/off field", line)) == 1
-              and re.search(r"forwarding the 1 on/off field among these\b", line) is not None
+        # (blind reviews of regen-2) the forwarding clause is gone: no line says what forwarding would do (C931)
+        ok = (not bad and "off for good" in md and "no effect in game" in line and "on/off field" not in md
               and "brings them back" not in md)
         return ok, f"bad {bad}; {line[:400]}"
 
@@ -4587,15 +4587,7 @@ def main():
         cell(name, fn)
 
 
-    # C927 (found in regen-1: a kind line's on/off count larger than its notes): every line's on/off clause counts the
-    # one field (D3's position below the world) once, however the line names the losing mods.
-    def c927_on_off_clause_counted_once():
-        plan, md, _ = offwin_bundle()
-        got = re.findall(r"forwarding the (\d+) on/off field", md)
-        return bool(got) and set(got) == {"1"}, f"{got}"
-
-    for name, fn in [("after-review/C927-on-off-clause-counted-once", c927_on_off_clause_counted_once)]:
-        cell(name, fn)
+    # C927 retired (blind reviews of regen-2): it counted the forwarding clause, which is removed (C931)
 
 
     # C928 (found in regen-1, Missives review 2): where a setup's detail lines are folded into one line per plugin pair,
