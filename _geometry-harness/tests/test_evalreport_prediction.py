@@ -4532,6 +4532,24 @@ def main():
     for name, fn in [("after-review/C919-fields-and-flags-in-plain-words", c919_fields_and_flags_in_plain_words)]:
         cell(name, fn)
 
+
+    # C920 (Missives review 3): a small record item says each side's value (what to forward) and, where skill data has
+    # it, what the field does in game.
+    def c920_small_record_item_values_and_meaning():
+        W1 = f"00C920:{BASE}"
+        chains = [(W1, "Worldspace", [(BASE, {"Flags": "SmallWorld"}), (OTHER, {"Flags": "SmallWorld, NoGrass"}),
+                                      (MOD_A, {"Flags": "SmallWorld"})])]
+        r_ = lost_row(OTHER, MOD_A, W1, "Flags", ["Flags=SmallWorld, NoGrass"], PH, ["Flags=SmallWorld"], before=BASE)
+        r_["Summary"] = f"Worldspace TestWorld: Flags - {OTHER}'s value lost to {MOD_A}'s"
+        plan, md, _ = core_bundle([r_], [r_], p_chains=chains, masters=MASTERS_)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        ok = (f'{OTHER} has "SmallWorld, NoGrass"' in it and f'{MOD_A} has "SmallWorld"' in it and "grass" in it.lower()
+              .replace("nograss", ""))
+        return ok, it[-300:]
+
+    for name, fn in [("after-review/C920-small-record-item-values-and-meaning", c920_small_record_item_values_and_meaning)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
