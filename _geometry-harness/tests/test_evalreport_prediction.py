@@ -5697,6 +5697,87 @@ def main():
                      ("round-2/C986-patch-removal-said-as-removal", c986_patch_removal_said_as_removal)]:
         cell(name, fn)
 
+    # ------------------------------------------------ third review, round 3 (C1000-C1019): the re-reviews of regen-r2b
+    # C1000-C1002 (round 3, B1: BPT re-review Blocking 1): which plugins' values lose to the patch is decided by the same
+    # equality rule the prediction sets rows aside by (the import's chain reads both values the same: case, unused
+    # bytes, rounding). OtherMod moves the object; the patch carries OtherMod's position with the rotation rounded in
+    # the last float digit. Where ModA kept the base game's value, the patch resolves the clash; where ModA moved it
+    # too, the patch keeps OtherMod's value over ModA's change; a patch value that really differs stays its own.
+    def rounding_bundle(a_moves, patch_rz, patch_z="0"):
+        P = f"00CA00:{BASE}"
+        b_ = pl(100, 100, 0, "1.5707963")
+        o_ = pl(160, 100, 0, "1.5707963")
+        a_ = pl(100, 40, 0, "1.5707963") if a_moves else dict(b_)
+        w_ = pl(160, 100, patch_z, patch_rz)
+        p_ch = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_)])]
+        w_ch = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_), (PATCH, w_)])]
+        p_rows = [pl_row(P, OTHER, MOD_A, b_, o_, a_)]
+        w_rows = [pl_row(P, OTHER, PATCH, b_, o_, w_), pl_row(P, MOD_A, PATCH, b_, a_, w_)]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch,
+                                  masters={**MASTERS_, PATCH: [BASE, OTHER, MOD_A]})
+        return [e.get("withPatch") for e in rec_of(plan, P) if e.get("admission") == "admitted"]
+
+    def c1000_rounding_only_patch_value_resolves():
+        got = rounding_bundle(False, "1.5707964", "2.5E-05")
+        return got == ["resolved"], f"{got}"
+
+    def c1001_rounding_only_patch_value_keeps_losing_value():
+        got = rounding_bundle(True, "1.5707964")
+        return got == ["switched"], f"{got}"
+
+    def c1002_patch_value_really_different_stays_own():
+        got = rounding_bundle(False, "1.6")
+        return got == ["own"], f"{got}"
+
+    for name, fn in [("round-3/C1000-rounding-only-patch-value-resolves", c1000_rounding_only_patch_value_resolves),
+                     ("round-3/C1001-rounding-only-patch-value-keeps-losing-value",
+                      c1001_rounding_only_patch_value_keeps_losing_value),
+                     ("round-3/C1002-patch-value-really-different-stays-own", c1002_patch_value_really_different_stays_own)]:
+        cell(name, fn)
+
+    # C1003, C1004 (round 3, B2: Clockwork re-review Blocking 1): a navmesh comparison counts what its sentence names,
+    # distinct navmesh records with new (or repaired) broken links, from the comparison's own rows, never the probe's
+    # (record, target navmesh) pairs. N1 links two targets (three links), N2 one: the probe counts 3 pairs, there are
+    # 2 records. Repaired: the same rows the other way round.
+    def nav_link_row(a, b, nav, target, tri):
+        return {"Kind": "EDGE-IDX", "A": a, "B": b,
+                "Summary": (f"navmesh {nav} in CityExterior03 (ext) edge-links {target} triangle {tri} of 10   "
+                            f"[record provided by: {BASE} -> {a}]"),
+                "Necessary": [{"FormKey": nav, "Label": "CityExterior03 (ext)", "Physical": "Holds"}],
+                "Alternative": [{"FormKey": target, "Role": "navmesh"}]}
+
+    def nav_cmp_bundle(direction):
+        n1, n2, t1, t2 = f"00CA31:{BASE}", f"00CA32:{BASE}", f"00CA41:{BASE}", f"00CA42:{BASE}"
+        rows_ = [nav_link_row(MOD_A, MOD_B, n1, t1, 11), nav_link_row(MOD_A, MOD_B, n1, t1, 12),
+                 nav_link_row(MOD_A, MOD_B, n1, t2, 13), nav_link_row(MOD_A, MOD_B, n2, t1, 14)]
+        if direction == "created":
+            order = {"without-patch": {"navownprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                           created=3, newDefect=3, attributed=0, unmeasured=0)}}
+            log = f"NEW     EDGE-IDX    {MOD_A}  x  {MOD_B}   +3 record(s): created 3\n"
+            results = {(NAVOWN, "without-patch"): rows_, (NAVOWN, "baseline"): []}
+        else:
+            order = {"without-patch": {"navownprobe": dict(verdict="DIFFERENTIAL-HELPFUL", repaired=3, reclassified=0,
+                                                           created=0, newDefect=0, attributed=0, unmeasured=0)}}
+            log = f"GONE    EDGE-IDX    {MOD_A}  x  {MOD_B}   -3 record(s): repaired 3\n"
+            results = {(NAVOWN, "without-patch"): [], (NAVOWN, "baseline"): rows_}
+        plan, md, html = compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                            diff_logs={(NAVOWN, "without-patch"): log})
+        kind_ = "regression" if direction == "created" else "repaired"
+        f = next((x for x in plan.get("findings") or [] if x.get("kind") == kind_ and x.get("checkId") == NAVOWN), {})
+        return f.get("readerPlain") or "", md
+
+    def c1003_navmesh_comparison_counts_records():
+        plain, md = nav_cmp_bundle("created")
+        return "2 navmesh records with new broken links" in plain and "2 navmesh records" in md, plain
+
+    def c1004_navmesh_repairs_count_records():
+        plain, md = nav_cmp_bundle("repaired")
+        return "repaired 2 existing navmesh records with broken links" in plain, plain
+
+    for name, fn in [("round-3/C1003-navmesh-comparison-counts-records", c1003_navmesh_comparison_counts_records),
+                     ("round-3/C1004-navmesh-repairs-count-records", c1004_navmesh_repairs_count_records)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
