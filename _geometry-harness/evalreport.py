@@ -3845,8 +3845,10 @@ def build_prediction(ctx: dict) -> dict:
                 pl_, n_pl = places.most_common(1)[0]
                 w_key = ("stillThereAllIn" if len(places) == 1 else "stillThereMostIn" if n_pl * 2 > sum(places.values())
                          else "stillThereSomeIn")
+                # (third review, Sewers S2) the place count is of the item's unit (pairs, links), said with it
                 where_.append(bind(words[w_key], {"place": re.sub(r"\s+\d+ tris -> \d+$", "", pl_),
-                                                  "count": fmt_n(n_pl), "more": fmt_n(len(places) - 1)}))
+                                                  "count": fmt_n(n_pl), "more": fmt_n(len(places) - 1),
+                                                  "unit": unit_noun(g["checkId"], g["kind"], n_pl)}))
             held_ = sum(1 for e in es if patch_places(e))
             if held_ and words.get("stillTherePatchMoves"):
                 # a patch places one of the objects and they still cross there (Clockwork review S5)
