@@ -4975,6 +4975,25 @@ def main():
     for name, fn in [("third-review/C950-headline-says-off-for-good", c950_headline_says_off_for_good)]:
         cell(name, fn)
 
+    # C952 (Snazzy review S4, Gate A finding 1): a lost water height is not set aside as "no effect": the item gives both
+    # values, the base game's no-water value said in words, and says the effect depends on the cell's water flag, which
+    # this record data does not show (no provider's flags differ here, so none was read).
+    def c952_water_height_values_and_flag():
+        C1 = f"00C952:{BASE}"
+        tr_ = tree_transcript([(C1, "Cell", [(BASE, {"WaterHeight": "-2147483600"}), (OTHER, {"WaterHeight": "0"}),
+                                             (MOD_A, {"WaterHeight": "-2147483600"})])])
+        r_ = lost_row(OTHER, MOD_A, C1, "WaterHeight", ["WaterHeight=0"], PH, PH, label="TestCellWet")
+        r_["Summary"] = f"Cell TestCellWet: WaterHeight - {OTHER}'s value lost to {MOD_A}'s"
+        plan, md, _ = core_bundle([r_], [r_], check=CELLATTR, masters=MASTERS_, p_tr=tr_)
+        adm = [e["admission"] for e in rec_of(plan, C1)]
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Cell settings")), "")
+        ok = (adm == ["admitted"] and "no water" in it and "-2147483600" not in it and "HasWater" in it
+              and "not in the record data" in it)
+        return ok, f"{adm}; {it[-400:]}"
+
+    for name, fn in [("third-review/C952-water-height-values-and-flag", c952_water_height_values_and_flag)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
