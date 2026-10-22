@@ -29,8 +29,8 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 
 Every record on the setup the prediction reads ({{ p.reader.prediction.predictionArm }}), with whether it counts as a clash between mods (`admitted`) or why it is set aside, and how an admitted one is attributed.
 
-{% for r in p.reader.prediction.record %}- {{ r.checkId }} {{ r.kind }} {{ r.A }} x {{ r.B }} `{{ r.formKey|txt }}`: {{ r.admission }}{% if r.get("attribution") %}, {{ r.attribution }}{% if r.get("attributionMod") %} ({{ r.attributionMod }}){% endif %}{% endif %}{% if r.findingId %} — [{{ r.findingId }}](#{{ r.findingId }}){% endif %}
-{% endfor %}
+{% for r in p.reader.prediction.record %}- {{ r.checkId }} {{ r.kind }} {{ r.A }} x {{ r.B }} `{{ r.formKey|txt }}`: {{ r.admission }}{% if r.get("attribution") %}, {{ r.attribution }}{% if r.get("attributionMod") %} ({{ r.attributionMod }}){% endif %}{% endif %}{% if r.findingId %} — [{{ r.findingId }}](#{{ r.findingId }}){% endif %}{{ "
+" }}{% endfor %}
 {% set sib = p.reader.prediction.get("sibling") %}{% if sib %}
 <a id="sibling-evaluation"></a>
 ## Sibling evaluation
