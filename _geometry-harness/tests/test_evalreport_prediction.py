@@ -5628,7 +5628,9 @@ def main():
         lose_ = "05" if patch_has_field else None
         chain_ = [(BASE, mh_("00")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), (O3, mh_("07")), (MOD_A, mh_("09"))]
         p_ch = [(W1, "Worldspace", chain_)]
-        w_ch = [(W1, "Worldspace", chain_ + [(PATCH, mh_(lose_))])]
+        # a tree answer writes the field the patch lacks as the import captures it ("has X ABSENT", "has no X")
+        w_ch = [(W1, "Worldspace", chain_ + [(PATCH, mh_(lose_) if patch_has_field else {
+            "MaxHeight": "has MaxHeight ABSENT", "MaxHeight.CellData": "has no MaxHeight.CellData"})])]
         lost_ = ["MaxHeight.CellData=05"] if patch_has_field else [f"MaxHeight.CellData only in {MOD_A}: 09"]
         mh_row = lambda a_, b_: lost_row(a_, b_, W1, "MaxHeight", lost_, PH, ["MaxHeight.CellData=00"])  # noqa: E731
         def grid_(a_, b_):
