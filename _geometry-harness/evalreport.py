@@ -6061,7 +6061,39 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                          if e.get("admission") == "admitted" and e.get("findingId"))
     pred_arm_ = pred_.get("predictionArm")
 
+    # (third review: Winterhold S4, Clockwork S2, BPT S4) a detail line on the setup with the patch says the same, its rows
+    # joined to the prediction's rows by identity (the object and its partners, or the record field, and the two mods)
+    with_arm_ = ((plan.get("reader") or {}).get("validation") or {}).get("withPatchArm")
+    multi_ = len(pred_.get("mods") or []) > 1
+    f_by_id = {f["id"]: f for f in findings if f.get("id")}
+
+    def ident_(check, fk, field, other, a, b):
+        return (check, str(fk), field if field else tuple(sorted(str(x) for x in other or [])),
+                frozenset((str(a).lower(), str(b).lower())))
+    pred_ident = {}
+    for e_ in pred_.get("record") or []:
+        k_ = ident_(e_["checkId"], e_["formKey"], e_.get("field") if e_["kind"] == "LOST-EDIT" else None,
+                    e_.get("other"), e_["A"], e_["B"])
+        pred_ident[k_] = pred_ident.get(k_, False) or (e_.get("admission") == "admitted"
+                                                       and not (multi_ and e_.get("attribution") == "single-mod"))
+
+    def with_patch_note(fids, n_rows):
+        got_ = collections.Counter()
+        for x in fids:
+            f_ = f_by_id.get(x) or {}
+            c_ = f_.get("counts") or {}
+            for r_ in f_.get("rows") or []:
+                k_ = ident_(f_.get("checkId"), r_.get("formKey"), r_.get("field"), r_.get("other"), c_.get("A"), c_.get("B"))
+                got_["counted" if pred_ident.get(k_) else "aside" if k_ in pred_ident else "new"] += 1
+        if sum(got_.values()) != n_rows or got_["counted"] == n_rows or not conc.get("withPatchSplitParts"):
+            return ""
+        return " (" + "; ".join(bind(conc["withPatchSplitParts"][w_], {"count": fmt_n(got_[w_])})
+                                for w_ in ("counted", "aside", "new") if got_[w_]) + ")"
+
     def counted_note(fids, n_rows):
+        if with_arm_ and with_arm_ != pred_arm_ and fids and all((f_by_id.get(x) or {}).get("armId") == with_arm_
+                                                                 for x in fids):
+            return with_patch_note(fids, n_rows)
         k_ = sum(counted_by_fid.get(x, 0) for x in fids)
         if not pred_arm_ or not k_ or k_ >= n_rows or not conc.get("countedAboveNote"):
             return ""
@@ -6157,7 +6189,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                     "note": next((f.get("readerProvenance") for f in relevant if f.get("readerProvenance")), None)})
                     rest = [f for f in rest if not f.get("readerRelevant")]
                 for f in rest:
-                    if f.get("readerRelevant") and f.get("armId") == pred_arm_ and f.get("readerPlain"):
+                    if f.get("readerRelevant") and f.get("armId") in (pred_arm_, with_arm_) and f.get("readerPlain"):
                         note_ = counted_note([f["id"]], int(f.get("readerRows", f.get("rowsTotal")) or 0))
                         if note_:
                             head_, _, tail_ = str(f["readerPlain"]).partition(". ")
