@@ -4906,6 +4906,25 @@ def main():
     for name, fn in [("third-review/C942-summary-new-excludes-brought-back", c942_summary_new_excludes_brought_back)]:
         cell(name, fn)
 
+    # C948 (Clockwork review S6): the separate evaluation's setups are named against the measured load order, which holds
+    # the patch: its setup without ModA lacks the patch too, so it is "the measured load order without the patch and
+    # ModA", never "without ModA" alone.
+    def c948_sibling_setups_against_measured_order():
+        O2 = "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A])]
+        rows_ = [row("CONTACT", OTHER, MOD_A, f"000C48:{MOD_A}")]
+        s_arms = [arm("baseline", [BASE, OTHER, O2, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER, O2])]
+        s_results = {(CONTACT, "baseline"): rows_, (CONTACT, "without-a"): []}
+        plan, md, _ = compile_and_render(arms, {(CONTACT, "baseline"): rows_, (CONTACT, "without-patch"): rows_},
+                                         [MOD_A], patches=[PATCH],
+                                         sibling=(s_arms, s_results, [MOD_A], {"plan_id": "sibl00000948"}))
+        ln = next((x for x in md.splitlines() if "separate evaluation" in x and "measured these setups" in x), "")
+        return re.search(r"without [^.;]*" + re.escape(PATCH), ln) is not None and MOD_A in ln, ln[:300]
+
+    for name, fn in [("third-review/C948-sibling-setups-against-measured-order", c948_sibling_setups_against_measured_order)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
