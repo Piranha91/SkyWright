@@ -5547,6 +5547,23 @@ def main():
         top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
         return ("the base game's triangle count" in top and n1 in top), top[-400:]
 
+    # C1053 (Clockwork S4): a measured navmesh replacement with ground lost is said in the headline paragraph too (not
+    # counted as a clash), with how many still lose it with the patch.
+    def c1053_navmesh_loss_in_verdict():
+        n1, n2 = f"000N53:{BASE}", f"000N54:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  689 tris -> 5")]
+        preds = [{"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n_, "Other": None, "Physical": "Holds",
+                  "Detail": "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u from the winner's"}
+                 for n_ in (n1, n2)]
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
+        v = str((reader(plan).get("prediction") or {}).get("verdict") or "")
+        return ("navmesh replaces" in v and "2 navmesh records" in v and "not counted" in v), v[-300:]
+
+    for name, fn in [("fourth-review/C1053-navmesh-loss-in-verdict", c1053_navmesh_loss_in_verdict)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
