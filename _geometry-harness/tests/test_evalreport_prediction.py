@@ -6197,6 +6197,29 @@ def main():
         return (f"wins over {UPD}'s own change" in line and f"{CC1}'s own change" not in line
                 and f"with {PATCH}" in line and f"{UPD}'s value in 1 of the 1" in line), line[-400:]
 
+    # C1038 (Pilgrim S3): an alias split is one clash whichever direction its rows name it: two rows (X with Y, Y with X)
+    # of one quest scene, new with the patch and already there without the evaluated mod, are 1 clash brought back; the
+    # detail line's split counts 1, as its scene count does; the summary says nothing ELSE new.
+    def c1038_alias_pair_one_clash():
+        O2 = "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A]), arm("without-a", [BASE, OTHER, O2])]
+        A1, A2 = f"000A38:{BASE}", f"000B38:{BASE}"
+        rows_ = [row("SPLIT", OTHER, PATCH, x_, other=y_, label="Temple (int)") for x_, y_ in ((A1, A2), (A2, A1))]
+        nb_ = [row("SPLIT", OTHER, O2, x_, other=y_, label="Temple (int)") for x_, y_ in ((A1, A2), (A2, A1))]
+        for r_ in rows_ + nb_:
+            r_["Summary"] = "quest 'Q1' aliases 'X' and 'Y' were 137u apart in Temple (int), now 1,800u apart"
+        plan, md, _ = compile_and_render(arms, {(ALIAS, "baseline"): rows_, (ALIAS, "without-patch"): [],
+                                                (ALIAS, "without-a"): nb_}, [MOD_A], patches=[PATCH])
+        summ = str((reader(plan).get("validation") or {}).get("summary") or "")
+        det = next((ln for ln in md.splitlines() if "quest scene" in ln and "Measured load order" in ln), "")
+        ok = ("1 clash brought back" in summ and "nothing else new" in summ and "(2 new with the patch)" not in det
+              and "(1 new with the patch)" in det)
+        return ok, f"{summ[:200]} || {det[-200:]}"
+
+    for name, fn in [("fourth-review/C1038-alias-pair-one-clash", c1038_alias_pair_one_clash)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1044-base-value-named-by-its-origin", c1044_base_value_named_by_its_origin)]:
         cell(name, fn)
 
