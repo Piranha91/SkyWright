@@ -5532,6 +5532,24 @@ def main():
                      ("round-2/C979-evaluated-linker-base-link-counted", c979_evaluated_linker_base_link_counted)]:
         cell(name, fn)
 
+    # C1052 (Clockwork S2): a navmesh the evaluated mod's version replaces with the base game's triangle count (read from
+    # the base game's plugin file) is said so on the navmesh-replacement line, so a reader sees the city mod's navmesh
+    # work undone rather than "cut down".
+    def c1052_replacing_navmesh_base_count_said():
+        import copy
+        n1 = f"000E52:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  154 tris -> 104")]
+        p_rows[0]["Necessary"][0]["PhysicalDetail"] = "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u"
+        arms_ = with_files(copy.deepcopy(PATCH_ADDED_ARMS),
+                           {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E52, [("NVNM", nvnm(104, []))], False)])})
+        plan, md, html = compile_and_render(arms_, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        return ("the base game's triangle count" in top and n1 in top), top[-400:]
+
+    for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
+        cell(name, fn)
+
     # C980 (round 2, B2: Snazzy review Blocking 1, Clockwork review S3): the switch-off sentence counts objects, as it
     # names them. ModB switches 2 objects off with three fields each (record flags, enable parent, position below the
     # world); ModA's versions have them on: 2 objects, not 6.
