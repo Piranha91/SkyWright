@@ -4344,6 +4344,31 @@ def main():
     for name, fn in [("after-review/C911-new-problem-objects-named-with-gap", c911_new_problem_objects_named_with_gap)]:
         cell(name, fn)
 
+
+    # C912 (Pilgrim review 2): the outcome where a patch keeps one side's value reads as one phrase ("the patch keeps
+    # X's value over Y's change on N"), and the once-said "not measured" sentence names the items it covers by their
+    # other mods instead of "the items above that say nothing else about it".
+    def c912_outcome_and_once_sentence_parse():
+        plan, md, html = record_validation_bundle()
+        items = " ".join((reader(plan).get("validation") or {}).get("itemLines") or [])
+        ok_a = (f"the patch keeps {MOD_A}'s value over {MOD_B}'s change on 1" in items
+                and "change is dropped" not in md)
+        O2, O3 = "Second.esp", "Third.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, O3, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, O3, MOD_A]), arm("without-o2", [BASE, OTHER, O3, MOD_A])]
+        p_rows = [lost_row(OTHER, MOD_A, f"00C912:{BASE}", "Owner", "o", "a", "v"),
+                  lost_row(O3, MOD_A, f"00C913:{BASE}", "Owner", "t", "a", "v"),
+                  lost_row(O2, MOD_A, f"00C914:{BASE}", "Owner", "s", "a", "v")]
+        enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "baseline"): [], (RECORDS, "without-o2"): p_rows[:2]}
+        plan2, md2, _ = compile_and_render(arms, {(CONTACT, a_["armId"]): [] for a_ in arms}, [MOD_A], patches=[PATCH],
+                                           enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()})
+        once = next((ln for ln in md2.splitlines() if ln.startswith("For ") and "was not measured" in ln), "")
+        ok_b = (OTHER in once and O3 in once and "say nothing else" not in once)
+        return ok_a and ok_b, f"{items[:200]}; {once[:250]}"
+
+    for name, fn in [("after-review/C912-outcome-and-once-sentence-parse", c912_outcome_and_once_sentence_parse)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
