@@ -6409,7 +6409,20 @@ def main():
     for name, fn in [("fourth-review/C1056-land-flags-with-patch-status", c1056_land_flags_with_patch_status)]:
         cell(name, fn)
 
-    for name, fn in [("fourth-review/C1050-effect-model-pairs-said", c1050_effect_model_pairs_said),
+    # C1051b (found on regen-r4a): where the rows carry the winner's value as a placeholder (a tree answer), the height
+    # difference is read from the record chain's positions.
+    def c1051b_height_difference_from_chain():
+        D_ = f"00CA5B:{BASE}"
+        lo_, wi_ = offs(1424), offs(0)
+        rows_ = [lost_row(MOD_A, MOD_B, D_, "Placement", ["Placement.Position=100,100,1424"], PH, PH)]
+        ch_ = [(D_, "PlacedObject", [(BASE, offs(0)), (MOD_A, lo_), (MOD_B, wi_)])]
+        plan, md, _ = core_bundle(rows_, list(rows_), targets=(MOD_A, MOD_B), p_chains=ch_, w_chains=ch_,
+                                  masters={**MASTERS_, PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return "1,424 u lower" in it, it[-300:]
+
+    for name, fn in [("fourth-review/C1051b-height-difference-from-chain", c1051b_height_difference_from_chain),
+                     ("fourth-review/C1050-effect-model-pairs-said", c1050_effect_model_pairs_said),
                      ("fourth-review/C1051-height-difference-said", c1051_height_difference_said)]:
         cell(name, fn)
 
