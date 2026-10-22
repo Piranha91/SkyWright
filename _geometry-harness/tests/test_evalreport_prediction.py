@@ -5010,6 +5010,21 @@ def main():
     for name, fn in [("third-review/C944-still-there-place-count-has-unit", c944_still_there_place_count_has_unit)]:
         cell(name, fn)
 
+    # C954 (Snazzy re-review on regen-3): "N of them objects already counted above" names the shared objects, so it is
+    # not read as N of the check's own inconsistencies (C501's fixture: 000F01 and 000F02 are counted by both checks).
+    def c954_shared_objects_named():
+        ct = [row("CONTACT", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2, 3, 4)]
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F0{i}:{MOD_A}", other=f"000H0{i}:{MOD_B}") for i in (1, 2, 5)]
+        results = {(c, a): [] for c in (FIXTURE, CONTACT) for a in ("dependency-only", "plus-a", "plus-b")}
+        results.update({(FIXTURE, "baseline"): fx, (CONTACT, "baseline"): ct})
+        plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        v = (reader(plan).get("prediction") or {}).get("verdict") or ""
+        ok = f"000F01:{MOD_A}" in v and f"000F02:{MOD_A}" in v and "already counted above" in v
+        return ok, f"verdict {v!r}"
+
+    for name, fn in [("third-review/C954-shared-objects-named", c954_shared_objects_named)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
