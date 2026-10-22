@@ -5593,6 +5593,30 @@ def main():
     for name, fn in [("fourth-review/C1053-navmesh-loss-in-verdict", c1053_navmesh_loss_in_verdict)]:
         cell(name, fn)
 
+    # C1048 (Missives S3): a clash whose place is a worldspace's persistent cell (a bare form key) is located by the grid
+    # cell of its object's position, read from the winning plugin's file (its recorded bytes); placements read known
+    # answers (DATA: position and rotation).
+    def c1048_persistent_place_located_by_grid():
+        import copy
+        import pluginread
+        X, Y = f"000F48:{MOD_A}", f"000F49:{MOD_B}"
+        f_ = plugin_file_of(MOD_A, [BASE], [("REFR", 0x01000F48, [("DATA", struct.pack("<6f", -31410.25, -88133.7, -3187.5,
+                                                                                         0.0, 0.0, 6.18))], False)],
+                            group="CELL")
+        got_ = pluginread.placements(f_, [X])["records"][X]
+        r_ = row("OVERLAP", MOD_B, MOD_A, X, other=Y, label="000D74:Skyrim.esm (ext)")
+        arms_ = with_files([arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                            arm("without-patch", [BASE, MOD_A, MOD_B]), arm("without-b", [BASE, MOD_A])], {MOD_A: f_})
+        plan, md, _ = compile_and_render(arms_, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [r_],
+                                                 (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH])
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        ok = (got_ and [round(x, 1) for x in got_["position"]] == [-31410.2, -88133.7, -3187.5]
+              and "grid cell -8, -22" in it)
+        return ok, f"{got_}; {it[-300:]}"
+
+    for name, fn in [("fourth-review/C1048-persistent-place-located-by-grid", c1048_persistent_place_located_by_grid)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
