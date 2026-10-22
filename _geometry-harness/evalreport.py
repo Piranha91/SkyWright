@@ -2406,6 +2406,13 @@ def build_prediction(ctx: dict) -> dict:
             v4_ = hit["row"].get("values") or {}
             lp_, wp_ = (_vec(next((x_ for x_ in (v4_.get(k_) if isinstance(v4_.get(k_), list) else [v4_.get(k_)])
                                    if "Position" in str(x_)), None)) for k_ in ("lost", "winner"))
+            if not (lp_ and wp_):
+                # a row carrying the winner's value as a placeholder: the record chain's positions
+                chh_ = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+                lowh_ = [str(x).lower() for x in (chh_ or {}).get("providers") or []]
+                if chh_ and rk[2].lower() in lowh_ and rk[3].lower() in lowh_:
+                    lp_, wp_ = (_vec(next((v_ for k_, v_ in recordrows.provider_fields(chh_, sup_place, lowh_.index(x_.lower())).items()
+                                           if k_.endswith("Position")), None)) for x_ in (rk[2], rk[3]))
             if lp_ and wp_ and math.dist(lp_[:2], wp_[:2]) <= 1.0 and abs(wp_[2] - lp_[2]) >= SEAT_SPOT_UNITS:
                 g.setdefault("_heightDiff", {}).setdefault((rk[3], rk[2]), []).append(wp_[2] - lp_[2])
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
