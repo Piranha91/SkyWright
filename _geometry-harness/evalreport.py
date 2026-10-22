@@ -1564,6 +1564,14 @@ def build_prediction(ctx: dict) -> dict:
                for x in [k_[4], *((h_.get("row") or {}).get("other") or [])] if x}
     for key_ in [k for k in list(needed_fks) if needed_fks[k]]:
         needed_fks[key_] |= geo_fks
+    # (round 2, Snazzy S2) every measured setup of a record check reads the records any setup lost a change on, so the
+    # setup with the patch says whether the patch holds a field it no longer loses (a removal)
+    lost_by_check_ = collections.defaultdict(set)
+    for (c_, a_), fks_ in list(needed_fks.items()):
+        lost_by_check_[c_] |= {x for x in fks_ if x not in geo_fks}
+    for (c_, a_) in measured:
+        if lost_by_check_.get(c_):
+            needed_fks[(c_, a_)] |= lost_by_check_[c_]
 
     def chains_of(check_id, arm_id):
         key = (check_id, arm_id)
@@ -3792,15 +3800,57 @@ def build_prediction(ctx: dict) -> dict:
                      and (e["checkId"], patched_arm) in measured
                      # overwrite history is said by whether it is still flagged; its measured loss, apart (W-S1)
                      and not (present if e["admission"] == "history" else there)(patched_arm, keyof(e))]
-        spots = collections.Counter(e["admission"] for e in spot_rows)
+        # (round 2, Missives S1 and Snazzy S2) an earlier record clash a patch also fixes is a change in game: one field of
+        # one record, however many plugins' values or record checks name it; one whose values differ only in bytes the game
+        # does not read is none; and where the patch holds none of the field, the patch removes it, said as a removal
+        def spot_noise(e):
+            if e["kind"] != "LOST-EDIT":
+                return False
+            rk_ = keyof(e)
+            if lost_edit_noise(rk_) in NOISE_ADMISSIONS:
+                return True
+            rb_ = read_bits(p_of(e["checkId"]), rk_, str(e.get("field") or ""))
+            return rb_ is not None and rb_[0] == rb_[1]
+
+        def patch_removes(e):
+            ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
+            if not ch_ or len(ch_["providers"]) < 2 or str(ch_["providers"][-1]).lower() not in patch_lower:
+                return False
+            f_ = str(e.get("field") or "")
+            n_ = len(ch_["providers"])
+            return (not recordrows.provider_fields(ch_, f_, n_ - 1)
+                    and any(recordrows.provider_fields(ch_, f_, j_) for j_ in range(n_ - 1)))
+        spot_rows = [e for e in spot_rows if not (e["admission"] == "alreadyPresent" and spot_noise(e))]
+        spot_kind = {id(e): ("patchRemoves" if e["admission"] == "alreadyPresent" and e["kind"] == "LOST-EDIT"
+                             and patch_removes(e) else e["admission"]) for e in spot_rows}
+
+        def spot_unit(e):
+            if spot_kind[id(e)] in ("alreadyPresent", "patchRemoves") and e["kind"] == "LOST-EDIT":
+                return ("change", str(e["formKey"]), str(e.get("field") or ""))
+            return ("row", id(e))
+        spot_units = collections.defaultdict(dict)
+        for e in spot_rows:
+            spot_units[spot_kind[id(e)]].setdefault(spot_unit(e), e)
+        spots = collections.Counter({k: len(v) for k, v in spot_units.items()})
+        fixes_ = "fix" if re.match(r"^the [\d,]+ patches$", str(patch)) else "fixes"
         # overwrite history no longer flagged is said in its own sentence, never as resolved by the patch (W3)
         # (third review, Clockwork S5) a clash already there without the evaluated mods that the patch resolves is named by
-        # its pairs, so the sentence says which earlier clashes the patch also fixes
+        # its pairs, so the sentence says which earlier clashes the patch also fixes; a record change by its field
         def spot_pairs(k):
-            c_ = collections.Counter(f"{e['A']} and {e['B']}" for e in spot_rows if e["admission"] == k)
-            top_ = [f"{pr_} {fmt_n(n_)}" for pr_, n_ in sorted(c_.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:3]]
+            c_, change_ = collections.Counter(), set()
+            for u_, e in spot_units.get(k, {}).items():
+                if u_[0] == "change":
+                    nm_ = object_name(e["formKey"], e.get("summary"))
+                    key_ = f"{field_word(e.get('field'))} on {e['formKey']}" + (f" ({nm_})" if nm_ else "")
+                    change_.add(key_)
+                else:
+                    key_ = f"{e['A']} and {e['B']}"
+                c_[key_] += 1
+            top_ = [pr_ if pr_ in change_ else f"{pr_} {fmt_n(n_)}"
+                    for pr_, n_ in sorted(c_.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:3]]
             return "; ".join(top_) + (bind(words["blindSpotMorePairs"], {"count": fmt_n(len(c_) - 3)}) if len(c_) > 3 else "")
-        blind = [{"admission": k, "count": n, "why": bind(words["blindSpotWhy"][k], {"patch": patch, "pairs": spot_pairs(k)})}
+        blind = [{"admission": k, "count": n, "why": bind(words["blindSpotWhy"][k], {"patch": patch, "pairs": spot_pairs(k),
+                                                                                     "fixes": fixes_})}
                  for k, n in sorted(spots.items()) if k != "history"]
         # overwrite history is not a predicted clash, but a row no longer flagged with the patch whose physical test held
         # (the overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted), and
@@ -3912,7 +3962,7 @@ def build_prediction(ctx: dict) -> dict:
             # several reasons in one sentence, each with its count (P53: one line each took a third of a page)
             sentences.append(bind(words["validationBlindSpots"], {"patch": patch, "parts": "; ".join(
                 f"{fmt_n(s['count'])} " + bind(words['blindSpotShort'].get(s['admission'], s['why']), {
-                    "patch": patch, "pairs": spot_pairs(s['admission'])}) for s in blind)}))
+                    "patch": patch, "pairs": spot_pairs(s['admission']), "fixes": fixes_}) for s in blind)}))
         else:
             sentences += [bind(words["validationBlindSpot"], {"patch": patch, "count": s["count"], "why": s["why"]})
                           for s in blind]
