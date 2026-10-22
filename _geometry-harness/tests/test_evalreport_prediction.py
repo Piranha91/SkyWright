@@ -4866,6 +4866,29 @@ def main():
     for name, fn in [("third-review/C967-all-set-aside-entry-marked", c967_all_set_aside_entry_marked)]:
         cell(name, fn)
 
+    # C938 (Missives review S2): OtherMod and Neighbour.esp each change a worldspace's MaxHeight the same way (Neighbour
+    # loads later; the row names OtherMod); ModA, which wins, keeps the base game's value. The item names both plugins
+    # holding the lost value, says the lost value is an absence (OtherMod has no such data), and that ModA's is the base
+    # game's value.
+    def c938_carriers_absence_and_base_value_said():
+        O2 = "Neighbour.esp"
+        W1 = f"00C938:{BASE}"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A, MOD_B])]
+        mh_b, mh_o = {"MaxHeight.CellData": "05", "MaxHeight.Offset": "5"}, {"MaxHeight.CellData": "00", "MaxHeight.Offset": "0"}
+        tr_ = tree_transcript([(W1, "Worldspace", [(BASE, mh_b), (OTHER, mh_o), (O2, dict(mh_o)), (MOD_A, dict(mh_b))])])
+        r_ = lost_row(OTHER, MOD_A, W1, "MaxHeight", [f"MaxHeight.CellData only in {MOD_A}: 00"], PH, PH)
+        r_["Summary"] = f"Worldspace TestWorld: MaxHeight - {OTHER}'s value lost to {MOD_A}'s"
+        plan, md, _ = core_bundle([r_], [r_], p_tr=tr_, arms=arms,
+                                  masters={OTHER: [BASE], O2: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        ok = (f"{O2} holds the same value" in it and f"{OTHER} has no " in it
+              and f"{MOD_A}'s value" in it and "base game's" in it)
+        return ok, it[-400:]
+
+    for name, fn in [("third-review/C938-carriers-absence-and-base-value-said", c938_carriers_absence_and_base_value_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
