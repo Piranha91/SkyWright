@@ -3711,6 +3711,24 @@ def build_prediction(ctx: dict) -> dict:
                       "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],
                       "missingFacts": list(words["validationMissingFacts"])}
     headings = {k: bind(v, {"subject": subject}) for k, v in words["headings"].items()}
+    # (Missives review 2) a one-sided seam finding whose every boundary touches a cell where the mod undoes its own
+    # master's fix is said as that undo in the detail list, never as a clash with the mod owning the neighbouring cell
+    sd_ = words.get("seamPutBackDetail")
+    for f_ in findings if sd_ and put_cells else []:
+        c_ = f_.get("counts") or {}
+        if f_.get("kind") != "finding" or state_split(str(c_.get("groupKind") or ""))[0] not in one_sided_res:
+            continue
+        rows_ = [r_ for r_ in (f_.get("allRows") or f_.get("rows") or []) if isinstance(r_, dict)]
+        hits_ = set()
+        for r_ in rows_:
+            got_ = {put_cells[x_] for x_ in [str(r_.get("formKey")), *map(str, r_.get("other") or ())] if x_ in put_cells}
+            hits_ |= got_ if got_ else {None}
+        mods_ = {str(m_).lower(): m_ for m_ in (c_.get("A"), c_.get("B")) if m_}
+        if rows_ and len(hits_) == 1 and None not in hits_ and next(iter(hits_))[0] in mods_:
+            mod_l, master_ = next(iter(hits_))
+            n_ = len(rows_)
+            f_["readerPlain"] = bind(sd_, {"count": fmt_n(n_), "noun": "boundary" if n_ == 1 else "boundaries",
+                                           "mod": mods_[mod_l], "master": master_})
     # (Pilgrim review 1) a split of quest aliases is said by scene, with the probe's own distance sentence, naming the
     # plugin that first set the actors' winning placement (the record import's chain of that setup), never as records
     # "between" the probe's plugin pair
