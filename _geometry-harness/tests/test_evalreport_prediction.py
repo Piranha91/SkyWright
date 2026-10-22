@@ -5305,6 +5305,22 @@ def main():
     for name, fn in [("third-review/C959-replaced-model-not-only-edits", c959_replaced_model_not_only_edits)]:
         cell(name, fn)
 
+    # C970 (BPT re-review S1, found on regen-q4): the row's own winner value is a placeholder, so the record chain of the
+    # setup with the patch decides that the two values name the same file but for letter case.
+    def c970_case_only_from_chain():
+        T1 = f"00C970:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, f"00C971:{BASE}", "Owner", "a", "b", "v")]
+        lr_ = lost_row(PATCH, OTHER, T1, "HdLodDiffuseTexture", ["HdLodDiffuseTexture=data/textures/land/a.dds"], PH, PH)
+        w_ch = [(T1, "Worldspace", [(BASE, {"HdLodDiffuseTexture": "x.dds"}),
+                                    (PATCH, {"HdLodDiffuseTexture": "data/textures/land/a.dds"}),
+                                    (OTHER, {"HdLodDiffuseTexture": "Data/Textures/Land/A.dds"})])]
+        plan, md, _ = core_bundle(p_rows, list(p_rows) + [lr_], targets=(MOD_A, MOD_B), w_chains=w_ch)
+        ln = next((x for x in md.splitlines() if OTHER in x and PATCH in x and "whose change is lost" in x), "")
+        return "letter case" in ln and "new with the patch" not in ln, ln[:300]
+
+    for name, fn in [("third-review/C970-case-only-from-chain", c970_case_only_from_chain)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
