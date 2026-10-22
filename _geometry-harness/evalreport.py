@@ -988,7 +988,8 @@ def field_name(row: dict) -> str:
 
 
 # lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
-NOISE_ADMISSIONS = ("navmeshCheck", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead")
+NOISE_ADMISSIONS = ("navmeshCheck", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead",
+                    "winnerOwnChange")
 FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
                     / "references" / "record-field-scope.json")
 _field_masks = []
@@ -1748,6 +1749,25 @@ def build_prediction(ctx: dict) -> dict:
                     return False
         return True
 
+    def read_bits(arm_id, rk, top):
+        """The bits the game reads of the row's masked field ({leaf: int}) in the losing and the winning plugin's
+        versions, from the record import's chain of that setup; None where the chain does not hold both."""
+        masks = field_masks().get(record_type_of(rk[5])) or {}
+        ch = (chains_of(rk[0], arm_id) or {}).get(str(rk[4]))
+        if not ch or not masks:
+            return None
+        low_ = [str(x).lower() for x in ch["providers"]]
+        if rk[2].lower() not in low_ or rk[3].lower() not in low_:
+            return None
+        got_ = []
+        for p_ in (rk[2], rk[3]):
+            f_ = recordrows.provider_fields(ch, top, low_.index(p_.lower()))
+            try:
+                got_.append({k: int(v) & int(masks[k]) for k, v in f_.items() if k in masks})
+            except ValueError:
+                return None
+        return tuple(got_) if got_[0] and got_[1] and set(got_[0]) == set(got_[1]) else None
+
     def lost_edit_noise(rk, rows=None, arm=None):
         """A lost-edit row whose values show no change the game sees, or whose subject another check judges: lists
         holding the same items in another order (lists are compared as sets of items, the record lane's rule; P108), a
@@ -1768,7 +1788,10 @@ def build_prediction(ctx: dict) -> dict:
         if carried_list(lost, rk[3]):
             return "carriedList"
         if masked_same(lost, v.get("overridden"), rtype, top):
-            return "unusedBits"
+            # the losing mod changed only bytes the game does not read; where the winner's read bits differ from the
+            # value the losing mod carries, that is the winner's own change, said on its own line (Missives review 1)
+            rb_ = read_bits(arm or p_of(rk[0]), rk, top)
+            return "winnerOwnChange" if rb_ is not None and rb_[0] != rb_[1] else "unusedBits"
         if same_in_chain(arm or p_of(rk[0]), rk):
             return "sameAsRead"                # the import's chain reads both values the same (case, bytes, rounding)
         return None
@@ -2466,6 +2489,38 @@ def build_prediction(ctx: dict) -> dict:
             "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
                 "patch": patch_text, "left": fmt_n(left_), "count": fmt_n(n_)})}),
             "findingIds": u_["findingIds"][:1]})
+    # (Missives review 1) the winner's own change to the bits the game reads of a field whose losing change is only in
+    # unread bytes: one line per winning mod, with each record and what the read bits mean (skill data)
+    own_ = collections.OrderedDict()
+    rb_words = words.get("readBitsWords") or {}
+    for e in record:
+        if e["admission"] != "winnerOwnChange":
+            continue
+        rk_ = (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])
+        rb_ = read_bits(p_of(e["checkId"]), rk_, str(e.get("field") or ""))
+        if rb_ is None:
+            continue
+        o_ = own_.setdefault(e["B"], {"parts": collections.OrderedDict(), "findingIds": [], "noun": None})
+        lab_ = re.match(r"^\S+ (\S+):", str(e.get("summary") or ""))
+        for leaf_ in sorted(rb_[1]):
+            w_ = (rb_words.get(record_type_of(e["summary"])) or {}).get(leaf_) or {}
+            o_["noun"] = o_["noun"] or w_.get("noun") or leaf_
+            old_, new_ = rb_[0][leaf_], rb_[1][leaf_]
+            if old_ == new_:
+                continue
+            if w_.get("bits"):
+                old_, new_ = (bin(x_ & int(w_["bits"])).count("1") for x_ in (old_, new_))
+            o_["parts"].setdefault(str(e["formKey"]), bind(words["winnerOwnChangePart"], {
+                "label": lab_.group(1) if lab_ else "", "formKey": e["formKey"], "unit": w_.get("unit") or leaf_,
+                "old": fmt_n(old_), "new": fmt_n(new_), "of": (" of " + fmt_n(w_["of"])) if w_.get("of") else ""}))
+        if e.get("findingId") and e["findingId"] not in o_["findingIds"]:
+            o_["findingIds"].append(e["findingId"])
+    for mod_, o_ in own_.items():
+        if o_["parts"]:
+            n_ = len(o_["parts"])
+            loss_lines.append({"text": bind(words["winnerOwnChangeLine"], {
+                "mod": mod_, "noun": o_["noun"], "count": fmt_n(n_), "records": "record" if n_ == 1 else "records",
+                "parts": "; ".join(o_["parts"].values())}), "findingIds": o_["findingIds"][:1]})
     # a rebuilt record supersedes the loser's small fix (Pilgrim final review B1): one line per winning mod, with the
     # record facts in plain words, never in the clash counts
     sup_ = collections.OrderedDict()
