@@ -6389,6 +6389,28 @@ def main():
     for name, fn in [("fourth-review/C1036-alone-state-meaning-per-mod", c1036_alone_state_meaning_per_mod)]:
         cell(name, fn)
 
+    # C1058 (Sewers S2): where the also-found check's rows come only from the separate evaluation (the check failed on
+    # this bundle's setups), the item says its finding comes from that evaluation.
+    def c1058_also_found_from_sibling_said():
+        X, Yo = f"000X58:{MOD_A}", f"000Y58:{MOD_B}"
+        ov_ = row("OVERLAP", MOD_B, MOD_A, X, other=Yo)
+        st_ = row("STATE-CONTACT@000S58:ModB.esp@Unknown", MOD_B, MOD_A, Yo, label="Camp (ext)", other=X)
+        st_["Summary"] = (f"Contact StateConditional under PlankSwitch ({MOD_B}): {Yo} [Static Scaffold] leaves - Sunk: the "
+                          f"host leaves with the flip")
+        s_arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("dependency-only", [BASE]),
+                  arm("plus-a", [BASE, MOD_A]), arm("plus-b", [BASE, MOD_B])]
+        s_results = {(OVERLAP, "baseline"): [ov_], (OVERLAP, "dependency-only"): [], (OVERLAP, "plus-a"): [],
+                     (OVERLAP, "plus-b"): [], (STATE, "baseline"): [st_], (STATE, "dependency-only"): [],
+                     (STATE, "plus-a"): [], (STATE, "plus-b"): []}
+        results = {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [ov_], (STATE, "baseline"): []}
+        plan, md, html = compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                            sibling=(s_arms, s_results, [MOD_A, MOD_B], {"plan_id": "sibl00001058"}))
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        return ("also found by the check" in it and "separate evaluation" in it.split("also found by the check", 1)[-1]), it[-400:]
+
+    for name, fn in [("fourth-review/C1058-also-found-from-sibling-said", c1058_also_found_from_sibling_said)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1035-switch-after-flip-said", c1035_switch_after_flip_said)]:
         cell(name, fn)
 
