@@ -6542,7 +6542,21 @@ def main():
     for name, fn in [("fourth-review/C1060-body-unread-object-named", c1060_body_unread_object_named)]:
         cell(name, fn)
 
-    for name, fn in [("fourth-review/C1059-patch-scope-said", c1059_patch_scope_said)]:
+    # C1067 (found between regen-r4d and regen-r4e: Clockwork's line changed order): the covered masters are named in load
+    # order, whatever order the patch's master list gives them in.
+    def c1067_patch_scope_in_load_order():
+        O2, O3, O4 = "Neighbour.esp", "Third.esp", "Fourth.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, O3, O4, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, O3, O4, MOD_A])]
+        r_ = row("OVERLAP", O4, MOD_A, f"000X67:{MOD_A}", other=f"000Y67:{O4}")
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r_], (OVERLAP, "without-patch"): [r_]}, [MOD_A],
+                                         patches=[PATCH], masters={OTHER: [BASE], O2: [BASE], O3: [BASE], O4: [BASE],
+                                                                   MOD_A: [BASE], PATCH: [BASE, O3, OTHER, O2, MOD_A]})
+        ln = next((x for x in (reader(plan).get("validation") or {}).get("sentences") or [] if "masters" in x), "")
+        return f"only {OTHER}, {O2} and {O3};" in ln, ln[:300]
+
+    for name, fn in [("fourth-review/C1059-patch-scope-said", c1059_patch_scope_said),
+                     ("fourth-review/C1067-patch-scope-in-load-order", c1067_patch_scope_in_load_order)]:
         cell(name, fn)
 
     for name, fn in [("fourth-review/C1058-also-found-from-sibling-said", c1058_also_found_from_sibling_said)]:
