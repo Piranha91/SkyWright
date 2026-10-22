@@ -87,7 +87,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 
 {% endfor %}
 
-## {{ p.reader.locationOrder.heading or "Load order for these locations" }}
+{% if "order" not in (p.layout or "").split() %}## {{ p.reader.locationOrder.heading or "Load order for these locations" }}
 
 {{ p.reader.locationOrder.intro or "Plugins tied to the places discussed below, in measured order." }}
 
@@ -112,7 +112,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 {% endif %}
 Coverage: {{ "all contributors to the listed locations identified." if a.locationPluginScope.complete else "incomplete — " ~ a.locationPluginScope.missingInput }}{% if a.locationPluginScope.get("note") %} {{ a.locationPluginScope.note }}{% endif %}{% endif %}
 
-{% endfor %}
+{% endfor %}{% endif %}
 
 {% set regressions = p.findings|selectattr("kind", "equalto", "regression")|selectattr("readerRelevant")|list %}
 ## {{ p.reader.sectionHeadings.regressions }}
@@ -160,7 +160,7 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 
 {% if "tail" in (p.layout or "").split() %}## Further notes
 
-{{ p.reader.get("tailMovedLine") or "The comparisons' other results, what still needs checking, the checks that found no problem, the reference information collected and the evidence notes are in the evidence index." }} [Further notes](evidence-index.md#further-notes).
+{{ p.reader.get("tailMovedLine") or "The comparisons' other results, what still needs checking, the checks that found no problem, the reference information collected and the evidence notes are in the evidence index." }}{% if "order" in (p.layout or "").split() %} {{ p.reader.get("orderMovedLine") or "So is the load order for these locations." }}{% endif %} [Further notes](evidence-index.md#further-notes).
 {% else %}## What still needs checking
 
 {% if p.scope.completion.missingRequired %}{% if p.reader.get("missingCoveredLine") %}{{ p.reader.missingCoveredLine }}

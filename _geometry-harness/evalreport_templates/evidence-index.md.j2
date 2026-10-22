@@ -168,6 +168,11 @@ No media row: nothing was supplied to this bundle under `--media`, and no unasse
 <a id="further-notes"></a>
 ## Further notes
 
+### Load order for these locations
+
+{% for a in p.scope.arms %}- **{{ a.readerLabel }}**: {{ (a.locationPluginOrder or [])|join(", ") or "no evidenced plugin was identified" }}.
+{% endfor %}
+
 ### The comparisons' other results
 
 {% for item in (p.reader.get("comparisonSummary") or []) %}- {{ item }}
