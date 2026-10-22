@@ -3818,8 +3818,12 @@ def build_prediction(ctx: dict) -> dict:
                 return False
             f_ = str(e.get("field") or "")
             n_ = len(ch_["providers"])
-            return (not recordrows.provider_fields(ch_, f_, n_ - 1)
-                    and any(recordrows.provider_fields(ch_, f_, j_) for j_ in range(n_ - 1)))
+
+            def held(j_):
+                # a tree answer writes a field a provider lacks as "has X ABSENT" or "has no X"
+                return {k_: v_ for k_, v_ in recordrows.provider_fields(ch_, f_, j_).items()
+                        if not re.match(r"^has (?:no \S|.* ABSENT$)", str(v_))}
+            return not held(n_ - 1) and any(held(j_) for j_ in range(n_ - 1))
         spot_rows = [e for e in spot_rows if not (e["admission"] == "alreadyPresent" and spot_noise(e))]
         spot_kind = {id(e): ("patchRemoves" if e["admission"] == "alreadyPresent" and e["kind"] == "LOST-EDIT"
                              and patch_removes(e) else e["admission"]) for e in spot_rows}
