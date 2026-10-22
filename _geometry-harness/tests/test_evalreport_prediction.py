@@ -5814,6 +5814,140 @@ def main():
                      ("round-3/C1004-navmesh-repairs-count-records", c1004_navmesh_repairs_count_records)]:
         cell(name, fn)
 
+    # ------------------------------------------------ after the fourth review (C1020-C1099): what a lost value means in
+    # game is held against everything else the same plugins do to the same record.
+    # C1020-C1023 (Winterhold S1): ModA's lost value switches the object off (below the world, opposite to the player)
+    # and ModB's version has it on. Where ModB placed the object itself -- moved it across at least its size (no bounds
+    # here: 64 u) from the spot ModA inherits, or gave it another base -- the object drawn is ModB's own placement, not the
+    # one ModA removes: never "still brings back", and the still-there line says what ModB did. Where ModB left it at
+    # the spot (C1021) or only nudged it (C1022), ModB still brings back the object ModA removes.
+    def reuse_bundle(win_pos="100,100,0", win_base=None):
+        D = f"00CA20:{BASE}"
+        lost_ = offs(-30000, "InitiallyDisabled", "000014:Skyrim.esm")
+        win_ = offs(0)
+        win_["Placement.Position"] = win_pos
+        base_ = offs(0)
+        for d_ in (lost_, win_, base_):
+            d_["Base"] = f"0B0A20:{BASE}"
+        if win_base:
+            win_["Base"] = win_base
+        rows_ = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(lost_), off_txt(win_), off_txt(base_), before=BASE)]
+        ch_ = [(D, "PlacedObject", [(BASE, base_), (MOD_A, lost_), (MOD_B, win_)])]
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]})
+        st = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+        part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if D in x), "")
+        return D, st, part
+
+    def c1020_moved_by_winner_not_brought_back():
+        D, st, part = reuse_bundle(win_pos="1100,100,0")
+        return ("brings back" not in part and bool(part) and "moved" in part and "1,000 u" in part), st[:400]
+
+    def c1021_same_spot_still_brought_back():
+        D, st, part = reuse_bundle()
+        return re.search(r"still brings back 1 object\b", part) is not None, st[:400]
+
+    def c1022_nudged_still_brought_back():
+        D, st, part = reuse_bundle(win_pos="110,100,0")
+        return re.search(r"still brings back 1 object\b", part) is not None, st[:400]
+
+    def c1023_rebased_by_winner_not_brought_back():
+        D, st, part = reuse_bundle(win_base=f"0B0A21:{MOD_B}")
+        return ("brings back" not in part and bool(part) and "another base" in part), st[:400]
+
+    # C1024, C1025 (Winterhold S2, Snazzy r3 S2, and the BPT shape): a lost change on an object the winning version (in
+    # the setup with the patch) sets off for good, where ModA's own version has the object on, is not "no effect in
+    # game": the object ModA shows is not drawn. C1024: the patch carries ModB's removal (kept); C1025: nothing patches
+    # it (left), ModB enables it opposite to the player.
+    def off_effect_bundle(kept):
+        D = f"00CA24:{BASE}"
+        a_ = offs(0)
+        a_["Placement.Position"] = "300,100,0"
+        b_ = offs(-30000) if kept else offs(0, "0", "000014:Skyrim.esm")
+        p_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        if kept:
+            w_rows = [lost_row(MOD_A, PATCH, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+            w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)])]
+        else:
+            w_rows = list(p_rows)
+            w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+        pr_ = reader(plan).get("prediction") or {}
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        return kl, str(pr_.get("withPatchStays") or ""), md
+
+    def c1024_kept_removal_of_shown_object_not_drawn():
+        kl, st, md = off_effect_bundle(kept=True)
+        return (re.search(r"\b1 on objects [^;()]*not drawn", kl) is not None and "no effect in game" not in kl
+                and "no effect in game" not in str(reader_summary(md))), kl[:400]
+
+    def c1025_left_removal_of_shown_object_not_drawn():
+        kl, st, md = off_effect_bundle(kept=False)
+        return (re.search(r"\b1 on objects [^;()]*not drawn", st) is not None and "no effect in game" not in st
+                and re.search(r"\b1 on objects [^;()]*not drawn", kl) is not None), st[:400]
+
+    def reader_summary(md):
+        return next((ln for ln in md.splitlines() if ln.startswith("In short, with")), "")
+
+    # C1026-C1028 (BPT r3 S2): ModA undoes its master Update.esm's fix (puts back the value from before it). Where ModA
+    # also changed the same record itself -- another base (C1026), or a new position while undoing the fix that switched
+    # the object off (C1027) -- the loss is likely deliberate, said with its count; where it changed nothing else
+    # (C1028), the line says the change is lost in game and nothing of intent.
+    def undo_rework_bundle(kind):
+        R = f"00CA26:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        b0, u0, a0 = offs(0), offs(0), offs(0)
+        for d_ in (b0, u0, a0):
+            d_["Base"] = f"0B0A26:{BASE}"
+        if kind == "base":
+            u0["Placement.Position"] = "100,100,12"         # Update.esm seats the object
+            a0["Base"] = f"0B0A27:{MOD_A}"                   # ModA puts the old seat back and gives it its own base
+            field, lost = "Placement", ["Placement.Position=100,100,12"]
+        else:
+            u0.update(offs(-30000, "InitiallyDisabled", "000014:Skyrim.esm"))   # Update.esm switches it off
+            u0["Base"] = f"0B0A26:{BASE}"
+            if kind == "moved":
+                a0["Placement.Position"] = "100,140,0"       # ModA switches it back on and moves it itself
+            field, lost = "EnableParent", ["EnableParent.Reference=000014:Skyrim.esm",
+                                           "EnableParent.Flags=SetEnableStateToOppositeOfParent"]
+        chains = [(R, "PlacedObject", [(BASE, b0), (UPD, u0), (MOD_A, a0)])]
+        p_rows = [lost_row(UPD, MOD_A, R, field, lost, PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
+                                  masters={UPD: [BASE], OTHER: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE], PATCH: [BASE]})
+        adm = [e["admission"] for e in rec_of(plan, R)]
+        line = next((ln for ln in md.splitlines() if f"{MOD_A} undoes its master {UPD}'s fix" in ln), "")
+        return adm, line
+
+    def c1026_undo_on_rebased_record_likely_deliberate():
+        adm, line = undo_rework_bundle("base")
+        return adm == ["undoesMaster"] and re.search(r"\b1 of them [^.]*likely deliberate", line) is not None, \
+            f"{adm}; {line[:300]}"
+
+    def c1027_undo_on_moved_record_likely_deliberate():
+        adm, line = undo_rework_bundle("moved")
+        return adm == ["undoesMaster"] and re.search(r"\b1 of them [^.]*likely deliberate", line) is not None, \
+            f"{adm}; {line[:300]}"
+
+    def c1028_undo_alone_says_lost_no_intent():
+        adm, line = undo_rework_bundle("plain")
+        return (adm == ["undoesMaster"] and "is lost in game" in line and "deliberate" not in line), f"{adm}; {line[:300]}"
+
+    for name, fn in [("fourth-review/C1020-moved-by-winner-not-brought-back", c1020_moved_by_winner_not_brought_back),
+                     ("fourth-review/C1021-same-spot-still-brought-back", c1021_same_spot_still_brought_back),
+                     ("fourth-review/C1022-nudged-still-brought-back", c1022_nudged_still_brought_back),
+                     ("fourth-review/C1023-rebased-by-winner-not-brought-back", c1023_rebased_by_winner_not_brought_back),
+                     ("fourth-review/C1024-kept-removal-of-shown-object-not-drawn",
+                      c1024_kept_removal_of_shown_object_not_drawn),
+                     ("fourth-review/C1025-left-removal-of-shown-object-not-drawn",
+                      c1025_left_removal_of_shown_object_not_drawn),
+                     ("fourth-review/C1026-undo-on-rebased-record-likely-deliberate",
+                      c1026_undo_on_rebased_record_likely_deliberate),
+                     ("fourth-review/C1027-undo-on-moved-record-likely-deliberate",
+                      c1027_undo_on_moved_record_likely_deliberate),
+                     ("fourth-review/C1028-undo-alone-says-lost-no-intent", c1028_undo_alone_says_lost_no_intent)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
