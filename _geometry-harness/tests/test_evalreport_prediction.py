@@ -3772,9 +3772,10 @@ def main():
         r2 = lost_row(OTHER, MOD_A, R2, "Placement", "o2", "a2", "v2")
         names = {"schema": "names-v1", "places": {}, "objects": {}, "mods": {}, "missing": [],
                  "refs": {R2: {"base": f"0BC001:{BASE}", "carriedBy": [BASE]}},
-                 "bases": {f"0BC001:{BASE}": {"type": "Static", "editorId": "COCMarkerHeading", "model": "m.nif"}}}
+                 "bases": {f"0BC001:{BASE}": {"type": "Static", "editorId": "COCMarkerHeading", "model": "MarkerCOCHeading.nif"}}}
         plan, md, _ = core_bundle([r1, r2], [], names=names)
-        ok = f"{R1} (RorlundREF, Placement)" in md and f"{R2} (a COCMarkerHeading, Placement)" in md
+        # after-review (Pilgrim review 3): the base's kind is said before its editor ID (a marker by its model's name)
+        ok = f"{R1} (RorlundREF, Placement)" in md and f"{R2} (an editor marker COCMarkerHeading, Placement)" in md
         return ok, next((ln for ln in md.splitlines() if "For example" in ln), "")[-220:]
 
     # C817 (Missives review 6, BPT review S6): an overlap item names its objects by their bases, and rows that are all
@@ -3791,7 +3792,7 @@ def main():
         extra = {(OVERLAP, "without-patch"): rows_, (OVERLAP, "baseline"): []}
         plan, md, _ = core_bundle([], [], extra_results=extra, names=names)
         line = next((ln for ln in md.splitlines() if ln.startswith("- **") and "overlap pair" in ln), "")
-        ok = f"All 2 are against one object, {Y} (a WallPiece)" in line
+        ok = f"All 2 are against one object, {Y} (a static object WallPiece)" in line   # after-review: kind said
         return ok, line[-260:]
 
     # C818 (Pilgrim review M1, Missives review 6): "most" only where one place holds more than half.
@@ -4369,6 +4370,32 @@ def main():
         return ok_a and ok_b, f"{items[:200]}; {once[:250]}"
 
     for name, fn in [("after-review/C912-outcome-and-once-sentence-parse", c912_outcome_and_once_sentence_parse)]:
+        cell(name, fn)
+
+
+    # C913 (Pilgrim review 3, Clockwork review 2): an object is named by what kind of thing it is, from its base's
+    # record type or its model's folder (skill data), before its editor ID: a visual effect, the NPC, a container.
+    def c913_objects_named_by_kind():
+        X1, Y1, N1 = f"000X91:{MOD_A}", f"000Y91:{OTHER}", f"00C913:{BASE}"
+        rows_ = [row("OVERLAP", OTHER, MOD_A, X1, other=Y1)]
+        r1 = lost_row(OTHER, MOD_A, N1, "Placement", "o1", "a1", "v1")
+        r1["Summary"] = f"PlacedNpc TestPriestREF: Placement - {OTHER}'s value lost to {MOD_A}'s"
+        names = {"schema": "names-v1", "places": {}, "objects": {}, "mods": {}, "missing": [],
+                 "refs": {X1: {"base": f"0BC091:{BASE}", "carriedBy": [MOD_A]},
+                          Y1: {"base": f"0BC092:{BASE}", "carriedBy": [OTHER]},
+                          N1: {"base": f"0BC093:{BASE}", "carriedBy": [BASE]}},
+                 "bases": {f"0BC091:{BASE}": {"type": "MoveableStatic", "editorId": "TestMist01",
+                                               "model": "Effects\\Ambient\\TestMist01.nif"},
+                           f"0BC092:{BASE}": {"type": "Container", "editorId": "TestChest", "model": "c.nif"},
+                           f"0BC093:{BASE}": {"type": "Npc", "editorId": "TestPriest", "model": None}}}
+        extra = {(OVERLAP, "without-patch"): rows_, (OVERLAP, "baseline"): []}
+        plan, md, _ = core_bundle([r1], [], extra_results=extra, names=names)
+        ok = ("a visual effect TestMist01" in md and "a container TestChest" in md
+              and "the NPC TestPriestREF" in md)
+        lines = [ln for ln in md.splitlines() if "TestMist01" in ln or "TestPriestREF" in ln]
+        return ok, " | ".join(x[-160:] for x in lines[:2])
+
+    for name, fn in [("after-review/C913-objects-named-by-kind", c913_objects_named_by_kind)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
