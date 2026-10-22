@@ -6432,6 +6432,27 @@ def main():
     for name, fn in [("fourth-review/C1044-base-value-named-by-its-origin", c1044_base_value_named_by_its_origin)]:
         cell(name, fn)
 
+    # C1066 (correction of 1dd9c3d9, found by claimaudit BGVALUE on regen-r4b): the origin of a carried base-game value is
+    # searched from the first plugin after the record's own first value: Skyrim.esm holds u, Update.esm changes it to v,
+    # HearthFires.esm (built on Update.esm) puts u back as its own change, and OtherMod (also built on Update.esm) carries
+    # u. OtherMod's value is HearthFires' change it carries: set aside, the loss said as HearthFires.esm's; never the
+    # record's first value counted as OtherMod's own change.
+    def c1066_base_origin_after_first_value():
+        W = f"00CA66:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, HF_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, HF_, OTHER, MOD_A, MOD_B])]
+        ch_ = [(W, "Cell", [(BASE, {"Owner": "u"}), (UPD, {"Owner": "v"}), (HF_, {"Owner": "u"}), (OTHER, {"Owner": "u"}),
+                            (MOD_A, {"Owner": "w"})])]
+        p_rows = [lost_row(x_, MOD_A, W, "Owner", ["Owner=u"], PH, PH) for x_ in (HF_, OTHER)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=ch_,
+                                  masters={UPD: [BASE], HF_: [BASE, UPD], OTHER: [BASE, UPD], MOD_A: [BASE], MOD_B: [BASE],
+                                           PATCH: [BASE]})
+        got = {e["A"]: (e["admission"], e.get("baseValueOf")) for e in rec_of(plan, W)}
+        return got.get(OTHER) == ("notOwnEdit", HF_), f"{got}"
+
+    for name, fn in [("fourth-review/C1066-base-origin-after-first-value", c1066_base_origin_after_first_value)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1045-earlier-fix-names-loser-and-winner", c1045_earlier_fix_names_loser_and_winner),
                      ("fourth-review/C1046-patch-removal-own-line", c1046_patch_removal_own_line)]:
         cell(name, fn)
