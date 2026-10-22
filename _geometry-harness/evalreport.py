@@ -4356,7 +4356,10 @@ def build_prediction(ctx: dict) -> dict:
                                           if not is_base_game(m_, words) and str(m_).lower() not in pt_lower
                                           and str(m_).lower() not in patch_lower))
             disp_ = {str(x_).lower(): x_ for a_ in all_orders.values() for x_ in a_ or []}
-            covered_ = [disp_.get(str(m_).lower(), m_) for m_ in covered_]
+            # in load order (a plugin's master list is read as a set: its order is not the file's)
+            ord_ = [str(x_).lower() for x_ in all_orders.get(p_arm) or []]
+            covered_ = sorted((disp_.get(str(m_).lower(), m_) for m_ in covered_),
+                              key=lambda m_: (ord_.index(str(m_).lower()) if str(m_).lower() in ord_ else 10 ** 6, str(m_).lower()))
             cov_low_ = {str(m_).lower() for m_ in covered_}
             outside_ = list(dict.fromkeys(m_ for e in open_ for m_ in (e["A"], e["B"])
                                           if str(m_).lower() not in pt_lower and not is_base_game(m_, words)
