@@ -6423,6 +6423,21 @@ def main():
         ln = next((x for x in (val.get("sentences") or []) if "masters" in x), "")
         return (OTHER in ln and O2 in ln and "outside" in ln), ln[:400] or txt[:300]
 
+    # C1060 (Sewers S5): a clash set aside because its object's base record was not read names that object (and the
+    # place its row gives), so a modder can look at it.
+    def c1060_body_unread_object_named():
+        refs = {f"000L0{i}:{MOD_A}": {"base": f"0B0S01:{MOD_A}"} for i in (1, 2)}
+        refs.update({f"000H0{i}:{MOD_B}": {"base": f"0B0S01:{MOD_A}"} for i in (1, 2, 3)})
+        bases = {f"0B0S01:{MOD_A}": {"type": "Static", "model": "rock.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, body_rows(), [MOD_A, MOD_B], patches=[PATCH],
+                                            names={"refs": refs, "bases": bases})
+        line = next((ln for ln in md.splitlines() if "base record was not read" in ln), "")
+        seg = line.split("base record was not read", 1)[-1][:200]
+        return f"000L03:{MOD_A}" in seg, seg
+
+    for name, fn in [("fourth-review/C1060-body-unread-object-named", c1060_body_unread_object_named)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1059-patch-scope-said", c1059_patch_scope_said)]:
         cell(name, fn)
 
