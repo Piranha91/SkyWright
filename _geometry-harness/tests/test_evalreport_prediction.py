@@ -3024,7 +3024,7 @@ def main():
                   lost_row(MOD_A, PATCH, F2, "OcclusionData", "a", "p", "o")]
         plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
         ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
-        ok = "1 record field, in 2 plugin pairs" in ln
+        ok = "1 record field, lost by 2 plugin pairs in all" in ln     # (fourth review) the pairs read as the losers
         return ok, f"line {ln[:160]!r}"
 
     # C1043 (Clockwork review S3 / Minor 4): the patch-wins line says the pairs are the plugin pairs that lose its fields,
@@ -3101,7 +3101,7 @@ def main():
             r_["Summary"] = r_["Summary"].replace("PlacedObject", "Cell")
         plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
         ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
-        ok = "1 record field, in 1 plugin pair," in ln and "1 more" in ln
+        ok = "1 record field, lost by 1 plugin pair in all," in ln and "1 more" in ln   # (fourth review) wording
         return ok, f"line {ln[:240]!r}"
 
     for name, fn in [("w2-cw/C620-no-change-never-dropped", c620_no_change_never_dropped),
