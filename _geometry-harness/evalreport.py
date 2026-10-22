@@ -3688,6 +3688,37 @@ def build_prediction(ctx: dict) -> dict:
                       "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],
                       "missingFacts": list(words["validationMissingFacts"])}
     headings = {k: bind(v, {"subject": subject}) for k, v in words["headings"].items()}
+    # (Pilgrim review 1) a split of quest aliases is said by scene, with the probe's own distance sentence, naming the
+    # plugin that first set the actors' winning placement (the record import's chain of that setup), never as records
+    # "between" the probe's plugin pair
+    sp_ = words.get("splitDetail") or {}
+    for f_ in findings:
+        if f_.get("kind") != "finding" or f_.get("checkId") != sp_.get("check"):
+            continue
+        rows_ = [r_ for r_ in f_.get("rows") or [] if isinstance(r_, dict)]
+        scenes_ = list(dict.fromkeys(m_.group(1) for r_ in rows_
+                                     for m_ in [re.search(sp_.get("scenePattern") or "$^", str(r_.get("summary") or ""))]
+                                     if m_))
+        if not scenes_:
+            continue
+        origins_ = collections.Counter()
+        for r_ in rows_:
+            ch_ = (chains_of(sp_.get("recordCheck"), f_.get("armId")) or {}).get(str(r_.get("formKey")))
+            vals_ = (ch_ or {}).get("values", {}).get(sp_.get("field") or "Placement")
+            if not vals_:
+                continue
+            k_ = next(i_ for i_ in range(len(vals_)) if vals_[i_] == vals_[-1])
+            if 0 < k_ < len(vals_) - 1:
+                origins_[(ch_["providers"][k_], ch_["providers"][-1])] += 1
+        c_ = f_.get("counts") or {}
+        ex_ = str(rows_[0].get("summary") or "")
+        vals_ = {"count": fmt_n(len(scenes_)), "scenes": sp_["noun"][0 if len(scenes_) == 1 else 1], "example": ex_,
+                 "winner": c_.get("B") or ""}
+        if len(origins_) == 1:
+            (origin_, carrier_), _ = origins_.most_common(1)[0]
+            f_["readerPlain"] = bind(sp_["lineFrom"], {**vals_, "origin": origin_, "carrier": carrier_})
+        else:
+            f_["readerPlain"] = bind(sp_["line"], vals_)
     return {"prediction": prediction, "coverage": coverage, "validation": validation, "headings": headings}
 
 
