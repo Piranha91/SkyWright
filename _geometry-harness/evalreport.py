@@ -3258,6 +3258,8 @@ def build_prediction(ctx: dict) -> dict:
             es_ = [e for e in es_ if still_off(e)]
             return off_text(len(es_), sum(1 for e in es_ if brings_back(e)))
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
+        problem_objects = {}
+        gap_re = (words.get("newObjects") or {}).get("gapPattern")
         problem_rows = collections.Counter()          # rows per new problem: an object's pairs (BPT review S3)
         # new with the patch is decided by the same setup with and without the patch alone (coordinator ruling on
         # Pilgrim's blind review); a new clash another setup without the patch also has (Grand Solitude alone splits
@@ -3314,6 +3316,17 @@ def build_prediction(ctx: dict) -> dict:
                 problems.append(rk)
 
                 problem_finding.setdefault(rk[0], []).append(hit["finding"].get("id"))
+            if (rk[0], p_of(rk[0])) in measured and rk[1] != "LOST-EDIT" and rk[4]:
+                # (BPT review 2) each new object by its base and model, with the measured gap to the nearest surface
+                gap_ = None
+                for t_ in (hit["row"].get("physicalDetail"), hit["row"].get("summary")):
+                    m_ = re.search(gap_re, str(t_ or "")) if gap_re else None
+                    if m_:
+                        gap_ = float(m_.group(1))
+                        break
+                o_ = problem_objects.setdefault(rk[0], collections.OrderedDict()).setdefault(str(rk[4]), None)
+                if gap_ is not None and (o_ is None or gap_ < o_):
+                    problem_objects[rk[0]][str(rk[4])] = gap_
         spot_rows = [e for e in record if e["admission"] not in ("admitted", "repeat", "sameClash", "sameValue", "samePair",
                                                                  "undoesMaster", "superseded",
                                                                  *NOISE_ADMISSIONS)
@@ -3485,7 +3498,28 @@ def build_prediction(ctx: dict) -> dict:
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
         # a geometry clash between a plugin's object and its master's is counted and labelled (coordinator ruling)
         problem_master = collections.Counter(rk[0] for rk in problems if ident_of.get(rk, tuple(rk[:5])) in master_idents)
+        def objects_note(c):
+            """The new objects of a check grouped by base: the base's editor ID, its model and the measured gaps."""
+            nw_ = words.get("newObjects") or {}
+            groups_ = collections.OrderedDict()
+            for fk_, gap_ in (problem_objects.get(c) or {}).items():
+                base_ = name_bases.get((name_refs.get(fk_) or {}).get("base") or "") or {}
+                if not base_.get("editorId"):
+                    return None                # a new object whose base was not read: no partial naming
+                groups_.setdefault((base_["editorId"], base_.get("model") or ""), []).append(gap_)
+            if not groups_ or not nw_.get("group"):
+                return None
+            parts_ = []
+            for (ed_, model_), gaps_ in groups_.items():
+                known_ = [g_ for g_ in gaps_ if g_ is not None]
+                parts_.append(bind(nw_["group"], {
+                    "count": fmt_n(len(gaps_)), "base": ed_, "model": bind(nw_["model"], {"model": model_}) if model_ else "",
+                    "gaps": bind(nw_["gaps"], {"gaps": ", ".join(fmt_units(g_) for g_ in sorted(known_, reverse=True))})
+                    if known_ else ""}))
+            return "; ".join(parts_)
+
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
+                         "objectsNote": objects_note(c),
                          "masterNote": (bind(words["newByCheckOwnMaster"], {"count": fmt_n(problem_master[c])})
                                         if problem_master.get(c) else None),
                          "findingIds": [x for x in dict.fromkeys(fids) if x]}
