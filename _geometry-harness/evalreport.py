@@ -1667,7 +1667,7 @@ def build_prediction(ctx: dict) -> dict:
         # record's first (the base game's original value) or a later fix
         # (fourth review, Clockwork r3 S1) the EARLIEST such provider: the plugin that set the value; a later base-game
         # plugin holding the same value (a Creation Club plugin carrying an update's value) only carries it
-        base_k = next((k for k in range(0, i) if is_base_game(provs[k], words) and vals[k] == vals[i]
+        base_k = next((k for k in range(1, i) if is_base_game(provs[k], words) and vals[k] == vals[i]
                        and recordrows.own_change(provs, vals, k, (masters or {}).get(str(provs[k]).lower())
                                                  if masters is not None else None)[0]), None)
         return {"changed": changed, "inherits": provs[j] if j is not None else None,
