@@ -2448,6 +2448,19 @@ def build_prediction(ctx: dict) -> dict:
             # is an absence (the loser has no such data); a winner keeping the base game's value
             g.setdefault("_fieldRows", collections.Counter())[field_word(hit["row"].get("field"))] += 1
             g.setdefault("_rawFields", collections.Counter())[str(hit["row"].get("field"))] += 1
+            # (fourth review, Missives S4) which leaves of the field differ between the two versions, and whose value is
+            # used without the winner (the provider loaded just before it), from the record chain
+            ch4_ = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+            low4_ = [str(x).lower() for x in (ch4_ or {}).get("providers") or []]
+            if ch4_ and rk[2].lower() in low4_ and rk[3].lower() in low4_:
+                ia4_, ib4_ = low4_.index(rk[2].lower()), low4_.index(rk[3].lower())
+                f4_ = str(hit["row"].get("field") or "")
+                la_, lb_ = (recordrows.provider_fields(ch4_, f4_, k_) for k_ in (ia4_, ib4_))
+                diff4_ = sorted(k_ for k_ in set(la_) | set(lb_) if la_.get(k_) != lb_.get(k_))
+                g.setdefault("_leafDiff", {}).setdefault(f4_, []).append(
+                    (tuple(diff4_), la_.get(diff4_[0]) if len(diff4_) == 1 else None,
+                     lb_.get(diff4_[0]) if len(diff4_) == 1 else None))
+                g.setdefault("_prevWinner", set()).add(ch4_["providers"][ib4_ - 1] if ib4_ > 0 else None)
             got3_ = field_chain(p_of(rk[0]), rk, rk[2])
             if got3_ is not None:
                 provs3, vals3, _ = got3_
@@ -2755,6 +2768,19 @@ def build_prediction(ctx: dict) -> dict:
         s_off = g.pop("_startsOff", None) or set()
         if s_off and words.get("itemStartsOff"):
             detail.append(bind(words["itemStartsOff"], {"count": fmt_n(len(s_off)), "objects": objs_(len(s_off))}))
+        for f4_, ds4_ in (g.pop("_leafDiff", None) or {}).items():
+            leaves_ = {d_[0] for d_ in ds4_}
+            if (len(leaves_) == 1 and len(next(iter(leaves_))) == 1 and next(iter(leaves_))[0].endswith("Flags")
+                    and words.get("itemLeafFlagsOnly")):
+                pairs4_ = list(dict.fromkeys((d_[1] or "none", d_[2] or "none") for d_ in ds4_))
+                detail.append(bind(words["itemLeafFlagsOnly"], {
+                    "field": field_word(f4_), "values": "; ".join(f"{a_} against {b_}" for a_, b_ in pairs4_[:2])}))
+        prev_ = g.pop("_prevWinner", None) or set()
+        if len(directions) == 1 and len(prev_) == 1 and None not in prev_ and words.get("itemPreviousWinner"):
+            lo4_, wi4_ = next(iter(directions))
+            p4_ = next(iter(prev_))
+            if str(p4_).lower() != str(lo4_).lower():
+                detail.append(bind(words["itemPreviousWinner"], {"winner": wi4_, "prev": p4_}))
         n_eff_ = g.pop("_effectPairs", 0)
         if n_eff_ and words.get("itemEffectPairs"):
             detail.append(bind(words["itemEffectPairs"], {"count": fmt_n(n_eff_), "all": "All" if n_eff_ == g["count"] else ""}))
