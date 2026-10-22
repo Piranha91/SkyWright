@@ -5977,6 +5977,23 @@ def main():
         line = next((ln for ln in md.splitlines() if f"{MOD_A} undoes its master {UPD}'s fix" in ln), "")
         return adm == ["undoesMaster"] and "deliberate" not in line and "is lost in game" in line, f"{adm}; {line[:300]}"
 
+    # C1029 (BPT r2/r3 S1): ModB switches off an object whose base has no model (a room marker) and ModA has it on: the
+    # item says it is enabled, with nothing drawn, never "the object is drawn".
+    def c1029_no_model_switched_on_not_drawn():
+        D1 = f"00CA29:{BASE}"
+        lost_, win_ = offs(-30000), offs(0)
+        rows_ = [lost_row(MOD_B, MOD_A, D1, "Placement", off_txt(lost_), off_txt(win_), off_txt(offs(0)), before=BASE)]
+        ch_ = [(D1, "PlacedObject", [(BASE, offs(0)), (MOD_B, lost_), (MOD_A, win_)])]
+        names = {"refs": {D1: {"base": f"00001F:{BASE}"}},
+                 "bases": {f"00001F:{BASE}": {"type": "Static", "editorId": "RoomMarker", "model": ""}}}
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B), names=names)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return (f"{MOD_B}'s value switches the object off" in it and "is drawn" not in it and "no model" in it), it[-400:]
+
+    for name, fn in [("fourth-review/C1029-no-model-switched-on-not-drawn", c1029_no_model_switched_on_not_drawn)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1061-parent-loser-worded-apart", c1061_parent_loser_worded_apart),
                      ("fourth-review/C1062-starts-off-loser-worded-apart", c1062_starts_off_loser_worded_apart),
                      ("fourth-review/C1063-rounding-is-no-rework", c1063_rounding_is_no_rework)]:
