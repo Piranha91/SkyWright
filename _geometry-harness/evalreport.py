@@ -5430,9 +5430,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "parts": "; ".join(f"{fmt_n(aside_counts[k])} {pw['detailAside'][k]}"
                            for k in ("baseGame", "ownMaster", "sameMod", "countOnly", "noBody") if aside_counts.get(k))})
                                  if aside_total else None)
-    reader["detailSingleModLine"] = (bind(pw["detailSingleModLine"], {
+    # (Pilgrim review 5) a result left out of this list that holds a clash counted at the top is said so, never "set
+    # aside": counted from the prediction record's admitted rows by finding
+    counted_fids_ = {str(e.get("findingId")) for e in lead["prediction"].get("record") or []
+                     if e.get("admission") == "admitted" and e.get("findingId")}
+    single_counted = sum(1 for f in findings if f.get("readerDetailAside") == "singleMod" and f.get("readerRelevant")
+                         and str(f.get("id")) in counted_fids_)
+    reader["detailSingleModLine"] = (bind(pw["detailSingleModCounted" if single_counted else "detailSingleModLine"], {
         "count": fmt_n(single_mod_count), "resultNoun": "result" if single_mod_count == 1 else "results",
-        "verb": "is" if single_mod_count == 1 else "are"}) if single_mod_count else None)
+        "verb": "is" if single_mod_count == 1 else "are", "counted": fmt_n(single_counted),
+        "holds": "holds" if single_counted == 1 else "hold", "rest": fmt_n(single_mod_count - single_counted)})
+                                     if single_mod_count else None)
     # the `missing` chapter names every required missing check id, one caption per status group
     missing_by_status: dict = collections.OrderedDict()
     for m in missing:
