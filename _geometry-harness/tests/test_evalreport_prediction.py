@@ -5623,7 +5623,19 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         return f"{OTHER} has no" not in it and "absence" not in it, it[-400:]
 
-    for name, fn in [("round-2/C984-absence-only-when-whole-value-absent", c984_absence_only_when_whole_value_absent)]:
+    # C988 (round 2, R1 guard, Missives S2's SolitudeWorld): a lost value whose lines are only the winner's entries and the
+    # loser's own "ABSENT here" for the field is still an absence.
+    def c988_absent_here_line_is_absence():
+        W1 = f"00C988:{BASE}"
+        r_ = lost_row(OTHER, MOD_A, W1, "MaxHeight", [f"MaxHeight.CellData only in {MOD_A}: 00", "MaxHeight: ABSENT here"],
+                      PH, PH)
+        r_["Summary"] = f"Worldspace TestWorld: MaxHeight - {OTHER}'s value lost to {MOD_A}'s"
+        plan, md, _ = core_bundle([r_], [r_], masters=MASTERS_)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return f"{OTHER} has no " in it and "absence" in it, it[-400:]
+
+    for name, fn in [("round-2/C984-absence-only-when-whole-value-absent", c984_absence_only_when_whole_value_absent),
+                     ("round-2/C988-absent-here-line-is-absence", c988_absent_here_line_is_absence)]:
         cell(name, fn)
 
     # C985, C986 (round 2, R2: Missives review S1, Snazzy review S2): the earlier clashes a patch also fixes are counted as
