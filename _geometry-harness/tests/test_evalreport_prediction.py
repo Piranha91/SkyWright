@@ -4398,6 +4398,29 @@ def main():
     for name, fn in [("after-review/C913-objects-named-by-kind", c913_objects_named_by_kind)]:
         cell(name, fn)
 
+
+    # C914 (Pilgrim review 4): the base-game line names, for a quest or switch check, the objects (by kind and editor
+    # ID from the probe's own words) and their places, and links each of its findings.
+    def c914_base_game_line_names_objects_and_places():
+        X3, X4 = f"000X03:{MOD_A}", f"000X04:{MOD_A}"
+        r1 = state_row("S1", BASE, MOD_A, X3, S0)
+        r1["Summary"] = f"Route StateConditional under CampEnable: {X3} [Static TestCairn] arrives - Blocked: cuts the path"
+        r1["Necessary"][0]["Label"] = "Farm (ext)"
+        r2 = state_row("S2", BASE, MOD_A, X4, S0)
+        r2["Summary"] = f"Route StateConditional under HallEnable: {X4} [Activator TestShrine] arrives - LikelyBlocked"
+        r2["Necessary"][0]["Label"] = "Hall (int)"
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): [r1, r2], (STATE, "without-b"): [],
+                   (STATE, "without-a"): []}
+        plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
+        ln = next((x for x in md.splitlines() if "against base-game objects" in x), "")
+        ok = ("TestCairn" in ln and "Farm (ext)" in ln and "TestShrine" in ln and "Hall (int)" in ln
+              and len(re.findall(r"\(evidence-index\.md#F-\d+\)", ln)) == 2)
+        return ok, ln[:300]
+
+    for name, fn in [("after-review/C914-base-game-line-names-objects-and-places",
+                      c914_base_game_line_names_objects_and_places)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
