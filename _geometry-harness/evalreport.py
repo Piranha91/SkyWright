@@ -1505,6 +1505,7 @@ def build_prediction(ctx: dict) -> dict:
 
     body_checks = set(words.get("bodyChecks") or [])   # checks whose rows name placed objects, which have a base
     symmetric_checks = set(words.get("symmetricPairChecks") or [])
+    effect_model_re = re.compile(words["effectModelPattern"], re.I) if words.get("effectModelPattern") else None
 
     def body_unread(rk, other):
         return (bases_read and rk[0] in body_checks
@@ -2352,6 +2353,18 @@ def build_prediction(ctx: dict) -> dict:
             pairs_ = g.setdefault("_objPairs", [])
             if not pairs_ and (object_name(rk[4]) or object_name(o0_)):
                 pairs_.append(bind(words["itemObjectPair"], {"a": named(rk[4]), "b": named(o0_)}))
+        if rk[1] != "LOST-EDIT" and hit["row"].get("other") and effect_model_re is not None and any(
+                effect_model_re.search(str((name_bases.get((name_refs.get(str(o_)) or {}).get("base") or "") or {})
+                                           .get("model") or "")) for o_ in [rk[4], *hit["row"]["other"]]):
+            # (fourth review, Pilgrim S2) a pair with an object whose model is a visual effect (skill data): said apart
+            g["_effectPairs"] = g.get("_effectPairs", 0) + 1
+        if rk[1] == "LOST-EDIT" and str(hit["row"].get("field") or "") == sup_place:
+            # (fourth review, Pilgrim S4) a straight vertical difference between the two values: said with its height
+            v4_ = hit["row"].get("values") or {}
+            lp_, wp_ = (_vec(next((x_ for x_ in (v4_.get(k_) if isinstance(v4_.get(k_), list) else [v4_.get(k_)])
+                                   if "Position" in str(x_)), None)) for k_ in ("lost", "winner"))
+            if lp_ and wp_ and math.dist(lp_[:2], wp_[:2]) <= 1.0 and abs(wp_[2] - lp_[2]) >= SEAT_SPOT_UNITS:
+                g.setdefault("_heightDiff", {}).setdefault((rk[3], rk[2]), []).append(wp_[2] - lp_[2])
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
             # a pair of objects: both are objects in the clash (blind review: 323 pairs are 274 objects)
             g.setdefault("_pairObjects", set()).update([str(rk[4]), *map(str, hit["row"]["other"])])
@@ -2742,6 +2755,18 @@ def build_prediction(ctx: dict) -> dict:
         s_off = g.pop("_startsOff", None) or set()
         if s_off and words.get("itemStartsOff"):
             detail.append(bind(words["itemStartsOff"], {"count": fmt_n(len(s_off)), "objects": objs_(len(s_off))}))
+        n_eff_ = g.pop("_effectPairs", 0)
+        if n_eff_ and words.get("itemEffectPairs"):
+            detail.append(bind(words["itemEffectPairs"], {"count": fmt_n(n_eff_), "all": "All" if n_eff_ == g["count"] else ""}))
+        for (wi_, lo_), dzs_ in (g.pop("_heightDiff", None) or {}).items():
+            if words.get("itemHeightDiff"):
+                lo_d, hi_d = min(abs(x_) for x_ in dzs_), max(abs(x_) for x_ in dzs_)
+                dir_ = ("lower" if all(x_ < 0 for x_ in dzs_) else "higher" if all(x_ > 0 for x_ in dzs_)
+                        else "lower or higher")
+                detail.append(bind(words["itemHeightDiff"], {
+                    "winner": wi_, "loser": lo_, "count": fmt_n(len(dzs_)), "noun": words["fieldNoun"][0 if len(dzs_) == 1 else 1],
+                    "range": fmt_units(lo_d) if abs(hi_d - lo_d) < 0.5 else f"{fmt_units(lo_d)} to {fmt_units(hi_d)}",
+                    "dir": dir_}))
         fn_ = g.pop("_rawFields", None) or {}
         if g["kind"] == "LOST-EDIT" and fn_ and words.get("itemMainFieldInGame"):
             top_f, top_n = collections.Counter(fn_).most_common(1)[0]
