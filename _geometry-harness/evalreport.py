@@ -2973,6 +2973,19 @@ def build_prediction(ctx: dict) -> dict:
                                                if patched_arm else "together"],
             "winner": winner, "loser": loser, "count": fmt_n(len(hits)), "holds": fmt_n(len(held)),
             "examples": ex_})
+        # (fourth review, Clockwork S2) a replacing navmesh with the base game's own triangle count, read from the base
+        # game's plugin file: the city mod's navmesh work is undone there, not trimmed
+        base_same_ = []
+        for d_ in drops:
+            fk_ = str(d_[4] or "")
+            origin_ = fk_.split(":", 1)[1] if ":" in fk_ else ""
+            if origin_ and is_base_game(origin_, words):
+                got_ = plugin_record(origin_, "navmesh", fk_)
+                if got_ and got_.get("triangles") == d_[3]:
+                    base_same_.append(f"{fk_} ({fmt_n(d_[3])} triangles)")
+        if base_same_ and words.get("historyLossBaseCount"):
+            text += " " + bind(words["historyLossBaseCount"], {"count": fmt_n(len(base_same_)), "winner": winner,
+                                                                "records": ", ".join(base_same_[:3])})
         if links:
             text += " " + bind(words["historyLossLinks"], {"links": fmt_n(len(links)), "targets": ", ".join(tdesc)})
         if n_measured and n_persist:
