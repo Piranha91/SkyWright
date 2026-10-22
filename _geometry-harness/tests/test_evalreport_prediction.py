@@ -4217,6 +4217,33 @@ def main():
     for name, fn in [("after-review/C907-alone-line-names-alone-winner", c907_alone_line_names_alone_winner)]:
         cell(name, fn)
 
+
+    # C908 (Winterhold review 3): the undone line links the finding that holds the objects it names as switched back on,
+    # not the first finding in check order (here a cell finding with no example in it).
+    def c908_undone_link_holds_examples():
+        C1 = f"00C908:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]
+        w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", "a1", "a1"),
+                  lost_row(MOD_A, PATCH, f"000702:{BASE}", "SkyrimMajorRecordFlags", "InitiallyDisabled", "0", "0")]
+        c_rows = [lost_row(MOD_B, PATCH, C1, "Lighting", "b9", "v9", "v9")]
+        c_rows[0]["Summary"] = f"Cell TestCellSouth: Lighting - {MOD_B}'s value lost to {PATCH}'s"
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows,
+               (CELLATTR, "baseline"): [], (CELLATTR, "with-patch"): c_rows}
+        count_only = {k: max(1, len(v)) for k, v in enr.items()}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                            count_only=count_only, enrichment=enr)
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
+        m_ = re.search(r"\[(F-\d+)\]", line)
+        fid = m_.group(1) if m_ else None
+        f_ = next((f for f in plan.get("findings") or [] if f.get("id") == fid), {})
+        holds = any(str(r_.get("formKey")) == f"000702:{BASE}" for r_ in f_.get("rows") or [])
+        ok = "switch an object back on" in line and holds
+        return ok, f"link {fid} ({f_.get('checkId')}); {line[:200]}"
+
+    for name, fn in [("after-review/C908-undone-link-holds-examples", c908_undone_link_holds_examples)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
