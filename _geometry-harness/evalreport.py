@@ -4308,6 +4308,24 @@ def build_prediction(ctx: dict) -> dict:
                      # new problems in their units, an object of a by-object check with its pairs (BPT review S3)
                      bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
+        # (fourth review, Sewers S3) which other mods the patches cover (their masters besides the base game and the
+        # evaluated mods): what is still there with a mod they do not cover is outside what they set out to fix
+        if masters is not None and open_ and words.get("validationPatchScope"):
+            covered_ = list(dict.fromkeys(m_ for p_ in patch_names for m_ in (masters.get(str(p_).lower()) or [])
+                                          if not is_base_game(m_, words) and str(m_).lower() not in pt_lower
+                                          and str(m_).lower() not in patch_lower))
+            disp_ = {str(x_).lower(): x_ for a_ in all_orders.values() for x_ in a_ or []}
+            covered_ = [disp_.get(str(m_).lower(), m_) for m_ in covered_]
+            cov_low_ = {str(m_).lower() for m_ in covered_}
+            outside_ = list(dict.fromkeys(m_ for e in open_ for m_ in (e["A"], e["B"])
+                                          if str(m_).lower() not in pt_lower and not is_base_game(m_, words)
+                                          and str(m_).lower() not in patch_lower and str(m_).lower() not in cov_low_))
+            if outside_:
+                sentences.insert(new_idx, bind(words["validationPatchScope"], {
+                    "patch": patch, "covered": and_list(covered_) if covered_ else words.get("validationPatchScopeNone") or "none",
+                    "outside": and_list(outside_), "lists": "list" if len(patch_names) > 1 else "lists",
+                    "it": "they set" if len(patch_names) > 1 else "it sets"}))
+                new_idx += 1
         not_new_sentence = None
         if not_new:
             by_setup = collections.OrderedDict()
