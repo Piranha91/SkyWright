@@ -4113,6 +4113,34 @@ def main():
                      ("after-review/C904-same-land-byte-stays-unused", c904_same_land_byte_stays_unused)]:
         cell(name, fn)
 
+
+    # C923 (reviewer, BPT 1): every off-for-good count sits next to the count it is part of and is never larger; only
+    # a lost value of the field that sets the object off (D3's position below the world) would bring it back if
+    # forwarded, so only that is said: D1 (enabled opposite to the player, its Placement lost) has no effect in game.
+    def part_le_whole(text):
+        bad = []
+        for m_ in re.finditer(r"\((\d[\d,]*) on objects set off for good", text):
+            before = re.findall(r"(?<![\w.])(\d[\d,]*)(?!\w)", text[:m_.start()])
+            whole = int(before[-1].replace(",", "")) if before else -1
+            if int(m_.group(1).replace(",", "")) > whole:
+                bad.append((m_.group(1), whole))
+        return bad
+
+    def c923_off_count_part_of_its_count_and_true_effect():
+        plan, md, _ = offwin_bundle()
+        st = pair_parts((reader(plan).get("prediction") or {}).get("withPatchStays"), MOD_A, MOD_B)
+        st_ = " ".join(st)
+        left_part, _, kept_part = st_.partition(", and ")
+        bad = part_le_whole(md)
+        ok = (not bad and "off for good" in md and "forwarding" not in left_part
+              and re.search(r"forwarding the 1 on/off field\b", kept_part) is not None
+              and "brings them back" not in md)
+        return ok, f"bad {bad}; {st}"
+
+    for name, fn in [("after-review/C923-off-count-part-of-its-count-and-true-effect",
+                      c923_off_count_part_of_its_count_and_true_effect)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
