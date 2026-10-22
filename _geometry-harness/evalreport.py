@@ -2241,7 +2241,10 @@ def build_prediction(ctx: dict) -> dict:
         partners_ = g.pop("_partnerSet", set())
         obj_pairs_ = g.pop("_objPairs", [])
         if g["count"] > 1 and len(partners_) == 1:
-            detail.append(bind(words["itemOnePartner"], {"count": fmt_n(g["count"]), "object": named(next(iter(partners_)))}))
+            # (Clockwork review 4) a navmesh is a navmesh record, never an object
+            on_ = (words.get("objectNouns") or {}).get(g["checkId"]) or ["object", "objects"]
+            detail.append(bind(words["itemOnePartner"], {"count": fmt_n(g["count"]), "object": named(next(iter(partners_))),
+                                                         "noun": on_[0]}))
         elif obj_pairs_ and g["count"] <= int(words.get("itemObjectPairsMax") or 5):
             detail.append(bind(words["itemObjectPairs"], {"pairs": "; ".join(obj_pairs_)}))
         st_entries = g.pop("_stateEntries", None)
@@ -3697,8 +3700,9 @@ def build_prediction(ctx: dict) -> dict:
             places.pop("", None)
             where_ = []
             if g["checkId"] not in by_object:
+                on_ = (words.get("objectNouns") or {}).get(g["checkId"]) or ["object", "objects"]
                 where_.append(bind(words["stillThereObjects"], {"count": fmt_n(len(objs)),
-                                                                 "noun": "object" if len(objs) == 1 else "objects"}))
+                                                                 "noun": on_[0] if len(objs) == 1 else on_[1]}))
             if places:
                 pl_, n_pl = places.most_common(1)[0]
                 w_key = ("stillThereAllIn" if len(places) == 1 else "stillThereMostIn" if n_pl * 2 > sum(places.values())
