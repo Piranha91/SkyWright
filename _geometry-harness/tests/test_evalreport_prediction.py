@@ -5650,7 +5650,7 @@ def main():
     # C985, C986 (round 2, R2: Missives review S1, Snazzy review S2): the earlier clashes a patch also fixes are counted as
     # distinct changes in game: one field lost by two plugins is one; a Grid change only in bytes the game does not read
     # is none. Where the patch has no such field at all, the clash is said as the patch removing it, not as a fix.
-    def earlier_fix_bundle(patch_has_field):
+    def earlier_fix_bundle(patch_has_field, whole=False):
         """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight's cell data 05, ModA 09, the patch 05. Removal:
         OtherMod and Neighbour have no MaxHeight, ModA has 09, the patch has none. Without ModA both lose to Later.esp too (already
         there). A Grid row differing only in unused bytes is lost the same way and fixed too."""
@@ -5691,6 +5691,8 @@ def main():
                                          [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
                                          enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE], O3: [BASE],
                                                                                   PATCH: [BASE]})
+        if whole:
+            return md
         return next((x for x in md.splitlines() if "but not predicted" in x), "")
 
     def c985_earlier_fixes_counted_once():
@@ -6099,6 +6101,85 @@ def main():
         reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
         pl_ = str(reg.get("readerPlain") or "")
         return ("repaired 1 existing problem" in pl_ and "repaired 2" not in pl_ and "no model" in pl_), pl_[-300:]
+
+    # C1057 (BPT r2/r3 S5): a new object's nearest surface at the contact probe's search limit (128 u) is said as nothing
+    # found within the limit, never as a distance; a measured gap below it stays a distance.
+    def c1057_search_limit_not_a_distance():
+        X1, X2 = f"000X57:{MOD_A}", f"000X58:{MOD_A}"
+        new = [row("CONTACT", MOD_B, MOD_A, X1, other=f"000H57:{MOD_B}"), row("CONTACT", MOD_B, MOD_A, X2, other=f"000H58:{MOD_B}")]
+        new[0]["Summary"] += "; nearest floor or wall 128u"
+        new[1]["Summary"] += "; nearest floor or wall 4.9u"
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                     created=2, newDefect=2, attributed=0, unmeasured=0)}}
+        log = f"NEW     CONTACT    {MOD_B}  x  {MOD_A}   +2 record(s): created 2\n"
+        refs = {X1: {"base": f"0B0P57:{MOD_A}"}, X2: {"base": f"0B0P57:{MOD_A}"},
+                **{f"000H5{i}:{MOD_B}": {"base": f"0B0W57:{MOD_B}"} for i in (7, 8)}}
+        bases = {f"0B0P57:{MOD_A}": {"type": "Static", "editorId": "ShadowPlane", "model": "plane.nif"},
+                 f"0B0W57:{MOD_B}": {"type": "Static", "editorId": "Wall", "model": "wall.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): new},
+                                            [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                            names={"refs": refs, "bases": bases}, diff_logs={(CONTACT, "with-patch"): log})
+        notes = " ".join(str(n.get("objectsNote") or "") for n in (reader(plan).get("validation") or {}).get("newByCheck") or [])
+        return ("128 u," not in notes and not notes.rstrip().endswith("128 u") and "within 128 u" in notes
+                and "4.9 u" in notes), notes[:300]
+
+    # C1045, C1047 (Clockwork S5, Missives S1 wording, BPT r2 S4): a change the patch also fixes that is already lost
+    # without the evaluated mod is said as what it is: the losing plugin's change and the plugin it is lost to in the
+    # setup without the evaluated mod, never "present without the evaluated mods" beside a pair naming that mod.
+    def c1045_earlier_fix_names_loser_and_winner():
+        ln = earlier_fix_bundle(True)
+        return ("present without the evaluated mods" not in ln and f"{OTHER}'s change" in ln and "Later.esp" in ln), ln[:500]
+
+    # C1046 (Snazzy r2 S1, r3 S1): a field the patch removes (it holds none of it) is a loss the patch introduces, said on
+    # its own line with its in-game effect not established, never under "Resolved ... but not predicted".
+    def c1046_patch_removal_own_line():
+        md = earlier_fix_bundle(False, whole=True)
+        nl = next((x for x in md.splitlines() if "but not predicted" in x), "")
+        own = next((x for x in md.splitlines() if "removes" in x and "max height data" in x), "")
+        return ("removes" not in nl and bool(own) and "but not predicted" not in own and "not established" in own),             f"{nl[:200]} || {own[:300]}"
+
+    # C1041 (Clockwork r3 S2): the carried-value clause counts record fields, as the sentence it is part of does: two
+    # plugins carrying HearthFires.esm's value on one cell and one on another are 3 fields, "in 3 of them", not 2 records.
+    def c1041_carried_clause_counts_fields():
+        W1, W2, O2 = f"00CA41:{BASE}", f"00CA42:{BASE}", "Neighbour.esp"
+        arms = [arm("baseline", [BASE, HF_, THIRD, OTHER, O2, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, THIRD, OTHER, O2, MOD_A, MOD_B])]
+        ch_ = [(BASE, {"WaterHeight": "0"}), (HF_, {"WaterHeight": "3.4028235E+38"}), (THIRD, {"WaterHeight": "-2147483648"}),
+               (OTHER, {"WaterHeight": "3.4028235E+38"}), (O2, {"WaterHeight": "3.4028235E+38"}),
+               (MOD_A, {"WaterHeight": "-2147483648"})]
+        chains = [(W1, "Cell", ch_), (W2, "Cell", ch_)]
+        p_rows = [lost_row(x_, MOD_A, w_, "WaterHeight", ["WaterHeight=3.4028235E+38"], PH, PH)
+                  for x_, w_ in ((HF_, W1), (OTHER, W1), (O2, W1), (HF_, W2), (OTHER, W2))]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], THIRD: [BASE], OTHER: [BASE, HF_], O2: [BASE, HF_],
+                                           MOD_A: [BASE], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if "only undoes the change" in ln), "")
+        return re.search(r"in 3 of them the value lost is still an earlier plugin's change", line) is not None, line[-300:]
+
+    # C1040 (Snazzy S3): the detail list's count of results that are not clashes between two mods names its population
+    # (result rows of every setup measured, already-there ones included), so it is not read against the prediction's
+    # "with the base game" count of new clashes.
+    def c1040_detail_aside_population_named():
+        found = []
+        for fn_ in (base_game_only_bundle, already_present_and_mod_partner_bundle, detail_bundle):
+            plan = fn_()[0]
+            ln_ = str(reader(plan).get("detailAsideLine") or "")
+            if ln_:
+                found.append(ln_)
+        return bool(found) and all("every setup measured" in x_ for x_ in found), f"{found[:1]}"
+
+    for name, fn in [("fourth-review/C1040-detail-aside-population-named", c1040_detail_aside_population_named)]:
+        cell(name, fn)
+
+    for name, fn in [("fourth-review/C1041-carried-clause-counts-fields", c1041_carried_clause_counts_fields)]:
+        cell(name, fn)
+
+    for name, fn in [("fourth-review/C1045-earlier-fix-names-loser-and-winner", c1045_earlier_fix_names_loser_and_winner),
+                     ("fourth-review/C1046-patch-removal-own-line", c1046_patch_removal_own_line)]:
+        cell(name, fn)
+
+    for name, fn in [("fourth-review/C1057-search-limit-not-a-distance", c1057_search_limit_not_a_distance)]:
+        cell(name, fn)
 
     for name, fn in [("fourth-review/C1039-repairs-count-bodied-objects", c1039_repairs_count_bodied_objects)]:
         cell(name, fn)
