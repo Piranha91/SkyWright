@@ -3063,7 +3063,7 @@ def main():
         arms = [arm("baseline", [BASE, OTHER, CASE, MOD_A, MOD_B, PATCH], kind="baseline"),
                 arm("without-patch", [BASE, OTHER, CASE, MOD_A, MOD_B])]
         p_rows = [lost_row(OTHER, MOD_A, f"00C311:{BASE}", "Owner", "o", "a", "v")] + [
-            lost_row(CASE, MOD_A, f"00C31{i}:{BASE}", "Model", "Meshes\X\A.nif", "meshes/x/a.nif", "v") for i in (2, 3)]
+            lost_row(CASE, MOD_A, f"00C31{i}:{BASE}", "Model", "Meshes\\X\\A.nif", "meshes/x/a.nif", "v") for i in (2, 3)]
         plan, md, html = cw_bundle(p_rows, arms=arms)
         line = reader(plan).get("scopeLine") or ""
         ok = OTHER in line and CASE not in line and "main recorded conflicts" in line
