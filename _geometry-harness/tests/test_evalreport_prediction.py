@@ -4175,6 +4175,24 @@ def main():
     for name, fn in [("after-review/C905-alias-split-names-placement-origin", c905_alias_split_names_placement_origin)]:
         cell(name, fn)
 
+
+    # C906 (Pilgrim review 5): the further-record-results line says how many of the results it leaves out of the detail
+    # list hold clashes counted at the top; it never calls those "set aside".
+    def c906_further_results_counted_at_top_said():
+        R1 = f"00C906:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, R1, "Placement", "Position=5,5,5", "Position=9,9,9", "Position=0,0,0")]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), masters=MASTERS_)
+        adm = [e["admission"] for e in rec_of(plan, R1)]
+        line = next((ln for ln in md.splitlines() if "further record result" in ln), "")
+        m_ = re.match(r"^(\d+) further record results?", line)
+        n_ = int(m_.group(1)) if m_ else 0
+        ok = (adm == ["admitted"] and n_ >= 1 and "counted at the top" in line
+              and re.search(r"\b1 of them hold", line) is not None and "all were measured and set aside" not in line)
+        return ok, f"{adm}; {line[:300]}"
+
+    for name, fn in [("after-review/C906-further-results-counted-at-top-said", c906_further_results_counted_at_top_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
