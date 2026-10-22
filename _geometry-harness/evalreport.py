@@ -3695,8 +3695,13 @@ def build_prediction(ctx: dict) -> dict:
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "undone": len(undone), "undoneBy": dict(undone_by),
                       "undoneSentence": undone_sentence,
-                      "undoneFindingIds": list(dict.fromkeys(h_["finding"].get("id") for _, h_ in undone
-                                                             if h_["finding"].get("id"))),
+                      # (Winterhold review 3) the finding holding the objects named as switched back on first, then
+                      # the others by how many undone changes they hold
+                      "undoneFindingIds": list(dict.fromkeys(
+                          [h_["finding"].get("id") for rk_, h_ in undone
+                           if h_["finding"].get("id") and str(rk_[4]) in enable_examples]
+                          + [f_ for f_, _ in collections.Counter(h_["finding"].get("id") for _, h_ in undone
+                                                                 if h_["finding"].get("id")).most_common()])),
                       "cannotTell": len(untold) + len(untold_value), "valueUnrecorded": len(untold_value),
                       "falseAlarms": None,
                       "patchProblems": len(problems),
