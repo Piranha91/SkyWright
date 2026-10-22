@@ -4994,6 +4994,22 @@ def main():
     for name, fn in [("third-review/C952-water-height-values-and-flag", c952_water_height_values_and_flag)]:
         cell(name, fn)
 
+    # C944 (Sewers review S2): the still-there line's per-place figure names its unit (overlap pairs), so it is not read
+    # as part of the object count it follows.
+    def c944_still_there_place_count_has_unit():
+        X = f"000X44:{MOD_A}"
+        ys = [f"000Y4{i}:{MOD_B}" for i in (1, 2, 3)]
+        labels = ["PlaceNorth (int)", "PlaceNorth (int)", "PlaceSouth (int)"]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, label=l_, other=y) for y, l_ in zip(ys, labels)]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): p_rows},
+                                         [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds})
+        st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
+        return "most in PlaceNorth (int) (2 overlap pairs)" in st, st[:300]
+
+    for name, fn in [("third-review/C944-still-there-place-count-has-unit", c944_still_there_place_count_has_unit)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
