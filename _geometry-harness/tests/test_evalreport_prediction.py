@@ -4457,6 +4457,45 @@ def main():
     for name, fn in [("after-review/C915-state-clash-in-game-from-row", c915_state_clash_in_game_from_row)]:
         cell(name, fn)
 
+
+    # C916 (Clockwork review 3): the largest navmesh losses are ranked by the measured samples of lost ground, never by
+    # triangle counts (a navmesh can grow and still lose ground); C918 (Winterhold review 4): the sample is said as a
+    # test point that ranks losses, not as an area.
+    def nav_loss_bundle():
+        n1, n2, n3 = f"000N31:{BASE}", f"000N32:{BASE}", f"000N33:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  8 tris -> 94"),
+                  row("CLOBBERED", MOD_A, MOD_B, n3, label="CityExterior03 (ext)  300 tris -> 290")]
+        for r_, n_ in zip(p_rows, (16, 1463, 300)):
+            r_["Necessary"][0]["PhysicalDetail"] = (f"victim-only ground: {n_} sample(s) of the loser's mesh farther "
+                                                    f"than 120u from the winner's")
+        return compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                  [MOD_A, MOD_B], patches=[PATCH])
+
+    def c916_largest_by_lost_ground():
+        plan, md, _ = nav_loss_bundle()
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        m_ = re.search(r"The largest[^:]*: (.*?)\.", top)
+        ex = m_.group(1) if m_ else ""
+        ok = bool(ex) and ex.index("CityExterior02") < ex.index("CityExterior03") < ex.index("CityExterior01") \
+            if all(x in ex for x in ("CityExterior01", "CityExterior02", "CityExterior03")) else False
+        return ok and "8 -> 94" not in ex and "1,463" in ex, top[:400]
+
+    def c918_sample_said_as_test_point():
+        n2 = f"000N42:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  689 tris -> 5")]
+        preds = [{"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n2, "Other": None, "Physical": "Holds",
+                  "Detail": "victim-only ground: 22597 sample(s) of the loser's mesh farther than 120u from the winner's"}]
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                         [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        ok = "22,597" in top and "taken every 64 units" not in top and "not an area" in top
+        return ok, top[-300:]
+
+    for name, fn in [("after-review/C916-largest-by-lost-ground", c916_largest_by_lost_ground),
+                     ("after-review/C918-sample-said-as-test-point", c918_sample_said_as_test_point)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
