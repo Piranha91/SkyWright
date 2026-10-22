@@ -4920,7 +4920,7 @@ def main():
                                          [MOD_A], patches=[PATCH],
                                          sibling=(s_arms, s_results, [MOD_A], {"plan_id": "sibl00000948"}))
         ln = next((x for x in md.splitlines() if "separate evaluation" in x and "measured these setups" in x), "")
-        return re.search(r"without [^.;]*" + re.escape(PATCH), ln) is not None and MOD_A in ln, ln[:300]
+        return f"the measured load order without {MOD_A}, {PATCH}" in ln, ln[:300]
 
     for name, fn in [("third-review/C948-sibling-setups-against-measured-order", c948_sibling_setups_against_measured_order)]:
         cell(name, fn)
