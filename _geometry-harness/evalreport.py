@@ -2456,6 +2456,13 @@ def build_prediction(ctx: dict) -> dict:
                 c_["typeOnly"] = c_.get("typeOnly", 0) + (1 if m_.group("h1") == m_.group("h2") else 0)
             if e.get("findingId") and e["findingId"] not in c_["fids"]:
                 c_["fids"].append(e["findingId"])
+            # (Pilgrim review 4) the object, by kind and editor ID from the probe's own words, and its place
+            ob_ = re.search(r"\[(\w+) ([^\]\s]+)\]", str(e.get("summary") or ""))
+            if ob_:
+                kind_ = (kinds_.get("types") or {}).get(ob_.group(1), "")
+                pl_ = str((p_rows.get((e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])) or {}).get("row", {}).get("label") or "")
+                c_.setdefault("objs", collections.OrderedDict()).setdefault(pl_, {})[str(e["formKey"])] = (
+                    f"{kind_} {ob_.group(2)}" if kind_ else ob_.group(2))
     for (mod_, side_), by_c in base_geo.items():
         line_ = words.get("baseGameSidePutBackLine" if isinstance(side_, tuple) else
                           "baseGameSideLine" if side_ else "baseGameGeometryLine")
@@ -2465,8 +2472,13 @@ def build_prediction(ctx: dict) -> dict:
                 "cells": fmt_n(len(seam_cells.get((mod_, side_)) or ())), "parts": "; ".join(
                 bind(words["seamTypeOnlyPart"], {"count": fmt_n(c_["n"])}) if c_.get("typeOnly") == c_["n"] and
                 words.get("seamTypeOnlyPart") else
-                f"{fmt_n(c_['n'])} {unit_noun(cid_, c_['kind'], c_['n'])} ({title_of(cid_)})" for cid_, c_ in by_c.items())}),
-                "findingIds": [f_ for c_ in by_c.values() for f_ in c_["fids"]][:1]})
+                f"{fmt_n(c_['n'])} {unit_noun(cid_, c_['kind'], c_['n'])} ({title_of(cid_)}"
+                + (": " + "; ".join(bind(words["baseGameObjectsIn"], {"objects": and_list(list(o_.values())), "place": pl_})
+                                    if pl_ else and_list(list(o_.values())) for pl_, o_ in c_["objs"].items())
+                   if c_.get("objs") else "") + ")" for cid_, c_ in by_c.items())}),
+                # every finding of a line that names its objects is linked (Pilgrim review 4)
+                "findingIds": [f_ for c_ in by_c.values() for f_ in c_["fids"]][:4],
+                "linkAll": any(c_.get("objs") for c_ in by_c.values())})
     # P63: a mod changing a value of a plugin it lists as a master is said as that, one line per mod and master, with
     # the count by check, never as a clash between mods (its count is in `setAside`, said by this line alone)
     own_master = collections.OrderedDict()

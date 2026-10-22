@@ -24,7 +24,7 @@
 " }}{% endif %}{{ o }}{{ " " if not loop.last else "
 
 " }}{% endfor %}{% for h in pred.get("historyLossLines") or [] %}{% if loop.first %}{{ "
-" }}{% endif %}- {{ h.text }}{% for fid in h.findingIds[:1] %} [Evidence](evidence-index.md#{{ fid }}).{% endfor %}
+" }}{% endif %}- {{ h.text }}{% for fid in (h.findingIds[:4] if h.get("linkAll") else h.findingIds[:1]) %}{% if loop.first %} [Evidence](evidence-index.md#{{ fid }}){% else %} [{{ fid }}](evidence-index.md#{{ fid }}){% endif %}{% if loop.last %}.{% endif %}{% endfor %}
 
 {% endfor %}{% for o in pred.get("orderRiskLines") or [] %}{% if loop.first %}{{ "
 " }}{% endif %}- {{ o.text }} [Evidence]({{ o.path }}).
