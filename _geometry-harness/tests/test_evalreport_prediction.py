@@ -5542,7 +5542,20 @@ def main():
         ok = f"On 2 objects, {MOD_B}'s value switches the object off" in it and "In 6 of them" not in it
         return ok, it[-500:]
 
-    for name, fn in [("round-2/C980-switch-off-counts-objects", c980_switch_off_counts_objects)]:
+    # C987 (round 2, B2, found by the SWITCHOFF audit on Winterhold): a lost record-flags value written as a number
+    # (3072: initially disabled, bit 2048, and bit 1024) switches the object off as the flag's name does.
+    def c987_numeric_initially_disabled_switches_off():
+        D = f"00C987:{BASE}"
+        lost_ = offs(0, "3072")
+        p_rows = [lost_row(MOD_B, MOD_A, D, "SkyrimMajorRecordFlags", "3072", PH, "0", before=BASE)]
+        chs = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_B, lost_), (MOD_A, offs(0))])]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), p_chains=chs, w_chains=chs, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return f"On 1 object, {MOD_B}'s value switches the object off" in it, it[-400:]
+
+    for name, fn in [("round-2/C980-switch-off-counts-objects", c980_switch_off_counts_objects),
+                     ("round-2/C987-numeric-initially-disabled-switches-off", c987_numeric_initially_disabled_switches_off)]:
         cell(name, fn)
 
     # C981 (round 2, B3: Snazzy review Blocking 2): the headline's shared objects are every object of the entry that any
