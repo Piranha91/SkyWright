@@ -2342,7 +2342,8 @@ def build_prediction(ctx: dict) -> dict:
             lost_ls_ = [str(x) for x in (lost_ls_ if isinstance(lost_ls_, list) else [lost_ls_]) if x not in (None, "")]
             # (round 2, BPT S1) an absence only where the losing mod has none of the field: every line of its lost value is
             # one only the winner has, never a value with some entries of the loser's own beside others only the winner has
-            if lost_ls_ and all(re.search(r"\bonly in " + re.escape(rk[3]), x) for x in lost_ls_) and lost_txt_:
+            if lost_ls_ and all(re.search(r"\bonly in " + re.escape(rk[3]), x) or re.search(r": ABSENT here$", x)
+                                for x in lost_ls_) and lost_txt_:
                 g.setdefault("_loserAbsent", collections.Counter())[field_word(hit["row"].get("field"))] += 1
             if "_carriedFrom" not in g:
                 got_ = field_chain(p_of(rk[0]), rk, rk[2])
