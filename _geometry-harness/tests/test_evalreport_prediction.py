@@ -4568,6 +4568,24 @@ def main():
     for name, fn in [("after-review/C921-state-detail-counts-objects", c921_state_detail_counts_objects)]:
         cell(name, fn)
 
+
+    # C926 (found in regen-1: a worldspace's height map quoted in full): a small record item quotes each side's value
+    # only where it is short enough to read and forward; a long value (a table) is not quoted.
+    def c926_long_values_not_quoted():
+        W1 = f"00C926:{BASE}"
+        big_a, big_b = "1A" * 400, "2B" * 400
+        tr_ = tree_transcript([(W1, "Worldspace", [(BASE, {"MaxHeight.CellData": "00", "MaxHeight.Offset": "0"}),
+                                                   (OTHER, {"MaxHeight.CellData": big_a, "MaxHeight.Offset": "1"}),
+                                                   (MOD_A, {"MaxHeight.CellData": big_b, "MaxHeight.Offset": "2"})])])
+        r_ = lost_row(OTHER, MOD_A, W1, "MaxHeight", ["MaxHeight.Offset=1"], PH, ["MaxHeight.Offset=0"], before=BASE)
+        r_["Summary"] = f"Worldspace TestWorld: MaxHeight - {OTHER}'s value lost to {MOD_A}'s"
+        plan, md, _ = core_bundle([r_], [r_], p_tr=tr_, masters=MASTERS_)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return len(it) < 1200 and "1A1A1A1A1A1A" not in it, f"{len(it)} chars: {it[-200:]}"
+
+    for name, fn in [("after-review/C926-long-values-not-quoted", c926_long_values_not_quoted)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
