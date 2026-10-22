@@ -6421,7 +6421,30 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         return "1,424 u lower" in it, it[-300:]
 
-    for name, fn in [("fourth-review/C1051b-height-difference-from-chain", c1051b_height_difference_from_chain),
+    # C1051c, C1051d (found on regen-r4c: Pilgrim's priests also moved across): every Placement row of the pair lower by
+    # 64 u or more in the winner's value is a level difference, said with its range whatever the horizontal move (C1051c);
+    # rows differing in height both ways are not (C1051d).
+    def height_pair_bundle(zs):
+        rows_ = []
+        for i_, (zl_, zw_) in enumerate(zs):
+            D_ = f"00CA6{i_}:{BASE}"
+            rows_.append(lost_row(MOD_A, MOD_B, D_, "Placement", f"Position=100,{2000 + i_},{zl_}; Rotation=0,0,0",
+                                  f"Position=150,{i_}00,{zw_}; Rotation=0,0,0", f"Position=150,{i_}00,{zw_}; Rotation=0,0,0",
+                                  before=BASE))
+        plan, md, _ = core_bundle(rows_, list(rows_), targets=(MOD_A, MOD_B), masters={**MASTERS_, PATCH: [BASE]})
+        return next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+
+    def c1051c_level_difference_with_horizontal_move():
+        it = height_pair_bundle([(1424, 0), (1712, 0)])
+        return "1,424 u to 1,712 u lower" in it, it[-300:]
+
+    def c1051d_mixed_heights_not_said():
+        it = height_pair_bundle([(1424, 0), (-500, 0)])
+        return "lower" not in it and "higher" not in it, it[-300:]
+
+    for name, fn in [("fourth-review/C1051c-level-difference-with-horizontal-move", c1051c_level_difference_with_horizontal_move),
+                     ("fourth-review/C1051d-mixed-heights-not-said", c1051d_mixed_heights_not_said),
+                     ("fourth-review/C1051b-height-difference-from-chain", c1051b_height_difference_from_chain),
                      ("fourth-review/C1050-effect-model-pairs-said", c1050_effect_model_pairs_said),
                      ("fourth-review/C1051-height-difference-said", c1051_height_difference_said)]:
         cell(name, fn)
