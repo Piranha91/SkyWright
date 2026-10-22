@@ -6090,13 +6090,25 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     for f in relevant:
                         c = f.get("counts") or {}
                         ph = phrases.get(str(c.get("groupKind") or "")) or {}
-                        e_ = by_pair.setdefault((c.get("A"), c.get("B"), ph.get("unitPlural")),
-                                                {"n": 0, "ids": [], "ph": ph, "A": c.get("A"), "B": c.get("B")})
+                        st_ = str(c.get("groupKind") or "").startswith("STATE-")
+                        e_ = by_pair.setdefault((c.get("A"), c.get("B"), ph.get("unitPlural"), st_),
+                                                {"n": 0, "ids": [], "ph": ph, "A": c.get("A"), "B": c.get("B"),
+                                                 "objs": set(), "state": st_})
                         e_["n"] += int(f.get("readerRows", f.get("rowsTotal")) or 0)
                         e_["ids"].append(f["id"])
+                        # (Pilgrim review, earlier S6) a world-state row is one object, counted once across states
+                        e_["objs"] |= {(str(r_.get("formKey")), tuple(map(str, r_.get("other") or ())))
+                                       for r_ in f.get("allRows") or [] if isinstance(r_, dict)}
                     entries = []
                     for e_ in by_pair.values():
                         n_, ph = e_["n"], e_["ph"]
+                        if e_["state"] and e_["objs"] and conc.get("detailStateObjects"):
+                            no_ = len(e_["objs"])
+                            entries.append({"id": e_["ids"][0], "more": e_["ids"][1:],
+                                            "text": bind(conc["detailStateObjects"], {
+                                                "count": fmt_n(no_), "noun": "object" if no_ == 1 else "objects",
+                                                "A": e_["A"], "B": e_["B"], "states": fmt_n(len(e_["ids"]))})})
+                            continue
                         unit = (ph.get("unitSingular") if n_ == 1 else ph.get("unitPlural")) or ("record" if n_ == 1 else "records")
                         entries.append({"id": e_["ids"][0], "more": e_["ids"][1:],
                                         "text": f"{fmt_n(n_)} {unit} between {e_['A']} and {e_['B']}"
