@@ -2487,6 +2487,14 @@ def build_prediction(ctx: dict) -> dict:
                 m_ = re.search(st_words["pattern"], sm_)
                 what_ = (st_words.get("states") or {}).get(m_.group("state")) if m_ else None
                 if what_:
+                    # (BPT re-review S2) every row's depth under the same switch: a range and its deepest, never one
+                    # row's depth for all
+                    ds_ = sorted({float(x_) for s2_ in summaries_ if re.search(st_words["pattern"], s2_)
+                                  and re.search(st_words["pattern"], s2_).group("switch") == m_.group("switch")
+                                  for x_ in re.findall(r"(\d+(?:\.\d+)?)\s*u inside", s2_)})
+                    rng_ = (st_words.get("statesRange") or {}).get(m_.group("state"))
+                    if len(ds_) > 1 and rng_:
+                        what_ = bind(rng_, {"low": f"{ds_[0]:g} u", "high": f"{ds_[-1]:g} u"})
                     dm_ = re.search(r"(\d+(?:\.\d+)?)\s*u inside", sm_)
                     g["inGame"] = bind(st_words["line"], {"switch": m_.group("switch"), "what": bind(what_, {
                         "depth": f"{dm_.group(1)} u" if dm_ else ""})})
