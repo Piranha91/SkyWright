@@ -6095,6 +6095,10 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                                                  for x in fids):
             return with_patch_note(fids, n_rows)
         k_ = sum(counted_by_fid.get(x, 0) for x in fids)
+        if (pred_arm_ and not k_ and n_rows and conc.get("withPatchSplitParts")
+                and all((f_by_id.get(x) or {}).get("armId") == pred_arm_ for x in fids)):
+            # every row set aside: said, so the list adds up with the top (third review, Clockwork S2)
+            return " (" + bind(conc["withPatchSplitParts"]["aside"], {"count": fmt_n(n_rows)}) + ")"
         if not pred_arm_ or not k_ or k_ >= n_rows or not conc.get("countedAboveNote"):
             return ""
         return bind(conc["countedAboveNote"], {"counted": fmt_n(k_), "rest": fmt_n(n_rows - k_)})
