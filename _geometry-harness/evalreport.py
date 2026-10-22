@@ -50,6 +50,7 @@ sys.path.insert(0, str(HERE))
 import evalsettings  # noqa: E402
 import recordrows  # noqa: E402
 import refscan  # noqa: E402
+import pluginread  # noqa: E402
 
 try:
     import jinja2
@@ -1734,6 +1735,32 @@ def build_prediction(ctx: dict) -> dict:
             ref_cache[key_] = got_
         return ref_cache[key_]
 
+    # (round 2 of the third review) record data the imports do not carry, read from the plugin file the prediction setup
+    # names, only where its bytes are the recorded ones (sha256): a navmesh's edge links, a cell's DATA flags. None where
+    # there is no such read; every read is recorded in the prediction (pluginReads).
+    plugin_reads, pread_cache = [], {}
+
+    def plugin_record(plugin, what, fk):
+        key_ = (str(plugin).lower(), what, str(fk))
+        if key_ not in pread_cache:
+            got_, (path_, sha_) = None, plugin_file(plugin)
+            if path_ and sha_ and Path(path_).is_file():
+                if path_ not in sha_cache:
+                    sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+                if sha_cache[path_] == sha_:
+                    try:
+                        res_ = (pluginread.navmesh_links if what == "navmesh" else pluginread.cell_flags)(path_, [str(fk)])
+                        got_ = res_["records"].get(str(fk))
+                        plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
+                                             "found": got_ is not None})
+                        if got_ is None:
+                            got_ = {}                  # read: the plugin holds no such record
+                    except pluginread.PluginReadError as e_:
+                        plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
+                                             "error": str(e_)})
+            pread_cache[key_] = got_
+        return pread_cache[key_]
+
     def winner_on_at_load(rk):
         """"on": the winner's whole version has the object on when the game loads; "parent": its own record does not
         switch it off but it has an enable parent; "off": it switches it off itself; None: the chain does not hold it."""
@@ -2456,7 +2483,17 @@ def build_prediction(ctx: dict) -> dict:
                     fv_ = recordrows.provider_fields(ch_, dep_["field"], low_.index(rk_[3].lower())) \
                         if dep_["field"] in (ch_.get("values") or {}) else {}
                     txt_ = " ".join(str(x) for x in fv_.values())
-                    detail.append(dep_["unread"] if not fv_ else dep_["set"] if dep_["flag"] in txt_ else dep_["unset"])
+                    read_ = None
+                    if not fv_ and dep_.get("read") == "cellFlags":
+                        # (round 2, Snazzy S1) the flag the import does not carry, read from the winning plugin's own
+                        # record in its file; never said to be absent from the record data
+                        got_ = plugin_record(rk_[3], "cell", rk_[4])
+                        if got_ and got_.get("value") is not None:
+                            txt_, read_ = " ".join(got_.get("flags") or []), rk_[3]
+                    detail.append(dep_["unread"] if not fv_ and read_ is None else
+                                  dep_["set"] if dep_["flag"] in txt_ else dep_["unset"])
+                    if read_ is not None and dep_.get("readFrom"):
+                        detail.append(bind(dep_["readFrom"], {"plugin": read_}))
         pool = g.pop("_recordPool", None)
         if pool:
             g["_records"] = (pool[0] + pool[1])[:2]
@@ -3181,6 +3218,7 @@ def build_prediction(ctx: dict) -> dict:
                 sibling_record["roles"].setdefault(f"without {m_}", a_.split(":", 1)[1])
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "referenceReads": ref_reads,
+                  "pluginReads": plugin_reads,
                   "singleArms": s_arms, "verdict": verdict, "status": "found" if items else "none-found",
                   "items": items, "historyLossLines": loss_lines, "aloneLines": [{**v, "groups": [{"from": k, "entries": e} for k, e in v["groups"].items()]}
                                                  for v in alone_lines.values()],

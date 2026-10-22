@@ -4991,8 +4991,9 @@ def main():
         plan, md, _ = core_bundle([r_], [r_], check=CELLATTR, masters=MASTERS_, p_tr=tr_)
         adm = [e["admission"] for e in rec_of(plan, C1)]
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Cell settings")), "")
+        # (round 2, R) no file is named for ModA here, so the flag was not read: said so, never "not in the record data"
         ok = (adm == ["admitted"] and "no water" in it and "-2147483600" not in it and "HasWater" in it
-              and "not in the record data" in it)
+              and "not read for this report" in it and "not in the record data" not in it)
         return ok, f"{adm}; {it[-400:]}"
 
     for name, fn in [("third-review/C952-water-height-values-and-flag", c952_water_height_values_and_flag)]:
