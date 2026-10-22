@@ -2119,7 +2119,13 @@ def build_prediction(ctx: dict) -> dict:
                     ex_ = (rk[4], (nm_ + ", " if nm_ else "") + field_word(f_), plain_value(f_, v_.get("lost")),
                            plain_value(f_, v_.get("winner")))
                     best_ = g.get("_winnerOwnExample")
-                    if best_ is None or len(ex_[2]) + len(ex_[3]) < len(best_[2]) + len(best_[3]):
+
+                    def ex_key(x_):
+                        # a flag example whose numbers all decode reads better than one left as a bare number (W5)
+                        raw_ = bool(flag_bits_.get(str(f_))) and any(re.fullmatch(r"\d+", t_.strip())
+                                                                     for t_ in (x_[2] + "," + x_[3]).split(","))
+                        return (raw_, len(x_[2]) + len(x_[3]))
+                    if best_ is None or ex_key(ex_) < ex_key(best_):
                         g["_winnerOwnExample"] = ex_
             # where the lost value was first set (Missives review 2): a value several plugins carry is named with the
             # plugin that introduced it, so a reader does not take it for the loser's alone
@@ -3648,9 +3654,9 @@ def build_prediction(ctx: dict) -> dict:
                     return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
                 # whose change stays lost, as without the patch (fourth blind review, W1): never "kept" alone
                 by = bi.get("keptBy") or {}
-                note_ = off_text(bi.get("offKept"), bi.get("offKeptBack"))
                 if sum(by.values()) != bi.get("kept"):
-                    return bind(ow["keptUnnamed"], {"count": fmt_n(bi.get(k) or 0)}) + note_
+                    return (bind(ow["keptUnnamed"], {"count": fmt_n(bi.get(k) or 0)})
+                            + off_text(bi.get("offKept"), bi.get("offKeptBack")))
                 # each loser's off-for-good count beside its own count (reviewer, BPT 1)
                 return ", ".join(bind(ow["kept"], {"loser": m_, "count": fmt_n(n_)})
                                  + off_text((bi.get("offKeptBy") or {}).get(m_), (bi.get("offKeptBackBy") or {}).get(m_))
