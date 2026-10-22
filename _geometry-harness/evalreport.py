@@ -3146,11 +3146,26 @@ def build_prediction(ctx: dict) -> dict:
                 "old": fmt_n(old_), "new": fmt_n(new_), "of": (" of " + fmt_n(w_["of"])) if w_.get("of") else ""}))
         if e.get("findingId") and e["findingId"] not in o_["findingIds"]:
             o_["findingIds"].append(e["findingId"])
+        # (fourth review, Missives S5) whether the setup with the patch's winning version reads the same bits
+        if patched_arm:
+            chp_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
+            masks_ = field_masks().get(record_type_of(e["summary"])) or {}
+            if chp_ and chp_.get("providers") and masks_:
+                try:
+                    lastf_ = {k_: int(v_) & int(masks_[k_]) for k_, v_ in recordrows.provider_fields(
+                        chp_, str(e.get("field") or ""), len(chp_["providers"]) - 1).items() if k_ in masks_}
+                    o_.setdefault("withPatch", {})[str(e["formKey"])] = lastf_ == rb_[1]
+                except ValueError:
+                    pass
     for mod_, o_ in own_.items():
         if o_["parts"]:
             n_ = len(o_["parts"])
+            wp_ = o_.get("withPatch") or {}
             loss_lines.append({"text": bind(words["winnerOwnChangeLine"], {
                 "mod": mod_, "noun": o_["noun"], "count": fmt_n(n_), "records": (o_["records"] or ["record", "records"])[0 if n_ == 1 else 1],
+                "patch": bind(words["winnerOwnChangePatch"], {"patch": patch_text, "left": fmt_n(sum(1 for k_ in o_["parts"] if wp_.get(k_))),
+                                                               "count": fmt_n(n_)})
+                if words.get("winnerOwnChangePatch") and all(k_ in wp_ for k_ in o_["parts"]) else "",
                 "parts": "; ".join(o_["parts"].values())}), "findingIds": o_["findingIds"][:1]})
     # a rebuilt record supersedes the loser's small fix (Pilgrim final review B1): one line per winning mod, with the
     # record facts in plain words, never in the clash counts
