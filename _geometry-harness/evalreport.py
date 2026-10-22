@@ -3858,7 +3858,8 @@ def build_prediction(ctx: dict) -> dict:
                 c_[key_] += 1
             top_ = [pr_ if pr_ in change_ else f"{pr_} {fmt_n(n_)}"
                     for pr_, n_ in sorted(c_.items(), key=lambda kv: (-kv[1], kv[0].lower()))[:3]]
-            return "; ".join(top_) + (bind(words["blindSpotMorePairs"], {"count": fmt_n(len(c_) - 3)}) if len(c_) > 3 else "")
+            more_ = words["blindSpotMorePairs"] if len(change_) < len(c_) else words.get("blindSpotMoreChanges") or "; and {count} more"
+            return "; ".join(top_) + (bind(more_, {"count": fmt_n(len(c_) - 3)}) if len(c_) > 3 else "")
         blind = [{"admission": k, "count": n, "why": bind(words["blindSpotWhy"][k], {"patch": patch, "pairs": spot_pairs(k),
                                                                                      "fixes": fixes_})}
                  for k, n in sorted(spots.items()) if k != "history"]
