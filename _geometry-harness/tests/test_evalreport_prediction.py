@@ -4628,6 +4628,25 @@ def main():
     for name, fn in [("after-review/C928-folded-water-detail-names-the-undo", c928_folded_water_detail_names_the_undo)]:
         cell(name, fn)
 
+
+    # C929 (found in regen-1, Pilgrim review 4): the base-game line links every finding, also one whose object another
+    # world state already counted (the shrine in two Dawnguard states).
+    def c929_base_game_line_links_every_state():
+        X3 = f"000X93:{MOD_A}"
+        rows_ = []
+        for st_ in ("S1", "S2"):
+            r_ = state_row(st_, BASE, MOD_A, X3, S0)
+            r_["Summary"] = f"Route StateConditional under Enable{st_}: {X3} [Activator TestShrine] arrives - LikelyBlocked"
+            rows_.append(r_)
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): rows_, (STATE, "without-b"): [],
+                   (STATE, "without-a"): []}
+        plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
+        ln = next((x for x in md.splitlines() if "against base-game objects" in x), "")
+        return len(re.findall(r"\(evidence-index\.md#F-\d+\)", ln)) == 2 and "1 clash" in ln, ln[:300]
+
+    for name, fn in [("after-review/C929-base-game-line-links-every-state", c929_base_game_line_links_every_state)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
