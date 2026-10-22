@@ -2140,6 +2140,27 @@ def build_prediction(ctx: dict) -> dict:
                         g["_winnerOwnExample"] = ex_
             # where the lost value was first set (Missives review 2): a value several plugins carry is named with the
             # plugin that introduced it, so a reader does not take it for the loser's alone
+            # (third review, Missives S2) other plugins holding the same lost value as their own change; a lost value that
+            # is an absence (the loser has no such data); a winner keeping the base game's value
+            g.setdefault("_fieldRows", collections.Counter())[field_word(hit["row"].get("field"))] += 1
+            got3_ = field_chain(p_of(rk[0]), rk, rk[2])
+            if got3_ is not None:
+                provs3, vals3, _ = got3_
+                low3 = [str(x).lower() for x in provs3]
+                if rk[2].lower() in low3 and rk[3].lower() in low3:
+                    i3, w3 = low3.index(rk[2].lower()), low3.index(rk[3].lower())
+                    for j3 in range(len(provs3)):
+                        if (j3 not in (i3, w3) and j3 < w3 and vals3[j3] == vals3[i3] and not is_base_game(provs3[j3], words)
+                                and recordrows.own_change(provs3, vals3, j3, (masters or {}).get(low3[j3])
+                                                          if masters is not None else None)[0]):
+                            g.setdefault("_sameBy", collections.Counter())[provs3[j3]] += 1
+                    if (vals3[w3] == vals3[0] and not recordrows.own_change(
+                            provs3, vals3, w3, (masters or {}).get(low3[w3]) if masters is not None else None)[0]):
+                        g.setdefault("_winnerBase", collections.Counter())[field_word(hit["row"].get("field"))] += 1
+            lost_txt_ = " ".join(map(str, (hit["row"].get("values") or {}).get("lost") or [])) if isinstance(
+                (hit["row"].get("values") or {}).get("lost"), list) else str((hit["row"].get("values") or {}).get("lost") or "")
+            if re.search(r"\bonly in " + re.escape(rk[3]), lost_txt_):
+                g.setdefault("_loserAbsent", collections.Counter())[field_word(hit["row"].get("field"))] += 1
             if "_carriedFrom" not in g:
                 got_ = field_chain(p_of(rk[0]), rk, rk[2])
                 if got_ is not None:
@@ -2263,6 +2284,22 @@ def build_prediction(ctx: dict) -> dict:
                 "record": carried_from[0], "field": carried_from[1], "origin": carried_from[3],
                 "value": re.sub("^" + re.escape(str(carried_from[1])) + "=", "", str(carried_from[2])),
                 "carriers": " and ".join(carried_from[4][-3:])}))
+        # each said only where it holds for every row of the item, never of a few rows as if of all
+        same_by = [m_ for m_, n_ in (g.pop("_sameBy", None) or {}).items() if n_ == g["count"]]
+        win_base_c, absent_c = g.pop("_winnerBase", None) or {}, g.pop("_loserAbsent", None) or {}
+        rows_c = g.pop("_fieldRows", None) or {}
+        win_base = [f_ for f_, n_ in win_base_c.items() if n_ == rows_c.get(f_)]     # per field, every row of it
+        absent_ = [f_ for f_, n_ in absent_c.items() if n_ == rows_c.get(f_)]
+        if len(directions) == 1 and words.get("itemSameValueBy"):
+            loser, winner = next(iter(directions))
+            if absent_:
+                detail.append(bind(words["itemLoserAbsent"], {"loser": loser, "fields": " and ".join(absent_)}))
+            if same_by:
+                detail.append(bind(words["itemSameValueBy"], {
+                    "others": " and ".join(same_by), "holds": "holds" if len(same_by) == 1 else "hold",
+                    "their": "its" if len(same_by) == 1 else "their", "loser": loser}))
+            if win_base:
+                detail.append(bind(words["itemWinnerBase"], {"winner": winner, "fields": " and ".join(win_base)}))
         n_undecided = g.pop("_notDecided", 0)
         if n_undecided and len(directions) == 1:
             loser, winner = next(iter(directions))
