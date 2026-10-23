@@ -135,7 +135,7 @@ def tree_transcript(chains):
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
-                diff_logs=None, states_not_explored=None, transcripts=None, masters=None):
+                diff_logs=None, states_not_explored=None, transcripts=None, masters=None, coverage_pops=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -182,7 +182,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
         receipt = {"receiptId": rid, "checkId": check_id, "armId": arm_id, "part": "arm", "schemaVersion": 1,
                    "exitCode": 0, "validation": {"accepted": True, "identityLimits": []},
                    "result": {"detector": "finding" if rows else "null", "findings": len(rows),
-                              "coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}]},
+                              # coverage_pops: {(checkId, armId): [coverage lines]} replaces the one default line
+                              "coverage": (coverage_pops or {}).get((check_id, arm_id))
+                              or [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}]},
                    "consumed": {"tool": {"exe": PROBE[check_id], "dllSha256": (tool_builds or {}).get(
                        (check_id, arm_id), "d" * 64), "coreDllSha256": "c" * 64},
                                 "configuration": {"plugins": config_of(check_id, arm_id)}}}
@@ -8341,7 +8343,19 @@ def main():
         return ("counted once" in summ and "2 object-and-support pairs," not in summ and "counted once there" in kl), \
             f"{summ[:300]} || {kl[:200]}"
 
+    # C1153 (Sewers S4): a record check with no finding whose coverage judged navmesh records says their geometry is
+    # judged by the navmesh check, so "no finding" is not read as no navmesh change lost.
+    def c1153_null_says_navmesh_judged_elsewhere():
+        cov_ = [{"Population": "contested NavigationMesh records", "Judged": 37, "Unjudgeable": {}},
+                {"Population": "contested Cell records", "Judged": 48, "Unjudgeable": {}}]
+        plan, md, html, idx = compile_and_render(WP_ARMS, {(RECORDS, "baseline"): [], (RECORDS, "without-patch"): []},
+                                                 [MOD_A], patches=[PATCH], want_index=True,
+                                                 coverage_pops={(RECORDS, a_): cov_ for a_ in ("baseline", "without-patch")})
+        ln = next((x for x in idx.splitlines() if "No finding in the completed check" in x), "")
+        return ("Of the 37 NavigationMesh records it judged, the geometry (Data) is judged by the check" in ln), ln[:400]
+
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
+                     ("seventh-review/C1153-null-says-navmesh-judged-elsewhere", c1153_null_says_navmesh_judged_elsewhere),
                      ("seventh-review/C1152-shared-objects-counted-once-in-comparison",
                       c1152_shared_objects_counted_once_in_comparison),
                      ("seventh-review/C1151-switch-depth-on-its-object", c1151_switch_depth_on_its_object),

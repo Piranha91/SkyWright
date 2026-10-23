@@ -6546,6 +6546,23 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             f["_group"] = g
 
     # (5) completed null checks with their coverage lines from the receipt
+    def judged_elsewhere(check_id, cov):
+        """(seventh review, Sewers S4) a population of this check whose field another check judges (skill data
+        lostEditJudgedBy: a navmesh's geometry, judged by the navmesh check): said, so 'no finding' is not read as none
+        lost there."""
+        pw_ = (pr.get("reader") or {}).get("prediction") or {}
+        out_ = []
+        for j_ in pw_.get("lostEditJudgedBy") or []:
+            if not isinstance(j_, dict):
+                continue
+            n_ = next((c_.get("judged") for c_ in cov if str(c_.get("population") or "").endswith(
+                f" {j_.get('recordType')} records") and c_.get("judged")), None)
+            if n_ and pw_.get("nullJudgedElsewhere"):
+                out_.append(" " + bind(pw_["nullJudgedElsewhere"], {
+                    "count": n_, "recordType": j_.get("recordType"), "field": j_.get("field"),
+                    "title": ((pr.get("reader") or {}).get("checkTitles") or {}).get(j_.get("check")) or j_.get("check")}))
+        return "".join(out_)
+
     for r in ev.get("completedNullChecks") or []:
         check_id, arm_id, part = r.get("checkId"), r.get("armId"), r.get("part")
         rc = b.receipt_by_key.get((check_id, arm_id, part)) or {}
@@ -6556,7 +6573,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
              "armId": arm_id, "part": part, "title": b.check_title(check_id),
              "strength": (rc.get("result") or {}).get("strength"), "verdict": (rc.get("result") or {}).get("verdict"),
              "plain": bind(templates.get("null", ""), {"armId": arm_id, "partText": f" ({part} part)" if part else "",
-                                                      "coverage": r.get("coverage")}),
+                                                      "coverage": r.get("coverage")}) + judged_elsewhere(check_id, cov),
              "counts": {"coverage": r.get("coverage"), "coverageLines": cov}, "evidenceIds": eids_for(check_id, arm_id, part),
              "rows": []})
 
