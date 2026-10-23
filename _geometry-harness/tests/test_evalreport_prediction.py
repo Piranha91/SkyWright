@@ -5014,7 +5014,9 @@ def main():
     def c950_headline_says_off_for_good():
         plan, md, _ = offwin_bundle()
         verdict = str((reader(plan).get("prediction") or {}).get("verdict") or "")
-        return re.search(r"\(3 record fields, 2 of them on objects the winning version sets off for good\)", verdict) is not None, verdict[:300]
+        # (fifth review, BPT S2) both of ModB's removals are its own: the headline also says so
+        return re.search(r"\(3 record fields, 2 of them on objects the winning version sets off for good, 2 of these "
+                         r"removed by the winning mod itself\)", verdict) is not None, verdict[:300]
 
     for name, fn in [("third-review/C950-headline-says-off-for-good", c950_headline_says_off_for_good)]:
         cell(name, fn)
@@ -6727,25 +6729,35 @@ def main():
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters=mas_, arms=arms)
         pr_ = reader(plan).get("prediction") or {}
         kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
-        return kl, str(pr_.get("withPatchStays") or ""), plan
+        return kl, str(pr_.get("withPatchStays") or ""), plan, md
 
     def c1074_kept_own_removal_said_winners():
-        kl, st, plan = own_removal_bundle([f"00CA74:{BASE}"], [])
+        kl, st, plan, md = own_removal_bundle([f"00CA74:{BASE}"], [])
         return (re.search(r"\b1 on objects [^;()]*removes itself", kl) is not None
                 and "winner sets off for good" not in kl), kl[:400]
 
     def c1075_left_own_removal_patch_keeps_same():
-        kl, st, plan = own_removal_bundle([f"00CA75:{BASE}"], [f"00CB75:{BASE}"])
+        kl, st, plan, md = own_removal_bundle([f"00CA75:{BASE}"], [f"00CB75:{BASE}"])
         part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if "record field" in x), "")
         return (re.search(r"removes itself", part) is not None and re.search(r"keeps the same removal on 1 more", part) is not None
                 and len(re.findall(r"\b1 on objects [^;()]*removes itself", kl)) == 2), f"{part[:300]} || {kl[:300]}"
 
     def c1076_inherited_removal_not_winners_own():
-        kl, st, plan = own_removal_bundle([], [f"00CA76:{BASE}"], inherited=True)
+        kl, st, plan, md = own_removal_bundle([], [f"00CA76:{BASE}"], inherited=True)
         return ("removes itself" not in kl and "removes itself" not in st
                 and re.search(r"\b1 on objects [^;()]*winner sets off for good", kl) is not None), f"{kl[:300]} || {st[:300]}"
 
-    for name, fn in [("fifth-review/C1074-kept-own-removal-said-winners", c1074_kept_own_removal_said_winners),
+    # C1078 (BPT S2, Gate A condition R3): the top of the report says it too: the headline's off-for-good count says how
+    # many are the winner's own removal, and the record-field item says the winner removes the objects itself.
+    def c1078_own_removal_at_the_top():
+        kl, st, plan, md = own_removal_bundle([], [f"00CA78:{BASE}"])
+        pr_ = reader(plan).get("prediction") or {}
+        verdict = str(pr_.get("verdict") or "")
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return ("1 of these removed by the winning mod itself" in verdict and "own removal" in it), f"{verdict[:300]} || {it[-300:]}"
+
+    for name, fn in [("fifth-review/C1078-own-removal-at-the-top", c1078_own_removal_at_the_top),
+                     ("fifth-review/C1074-kept-own-removal-said-winners", c1074_kept_own_removal_said_winners),
                      ("fifth-review/C1075-left-own-removal-patch-keeps-same", c1075_left_own_removal_patch_keeps_same),
                      ("fifth-review/C1076-inherited-removal-not-winners-own", c1076_inherited_removal_not_winners_own)]:
         cell(name, fn)
