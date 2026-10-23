@@ -8207,7 +8207,28 @@ def main():
         s_ = next((x for x in re.split(r"(?<=\.)\s+(?=Also)", line) if "another order" in x), "")
         return ("1 record field (2 plugin pairs)" in s_), s_[:300]
 
-    for name, fn in [("seventh-review/C1155-set-aside-carried-one-explanation", c1155_set_aside_carried_one_explanation),
+    # C1149 (found at regen-r7dev, Winterhold): the one-mod-alone line of a check says each mod's in-game meaning; an
+    # item whose pairs include visual-effect models leads its meaning with "for the other N pairs", which that line does
+    # not split: the line says the shared meaning once, never "In game, from X: in game, for the other N ...".
+    def c1149_alone_line_meaning_without_effect_lead():
+        X1, X2, Y1 = f"000X49:{MOD_A}", f"000Y49:{MOD_A}", f"000Z49:{MOD_B}"
+        O1, O2, O3 = f"000A49:{OTHER}", f"000B49:{OTHER}", f"000C49:{OTHER}"
+        rows_ = [row("OVERLAP", OTHER, MOD_A, X1, other=O1), row("OVERLAP", OTHER, MOD_A, X2, other=O2),
+                 row("OVERLAP", OTHER, MOD_B, Y1, other=O3)]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B], kind="baseline"), arm("only-a", [BASE, OTHER, MOD_A]),
+                arm("only-b", [BASE, OTHER, MOD_B]), arm("neither", [BASE, OTHER])]
+        b_ = lambda n_, m_: {"type": "Static", "editorId": n_, "model": m_}  # noqa: E731
+        names_ = {"refs": {x_: {"base": f"0B{x_[:4]}:{BASE}"} for x_ in (X1, X2, Y1, O1, O2, O3)},
+                  "bases": {f"0B{x_[:4]}:{BASE}": b_("Obj" + x_[:4], "effects\\fxmist.nif" if x_ == O1 else "arch\\wall.nif")
+                            for x_ in (X1, X2, Y1, O1, O2, O3)}}
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rows_, (OVERLAP, "only-a"): rows_[:2],
+                                                (OVERLAP, "only-b"): rows_[2:], (OVERLAP, "neither"): []},
+                                         [MOD_A, MOD_B], names=names_)
+        ln = next((x for x in md.splitlines() if "Objects occupying the same space** (overlap pairs)" in x), "")
+        return (bool(ln) and "for the other" not in ln and "In game" in ln), ln[-400:]
+
+    for name, fn in [("seventh-review/C1149-alone-line-meaning-without-effect-lead", c1149_alone_line_meaning_without_effect_lead),
+                     ("seventh-review/C1155-set-aside-carried-one-explanation", c1155_set_aside_carried_one_explanation),
                      ("seventh-review/C1161-set-aside-counts-fields", c1161_set_aside_counts_fields)]:
         cell(name, fn)
 

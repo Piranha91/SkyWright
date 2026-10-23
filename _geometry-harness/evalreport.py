@@ -3999,9 +3999,14 @@ def build_prediction(ctx: dict) -> dict:
         line["groups"].setdefault(key, []).append({"text": text_,
                                                    "findingIds": list(g["findingIds"])})
         # (fourth review, Winterhold S3) each mod's clashes keep their own in-game meaning
-        line.setdefault("_inGameBy", collections.OrderedDict()).setdefault(mod, g["inGameText"])
+        # (seventh review) the "for the other N pairs" lead belongs to the item's effect-model split, which this line
+        # does not say: its meaning is compared and said without it
+        line.setdefault("_inGameBy", collections.OrderedDict()).setdefault(mod, re.sub(
+            r"^In game, for the other [\d,]+ [^:]+: ", "In game: ", g["inGameText"] or ""))
     for line in alone_lines.values():
         by_ = line.pop("_inGameBy", None) or {}
+        if by_ and len(set(by_.values())) == 1:
+            line["inGameText"] = next(iter(by_.values()))
         if len(set(by_.values())) > 1 and words.get("aloneInGamePart"):
             line["inGameText"] = words.get("aloneInGameLead", "In game, ") + "; ".join(
                 bind(words["aloneInGamePart"], {"mod": m_, "text": (re.sub(r"^In game: ", "", t_).rstrip(".")[:1].lower()
