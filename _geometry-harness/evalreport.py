@@ -2583,6 +2583,8 @@ def build_prediction(ctx: dict) -> dict:
             g["_touchingPairs"] = g.get("_touchingPairs", 0) + 1
         if eff_row_ or touch_row_:
             g["_notCrossing"] = g.get("_notCrossing", 0) + 1
+        if rk[1] != "LOST-EDIT" and hit["row"].get("other"):
+            g.setdefault("_rowObjs", []).append((str(rk[4]), str(hit["row"]["other"][0])))
         if rk[1] == "LOST-EDIT" and str(hit["row"].get("field") or "") == sup_place:
             # (fourth review, Pilgrim S4) a straight vertical difference between the two values: said with its height
             v4_ = hit["row"].get("values") or {}
@@ -3137,6 +3139,18 @@ def build_prediction(ctx: dict) -> dict:
         n_eff_ = g.pop("_effectPairs", 0)
         g["effectPairs"] = n_eff_          # (sixth review, Pilgrim S2, BPT S2) carried to the totals
         g["_effN"] = g.pop("_notCrossing", 0)
+        # (sixth review, Clockwork r5 S1) pairs on objects whose own record change between the same two mods is lost
+        # (an admitted record-field row): linked to that item, where the object's place in game is decided
+        row_objs_ = g.pop("_rowObjs", None) or []
+        if row_objs_ and words.get("itemLinkedLost") and g["kind"] != "LOST-EDIT":
+            mods_l_ = {str(m_).lower() for m_ in g["mods"]}
+            lost_o_ = {str(e["formKey"]) for e in record if e["kind"] == "LOST-EDIT" and e["admission"] == "admitted"
+                       and {e["A"].lower(), e["B"].lower()} == mods_l_}
+            linked_ = [(a_, b_) for a_, b_ in row_objs_ if a_ in lost_o_ or b_ in lost_o_]
+            if linked_:
+                detail.append(bind(words["itemLinkedLost"], {
+                    "count": fmt_n(len(linked_)), "pairs": "pairs is" if len(linked_) == 1 else "pairs are",
+                    "examples": "; ".join(dict.fromkeys(named(a_ if a_ in lost_o_ else b_) for a_, b_ in linked_[:3]))}))
         n_touch_ = g.pop("_touchingPairs", 0)
         n_cop_ = g.pop("_coplanarPairs", 0)
         if n_cop_ and words.get("itemCoplanarPairs"):

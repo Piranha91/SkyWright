@@ -7861,6 +7861,31 @@ def main():
     for name, fn in [("sixth-review/C1125-base-links-one-figure", c1125_base_links_one_figure)]:
         cell(name, fn)
 
+    # C1127 (Clockwork r5 S1): an overlap pair on an object whose own record change by one of the two mods is lost to
+    # the other (a counted record-field row between them) is linked to that item in the overlap item.
+    def c1127_overlap_linked_to_lost_field():
+        T, W = f"00CA27:{BASE}", f"000W27:{MOD_B}"
+        ov_ = row("OVERLAP", MOD_B, MOD_A, T, other=W)
+        a_, b_ = offs(0), offs(0)
+        a_["Placement.Position"], b_["Placement.Position"] = "300,100,0", "700,100,0"
+        lr_ = lost_row(MOD_B, MOD_A, T, "Placement", off_txt(b_), off_txt(a_), off_txt(offs(0)), before=BASE)
+        arms = [arm("baseline", [BASE, MOD_B, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_B, MOD_A]),
+                arm("without-b", [BASE, MOD_A])]
+        ch_ = [(T, "PlacedObject", [(BASE, offs(0)), (MOD_B, b_), (MOD_A, a_)])]
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [ov_],
+                                                (OVERLAP, "without-b"): [], (CONTACT, "without-patch"): [],
+                                                (CONTACT, "without-b"): []}, [MOD_A], patches=[PATCH],
+                                         count_only={(RECORDS, "without-patch"): 1, (RECORDS, "without-b"): 1},
+                                         enrichment={(RECORDS, "without-patch"): [lr_], (RECORDS, "without-b"): []},
+                                         transcripts={(RECORDS, "without-patch"): records_transcript(ch_)},
+                                         masters={MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        adm = [e["admission"] for e in rec_of(plan, T)]
+        return ("record change by one of the two mods is lost" in it and "00CA27" in it.split("record change")[-1]), f"{adm}; {it[-400:]}"
+
+    for name, fn in [("sixth-review/C1127-overlap-linked-to-lost-field", c1127_overlap_linked_to_lost_field)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
