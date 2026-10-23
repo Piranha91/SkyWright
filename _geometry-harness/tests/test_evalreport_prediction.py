@@ -7652,7 +7652,7 @@ def main():
     def c1112_winner_base_on_some_rows_counted():
         plan, md = base_some_bundle()
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
-        return re.search(r"In 2 of them ModB\.esp's value of [^.]*is the base game's", it) is not None, it[-500:]
+        return re.search(r"In 2 of them ModB\.esp's value is the base game's", it) is not None, it[-500:]
 
     def c1113_field_meaning_not_listed_undescribed():
         plan, md = base_some_bundle()
@@ -7881,7 +7881,7 @@ def main():
                                          masters={MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE]})
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
         adm = [e["admission"] for e in rec_of(plan, T)]
-        return ("record change between the two mods is lost" in it and "00CA27" in it.split("record change")[-1]), f"{adm}; {it[-400:]}"
+        return re.search(r"\b1 of these pairs is on an object whose own record change between the two mods is lost", it) is not None, f"{adm}; {it[-400:]}"
 
     for name, fn in [("sixth-review/C1127-overlap-linked-to-lost-field", c1127_overlap_linked_to_lost_field)]:
         cell(name, fn)

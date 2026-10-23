@@ -3160,7 +3160,7 @@ def build_prediction(ctx: dict) -> dict:
             meaning_ = bind(forms_[0 if len(ex_) == 1 else 1], {"loser": lo_, "winner": wi_})
             if words.get(key_):
                 detail.append(bind(words[key_], {"count": fmt_n(len(ex_)), "objects": objs_(len(ex_)), "loser": lo_,
-                                                 "winner": wi_, "examples": "; ".join(list(ex_.values())[:n_ex_]),
+                                                 "winner": wi_, "examples": "; ".join(list(ex_.values())[:1 if how_ == "onMarker" else n_ex_]),
                                                  "meaning": meaning_}))
         for m_, s_ in (g.pop("_startsOffLoser", None) or {}).items():
             if words.get("itemStartsOffLoser"):
