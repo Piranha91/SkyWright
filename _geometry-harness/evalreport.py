@@ -4543,6 +4543,15 @@ def build_prediction(ctx: dict) -> dict:
                 "enables": bind(words["validationUndoneEnables"], {
                     "count": fmt_n(n_enable), "examples": "; ".join(enable_examples)}) if n_enable else ""}))
             undone_sentence = sentences[-1]
+        # (fifth review, Snazzy pelts) a row set aside as cannot tell that the setup with the patch no longer lists is no
+        # longer found there, never "resolved": whether it was a problem was not told
+        ct_set_ = set(words.get("cannotTellAdmissions") or [])
+        ct_ = [s_ for s_ in blind if s_["admission"] in ct_set_]
+        blind = [s_ for s_ in blind if s_["admission"] not in ct_set_]
+        if ct_ and words.get("validationNoLongerFound"):
+            sentences.append(bind(words["validationNoLongerFound"], {"patch": patch, "parts": "; ".join(
+                f"{fmt_n(s_['count'])} " + bind(words['blindSpotShort'].get(s_['admission'], s_['why']), {"patch": patch})
+                for s_ in ct_)}))
         if len(blind) > 1 and words.get("validationBlindSpots"):
             # several reasons in one sentence, each with its count (P53: one line each took a third of a page)
             sentences.append(bind(words["validationBlindSpots"], {"patch": patch, "parts": "; ".join(
@@ -4929,7 +4938,7 @@ def build_prediction(ctx: dict) -> dict:
                       "patchProblems": len(problems),
                       "notNewWithPatch": len(not_new), "notNewSentence": not_new_sentence,
                       "patchChoices": choices,
-                      "notMeasured": len(not_measured), "blindSpots": blind, "sentences": sentences,
+                      "notMeasured": len(not_measured), "blindSpots": blind, "noLongerFound": ct_, "sentences": sentences,
                       "otherComparisons": [c for c in comparisons if c["withPatch"] != patched_arm or c["withoutPatch"] != p_arm],
                       "missingFacts": list(words["validationMissingFacts"])}
     headings = {k: bind(v, {"subject": subject}) for k, v in words["headings"].items()}
