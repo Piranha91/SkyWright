@@ -6761,6 +6761,39 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             setups_.append(bind(pw_also["alsoEvaluationSetup"], {
                 "arm": arm_.get("armId"), "plugins": shown_ or pw_also.get("alsoEvaluationBaseOnly") or "the base game only"}))
         also_lines.append(bind(pw_also["alsoEvaluation"], {"name": Path(x_).name, "setups": "; ".join(setups_)}))
+        # (fifth review, Sewers S1) a setup of it that loads another version of an evaluated plugin (same name, other
+        # bytes): for each counted geometry clash kind between two plugins, how many of those pairs that setup finds
+        p_arm_ = (reader.get("prediction") or {}).get("predictionArm")
+        main_sha_ = {str(q.get("name")).lower(): str(q.get("sha256") or "").lower()
+                     for a_ in b.plan.get("arms") or [] if a_.get("armId") == p_arm_
+                     for q in (a_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict)}
+        targets_ = {str(m).lower() for m in (reader.get("prediction") or {}).get("mods") or []}
+        for arm_ in ab_.plan.get("arms") or []:
+            var_ = [str(q.get("name")) for q in (arm_.get("requested") or {}).get("plugins") or []
+                    if isinstance(q, dict) and str(q.get("name")).lower() in targets_
+                    and main_sha_.get(str(q.get("name")).lower()) not in (None, str(q.get("sha256") or "").lower())]
+            if not var_ or not pw_also.get("alsoVariantFinds"):
+                continue
+            groups_ = collections.OrderedDict()
+            for e_ in (reader.get("prediction") or {}).get("record") or []:
+                if (e_.get("admission") == "admitted" and str(e_.get("checkId")).startswith("geometry.") and e_.get("other")
+                        and e_.get("attribution") != "single-mod"):
+                    groups_.setdefault((e_["checkId"], e_["A"], e_["B"], e_["kind"]), []).append(e_)
+            loaded_ = {str(q.get("name")).lower() for q in (arm_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict)}
+            for (c_, a_, b2_, k_), es_ in groups_.items():
+                if str(a_).lower() not in loaded_ or str(b2_).lower() not in loaded_:
+                    continue                   # a pair that setup does not load: nothing to say
+                path_ = ab_.output_emit_path(c_, arm_.get("armId"), "arm")
+                em_ = ab_.emit(path_) if path_ else None
+                if not isinstance(em_, dict):
+                    continue
+                there_ = {(str(r_.get("formKey")), frozenset(map(str, r_.get("other") or ())))
+                          for cc_ in em_.get("Conflicts") or [] for r_ in conflict_rows(cc_, None)}
+                n_ = sum(1 for e_ in es_ if (str(e_["formKey"]), frozenset(map(str, e_.get("other") or ()))) in there_)
+                also_lines.append(bind(pw_also["alsoVariantFinds"], {
+                    "arm": arm_.get("armId"), "plugin": " and ".join(var_), "found": fmt_n(n_), "count": fmt_n(len(es_)),
+                    "unit": (reader_data.get("kindPhrases") or {}).get(k_, {}).get("unitPlural" if len(es_) != 1 else "unitSingular")
+                    or "clashes", "a": a_, "b": b2_}))
     reader["prediction"]["alsoEvaluations"] = also_lines
     # Evidence derived after measurement (bundle standard §8, enrichment): listed in the evidence index with what
     # it was derived from; names reach the plan so a reader's page needs no side input.
