@@ -4134,6 +4134,20 @@ def build_prediction(ctx: dict) -> dict:
         missing_facts.append(words["noModInSetup"])
     elif len(p_targets) > 1 and all(v is None for v in s_arms.values()) and not items:
         missing_facts.append(bind(words["attribution"]["not-separable"], {"why": words["notSeparableWhy"]["noSingleSetups"]}))
+    def aside_n(adm):
+        """(seventh review, Missives S3, Clockwork S2) a set-aside count in its unit: distinct record fields (navmesh
+        records for the navmesh check's rows), and the plugin pairs (rows) behind them."""
+        es_ = [e for e in record if e["admission"] == adm]
+        if not es_:
+            return set_aside[adm], set_aside[adm]
+        n_ = len({str(e["formKey"]) if adm == "navmeshCheck" else (str(e["formKey"]), e.get("field")) for e in es_})
+        return n_, len(es_)
+
+    def aside_noun(adm):
+        n_, r_ = aside_n(adm)
+        return words["fieldNoun"][0 if n_ == 1 else 1] + (bind(words["setAsidePairs"], {"count": fmt_n(r_)})
+                                                          if r_ > n_ and words.get("setAsidePairs") else "")
+
     aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
              "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
@@ -4339,9 +4353,15 @@ def build_prediction(ctx: dict) -> dict:
                                        + base_links_total(m_)
                                        for m_, n_ in base_link_cut_by.items() if words.get("setAsideBaseLinkCut"))
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
-                                   + (" " + bind(words["setAsideNotOwnEdit"], {
-                                       "count": fmt_n(aside["notOwnEdit"]),
-                                       "noun": words["fieldNoun"][0 if aside["notOwnEdit"] == 1 else 1],
+                                   + (" " + bind(words["setAsideNotOwnEditAllCarried"], {
+                                       "count": fmt_n(aside_n("notOwnEdit")[0]), "noun": aside_noun("notOwnEdit"),
+                                       "examples": "; ".join(sorted(set(carried_notown))[:2])})
+                                      if (aside["notOwnEdit"] and words.get("setAsideNotOwnEditAllCarried")
+                                          and not set_aside["notOwnEditEarlierWins"]
+                                          and len(set(carried_notown)) == aside_n("notOwnEdit")[0]) else
+                                      " " + bind(words["setAsideNotOwnEdit"], {
+                                       "count": fmt_n(aside_n("notOwnEdit")[0]),
+                                       "noun": aside_noun("notOwnEdit"),
                                        "earlier": (bind(words["setAsideNotOwnEditEarlier"], {
                                            "count": fmt_n(set_aside["notOwnEditEarlierWins"])})
                                            if set_aside["notOwnEditEarlierWins"] else "") + (bind(
@@ -4353,7 +4373,7 @@ def build_prediction(ctx: dict) -> dict:
                                                         if (k_ == "navmeshCheck" and door_lines_read
                                                             and words.get("setAsideNoiseNavmeshDoorsRead"))
                                                         else words["setAsideNoise"][k_], {
-                                       "count": fmt_n(aside[k_]), "noun": words["fieldNoun"][0 if aside[k_] == 1 else 1]})
+                                       "count": fmt_n(aside_n(k_)[0]), "noun": aside_noun(k_)})
                                        for k_ in NOISE_ADMISSIONS if aside[k_] and (words.get("setAsideNoise") or {}).get(k_))
                                    if sum(aside.values()) else None),
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {

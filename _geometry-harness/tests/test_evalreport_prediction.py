@@ -3785,7 +3785,9 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
                                   masters={HF_: [BASE], THIRD: [BASE], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE]})
         got = {e["A"]: e["admission"] for e in rec_of(plan, W)}
-        line = next((ln for ln in md.splitlines() if "only undoes the change" in ln), "")
+        # (seventh review, Clockwork S2) every such field carries an earlier change: said with that one explanation
+        line = next((ln for ln in md.splitlines() if "only undoes the change" in ln
+                     or "only carries an earlier plugin's change" in ln), "")
         ok = (got == {HF_: "baseGame", OTHER: "notOwnEdit"} and "the value in game does change" in line
               and "00C816" in line and "nothing is lost in game" not in line)
         return ok, f"{got}; {line[-260:]!r}"
@@ -6790,8 +6792,11 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
                                   masters={HF_: [BASE], THIRD: [BASE], OTHER: [BASE, HF_], O2: [BASE, HF_],
                                            MOD_A: [BASE], MOD_B: [BASE]})
-        line = next((ln for ln in md.splitlines() if "only undoes the change" in ln), "")
-        return re.search(r"in 3 of them the value lost is still an earlier plugin's change", line) is not None, line[-300:]
+        # (seventh review, Clockwork S2) the 3 rows are 2 record fields, every one carrying an earlier change: counted in
+        # fields with their plugin pairs, with that one explanation (the old "in 3 of them" counted rows as fields)
+        line = next((ln for ln in md.splitlines() if "only carries an earlier plugin's change" in ln), "")
+        return re.search(r"2 record fields \(3 plugin pairs\) where the losing plugin only carries an earlier plugin's change",
+                         line) is not None, line[-300:]
 
     # C1040 (Snazzy S3): the detail list's count of results that are not clashes between two mods names its population
     # (result rows of every setup measured, already-there ones included), so it is not read against the prediction's
@@ -8171,6 +8176,39 @@ def main():
                      ("seventh-review/C1145-needs-both-judged-on-the-chain", c1145_needs_both_judged_on_the_chain),
                      ("seventh-review/C1146-still-there-names-value-origin", c1146_still_there_names_value_origin),
                      ("seventh-review/C1147-sky-model-not-solid", c1147_sky_model_not_solid)]:
+        cell(name, fn)
+
+    # ------------------------------------------------ seventh review, later items (C1150-C1161)
+    # C1155 (Clockwork S2): two plugins carry HearthFires.esm's value on one field, both lost to ModA: the set-aside
+    # sentence counts 1 record field (2 plugin pairs), and where every such field carries an earlier plugin's change,
+    # gives that one explanation, never "only undoes the change of the mod loaded before it" beside it.
+    def c1155_set_aside_carried_one_explanation():
+        W, O2 = f"00CA55:{BASE}", "Neighbour.esp"
+        arms = [arm("baseline", [BASE, HF_, THIRD, OTHER, O2, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, THIRD, OTHER, O2, MOD_A, MOD_B])]
+        chains = [(W, "Cell", [(BASE, {"WaterHeight": "0"}), (HF_, {"WaterHeight": "5"}), (THIRD, {"WaterHeight": "7"}),
+                               (OTHER, {"WaterHeight": "5"}), (O2, {"WaterHeight": "5"}), (MOD_A, {"WaterHeight": "7"})])]
+        p_rows = [lost_row(x_, MOD_A, W, "WaterHeight", ["WaterHeight=5"], PH, PH) for x_ in (HF_, OTHER, O2)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], THIRD: [BASE], OTHER: [BASE, HF_], O2: [BASE, HF_], MOD_A: [BASE],
+                                           MOD_B: [BASE]})
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        s_ = next((x for x in re.split(r"(?<=\.)\s+(?=Also)", line) if "00CA55" in x), "")
+        return ("1 record field (2 plugin pairs)" in s_ and "only undoes the change" not in s_), s_[:400]
+
+    # C1161 (Missives S3): a set-aside count in record fields counts fields, with its plugin pairs where more rows than
+    # fields: two losers of one list field that differs only in order are 1 record field (2 plugin pairs).
+    def c1161_set_aside_counts_fields():
+        G1 = f"00CA61:{BASE}"
+        p_rows = [lost_row(x_, MOD_A, G1, "Regions", [f"Regions: same 7 item(s), ORDER DIFFERS from {MOD_A}"], PH, [PH])
+                  for x_ in (OTHER, THIRD)]
+        plan, md, _ = cw_bundle(p_rows, check=CELLATTR)
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        s_ = next((x for x in re.split(r"(?<=\.)\s+(?=Also)", line) if "another order" in x), "")
+        return ("1 record field (2 plugin pairs)" in s_), s_[:300]
+
+    for name, fn in [("seventh-review/C1155-set-aside-carried-one-explanation", c1155_set_aside_carried_one_explanation),
+                     ("seventh-review/C1161-set-aside-counts-fields", c1161_set_aside_counts_fields)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
