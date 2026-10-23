@@ -6756,7 +6756,39 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         return ("1 of these removed by the winning mod itself" in verdict and "own removal" in it), f"{verdict[:300]} || {it[-300:]}"
 
-    for name, fn in [("fifth-review/C1078-own-removal-at-the-top", c1078_own_removal_at_the_top),
+    # C1077 (Snazzy S2, Winterhold R2-2): a kept lost change gets its meaning in game too. D1: ModA switches the object
+    # off, ModB has it on and the patch carries ModB's on version: the object ModA removes is drawn. D2: the same, but
+    # the patch moves it 900 u across: drawn at the patch's own spot. D3: ModA's change of the base is lost; ModB's base
+    # is kept: the object is ModB's.
+    def c1077_kept_rows_meaning():
+        D1, D2, D3 = f"00CA77:{BASE}", f"00CB77:{BASE}", f"00CC77:{BASE}"
+        a_off = offs(-30000, "InitiallyDisabled")
+        p_rows, w_rows, p_ch, w_ch = [], [], [], []
+        for D, pat_pos in ((D1, None), (D2, "1000,100,0")):
+            b_ = offs(0)
+            pt_ = offs(0)
+            if pat_pos:
+                pt_["Placement.Position"] = pat_pos
+            p_rows.append(lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_off), off_txt(b_), off_txt(offs(0)), before=BASE))
+            w_rows.append(lost_row(MOD_A, PATCH, D, "Placement", off_txt(a_off), off_txt(pt_), off_txt(offs(0)), before=BASE))
+            p_ch.append((D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_off), (MOD_B, b_)]))
+            w_ch.append((D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_off), (MOD_B, b_), (PATCH, pt_)]))
+        o_, a_, b_ = ({**offs(0), "Base": f"0B0C{n}:{BASE}"} for n in ("70", "71", "70"))
+        p_rows.append(lost_row(MOD_A, MOD_B, D3, "Base", [f"Base=0B0C71:{BASE}"], [f"Base=0B0C70:{BASE}"],
+                               [f"Base=0B0C70:{BASE}"], before=BASE))
+        w_rows.append(lost_row(MOD_A, PATCH, D3, "Base", [f"Base=0B0C71:{BASE}"], [f"Base=0B0C70:{BASE}"],
+                               [f"Base=0B0C70:{BASE}"], before=BASE))
+        p_ch.append((D3, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_)]))
+        w_ch.append((D3, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)]))
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+        pr_ = reader(plan).get("prediction") or {}
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        return (re.search(r"\b1 on objects the losing mod switches off and the patch has on, so drawn\b", kl) is not None
+                and re.search(r"\b1 on objects the losing mod switches off and the patch has on at a spot of its own", kl)
+                is not None and re.search(r"\b1 in the object's base, so the object is the winning mod's", kl) is not None), kl[:500]
+
+    for name, fn in [("fifth-review/C1077-kept-rows-meaning", c1077_kept_rows_meaning),
+                     ("fifth-review/C1078-own-removal-at-the-top", c1078_own_removal_at_the_top),
                      ("fifth-review/C1074-kept-own-removal-said-winners", c1074_kept_own_removal_said_winners),
                      ("fifth-review/C1075-left-own-removal-patch-keeps-same", c1075_left_own_removal_patch_keeps_same),
                      ("fifth-review/C1076-inherited-removal-not-winners-own", c1076_inherited_removal_not_winners_own)]:
