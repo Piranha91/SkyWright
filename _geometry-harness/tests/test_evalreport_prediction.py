@@ -7346,13 +7346,15 @@ def main():
                      ("sixth-review/C1102-inherited-removal-stays-left", c1102_inherited_removal_stays_left)]:
         cell(name, fn)
 
-    # C1104-C1106 (Winterhold r6 S1): an object of another mod rests on a support the evaluated mod removes (below the
-    # world, enabled opposite to the player, initially disabled). The patch keeps the support removed (its own version
-    # moves it 16 u, still below the world) and does not touch the object. With the patch the object still has no
-    # support, whatever the check's own re-measure says: the with-patch outcome follows the support's state in the setup
-    # with the patch, read from the plugin files (C1104: left, never resolved). Where the patch moves the object itself
-    # far away, the re-measure stands (C1105, guard: resolved). A comparison never counts as new an object whose support
-    # is removed in the setup it is compared with too (C1106: not "introduced", not new with the patch).
+    # C1103-C1106, C1132 (Winterhold r6 S1, gate A condition R1): an object of another mod rests on a support the
+    # evaluated mod removes (below the world, enabled opposite to the player, initially disabled). The patch keeps the
+    # support removed (its own version moves it 16 u, still below the world) and does not touch the object, so with the
+    # patch the object still has no support; the setup with the patch does not list the pair. Read from the plugin
+    # files, the with-patch outcome follows the support's state there where the check's re-measure found no support
+    # (Holds: never "the patch's placement", C1103) or did not measure (C1104: left, never resolved). Where the patch
+    # moves the object itself far away, nothing is overridden (C1105, guard: resolved); where the re-measure found the
+    # object supported (Gone), it stands as measured (C1132, guard R1: resolved). A comparison never counts as new an
+    # object whose support is removed in the setup it is compared with too (C1106: not "introduced", not new).
     def refr_file(name, masters, refs, group="CELL"):
         """A plugin of placed references: refs [(form id, base id, (x, y, z), off)]; off: below the world is in the
         position, and an off reference is also enabled opposite to the player and initially disabled."""
@@ -7372,7 +7374,7 @@ def main():
         p_.write_bytes(out)
         return p_
 
-    def support_bundle(patch_moves_object=False, created=False):
+    def support_bundle(patch_moves_object=False, created=False, pred="Gone"):
         S, X = f"00CB04:{BASE}", f"000F04:{OTHER}"
         arms_ = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B], kind="baseline"),
                  arm("with-patch", [BASE, OTHER, MOD_A, MOD_B, PATCH])]
@@ -7397,19 +7399,29 @@ def main():
             return compile_and_render(arms_, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): [r_]},
                                       [MOD_A, MOD_B], patches=[PATCH], order=order, names=names_,
                                       diff_logs={(CONTACT, "with-patch"): log}), X
-        preds = {(CONTACT, "with-patch"): [{"Kind": "CONTACT", "A": OTHER, "B": MOD_A, "FormKey": X, "Other": S,
-                                            "Physical": "Gone"}]}
+        preds = ({(CONTACT, "with-patch"): [{"Kind": "CONTACT", "A": OTHER, "B": MOD_A, "FormKey": X, "Other": S,
+                                             "Physical": pred}]} if pred else None)
         return compile_and_render(arms_, {(CONTACT, "baseline"): [r_], (CONTACT, "with-patch"): []},
                                   [MOD_A, MOD_B], patches=[PATCH], names=names_, predicates=preds), X
 
+    def c1103_support_removed_not_patch_placement():
+        (plan, md, _), X = support_bundle(pred="Holds")
+        w = [e.get("withPatch") for e in rec_of(plan, X)]
+        return w == ["left"], f"withPatch {w}"
+
     def c1104_support_still_removed_with_patch_left():
-        (plan, md, _), X = support_bundle()
+        (plan, md, _), X = support_bundle(pred=None)
         w = [e.get("withPatch") for e in rec_of(plan, X)]
         kl = [x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or [] if "resolved" in x or "left" in x]
         return w == ["left"], f"withPatch {w}; {kl[:2]}"
 
     def c1105_object_moved_by_patch_stays_resolved():
-        (plan, md, _), X = support_bundle(patch_moves_object=True)
+        (plan, md, _), X = support_bundle(patch_moves_object=True, pred=None)
+        w = [e.get("withPatch") for e in rec_of(plan, X)]
+        return w == ["resolved"], f"withPatch {w}"
+
+    def c1132_remeasure_found_support_stands():
+        (plan, md, _), X = support_bundle(pred="Gone")
         w = [e.get("withPatch") for e in rec_of(plan, X)]
         return w == ["resolved"], f"withPatch {w}"
 
@@ -7422,7 +7434,9 @@ def main():
             f"comparison created {c.get('readerCreated')}; new with the patch {val.get('patchProblems')}; "
             f"{str(reg.get('readerPlain'))[:200]!r}")
 
-    for name, fn in [("sixth-review/C1104-support-still-removed-with-patch-left", c1104_support_still_removed_with_patch_left),
+    for name, fn in [("sixth-review/C1103-support-removed-not-patch-placement", c1103_support_removed_not_patch_placement),
+                     ("sixth-review/C1104-support-still-removed-with-patch-left", c1104_support_still_removed_with_patch_left),
+                     ("sixth-review/C1132-remeasure-found-support-stands", c1132_remeasure_found_support_stands),
                      ("sixth-review/C1105-object-moved-by-patch-stays-resolved", c1105_object_moved_by_patch_stays_resolved),
                      ("sixth-review/C1106-created-with-support-removed-before-not-new",
                       c1106_created_with_support_removed_before_not_new)]:
