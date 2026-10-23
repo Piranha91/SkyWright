@@ -5673,17 +5673,20 @@ def main():
 
     # C1079 (Pilgrim S1, fifth review): an overlap pair whose need of the other mod was not measured, where that mod's
     # object is a base-game record it only moves (2 u, same turn: read from both plugin files), says how far it moves it.
-    # (review5-sewers B1) every partner the other mod carries is said with what it does to it: with one partner moved
-    # 300 u and turned beside the 2 u nudge, the sentence names both, with their distances and the turn, and no "only".
+    # (review5-sewers B1, review5-pilgrim B1, review5-missives S1) every partner the other mod carries is said with every
+    # change it makes there (position, turn, base, scale, enable state), read from both plugin files: a 2 u nudge alone is
+    # "only moves"; beside a partner moved 300 u and turned, both are named with their distances, no "only"; a partner
+    # whose base alone the other mod changes is said as given another base, never as moved 0.0 u.
     def nudge_bundle(partners):
-        """partners: [(form id low bits, base (x, y, z, rz), other mod's (x, y, z, rz))]"""
+        """partners: [(form id low bits, base (x, y, z, rz, NAME id), other mod's (x, y, z, rz, NAME id))]"""
         X = f"000F79:{MOD_A}"
         rows_, refs_ = [], {X: {"base": f"0B0A79:{BASE}", "carriedBy": [MOD_A]}}
         recs_b, recs_o = [], []
         for low_, pb_, po_ in partners:
             Y = f"{low_:06X}:{BASE}"
-            recs_b.append(("REFR", low_, [("DATA", struct.pack("<6f", pb_[0], pb_[1], pb_[2], 0.0, 0.0, pb_[3]))], False))
-            recs_o.append(("REFR", low_, [("DATA", struct.pack("<6f", po_[0], po_[1], po_[2], 0.0, 0.0, po_[3]))], False))
+            for recs_, v_ in ((recs_b, pb_), (recs_o, po_)):
+                recs_.append(("REFR", low_, [("NAME", struct.pack("<I", v_[4])),
+                                              ("DATA", struct.pack("<6f", v_[0], v_[1], v_[2], 0.0, 0.0, v_[3]))], False))
             rows_.append(row("OVERLAP", OTHER, MOD_A, X, other=Y))
             refs_[Y] = {"base": f"0B0A79:{BASE}", "carriedBy": [BASE, OTHER]}
         fb_ = plugin_file_of(BASE, [], recs_b, group="CELL")
@@ -5696,13 +5699,17 @@ def main():
         return md, next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
 
     def c1079_other_mod_nudge_said():
-        md1, it1 = nudge_bundle([(0x00CA79, (100.0, 100.0, 0.0, 1.5), (102.0, 100.0, 0.0, 1.5))])
-        md2, it2 = nudge_bundle([(0x00CA79, (100.0, 100.0, 0.0, 1.5), (102.0, 100.0, 0.0, 1.5)),
-                                 (0x00CB79, (500.0, 100.0, 0.0, 1.5), (800.0, 100.0, 0.0, 2.0))])
+        near_ = (0x00CA79, (100.0, 100.0, 0.0, 1.5, 0x0B0A79), (102.0, 100.0, 0.0, 1.5, 0x0B0A79))
+        far_ = (0x00CB79, (500.0, 100.0, 0.0, 1.5, 0x0B0A79), (800.0, 100.0, 0.0, 2.0, 0x0B0A79))
+        rebase_ = (0x00CC79, (900.0, 100.0, 0.0, 1.5, 0x0B0A79), (900.0, 100.0, 0.0, 1.5, 0x01000B7A))
+        md1, it1 = nudge_bundle([near_])
+        md2, it2 = nudge_bundle([near_, far_])
+        md3, it3 = nudge_bundle([rebase_])
         one_ = re.search(re.escape(OTHER) + r" only moves [^:]*?by 2.0 u", it1) is not None and "was not measured" in md1
         two_ = (" only " not in it2.split("For example")[0] and "00CA79:Skyrim.esm" in it2 and "00CB79:Skyrim.esm" in it2
                 and re.search(r"00CB79:Skyrim\.esm[^;.]*300\.0 u[^;.]*turn", it2) is not None and "2.0 u" in it2)
-        return one_ and two_, f"{it1[-250:]} || {it2[-400:]}"
+        three_ = ("00CC79:Skyrim.esm" in it3 and "another base" in it3 and "0.0 u" not in it3 and " only " not in it3)
+        return one_ and two_ and three_, f"{one_} {two_} {three_} || {it2[-300:]} || {it3[-300:]}"
 
     for name, fn in [("fifth-review/C1079-other-mod-nudge-said", c1079_other_mod_nudge_said)]:
         cell(name, fn)
