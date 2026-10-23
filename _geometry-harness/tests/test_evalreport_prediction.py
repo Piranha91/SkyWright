@@ -5835,6 +5835,29 @@ def main():
     for name, fn in [("fifth-review/C1087-state-fixture-zero-gap-cannot-tell", c1087_state_fixture_zero_gap_cannot_tell)]:
         cell(name, fn)
 
+    # C1088 (Winterhold R2-3): the sentence that a winner's value of a field is the base game's names its own example (a
+    # record of that field), so the item's examples (objects the winner moved) do not read as examples of it.
+    def c1088_winner_base_sentence_names_its_example():
+        R1, R2 = f"00CA88:{BASE}", f"00CB88:{BASE}"
+        a1, b1 = offs(0), offs(0)
+        a1["Placement.Position"], b1["Placement.Position"] = "300,100,0", "700,100,0"
+        a2 = offs(0, "0", "000014:Skyrim.esm")
+        b2 = offs(0)
+        rows_ = [lost_row(MOD_A, MOD_B, R1, "Placement", off_txt(a1), off_txt(b1), off_txt(offs(0)), before=BASE),
+                 lost_row(MOD_A, MOD_B, R2, "EnableParent", ["EnableParent.Reference=000014:Skyrim.esm",
+                                                             "EnableParent.Flags=SetEnableStateToOppositeOfParent"],
+                          PH, PH, before=BASE)]
+        ch_ = [(R1, "PlacedObject", [(BASE, offs(0)), (MOD_A, a1), (MOD_B, b1)]),
+               (R2, "PlacedObject", [(BASE, offs(0)), (MOD_A, a2), (MOD_B, b2)])]
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        s_ = next((x for x in re.split(r"(?<=[.)])\s+", it) if "is the base game's" in x), "")
+        return ("00CB88" in s_ and "00CA88" not in s_), f"{s_} || {it[-400:]}"
+
+    for name, fn in [("fifth-review/C1088-winner-base-sentence-names-its-example", c1088_winner_base_sentence_names_its_example)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
