@@ -167,10 +167,10 @@ No media row: nothing was supplied to this bundle under `--media`, and no unasse
 
 <a id="further-notes"></a>
 ## Further notes
-{% if p.reader.coverage.setAsideLine %}
+{% if (p.reader.get("coverage") or {}).get("setAsideLine") %}
 ### What the counts leave out
 
-{{ p.reader.coverage.setAsideLine }}
+{{ (p.reader.get("coverage") or {}).get("setAsideLine") }}
 {% endif %}
 ### Load order for these locations
 
