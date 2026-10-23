@@ -5024,8 +5024,9 @@ def main():
     def c950_headline_says_off_for_good():
         plan, md, _ = offwin_bundle()
         verdict = str((reader(plan).get("prediction") or {}).get("verdict") or "")
-        # (fifth review, BPT S2) both of ModB's removals are its own: the headline also says so
-        return re.search(r"\(3 record fields, 2 of them on objects the winning version sets off for good, 2 by the "
+        # (fifth review, BPT S2) the headline says how many of ModB's removals are its own: D3's (D1's is an earlier
+        # mod's that ModB carries, since the sixth review's fixture change for C900-C931)
+        return re.search(r"\(3 record fields, 2 of them on objects the winning version sets off for good, 1 by the "
                          r"winner's own removal\)", verdict) is not None, verdict[:300]
 
     for name, fn in [("third-review/C950-headline-says-off-for-good", c950_headline_says_off_for_good)]:

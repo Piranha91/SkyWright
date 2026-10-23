@@ -988,6 +988,78 @@ def is_base_game(name: str, words: dict) -> bool:
     return n in listed or bool(prefix and n.startswith(prefix) and n.endswith((".esm", ".esp", ".esl")))
 
 
+_PLUGIN_SHA = {}
+
+
+def setup_version(plugins: list, fk: str, reads: list | None = None):
+    """(plugin, its placementFull) of the last plugin of a setup holding the placed record `fk`, read from every plugin
+    file of that setup from the record's origin on, each only where its bytes are the recorded ones (sha256); (None,
+    None) where none holds it; None where a file of the setup is missing, differs or does not read. Each read is
+    appended to `reads` (pluginReads)."""
+    origin_, started_, last_ = str(fk).split(":", 1)[-1].lower(), False, (None, None)
+    for x in plugins or []:
+        started_ = started_ or str(x.get("name")).lower() == origin_
+        if not started_:
+            continue
+        path_ = str(x.get("path") or "")
+        if not path_ or not Path(path_).is_file():
+            return None
+        if path_ not in _PLUGIN_SHA:
+            _PLUGIN_SHA[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+        if _PLUGIN_SHA[path_] != str(x.get("sha256") or "").lower():
+            return None
+        try:
+            got_ = pluginread.placements_full(path_, [str(fk)])["records"].get(str(fk))
+        except pluginread.PluginReadError:
+            return None
+        if reads is not None:
+            reads.append({"plugin": x.get("name"), "sha256": _PLUGIN_SHA[path_], "record": str(fk), "read": "placementFull",
+                          "found": got_ is not None})
+        if got_ is not None:
+            last_ = (x.get("name"), got_)
+    return last_
+
+
+def placement_off_for_good(v: dict, words: dict) -> bool:
+    """A placementFull version sets its object off for good: moved below the world (disabledValuePatterns), or enabled
+    opposite to a parent that is always enabled (the player); the same rule as the record chains' provider_disables."""
+    if not v:
+        return False
+    pos_ = v.get("position") or []
+    text_ = "Placement.Position=" + ",".join(str(float(x)) for x in pos_)
+    if any(re.search(p_, text_) for p_ in words.get("disabledValuePatterns") or []):
+        return True
+    ep_ = v.get("enableParent")
+    always_ = {str(x).lower() for x in (words.get("disabledRecord") or {}).get("alwaysEnabledParents") or []}
+    return bool(ep_ and str(ep_[0]).lower() in always_ and ep_[1])
+
+
+def support_still_removed(plugins_in: list, plugins_ref: list, fk: str, others, words: dict, reads=None) -> bool | None:
+    """(sixth review, Winterhold r6 S1) In the setup `plugins_in`, every support of the object (`others`) is off for good
+    at its last version, and the object's last version is on (not off for good, not initially disabled, not deleted)
+    and within skill data supportUnmovedUnits of where it stands in the setup `plugins_ref`: the object still has no
+    support there, whatever that setup's check lists. None where a plugin file of either setup is not read."""
+    if not others:
+        return False
+    o_in, o_ref = setup_version(plugins_in, fk, reads), setup_version(plugins_ref, fk, reads)
+    if o_in is None or o_ref is None:
+        return None
+    v_in, v_ref = o_in[1], o_ref[1]
+    if not v_in or not v_ref or not v_in.get("position") or not v_ref.get("position"):
+        return False
+    if placement_off_for_good(v_in, words) or v_in.get("initiallyDisabled") or v_in.get("deleted"):
+        return False
+    if math.dist(v_in["position"], v_ref["position"]) > float(words.get("supportUnmovedUnits") or 1.0):
+        return False
+    for s_ in others:
+        sv_ = setup_version(plugins_in, str(s_), reads)
+        if sv_ is None:
+            return None
+        if not placement_off_for_good(sv_[1], words):
+            return False
+    return True
+
+
 def plugin_masters(b: "Bundle") -> dict | None:
     """Each plugin's own master list (lower case), read from the configuration the probes record in their emits
     (`Configuration.Plugins[].Masters`): a fact of the plugin file, the same in every setup that loads it. Per setup the
@@ -4235,6 +4307,29 @@ def build_prediction(ctx: dict) -> dict:
         for e in judged:
             if outcome[id(e)] == "left" and left_split.get(id(e)) == "patchHeld":
                 outcome[id(e)] = "patchPlaced"
+        # (sixth review, Winterhold r6 S1) an object left without its support, whose supports are all still off for good
+        # in the setup with the patch and which no patch moves or switches off, still has no support there: left,
+        # whatever the setup's own list says (a patch carrying the removal is no placement). Never over a re-measure
+        # that found the object supported (Gone: gate A condition R1); only where it found none (Holds) or did not
+        # measure. Read from the plugin files of both setups (recorded bytes only); every judgement is in pluginReads.
+        support_checks_ = set(words.get("supportChecks") or [])
+        main_b_ = ctx.get("mainBundle")
+        arm_rows_ = {a_.get("armId"): (a_.get("requested") or {}).get("plugins") or []
+                     for a_ in ((main_b_.plan.get("arms") if main_b_ else None) or [])}
+        for e in judged:
+            if (e["checkId"] not in support_checks_ or e["kind"] == "LOST-EDIT" or e.get("rows")
+                    or outcome[id(e)] not in ("resolved", "patchPlaced", "cannot-tell")):
+                continue
+            o_ = (e.get("other") or [None])[0]
+            if ((predicates(e["checkId"]) or {}).get((e["kind"], e["A"], e["B"], e["formKey"], o_))) == "Gone":
+                continue
+            st_ = support_still_removed(arm_rows_.get(patched_arm), arm_rows_.get(p_arm), str(e["formKey"]),
+                                        [str(x) for x in e.get("other") or []], words)
+            plugin_reads.append({"read": "supportState", "record": str(e["formKey"]), "supports": e.get("other"),
+                                 "setup": patched_arm, "stillRemoved": st_})
+            if st_:
+                outcome[id(e)] = "left"
+                left_split[id(e)] = "supportRemoved"
         hits = [e for e in judged if outcome[id(e)] == "resolved"]
         switched = [e for e in judged if outcome[id(e)] == "switched"]
         own = [e for e in judged if outcome[id(e)] == "own"]
@@ -4378,6 +4473,7 @@ def build_prediction(ctx: dict) -> dict:
         for e in admitted:
             e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
+        support_new = set()
         problem_objects, problem_movers = {}, {}
         gap_re = (words.get("newObjects") or {}).get("gapPattern")
         problem_rows = collections.Counter()          # rows per new problem: an object's pairs (BPT review S3)
@@ -4417,6 +4513,12 @@ def build_prediction(ctx: dict) -> dict:
             ident_ = ident_of.get(rk, tuple(rk[:5]))
             if no_body(rk, hit["row"].get("other")):
                 no_body_new.add(ident_)        # an object with no model: no body, not a clash
+                continue
+            if rk[0] in support_checks_ and support_still_removed(
+                    arm_rows_.get(p_arm), arm_rows_.get(patched_arm), str(rk[4]),
+                    [str(x) for x in hit["row"].get("other") or []], words):
+                # (sixth review, Winterhold r6 S1) its support is removed without the patch too: not new with it
+                support_new.add(ident_)
                 continue
             if master_of(masters, rk[2], rk[3]) and is_geometry_check(rk[0], words):
                 master_idents.add(ident_)      # any row of it is between a plugin's object and its master's
@@ -4714,6 +4816,9 @@ def build_prediction(ctx: dict) -> dict:
         if no_body_new:
             # said with the new clashes it is set aside from (page budget)
             sentences[new_idx] += " " + bind(words["validationNoBody"], {"patch": patch, "count": len(no_body_new)})
+        support_new -= problem_seen
+        if support_new and words.get("validationSupportRemoved"):
+            sentences[new_idx] += " " + bind(words["validationSupportRemoved"], {"patch": patch, "count": len(support_new)})
         if problems and not bases_read and any(rk[0] in body_checks for rk in problems):
             sentences.append(bind(words["validationBodyNotRead"], {"patch": patch}))
         if untold:
@@ -4776,7 +4881,7 @@ def build_prediction(ctx: dict) -> dict:
                             "cannotTell": sum(1 for e in all_["untold"] if item_of(e) == k),
                             **{f"open{n[0].upper()}{n[1:]}": sum(1 for e in all_["open"] if item_of(e) == k
                                                                  and left_split.get(id(e)) == n)
-                               for n in ("listed", "patchHeld", "notAttributed")},
+                               for n in ("listed", "patchHeld", "notAttributed", "supportRemoved")},
                             "notMeasured": sum(1 for e in not_measured if item_of(e) == k)})
         # a geometry clash between a plugin's object and its master's is counted and labelled (coordinator ruling)
         problem_master = collections.Counter(rk[0] for rk in problems if ident_of.get(rk, tuple(rk[:5])) in master_idents)
@@ -4876,11 +4981,11 @@ def build_prediction(ctx: dict) -> dict:
                                                                  for s_ in OFF_STATES}))
                                  for m_, n_ in sorted(by.items(), key=lambda kv: (-kv[1], kv[0].lower())))
             parts = [part(k) for k in keys if bi.get(k)]
-            if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed")):
+            if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed") or bi.get("openSupportRemoved")):
                 # the objects still intersect: say how many are still reported between two mods and why the rest
                 # are not (W-B2), never a bare "left N" that the detail sections cannot reconcile
                 split = [bind(ow["openSplit"][n], {"count": fmt_n(bi[f"open{n[0].upper()}{n[1:]}"])})
-                         for n in ("listed", "patchHeld", "notAttributed") if bi.get(f"open{n[0].upper()}{n[1:]}")]
+                         for n in ("listed", "patchHeld", "notAttributed", "supportRemoved") if bi.get(f"open{n[0].upper()}{n[1:]}")]
                 # the off-for-good count goes first, beside the count it is part of (reviewer, BPT 1)
                 off_ = off_text(off_from(bi, "offOpen"), wrap=False)
                 parts[[k for k in keys if bi.get(k)].index("open")] = (
@@ -5665,6 +5770,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 known_objects = {what(x) for x in known_rows} - had_objects
                 bodied = {what(x) for x in known_rows if not row_has_no_body(names_doc0, x)} - had_objects
                 no_body_created = len(known_objects - bodied)
+                # (sixth review, Winterhold r6 S1) an object whose support is off for good in the setup compared with too,
+                # where it stands on and unmoved, is no new problem: that setup's check does not list it
+                pw_ = (pr.get("reader") or {}).get("prediction") or {}
+                cmp_arm_ = "baseline" if arm_id != "baseline" else None
+                arm_rows6_ = {a_.get("armId"): (a_.get("requested") or {}).get("plugins") or [] for a_ in b.plan.get("arms") or []}
+                support_kept = ({what(x) for x in known_rows if what(x) in bodied and x.get("other")
+                                 and support_still_removed(arm_rows6_.get(cmp_arm_), arm_rows6_.get(arm_id),
+                                                           str(x.get("formKey")), [str(o) for o in x.get("other") or []], pw_)}
+                                if check_id in set(pw_.get("supportChecks") or []) and cmp_arm_ else set())
+                bodied -= support_kept
                 first = created_groups[0] if created_groups else {}
                 gated = bool(context_only_by_check.get(str(check_id)))
                 reader_groups = [d for d in created_groups if not context_only(check_id, d.get("kind"))]
@@ -5683,6 +5798,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                                  for d in created_groups], "readerCreated": reader_created,
                             "readerUnitCounted": unit_n is not None,
                             "readerNoBody": no_body_created,
+                            "readerSupportRemoved": len(support_kept),
                             "readerRepaired": reader_repaired}
                 f = add({"id": None, "kind": "regression", "priority": 1, "checkId": check_id,
                          "family": b.check_family(check_id), "armId": arm_id, "part": "diff",
@@ -5977,6 +6093,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                     + f" in the {check_phrase}"
                                     + (bind((reader_data.get("comparisonState") or {})["noBodyCreated"], {"count": fmt_n(no_body_n)})
                                        if no_body_n else "")
+                                    # (sixth review, Winterhold r6 S1) objects whose support is removed in both setups
+                                    + (bind((reader_data.get("comparisonState") or {})["supportRemovedCreated"],
+                                            {"count": fmt_n(c.get("readerSupportRemoved"))})
+                                       if c.get("readerSupportRemoved") else "")
                                     + "." +
                                     (f" It also repaired {fmt_n(repaired_count)} existing {noun(repaired_count, 'problem')}"
                                      + (bind((reader_data.get("comparisonState") or {})["noBodyCreated"],
