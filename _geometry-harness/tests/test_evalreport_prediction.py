@@ -5533,6 +5533,30 @@ def main():
         plan, md, _ = compile_and_render(arms, {(NAVOWN, "baseline"): rows_, (NAVOWN, "without-a"): []}, [MOD_A])
         return plan, md
 
+    # C1093 (Sewers S2): the same base links, where the base game's own version of the target navmesh has the triangles
+    # they point at (600 triangles) and the evaluated mod's has 432: the evaluated mod's cut breaks them, said so, never
+    # "the base game's own".
+    def c1093_base_link_broken_by_target_cut():
+        rows_ = []
+        for t_ in (501, 502):
+            r_ = row("EDGE-IDX", OTHER, MOD_A, N_LINK, label="CityExterior04 (ext)", other=N_TGT)
+            r_["Summary"] = (f"navmesh {N_LINK} in CityExterior04 (ext) edge-links {N_TGT} triangle {t_} of 432   "
+                             f"[record provided by: {BASE} -> {OTHER}]")
+            rows_.append(r_)
+        links_ = [(0x00000D43, 501), (0x00000D43, 502)]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
+        fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_))], True),
+                                               ("NAVM", 0x00000D43, [("NVNM", nvnm(600, []))], False)]),
+               OTHER: plugin_file_of(OTHER, [BASE], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_))], False)])}
+        with_files(arms, fs_)
+        plan, md, _ = compile_and_render(arms, {(NAVOWN, "baseline"): rows_, (NAVOWN, "without-a"): []}, [MOD_A])
+        aside = str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+        return ("2 broken navmesh links" in aside and f"{MOD_A} breaks" in aside
+                and "base game's own" not in aside), aside[-400:]
+
+    for name, fn in [("fifth-review/C1093-base-link-broken-by-target-cut", c1093_base_link_broken_by_target_cut)]:
+        cell(name, fn)
+
     def c976_base_link_carried_set_aside():
         plan, md = link_bundle(base_has=True)
         adm = [e["admission"] for e in rec_of(plan, N_LINK)]
