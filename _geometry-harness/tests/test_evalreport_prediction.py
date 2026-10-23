@@ -6274,17 +6274,20 @@ def main():
     # C985, C986 (round 2, R2: Missives review S1, Snazzy review S2): the earlier clashes a patch also fixes are counted as
     # distinct changes in game: one field lost by two plugins is one; a Grid change only in bytes the game does not read
     # is none. Where the patch has no such field at all, the clash is said as the patch removing it, not as a fix.
-    def earlier_fix_bundle(patch_has_field, whole=False, o2_carries=False):
+    def earlier_fix_bundle(patch_has_field, whole=False, o2_carries=False, fourth=False):
         """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight's cell data 05, ModA 09, the patch 05. Removal:
         OtherMod and Neighbour have no MaxHeight, ModA has 09, the patch has none. Without ModA both lose to Later.esp too (already
-        there). A Grid row differing only in unused bytes is lost the same way and fixed too."""
+        there). A Grid row differing only in unused bytes is lost the same way and fixed too. fourth: Fourth.esp, after
+        Neighbour, carries OtherMod's value too (built with OtherMod as a master)."""
         O2, O3 = "Neighbour.esp", "Later.esp"
+        O4s = ["Fourth.esp"] if fourth else []
         W1, C2 = f"00C985:{BASE}", f"00C986:{BASE}"
-        arms_ = [arm("baseline", [BASE, OTHER, O2, O3, MOD_A, PATCH], kind="baseline"),
-                 arm("without-patch", [BASE, OTHER, O2, O3, MOD_A]), arm("without-a", [BASE, OTHER, O2, O3])]
+        arms_ = [arm("baseline", [BASE, OTHER, O2, *O4s, O3, MOD_A, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, OTHER, O2, *O4s, O3, MOD_A]), arm("without-a", [BASE, OTHER, O2, *O4s, O3])]
         mh_ = lambda x: {"MaxHeight.CellData": x, "MaxHeight.Offset": "0"} if x else {}  # noqa: E731
         lose_ = "05" if patch_has_field else None
-        chain_ = [(BASE, mh_("00")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), (O3, mh_("07")), (MOD_A, mh_("09"))]
+        chain_ = [(BASE, mh_("00")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), *[(x_, mh_(lose_)) for x_ in O4s],
+                  (O3, mh_("07")), (MOD_A, mh_("09"))]
         p_ch = [(W1, "Worldspace", chain_)]
         # a tree answer writes the field the patch lacks as the import captures it ("has X ABSENT", "has no X")
         w_ch = [(W1, "Worldspace", chain_ + [(PATCH, mh_(lose_) if patch_has_field else {
@@ -6295,8 +6298,8 @@ def main():
             r_ = lost_row(a_, b_, C2, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"])
             r_["Summary"] = f"Cell TestCellGrid: Grid - {a_}'s value lost to {b_}'s"
             return r_
-        p_rows = [mh_row(OTHER, MOD_A), mh_row(O2, MOD_A), grid_(OTHER, MOD_A)]
-        n_rows = [mh_row(OTHER, O3), mh_row(O2, O3), grid_(OTHER, O3)]
+        p_rows = [mh_row(OTHER, MOD_A), mh_row(O2, MOD_A), *[mh_row(x_, MOD_A) for x_ in O4s], grid_(OTHER, MOD_A)]
+        n_rows = [mh_row(OTHER, O3), mh_row(O2, O3), *[mh_row(x_, O3) for x_ in O4s], grid_(OTHER, O3)]
         enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "without-a"): n_rows, (RECORDS, "baseline"): []}
         def absent_too(tr_):
             """A tree answer also lists a field the winner has and a provider lacks, as the record imports capture it."""
@@ -6314,7 +6317,8 @@ def main():
         plan, md, _ = compile_and_render(arms_, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch", "without-a")},
                                          [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
                                          enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE, OTHER] if o2_carries
-                                                                                  else [BASE], O3: [BASE], PATCH: [BASE]})
+                                                                                  else [BASE], O3: [BASE], PATCH: [BASE],
+                                                   **{x_: [BASE, OTHER] for x_ in O4s}})
         if whole:
             return md
         return next((x for x in md.splitlines() if "but not predicted" in x), "")
@@ -7983,9 +7987,10 @@ def main():
     # one read of the record's versions: whose own change the value (or the off-for-good state, or the placement) is,
     # and who only carries it.
     # C1148 (the read itself): recordrows.attribute over a provider chain. Provider i changed the field when its value
-    # differs from the one it inherits from its nearest master; the value's origin is the earliest provider whose own
-    # change that value is (a value put back or copied from an earlier plugin's change is that plugin's); the carriers
-    # are the providers after the origin holding the same value without a change of their own.
+    # differs from the one it inherits from its nearest master; the value's origin is found by walking back through the
+    # versions it inherits while the value is unchanged (the plugin that made the change it carries); `sameAs` lists the
+    # earlier providers holding the same value as a change of their own (the same change made independently, earliest
+    # first); the carriers are the later providers whose value's origin is that plugin.
     def c1148_attribution_read():
         import recordrows as RR_
         fn_ = getattr(RR_, "attribute", None)
@@ -7996,8 +8001,8 @@ def main():
         ms_ = {UPD.lower(): [BASE], "laterfix.esp": [BASE, UPD], OTHER.lower(): [BASE, UPD], MOD_A.lower(): [BASE, UPD],
                PATCH.lower(): [BASE, MOD_A]}
         p_, o_ = fn_(provs_, vals_, 5, ms_), fn_(provs_, vals_, 3, ms_)
-        ok_ = (p_.get("own") is True and p_.get("origin") == 2 and o_.get("own") is False and o_.get("origin") == 1
-               and o_.get("carriers") == [3])
+        ok_ = (p_.get("own") is True and p_.get("origin") == 5 and p_.get("sameAs") == [2]
+               and o_.get("own") is False and o_.get("origin") == 1 and o_.get("carriers") == [3])
         return ok_, f"patch {p_}; other {o_}"
 
     # C1140 (Pilgrim S2): the other mod moves a base-game partner farther than the object's size: the measured crossing
@@ -8079,11 +8084,13 @@ def main():
         return (LF in tail_ and re.search(r"replac|supersed", tail_) is not None), line[-400:]
 
     # C1144 (Missives r6 S2): an earlier loss the patch also fixes names only the plugin whose own change the losing value
-    # is: Neighbour.esp, built without OtherMod.esp as a master, holds OtherMod.esp's value (a copy, not a change of its
-    # own value), so the change is OtherMod.esp's; Neighbour.esp is never said to change it.
-    def c1144_earlier_fix_copy_named_by_origin():
-        ln = earlier_fix_bundle(True, o2_carries=False)
-        return ("OtherMod.esp's change" in ln and "Neighbour.esp's" not in ln), ln[:500]
+    # is. Neighbour.esp and Fourth.esp, each built with OtherMod.esp as a master, only carry OtherMod.esp's value: the
+    # change is OtherMod.esp's, whichever loser's row the unit is read from; neither carrier is said to change it.
+    # (Cause on regen-r6b: the read was keyed by a row rebuilt from another loser's summary, found no field and walked
+    # back to the base game, so each carrier was named as its own; logs/missives-own-of-debug.txt.)
+    def c1144_earlier_fix_carriers_named_by_origin():
+        ln = earlier_fix_bundle(True, o2_carries=True, fourth=True)
+        return ("OtherMod.esp's change" in ln and "Neighbour.esp's" not in ln and "Fourth.esp's" not in ln), ln[:500]
 
     # C1145 (BPT r6 S3): ModA's value is lost to Partner.esp's own change; the only measured setup without Partner.esp
     # also lacks Later.esp, which loads after ModA and carries the base game's value. Read from the record's versions,
@@ -8155,7 +8162,7 @@ def main():
                      ("seventh-review/C1141-patch-removal-credited-to-patch", c1141_patch_removal_credited_to_patch),
                      ("seventh-review/C1142-undo-carriers-per-field", c1142_undo_carriers_per_field),
                      ("seventh-review/C1143-with-patch-superseding-change-named", c1143_with_patch_superseding_change_named),
-                     ("seventh-review/C1144-earlier-fix-copy-named-by-origin", c1144_earlier_fix_copy_named_by_origin),
+                     ("seventh-review/C1144-earlier-fix-carriers-named-by-origin", c1144_earlier_fix_carriers_named_by_origin),
                      ("seventh-review/C1145-needs-both-judged-on-the-chain", c1145_needs_both_judged_on_the_chain),
                      ("seventh-review/C1146-still-there-names-value-origin", c1146_still_there_names_value_origin),
                      ("seventh-review/C1147-sky-model-not-solid", c1147_sky_model_not_solid)]:
