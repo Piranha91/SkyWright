@@ -7760,6 +7760,26 @@ def main():
     for name, fn in [("sixth-review/C1117-nobody-lights-named", c1117_nobody_lights_named)]:
         cell(name, fn)
 
+    # C1121 (Sewers r6 S1): where the losing version is a single-triangle stub (the losing mod's removal) and the winning
+    # version has the base game's triangle count (600), the line says the winner puts back the base game's navmesh where
+    # the losing mod removed it, and counts it among the base-game-sized ones.
+    def c1121_stub_put_back_at_base_size():
+        n1 = f"000E21:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="TempleInterior (int)  1 tris -> 600")]
+        p_rows[0]["Necessary"][0]["Detail"] = "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u"
+        arms_ = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E21, [("NVNM", nvnm(600, []))], False)]),
+               MOD_A: plugin_file_of(MOD_A, [BASE], [("NAVM", 0x00000E21, [("NVNM", nvnm(1, []))], False)]),
+               MOD_B: plugin_file_of(MOD_B, [BASE], [("NAVM", 0x00000E21, [("NVNM", nvnm(600, []))], False)])}
+        with_files(arms_, fs_)
+        plan, md, html = compile_and_render(arms_, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        return ("puts back" in top and "000E21" in top and "600 triangles" in top and "removed" in top), top[-500:]
+
+    for name, fn in [("sixth-review/C1121-stub-put-back-at-base-size", c1121_stub_put_back_at_base_size)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

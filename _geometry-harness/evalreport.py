@@ -3358,6 +3358,22 @@ def build_prediction(ctx: dict) -> dict:
                 "count": fmt_n(len(stubs)), "loser": loser, "version": "version is" if len(stubs) == 1 else "versions are",
                 "records": ", ".join(str(h["row"].get("formKey")) for h in stubs[:3])
                 + (f" and {fmt_n(len(stubs) - 3)} more" if len(stubs) > 3 else "")})
+        # (sixth review, Sewers r6 S1) a stub whose winning version has the base game's triangle count: the winner puts
+        # back the base game's navmesh where the losing mod removed it, read from both plugin files
+        put_back_ = []
+        for h in stubs:
+            fk_ = str(h["row"].get("formKey") or "")
+            origin_ = fk_.split(":", 1)[1] if ":" in fk_ else ""
+            if origin_ and is_base_game(origin_, words):
+                b_ = plugin_record(origin_, "navmesh", fk_)
+                w_ = plugin_record(winner, "navmesh", fk_)
+                if (b_ and w_ and b_.get("triangles") is not None and b_.get("triangles") == w_.get("triangles")
+                        and int(b_["triangles"]) > int(words.get("navmeshStubTriangles") or 1)):
+                    put_back_.append(f"{fk_} ({fmt_n(int(b_['triangles']))} triangles)")
+        if put_back_ and words.get("historyLossStubPutBack"):
+            text += " " + bind(words["historyLossStubPutBack"], {"winner": winner, "loser": loser,
+                                                                  "records": ", ".join(x_.split(" ", 1)[0] for x_ in put_back_[:3])})
+            base_same_ += put_back_
         if base_same_ and words.get("historyLossBaseCount"):
             text += " " + bind(words["historyLossBaseCount"], {"count": fmt_n(len(base_same_)), "winner": winner,
                                                                 "records": ", ".join(base_same_[:3])})
