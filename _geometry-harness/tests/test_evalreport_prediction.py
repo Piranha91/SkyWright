@@ -6013,6 +6013,20 @@ def main():
     for name, fn in [("fifth-review/C1097-land-flags-meaning-said", c1097_land_flags_meaning_said)]:
         cell(name, fn)
 
+    # C1098 (Missives line 107): the location list's coverage note names a plugin the evidence names outside the list as
+    # named by the evidence index, never as "the findings above" (here OtherMod.esp is in a set-aside row only).
+    def c1098_coverage_note_says_evidence_index():
+        arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER])]
+        arms[0]["locationContributors"] = {"complete": True, "locations": [{"name": "Loc (int)", "plugins": [
+            {"name": BASE}, {"name": MOD_A}]}]}
+        rows_ = [row("OVERLAP", OTHER, MOD_A, f"000X98:{MOD_A}", other=f"000Y98:{OTHER}")]
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rows_, (OVERLAP, "without-a"): rows_}, [MOD_A])
+        ln = next((x for x in md.splitlines() if "also name" in x), "")
+        return ("The findings above also name" not in md and f"The evidence index also names {OTHER}" in ln), ln[:300]
+
+    for name, fn in [("fifth-review/C1098-coverage-note-says-evidence-index", c1098_coverage_note_says_evidence_index)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
