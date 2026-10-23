@@ -1631,6 +1631,18 @@ def build_prediction(ctx: dict) -> dict:
     # base the enrichment did not read is "cannot tell", never counted or dropped unsaid (round 3, coordinator D2)
     bases_read = isinstance(names.get("bases"), dict)
 
+    def carried_origin(provs_, vals_, w_):
+        """The plugin whose own change provider w_'s value is, walking back through the versions it only carries; None
+        where w_'s value is its own change."""
+        k_ = w_
+        for _ in range(len(provs_)):
+            ch_, j_ = recordrows.own_change(provs_, vals_, k_, (masters or {}).get(str(provs_[k_]).lower())
+                                            if masters is not None else None)
+            if ch_ or j_ is None:
+                break
+            k_ = j_
+        return provs_[k_] if k_ != w_ else None
+
     def base_unknown(fk):
         ref_ = name_refs.get(str(fk)) or {}
         if not ref_.get("base") and name_bases and ":" in str(fk):
@@ -2719,6 +2731,11 @@ def build_prediction(ctx: dict) -> dict:
                                 and recordrows.own_change(provs3, vals3, j3, (masters or {}).get(low3[j3])
                                                           if masters is not None else None)[0]):
                             g.setdefault("_sameBy", collections.Counter())[provs3[j3]] += 1
+                    # (sixth review, BPT r6 S3, Missives) the winner's value is an earlier, not base-game plugin's
+                    # own change it only carries: that plugin is named as the value's own
+                    org_ = carried_origin(provs3, vals3, w3)
+                    if org_ is not None and not is_base_game(org_, words):
+                        g.setdefault("_winnerCarries", collections.Counter())[(rk[3], org_)] += 1
                     if (vals3[w3] == vals3[0] and not recordrows.own_change(
                             provs3, vals3, w3, (masters or {}).get(low3[w3]) if masters is not None else None)[0]):
                         g.setdefault("_winnerBase", collections.Counter())[field_word(hit["row"].get("field"))] += 1
@@ -2966,6 +2983,10 @@ def build_prediction(ctx: dict) -> dict:
                     "example": bind(words["itemWinnerBaseExample"], {"example": ex_wb_, "field": win_base[0]})
                     if ex_wb_ and words.get("itemWinnerBaseExample") else ""}))
         g.pop("_winnerBaseEx", None)
+        for (wc_, oc_), nc_ in (g.pop("_winnerCarries", None) or {}).items():
+            if words.get("itemWinnerCarries"):
+                detail.append(bind(words["itemWinnerCarries"], {"winner": wc_, "origin": oc_, "count": fmt_n(nc_),
+                                                                "all": "every one" if nc_ == g["count"] else f"{fmt_n(nc_)} of them"}))
         n_undecided = g.pop("_notDecided", 0)
         if n_undecided and len(directions) == 1:
             loser, winner = next(iter(directions))
@@ -4988,7 +5009,18 @@ def build_prediction(ctx: dict) -> dict:
             covered_ = sorted((disp_.get(str(m_).lower(), m_) for m_ in covered_),
                               key=lambda m_: (ord_.index(str(m_).lower()) if str(m_).lower() in ord_ else 10 ** 6, str(m_).lower()))
             cov_low_ = {str(m_).lower() for m_ in covered_}
-            outside_ = list(dict.fromkeys(m_ for e in open_ for m_ in (e["A"], e["B"])
+            def owner_(e, m_):
+                """(sixth review, BPT r6 S3) a winning value another plugin's own change carries is that plugin's"""
+                if e["kind"] != "LOST-EDIT" or m_ != e["B"]:
+                    return m_
+                fc_ = field_chain(p_of(e["checkId"]), (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"]), e["A"])
+                if fc_ is None:
+                    return m_
+                low_ = [str(x).lower() for x in fc_[0]]
+                if str(m_).lower() not in low_:
+                    return m_
+                return carried_origin(fc_[0], fc_[1], low_.index(str(m_).lower())) or m_
+            outside_ = list(dict.fromkeys(m_ for e in open_ for m_ in (owner_(e, e["A"]), owner_(e, e["B"]))
                                           if str(m_).lower() not in pt_lower and not is_base_game(m_, words)
                                           and str(m_).lower() not in patch_lower and str(m_).lower() not in cov_low_))
             if outside_:

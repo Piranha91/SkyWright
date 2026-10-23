@@ -7906,6 +7906,27 @@ def main():
     for name, fn in [("sixth-review/C1128-undo-line-names-carrier", c1128_undo_line_names_carrier)]:
         cell(name, fn)
 
+    # C1116 (BPT r6 S3, Missives Tamriel owners): ModA's value is lost to OtherMod.esp's, which is ThirdMod.esp's own
+    # change that OtherMod.esp only carries. The item names ThirdMod.esp as the value's own, and the patch-scope line
+    # judges by ThirdMod.esp, which the patch lists as a master: nothing is said outside what it sets out to fix.
+    def c1116_carried_winner_value_named_by_owner():
+        R = f"00CA16:{BASE}"
+        arms = [arm("baseline", [BASE, THIRD, MOD_A, OTHER, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, THIRD, MOD_A, OTHER])]
+        chains = [(R, "Worldspace", [(BASE, {"MaxHeight.CellData": "00"}), (THIRD, {"MaxHeight.CellData": "0B"}),
+                                     (MOD_A, {"MaxHeight.CellData": "0A"}), (OTHER, {"MaxHeight.CellData": "0B"})])]
+        p_rows = [lost_row(MOD_A, OTHER, R, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=0B"],
+                           ["MaxHeight.CellData=00"])]
+        p_rows[0]["Summary"] = f"Worldspace Tamriel: MaxHeight - {MOD_A}'s value lost to {OTHER}'s"
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
+                                  masters={THIRD: [BASE], MOD_A: [BASE], OTHER: [BASE, THIRD], PATCH: [BASE, THIRD]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        scope = next((ln for ln in md.splitlines() if "outside what" in ln), "")
+        return (f"{OTHER}'s value is {THIRD}'s own change, which {OTHER} only carries" in it and OTHER not in scope), f"{it[-300:]} || {scope}"
+
+    for name, fn in [("sixth-review/C1116-carried-winner-value-named-by-owner", c1116_carried_winner_value_named_by_owner)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
