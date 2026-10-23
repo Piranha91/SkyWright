@@ -4363,6 +4363,20 @@ def build_prediction(ctx: dict) -> dict:
 
         def off_from(bi, prefix):
             return collections.Counter({s_: bi.get(f"{prefix}_{s_}") or 0 for s_ in OFF_STATES})
+
+        # (sixth review, BPT r6 S1) a lost change no patch touches, on an object the losing mod has on and the pair's
+        # winner removes by its own change, has no effect in game while that removal stands: the winner's own removal
+        # standing, nothing to patch. Its own with-patch outcome, never "left" (not in the left totals, the still-there
+        # line or "still present"). An inherited removal ("on") stays left: the losing mod may undo it on purpose.
+        for e in judged:
+            if outcome[id(e)] == "left" and e["kind"] == "LOST-EDIT" and off_state(e) == "onOwn":
+                outcome[id(e)] = "removalStands"
+        all_["stands"] = [e for e in judged if outcome[id(e)] == "removalStands"]
+        all_["open"] = [e for e in all_["open"] if outcome[id(e)] == "left"]
+        stands = credit(all_["stands"])
+        open_ = [e for e in open_ if outcome[id(e)] == "left"]
+        for e in admitted:
+            e["withPatch"] = outcome.get(id(e), "not-measured")
         problems, choices, problem_finding, no_body_new, problem_seen = [], 0, {}, set(), set()
         problem_objects, problem_movers = {}, {}
         gap_re = (words.get("newObjects") or {}).get("gapPattern")
@@ -4600,6 +4614,8 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationKept"], {"patch": patch, "count": n_kept_, "by": by_}))
         if placed:
             sentences.append(bind(words["validationPlaced"], {"patch": patch, "count": by_unit(placed)}))
+        if stands:
+            sentences.append(bind(words["validationStands"], {"patch": patch, "count": by_unit(stands)}))
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
         edited = sum(1 for e in open_ if left_split.get(id(e)) == "patchHeld")
         n_open_ = by_unit_note(open_, False)
@@ -4607,7 +4623,7 @@ def build_prediction(ctx: dict) -> dict:
         # still present: no "still present: 0"
         sentences += ([bind(words["validationOpen"], {"patch": patch, "count": n_open_, "split": (bind(
                           words["validationOpenSplit"], {"untouched": fmt_n(len(open_) - edited), "edited": fmt_n(edited)})
-                          if edited else "")})] if open_ or not placed else []) + [
+                          if edited else "")})] if open_ or not (placed or stands) else []) + [
                      # new problems in their units, an object of a by-object check with its pairs (BPT review S3)
                      bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
@@ -4747,6 +4763,7 @@ def build_prediction(ctx: dict) -> dict:
                                                                    if item_of(e) == k)),
                             "own": sum(1 for e in all_["own"] if item_of(e) == k),
                             "open": sum(1 for e in all_["open"] if item_of(e) == k),
+                            "stands": sum(1 for e in all_["stands"] if item_of(e) == k),
                             "kept": sum(1 for e in all_["kept"] if item_of(e) == k),
                             "placed": sum(1 for e in all_["placed"] if item_of(e) == k),
                             # (third review, Winterhold S1) by loser and winner: the patch keeps the winner's value
@@ -4829,7 +4846,7 @@ def build_prediction(ctx: dict) -> dict:
         ow = words["itemOutcomeWords"]
 
         def outcome_text(bi):
-            keys = ("hits", "switched", "own", "kept", "open", "placed", "cannotTell", "notMeasured")
+            keys = ("hits", "switched", "own", "kept", "stands", "open", "placed", "cannotTell", "notMeasured")
 
             def part(k):
                 if k == "switched":
@@ -4940,15 +4957,7 @@ def build_prediction(ctx: dict) -> dict:
                     n_open = len(pes_)
                     text_ = (bind(words["stillThereLost"], {"count": fmt_n(n_open), "loser": loser, "winner": winner,
                                                             "unit": u_[0 if n_open == 1 else 1]}) + off_note(pes_))
-                    # (fifth review, BPT S2) the winner's own removal, which a patch keeps on the pair's other rows
-                    if any(off_state(e) == "onOwn" for e in pes_) and words.get("stillThereOwnRemovalKept"):
-                        kept_own_ = collections.Counter()
-                        for e in all_["kept"]:
-                            if (e["A"], e["B"]) == (loser, winner) and off_state(e) == "onOwn":
-                                ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"])) or {}
-                                kept_own_[str((ch_.get("providers") or [""])[-1])] += 1
-                        for pt_, n_ in kept_own_.items():
-                            text_ += bind(words["stillThereOwnRemovalKept"], {"patch": pt_, "count": fmt_n(n_)})
+                    # (sixth review, BPT r6 S1) the winner's own removal is never here: its own outcome (removalStands)
                     stays_parts.append((len(pes_), text_))
                 for e in es:
                     v_ = e.get("values") or {}
@@ -5042,6 +5051,9 @@ def build_prediction(ctx: dict) -> dict:
         if kept:
             # a patch carrying the winning value is said apart, never as left (Winterhold review 1, BPT review 3)
             sum_parts.append(bind(words["validationSummaryCarried"], {"count": by_unit_note(kept)}))
+        if stands:
+            # (sixth review, BPT r6 S1) the winner's own removal standing: nothing to patch, never left
+            sum_parts.append(bind(words["validationSummaryStands"], {"count": by_unit(stands, True)}))
         if open_:
             sum_parts.append(bind(words["validationSummaryLeft"], {"count": by_unit_note(open_)}))
         if placed:
@@ -5085,7 +5097,7 @@ def build_prediction(ctx: dict) -> dict:
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
                       "patchChoiceNoise": patch_noise, "caseOnlyRows": case_only_rows,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
-                      "open": len(open_), "undone": len(undone), "undoneBy": dict(undone_by),
+                      "open": len(open_), "stands": len(stands), "undone": len(undone), "undoneBy": dict(undone_by),
                       "undoneSentence": undone_sentence,
                       # (Winterhold review 3) the finding holding the objects named as switched back on first, then
                       # the others by how many undone changes they hold

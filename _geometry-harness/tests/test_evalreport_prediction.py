@@ -4118,12 +4118,15 @@ def main():
         w_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)
                   for D, b_ in ((D1, b_off), (D2, b_mv))]
         w_rows.append(lost_row(MOD_A, PATCH, D3, "Placement", off_txt(a_), off_txt(b_low), off_txt(offs(0)), before=BASE))
-        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])
+        # (sixth review, BPT r6 S1) D1's removal is an earlier mod's that ModB carries: still left with the patch (a
+        # winner's own removal standing is its own outcome, C1101)
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), *([(OTHER, b_)] if D == D1 else []), (MOD_A, a_), (MOD_B, b_)])
                 for D, b_ in ((D1, b_off), (D2, b_mv), (D3, b_low))]
-        w_ch = [(D1, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_off)]),
+        w_ch = [(D1, "PlacedObject", [(BASE, offs(0)), (OTHER, b_off), (MOD_A, a_), (MOD_B, b_off)]),
                 (D2, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_mv)]),
                 (D3, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_low), (PATCH, b_low)])]
-        return core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+        return core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch,
+                           masters={**MASTERS_, MOD_B: [BASE, OTHER], PATCH: [BASE]})
 
     def c900_offwin_said_where_still_there():
         plan, md, _ = offwin_bundle()
@@ -6492,10 +6495,13 @@ def main():
             w_rows = [lost_row(MOD_A, PATCH, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
             w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)])]
         else:
+            # (sixth review, BPT r6 S1) ModB carries an earlier mod's removal: still left (an own removal standing is
+            # its own outcome, C1101)
             w_rows = list(p_rows)
-            w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
-        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
-        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+            w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (OTHER, b_), (MOD_A, a_), (MOD_B, b_)])]
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), *([] if kept else [(OTHER, b_)]), (MOD_A, a_), (MOD_B, b_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch,
+                                  masters={**MASTERS_, PATCH: [BASE], **({} if kept else {MOD_B: [BASE, OTHER]})})
         pr_ = reader(plan).get("prediction") or {}
         kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
         return kl, str(pr_.get("withPatchStays") or ""), md
@@ -7246,8 +7252,10 @@ def main():
     def c1075_left_own_removal_patch_keeps_same():
         kl, st, plan, md = own_removal_bundle([f"00CA75:{BASE}"], [f"00CB75:{BASE}"])
         part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if "record field" in x), "")
-        return (re.search(r"winner's own change sets off", part) is not None and re.search(r"keeps the same removal on 1 more", part) is not None
-                and len(re.findall(r"\b1 on objects [^;()]*winner's own change sets off", kl)) == 2), f"{part[:300]} || {kl[:300]}"
+        # (sixth review, BPT r6 S1) the untouched row is the winner's own removal standing: out of the still-there line,
+        # said beside the kept row on which the patch carries the same removal
+        return (not part and "winner's own removal stands on 1" in kl
+                and len(re.findall(r"\b1 on objects [^;()]*winner's own change sets off", kl)) == 1), f"{part[:300]} || {kl[:300]}"
 
     def c1076_inherited_removal_not_winners_own():
         kl, st, plan, md = own_removal_bundle([], [f"00CA76:{BASE}"], inherited=True)
