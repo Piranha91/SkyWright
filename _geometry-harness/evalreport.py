@@ -1941,6 +1941,20 @@ def build_prediction(ctx: dict) -> dict:
         f_ = provider_fields_all(ch, low_.index(str(plugin).lower()))
         return not re.match(r"^[0-9A-Fa-f]{6}:", str(f_.get("EnableParent.Reference") or "").strip())
 
+    def side_own_removal(rk, plugin, arm_id=None):
+        """(fifth review, BPT S2) `plugin`'s version sets the object off for good by its own change: its version is off
+        for good and the version it inherits from its masters is not; False where the chain does not hold it."""
+        ch = (chains_of(rk[0], arm_id or p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch:
+            return False
+        low_ = [str(x).lower() for x in ch["providers"]]
+        if str(plugin).lower() not in low_:
+            return False
+        i_ = low_.index(str(plugin).lower())
+        _, j_ = recordrows.own_change(ch["providers"], [0] * len(low_), i_,
+                                      (masters or {}).get(str(plugin).lower()) if masters is not None else None)
+        return j_ is not None and provider_disables(ch, i_) and not provider_disables(ch, j_)
+
     def side_disables(rk, plugin, arm_id=None):
         """Whether `plugin`'s version of the row's record disables the object (provider_disables); None where the
         record import's chain does not hold it."""
@@ -2447,6 +2461,8 @@ def build_prediction(ctx: dict) -> dict:
                                      or side_disables(rk, rk[3])) and not (
                 disables((hit["row"].get("values") or {}).get("lost")) or side_disables(rk, rk[2])):
             g["_disables"] = g.get("_disables", 0) + 1
+            if side_own_removal(rk, rk[3]):
+                g["_disablesOwn"] = g.get("_disablesOwn", 0) + 1     # (fifth review, BPT S2) the winner's own removal
         lost_v_ = (hit["row"].get("values") or {}).get("lost")
         lost_n_ = re.fullmatch(r"\s*(?:\w*MajorRecordFlags=)?(\d+)\s*", " ".join(map(str, lost_v_)) if isinstance(lost_v_, list)
                                else str(lost_v_ or ""))
@@ -2620,7 +2636,7 @@ def build_prediction(ctx: dict) -> dict:
         """Every partner object of the item's rows is a base-game record (the other mod only edits it)."""
         others_ = [o_ for o_ in g.get("_partners") or []]
         return bool(others_) and all(is_base_game(str(o_).split(":", 1)[-1], words) for o_ in others_)
-    dis_of = {}
+    dis_of, dis_own_of = {}, {}
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
@@ -2794,9 +2810,14 @@ def build_prediction(ctx: dict) -> dict:
                     "trigger": words.get("itemAlsoSwitchTriggerUnknown") or ""
                     if (sw_, by_, obj_, how_) in sw_unknown_ else ""}))
         n_dis = g.pop("_disables", 0)
+        n_dis_own = g.pop("_disablesOwn", 0)
         dis_of[id(g)] = n_dis                  # (third review, BPT S1) the headline carries the same count
+        dis_own_of[id(g)] = n_dis_own
         if n_dis and words.get("itemDisables"):
-            detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)}))
+            detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)})
+                          + (" " + bind(words["itemDisablesOwn"], {"count": fmt_n(n_dis_own),
+                                                                   "lead": "All" if n_dis_own == n_dis else f"In {fmt_n(n_dis_own)}"})
+                             if n_dis_own and words.get("itemDisablesOwn") else ""))
         for m_, n_ in (g.pop("_baseNavCarried", None) or {}).items():
             if n_ == g["count"] and words.get("baseNavCarriedName"):
                 # (reviewer on faa9ce47) every row is a link of a base-game navmesh the mod only carries: the pair is
@@ -3396,6 +3417,7 @@ def build_prediction(ctx: dict) -> dict:
                                                            "_f": collections.Counter(), "offForGood": 0})
             e["relationships"] += g["relationships"]
             e["offForGood"] += dis_of.get(id(g), 0)
+            e["offOwn"] = e.get("offOwn", 0) + dis_own_of.get(id(g), 0)
             e["_s"] |= subjects_of[id(g)]
             e["_po"] |= pair_objects_of[id(g)]
             e["_f"].update(field_names_of[id(g)])
@@ -3417,6 +3439,8 @@ def build_prediction(ctx: dict) -> dict:
                     "count": fmt_n(e["relationships"]),
                     "noun": words["fieldNoun"][0 if e["relationships"] == 1 else 1]
                     + (bind(words["verdictFieldsOff"], {"count": fmt_n(e["offForGood"])})
+                       + (bind(words["verdictFieldsOffOwn"], {"count": fmt_n(e["offOwn"])})
+                          if e.get("offOwn") and words.get("verdictFieldsOffOwn") else "")
                        if e.get("offForGood") and words.get("verdictFieldsOff") else ""),
                     "fields": fields_text(collections.Counter(e.get("fieldNames") or {}))})
             elif (e["kind"] != "LOST-EDIT" and e.get("pairObjects") and words.get("verdictObjectsToo")
