@@ -5708,6 +5708,33 @@ def main():
     for name, fn in [("fifth-review/C1081-flags-meaning-by-row-type", c1081_flags_meaning_by_row_type)]:
         cell(name, fn)
 
+    # C1082 (Pilgrim S4, BPT S1): where effect-model pairs are counted, the unconditional in-game line speaks only of the
+    # other pairs (an item of effect pairs only has none), and the still-there part says how many left pairs have one.
+    def c1082_effect_pairs_in_game_and_still_there():
+        X, Y, Z = f"000X82:{MOD_A}", f"000Y82:{MOD_B}", f"000Z82:{MOD_B}"
+        refs = {X: {"base": f"0B0X82:{MOD_A}"}, Y: {"base": f"0B0Y82:{MOD_B}"}, Z: {"base": f"0B0Z82:{MOD_B}"}}
+        bases = {f"0B0X82:{MOD_A}": {"type": "Static", "editorId": "Rock", "model": "Landscape\\Rock01.nif"},
+                 f"0B0Y82:{MOD_B}": {"type": "MoveableStatic", "editorId": "FXMist", "model": "Effects\\Ambient\\FXMist01.nif"},
+                 f"0B0Z82:{MOD_B}": {"type": "Static", "editorId": "Wall", "model": "Architecture\\Wall01.nif"}}
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+
+        def run(others):
+            rows_ = [row("OVERLAP", MOD_B, MOD_A, X, other=o_) for o_ in others]
+            plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): list(rows_), (OVERLAP, "without-patch"): rows_,
+                                                    (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH],
+                                             names={"refs": refs, "bases": bases})
+            it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+            st = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+            return it, st
+        it1, st1 = run([Y])
+        it2, st2 = run([Y, Z])
+        return ("drawn through each other" not in it1 and "for the other 1 pair" in it2 and "drawn through each other" in it2
+                and "1 with a visual-effect model" in st2), f"{it1[-200:]} || {it2[-250:]} || {st2[-200:]}"
+
+    for name, fn in [("fifth-review/C1082-effect-pairs-in-game-and-still-there", c1082_effect_pairs_in_game_and_still_there)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
