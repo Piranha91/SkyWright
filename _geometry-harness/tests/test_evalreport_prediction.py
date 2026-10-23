@@ -5970,7 +5970,7 @@ def main():
                                          also=[(v_arms, v_res, [MOD_A], {})])
         also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
         return (re.search(r"another version of " + re.escape(MOD_A), also_) is not None
-                and re.search(r"finds 0 of the 2 overlap pairs between " + re.escape(OTHER) + " and " + re.escape(MOD_A), also_)
+                and re.search(r"finds (?:[^.]*?; )?0 of the 2 overlap pairs between " + re.escape(OTHER) + " and " + re.escape(MOD_A), also_)
                 is not None), also_[-400:]
 
     for name, fn in [("fifth-review/C1092-also-variant-finds-pairs", c1092_also_variant_finds_pairs)]:
@@ -7201,10 +7201,19 @@ def main():
                                [f"Base=0B0C70:{BASE}"], before=BASE))
         p_ch.append((D3, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_)]))
         w_ch.append((D3, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)]))
+        # D4 (audit KEPTMEANING on regen-r5b): ModA's switch-off written as a flags number (3072: bit 2048 set)
+        D4 = f"00CD77:{BASE}"
+        a4_, b4_ = offs(0, "3072"), offs(0, "1024")
+        p_rows.append(lost_row(MOD_A, MOD_B, D4, "SkyrimMajorRecordFlags", ["SkyrimMajorRecordFlags=3072"],
+                               ["SkyrimMajorRecordFlags=1024"], ["SkyrimMajorRecordFlags=1024"], before=BASE))
+        w_rows.append(lost_row(MOD_A, PATCH, D4, "SkyrimMajorRecordFlags", ["SkyrimMajorRecordFlags=3072"],
+                               ["SkyrimMajorRecordFlags=1024"], ["SkyrimMajorRecordFlags=1024"], before=BASE))
+        p_ch.append((D4, "PlacedObject", [(BASE, b4_), (MOD_A, a4_), (MOD_B, b4_)]))
+        w_ch.append((D4, "PlacedObject", [(BASE, b4_), (MOD_A, a4_), (MOD_B, b4_), (PATCH, b4_)]))
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
         pr_ = reader(plan).get("prediction") or {}
         kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
-        return (re.search(r"\b1 drawn though the losing mod switches them off\b", kl) is not None
+        return (re.search(r"\b2 drawn though the losing mod switches them off\b", kl) is not None
                 and re.search(r"\b1 drawn at the patch's own spot though the losing mod switches them off", kl) is not None
                 and re.search(r"\b1 in the base, so the object is the winning mod's", kl) is not None), kl[:500]
 
