@@ -5980,6 +5980,24 @@ def main():
     for name, fn in [("fifth-review/C1095-findings-list-names-patch-placed", c1095_findings_list_names_patch_placed)]:
         cell(name, fn)
 
+    # C1096 (Missives S1): every record import whose own tool note says it narrowed a record type's fields is said, in
+    # either of the note's wordings ("their" / "its compared fields", or "narrowed without"), not only the cell import's.
+    def c1096_every_import_narrowing_said():
+        pr_ = priorities()
+        rows_ = [{"checkId": CELLATTR, "tool": {"name": "housecarl_records tree over the 21 CELL records narrowed to their "
+                                                          "compared fields without MaxHeightData (N11), composed by a script"}},
+                 {"checkId": RECORDS, "tool": {"name": "ordered housecarl_records calls (tree form over all 2,110 FormKeys; "
+                                                         "CELL re-read narrowed to its compared fields without MaxHeightData "
+                                                         "(c03; N11), WRLD narrowed without OffsetData), composed by a script"}}]
+        facts = R.import_narrowed_facts(rows_, pr_, lambda c_: c_)
+        joined = " | ".join(facts)
+        return (any(f_.startswith(RECORDS) and "MaxHeightData" in f_ for f_ in facts)
+                and any(f_.startswith(RECORDS) and "OffsetData" in f_ for f_ in facts)
+                and any(f_.startswith(CELLATTR) and "MaxHeightData" in f_ for f_ in facts)), joined[:500]
+
+    for name, fn in [("fifth-review/C1096-every-import-narrowing-said", c1096_every_import_narrowing_said)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
