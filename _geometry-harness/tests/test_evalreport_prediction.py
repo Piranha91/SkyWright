@@ -8385,17 +8385,33 @@ def main():
     # C1157 (Clockwork S4): the patch lists OtherMod.esp as a master, and a clash with it is still there with the patch,
     # beside one with Neighbour.esp, which it does not list: the scope line says the OtherMod one is inside what the
     # patch sets out to fix and stays with it, not only that the Neighbour one is outside.
-    def c1157_scope_line_says_inside_left():
+    def scope_bundle(patch_edits_it):
+        """Neighbour.esp's pair (the patch neither lists nor edits it) and OtherMod.esp's pair (the patch lists OtherMod
+        as a master; with patch_edits_it its own file holds a version of OtherMod's object)."""
         O2 = "Neighbour.esp"
-        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
-                arm("without-patch", [BASE, OTHER, O2, MOD_A])]
-        r1 = row("OVERLAP", O2, MOD_A, f"000X57:{MOD_A}", other=f"000Y57:{O2}")
-        r2 = row("OVERLAP", OTHER, MOD_A, f"000X58:{MOD_A}", other=f"000Y58:{OTHER}")
+        recs_ = ([("REFR", (1 << 24) | 0x000E58, [("NAME", struct.pack("<I", 0x0B0A79)),
+                                                 ("DATA", struct.pack("<6f", 1.0, 2.0, 3.0, 0.0, 0.0, 0.0))], False)]
+                 if patch_edits_it else [])
+        arms = with_files([arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                           arm("without-patch", [BASE, OTHER, O2, MOD_A])],
+                          {PATCH: plugin_file_of(PATCH, [BASE, OTHER, MOD_A], recs_, group="CELL")})
+        r1 = row("OVERLAP", O2, MOD_A, f"000E57:{MOD_A}", other=f"000E59:{O2}")
+        r2 = row("OVERLAP", OTHER, MOD_A, f"000E56:{MOD_A}", other=f"000E58:{OTHER}")
         plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r1, r2], (OVERLAP, "without-patch"): [r1, r2]},
                                          [MOD_A], patches=[PATCH], masters={OTHER: [BASE], O2: [BASE], MOD_A: [BASE],
                                                                             PATCH: [BASE, OTHER, MOD_A]})
-        ln = next((x for x in ((reader(plan).get("validation") or {}).get("sentences") or []) if "masters" in x), "")
+        return next((x for x in ((reader(plan).get("validation") or {}).get("sentences") or []) if "masters" in x), "")
+
+    def c1157_scope_line_says_inside_left():
+        # (round 2, Clockwork 77) inside only where the patch edits the pair's object
+        ln = scope_bundle(True)
         return (f"still there with {OTHER} (1 overlap pair) is inside what it sets out to fix" in ln), ln[:500]
+
+    # C1163 (round 2, Clockwork line 77): the patch lists OtherMod.esp as a master but edits none of the pair's objects:
+    # the remainder is outside what the patch sets out to fix, said with Neighbour.esp's, never inside.
+    def c1163_master_alone_is_not_scope():
+        ln = scope_bundle(False)
+        return ("is inside what" not in ln and f"still there with Neighbour.esp and {OTHER} is outside" in ln), ln[:500]
 
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
                      ("seventh-review/C1157-scope-line-says-inside-left", c1157_scope_line_says_inside_left),
@@ -8434,7 +8450,8 @@ def main():
                    if x.startswith("Objects occupying")), "")
         return ("resolved 1 (1 by the patch switching an object off)" in kl), kl[:300]
 
-    for name, fn in [("round2/C1162-switch-off-either-object-counted", c1162_switch_off_either_object_counted)]:
+    for name, fn in [("round2/C1162-switch-off-either-object-counted", c1162_switch_off_either_object_counted),
+                     ("round2/C1163-master-alone-is-not-scope", c1163_master_alone_is_not_scope)]:
         cell(name, fn)
 
     for name, ok, detail in cells:

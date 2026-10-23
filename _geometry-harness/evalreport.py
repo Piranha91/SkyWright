@@ -1923,11 +1923,15 @@ def build_prediction(ctx: dict) -> dict:
     ref_reads, ref_cache, sha_cache = [], {}, {}
 
     def plugin_file(name):
+        """(path, sha256) of a plugin as the prediction setup records it; (seventh review round 2) a plugin only the
+        other setups load (a declared patch) as the first of them records it."""
         main_b = ctx.get("mainBundle")
-        arm_ = next((x for x in (main_b.plan.get("arms") if main_b else None) or [] if x.get("armId") == p_arm), {})
-        return next(((str(x.get("path") or ""), str(x.get("sha256") or "").lower())
-                     for x in (arm_.get("requested") or {}).get("plugins") or []
-                     if str(x.get("name")).lower() == str(name).lower()), ("", ""))
+        arms_ = (main_b.plan.get("arms") if main_b else None) or []
+        for arm_ in sorted(arms_, key=lambda x: x.get("armId") != p_arm):
+            for x in (arm_.get("requested") or {}).get("plugins") or []:
+                if str(x.get("name")).lower() == str(name).lower():
+                    return str(x.get("path") or ""), str(x.get("sha256") or "").lower()
+        return "", ""
 
     def refers_to(plugin, fk):
         key_ = (str(plugin).lower(), str(fk))
@@ -5318,15 +5322,31 @@ def build_prediction(ctx: dict) -> dict:
                 # (seventh review) the attribution read, by setup, record and field
                 got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), m_)
                 return got_[0][got_[2]["origin"]] if got_ is not None else m_
+            def patch_edits(e):
+                """(seventh review round 2, Clockwork 77) a declared patch holds a version of what the remainder is
+                about: the record of a lost change (the chain with the patches), a navmesh, or an object of a geometry
+                pair (read from the patch's own file). Only then is the remainder inside what the patch sets out to fix;
+                listing the mod as a master is not enough."""
+                if e["kind"] == "LOST-EDIT":
+                    ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"])) or {}
+                    return bool({str(x).lower() for x in ch_.get("providers") or []} & patch_lower)
+                what_ = "navmesh" if e["checkId"] == "geometry.navmesh-ownership" else "placementFull"
+                for p_ in patch_names:
+                    for fk_ in [e["formKey"], *(e.get("other") or [])]:
+                        if fk_ and plugin_record(p_, what_, str(fk_)):
+                            return True
+                return False
+            edited_ = {id(e): patch_edits(e) for e in open_}
             outside_ = list(dict.fromkeys(m_ for e in open_ for m_ in (owner_(e, e["A"]), owner_(e, e["B"]))
                                           if str(m_).lower() not in pt_lower and not is_base_game(m_, words)
-                                          and str(m_).lower() not in patch_lower and str(m_).lower() not in cov_low_))
+                                          and str(m_).lower() not in patch_lower
+                                          and (str(m_).lower() not in cov_low_ or not edited_[id(e)])))
             # (seventh review, Clockwork S4) what is still there with a mod the patches do list as a master is inside what
             # they set out to fix and left by them: said too, in its units
             inside_ = collections.OrderedDict()
             for e in open_:
                 for m_ in dict.fromkeys((owner_(e, e["A"]), owner_(e, e["B"]))):
-                    if str(m_).lower() in cov_low_ and str(m_).lower() not in pt_lower:
+                    if str(m_).lower() in cov_low_ and str(m_).lower() not in pt_lower and edited_[id(e)]:
                         inside_.setdefault(disp_.get(str(m_).lower(), m_), []).append(e)
             inside_text_ = ("".join(" " + bind(words["validationPatchScopeInside"], {
                 "inside": m_, "count": by_unit(es_, True), "it": "they set" if len(patch_names) > 1 else "it sets",
