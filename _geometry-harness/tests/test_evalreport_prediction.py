@@ -5735,6 +5735,22 @@ def main():
     for name, fn in [("fifth-review/C1082-effect-pairs-in-game-and-still-there", c1082_effect_pairs_in_game_and_still_there)]:
         cell(name, fn)
 
+    # C1083 (BPT S3): a height difference between the two values is said with how far apart they are across the floor
+    # where that is at least an object's spot (here 1,000 u), never as a height alone.
+    def c1083_height_diff_with_across():
+        rows_ = []
+        for i_ in (1, 2):
+            D_ = f"00CA8{i_}:{BASE}"
+            rows_.append(lost_row(MOD_A, MOD_B, D_, "Placement", f"Position=100,{i_}00,0; Rotation=0,0,0",
+                                  f"Position=1100,{i_}00,288; Rotation=0,0,0", f"Position=100,{i_}00,288; Rotation=0,0,0",
+                                  before=BASE))
+        plan, md, _ = core_bundle(rows_, list(rows_), targets=(MOD_A, MOD_B), masters={**MASTERS_, PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return ("288 u higher" in it and "1,000 u away across the floor" in it), it[-400:]
+
+    for name, fn in [("fifth-review/C1083-height-diff-with-across", c1083_height_diff_with_across)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
