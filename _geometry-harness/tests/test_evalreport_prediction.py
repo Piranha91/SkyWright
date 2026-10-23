@@ -5022,8 +5022,8 @@ def main():
         plan, md, _ = offwin_bundle()
         verdict = str((reader(plan).get("prediction") or {}).get("verdict") or "")
         # (fifth review, BPT S2) both of ModB's removals are its own: the headline also says so
-        return re.search(r"\(3 record fields, 2 of them on objects the winning version sets off for good, 2 of these "
-                         r"removed by the winning mod itself\)", verdict) is not None, verdict[:300]
+        return re.search(r"\(3 record fields, 2 of them on objects the winning version sets off for good, 2 by the "
+                         r"winner's own removal\)", verdict) is not None, verdict[:300]
 
     for name, fn in [("third-review/C950-headline-says-off-for-good", c950_headline_says_off_for_good)]:
         cell(name, fn)
@@ -5839,7 +5839,7 @@ def main():
                                                 (OVERLAP, "without-a"): []}, [MOD_A, MOD_B])
         line = next((ln for ln in md.split("## What the checks found", 1)[-1].splitlines()
                      if "Measured load order" in ln and "4 overlap pairs" in ln), "")
-        return ("(3 counted at the top; 1 already there with one mod alone)" in line), line[:300]
+        return ("(3 at the top; 1 with one mod alone)" in line), line[:300]
 
     for name, fn in [("fifth-review/C1086-detail-split-counts-alone-apart", c1086_detail_split_counts_alone_apart)]:
         cell(name, fn)
@@ -5914,7 +5914,25 @@ def main():
         if k_ is None:
             return False, "no tail-order step"
         bad_ = [s_ for s_ in ladder_[k_ + 1:] if not {"tail", "order"} <= set(str(s_.get("layout")).split())]
-        return not bad_, f"later steps without the moves: {bad_}"
+        # the step after it moves the set-aside line (what the counts leave out, and why) into the evidence index's
+        # further notes, with a pointer in the report; the steps after keep that move too
+        a_ = next((i_ for i_, s_ in enumerate(ladder_) if "aside" in str(s_.get("layout")).split()), None)
+        if a_ is None or a_ != k_ + 1 or any("aside" not in str(s_.get("layout")).split() for s_ in ladder_[a_:]):
+            return False, f"no cumulative aside step right after the tail-order step: {ladder_[k_:]}"
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F8{i}:{MOD_A}", other=f"000H8{i}:{MOD_B}") for i in (1, 2)]
+        fx[0]["Summary"] = "LeftInEmptySpace: Static Pelt; its assembly of 1 touches no floor or wall now (nearest floor or wall 0u)"
+        fx[1]["Summary"] = "LeftInEmptySpace: Static Rack; its assembly of 1 touches no floor or wall now (nearest floor or wall 27u)"
+        results = {(FIXTURE, a): [] for a in ("dependency-only", "plus-a", "plus-b")}
+        results[(FIXTURE, "baseline")] = fx
+        plan, md0, html0 = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
+        line_ = str(((reader(plan).get("coverage") or {}).get("setAsideLine")) or "")
+        st_ = ladder_[a_]
+        out_ = Path(tempfile.mkdtemp(prefix="c1089-"))
+        got_ = R.render_all(plan, R.effective_view(plan, st_["rowsPerGroup"], st_["figuresPerFinding"], R.load_priorities(),
+                                                   st_["layout"]), out_, "")
+        ok = (not bad_ and bool(line_) and line_ in md0 and line_ not in got_["report.md"]
+              and line_ in got_["evidence-index.md"] and "evidence-index.md#further-notes" in got_["report.md"])
+        return ok, f"later steps without the moves: {bad_}; line {line_[:80]!r}"
 
     for name, fn in [("fifth-review/C1089-ladder-steps-cumulative", c1089_ladder_steps_cumulative)]:
         cell(name, fn)
@@ -7157,7 +7175,7 @@ def main():
         pr_ = reader(plan).get("prediction") or {}
         verdict = str(pr_.get("verdict") or "")
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
-        return ("1 of these removed by the winning mod itself" in verdict and "own removal" in it), f"{verdict[:300]} || {it[-300:]}"
+        return ("1 by the winner's own removal" in verdict and "own removal" in it), f"{verdict[:300]} || {it[-300:]}"
 
     # C1077 (Snazzy S2, Winterhold R2-2): a kept lost change gets its meaning in game too. D1: ModA switches the object
     # off, ModB has it on and the patch carries ModB's on version: the object ModA removes is drawn. D2: the same, but

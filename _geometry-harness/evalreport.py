@@ -4712,7 +4712,13 @@ def build_prediction(ctx: dict) -> dict:
         def new_in_game(c):
             """(fifth review, BPT S5) the check's in-game meaning, as a candidate for a visual check"""
             ig_ = in_game.get(c)
-            return bind(words["newByCheckInGame"], {"what": ig_}) if ig_ and words.get("newByCheckInGame") else ""
+            # said for the checks whose title does not say what a new problem does in game (skill data, page budget)
+            if c not in set(words.get("newByCheckInGameChecks") or []):
+                return ""
+            if not (ig_ and words.get("newByCheckInGame")):
+                return ""
+            # the check's meaning up to its first clause, then the hedge (page budget)
+            return bind(words["newByCheckInGame"], {"what": ig_.split(";", 1)[0]}) + (words.get("newByCheckCandidate") or "")
 
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
                          "objectsNote": "; ".join(x_ for x_ in (split_note(c) or objects_note(c), new_in_game(c)) if x_) or None,
@@ -4761,6 +4767,14 @@ def build_prediction(ctx: dict) -> dict:
                     bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(([off_] if off_ else []) + split)
                     + ")")
             return ", ".join(parts) if parts else ow["none"]
+        def no_kept_meaning(bi):
+            """(fifth review, page budget) a by-item tally without the kept rows' meanings, said once in the kind line"""
+            out_ = {k_: v_ for k_, v_ in bi.items() if "_kept" not in k_}
+            if isinstance(bi.get("offKeptBy"), dict):
+                out_["offKeptBy"] = collections.Counter({k_: v_ for k_, v_ in bi["offKeptBy"].items()
+                                                         if not k_.rsplit("|", 1)[-1].startswith("kept")})
+            return out_
+
         item_lines, alone_total = [], collections.Counter()
         for g, bi in zip(prediction["items"], by_item):
             if g.get("shownAs") == "alone" or (multi and g.get("attribution") == "single-mod"):
@@ -4773,10 +4787,12 @@ def build_prediction(ctx: dict) -> dict:
                 "title": g["title"], "modA": (g.get("pairNames") or {}).get(g["mods"][0], g["mods"][0]),
                 "modB": (g.get("pairNames") or {}).get(g["mods"][1], g["mods"][1]), "count": fmt_n(g["count"]),
                 "mod": g.get("attributionMod"), "other": next((m_ for m_ in g["mods"] if m_.lower() != str(
-                    g.get("attributionMod")).lower()), ""), "outcomes": outcome_text(bi)}))
+                    g.get("attributionMod")).lower()), ""), "outcomes": outcome_text(no_kept_meaning(bi))}))
         if alone_total.get("count"):
             item_lines.append(bind(words["validationAloneLine"], {"count": fmt_n(alone_total["count"]),
-                                                                  "outcomes": outcome_text(alone_total)}))
+                                                                  # kept rows' meanings are said in the kind lines (page budget)
+                                                                  "outcomes": outcome_text({k_: v_ for k_, v_ in alone_total.items()
+                                                                                            if "_kept" not in k_})}))
         # what stays with the patch, said at the top under the prediction (third blind review, W-S6 / S-S5)
         # the clashes the totals divide: every item credit() keeps (the counted ones and those not separated)
         counted_items = [g for g in prediction["items"] if not multi or g.get("attribution") != "single-mod"]
