@@ -754,6 +754,14 @@ def base_has_no_model(names: dict | None, fk) -> bool:
     return bool(base.get("type")) and base.get("model") == ""
 
 
+def no_model_type(names: dict | None, fk) -> str | None:
+    """The base record type of a placed object whose base has no model (base_has_no_model), else None."""
+    if not base_has_no_model(names, fk):
+        return None
+    return str(((names.get("bases") or {}).get(((names.get("refs") or {}).get(str(fk)) or {}).get("base") or "") or {})
+               .get("type"))
+
+
 def row_has_no_body(names: dict | None, r: dict) -> bool:
     """A geometry row whose object, or any partner object, has no body (see base_has_no_model)."""
     return any(base_has_no_model(names, x) for x in [r.get("formKey"), *(r.get("other") or ())] if x)
@@ -2450,8 +2458,9 @@ def build_prediction(ctx: dict) -> dict:
             # (whose state the record data does not give: then only that its own record does not switch it off)
             won_ = winner_on_at_load(rk)
             if won_ == "on" and base_has_no_model(names, rk[4]):
-                won_ = "onNoModel"             # (fourth review, BPT S1) a marker: enabled, nothing drawn
-            if won_ in ("on", "parent", "onNoModel"):
+                # (fifth review, Snazzy 17, BPT 19) no model: what it does in game is its base type's (noModelMeaning)
+                won_ = ("onNoModel", no_model_type(names, rk[4]))
+            if won_ in ("on", "parent") or isinstance(won_, tuple):
                 # (round 2, Snazzy B1) counted by object, as the sentence names them: one object's fields count once
                 sw_ = g.setdefault("_switchOff", {}).setdefault((rk[2], rk[3], won_), {})
                 sw_.setdefault(str(rk[4]), named(rk[4], rk[5]))
@@ -2804,14 +2813,26 @@ def build_prediction(ctx: dict) -> dict:
         def objs_(n_):
             return "object" if n_ == 1 else "objects"
         sw_all_ = g.pop("_switchOff", None) or {}
-        for (lo_, wi_, how_), ex_ in sorted(sw_all_.items(), key=lambda kv: ("on", "onNoModel", "parent").index(kv[0][2])):
+        nm_words_ = words.get("noModelMeaning") or {}
+
+        def sw_order(kv):
+            h_ = kv[0][2]
+            return (("on", "onNoModel", "parent").index(h_[0] if isinstance(h_, tuple) else h_),
+                    str(h_[1]) if isinstance(h_, tuple) else "")
+        for (lo_, wi_, how_), ex_ in sorted(sw_all_.items(), key=sw_order):
+            typ_ = how_[1] if isinstance(how_, tuple) else None
+            how_ = how_[0] if isinstance(how_, tuple) else how_
             key_ = {"on": "itemSwitchOffDrawn", "onNoModel": "itemSwitchOffNoModel"}.get(how_, "itemSwitchOffParent")
             n_ex_ = 2
             if how_ == "onNoModel" and (lo_, wi_, "on") in sw_all_ and words.get("itemSwitchOffNoModelMore"):
                 key_, n_ex_ = "itemSwitchOffNoModelMore", 1     # said after the drawn ones, short (page budget)
+            # (fifth review) one sentence per base type, its meaning from skill data: never "shows nothing"
+            forms_ = (nm_words_.get("types") or {}).get(typ_) or nm_words_.get("default") or ["", ""]
+            meaning_ = bind(forms_[0 if len(ex_) == 1 else 1], {"loser": lo_, "winner": wi_})
             if words.get(key_):
                 detail.append(bind(words[key_], {"count": fmt_n(len(ex_)), "objects": objs_(len(ex_)), "loser": lo_,
-                                                 "winner": wi_, "examples": "; ".join(list(ex_.values())[:n_ex_])}))
+                                                 "winner": wi_, "examples": "; ".join(list(ex_.values())[:n_ex_]),
+                                                 "meaning": meaning_}))
         for m_, s_ in (g.pop("_startsOffLoser", None) or {}).items():
             if words.get("itemStartsOffLoser"):
                 detail.append(bind(words["itemStartsOffLoser"], {"count": fmt_n(len(s_)), "objects": objs_(len(s_)),
