@@ -4091,14 +4091,31 @@ def build_prediction(ctx: dict) -> dict:
                 off_cache[id(e)] = r_
             return off_cache[id(e)]
 
-        OFF_STATES = ("on", "parent", "starts", "off", "unknown")
+        OFF_STATES = ("onOwn", "on", "parent", "starts", "off", "unknown")
+
+        def own_removal(e):
+            """(fifth review, BPT S2) The pair winner's version in the setup with the patch sets the object off for good
+            by its own change: its version is off for good and the version it inherits from its masters is not."""
+            ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
+            if not ch_:
+                return False
+            low_ = [str(x).lower() for x in ch_["providers"]]
+            if str(e["B"]).lower() not in low_:
+                return False
+            ib_ = low_.index(str(e["B"]).lower())
+            _, j_ = recordrows.own_change(ch_["providers"], [0] * len(low_), ib_,
+                                          (masters or {}).get(str(e["B"]).lower()) if masters is not None else None)
+            return j_ is not None and provider_disables(ch_, ib_) and not provider_disables(ch_, j_)
 
         def off_state(e):
             """(fourth review, Winterhold S2) None, or the losing plugin's own version's state (version_state) in the
-            setup with the patch, for a row still_off covers: 'no effect in game' only where it is off for good too."""
+            setup with the patch, for a row still_off covers: 'no effect in game' only where it is off for good too.
+            (fifth review, BPT S2) a losing version that has the object on, where the winner removes it by its own
+            change, is "onOwn": the winner's own removal, not an earlier mod's it carries."""
             if not still_off(e):
                 return None
-            return side_state(keyof(e), e["A"], patched_arm) or "unknown"
+            st_ = side_state(keyof(e), e["A"], patched_arm) or "unknown"
+            return "onOwn" if st_ == "on" and own_removal(e) else st_
 
         def off_counts(es_):
             return collections.Counter(off_state(e) for e in es_ if off_state(e))
@@ -4620,6 +4637,15 @@ def build_prediction(ctx: dict) -> dict:
                     n_open = len(pes_)
                     text_ = (bind(words["stillThereLost"], {"count": fmt_n(n_open), "loser": loser, "winner": winner,
                                                             "unit": u_[0 if n_open == 1 else 1]}) + off_note(pes_))
+                    # (fifth review, BPT S2) the winner's own removal, which a patch keeps on the pair's other rows
+                    if any(off_state(e) == "onOwn" for e in pes_) and words.get("stillThereOwnRemovalKept"):
+                        kept_own_ = collections.Counter()
+                        for e in all_["kept"]:
+                            if (e["A"], e["B"]) == (loser, winner) and off_state(e) == "onOwn":
+                                ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"])) or {}
+                                kept_own_[str((ch_.get("providers") or [""])[-1])] += 1
+                        for pt_, n_ in kept_own_.items():
+                            text_ += bind(words["stillThereOwnRemovalKept"], {"patch": pt_, "count": fmt_n(n_)})
                     stays_parts.append((len(pes_), text_))
                 for e in es:
                     v_ = e.get("values") or {}
