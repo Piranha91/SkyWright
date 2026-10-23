@@ -7612,6 +7612,76 @@ def main():
                      ("sixth-review/C1129-narrowing-names-record-type", c1129_narrowing_names_record_type)]:
         cell(name, fn)
 
+    # C1111 (Pilgrim r6 S2, BPT r5/r6 S2): the totals a modder sizes the job from say how many overlap pairs have an
+    # object whose model is a visual effect: the headline, the kind line's total and its left count, and the summary.
+    def c1111_effect_share_in_totals():
+        X, Y, Z = f"000X11:{MOD_A}", f"000Y11:{MOD_B}", f"000Z11:{MOD_B}"
+        r1, r2 = row("OVERLAP", MOD_B, MOD_A, X, other=Y), row("OVERLAP", MOD_B, MOD_A, X, other=Z)
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        names_ = {"refs": {X: {"base": f"0B0X11:{MOD_A}"}, Y: {"base": f"0B0Y11:{MOD_B}"}, Z: {"base": f"0B0Z11:{MOD_B}"}},
+                  "bases": {f"0B0X11:{MOD_A}": {"type": "Static", "editorId": "Wall", "model": "arch\\wall.nif"},
+                            f"0B0Y11:{MOD_B}": {"type": "MoveableStatic", "editorId": "Mist", "model": "effects\\fxmist.nif"},
+                            f"0B0Z11:{MOD_B}": {"type": "Static", "editorId": "Rock", "model": "rocks\\rock.nif"}}}
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r1, r2], (OVERLAP, "without-patch"): [r1, r2],
+                                                (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH], names=names_)
+        pr_ = reader(plan).get("prediction") or {}
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Objects occupying")), "")
+        summ = str((reader(plan).get("validation") or {}).get("summary") or "")
+        v = str(pr_.get("verdict") or "")
+        return ("1 with a visual-effect model" in v and kl.count("1 with a visual-effect model") == 2
+                and "1 with a visual-effect model" in summ), f"{v[-200:]} || {kl} || {summ[-200:]}"
+
+    # C1112, C1113 (Pilgrim r5 S1): where the winner's value is the base game's on some of an item's rows only, the item
+    # says so with its count (it puts back what the losing mod changed); and an item whose rows are all one field with a
+    # meaning said ("All of them are the position: ...") is not listed as one whose in-game effect is not described.
+    def base_some_bundle():
+        Rs = [f"00CA1{i}:{BASE}" for i in (2, 3, 4)]
+        rows_, ch_ = [], []
+        for i_, R in enumerate(Rs):
+            a_, b_ = offs(0), offs(0)
+            a_["Placement.Position"] = f"{300 + i_},100,0"
+            if i_ == 2:
+                b_["Placement.Position"] = "900,100,0"
+            rows_.append(lost_row(MOD_A, MOD_B, R, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE))
+            ch_.append((R, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)]))
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        return plan, md
+
+    def c1112_winner_base_on_some_rows_counted():
+        plan, md = base_some_bundle()
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return re.search(r"In 2 of them ModB\.esp's value of [^.]*is the base game's", it) is not None, it[-500:]
+
+    def c1113_field_meaning_not_listed_undescribed():
+        plan, md = base_some_bundle()
+        bad = [ln for ln in md.splitlines() if "show in game is not described" in ln and "Record fields" in ln]
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return ("of them are the position" in it and not bad
+                and "Its in-game effect is not described" not in it), f"{bad} || {it[-200:]}"
+
+    # C1115 (BPT r5 S3): an overlap pair the probe reports as coplanar is said apart, like a touching pair, and the
+    # "drawn through each other" line speaks only of the other pairs.
+    def c1115_coplanar_pairs_said_apart():
+        X, Y, Z = f"000X15:{MOD_A}", f"000Y15:{MOD_B}", f"000Z15:{MOD_B}"
+        r1 = row("OVERLAP", MOD_B, MOD_A, X, other=Y)
+        r1["Summary"] = f"Static from {MOD_A} / Static from {MOD_B}: coplanar_overlap, containment unassessed, 40 triangle pairs"
+        r2 = row("OVERLAP", MOD_B, MOD_A, X, other=Z)
+        r2["Summary"] = f"Static from {MOD_A} / Static from {MOD_B}: crossing, containment unassessed, 12 triangle pairs"
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [r1, r2],
+                                                (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH])
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        return ("1 of these pairs are coplanar" in it or "1 of these pairs is coplanar" in it) and "for the other 1 overlap pair" in it, it[-400:]
+
+    for name, fn in [("sixth-review/C1111-effect-share-in-totals", c1111_effect_share_in_totals),
+                     ("sixth-review/C1112-winner-base-on-some-rows-counted", c1112_winner_base_on_some_rows_counted),
+                     ("sixth-review/C1113-field-meaning-not-listed-undescribed", c1113_field_meaning_not_listed_undescribed),
+                     ("sixth-review/C1115-coplanar-pairs-said-apart", c1115_coplanar_pairs_said_apart)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

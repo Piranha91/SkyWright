@@ -1611,6 +1611,7 @@ def build_prediction(ctx: dict) -> dict:
     effect_model_re = re.compile(words["effectModelPattern"], re.I) if words.get("effectModelPattern") else None
 
     touching_re = re.compile(words["touchingPattern"]) if words.get("touchingPattern") else None
+    coplanar_re = re.compile(words["coplanarPattern"]) if words.get("coplanarPattern") else None
 
     def effect_pair(fk, others):
         """A geometry pair with an object whose base's model is a visual effect (skill data effectModelPattern)."""
@@ -2527,6 +2528,13 @@ def build_prediction(ctx: dict) -> dict:
             g["_effectPairs"] = g.get("_effectPairs", 0) + 1
         touch_row_ = (rk[1] != "LOST-EDIT" and touching_re is not None and bool(hit["row"].get("other"))
                       and touching_re.search(str(rk[5] or "")) is not None)
+        cop_row_ = (rk[1] != "LOST-EDIT" and coplanar_re is not None and bool(hit["row"].get("other"))
+                    and not touch_row_ and coplanar_re.search(str(rk[5] or "")) is not None)
+        if cop_row_:
+            # (sixth review, BPT r5 S3) a pair the probe reports as coplanar: surfaces in one plane, said apart
+            g["_coplanarPairs"] = g.get("_coplanarPairs", 0) + 1
+            if not eff_row_:
+                g["_notCrossing"] = g.get("_notCrossing", 0) + 1
         if touch_row_:
             # (fifth review, Sewers S3) a pair the probe reports as touching: surfaces in contact, said apart
             g["_touchingPairs"] = g.get("_touchingPairs", 0) + 1
@@ -2893,6 +2901,15 @@ def build_prediction(ctx: dict) -> dict:
                 detail.append(bind(words["itemSameValueBy"], {
                     "others": " and ".join(same_by), "holds": "holds" if len(same_by) == 1 else "hold",
                     "their": "its" if len(same_by) == 1 else "their", "loser": loser}))
+            # (sixth review, Pilgrim r5 S1) where it holds for some rows of a field only, said with its count
+            some_ = [(f_, n_) for f_, n_ in win_base_c.items() if f_ not in win_base and 0 < n_ < (rows_c.get(f_) or 0)]
+            if some_ and words.get("itemWinnerBaseSome"):
+                ex_ws_ = (g.get("_winnerBaseEx") or {}).get(some_[0][0])
+                detail.append(bind(words["itemWinnerBaseSome"], {
+                    "count": fmt_n(sum(n_ for _, n_ in some_)), "winner": winner, "loser": loser,
+                    "fields": " and ".join(f_ for f_, _ in some_),
+                    "example": bind(words["itemWinnerBaseExample"], {"example": ex_ws_, "field": some_[0][0]})
+                    if ex_ws_ and words.get("itemWinnerBaseExample") else ""}))
             if win_base:
                 ex_wb_ = (g.get("_winnerBaseEx") or {}).get(win_base[0])
                 detail.append(bind(words["itemWinnerBase"], {
@@ -3070,8 +3087,12 @@ def build_prediction(ctx: dict) -> dict:
             if str(p4_).lower() != str(lo4_).lower():
                 detail.append(bind(words["itemPreviousWinner"], {"winner": wi4_, "prev": p4_}))
         n_eff_ = g.pop("_effectPairs", 0)
+        g["effectPairs"] = n_eff_          # (sixth review, Pilgrim S2, BPT S2) carried to the totals
         g["_effN"] = g.pop("_notCrossing", 0)
         n_touch_ = g.pop("_touchingPairs", 0)
+        n_cop_ = g.pop("_coplanarPairs", 0)
+        if n_cop_ and words.get("itemCoplanarPairs"):
+            detail.append(bind(words["itemCoplanarPairs"], {"count": fmt_n(n_cop_), "verb": "is" if n_cop_ == 1 else "are"}))
         if n_touch_ and words.get("itemTouchingPairs"):
             detail.append(bind(words["itemTouchingPairs"], {"count": fmt_n(n_touch_), "verb": "touch" if n_touch_ != 1 else "touch"}))
         if n_eff_ and words.get("itemEffectPairs"):
@@ -3101,6 +3122,8 @@ def build_prediction(ctx: dict) -> dict:
                 detail.append(bind(words["itemMainFieldInGame"], {
                     "count": fmt_n(top_n), "field": field_word(top_f), "meaning": mean_,
                     "lead": "All" if top_n == sum(fn_.values()) else "Most"}))
+                # (sixth review, Pilgrim r5 S1) every row's field has its meaning said: no "not described" for it
+                g["_meaningAll"] = top_n == sum(fn_.values())
         fl_ = g.pop("_fieldsLine", None)
         if fl_:
             detail.append(bind(words["itemFields"], {"fields": fl_}))
@@ -3142,7 +3165,8 @@ def build_prediction(ctx: dict) -> dict:
                     g["inGame"] = bind(st_words["line"], {"switch": m_.group("switch"), "what": bind(what_, {
                         "depth": f"{dm_.group(1)} u" if dm_ else ""})})
                     break
-        g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else words["inGameMissing"])
+        g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else "" if g.pop("_meaningAll", False)
+                           else words["inGameMissing"])
         n_eff_ = g.pop("_effN", 0)
         if n_eff_ and g["inGame"] and g["kind"] != "LOST-EDIT":
             # (fifth review, Pilgrim S4) the in-game line speaks only of the pairs with no visual-effect model
@@ -3726,6 +3750,7 @@ def build_prediction(ctx: dict) -> dict:
             e["relationships"] += g["relationships"]
             e["offForGood"] += dis_of.get(id(g), 0)
             e["offOwn"] = e.get("offOwn", 0) + dis_own_of.get(id(g), 0)
+            e["effectPairs"] = e.get("effectPairs", 0) + int(g.get("effectPairs") or 0)
             e["_s"] |= subjects_of[id(g)]
             e["_po"] |= pair_objects_of[id(g)]
             e["_f"].update(field_names_of[id(g)])
@@ -3753,7 +3778,9 @@ def build_prediction(ctx: dict) -> dict:
                     "fields": fields_text(collections.Counter(e.get("fieldNames") or {}))})
             elif (e["kind"] != "LOST-EDIT" and e.get("pairObjects") and words.get("verdictObjectsToo")
                   and e["checkId"] in set(words.get("verdictObjectsChecks") or [])):
-                phrase += " " + bind(words["verdictObjectsToo"], {"count": fmt_n(e["pairObjects"])})
+                phrase += " " + bind(words["verdictObjectsEffect"] if e.get("effectPairs") and words.get("verdictObjectsEffect")
+                                     else words["verdictObjectsToo"], {"count": fmt_n(e["pairObjects"]),
+                                                                       "effect": fmt_n(e.get("effectPairs") or 0)})
             out.append({**e, "unit": u, "count": n, "phrase": phrase})
         return sorted(out, key=lambda e: (-e["count"], e["checkId"], e["kind"]))
 
@@ -4775,8 +4802,12 @@ def build_prediction(ctx: dict) -> dict:
                 c_[(unit_noun(e["checkId"], e["kind"], 1), unit_noun(e["checkId"], e["kind"], 2))].append(e)
             if len(c_) <= 1 and not named:
                 return fmt_n(len(xs)) + off_note(xs)
-            return ", ".join(f"{fmt_n(len(es_))} {u_[0] if len(es_) == 1 else u_[1]}" + off_note(es_) for u_, es_ in
-                             sorted(c_.items(), key=lambda kv: (-len(kv[1]), kv[0])))
+            def eff_note_(es_):
+                n_ = sum(1 for e in es_ if e["kind"] != "LOST-EDIT" and effect_pair(e["formKey"], e.get("other")))
+                return (" (" + bind(words["stillThereEffect"], {"count": fmt_n(n_)}) + ")"
+                        if n_ and words.get("stillThereEffect") else "")
+            return ", ".join(f"{fmt_n(len(es_))} {u_[0] if len(es_) == 1 else u_[1]}" + off_note(es_) + eff_note_(es_)
+                             for u_, es_ in sorted(c_.items(), key=lambda kv: (-len(kv[1]), kv[0])))
 
         sentences = [bind(words["validationHits"], {"patch": patch, "count": by_unit(hits)})]
 
@@ -4951,6 +4982,9 @@ def build_prediction(ctx: dict) -> dict:
                             "own": sum(1 for e in all_["own"] if item_of(e) == k),
                             "open": sum(1 for e in all_["open"] if item_of(e) == k),
                             "stands": sum(1 for e in all_["stands"] if item_of(e) == k),
+                            # (sixth review, Pilgrim S2, BPT S2) left pairs with a visual-effect model
+                            "openEffect": sum(1 for e in all_["open"] if item_of(e) == k and e["kind"] != "LOST-EDIT"
+                                              and effect_pair(e["formKey"], e.get("other"))),
                             "kept": sum(1 for e in all_["kept"] if item_of(e) == k),
                             "placed": sum(1 for e in all_["placed"] if item_of(e) == k),
                             # (third review, Winterhold S1) by loser and winner: the patch keeps the winner's value
@@ -5044,7 +5078,9 @@ def build_prediction(ctx: dict) -> dict:
                                                            "count": fmt_n(n_)})
                                      for k_, n_ in sorted(by_.items(), key=lambda kv: (-kv[1], kv[0].lower())))
                 if k == "open":
-                    return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + off_text(off_from(bi, "offOpen"))
+                    return (bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + off_text(off_from(bi, "offOpen"))
+                            + (" (" + bind(words["stillThereEffect"], {"count": fmt_n(bi["openEffect"])}) + ")"
+                               if bi.get("openEffect") and words.get("stillThereEffect") else ""))
                 if k in ("hits", "own") and bi.get(f"{k}Off") and ow.get(f"{k}Off"):
                     # (blind round 1, Snazzy S1) how many the patch resolves by switching an object off: its choice
                     return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + bind(ow[f"{k}Off"], {"count": fmt_n(bi[f"{k}Off"])})
@@ -5070,8 +5106,10 @@ def build_prediction(ctx: dict) -> dict:
                          for n in ("listed", "patchHeld", "notAttributed", "supportRemoved") if bi.get(f"open{n[0].upper()}{n[1:]}")]
                 # the off-for-good count goes first, beside the count it is part of (reviewer, BPT 1)
                 off_ = off_text(off_from(bi, "offOpen"), wrap=False)
+                eff_ = ([bind(words["stillThereEffect"], {"count": fmt_n(bi["openEffect"])})]
+                        if bi.get("openEffect") and words.get("stillThereEffect") else [])
                 parts[[k for k in keys if bi.get(k)].index("open")] = (
-                    bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(([off_] if off_ else []) + split)
+                    bind(ow["open"], {"count": fmt_n(bi["open"])}) + " (" + "; ".join(([off_] if off_ else []) + eff_ + split)
                     + ")")
             return ", ".join(parts) if parts else ow["none"]
         def no_kept_meaning(bi):
@@ -5118,8 +5156,10 @@ def build_prediction(ctx: dict) -> dict:
                 kp_by.update(bi.get("keptBy") or {})
                 ok_by.update(bi.get("offKeptBy") or {})
             total = sum(g["count"] for g, _ in gs)
+            eff_t_ = sum(int(g.get("effectPairs") or 0) for g, _ in gs)
             kind_lines.append(bind(words["withPatchKindLine"], {
-                "title": title_of(check_id), "total": fmt_n(total), "unit": unit_noun(check_id, kind, total),
+                "title": title_of(check_id), "total": fmt_n(total), "unit": unit_noun(check_id, kind, total)
+                + (", " + bind(words["stillThereEffect"], {"count": fmt_n(eff_t_)}) if eff_t_ and words.get("stillThereEffect") else ""),
                 "outcomes": outcome_text({**agg, "switchedBy": dict(sw_by), "keptBy": kp_by,
                                          "offKeptBy": ok_by})}))
         stays_parts, back = [], collections.OrderedDict()
