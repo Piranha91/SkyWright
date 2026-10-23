@@ -2698,6 +2698,7 @@ def build_prediction(ctx: dict) -> dict:
             g.setdefault("_lostKeys", []).append((rk, hit["row"].get("field")))
         g.setdefault("_subjectRows", collections.Counter())[rk[4] if rk[4] is not None else ("row", rk[5])] += 1
         g.setdefault("_rowSummaries", []).append(str(rk[5] or ""))
+        g.setdefault("_rowKinds", []).append((str(rk[1]), str(rk[4])))
         fid = hit["finding"].get("id") if rk[0] not in sib_only else None
         if fid and fid not in g["findingIds"]:
             g["findingIds"].append(fid)
@@ -3333,9 +3334,18 @@ def build_prediction(ctx: dict) -> dict:
                     if len(ds_) > 1 and rng_:
                         what_ = bind(rng_, {"low": f"{ds_[0]:g} u", "high": f"{ds_[-1]:g} u"})
                     dm_ = re.search(r"(\d+(?:\.\d+)?)\s*u inside", sm_)
-                    g["inGame"] = bind(st_words["line"], {"switch": m_.group("switch"), "what": bind(what_, {
-                        "depth": f"{dm_.group(1)} u" if dm_ else ""})})
+                    # (seventh review, Sewers S1) a switch state whose direction the check did not find is said without
+                    # one, and the depth is the row's own object's, against something the check does not name
+                    kinds_ = g.get("_rowKinds") or []
+                    unknown_ = bool(kinds_) and all(k_.endswith("@Unknown") for k_, _ in kinds_)
+                    objs_ = list(dict.fromkeys(f_ for _, f_ in kinds_))
+                    line_ = st_words.get("lineUnknown") if unknown_ and st_words.get("lineUnknown") else st_words["line"]
+                    what_o_ = (st_words.get("statesOwn") or {}).get(m_.group("state")) if len(objs_) == 1 else None
+                    g["inGame"] = bind(line_, {"switch": m_.group("switch"), "what": bind(what_o_ if what_o_ and len(ds_) <= 1
+                                                                                        else what_, {
+                        "depth": f"{dm_.group(1)} u" if dm_ else "", "object": named(objs_[0]) if objs_ else ""})})
                     break
+        g.pop("_rowKinds", None)
         g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else "" if g.pop("_meaningAll", False)
                            else words["inGameMissing"])
         n_eff_ = g.pop("_effN", 0)

@@ -6648,7 +6648,9 @@ def main():
         results.update({(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch", "without-b", "without-a")})
         plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH])
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
-        return ("hold only until" not in it and "18.6 u inside something else" in it and "was not found" in it), it[-400:]
+        # (seventh review, Sewers S1) the depth is the row's own object's, against something the check does not name
+        return ("hold only until" not in it and "18.6 u inside something it does not name" in it
+                and "was not found" in it), it[-400:]
 
     # C1064 (Winterhold page limit, fourth review): the ladder step after the tail step also moves the location load
     # order section into the evidence index's further notes, says so in the pointer line, and comes before any step
@@ -6700,7 +6702,9 @@ def main():
         plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], patches=[PATCH])
         title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
         line = next((ln for ln in md.splitlines() if ln.startswith(f"- **{title}**")), "")
-        ok = (re.search(r"from ModA\.esp: when GuardSwitch is set, an object sits 9 u inside another", line) is not None
+        # (seventh review, Sewers S1) the depth is the row's own object's, against something the check does not name
+        ok = (re.search(r"from ModA\.esp: when GuardSwitch is set, the check reports 000X36:ThirdMod\.esp 9 u inside "
+                        r"something it does not name", line) is not None
               and "In game: when" not in line)
         return ok, line[-400:]
 
@@ -8294,7 +8298,34 @@ def main():
         line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
         return ("018A59:Skyrim.esm TestCityLocation" in line), line[:400]
 
+    # C1151 (Sewers S1): the quest-or-switch check's row puts its depth on its own object (the one that leaves) and
+    # names no other; its state is Unknown. The overlap item says the depth is that object's, and a switch clash item of
+    # its own says the switch flips "which way was not found", never "when X is set", with the depth on that object.
+    def c1151_switch_depth_on_its_object():
+        X, Yo = f"000X51:{MOD_A}", f"000Y51:{MOD_B}"
+        ov_ = row("OVERLAP", MOD_B, MOD_A, X, other=Yo)
+        st_ = row("STATE-CONTACT@000S51:ModB.esp@Unknown", MOD_B, MOD_A, Yo, label="Camp (ext)", other=X)
+        st_["Summary"] = (f"Contact StateConditional under PlankSwitch ({MOD_B}): {Yo} [Static Scaffold] leaves - Sunk: the "
+                          f"host leaves with the flip - hung from the host as authored (0u gap); under the winner it sits "
+                          f"18.6u inside something else in Camp (ext)")
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A]), arm("without-a", [BASE, MOD_B])]
+        sets_ = ("baseline", "without-patch", "without-b", "without-a")
+        res1 = {(OVERLAP, a_): ([ov_] if a_ == "without-patch" else []) for a_ in sets_}
+        res1.update({(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in sets_})
+        _, md1, _ = compile_and_render(arms, res1, [MOD_A], patches=[PATCH])
+        it1 = next((ln for ln in md1.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        res2 = {(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in sets_}
+        res2.update({(CONTACT, a_): [] for a_ in sets_})
+        plan2, md2, _ = compile_and_render(arms, res2, [MOD_A], patches=[PATCH])
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        it2 = next((ln for ln in md2.splitlines() if ln.startswith(f"- **{title}")), "")
+        ok = ("itself 18.6 u inside something it does not name" in it1 and "which way was not found" in it2
+              and "is set," not in it2 and "000Y51" in it2.split("In game", 1)[-1])
+        return ok, f"{it1[-300:]} || {it2[-300:]}"
+
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
+                     ("seventh-review/C1151-switch-depth-on-its-object", c1151_switch_depth_on_its_object),
                      ("seventh-review/C1158-undone-line-itemised", c1158_undone_line_itemised),
                      ("seventh-review/C1159-kept-position-has-meaning", c1159_kept_position_has_meaning),
                      ("seventh-review/C1150-kept-note-says-objects", c1150_kept_note_says_objects),
