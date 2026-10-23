@@ -8354,7 +8354,27 @@ def main():
         ln = next((x for x in idx.splitlines() if "No finding in the completed check" in x), "")
         return ("Of the 37 NavigationMesh records it judged, the geometry (Data) is judged by the check" in ln), ln[:400]
 
+    # C1154 (Sewers R4 S4): an overlap pair whose object's base model is an editor marker the game does not draw (an
+    # auto-load door's marker model, in skill data markerModels) has no body: set aside with the no-body pairs, never
+    # counted or said "drawn through each other"; the other pair stays counted.
+    def c1154_marker_model_has_no_body():
+        X, Y, Z = f"000X54:{MOD_A}", f"000Y54:{MOD_B}", f"000Z54:{MOD_B}"
+        r1, r2 = row("OVERLAP", MOD_B, MOD_A, X, other=Y), row("OVERLAP", MOD_B, MOD_A, X, other=Z)
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        names_ = {"refs": {X: {"base": f"0B0X54:{MOD_A}"}, Y: {"base": f"0B0Y54:{MOD_B}"}, Z: {"base": f"0B0Z54:{MOD_B}"}},
+                  "bases": {f"0B0X54:{MOD_A}": {"type": "Static", "editorId": "Wall", "model": "arch\\wall.nif"},
+                            f"0B0Y54:{MOD_B}": {"type": "Door", "editorId": "AutoLoadDoor01", "model": "AutoLoadMarker01.nif"},
+                            f"0B0Z54:{MOD_B}": {"type": "Static", "editorId": "Rock", "model": "rocks\\rock.nif"}}}
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r1, r2], (OVERLAP, "without-patch"): [r1, r2],
+                                                (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH], names=names_)
+        adm = sorted(e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
+                     if e["checkId"] == OVERLAP)
+        v = str((reader(plan).get("prediction") or {}).get("verdict") or "")
+        return (adm == ["admitted", "noBody"] and "1 overlap candidate" in v), f"{adm}; {v[-200:]}"
+
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
+                     ("seventh-review/C1154-marker-model-has-no-body", c1154_marker_model_has_no_body),
                      ("seventh-review/C1153-null-says-navmesh-judged-elsewhere", c1153_null_says_navmesh_judged_elsewhere),
                      ("seventh-review/C1152-shared-objects-counted-once-in-comparison",
                       c1152_shared_objects_counted_once_in_comparison),

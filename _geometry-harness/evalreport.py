@@ -1590,10 +1590,19 @@ def build_prediction(ctx: dict) -> dict:
         n_ = object_name(fk, summary)
         return f"{fk} ({n_})" if n_ else str(fk)
 
+    marker_models = {str(x).replace("\\", "/").lower() for x in (words.get("markerModels") or {}).get("models") or []}
+
+    def marker_model(fk):
+        """(seventh review, Sewers R4 S4) the object's base's model is one the game does not draw (every shape an editor
+        marker; skill data `markerModels`, from a census of the base game's meshes)."""
+        m_ = str((name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}).get("model") or "")
+        m_ = m_.replace("\\", "/").lower()
+        return bool(m_) and (m_ in marker_models or (m_.startswith("meshes/") and m_[7:] in marker_models))
+
     def bodiless(fk):
         """An object whose base record has no model has no body to clash, whatever its type (W-B3, round 4): decided
-        from the record's model field, never a name."""
-        return base_has_no_model(names, fk)
+        from the record's model field, never a name. (seventh review) Nor has one whose model the game does not draw."""
+        return base_has_no_model(names, fk) or marker_model(fk)
 
     marker_cache = {}
 
@@ -1604,6 +1613,8 @@ def build_prediction(ctx: dict) -> dict:
         b_ = (name_refs.get(str(fk)) or {}).get("base")
         typ_ = str((name_bases.get(b_ or "") or {}).get("type") or "")
         bit_ = (words.get("markerFlags") or {}).get(typ_)
+        if marker_model(fk):
+            return True                        # (seventh review) a model the game does not draw
         if not b_ or not bit_:
             return False
         if b_ not in marker_cache:
