@@ -6068,7 +6068,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         uncovered = [n for n in m_names if n and n.lower() in {x.lower() for x in evidence_plugins_by_arm.get(measured_["armId"], set()) if x}
                      and n.lower() not in m_list]
         if uncovered:
-            measured_["locationPluginScope"]["note"] = ("The findings above also name " + ", ".join(uncovered)
+            # (fifth review, Missives line 107) the evidence names them, set-aside rows included: never "the findings above"
+            measured_["locationPluginScope"]["note"] = ("The evidence index also names " + ", ".join(uncovered)
                                                         + ", at locations this list does not cover.")
         for a in arms_out:
             if a is measured_ or a["locationPluginScope"]["basis"] == "measured per-location contributors":
