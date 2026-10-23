@@ -5455,7 +5455,25 @@ def build_prediction(ctx: dict) -> dict:
                 if (chw_ and chw_.get("providers") and version_state(chw_, len(chw_["providers"]) - 1) in ("off", "starts")
                         and (not chp_ or not chp_.get("providers") or version_state(chp_, len(chp_["providers"]) - 1) == "on")):
                     return True
+                # (seventh review round 2, BPT B1) an object the record import does not hold (no contest on it): its
+                # last version in each setup read from the plugin files, so either object of the pair is judged alike
+                if not (chw_ and chw_.get("providers")):
+                    sw_, sp_ = files_state(patched_arm, str(o_)), files_state(p_arm, str(o_))
+                    if sw_ == "off" and sp_ == "on":
+                        return True
             return False
+
+        files_state_cache = {}
+
+        def files_state(arm_, fk_):
+            """'off' (off for good or initially disabled at its last version), 'on', or None where not read."""
+            if (arm_, fk_) not in files_state_cache:
+                files_state_cache[(arm_, fk_)] = setup_version(arm_rows6_.get(arm_), fk_)
+            got_ = files_state_cache[(arm_, fk_)]
+            if not got_ or got_[1] is None:
+                return None
+            v_ = got_[1]
+            return "off" if (placement_off_for_good(v_, words) or v_.get("initiallyDisabled")) else "on"
 
         def item_of(e):
             return (e["checkId"], e.get("itemKind") or e["kind"], tuple(sorted([e["A"], e["B"]], key=str.lower)),

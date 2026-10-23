@@ -8413,6 +8413,30 @@ def main():
                      ("seventh-review/C1161-set-aside-counts-fields", c1161_set_aside_counts_fields)]:
         cell(name, fn)
 
+    # ------------------------------------------------ seventh review, round 2 (C1162-C1189)
+    # C1162 (BPT B1): an overlap pair the patch resolves by switching off the OTHER object (ModB's), which no record
+    # import holds: read from the plugin files of each setup, counted as resolved by switching an object off, the same
+    # rule as when the patch switches off the row's own object.
+    def c1162_switch_off_either_object_counted():
+        X, Y = f"000E61:{MOD_A}", f"000E62:{MOD_B}"
+        def refr(low_, z_):
+            return ("REFR", low_, [("NAME", struct.pack("<I", 0x0B0A79)),
+                                   ("DATA", struct.pack("<6f", 100.0, 100.0, z_, 0.0, 0.0, 0.0))], False)
+        fb_ = plugin_file_of(MOD_B, [BASE], [refr((1 << 24) | 0x000E62, 0.0)], group="CELL")
+        fp_ = plugin_file_of(PATCH, [BASE, MOD_B], [refr((1 << 24) | 0x000E62, -30000.0)], group="CELL")
+        arms_ = with_files([arm("baseline", [BASE, MOD_B, MOD_A, PATCH], kind="baseline"),
+                            arm("without-patch", [BASE, MOD_B, MOD_A])],
+                           {MOD_B: fb_, PATCH: fp_, MOD_A: plugin_file_of(MOD_A, [BASE], [], group="CELL")})
+        r_ = row("OVERLAP", MOD_B, MOD_A, X, other=Y)
+        plan, md, _ = compile_and_render(arms_, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [r_]}, [MOD_A],
+                                         patches=[PATCH])
+        kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
+                   if x.startswith("Objects occupying")), "")
+        return ("resolved 1 (1 by the patch switching an object off)" in kl), kl[:300]
+
+    for name, fn in [("round2/C1162-switch-off-either-object-counted", c1162_switch_off_either_object_counted)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
