@@ -5314,21 +5314,32 @@ def build_prediction(ctx: dict) -> dict:
                 """(sixth review, BPT r6 S3) a winning value another plugin's own change carries is that plugin's"""
                 if e["kind"] != "LOST-EDIT" or m_ != e["B"]:
                     return m_
-                fc_ = field_chain(p_of(e["checkId"]), (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"]), e["A"])
-                if fc_ is None:
-                    return m_
-                low_ = [str(x).lower() for x in fc_[0]]
-                if str(m_).lower() not in low_:
-                    return m_
-                return carried_origin(fc_[0], fc_[1], low_.index(str(m_).lower())) or m_
+                # (seventh review) the attribution read, by setup, record and field
+                got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), m_)
+                return got_[0][got_[2]["origin"]] if got_ is not None else m_
             outside_ = list(dict.fromkeys(m_ for e in open_ for m_ in (owner_(e, e["A"]), owner_(e, e["B"]))
                                           if str(m_).lower() not in pt_lower and not is_base_game(m_, words)
                                           and str(m_).lower() not in patch_lower and str(m_).lower() not in cov_low_))
+            # (seventh review, Clockwork S4) what is still there with a mod the patches do list as a master is inside what
+            # they set out to fix and left by them: said too, in its units
+            inside_ = collections.OrderedDict()
+            for e in open_:
+                for m_ in dict.fromkeys((owner_(e, e["A"]), owner_(e, e["B"]))):
+                    if str(m_).lower() in cov_low_ and str(m_).lower() not in pt_lower:
+                        inside_.setdefault(disp_.get(str(m_).lower(), m_), []).append(e)
+            inside_text_ = ("".join(" " + bind(words["validationPatchScopeInside"], {
+                "inside": m_, "count": by_unit(es_, True), "it": "they set" if len(patch_names) > 1 else "it sets",
+                "them": "them" if len(patch_names) > 1 else "it"})
+                for m_, es_ in inside_.items()) if words.get("validationPatchScopeInside") else "")
             if outside_:
                 sentences.insert(new_idx, bind(words["validationPatchScope"], {
                     "patch": patch, "covered": and_list(covered_) if covered_ else words.get("validationPatchScopeNone") or "none",
                     "outside": and_list(outside_), "lists": "list" if len(patch_names) > 1 else "lists",
-                    "it": "they set" if len(patch_names) > 1 else "it sets"}))
+                    "it": "they set" if len(patch_names) > 1 else "it sets"})
+                    + inside_text_)
+                new_idx += 1
+            elif inside_text_:
+                sentences.insert(new_idx, inside_text_.strip())
                 new_idx += 1
         not_new_sentence = None
         if not_new:

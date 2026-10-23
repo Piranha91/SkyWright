@@ -8382,7 +8382,23 @@ def main():
         ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
         return ("Measured again in the setup with" in ln and "12 to 38 triangle pairs" in ln), ln[:400]
 
+    # C1157 (Clockwork S4): the patch lists OtherMod.esp as a master, and a clash with it is still there with the patch,
+    # beside one with Neighbour.esp, which it does not list: the scope line says the OtherMod one is inside what the
+    # patch sets out to fix and stays with it, not only that the Neighbour one is outside.
+    def c1157_scope_line_says_inside_left():
+        O2 = "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A])]
+        r1 = row("OVERLAP", O2, MOD_A, f"000X57:{MOD_A}", other=f"000Y57:{O2}")
+        r2 = row("OVERLAP", OTHER, MOD_A, f"000X58:{MOD_A}", other=f"000Y58:{OTHER}")
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r1, r2], (OVERLAP, "without-patch"): [r1, r2]},
+                                         [MOD_A], patches=[PATCH], masters={OTHER: [BASE], O2: [BASE], MOD_A: [BASE],
+                                                                            PATCH: [BASE, OTHER, MOD_A]})
+        ln = next((x for x in ((reader(plan).get("validation") or {}).get("sentences") or []) if "masters" in x), "")
+        return (f"still there with {OTHER} (1 overlap pair) is inside what it sets out to fix" in ln), ln[:500]
+
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
+                     ("seventh-review/C1157-scope-line-says-inside-left", c1157_scope_line_says_inside_left),
                      ("seventh-review/C1156-patch-placed-says-remeasure", c1156_patch_placed_says_remeasure),
                      ("seventh-review/C1154-marker-model-has-no-body", c1154_marker_model_has_no_body),
                      ("seventh-review/C1153-null-says-navmesh-judged-elsewhere", c1153_null_says_navmesh_judged_elsewhere),
