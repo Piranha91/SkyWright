@@ -284,7 +284,7 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
 
 
 def compile_and_render(arms, results, targets, want_index=False, sibling=None, settings_extra=None, order_setups=None,
-                       **kw):
+                       also=None, **kw):
     """The real compiler and the real templates: (plan, report.md, report.html).
 
     sibling: (arms, results, targets, kw) -- a second bundle (the evaluation without the patch) built beside this one
@@ -306,6 +306,10 @@ def compile_and_render(arms, results, targets, want_index=False, sibling=None, s
             extra["sibling_dir"] = make_bundle(Path(td) / "sibling", s_arms, s_results, s_targets, **s_kw)
         if order_setups is not None:
             extra["order_setups"] = order_setups
+        if also:
+            # (fifth review) further evaluations supplied with the report (--also-bundle): (arms, results, targets, kw)
+            settings["alsoBundles"] = [str(make_bundle(Path(td) / f"also{i_}", a_[0], a_[1], a_[2], **a_[3]))
+                                       for i_, a_ in enumerate(also)]
         plan = R.compile_plan(bdir, {"bundle": {"complete": True}}, settings, pr, str(bdir), **extra)
         view = R.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], pr, "normal")
         out = R.render_all(plan, view, Path(td) / "out", "")
@@ -5893,6 +5897,27 @@ def main():
         return ("2 record fields the mods changed" in line and "2 of them, on 1 object, switch" in line), line[:300]
 
     for name, fn in [("fifth-review/C1091-undone-line-units", c1091_undone_line_units)]:
+        cell(name, fn)
+
+    # C1092 (Sewers S1): a further evaluation supplied with the report whose setup loads another version of the evaluated
+    # plugin (same name, other bytes) says, for a counted overlap item, how many of its pairs that version's setup finds:
+    # here none of the 2 against OtherMod's tower.
+    def c1092_also_variant_finds_pairs():
+        X1, X2, T_ = f"000X92:{MOD_A}", f"000X93:{MOD_A}", f"000T92:{OTHER}"
+        rows_ = [row("OVERLAP", OTHER, MOD_A, x_, other=T_) for x_ in (X1, X2)]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, OTHER, MOD_A]),
+                arm("without-other", [BASE, MOD_A])]
+        v_arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline", shas={MOD_A: "b" * 64})]
+        v_res = {(OVERLAP, "baseline"): [row("OVERLAP", OTHER, MOD_A, f"000X99:{MOD_A}", other=f"000T99:{OTHER}")]}
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): list(rows_), (OVERLAP, "without-patch"): rows_,
+                                                (OVERLAP, "without-other"): []}, [MOD_A], patches=[PATCH],
+                                         also=[(v_arms, v_res, [MOD_A], {})])
+        also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
+        return (re.search(r"another version of " + re.escape(MOD_A), also_) is not None
+                and re.search(r"finds 0 of the 2 overlap pairs between " + re.escape(OTHER) + " and " + re.escape(MOD_A), also_)
+                is not None), also_[-400:]
+
+    for name, fn in [("fifth-review/C1092-also-variant-finds-pairs", c1092_also_variant_finds_pairs)]:
         cell(name, fn)
 
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
