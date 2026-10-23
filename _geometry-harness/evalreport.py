@@ -5201,16 +5201,34 @@ def build_prediction(ctx: dict) -> dict:
                               if with_checks else t_)
             return ", ".join(parts_) if parts_ else "0"
 
+        # (seventh review, Sewers S2) a by-object kind whose every object the headline counts under an earlier check is
+        # counted once there in the comparison too: said beside the others, never added
+        shared_kinds = {}
+        for i_, v_ in enumerate(prediction.get("verdictCounts") or []):
+            if v_.get("sharedObjects") and not v_.get("newObjects"):
+                first_ = next((w_ for w_ in (prediction.get("verdictCounts") or [])[:i_] if w_["checkId"] in by_object), None)
+                if first_ is not None:
+                    shared_kinds[(v_["checkId"], v_["kind"])] = title_of(first_["checkId"])
+
+        def shared_note(xs):
+            c_ = collections.Counter((e["checkId"], e["kind"]) for e in xs if (e["checkId"], e["kind"]) in shared_kinds)
+            return "".join(bind(words["byUnitSameObjects"], {"count": fmt_n(n_), "noun": unit_noun(k_[0], k_[1], n_),
+                                                           "title": shared_kinds[k_]})
+                           for k_, n_ in c_.items() if words.get("byUnitSameObjects"))
+
         def by_unit(xs, named=False):
             """A count given once per unit when its clashes are of several (never pairs added to record fields); named:
             the unit is said even when there is one."""
             c_ = collections.Counter()
+            note_ = shared_note(xs)
+            if note_:
+                xs = [e for e in xs if (e["checkId"], e["kind"]) not in shared_kinds]
             for e in xs:
                 c_[(unit_noun(e["checkId"], e["kind"], 1), unit_noun(e["checkId"], e["kind"], 2))] += 1
             if len(c_) <= 1 and not named:
-                return fmt_n(sum(c_.values()))
+                return fmt_n(sum(c_.values())) + note_
             return ", ".join(f"{fmt_n(n_)} {u_[0] if n_ == 1 else u_[1]}" for u_, n_ in
-                             sorted(c_.items(), key=lambda kv: (-kv[1], kv[0])))
+                             sorted(c_.items(), key=lambda kv: (-kv[1], kv[0]))) + note_
 
         def by_unit_note(xs, named=True):
             """by_unit, each unit's count followed by how many of its lost changes are on objects set off for good."""
@@ -5610,7 +5628,9 @@ def build_prediction(ctx: dict) -> dict:
             eff_t_ = sum(int(g.get("effectPairs") or 0) for g, _ in gs)
             kind_lines.append(bind(words["withPatchKindLine"], {
                 "title": title_of(check_id), "total": fmt_n(total), "unit": unit_noun(check_id, kind, total)
-                + (", " + bind(words["stillThereEffect"], {"count": fmt_n(eff_t_)}) if eff_t_ and words.get("stillThereEffect") else ""),
+                + (", " + bind(words["stillThereEffect"], {"count": fmt_n(eff_t_)}) if eff_t_ and words.get("stillThereEffect") else "")
+                + (bind(words["kindLineSameObjects"], {"title": shared_kinds[(check_id, kind)]})
+                   if (check_id, kind) in shared_kinds and words.get("kindLineSameObjects") else ""),
                 "outcomes": outcome_text({**agg, "switchedBy": dict(sw_by), "keptBy": kp_by,
                                          "offKeptBy": ok_by, "offKeptObjs": ob_by})}))
         stays_parts, back = [], collections.OrderedDict()

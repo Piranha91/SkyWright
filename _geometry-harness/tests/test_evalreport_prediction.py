@@ -8324,7 +8324,23 @@ def main():
               and "is set," not in it2 and "000Y51" in it2.split("In game", 1)[-1])
         return ok, f"{it1[-300:]} || {it2[-300:]}"
 
+    # C1152 (Sewers S2): the support check's 2 rows are on the 2 objects the fixture check counts; the headline counts
+    # them once, and so do the with-patch kind line and the summary: said as the same objects, never added.
+    def c1152_shared_objects_counted_once_in_comparison():
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F5{i}:{MOD_A}", other=f"000H5{i}:{MOD_B}") for i in (1, 2)]
+        ct = [row("CONTACT", MOD_B, MOD_A, f"000F5{i}:{MOD_A}", other=f"000G5{i}:{MOD_B}") for i in (1, 2)]
+        results = {(c, a): [] for c in (FIXTURE, CONTACT) for a in ("baseline",)}
+        results.update({(FIXTURE, "without-patch"): fx, (CONTACT, "without-patch"): ct})
+        plan, md, _ = compile_and_render(WP_ARMS, results, [MOD_A], patches=[PATCH])
+        summ = str((reader(plan).get("validation") or {}).get("summary") or "")
+        kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
+                   if x.startswith(priorities()["reader"]["checkTitles"].get(CONTACT) or CONTACT)), "")
+        return ("counted once" in summ and "2 object-and-support pairs," not in summ and "counted once there" in kl), \
+            f"{summ[:300]} || {kl[:200]}"
+
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
+                     ("seventh-review/C1152-shared-objects-counted-once-in-comparison",
+                      c1152_shared_objects_counted_once_in_comparison),
                      ("seventh-review/C1151-switch-depth-on-its-object", c1151_switch_depth_on_its_object),
                      ("seventh-review/C1158-undone-line-itemised", c1158_undone_line_itemised),
                      ("seventh-review/C1159-kept-position-has-meaning", c1159_kept_position_has_meaning),
