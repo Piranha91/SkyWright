@@ -141,7 +141,9 @@ def _read(path, rtype, form_keys, decode):
                         data = zlib.decompress(data[4:])
                     except zlib.error as e:
                         raise PluginReadError(f"record {fk}: a compressed record does not decompress: {e}") from e
-                out[fk] = decode(dict(_subrecords(data)), fk, global_)
+                subs_ = dict(_subrecords(data))
+                subs_["__flags__"] = flags          # the record header's flags, for a decoder that reads them
+                out[fk] = decode(subs_, fk, global_)
     except OSError as e:
         raise PluginReadError(f"cannot read {p}: {e}") from e
     return {"plugin": p.name, "masters": masters, "records": out}
@@ -185,6 +187,28 @@ def _placement(subs, fk, global_):
 
 def placements(path, form_keys):
     return _read(path, PLACED_TYPES, form_keys, _placement)
+
+
+def _placement_full(subs, fk, global_):
+    """A placed reference's DATA position and rotation, its base (NAME), scale (XSCL, 1 where absent), enable parent
+    (XESP: the parent and whether the state is opposite) and the record flags the game reads at load (initially disabled
+    0x800, deleted 0x20)."""
+    out = _placement(subs, fk, global_)
+    name = subs.get("NAME")
+    out["base"] = global_(struct.unpack_from("<I", name, 0)[0]) if name and len(name) >= 4 else None
+    xs = subs.get("XSCL")
+    out["scale"] = round(struct.unpack_from("<f", xs, 0)[0], 4) if xs and len(xs) >= 4 else 1.0
+    xe = subs.get("XESP")
+    out["enableParent"] = ([global_(struct.unpack_from("<I", xe, 0)[0]), bool(xe[4] & 1) if len(xe) > 4 else False]
+                           if xe and len(xe) >= 4 else None)
+    f = int(subs.get("__flags__") or 0)
+    out["initiallyDisabled"], out["deleted"] = bool(f & 0x800), bool(f & 0x20)
+    return out
+
+
+def placements_full(path, form_keys):
+    """placements, with the base, scale, enable parent and load-time flags (see _placement_full)."""
+    return _read(path, PLACED_TYPES, form_keys, _placement_full)
 
 
 def navmesh_links(path, form_keys):

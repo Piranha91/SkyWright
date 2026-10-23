@@ -1814,7 +1814,8 @@ def build_prediction(ctx: dict) -> dict:
                     sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
                 if sha_cache[path_] == sha_:
                     try:
-                        res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements}.get(
+                        res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements,
+                                "placementFull": pluginread.placements_full}.get(
                             what, pluginread.cell_flags)(path_, [str(fk)])
                         got_ = res_["records"].get(str(fk))
                         plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
@@ -2723,7 +2724,9 @@ def build_prediction(ctx: dict) -> dict:
             # base game's object; no geometry at the base game's place is claimed
             order_ = [str(x) for x in all_orders.get(p_arm) or []]
             low_order_ = [x.lower() for x in order_]
-            nudged_ = {}
+            # (review5: Sewers B1, Pilgrim B1, Missives S1) every base-game partner the other mod carries, with every change
+            # it makes there that sets where or what the object is: position, turn, base, scale, enable state
+            changes_ = collections.OrderedDict()
             for o_ in dict.fromkeys(g.get("_partners") or []):
                 if not is_base_game(str(o_).split(":", 1)[-1], words):
                     continue
@@ -2733,19 +2736,57 @@ def build_prediction(ctx: dict) -> dict:
                 prev_ = [x for x in order_[:low_order_.index(str(other_mod).lower())] if x.lower() in carr_]
                 if not prev_:
                     continue
-                mine_, before_ = plugin_record(other_mod, "placement", str(o_)), plugin_record(prev_[-1], "placement", str(o_))
+                mine_, before_ = (plugin_record(other_mod, "placementFull", str(o_)),
+                                  plugin_record(prev_[-1], "placementFull", str(o_)))
                 if not (mine_ and before_ and mine_.get("position") and before_.get("position")):
+                    changes_[str(o_)] = None                      # carried, but its versions were not read
                     continue
                 d_ = math.dist(mine_["position"], before_["position"])
-                same_turn_ = all(abs(a_ - b_) < 1e-3 for a_, b_ in zip(mine_.get("rotation") or (), before_.get("rotation") or ()))
-                if same_turn_ and d_ < spot_size(str(o_)):
-                    nudged_[str(o_)] = d_
-            if nudged_:
-                ds_ = sorted(nudged_.values())
+                turned_ = any(abs((a_ - b_ + math.pi) % (2 * math.pi) - math.pi) >= 1e-3
+                              for a_, b_ in zip(mine_.get("rotation") or (), before_.get("rotation") or ()))
+                changes_[str(o_)] = {
+                    "moved": d_ if d_ >= 0.05 else None, "turned": turned_,
+                    "rebased": mine_.get("base") != before_.get("base"),
+                    "scale": (before_.get("scale"), mine_.get("scale")) if mine_.get("scale") != before_.get("scale") else None,
+                    "enable": (mine_.get("enableParent") != before_.get("enableParent")
+                               or mine_.get("initiallyDisabled") != before_.get("initiallyDisabled")
+                               or mine_.get("deleted") != before_.get("deleted")),
+                    "far": d_ >= spot_size(str(o_))}
+            read_ = {k_: v_ for k_, v_ in changes_.items() if v_ is not None}
+            small_ = read_ and all(v_["moved"] is not None and not v_["far"] and not v_["turned"] and not v_["rebased"]
+                                   and not v_["scale"] and not v_["enable"] for v_ in read_.values())
+            if small_ and len(read_) == len(changes_) and words.get("itemOtherNudged"):
+                # "only" where every partner it carries is a small move and nothing else
+                ds_ = sorted(v_["moved"] for v_ in read_.values())
                 detail.append(bind(words["itemOtherNudged"], {
-                    "mod": other_mod, "count": fmt_n(len(nudged_)), "objects": "object" if len(nudged_) == 1 else "objects",
+                    "mod": other_mod, "count": fmt_n(len(read_)), "objects": "object" if len(read_) == 1 else "objects",
                     "range": (f"{ds_[0]:,.1f} u" if ds_[-1] - ds_[0] < 0.05 else f"{ds_[0]:,.1f} u to {ds_[-1]:,.1f} u"),
-                    "examples": "; ".join(named(k_) for k_ in list(nudged_)[:2])}))
+                    "examples": "; ".join(named(k_) for k_ in list(read_)[:2])}))
+            elif changes_ and words.get("itemOtherChanges"):
+                ow_ = words.get("otherChangeWords") or {}
+
+                def what_(v_):
+                    if v_ is None:
+                        return ow_.get("unread") or "its versions were not read"
+                    parts_ = []
+                    if v_["moved"] is not None:
+                        parts_.append(bind(ow_.get("moved") or "moved {d}", {"d": f"{v_['moved']:,.1f} u"}))
+                    if v_["turned"]:
+                        parts_.append(ow_.get("turned") or "turned")
+                    if v_["rebased"]:
+                        parts_.append(ow_.get("rebased") or "given another base")
+                    if v_["scale"]:
+                        parts_.append(bind(ow_.get("scale") or "scaled {a} -> {b}", {"a": f"{v_['scale'][0]:g}", "b": f"{v_['scale'][1]:g}"}))
+                    if v_["enable"]:
+                        parts_.append(ow_.get("enable") or "its enable state changed")
+                    return ", ".join(parts_) or ow_.get("nothing") or "nothing that sets where it stands or what it is"
+                shown_ = list(changes_.items())[:int(words.get("itemOtherChangesMax") or 6)]
+                more_ = len(changes_) - len(shown_)
+                detail.append(bind(words["itemOtherChanges"], {
+                    "mod": other_mod, "parts": "; ".join(f"{named(k_)} {what_(v_)}" for k_, v_ in shown_)
+                    + (bind(ow_.get("more") or "; and {count} more", {"count": fmt_n(more_)}) if more_ else ""),
+                    "own": (words.get("itemOtherChangesOwn") or "") if any(v_ and (v_["far"] or v_["rebased"] or v_["turned"])
+                                                                          for v_ in changes_.values()) else ""}))
         n_own, ex_own = g.pop("_winnerOwn", 0), g.pop("_winnerOwnExample", None)
         if n_own and len(directions) == 1:
             loser, winner = next(iter(directions))

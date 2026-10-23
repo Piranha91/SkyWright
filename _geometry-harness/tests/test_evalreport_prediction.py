@@ -5709,7 +5709,7 @@ def main():
         two_ = (" only " not in it2.split("For example")[0] and "00CA79:Skyrim.esm" in it2 and "00CB79:Skyrim.esm" in it2
                 and re.search(r"00CB79:Skyrim\.esm[^;.]*300\.0 u[^;.]*turn", it2) is not None and "2.0 u" in it2)
         three_ = ("00CC79:Skyrim.esm" in it3 and "another base" in it3 and "0.0 u" not in it3 and " only " not in it3)
-        return one_ and two_ and three_, f"{one_} {two_} {three_} || {it2[-300:]} || {it3[-300:]}"
+        return one_ and two_ and three_, f"{one_} {two_} {three_} || {it2[:700]} || {it3[:700]}"
 
     for name, fn in [("fifth-review/C1079-other-mod-nudge-said", c1079_other_mod_nudge_said)]:
         cell(name, fn)
