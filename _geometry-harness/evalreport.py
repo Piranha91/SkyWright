@@ -3642,10 +3642,16 @@ def build_prediction(ctx: dict) -> dict:
                     if identity(str(r_.get("_check")), "LOST-EDIT", a_, b_, {"formKey": n_.get("FormKey"),
                                                                            "field": r_.get("Field")}) in p_lost:
                         continue               # the measured order loses it too
-                    g_ = per_pair.setdefault((a_, b_), {"n": 0, "records": {}, "fields": collections.Counter()})
+                    g_ = per_pair.setdefault((a_, b_), {"n": 0, "records": {}, "fields": collections.Counter(),
+                                                        "fieldTypes": collections.defaultdict(collections.Counter)})
                     g_["n"] += 1
+                    if r_.get("_type"):
+                        g_["fieldTypes"][str(r_.get("Field"))][str(r_.get("_type"))] += 1
                     g_["records"].setdefault(str(n_.get("FormKey")), r_.get("_type"))
                     g_["fields"][str(r_.get("Field"))] += 1
+            def ftypes_(g_, f_):
+                """(fifth review, Pilgrim S3) the record types of the field's own rows, most rows first"""
+                return [t_ for t_, _ in g_["fieldTypes"][f_].most_common()]
             for (a_, b_), g_ in sorted(per_pair.items(), key=lambda kv: -kv[1]["n"]):
                 types_ = collections.Counter(t_ for t_ in g_["records"].values() if t_)
                 n_rec = len(g_["records"])
@@ -3667,9 +3673,9 @@ def build_prediction(ctx: dict) -> dict:
                         " (" + ", ".join(f"{t_} {fmt_n(c_)}" for t_, c_ in types_.most_common()) + ")" if types_ else ""),
                     "fields": fields_text(g_["fields"]),
                     "inGame": (bind(words["orderRiskInGame"], {"meanings": "; ".join(
-                        f"{field_word(f_)}: {m_}" for f_, m_ in ((f_, field_meaning(list(types_), f_))
+                        f"{field_word(f_)}: {m_}" for f_, m_ in ((f_, field_meaning(ftypes_(g_, f_), f_))
                                                                  for f_, _ in collections.Counter(g_["fields"]).most_common())
-                        if m_)}) if any(field_meaning(list(types_), f_) for f_ in g_["fields"])
+                        if m_)}) if any(field_meaning(ftypes_(g_, f_), f_) for f_ in g_["fields"])
                         else words["orderRiskInGameMissing"])})})
                 order_record.append({"armId": o_.get("armId"), "planPath": o_.get("planPath"),
                                      "rowsPath": o_.get("rowsPath"), "loser": a_, "winner": b_, "fields": g_["n"],
