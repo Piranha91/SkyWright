@@ -4770,8 +4770,10 @@ def main():
                 (D2, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)])]
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
         line = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+        # (seventh review, BPT r6 S3) the still-there part may say ModB only carries the base game's value (the
+        # attribution read); what must not appear is a patch's carried value
         ok = (re.search(r"still brings back 1 object\b", line) is not None and D1 in line and D2 not in line
-              and "carr" not in line)
+              and "carried by a patch" not in line and "patch carries" not in line)
         return ok, line[:400]
 
     # C934 (Clockwork review S1): an overlap pair still crossing with the patch, which the setup with the patch does not
@@ -7527,7 +7529,10 @@ def main():
         near_ = (0x00CA10, (100.0, 100.0, 0.0, 1.5, 0x0B0A79), (102.0, 100.0, 0.0, 1.5, 0x0B0A79))
         far_ = (0x00CB10, (500.0, 100.0, 0.0, 1.5, 0x0B0A79), (800.0, 100.0, 0.0, 2.0, 0x0B0A79))
         md, it = nudge_bundle([near_, far_])
-        s_ = next((x for x in re.split(r"(?<=\.)\s+", it) if "may come from its own placement" in x), "")
+        # (seventh review, Pilgrim S2) the far partner (300 u, beyond its size) is now credited to the mod's own
+        # placement, in its own sentence; the nudged one is in neither
+        s_ = " ".join(x for x in re.split(r"(?<=\.)\s+", it) if "may come from its own placement" in x
+                      or "own placement, not the base game's" in x)
         return ("00CB10:Skyrim.esm" in s_ and "00CA10:Skyrim.esm" not in s_), s_[:300]
 
     # C1114 (BPT r5 S1): a patch that takes the losing mod's value over the winner's change (switched) is worded apart

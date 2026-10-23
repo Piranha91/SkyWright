@@ -2943,7 +2943,10 @@ def build_prediction(ctx: dict) -> dict:
                     "enable": (mine_.get("enableParent") != before_.get("enableParent")
                                or mine_.get("initiallyDisabled") != before_.get("initiallyDisabled")
                                or mine_.get("deleted") != before_.get("deleted")),
-                    "far": d_ >= spot_size(str(o_))}
+                    "far": d_ >= spot_size(str(o_)),
+                    # (seventh review, Pilgrim S2) moved farther than the object's whole size (twice its half extent): the
+                    # measured crossing is where that mod places it; the attribution read over the placement
+                    "beyond": d_ >= 2 * spot_size(str(o_))}
             read_ = {k_: v_ for k_, v_ in changes_.items() if v_ is not None}
             small_ = read_ and all(v_["moved"] is not None and not v_["far"] and not v_["turned"] and not v_["rebased"]
                                    and not v_["scale"] and not v_["enable"] for v_ in read_.values())
@@ -2978,9 +2981,15 @@ def build_prediction(ctx: dict) -> dict:
                     "mod": other_mod, "parts": "; ".join(f"{named(k_)} {what_(v_)}" for k_, v_ in shown_)
                     + (bind(ow_.get("more") or "; and {count} more", {"count": fmt_n(more_)}) if more_ else ""),
                     # (sixth review, Pilgrim r6 S1) naming the partners it applies to, never one only nudged
-                    "own": bind(words.get("itemOtherChangesOwn") or "", {"examples": "; ".join(
-                        k_ for k_, v_ in changes_.items() if v_ and (v_["far"] or v_["rebased"] or v_["turned"]))})
-                    if any(v_ and (v_["far"] or v_["rebased"] or v_["turned"]) for v_ in changes_.values()) else ""}))
+                    # (seventh review, Pilgrim S2) a partner moved beyond its size is credited to the mod's placement
+                    "own": (bind(words.get("itemOtherChangesFar") or "", {"mod": other_mod, "examples": "; ".join(
+                        k_ for k_, v_ in changes_.items() if v_ and v_["beyond"])})
+                        if any(v_ and v_["beyond"] for v_ in changes_.values()) else "")
+                    + (bind(words.get("itemOtherChangesOwn") or "", {"examples": "; ".join(
+                        k_ for k_, v_ in changes_.items() if v_ and not v_["beyond"]
+                        and (v_["far"] or v_["rebased"] or v_["turned"]))})
+                       if any(v_ and not v_["beyond"] and (v_["far"] or v_["rebased"] or v_["turned"])
+                              for v_ in changes_.values()) else "")}))
         n_own, ex_own = g.pop("_winnerOwn", 0), g.pop("_winnerOwnExample", None)
         if n_own and len(directions) == 1:
             loser, winner = next(iter(directions))
@@ -3592,6 +3601,37 @@ def build_prediction(ctx: dict) -> dict:
             "mod": dep, "master": mas, "count": fmt_n(sum(c_["n"] for c_ in by_check.values())),
             "parts": ", ".join(parts)}),
             "findingIds": list(dict.fromkeys(fids))})
+    def field_carriers(rks_, base_, mod_, fallback=()):
+        """(seventh review, Missives S1) The plugins that carry base_'s value of each field in this order, read per field
+        from the prediction setup's chain (the attribution read): those after base_ and before mod_ holding base_'s
+        value, not base-game plugins. {carrier: fields it carries in}, and how many fields were read; where no field's
+        chain was read, the rows' own losers (fallback), each said for every field."""
+        per_, read_ = collections.OrderedDict(), 0
+        for rk_ in rks_:
+            got_ = whose_value(p_of(rk_[0]), rk_[0], rk_[4], ((p_rows.get(rk_) or {}).get("row") or {}).get("field"),
+                               plugin=base_)
+            if got_ is None:
+                continue
+            provs_, vals_, a_ = got_
+            low_ = [str(x).lower() for x in provs_]
+            if str(mod_).lower() not in low_:
+                continue
+            read_ += 1
+            b_, d_ = low_.index(str(base_).lower()), low_.index(str(mod_).lower())
+            for k_ in range(b_ + 1, d_):
+                if vals_[k_] == vals_[b_] and not is_base_game(provs_[k_], words):
+                    per_[provs_[k_]] = per_.get(provs_[k_], 0) + 1
+        if not read_:
+            return collections.OrderedDict((c_, len(rks_)) for c_ in fallback), len(rks_)
+        return per_, read_
+
+    def carriers_text(per_, n_):
+        """The carriers, each with its count of fields where it carries the value in fewer than all of them."""
+        names_ = [c_ if k_ >= n_ else bind(words.get("carrierInSome") or "{carrier} (in {count} of them)",
+                                          {"carrier": c_, "count": fmt_n(k_)}) for c_, k_ in per_.items()]
+        return " and ".join(names_[:3]) + (bind(words.get("carrierMore") or " and {count} more",
+                                                  {"count": fmt_n(len(names_) - 3)}) if len(names_) > 3 else "")
+
     # coordinator D1: a mod undoing its own master's fix (it puts back the value from before that master's change) is a
     # measured effect, one line per mod and master: the fields, examples, and how many are still so with the patch
     undo_ = collections.OrderedDict()
@@ -3622,9 +3662,11 @@ def build_prediction(ctx: dict) -> dict:
         carr_ = list(dict.fromkeys(e["A"] for e in record if e["admission"] == "notOwnEdit" and e["B"] == mod_
                                    and (str(e["formKey"]), e.get("field")) in u_["fields"]
                                    and e["A"].lower() != str(mas_).lower()))
-        rework_ += (bind(words["undoesMasterCarried"], {"carriers": " and ".join(carr_), "master": mas_,
-                                                         "verb": "carries" if len(carr_) == 1 else "carry"})
-                    if carr_ and words.get("undoesMasterCarried") else "")
+        # (seventh review, Missives S1) read per field from the chain: each carrier for the fields it carries in
+        per_c_, n_c_ = field_carriers(list(u_["fields"].values()), mas_, mod_, carr_)
+        rework_ += (bind(words["undoesMasterCarried"], {"carriers": carriers_text(per_c_, n_c_), "master": mas_,
+                                                         "verb": "carries" if len(per_c_) == 1 else "carry"})
+                    if per_c_ and words.get("undoesMasterCarried") else "")
         loss_lines.append({"text": bind(words["undoesMasterLine"], {
             "rework": rework_,
             "mod": mod_, "master": mas_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
@@ -3734,7 +3776,7 @@ def build_prediction(ctx: dict) -> dict:
         n_ = len(d_["fields"])
         # (fourth review, Clockwork r3 S1) what the setup with the patch has: whether its winner holds the base-game
         # plugin's value, read by the record chain's read-same rule
-        kept_ = None
+        kept_, later_ = None, collections.OrderedDict()
         if patched_arm and words.get("baseValueDroppedPatch"):
             kept_ = 0
             for rk_ in (d_.get("rows") or {}).values():
@@ -3744,15 +3786,29 @@ def build_prediction(ctx: dict) -> dict:
                 if ch_ and str(base_).lower() in low_ and (f_ in (ch_.get("values") or {}) or ch_.get("allListed")):
                     vs_ = (ch_.get("values") or {}).get(f_) or [()] * len(low_)
                     kept_ += int(vs_[low_.index(str(base_).lower())] == vs_[-1])  # the chain's read-same values
+                    # (seventh review, Clockwork S1) a winning value that is neither the base plugin's nor the mod's but
+                    # a later change replacing it: who first made it (the earliest provider after the base plugin
+                    # holding it as its own change, by the attribution read; decision 1 at Gate A)
+                    b_ = low_.index(str(base_).lower())
+                    if (vs_[-1] != vs_[b_] and (str(mod_).lower() not in low_
+                                                or vs_[-1] != vs_[low_.index(str(mod_).lower())])):
+                        own_ = [recordrows.attribute(ch_["providers"], vs_, k_, masters)["own"] for k_ in range(len(low_))]
+                        first_ = next((k_ for k_ in range(b_ + 1, len(low_)) if vs_[k_] == vs_[-1] and own_[k_]), None)
+                        if first_ is not None:
+                            later_[ch_["providers"][first_]] = later_.get(ch_["providers"][first_], 0) + 1
             if not any((chains_of(rk_[0], patched_arm) or {}).get(str(rk_[4])) for rk_ in (d_.get("rows") or {}).values()):
                 kept_ = None
+        # (seventh review, Missives S1) the carriers read per field from the chain
+        per_c_, n_c_ = field_carriers(list((d_.get("rows") or {}).values()), base_, mod_, d_["carriers"])
         loss_lines.append({"text": bind(words["baseValueDroppedLine"], {
             "mod": mod_, "base": base_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
             "examples": "; ".join(f"{fk_} ({f_})" for fk_, f_ in list(d_["fields"])[:2]),
-            "verb": "carries" if len(d_["carriers"]) == 1 else "carry",
+            "verb": "carries" if len(per_c_) == 1 else "carry",
             "patch": "" if kept_ is None else bind(words["baseValueDroppedPatch"], {
-                "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_}),
-            "carriers": " and ".join(d_["carriers"])})
+                "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_})
+            + "".join(bind(words.get("baseValueDroppedLater") or "", {
+                "count": fmt_n(c_), "later": l_, "base": base_}) for l_, c_ in later_.items()),
+            "carriers": carriers_text(per_c_, n_c_)})
             + (" " + bind(words["waterHeightOutside"]["line"], {"examples": "; ".join(
                 f"{fk_} ({v_})" for fk_, v_ in list(d_["outside"].items())[:2])})
                if d_.get("outside") and (words.get("waterHeightOutside") or {}).get("line") else ""),
@@ -4725,7 +4781,7 @@ def build_prediction(ctx: dict) -> dict:
                 off_cache[id(e)] = r_
             return off_cache[id(e)]
 
-        OFF_STATES = ("onOwn", "on", "parent", "starts", "off", "unknown", "keptOn", "keptOnPlaced", "keptBase")
+        OFF_STATES = ("onOwn", "onPatch", "on", "parent", "starts", "off", "unknown", "keptOn", "keptOnPlaced", "keptBase")
 
         def kept_meaning(e):
             """(fifth review, Snazzy S2, Winterhold R2-2) what a kept lost change on an object the version with the patch
@@ -4764,9 +4820,23 @@ def build_prediction(ctx: dict) -> dict:
             if str(e["B"]).lower() not in low_:
                 return False
             ib_ = low_.index(str(e["B"]).lower())
-            _, j_ = recordrows.own_change(ch_["providers"], [0] * len(low_), ib_,
-                                          (masters or {}).get(str(e["B"]).lower()) if masters is not None else None)
-            return j_ is not None and provider_disables(ch_, ib_) and not provider_disables(ch_, j_)
+            # (seventh review) the attribution read over each version's off-for-good state
+            a_ = recordrows.attribute(ch_["providers"], [provider_disables(ch_, k_) for k_ in range(len(low_))], ib_,
+                                      masters)
+            return a_["inherits"] is not None and provider_disables(ch_, ib_) and a_["own"]
+
+        def removal_by_patch(e):
+            """(seventh review, Snazzy S1) The last version with the patch sets the object off for good by a declared
+            patch's own change (the attribution read over each version's off-for-good state)."""
+            ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
+            if not ch_ or not ch_.get("providers"):
+                return False
+            n_ = len(ch_["providers"])
+            flags_ = [provider_disables(ch_, k_) for k_ in range(n_)]
+            if not flags_[-1]:
+                return False
+            o_ = recordrows.attribute(ch_["providers"], flags_, n_ - 1, masters)["origin"]
+            return str(ch_["providers"][o_]).lower() in patch_lower and o_ > 0
 
         def off_state(e):
             """(fourth review, Winterhold S2) None, or the losing plugin's own version's state (version_state) in the
@@ -4776,7 +4846,9 @@ def build_prediction(ctx: dict) -> dict:
             if not still_off(e):
                 return kept_meaning(e) if outcome.get(id(e)) == "kept" else None
             st_ = side_state(keyof(e), e["A"], patched_arm) or "unknown"
-            return "onOwn" if st_ == "on" and own_removal(e) else st_
+            if st_ == "on" and own_removal(e):
+                return "onOwn"
+            return "onPatch" if st_ == "on" and removal_by_patch(e) else st_
 
         def off_counts(es_):
             return collections.Counter(off_state(e) for e in es_ if off_state(e))
@@ -5444,8 +5516,22 @@ def build_prediction(ctx: dict) -> dict:
                     u_ = (words.get("stillThereLostUnits") or {}).get(g["checkId"]) or words["fieldNoun"]
                     # "left" is a lost change no patch touches (Winterhold review 1, BPT review 3)
                     n_open = len(pes_)
+                    # (seventh review, BPT r6 S3 line 16) where the winner only carries the value, whose change it is
+                    org_ = collections.OrderedDict()
+                    for e in pes_:
+                        got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), winner)
+                        o_ = None if got_ is None else got_[2]["origin"]
+                        org_[None if o_ is None or got_[0][o_].lower() == winner.lower() else
+                             ((words.get("baseGameOwner") or "the base game") if o_ == 0 and is_base_game(got_[0][0], words)
+                              else got_[0][o_])] = 1
+                    carried_ = [x for x in org_ if x] if None not in org_ else []
                     text_ = (bind(words["stillThereLost"], {"count": fmt_n(n_open), "loser": loser, "winner": winner,
-                                                            "unit": u_[0 if n_open == 1 else 1]}) + off_note(pes_))
+                                                            "unit": u_[0 if n_open == 1 else 1]})
+                             + (bind(words.get("stillThereCarriedBase") if carried_ == [words.get("baseGameOwner") or
+                                                                                       "the base game"]
+                                     and words.get("stillThereCarriedBase") else words.get("stillThereCarried") or "",
+                                     {"winner": winner, "origin": and_list(carried_)})
+                                if carried_ else "") + off_note(pes_))
                     # (sixth review, BPT r6 S1) the winner's own removal is never here: its own outcome (removalStands)
                     stays_parts.append((len(pes_), text_))
                 for e in es:
