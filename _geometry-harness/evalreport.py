@@ -4607,8 +4607,24 @@ def build_prediction(ctx: dict) -> dict:
                                         if movers_.get((ed_, model_)) and nw_.get("movers") else ""))
             return "; ".join(parts_)
 
+        def split_note(c):
+            """(fifth review, Pilgrim S2) the new alias splits in one unit: actor pairs and the quests they are split in."""
+            sp5_ = words.get("splitDetail") or {}
+            if c != sp5_.get("check") or not sp5_.get("byCheck"):
+                return None
+            sums_ = [str(rk[5] or "") for rk in problems if rk[0] == c]
+            qs_ = list(dict.fromkeys(m_.group(1) for x_ in sums_ for m_ in [re.search(sp5_.get("scenePattern") or "$^", x_)] if m_))
+            ps_ = list(dict.fromkeys(tuple(m_.groups()) for x_ in sums_ for m_ in [re.search(sp5_.get("pairPattern") or "$^", x_)] if m_))
+            ps_ = list(dict.fromkeys(tuple(sorted(p_)) for p_ in ps_))
+            if not qs_ or not ps_:
+                return None
+            return bind(sp5_["byCheck"], {"pairs": fmt_n(len(ps_)), "pairNoun": sp5_["pairNoun"][0 if len(ps_) == 1 else 1],
+                                          "names": "; ".join(" and ".join(p_) for p_ in ps_), "count": fmt_n(len(qs_)),
+                                          "scenes": sp5_["noun"][0 if len(qs_) == 1 else 1],
+                                          "quests": ", ".join(f"'{q_}'" for q_ in qs_)})
+
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
-                         "objectsNote": objects_note(c),
+                         "objectsNote": split_note(c) or objects_note(c),
                          "masterNote": (bind(words["newByCheckOwnMaster"], {"count": fmt_n(problem_master[c])})
                                         if problem_master.get(c) else None),
                          "findingIds": [x for x in dict.fromkeys(fids) if x]}
@@ -4916,8 +4932,13 @@ def build_prediction(ctx: dict) -> dict:
                 origins_[(ch_["providers"][k_], ch_["providers"][-1])] += 1
         c_ = f_.get("counts") or {}
         ex_ = str(rows_[0].get("summary") or "")
+        # (fifth review, Pilgrim S2) one unit: the actor pairs, and the quests (scenes) they are split in, all named
+        pairs_ = {frozenset(m_.groups()) for r_ in rows_
+                  for m_ in [re.search(sp_.get("pairPattern") or "$^", str(r_.get("summary") or ""))] if m_}
         vals_ = {"count": fmt_n(len(scenes_)), "scenes": sp_["noun"][0 if len(scenes_) == 1 else 1], "example": ex_,
-                 "winner": c_.get("B") or ""}
+                 "winner": c_.get("B") or "", "pairs": fmt_n(len(pairs_) or 1),
+                 "pairNoun": (sp_.get("pairNoun") or ["", ""])[0 if len(pairs_) <= 1 else 1],
+                 "quests": ", ".join(f"'{q_}'" for q_ in scenes_)}
         if len(origins_) == 1:
             (origin_, carrier_), _ = origins_.most_common(1)[0]
             f_["readerPlain"] = bind(sp_["lineFrom"], {**vals_, "origin": origin_, "carrier": carrier_})
