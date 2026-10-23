@@ -906,8 +906,12 @@ def import_narrowed_facts(rows: list, pr: dict, title_of) -> list:
         for m_ in re.finditer(pat_, name_):
             n_ = re.search(r"over the (\d+) ", name_)
             key_ = (r_.get("checkId"), m_.group("fields").strip())
+            # (sixth review, Missives S1) the record type the note narrowed (its signature just before), so a cell's
+            # field is never taken for the worldspace field of the same name
+            sig_ = re.findall(r"\b([A-Z][A-Z_]{3})\b", name_[:m_.start()])
+            typ_ = (w_.get("importNarrowedTypes") or {}).get(sig_[-1]) if sig_ else None
             out_.setdefault(key_, bind(w_["importNarrowedFact"], {
-                "title": title_of(r_.get("checkId")), "fields": key_[1],
+                "title": title_of(r_.get("checkId")), "fields": f"{typ_} {key_[1]}" if typ_ else key_[1],
                 "records": f" on the {n_.group(1)} records it read" if n_ else ""}))
     return list(out_.values())
 
@@ -2857,8 +2861,10 @@ def build_prediction(ctx: dict) -> dict:
                 detail.append(bind(words["itemOtherChanges"], {
                     "mod": other_mod, "parts": "; ".join(f"{named(k_)} {what_(v_)}" for k_, v_ in shown_)
                     + (bind(ow_.get("more") or "; and {count} more", {"count": fmt_n(more_)}) if more_ else ""),
-                    "own": (words.get("itemOtherChangesOwn") or "") if any(v_ and (v_["far"] or v_["rebased"] or v_["turned"])
-                                                                          for v_ in changes_.values()) else ""}))
+                    # (sixth review, Pilgrim r6 S1) naming the partners it applies to, never one only nudged
+                    "own": bind(words.get("itemOtherChangesOwn") or "", {"examples": "; ".join(
+                        k_ for k_, v_ in changes_.items() if v_ and (v_["far"] or v_["rebased"] or v_["turned"]))})
+                    if any(v_ and (v_["far"] or v_["rebased"] or v_["turned"]) for v_ in changes_.values()) else ""}))
         n_own, ex_own = g.pop("_winnerOwn", 0), g.pop("_winnerOwnExample", None)
         if n_own and len(directions) == 1:
             loser, winner = next(iter(directions))
@@ -5745,7 +5751,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if not rows_:
             return None
         bodied_ = {x.get("formKey") for x in rows_ if not row_has_no_body(names_doc0, x)}
-        return len(bodied_), len({x.get("formKey") for x in rows_} - bodied_)
+        # (sixth review, Sewers r6 S4) the pairs those bodied objects were listed in, so the unit can be said
+        return (len(bodied_), len({x.get("formKey") for x in rows_} - bodied_),
+                sum(1 for x in rows_ if x.get("formKey") in bodied_))
 
     def context_only(check_id, group_kind) -> bool:
         return str(group_kind or "") in set(context_only_by_check.get(str(check_id), []) or [])
@@ -5917,6 +5925,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                          "counts": {**counts, "diffLines": [d["line"] for d in shrank],
                                     "readerRepaired": reader_repaired, "readerReclassified": reader_reclassified,
                                     "readerRepairedNoBody": rep_obj_[1] if rep_obj_ else 0,
+                                    "readerRepairedPairs": rep_obj_[2] if rep_obj_ else None,
+                                    "readerRepairGroupKind": (shrank[0] or {}).get("kind") if shrank else None,
                                     "readerUnitCounted": unit_r is not None},
                          "evidenceIds": eids_for(check_id, arm_id, "diff"), "rows": []})
                 f["readerRelevant"] = bool(reader_shrank) if shrank else not gated
@@ -6221,6 +6231,14 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                        if c.get("readerUnitCounted") else None)
                 f["readerPlain"] = (f"{arm_subject(f.get('armId'))} repaired {fmt_n(repaired_count)} existing "
                                     f"{(ru_[0 if repaired_count == 1 else 1]) if ru_ else noun(repaired_count, 'problem')}"
+                                    # (sixth review, Sewers r6 S4) a by-object repair names its objects and their pairs
+                                    + (bind((reader_data.get("comparisonState") or {})["repairedObjectsPairs"], {
+                                        "objects": fmt_n(repaired_count), "objectNoun": noun(repaired_count, "object"),
+                                        "pairs": fmt_n(c.get("readerRepairedPairs")),
+                                        "unit": ((((pr.get("reader") or {}).get("prediction") or {}).get("byObjectUnits") or {})
+                                                 .get(str(f.get("checkId"))) or ["pair", "pairs"])[0 if c.get("readerRepairedPairs") == 1 else 1]})
+                                       if (c.get("readerRepairedPairs") or 0) > repaired_count
+                                       and (reader_data.get("comparisonState") or {}).get("repairedObjectsPairs") else "")
                                     + (bind((reader_data.get("comparisonState") or {})["noBodyCreated"],
                                             {"count": fmt_n(c.get("readerRepairedNoBody"))})
                                        if c.get("readerRepairedNoBody") else "")
@@ -7115,6 +7133,20 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     reader["verdict"] = verdict
     reader["refusedSummary"] = refused_lines       # said again where the page reports no new problem
     reader["prediction"] = lead["prediction"]
+    # (sixth review, Snazzy S2, Missives line 157) a comparison's rows still physically there that the prediction's
+    # patch-placed pairs account for (a patch places one of the two objects) are said with that reason
+    if cmp_words.get("stillHoldingPatchPlaced"):
+        placed_n_ = collections.Counter(e.get("checkId") for e in lead["prediction"].get("record") or []
+                                        if e.get("withPatch") == "patchPlaced")
+        for f in findings:
+            n_ = int((comparison_state.get((f.get("checkId"), f.get("armId"))) or {}).get("stillHolding") or 0)
+            if not n_ or placed_n_.get(f.get("checkId")) != n_:
+                continue
+            old_ = bind(cmp_words["stillHolding"], {"count": fmt_n(n_), "verb": "is" if n_ == 1 else "are"})
+            new_ = bind(cmp_words["stillHoldingPatchPlaced"], {"count": fmt_n(n_), "verb": "is" if n_ == 1 else "are"})
+            title_ = check_titles.get(str(f.get("checkId")), f.get("title"))
+            reader["comparisonSummary"] = [x_.replace(old_, new_) if str(x_).startswith(str(title_)) else x_
+                                           for x_ in reader.get("comparisonSummary") or []]
     # further evaluations supplied with the report are named with what each measured, never left unsaid (Missives
     # review 4); they are not joined into the counts
     pw_also = reader_data.get("prediction") or {}
@@ -7165,7 +7197,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                     or "clashes", "a": a_, "b": b2_}))
             if parts_v_:
                 # one sentence per setup, its parts joined (page budget)
+                # (sixth review, Sewers r5 S1) the other version named by the folder that setup loads it from
+                folders_ = [Path(str(q.get("path") or "").replace("\\", "/")).parent.name for q in
+                            (arm_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict) and str(q.get("name")) in var_]
                 also_lines.append(bind(pw_also["alsoVariantFinds"], {"arm": arm_.get("armId"), "plugin": " and ".join(var_),
+                                                                     "folder": " and ".join(f_ for f_ in folders_ if f_) or "-",
                                                                      "parts": "; ".join(parts_v_)}))
     reader["prediction"]["alsoEvaluations"] = also_lines
     # Evidence derived after measurement (bundle standard §8, enrichment): listed in the evidence index with what

@@ -2311,7 +2311,8 @@ def main():
         p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
         line, items = p.get("withPatchLine") or "", " ".join(val.get("itemLines") or [])
         # after-review (Pilgrim review 2): reworded as one phrase; the outcome and its count are unchanged
-        want = f"the patch keeps {MOD_A}'s value over {MOD_B}'s change on 1"
+        # (sixth review, BPT r5 S1) the switched outcome is worded apart from the kept one: "restores"
+        want = f"the patch restores {MOD_A}'s value, dropping the winning {MOD_B}'s change on 1"
         ok = want in line and want in items and "resolved" not in line and val.get("hits") == 0
         return ok, f"with-patch line {line!r}; items {items[:240]!r}"
 
@@ -4428,7 +4429,7 @@ def main():
     def c912_outcome_and_once_sentence_parse():
         plan, md, html = record_validation_bundle()
         items = " ".join((reader(plan).get("validation") or {}).get("itemLines") or [])
-        ok_a = (f"the patch keeps {MOD_A}'s value over {MOD_B}'s change on 1" in items
+        ok_a = (f"the patch restores {MOD_A}'s value, dropping the winning {MOD_B}'s change on 1" in items
                 and "change is dropped" not in md)
         O2, O3 = "Second.esp", "Third.esp"
         arms = [arm("baseline", [BASE, OTHER, O2, O3, MOD_A, PATCH], kind="baseline"),
