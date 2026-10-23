@@ -7780,6 +7780,29 @@ def main():
     for name, fn in [("sixth-review/C1121-stub-put-back-at-base-size", c1121_stub_put_back_at_base_size)]:
         cell(name, fn)
 
+    # C1122 (Sewers r6 S2): a partner whose reference the names enrichment did not read takes its base from its own
+    # plugin file (the reference's NAME), judged by that base's record in the enrichment (a door with a model): it has a
+    # body, so the row is counted, not set aside as "base not read".
+    def c1122_unread_reference_base_from_plugin():
+        import copy
+        X, Y = f"000X22:{MOD_A}", f"000F22:{MOD_B}"
+        rows_ = [row("OVERLAP", MOD_B, MOD_A, X, other=Y)]
+        fy_ = plugin_file_of(MOD_B, [BASE], [("REFR", 0x01000F22, [("NAME", struct.pack("<I", 0x01000D62)),
+                                                                   ("DATA", struct.pack("<6f", 1.0, 2.0, 3.0, 0.0, 0.0, 0.0))],
+                                              False)], group="CELL")
+        names_ = {"refs": {X: {"base": f"0B0X22:{MOD_A}"}, f"000F23:{MOD_B}": {"base": f"000D62:{MOD_B}"}},
+                  "bases": {f"0B0X22:{MOD_A}": {"type": "Static", "editorId": "Wall", "model": "wall.nif"},
+                            f"000D62:{MOD_B}": {"type": "Door", "editorId": "Manhole", "model": "door02.nif"}}}
+        arms = with_files([arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                           arm("without-patch", [BASE, MOD_A, MOD_B]), arm("without-b", [BASE, MOD_A])], {MOD_B: fy_})
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): rows_,
+                                                (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH], names=names_)
+        adm = [e["admission"] for e in rec_of(plan, X)]
+        return adm == ["admitted"], f"{adm}"
+
+    for name, fn in [("sixth-review/C1122-unread-reference-base-from-plugin", c1122_unread_reference_base_from_plugin)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

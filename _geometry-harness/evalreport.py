@@ -1632,6 +1632,13 @@ def build_prediction(ctx: dict) -> dict:
     bases_read = isinstance(names.get("bases"), dict)
 
     def base_unknown(fk):
+        ref_ = name_refs.get(str(fk)) or {}
+        if not ref_.get("base") and name_bases and ":" in str(fk):
+            # (sixth review, Sewers r6 S2) a reference the names enrichment did not read: its base from its own plugin
+            # file (recorded bytes only), judged by that base's record where the enrichment has it
+            got_ = plugin_record(str(fk).split(":", 1)[1], "placementFull", str(fk))
+            if got_ and got_.get("base") and got_["base"] in name_bases:
+                name_refs[str(fk)] = {**ref_, "base": got_["base"], "baseReadFrom": str(fk).split(":", 1)[1]}
         base = name_bases.get((name_refs.get(str(fk)) or {}).get("base") or "") or {}
         return not base.get("type") or (base.get("type") == "Light" and base.get("model") is None)
 
