@@ -7886,6 +7886,26 @@ def main():
     for name, fn in [("sixth-review/C1127-overlap-linked-to-lost-field", c1127_overlap_linked_to_lost_field)]:
         cell(name, fn)
 
+    # C1128 (Clockwork r5 S2): where another plugin carries the master's value the mod undoes (its row set aside as no
+    # edit of its own), the undo line names it, so the loss is not read as the master's alone.
+    def c1128_undo_line_names_carrier():
+        R = f"00CA28:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, MOD_A, MOD_B])]
+        b0, u0, a0 = offs(0), offs(0), offs(0)
+        u0["Placement.Position"] = "100,100,12"
+        chains = [(R, "PlacedObject", [(BASE, b0), (UPD, u0), (OTHER, u0), (MOD_A, a0)])]
+        p_rows = [lost_row(UPD, MOD_A, R, "Placement", ["Placement.Position=100,100,12"], PH, PH),
+                  lost_row(OTHER, MOD_A, R, "Placement", ["Placement.Position=100,100,12"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
+                                  masters={UPD: [BASE], OTHER: [BASE, UPD], MOD_A: [BASE, UPD], MOD_B: [BASE], PATCH: [BASE]})
+        adm = {e["A"]: e["admission"] for e in rec_of(plan, R)}
+        line = next((ln for ln in md.splitlines() if f"{MOD_A} undoes its master {UPD}'s fix" in ln), "")
+        return (adm.get(UPD) == "undoesMaster" and f"{OTHER} carries {UPD}'s value" in line), f"{adm}; {line[:400]}"
+
+    for name, fn in [("sixth-review/C1128-undo-line-names-carrier", c1128_undo_line_names_carrier)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

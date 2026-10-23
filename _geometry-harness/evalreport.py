@@ -3554,6 +3554,14 @@ def build_prediction(ctx: dict) -> dict:
             "count": fmt_n(len(rw_)), "what": what_,
             "examples": "; ".join(fk_ for fk_ in dict.fromkeys(k_[0] for k_ in rw_))}) if rw_ and words.get(
             "undoesMasterRework") else "")
+        # (sixth review, Clockwork r5 S2) the plugins that carry the master's value in this order, whose record the mod
+        # overrides there (set aside as no edit of theirs): named, so the loss is not read as the master's alone
+        carr_ = list(dict.fromkeys(e["A"] for e in record if e["admission"] == "notOwnEdit" and e["B"] == mod_
+                                   and (str(e["formKey"]), e.get("field")) in u_["fields"]
+                                   and e["A"].lower() != str(mas_).lower()))
+        rework_ += (bind(words["undoesMasterCarried"], {"carriers": " and ".join(carr_), "master": mas_,
+                                                         "verb": "carries" if len(carr_) == 1 else "carry"})
+                    if carr_ and words.get("undoesMasterCarried") else "")
         loss_lines.append({"text": bind(words["undoesMasterLine"], {
             "rework": rework_,
             "mod": mod_, "master": mas_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
