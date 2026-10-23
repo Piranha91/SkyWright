@@ -2442,6 +2442,8 @@ def build_prediction(ctx: dict) -> dict:
             # is 64 u or more the same way, at render); a value below the world is a switch-off, said apart
             if lp_ and wp_ and lp_[2] > -29000 and wp_[2] > -29000:
                 g.setdefault("_heightDiff", {}).setdefault((rk[3], rk[2]), []).append(wp_[2] - lp_[2])
+                # (fifth review, BPT S3) and how far apart across the floor
+                g.setdefault("_acrossDiff", {}).setdefault((rk[3], rk[2]), []).append(math.dist(wp_[:2], lp_[:2]))
             else:
                 g.setdefault("_heightDiff", {}).setdefault((rk[3], rk[2]), []).append(None)
         if rk[1] != "LOST-EDIT" and rk[0] not in by_object and hit["row"].get("other"):
@@ -2922,10 +2924,17 @@ def build_prediction(ctx: dict) -> dict:
                 lo_d, hi_d = min(abs(x_) for x_ in dzs_), max(abs(x_) for x_ in dzs_)
                 dir_ = ("lower" if all(x_ < 0 for x_ in dzs_) else "higher" if all(x_ > 0 for x_ in dzs_)
                         else "lower or higher")
+                acr_ = (g.get("_acrossDiff") or {}).get((wi_, lo_)) or []
+                across_ = ""
+                if acr_ and max(acr_) >= SEAT_SPOT_UNITS and words.get("itemHeightDiffAcross"):
+                    lo_a, hi_a = min(acr_), max(acr_)
+                    across_ = bind(words["itemHeightDiffAcross"], {
+                        "range": fmt_units(lo_a) if abs(hi_a - lo_a) < 0.5 else f"{fmt_units(lo_a)} to {fmt_units(hi_a)}"})
                 detail.append(bind(words["itemHeightDiff"], {
                     "winner": wi_, "loser": lo_, "count": fmt_n(len(dzs_)), "noun": words["fieldNoun"][0 if len(dzs_) == 1 else 1],
                     "range": fmt_units(lo_d) if abs(hi_d - lo_d) < 0.5 else f"{fmt_units(lo_d)} to {fmt_units(hi_d)}",
-                    "dir": dir_}))
+                    "dir": dir_, "across": across_}))
+        g.pop("_acrossDiff", None)
         fn_ = g.pop("_rawFields", None) or {}
         if g["kind"] == "LOST-EDIT" and fn_ and words.get("itemMainFieldInGame"):
             top_f, top_n = collections.Counter(fn_).most_common(1)[0]
