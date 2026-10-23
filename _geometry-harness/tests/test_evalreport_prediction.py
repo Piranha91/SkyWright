@@ -2330,8 +2330,8 @@ def main():
         line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
         new = next((ln for ln in md.splitlines() if ln.startswith("- New clashes in the setup")), "")
         ok = (val.get("undone") == 2 and val.get("undoneBy") == {MOD_A: 1, MOD_B: 1}
-              and f"2 changes the mods made ({MOD_A} 1, {MOD_B} 1)" in line
-              and f"1 of them switch an object back on, for example 000702:{BASE}" in line
+              and f"2 record fields the mods changed ({MOD_A} 1, {MOD_B} 1)" in line     # (fifth review) its unit named
+              and f"1 of them, on 1 object, switch the object back on, for example 000702:{BASE}" in line
               and new.endswith(": 0.") and "undo" not in new and val.get("patchProblems") == 0)
         return ok, f"undone {val.get('undone')} {val.get('undoneBy')}; line {line!r}; new clashes {new!r}"
 

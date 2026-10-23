@@ -4541,7 +4541,9 @@ def build_prediction(ctx: dict) -> dict:
                 "by": ", ".join(f"{m_} {fmt_n(n_)}" for m_, n_ in sorted(undone_by.items(),
                                                                           key=lambda kv: (-kv[1], kv[0].lower()))),
                 "enables": bind(words["validationUndoneEnables"], {
-                    "count": fmt_n(n_enable), "examples": "; ".join(enable_examples)}) if n_enable else ""}))
+                    "count": fmt_n(n_enable), "examples": "; ".join(enable_examples),
+                    "objects": (lambda n_: f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}")(
+                        len({str(rk[4]) for rk in switched_on}))}) if n_enable else ""}))
             undone_sentence = sentences[-1]
         # (fifth review, Snazzy pelts) a row set aside as cannot tell that the setup with the patch no longer lists is no
         # longer found there, never "resolved": whether it was a problem was not told
