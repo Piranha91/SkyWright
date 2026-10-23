@@ -3676,6 +3676,14 @@ def build_prediction(ctx: dict) -> dict:
             d_["fields"].setdefault((str(e["formKey"]), e.get("field")), e.get("label") or "")
             d_.setdefault("rows", {}).setdefault((str(e["formKey"]), e.get("field")),
                                                  (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"]))
+            # (sixth review, Missives S5) a water height outside any height in the world (skill data bound): its
+            # effect in game is not read here, never said lost in game alone
+            wb_ = words.get("waterHeightOutside") or {}
+            if str(e.get("field")) in (wb_.get("fields") or []):
+                for v_ in (e.get("values") or {}).get("lost") or []:
+                    m_ = re.search(r"=\s*(-?[\d.]+(?:[eE][-+]?\d+)?)\s*$", str(v_))
+                    if m_ and abs(float(m_.group(1))) >= float(wb_.get("bound") or 1e9):
+                        d_.setdefault("outside", collections.OrderedDict())[str(e["formKey"])] = m_.group(1)
             if e["A"] not in d_["carriers"]:
                 d_["carriers"].append(e["A"])
             if e.get("findingId") and e["findingId"] not in d_["findingIds"]:
@@ -3702,7 +3710,11 @@ def build_prediction(ctx: dict) -> dict:
             "verb": "carries" if len(d_["carriers"]) == 1 else "carry",
             "patch": "" if kept_ is None else bind(words["baseValueDroppedPatch"], {
                 "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_}),
-            "carriers": " and ".join(d_["carriers"])}), "findingIds": d_["findingIds"][:1]})
+            "carriers": " and ".join(d_["carriers"])})
+            + (" " + bind(words["waterHeightOutside"]["line"], {"examples": "; ".join(
+                f"{fk_} ({v_})" for fk_, v_ in list(d_["outside"].items())[:2])})
+               if d_.get("outside") and (words.get("waterHeightOutside") or {}).get("line") else ""),
+            "findingIds": d_["findingIds"][:1]})
     # (Missives review 1) the winner's own change to the bits the game reads of a field whose losing change is only in
     # unread bytes: one line per winning mod, with each record and what the read bits mean (skill data)
     own_ = collections.OrderedDict()

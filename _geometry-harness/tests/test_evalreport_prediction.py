@@ -7936,6 +7936,23 @@ def main():
     for name, fn in [("sixth-review/C1133-earlier-fix-names-value-owner", c1133_earlier_fix_names_value_owner)]:
         cell(name, fn)
 
+    # C1131 (Missives S5): a base-game plugin's water height a mod's value wins over, which is far outside any height
+    # in the world (3.4E+38), is said with that, and that what it and the winning value do in game is not read here.
+    def c1131_water_height_outside_world_said():
+        W1 = f"00CA31:{BASE}"
+        arms = [arm("baseline", [BASE, HF_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, OTHER, MOD_A, MOD_B])]
+        ch_ = [(BASE, {"WaterHeight": "0"}), (HF_, {"WaterHeight": "3.4028235E+38"}), (OTHER, {"WaterHeight": "3.4028235E+38"}),
+               (MOD_A, {"WaterHeight": "-2147483648"})]
+        p_rows = [lost_row(x_, MOD_A, W1, "WaterHeight", ["WaterHeight=3.4028235E+38"], PH, PH) for x_ in (HF_, OTHER)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=[(W1, "Cell", ch_)],
+                                  masters={HF_: [BASE], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if f"over {HF_}'s own change" in ln or "far outside" in ln), "")
+        return ("far outside any height in the world" in line and "not read here" in line), line[-400:]
+
+    for name, fn in [("sixth-review/C1131-water-height-outside-world-said", c1131_water_height_outside_world_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
