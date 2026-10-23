@@ -6081,6 +6081,33 @@ def main():
     for name, fn in [("fifth-review/C1098-coverage-note-says-evidence-index", c1098_coverage_note_says_evidence_index)]:
         cell(name, fn)
 
+    # C1086b (blind round 1, Winterhold S1; the C1068-C1098 range is used up): a navmesh whose losing version is a
+    # single-triangle stub (how a mod removes a navmesh; the base game's has 600) loses no ground of the losing mod's, read
+    # from the plugin files: the loss line counts only the other navmesh and says the stub apart.
+    def c1086b_stub_navmesh_loses_no_ground():
+        n1, n2 = f"000E86:{BASE}", f"000E87:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  1 tris -> 345"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="CityExterior02 (ext)  500 tris -> 345")]
+        for r_ in p_rows:
+            r_["Necessary"][0]["Detail"] = "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u from the winner's"
+        preds = [{"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n_, "Other": None, "Physical": "Holds",
+                  "Detail": "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u from the winner's"}
+                 for n_ in (n1, n2)]
+        arms_ = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E86, [("NVNM", nvnm(600, []))], False),
+                                               ("NAVM", 0x00000E87, [("NVNM", nvnm(600, []))], False)]),
+               MOD_A: plugin_file_of(MOD_A, [BASE], [("NAVM", 0x00000E86, [("NVNM", nvnm(1, []))], False),
+                                                     ("NAVM", 0x00000E87, [("NVNM", nvnm(500, []))], False)])}
+        with_files(arms_, fs_)
+        plan, md, html = compile_and_render(arms_, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
+        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+        return ("in 1 of them ground ModA.esp's navmesh covered" in top and "single triangle" in top
+                and "000E86" in top), top[-500:]
+
+    for name, fn in [("fifth-review/C1086b-stub-navmesh-loses-no-ground", c1086b_stub_navmesh_loses_no_ground)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
