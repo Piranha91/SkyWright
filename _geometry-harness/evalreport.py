@@ -4178,7 +4178,9 @@ def build_prediction(ctx: dict) -> dict:
             return (" ({})" if wrap else "{}").format("; ".join(parts_))
 
         def off_note(es_):
-            return off_text(off_counts(es_))
+            """The off-for-good note of a summary or sentence line: the kept rows' meanings (keptOn, keptOnPlaced,
+            keptBase) are said once, in the with-patch kind and pair lines (page budget, fifth review)."""
+            return off_text(collections.Counter({k_: v_ for k_, v_ in off_counts(es_).items() if not k_.startswith("kept")}))
 
         def off_keys(prefix, es_):
             """Per-state counts as int keys of a by-item dict ({prefix}_{state}), so they add up across items."""

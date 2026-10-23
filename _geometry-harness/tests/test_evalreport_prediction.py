@@ -6783,9 +6783,9 @@ def main():
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
         pr_ = reader(plan).get("prediction") or {}
         kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
-        return (re.search(r"\b1 on objects the losing mod switches off and the patch has on, so drawn\b", kl) is not None
-                and re.search(r"\b1 on objects the losing mod switches off and the patch has on at a spot of its own", kl)
-                is not None and re.search(r"\b1 in the object's base, so the object is the winning mod's", kl) is not None), kl[:500]
+        return (re.search(r"\b1 drawn though the losing mod switches them off\b", kl) is not None
+                and re.search(r"\b1 drawn at the patch's own spot though the losing mod switches them off", kl) is not None
+                and re.search(r"\b1 in the base, so the object is the winning mod's", kl) is not None), kl[:500]
 
     for name, fn in [("fifth-review/C1077-kept-rows-meaning", c1077_kept_rows_meaning),
                      ("fifth-review/C1078-own-removal-at-the-top", c1078_own_removal_at_the_top),
