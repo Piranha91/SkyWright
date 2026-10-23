@@ -4649,8 +4649,13 @@ def build_prediction(ctx: dict) -> dict:
                                           "scenes": sp5_["noun"][0 if len(qs_) == 1 else 1],
                                           "quests": ", ".join(f"'{q_}'" for q_ in qs_)})
 
+        def new_in_game(c):
+            """(fifth review, BPT S5) the check's in-game meaning, as a candidate for a visual check"""
+            ig_ = in_game.get(c)
+            return bind(words["newByCheckInGame"], {"what": ig_}) if ig_ and words.get("newByCheckInGame") else ""
+
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
-                         "objectsNote": split_note(c) or objects_note(c),
+                         "objectsNote": "; ".join(x_ for x_ in (split_note(c) or objects_note(c), new_in_game(c)) if x_) or None,
                          "masterNote": (bind(words["newByCheckOwnMaster"], {"count": fmt_n(problem_master[c])})
                                         if problem_master.get(c) else None),
                          "findingIds": [x for x in dict.fromkeys(fids) if x]}
