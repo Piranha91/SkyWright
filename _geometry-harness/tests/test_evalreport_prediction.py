@@ -5816,6 +5816,25 @@ def main():
     for name, fn in [("fifth-review/C1086-detail-split-counts-alone-apart", c1086_detail_split_counts_alone_apart)]:
         cell(name, fn)
 
+    # C1087 (Winterhold S3): a quest-or-switch row of a fixture left in empty space whose nearest floor or wall is 0 u is
+    # set aside as cannot tell, by the same rule as the fixture check's rows.
+    def c1087_state_fixture_zero_gap_cannot_tell():
+        arms = [arm("baseline", [BASE, THIRD, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, THIRD, MOD_A, MOD_B]), arm("without-b", [BASE, THIRD, MOD_A]),
+                arm("without-a", [BASE, THIRD, MOD_B])]
+        r2 = row("STATE-EMPTY@000S87:ThirdMod.esp@Triggered", THIRD, MOD_B, f"000Z87:{THIRD}", label="Hall (int)")
+        r2["Summary"] = (f"LeftInEmptySpace: Furniture Cot (fixed) in Hall (int); {MOD_B} removed or moved 000H87:Skyrim.esm; "
+                         f"its assembly of 1 touches no floor or wall now (nearest floor or wall 0u) @ 000S87:ThirdMod.esp")
+        results = {(STATE, "baseline"): [], (STATE, "without-patch"): [r2], (STATE, "without-b"): [],
+                   (STATE, "without-a"): [r2]}
+        plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], patches=[PATCH])
+        adm = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
+               if str(e.get("formKey")).startswith("000Z87")]
+        return adm == ["anchorUnclear"], f"{adm}"
+
+    for name, fn in [("fifth-review/C1087-state-fixture-zero-gap-cannot-tell", c1087_state_fixture_zero_gap_cannot_tell)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
