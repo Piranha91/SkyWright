@@ -1535,6 +1535,8 @@ def build_prediction(ctx: dict) -> dict:
     body_checks = set(words.get("bodyChecks") or [])   # checks whose rows name placed objects, which have a base
     effect_model_re = re.compile(words["effectModelPattern"], re.I) if words.get("effectModelPattern") else None
 
+    touching_re = re.compile(words["touchingPattern"]) if words.get("touchingPattern") else None
+
     def effect_pair(fk, others):
         """A geometry pair with an object whose base's model is a visual effect (skill data effectModelPattern)."""
         return effect_model_re is not None and any(
@@ -2443,9 +2445,17 @@ def build_prediction(ctx: dict) -> dict:
             pairs_ = g.setdefault("_objPairs", [])
             if not pairs_ and (object_name(rk[4]) or object_name(o0_)):
                 pairs_.append(bind(words["itemObjectPair"], {"a": named(rk[4]), "b": named(o0_)}))
-        if rk[1] != "LOST-EDIT" and hit["row"].get("other") and effect_pair(rk[4], hit["row"]["other"]):
+        eff_row_ = rk[1] != "LOST-EDIT" and bool(hit["row"].get("other")) and effect_pair(rk[4], hit["row"]["other"])
+        if eff_row_:
             # (fourth review, Pilgrim S2) a pair with an object whose model is a visual effect (skill data): said apart
             g["_effectPairs"] = g.get("_effectPairs", 0) + 1
+        touch_row_ = (rk[1] != "LOST-EDIT" and touching_re is not None and bool(hit["row"].get("other"))
+                      and touching_re.search(str(rk[5] or "")) is not None)
+        if touch_row_:
+            # (fifth review, Sewers S3) a pair the probe reports as touching: surfaces in contact, said apart
+            g["_touchingPairs"] = g.get("_touchingPairs", 0) + 1
+        if eff_row_ or touch_row_:
+            g["_notCrossing"] = g.get("_notCrossing", 0) + 1
         if rk[1] == "LOST-EDIT" and str(hit["row"].get("field") or "") == sup_place:
             # (fourth review, Pilgrim S4) a straight vertical difference between the two values: said with its height
             v4_ = hit["row"].get("values") or {}
@@ -2942,7 +2952,10 @@ def build_prediction(ctx: dict) -> dict:
             if str(p4_).lower() != str(lo4_).lower():
                 detail.append(bind(words["itemPreviousWinner"], {"winner": wi4_, "prev": p4_}))
         n_eff_ = g.pop("_effectPairs", 0)
-        g["_effN"] = n_eff_
+        g["_effN"] = g.pop("_notCrossing", 0)
+        n_touch_ = g.pop("_touchingPairs", 0)
+        if n_touch_ and words.get("itemTouchingPairs"):
+            detail.append(bind(words["itemTouchingPairs"], {"count": fmt_n(n_touch_), "verb": "touch" if n_touch_ != 1 else "touch"}))
         if n_eff_ and words.get("itemEffectPairs"):
             detail.append(bind(words["itemEffectPairs"], {"count": fmt_n(n_eff_), "all": "All" if n_eff_ == g["count"] else ""}))
         for (wi_, lo_), dzs_ in (g.pop("_heightDiff", None) or {}).items():
