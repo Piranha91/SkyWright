@@ -7682,6 +7682,66 @@ def main():
                      ("sixth-review/C1115-coplanar-pairs-said-apart", c1115_coplanar_pairs_said_apart)]:
         cell(name, fn)
 
+    # C1118 (Winterhold r6 S2): an object the losing value switches off and the winner has on, whose base is a Static
+    # carrying the editor-marker record flag (read from the base's plugin file), is not counted as drawn and never its
+    # example; it is said apart as a marker the game does not draw. A Static without the flag stays drawn (guard part).
+    def c1118_marker_base_not_drawn():
+        import copy
+        M, D = f"00CA18:{BASE}", f"00CB18:{BASE}"
+        def stat_file():
+            def sub(sig, data):
+                return sig.encode() + struct.pack("<H", len(data)) + data
+            hdr = sub("HEDR", struct.pack("<fII", 1.7, 2, 0x800))
+            body = b""
+            for fid, flags in ((0x00000B18, 0x00800000), (0x00000B19, 0)):
+                data = sub("EDID", b"Thing" + bytes(1))
+                body += b"STAT" + struct.pack("<IIIIHH", len(data), flags, fid, 0, 44, 0) + data
+            out = (b"TES4" + struct.pack("<IIIIHH", len(hdr), 0, 0, 0, 44, 0) + hdr
+                   + b"GRUP" + struct.pack("<I4sIIHH", 24 + len(body), b"STAT", 0, 0, 0, 0) + body)
+            p_ = Path(tempfile.mkdtemp(prefix="r6m-")) / BASE
+            p_.write_bytes(out)
+            return p_
+        rows_, ch_ = [], []
+        for fk_ in (M, D):
+            lost_, win_ = offs(-30000), offs(0)
+            rows_.append(lost_row(MOD_B, MOD_A, fk_, "Placement", off_txt(lost_), off_txt(win_), off_txt(offs(0)), before=BASE))
+            ch_.append((fk_, "PlacedObject", [(BASE, offs(0)), (MOD_B, lost_), (MOD_A, win_)]))
+        names_ = {"refs": {M: {"base": f"000B18:{BASE}"}, D: {"base": f"000B19:{BASE}"}},
+                  "bases": {f"000B18:{BASE}": {"type": "Static", "editorId": "XMarker", "model": "MarkerX.nif"},
+                            f"000B19:{BASE}": {"type": "Static", "editorId": "Crate01", "model": "clutter\\crate01.nif"}}}
+        arms_ = with_files(copy.deepcopy(WP_ARMS), {BASE: stat_file()})
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B), names=names_, arms=arms_)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        drawn_ = next((x for x in re.split(r"(?<=[.)])\s+(?=On |In |For )", it) if "is drawn" in x), "")
+        return ("00CB18" in drawn_ and "00CA18" not in drawn_ and "editor marker" in it
+                and re.search(r"On 1 object, ", drawn_) is not None), it[-500:]
+
+    # C1119 (Snazzy S1, gate A condition R3): a lost water height on an interior cell whose losing and winning versions
+    # both lack the HasWater flag (read from the plugin files) has no water in game: set aside, not counted. A cell whose
+    # winning version has the flag stays counted (guard part).
+    def c1119_water_height_without_water_set_aside():
+        import copy
+        C1, C2 = f"00C119:{BASE}", f"00C219:{BASE}"
+        fs_ = {OTHER: plugin_file_of(OTHER, [BASE], [("CELL", 0x0000C119, [("DATA", struct.pack("<H", 0x0081))], False),
+                                                     ("CELL", 0x0000C219, [("DATA", struct.pack("<H", 0x0083))], False)], group="CELL"),
+               MOD_A: plugin_file_of(MOD_A, [BASE], [("CELL", 0x0000C119, [("DATA", struct.pack("<H", 0x0081))], False),
+                                                     ("CELL", 0x0000C219, [("DATA", struct.pack("<H", 0x0083))], False)], group="CELL")}
+        rows_ = []
+        for C, lab_ in ((C1, "DryHall"), (C2, "WetHall")):
+            r_ = lost_row(OTHER, MOD_A, C, "WaterHeight", ["WaterHeight=0"], PH, PH, label=lab_)
+            r_["Summary"] = f"Cell {lab_}: WaterHeight - {OTHER}'s value lost to {MOD_A}'s"
+            rows_.append(r_)
+        arms_ = with_files(copy.deepcopy(WP_ARMS), fs_)
+        plan, md, _ = core_bundle(rows_, rows_, check=CELLATTR, masters=MASTERS_, arms=arms_)
+        a1, a2 = [e["admission"] for e in rec_of(plan, C1)], [e["admission"] for e in rec_of(plan, C2)]
+        aside = str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+        return (a1 == ["noWater"] and a2 == ["admitted"] and "HasWater" in aside), f"{a1} {a2}; {aside[-300:]}"
+
+    for name, fn in [("sixth-review/C1118-marker-base-not-drawn", c1118_marker_base_not_drawn),
+                     ("sixth-review/C1119-water-height-without-water-set-aside", c1119_water_height_without_water_set_aside)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

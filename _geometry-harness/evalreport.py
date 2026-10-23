@@ -1113,7 +1113,7 @@ def field_name(row: dict) -> str:
 
 
 # lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
-NOISE_ADMISSIONS = ("navmeshCheck", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead",
+NOISE_ADMISSIONS = ("navmeshCheck", "noWater", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead",
                     "winnerOwnChange")
 FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
                     / "references" / "record-field-scope.json")
@@ -1594,6 +1594,34 @@ def build_prediction(ctx: dict) -> dict:
         """An object whose base record has no model has no body to clash, whatever its type (W-B3, round 4): decided
         from the record's model field, never a name."""
         return base_has_no_model(names, fk)
+
+    marker_cache = {}
+
+    def base_is_marker(fk):
+        """(sixth review, Winterhold r6 S2) The object's base is an editor marker: a base of a type skill data
+        `markerFlags` lists, carrying that record flag in its own plugin's file (recorded bytes only). False where not
+        read."""
+        b_ = (name_refs.get(str(fk)) or {}).get("base")
+        typ_ = str((name_bases.get(b_ or "") or {}).get("type") or "")
+        bit_ = (words.get("markerFlags") or {}).get(typ_)
+        if not b_ or not bit_:
+            return False
+        if b_ not in marker_cache:
+            path_, sha_ = plugin_file(str(b_).split(":", 1)[-1])
+            got_ = None
+            if path_ and sha_ and Path(path_).is_file():
+                if path_ not in sha_cache:
+                    sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+                if sha_cache[path_] == sha_:
+                    try:
+                        got_ = pluginread.record_flags(path_, [b_], (words.get("markerRecordTypes") or {}).get(typ_, "STAT").encode())
+                        got_ = got_.get(b_)
+                        plugin_reads.append({"plugin": str(b_).split(":", 1)[-1], "sha256": sha_, "record": b_,
+                                             "read": "recordFlags", "found": got_ is not None})
+                    except pluginread.PluginReadError:
+                        got_ = None
+            marker_cache[b_] = bool(got_ is not None and int(got_) & int(bit_))
+        return marker_cache[b_]
 
     def no_body(rk, other):
         return rk[1] != "LOST-EDIT" and (bodiless(rk[4]) or any(bodiless(o) for o in other or ()))
@@ -2178,6 +2206,14 @@ def build_prediction(ctx: dict) -> dict:
             if (rtype == j_.get("recordType") and top == j_.get("field")
                     and (j_.get("check"), arm or p_of(j_.get("check"))) in measured):
                 return "navmeshCheck"
+        # (sixth review, Snazzy S1; gate A condition R3) a water field on an interior cell neither side of which has
+        # water (its HasWater flag, read from both plugin files): no change in game. Exterior cells are not judged so
+        wn_ = words.get("waterNeedsFlag") or {}
+        if rtype == wn_.get("recordType") and top in (wn_.get("fields") or []):
+            fl_ = [plugin_record(pl_, "cell", rk[4]) for pl_ in (rk[2], rk[3])]
+            if all(f_ and f_.get("value") is not None and wn_.get("interiorFlag") in (f_.get("flags") or [])
+                   and wn_.get("flag") not in (f_.get("flags") or []) for f_ in fl_):
+                return "noWater"
         if order_only_re is not None and lost and all(order_only_re.match(str(x))
                                                       for x in (lost if isinstance(lost, list) else [lost])):
             return "orderOnly"
@@ -2593,10 +2629,14 @@ def build_prediction(ctx: dict) -> dict:
             # on when the game loads: not initially disabled, not deleted, not below the world, and no enable parent
             # (whose state the record data does not give: then only that its own record does not switch it off)
             won_ = winner_on_at_load(rk)
+            if won_ == "on" and base_is_marker(rk[4]):
+                # (sixth review, Winterhold r6 S2) an editor marker's base (record flag, read from its plugin file):
+                # never drawn in game, so never counted as drawn
+                won_ = "onMarker"
             if won_ == "on" and base_has_no_model(names, rk[4]):
                 # (fifth review, Snazzy 17, BPT 19) no model: what it does in game is its base type's (noModelMeaning)
                 won_ = ("onNoModel", no_model_type(names, rk[4]))
-            if won_ in ("on", "parent") or isinstance(won_, tuple):
+            if won_ in ("on", "parent", "onMarker") or isinstance(won_, tuple):
                 # (round 2, Snazzy B1) counted by object, as the sentence names them: one object's fields count once
                 sw_ = g.setdefault("_switchOff", {}).setdefault((rk[2], rk[3], won_), {})
                 sw_.setdefault(str(rk[4]), named(rk[4], rk[5]))
@@ -3045,12 +3085,13 @@ def build_prediction(ctx: dict) -> dict:
 
         def sw_order(kv):
             h_ = kv[0][2]
-            return (("on", "onNoModel", "parent").index(h_[0] if isinstance(h_, tuple) else h_),
+            return (("on", "onNoModel", "onMarker", "parent").index(h_[0] if isinstance(h_, tuple) else h_),
                     str(h_[1]) if isinstance(h_, tuple) else "")
         for (lo_, wi_, how_), ex_ in sorted(sw_all_.items(), key=sw_order):
             typ_ = how_[1] if isinstance(how_, tuple) else None
             how_ = how_[0] if isinstance(how_, tuple) else how_
-            key_ = {"on": "itemSwitchOffDrawn", "onNoModel": "itemSwitchOffNoModel"}.get(how_, "itemSwitchOffParent")
+            key_ = {"on": "itemSwitchOffDrawn", "onNoModel": "itemSwitchOffNoModel",
+                    "onMarker": "itemSwitchOffMarker"}.get(how_, "itemSwitchOffParent")
             n_ex_ = 2
             if how_ == "onNoModel" and (lo_, wi_, "on") in sw_all_ and words.get("itemSwitchOffNoModelMore"):
                 key_, n_ex_ = "itemSwitchOffNoModelMore", 1     # said after the drawn ones, short (page budget)

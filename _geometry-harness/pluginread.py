@@ -247,3 +247,48 @@ def navmesh_doors_all(path):
             for (t, fid) in places if t == b"NAVM"]
     got = _read(p, b"NAVM", want, _navmesh)["records"]
     return {fk: [d for d, _ in (v or {}).get("doors") or []] for fk, v in got.items()}
+
+
+_TOP = {}
+
+
+def record_flags(path, form_keys, rtype):
+    """(sixth review) The record header flags of named records in one top-level group of the plugin (a base record's
+    group, e.g. STAT): {formKey: flags, or None where the plugin holds no such record}. The group is indexed once per
+    file state."""
+    p = Path(path)
+    try:
+        st = p.stat()
+        key = (str(p).lower(), st.st_size, st.st_mtime_ns, rtype)
+        if key not in _TOP:
+            buf = p.read_bytes()
+            if buf[:4] != b"TES4":
+                raise PluginReadError(f"{p.name} is not a plugin file (no TES4 header)")
+            hsize = struct.unpack_from("<I", buf, 4)[0]
+            masters = [d.rstrip(b"\x00").decode("latin-1") for s, d in _subrecords(buf[24:24 + hsize]) if s == "MAST"]
+            got, i = {}, 24 + hsize
+            while i + 24 <= len(buf):
+                size = struct.unpack_from("<I", buf, i + 4)[0]
+                if buf[i:i + 4] == b"GRUP":
+                    if buf[i + 8:i + 12] == rtype:
+                        j, end = i + 24, i + size
+                        while j + 24 <= end:
+                            rs = struct.unpack_from("<I", buf, j + 4)[0]
+                            flags, fid = struct.unpack_from("<II", buf, j + 8)
+                            got[fid] = flags
+                            j += 24 + rs
+                    i += size
+                else:
+                    i += 24 + size
+            _TOP[key] = (masters, got)
+    except (OSError, struct.error) as e:
+        raise PluginReadError(f"cannot read {p}: {e}") from e
+    masters, got = _TOP[key]
+    low = [m.lower() for m in masters]
+    out = {}
+    for fk in form_keys:
+        obj, _, origin = str(fk).partition(":")
+        idx = low.index(origin.lower()) if origin.lower() in low else (
+            len(masters) if origin.lower() == p.name.lower() else None)
+        out[str(fk)] = got.get((idx << 24) | int(obj, 16)) if idx is not None else None
+    return out
