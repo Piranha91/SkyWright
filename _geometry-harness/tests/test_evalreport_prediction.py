@@ -5773,6 +5773,31 @@ def main():
     for name, fn in [("fifth-review/C1084-new-by-check-in-game", c1084_new_by_check_in_game)]:
         cell(name, fn)
 
+    # C1085 (BPT S6): an object no longer listed with the patch whose own predicate there still Holds left the class with
+    # its problem (the probe's "reclassified"); it is no repair. Three gone: G (body, Gone), L1 (no model, Gone), L2 (no
+    # model, Holds): repaired 1 with a body plus 1 with no model, and the changed owner said once.
+    def c1085_reclassified_not_repaired():
+        G0, L1, L2, K = f"000G85:{MOD_A}", f"000L85:{MOD_A}", f"000M85:{MOD_A}", f"000K85:{MOD_A}"
+        base = [row("CONTACT", MOD_B, MOD_A, x_, other=f"000H{i}5:{MOD_B}") for i, x_ in enumerate((G0, L1, L2, K))]
+        withp = [base[3]]
+        preds = [{"Kind": "CONTACT", "A": MOD_B, "B": MOD_A, "FormKey": x_, "Other": f"000H{i}5:{MOD_B}", "Physical": p_}
+                 for i, (x_, p_) in enumerate(((G0, "Gone"), (L1, "Gone"), (L2, "Holds"), (K, "Holds")))]
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=2, reclassified=1,
+                                                     created=0, newDefect=0, attributed=0, unmeasured=0)}}
+        log = f"SHRANK  CONTACT    {MOD_B}  x  {MOD_A}   -3 record(s): repaired 2, reclassified 1\n"
+        refs = {G0: {"base": f"0B0S85:{MOD_A}"}, K: {"base": f"0B0S85:{MOD_A}"}, L1: {"base": f"0B0L85:{MOD_A}"},
+                L2: {"base": f"0B0L85:{MOD_A}"}, **{f"000H{i}5:{MOD_B}": {"base": f"0B0W85:{MOD_B}"} for i in range(4)}}
+        bases = {f"0B0S85:{MOD_A}": {"type": "Static", "model": "lantern.nif"}, f"0B0L85:{MOD_A}": {"type": "Light", "model": ""},
+                 f"0B0W85:{MOD_B}": {"type": "Static", "model": "table.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): base, (CONTACT, "with-patch"): withp},
+                                            [MOD_A, MOD_B], patches=[PATCH], order=order, predicates={(CONTACT, "with-patch"): preds},
+                                            names={"refs": refs, "bases": bases}, diff_logs={(CONTACT, "with-patch"): log})
+        pl_ = " ".join(str(f.get("readerPlain") or "") for f in plan.get("findings") or [] if "repaired" in str(f.get("readerPlain") or ""))
+        return ("repaired 1 existing problem (not counted: 1 more whose object's record has no model" in pl_), (pl_[-300:] or md[-1500:])
+
+    for name, fn in [("fifth-review/C1085-reclassified-not-repaired", c1085_reclassified_not_repaired)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
