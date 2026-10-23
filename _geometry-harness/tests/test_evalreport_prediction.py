@@ -6733,18 +6733,18 @@ def main():
 
     def c1074_kept_own_removal_said_winners():
         kl, st, plan, md = own_removal_bundle([f"00CA74:{BASE}"], [])
-        return (re.search(r"\b1 on objects [^;()]*removes itself", kl) is not None
+        return (re.search(r"\b1 on objects [^;()]*winner's own change sets off", kl) is not None
                 and "winner sets off for good" not in kl), kl[:400]
 
     def c1075_left_own_removal_patch_keeps_same():
         kl, st, plan, md = own_removal_bundle([f"00CA75:{BASE}"], [f"00CB75:{BASE}"])
         part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if "record field" in x), "")
-        return (re.search(r"removes itself", part) is not None and re.search(r"keeps the same removal on 1 more", part) is not None
-                and len(re.findall(r"\b1 on objects [^;()]*removes itself", kl)) == 2), f"{part[:300]} || {kl[:300]}"
+        return (re.search(r"winner's own change sets off", part) is not None and re.search(r"keeps the same removal on 1 more", part) is not None
+                and len(re.findall(r"\b1 on objects [^;()]*winner's own change sets off", kl)) == 2), f"{part[:300]} || {kl[:300]}"
 
     def c1076_inherited_removal_not_winners_own():
         kl, st, plan, md = own_removal_bundle([], [f"00CA76:{BASE}"], inherited=True)
-        return ("removes itself" not in kl and "removes itself" not in st
+        return ("winner's own change sets off" not in kl and "winner's own change sets off" not in st
                 and re.search(r"\b1 on objects [^;()]*winner sets off for good", kl) is not None), f"{kl[:300]} || {st[:300]}"
 
     # C1078 (BPT S2, Gate A condition R3): the top of the report says it too: the headline's off-for-good count says how
