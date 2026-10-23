@@ -5905,6 +5905,20 @@ def main():
     for name, fn in [("fifth-review/C1090-cannot-tell-not-resolved", c1090_cannot_tell_not_resolved)]:
         cell(name, fn)
 
+    # C1089 (Winterhold page limit, fifth review): the abridgement ladder is cumulative: every step after the one that moves
+    # the closing sections and the location load order keeps those moves while it shows fewer rows or figures, so a
+    # later step is never longer than the step before it for having put the sections back.
+    def c1089_ladder_steps_cumulative():
+        ladder_ = R.load_priorities().get("abridgementLadder") or []
+        k_ = next((i_ for i_, s_ in enumerate(ladder_) if {"tail", "order"} <= set(str(s_.get("layout")).split())), None)
+        if k_ is None:
+            return False, "no tail-order step"
+        bad_ = [s_ for s_ in ladder_[k_ + 1:] if not {"tail", "order"} <= set(str(s_.get("layout")).split())]
+        return not bad_, f"later steps without the moves: {bad_}"
+
+    for name, fn in [("fifth-review/C1089-ladder-steps-cumulative", c1089_ladder_steps_cumulative)]:
+        cell(name, fn)
+
     # C1091 (Snazzy "173 / 53"): the undone line names its units: record fields, and how many objects the ones that switch
     # an object back on are on (two fields of one object switched back on: 2 fields on 1 object).
     def c1091_undone_line_units():
