@@ -2819,7 +2819,10 @@ def main():
         hits = next((ln for ln in md.splitlines() if ln.startswith("- Predicted and resolved by")), "")
         v = p.get("verdict") or ""
         ok = (len(lines) == 1 and "(2 object-and-support pairs)" in lines[0] and "(2 objects)" not in lines[0]
-              and "objects" not in hits and "the same object also found by the check" in v and "the same 1 objects" not in v)
+              # (seventh review, Sewers S2) the shared fixture pair is said as on the same objects, counted once: what
+              # must not appear is a count of objects for pairs
+              and re.search(r"[0-9] objects", hits) is None and "counted once" in hits
+              and "the same object also found by the check" in v and "the same 1 objects" not in v)
         return ok, f"lines {lines}; resolved {hits!r}; verdict {v[-160:]!r}"
 
     # C587. A check this evaluation could not run on the measured order, counted from the separate evaluation without the
