@@ -4788,11 +4788,12 @@ def main():
     # C934 (Clockwork review S1): an overlap pair still crossing with the patch, which the setup with the patch does not
     # list between two mods, where the patch places one of the objects (the record chain: the patch's version of X loads
     # last and moves it), is the patch's placement: not "left", not in the still-there line, said apart.
-    def placed_overlap_bundle(patch_moves=True, listed=False):
+    def placed_overlap_bundle(patch_moves=True, listed=False, details=None):
         X = f"000X34:{MOD_A}"
         ys = [f"000Y3{i}:{MOD_B}" for i in (1, 2)]
         p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
-        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds",
+                  **({"Detail": details[i_]} if details else {})} for i_, y in enumerate(ys)]
         other_ = f"00C93A:{BASE}"
         enr = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")]}
         x_chain = [(MOD_A, {"Placement.Position": "1,1,1"})] + ([(PATCH, {"Placement.Position": "9,9,9"})]
@@ -8373,7 +8374,16 @@ def main():
         v = str((reader(plan).get("prediction") or {}).get("verdict") or "")
         return (adm == ["admitted", "noBody"] and "1 overlap candidate" in v), f"{adm}; {v[-200:]}"
 
+    # C1156 (Clockwork S3): the pairs still crossing where a patch places one of the objects were measured again in the
+    # setup with the patch: the line says so, with the triangle pairs the re-measure found.
+    def c1156_patch_placed_says_remeasure():
+        plan, md, X = placed_overlap_bundle(details=["actual render surfaces: crossing; containment unassessed; 38 triangle pairs [mm]",
+                                                     "actual render surfaces: crossing; containment unassessed; 12 triangle pairs [mm]"])
+        ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
+        return ("Measured again in the setup with" in ln and "12 to 38 triangle pairs" in ln), ln[:400]
+
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
+                     ("seventh-review/C1156-patch-placed-says-remeasure", c1156_patch_placed_says_remeasure),
                      ("seventh-review/C1154-marker-model-has-no-body", c1154_marker_model_has_no_body),
                      ("seventh-review/C1153-null-says-navmesh-judged-elsewhere", c1153_null_says_navmesh_judged_elsewhere),
                      ("seventh-review/C1152-shared-objects-counted-once-in-comparison",

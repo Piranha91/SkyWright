@@ -5274,7 +5274,17 @@ def build_prediction(ctx: dict) -> dict:
             n_kept_ = fmt_n(len(kept)) + off_note(kept)
             sentences.append(bind(words["validationKept"], {"patch": patch, "count": n_kept_, "by": by_}))
         if placed:
-            sentences.append(bind(words["validationPlaced"], {"patch": patch, "count": by_unit(placed)}))
+            # (seventh review, Clockwork S3) where the setup with the patch measured each again, what it found there
+            tri_ = []
+            for e in placed:
+                rm_ = (remeasure_with_patch(e["checkId"]) or {}).get(
+                    (e["kind"], e["A"], e["B"], e["formKey"], (e.get("other") or [None])[0]))
+                m_ = re.search(r"(\d+) triangle pairs", rm_[1]) if rm_ and rm_[0] == "Holds" else None
+                tri_.append(int(m_.group(1)) if m_ else None)
+            sentences.append(bind(words["validationPlaced"], {"patch": patch, "count": by_unit(placed)})
+                             + (" " + bind(words["validationPlacedMeasured"], {
+                                 "patch": patch, "low": fmt_n(min(tri_)), "high": fmt_n(max(tri_))})
+                                if tri_ and None not in tri_ and words.get("validationPlacedMeasured") else ""))
         if stands:
             sentences.append(bind(words["validationStands"], {"patch": patch, "count": by_unit(stands)}))
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
