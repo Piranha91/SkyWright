@@ -7978,6 +7978,189 @@ def main():
     for name, fn in [("sixth-review/C1130-evaluated-list-drop-said-as-own", c1130_evaluated_list_drop_said_as_own)]:
         cell(name, fn)
 
+    # ------------------------------------------------ after the seventh review (C1140-C1189)
+    # The attribution class: every sentence that names a plugin as the source of a value, a removal or a crossing asks
+    # one read of the record's versions: whose own change the value (or the off-for-good state, or the placement) is,
+    # and who only carries it.
+    # C1148 (the read itself): recordrows.attribute over a provider chain. Provider i changed the field when its value
+    # differs from the one it inherits from its nearest master; the value's origin is the earliest provider whose own
+    # change that value is (a value put back or copied from an earlier plugin's change is that plugin's); the carriers
+    # are the providers after the origin holding the same value without a change of their own.
+    def c1148_attribution_read():
+        import recordrows as RR_
+        fn_ = getattr(RR_, "attribute", None)
+        if fn_ is None:
+            return False, "recordrows has no attribution read (attribute)"
+        provs_ = [BASE, UPD, "LaterFix.esp", OTHER, MOD_A, PATCH]
+        vals_ = ["v0", "v1", "v2", "v1", "v3", "v2"]
+        ms_ = {UPD.lower(): [BASE], "laterfix.esp": [BASE, UPD], OTHER.lower(): [BASE, UPD], MOD_A.lower(): [BASE, UPD],
+               PATCH.lower(): [BASE, MOD_A]}
+        p_, o_ = fn_(provs_, vals_, 5, ms_), fn_(provs_, vals_, 3, ms_)
+        ok_ = (p_.get("own") is True and p_.get("origin") == 2 and o_.get("own") is False and o_.get("origin") == 1
+               and o_.get("carriers") == [3])
+        return ok_, f"patch {p_}; other {o_}"
+
+    # C1140 (Pilgrim S2): the other mod moves a base-game partner farther than the object's size: the measured crossing
+    # is where that mod places it (the base game's placement is elsewhere), so it is credited to that mod's own
+    # placement, never "may come from its own placement as much as from the base game's". A partner it only turns keeps
+    # that sentence (both placements share the spot).
+    def c1140_far_move_credits_mover_placement():
+        far_ = (0x00CA40, (500.0, 100.0, 0.0, 1.5, 0x0B0A79), (800.0, 100.0, 0.0, 1.5, 0x0B0A79))
+        turn_ = (0x00CB40, (900.0, 100.0, 0.0, 1.5, 0x0B0A79), (900.0, 100.0, 0.0, 2.0, 0x0B0A79))
+        md, it = nudge_bundle([far_, turn_])
+        sents_ = re.split(r"(?<=\.)\s+", it)
+        hedge_ = " ".join(x for x in sents_ if "as much as from the base game" in x)
+        credit_ = next((x for x in sents_ if "00CA40:Skyrim.esm" in x and f"{OTHER}'s own placement" in x
+                        and "as much as" not in x), "")
+        return ("00CA40:Skyrim.esm" not in hedge_ and "00CB40:Skyrim.esm" in hedge_ and bool(credit_)), \
+            f"hedge {hedge_[:240]!r} || credit {credit_[:240]!r}"
+
+    # C1141 (Snazzy S1): a kept lost change (the patch keeps ModB's base over ModA's) on an object both mods have on,
+    # which the patch's own version sets off for good: the removal is the patch's own change, said so, never "the winner
+    # sets off for good".
+    def c1141_patch_removal_credited_to_patch():
+        D = f"00CA41:{BASE}"
+        o_, a_, b_ = ({**offs(0), "Base": f"0B0C{n}:{BASE}"} for n in ("70", "71", "72"))
+        pt_ = {**offs(-30000, "InitiallyDisabled"), "Base": f"0B0C72:{BASE}"}
+        p_rows = [lost_row(MOD_A, MOD_B, D, "Base", [f"Base=0B0C71:{BASE}"], [f"Base=0B0C72:{BASE}"],
+                           [f"Base=0B0C70:{BASE}"], before=BASE)]
+        w_rows = [lost_row(MOD_A, PATCH, D, "Base", [f"Base=0B0C71:{BASE}"], [f"Base=0B0C72:{BASE}"],
+                           [f"Base=0B0C70:{BASE}"], before=BASE)]
+        p_ch = [(D, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_)])]
+        w_ch = [(D, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_), (PATCH, pt_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE, MOD_B]})
+        pr_ = reader(plan).get("prediction") or {}
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        w = [e.get("withPatch") for e in rec_of(plan, D)]
+        return (w == ["kept"] and "winner sets off for good" not in kl
+                and re.search(r"\b1 on objects [^;()]*patch's own change sets off for good", kl) is not None), f"{w}; {kl[:400]}"
+
+    # C1142 (Missives S1): ModA undoes its master Update.esm's fix in two records; OtherMod.esp carries Update.esm's value
+    # in the first only and ThirdMod.esp in the second only (read from each record's versions; ThirdMod's has no row of
+    # its own). The undo line names each carrier for the fields it carries, never one plugin for all of them.
+    def c1142_undo_carriers_per_field():
+        R1, R2 = f"00CA42:{BASE}", f"00CB42:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, OTHER, THIRD, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, OTHER, THIRD, MOD_A, MOD_B])]
+        b0, a0 = offs(0), offs(0)
+        u0 = offs(0)
+        u0["Placement.Position"] = "100,100,12"
+        chains = [(R1, "PlacedObject", [(BASE, b0), (UPD, u0), (OTHER, u0), (MOD_A, a0)]),
+                  (R2, "PlacedObject", [(BASE, b0), (UPD, u0), (THIRD, u0), (MOD_A, a0)])]
+        p_rows = [lost_row(UPD, MOD_A, R1, "Placement", ["Placement.Position=100,100,12"], PH, PH),
+                  lost_row(UPD, MOD_A, R2, "Placement", ["Placement.Position=100,100,12"], PH, PH),
+                  lost_row(OTHER, MOD_A, R1, "Placement", ["Placement.Position=100,100,12"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
+                                  masters={UPD: [BASE], OTHER: [BASE, UPD], THIRD: [BASE, UPD], MOD_A: [BASE, UPD],
+                                           MOD_B: [BASE], PATCH: [BASE]})
+        line = next((ln for ln in md.splitlines() if f"{MOD_A} undoes its master {UPD}'s fix" in ln), "")
+        return (THIRD in line and OTHER in line and f"{OTHER} carries {UPD}'s value there" not in line), line[:500]
+
+    # C1143 (Clockwork S1): ModA's value wins over HearthFires.esm's own change (OtherMod.esp only carries it). With the
+    # patch, the winning version holds LaterFix.esp's own change of that field, made over HearthFires.esm's value: the
+    # line says the patch's winner has that later change, which replaces HearthFires.esm's, never only "has
+    # HearthFires.esm's value in 0 of the 1".
+    def c1143_with_patch_superseding_change_named():
+        L1, LF = f"00CA43:{BASE}", "LaterFix.esp"
+        arms = [arm("baseline", [BASE, HF_, LF, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, LF, OTHER, MOD_A, MOD_B])]
+        pre_ = [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}), (LF, {"Location": "018A5A:Skyrim.esm"}),
+                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": ""})]
+        p_ch = [(L1, "Cell", pre_)]
+        w_ch = [(L1, "Cell", pre_ + [(PATCH, {"Location": "018A5A:Skyrim.esm"})])]
+        p_rows = [lost_row(HF_, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
+        w_rows = [lost_row(MOD_A, PATCH, L1, "Location", ["Location="], ["Location=018A5A:Skyrim.esm"], PH)]
+        plan, md, _ = core_bundle(p_rows, w_rows, check=CELLATTR, arms=arms, p_chains=p_ch, w_chains=w_ch,
+                                  masters={HF_: [BASE], LF: [BASE, HF_], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE],
+                                           PATCH: [BASE, MOD_A]})
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
+        tail_ = line.split("; with ", 1)[1] if "; with " in line else ""
+        return (LF in tail_ and re.search(r"replac|supersed", tail_) is not None), line[-400:]
+
+    # C1144 (Missives r6 S2): an earlier loss the patch also fixes names only the plugin whose own change the losing value
+    # is: Neighbour.esp, built without OtherMod.esp as a master, holds OtherMod.esp's value (a copy, not a change of its
+    # own value), so the change is OtherMod.esp's; Neighbour.esp is never said to change it.
+    def c1144_earlier_fix_copy_named_by_origin():
+        ln = earlier_fix_bundle(True, o2_carries=False)
+        return ("OtherMod.esp's change" in ln and "Neighbour.esp's" not in ln), ln[:500]
+
+    # C1145 (BPT r6 S3): ModA's value is lost to Partner.esp's own change; the only measured setup without Partner.esp
+    # also lacks Later.esp, which loads after ModA and carries the base game's value. Read from the record's versions,
+    # without Partner.esp ModA's value is still lost (to Later.esp's): the item never says it needs both because "the
+    # setup without Partner.esp does not show it", and names Later.esp.
+    def c1145_needs_both_judged_on_the_chain():
+        PT_, LT_, R_ = "Partner.esp", "Later.esp", f"00CA45:{BASE}"
+        arms_ = [arm("baseline", [BASE, MOD_A, LT_, PT_, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, MOD_A, LT_, PT_]), arm("without-partner", [BASE, MOD_A])]
+        mh_ = lambda x: {"MaxHeight.CellData": x, "MaxHeight.Offset": "0"}  # noqa: E731
+        ch_ = [(R_, "Worldspace", [(BASE, mh_("00")), (MOD_A, mh_("0A")), (LT_, mh_("00")), (PT_, mh_("0B"))])]
+        r_ = lost_row(MOD_A, PT_, R_, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=0B"],
+                      ["MaxHeight.CellData=00"])
+        r_["Summary"] = f"Worldspace Tamriel: MaxHeight - {MOD_A}'s value lost to {PT_}'s"
+        enr = {(RECORDS, "without-patch"): [r_], (RECORDS, "baseline"): [r_], (RECORDS, "without-partner"): []}
+        tr = {(RECORDS, "without-patch"): records_transcript(ch_), (RECORDS, "baseline"): records_transcript(ch_)}
+        plan, md, _ = compile_and_render(arms_, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch", "without-partner")},
+                                         [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                         enrichment=enr, transcripts=tr,
+                                         masters={MOD_A: [BASE], LT_: [BASE], PT_: [BASE, LT_], PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        return ("does not show it" not in it and LT_ in it), it[:500]
+
+    # C1146 (BPT r6 S3, line 16): a lost change no patch touches, lost to OtherMod.esp's value that is ThirdMod.esp's own
+    # change OtherMod.esp only carries: the still-there line names ThirdMod.esp as the value's own, never OtherMod.esp
+    # alone.
+    def c1146_still_there_names_value_origin():
+        R = f"00CA46:{BASE}"
+        arms = [arm("baseline", [BASE, THIRD, MOD_A, OTHER, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, THIRD, MOD_A, OTHER])]
+        chains = [(R, "Worldspace", [(BASE, {"MaxHeight.CellData": "00"}), (THIRD, {"MaxHeight.CellData": "0B"}),
+                                     (MOD_A, {"MaxHeight.CellData": "0A"}), (OTHER, {"MaxHeight.CellData": "0B"})])]
+        p_rows = [lost_row(MOD_A, OTHER, R, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=0B"],
+                           ["MaxHeight.CellData=00"])]
+        p_rows[0]["Summary"] = f"Worldspace Tamriel: MaxHeight - {MOD_A}'s value lost to {OTHER}'s"
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
+                                  masters={THIRD: [BASE], MOD_A: [BASE], OTHER: [BASE, THIRD], PATCH: [BASE]})
+        st = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+        part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if "record field" in x), "")
+        return (bool(part) and THIRD in part), f"{part[:300]!r} || {st[:300]!r}"
+
+    # C1147 (Winterhold S1): a model in the sky folder (a cloud card: an effect-shaded, alpha-blended model with no
+    # collision, like every model there) is not a solid body: counted with the visual-effect pairs in the headline and
+    # the kind line, said so in the item, and in the line of new clashes with the patch.
+    def c1147_sky_model_not_solid():
+        X, Y, Z, W = f"000X47:{MOD_A}", f"000Y47:{MOD_B}", f"000Z47:{MOD_B}", f"000W47:{MOD_B}"
+        r1, r2, r3 = (row("OVERLAP", MOD_B, MOD_A, X, other=o_) for o_ in (Y, Z, W))
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        names_ = {"refs": {X: {"base": f"0B0X47:{MOD_A}"}, Y: {"base": f"0B0Y47:{MOD_B}"}, Z: {"base": f"0B0Z47:{MOD_B}"},
+                           W: {"base": f"0B0Y47:{MOD_B}"}},
+                  "bases": {f"0B0X47:{MOD_A}": {"type": "Static", "editorId": "Wall", "model": "arch\\wall.nif"},
+                            f"0B0Y47:{MOD_B}": {"type": "Static", "editorId": "CloudDistant",
+                                                "model": "Sky\\INV_CloudDistant01_O.nif"},
+                            f"0B0Z47:{MOD_B}": {"type": "Static", "editorId": "Rock", "model": "rocks\\rock.nif"}}}
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r1, r2, r3], (OVERLAP, "without-patch"): [r1, r2],
+                                                (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH], names=names_)
+        pr_ = reader(plan).get("prediction") or {}
+        v = str(pr_.get("verdict") or "")
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Objects occupying")), "")
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        nw = next((ln for ln in md.splitlines() if "New clashes with the patch" in ln), "")
+        return ("1 of the pairs with a visual-effect model" in v and "1 with a visual-effect model" in kl
+                and re.search(r"1 of these pairs involve[^.]*sky", it) is not None
+                and "visual-effect model" in nw), f"{v[-160:]} || {kl[:160]} || {it[-300:]} || {nw[:300]}"
+
+    for name, fn in [("seventh-review/C1148-attribution-read", c1148_attribution_read),
+                     ("seventh-review/C1140-far-move-credits-mover-placement", c1140_far_move_credits_mover_placement),
+                     ("seventh-review/C1141-patch-removal-credited-to-patch", c1141_patch_removal_credited_to_patch),
+                     ("seventh-review/C1142-undo-carriers-per-field", c1142_undo_carriers_per_field),
+                     ("seventh-review/C1143-with-patch-superseding-change-named", c1143_with_patch_superseding_change_named),
+                     ("seventh-review/C1144-earlier-fix-copy-named-by-origin", c1144_earlier_fix_copy_named_by_origin),
+                     ("seventh-review/C1145-needs-both-judged-on-the-chain", c1145_needs_both_judged_on_the_chain),
+                     ("seventh-review/C1146-still-there-names-value-origin", c1146_still_there_names_value_origin),
+                     ("seventh-review/C1147-sky-model-not-solid", c1147_sky_model_not_solid)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
