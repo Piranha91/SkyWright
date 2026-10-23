@@ -844,6 +844,9 @@ def main():
     cells = []
 
     def cell(name, fn):
+        only_ = _os_settings.environ.get("HC_CELLS")              # a development run of some cells only (comma list)
+        if only_ and not any(x_ and x_ in name for x_ in only_.split(",")):
+            return
         try:
             ok, detail = fn()
         except Exception as ex:                                       # a crash is a failure, never a skip
@@ -5638,6 +5641,27 @@ def main():
         cell(name, fn)
 
     for name, fn in [("fourth-review/C1048-persistent-place-located-by-grid", c1048_persistent_place_located_by_grid)]:
+        cell(name, fn)
+
+    # C1079 (Pilgrim S1, fifth review): an overlap pair whose need of the other mod was not measured, where that mod's
+    # object is a base-game record it only moves (2 u, same turn: read from both plugin files), says how far it moves it.
+    def c1079_other_mod_nudge_said():
+        X, Y = f"000F79:{MOD_A}", f"00CA79:{BASE}"
+        fb_ = plugin_file_of(BASE, [], [("REFR", 0x0000CA79, [("DATA", struct.pack("<6f", 100.0, 100.0, 0.0, 0.0, 0.0, 1.5))], False)],
+                             group="CELL")
+        fo_ = plugin_file_of(OTHER, [BASE], [("REFR", 0x0000CA79, [("DATA", struct.pack("<6f", 102.0, 100.0, 0.0, 0.0, 0.0, 1.5))], False)],
+                             group="CELL")
+        r_ = row("OVERLAP", OTHER, MOD_A, X, other=Y)
+        arms_ = with_files([arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                            arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])], {BASE: fb_, OTHER: fo_})
+        names_ = {"refs": {Y: {"base": f"0B0A79:{BASE}", "carriedBy": [BASE, OTHER]}, X: {"base": f"0B0A79:{BASE}", "carriedBy": [MOD_A]}},
+                  "bases": {f"0B0A79:{BASE}": {"type": "Static", "editorId": "Rock01", "model": "rocks\\rock01.nif"}}}
+        plan, md, _ = compile_and_render(arms_, {(OVERLAP, "baseline"): [r_], (OVERLAP, "without-patch"): [r_]}, [MOD_A],
+                                         patches=[PATCH], names=names_)
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        return (re.search(re.escape(OTHER) + r" only moves [^.]*2 u", it) is not None and "was not measured" in md), (it[-400:] or md[:1500])
+
+    for name, fn in [("fifth-review/C1079-other-mod-nudge-said", c1079_other_mod_nudge_said)]:
         cell(name, fn)
 
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
