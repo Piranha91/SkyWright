@@ -5944,6 +5944,24 @@ def main():
     for name, fn in [("fifth-review/C1092-also-variant-finds-pairs", c1092_also_variant_finds_pairs)]:
         cell(name, fn)
 
+    # C1094 (Sewers S3): an overlap pair the probe reports as touching is said as surfaces in contact, counted apart in
+    # the item, and the "drawn through each other" line speaks only of the crossing pairs.
+    def c1094_touching_pairs_said_apart():
+        X, Y, Z = f"000X94:{MOD_A}", f"000Y94:{MOD_B}", f"000Z94:{MOD_B}"
+        r1 = row("OVERLAP", MOD_B, MOD_A, X, other=Y)
+        r1["Summary"] = f"Static from {MOD_A} / Static from {MOD_B}: touching, containment unassessed, 992 triangle pairs"
+        r2 = row("OVERLAP", MOD_B, MOD_A, X, other=Z)
+        r2["Summary"] = f"Static from {MOD_A} / Static from {MOD_B}: 12 triangle pairs"
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [r1, r2],
+                                                (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH])
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+        return ("1 of these pairs only touch" in it and "for the other 1 overlap pair" in it), it[-400:]
+
+    for name, fn in [("fifth-review/C1094-touching-pairs-said-apart", c1094_touching_pairs_said_apart)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
