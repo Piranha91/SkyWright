@@ -3364,6 +3364,7 @@ def build_prediction(ctx: dict) -> dict:
         for leaf_ in sorted(rb_[1]):
             w_ = (rb_words.get(record_type_of(e["summary"])) or {}).get(leaf_) or {}
             o_["noun"] = o_["noun"] or w_.get("noun") or leaf_
+            o_["inGame"] = o_.get("inGame") or w_.get("inGame")
             old_, new_ = rb_[0][leaf_], rb_[1][leaf_]
             if old_ == new_:
                 continue
@@ -3394,7 +3395,10 @@ def build_prediction(ctx: dict) -> dict:
                 "patch": bind(words["winnerOwnChangePatch"], {"patch": patch_text, "left": fmt_n(sum(1 for k_ in o_["parts"] if wp_.get(k_))),
                                                                "count": fmt_n(n_)})
                 if words.get("winnerOwnChangePatch") and all(k_ in wp_ for k_ in o_["parts"]) else "",
-                "parts": "; ".join(o_["parts"].values())}), "findingIds": o_["findingIds"][:1]})
+                "parts": "; ".join(o_["parts"].values()),
+                # (fifth review, Missives S2) what the bits do in game, from skill data readBitsWords
+                "inGame": bind(words.get("winnerOwnChangeInGame") or "", {"what": o_["inGame"]}) if o_.get("inGame") else ""}),
+                "findingIds": o_["findingIds"][:1]})
     # a rebuilt record supersedes the loser's small fix (Pilgrim final review B1): one line per winning mod, with the
     # record facts in plain words, never in the clash counts
     sup_ = collections.OrderedDict()
