@@ -7181,6 +7181,11 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
     pred_ = (plan.get("reader") or {}).get("prediction") or {}
     counted_by_fid = collections.Counter(e.get("findingId") for e in pred_.get("record") or []
                                          if e.get("admission") == "admitted" and e.get("findingId"))
+    # (fifth review, Winterhold S1) with two evaluated mods, rows already there with one mod alone are not counted at the top
+    alone_by_fid = (collections.Counter(e.get("findingId") for e in pred_.get("record") or []
+                                        if e.get("admission") == "admitted" and e.get("findingId")
+                                        and e.get("attribution") == "single-mod")
+                    if len(pred_.get("mods") or []) > 1 else collections.Counter())
     pred_arm_ = pred_.get("predictionArm")
 
     # (third review: Winterhold S4, Clockwork S2, BPT S4) a detail line on the setup with the patch says the same, its rows
@@ -7241,6 +7246,11 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                 and all((f_by_id.get(x) or {}).get("armId") == pred_arm_ for x in fids)):
             # every row set aside: said, so the list adds up with the top (third review, Clockwork S2)
             return " (" + bind(conc["withPatchSplitParts"]["aside"], {"count": fmt_n(n_rows)}) + ")"
+        al_ = sum(alone_by_fid.get(x, 0) for x in fids)
+        if pred_arm_ and k_ and al_ and conc.get("countedAboveAloneNote") and k_ <= n_rows:
+            return bind(conc["countedAboveAloneNote"], {"counted": fmt_n(k_ - al_), "alone": fmt_n(al_),
+                                                         "rest": (bind(conc.get("countedAboveRest") or "; {rest} set aside",
+                                                                       {"rest": fmt_n(n_rows - k_)}) if n_rows > k_ else "")})
         if not pred_arm_ or not k_ or k_ >= n_rows or not conc.get("countedAboveNote"):
             return ""
         return bind(conc["countedAboveNote"], {"counted": fmt_n(k_), "rest": fmt_n(n_rows - k_)})
