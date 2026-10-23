@@ -5729,7 +5729,7 @@ def main():
             return it, st
         it1, st1 = run([Y])
         it2, st2 = run([Y, Z])
-        return ("drawn through each other" not in it1 and "for the other 1 pair" in it2 and "drawn through each other" in it2
+        return ("drawn through each other" not in it1 and "for the other 1 overlap pair" in it2 and "drawn through each other" in it2
                 and "1 with a visual-effect model" in st2), f"{it1[-200:]} || {it2[-250:]} || {st2[-200:]}"
 
     for name, fn in [("fifth-review/C1082-effect-pairs-in-game-and-still-there", c1082_effect_pairs_in_game_and_still_there)]:

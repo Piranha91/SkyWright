@@ -1535,6 +1535,12 @@ def build_prediction(ctx: dict) -> dict:
     body_checks = set(words.get("bodyChecks") or [])   # checks whose rows name placed objects, which have a base
     effect_model_re = re.compile(words["effectModelPattern"], re.I) if words.get("effectModelPattern") else None
 
+    def effect_pair(fk, others):
+        """A geometry pair with an object whose base's model is a visual effect (skill data effectModelPattern)."""
+        return effect_model_re is not None and any(
+            effect_model_re.search(str((name_bases.get((name_refs.get(str(o_)) or {}).get("base") or "") or {})
+                                       .get("model") or "")) for o_ in [fk, *(others or ())])
+
     def body_unread(rk, other):
         return (bases_read and rk[0] in body_checks
                 and (base_unknown(rk[4]) or any(base_unknown(o) for o in other or ())))
@@ -2417,9 +2423,7 @@ def build_prediction(ctx: dict) -> dict:
             pairs_ = g.setdefault("_objPairs", [])
             if not pairs_ and (object_name(rk[4]) or object_name(o0_)):
                 pairs_.append(bind(words["itemObjectPair"], {"a": named(rk[4]), "b": named(o0_)}))
-        if rk[1] != "LOST-EDIT" and hit["row"].get("other") and effect_model_re is not None and any(
-                effect_model_re.search(str((name_bases.get((name_refs.get(str(o_)) or {}).get("base") or "") or {})
-                                           .get("model") or "")) for o_ in [rk[4], *hit["row"]["other"]]):
+        if rk[1] != "LOST-EDIT" and hit["row"].get("other") and effect_pair(rk[4], hit["row"]["other"]):
             # (fourth review, Pilgrim S2) a pair with an object whose model is a visual effect (skill data): said apart
             g["_effectPairs"] = g.get("_effectPairs", 0) + 1
         if rk[1] == "LOST-EDIT" and str(hit["row"].get("field") or "") == sup_place:
@@ -2909,6 +2913,7 @@ def build_prediction(ctx: dict) -> dict:
             if str(p4_).lower() != str(lo4_).lower():
                 detail.append(bind(words["itemPreviousWinner"], {"winner": wi4_, "prev": p4_}))
         n_eff_ = g.pop("_effectPairs", 0)
+        g["_effN"] = n_eff_
         if n_eff_ and words.get("itemEffectPairs"):
             detail.append(bind(words["itemEffectPairs"], {"count": fmt_n(n_eff_), "all": "All" if n_eff_ == g["count"] else ""}))
         for (wi_, lo_), dzs_ in (g.pop("_heightDiff", None) or {}).items():
@@ -2971,6 +2976,12 @@ def build_prediction(ctx: dict) -> dict:
                         "depth": f"{dm_.group(1)} u" if dm_ else ""})})
                     break
         g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else words["inGameMissing"])
+        n_eff_ = g.pop("_effN", 0)
+        if n_eff_ and g["inGame"] and g["kind"] != "LOST-EDIT":
+            # (fifth review, Pilgrim S4) the in-game line speaks only of the pairs with no visual-effect model
+            g["inGameText"] = ("" if n_eff_ >= g["count"] else bind(words.get("inGameOthers") or "In game, for the other {count} {unit}: {what}.", {
+                "count": fmt_n(g["count"] - n_eff_), "unit": unit_noun(g["checkId"], g["kind"], g["count"] - n_eff_),
+                "what": g["inGame"]}))
         g["shownAs"] = ("pair" if not multi or g["attribution"] == "needs-both" else
                         "alone" if g["attribution"] == "single-mod" else "unseparated")
         items.append(g)
@@ -4779,6 +4790,10 @@ def build_prediction(ctx: dict) -> dict:
                 where_.append(bind(words[w_key], {"place": re.sub(r"\s+\d+ tris -> \d+$", "", pl_),
                                                   "count": fmt_n(n_pl), "more": fmt_n(len(places) - 1),
                                                   "unit": unit_noun(g["checkId"], g["kind"], n_pl)}))
+            eff_ = sum(1 for e in es if g["kind"] != "LOST-EDIT" and e.get("other") and effect_pair(e["formKey"], e["other"]))
+            if eff_ and words.get("stillThereEffect"):
+                # (fifth review, BPT S1) how many of the pairs still there involve a visual-effect model
+                where_.append(bind(words["stillThereEffect"], {"count": fmt_n(eff_)}))
             held_ = sum(1 for e in es if patch_places(e))
             if held_ and words.get("stillTherePatchMoves"):
                 # a patch places one of the objects and they still cross there (Clockwork review S5)
