@@ -3864,7 +3864,7 @@ def build_prediction(ctx: dict) -> dict:
         n_ = len(d_["fields"])
         # (fourth review, Clockwork r3 S1) what the setup with the patch has: whether its winner holds the base-game
         # plugin's value, read by the record chain's read-same rule
-        kept_, later_ = None, collections.OrderedDict()
+        kept_, later_, none_ = None, collections.OrderedDict(), 0
         if patched_arm and words.get("baseValueDroppedPatch"):
             kept_ = 0
             for rk_ in (d_.get("rows") or {}).values():
@@ -3878,12 +3878,18 @@ def build_prediction(ctx: dict) -> dict:
                     # a later change replacing it: who first made it (the earliest provider after the base plugin
                     # holding it as its own change, by the attribution read; decision 1 at Gate A)
                     b_ = low_.index(str(base_).lower())
-                    if (vs_[-1] != vs_[b_] and (str(mod_).lower() not in low_
-                                                or vs_[-1] != vs_[low_.index(str(mod_).lower())])):
-                        own_ = [recordrows.attribute(ch_["providers"], vs_, k_, masters)["own"] for k_ in range(len(low_))]
-                        first_ = next((k_ for k_ in range(b_ + 1, len(low_)) if vs_[k_] == vs_[-1] and own_[k_]), None)
-                        if first_ is not None:
-                            later_[ch_["providers"][first_]] = later_.get(ch_["providers"][first_], 0) + 1
+                    # (seventh review round 2, Snazzy 28 / 73) a winning version holding none of the field holds no later
+                    # change: the field is gone there, said so, as the removal line says it
+                    held_last_ = {k_: v_ for k_, v_ in recordrows.provider_fields(ch_, f_, len(low_) - 1).items()
+                                  if not re.match(r"^has (?:no \S|.* ABSENT$)", str(v_))}
+                    if not held_last_ and any(recordrows.provider_fields(ch_, f_, j_) for j_ in range(len(low_) - 1)):
+                        none_ += 1
+                    elif (vs_[-1] != vs_[b_] and (str(mod_).lower() not in low_
+                                                  or vs_[-1] != vs_[low_.index(str(mod_).lower())])):
+                        # the value's one owner (round 2), where it comes after the base plugin
+                        o_ = owner_of(ch_["providers"], vs_, len(low_) - 1)
+                        if o_[0] > b_:
+                            later_[o_[1]] = later_.get(o_[1], 0) + 1
             if not any((chains_of(rk_[0], patched_arm) or {}).get(str(rk_[4])) for rk_ in (d_.get("rows") or {}).values()):
                 kept_ = None
         # (seventh review, Missives S1) the carriers read per field from the chain
@@ -3897,7 +3903,8 @@ def build_prediction(ctx: dict) -> dict:
             "patch": "" if kept_ is None else bind(words["baseValueDroppedPatch"], {
                 "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_})
             + "".join(bind(words.get("baseValueDroppedLater") or "", {
-                "count": fmt_n(c_), "later": l_, "base": base_}) for l_, c_ in later_.items()),
+                "count": fmt_n(c_), "later": l_, "base": base_}) for l_, c_ in later_.items())
+            + (bind(words.get("baseValueDroppedNone") or "", {"count": fmt_n(none_), "base": base_}) if none_ else ""),
             "carriers": carriers_text(per_c_, n_c_)})
             + (" " + bind(words["waterHeightOutside"]["line"], {"examples": "; ".join(
                 f"{fk_} ({v_})" for fk_, v_ in list(d_["outside"].items())[:2])})

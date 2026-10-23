@@ -8488,7 +8488,27 @@ def main():
                              {MOD_A: [BASE], E_: [BASE], M_: [BASE], L_: [BASE]})
         return (f"Without {L_}, the value used is {E_}'s, which {M_} carries" in it), it[-400:]
 
+    # C1167 (round 2, Snazzy 28 / 73): with the patch the winning version holds none of the field: the base-fix line says
+    # so, never that it holds a later change of it.
+    def c1167_patch_without_the_field_holds_no_later_change():
+        L1, LF = f"00CA67:{BASE}", "LaterFix.esp"
+        arms = [arm("baseline", [BASE, HF_, LF, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, LF, OTHER, MOD_A, MOD_B])]
+        pre_ = [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}), (LF, {"Location": "has no Location"}),
+                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": ""})]
+        p_ch = [(L1, "Cell", pre_)]
+        w_ch = [(L1, "Cell", pre_ + [(PATCH, {"Location": "has no Location"})])]
+        p_rows = [lost_row(HF_, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, [], check=CELLATTR, arms=arms, p_chains=p_ch, w_chains=w_ch,
+                                  masters={HF_: [BASE], LF: [BASE, HF_], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE],
+                                           PATCH: [BASE, MOD_A]})
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
+        return ("holds none of that field" in line and "later value" not in line), line[-400:]
+
     for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
+                     ("round2/C1167-patch-without-the-field-holds-no-later-change",
+                      c1167_patch_without_the_field_holds_no_later_change),
                      ("round2/C1165-others-carry-the-losers-value", c1165_others_carry_the_losers_value),
                      ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner)]:
         cell(name, fn)
