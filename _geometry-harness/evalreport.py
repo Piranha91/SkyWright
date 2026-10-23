@@ -1113,7 +1113,7 @@ def field_name(row: dict) -> str:
 
 
 # lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
-NOISE_ADMISSIONS = ("navmeshCheck", "noWater", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead",
+NOISE_ADMISSIONS = ("navmeshCheck", "noWater", "winnerListDrop", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead",
                     "winnerOwnChange")
 FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
                     / "references" / "record-field-scope.json")
@@ -2294,12 +2294,42 @@ def build_prediction(ctx: dict) -> dict:
                              "navmesh", tgt_)
         return bool(got_ and got_.get("triangles") is not None and tri_ < int(got_["triangles"]) and now_ <= tri_)
 
+    def list_items_(v):
+        """The items a list delta says only this version holds ("only here: [i] X; ..."); None where the delta is cut
+        short ("more element(s)") or names none."""
+        t_ = " ".join(map(str, v)) if isinstance(v, (list, tuple)) else str(v or "")
+        if "more element" in t_:
+            return None
+        m_ = re.search(r"only here:(.*?)(?:only in |$)", t_)
+        got_ = set(re.findall(r"\[\d+\]\s*([0-9A-Fa-f]{6}:[^;,()\]]+?)\s*(?=;|,|\(|$)", m_.group(1))) if m_ else set()
+        return got_ or None
+
+    def list_drop(rk):
+        """(sixth review, Missives r5 S2; gate A condition R4) an evaluated mod's list that drops items the base game's
+        version holds, against a losing version that holds the same items as the base game's (in any order): the
+        evaluated mod's own change against the base game, never a clash of the losing plugin's. The dropped items, or
+        None."""
+        if rk[1] != "LOST-EDIT" or rk[3].lower() not in pt_lower:
+            return None
+        f_ = str(((p_rows.get(rk) or {}).get("row") or {}).get("field") or "")
+        ch_ = (chains_of(rk[0], p_of(rk[0])) or {}).get(str(rk[4]))
+        if not ch_ or f_ not in (ch_.get("values") or {}):
+            return None
+        low_ = [str(x).lower() for x in ch_["providers"]]
+        if rk[2].lower() not in low_ or low_[-1] != rk[3].lower() or not is_base_game(ch_["providers"][0], words):
+            return None
+        vals_ = ch_["values"][f_]
+        bi_, li_ = list_items_(vals_[0]), list_items_(vals_[low_.index(rk[2].lower())])
+        return sorted(bi_) if bi_ and li_ == bi_ else None
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
             return "history"
         if a.lower() == b.lower():
             return "sameMod"
+        if list_drop(rk):
+            return "winnerListDrop"
         if there(w_arm, rk):
             return "alreadyPresent"
         if rk[1] == "EDGE-IDX" and (link_origin(rk) or ("",))[0] == "base":
@@ -3715,6 +3745,34 @@ def build_prediction(ctx: dict) -> dict:
                 f"{fk_} ({v_})" for fk_, v_ in list(d_["outside"].items())[:2])})
                if d_.get("outside") and (words.get("waterHeightOutside") or {}).get("line") else ""),
             "findingIds": d_["findingIds"][:1]})
+    # (sixth review, Missives r5 S2; R4) an evaluated mod's list dropping items the base game's version holds, against
+    # versions that only carry the base game's items: its own change against the base game, one line per mod
+    drop_ = collections.OrderedDict()
+    for e in record:
+        if e["admission"] != "winnerListDrop":
+            continue
+        rk_ = (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])
+        d_ = drop_.setdefault(e["B"], {"fields": collections.OrderedDict(), "carriers": [], "findingIds": []})
+        d_["fields"].setdefault((str(e["formKey"]), e.get("field")), (rk_, list_drop(rk_) or []))
+        if e["A"] not in d_["carriers"]:
+            d_["carriers"].append(e["A"])
+        if e.get("findingId") and e["findingId"] not in d_["findingIds"]:
+            d_["findingIds"].append(e["findingId"])
+    for mod_, d_ in drop_.items():
+        n_ = len(d_["fields"])
+        still_ = None
+        if patched_arm:
+            still_ = sum(1 for (fk_, f_), (rk_, _) in d_["fields"].items()
+                         if [str(x).lower() for x in ((chains_of(rk_[0], patched_arm) or {}).get(fk_) or {}).get("providers") or []][-1:]
+                         == [mod_.lower()])
+        if words.get("winnerListDropLine"):
+            loss_lines.append({"text": bind(words["winnerListDropLine"], {
+                "mod": mod_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
+                "examples": "; ".join(f"{named(fk_)} ({f_}: {', '.join(it_)})" for (fk_, f_), (_, it_) in list(d_["fields"].items())[:2]),
+                "carriers": " and ".join(d_["carriers"]), "verb": "carries" if len(d_["carriers"]) == 1 else "carry",
+                "patch": "" if still_ is None else bind(words["winnerListDropPatch"], {
+                    "patch": patch_text, "still": fmt_n(still_), "count": fmt_n(n_)})}),
+                "findingIds": d_["findingIds"][:1]})
     # (Missives review 1) the winner's own change to the bits the game reads of a field whose losing change is only in
     # unread bytes: one line per winning mod, with each record and what the read bits mean (skill data)
     own_ = collections.OrderedDict()

@@ -7953,6 +7953,31 @@ def main():
     for name, fn in [("sixth-review/C1131-water-height-outside-world-said", c1131_water_height_outside_world_said)]:
         cell(name, fn)
 
+    # C1130 (Missives r5 S2, gate A condition R4): ModA's list of a cell's regions drops an item the base game's version
+    # holds; OtherMod.esp's version holds the base game's items in another order. The loss is ModA's own change against
+    # the base game, said in a measured line naming the dropped item, never filed as OtherMod.esp's clash.
+    def c1130_evaluated_list_drop_said_as_own():
+        C = f"00CA30:{BASE}"
+        d_base = f"Regions: 3 vs {MOD_A} 2 item(s) — only here: [0] 00AAAA:Skyrim.esm"
+        d_oth = f"Regions: 3 vs {MOD_A} 2 item(s) — only here: [2] 00AAAA:Skyrim.esm"
+        nodes = [{"plugin": BASE, "is_winner": False, "is_reference": False, "complete": True, "deltas": [d_base]},
+                 {"plugin": OTHER, "is_winner": False, "is_reference": False, "complete": True, "deltas": [d_oth]},
+                 {"plugin": MOD_A, "is_winner": True, "is_reference": True}]
+        req = [{"batchMarker": "b1"}, {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "housecarl_records", "arguments": {"formids": [C], "project": {"form": "tree"}}}}]
+        resp = [{"batchMarker": "b1"}, {"jsonrpc": "2.0", "id": 1, "result": {"content": [{"type": "text", "text": json.dumps(
+            {"rows": [{"formid": C, "type": "Cell", "editorid": None, "reference": MOD_A, "touchers": [BASE, OTHER, MOD_A],
+                       "nodes": nodes}]})}]}}]
+        r_ = lost_row(OTHER, MOD_A, C, "Regions", [d_oth], PH, [d_base], label="OriginExt")
+        r_["Summary"] = f"Cell OriginExt: Regions - {OTHER}'s value lost to {MOD_A}'s"
+        plan, md, _ = core_bundle([r_], [r_], check=CELLATTR, masters=MASTERS_, p_tr=(req, resp))
+        adm = [e["admission"] for e in rec_of(plan, C)]
+        line = next((ln for ln in md.splitlines() if "drops items the base game" in ln), "")
+        return (adm == ["winnerListDrop"] and "00AAAA:Skyrim.esm" in line and f"{MOD_A}'s own change" in line), f"{adm}; {line[:400]}"
+
+    for name, fn in [("sixth-review/C1130-evaluated-list-drop-said-as-own", c1130_evaluated_list_drop_said_as_own)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
