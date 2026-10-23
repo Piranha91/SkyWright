@@ -4886,6 +4886,17 @@ def build_prediction(ctx: dict) -> dict:
                         ls_ = losers_of_unit.get(u_) or [e["A"]]
                         ws_ = list(dict.fromkeys(w_ for l_ in ls_ for w_ in w_wins.get(
                             (str(e["formKey"]), e.get("field"), str(l_).lower()), [])))
+
+                        def own_of(l_):
+                            """(sixth review, Missives) a losing value another plugin's own change carries is that
+                            plugin's change"""
+                            fc_ = field_chain(p_of(e["checkId"]), (e["checkId"], e["kind"], l_, e["B"], e["formKey"],
+                                                                   e["summary"]), l_)
+                            low_ = [str(x).lower() for x in (fc_ or ((), ()))[0]]
+                            o_ = (carried_origin(fc_[0], fc_[1], low_.index(str(l_).lower()))
+                                  if fc_ and str(l_).lower() in low_ else None)
+                            return o_ if o_ and not is_base_game(o_, words) else l_
+                        ls_ = list(dict.fromkeys(own_of(l_) for l_ in ls_))
                         if ws_:
                             key_ += bind(words["blindSpotLostTo"], {"losers": and_list([f"{l_}'s" for l_ in ls_[:2]]) + (
                                 f" and {fmt_n(len(ls_) - 2)} more" if len(ls_) > 2 else ""), "winners": and_list(ws_[:2])})

@@ -6274,7 +6274,7 @@ def main():
     # C985, C986 (round 2, R2: Missives review S1, Snazzy review S2): the earlier clashes a patch also fixes are counted as
     # distinct changes in game: one field lost by two plugins is one; a Grid change only in bytes the game does not read
     # is none. Where the patch has no such field at all, the clash is said as the patch removing it, not as a fix.
-    def earlier_fix_bundle(patch_has_field, whole=False):
+    def earlier_fix_bundle(patch_has_field, whole=False, o2_carries=False):
         """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight's cell data 05, ModA 09, the patch 05. Removal:
         OtherMod and Neighbour have no MaxHeight, ModA has 09, the patch has none. Without ModA both lose to Later.esp too (already
         there). A Grid row differing only in unused bytes is lost the same way and fixed too."""
@@ -6313,8 +6313,8 @@ def main():
         tr = {(RECORDS, "without-patch"): absent_too(p_tr_), (RECORDS, "baseline"): tree_transcript(w_ch)}
         plan, md, _ = compile_and_render(arms_, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch", "without-a")},
                                          [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
-                                         enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE], O3: [BASE],
-                                                                                  PATCH: [BASE]})
+                                         enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE, OTHER] if o2_carries
+                                                                                  else [BASE], O3: [BASE], PATCH: [BASE]})
         if whole:
             return md
         return next((x for x in md.splitlines() if "but not predicted" in x), "")
@@ -7925,6 +7925,15 @@ def main():
         return (f"{OTHER}'s value is {THIRD}'s own change, which {OTHER} only carries" in it and OTHER not in scope), f"{it[-300:]} || {scope}"
 
     for name, fn in [("sixth-review/C1116-carried-winner-value-named-by-owner", c1116_carried_winner_value_named_by_owner)]:
+        cell(name, fn)
+
+    # C1133 (Missives, Tamriel max height owners): an earlier loss the patch also fixes names whose own change the
+    # losing value is: Neighbour.esp only carries OtherMod.esp's value, so the change is OtherMod.esp's alone.
+    def c1133_earlier_fix_names_value_owner():
+        ln = earlier_fix_bundle(True, o2_carries=True)
+        return ("OtherMod.esp's change" in ln and "Neighbour.esp's" not in ln), ln[:500]
+
+    for name, fn in [("sixth-review/C1133-earlier-fix-names-value-owner", c1133_earlier_fix_names_value_owner)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
