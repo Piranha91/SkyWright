@@ -4830,7 +4830,7 @@ def build_prediction(ctx: dict) -> dict:
                 off_cache[id(e)] = r_
             return off_cache[id(e)]
 
-        OFF_STATES = ("onOwn", "onPatch", "on", "parent", "starts", "off", "unknown", "keptOn", "keptOnPlaced", "keptBase")
+        OFF_STATES = ("onOwn", "onPatch", "on", "parent", "starts", "off", "unknown", "keptOn", "keptOnPlaced", "keptBase", "keptPlace")
 
         def kept_meaning(e):
             """(fifth review, Snazzy S2, Winterhold R2-2) what a kept lost change on an object the version with the patch
@@ -4857,6 +4857,9 @@ def build_prediction(ctx: dict) -> dict:
                 return "keptOn"
             if str(e.get("field") or "") == (lm_words.get("baseField") or "Base"):
                 return "keptBase"
+            # (seventh review, BPT S3) every kept row has its meaning: a kept position is the winning mod's spot
+            if str(e.get("field") or "") == sup_place:
+                return "keptPlace"
             return None
 
         def own_removal(e):
@@ -4902,12 +4905,21 @@ def build_prediction(ctx: dict) -> dict:
         def off_counts(es_):
             return collections.Counter(off_state(e) for e in es_ if off_state(e))
 
-        def off_text(c_, wrap=True):
-            """The off-for-good note: a Counter by the losing version's state (an int is an unknown state)."""
+        def off_text(c_, wrap=True, objs=None):
+            """The off-for-good note: a Counter by the losing version's state (an int is an unknown state). objs: the
+            objects per state, said with the record fields where they differ (seventh review, Winterhold S2)."""
             if isinstance(c_, int):
                 c_ = collections.Counter({"unknown": c_}) if c_ else collections.Counter()
             notes_ = words.get("offGoodNotes") or {}
-            parts_ = [bind(notes_.get(s_) or words["offGoodNote"], {"count": fmt_n(c_[s_])}) for s_ in OFF_STATES
+
+            def cnt_(s_):
+                o_ = (objs or {}).get(s_)
+                if not o_ or o_ >= c_[s_] or not words.get("offGoodObjects"):
+                    return fmt_n(c_[s_])
+                return bind(words["offGoodObjects"], {"objects": fmt_n(o_), "count": fmt_n(c_[s_]),
+                                                      "noun": words["fieldNoun"][0 if c_[s_] == 1 else 1],
+                                                      "objNoun": "object" if o_ == 1 else "objects"})
+            parts_ = [bind(notes_.get(s_) or words["offGoodNote"], {"count": cnt_(s_)}) for s_ in OFF_STATES
                       if (c_ or {}).get(s_)]
             if not parts_:
                 return ""
@@ -5375,6 +5387,9 @@ def build_prediction(ctx: dict) -> dict:
                             # (fourth review) each off-for-good count by the losing version's own state
                             "offKeptBy": collections.Counter(f"{e['A']}|{e['B']}|{off_state(e)}" for e in all_["kept"]
                                                              if item_of(e) == k and off_state(e)),
+                            # (seventh review, Winterhold S2) the objects those record fields are on
+                            "offKeptObjs": sorted({(f"{e['A']}|{e['B']}|{off_state(e)}", str(e["formKey"]))
+                                                   for e in all_["kept"] if item_of(e) == k and off_state(e)}),
                             **{k2_: v2_ for n_, x_ in (("Open", "open"), ("Kept", "kept"))
                                for k2_, v2_ in off_keys(f"off{n_}", [e for e in all_[x_] if item_of(e) == k]).items()},
                             "cannotTell": sum(1 for e in all_["untold"] if item_of(e) == k),
@@ -5487,7 +5502,11 @@ def build_prediction(ctx: dict) -> dict:
                 return ", ".join(bind(ow["kept"], {"loser": m_.split("|")[0], "winner": m_.split("|")[1],
                                                    "count": fmt_n(n_)})
                                  + off_text(collections.Counter({s_: (bi.get("offKeptBy") or {}).get(f"{m_}|{s_}", 0)
-                                                                 for s_ in OFF_STATES}))
+                                                                 for s_ in OFF_STATES}),
+                                            objs=collections.Counter(s_.rsplit("|", 1)[-1] for s_, _ in
+                                                                     {tuple(x_) for x_ in bi.get("offKeptObjs") or []}
+                                                                     if s_.rsplit("|", 1)[0] == m_)
+                                            if bi.get("offKeptObjs") is not None else None)
                                  for m_, n_ in sorted(by.items(), key=lambda kv: (-kv[1], kv[0].lower())))
             parts = [part(k) for k in keys if bi.get(k)]
             if bi.get("open") and (bi.get("openPatchHeld") or bi.get("openNotAttributed") or bi.get("openSupportRemoved")):
@@ -5541,18 +5560,20 @@ def build_prediction(ctx: dict) -> dict:
         for (check_id, kind), gs in by_kind.items():
             agg = collections.Counter()
             sw_by, kp_by, ok_by = (collections.Counter() for _ in range(3))
+            ob_by = []
             for g, bi in gs:
                 agg.update({k_: v_ for k_, v_ in bi.items() if isinstance(v_, int)})
                 sw_by.update(bi.get("switchedBy") or {})
                 kp_by.update(bi.get("keptBy") or {})
                 ok_by.update(bi.get("offKeptBy") or {})
+                ob_by += list(bi.get("offKeptObjs") or [])
             total = sum(g["count"] for g, _ in gs)
             eff_t_ = sum(int(g.get("effectPairs") or 0) for g, _ in gs)
             kind_lines.append(bind(words["withPatchKindLine"], {
                 "title": title_of(check_id), "total": fmt_n(total), "unit": unit_noun(check_id, kind, total)
                 + (", " + bind(words["stillThereEffect"], {"count": fmt_n(eff_t_)}) if eff_t_ and words.get("stillThereEffect") else ""),
                 "outcomes": outcome_text({**agg, "switchedBy": dict(sw_by), "keptBy": kp_by,
-                                         "offKeptBy": ok_by})}))
+                                         "offKeptBy": ok_by, "offKeptObjs": ob_by})}))
         stays_parts, back = [], collections.OrderedDict()
         reused_moved, reused_base = collections.OrderedDict(), collections.OrderedDict()
         stay_groups = collections.OrderedDict()

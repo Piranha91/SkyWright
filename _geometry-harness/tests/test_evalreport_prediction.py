@@ -8227,7 +8227,41 @@ def main():
         ln = next((x for x in md.splitlines() if "Objects occupying the same space** (overlap pairs)" in x), "")
         return (bool(ln) and "for the other" not in ln and "In game" in ln), ln[-400:]
 
-    for name, fn in [("seventh-review/C1149-alone-line-meaning-without-effect-lead", c1149_alone_line_meaning_without_effect_lead),
+    # C1150 (Winterhold S2): the patch keeps ModB's on version of one object over ModA's two switch-off fields (its
+    # position below the world and its flags): the with-patch note counts the record fields with the objects they are
+    # on, "2 record fields (1 object) drawn though ...", never "2 drawn" as if two objects.
+    def c1150_kept_note_says_objects():
+        D = f"00CA50:{BASE}"
+        a_, b_ = offs(-30000, "InitiallyDisabled"), offs(0)
+        p_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE),
+                  lost_row(MOD_A, MOD_B, D, "SkyrimMajorRecordFlags", ["SkyrimMajorRecordFlags=InitiallyDisabled"],
+                           ["SkyrimMajorRecordFlags=0"], ["SkyrimMajorRecordFlags=0"], before=BASE)]
+        w_rows = [dict(r_, B=PATCH, Summary=r_["Summary"].replace(MOD_B, PATCH)) for r_ in p_rows]
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
+        w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+        kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
+                   if x.startswith("Record fields")), "")
+        return ("2 record fields (1 object) drawn though the losing mod switches them off" in kl), kl[:400]
+
+    # C1159 (BPT S3): every kept row of the with-patch line has its meaning: a kept position (both versions have the
+    # object on; ModA moved it, the patch keeps ModB's spot) is said as the object standing where the winning mod puts it.
+    def c1159_kept_position_has_meaning():
+        D = f"00CA59:{BASE}"
+        a_, b_ = offs(0), offs(0)
+        a_["Placement.Position"], b_["Placement.Position"] = "300,100,0", "500,100,0"
+        p_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        w_rows = [lost_row(MOD_A, PATCH, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
+        w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_), (PATCH, b_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
+        kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
+                   if x.startswith("Record fields")), "")
+        return ("1 in the position, so the object stands where the winning mod puts it" in kl), kl[:400]
+
+    for name, fn in [("seventh-review/C1159-kept-position-has-meaning", c1159_kept_position_has_meaning),
+                     ("seventh-review/C1150-kept-note-says-objects", c1150_kept_note_says_objects),
+                     ("seventh-review/C1149-alone-line-meaning-without-effect-lead", c1149_alone_line_meaning_without_effect_lead),
                      ("seventh-review/C1155-set-aside-carried-one-explanation", c1155_set_aside_carried_one_explanation),
                      ("seventh-review/C1161-set-aside-counts-fields", c1161_set_aside_counts_fields)]:
         cell(name, fn)
