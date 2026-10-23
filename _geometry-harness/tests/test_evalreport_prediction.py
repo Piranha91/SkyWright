@@ -7310,6 +7310,184 @@ def main():
                      ("fifth-review/C1076-inherited-removal-not-winners-own", c1076_inherited_removal_not_winners_own)]:
         cell(name, fn)
 
+    # ------------------------------------------------ after the sixth review (C1101-C1139)
+    # C1101-C1102 (BPT r6 S1): ModA has the object on and moved; ModB, the winner, removes it by its own change, and no
+    # patch touches the record. In game the object is not drawn while ModB's removal stands, so ModA's lost change has no
+    # effect there: nothing to patch. It is not a clash left with the patch: not "left", not in the still-there line, not
+    # in "still present", said with the winner's own removal and "nothing to patch" (C1101). Where the winner only
+    # carries an earlier mod's removal (C1102, guard), the losing mod may be undoing that removal on purpose: still left.
+    def c1101_own_removal_stands_nothing_to_patch():
+        D = f"00CA01:{BASE}"
+        kl, st, plan, md = own_removal_bundle([], [D])
+        w = [e.get("withPatch") for e in rec_of(plan, D)]
+        part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if "record field" in x), "")
+        summ = str((reader(plan).get("validation") or {}).get("summary") or "")
+        left_ = summ.split(" left ", 1)[1].split(", and new")[0] if " left " in summ else ""
+        open_ = next((ln for ln in md.splitlines() if ln.startswith("- Predicted and still present")), "")
+        ok = (bool(w) and w != ["left"] and "nothing to patch" in kl and re.search(r"\bleft 1\b", kl) is None
+              and not part and "record field" not in left_ and "record field" not in open_)
+        return ok, f"withPatch {w}; kind {kl[:300]!r}; stays {part[:160]!r}; summary left {left_[:120]!r}; open {open_[:120]!r}"
+
+    def c1102_inherited_removal_stays_left():
+        D = f"00CA02:{BASE}"
+        kl, st, plan, md = own_removal_bundle([], [D], inherited=True)
+        w = [e.get("withPatch") for e in rec_of(plan, D)]
+        return (w == ["left"] and "nothing to patch" not in kl), f"withPatch {w}; kind {kl[:300]!r}"
+
+    for name, fn in [("sixth-review/C1101-own-removal-stands-nothing-to-patch", c1101_own_removal_stands_nothing_to_patch),
+                     ("sixth-review/C1102-inherited-removal-stays-left", c1102_inherited_removal_stays_left)]:
+        cell(name, fn)
+
+    # C1104-C1106 (Winterhold r6 S1): an object of another mod rests on a support the evaluated mod removes (below the
+    # world, enabled opposite to the player, initially disabled). The patch keeps the support removed (its own version
+    # moves it 16 u, still below the world) and does not touch the object. With the patch the object still has no
+    # support, whatever the check's own re-measure says: the with-patch outcome follows the support's state in the setup
+    # with the patch, read from the plugin files (C1104: left, never resolved). Where the patch moves the object itself
+    # far away, the re-measure stands (C1105, guard: resolved). A comparison never counts as new an object whose support
+    # is removed in the setup it is compared with too (C1106: not "introduced", not new with the patch).
+    def refr_file(name, masters, refs, group="CELL"):
+        """A plugin of placed references: refs [(form id, base id, (x, y, z), off)]; off: below the world is in the
+        position, and an off reference is also enabled opposite to the player and initially disabled."""
+        def sub(sig, data):
+            return sig.encode() + struct.pack("<H", len(data)) + data
+        hdr = sub("HEDR", struct.pack("<fII", 1.7, len(refs), 0x800)) + b"".join(
+            sub("MAST", m.encode() + b"\x00") + sub("DATA", b"\x00" * 8) for m in masters)
+        body = b""
+        for fid, base_id, pos, off in refs:
+            data = sub("NAME", struct.pack("<I", base_id)) + sub("DATA", struct.pack("<6f", *pos, 0.0, 0.0, 0.0))
+            if off:
+                data += sub("XESP", struct.pack("<IB3x", 0x00000014, 1))
+            body += b"REFR" + struct.pack("<IIIIHH", len(data), 0x800 if off else 0, fid, 0, 44, 0) + data
+        out = (b"TES4" + struct.pack("<IIIIHH", len(hdr), 0, 0, 0, 44, 0) + hdr
+               + b"GRUP" + struct.pack("<I4sIIHH", 24 + len(body), group.encode(), 0, 0, 0, 0) + body)
+        p_ = Path(tempfile.mkdtemp(prefix="r6-")) / name
+        p_.write_bytes(out)
+        return p_
+
+    def support_bundle(patch_moves_object=False, created=False):
+        S, X = f"00CB04:{BASE}", f"000F04:{OTHER}"
+        arms_ = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B], kind="baseline"),
+                 arm("with-patch", [BASE, OTHER, MOD_A, MOD_B, PATCH])]
+        p_refs = [(0x0000CB04, 0x00000B04, (100.0, 116.0, -30000.0), True)]
+        if patch_moves_object:
+            p_refs.append((0x01000F04, 0x00000B05, (2100.0, 2100.0, 1500.0), False))
+        fs_ = {BASE: refr_file(BASE, [], [(0x0000CB04, 0x00000B04, (100.0, 100.0, 0.0), False)]),
+               OTHER: refr_file(OTHER, [BASE], [(0x01000F04, 0x00000B05, (110.0, 100.0, 64.0), False)]),
+               MOD_A: refr_file(MOD_A, [BASE], [(0x0000CB04, 0x00000B04, (100.0, 100.0, -30000.0), True)]),
+               MOD_B: refr_file(MOD_B, [BASE], []),
+               PATCH: refr_file(PATCH, [BASE, OTHER], p_refs)}
+        with_files(arms_, fs_)
+        names_ = {"refs": {X: {"base": f"000B05:{BASE}", "carriedBy": [OTHER] + ([PATCH] if patch_moves_object else [])},
+                           S: {"base": f"000B04:{BASE}", "carriedBy": [BASE, MOD_A, PATCH]}},
+                  "bases": {f"000B05:{BASE}": {"type": "Furniture", "editorId": "WoodPile", "model": "woodpickup.nif"},
+                            f"000B04:{BASE}": {"type": "Static", "editorId": "FloorPiece", "model": "floor.nif"}}}
+        r_ = row("CONTACT", OTHER, MOD_A, X, label="Longhouse (int)", other=S)
+        if created:
+            order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                         created=1, newDefect=1, attributed=0, unmeasured=0)}}
+            log = f"NEW     CONTACT    {OTHER}  x  {MOD_A}   +1 record(s): created 1\n"
+            return compile_and_render(arms_, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): [r_]},
+                                      [MOD_A, MOD_B], patches=[PATCH], order=order, names=names_,
+                                      diff_logs={(CONTACT, "with-patch"): log}), X
+        preds = {(CONTACT, "with-patch"): [{"Kind": "CONTACT", "A": OTHER, "B": MOD_A, "FormKey": X, "Other": S,
+                                            "Physical": "Gone"}]}
+        return compile_and_render(arms_, {(CONTACT, "baseline"): [r_], (CONTACT, "with-patch"): []},
+                                  [MOD_A, MOD_B], patches=[PATCH], names=names_, predicates=preds), X
+
+    def c1104_support_still_removed_with_patch_left():
+        (plan, md, _), X = support_bundle()
+        w = [e.get("withPatch") for e in rec_of(plan, X)]
+        kl = [x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or [] if "resolved" in x or "left" in x]
+        return w == ["left"], f"withPatch {w}; {kl[:2]}"
+
+    def c1105_object_moved_by_patch_stays_resolved():
+        (plan, md, _), X = support_bundle(patch_moves_object=True)
+        w = [e.get("withPatch") for e in rec_of(plan, X)]
+        return w == ["resolved"], f"withPatch {w}"
+
+    def c1106_created_with_support_removed_before_not_new():
+        (plan, md, _), X = support_bundle(created=True)
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression"), {})
+        c = reg.get("counts") or {}
+        val = reader(plan).get("validation") or {}
+        return (c.get("readerCreated") == 0 and not val.get("patchProblems")), (
+            f"comparison created {c.get('readerCreated')}; new with the patch {val.get('patchProblems')}; "
+            f"{str(reg.get('readerPlain'))[:200]!r}")
+
+    for name, fn in [("sixth-review/C1104-support-still-removed-with-patch-left", c1104_support_still_removed_with_patch_left),
+                     ("sixth-review/C1105-object-moved-by-patch-stays-resolved", c1105_object_moved_by_patch_stays_resolved),
+                     ("sixth-review/C1106-created-with-support-removed-before-not-new",
+                      c1106_created_with_support_removed_before_not_new)]:
+        cell(name, fn)
+
+    # C1107-C1109 (Clockwork r6 S1): ModA's navmesh 0C3907 replaces ModB's, which links three doors of ModB's own (and
+    # the base game's door the base navmesh links). ModA's version links only the base game's door. Read from the plugin
+    # files: ModB's doors 000D01 and 000D02 have no door link in any navmesh of the setup; 000D03 is linked by ModB's
+    # navmesh 0C3908 (C1108: not said lost). The patch's version links 000D01 again, so with the patch 000D02 alone is
+    # still without one (C1107). The plugin reader reads a navmesh's door triangles (C1109).
+    N_D1, N_D2 = 0x00000C3907, 0x00000C3908
+
+    def nvnm_d(n_tris, doors):
+        """A navmesh's geometry with door triangles [(triangle before the door, door FormID)] and no edge links."""
+        return (struct.pack("<IIII", 12, 0xA5E9A03C, 0x3C, 0) + struct.pack("<I", 0) + struct.pack("<I", n_tris)
+                + b"\x00" * 16 * n_tris + struct.pack("<I", 0) + struct.pack("<I", len(doors))
+                + b"".join(struct.pack("<hII", t_, 0, d_) for t_, d_ in doors))
+
+    def door_files():
+        door_refs = [("REFR", 0x01000D01 + i_, [("NAME", struct.pack("<I", 0x00000B10)),
+                                                 ("DATA", struct.pack("<6f", 100.0 * i_, 0.0, 0.0, 0.0, 0.0, 0.0))], False)
+                     for i_ in range(3)]
+        return {BASE: plugin_file_of(BASE, [], [("NAVM", N_D1, [("NVNM", nvnm_d(8, [(5, 0x00000C3A00)]))], False),
+                                                ("NAVM", N_D2, [("NVNM", nvnm_d(8, []))], False)]),
+                OTHER: plugin_file_of(OTHER, [BASE], []),
+                MOD_B: plugin_file_of(MOD_B, [BASE], [
+                    ("NAVM", N_D1, [("NVNM", nvnm_d(8, [(5, 0x00000C3A00), (6, 0x01000D01), (7, 0x01000D02),
+                                                        (2, 0x01000D03)]))], True),
+                    ("NAVM", N_D2, [("NVNM", nvnm_d(8, [(3, 0x01000D03)]))], False)] + door_refs),
+                MOD_A: plugin_file_of(MOD_A, [BASE], [("NAVM", N_D1, [("NVNM", nvnm_d(9, [(5, 0x00000C3A00)]))], False)]),
+                PATCH: plugin_file_of(PATCH, [BASE, MOD_B], [
+                    ("NAVM", N_D1, [("NVNM", nvnm_d(9, [(5, 0x00000C3A00), (6, 0x01000D01)]))], False)])}
+
+    def door_bundle():
+        N1 = f"0C3907:{BASE}"
+        r_ = lost_row(MOD_B, MOD_A, N1, "Data", ["Data.Max=1,2,3"], PH, ["Data.Max=0,0,0"])
+        r_["Summary"] = f"NavigationMesh {N1}: Data - {MOD_B}'s value lost to {MOD_A}'s"
+        arms_ = with_files([arm("baseline", [BASE, OTHER, MOD_B, MOD_A, PATCH], kind="baseline"),
+                            arm("without-patch", [BASE, OTHER, MOD_B, MOD_A])], door_files())
+        measured = {(NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): []}
+        plan, md, _ = cw_bundle([r_], extra_results=measured, arms=arms_)
+        sec = md.split("## What the checks could not judge")[0]
+        return plan, sec, str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+
+    def c1107_lost_door_links_said_with_patch():
+        plan, sec, aside = door_bundle()
+        d1, d2 = f"000D01:{MOD_B}", f"000D02:{MOD_B}"
+        ok = ("door link" in sec and d1 in sec and d2 in sec
+              and re.search(r"\b1 still ha(?:s|ve) no[^.]*" + re.escape(d2), sec) is not None
+              and "not checked by any check here" not in aside)
+        ln = next((x for x in sec.splitlines() if "door" in x), "")
+        return ok, f"{ln[:400]!r} || aside {aside[-200:]!r}"
+
+    def c1108_door_linked_elsewhere_not_lost():
+        plan, sec, aside = door_bundle()
+        return (f"000D03:{MOD_B}" not in sec and f"0C3A00:{BASE}" not in sec), sec[-300:]
+
+    def c1109_pluginread_door_triangles():
+        import pluginread
+        f_ = door_files()[MOD_B]
+        got = pluginread.navmesh_links(f_, [f"0C3907:{BASE}", f"0C3908:{BASE}"])["records"]
+        want1 = [[f"0C3A00:{BASE}", 5], [f"000D01:{MOD_B}", 6], [f"000D02:{MOD_B}", 7],
+                 [f"000D03:{MOD_B}", 2]]
+        ok = ((got.get(f"0C3907:{BASE}") or {}).get("doors") == want1
+              and (got.get(f"0C3908:{BASE}") or {}).get("doors") == [[f"000D03:{MOD_B}", 3]]
+              and (got.get(f"0C3907:{BASE}") or {}).get("triangles") == 8)
+        return ok, f"{got}"
+
+    for name, fn in [("sixth-review/C1107-lost-door-links-said-with-patch", c1107_lost_door_links_said_with_patch),
+                     ("sixth-review/C1108-door-linked-elsewhere-not-lost", c1108_door_linked_elsewhere_not_lost),
+                     ("sixth-review/C1109-pluginread-door-triangles", c1109_pluginread_door_triangles)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
