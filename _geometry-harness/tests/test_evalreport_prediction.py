@@ -5998,6 +5998,21 @@ def main():
     for name, fn in [("fifth-review/C1096-every-import-narrowing-said", c1096_every_import_narrowing_said)]:
         cell(name, fn)
 
+    # C1097 (Missives S2): a winner's own change to a cell's land flags says what hidden quarters do in game: the land of
+    # a hidden quarter is not drawn (skill data readBitsWords), beside the with-patch status.
+    def c1097_land_flags_meaning_said():
+        C1 = f"00CA97:{BASE}"
+        r_ = lost_row(OTHER, MOD_A, C1, "Grid", ["Grid.Flags=-412494080"], PH, ["Grid.Flags=-499936256"], label="TestCellLand")
+        r_["Summary"] = f"Cell TestCellLand: Grid - {OTHER}'s value lost to {MOD_A}'s"
+        ch_ = [(BASE, {"Grid.Flags": "5504256"}), (OTHER, {"Grid.Flags": "-412494080"}), (MOD_A, {"Grid.Flags": "-1223611121"})]
+        tr_ = tree_transcript([(C1, "Cell", ch_)])
+        plan, md, _ = core_bundle([r_], [r_], check=CELLATTR, masters=MASTERS_, p_tr=tr_, w_chains=[(C1, "Cell", ch_)])
+        line = next((ln for ln in md.splitlines() if "land flags" in ln and MOD_A in ln), "")
+        return ("not drawn" in line and f"with {PATCH}, still so in 1 of the 1" in line), line[-300:]
+
+    for name, fn in [("fifth-review/C1097-land-flags-meaning-said", c1097_land_flags_meaning_said)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
