@@ -471,6 +471,29 @@ def own_change(providers: list, values: list, i: int, masters=None) -> tuple[boo
     return values[i] != values[j], j
 
 
+def attribute(providers: list, values: list, i: int, masters_of=None) -> dict:
+    """Whose change provider i's value is, the one attribution read every sentence naming a plugin as the source of a
+    value, a removal or a placement asks (values may be field values, off-for-good flags or spots). {own: i changed it
+    (own_change), inherits: index it inherits from, origin: index of the provider that made the change i carries
+    (walking back through the versions it inherits while the value is unchanged), sameAs: earlier providers holding the
+    identical value as a change of their own (the same change made independently, earliest first), carriers: later
+    providers whose origin is that one}. masters_of: {plugin lower: [masters]}, or None (the provider before)."""
+    def ms(k):
+        return (masters_of or {}).get(str(providers[k]).lower()) if masters_of is not None else None
+    own_ = [own_change(providers, values, k, ms(k)) for k in range(len(providers))]
+
+    def origin(k):
+        for _ in range(len(providers)):
+            if own_[k][0] or own_[k][1] is None:
+                return k
+            k = own_[k][1]
+        return k
+    o_ = origin(i)
+    return {"own": own_[i][0], "inherits": own_[i][1], "origin": o_,
+            "sameAs": [k for k in range(o_) if values[k] == values[o_] and own_[k][0]],
+            "carriers": [k for k in range(o_ + 1, len(providers)) if k != o_ and not own_[k][0] and origin(k) == o_]}
+
+
 def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, containers=None, line=None, unjudged=None,
                    formkeys=None):
     """Each record's provider chain in this setup: {formKey: {type, editorId, providers [names, load order],

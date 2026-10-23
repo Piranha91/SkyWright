@@ -1634,14 +1634,26 @@ def build_prediction(ctx: dict) -> dict:
     def carried_origin(provs_, vals_, w_):
         """The plugin whose own change provider w_'s value is, walking back through the versions it only carries; None
         where w_'s value is its own change."""
-        k_ = w_
-        for _ in range(len(provs_)):
-            ch_, j_ = recordrows.own_change(provs_, vals_, k_, (masters or {}).get(str(provs_[k_]).lower())
-                                            if masters is not None else None)
-            if ch_ or j_ is None:
-                break
-            k_ = j_
+        k_ = recordrows.attribute(provs_, vals_, w_, masters)["origin"]
         return provs_[k_] if k_ != w_ else None
+
+    def whose_value(arm_id, check_id, fk, field, plugin=None, index=None):
+        """(seventh review) The attribution read of one record field in one setup, keyed by setup, check, record and
+        field, never by a row: (providers, values, recordrows.attribute of the plugin or index), or None where that
+        setup's chain does not hold the field (the sentence then names no one)."""
+        if not field:
+            return None
+        ch_ = (chains_of(check_id, arm_id) or {}).get(str(fk))
+        if not ch_ or not ch_.get("providers") or not (field in ch_["values"] or ch_.get("allListed")):
+            return None
+        provs_ = list(ch_["providers"])
+        vals_ = list(ch_["values"].get(field) or [()] * len(provs_))
+        if index is None:
+            low_ = [str(x).lower() for x in provs_]
+            if str(plugin).lower() not in low_:
+                return None
+            index = low_.index(str(plugin).lower())
+        return provs_, vals_, recordrows.attribute(provs_, vals_, index, masters)
 
     def base_unknown(fk):
         ref_ = name_refs.get(str(fk)) or {}
@@ -4960,12 +4972,15 @@ def build_prediction(ctx: dict) -> dict:
                         def own_of(l_):
                             """(sixth review, Missives) a losing value another plugin's own change carries is that
                             plugin's change"""
-                            fc_ = field_chain(p_of(e["checkId"]), (e["checkId"], e["kind"], l_, e["B"], e["formKey"],
-                                                                   e["summary"]), l_)
-                            low_ = [str(x).lower() for x in (fc_ or ((), ()))[0]]
-                            o_ = (carried_origin(fc_[0], fc_[1], low_.index(str(l_).lower()))
-                                  if fc_ and str(l_).lower() in low_ else None)
-                            return o_ if o_ and not is_base_game(o_, words) else l_
+                            # (seventh review, Missives r6 S2) the read keyed by setup, record and field, never by a
+                            # row rebuilt from another loser's summary; a value the base game's record holds from the
+                            # start is the base game's
+                            got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), l_)
+                            if got_ is None:
+                                return l_
+                            o_ = got_[2]["origin"]
+                            return ((words.get("baseGameOwner") or "the base game") if o_ == 0 and is_base_game(got_[0][0], words)
+                                    else got_[0][o_])
                         ls_ = list(dict.fromkeys(own_of(l_) for l_ in ls_))
                         if ws_:
                             key_ += bind(words["blindSpotLostTo"], {"losers": and_list([f"{l_}'s" for l_ in ls_[:2]]) + (
