@@ -4230,7 +4230,12 @@ def build_prediction(ctx: dict) -> dict:
             if e["kind"] != "LOST-EDIT" or not ch_ or not ch_.get("providers"):
                 return None
             last_ = len(ch_["providers"]) - 1
-            if off_at_load((e.get("values") or {}).get("lost")) and version_state(ch_, last_) == "on":
+            lost_k_ = (e.get("values") or {}).get("lost")
+            lost_kt_ = " ".join(map(str, lost_k_)) if isinstance(lost_k_, list) else str(lost_k_ or "")
+            num_k_ = re.fullmatch(r"\s*(?:\w*MajorRecordFlags=)?(\d+)\s*", lost_kt_)
+            # a switch-off by name, or as bit 2048 of a record-flags number (as the prediction's switch-off rows read it)
+            if ((off_at_load(lost_k_) or bool(num_k_ and int(num_k_.group(1)) & 0x800))
+                    and version_state(ch_, last_) == "on"):
                 low_ = [str(x).lower() for x in ch_["providers"]]
                 if str(e["B"]).lower() in low_:
                     pw_, pl_ = (_vec(next((v_ for k_, v_ in recordrows.provider_fields(ch_, sup_place, i_).items()
