@@ -5363,6 +5363,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             return None
         keys = {(d["kind"], d["A"], d["B"]) for d in groups}
         still = {x.get("formKey") for c in against_emit.get("Conflicts") or [] for x in conflict_rows(c, None)}
+        # (fifth review, BPT S6) an object the compared setup no longer lists but whose own carried predicate there still
+        # Holds left the class with its problem (the probe's reclassified): no repair
+        still |= {str(p_.get("FormKey")) for p_ in against_emit.get("Predicates") or []
+                  if isinstance(p_, dict) and p_.get("Physical") == "Holds"
+                  and (p_.get("Kind"), p_.get("A"), p_.get("B")) in keys}
         rows_ = [x for c in from_emit.get("Conflicts") or [] if (c.get("Kind"), c.get("A"), c.get("B")) in keys
                  for x in conflict_rows(c, None) if x.get("formKey") and x.get("formKey") not in still]
         if not rows_:
