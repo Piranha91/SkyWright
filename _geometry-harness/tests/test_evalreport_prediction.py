@@ -5673,21 +5673,36 @@ def main():
 
     # C1079 (Pilgrim S1, fifth review): an overlap pair whose need of the other mod was not measured, where that mod's
     # object is a base-game record it only moves (2 u, same turn: read from both plugin files), says how far it moves it.
-    def c1079_other_mod_nudge_said():
-        X, Y = f"000F79:{MOD_A}", f"00CA79:{BASE}"
-        fb_ = plugin_file_of(BASE, [], [("REFR", 0x0000CA79, [("DATA", struct.pack("<6f", 100.0, 100.0, 0.0, 0.0, 0.0, 1.5))], False)],
-                             group="CELL")
-        fo_ = plugin_file_of(OTHER, [BASE], [("REFR", 0x0000CA79, [("DATA", struct.pack("<6f", 102.0, 100.0, 0.0, 0.0, 0.0, 1.5))], False)],
-                             group="CELL")
-        r_ = row("OVERLAP", OTHER, MOD_A, X, other=Y)
+    # (review5-sewers B1) every partner the other mod carries is said with what it does to it: with one partner moved
+    # 300 u and turned beside the 2 u nudge, the sentence names both, with their distances and the turn, and no "only".
+    def nudge_bundle(partners):
+        """partners: [(form id low bits, base (x, y, z, rz), other mod's (x, y, z, rz))]"""
+        X = f"000F79:{MOD_A}"
+        rows_, refs_ = [], {X: {"base": f"0B0A79:{BASE}", "carriedBy": [MOD_A]}}
+        recs_b, recs_o = [], []
+        for low_, pb_, po_ in partners:
+            Y = f"{low_:06X}:{BASE}"
+            recs_b.append(("REFR", low_, [("DATA", struct.pack("<6f", pb_[0], pb_[1], pb_[2], 0.0, 0.0, pb_[3]))], False))
+            recs_o.append(("REFR", low_, [("DATA", struct.pack("<6f", po_[0], po_[1], po_[2], 0.0, 0.0, po_[3]))], False))
+            rows_.append(row("OVERLAP", OTHER, MOD_A, X, other=Y))
+            refs_[Y] = {"base": f"0B0A79:{BASE}", "carriedBy": [BASE, OTHER]}
+        fb_ = plugin_file_of(BASE, [], recs_b, group="CELL")
+        fo_ = plugin_file_of(OTHER, [BASE], recs_o, group="CELL")
         arms_ = with_files([arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
                             arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])], {BASE: fb_, OTHER: fo_})
-        names_ = {"refs": {Y: {"base": f"0B0A79:{BASE}", "carriedBy": [BASE, OTHER]}, X: {"base": f"0B0A79:{BASE}", "carriedBy": [MOD_A]}},
-                  "bases": {f"0B0A79:{BASE}": {"type": "Static", "editorId": "Rock01", "model": "rocks\\rock01.nif"}}}
-        plan, md, _ = compile_and_render(arms_, {(OVERLAP, "baseline"): [r_], (OVERLAP, "without-patch"): [r_]}, [MOD_A],
+        names_ = {"refs": refs_, "bases": {f"0B0A79:{BASE}": {"type": "Static", "editorId": "Rock01", "model": "rocks\\rock01.nif"}}}
+        plan, md, _ = compile_and_render(arms_, {(OVERLAP, "baseline"): list(rows_), (OVERLAP, "without-patch"): rows_}, [MOD_A],
                                          patches=[PATCH], names=names_)
-        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
-        return (re.search(re.escape(OTHER) + r" only moves [^:]*?by 2.0 u", it) is not None and "was not measured" in md), (it[-400:] or md[:1500])
+        return md, next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
+
+    def c1079_other_mod_nudge_said():
+        md1, it1 = nudge_bundle([(0x00CA79, (100.0, 100.0, 0.0, 1.5), (102.0, 100.0, 0.0, 1.5))])
+        md2, it2 = nudge_bundle([(0x00CA79, (100.0, 100.0, 0.0, 1.5), (102.0, 100.0, 0.0, 1.5)),
+                                 (0x00CB79, (500.0, 100.0, 0.0, 1.5), (800.0, 100.0, 0.0, 2.0))])
+        one_ = re.search(re.escape(OTHER) + r" only moves [^:]*?by 2.0 u", it1) is not None and "was not measured" in md1
+        two_ = (" only " not in it2.split("For example")[0] and "00CA79:Skyrim.esm" in it2 and "00CB79:Skyrim.esm" in it2
+                and re.search(r"00CB79:Skyrim\.esm[^;.]*300\.0 u[^;.]*turn", it2) is not None and "2.0 u" in it2)
+        return one_ and two_, f"{it1[-250:]} || {it2[-400:]}"
 
     for name, fn in [("fifth-review/C1079-other-mod-nudge-said", c1079_other_mod_nudge_said)]:
         cell(name, fn)
