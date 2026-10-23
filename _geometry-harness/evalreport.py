@@ -2680,6 +2680,35 @@ def build_prediction(ctx: dict) -> dict:
         if g["kind"] == "LOST-EDIT" and len(directions) == 1:
             loser, winner = next(iter(directions))
             detail.append(bind(words["itemDirection"], {"loser": loser, "winner": winner}))
+        if attr_key == "with-target" and g["kind"] != "LOST-EDIT" and other_mod and words.get("itemOtherNudged"):
+            # (fifth review, Pilgrim S1) where the other mod's object is a base-game record it only moves (same turn,
+            # less than the object's size), read from both plugin files: how far, so a modder sees it is in effect the
+            # base game's object; no geometry at the base game's place is claimed
+            order_ = [str(x) for x in all_orders.get(p_arm) or []]
+            low_order_ = [x.lower() for x in order_]
+            nudged_ = {}
+            for o_ in dict.fromkeys(g.get("_partners") or []):
+                if not is_base_game(str(o_).split(":", 1)[-1], words):
+                    continue
+                carr_ = {str(c_).lower() for c_ in (name_refs.get(str(o_)) or {}).get("carriedBy") or []}
+                if str(other_mod).lower() not in carr_ or str(other_mod).lower() not in low_order_:
+                    continue
+                prev_ = [x for x in order_[:low_order_.index(str(other_mod).lower())] if x.lower() in carr_]
+                if not prev_:
+                    continue
+                mine_, before_ = plugin_record(other_mod, "placement", str(o_)), plugin_record(prev_[-1], "placement", str(o_))
+                if not (mine_ and before_ and mine_.get("position") and before_.get("position")):
+                    continue
+                d_ = math.dist(mine_["position"], before_["position"])
+                same_turn_ = all(abs(a_ - b_) < 1e-3 for a_, b_ in zip(mine_.get("rotation") or (), before_.get("rotation") or ()))
+                if same_turn_ and d_ < spot_size(str(o_)):
+                    nudged_[str(o_)] = d_
+            if nudged_:
+                ds_ = sorted(nudged_.values())
+                detail.append(bind(words["itemOtherNudged"], {
+                    "mod": other_mod, "count": fmt_n(len(nudged_)), "objects": "object" if len(nudged_) == 1 else "objects",
+                    "range": (f"{ds_[0]:,.1f} u" if ds_[-1] - ds_[0] < 0.05 else f"{ds_[0]:,.1f} u to {ds_[-1]:,.1f} u"),
+                    "examples": "; ".join(named(k_) for k_ in list(nudged_)[:2])}))
         n_own, ex_own = g.pop("_winnerOwn", 0), g.pop("_winnerOwnExample", None)
         if n_own and len(directions) == 1:
             loser, winner = next(iter(directions))

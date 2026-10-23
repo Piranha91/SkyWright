@@ -5659,7 +5659,7 @@ def main():
         plan, md, _ = compile_and_render(arms_, {(OVERLAP, "baseline"): [r_], (OVERLAP, "without-patch"): [r_]}, [MOD_A],
                                          patches=[PATCH], names=names_)
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
-        return (re.search(re.escape(OTHER) + r" only moves [^.]*2 u", it) is not None and "was not measured" in md), (it[-400:] or md[:1500])
+        return (re.search(re.escape(OTHER) + r" only moves [^:]*?by 2.0 u", it) is not None and "was not measured" in md), (it[-400:] or md[:1500])
 
     for name, fn in [("fifth-review/C1079-other-mod-nudge-said", c1079_other_mod_nudge_said)]:
         cell(name, fn)
