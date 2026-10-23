@@ -7359,7 +7359,8 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
             # every row set aside: said, so the list adds up with the top (third review, Clockwork S2)
             return " (" + bind(conc["withPatchSplitParts"]["aside"], {"count": fmt_n(n_rows)}) + ")"
         al_ = sum(alone_by_fid.get(x, 0) for x in fids)
-        if pred_arm_ and k_ and al_ and conc.get("countedAboveAloneNote") and k_ <= n_rows:
+        # said where the line mixes rows counted at the top with ones already there with one mod alone (page budget)
+        if pred_arm_ and k_ and al_ and k_ > al_ and conc.get("countedAboveAloneNote") and k_ <= n_rows:
             return bind(conc["countedAboveAloneNote"], {"counted": fmt_n(k_ - al_), "alone": fmt_n(al_),
                                                          "rest": (bind(conc.get("countedAboveRest") or "; {rest} set aside",
                                                                        {"rest": fmt_n(n_rows - k_)}) if n_rows > k_ else "")})
