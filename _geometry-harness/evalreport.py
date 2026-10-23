@@ -2561,6 +2561,8 @@ def build_prediction(ctx: dict) -> dict:
                     if (vals3[w3] == vals3[0] and not recordrows.own_change(
                             provs3, vals3, w3, (masters or {}).get(low3[w3]) if masters is not None else None)[0]):
                         g.setdefault("_winnerBase", collections.Counter())[field_word(hit["row"].get("field"))] += 1
+                        # (fifth review, Winterhold R2-3) the sentence names a record of its own field as its example
+                        g.setdefault("_winnerBaseEx", {}).setdefault(field_word(hit["row"].get("field")), str(rk[4]))
             lost_txt_ = " ".join(map(str, (hit["row"].get("values") or {}).get("lost") or [])) if isinstance(
                 (hit["row"].get("values") or {}).get("lost"), list) else str((hit["row"].get("values") or {}).get("lost") or "")
             lost_ls_ = (hit["row"].get("values") or {}).get("lost")
@@ -2746,7 +2748,12 @@ def build_prediction(ctx: dict) -> dict:
                     "others": " and ".join(same_by), "holds": "holds" if len(same_by) == 1 else "hold",
                     "their": "its" if len(same_by) == 1 else "their", "loser": loser}))
             if win_base:
-                detail.append(bind(words["itemWinnerBase"], {"winner": winner, "fields": " and ".join(win_base)}))
+                ex_wb_ = (g.get("_winnerBaseEx") or {}).get(win_base[0])
+                detail.append(bind(words["itemWinnerBase"], {
+                    "winner": winner, "fields": " and ".join(win_base),
+                    "example": bind(words["itemWinnerBaseExample"], {"example": ex_wb_, "field": win_base[0]})
+                    if ex_wb_ and words.get("itemWinnerBaseExample") else ""}))
+        g.pop("_winnerBaseEx", None)
         n_undecided = g.pop("_notDecided", 0)
         if n_undecided and len(directions) == 1:
             loser, winner = next(iter(directions))
