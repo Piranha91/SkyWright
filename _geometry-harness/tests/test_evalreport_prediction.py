@@ -5877,6 +5877,24 @@ def main():
     for name, fn in [("fifth-review/C1090-cannot-tell-not-resolved", c1090_cannot_tell_not_resolved)]:
         cell(name, fn)
 
+    # C1091 (Snazzy "173 / 53"): the undone line names its units: record fields, and how many objects the ones that switch
+    # an object back on are on (two fields of one object switched back on: 2 fields on 1 object).
+    def c1091_undone_line_units():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000791:{BASE}", "LocationReference", "a1", "b1", "v")]
+        w_rows = [lost_row(MOD_A, PATCH, f"000792:{BASE}", "SkyrimMajorRecordFlags", "InitiallyDisabled", "0", "0"),
+                  lost_row(MOD_A, PATCH, f"000792:{BASE}", "EnableParent",
+                           ["EnableParent.Reference=000014:Skyrim.esm", "EnableParent.Flags=SetEnableStateToOppositeOfParent"],
+                           "none", "none")]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH], enrichment=enr,
+                                            count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 2})
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
+        return ("2 record fields the mods changed" in line and "2 of them, on 1 object, switch" in line), line[:300]
+
+    for name, fn in [("fifth-review/C1091-undone-line-units", c1091_undone_line_units)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
