@@ -5962,6 +5962,24 @@ def main():
     for name, fn in [("fifth-review/C1094-touching-pairs-said-apart", c1094_touching_pairs_said_apart)]:
         cell(name, fn)
 
+    # C1095 (Clockwork S1): the findings list of the setup with the patch, which does not list a pair still crossing where
+    # a patch places one of its objects (found by the patch comparison's re-measure), says so beside its own results.
+    def c1095_findings_list_names_patch_placed():
+        X = f"000X95:{MOD_A}"
+        ys = [f"000Y9{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        refs = {ys[1]: {"carriedBy": [MOD_B, PATCH]}, ys[0]: {"carriedBy": [MOD_B]}, X: {"carriedBy": [MOD_A]}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): [
+            row("OVERLAP", MOD_B, MOD_A, X, other=ys[0])]}, [MOD_A, MOD_B], patches=[PATCH],
+            predicates={(OVERLAP, "with-patch"): preds}, names={"refs": refs})
+        found = md.split("## What the checks found", 1)[-1].split("\n## ", 1)[0]
+        lines_ = [ln for ln in found.splitlines() if ln.startswith("- **") and "overlap pair" in ln]
+        return any("where a patch places one of the objects" in ln and "1 overlap pair" in ln for ln in lines_), f"{lines_}"
+
+    for name, fn in [("fifth-review/C1095-findings-list-names-patch-placed", c1095_findings_list_names_patch_placed)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
