@@ -6361,8 +6361,10 @@ def main():
                  other=f"000Y36:{MOD_A}")
         r1["Summary"] = f"Contact StateConditional under GuardSwitch ({THIRD}): 000X36:{THIRD} arrives - Sunk: sits 9u inside something"
         r2 = row("STATE-EMPTY@000S36:ThirdMod.esp@Triggered", THIRD, MOD_B, f"000Z36:{THIRD}", label="Hall (int)")
+        # (fifth review, Winterhold S3) the gap is 12 u: a 0 u row is now set aside as cannot tell (C1087), so this row keeps
+        # the per-mod meaning this case tests
         r2["Summary"] = (f"LeftInEmptySpace: Furniture Cot (fixed) in Hall (int); {MOD_B} removed or moved 000H36:Skyrim.esm; "
-                         f"its assembly of 1 touches no floor or wall now (nearest floor or wall 0u) @ 000S36:ThirdMod.esp")
+                         f"its assembly of 1 touches no floor or wall now (nearest floor or wall 12u) @ 000S36:ThirdMod.esp")
         results = {(STATE, "baseline"): [], (STATE, "without-patch"): [r1, r2], (STATE, "without-b"): [r1],
                    (STATE, "without-a"): [r2]}
         plan, md, html = compile_and_render(arms, results, [MOD_A, MOD_B], patches=[PATCH])

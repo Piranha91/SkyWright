@@ -2213,8 +2213,10 @@ def build_prediction(ctx: dict) -> dict:
                 return "listKept"              # every item it added or removed the winning list keeps so
             if (supersede(rk) or {}).get("kind") in ("kind", "place"):
                 return "superseded"            # the winner rebuilt the record after the loser's small fix
-        if (rk[0] == "geometry.fixture-empty-space" and anchor_unclear_re is not None
-                and anchor_unclear_re.search(rk[5])):
+        # (fifth review, Winterhold S3) the same rule for a quest-or-switch row of a fixture left in empty space
+        if ((rk[0] == "geometry.fixture-empty-space"
+             or str(rk[1]).split("@", 1)[0] in set(words.get("fixtureAnchorUnclearKinds") or []))
+                and anchor_unclear_re is not None and anchor_unclear_re.search(rk[5])):
             return "anchorUnclear"             # a floor or wall's box reaches it though no touch was found: cannot tell
         return "admitted"
 
