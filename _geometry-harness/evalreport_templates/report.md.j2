@@ -55,9 +55,12 @@
 {% endfor %}
 {% for item in cov.notes %}- {{ item }}
 {% endfor %}
-{% if cov.setAsideLine %}
+{% if cov.setAsideLine and "aside" not in (p.layout or "").split() %}
 
 {{ cov.setAsideLine }} [Prediction record](evidence-index.md#prediction-record).
+{% elif cov.setAsideLine %}
+
+{{ p.reader.get("asideMovedLine") or "What the counts above leave out, and why, is in the evidence index." }} [Further notes](evidence-index.md#further-notes).
 {% endif %}
 
 ## {{ p.reader.sectionHeadings.validation }}
