@@ -2440,7 +2440,25 @@ def build_prediction(ctx: dict) -> dict:
             if (arm_m is None or (rk[0], arm_m) not in measured
                     or (str(arm_m).startswith("sibling:") and not sib_ok.get(rk[0]))):
                 return "with-target", t, None
-            return ("single-mod" if there(arm_m, rk) else "needs-both"), t, None
+            if there(arm_m, rk):
+                return "single-mod", t, None
+            # (seventh review, BPT r6 S3) a lost record change where the measured setup without the other mod also lacks
+            # other plugins: judged by the prediction setup's own versions with the other mod's version left out. Where
+            # a later plugin's different value still wins over the losing value there, it does not need the other mod.
+            if (rk[1] == "LOST-EDIT" and rk[2].lower() == str(t).lower()
+                    and {str(x).lower() for x in all_orders.get(arm_m) or []} != p_set - {others[0].lower()}):
+                got_ = whose_value(p_arm, rk[0], rk[4], ((p_rows.get(rk) or {}).get("row") or {}).get("field"), rk[2])
+                if got_ is not None:
+                    provs_, vals_, _ = got_
+                    low_ = [str(x).lower() for x in provs_]
+                    rest_ = [k_ for k_ in range(len(low_)) if low_[k_] != others[0].lower()]
+                    i_ = low_.index(rk[2].lower())
+                    if rest_ and rest_[-1] > i_ and vals_[rest_[-1]] != vals_[i_]:
+                        miss_ = sorted((x for x in all_orders.get(p_arm) or [] if x.lower() not in
+                                        {str(y).lower() for y in all_orders.get(arm_m) or []} and x.lower() != others[0].lower()),
+                                       key=str.lower)
+                        return "single-mod", t, ["chain", provs_[rest_[-1]], miss_]
+            return "needs-both", t, None
         if any(str(s_arms.get(t)).startswith("sibling:") for t in p_targets) and not sib_ok.get(rk[0]):
             return "not-separable", None, words["notSeparableWhy"]["siblingDisagrees"]
         unmeasured = [t for t in p_targets if s_arms.get(t) is None or (rk[0], s_arms[t]) not in measured]
@@ -2597,7 +2615,7 @@ def build_prediction(ctx: dict) -> dict:
             continue
         record.append(entry)
         mods = sorted([rk[2], rk[3]], key=str.lower)
-        gk = (rk[0], base_kind, tuple(mods), attr, attr_mod, why)
+        gk = (rk[0], base_kind, tuple(mods), attr, attr_mod, why if not isinstance(why, list) else (why[0], why[1], tuple(why[2])))
         g = groups.setdefault(gk, {"checkId": rk[0], "kind": base_kind, "mods": mods, "count": 0, "attribution": attr,
                                    "attributionMod": attr_mod, "attributionWhy": why, "findingIds": [], "examples": [],
                                    "_subjects": set()})
@@ -2890,7 +2908,13 @@ def build_prediction(ctx: dict) -> dict:
         elif (attr_key == "single-mod" and g["attributionMod"]
                 and str(g["attributionMod"]).lower() not in {m.lower() for m in g["mods"]}):
             attr_key = "single-mod-elsewhere"       # the same object is broken with the other evaluated mod alone
+        chain_why_ = g.get("attributionWhy") if isinstance(g.get("attributionWhy"), list) else None
+        if attr_key == "single-mod-target" and chain_why_ and words["attribution"].get("single-mod-target-chain"):
+            # (seventh review, BPT r6 S3) judged from the record's own versions, not from a setup lacking more
+            attr_key = "single-mod-target-chain"
         attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "other": other_mod,
+                                                          "next": chain_why_[1] if chain_why_ else "",
+                                                          "missing": and_list(chain_why_[2]) if chain_why_ and chain_why_[2] else "",
                                                           "replaced": fmt_n(replaced_) if attr_key.endswith("replaced") else "",
                                                           "why": g["attributionWhy"] or ""})
         subjects_of[id(g)] = g.pop("_subjects")
@@ -5392,8 +5416,16 @@ def build_prediction(ctx: dict) -> dict:
             # the check's meaning up to its first clause, then the hedge (page budget)
             return bind(words["newByCheckInGame"], {"what": ig_.split(";", 1)[0]}) + (words.get("newByCheckCandidate") or "")
 
+        def new_effect(c):
+            """(seventh review, Winterhold S1) how many of the check's new pairs have an object whose model is a visual
+            effect (the same predicate as the headline's share)"""
+            n_ = sum(1 for rk in problems if rk[0] == c and rk[1] != "LOST-EDIT"
+                     and effect_pair(rk[4], ((patched_rows.get(rk) or {}).get("row") or {}).get("other")))
+            return bind(words["newByCheckEffect"], {"count": fmt_n(n_)}) if n_ and words.get("newByCheckEffect") else ""
+
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
-                         "objectsNote": "; ".join(x_ for x_ in (split_note(c) or objects_note(c), new_in_game(c)) if x_) or None,
+                         "objectsNote": "; ".join(x_ for x_ in (split_note(c) or objects_note(c), new_effect(c), new_in_game(c))
+                                                  if x_) or None,
                          "masterNote": (bind(words["newByCheckOwnMaster"], {"count": fmt_n(problem_master[c])})
                                         if problem_master.get(c) else None),
                          "findingIds": [x for x in dict.fromkeys(fids) if x]}
