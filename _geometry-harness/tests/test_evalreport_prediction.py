@@ -7629,7 +7629,7 @@ def main():
         kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Objects occupying")), "")
         summ = str((reader(plan).get("validation") or {}).get("summary") or "")
         v = str(pr_.get("verdict") or "")
-        return ("1 with a visual-effect model" in v and kl.count("1 with a visual-effect model") == 2
+        return ("1 of the pairs with a visual-effect model" in v and kl.count("1 with a visual-effect model") == 2
                 and "1 with a visual-effect model" in summ), f"{v[-200:]} || {kl} || {summ[-200:]}"
 
     # C1112, C1113 (Pilgrim r5 S1): where the winner's value is the base game's on some of an item's rows only, the item
@@ -7881,7 +7881,7 @@ def main():
                                          masters={MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE]})
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
         adm = [e["admission"] for e in rec_of(plan, T)]
-        return ("record change by one of the two mods is lost" in it and "00CA27" in it.split("record change")[-1]), f"{adm}; {it[-400:]}"
+        return ("record change between the two mods is lost" in it and "00CA27" in it.split("record change")[-1]), f"{adm}; {it[-400:]}"
 
     for name, fn in [("sixth-review/C1127-overlap-linked-to-lost-field", c1127_overlap_linked_to_lost_field)]:
         cell(name, fn)

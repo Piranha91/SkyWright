@@ -2680,7 +2680,7 @@ def build_prediction(ctx: dict) -> dict:
             # on when the game loads: not initially disabled, not deleted, not below the world, and no enable parent
             # (whose state the record data does not give: then only that its own record does not switch it off)
             won_ = winner_on_at_load(rk)
-            if won_ == "on" and base_is_marker(rk[4]):
+            if won_ == "on" and not base_has_no_model(names, rk[4]) and base_is_marker(rk[4]):
                 # (sixth review, Winterhold r6 S2) an editor marker's base (record flag, read from its plugin file):
                 # never drawn in game, so never counted as drawn
                 won_ = "onMarker"
@@ -3201,7 +3201,7 @@ def build_prediction(ctx: dict) -> dict:
             if linked_:
                 detail.append(bind(words["itemLinkedLost"], {
                     "count": fmt_n(len(linked_)), "pairs": "pairs is" if len(linked_) == 1 else "pairs are",
-                    "examples": "; ".join(dict.fromkeys(named(a_ if a_ in lost_o_ else b_) for a_, b_ in linked_[:3]))}))
+                    "examples": named(linked_[0][0] if linked_[0][0] in lost_o_ else linked_[0][1])}))
         n_touch_ = g.pop("_touchingPairs", 0)
         n_cop_ = g.pop("_coplanarPairs", 0)
         if n_cop_ and words.get("itemCoplanarPairs"):
@@ -3687,11 +3687,11 @@ def build_prediction(ctx: dict) -> dict:
                     "recordNoun": "navmesh record" if len(navs_) == 1 else "navmesh records",
                     "doorNoun": "door" if len(doors_) == 1 else "doors",
                     "parts": "; ".join(bind(words["doorLinksPart"], {
-                        "loser": l_, "count": fmt_n(len(m_)), "examples": ", ".join(list(m_)[:3])})
+                        "loser": l_, "count": fmt_n(len(m_)), "examples": ", ".join(list(m_))})
                         for l_, m_ in by_loser_.items()),
                     "patch": "" if still_ is None else bind(words["doorLinksPatch"], {
                         "patch": patch_text, "count": fmt_n(len(still_)), "has": "has" if len(still_) == 1 else "have",
-                        "examples": ", ".join(still_[:4]) or "-"})}),
+                        "examples": ", ".join(still_) or "-"})}),
                     "findingIds": list(dict.fromkeys(e.get("findingId") for e in nav_rows_ if e.get("findingId")))[:1]})
     # (third review, Missives S1) a base-game plugin's own fix that the winner's value drops, where the losing mod only
     # carries or restores it: one line per winner and base-game plugin, naming the plugins that carry the value
@@ -4225,7 +4225,7 @@ def build_prediction(ctx: dict) -> dict:
                                    + ((" " + bind(words["setAsideNoBodyLights"], {
                                        "count": fmt_n(len(nobody_lights())),
                                        "noun": "is a light" if len(nobody_lights()) == 1 else "are lights",
-                                       "examples": "; ".join(list(nobody_lights().values())[:4])}))
+                                       "examples": "; ".join(list(nobody_lights().values())[:2])}))
                                       if aside["noBody"] and nobody_lights() and words.get("setAsideNoBodyLights") else "")
                                    + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
                                    + (" " + bind(words["setAsideBodyUnread"], {**aside, "examples": unread_examples()})
