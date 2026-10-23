@@ -3909,6 +3909,18 @@ def build_prediction(ctx: dict) -> dict:
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
              "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
              **{k_: set_aside[k_] for k_ in NOISE_ADMISSIONS}}
+    def nobody_lights():
+        """(sixth review, BPT r6 S4) the lights a support or fixture row sets aside as having no body: a light left where
+        the object it stood on or hung from was moved or removed still lights that spot."""
+        out_ = collections.OrderedDict()
+        for e in record:
+            if e["admission"] != "noBody" or e["checkId"] not in set(words.get("supportChecks") or []):
+                continue
+            for o_ in [e["formKey"], *(e.get("other") or [])]:
+                if no_model_type(names, o_) == "Light":
+                    out_.setdefault(str(o_), named(o_))
+        return out_
+
     def unread_examples():
         """(fourth review, Sewers S5) the objects whose base record was not read, with the place their row gives."""
         ex_ = []
@@ -4049,6 +4061,11 @@ def build_prediction(ctx: dict) -> dict:
                       if any(aside.get(k_) for k_ in words["setAsideParts"]) else "")
                                    + (" " + bind(words["setAsideNoBody"], aside)
                                                                          if aside["noBody"] else "")
+                                   + ((" " + bind(words["setAsideNoBodyLights"], {
+                                       "count": fmt_n(len(nobody_lights())),
+                                       "noun": "is a light" if len(nobody_lights()) == 1 else "are lights",
+                                       "examples": "; ".join(list(nobody_lights().values())[:4])}))
+                                      if aside["noBody"] and nobody_lights() and words.get("setAsideNoBodyLights") else "")
                                    + (" " + bind(words["setAsidePathCase"], aside) if aside["pathCase"] else "")
                                    + (" " + bind(words["setAsideBodyUnread"], {**aside, "examples": unread_examples()})
                                       if aside["bodyUnread"] else "")

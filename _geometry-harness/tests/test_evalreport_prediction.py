@@ -7742,6 +7742,24 @@ def main():
                      ("sixth-review/C1119-water-height-without-water-set-aside", c1119_water_height_without_water_set_aside)]:
         cell(name, fn)
 
+    # C1117 (BPT r6 S4): a light set aside as having no body in the support check (its support moved or removed by the
+    # other mod) is named in the set-aside sentence, with what a light does there: it still lights that spot.
+    def c1117_nobody_lights_named():
+        X, S = f"000X17:{MOD_A}", f"000S17:{MOD_B}"
+        rows_ = [row("CONTACT", MOD_B, MOD_A, X, other=S)]
+        names_ = {"refs": {X: {"base": f"0B0X17:{MOD_A}"}, S: {"base": f"0B0S17:{MOD_B}"}},
+                  "bases": {f"0B0X17:{MOD_A}": {"type": "Light", "editorId": "LampGlowNS", "model": ""},
+                            f"0B0S17:{MOD_B}": {"type": "Static", "editorId": "Table", "model": "table.nif"}}}
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        plan, md, _ = compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): rows_,
+                                                (CONTACT, "without-b"): []}, [MOD_A], patches=[PATCH], names=names_)
+        aside = str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+        return (X in aside and "LampGlowNS" in aside and "still lights" in aside), aside[-300:]
+
+    for name, fn in [("sixth-review/C1117-nobody-lights-named", c1117_nobody_lights_named)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
