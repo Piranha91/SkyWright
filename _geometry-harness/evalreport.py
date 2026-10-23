@@ -7327,6 +7327,24 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         return " (" + "; ".join(bind(conc["withPatchSplitParts"][w_], {"count": fmt_n(got_[w_])})
                                 for w_ in ("counted", "aside", "case", "new") if got_[w_]) + ")"
 
+    placed_seen_ = set()
+
+    def placed_note(f):
+        """(fifth review, Clockwork S1) on the setup with the patch, the pairs the patch comparison finds still crossing
+        where a patch places one of the objects, which that setup's own list does not hold; said once per check"""
+        if not with_arm_ or f.get("armId") != with_arm_ or str(f.get("checkId")) in placed_seen_ or not conc.get("detailPatchPlaced"):
+            return ""
+        by_ = collections.Counter((e_["A"], e_["B"]) for e_ in pred_.get("record") or []
+                                  if e_.get("checkId") == f.get("checkId") and e_.get("withPatch") == "patchPlaced")
+        if not by_:
+            return ""
+        placed_seen_.add(str(f.get("checkId")))
+        ph_ = ((pr.get("reader") or {}).get("kindPhrases") or {}).get(next((e_["kind"] for e_ in pred_.get("record") or []
+                                                                            if e_.get("checkId") == f.get("checkId")), ""), {})
+        parts_ = [f"{fmt_n(n_)} {('pair' if n_ == 1 else 'pairs') if not ph_ else (ph_.get('unitSingular') if n_ == 1 else ph_.get('unitPlural'))} between {a_} and {b_}"
+                  for (a_, b_), n_ in by_.items()]
+        return bind(conc["detailPatchPlaced"], {"parts": "; ".join(parts_)})
+
     def counted_note(fids, n_rows):
         if with_arm_ and with_arm_ != pred_arm_ and fids and all((f_by_id.get(x) or {}).get("armId") == with_arm_
                                                                  for x in fids):
@@ -7431,11 +7449,16 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                         entries.append({"id": e_["ids"][0], "more": e_["ids"][1:],
                                         "text": f"{fmt_n(n_)} {unit} between {e_['A']} and {e_['B']}"
                                                 + counted_note(e_["ids"], n_)})
+                    note_c_ = next((f.get("readerProvenance") for f in relevant if f.get("readerProvenance")), None)
+                    pp_ = placed_note(relevant[0])
                     compact.append({"id": relevant[0]["id"], "readerArmLabel": relevant[0].get("readerArmLabel"),
                                     "entries": entries,
-                                    "note": next((f.get("readerProvenance") for f in relevant if f.get("readerProvenance")), None)})
+                                    "note": " ".join(x_ for x_ in (note_c_, pp_) if x_) or None})
                     rest = [f for f in rest if not f.get("readerRelevant")]
                 for f in rest:
+                    pp_ = placed_note(f) if f.get("readerRelevant") and f.get("readerPlain") else ""
+                    if pp_ and pp_ not in str(f["readerPlain"]):
+                        f["readerPlain"] = str(f["readerPlain"]).rstrip() + " " + pp_
                     if f.get("readerRelevant") and f.get("armId") in (pred_arm_, with_arm_) and f.get("readerPlain"):
                         note_ = counted_note([f["id"]], int(f.get("readerRows", f.get("rowsTotal")) or 0))
                         if note_:
