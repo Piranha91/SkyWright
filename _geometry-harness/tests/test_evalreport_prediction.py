@@ -5664,6 +5664,32 @@ def main():
     for name, fn in [("fifth-review/C1079-other-mod-nudge-said", c1079_other_mod_nudge_said)]:
         cell(name, fn)
 
+    # C1080 (Pilgrim S2): one actor pair split in two quests is said in one unit, naming both quests, in the detail line
+    # and in the by-check line of new clashes; never one clash per actor.
+    def c1080_alias_split_one_unit():
+        O2 = "Neighbour.esp"
+        arms = [arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, O2, MOD_A]), arm("without-a", [BASE, OTHER, O2])]
+        A1, A2, Q1, Q2 = f"000A80:{BASE}", f"000B80:{BASE}", f"000Q80:{BASE}", f"000R80:{BASE}"
+        rows_ = []
+        for q_, qn_ in ((Q1, "Q one"), (Q2, "Q two")):
+            for x_ in (A1, A2):
+                r_ = row("SPLIT", OTHER, PATCH, x_, other=q_, label="Temple (int)")
+                r_["Summary"] = f"quest '{qn_}' aliases 'Xa' and 'Ya' were 137u apart in Temple (int), now 1,800u apart"
+                rows_.append(r_)
+        names_ = {"refs": {A1: {"base": f"0B0A80:{BASE}"}, A2: {"base": f"0B0B80:{BASE}"}},
+                  "bases": {f"0B0A80:{BASE}": {"type": "Npc", "editorId": "Xa", "model": "x.nif"},
+                            f"0B0B80:{BASE}": {"type": "Npc", "editorId": "Ya", "model": "y.nif"}}}
+        plan, md, _ = compile_and_render(arms, {(ALIAS, "baseline"): rows_, (ALIAS, "without-patch"): [],
+                                                (ALIAS, "without-a"): []}, [MOD_A], patches=[PATCH], names=names_)
+        det = next((ln for ln in md.splitlines() if "quest scene" in ln and "Measured load order" in ln), "")
+        nb = next((ln for ln in md.splitlines() if ln.startswith("- New clashes with the patch, by check")), "")
+        return ("1 actor pair split in 2 quest scenes ('Q one', 'Q two')" in det and "1 Xa; 1 Ya" not in nb
+                and "1 actor pair" in nb), f"{det[-300:]} || {nb[-200:]}"
+
+    for name, fn in [("fifth-review/C1080-alias-split-one-unit", c1080_alias_split_one_unit)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
