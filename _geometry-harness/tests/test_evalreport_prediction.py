@@ -6632,6 +6632,124 @@ def main():
                      ("fourth-review/C1028-undo-alone-says-lost-no-intent", c1028_undo_alone_says_lost_no_intent)]:
         cell(name, fn)
 
+    # ---------------------------------------- fifth review (2026-10-22): what an object with no model does in game, and a
+    # removal the winning mod makes itself.
+    # C1068-C1073 (Snazzy line 17, BPT line 19): ModB switches off an object whose base has no model and ModA's version has
+    # it on. What that object does in game depends on its base record's type (skill data), never "shows nothing": a
+    # light lights the space around it (C1068), an idle marker is a spot NPCs can use (C1070); a static marker (C1069)
+    # or an activator (C1071) may still act in game, which the record data read here does not say. Said after drawn
+    # objects (C1072) and one meaning per type in one pair (C1073).
+    def no_model_segments(objs, drawn=()):
+        """objs: [(object id, base type, editor ID)] with no model; drawn: object ids whose base has a model. Returns the
+        record-field item line and, per object, the sentence of it that names the object."""
+        rows_, ch_, refs_, bases_ = [], [], {}, {}
+        for fk_, typ_, eid_ in [*objs, *[(d_, "Static", "Crate01") for d_ in drawn]]:
+            b_ = f"0B{fk_[2:6]}:{BASE}"
+            lost_, win_ = offs(-30000), offs(0)
+            rows_.append(lost_row(MOD_B, MOD_A, fk_, "Placement", off_txt(lost_), off_txt(win_), off_txt(offs(0)), before=BASE))
+            ch_.append((fk_, "PlacedObject", [(BASE, offs(0)), (MOD_B, lost_), (MOD_A, win_)]))
+            refs_[fk_] = {"base": b_}
+            bases_[b_] = {"type": typ_, "editorId": eid_, "model": "" if fk_ not in drawn else "clutter\\crate01.nif"}
+        plan, md, _ = core_bundle(rows_, list(rows_), p_chains=ch_, w_chains=ch_, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B), names={"refs": refs_, "bases": bases_})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        sents = re.split(r"(?<=[.)])\s+(?=On |In |For |Most |\[)", it)
+        return it, {fk_: next((s_ for s_ in sents if fk_ in s_), "") for fk_, _, _ in objs}
+
+    def c1068_no_model_light_lights():
+        it, seg = no_model_segments([(f"00CA68:{BASE}", "Light", "ShadowLight01")])
+        s_ = seg[f"00CA68:{BASE}"]
+        return (bool(s_) and "nothing in game" not in it and "lights" in s_ and "is drawn" not in s_), it[-400:]
+
+    def c1069_no_model_static_marker_not_read():
+        it, seg = no_model_segments([(f"00CA69:{BASE}", "Static", "MarkerBox01")])
+        s_ = seg[f"00CA69:{BASE}"]
+        return (bool(s_) and "nothing in game" not in it and "not read here" in s_ and "is drawn" not in s_), it[-400:]
+
+    def c1070_no_model_idle_marker_npcs():
+        it, seg = no_model_segments([(f"00CA70:{BASE}", "IdleMarker", "LeanIdle01")])
+        s_ = seg[f"00CA70:{BASE}"]
+        return (bool(s_) and "nothing in game" not in it and "NPCs" in s_), it[-400:]
+
+    def c1071_no_model_activator_not_read():
+        it, seg = no_model_segments([(f"00CA71:{BASE}", "Activator", "TriggerBox01")])
+        s_ = seg[f"00CA71:{BASE}"]
+        return (bool(s_) and "nothing in game" not in it and "not read here" in s_), it[-400:]
+
+    def c1072_no_model_light_after_drawn_lights():
+        it, seg = no_model_segments([(f"00CA72:{BASE}", "Light", "ShadowLight01")], drawn=(f"00CB72:{BASE}",))
+        s_ = seg[f"00CA72:{BASE}"]
+        return (bool(s_) and "is drawn" in it and "nothing in game" not in it and "lights" in s_), it[-400:]
+
+    def c1073_no_model_one_meaning_per_type():
+        it, seg = no_model_segments([(f"00CA73:{BASE}", "Light", "ShadowLight01"),
+                                     (f"00CB73:{BASE}", "IdleMarker", "LeanIdle01")])
+        sl_, si_ = seg[f"00CA73:{BASE}"], seg[f"00CB73:{BASE}"]
+        return (bool(sl_) and bool(si_) and sl_ != si_ and "lights" in sl_ and "NPCs" not in sl_ and "NPCs" in si_
+                and "lights" not in si_ and "nothing in game" not in it), it[-500:]
+
+    for name, fn in [("fifth-review/C1068-no-model-light-lights", c1068_no_model_light_lights),
+                     ("fifth-review/C1069-no-model-static-marker-not-read", c1069_no_model_static_marker_not_read),
+                     ("fifth-review/C1070-no-model-idle-marker-npcs", c1070_no_model_idle_marker_npcs),
+                     ("fifth-review/C1071-no-model-activator-not-read", c1071_no_model_activator_not_read),
+                     ("fifth-review/C1072-no-model-light-after-drawn-lights", c1072_no_model_light_after_drawn_lights),
+                     ("fifth-review/C1073-no-model-one-meaning-per-type", c1073_no_model_one_meaning_per_type)]:
+        cell(name, fn)
+
+    # C1074-C1076 (BPT S2): ModA has the object on and moved; ModB, the winner, switches it off for good by its own change
+    # (below the world, initially disabled; the version it inherits has it on). That is ModB's own removal: every
+    # with-patch sentence says the winner removes the object itself (C1074, kept by the patch), and the still-there line
+    # says it for the untouched ones, with the patch keeping the same removal on the others (C1075). Where the winner only
+    # carries an earlier mod's removal (C1076, guard), it is not said as the winner's own.
+    def own_removal_bundle(kept_ids, left_ids, inherited=False):
+        p_rows, w_rows, p_ch, w_ch = [], [], [], []
+        mas_ = {**MASTERS_, PATCH: [BASE]}
+        for fk_ in [*kept_ids, *left_ids]:
+            a_ = offs(0)
+            a_["Placement.Position"] = "300,100,0"
+            b_ = offs(-30000, "InitiallyDisabled")
+            pre_ = [(BASE, offs(0))]
+            if inherited:
+                pre_.append((OTHER, b_))                     # an earlier mod removes it; ModB carries that removal
+                mas_[MOD_B] = [BASE, OTHER]
+            p_rows.append(lost_row(MOD_A, MOD_B, fk_, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE))
+            p_ch.append((fk_, "PlacedObject", [*pre_, (MOD_A, a_), (MOD_B, b_)]))
+            if fk_ in kept_ids:
+                w_rows.append(lost_row(MOD_A, PATCH, fk_, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE))
+                w_ch.append((fk_, "PlacedObject", [*pre_, (MOD_A, a_), (MOD_B, b_), (PATCH, b_)]))
+            else:
+                w_rows.append(p_rows[-1])
+                w_ch.append(p_ch[-1])
+        arms = None
+        if inherited:
+            arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                    arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters=mas_, arms=arms)
+        pr_ = reader(plan).get("prediction") or {}
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        return kl, str(pr_.get("withPatchStays") or ""), plan
+
+    def c1074_kept_own_removal_said_winners():
+        kl, st, plan = own_removal_bundle([f"00CA74:{BASE}"], [])
+        return (re.search(r"\b1 on objects [^;()]*removes itself", kl) is not None
+                and "winner sets off for good" not in kl), kl[:400]
+
+    def c1075_left_own_removal_patch_keeps_same():
+        kl, st, plan = own_removal_bundle([f"00CA75:{BASE}"], [f"00CB75:{BASE}"])
+        part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if "record field" in x), "")
+        return (re.search(r"removes itself", part) is not None and re.search(r"keeps the same removal on 1 more", part) is not None
+                and len(re.findall(r"\b1 on objects [^;()]*removes itself", kl)) == 2), f"{part[:300]} || {kl[:300]}"
+
+    def c1076_inherited_removal_not_winners_own():
+        kl, st, plan = own_removal_bundle([], [f"00CA76:{BASE}"], inherited=True)
+        return ("removes itself" not in kl and "removes itself" not in st
+                and re.search(r"\b1 on objects [^;()]*winner sets off for good", kl) is not None), f"{kl[:300]} || {st[:300]}"
+
+    for name, fn in [("fifth-review/C1074-kept-own-removal-said-winners", c1074_kept_own_removal_said_winners),
+                     ("fifth-review/C1075-left-own-removal-patch-keeps-same", c1075_left_own_removal_patch_keeps_same),
+                     ("fifth-review/C1076-inherited-removal-not-winners-own", c1076_inherited_removal_not_winners_own)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
