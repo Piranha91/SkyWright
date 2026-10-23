@@ -5506,8 +5506,10 @@ def main():
             ("CELL", 0x00000C12, [("DATA", struct.pack("<H", 0x0083))], True)])
         nv_ = pluginread.navmesh_links(f_, [f"000E41:{BASE}", f"000E42:{BASE}", f"000E43:{BASE}"])["records"]
         cf_ = pluginread.cell_flags(f_, [f"000C11:{BASE}", f"000C12:{BASE}"])["records"]
-        ok = (nv_[f"000E41:{BASE}"] == {"triangles": 3, "links": [[0, f"000D43:{BASE}", 501], [0, f"000E99:{OTHER}", 7]]}
-              and nv_[f"000E42:{BASE}"] == {"triangles": 2, "links": [[0, f"000D43:{BASE}", 9]]}
+        # (sixth review) the reader also returns door triangles: none in these geometries
+        ok = (nv_[f"000E41:{BASE}"] == {"triangles": 3, "links": [[0, f"000D43:{BASE}", 501], [0, f"000E99:{OTHER}", 7]],
+                                         "doors": []}
+              and nv_[f"000E42:{BASE}"] == {"triangles": 2, "links": [[0, f"000D43:{BASE}", 9]], "doors": []}
               and nv_[f"000E43:{BASE}"] is None
               and cf_[f"000C11:{BASE}"]["flags"] == ["IsInteriorCell", "ShowSky"]
               and cf_[f"000C12:{BASE}"]["flags"] == ["IsInteriorCell", "HasWater", "ShowSky"])
@@ -7457,15 +7459,17 @@ def main():
                 + b"".join(struct.pack("<hII", t_, 0, d_) for t_, d_ in doors))
 
     def door_files():
+        # (gate A condition R2) ModB's three doors lead somewhere (a teleport, XTEL); its fourth, 000D04, does not
         door_refs = [("REFR", 0x01000D01 + i_, [("NAME", struct.pack("<I", 0x00000B10)),
-                                                 ("DATA", struct.pack("<6f", 100.0 * i_, 0.0, 0.0, 0.0, 0.0, 0.0))], False)
-                     for i_ in range(3)]
+                                                 ("DATA", struct.pack("<6f", 100.0 * i_, 0.0, 0.0, 0.0, 0.0, 0.0))]
+                      + ([("XTEL", struct.pack("<I", 0x00000C3A10) + b"\x00" * 28)] if i_ < 3 else []), False)
+                     for i_ in range(4)]
         return {BASE: plugin_file_of(BASE, [], [("NAVM", N_D1, [("NVNM", nvnm_d(8, [(5, 0x00000C3A00)]))], False),
                                                 ("NAVM", N_D2, [("NVNM", nvnm_d(8, []))], False)]),
                 OTHER: plugin_file_of(OTHER, [BASE], []),
                 MOD_B: plugin_file_of(MOD_B, [BASE], [
                     ("NAVM", N_D1, [("NVNM", nvnm_d(8, [(5, 0x00000C3A00), (6, 0x01000D01), (7, 0x01000D02),
-                                                        (2, 0x01000D03)]))], True),
+                                                        (2, 0x01000D03), (1, 0x01000D04)]))], True),
                     ("NAVM", N_D2, [("NVNM", nvnm_d(8, [(3, 0x01000D03)]))], False)] + door_refs),
                 MOD_A: plugin_file_of(MOD_A, [BASE], [("NAVM", N_D1, [("NVNM", nvnm_d(9, [(5, 0x00000C3A00)]))], False)]),
                 PATCH: plugin_file_of(PATCH, [BASE, MOD_B], [
@@ -7493,14 +7497,14 @@ def main():
 
     def c1108_door_linked_elsewhere_not_lost():
         plan, sec, aside = door_bundle()
-        return (f"000D03:{MOD_B}" not in sec and f"0C3A00:{BASE}" not in sec), sec[-300:]
+        return (f"000D03:{MOD_B}" not in sec and f"0C3A00:{BASE}" not in sec and f"000D04:{MOD_B}" not in sec), sec[-300:]
 
     def c1109_pluginread_door_triangles():
         import pluginread
         f_ = door_files()[MOD_B]
         got = pluginread.navmesh_links(f_, [f"0C3907:{BASE}", f"0C3908:{BASE}"])["records"]
         want1 = [[f"0C3A00:{BASE}", 5], [f"000D01:{MOD_B}", 6], [f"000D02:{MOD_B}", 7],
-                 [f"000D03:{MOD_B}", 2]]
+                 [f"000D03:{MOD_B}", 2], [f"000D04:{MOD_B}", 1]]
         ok = ((got.get(f"0C3907:{BASE}") or {}).get("doors") == want1
               and (got.get(f"0C3908:{BASE}") or {}).get("doors") == [[f"000D03:{MOD_B}", 3]]
               and (got.get(f"0C3907:{BASE}") or {}).get("triangles") == 8)

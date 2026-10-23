@@ -12,6 +12,9 @@ Two reads, each of named records only:
   the bits the game defines (CELL_FLAGS).
 * placements (`placements`, fourth review): a placed reference's DATA subrecord, its position and rotation (six
   float32: x, y, z, then rotation x, y, z in radians), for the placed record types (PLACED_TYPES).
+* door triangles (sixth review), in `navmesh_links`' answer as "doors": after the edge links, a count (uint32) and per
+  door triangle the triangle before the door (int16), a value not read (uint32) and the door's FormID; and a door's
+  teleport destination (XTEL), in `placements_full`' answer as "teleport".
 
 A FormID is read as this plugin writes it: the high byte is the index of the record's origin file in the plugin's master
 list, or the master count for the plugin's own records; every answer names records as "XXXXXX:Origin.esm".
@@ -166,7 +169,20 @@ def _navmesh(subs, fk, global_):
     if o + 10 * ne > len(data):
         raise PluginReadError(f"navmesh {fk}: {ne} edge links do not fit its geometry")
     raw = [struct.unpack_from("<IIh", data, o + 10 * k) for k in range(ne)]
-    return {"triangles": nt, "links": [[t, global_(m), tri] for t, m, tri in raw]}
+    out = {"triangles": nt, "links": [[t, global_(m), tri] for t, m, tri in raw]}
+    # (sixth review) the door triangles after the edge links: each the triangle before the door (int16), a value not
+    # read (uint32) and the door's FormID; a geometry that ends after its edge links has none
+    o += 10 * ne
+    doors = []
+    if o + 4 <= len(data):
+        nd = struct.unpack_from("<I", data, o)[0]
+        o += 4
+        if o + 10 * nd > len(data):
+            raise PluginReadError(f"navmesh {fk}: {nd} door triangles do not fit its geometry")
+        doors = [[global_(struct.unpack_from("<I", data, o + 10 * k + 6)[0]), struct.unpack_from("<h", data, o + 10 * k)[0]]
+                 for k in range(nd)]
+    out["doors"] = doors
+    return out
 
 
 def _cell(subs, fk, global_):
@@ -203,6 +219,9 @@ def _placement_full(subs, fk, global_):
                            if xe and len(xe) >= 4 else None)
     f = int(subs.get("__flags__") or 0)
     out["initiallyDisabled"], out["deleted"] = bool(f & 0x800), bool(f & 0x20)
+    # (sixth review) a door's teleport (XTEL): the destination door it leads to, None where it has none
+    xt = subs.get("XTEL")
+    out["teleport"] = global_(struct.unpack_from("<I", xt, 0)[0]) if xt and len(xt) >= 4 else None
     return out
 
 
@@ -217,3 +236,14 @@ def navmesh_links(path, form_keys):
 
 def cell_flags(path, form_keys):
     return _read(path, b"CELL", form_keys, _cell)
+
+
+def navmesh_doors_all(path):
+    """(sixth review) Every navmesh record the plugin holds, with the doors its door triangles name: {formKey: [door
+    formKey, ...]} (a navmesh without geometry: []). One pass over the file's navmesh records."""
+    p = Path(path)
+    masters, places = _index(p, (b"NAVM", b"CELL"))
+    want = [f"{fid & 0xFFFFFF:06X}:{masters[fid >> 24] if (fid >> 24) < len(masters) else p.name}"
+            for (t, fid) in places if t == b"NAVM"]
+    got = _read(p, b"NAVM", want, _navmesh)["records"]
+    return {fk: [d for d, _ in (v or {}).get("doors") or []] for fk, v in got.items()}

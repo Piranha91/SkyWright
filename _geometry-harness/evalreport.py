@@ -3444,6 +3444,79 @@ def build_prediction(ctx: dict) -> dict:
             "patch": "" if left_ is None else bind(words["undoesMasterPatch"], {
                 "patch": patch_text, "left": fmt_n(left_), "count": fmt_n(n_)})}),
             "findingIds": u_["findingIds"][:1]})
+    # (sixth review, Clockwork r6 S1) a navmesh the navmesh check judges by links and ground (navmeshCheck rows) may
+    # also drop the losing version's door links. Read from the plugin files: the doors the losing version links and the
+    # winning one does not, kept where no navmesh of the setup links the door at its last version and the door's own
+    # last version still leads somewhere (a teleport) and is not off for good (gate A condition R2); with the patch,
+    # how many still have none. A measured line, not counted (no check judges door links), no NPC claim.
+    door_lines_read = False
+    nav_rows_ = [e for e in record if e["admission"] == "navmeshCheck"]
+    main_b6_ = ctx.get("mainBundle")
+    arm_rows6_ = {a_.get("armId"): (a_.get("requested") or {}).get("plugins") or []
+                  for a_ in ((main_b6_.plan.get("arms") if main_b6_ else None) or [])}
+    scan6_ = {}
+
+    def setup_doors(arm_):
+        """{navmesh formKey: (plugin, doors)} at each navmesh's last version in the setup; None if a file is not read."""
+        if arm_ not in scan6_:
+            out_, per_ = {}, {}
+            for x_ in arm_rows6_.get(arm_) or []:
+                path_ = str(x_.get("path") or "")
+                if not path_ or not Path(path_).is_file():
+                    out_ = None
+                    break
+                if path_ not in _PLUGIN_SHA:
+                    _PLUGIN_SHA[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+                if _PLUGIN_SHA[path_] != str(x_.get("sha256") or "").lower():
+                    out_ = None
+                    break
+                try:
+                    got_ = pluginread.navmesh_doors_all(path_)
+                except pluginread.PluginReadError:
+                    out_ = None
+                    break
+                for nfk_, ds_ in got_.items():
+                    out_[nfk_.lower()] = (x_.get("name"), {d_.lower() for d_ in ds_})
+                    per_[(str(x_.get("name")).lower(), nfk_.lower())] = {d_.lower() for d_ in ds_}
+            scan6_[arm_] = (out_, per_) if out_ is not None else (None, None)
+            plugin_reads.append({"read": "navmeshDoors", "setup": arm_, "complete": out_ is not None})
+        return scan6_[arm_]
+    if nav_rows_ and words.get("doorLinksLine"):
+        last_p_, per_p_ = setup_doors(p_arm)
+        if last_p_ is not None:
+            door_lines_read = True
+            lost_by_ = collections.OrderedDict()           # winner -> loser -> {door: navmesh}
+            for e in nav_rows_:
+                nfk_ = str(e["formKey"]).lower()
+                lose_, win_ = per_p_.get((e["A"].lower(), nfk_)), per_p_.get((e["B"].lower(), nfk_))
+                if lose_ is None or win_ is None:
+                    continue
+                for d_ in sorted(lose_ - win_):
+                    if any(d_ in ds_ for _, ds_ in last_p_.values()):
+                        continue                           # another navmesh links it
+                    dfk_ = next((f"{d_[:6].upper()}:{x_.get('name')}" for x_ in arm_rows6_.get(p_arm) or []
+                                 if str(x_.get("name")).lower() == d_.split(":", 1)[1]), None)
+                    dv_ = setup_version(arm_rows6_.get(p_arm), dfk_) if dfk_ else None
+                    if not dv_ or not dv_[1] or not dv_[1].get("teleport") or placement_off_for_good(dv_[1], words):
+                        continue                           # a door that leads nowhere, or is off for good (R2)
+                    lost_by_.setdefault(e["B"], collections.OrderedDict()).setdefault(e["A"], collections.OrderedDict())[dfk_] = str(e["formKey"])
+            last_w_ = setup_doors(patched_arm)[0] if patched_arm else None
+            for winner_, by_loser_ in lost_by_.items():
+                doors_ = [d_ for m_ in by_loser_.values() for d_ in m_]
+                navs_ = {n_ for m_ in by_loser_.values() for n_ in m_.values()}
+                still_ = ([d_ for d_ in doors_ if not any(d_.lower() in ds_ for _, ds_ in last_w_.values())]
+                          if last_w_ is not None else None)
+                loss_lines.append({"text": bind(words["doorLinksLine"], {
+                    "winner": winner_, "count": fmt_n(len(doors_)), "records": fmt_n(len(navs_)),
+                    "recordNoun": "navmesh record" if len(navs_) == 1 else "navmesh records",
+                    "doorNoun": "door" if len(doors_) == 1 else "doors",
+                    "parts": "; ".join(bind(words["doorLinksPart"], {
+                        "loser": l_, "count": fmt_n(len(m_)), "examples": ", ".join(list(m_)[:3])})
+                        for l_, m_ in by_loser_.items()),
+                    "patch": "" if still_ is None else bind(words["doorLinksPatch"], {
+                        "patch": patch_text, "count": fmt_n(len(still_)), "has": "has" if len(still_) == 1 else "have",
+                        "examples": ", ".join(still_[:4]) or "-"})}),
+                    "findingIds": list(dict.fromkeys(e.get("findingId") for e in nav_rows_ if e.get("findingId")))[:1]})
     # (third review, Missives S1) a base-game plugin's own fix that the winner's value drops, where the losing mod only
     # carries or restores it: one line per winner and base-game plugin, naming the plugins that carry the value
     base_drop = collections.OrderedDict()
@@ -3931,7 +4004,10 @@ def build_prediction(ctx: dict) -> dict:
                                                "count": fmt_n(len(carried_notown)),   # fields, as its sentence counts (fourth review, Clockwork r3 S2)
                                                "examples": "; ".join(sorted(set(carried_notown))[:2])})
                                            if carried_notown else "")}) if aside["notOwnEdit"] else "")
-                                   + "".join(" " + bind(words["setAsideNoise"][k_], {
+                                   + "".join(" " + bind(words["setAsideNoiseNavmeshDoorsRead"]
+                                                        if (k_ == "navmeshCheck" and door_lines_read
+                                                            and words.get("setAsideNoiseNavmeshDoorsRead"))
+                                                        else words["setAsideNoise"][k_], {
                                        "count": fmt_n(aside[k_]), "noun": words["fieldNoun"][0 if aside[k_] == 1 else 1]})
                                        for k_ in NOISE_ADMISSIONS if aside[k_] and (words.get("setAsideNoise") or {}).get(k_))
                                    if sum(aside.values()) else None),
