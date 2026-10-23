@@ -7829,6 +7829,38 @@ def main():
     for name, fn in [("sixth-review/C1124-failed-check-rows-from-sibling-said", c1124_failed_check_rows_from_sibling_said)]:
         cell(name, fn)
 
+    # C1125 (Sewers r5 S3): the evaluated mod's broken links of base-game navmeshes are said as one figure: the ones on
+    # the base-game line (navmeshes no other mod edits) and those whose linking navmesh another mod carries, with how
+    # many the setup with the patch still has.
+    def c1125_base_links_one_figure():
+        rows_ = []
+        for t_ in (501, 502):
+            r_ = row("EDGE-IDX", OTHER, MOD_A, N_LINK, label="CityExterior04 (ext)", other=N_TGT)
+            r_["Summary"] = (f"navmesh {N_LINK} in CityExterior04 (ext) edge-links {N_TGT} triangle {t_} of 432   "
+                             f"[record provided by: {BASE} -> {OTHER}]")
+            rows_.append(r_)
+        N2 = f"000E42:{BASE}"
+        r3 = row("EDGE-IDX", BASE, MOD_A, N2, label="CityExterior05 (ext)", other=N_TGT)
+        r3["Summary"] = (f"navmesh {N2} in CityExterior05 (ext) edge-links {N_TGT} triangle 503 of 432   "
+                         f"[record provided by: {BASE}]")
+        rows_.append(r3)
+        links_ = [(0x00000D43, 501), (0x00000D43, 502)]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, OTHER, MOD_A]),
+                arm("without-a", [BASE, OTHER])]
+        fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_))], True),
+                                               ("NAVM", 0x00000E42, [("NVNM", nvnm(4, [(0x00000D43, 503)]))], False),
+                                               ("NAVM", 0x00000D43, [("NVNM", nvnm(600, []))], False)]),
+               OTHER: plugin_file_of(OTHER, [BASE], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_))], False)])}
+        with_files(arms, fs_)
+        plan, md, _ = compile_and_render(arms, {(NAVOWN, "baseline"): rows_, (NAVOWN, "without-patch"): rows_,
+                                                (NAVOWN, "without-a"): []}, [MOD_A], patches=[PATCH])
+        adm = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []]
+        aside = str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+        return (f"{MOD_A} breaks 3 links of base-game navmeshes" in aside and "3 of the 3 are still broken" in aside), f"{adm}; {aside[-400:]}"
+
+    for name, fn in [("sixth-review/C1125-base-links-one-figure", c1125_base_links_one_figure)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

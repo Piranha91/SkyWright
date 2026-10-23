@@ -3941,6 +3941,22 @@ def build_prediction(ctx: dict) -> dict:
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
              "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
              **{k_: set_aside[k_] for k_ in NOISE_ADMISSIONS}}
+    def base_links_total(mod_):
+        """(sixth review, Sewers r5 S3) the evaluated mod's broken links of base-game navmeshes said as one figure: the
+        base-game line's and the carried ones, and how many the setup with the patch still has."""
+        rows_ = [e for e in record if e["kind"] == "EDGE-IDX" and e["admission"] in ("baseGame", "baseLink")
+                 and mod_ in (e["A"], e["B"])]
+        other_ = sum(1 for e in rows_ if e["admission"] == "baseGame")
+        if not other_ or not words.get("setAsideBaseLinkTotal"):
+            return ""
+        still_ = (sum(1 for e in rows_ if there(patched_arm, (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"],
+                                                               e["summary"])))
+                  if patched_arm and (rows_[0]["checkId"], patched_arm) in measured else None)
+        return " " + bind(words["setAsideBaseLinkTotal"], {
+            "other": fmt_n(other_), "mod": mod_, "total": fmt_n(len(rows_)),
+            "patch": "" if still_ is None else bind(words["setAsideBaseLinkTotalPatch"], {
+                "patch": patch_text, "still": fmt_n(still_), "total": fmt_n(len(rows_))})})
+
     def nobody_lights():
         """(sixth review, BPT r6 S4) the lights a support or fixture row sets aside as having no body: a light left where
         the object it stood on or hung from was moved or removed still lights that spot."""
@@ -4115,6 +4131,7 @@ def build_prediction(ctx: dict) -> dict:
                                        "count": fmt_n(n_), "mod": m_, "carriers": " and ".join(base_link_by),
                                        "noun": "link" if n_ == 1 else "links",
                                        "verb": "carries" if len(base_link_by) == 1 else "carry"})
+                                       + base_links_total(m_)
                                        for m_, n_ in base_link_cut_by.items() if words.get("setAsideBaseLinkCut"))
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
                                    + (" " + bind(words["setAsideNotOwnEdit"], {
