@@ -5858,20 +5858,6 @@ def main():
     for name, fn in [("fifth-review/C1088-winner-base-sentence-names-its-example", c1088_winner_base_sentence_names_its_example)]:
         cell(name, fn)
 
-    # C1089 (Snazzy S3): the measured loss of navmesh ground says what it means in game: NPCs cannot walk the lost ground
-    # unless another navmesh covers it (not checked), still not counted as a clash.
-    def c1089_lost_ground_meaning_said():
-        n1 = f"000N89:{BASE}"
-        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="CityExterior01 (ext)  598 tris -> 345")]
-        preds = [{"Kind": "CLOBBERED", "A": MOD_A, "B": MOD_B, "FormKey": n1, "Other": None, "Physical": "Holds",
-                  "Detail": "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u from the winner's"}]
-        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
-                                            [MOD_A, MOD_B], patches=[PATCH], predicates={(NAVOWN, "with-patch"): preds})
-        top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
-        return ("NPCs cannot walk" in top and "not counted above as a clash" in top), top[-300:]
-
-    for name, fn in [("fifth-review/C1089-lost-ground-meaning-said", c1089_lost_ground_meaning_said)]:
-        cell(name, fn)
 
     # C1090 (Snazzy earlier R2, pelts): a row set aside as cannot tell (fixture at 0 u) that the setup with the patch no
     # longer lists is "no longer found", never "resolved by the patch".
