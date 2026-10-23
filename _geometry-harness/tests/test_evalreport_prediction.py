@@ -5690,6 +5690,24 @@ def main():
     for name, fn in [("fifth-review/C1080-alias-split-one-unit", c1080_alias_split_one_unit)]:
         cell(name, fn)
 
+    # C1081 (Pilgrim S3): the load-order line says what a field means by the record type of its own rows: Flags lost on 2
+    # cells and 1 worldspace is said as the cell's switches (ShowSky first), not the worldspace's grass switch.
+    def c1081_flags_meaning_by_row_type():
+        p_rec = [lost_row(MOD_A, OTHER, f"000C81:{BASE}", "Lighting", "a", "o", "v")]
+        arms = [arm("baseline", [BASE, MOD_A, OTHER], kind="baseline")]
+        o_rows = [dict(lost_row(OTHER, MOD_A, f"000W81:{BASE}", "Flags", "o", "a", "v"), _check=CELLATTR, _type="Worldspace")]
+        o_rows += [dict(lost_row(OTHER, MOD_A, f"000C8{i_}:{BASE}", "Flags", "o", "a", "v"), _check=CELLATTR, _type="Cell")
+                   for i_ in (2, 3)]
+        setup = {"armId": "other-first", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
+                 "plugins": plugins(BASE, OTHER, MOD_A), "rows": o_rows}
+        plan, md, _ = compile_and_render(arms, {(CONTACT, "baseline"): []}, [MOD_A], count_only={(CELLATTR, "baseline"): 1},
+                                         enrichment={(CELLATTR, "baseline"): p_rec}, order_setups=[setup])
+        ln = " ".join(x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or [])
+        return ("ShowSky" in ln and "NoGrass" not in ln), ln[-400:]
+
+    for name, fn in [("fifth-review/C1081-flags-meaning-by-row-type", c1081_flags_meaning_by_row_type)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
