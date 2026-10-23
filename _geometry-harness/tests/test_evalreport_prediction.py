@@ -4306,7 +4306,7 @@ def main():
         fid = m_.group(1) if m_ else None
         f_ = next((f for f in plan.get("findings") or [] if f.get("id") == fid), {})
         holds = any(str(r_.get("formKey")) == f"000702:{BASE}" for r_ in f_.get("rows") or [])
-        ok = "switch an object back on" in line and holds
+        ok = "switch the object back on" in line and holds      # (fifth review) the wording names its unit
         return ok, f"link {fid} ({f_.get('checkId')}); {line[:200]}"
 
     for name, fn in [("after-review/C908-undone-link-holds-examples", c908_undone_link_holds_examples)]:
