@@ -7803,6 +7803,32 @@ def main():
     for name, fn in [("sixth-review/C1122-unread-reference-base-from-plugin", c1122_unread_reference_base_from_plugin)]:
         cell(name, fn)
 
+    # C1124 (Sewers r5 S2 / r6 S3): a check that failed in this evaluation, whose rows this report takes from the
+    # separate evaluation without the patch though none is counted, says so where its failure is listed; the base-game
+    # line says its clash comes from there, and names a Creation Club plugin's object with its plugin.
+    def c1124_failed_check_rows_from_sibling_said():
+        CC = "ccTestPack.esl"
+        Xs, Ys = f"000X24:{MOD_A}", f"000Y24:{CC}"
+        st_ = row("STATE-CONTACT@000S24:ModA.esp@Triggered", CC, MOD_A, Xs, label="Origin (ext)", other=Ys)
+        st_["Summary"] = (f"Contact StateConditional under PlankSwitch ({MOD_A}): {Xs} [Activator CritterMoth] arrives - "
+                          f"Sunk: sits 9u inside something")
+        arms = [arm("baseline", [BASE, CC, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, CC, MOD_A])]
+        s_arms = [arm("baseline", [BASE, CC, MOD_A], kind="baseline"), arm("plus-a", [BASE, CC, MOD_A]),
+                  arm("dependency-only", [BASE, CC])]
+        s_results = {(STATE, "baseline"): [st_], (STATE, "plus-a"): [st_], (STATE, "dependency-only"): [],
+                     (CONTACT, "baseline"): [], (CONTACT, "plus-a"): [], (CONTACT, "dependency-only"): []}
+        plan, md, html = compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}, [MOD_A],
+                                            patches=[PATCH], missing=[(STATE, "without-patch", "failed"), (STATE, "baseline", "failed")],
+                                            sibling=(s_arms, s_results, [MOD_A], {"plan_id": "sibl00001124"}))
+        adm = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or [] if e.get("source") == "sibling"]
+        miss = [ln for ln in md.splitlines() if "No result" in ln]
+        bg = next((ln for ln in md.splitlines() if "against base-game objects" in ln), "")
+        return (any("come from the separate evaluation" in ln for ln in miss)
+                and "from the separate evaluation" in bg and f"of {CC}" in bg), f"{adm}; {miss}; {bg[:300]}"
+
+    for name, fn in [("sixth-review/C1124-failed-check-rows-from-sibling-said", c1124_failed_check_rows_from_sibling_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)

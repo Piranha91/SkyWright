@@ -3462,8 +3462,16 @@ def build_prediction(ctx: dict) -> dict:
             if ob_:
                 kind_ = (kinds_.get("types") or {}).get(ob_.group(1), "")
                 pl_ = str((p_rows.get((e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])) or {}).get("row", {}).get("label") or "")
+                # (sixth review, Sewers S3) an object of a Creation Club plugin is named with its plugin, not as the
+                # base game's
+                listed_ = {str(x).lower() for x in words.get("baseGamePlugins") or []}
+                cc_ = next((str(x).split(":", 1)[1] for x in [e["formKey"], *(e.get("other") or ())]
+                            if ":" in str(x) and is_base_game(str(x).split(":", 1)[1], words)
+                            and str(x).split(":", 1)[1].lower() not in listed_), None)
                 c_.setdefault("objs", collections.OrderedDict()).setdefault(pl_, {})[str(e["formKey"])] = (
-                    f"{kind_} {ob_.group(2)}" if kind_ else ob_.group(2))
+                    (f"{kind_} {ob_.group(2)}" if kind_ else ob_.group(2)) + (f" of {cc_}" if cc_ else ""))
+            if e.get("source") == "sibling":
+                c_["sibling"] = True
     for (mod_, side_), by_c in base_geo.items():
         line_ = words.get("baseGameSidePutBackLine" if isinstance(side_, tuple) else
                           "baseGameSideLine" if side_ else "baseGameGeometryLine")
@@ -3474,6 +3482,7 @@ def build_prediction(ctx: dict) -> dict:
                 bind(words["seamTypeOnlyPart"], {"count": fmt_n(c_["n"])}) if c_.get("typeOnly") == c_["n"] and
                 words.get("seamTypeOnlyPart") else
                 f"{fmt_n(c_['n'])} {unit_noun(cid_, c_['kind'], c_['n'])} ({title_of(cid_)}"
+                + (words.get("baseGameFromSibling") or "" if c_.get("sibling") else "")
                 + (": " + "; ".join(bind(words["baseGameObjectsIn"], {"objects": and_list(list(o_.values())), "place": pl_})
                                     if pl_ else and_list(list(o_.values())) for pl_, o_ in c_["objs"].items())
                    if c_.get("objs") else "") + ")" for cid_, c_ in by_c.items())}),
@@ -4134,6 +4143,8 @@ def build_prediction(ctx: dict) -> dict:
                   "orderRiskLines": order_lines, "orderRisks": order_record}
 
     sib_counted = {e["checkId"] for e in record if e.get("source") == "sibling" and e["admission"] == "admitted"}
+    # (sixth review, Sewers S3) a check whose rows this report takes from the separate evaluation, counted or not
+    sib_used = {e["checkId"] for e in record if e.get("source") == "sibling"} - sib_counted
     # --- coverage: what the checks could not judge, by named reason and count
     reasons = words["coverageReasons"]
     lines = []
@@ -4163,6 +4174,9 @@ def build_prediction(ctx: dict) -> dict:
                         and words.get("missingFromSibling")):
                     # its result for this setup is taken from the separate evaluation, said here too (P95)
                     label += words["missingFromSibling"]
+                elif (part not in ("diff", "reverse") and a == p_arm and check_id in sib_used
+                        and words.get("missingFromSiblingUsed")):
+                    label += words["missingFromSiblingUsed"]
                 return (f"the comparison of {label} with the measured load order" if part in ("diff", "reverse")
                         else label)
             setups = sorted({(a, part) for a, part in arms_ if a}, key=lambda x: (str(x[0]), str(x[1])))
