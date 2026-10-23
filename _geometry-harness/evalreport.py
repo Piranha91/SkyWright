@@ -2145,6 +2145,21 @@ def build_prediction(ctx: dict) -> dict:
                 return ("base", None) if is_base_game(pv_, words) else ("added", pv_)
         return ("unread", None)
 
+    def base_link_cut(rk):
+        """(fifth review, Sewers S2) a base link the evaluated mod breaks: the base game's own version of the target
+        navmesh (its origin plugin, read from the file) has the triangle the link points at, and the row's own count of
+        the target's triangles (the evaluated mod's version) is at most that index."""
+        m_ = re.search(r"edge-links (\S+) triangle (\d+) of (\d+)", str(rk[5] or ""))
+        if not m_:
+            return False
+        tgt_, tri_, now_ = m_.group(1), int(m_.group(2)), int(m_.group(3))
+        origin_ = tgt_.split(":", 1)[-1]
+        if not is_base_game(origin_, words):
+            return False
+        got_ = plugin_record(next((x for x in all_orders.get(p_arm) or [] if x.lower() == origin_.lower()), origin_),
+                             "navmesh", tgt_)
+        return bool(got_ and got_.get("triangles") is not None and tri_ < int(got_["triangles"]) and now_ <= tri_)
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -2266,7 +2281,7 @@ def build_prediction(ctx: dict) -> dict:
             return "single-mod", alone[0], None
         return "needs-both", None, None
 
-    record, set_aside, carried_notown, base_link_by = [], collections.Counter(), [], []
+    record, set_aside, carried_notown, base_link_by, base_link_cut_by = [], collections.Counter(), [], [], {}
     lost_seen = set()
     groups = collections.OrderedDict()
     multi = len(p_targets) > 1
@@ -2378,6 +2393,9 @@ def build_prediction(ctx: dict) -> dict:
             set_aside[adm] += 1
             if adm == "baseLink" and rk[2] not in base_link_by:
                 base_link_by.append(rk[2])
+            if adm == "baseLink" and base_link_cut(rk):
+                base_link_cut_by.setdefault(rk[3], 0)
+                base_link_cut_by[rk[3]] += 1
             if adm == "samePair":
                 entry["sameAsCheck"] = pair_owner[pair_][0]
             if adm == "notOwnEdit":
@@ -3739,10 +3757,16 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsideOffUnreferencedWinner"], {**aside, "winners": " and ".join(unref_winners)})
                                       if aside["offUnreferencedWinner"] else "")
                                    + (" " + bind(words["setAsideBaseLink"], {
-                                       "count": fmt_n(aside["baseLink"]), "carriers": " and ".join(base_link_by),
-                                       "noun": "link" if aside["baseLink"] == 1 else "links",
+                                       "count": fmt_n(aside["baseLink"] - sum(base_link_cut_by.values())),
+                                       "carriers": " and ".join(base_link_by),
+                                       "noun": "link" if aside["baseLink"] - sum(base_link_cut_by.values()) == 1 else "links",
                                        "verb": "carries" if len(base_link_by) == 1 else "carry"})
-                                      if aside["baseLink"] else "")
+                                      if aside["baseLink"] > sum(base_link_cut_by.values()) else "")
+                                   + "".join(" " + bind(words["setAsideBaseLinkCut"], {
+                                       "count": fmt_n(n_), "mod": m_, "carriers": " and ".join(base_link_by),
+                                       "noun": "link" if n_ == 1 else "links",
+                                       "verb": "carries" if len(base_link_by) == 1 else "carry"})
+                                       for m_, n_ in base_link_cut_by.items() if words.get("setAsideBaseLinkCut"))
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
                                    + (" " + bind(words["setAsideNotOwnEdit"], {
                                        "count": fmt_n(aside["notOwnEdit"]),
