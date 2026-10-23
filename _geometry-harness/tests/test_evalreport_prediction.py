@@ -5873,6 +5873,24 @@ def main():
     for name, fn in [("fifth-review/C1089-lost-ground-meaning-said", c1089_lost_ground_meaning_said)]:
         cell(name, fn)
 
+    # C1090 (Snazzy earlier R2, pelts): a row set aside as cannot tell (fixture at 0 u) that the setup with the patch no
+    # longer lists is "no longer found", never "resolved by the patch".
+    def c1090_cannot_tell_not_resolved():
+        fx = [row("EMPTY-SPACE", MOD_B, MOD_A, f"000F9{i}:{MOD_A}", other=f"000H9{i}:{MOD_B}") for i in (1, 2)]
+        fx[0]["Summary"] = "LeftInEmptySpace: Static Pelt; its assembly of 1 touches no floor or wall now (nearest floor or wall 0u)"
+        fx[1]["Summary"] = "LeftInEmptySpace: Static Rack; its assembly of 1 touches no floor or wall now (nearest floor or wall 27u)"
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        plan, md, _ = compile_and_render(arms, {(FIXTURE, "baseline"): [fx[1]], (FIXTURE, "without-patch"): fx,
+                                                (FIXTURE, "without-b"): []}, [MOD_A], patches=[PATCH])
+        sents = (reader(plan).get("validation") or {}).get("sentences") or []
+        res_ = [x for x in sents if x.startswith("Resolved by") and "not predicted" in x]
+        gone_ = [x for x in sents if "no longer found" in x.lower()]
+        return (not any("0u" in x or "floor or wall" in x for x in res_) and any("1 " in x for x in gone_)), f"{res_} || {gone_}"
+
+    for name, fn in [("fifth-review/C1090-cannot-tell-not-resolved", c1090_cannot_tell_not_resolved)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
