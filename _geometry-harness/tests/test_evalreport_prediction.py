@@ -2335,7 +2335,9 @@ def main():
         line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
         new = next((ln for ln in md.splitlines() if ln.startswith("- New clashes in the setup")), "")
         ok = (val.get("undone") == 2 and val.get("undoneBy") == {MOD_A: 1, MOD_B: 1}
-              and f"2 record fields the mods changed ({MOD_A} 1, {MOD_B} 1)" in line     # (fifth review) its unit named
+              # (fifth review) its unit named; (seventh review, BPT S1) each plugin's fields and records named
+              and f"2 record fields the mods changed ({MOD_A} 1: record flags of 000702:{BASE}; {MOD_B} 1: position of "
+                  f"000703:{BASE})" in line
               and f"1 of them, on 1 object, switch the object back on, for example 000702:{BASE}" in line
               and new.endswith(": 0.") and "undo" not in new and val.get("patchProblems") == 0)
         return ok, f"undone {val.get('undone')} {val.get('undoneBy')}; line {line!r}; new clashes {new!r}"
@@ -8259,7 +8261,24 @@ def main():
                    if x.startswith("Record fields")), "")
         return ("1 in the position, so the object stands where the winning mod puts it" in kl), kl[:400]
 
-    for name, fn in [("seventh-review/C1159-kept-position-has-meaning", c1159_kept_position_has_meaning),
+    # C1158 (BPT S1): the line of record changes the patch undoes names, per plugin, the fields and the records they are
+    # on, so a modder can find them; the counts stay.
+    def c1158_undone_line_itemised():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000781:{BASE}", "LocationReference", "a1", "b1", "v")]
+        w_rows = [lost_row(MOD_B, PATCH, f"000781:{BASE}", "LocationReference", "b1", "a1", "a1"),
+                  lost_row(MOD_A, PATCH, f"000782:{BASE}", "Primitive", "Bounds=1,2,3", "Bounds=4,5,6", "v"),
+                  lost_row(MOD_B, PATCH, f"000783:{BASE}", "Placement", "Position=1,2,3; Rotation=0,0,0",
+                           "Position=4,5,6; Rotation=0,0,0", "v")]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH],
+                                            count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 3}, enrichment=enr)
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
+        return (f"{MOD_A} 1: " in line and f"000782:{BASE}" in line and f"{MOD_B} 1: " in line
+                and f"000783:{BASE}" in line), line[:400]
+
+    for name, fn in [("seventh-review/C1158-undone-line-itemised", c1158_undone_line_itemised),
+                     ("seventh-review/C1159-kept-position-has-meaning", c1159_kept_position_has_meaning),
                      ("seventh-review/C1150-kept-note-says-objects", c1150_kept_note_says_objects),
                      ("seventh-review/C1149-alone-line-meaning-without-effect-lead", c1149_alone_line_meaning_without_effect_lead),
                      ("seventh-review/C1155-set-aside-carried-one-explanation", c1155_set_aside_carried_one_explanation),

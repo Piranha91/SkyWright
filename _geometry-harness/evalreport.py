@@ -5276,8 +5276,14 @@ def build_prediction(ctx: dict) -> dict:
             # clashes (coordinator, item 3 of the fifth review; P52): the objects switched back on are the examples
             sentences.append(bind(words["validationUndone"], {
                 "patch": patch, "count": fmt_n(len(undone)),
-                "by": ", ".join(f"{m_} {fmt_n(n_)}" for m_, n_ in sorted(undone_by.items(),
-                                                                          key=lambda kv: (-kv[1], kv[0].lower()))),
+                # (seventh review, BPT S1) each plugin's undone fields named, with the records they are on
+                "by": "; ".join(bind(words.get("validationUndoneBy") or "{mod} {count}", {
+                    "mod": m_, "count": fmt_n(n_),
+                    "fields": and_list(list(dict.fromkeys(field_word(h_["row"].get("field")) for rk_, h_ in undone
+                                                          if rk_[2] == m_))),
+                    "records": ", ".join(list(dict.fromkeys(str(rk_[4]) for rk_, _ in undone if rk_[2] == m_))[:3])
+                    + (" and more" if len({str(rk_[4]) for rk_, _ in undone if rk_[2] == m_}) > 3 else "")})
+                    for m_, n_ in sorted(undone_by.items(), key=lambda kv: (-kv[1], kv[0].lower()))),
                 "enables": bind(words["validationUndoneEnables"], {
                     "count": fmt_n(n_enable), "examples": "; ".join(enable_examples),
                     "objects": (lambda n_: f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}")(
