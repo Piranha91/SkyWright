@@ -6709,8 +6709,8 @@ def main():
         title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
         line = next((ln for ln in md.splitlines() if ln.startswith(f"- **{title}**")), "")
         # (seventh review, Sewers S1) the depth is the row's own object's, against something the check does not name
-        ok = (re.search(r"from ModA\.esp: when GuardSwitch is set, the check reports 000X36:ThirdMod\.esp 9 u inside "
-                        r"something it does not name", line) is not None
+        ok = (re.search(r"from ModA\.esp: when GuardSwitch is set, 000X36:ThirdMod\.esp sits 9 u inside "
+                        r"another", line) is not None
               and "In game: when" not in line)
         return ok, line[-400:]
 
@@ -6898,7 +6898,7 @@ def main():
         plan, md, html = compile_and_render(arms, results, [MOD_A], patches=[PATCH], names={"refs": refs, "bases": bases})
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects occupying the same space")), "")
         adm = [e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or [] if e["checkId"] == OVERLAP]
-        return ("1 of these" in it and "visual effect" in it and adm == ["admitted", "admitted"]), f"{adm}; {it[-400:]}"
+        return ("1 of these" in it and "visual-effect model" in it and adm == ["admitted", "admitted"]), f"{adm}; {it[-400:]}"
 
     # C1056 (Missives S5): a winner's own change to a cell's land flags says whether the setup with the patch still has it
     # (the patch leaves the cell to ModA: still so in 1 of the 1).
@@ -8177,7 +8177,7 @@ def main():
         nw = next((ln for ln in md.splitlines() if "New clashes with the patch" in ln), "")
         return ("1 of the pairs with a visual-effect model" in v and "1 with a visual-effect model" in kl
                 and re.search(r"1 of these pairs involve[^.]*sky", it) is not None
-                and "visual-effect model" in nw), f"{v[-160:]} || {kl[:160]} || {it[-300:]} || {nw[:300]}"
+                and "1 with a visual-effect model" in nw), f"{v[-160:]} || {kl[:160]} || {it[-300:]} || {nw[:300]}"
 
     for name, fn in [("seventh-review/C1148-attribution-read", c1148_attribution_read),
                      ("seventh-review/C1140-far-move-credits-mover-placement", c1140_far_move_credits_mover_placement),
@@ -8241,7 +8241,7 @@ def main():
 
     # C1150 (Winterhold S2): the patch keeps ModB's on version of one object over ModA's two switch-off fields (its
     # position below the world and its flags): the with-patch note counts the record fields with the objects they are
-    # on, "2 record fields (1 object) drawn though ...", never "2 drawn" as if two objects.
+    # on, "2 (1 object) drawn though ...", never "2 drawn" as if two objects.
     def c1150_kept_note_says_objects():
         D = f"00CA50:{BASE}"
         a_, b_ = offs(-30000, "InitiallyDisabled"), offs(0)
@@ -8254,7 +8254,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
         kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
                    if x.startswith("Record fields")), "")
-        return ("2 record fields (1 object) drawn though the losing mod switches them off" in kl), kl[:400]
+        return ("2 (1 object) drawn though the losing mod switches them off" in kl), kl[:400]
 
     # C1159 (BPT S3): every kept row of the with-patch line has its meaning: a kept position (both versions have the
     # object on; ModA moved it, the patch keeps ModB's spot) is said as the object standing where the winning mod puts it.
@@ -8269,7 +8269,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]})
         kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
                    if x.startswith("Record fields")), "")
-        return ("1 in the position, so the object stands where the winning mod puts it" in kl), kl[:400]
+        return ("1 in the position, the winning mod's spot" in kl), kl[:400]
 
     # C1158 (BPT S1): the line of record changes the patch undoes names, per plugin, the fields and the records they are
     # on, so a modder can find them; the counts stay.
@@ -8380,7 +8380,7 @@ def main():
         plan, md, X = placed_overlap_bundle(details=["actual render surfaces: crossing; containment unassessed; 38 triangle pairs [mm]",
                                                      "actual render surfaces: crossing; containment unassessed; 12 triangle pairs [mm]"])
         ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
-        return ("Measured again in the setup with" in ln and "12 to 38 triangle pairs" in ln), ln[:400]
+        return ("Re-measured there with" in ln and "12 to 38 triangle pairs" in ln), ln[:400]
 
     # C1157 (Clockwork S4): the patch lists OtherMod.esp as a master, and a clash with it is still there with the patch,
     # beside one with Neighbour.esp, which it does not list: the scope line says the OtherMod one is inside what the

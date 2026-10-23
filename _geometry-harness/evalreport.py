@@ -4958,7 +4958,8 @@ def build_prediction(ctx: dict) -> dict:
 
             def cnt_(s_):
                 o_ = (objs or {}).get(s_)
-                if not o_ or o_ >= c_[s_] or not words.get("offGoodObjects"):
+                # (page budget) the objects are said where the note says they are drawn
+                if not o_ or o_ >= c_[s_] or not words.get("offGoodObjects") or s_ != "keptOn":
                     return fmt_n(c_[s_])
                 return bind(words["offGoodObjects"], {"objects": fmt_n(o_), "count": fmt_n(c_[s_]),
                                                       "noun": words["fieldNoun"][0 if c_[s_] == 1 else 1],
@@ -5360,12 +5361,18 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationUndone"], {
                 "patch": patch, "count": fmt_n(len(undone)),
                 # (seventh review, BPT S1) each plugin's undone fields named, with the records they are on
-                "by": "; ".join(bind(words.get("validationUndoneBy") or "{mod} {count}", {
+                # (page budget) itemised for a plugin with at most 3 fields on at most 3 records; a count otherwise
+                "by": "; ".join(bind(words.get("validationUndoneBy") if (
+                    len({h_["row"].get("field") for rk_, h_ in undone if rk_[2] == m_}) <= 3
+                    and len({str(rk_[4]) for rk_, _ in undone if rk_[2] == m_}) <= 3) and words.get("validationUndoneBy")
+                    else "{mod} {count}", {
                     "mod": m_, "count": fmt_n(n_),
-                    "fields": and_list(list(dict.fromkeys(field_word(h_["row"].get("field")) for rk_, h_ in undone
-                                                          if rk_[2] == m_))),
-                    "records": ", ".join(list(dict.fromkeys(str(rk_[4]) for rk_, _ in undone if rk_[2] == m_))[:3])
-                    + (" and more" if len({str(rk_[4]) for rk_, _ in undone if rk_[2] == m_}) > 3 else "")})
+                    # (page budget) up to 2 fields, then "and more"
+                    "fields": (lambda fs_: and_list(fs_[:2]) + (" and more" if len(fs_) > 2 else ""))(
+                        list(dict.fromkeys(field_word(h_["row"].get("field")) for rk_, h_ in undone if rk_[2] == m_))),
+                    # (page budget) the records only where there are at most 2
+                    "records": (lambda rs_: f" of {and_list(rs_)}" if len(rs_) <= 3 else "")(
+                        list(dict.fromkeys(str(rk_[4]) for rk_, _ in undone if rk_[2] == m_)))})
                     for m_, n_ in sorted(undone_by.items(), key=lambda kv: (-kv[1], kv[0].lower()))),
                 "enables": bind(words["validationUndoneEnables"], {
                     "count": fmt_n(n_enable), "examples": "; ".join(enable_examples),
