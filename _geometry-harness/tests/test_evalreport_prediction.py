@@ -7515,6 +7515,102 @@ def main():
                      ("sixth-review/C1109-pluginread-door-triangles", c1109_pluginread_door_triangles)]:
         cell(name, fn)
 
+    # ------------------------------------------------ sixth review, later items (C1110-C1131)
+    # C1110 (Pilgrim r6 S1, wording): the sentence that a crossing may come from the other mod's own placement names the
+    # partners it moved across their size, turned or rebased, never a partner it only nudged.
+    def c1110_own_placement_sentence_names_its_partners():
+        near_ = (0x00CA10, (100.0, 100.0, 0.0, 1.5, 0x0B0A79), (102.0, 100.0, 0.0, 1.5, 0x0B0A79))
+        far_ = (0x00CB10, (500.0, 100.0, 0.0, 1.5, 0x0B0A79), (800.0, 100.0, 0.0, 2.0, 0x0B0A79))
+        md, it = nudge_bundle([near_, far_])
+        s_ = next((x for x in re.split(r"(?<=\.)\s+", it) if "may come from its own placement" in x), "")
+        return ("00CB10:Skyrim.esm" in s_ and "00CA10:Skyrim.esm" not in s_), s_[:300]
+
+    # C1114 (BPT r5 S1): a patch that takes the losing mod's value over the winner's change (switched) is worded apart
+    # from a patch carrying the winner's value (kept): "restores", never the kept wording.
+    def c1114_switched_worded_apart_from_kept():
+        R2_ = f"00C214:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, R2_, "Placement", "o2", "a2", "v2")]
+        w_rows = [lost_row(MOD_A, PATCH, R2_, "Placement", "a2", "o2", "o2")]
+        chains = [(R2_, "PlacedObject", [(BASE, {"Placement": "v2"}), (OTHER, {"Placement": "o2"}),
+                                         (MOD_A, {"Placement": "a2"})])]
+        plan, md, html = core_bundle(p_rows, w_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        return ([e.get("withPatch") for e in rec_of(plan, R2_)] == ["switched"] and "restores" in kl
+                and "keeps OtherMod.esp's value" not in kl), kl[:300]
+
+    # C1120 (Snazzy S2, Missives line 157): a comparison's still-holding sentence gives the reason the prediction
+    # records: a patch places one of the two objects (its patch-placed pairs account for every one), never "one plugin
+    # now places both".
+    def c1120_still_holding_reason_patch_places_one():
+        X = f"000X20:{MOD_A}"
+        ys = [f"000Y2{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": p_}
+                 for y, p_ in zip(ys, ("Gone", "Holds"))]
+        refs = {ys[1]: {"carriedBy": [MOD_B, PATCH]}, ys[0]: {"carriedBy": [MOD_B]}, X: {"carriedBy": [MOD_A]}}
+        order = {"with-patch": {"overlapprobe": dict(verdict="DIFFERENTIAL-VERIFIED", repaired=1, reclassified=1, created=0,
+                                                     newDefect=0, attributed=0, unmeasured=0)}}
+        log = ("   reclassified : 1 record(s)   (left the class still holding 1; left with no physical defect to begin with 0;"
+               " entered reading Gone 0)\n")
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                            names={"refs": refs}, order=order, diff_logs={(OVERLAP, "with-patch"): log})
+        ln = next((x for x in md.splitlines() if "still physically there" in x), "")
+        return ("a patch now places one of the two objects" in ln and "one plugin now places both" not in ln), ln[-300:]
+
+    # C1123 (Sewers r5 S1): a further evaluation's other version of an evaluated plugin is named by the folder its plan
+    # loads it from.
+    def c1123_variant_named_by_folder():
+        X1, T_ = f"000X23:{MOD_A}", f"000T23:{OTHER}"
+        rows_ = [row("OVERLAP", OTHER, MOD_A, X1, other=T_)]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, OTHER, MOD_A]),
+                arm("without-other", [BASE, MOD_A])]
+        v_arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline", shas={MOD_A: "b" * 64})]
+        for q_ in v_arms[0]["requested"]["plugins"]:
+            if q_["name"] == MOD_A:
+                q_["path"] = f"X:/mods/ModA compatible variant/{MOD_A}"
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): list(rows_), (OVERLAP, "without-patch"): rows_,
+                                                (OVERLAP, "without-other"): []}, [MOD_A], patches=[PATCH],
+                                         also=[(v_arms, {(OVERLAP, "baseline"): []}, [MOD_A], {})])
+        also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
+        return "ModA compatible variant" in also_, also_[-300:]
+
+    # C1126 (Sewers r6 S4): a by-object comparison's repairs say their unit: the object and its pairs.
+    def c1126_repairs_name_objects_and_pairs():
+        G0 = f"000G26:{MOD_A}"
+        base = [row("CONTACT", MOD_B, MOD_A, G0, other=f"000H{i}6:{MOD_B}") for i in (1, 2)]
+        preds = [{"Kind": "CONTACT", "A": MOD_B, "B": MOD_A, "FormKey": G0, "Other": f"000H{i}6:{MOD_B}", "Physical": "Gone"}
+                 for i in (1, 2)]
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-VERIFIED", repaired=2, reclassified=0,
+                                                     created=0, newDefect=0, attributed=0, unmeasured=0)}}
+        log = f"SHRANK  CONTACT    {MOD_B}  x  {MOD_A}   -2 record(s): repaired 2\n"
+        refs = {G0: {"base": f"0B0S26:{MOD_A}"}, **{f"000H{i}6:{MOD_B}": {"base": f"0B0W26:{MOD_B}"} for i in (1, 2)}}
+        bases = {f"0B0S26:{MOD_A}": {"type": "Static", "model": "lantern.nif"}, f"0B0W26:{MOD_B}": {"type": "Static", "model": "table.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): base, (CONTACT, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH], order=order, predicates={(CONTACT, "with-patch"): preds},
+                                            names={"refs": refs, "bases": bases}, diff_logs={(CONTACT, "with-patch"): log})
+        ln = next((x for x in md.splitlines() if "repaired 1 existing" in x), "")
+        return re.search(r"repaired 1 existing problem \(1 object, 2 object-and-support pairs\)", ln) is not None, ln[-300:]
+
+    # C1129 (Missives r5 S3 / r6 S1): the narrowing note names the record type it covers, so the cells' MaxHeightData
+    # is not taken for the worldspace field a report counts.
+    def c1129_narrowing_names_record_type():
+        pr_ = priorities()
+        rows_ = [{"checkId": RECORDS, "tool": {"name": "ordered housecarl_records calls (CELL re-read narrowed to its compared "
+                                                         "fields without MaxHeightData (c03; N11), WRLD narrowed without "
+                                                         "OffsetData), composed by a script"}}]
+        facts = R.import_narrowed_facts(rows_, pr_, lambda c_: c_)
+        j_ = " | ".join(facts)
+        return ("cell records' MaxHeightData" in j_ and "worldspace records' OffsetData" in j_), j_[:400]
+
+    for name, fn in [("sixth-review/C1110-own-placement-sentence-names-its-partners", c1110_own_placement_sentence_names_its_partners),
+                     ("sixth-review/C1114-switched-worded-apart-from-kept", c1114_switched_worded_apart_from_kept),
+                     ("sixth-review/C1120-still-holding-reason-patch-places-one", c1120_still_holding_reason_patch_places_one),
+                     ("sixth-review/C1123-variant-named-by-folder", c1123_variant_named_by_folder),
+                     ("sixth-review/C1126-repairs-name-objects-and-pairs", c1126_repairs_name_objects_and_pairs),
+                     ("sixth-review/C1129-narrowing-names-record-type", c1129_narrowing_names_record_type)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
