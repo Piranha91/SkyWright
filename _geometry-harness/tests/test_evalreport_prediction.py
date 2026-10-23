@@ -5751,6 +5751,28 @@ def main():
     for name, fn in [("fifth-review/C1083-height-diff-with-across", c1083_height_diff_with_across)]:
         cell(name, fn)
 
+    # C1084 (BPT S5): the new problems a patch brings, by check, carry that check's in-game meaning as a candidate for a
+    # visual check (no role read from a model's name), so a modder is not left to guess what a new problem does.
+    def c1084_new_by_check_in_game():
+        X1 = f"000X84:{MOD_A}"
+        new = [row("CONTACT", MOD_B, MOD_A, X1, other=f"000H84:{MOD_B}")]
+        new[0]["Summary"] += "; nearest floor or wall 4.9u"
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                     created=1, newDefect=1, attributed=0, unmeasured=0)}}
+        log = f"NEW     CONTACT    {MOD_B}  x  {MOD_A}   +1 record(s): created 1\n"
+        refs = {X1: {"base": f"0B0P84:{MOD_A}"}, f"000H84:{MOD_B}": {"base": f"0B0W84:{MOD_B}"}}
+        bases = {f"0B0P84:{MOD_A}": {"type": "Static", "editorId": "ShadowPlane", "model": "plane.nif"},
+                 f"0B0W84:{MOD_B}": {"type": "Static", "editorId": "Wall", "model": "wall.nif"}}
+        plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): new},
+                                            [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                            names={"refs": refs, "bases": bases}, diff_logs={(CONTACT, "with-patch"): log})
+        nb = next((ln for ln in md.splitlines() if ln.startswith("- New clashes with the patch, by check")), "")
+        return ("in game" in nb.lower() and "candidate for a visual check" in nb and "shadow" not in nb.lower()
+                .replace("shadowplane", "")), nb[-300:]
+
+    for name, fn in [("fifth-review/C1084-new-by-check-in-game", c1084_new_by_check_in_game)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
