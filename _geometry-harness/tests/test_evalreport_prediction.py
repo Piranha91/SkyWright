@@ -5798,6 +5798,24 @@ def main():
     for name, fn in [("fifth-review/C1085-reclassified-not-repaired", c1085_reclassified_not_repaired)]:
         cell(name, fn)
 
+    # C1086 (Winterhold S1): with two evaluated mods, a detail line whose rows the top counts only in part says the rows
+    # already there with one mod alone apart from those counted at the top, never "N counted at the top" for all.
+    def c1086_detail_split_counts_alone_apart():
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B], kind="baseline"), arm("without-b", [BASE, OTHER, MOD_A]),
+                arm("without-a", [BASE, OTHER, MOD_B])]
+        rows_ = [row("OVERLAP", MOD_B, MOD_A, f"000X8{i}:{MOD_A}", other=f"000Y8{i}:{MOD_B}") for i in range(3)]
+        # one pair against a base-game object ModB also edits: already there with ModA alone
+        rows_.append(row("OVERLAP", MOD_B, MOD_A, f"000Z86:{MOD_A}", other=f"000W86:{BASE}"))
+        al_ = [row("OVERLAP", BASE, MOD_A, f"000Z86:{MOD_A}", other=f"000W86:{BASE}")]
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rows_, (OVERLAP, "without-b"): al_,
+                                                (OVERLAP, "without-a"): []}, [MOD_A, MOD_B])
+        line = next((ln for ln in md.split("## What the checks found", 1)[-1].splitlines()
+                     if "Measured load order" in ln and "4 overlap pairs" in ln), "")
+        return ("(3 counted at the top; 1 already there with one mod alone)" in line), line[:300]
+
+    for name, fn in [("fifth-review/C1086-detail-split-counts-alone-apart", c1086_detail_split_counts_alone_apart)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
