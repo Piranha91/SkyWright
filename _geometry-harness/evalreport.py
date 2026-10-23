@@ -1645,8 +1645,15 @@ def build_prediction(ctx: dict) -> dict:
     def carried_origin(provs_, vals_, w_):
         """The plugin whose own change provider w_'s value is, walking back through the versions it only carries; None
         where w_'s value is its own change."""
-        k_ = recordrows.attribute(provs_, vals_, w_, masters)["origin"]
+        k_ = recordrows.attribute(provs_, vals_, w_, masters)["owner"]
         return provs_[k_] if k_ != w_ else None
+
+    def owner_of(provs_, vals_, k_):
+        """(seventh review round 2) (index, name) of the one owner of provider k_'s value: the first provider holding it
+        as a change of its own; "the base game" for the record's original value."""
+        o_ = recordrows.attribute(provs_, vals_, k_, masters)["owner"]
+        return o_, ((words.get("baseGameOwner") or "the base game") if o_ == 0 and is_base_game(provs_[0], words)
+                    else provs_[o_])
 
     def whose_value(arm_id, check_id, fk, field, plugin=None, index=None):
         """(seventh review) The attribution read of one record field in one setup, keyed by setup, check, record and
@@ -2773,7 +2780,10 @@ def build_prediction(ctx: dict) -> dict:
             # field itself too; said in the item, never only "lost to"
             if (supersede(rk) or {}).get("kind") == "undecided":
                 g["_notDecided"] = g.get("_notDecided", 0) + 1
-            if (own_edit(p_of(rk[0]), rk, rk[3]) or {}).get("changed"):
+            own_w_ = whose_value(p_of(rk[0]), rk[0], rk[4], hit["row"].get("field"), rk[3])
+            if (own_edit(p_of(rk[0]), rk, rk[3]) or {}).get("changed") and (
+                    own_w_ is None or own_w_[2]["owner"] == own_w_[2]["origin"] == [str(x).lower() for x in own_w_[0]].index(rk[3].lower())):
+                # (seventh review round 2) and the value is its own, not one an earlier plugin made first
                 g["_winnerOwn"] = g.get("_winnerOwn", 0) + 1
                 v_ = hit["row"].get("values") or {}
                 if value_recorded(v_.get("lost")) and value_recorded(v_.get("winner")):
@@ -2808,22 +2818,29 @@ def build_prediction(ctx: dict) -> dict:
                 g.setdefault("_leafDiff", {}).setdefault(f4_, []).append(
                     (tuple(diff4_), la_.get(diff4_[0]) if len(diff4_) == 1 else None,
                      lb_.get(diff4_[0]) if len(diff4_) == 1 else None))
-                g.setdefault("_prevWinner", set()).add(ch4_["providers"][ib4_ - 1] if ib4_ > 0 else None)
+                pw_ = ch4_["providers"][ib4_ - 1] if ib4_ > 0 else None
+                po_ = None
+                if pw_ is not None:
+                    gp_ = whose_value(p_of(rk[0]), rk[0], rk[4], f4_, pw_)
+                    po_ = owner_of(gp_[0], gp_[1], gp_[2]["origin"])[1] if gp_ is not None else None
+                g.setdefault("_prevWinner", set()).add((pw_, po_) if pw_ is not None else None)
             got3_ = field_chain(p_of(rk[0]), rk, rk[2])
             if got3_ is not None:
                 provs3, vals3, _ = got3_
                 low3 = [str(x).lower() for x in provs3]
                 if rk[2].lower() in low3 and rk[3].lower() in low3:
                     i3, w3 = low3.index(rk[2].lower()), low3.index(rk[3].lower())
-                    for j3 in range(len(provs3)):
-                        if (j3 not in (i3, w3) and j3 < w3 and vals3[j3] == vals3[i3] and not is_base_game(provs3[j3], words)
-                                and recordrows.own_change(provs3, vals3, j3, (masters or {}).get(low3[j3])
-                                                          if masters is not None else None)[0]):
-                            g.setdefault("_sameBy", collections.Counter())[provs3[j3]] += 1
+                    # (seventh review round 2, Missives 21) where the loser owns its value, the others holding it
+                    # carry it, whether by a master or by the same bytes
+                    if owner_of(provs3, vals3, i3)[0] == i3:
+                        for j3 in range(i3 + 1, w3):
+                            if vals3[j3] == vals3[i3] and not is_base_game(provs3[j3], words):
+                                g.setdefault("_sameBy", collections.Counter())[provs3[j3]] += 1
                     # (sixth review, BPT r6 S3, Missives) the winner's value is an earlier, not base-game plugin's
                     # own change it only carries: that plugin is named as the value's own
-                    org_ = carried_origin(provs3, vals3, w3)
-                    if org_ is not None and not is_base_game(org_, words):
+                    ow3_ = owner_of(provs3, vals3, w3)
+                    org_ = ow3_[1] if ow3_[0] != w3 else None
+                    if org_ is not None and ow3_[0] != 0:
                         g.setdefault("_winnerCarries", collections.Counter())[(rk[3], org_)] += 1
                     if (vals3[w3] == vals3[0] and not recordrows.own_change(
                             provs3, vals3, w3, (masters or {}).get(low3[w3]) if masters is not None else None)[0]):
@@ -2846,8 +2863,8 @@ def build_prediction(ctx: dict) -> dict:
                     low_ = [str(x).lower() for x in provs_]
                     if rk[2].lower() in low_:
                         i_ = low_.index(rk[2].lower())
-                        # the first plugin that holds the value (another may have removed it in between)
-                        k_ = next(k for k in range(len(vals_)) if vals_[k] == vals_[i_])
+                        # (seventh review round 2) the one owner of the value
+                        k_ = recordrows.attribute(provs_, vals_, i_, masters)["owner"]
                         if k_ != i_ and k_ > 0:
                             g["_carriedFrom"] = (named(rk[4], rk[5]), hit["row"].get("field"),
                                                  shown_value((hit["row"].get("values") or {}).get("lost")),
@@ -3258,9 +3275,12 @@ def build_prediction(ctx: dict) -> dict:
         prev_ = g.pop("_prevWinner", None) or set()
         if len(directions) == 1 and len(prev_) == 1 and None not in prev_ and words.get("itemPreviousWinner"):
             lo4_, wi4_ = next(iter(directions))
-            p4_ = next(iter(prev_))
+            p4_, o4_ = next(iter(prev_))
             if str(p4_).lower() != str(lo4_).lower():
-                detail.append(bind(words["itemPreviousWinner"], {"winner": wi4_, "prev": p4_}))
+                # (seventh review round 2) the value used is named by its one owner, with the plugin that carries it
+                detail.append(bind(words["itemPreviousWinnerCarried"], {"winner": wi4_, "prev": p4_, "owner": o4_})
+                              if o4_ and str(o4_).lower() != str(p4_).lower() and words.get("itemPreviousWinnerCarried")
+                              else bind(words["itemPreviousWinner"], {"winner": wi4_, "prev": p4_}))
         n_eff_ = g.pop("_effectPairs", 0)
         g["effectPairs"] = n_eff_          # (sixth review, Pilgrim S2, BPT S2) carried to the totals
         g["_effN"] = g.pop("_notCrossing", 0)
@@ -5160,9 +5180,7 @@ def build_prediction(ctx: dict) -> dict:
                             got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), l_)
                             if got_ is None:
                                 return l_
-                            o_ = got_[2]["origin"]
-                            return ((words.get("baseGameOwner") or "the base game") if o_ == 0 and is_base_game(got_[0][0], words)
-                                    else got_[0][o_])
+                            return owner_of(got_[0], got_[1], got_[2]["origin"])[1]
                         ls_ = list(dict.fromkeys(own_of(l_) for l_ in ls_))
                         if ws_:
                             key_ += bind(words["blindSpotLostTo"], {"losers": and_list([f"{l_}'s" for l_ in ls_[:2]]) + (
@@ -5321,7 +5339,7 @@ def build_prediction(ctx: dict) -> dict:
                     return m_
                 # (seventh review) the attribution read, by setup, record and field
                 got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), m_)
-                return got_[0][got_[2]["origin"]] if got_ is not None else m_
+                return owner_of(got_[0], got_[1], got_[2]["origin"])[1] if got_ is not None else m_
             def patch_edits(e):
                 """(seventh review round 2, Clockwork 77) a declared patch holds a version of what the remainder is
                 about: the record of a lost change (the chain with the patches), a navmesh, or an object of a geometry
@@ -5734,10 +5752,8 @@ def build_prediction(ctx: dict) -> dict:
                     org_ = collections.OrderedDict()
                     for e in pes_:
                         got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), winner)
-                        o_ = None if got_ is None else got_[2]["origin"]
-                        org_[None if o_ is None or got_[0][o_].lower() == winner.lower() else
-                             ((words.get("baseGameOwner") or "the base game") if o_ == 0 and is_base_game(got_[0][0], words)
-                              else got_[0][o_])] = 1
+                        own_ = None if got_ is None else owner_of(got_[0], got_[1], got_[2]["origin"])
+                        org_[None if own_ is None or str(own_[1]).lower() == winner.lower() else own_[1]] = 1
                     carried_ = [x for x in org_ if x] if None not in org_ else []
                     text_ = (bind(words["stillThereLost"], {"count": fmt_n(n_open), "loser": loser, "winner": winner,
                                                             "unit": u_[0 if n_open == 1 else 1]})

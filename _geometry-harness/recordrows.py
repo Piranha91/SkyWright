@@ -489,8 +489,11 @@ def attribute(providers: list, values: list, i: int, masters_of=None) -> dict:
             k = own_[k][1]
         return k
     o_ = origin(i)
-    return {"own": own_[i][0], "inherits": own_[i][1], "origin": o_,
-            "sameAs": [k for k in range(o_) if values[k] == values[o_] and own_[k][0]],
+    same_ = [k for k in range(o_) if values[k] == values[o_] and own_[k][0]]
+    # (seventh review round 2) one value, one owner: the first provider holding it as a change of its own; a later
+    # holder, whether it inherits the value or sets the same bytes itself, carries it
+    return {"own": own_[i][0], "inherits": own_[i][1], "origin": o_, "sameAs": same_,
+            "owner": same_[0] if same_ else o_,
             "carriers": [k for k in range(o_ + 1, len(providers)) if k != o_ and not own_[k][0] and origin(k) == o_]}
 
 

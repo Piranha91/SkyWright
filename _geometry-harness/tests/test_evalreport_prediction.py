@@ -7948,7 +7948,8 @@ def main():
                                   masters={THIRD: [BASE], MOD_A: [BASE], OTHER: [BASE, THIRD], PATCH: [BASE, THIRD]})
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         scope = next((ln for ln in md.splitlines() if "outside what" in ln), "")
-        return (f"{OTHER}'s value is {THIRD}'s own change, which {OTHER} only carries" in it and OTHER not in scope), f"{it[-300:]} || {scope}"
+        # (seventh review round 2) one owner, said in the same terms everywhere: "one ThirdMod.esp made first"
+        return (f"{OTHER}'s value is one {THIRD} made first, which {OTHER} only carries" in it and OTHER not in scope), f"{it[-300:]} || {scope}"
 
     for name, fn in [("sixth-review/C1116-carried-winner-value-named-by-owner", c1116_carried_winner_value_named_by_owner)]:
         cell(name, fn)
@@ -8152,7 +8153,7 @@ def main():
                                   masters={THIRD: [BASE], MOD_A: [BASE], OTHER: [BASE, THIRD], PATCH: [BASE]})
         st = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
         part = next((x for x in re.split(r";\s+(?![^()]*\))", st) if "record field" in x), "")
-        return (bool(part) and THIRD in part), f"{part[:300]!r} || {st[:300]!r}"
+        return (bool(part) and f"one {THIRD} made first" in part), f"{part[:300]!r} || {st[:300]!r}"
 
     # C1147 (Winterhold S1): a model in the sky folder (a cloud card: an effect-shaded, alpha-blended model with no
     # collision, like every model there) is not a solid body: counted with the visual-effect pairs in the headline and
@@ -8449,6 +8450,48 @@ def main():
         kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
                    if x.startswith("Objects occupying")), "")
         return ("resolved 1 (1 by the patch switching an object off)" in kl), kl[:300]
+
+    # C1164-C1166 (round 2, the attribution class): one value has one owner, the first plugin that holds it as a change of
+    # its own; a later plugin holding the same bytes carries it, whether it inherits them from a master or not.
+    def owner_bundle(chain_vals, loser, winner, ms):
+        R_ = f"00CA64:{BASE}"
+        mh_ = lambda x: {"MaxHeight.CellData": x}  # noqa: E731
+        names_ = [p_ for p_, _ in chain_vals]
+        arms = [arm("baseline", names_ + [PATCH], kind="baseline"), arm("without-patch", names_)]
+        ch_ = [(R_, "Worldspace", [(p_, mh_(v_)) for p_, v_ in chain_vals])]
+        vals_ = dict(chain_vals)
+        r_ = lost_row(loser, winner, R_, "MaxHeight", [f"MaxHeight.CellData={vals_[loser]}"],
+                      [f"MaxHeight.CellData={vals_[winner]}"], ["MaxHeight.CellData=00"])
+        r_["Summary"] = f"Worldspace Tamriel: MaxHeight - {loser}'s value lost to {winner}'s"
+        plan, md, _ = core_bundle([r_], [r_], arms=arms, p_chains=ch_, w_chains=ch_, masters={**ms, PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        st = str((reader(plan).get("prediction") or {}).get("withPatchStays") or "")
+        return it, st
+
+    def c1164_same_bytes_have_one_owner():
+        E_, L_ = "Earlier.esp", "LaterSame.esp"
+        it, st = owner_bundle([(BASE, "00"), (E_, "0B"), (MOD_A, "0A"), (L_, "0B")], MOD_A, L_,
+                              {E_: [BASE], MOD_A: [BASE], L_: [BASE]})
+        return (f"{L_}'s value is one {E_} made first, which {L_} only carries" in it
+                and f"{L_} changed the field itself" not in it and f"one {E_} made first" in st), f"{it[-400:]} || {st[:200]}"
+
+    def c1165_others_carry_the_losers_value():
+        G_, P1_, P2_ = "GrandWalls.esp", "GrandPatchOne.esp", "GrandPatchTwo.esp"
+        it, _ = owner_bundle([(BASE, "00"), (G_, "0B"), (P1_, "0B"), (P2_, "0B"), (MOD_A, "0A")], G_, MOD_A,
+                             {G_: [BASE], P1_: [BASE, G_], P2_: [BASE], MOD_A: [BASE]})
+        return (f"{P1_} and {P2_} hold the same value as {G_}, which {G_} made first" in it
+                and "as their own change" not in it), it[-400:]
+
+    def c1166_value_used_without_winner_named_by_owner():
+        E_, M_, L_ = "Earlier.esp", "Middle.esp", "LaterOwn.esp"
+        it, _ = owner_bundle([(BASE, "00"), (MOD_A, "0A"), (E_, "0B"), (M_, "0B"), (L_, "0C")], MOD_A, L_,
+                             {MOD_A: [BASE], E_: [BASE], M_: [BASE], L_: [BASE]})
+        return (f"Without {L_}, the value used is {E_}'s, which {M_} carries" in it), it[-400:]
+
+    for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
+                     ("round2/C1165-others-carry-the-losers-value", c1165_others_carry_the_losers_value),
+                     ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner)]:
+        cell(name, fn)
 
     for name, fn in [("round2/C1162-switch-off-either-object-counted", c1162_switch_off_either_object_counted),
                      ("round2/C1163-master-alone-is-not-scope", c1163_master_alone_is_not_scope)]:
