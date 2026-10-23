@@ -1950,9 +1950,12 @@ def build_prediction(ctx: dict) -> dict:
                     sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
                 if sha_cache[path_] == sha_:
                     try:
-                        res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements,
-                                "placementFull": pluginread.placements_full}.get(
-                            what, pluginread.cell_flags)(path_, [str(fk)])
+                        if what == "editorId":          # (seventh review, Missives S2) a record's editor ID
+                            res_ = {"records": pluginread.editor_ids(path_, [str(fk)])}
+                        else:
+                            res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements,
+                                    "placementFull": pluginread.placements_full}.get(
+                                what, pluginread.cell_flags)(path_, [str(fk)])
                         got_ = res_["records"].get(str(fk))
                         plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
                                              "found": got_ is not None})
@@ -1963,6 +1966,16 @@ def build_prediction(ctx: dict) -> dict:
                                              "error": str(e_)})
             pread_cache[key_] = got_
         return pread_cache[key_]
+
+    fk_any_re = re.compile(r"\b([0-9A-Fa-f]{6}):([^\s,;()\[\]]+?\.es[mpl])\b")
+
+    def with_editor_ids(text):
+        """(seventh review, Missives S2) each FormID in a value named with its editor ID, read from its defining plugin
+        file (recorded bytes only); unchanged where it was not read."""
+        def one(m_):
+            got_ = plugin_record(m_.group(2), "editorId", f"{m_.group(1).upper()}:{m_.group(2)}")
+            return f"{m_.group(0)} {got_}" if isinstance(got_, str) and got_ else m_.group(0)
+        return fk_any_re.sub(one, str(text or ""))
 
     persistent_re = re.compile(words["persistentPlacePattern"]) if words.get("persistentPlacePattern") else None
 
@@ -3782,6 +3795,12 @@ def build_prediction(ctx: dict) -> dict:
             d_ = base_drop.setdefault((e["B"], e["baseValueOf"]), {"fields": collections.OrderedDict(),
                                                                    "carriers": [], "findingIds": []})
             d_["fields"].setdefault((str(e["formKey"]), e.get("field")), e.get("label") or "")
+            # (seventh review, Missives S2) the value lost, where it names records: said with their editor IDs
+            lv_ = " ".join(map(str, (e.get("values") or {}).get("lost") or [])) if isinstance(
+                (e.get("values") or {}).get("lost"), list) else str((e.get("values") or {}).get("lost") or "")
+            if fk_any_re.search(lv_):
+                d_.setdefault("lostIds", {}).setdefault((str(e["formKey"]), e.get("field")), ", ".join(
+                    dict.fromkeys(m_.group(0) for m_ in fk_any_re.finditer(lv_))))
             d_.setdefault("rows", {}).setdefault((str(e["formKey"]), e.get("field")),
                                                  (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"]))
             # (sixth review, Missives S5) a water height outside any height in the world (skill data bound): its
@@ -3826,7 +3845,9 @@ def build_prediction(ctx: dict) -> dict:
         per_c_, n_c_ = field_carriers(list((d_.get("rows") or {}).values()), base_, mod_, d_["carriers"])
         loss_lines.append({"text": bind(words["baseValueDroppedLine"], {
             "mod": mod_, "base": base_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
-            "examples": "; ".join(f"{fk_} ({f_})" for fk_, f_ in list(d_["fields"])[:2]),
+            "examples": "; ".join(f"{fk_} ({f_}" + (f": {with_editor_ids((d_.get('lostIds') or {})[(fk_, f_)])}"
+                                                    if (fk_, f_) in (d_.get("lostIds") or {}) else "") + ")"
+                                  for fk_, f_ in list(d_["fields"])[:2]),
             "verb": "carries" if len(per_c_) == 1 else "carry",
             "patch": "" if kept_ is None else bind(words["baseValueDroppedPatch"], {
                 "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_})
@@ -3860,7 +3881,9 @@ def build_prediction(ctx: dict) -> dict:
         if words.get("winnerListDropLine"):
             loss_lines.append({"text": bind(words["winnerListDropLine"], {
                 "mod": mod_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
-                "examples": "; ".join(f"{named(fk_)} ({f_}: {', '.join(it_)})" for (fk_, f_), (_, it_) in list(d_["fields"].items())[:2]),
+                # (seventh review, Missives S2) each dropped item named with its editor ID
+                "examples": "; ".join(f"{named(fk_)} ({f_}: {with_editor_ids(', '.join(it_))})"
+                                      for (fk_, f_), (_, it_) in list(d_["fields"].items())[:2]),
                 "carriers": " and ".join(d_["carriers"]), "verb": "carries" if len(d_["carriers"]) == 1 else "carry",
                 "patch": "" if still_ is None else bind(words["winnerListDropPatch"], {
                     "patch": patch_text, "still": fmt_n(still_), "count": fmt_n(n_)})}),

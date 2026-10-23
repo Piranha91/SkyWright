@@ -8277,7 +8277,25 @@ def main():
         return (f"{MOD_A} 1: " in line and f"000782:{BASE}" in line and f"{MOD_B} 1: " in line
                 and f"000783:{BASE}" in line), line[:400]
 
-    for name, fn in [("seventh-review/C1158-undone-line-itemised", c1158_undone_line_itemised),
+    # C1160 (Missives S2): a lost value that names a record (a location) is said with that record's editor ID, read
+    # from its defining plugin file, so a modder can tell what is lost without looking the FormID up.
+    def c1160_lost_value_named_by_editor_id():
+        L1 = f"00CA60:{BASE}"
+        arms = with_files([arm("baseline", [BASE, HF_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                           arm("without-patch", [BASE, HF_, OTHER, MOD_A, MOD_B])],
+                          {BASE: plugin_file_of(BASE, [], [("LCTN", 0x018A59, [("EDID", b"TestCityLocation\x00")], False)],
+                                                group="LCTN")})
+        chains = [(L1, "Cell", [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}),
+                                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": ""})])]
+        p_rows = [lost_row(HF_, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
+        return ("018A59:Skyrim.esm TestCityLocation" in line), line[:400]
+
+    for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
+                     ("seventh-review/C1158-undone-line-itemised", c1158_undone_line_itemised),
                      ("seventh-review/C1159-kept-position-has-meaning", c1159_kept_position_has_meaning),
                      ("seventh-review/C1150-kept-note-says-objects", c1150_kept_note_says_objects),
                      ("seventh-review/C1149-alone-line-meaning-without-effect-lead", c1149_alone_line_meaning_without_effect_lead),

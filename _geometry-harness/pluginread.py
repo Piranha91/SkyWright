@@ -292,3 +292,62 @@ def record_flags(path, form_keys, rtype):
             len(masters) if origin.lower() == p.name.lower() else None)
         out[str(fk)] = got.get((idx << 24) | int(obj, 16)) if idx is not None else None
     return out
+
+
+_EDID = {}
+
+
+def editor_ids(path, form_keys):
+    """(seventh review, Missives S2) The editor ID (EDID) of named records anywhere in the plugin's top-level groups
+    (records nested in cell, worldspace or topic groups are not read): {formKey: editor ID, or None where the plugin holds
+    no such record or it has no EDID}. The file is indexed once per file state."""
+    p = Path(path)
+    try:
+        st = p.stat()
+        key = (str(p).lower(), st.st_size, st.st_mtime_ns)
+        if key not in _EDID:
+            buf = p.read_bytes()
+            if buf[:4] != b"TES4":
+                raise PluginReadError(f"{p.name} is not a plugin file (no TES4 header)")
+            hsize = struct.unpack_from("<I", buf, 4)[0]
+            masters = [d.rstrip(b"\x00").decode("latin-1") for s, d in _subrecords(buf[24:24 + hsize]) if s == "MAST"]
+            got, i = {}, 24 + hsize
+            while i + 24 <= len(buf):
+                size = struct.unpack_from("<I", buf, i + 4)[0]
+                if buf[i:i + 4] != b"GRUP":
+                    i += 24 + size
+                    continue
+                j, end = i + 24, i + size
+                while j + 24 <= end:
+                    rs = struct.unpack_from("<I", buf, j + 4)[0]
+                    if buf[j:j + 4] == b"GRUP":
+                        j += rs
+                        continue
+                    flags, fid = struct.unpack_from("<II", buf, j + 8)
+                    got[fid] = (j + 24, rs, flags)
+                    j += 24 + rs
+                i += size
+            _EDID[key] = (masters, got, buf)
+    except (OSError, struct.error) as e:
+        raise PluginReadError(f"cannot read {p}: {e}") from e
+    masters, got, buf = _EDID[key]
+    low = [m.lower() for m in masters]
+    out = {}
+    for fk in form_keys:
+        obj, _, origin = str(fk).partition(":")
+        idx = low.index(origin.lower()) if origin.lower() in low else (
+            len(masters) if origin.lower() == p.name.lower() else None)
+        place = got.get((idx << 24) | int(obj, 16)) if idx is not None and len(obj) == 6 else None
+        if place is None:
+            out[str(fk)] = None
+            continue
+        at, size, flags = place
+        data = buf[at:at + size]
+        if flags & COMPRESSED:
+            try:
+                data = zlib.decompress(data[4:])
+            except zlib.error as e:
+                raise PluginReadError(f"record {fk}: a compressed record does not decompress: {e}") from e
+        ed = dict(_subrecords(data)).get("EDID")
+        out[str(fk)] = ed.rstrip(b"\x00").decode("latin-1") if ed else None
+    return out
