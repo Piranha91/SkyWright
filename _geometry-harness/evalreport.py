@@ -4115,7 +4115,29 @@ def build_prediction(ctx: dict) -> dict:
                 off_cache[id(e)] = r_
             return off_cache[id(e)]
 
-        OFF_STATES = ("onOwn", "on", "parent", "starts", "off", "unknown")
+        OFF_STATES = ("onOwn", "on", "parent", "starts", "off", "unknown", "keptOn", "keptOnPlaced", "keptBase")
+
+        def kept_meaning(e):
+            """(fifth review, Snazzy S2, Winterhold R2-2) what a kept lost change on an object the version with the patch
+            does not set off for good means in game: the losing value switches the object off and the last version has
+            it on ("keptOn"; "keptOnPlaced" where that version stands across at least the object's size from the
+            winner's), or the lost field is the object's base ("keptBase"); None otherwise."""
+            ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
+            if e["kind"] != "LOST-EDIT" or not ch_ or not ch_.get("providers"):
+                return None
+            last_ = len(ch_["providers"]) - 1
+            if off_at_load((e.get("values") or {}).get("lost")) and version_state(ch_, last_) == "on":
+                low_ = [str(x).lower() for x in ch_["providers"]]
+                if str(e["B"]).lower() in low_:
+                    pw_, pl_ = (_vec(next((v_ for k_, v_ in recordrows.provider_fields(ch_, sup_place, i_).items()
+                                           if k_.endswith("Position")), None))
+                                for i_ in (low_.index(str(e["B"]).lower()), last_))
+                    if pw_ and pl_ and math.dist(pw_[:2], pl_[:2]) >= spot_size(e["formKey"]):
+                        return "keptOnPlaced"
+                return "keptOn"
+            if str(e.get("field") or "") == (lm_words.get("baseField") or "Base"):
+                return "keptBase"
+            return None
 
         def own_removal(e):
             """(fifth review, BPT S2) The pair winner's version in the setup with the patch sets the object off for good
@@ -4137,7 +4159,7 @@ def build_prediction(ctx: dict) -> dict:
             (fifth review, BPT S2) a losing version that has the object on, where the winner removes it by its own
             change, is "onOwn": the winner's own removal, not an earlier mod's it carries."""
             if not still_off(e):
-                return None
+                return kept_meaning(e) if outcome.get(id(e)) == "kept" else None
             st_ = side_state(keyof(e), e["A"], patched_arm) or "unknown"
             return "onOwn" if st_ == "on" and own_removal(e) else st_
 
