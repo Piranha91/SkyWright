@@ -3347,9 +3347,9 @@ def build_prediction(ctx: dict) -> dict:
                     dm_ = re.search(r"(\d+(?:\.\d+)?)\s*u inside", sm_)
                     # (seventh review, Sewers S1) a switch state whose direction the check did not find is said without
                     # one, and the depth is the row's own object's, against something the check does not name
-                    kinds_ = g.get("_rowKinds") or []
-                    unknown_ = bool(kinds_) and all(k_.endswith("@Unknown") for k_, _ in kinds_)
-                    objs_ = list(dict.fromkeys(f_ for _, f_ in kinds_))
+                    row_kinds_ = g.get("_rowKinds") or []
+                    unknown_ = bool(row_kinds_) and all(k_.endswith("@Unknown") for k_, _ in row_kinds_)
+                    objs_ = list(dict.fromkeys(f_ for _, f_ in row_kinds_))
                     line_ = st_words.get("lineUnknown") if unknown_ and st_words.get("lineUnknown") else st_words["line"]
                     what_o_ = (st_words.get("statesOwn") or {}).get(m_.group("state")) if len(objs_) == 1 else None
                     g["inGame"] = bind(line_, {"switch": m_.group("switch"), "what": bind(what_o_ if what_o_ and len(ds_) <= 1
