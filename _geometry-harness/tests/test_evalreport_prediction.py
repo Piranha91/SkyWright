@@ -6654,7 +6654,7 @@ def main():
                                   targets=(MOD_A, MOD_B), names={"refs": refs_, "bases": bases_})
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         sents = re.split(r"(?<=[.)])\s+(?=On |In |For |Most |\[)", it)
-        return it, {fk_: next((s_ for s_ in sents if fk_ in s_), "") for fk_, _, _ in objs}
+        return it, {fk_: next((s_ for s_ in sents if fk_ in s_ and "no model" in s_), "") for fk_, _, _ in objs}
 
     def c1068_no_model_light_lights():
         it, seg = no_model_segments([(f"00CA68:{BASE}", "Light", "ShadowLight01")])
