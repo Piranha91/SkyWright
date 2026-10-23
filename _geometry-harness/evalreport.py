@@ -902,14 +902,13 @@ def import_narrowed_facts(rows: list, pr: dict, title_of) -> list:
     out_ = collections.OrderedDict()
     for r_ in rows or []:
         name_ = str(((r_.get("tool") or {}) if isinstance(r_.get("tool"), dict) else {}).get("name") or "")
-        m_ = re.search(pat_, name_)
-        if not m_:
-            continue
-        n_ = re.search(r"over the (\d+) ", name_)
-        key_ = (r_.get("checkId"), m_.group("fields").strip())
-        out_.setdefault(key_, bind(w_["importNarrowedFact"], {
-            "title": title_of(r_.get("checkId")), "fields": key_[1],
-            "records": f" on the {n_.group(1)} records it read" if n_ else ""}))
+        # (fifth review, Missives S1) every narrowing the note names, in any of its wordings (skill data)
+        for m_ in re.finditer(pat_, name_):
+            n_ = re.search(r"over the (\d+) ", name_)
+            key_ = (r_.get("checkId"), m_.group("fields").strip())
+            out_.setdefault(key_, bind(w_["importNarrowedFact"], {
+                "title": title_of(r_.get("checkId")), "fields": key_[1],
+                "records": f" on the {n_.group(1)} records it read" if n_ else ""}))
     return list(out_.values())
 
 
