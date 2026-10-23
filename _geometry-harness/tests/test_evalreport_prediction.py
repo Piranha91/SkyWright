@@ -6132,7 +6132,9 @@ def main():
                 arm("without-b", [BASE, MOD_A])]
         tr = {(RECORDS, "baseline"): records_transcript([(Y, "PlacedObject", [(MOD_B, offs(0)), (PATCH, pt_)])]),
               (RECORDS, "without-patch"): records_transcript([(Y, "PlacedObject", [(MOD_B, offs(0))])])}
-        enr = {(RECORDS, "baseline"): [], (RECORDS, "without-patch"): []}
+        # the record import also holds a row of its own, as every real import does
+        q_ = lost_row(MOD_A, MOD_B, f"00CB91:{BASE}", "Owner", "a", "b", "v")
+        enr = {(RECORDS, "baseline"): [q_], (RECORDS, "without-patch"): [q_]}
         plan2, md2, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): rows_,
                                                   (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH],
                                            enrichment=enr, transcripts=tr, count_only={k_: 1 for k_ in enr})

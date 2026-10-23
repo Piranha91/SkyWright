@@ -4707,6 +4707,31 @@ def build_prediction(ctx: dict) -> dict:
         if not_measured:
             sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": by_unit(not_measured)}))
         # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
+        def patch_switches_off(e):
+            """(blind round 1, Snazzy S1) the setup with the patch has an object of the row off at load (off for good or
+            only initially disabled, its whole last version) where the setup without it has it on: for a record field
+            the patch sets itself, both mods' versions have the object on; for a geometry clash, either object."""
+            rec_c = (words.get("switchOffRecordCheck") or "records.contested-fields")
+            if e["kind"] == "LOST-EDIT":
+                ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
+                if not ch_ or not ch_.get("providers"):
+                    return False
+                low_ = [str(x).lower() for x in ch_["providers"]]
+                if str(e["A"]).lower() not in low_ or str(e["B"]).lower() not in low_:
+                    return False
+                return (version_state(ch_, len(low_) - 1) in ("off", "starts")
+                        and version_state(ch_, low_.index(str(e["A"]).lower())) == "on"
+                        and version_state(ch_, low_.index(str(e["B"]).lower())) == "on")
+            if not str(e["checkId"]).startswith("geometry."):
+                return False
+            for o_ in [e["formKey"], *(e.get("other") or ())]:
+                chw_ = (chains_of(rec_c, patched_arm) or {}).get(str(o_))
+                chp_ = (chains_of(rec_c, p_arm) or {}).get(str(o_))
+                if (chw_ and chw_.get("providers") and version_state(chw_, len(chw_["providers"]) - 1) in ("off", "starts")
+                        and (not chp_ or not chp_.get("providers") or version_state(chp_, len(chp_["providers"]) - 1) == "on")):
+                    return True
+            return False
+
         def item_of(e):
             return (e["checkId"], e.get("itemKind") or e["kind"], tuple(sorted([e["A"], e["B"]], key=str.lower)),
                     e.get("attribution"), e.get("attributionMod"))
@@ -4714,6 +4739,9 @@ def build_prediction(ctx: dict) -> dict:
         for g in prediction["items"]:
             k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
             by_item.append({"hits": sum(1 for e in all_["hits"] if item_of(e) == k),
+                            # (blind round 1, Snazzy S1) resolved / own by the patch switching an object off
+                            "hitsOff": sum(1 for e in all_["hits"] if item_of(e) == k and patch_switches_off(e)),
+                            "ownOff": sum(1 for e in all_["own"] if item_of(e) == k and patch_switches_off(e)),
                             "switched": sum(1 for e in all_["switched"] if item_of(e) == k),
                             "switchedBy": dict(collections.Counter(f"{e['A']}|{e['B']}" for e in all_["switched"]
                                                                    if item_of(e) == k)),
@@ -4813,6 +4841,9 @@ def build_prediction(ctx: dict) -> dict:
                                      for k_, n_ in sorted(by_.items(), key=lambda kv: (-kv[1], kv[0].lower())))
                 if k == "open":
                     return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + off_text(off_from(bi, "offOpen"))
+                if k in ("hits", "own") and bi.get(f"{k}Off") and ow.get(f"{k}Off"):
+                    # (blind round 1, Snazzy S1) how many the patch resolves by switching an object off: its choice
+                    return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + bind(ow[f"{k}Off"], {"count": fmt_n(bi[f"{k}Off"])})
                 if k != "kept":
                     return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)})
                 # whose change stays lost, as without the patch (fourth blind review, W1): never "kept" alone
