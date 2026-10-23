@@ -6108,6 +6108,41 @@ def main():
     for name, fn in [("fifth-review/C1086b-stub-navmesh-loses-no-ground", c1086b_stub_navmesh_loses_no_ground)]:
         cell(name, fn)
 
+    # C1091b (blind round 1, Snazzy S1): where the patch resolves a clash by switching an object off, the with-patch line
+    # says how many, neutrally: a record field the patch sets to its own value that switches off an object both mods have
+    # on, and an overlap pair resolved where the patch's version of one object is off at load.
+    def c1091b_patch_resolves_by_switching_off():
+        D = f"00CA91:{BASE}"
+        a_, b_ = offs(0), offs(0)
+        a_["Placement.Position"], b_["Placement.Position"] = "300,100,0", "500,100,0"
+        pt_ = offs(-30000, "InitiallyDisabled")
+        p_rows = [lost_row(MOD_A, MOD_B, D, "Placement", off_txt(a_), off_txt(b_), off_txt(offs(0)), before=BASE)]
+        w_rows = [lost_row(MOD_A, PATCH, D, "Placement", off_txt(a_), off_txt(pt_), off_txt(offs(0)), before=BASE),
+                  lost_row(MOD_B, PATCH, D, "Placement", off_txt(b_), off_txt(pt_), off_txt(offs(0)), before=BASE)]
+        p_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_)])]
+        w_ch = [(D, "PlacedObject", [(BASE, offs(0)), (MOD_A, a_), (MOD_B, b_), (PATCH, pt_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        own_ok = re.search(r"the patch's own value 1 \(1 where the patch switches off an object both mods have on\)", kl) is not None
+        # an overlap pair: ModA's object X against ModB's Y, gone with the patch, whose version of Y is off at load
+        X, Y = f"000X91:{MOD_A}", f"000Y91:{MOD_B}"
+        rows_ = [row("OVERLAP", MOD_B, MOD_A, X, other=Y)]
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B]),
+                arm("without-b", [BASE, MOD_A])]
+        tr = {(RECORDS, "baseline"): records_transcript([(Y, "PlacedObject", [(MOD_B, offs(0)), (PATCH, pt_)])]),
+              (RECORDS, "without-patch"): records_transcript([(Y, "PlacedObject", [(MOD_B, offs(0))])])}
+        enr = {(RECORDS, "baseline"): [], (RECORDS, "without-patch"): []}
+        plan2, md2, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): rows_,
+                                                  (OVERLAP, "without-b"): []}, [MOD_A], patches=[PATCH],
+                                           enrichment=enr, transcripts=tr, count_only={k_: 1 for k_ in enr})
+        kl2 = next((x for x in (reader(plan2).get("prediction") or {}).get("withPatchLines") or [] if x.startswith("Objects")), "")
+        ov_ok = re.search(r"resolved 1 \(1 by the patch switching an object off\)", kl2) is not None
+        return own_ok and ov_ok, f"{own_ok} {ov_ok} || {kl[:300]} || {kl2[:300]}"
+
+    for name, fn in [("fifth-review/C1091b-patch-resolves-by-switching-off", c1091b_patch_resolves_by_switching_off)]:
+        cell(name, fn)
+
     for name, fn in [("fourth-review/C1052-replacing-navmesh-base-count-said", c1052_replacing_navmesh_base_count_said)]:
         cell(name, fn)
 
