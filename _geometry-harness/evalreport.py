@@ -3121,6 +3121,21 @@ def build_prediction(ctx: dict) -> dict:
     patch_text = (", ".join(patch_names) if len(patch_names) <= 2 else
                   bind(words["patchesShort"], {"count": len(patch_names)}))
 
+    def navmesh_stub(plugin, fk):
+        """The plugin's own version of the navmesh has at most skill data navmeshStubTriangles triangles while the base
+        game's has more: a stub, how a mod removes a navmesh (read from both plugin files, recorded bytes only)."""
+        lim_ = words.get("navmeshStubTriangles")
+        fk_ = str(fk or "")
+        if lim_ is None or ":" not in fk_:
+            return False
+        mine_ = plugin_record(plugin, "navmesh", fk_)
+        origin_ = fk_.split(":", 1)[1]
+        base_ = plugin_record(next((x for x in all_orders.get(p_arm) or [] if x.lower() == origin_.lower()), origin_),
+                              "navmesh", fk_) if is_base_game(origin_, words) else None
+        return bool(mine_ and mine_.get("triangles") is not None and int(mine_["triangles"]) <= int(lim_)
+                    and (base_ is None or base_.get("triangles") is None or int(base_["triangles"]) > int(lim_)
+                         or int(base_["triangles"]) == int(mine_["triangles"])))
+
     def tri_label(label):
         m = re.match(r"^(.*?)\s+(\d+) tris -> (\d+)$", str(label or ""))
         return f"{m.group(1)} {fmt_n(int(m.group(2)))} -> {fmt_n(int(m.group(3)))} triangles" if m else str(label or "")
@@ -3143,8 +3158,12 @@ def build_prediction(ctx: dict) -> dict:
         return len(got), measured_, "; ".join(bind(words["historyPersistsExample"], {"place": pl, "samples": fmt_n(s_)})
                                               for s_, pl in got[:3])
     for (loser, winner), hits in by_pair.items():
-        held = [h for h in hits if h["row"].get("physical") == "Holds"]
-        if not held:
+        held_all = [h for h in hits if h["row"].get("physical") == "Holds"]
+        # (blind round 1, Winterhold S1) a losing version that is a stub of a navmesh (skill data navmeshStubTriangles,
+        # read from the losing plugin's file) is how a mod removes a navmesh: no ground of the losing mod's is lost there
+        stubs = [h for h in held_all if navmesh_stub(loser, h["row"].get("formKey"))]
+        held = [h for h in held_all if h not in stubs]
+        if not held and not stubs:
             continue
         drops, lost_ = [], []
         for h in held:
@@ -3191,6 +3210,11 @@ def build_prediction(ctx: dict) -> dict:
                 got_ = plugin_record(origin_, "navmesh", fk_)
                 if got_ and got_.get("triangles") == d_[3]:
                     base_same_.append(f"{fk_} ({fmt_n(d_[3])} triangles)")
+        if stubs and words.get("historyLossStub"):
+            text += " " + bind(words["historyLossStub"], {
+                "count": fmt_n(len(stubs)), "loser": loser, "version": "version is" if len(stubs) == 1 else "versions are",
+                "records": ", ".join(str(h["row"].get("formKey")) for h in stubs[:3])
+                + (f" and {fmt_n(len(stubs) - 3)} more" if len(stubs) > 3 else "")})
         if base_same_ and words.get("historyLossBaseCount"):
             text += " " + bind(words["historyLossBaseCount"], {"count": fmt_n(len(base_same_)), "winner": winner,
                                                                 "records": ", ".join(base_same_[:3])})
@@ -4505,9 +4529,11 @@ def build_prediction(ctx: dict) -> dict:
         # overwrite history is not a predicted clash, but a row no longer flagged with the patch whose physical test held
         # (the overwritten mod's ground lost) is named with its count (Winterhold review 8; the claim stays demoted), and
         # a navmesh whose loss still holds with the patch under another pair is named as persisting (fourth review, W3)
+        # (blind round 1, Winterhold S1) a stub of the losing mod's navmesh held no ground of that mod's (navmesh_stub)
         held_gone = [e for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds"
-                     and e["checkId"] == "geometry.navmesh-ownership"]
-        history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds")
+                     and e["checkId"] == "geometry.navmesh-ownership" and not navmesh_stub(e["A"], e["formKey"])]
+        history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds"
+                            and not (e["checkId"] == "geometry.navmesh-ownership" and navmesh_stub(e["A"], e["formKey"])))
         undone_by = collections.Counter(rk[2] for rk, _ in undone)
         switched_on = [rk for rk, h_ in undone if off_at_load((h_["row"].get("values") or {}).get("lost"))
                        and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
