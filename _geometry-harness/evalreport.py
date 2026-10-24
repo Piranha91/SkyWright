@@ -8211,7 +8211,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 if (e_.get("admission") == "admitted" and e_.get("other") and e_.get("kind") != "LOST-EDIT"
                         and (len((reader.get("prediction") or {}).get("mods") or []) <= 1
                              or e_.get("attribution") != "single-mod")):
-                    groups_.setdefault((e_["checkId"], e_["A"], e_["B"], e_["kind"]), []).append(e_)
+                    # (round 3) a state kind carries the row's own state after "@": grouped by its kind
+                    groups_.setdefault((e_["checkId"], e_["A"], e_["B"], str(e_["kind"]).split("@", 1)[0]), []).append(e_)
             loaded_ = {str(q.get("name")).lower() for q in (arm_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict)}
             parts_v_, none_v_, unmeasured_v_ = [], [], []
             for (c_, a_, b2_, k_), es_ in groups_.items():
@@ -8227,7 +8228,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                           for cc_ in em_.get("Conflicts") or [] for r_ in conflict_rows(cc_, None)}
                 n_ = sum(1 for e_ in es_ if (str(e_["formKey"]), frozenset(map(str, e_.get("other") or ()))) in there_)
                 unit_v_ = ((reader_data.get("kindPhrases") or {}).get(k_, {}).get("unitPlural" if len(es_) != 1 else "unitSingular")
-                           or "clashes")
+                           or ("clashes" if len(es_) != 1 else "clash"))       # (round 3) the unit agrees with its count
                 parts_v_.append(bind(pw_also["alsoVariantPart"], {
                     "found": fmt_n(n_), "count": fmt_n(len(es_)), "unit": unit_v_, "a": a_, "b": b2_}))
                 if not n_:
@@ -8849,11 +8850,16 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     again_ = collections.Counter(seen_[x] for x in fields_ if x in seen_)
                     for x in fields_:
                         seen_.setdefault(x, ((pr.get("reader") or {}).get("checkTitles") or {}).get(str(choices[0].get("checkId")), str(choices[0].get("title") or "")))
+                    # (round 3, review12 S1 / finding 7) the rows in one unit, one per record field and plugin pair, and
+                    # split so the parts add up: counted, no change in game, only carried by the loser
+                    rows_all_ = [row_key(f, r_) for f in choices for r_ in f.get("allRows") or [] if isinstance(r_, dict)]
+                    n_rows_ = len(rows_all_)
+                    n_noise_rows_ = sum(1 for k_ in rows_all_ if k_ in noise_)
+                    n_carried_rows_ = sum(1 for k_ in rows_all_ if k_ in carried_ and k_ not in noise_)
+                    n_kept_rows_ = n_rows_ - n_noise_rows_ - n_carried_rows_
+                    rows_said_ = bool(n_fields and n_rows_ > n_fields)
                     if n_aside or carried_f_:
                         choices = [f for f in choices if kept_rows(f)] or choices[:1]
-                    n_rows_ = sum(len([r_ for r_ in f.get("allRows") or [] if isinstance(r_, dict)]) for f in choices)
-                    # (round 3, review12 S1) the linked findings' rows the line counts, said when some are not
-                    n_kept_rows_ = sum(len(kept_rows(f)) for f in choices)
                     # (third review, Clockwork S3) every pair counted is linked, so the count recomputes from the rows
                     ids_ = [f["id"] for f in choices] or [f["id"] for f in part["groups"] if f.get("readerPatchChoice")][:1]
                     compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
@@ -8865,17 +8871,22 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                         "pairNoun": "pair" if len(choices) == 1 else "pairs",
                                         # (eighth review, page budget) the line's notes in one parenthesis
                                         "aside": (lambda ps_: f" ({'; '.join(ps_)})" if ps_ else "")([x_ for x_ in [
-                                            bind(conc.get("patchChoicesRows") or "", {"rows": fmt_n(n_rows_)})
-                                            + (bind(conc.get("patchChoicesRowsCounted") or "", {"count": fmt_n(n_kept_rows_)})
-                                               if n_kept_rows_ < n_rows_ else "")
-                                            if n_fields and n_rows_ > n_fields else "",
+                                            bind(conc.get("patchChoicesRows") or "", {"rows": fmt_n(n_rows_), "parts": (
+                                                lambda ps_: (": " + ", ".join(ps_)) if len(ps_) > 1 else "")([
+                                                    bind(conc.get(w_) or "", {"count": fmt_n(n_)}) for w_, n_ in (
+                                                        ("patchChoicesRowsCounted", n_kept_rows_),
+                                                        ("patchChoicesRowsNoise", n_noise_rows_),
+                                                        ("patchChoicesRowsCarried", n_carried_rows_)) if n_])})
+                                            if rows_said_ else "",
+                                            # with the rows said, the fields not counted are among them, never in a
+                                            # second unit
                                             bind(conc.get("patchChoicesAside") or "{count} more not counted", {
                                                 "count": fmt_n(n_aside), "fieldNoun": "field" if n_aside == 1 else "fields"})
-                                            if n_aside else "",
+                                            if n_aside and not rows_said_ else "",
                                             bind(conc.get("patchChoicesCarried") or "", {
                                                 "count": fmt_n(len(carried_f_)),
                                                 "fieldNoun": "field" if len(carried_f_) == 1 else "fields"})
-                                            if carried_f_ else "",
+                                            if carried_f_ and not rows_said_ else "",
                                             *[bind(conc.get("patchChoicesAgain") or "", {"count": fmt_n(n_), "title": t_})
                                               for t_, n_ in again_.items()]] if x_])}),
                                     "ids": ids_})
