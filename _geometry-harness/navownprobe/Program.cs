@@ -73,6 +73,8 @@ using HousecarlCore.Progress;
 using var __run = RunLog.BeginProcess("navownprobe", args);
 // Known answers for which version of a moved or deleted reference this probe's walk keeps (_shared/MovedRefFixture.cs).
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return NavownSelfTest.Run();
+// The edge-link identity fixture: written for tests/test_navown_edge_identity.py, which runs the real probe on it.
+if (args.Length >= 2 && args[0] == "--write-edge-link-fixture") { Console.WriteLine(string.Join(Environment.NewLine, EdgeLinkFixture.Write(args[1]))); return 0; }
 
 // The command line (NavownArgs.cs): an argument it does not know is refused by name, before anything is read.
 var cli = NavownArgs.Parse(args);
