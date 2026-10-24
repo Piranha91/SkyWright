@@ -857,6 +857,36 @@ def missing_assets(b: "Bundle", check_id: str, arm_id: str) -> list[dict] | None
     return [{"path": p_, "namedBy": owners.get(p_.replace("\\", "/").lower(), [])} for p_ in dict.fromkeys(absent)]
 
 
+def asset_view_read_whole(b: "Bundle", check_id: str, arm_id: str) -> bool:
+    """(eighth review, Pilgrim 27) True where every `housecarl_asset_status` answer of a missing-asset import reports its
+    archive reads, with no archive that failed to read (none omitted either): the asset view searched every enabled
+    mod's folders and archives. False where any answer reports a failure or does not report its archive reads."""
+    rc = b.receipt_by_key.get((check_id, arm_id, None)) or b.receipt_by_key.get((check_id, arm_id, "arm"))
+    if not rc:
+        return False
+    paths = [e["path"] for e in b.evidence_for(check_id, arm_id, rc.get("part")) if e.get("kind") == "emit"]
+    req = next((x for x in paths if x.endswith("request.jsonl")), None)
+    resp = next((x for x in paths if x.endswith("response.jsonl")), None)
+    if not req or not resp:
+        return False
+    try:
+        calls = {(bt, m.get("id")): (m.get("params") or {}).get("name")
+                 for bt, m in _transcript_messages((b.dir / req).read_text(encoding="utf-8"))
+                 if m.get("method") == "tools/call"}
+        seen = False
+        for bt, m in _transcript_messages((b.dir / resp).read_text(encoding="utf-8")):
+            if calls.get((bt, m.get("id"))) != "housecarl_asset_status":
+                continue
+            text = "".join(c.get("text", "") for c in ((m.get("result") or {}).get("content") or []) if isinstance(c, dict))
+            doc = json.loads(text) if text.strip().startswith("{") else {}
+            if not isinstance(doc.get("bsa_failures"), list) or doc["bsa_failures"] or int(doc.get("bsa_failures_omitted") or 0):
+                return False
+            seen = True
+        return seen
+    except (OSError, ValueError):
+        return False
+
+
 def infer_clobber_direction(finding: dict, plugin_order: list[str]) -> dict | None:
     c = finding.get("counts") or {}
     if c.get("groupKind") != "CLOBBERED" or not c.get("A") or not c.get("B"):
@@ -3669,7 +3699,10 @@ def build_prediction(ctx: dict) -> dict:
             "count": fmt_n(len(got_p)), "noun": bind(words["missingAssetNoun"][0 if len(got_p) == 1 else 1], {
                 "owners": " and ".join(owners) if owners else words["missingAssetOwnersUnknown"]}),
             "where": bind(words["missingAssetWhere"][where], {"patch": patch_text}),
-            "paths": "; ".join(x["path"] for x in got_p)})
+            "paths": "; ".join(x["path"] for x in got_p),
+            # (eighth review, Pilgrim 27) what was searched, where every archive read: no install hedge
+            "hedge": words["missingAssetSearched"] if words.get("missingAssetSearched") and asset_view_read_whole(
+                main_b, check_id, p_arm) else words.get("missingAssetHedge") or ""})
         if where == "only" and got_w:
             text += " " + bind(words["missingAssetWithPatch"], {"patch": patch_text, "count": fmt_n(len(got_w))})
         loss_lines.append({"text": text, "findingIds": [f_.get("id") for f_ in findings if f_.get("checkId") == check_id
