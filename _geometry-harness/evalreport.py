@@ -5252,11 +5252,43 @@ def build_prediction(ctx: dict) -> dict:
                      and e["checkId"] == "geometry.navmesh-ownership" and not navmesh_stub(e["A"], e["formKey"])]
         history_holds = sum(1 for e in spot_rows if e["admission"] == "history" and e.get("physical") == "Holds"
                             and not (e["checkId"] == "geometry.navmesh-ownership" and navmesh_stub(e["A"], e["formKey"])))
+        # (eighth review, BPT 77, Snazzy 70) what the patch's winning value is, by the attribution read of the setup with
+        # the patches: undone only where it reads the same as the value the mod's change replaced (the losing plugin's
+        # inherited value); a value the patch or another plugin owns is no undo and is said apart, by its owner
+        def undone_what(rk):
+            got_ = field_chain(patched_arm, rk, rk[2])
+            if got_ is None:
+                return "replaced", None
+            provs_, vals_, _ = got_
+            low_ = [str(x).lower() for x in provs_]
+            if str(rk[3]).lower() not in low_:
+                return "replaced", None
+            i_, w_ = low_.index(str(rk[2]).lower()), low_.index(str(rk[3]).lower())
+            _, j_ = recordrows.own_change(provs_, vals_, i_, (masters or {}).get(str(rk[2]).lower())
+                                          if masters is not None else None)
+            if j_ is not None and vals_[w_] == vals_[j_]:
+                return "putBack", None
+            return "replaced", owner_of(provs_, vals_, w_)[1]
+
+        def patch_sets_off(rk):
+            """The winning patch's own version of the object sets it off for good (provider_disables)."""
+            ch_ = (chains_of(rk[0], patched_arm) or {}).get(str(rk[4]))
+            low_ = [str(x).lower() for x in (ch_ or {}).get("providers") or []]
+            return bool(ch_) and str(rk[3]).lower() in low_ and provider_disables(ch_, low_.index(str(rk[3]).lower()))
+        what_ = {id(h_): undone_what(rk) for rk, h_ in undone}
+        replaced = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "replaced"]
+        undone = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "putBack"]
+        replaced_whose = collections.Counter(
+            "own" if what_[id(h_)][1] is not None and str(what_[id(h_)][1]).lower() in patch_lower
+            else (what_[id(h_)][1] or "") for rk, h_ in replaced)
+        undone_off = [rk for rk, _ in undone if patch_sets_off(rk)]
         undone_by = collections.Counter(rk[2] for rk, _ in undone)
         switched_on = [rk for rk, h_ in undone if off_at_load((h_["row"].get("values") or {}).get("lost"))
                        and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
         n_enable = len(switched_on)
         enable_examples = list(dict.fromkeys(str(rk[4]) for rk in switched_on))[:3]
+        switched_on_r = [rk for rk, h_ in replaced if off_at_load((h_["row"].get("values") or {}).get("lost"))
+                         and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
         def problems_text(with_checks=False, xs=None):
             """The new problems with the patch in their units: an object of a by-object check is counted as an object,
             with its pairs beside it (BPT review S3); with_checks names each check. xs: a subset of the problems."""
@@ -5457,30 +5489,47 @@ def build_prediction(ctx: dict) -> dict:
                         and x.lower() in pt_lower) or "the evaluated mod"}) for (c_, a_), rks in by_setup.items())}))
             not_new_sentence = sentences[-1]
         undone_sentence = None
+
+        def by_plugin(rows_):
+            """Each plugin's fields, with the records they are on (seventh review, BPT S1); itemised for a plugin with at
+            most 3 fields on at most 3 records, a count otherwise (page budget)."""
+            by_ = collections.Counter(rk_[2] for rk_, _ in rows_)
+            return "; ".join(bind(words.get("validationUndoneBy") if (
+                len({h_["row"].get("field") for rk_, h_ in rows_ if rk_[2] == m_}) <= 3
+                and len({str(rk_[4]) for rk_, _ in rows_ if rk_[2] == m_}) <= 3) and words.get("validationUndoneBy")
+                else "{mod} {count}", {
+                "mod": m_, "count": fmt_n(n_),
+                "fields": (lambda fs_: and_list(fs_[:2]) + (" and more" if len(fs_) > 2 else ""))(
+                    list(dict.fromkeys(field_word(h_["row"].get("field")) for rk_, h_ in rows_ if rk_[2] == m_))),
+                "records": (lambda rs_: f" of {and_list(rs_)}" if len(rs_) <= 3 else "")(
+                    list(dict.fromkeys(str(rk_[4]) for rk_, _ in rows_ if rk_[2] == m_)))})
+                for m_, n_ in sorted(by_.items(), key=lambda kv: (-kv[1], kv[0].lower())))
+
+        def enables_text(on_):
+            return bind(words["validationUndoneEnables"], {
+                "count": fmt_n(len(on_)), "examples": "; ".join(list(dict.fromkeys(str(rk[4]) for rk in on_))[:3]),
+                "objects": (lambda n_: f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}")(
+                    len({str(rk[4]) for rk in on_}))}) if on_ else ""
         if undone:
             # changes the patches undo are the patch author's choices, said in their own neutral line, never as new
             # clashes (coordinator, item 3 of the fifth review; P52): the objects switched back on are the examples
             sentences.append(bind(words["validationUndone"], {
-                "patch": patch, "count": fmt_n(len(undone)),
-                # (seventh review, BPT S1) each plugin's undone fields named, with the records they are on
-                # (page budget) itemised for a plugin with at most 3 fields on at most 3 records; a count otherwise
-                "by": "; ".join(bind(words.get("validationUndoneBy") if (
-                    len({h_["row"].get("field") for rk_, h_ in undone if rk_[2] == m_}) <= 3
-                    and len({str(rk_[4]) for rk_, _ in undone if rk_[2] == m_}) <= 3) and words.get("validationUndoneBy")
-                    else "{mod} {count}", {
-                    "mod": m_, "count": fmt_n(n_),
-                    # (page budget) up to 2 fields, then "and more"
-                    "fields": (lambda fs_: and_list(fs_[:2]) + (" and more" if len(fs_) > 2 else ""))(
-                        list(dict.fromkeys(field_word(h_["row"].get("field")) for rk_, h_ in undone if rk_[2] == m_))),
-                    # (page budget) the records only where there are at most 2
-                    "records": (lambda rs_: f" of {and_list(rs_)}" if len(rs_) <= 3 else "")(
-                        list(dict.fromkeys(str(rk_[4]) for rk_, _ in undone if rk_[2] == m_)))})
-                    for m_, n_ in sorted(undone_by.items(), key=lambda kv: (-kv[1], kv[0].lower()))),
-                "enables": bind(words["validationUndoneEnables"], {
-                    "count": fmt_n(n_enable), "examples": "; ".join(enable_examples),
-                    "objects": (lambda n_: f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}")(
-                        len({str(rk[4]) for rk in switched_on}))}) if n_enable else ""}))
+                "patch": patch, "count": fmt_n(len(undone)), "noun": words["fieldNoun"][0 if len(undone) == 1 else 1],
+                "by": by_plugin(undone),
+                "off": bind(words.get("validationUndoneOff") or "", {"count": fmt_n(len(undone_off)), "patch": patch})
+                if undone_off else "",
+                "enables": enables_text(switched_on)}))
             undone_sentence = sentences[-1]
+        replaced_sentence = None
+        if replaced and words.get("validationReplaced"):
+            sentences.append(bind(words["validationReplaced"], {
+                "patch": patch, "count": fmt_n(len(replaced)), "noun": words["fieldNoun"][0 if len(replaced) == 1 else 1],
+                "by": by_plugin(replaced),
+                "whose": ", ".join(bind(words["validationReplacedOwn" if k_ == "own" else "validationReplacedOf"
+                                              if k_ else "validationReplacedUnread"], {"count": fmt_n(n_), "owner": k_})
+                                   for k_, n_ in replaced_whose.most_common()),
+                "enables": enables_text(switched_on_r)}))
+            replaced_sentence = sentences[-1]
         # (fifth review, Snazzy pelts) a row set aside as cannot tell that the setup with the patch no longer lists is no
         # longer found there, never "resolved": whether it was a problem was not told
         ct_set_ = set(words.get("cannotTellAdmissions") or [])
@@ -5978,8 +6027,11 @@ def build_prediction(ctx: dict) -> dict:
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
                       "patchChoiceNoise": patch_noise, "caseOnlyRows": case_only_rows,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
-                      "open": len(open_), "stands": len(stands), "undone": len(undone), "undoneBy": dict(undone_by),
-                      "undoneSentence": undone_sentence,
+                      "open": len(open_), "stands": len(stands), "undone": len(undone), "undoneBy": dict(undone_by), "replaced": len(replaced),
+                      "replacedWhose": dict(replaced_whose), "undoneOff": len(undone_off),
+                      "undoneSentence": undone_sentence, "replacedSentence": replaced_sentence,
+                      "replacedFindingIds": [f_ for f_, _ in collections.Counter(
+                          h_["finding"].get("id") for _, h_ in replaced if h_["finding"].get("id")).most_common()],
                       # (Winterhold review 3) the finding holding the objects named as switched back on first, then
                       # the others by how many undone changes they hold
                       "undoneFindingIds": list(dict.fromkeys(

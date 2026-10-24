@@ -2326,8 +2326,9 @@ def main():
         p_rows = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]
         w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", "a1", "a1"),
                   lost_row(MOD_A, PATCH, f"000702:{BASE}", "SkyrimMajorRecordFlags", "InitiallyDisabled", "0", "0"),
+                  # (eighth review) the patch puts back the value ModB's change replaced: undone (C1179's rule)
                   lost_row(MOD_B, PATCH, f"000703:{BASE}", "Placement", "Position=1,2,3; Rotation=0,0,0",
-                           "Position=4,5,6; Rotation=0,0,0", "v")]
+                           "Position=4,5,6; Rotation=0,0,0", "Position=4,5,6; Rotation=0,0,0")]
         enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
         count_only = {(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 3}
         results = {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}
@@ -2510,7 +2511,7 @@ def main():
     # C546. The changes the patch undoes are linked to their evidence, like every other count in the patch section
     def c546_undone_changes_linked():
         p_rows = [lost_row(MOD_A, MOD_B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]
-        w_rows = [lost_row(MOD_A, PATCH, f"000702:{BASE}", "Name", "a2", "p2", "v2")]
+        w_rows = [lost_row(MOD_A, PATCH, f"000702:{BASE}", "Name", "a2", "p2", "p2")]   # put back (eighth review)
         enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
         count_only = {(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 1}
         results = {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}
@@ -3213,11 +3214,11 @@ def main():
         arms = [arm("baseline", [BASE, THIRD, MOD_A, MOD_B, PATCH], kind="baseline"),
                 arm("without-patch", [BASE, THIRD, MOD_A, MOD_B])]
         w_rows = [lost_row(MOD_A, PATCH, U1, "Owner", "1", "7", "5", before=THIRD),
-                  lost_row(MOD_B, PATCH, U2, "Owner", "8", "7", "1", before=MOD_A)]
+                  lost_row(MOD_B, PATCH, U2, "Owner", "8", "1", "1", before=MOD_A)]   # put back (eighth review)
         w_chains = [(U1, "PlacedObject", [(BASE, {"Owner": "1"}), (THIRD, {"Owner": "5"}), (MOD_A, {"Owner": "1"}),
                                           (PATCH, {"Owner": "7"})]),
                     (U2, "PlacedObject", [(BASE, {"Owner": "1"}), (MOD_A, {"Owner": "1"}), (MOD_B, {"Owner": "8"}),
-                                          (PATCH, {"Owner": "7"})])]
+                                          (PATCH, {"Owner": "1"})])]
         masters = {THIRD: [BASE], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]}
         p_rows = [lost_row(OTHER, MOD_A, f"00C633:{BASE}", "Owner", "o", "a", "v")]
         plan, md, _ = core_bundle(p_rows, w_rows, arms=arms, masters=masters, w_chains=w_chains)
@@ -3457,7 +3458,7 @@ def main():
                 arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
         reg = lost_row(OTHER, PATCH, U1, "Regions", ["Regions: same 2 item(s), ORDER DIFFERS from ModA - ModB patch.esp"],
                        PH, PH)
-        own_ = lost_row(OTHER, PATCH, U2, "Owner", "o", "p", "v")
+        own_ = lost_row(OTHER, PATCH, U2, "Owner", "o", "p", "p")      # put back (eighth review, C1179's rule)
         enr = {(RECORDS, "without-patch"): [lost_row(MOD_B, MOD_A, f"00C72A:{BASE}", "Owner", "b", "a", "v")],
                (RECORDS, "baseline"): [reg, own_], (CELLATTR, "without-patch"): [], (CELLATTR, "baseline"): [reg, own_]}
         count_only = {k: max(1, len(v)) for k, v in enr.items()}
@@ -8285,9 +8286,10 @@ def main():
     def c1158_undone_line_itemised():
         p_rows = [lost_row(MOD_A, MOD_B, f"000781:{BASE}", "LocationReference", "a1", "b1", "v")]
         w_rows = [lost_row(MOD_B, PATCH, f"000781:{BASE}", "LocationReference", "b1", "a1", "a1"),
-                  lost_row(MOD_A, PATCH, f"000782:{BASE}", "Primitive", "Bounds=1,2,3", "Bounds=4,5,6", "v"),
+                  # (eighth review) the patch puts back the value each mod's change replaced: undone (C1179's rule)
+                  lost_row(MOD_A, PATCH, f"000782:{BASE}", "Primitive", "Bounds=1,2,3", "Bounds=4,5,6", "Bounds=4,5,6"),
                   lost_row(MOD_B, PATCH, f"000783:{BASE}", "Placement", "Position=1,2,3; Rotation=0,0,0",
-                           "Position=4,5,6; Rotation=0,0,0", "v")]
+                           "Position=4,5,6; Rotation=0,0,0", "Position=4,5,6; Rotation=0,0,0")]
         enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
         plan, md, html = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []},
                                             [MOD_A, MOD_B], patches=[PATCH],
@@ -8711,7 +8713,7 @@ def main():
         un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
         own_ln = next((x for x in md.splitlines() if x.startswith("- ") and "own value" in x and R1 in x), "")
         return (": 1 record field" in un and MOD_B in un and MOD_A not in un and "put back" in un
-                and MOD_A in own_ln), f"undone {un[:300]!r}; own {own_ln[:300]!r}"
+                and MOD_A in own_ln and "(evidence-index.md#F-" in own_ln), f"undone {un[:300]!r}; own {own_ln[:300]!r}"
 
     # C1181 (eighth review, BPT 77, 0EB5B2): a value the patch puts back on an object its own version sets off for good
     # (enabled opposite to the player) has no effect in game while the object is off: the undone line says so.
