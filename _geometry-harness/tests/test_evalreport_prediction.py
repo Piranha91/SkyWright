@@ -9840,7 +9840,7 @@ def main():
         plan, md, _, idx = compile_and_render(arms_, results, [MOD_A], patches=[PATCH], want_index=True,
                                               count_only={k: max(1, len(v)) for k, v in enr.items()}, enrichment=enr)
         ln = next((x for x in md.splitlines() if "drop door links" in x), "")
-        m_ = re.search(r"\(evidence-index\.md#([^)]+)\)\s*$", ln.strip())
+        m_ = re.search(r"\(evidence-index\.md#([^)]+)\)\.?\s*$", ln.strip())
         anchor = m_.group(1) if m_ else ""
         sec = idx.split(f'<a id="{anchor}"></a>', 1)[1].split("\n<a id=", 1)[0] if anchor and f'<a id="{anchor}"></a>' in idx else ""
         d1 = next((x for x in sec.splitlines() if f"000D01:{MOD_B}" in x), "")
