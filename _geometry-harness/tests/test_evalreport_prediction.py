@@ -8929,6 +8929,20 @@ def main():
         return ("2 overlap pairs between" in ln and "1 counted at the top" in ln
                 and "1 already there with one mod alone" in ln), ln[-400:] or md[-800:]
 
+    # C1193 (eighth review, Missives 67 / 149, Pilgrim 28 / 63 / 142): the set-aside line names its unit (rows of the
+    # measured load order), so it reads apart from the evidence index's results counted across every setup. Wording held
+    # in skill data only: guarded by this test.
+    def c1193_set_aside_line_names_its_unit():
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        plan, md, _ = compile_and_render(arms, {(CONTACT, "baseline"): [row("CONTACT", MOD_B, MOD_A, f"000G93:{MOD_A}"),
+                                                                       row("CONTACT", BASE, MOD_A, f"000G94:{MOD_A}")],
+                                                (CONTACT, "with-patch"): []}, [MOD_A, MOD_B], patches=[PATCH])
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        return ("rows of the measured load order" in line and "1 with the base game" in line), line[:300]
+
+    for name, fn in [("eighth-review/C1193-set-aside-line-names-its-unit", c1193_set_aside_line_names_its_unit)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1188-placed-note-splits-counted-and-alone", c1188_placed_note_splits_counted_and_alone)]:
         cell(name, fn)
 
