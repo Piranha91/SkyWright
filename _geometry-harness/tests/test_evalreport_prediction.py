@@ -9826,6 +9826,62 @@ def main():
                       c1231_no_dropped_door_link_no_promised_line)]:
         cell(name, fn)
 
+    # C1234 (Clockwork S1): the door-links line links its own entry in the evidence index, which lists each door with the
+    # navmesh record that dropped its link, the plugin whose version held it and the one whose version wins.
+    def c1234_door_links_line_has_its_index_entry():
+        N1 = f"0C3907:{BASE}"
+        r_ = lost_row(MOD_B, MOD_A, N1, "Data", ["Data.Max=1,2,3"], PH, ["Data.Max=0,0,0"])
+        r_["Summary"] = f"NavigationMesh {N1}: Data - {MOD_B}'s value lost to {MOD_A}'s"
+        arms_ = with_files([arm("baseline", [BASE, OTHER, MOD_B, MOD_A, PATCH], kind="baseline"),
+                            arm("without-patch", [BASE, OTHER, MOD_B, MOD_A])], door_files())
+        enr = {(RECORDS, "without-patch"): [r_], (RECORDS, "baseline"): []}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): [],
+                   (NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): []}
+        plan, md, _, idx = compile_and_render(arms_, results, [MOD_A], patches=[PATCH], want_index=True,
+                                              count_only={k: max(1, len(v)) for k, v in enr.items()}, enrichment=enr)
+        ln = next((x for x in md.splitlines() if "drop door links" in x), "")
+        m_ = re.search(r"\(evidence-index\.md#([^)]+)\)\s*$", ln.strip())
+        anchor = m_.group(1) if m_ else ""
+        sec = idx.split(f'<a id="{anchor}"></a>', 1)[1].split("\n<a id=", 1)[0] if anchor and f'<a id="{anchor}"></a>' in idx else ""
+        d1 = next((x for x in sec.splitlines() if f"000D01:{MOD_B}" in x), "")
+        ok = (anchor.startswith("door-links") and f"000D02:{MOD_B}" in sec
+              and N1 in d1 and MOD_B in d1.replace(f"000D01:{MOD_B}", "") and MOD_A in d1)
+        return ok, f"anchor {anchor!r}; line end {ln[-120:]!r}; entry {sec[:400]!r}"
+
+    # C1235 (Clockwork 75, Winterhold 88): the re-measure of patch-placed pairs says its count is of the actual render
+    # surfaces and links an index entry giving each pair's figures and the file each was read from; the sums unchanged.
+    def c1235_placed_remeasure_says_basis_and_source():
+        X = f"000X34:{MOD_A}"
+        ys = [f"000Y3{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        for i_, r_ in enumerate(p_rows):
+            r_["Summary"] += f"; {(39, 3)[i_]} triangle pairs"
+            r_["Necessary"][0]["PhysicalDetail"] = ["crossing; 40 triangle pairs [mm]", "crossing; 3 triangle pairs [mm]"][i_]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds",
+                  "Detail": [f"actual render surfaces: crossing; {n_} triangle pairs [mm]" for n_ in (38, 12)][i_]}
+                 for i_, y in enumerate(ys)]
+        other_ = f"00C93A:{BASE}"
+        enr = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")]}
+        tr = {(RECORDS, "with-patch"): tree_transcript([
+            (X, "PlacedObject", [(MOD_A, {"Placement.Position": "1,1,1"}), (PATCH, {"Placement.Position": "9,9,9"})]),
+            (other_, "PlacedObject", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (PATCH, {"Owner": "p"})])])}
+        plan, md, _, idx = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): []},
+                                              [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                              enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                              transcripts=tr, want_index=True)
+        ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
+        m_ = re.search(r"\(evidence-index\.md#(patch-placed[^)]*)\)", ln)
+        anchor = m_.group(1) if m_ else ""
+        sec = idx.split(f'<a id="{anchor}"></a>', 1)[1].split("\n<a id=", 1)[0] if anchor and f'<a id="{anchor}"></a>' in idx else ""
+        y1 = next((x for x in sec.splitlines() if ys[0] in x), "")
+        ok = ("43 triangle pairs" in ln and "50 with it" in ln and "actual render surfaces" in ln
+              and "40" in y1 and "38" in y1 and "39" in y1 and ".json" in sec)
+        return ok, f"line {ln[-300:]!r}; entry {sec[:500]!r}"
+
+    for name, fn in [("tenth-review/C1234-door-links-line-has-its-index-entry", c1234_door_links_line_has_its_index_entry),
+                     ("tenth-review/C1235-placed-remeasure-says-basis-and-source", c1235_placed_remeasure_says_basis_and_source)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
