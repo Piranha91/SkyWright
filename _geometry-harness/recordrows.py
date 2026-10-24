@@ -712,6 +712,13 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
                 if scope.classify(rtype, key) != "compared":
                     continue
                 val = d[len(key):]
+                # (eighth review) "<field> only in <winner>: <value>": the winner holds the leaf and this provider does
+                # not; the winner's value is that value
+                if val.startswith(" only in " + winner + ": "):
+                    k0 = INDEX.sub("", key)
+                    v0 = val[len(" only in " + winner + ": "):]
+                    won_vals.setdefault(key, _masked(v0, masks[k0]) if k0 in masks else _angle(v0)
+                                        if k0 in scope.angles else _norm(v0))
                 cut = val.rfind(" (" + winner)
                 won = val[cut + len(" (" + winner):].rstrip(")").strip() if cut > 0 else None
                 if cut > 0:
