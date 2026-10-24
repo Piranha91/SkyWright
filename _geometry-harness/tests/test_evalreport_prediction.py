@@ -8959,6 +8959,22 @@ def main():
                    if x.startswith(titles[FIXTURE])), "")
         return (titles[CONTACT] in kl and titles[RECORDS] in kl), kl[:400]
 
+    # C1186 (eighth review, BPT 19): an item's examples say their own state: an example whose winning version sets the
+    # object off for good is said so, never shown bare beside a sentence about other rows.
+    def c1186_examples_say_off_for_good():
+        D1, D2 = f"00C186:{BASE}", f"00C286:{BASE}"
+        o_, a_, b_off, b_mv = offs(0), offs(5), offs(-30000), offs(40)
+        p_rows = [lost_row(MOD_A, MOD_B, D1, "Placement", off_txt(a_), off_txt(b_off), off_txt(o_), before=BASE),
+                  lost_row(MOD_A, MOD_B, D2, "Placement", off_txt(a_), off_txt(b_mv), off_txt(o_), before=BASE)]
+        p_ch = [(D1, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_off)]),
+                (D2, "PlacedObject", [(BASE, o_), (MOD_A, a_), (MOD_B, b_mv)])]
+        plan, md, _ = core_bundle(p_rows, [], p_chains=p_ch, masters=MASTERS_)
+        ex = next((m.group(0) for ln in md.splitlines() for m in [re.search(r"For example: .*?\)\.", ln)] if m and D1 in m.group(0)), "")
+        return (re.search(re.escape(D1) + r" \([^)]*off for good", ex) is not None), ex[:300] or md[:1500]
+
+    for name, fn in [("eighth-review/C1186-examples-say-off-for-good", c1186_examples_say_off_for_good)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1184-counted-once-names-each-first-item", c1184_counted_once_names_each_first_item)]:
         cell(name, fn)
 
