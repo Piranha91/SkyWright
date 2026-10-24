@@ -9070,6 +9070,38 @@ def main():
         return ("which way was not found" not in ig and "from the moment the game loads" in ig and "000X94" in ig
                 and "26.9 u" in ig), ig[:400]
 
+    # C1195 / C1204 (eighth review, Sewers 30; Gate A condition b): a base-size navmesh the winner puts back where the
+    # losing mod's own version is a single triangle says, from each setup's winning version, what it means: without the
+    # patch NPCs path on the winner's base-size navmesh; with the patch the winning version is read again, and the line
+    # says it is a single triangle again (C1195) or still base-size (C1204), whichever the files show.
+    def stub_put_back_bundle(patch_tris):
+        n1 = f"000E95:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="TempleInterior (int)  1 tris -> 600")]
+        p_rows[0]["Necessary"][0]["Detail"] = "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u"
+        arms_ = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E95, [("NVNM", nvnm(600, []))], False)]),
+               MOD_A: plugin_file_of(MOD_A, [BASE], [("NAVM", 0x00000E95, [("NVNM", nvnm(1, []))], False)]),
+               MOD_B: plugin_file_of(MOD_B, [BASE], [("NAVM", 0x00000E95, [("NVNM", nvnm(600, []))], False)]),
+               PATCH: plugin_file_of(PATCH, [BASE], [("NAVM", 0x00000E95, [("NVNM", nvnm(patch_tris, []))], False)])}
+        with_files(arms_, fs_)
+        plan, md, html = compile_and_render(arms_, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        return " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+
+    def c1195_stub_put_back_meaning_patch_stub():
+        top = stub_put_back_bundle(1)
+        return ("NPCs there path on ModB.esp's navmesh" in top and "a single triangle again" in top
+                and "still has" not in top), top[-600:]
+
+    def c1204_stub_put_back_meaning_patch_full():
+        top = stub_put_back_bundle(600)
+        return ("NPCs there path on ModB.esp's navmesh" in top and "still has 600 triangles" in top
+                and "single triangle again" not in top), top[-600:]
+
+    for name, fn in [("eighth-review/C1195-stub-put-back-meaning-patch-stub", c1195_stub_put_back_meaning_patch_stub),
+                     ("eighth-review/C1204-stub-put-back-meaning-patch-full", c1204_stub_put_back_meaning_patch_full)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1194-switch-direction-from-records", c1194_switch_direction_from_records)]:
         cell(name, fn)
 
