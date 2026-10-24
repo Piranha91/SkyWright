@@ -9557,9 +9557,10 @@ def main():
         req = [{"batchMarker": "b6-models"}, call(1, "housecarl_records", {"fields": ["Model.File"]}),
                {"batchMarker": "b7-assets"}, call(1, "housecarl_asset_status", {"asset_paths": ["x"]})]
         resp = [{"batchMarker": "b6-models"},
+                # a query answers in "matches", a walk in "records" (BPT's import): both are read
                 answer(1, {"matches": [{"formid": f"0C9801:{MOD_A}", "source": MOD_A,
-                                        "fields": [{"path": "Model.File", "value": "Arch\\House98.nif"}]},
-                                       {"formid": f"0C9802:{MOD_A}", "source": MOD_A,
+                                        "fields": [{"path": "Model.File", "value": "Arch\\House98.nif"}]}],
+                           "records": [{"formid": f"0C9802:{MOD_A}", "source": MOD_A,
                                         "fields": [{"path": "Model.File", "value": "Arch\\Wall98.nif"}]}]}),
                 {"batchMarker": "b7-assets"},
                 answer(1, {"results": [{"path": "meshes/Arch/House98.nif", "exists": False},
