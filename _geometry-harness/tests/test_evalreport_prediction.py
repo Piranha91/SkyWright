@@ -9622,6 +9622,32 @@ def main():
         sec_ = index[index.find(f'id="{has_[0]}"'):][:600] if has_ else ""
         return bool(has_) and X_ in sec_ and Y_ in sec_, f"links {anchors_}; entry {sec_[:300]!r}; line {it[-200:]!r}"
 
+    # C1222 (ninth review, Missives 30; gate A answer 1): the line saying a winner drops a base-game plugin's own change
+    # says, of each field it names, what the field does in game where the skill data holds it (a cell's Location), and
+    # that it is not read here where it does not (max height data).
+    def c1222_dropped_base_change_field_meaning():
+        L1, W1 = f"00C222:{BASE}", f"00C223:{BASE}"
+        arms = [arm("baseline", [BASE, HF_, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, OTHER, MOD_A, MOD_B])]
+        chains = [(L1, "Cell", [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}),
+                                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": ""})]),
+                  (W1, "Worldspace", [(BASE, {"MaxHeight": ""}), (HF_, {"MaxHeight": "MaxHeight.CellData=0B"}),
+                                      (OTHER, {"MaxHeight": "MaxHeight.CellData=0B"}), (MOD_A, {"MaxHeight": ""})])]
+        r1 = lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)
+        r1["Summary"] = f"Cell 00C222: Location - {OTHER}'s value lost to {MOD_A}'s"
+        r2 = lost_row(OTHER, MOD_A, W1, "MaxHeight", ["MaxHeight.CellData=0B"], PH, PH)
+        r2["Summary"] = f"Worldspace 00C223: MaxHeight - {OTHER}'s value lost to {MOD_A}'s"
+        p_rows = [r1, r2]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
+                                  masters={HF_: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
+        mean = priorities()["reader"]["prediction"]["fieldInGame"]["Cell|Location"]
+        return (f"In game, Location is {mean}." in line
+                and "What max height data does in game is not read here." in line), line[-500:]
+
+    for name, fn in [("ninth-review/C1222-dropped-base-change-field-meaning", c1222_dropped_base_change_field_meaning)]:
+        cell(name, fn)
+
     for name, fn in [("ninth-review/C1223-sibling-item-linked", c1223_sibling_item_linked)]:
         cell(name, fn)
 
