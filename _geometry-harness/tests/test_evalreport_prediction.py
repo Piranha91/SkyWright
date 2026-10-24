@@ -9960,6 +9960,34 @@ def main():
     for name, fn in [("tenth-review/C1237-base-game-carriers-counted", c1237_base_game_carriers_counted)]:
         cell(name, fn)
 
+    # C1238 (Sewers S1): where the check's row says the object sits inside "something else", the line does not name the
+    # row's other object as what it is inside; it says the check does not name it (the other object is named as what
+    # the row measures it against).
+    def c1238_inside_something_else_not_named():
+        X = f"000X38:{MOD_A}"
+        C_, P_ = f"000E01:{MOD_B}", f"000E02:{MOD_B}"
+        f_ = plugin_file_of(MOD_B, [BASE], [
+            ("REFR", 0x01000E01, [("NAME", struct.pack("<I", 0x01000E03)), ("DATA", struct.pack("<6f", 0, 0, 0, 0, 0, 0)),
+                                  ("XESP", struct.pack("<IB", 0x01000E02, 0))], False),
+            ("REFR", 0x01000E02, [("NAME", struct.pack("<I", 0x01000E04)), ("DATA", struct.pack("<6f", 9, 9, 0, 0, 0, 0))],
+             False)], group="CELL")
+        st_ = row(f"STATE-CONTACT@{P_}@Unknown", MOD_B, MOD_A, C_, label="Camp (ext)", other=X)
+        st_["Summary"] = (f"Contact StateConditional under PlankSwitch ({MOD_B}): {C_} [Static Scaffold] leaves - Sunk: the "
+                          f"host leaves with the flip - hung from the host as authored (0u gap); under the winner it sits "
+                          f"26.9u inside something else in Camp (ext)")
+        arms = with_files([arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                           arm("without-patch", [BASE, MOD_A, MOD_B])], {MOD_B: f_})
+        res = {(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch")}
+        plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH])
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        it = next((ln for ln in md.splitlines() if ln.startswith(f"- **{title}")), "")
+        ig = it.split("In game", 1)[-1]
+        return ("inside something the check does not name" in ig and not re.search(r"inside (object )?000X38", ig)
+                and "26.9 u" in ig), ig[:400]
+
+    for name, fn in [("tenth-review/C1238-inside-something-else-not-named", c1238_inside_something_else_not_named)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
