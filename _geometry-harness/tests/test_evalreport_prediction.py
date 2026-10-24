@@ -8586,7 +8586,7 @@ def main():
 
     # C1173 (round 3, BPT 15 / 71 / 85 / 88): both mods' changes are lost to the patch, whose value is the base game's
     # (the record's own value, put back): said as the base game's value put back, never as the patch's own value.
-    def c1173_patch_value_base_put_back():
+    def c1173_patch_value_base_put_back(mixed=False):
         R_ = f"00CA73:{BASE}"
         mh_ = lambda x: {"MaxHeight.CellData": x}  # noqa: E731
         p_rows = [lost_row(MOD_A, MOD_B, R_, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=0B"],
@@ -8597,11 +8597,26 @@ def main():
             r_["Summary"] = r_["Summary"].replace("PlacedObject", "Worldspace")
         p_ch = [(R_, "Worldspace", [(BASE, mh_("00")), (MOD_A, mh_("0A")), (MOD_B, mh_("0B"))])]
         w_ch = [(R_, "Worldspace", [(BASE, mh_("00")), (MOD_A, mh_("0A")), (MOD_B, mh_("0B")), (PATCH, mh_("00"))])]
+        if mixed:
+            # a second record where the patch's value (0C) is its own
+            R2 = f"00CA75:{BASE}"
+            p2 = [lost_row(MOD_A, MOD_B, R2, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=0B"],
+                           ["MaxHeight.CellData=00"], before=BASE)]
+            w2 = [lost_row(m_, PATCH, R2, "MaxHeight", [f"MaxHeight.CellData={v_}"], ["MaxHeight.CellData=0C"],
+                           ["MaxHeight.CellData=00"], before=BASE) for m_, v_ in ((MOD_A, "0A"), (MOD_B, "0B"))]
+            for r_ in p2 + w2:
+                r_["Summary"] = r_["Summary"].replace("PlacedObject", "Worldspace")
+            p_rows, w_rows = p_rows + p2, w_rows + w2
+            p_ch = p_ch + [(R2, "Worldspace", [(BASE, mh_("00")), (MOD_A, mh_("0A")), (MOD_B, mh_("0B"))])]
+            w_ch = w_ch + [(R2, "Worldspace", [(BASE, mh_("00")), (MOD_A, mh_("0A")), (MOD_B, mh_("0B")), (PATCH, mh_("0C"))])]
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]},
                                   targets=(MOD_A, MOD_B))
         pr_ = reader(plan).get("prediction") or {}
         kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
         vo = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch") and "both mods' values" in x), "")
+        if mixed:
+            return ("the patch's own value 1, the patch puts back the base game's value 1" in kl
+                    and "(the patch's own 1; the base game's value put back 1)" in vo and "its own value" not in vo), f"{kl} || {vo}"
         return ("puts back the base game's value 1" in kl and "own value" not in kl
                 and "puts back the base game's value over both mods' values: 1" in vo and "its own value" not in vo), f"{kl} || {vo}"
 
@@ -8619,6 +8634,7 @@ def main():
                      ("round2/C1168-base-game-owner-is-not-outside-scope", c1168_base_game_owner_is_not_outside_scope),
                      ("round3/C1172-carried-example-from-its-rows", c1172_carried_example_from_its_rows),
                      ("round3/C1173-patch-value-base-put-back", c1173_patch_value_base_put_back),
+                     ("round3/C1175-some-patch-values-base-put-back", lambda: c1173_patch_value_base_put_back(mixed=True)),
                      ("round3/C1174-earlier-base-value-put-back", c1174_earlier_base_value_put_back),
                      ("round2/C1169-mod-on-both-sides-says-each-part", c1169_mod_on_both_sides_says_each_part),
                      ("round3/C1171-scope-line-says-records-not-intent", c1171_scope_line_says_records_not_intent)]:

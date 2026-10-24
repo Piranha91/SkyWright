@@ -5328,9 +5328,10 @@ def build_prediction(ctx: dict) -> dict:
             n_ob_ = sum(1 for e in own if base_put_back(e))
             sentences.append(bind(words["validationOwnAllBase"], {"patch": patch, "count": fmt_n(len(own))})
                              if n_ob_ == len(own) and words.get("validationOwnAllBase") else
-                             bind(words["validationOwn"], {"patch": patch, "count": str(len(own)) + (
-                bind(words.get("validationOwnBase") or "", {"count": fmt_n(n_ob_), "all": "all" if n_ob_ == len(own)
-                                                            else fmt_n(n_ob_)}) if n_ob_ else "")}))
+                             bind(words["validationOwnSomeBase"], {"count": fmt_n(len(own)), "base": fmt_n(n_ob_),
+                                                                   "own": fmt_n(len(own) - n_ob_)})
+                             if n_ob_ and words.get("validationOwnSomeBase") else
+                             bind(words["validationOwn"], {"patch": patch, "count": len(own)}))
         if kept:
             kept_by = collections.Counter(e["A"] for e in kept)
             # whose change: named in the with-patch line and each item line; here only when several mods lose
