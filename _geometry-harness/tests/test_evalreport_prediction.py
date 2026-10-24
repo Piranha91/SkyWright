@@ -9542,6 +9542,55 @@ def main():
               and f"one plugin's versions win for both the fixture and its removed host ({MOD_A}" in line)
         return ok, f"{adm}; {line[-400:]!r}"
 
+    # C1219 / C1220 (ninth review, BPT 33; gate A answer 3): a missing mesh is said by what uses it, read from every plugin
+    # file of each setup: its one placed user switched off for good in both setups (not drawn while off), or no placed
+    # object in either setup using it, other uses not read. Never "could".
+    def missing_mesh_users_line():
+        import copy
+        MA = "loadability.missing-assets"
+
+        def call(i, name, args):
+            return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": args}}
+
+        def answer(i, doc):
+            return {"jsonrpc": "2.0", "id": i, "result": {"content": [{"type": "text", "text": json.dumps(doc)}]}}
+        req = [{"batchMarker": "b6-models"}, call(1, "housecarl_records", {"fields": ["Model.File"]}),
+               {"batchMarker": "b7-assets"}, call(1, "housecarl_asset_status", {"asset_paths": ["x"]})]
+        resp = [{"batchMarker": "b6-models"},
+                answer(1, {"matches": [{"formid": f"0C9801:{MOD_A}", "source": MOD_A,
+                                        "fields": [{"path": "Model.File", "value": "Arch\\House98.nif"}]},
+                                       {"formid": f"0C9802:{MOD_A}", "source": MOD_A,
+                                        "fields": [{"path": "Model.File", "value": "Arch\\Wall98.nif"}]}]}),
+                {"batchMarker": "b7-assets"},
+                answer(1, {"results": [{"path": "meshes/Arch/House98.nif", "exists": False},
+                                       {"path": "meshes/Arch/Wall98.nif", "exists": False}],
+                           "bsa_failures": [], "bsa_failures_omitted": 0})]
+        fa_ = plugin_file_of(MOD_A, [BASE], [("REFR", 0x010C9811, [("NAME", struct.pack("<I", 0x010C9801)),
+                                                                   ("DATA", struct.pack("<6f", 1.0, 2.0, -30000.0, 0.0, 0.0, 0.0))],
+                                              False)], group="CELL")
+        files_ = {MOD_A: fa_, **{n_: plugin_file_of(n_, [BASE] if n_ != BASE else [], [], group="CELL")
+                                 for n_ in (BASE, MOD_B, PATCH)}}
+        arms_ = with_files(copy.deepcopy(PATCHED_ARMS), files_)
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+        plan, md, _ = compile_and_render(arms_, results, [MOD_A, MOD_B], patches=[PATCH],
+                                         count_only={(MA, "baseline"): 1, (MA, "without-patch"): 1},
+                                         transcripts={(MA, "baseline"): (req, resp), (MA, "without-patch"): (req, resp)})
+        return next((ln for ln in md.splitlines() if "House98.nif" in ln), "")
+
+    def c1219_missing_mesh_only_user_off_for_good():
+        ln = missing_mesh_users_line()
+        return ("meshes/Arch/House98.nif: the one placed object that uses it (0C9811:ModA.esp) is switched off for good "
+                "in both setups, so it is not drawn while off." in ln and "could" not in ln), ln[-500:]
+
+    def c1220_missing_mesh_no_placed_user():
+        ln = missing_mesh_users_line()
+        return ("No placed object in either setup uses meshes/Arch/Wall98.nif; other uses (a script or a list creating the "
+                "object) were not read." in ln and "could" not in ln), ln[-500:]
+
+    for name, fn in [("ninth-review/C1219-missing-mesh-only-user-off-for-good", c1219_missing_mesh_only_user_off_for_good),
+                     ("ninth-review/C1220-missing-mesh-no-placed-user", c1220_missing_mesh_no_placed_user)]:
+        cell(name, fn)
+
     for name, fn in [("ninth-review/C1221-fixture-own-layout-set-aside", c1221_fixture_own_layout_set_aside)]:
         cell(name, fn)
 
