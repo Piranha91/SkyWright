@@ -2416,6 +2416,32 @@ def build_prediction(ctx: dict) -> dict:
         bi_, li_ = list_items_(vals_[0]), list_items_(vals_[low_.index(rk[2].lower())])
         return sorted(bi_) if bi_ and li_ == bi_ else None
 
+    own_layout_cache, own_layout_by = {}, collections.OrderedDict()
+
+    def own_layout(rk, other):
+        """(ninth review, Winterhold F-039) A fixture left hanging whose winning version (on) and whose removed host's
+        winning version (off for good, or deleted) are the same plugin's, read from the prediction setup's plugin files
+        (recorded bytes only): it hangs as that plugin ships it, whichever other mod the probe names. The plugin, or None
+        (another plugin's host, or a version not read)."""
+        if rk[0] not in set(words.get("ownLayoutChecks") or []) or not other:
+            return None
+        key_ = (str(rk[4]), tuple(map(str, other)))
+        if key_ not in own_layout_cache:
+            mb_ = ctx.get("mainBundle")
+            plugs_ = next(((a_.get("requested") or {}).get("plugins") or [] for a_ in ((mb_.plan.get("arms") if mb_ else None) or [])
+                           if a_.get("armId") == p_of(rk[0])), [])
+            got_ = None
+            fx_ = setup_version(plugs_, str(rk[4]), plugin_reads)
+            if fx_ and fx_[0] and not (placement_off_for_good(fx_[1], words) or fx_[1].get("deleted")):
+                for o_ in other:
+                    ho_ = setup_version(plugs_, str(o_), plugin_reads)
+                    if (ho_ and ho_[0] and str(ho_[0]).lower() == str(fx_[0]).lower()
+                            and (placement_off_for_good(ho_[1], words) or ho_[1].get("deleted"))):
+                        got_ = ho_[0]
+                        break
+            own_layout_cache[key_] = got_
+        return own_layout_cache[key_]
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -2486,6 +2512,10 @@ def build_prediction(ctx: dict) -> dict:
                 return "listKept"              # every item it added or removed the winning list keeps so
             if (supersede(rk) or {}).get("kind") in ("kind", "place"):
                 return "superseded"            # the winner rebuilt the record after the loser's small fix
+        lay_ = own_layout(rk, other)
+        if lay_:
+            own_layout_by.setdefault(lay_, []).append(str(rk[4]))
+            return "ownLayout"
         # (fifth review, Winterhold S3) the same rule for a quest-or-switch row of a fixture left in empty space
         if ((rk[0] == "geometry.fixture-empty-space"
              or str(rk[1]).split("@", 1)[0] in set(words.get("fixtureAnchorUnclearKinds") or []))
@@ -4372,6 +4402,7 @@ def build_prediction(ctx: dict) -> dict:
              "offUnreferenced": set_aside["offUnreferenced"], "baseLink": set_aside["baseLink"],
              "offUnreferencedWinner": set_aside["offUnreferencedWinner"],
              "anchorUnclear": set_aside["anchorUnclear"], "notOwnEdit": set_aside["notOwnEdit"],
+             "ownLayout": set_aside["ownLayout"],
              "ownMaster": set_aside["ownMaster"], "undoesMaster": set_aside["undoesMaster"],
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
              "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
@@ -4580,6 +4611,12 @@ def build_prediction(ctx: dict) -> dict:
                                        + base_links_total(m_)
                                        for m_, n_ in base_link_cut_by.items() if words.get("setAsideBaseLinkCut"))
                                    + (" " + bind(words["setAsideAnchorUnclear"], aside) if aside["anchorUnclear"] else "")
+                                   + (" " + bind(words["setAsideOwnLayout"], {
+                                       "count": fmt_n(aside["ownLayout"]),
+                                       "noun": "fixture" if aside["ownLayout"] == 1 else "fixtures",
+                                       "plugins": and_list(list(own_layout_by)),
+                                       "examples": "; ".join(list(dict.fromkeys(f for v_ in own_layout_by.values() for f in v_))[:2])})
+                                      if aside["ownLayout"] and words.get("setAsideOwnLayout") else "")
                                    + (" " + bind(words["setAsideNotOwnEditAllCarried"], {
                                        "count": fmt_n(aside_n("notOwnEdit")[0]), "noun": aside_noun("notOwnEdit"),
                                        "examples": "; ".join(sorted(set(carried_notown))[:2])})
