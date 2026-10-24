@@ -9270,7 +9270,7 @@ def main():
     def c1210_patch_wins_rows_relation_said():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
         ls = patch_wins_lines(md)
-        return any("2 rows linked, one per losing plugin and field" in x for x in ls), " || ".join(ls)[:600]
+        return any("2 rows linked, one per plugin pair" in x for x in ls), " || ".join(ls)[:600]   # page budget wording
 
     # C1211 (round 2 item 7, Sewers 39): with one evaluated mod the other version is compared on every counted group,
     # those already there with the mod alone too, and a counted check that version did not measure is named.
@@ -9318,8 +9318,9 @@ def main():
                                                                        row("CONTACT", BASE, MOD_A, f"000G14:{MOD_A}")],
                                                 (CONTACT, "with-patch"): [row("CONTACT", BASE, MOD_A, f"000G14:{MOD_A}")]},
                                          [MOD_A, MOD_B], patches=[PATCH])
-        ln = next((x for x in md.splitlines() if "further result" in x), "")
-        return ("one check's finding for one pair of plugins in one setup" in ln), ln[:400] or md[-600:]
+        # (page budget) said with the rows' own count, in the set-aside line, so both counts read together
+        ln = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        return ("(the further results listed in the detail count one per check, plugin pair and setup)" in ln), ln[:400]
 
     for name, fn in [("round2-8/C1206-set-aside-unit-names-prediction-setup", c1206_set_aside_unit_names_prediction_setup),
                      ("round2-8/C1207-patch-wins-base-owned-loser-is-carried", c1207_patch_wins_base_owned_loser_is_carried),
