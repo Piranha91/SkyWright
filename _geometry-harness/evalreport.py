@@ -4799,9 +4799,13 @@ def build_prediction(ctx: dict) -> dict:
         diff_arm = patched_arm if p_arm == "baseline" else (p_arm if patched_arm == "baseline" else None)
 
         def geometry_outcome(e):
-            if ((ctx.get("comparisonState") or {}).get((e["checkId"], diff_arm)) or {}).get("refused"):
-                return "cannot-tell"           # the comparison with and without the patch refused a verdict
+            # (eighth review, Snazzy 13 / 75) a comparison that refused its verdict still re-measured each row: the row's
+            # own predicate decides (Gone or Holds is a measurement; anything else cannot be told); only a refused
+            # comparison with no re-measure leaves its rows untold
+            refused_ = ((ctx.get("comparisonState") or {}).get((e["checkId"], diff_arm)) or {}).get("refused")
             preds = predicates(e["checkId"])
+            if refused_ and preds is None:
+                return "cannot-tell"           # the comparison with and without the patch refused a verdict
             if preds is None:
                 if there(patched_arm, keyof(e)):
                     return "left"
@@ -5984,6 +5988,11 @@ def build_prediction(ctx: dict) -> dict:
                           + [f_ for f_, _ in collections.Counter(h_["finding"].get("id") for _, h_ in undone
                                                                  if h_["finding"].get("id")).most_common()])),
                       "cannotTell": len(untold) + len(untold_value), "valueUnrecorded": len(untold_value),
+                      # (eighth review, Snazzy 150) predicted clashes re-measured gone in a comparison that refused its
+                      # verdict, by check: its own line says them beside the refusal
+                      "measuredGoneRefused": dict(collections.Counter(
+                          e["checkId"] for e in judged if e["kind"] != "LOST-EDIT" and outcome.get(id(e)) == "resolved"
+                          and ((ctx.get("comparisonState") or {}).get((e["checkId"], diff_arm)) or {}).get("refused"))),
                       "falseAlarms": None,
                       "patchProblems": len(problems),
                       "notNewWithPatch": len(not_new), "notNewSentence": not_new_sentence,
@@ -7739,8 +7748,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             context += ". " + str(f["readerProvenance"]).rstrip(".")
         null_summary.append(f"{subject} — {f.get('readerArmLabel')}: {context}")
     null_summary = sorted(set(null_summary))
+    refused_at = []                    # (eighth review) where each refused comparison's line sits, to add its re-measure
     for (check_id, arm_id), state in sorted(comparison_state.items()):
         if state["refused"] and arm_id != "baseline":
+            refused_at.append((len(comparison_summary), check_id, arm_id, state))
             comparison_summary.append(f"{check_titles.get(str(check_id), b.check_title(check_id))} — "
                                       f"{arm_labels.get(arm_id, 'Measured setup')}: "
                                       + bind(cmp_words["refusedLine"], {"why": refused_words(state)}))
@@ -7932,6 +7943,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if len(rest) < len(reader_missing):
             reader["missingCoveredLine"] = (reader_data.get("prediction") or {}).get("missingCoveredLine")
     reader["validation"] = lead["validation"]
+    # (eighth review, Snazzy 150) a refused comparison whose predicted clashes were re-measured gone says both: the rows
+    # measured gone, and that it refused a verdict on the rest
+    gone_ = (lead["validation"] or {}).get("measuredGoneRefused") or {}
+    for idx_, ck_, arm_, st_ in refused_at:
+        n_ = int(gone_.get(ck_) or 0)
+        if n_ and arm_ == (lead["validation"] or {}).get("withPatchArm") and cmp_words.get("refusedLineMeasured"):
+            comparison_summary[idx_] = (f"{check_titles.get(str(ck_), b.check_title(ck_))} — "
+                                        f"{arm_labels.get(arm_, 'Measured setup')}: "
+                                        + bind(cmp_words["refusedLineMeasured"], {
+                                            "count": fmt_n(n_), "noun": "clash" if n_ == 1 else "clashes",
+                                            "them": "it" if n_ == 1 else "them", "why": refused_words(st_)}))
     reader["sectionHeadings"].update(lead["headings"])
     pw = reader_data.get("prediction") or {}
     aside_total = sum(aside_counts.values())
