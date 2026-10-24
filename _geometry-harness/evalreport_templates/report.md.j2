@@ -155,7 +155,7 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 
 ## {{ p.reader.sectionHeadings.changes }}
 
-{% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{{ f.readerArmLabel }} — {{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
+{% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{% if not p.reader.changesOneSetup %}{{ f.readerArmLabel }} — {% endif %}{{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
 {% endfor %}{% else %}{{ val.get("noChangeLine") or "No measured repair or ownership change was recorded." }}
 {% endif %}
 {% if "tail" not in (p.layout or "").split() %}{% for item in p.reader.comparisonSummary %}- {{ item }}

@@ -8239,6 +8239,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
               "scopeLine": scope_line, "verdict": verdict, "limitations": limitations,
               "sectionHeadings": {"regressions": f"Problems introduced by {alternative_subject}",
                                   "changes": f"Changes made by {alternative_subject}"},
+              # (ninth review, page fit) with one alternative setup the section heading names it: its entries do not repeat it
+              "changesOneSetup": len(alternative_arms) == 1,
               "comparisonMods": comparison_names, "suppliedPatches": supplied, "checkTitles": check_titles,
               "locationOrder": reader_data.get("locationOrder") or {},
               "otherLimits": list(dict.fromkeys(other_limits)),
