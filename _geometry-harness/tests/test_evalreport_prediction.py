@@ -9167,6 +9167,17 @@ def main():
         lines = [x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or []]
         return (len(lines) == 1 and f"1 of {OTHER}'s record fields" in lines[0]), str(lines)[:400]
 
+    # C1201 (eighth review, the standing nudge set-aside): a report with a pair whose base-game object another mod only
+    # nudges says once, plainly, how such pairs are counted and why; the count does not change.
+    def c1201_nudge_counting_said_once():
+        near_ = (0x00CA01, (100.0, 100.0, 0.0, 1.5, 0x0B0A79), (102.0, 100.0, 0.0, 1.5, 0x0B0A79))
+        md_, it_ = nudge_bundle([near_])
+        n_ = md_.count("keeping its turn, is counted as a clash between")
+        return (n_ == 1 and "1 overlap pair" in it_), f"{n_} || {it_[:200]}"
+
+    for name, fn in [("eighth-review/C1201-nudge-counting-said-once", c1201_nudge_counting_said_once)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1199-order-line-sets-aside-no-water", c1199_order_line_sets_aside_no_water)]:
         cell(name, fn)
 
