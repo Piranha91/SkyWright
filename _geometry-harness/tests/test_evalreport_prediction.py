@@ -10144,6 +10144,15 @@ def main():
     for name, fn in [("tenth-review/C1241-aside-step-moves-notes-and-change-text", c1241_aside_step_moves_notes_and_change_text)]:
         cell(name, fn)
 
+    # C1242 (Gate C, regen-r10dev2 Winterhold 25 read 11 records losing ground against regen-r9a's 9): a version that is
+    # the base game's own single triangle loses no ground; it is not among the records said to lose ground (here none is).
+    def c1242_base_single_not_losing_ground():
+        top = stub_cell_bundle()
+        return re.search(r"\bin 0 of them ground\b", top) is not None, top[:400]
+
+    for name, fn in [("tenth-review/C1242-base-single-not-losing-ground", c1242_base_single_not_losing_ground)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
