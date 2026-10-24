@@ -9601,6 +9601,30 @@ def main():
         return (f"- **{title}:**" in sec and "Tested alternative setup" not in sec
                 and f"<li><strong>{title}:</strong>" in html), sec.strip()[:300]
 
+    # C1223 (ninth review, Sewers 27): an item counted from the separate evaluation links its rows: this index gives each
+    # such finding of the separate evaluation an entry (its check, pair, file and rows), and the item line links it.
+    def c1223_sibling_item_linked():
+        X_, Y_ = f"000X23:{MOD_A}", f"000Y23:{MOD_B}"
+        r_ = row("STATE-CONTACT@S1@Triggered", MOD_A, MOD_B, X_, label="Camp (ext)", other=Y_)
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B])]
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+        s_arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("plus-a", [BASE, MOD_A]),
+                  arm("plus-b", [BASE, MOD_B]), arm("dependency-only", [BASE])]
+        s_results = {(STATE, "baseline"): [r_], (STATE, "plus-a"): [], (STATE, "plus-b"): [],
+                     (STATE, "dependency-only"): [], (CONTACT, "baseline"): [], (CONTACT, "plus-a"): [],
+                     (CONTACT, "plus-b"): [], (CONTACT, "dependency-only"): []}
+        plan, md, html, index = compile_and_render(arms, results, [MOD_A], patches=[PATCH], want_index=True,
+                                                   missing=[(STATE, "without-patch", "failed"), (STATE, "baseline", "failed")],
+                                                   sibling=(s_arms, s_results, [MOD_A], {"plan_id": "sibl00000023"}))
+        it = next((ln for ln in md.splitlines() if "Measured in the separate evaluation" in ln), "")
+        anchors_ = re.findall(r"\(evidence-index\.md#([^)]+)\)", it)
+        has_ = [a_ for a_ in anchors_ if (f'id="{a_}"' in index or f"{{#{a_}}}" in index)]
+        sec_ = index[index.find(f'id="{has_[0]}"'):][:600] if has_ else ""
+        return bool(has_) and X_ in sec_ and Y_ in sec_, f"links {anchors_}; entry {sec_[:300]!r}; line {it[-200:]!r}"
+
+    for name, fn in [("ninth-review/C1223-sibling-item-linked", c1223_sibling_item_linked)]:
+        cell(name, fn)
+
     for name, fn in [("ninth-review/C1224-changes-entries-one-setup-unlabelled", c1224_changes_entries_one_setup_unlabelled)]:
         cell(name, fn)
 
