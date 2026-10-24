@@ -6533,10 +6533,19 @@ def build_prediction(ctx: dict) -> dict:
                          else words["validationSummaryNoNew"])
         # (eighth review, Snazzy 63 / 69) record fields the patch undoes, sets to another value or removes beside the
         # predicted clashes are said in the summary with their counts, never left behind "nothing new"
-        n_undo_ = len(undone) + int(spots.get("baseOverChange") or 0)
-        rec_fx_ = [bind(words[k_], {"count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1]})
+        # (tenth review, BPT S2) the fields the patch undoes, and apart from them the base game's value put back over
+        # another plugin's change, with how many of those are fields a predicted clash already counts
+        n_over_ = int(spots.get("baseOverChange") or 0) if words.get("validationSummaryBaseOver") else 0
+        n_undo_ = len(undone) + int(spots.get("baseOverChange") or 0) - n_over_
+        adm_f_ = {(str(e["formKey"]), e.get("field")) for e in record if e["admission"] == "admitted"}
+        n_over_seen_ = len({(str(e["formKey"]), e.get("field")) for e in (spot_units.get("baseOverChange") or {}).values()}
+                           & adm_f_)
+        rec_fx_ = [bind(words[k_], {"count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
+                                    "counted": bind(words.get("validationSummaryBaseOverCounted") or "",
+                                                    {"count": fmt_n(n_over_seen_)}) if n_over_seen_ else ""})
                    for k_, n_ in (("validationSummaryUndoes", n_undo_), ("validationSummarySets", len(replaced)),
-                                  ("validationSummaryRemoves", int(spots.get("patchRemoves") or 0)))
+                                  ("validationSummaryRemoves", int(spots.get("patchRemoves") or 0)),
+                                  ("validationSummaryBaseOver", n_over_))
                    if n_ and words.get(k_)]
         if rec_fx_ and words.get("validationSummaryRecordEffects"):
             sum_parts.insert(len(sum_parts) - 1, bind(words["validationSummaryRecordEffects"], {
