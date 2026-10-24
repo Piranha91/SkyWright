@@ -5559,7 +5559,9 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationUndone"], {
                 "patch": patch, "count": fmt_n(len(undone)), "noun": words["fieldNoun"][0 if len(undone) == 1 else 1],
                 "by": by_plugin(undone),
-                "off": bind(words.get("validationUndoneOff") or "", {"count": fmt_n(len(undone_off)), "patch": patch})
+                "off": bind(words.get("validationUndoneOff") or "", {"count": fmt_n(len(undone_off)),
+                                                                      "patch": and_list(list(dict.fromkeys(
+                                                                          str(rk_[3]) for rk_ in undone_off)))})
                 if undone_off else "",
                 "enables": enables_text(switched_on)}))
             undone_sentence = sentences[-1]
