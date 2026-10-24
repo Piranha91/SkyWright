@@ -3472,9 +3472,15 @@ def build_prediction(ctx: dict) -> dict:
                        and {e["A"].lower(), e["B"].lower()} == mods_l_}
             linked_ = [(a_, b_) for a_, b_ in row_objs_ if a_ in lost_o_ or b_ in lost_o_]
             if linked_:
+                # (tenth review, Snazzy S3) a by-object check counts its own objects in the headline; where some pairs
+                # count here only through the partner, the two bases are said apart
+                own_ = sum(1 for a_, _ in linked_ if a_ in lost_o_)
+                split_ = (bind(words["itemLinkedLostSplit"], {"own": fmt_n(own_), "partner": fmt_n(len(linked_) - own_)})
+                          if g["checkId"] in by_object and own_ < len(linked_) and words.get("itemLinkedLostSplit") else "")
                 detail.append(bind(words["itemLinkedLost"], {
                     "count": fmt_n(len(linked_)), "pairs": "pairs is" if len(linked_) == 1 else "pairs are",
-                    "examples": named(linked_[0][0] if linked_[0][0] in lost_o_ else linked_[0][1])}))
+                    "examples": named(linked_[0][0] if linked_[0][0] in lost_o_ else linked_[0][1])})
+                    + (" " + split_ if split_ else ""))
         n_touch_ = g.pop("_touchingPairs", 0)
         n_cop_ = g.pop("_coplanarPairs", 0)
         if n_cop_ and words.get("itemCoplanarPairs"):
