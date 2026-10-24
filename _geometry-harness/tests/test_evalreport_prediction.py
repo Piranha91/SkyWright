@@ -9142,6 +9142,34 @@ def main():
         return ("may be missing from this install" not in ok_ and "archives" in ok_
                 and "may be missing from this install" in bad_), f"{ok_[-250:]} || {bad_[-200:]}"
 
+    # C1199 (eighth review, Pilgrim 31): the load-order line applies the prediction's set-aside rules: a water height on
+    # an interior cell neither plugin's version of which has water is no change in game and is not counted (1 of 2).
+    def c1199_order_line_sets_aside_no_water():
+        C1, C2 = 0x00000E99, 0x00000E9A
+        fo_ = plugin_file_of(OTHER, [BASE], [("CELL", C1, [("DATA", struct.pack("<H", 0x0001))], False),
+                                             ("CELL", C2, [("DATA", struct.pack("<H", 0x0003))], False)], group="CELL")
+        fa_ = plugin_file_of(MOD_A, [BASE], [("CELL", C1, [("DATA", struct.pack("<H", 0x0001))], False),
+                                             ("CELL", C2, [("DATA", struct.pack("<H", 0x0003))], False)], group="CELL")
+        files_ = {OTHER: fo_, MOD_A: fa_}
+        shas_ = {n_: hashlib.sha256(Path(f_).read_bytes()).hexdigest() for n_, f_ in files_.items()}
+        arms = with_files([arm("baseline", [BASE, MOD_A, OTHER], kind="baseline")], files_)
+        p_rec = [lost_row(MOD_A, OTHER, f"000C99:{BASE}", "Lighting", "a", "o", "v")]
+        o_rows = [dict(lost_row(OTHER, MOD_A, f"{C1:06X}:{BASE}", "WaterHeight", "0", "-2147483600", "-2147483600"),
+                       _check=CELLATTR, _type="Cell"),
+                  dict(lost_row(OTHER, MOD_A, f"{C2:06X}:{BASE}", "WaterHeight", "0", "-2147483600", "-2147483600"),
+                       _check=CELLATTR, _type="Cell")]
+        pl_ = plugins(BASE, OTHER, MOD_A, shas=shas_)
+        setup = {"armId": "other-first", "planPath": "order/plan.json", "rowsPath": "order/rows.json",
+                 "plugins": pl_, "rows": o_rows}
+        plan, md, _ = compile_and_render(arms, {(CONTACT, "baseline"): []}, [MOD_A],
+                                         count_only={(CELLATTR, "baseline"): 1}, enrichment={(CELLATTR, "baseline"): p_rec},
+                                         order_setups=[setup])
+        lines = [x["text"] for x in (reader(plan).get("prediction") or {}).get("orderRiskLines") or []]
+        return (len(lines) == 1 and f"1 of {OTHER}'s record fields" in lines[0]), str(lines)[:400]
+
+    for name, fn in [("eighth-review/C1199-order-line-sets-aside-no-water", c1199_order_line_sets_aside_no_water)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1198-missing-asset-says-what-was-searched", c1198_missing_asset_says_what_was_searched)]:
         cell(name, fn)
 
