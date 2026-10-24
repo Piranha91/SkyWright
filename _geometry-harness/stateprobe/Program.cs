@@ -466,7 +466,7 @@ static void Merge(StateTally a, StateTally b)
     a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
     a.HostsLeaving += b.HostsLeaving; a.HostsArriving += b.HostsArriving; a.DepsArriving += b.DepsArriving; a.DepsLeaving += b.DepsLeaving; a.ReSupported += b.ReSupported; a.FloatingOnArrival += b.FloatingOnArrival; a.TouchingOnArrival += b.TouchingOnArrival; a.ContactUnmeasured += b.ContactUnmeasured;
     a.RouteAsked += b.RouteAsked; a.RouteUnjudged += b.RouteUnjudged; a.RouteNoLine += b.RouteNoLine; a.RouteClipped += b.RouteClipped; a.RouteNone += b.RouteNone; a.ElapsedMs += b.ElapsedMs;
-    a.OutsidePopulation += b.OutsidePopulation;
+    a.OutsidePopulation += b.OutsidePopulation; a.MergedContactRows += b.MergedContactRows;
 }
 double totalS = sw.Elapsed.TotalSeconds;
 phase.Mark("state-loop");
@@ -569,7 +569,7 @@ Console.WriteLine($"   contact verdicts: " + string.Join(", ", cls.Where(r => r.
 Console.WriteLine($"   route verdicts: " + string.Join(", ", cls.Where(r => r.Kind == StateRowKind.Route).GroupBy(r => $"{r.Route}{(r.Navcut ? " navcut" : "")}").OrderByDescending(g => g.Count()).Select(g => $"{g.Key} {g.Count():N0}"))
                 + $"; counted: {tally.RouteAsked:N0} asked, NoLine {tally.RouteNoLine:N0}, Clipped {tally.RouteClipped:N0}, None {tally.RouteNone:N0}");
 Console.WriteLine("   contact geometry: the CORE collision surface (no Havok radius) — contactprobe reads the radius for its gap by default since 2026-10-03; this probe does not yet (follow-up)");
-Console.WriteLine($"   contact counted: hosts leaving {tally.HostsLeaving:N0}, arriving {tally.HostsArriving:N0}; dependents arriving {tally.DepsArriving:N0} (touching {tally.TouchingOnArrival:N0}, floating {tally.FloatingOnArrival:N0}), re-supported {tally.ReSupported:N0}, unmeasured {tally.ContactUnmeasured:N0}");
+Console.WriteLine($"   contact counted: hosts leaving {tally.HostsLeaving:N0}, arriving {tally.HostsArriving:N0}; dependents arriving {tally.DepsArriving:N0} (touching {tally.TouchingOnArrival:N0}, floating {tally.FloatingOnArrival:N0}), re-supported {tally.ReSupported:N0}, unmeasured {tally.ContactUnmeasured:N0}; {tally.MergedContactRows:N0} rows read one pair a second way, merged");
 Console.WriteLine($"   by trigger kind of the switch: (see switchprobe's map; a state is evaluated whatever its trigger)");
 
 void PrintRow(StateRow r)
@@ -617,7 +617,7 @@ if (jsonPath is not null)
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, plugins = paths.Count,
         measurementPolicy = StateMeasurementPolicy,
         states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured,
-        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
+        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
         perState = perState.Select(p => new { state = p.Arm.Name, flips = p.Arm.Flips.Select(f => f.ToString()), p.Changes, p.Rows, p.Conditional, ms = p.Ms }),
         rows = rows.Select(r => new
         {

@@ -33,7 +33,8 @@ namespace HarnessShared;
 public enum StateRowKind { Overlap, Contact, Route }
 
 /// <summary>One row of the class. <paramref name="Member"/> is the reference the flip changed (arriving when
-/// <paramref name="Arrives"/>); <paramref name="Other"/> the reference on the other side (null for a route row).</summary>
+/// <paramref name="Arrives"/>); <paramref name="Other"/> the reference on the other side (null for a route row).
+/// <paramref name="MemberDepends"/>: the member is the dependent of the measurement (the dependent pass's Sunk row).</summary>
 public sealed record StateRow(
     string State, FormKey Switch, int SwitchOwner,
     StateRowKind Kind, StateVerdict Verdict, string Why,
@@ -46,7 +47,7 @@ public sealed record StateRow(
     ContactVerdict? ContactVerdict = null, ContactRelation Relation = ContactRelation.None,
     float Distance = float.NaN, float Penetration = float.NaN, float RawDistance = float.NaN, DependentMotion Motion = DependentMotion.Unknown,
     RouteCutVerdict? Route = null, bool Navcut = false,
-    PhysicalState Physical = PhysicalState.Holds, string PhysicalDetail = "");
+    PhysicalState Physical = PhysicalState.Holds, string PhysicalDetail = "", bool MemberDepends = false);
 
 /// <summary>What one evaluation walked and set aside, counted per rule 6.</summary>
 public sealed class StateTally
@@ -58,6 +59,8 @@ public sealed class StateTally
     public double ElapsedMs;
     /// <summary>Changed references a population scope did not process (window 2, task 1).</summary>
     public int OutsidePopulation;
+    /// <summary>Sunk contact rows folded into another row of the same state and pair (<see cref="StateEvaluator.Evaluate"/>).</summary>
+    public int MergedContactRows;
 }
 
 /// <summary>Opt-in phase timers for <see cref="StateEvaluator.Evaluate"/> (stateprobe --phase-timers): ticks of
@@ -355,7 +358,7 @@ public sealed class StateEvaluator
                     rows.Add(new StateRow(arm.Name, root.Key, root.Owner, StateRowKind.Contact, StateVerdict.StateConditional, $"Sunk: the arriving dependent sits {best.Contact.EffectivePenetration:0.#}u inside something enabled in the state",
                         key, true, placer, attacher, f.Base, best.Against, PlacerOf(best.Against), Contact.WinnerBase(best.Against), win.Cell, win.Space, interior, Pop(resp, ar), same, SameAuthor: resp == ar, MemberResponsible: resp, OtherResponsible: ar,
                         ContactVerdict: ContactVerdict.Sunk, Distance: best.Contact.FacingDistance, Penetration: best.Contact.EffectivePenetration, RawDistance: best.RawDistance, Motion: motion,
-                        Physical: PhysicalState.Holds, PhysicalDetail: $"{best.Contact.EffectivePenetration:0.#}u inside {best.Against}"));
+                        Physical: PhysicalState.Holds, PhysicalDetail: $"{best.Contact.EffectivePenetration:0.#}u inside {best.Against}", MemberDepends: true));
                 }
                 else if (best is not null && best.Contact.FacingDistance <= Contact.Epsilon) tally.TouchingOnArrival++;
                 else
@@ -385,7 +388,30 @@ public sealed class StateEvaluator
             if (tm is not null) Lap(ref tm.Other);
         }
         tally.ElapsedMs += sw.Elapsed.TotalMilliseconds;
-        return rows;
+        return OnePerPair(rows, tally);
     }
+
+    /// <summary>One row per pair: the host pass and the dependent pass can each write a Sunk row for the same two references in one
+    /// state, sometimes read in the two directions (each one's deepest vertex inside the other's solid). They are one clip in the
+    /// game, so they are one row. Each reading is a lower bound on the move that clears the clip, so the deeper is kept; on equal
+    /// depth (the same direction read twice) the dependent pass's row is kept. The kept row takes the pair's first row's place.</summary>
+    static List<StateRow> OnePerPair(List<StateRow> rows, StateTally tally)
+    {
+        var at = new Dictionary<(FormKey, FormKey), int>();
+        var kept = new List<StateRow>(rows.Count);
+        foreach (var r in rows)
+        {
+            if (r.Kind != StateRowKind.Contact || r.ContactVerdict != ContactVerdict.Sunk || r.Other is not { } o) { kept.Add(r); continue; }
+            var pair = PairKey(r.Member, o);
+            if (!at.TryGetValue(pair, out var i)) { at[pair] = kept.Count; kept.Add(r); continue; }
+            tally.MergedContactRows++;
+            if (Deeper(r, kept[i])) kept[i] = r;
+        }
+        return kept;
+    }
+
+    static (FormKey, FormKey) PairKey(FormKey a, FormKey b) => string.CompareOrdinal(a.ToString(), b.ToString()) <= 0 ? (a, b) : (b, a);
+
+    static bool Deeper(StateRow a, StateRow b) => a.Penetration != b.Penetration ? a.Penetration > b.Penetration : a.MemberDepends && !b.MemberDepends;
 
 }

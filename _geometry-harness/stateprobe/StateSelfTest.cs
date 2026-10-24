@@ -114,9 +114,11 @@ static class StateSelfTest
                 Of("StM1") == Want($"Contact StateConditional {F.C1}/{F.S1} ModSetOverVanilla"), Of("StM1"));
         t.Check("PD4-S-C2 StM2: C2 arrives Sunk on S2, Bethesda floor",
                 Of("StM2") == Want($"Contact StateConditional {F.C2}/{F.S2} BethesdaFloor"), Of("StM2"));
-        t.Check("PD4-S-C3 StM3: two rows, C3b on C3a and C3a enclosing C3b: same set, not same author",
-                byState["StM3"].Count == 2 && byState["StM3"].Select(r => r.Member).Distinct().Count() == 2 && byState["StM3"].All(r => r.SameSet && !r.SameAuthor && r.Verdict == StateVerdict.StateConditional
-                    && new[] { F.C3a, F.C3b }.Contains(r.Member) && r.Other is { } o && new[] { F.C3a, F.C3b }.Contains(o)), Of("StM3"));
+        // One row (2026-10-24): the host pass (C3a encloses C3b) and the dependent pass (C3b sits in C3a) read the same pair the same
+        // way, to the same depth; they are one clip, and the dependent pass's row is the one kept.
+        t.Check("PD4-S-C3 StM3: one row, C3b sunk in C3a (the dependent pass's): same set, not same author",
+                byState["StM3"].Count == 1 && byState["StM3"][0] is { SameSet: true, SameAuthor: false, Verdict: StateVerdict.StateConditional, MemberDepends: true, Member: var m3, Other: var o3 }
+                    && m3 == F.C3b && o3 == F.C3a, Of("StM3"));
         t.Check("PD4-S-C4 StM4: C4 arrives Sunk on S4, both StMod's: same author",
                 Of("StM4") == Want($"Contact StateConditional {F.C4}/{F.S4} ModOnMod same-author"), Of("StM4"));
         t.Check("PD4-S-C5 the stub's route rows: W1 and W3 arrive (StateConditional), W2 leaves (StateResolved)",
