@@ -5401,13 +5401,14 @@ def build_prediction(ctx: dict) -> dict:
         blind = [{"admission": k, "count": n, "why": bind(words["blindSpotWhy"][k], {"patch": patch, "pairs": spot_pairs(k),
                                                                                      "fixes": fixes_})}
                  for k, n in sorted(spots.items()) if k not in ("history", "patchRemoves", "baseOverChange")]
-        over_items_ = list(dict.fromkeys(
-            bind(words.get("validationBaseOverChangeItem") or "", {
-                "owner": over_[id(e)][0], "winner": over_[id(e)][1],
-                "carried": "" if str(over_[id(e)][0]).lower() == str(over_[id(e)][1]).lower()
-                else bind(words.get("validationBaseOverChangeCarried") or "", {"winner": over_[id(e)][1]}),
-                "field": field_word(e.get("field")), "record": str(e["formKey"])})
-            for e in (spot_units.get("baseOverChange") or {}).values()))
+        over_grp_ = collections.OrderedDict()           # (owner, carrier, field) -> records, said once per group
+        for e in (spot_units.get("baseOverChange") or {}).values():
+            over_grp_.setdefault((over_[id(e)][0], over_[id(e)][1], field_word(e.get("field"))), []).append(str(e["formKey"]))
+        over_items_ = [bind(words.get("validationBaseOverChangeItem") or "", {
+            "owner": o_, "winner": w_, "field": f_, "record": and_list(rs_),
+            "carried": "" if str(o_).lower() == str(w_).lower()
+            else bind(words.get("validationBaseOverChangeCarried") or "", {"winner": w_})})
+            for (o_, w_, f_), rs_ in over_grp_.items()]
         over_sentence = (bind(words["validationBaseOverChange"], {
             "patch": patch, "count": fmt_n(spots["baseOverChange"]),
             "noun": words["fieldNoun"][0 if spots["baseOverChange"] == 1 else 1], "items": "; ".join(over_items_)})
@@ -5635,10 +5636,10 @@ def build_prediction(ctx: dict) -> dict:
                 for m_ in dict.fromkeys((owner_(e, e["A"]), owner_(e, e["B"]))):
                     if str(m_).lower() not in pt_lower and edited_[id(e)] and not is_base_game(m_, words)                             and str(m_).lower() not in patch_lower:
                         inside_.setdefault(disp_.get(str(m_).lower(), m_), []).append(e)
-            inside_text_ = ("".join(" " + bind(words["validationPatchScopeInside"], {
-                "inside": m_, "count": by_unit(es_, True), "it": "they set" if len(patch_names) > 1 else "it sets",
-                "them": "them" if len(patch_names) > 1 else "it"})
-                for m_, es_ in inside_.items()) if words.get("validationPatchScopeInside") else "")
+            # (eighth review, page budget) every mod inside said in one sentence, each with its count
+            inside_text_ = (" " + bind(words["validationPatchScopeInside"], {
+                "inside": and_list([f"{m_} ({by_unit(es_, True)})" for m_, es_ in inside_.items()])})
+                if inside_ and words.get("validationPatchScopeInside") else "")
             # (seventh review round 2) a mod with remainders on both sides is said with the count of each, so one name
             # is never both outside and inside without saying which part
             def outside_part_(m_):
@@ -5698,21 +5699,34 @@ def build_prediction(ctx: dict) -> dict:
                 "patch": patch, "count": fmt_n(len(undone)), "noun": words["fieldNoun"][0 if len(undone) == 1 else 1],
                 "by": by_plugin(undone),
                 "off": bind(words.get("validationUndoneOff") or "", {"count": fmt_n(len(undone_off)),
-                                                                      "patch": and_list(list(dict.fromkeys(
-                                                                          str(rk_[3]) for rk_ in undone_off)))})
+                                                                      "patch": (lambda ps_: ps_[0] if len(ps_) == 1 else "a patch")(
+                                                                          list(dict.fromkeys(str(rk_[3]) for rk_ in undone_off)))})
                 if undone_off else "",
                 "enables": enables_text(switched_on)}))
             undone_sentence = sentences[-1]
         replaced_sentence = None
         if replaced and words.get("validationReplaced"):
-            sentences.append(bind(words["validationReplaced"], {
+            # (page budget, coordinator) with an undone line, said in its slot as a clause of its own
+            in_undone_ = bool(undone_sentence) and bool(words.get("validationReplacedClause"))
+            sentences.append(bind(words["validationReplacedClause" if in_undone_ else "validationReplaced"], {
                 "patch": patch, "count": fmt_n(len(replaced)), "noun": words["fieldNoun"][0 if len(replaced) == 1 else 1],
                 "by": by_plugin(replaced),
-                "whose": ", ".join(bind(words["validationReplacedOwn" if k_[0] == "own" else "validationReplacedOf"],
-                                        {"count": fmt_n(n_), "owner": k_[1]})
-                                   for k_, n_ in replaced_whose.most_common()),
+                # (page budget) the owning patches with their counts after one lead; other owners by name
+                "whose": "; ".join(x_ for x_ in (
+                    (words.get("validationReplacedOwnLead") or "") + ", ".join(
+                        bind(words["validationReplacedOwn"], {"count": fmt_n(n_), "owner": k_[1]})
+                        for k_, n_ in replaced_whose.most_common() if k_[0] == "own"),
+                    ", ".join(bind(words["validationReplacedOf"], {"count": fmt_n(n_), "owner": k_[1]})
+                              for k_, n_ in replaced_whose.most_common() if k_[0] != "own"))
+                    if x_ and x_ != (words.get("validationReplacedOwnLead") or "")),
                 "enables": enables_text(switched_on_r)}))
             replaced_sentence = sentences[-1]
+            if in_undone_:
+                tail_ = words.get("validationUndoneTail") or ""
+                i_ = sentences.index(undone_sentence)
+                head_ = undone_sentence[:-len(tail_)] if tail_ and undone_sentence.endswith(tail_) else undone_sentence.rstrip(".")
+                sentences[i_] = head_ + sentences.pop() + tail_
+                undone_sentence = replaced_sentence = sentences[i_]
         if undone_unread and words.get("validationUndoneUnread"):
             sentences.append(bind(words["validationUndoneUnread"], {
                 "patch": patch, "count": fmt_n(len(undone_unread)),
@@ -5737,7 +5751,17 @@ def build_prediction(ctx: dict) -> dict:
         if removes_sentence:
             sentences.append(removes_sentence)
         if over_sentence:
-            sentences.append(over_sentence)
+            # (page budget) said in the undone line where there is one, as its own clause
+            if undone_sentence in sentences and words.get("validationBaseOverChangeClause"):
+                i_ = sentences.index(undone_sentence)
+                tail_ = words.get("validationUndoneTail") or ""
+                head_ = undone_sentence[:-len(tail_)] if tail_ and undone_sentence.endswith(tail_) else undone_sentence.rstrip(".")
+                sentences[i_] = head_ + bind(words["validationBaseOverChangeClause"], {
+                    "count": fmt_n(spots["baseOverChange"]), "noun": words["fieldNoun"][0 if spots["baseOverChange"] == 1 else 1],
+                    "items": "; ".join(over_items_)}) + tail_
+                undone_sentence = sentences[i_]
+            else:
+                sentences.append(over_sentence)
         if spots.get("history"):
             sentences.append(bind(words["validationHistoryHolds"], {"count": fmt_n(history_holds), "patch": patch,
                                                                     "total": fmt_n(spots.get("history", 0))}))
@@ -8771,7 +8795,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                   and row_key(f, r_) not in noise_} - fields_
                     n_aside = len(all_ - fields_ - carried_f_)
                     n_fields = len(fields_) if all_ else sum(int(f.get("rowsTotal") or 0) for f in choices)
-                    n_rows_ = sum(len(kept_rows(f)) for f in choices)
+                    n_rows_ = None                 # (eighth review, Winterhold 159) the rows its links hold, set below
                     # (eighth review, Clockwork F-215 / F-167) a field an earlier record check's line counted is said there
                     seen_ = seen_choice_.setdefault(part.get("armId"), {})
                     again_ = collections.Counter(seen_[x] for x in fields_ if x in seen_)
@@ -8779,6 +8803,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                         seen_.setdefault(x, ((pr.get("reader") or {}).get("checkTitles") or {}).get(str(choices[0].get("checkId")), str(choices[0].get("title") or "")))
                     if n_aside or carried_f_:
                         choices = [f for f in choices if kept_rows(f)] or choices[:1]
+                    n_rows_ = sum(len([r_ for r_ in f.get("allRows") or [] if isinstance(r_, dict)]) for f in choices)
                     # (third review, Clockwork S3) every pair counted is linked, so the count recomputes from the rows
                     ids_ = [f["id"] for f in choices] or [f["id"] for f in part["groups"] if f.get("readerPatchChoice")][:1]
                     compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
@@ -8788,17 +8813,19 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                         "pairs": fmt_n(len(choices)),
                                         "fieldNoun": "field" if n_fields == 1 else "fields",
                                         "pairNoun": "pair" if len(choices) == 1 else "pairs",
-                                        "aside": (bind(conc.get("patchChoicesRows") or "", {"rows": fmt_n(n_rows_)})
-                                                  if n_fields and n_rows_ > n_fields else "")
-                                        + (bind(conc.get("patchChoicesAside") or " ({count} more not counted)", {
-                                            "count": fmt_n(n_aside), "fieldNoun": "field" if n_aside == 1 else "fields"})
-                                           if n_aside else "")
-                                        + (bind(conc.get("patchChoicesCarried") or "", {
-                                            "count": fmt_n(len(carried_f_)),
-                                            "fieldNoun": "field" if len(carried_f_) == 1 else "fields"})
-                                           if carried_f_ else "")
-                                        + "".join(bind(conc.get("patchChoicesAgain") or "", {
-                                            "count": fmt_n(n_), "title": t_}) for t_, n_ in again_.items())}),
+                                        # (eighth review, page budget) the line's notes in one parenthesis
+                                        "aside": (lambda ps_: f" ({'; '.join(ps_)})" if ps_ else "")([x_ for x_ in [
+                                            bind(conc.get("patchChoicesRows") or "", {"rows": fmt_n(n_rows_)})
+                                            if n_fields and n_rows_ > n_fields else "",
+                                            bind(conc.get("patchChoicesAside") or "{count} more not counted", {
+                                                "count": fmt_n(n_aside), "fieldNoun": "field" if n_aside == 1 else "fields"})
+                                            if n_aside else "",
+                                            bind(conc.get("patchChoicesCarried") or "", {
+                                                "count": fmt_n(len(carried_f_)),
+                                                "fieldNoun": "field" if len(carried_f_) == 1 else "fields"})
+                                            if carried_f_ else "",
+                                            *[bind(conc.get("patchChoicesAgain") or "", {"count": fmt_n(n_), "title": t_})
+                                              for t_, n_ in again_.items()]] if x_])}),
                                     "ids": ids_})
                 relevant = [f for f in rest if f.get("readerRelevant")]
                 if len(relevant) > compact_over:

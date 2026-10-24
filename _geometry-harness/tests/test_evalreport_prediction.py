@@ -8646,7 +8646,7 @@ def main():
         md_ = earlier_fix_bundle(True, base_value=True, whole=True)
         # (eighth review, BPT 78) putting the base game's value back over Later.esp's own change undoes that change: said
         # in the undone family, never as an earlier clash the patch fixes
-        un_ = next((x for x in md_.splitlines() if x.startswith("- Undone by") and "already so without" in x), "")
+        un_ = next((x for x in md_.splitlines() if x.startswith("- Undone by") and "as without the evaluated mods" in x), "")
         return ("the base game's change" not in md_ and "Later.esp's change" in un_
                 and "also fix" not in md_), un_[:500]
 
@@ -8723,10 +8723,12 @@ def main():
                                       (PATCH, {"Primitive.Bounds": "4,4,4"})])]
         plan, md, _ = core_bundle(p_rows, w_rows, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]},
                                   targets=(MOD_A, MOD_B))
-        un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
-        own_ln = next((x for x in md.splitlines() if x.startswith("- ") and "own value" in x and R1 in x), "")
+        # (page budget) the set-to-another-value part is a clause of the undone line, after its own marker
+        line_ = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
+        un, _, own_ln = line_.partition("; set to another value")
+        own_ln = own_ln + line_[-120:] if own_ln else ""
         return (": 1 record field" in un and MOD_B in un and MOD_A not in un and "put back" in un
-                and MOD_A in own_ln and "(evidence-index.md#F-" in own_ln and f"{PATCH}'s own value on 1" in own_ln), f"undone {un[:300]!r}; own {own_ln[:300]!r}"
+                and MOD_A in own_ln and "(evidence-index.md#F-" in own_ln and f"each patch's own value: {PATCH} 1" in own_ln), f"undone {un[:300]!r}; own {own_ln[:300]!r}"
 
     # C1181 (eighth review, BPT 77, 0EB5B2): a value the patch puts back on an object its own version sets off for good
     # (enabled opposite to the player) has no effect in game while the object is off: the undone line says so.
@@ -8749,7 +8751,7 @@ def main():
     # who carries it, never as an earlier clash the patch also fixes.
     def c1180_base_put_back_over_carried_change():
         md_ = earlier_fix_bundle(True, base_value=True, whole=True, later_carries=True)
-        un_ = next((x for x in md_.splitlines() if x.startswith("- Undone by") and "already so without" in x), "")
+        un_ = next((x for x in md_.splitlines() if x.startswith("- Undone by") and "as without the evaluated mods" in x), "")
         return ("Walls.esp's change, which Later.esp carries" in un_ and "also fix" not in md_
                 and "Whether that is intended is not recorded" in un_), un_[:500] or md_[-1500:]
 
@@ -8802,7 +8804,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, w_rows, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]},
                                   targets=(MOD_A, MOD_B))
         sm = next((x for x in md.splitlines() if x.startswith("In short, with ")), "")
-        return ("undoes 1 record field" in sm and "sets 1 record field" in sm
+        return ("undoes 1 record field" in sm and "sets 1 to another value" in sm   # wording: page budget
                 and "nothing new the checks can see" not in sm), sm[:500]
 
     # C1183 (eighth review, Missives 30): with the patches the winning version is still the mod's own, which holds none
@@ -8889,15 +8891,15 @@ def main():
     def c1190_patch_wins_line_carried_and_once():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
         ls = patch_wins_lines(md)
-        return (len(ls) == 2 and any(re.search(r"\b1 record field\b", x) and "only carries" in x for x in ls)
-                and any("also counted" in x for x in ls)), " || ".join(ls)[:700]
+        return (len(ls) == 2 and any(re.search(r"\b1 record field\b", x) and "only carried" in x for x in ls)  # wording: page budget
+                and any("1 also counted above" in x for x in ls)), " || ".join(ls)[:700]   # wording: page budget
 
     # C1189 (eighth review, Winterhold 154 / 159): the line gives its rows beside its fields when they differ (a field
     # two plugins lose to the patch is one field, two rows), so the count matches what its links hold.
     def c1189_patch_wins_line_gives_rows():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
         ls = patch_wins_lines(md)
-        return any("2 plugin-pair rows" in x for x in ls), " || ".join(ls)[:700]
+        return any("2 rows linked" in x for x in ls), " || ".join(ls)[:700]   # wording: page budget
 
     # C1188 (eighth review, Winterhold 88 / 145): the detail's note of pairs still crossing where a patch places one says,
     # with two evaluated mods, how many are counted at the top and how many were already there with one mod alone, so it
