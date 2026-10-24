@@ -4475,6 +4475,14 @@ def build_prediction(ctx: dict) -> dict:
                     if identity(str(r_.get("_check")), "LOST-EDIT", a_, b_, {"formKey": n_.get("FormKey"),
                                                                            "field": r_.get("Field")}) in p_lost:
                         continue               # the measured order loses it too
+                    # (eighth review, Pilgrim 31) the prediction's no-water rule: a water field on an interior cell
+                    # neither plugin's version of which has water, read from both plugin files, is no change in game
+                    wn_ = words.get("waterNeedsFlag") or {}
+                    if str(r_.get("_type")) == wn_.get("recordType") and str(r_.get("Field")) in (wn_.get("fields") or []):
+                        fl_ = [plugin_record(pl_, "cell", str(n_.get("FormKey"))) for pl_ in (a_, b_)]
+                        if all(f_ and f_.get("value") is not None and wn_.get("interiorFlag") in (f_.get("flags") or [])
+                               and wn_.get("flag") not in (f_.get("flags") or []) for f_ in fl_):
+                            continue
                     g_ = per_pair.setdefault((a_, b_), {"n": 0, "records": {}, "fields": collections.Counter(),
                                                         "fieldTypes": collections.defaultdict(collections.Counter)})
                     g_["n"] += 1
