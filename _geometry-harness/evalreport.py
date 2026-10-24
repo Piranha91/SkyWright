@@ -5308,15 +5308,21 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationKept"], {"patch": patch, "count": n_kept_, "by": by_}))
         if placed:
             # (seventh review, Clockwork S3) where the setup with the patch measured each again, what it found there
+            # (seventh review round 3, Missives 73) each pair's figures before and after come from that same pair's own
+            # rows: its row in the setup without the patch and its re-measure in the setup with it
             tri_ = []
             for e in placed:
                 rm_ = (remeasure_with_patch(e["checkId"]) or {}).get(
                     (e["kind"], e["A"], e["B"], e["formKey"], (e.get("other") or [None])[0]))
                 m_ = re.search(r"(\d+) triangle pairs", rm_[1]) if rm_ and rm_[0] == "Holds" else None
-                tri_.append(int(m_.group(1)) if m_ else None)
+                b_ = re.search(r"(\d+) triangle pairs", str(((p_rows.get(keyof(e)) or {}).get("row") or {}).get(
+                    "physicalDetail") or ""))
+                tri_.append((int(b_.group(1)), int(m_.group(1))) if m_ and b_ else None)
             sentences.append(bind(words["validationPlaced"], {"patch": patch, "count": by_unit(placed)})
                              + (" " + bind(words["validationPlacedMeasured"], {
-                                 "patch": patch, "low": fmt_n(min(tri_)), "high": fmt_n(max(tri_))})
+                                 "patch": patch, "before": fmt_n(sum(x_[0] for x_ in tri_)),
+                                 "after": fmt_n(sum(x_[1] for x_ in tri_)),
+                                 "each": words.get("validationPlacedEach") or "" if len(tri_) > 1 else ""})
                                 if tri_ and None not in tri_ and words.get("validationPlacedMeasured") else ""))
         if stands:
             sentences.append(bind(words["validationStands"], {"patch": patch, "count": by_unit(stands)}))

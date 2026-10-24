@@ -4788,10 +4788,13 @@ def main():
     # C934 (Clockwork review S1): an overlap pair still crossing with the patch, which the setup with the patch does not
     # list between two mods, where the patch places one of the objects (the record chain: the patch's version of X loads
     # last and moves it), is the patch's placement: not "left", not in the still-there line, said apart.
-    def placed_overlap_bundle(patch_moves=True, listed=False, details=None):
+    def placed_overlap_bundle(patch_moves=True, listed=False, details=None, before=None):
+        """before: each pair's PhysicalDetail in the setup without the patch (its own row)."""
         X = f"000X34:{MOD_A}"
         ys = [f"000Y3{i}:{MOD_B}" for i in (1, 2)]
         p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        for i_, r_ in enumerate(p_rows if before else []):
+            r_["Necessary"][0]["PhysicalDetail"] = before[i_]
         preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds",
                   **({"Detail": details[i_]} if details else {})} for i_, y in enumerate(ys)]
         other_ = f"00C93A:{BASE}"
@@ -8378,10 +8381,20 @@ def main():
     # C1156 (Clockwork S3): the pairs still crossing where a patch places one of the objects were measured again in the
     # setup with the patch: the line says so, with the triangle pairs the re-measure found.
     def c1156_patch_placed_says_remeasure():
+        # (round 3, Missives 73) each pair's before and after from its own rows, summed: 40 + 3 -> 38 + 12
         plan, md, X = placed_overlap_bundle(details=["actual render surfaces: crossing; containment unassessed; 38 triangle pairs [mm]",
-                                                     "actual render surfaces: crossing; containment unassessed; 12 triangle pairs [mm]"])
+                                                     "actual render surfaces: crossing; containment unassessed; 12 triangle pairs [mm]"],
+                                            before=["crossing; 40 triangle pairs [mm]", "crossing; 3 triangle pairs [mm]"])
         ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
-        return ("Re-measured there with" in ln and "12 to 38 triangle pairs" in ln), ln[:400]
+        return ("Re-measured there with" in ln and "43 triangle pairs without the patch and 50 with it" in ln), ln[:400]
+
+    # C1170 (round 3, Missives 73): one pair, 21 triangle pairs in its own row without the patch and 1 in its re-measure
+    # with it; its partner's other rows (another pair of the same object, 1) never give the before figure.
+    def c1170_before_after_from_the_pair_own_rows():
+        plan, md, X = placed_overlap_bundle(details=["crossing; 1 triangle pairs [mm]", "crossing; 1 triangle pairs [mm]"],
+                                            before=["crossing; 21 triangle pairs [mm]", "crossing; 1 triangle pairs [mm]"])
+        ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
+        return ("22 triangle pairs without the patch and 2 with it" in ln and "1 to 1" not in ln), ln[:400]
 
     # C1157 (Clockwork S4): the patch lists OtherMod.esp as a master, and a clash with it is still there with the patch,
     # beside one with Neighbour.esp, which it does not list: the scope line says the OtherMod one is inside what the
@@ -8418,6 +8431,7 @@ def main():
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
                      ("seventh-review/C1157-scope-line-says-inside-left", c1157_scope_line_says_inside_left),
                      ("seventh-review/C1156-patch-placed-says-remeasure", c1156_patch_placed_says_remeasure),
+                     ("round3/C1170-before-after-from-the-pair-own-rows", c1170_before_after_from_the_pair_own_rows),
                      ("seventh-review/C1154-marker-model-has-no-body", c1154_marker_model_has_no_body),
                      ("seventh-review/C1153-null-says-navmesh-judged-elsewhere", c1153_null_says_navmesh_judged_elsewhere),
                      ("seventh-review/C1152-shared-objects-counted-once-in-comparison",
