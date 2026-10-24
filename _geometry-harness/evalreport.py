@@ -850,7 +850,8 @@ def missing_assets(b: "Bundle", check_id: str, arm_id: str) -> list[dict] | None
                 absent += [str(x.get("path")) for x in doc.get("results") or []
                            if isinstance(x, dict) and x.get("exists") is False and x.get("path")]
                 continue
-            for rec in doc.get("matches") or []:
+            # (ninth review) a query answers in "matches", a walk in "records": the same record entries
+            for rec in (doc.get("matches") or []) + (doc.get("records") or []):
                 for fl in (rec.get("fields") or []) if isinstance(rec, dict) else []:
                     if isinstance(fl, dict) and fl.get("path") == "Model.File" and fl.get("value"):
                         v = str(fl["value"]).replace("\\", "/").lstrip("/")
