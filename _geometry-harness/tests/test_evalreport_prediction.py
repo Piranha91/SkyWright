@@ -319,6 +319,8 @@ def compile_and_render(arms, results, targets, want_index=False, sibling=None, s
         plan = R.compile_plan(bdir, {"bundle": {"complete": True}}, settings, pr, str(bdir), **extra)
         view = R.effective_view(plan, settings["rowsPerGroup"], settings["figuresPerFinding"], pr, "normal")
         out = R.render_all(plan, view, Path(td) / "out", "")
+    if want_index == "all":
+        return plan, out                      # (tenth review) every rendered file, for the anchor test
     if want_index:
         return plan, out["report.md"], out["report.html"], out["evidence-index.md"]
     return plan, out["report.md"], out["report.html"]
@@ -10057,6 +10059,55 @@ def main():
 
     for name, fn in [("tenth-review/C1239-base-single-triangle-not-a-removal", c1239_base_single_triangle_not_a_removal),
                      ("tenth-review/C1239b-own-navmesh-beside-winner-said", c1239b_own_navmesh_beside_winner_said)]:
+        cell(name, fn)
+
+    # C1240 (Gate C check-in: anchors): every evidence-index anchor the report links, in both its Markdown and its HTML,
+    # is written by the index in the same format. Run on the door-links and re-measure fixtures (C1234, C1235), whose
+    # HTML anchors were once written inside the sibling block and so never printed.
+    def report_anchors_resolve(out_):
+        bad_ = []
+        for rep_, idx_, pat_, idpat_ in (("report.md", "evidence-index.md", r"\(evidence-index\.md#([^)\s]+)\)", '<a id="{}"></a>'),
+                                         ("report.html", "evidence-index.html", r'href="evidence-index\.html#([^"]+)"', 'id="{}"')):
+            for a_ in set(re.findall(pat_, str(out_.get(rep_) or ""))):
+                if idpat_.format(a_) not in str(out_.get(idx_) or ""):
+                    bad_.append(f"{rep_} -> {idx_}#{a_}")
+        return bad_
+
+    def c1240_linked_anchors_written():
+        bad_ = []
+        N1 = f"0C3907:{BASE}"
+        r_ = lost_row(MOD_B, MOD_A, N1, "Data", ["Data.Max=1,2,3"], PH, ["Data.Max=0,0,0"])
+        r_["Summary"] = f"NavigationMesh {N1}: Data - {MOD_B}'s value lost to {MOD_A}'s"
+        arms_ = with_files([arm("baseline", [BASE, OTHER, MOD_B, MOD_A, PATCH], kind="baseline"),
+                            arm("without-patch", [BASE, OTHER, MOD_B, MOD_A])], door_files())
+        enr = {(RECORDS, "without-patch"): [r_], (RECORDS, "baseline"): []}
+        results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): [],
+                   (NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): []}
+        plan, out = compile_and_render(arms_, results, [MOD_A], patches=[PATCH], want_index="all",
+                                       count_only={k: max(1, len(v)) for k, v in enr.items()}, enrichment=enr)
+        door_ = "door-links-1" in str(out.get("report.html") or "")
+        bad_ += report_anchors_resolve(out)
+        X = f"000X34:{MOD_A}"
+        ys = [f"000Y3{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        for i_, r2_ in enumerate(p_rows):
+            r2_["Necessary"][0]["PhysicalDetail"] = ["crossing; 40 triangle pairs [mm]", "crossing; 3 triangle pairs [mm]"][i_]
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds",
+                  "Detail": f"crossing; {(38, 12)[i_]} triangle pairs [mm]"} for i_, y in enumerate(ys)]
+        other_ = f"00C93A:{BASE}"
+        enr2 = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")]}
+        tr = {(RECORDS, "with-patch"): tree_transcript([
+            (X, "PlacedObject", [(MOD_A, {"Placement.Position": "1,1,1"}), (PATCH, {"Placement.Position": "9,9,9"})]),
+            (other_, "PlacedObject", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (PATCH, {"Owner": "p"})])])}
+        plan, out = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): []},
+                                       [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                       enrichment=enr2, count_only={k: max(1, len(v)) for k, v in enr2.items()},
+                                       transcripts=tr, want_index="all")
+        placed_ = "patch-placed-pairs" in str(out.get("report.html") or "")
+        bad_ += report_anchors_resolve(out)
+        return door_ and placed_ and not bad_, f"door link {door_}, placed link {placed_}; unresolved {bad_}"
+
+    for name, fn in [("tenth-review/C1240-linked-anchors-written", c1240_linked_anchors_written)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
