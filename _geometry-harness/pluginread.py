@@ -15,6 +15,8 @@ Two reads, each of named records only:
 * door triangles (sixth review), in `navmesh_links`' answer as "doors": after the edge links, a count (uint32) and per
   door triangle the triangle before the door (int16), a value not read (uint32) and the door's FormID; and a door's
   teleport destination (XTEL), in `placements_full`' answer as "teleport".
+* a door's navmesh door link (tenth review), in `placements_full`' answer as "doorLink": XNDP, the navmesh's FormID
+  (uint32) and its triangle at the door (int16), then two bytes not read.
 
 A FormID is read as this plugin writes it: the high byte is the index of the record's origin file in the plugin's master
 list, or the master count for the plugin's own records; every answer names records as "XXXXXX:Origin.esm".
@@ -222,6 +224,10 @@ def _placement_full(subs, fk, global_):
     # (sixth review) a door's teleport (XTEL): the destination door it leads to, None where it has none
     xt = subs.get("XTEL")
     out["teleport"] = global_(struct.unpack_from("<I", xt, 0)[0]) if xt and len(xt) >= 4 else None
+    # (tenth review) a door's navmesh door link (XNDP): the navmesh and its triangle at the door, None where it has none
+    xn = subs.get("XNDP")
+    out["doorLink"] = ([global_(struct.unpack_from("<I", xn, 0)[0]), struct.unpack_from("<h", xn, 4)[0]]
+                       if xn and len(xn) >= 6 else None)
     return out
 
 

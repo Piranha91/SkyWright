@@ -1189,8 +1189,8 @@ def field_name(row: dict) -> str:
 
 
 # lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
-NOISE_ADMISSIONS = ("navmeshCheck", "noWater", "winnerListDrop", "orderOnly", "carriedList", "listKept", "unusedBits", "sameAsRead",
-                    "winnerOwnChange")
+NOISE_ADMISSIONS = ("navmeshCheck", "doorLinkNavmesh", "noWater", "winnerListDrop", "orderOnly", "carriedList", "listKept",
+                    "unusedBits", "sameAsRead", "winnerOwnChange")
 FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
                     / "references" / "record-field-scope.json")
 _field_masks = []
@@ -2346,6 +2346,22 @@ def build_prediction(ctx: dict) -> dict:
                 return None
         return tuple(got_) if got_[0] and got_[1] and set(got_[0]) == set(got_[1]) else None
 
+    def door_link_off_winner(rk, arm_id):
+        """(tenth review, Snazzy S1) The losing plugin's door link (its version's XNDP: navmesh, triangle) is not listed for
+        the door by the version of that navmesh that loads last in the setup (its door triangles, read from the plugin
+        files). False where it is listed, and where any file needed is not read (nothing decided)."""
+        link_ = (plugin_record(rk[2], "placementFull", rk[4]) or {}).get("doorLink")
+        if not link_:
+            return False
+        for pl_ in reversed(all_orders.get(arm_id) or []):
+            nav_ = plugin_record(pl_, "navmesh", link_[0])
+            if nav_ is None:
+                return False                   # a file not read: nothing decided
+            if nav_:
+                return [str(rk[4]).lower(), int(link_[1])] not in [[str(d_).lower(), int(t_)]
+                                                                     for d_, t_ in nav_.get("doors") or []]
+        return False
+
     def lost_edit_noise(rk, rows=None, arm=None):
         """A lost-edit row whose values show no change the game sees, or whose subject another check judges: lists
         holding the same items in another order (lists are compared as sets of items, the record lane's rule; P108), a
@@ -2360,6 +2376,14 @@ def build_prediction(ctx: dict) -> dict:
             if (rtype == j_.get("recordType") and top == j_.get("field")
                     and (j_.get("check"), arm or p_of(j_.get("check"))) in measured):
                 return "navmeshCheck"
+        # (tenth review, Snazzy S1) a door's navmesh door link names a navmesh and its triangle at the door; it is one
+        # link only with the version of that navmesh that wins. A losing value that version does not list for the door
+        # belongs with a navmesh version that does not win: no clash to forward. Read from the plugin files; a file not
+        # read decides nothing
+        dl_ = words.get("doorLinkNeedsNavmesh") or {}
+        if rtype == dl_.get("recordType") and top in (dl_.get("fields") or []) and door_link_off_winner(
+                rk, arm or p_of(rk[0])):
+            return "doorLinkNavmesh"
         # (sixth review, Snazzy S1; gate A condition R3) a water field on an interior cell neither side of which has
         # water (its HasWater flag, read from both plugin files): no change in game. Exterior cells are not judged so
         wn_ = words.get("waterNeedsFlag") or {}
@@ -4752,7 +4776,10 @@ def build_prediction(ctx: dict) -> dict:
                                                         if (k_ == "navmeshCheck" and door_lines_read
                                                             and words.get("setAsideNoiseNavmeshDoorsRead"))
                                                         else words["setAsideNoise"][k_], {
-                                       "count": fmt_n(aside_n(k_)[0]), "noun": aside_noun(k_)})
+                                       "count": fmt_n(aside_n(k_)[0]), "noun": aside_noun(k_),
+                                       # (tenth review) an example where a sentence names one
+                                       "examples": ", ".join(sorted({str(e["formKey"]) for e in record
+                                                                     if e["admission"] == k_})[:2])})
                                        for k_ in NOISE_ADMISSIONS if aside[k_] and (words.get("setAsideNoise") or {}).get(k_))
                                    if sum(aside.values()) else None),
                   "noneFoundBasis": None if items else bind(words["noneFoundBasis"], {
