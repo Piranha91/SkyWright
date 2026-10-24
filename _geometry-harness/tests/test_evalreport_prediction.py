@@ -9008,6 +9008,45 @@ def main():
         return ("000H87" in ig and "000H88" not in ig and "1 of them" in ig
                 and "floor or wall it was fixed to" not in ig), ig[:400]
 
+    # C1192 (eighth review, Missives persistent cells): a place that is a worldspace's persistent cell names its
+    # worldspace (the world-children group the cell is filed in, read from the cell's own plugin file, by its editor
+    # ID), beside the grid cell of the object's position.
+    def c1192_persistent_cell_names_its_world():
+        W_, C_, R_ = 0x000E92, 0x000E93, 0x000E94
+
+        def sub(sig, data):
+            return sig.encode() + struct.pack("<H", len(data)) + data
+
+        def rec(typ, fid, subs):
+            data = b"".join(sub(s_, d_) for s_, d_ in subs)
+            return typ.encode() + struct.pack("<IIIIHH", len(data), 0, fid, 0, 44, 0) + data
+
+        def grup(label, gtype, body):
+            lab = label if isinstance(label, bytes) else struct.pack("<I", label)
+            return b"GRUP" + struct.pack("<I", 24 + len(body)) + lab + struct.pack("<IIHH", gtype, 0, 0, 0) + body
+        refr = rec("REFR", R_, [("NAME", struct.pack("<I", 0x000E95)), ("DATA", struct.pack("<6f", 8200.0, 4100.0, 0, 0, 0, 0))])
+        cell = rec("CELL", C_, [("DATA", struct.pack("<H", 0))])
+        body = rec("WRLD", W_, [("EDID", b"TestWorld\x00")]) + grup(W_, 1, cell + grup(C_, 6, grup(C_, 8, refr)))
+        hdr = sub("HEDR", struct.pack("<fII", 1.7, 3, 0x800))
+        data = b"TES4" + struct.pack("<IIIIHH", len(hdr), 0, 0, 0, 44, 0) + hdr + grup(b"WRLD", 0, body)
+        f_ = Path(tempfile.mkdtemp(prefix="r8-")) / BASE
+        f_.write_bytes(data)
+        ref_, cell_ = f"{R_:06X}:{BASE}", f"{C_:06X}:{BASE}"
+        arms = with_files([arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                           arm("without-patch", [BASE, MOD_A, MOD_B])], {BASE: f_})
+        rows_ = [row("OVERLAP", MOD_B, MOD_A, ref_, label=f"{cell_} (ext)", other=f"000E96:{MOD_B}")]
+        res = {(OVERLAP, "without-patch"): rows_, (OVERLAP, "baseline"): []}
+        names_ = {"refs": {ref_: {"base": f"000E95:{BASE}", "carriedBy": [BASE]},
+                           f"000E96:{MOD_B}": {"base": f"000E97:{MOD_B}", "carriedBy": [MOD_B]}},
+                  "bases": {f"000E95:{BASE}": {"type": "Static", "editorId": "Rock", "model": "Landscape\\Rock.nif"},
+                            f"000E97:{MOD_B}": {"type": "Static", "editorId": "Crate", "model": "Clutter\\Crate.nif"}}}
+        plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH], names=names_)
+        ln = next((x for x in md.splitlines() if x.startswith("- **") and cell_ in x), "")
+        return (f"{cell_} (ext) in TestWorld, grid cell 2, 1" in ln), ln[:500] or md[:800]
+
+    for name, fn in [("eighth-review/C1192-persistent-cell-names-its-world", c1192_persistent_cell_names_its_world)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1187-fixture-host-kind-from-model", c1187_fixture_host_kind_from_model)]:
         cell(name, fn)
 
