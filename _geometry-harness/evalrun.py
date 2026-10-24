@@ -4770,8 +4770,19 @@ def _cmd_import_results(a, runlog: Run) -> int:
             else:
                 unjudgeable += sum(reasons.values())
         if not errors and judged <= 0:
-            errors.append(f"extraction-failed: imported evidence judged {judged} with "
-                          f"{unjudgeable} unjudgeable")
+            # Nothing the plan holds shows any mcp-only check's population empty on an arm: every such import is bound
+            # to the arm's population, and no registry row narrows it to the targets. So 0 stays a refusal everywhere;
+            # on an arm without the targets the sentence says why that does not change it.
+            targets = [str(t.get("name")) for t in plan.get("targets") or [] if isinstance(t, dict) and t.get("name")]
+            loads = arm_requested_plugins(arm)
+            note = ""
+            if targets and not any(t.lower() in loads for t in targets):
+                note = (f" (this arm loads none of the plan's target plugins, {', '.join(repr(t) for t in targets)}, but "
+                        f"this import is bound to the population {(arm.get('requested') or {}).get('population')!r}, "
+                        "which that does not empty, so 0 is not shown to be the answer)")
+            errors.append(f"extraction-failed: imported evidence judged {judged} with {unjudgeable} unjudgeable, which "
+                          f"cannot be told from a capture that read nothing{note}; check that the capture read this "
+                          "arm's records and import it again")
     roles = [str(x.get("role")) for x in rows if isinstance(x, dict)] if isinstance(rows, list) else []
     if not isinstance(rows, list) or len(rows) not in (2, 3):
         errors.append("output-missing: outputs must include the raw MCP request and response files, and may add rows")
