@@ -8784,6 +8784,28 @@ def main():
         un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
         return (re.search(r"1 [^;]*sets? off for good", un) is not None), un[:400]
 
+    # C1182 (eighth review, Snazzy 63 / 69): the summary of what the patch does never says "nothing new" alone beside
+    # record fields the patch undoes and sets to its own value: it says those counts, pointing to their lines.
+    def c1182_summary_says_record_effects():
+        R0, R1, R2 = f"00C082:{BASE}", f"00C182:{BASE}", f"00C282:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, R0, "LocationReference", "a0", "b0", "v0")]
+        w_rows = [lost_row(MOD_A, PATCH, R1, "Primitive", ["Primitive.Bounds=2,2,2"], ["Primitive.Bounds=3,3,3"],
+                           ["Primitive.Bounds=1,1,1"], before=BASE),
+                  lost_row(MOD_B, PATCH, R2, "Primitive", ["Primitive.Bounds=5,5,5"], ["Primitive.Bounds=4,4,4"],
+                           ["Primitive.Bounds=4,4,4"], before=BASE)]
+        w_ch = [(R1, "PlacedObject", [(BASE, {"Primitive.Bounds": "1,1,1"}), (MOD_A, {"Primitive.Bounds": "2,2,2"}),
+                                      (PATCH, {"Primitive.Bounds": "3,3,3"})]),
+                (R2, "PlacedObject", [(BASE, {"Primitive.Bounds": "4,4,4"}), (MOD_B, {"Primitive.Bounds": "5,5,5"}),
+                                      (PATCH, {"Primitive.Bounds": "4,4,4"})])]
+        plan, md, _ = core_bundle(p_rows, w_rows, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]},
+                                  targets=(MOD_A, MOD_B))
+        sm = next((x for x in md.splitlines() if x.startswith("In short, with ")), "")
+        return ("undoes 1 record field" in sm and "sets 1 record field" in sm
+                and "nothing new the checks can see" not in sm), sm[:500]
+
+    for name, fn in [("eighth-review/C1182-summary-says-record-effects", c1182_summary_says_record_effects)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1203-winner-value-from-only-in", c1203_winner_value_from_only_in)]:
         cell(name, fn)
 
