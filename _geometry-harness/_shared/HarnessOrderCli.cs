@@ -395,6 +395,11 @@ public static class HarnessOrderCli
     /// its records and none of its assets, which is why the caller records it in Limits. (SyntheticOrder ranked that
     /// block above Data until 2026-09-11; on a profile whose Creation Club plugins also sit, with different bytes, in a
     /// switched-off folder, that silently fed every <c>--enable</c> arm the other copies. Its header says how.)</para></summary>
+    /// <summary>Plugin file name to the copy the probes load for a view, by <see cref="BuildLayerMap"/>'s precedence.</summary>
+    public static IReadOnlyDictionary<string, string> PluginLayerMap(
+        string profileDir, IReadOnlyList<string> viewMods, string modsDir, string dataDir, string overwriteDir)
+        => BuildLayerMap(Mo2LoadOrder.ReadComposition(profileDir), viewMods, modsDir, dataDir, overwriteDir);
+
     static Dictionary<string, string> BuildLayerMap(
         Mo2Composition comp, IReadOnlyList<string> viewMods, string modsDir, string dataDir, string overwriteDir)
     {

@@ -87,7 +87,8 @@ overlapprobe: bounded strict render-surface scene capture
   --instance DIR --game DIR --profile NAME --order CANDIDATE.json
   --self-check-imported-accounting FIXTURE.json (no load order; prints the accounting receipt)
   --self-check-declared-cells FIXTURE.json (no load order; prints each declared cell's presence outcome)
-Scene candidates require explicit Mods asset priority; preflight checks MO2 names and relative priority.
+Scene candidates require explicit Mods asset priority; preflight checks MO2 names and relative priority, and refuses
+an arm whose plugins name meshes its Mods lack while an installed folder outside them has them.
 An exterior persistent cell cannot define a bounded scope. Unknown geometry remains explicit.
 --scene-scope-from accepts any scope declaring a bound: a non-empty scene.discovery.seedReferences[]
 or a non-empty scene.discovery.cells[]. An imported declared cell joins this capture's --scene-cell
@@ -378,7 +379,11 @@ string dataDir = Path.Combine(GamePath, "Data");
 SceneCapture.AssetPreflight? assetPreflight = null;
 if (sceneCapture || scenePreflight)
 {
-    try { assetPreflight = SceneCapture.PreflightCandidateAssets(orderFile!, profileName, profileDir, modsDir); }
+    try
+    {
+        assetPreflight = SceneCapture.PreflightCandidateAssets(orderFile!, profileName, profileDir, modsDir);
+        ViewMeshGaps.Check(assetPreflight, profileDir, modsDir, dataDir, overwriteDir, GamePath);
+    }
     catch (Exception ex)
     {
         var refusal = ex as SceneCapture.PreflightRefusal;
