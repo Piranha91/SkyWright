@@ -3806,7 +3806,8 @@ def build_prediction(ctx: dict) -> dict:
                     off_.append((x["path"], users_))
             where_u_ = (uw_.get("where") or {}).get("both" if len(arms_u_) > 1 else "one") or ["", ""]
             for path_, users_ in off_:
-                text += " " + bind(uw_["off"][0 if len(users_) == 1 else 1], {
+                # one missing mesh: the line has just named it
+                text += " " + bind(uw_["offOne" if len(got_p) == 1 and uw_.get("offOne") else "off"][0 if len(users_) == 1 else 1], {
                     "paths": path_, "refs": ", ".join(users_[:3]) + (f" and {fmt_n(len(users_) - 3)} more" if len(users_) > 3 else ""),
                     "where": where_u_[0]})
             if none_:
