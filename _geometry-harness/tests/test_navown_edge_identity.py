@@ -29,6 +29,8 @@ ordersweep's emit readers and evalreport's row identity on it:
     1402  control: another kind's rows (EDGE-NAV, DOOR-TRI) are written and keyed exactly as today.
     1403  control: another probe's emit (stateprobe on its row-identity fixture) is byte-identical in its rows to today's.
     1404  control: an in-range link is no row, and two sources into one target triangle are two rows.
+    1405  conflictdiff refuses (exit 3, one sentence) an emit whose EDGE-IDX rows name no triangle (written before the change)
+          against one whose rows do; two such emits still compare.
 
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_EI_HARNESS names another
 harness folder.
@@ -342,6 +344,27 @@ def t1404():
     assert sorted(NAME.get(c["Necessary"][0]["FormKey"].lower()) for c in six) == ["S", "S2"], show(six)
 
 
+def t1405():
+    """Rejects: a pre-change emit (EDGE-IDX rows with no Triangle) compared row for row with a per-link one, which reads its
+    pair rows as vanished and the links as created; and a refusal of two pre-change emits, which key alike."""
+    L = lab()
+    old = {}
+    for arm in ("base", "fix"):
+        d = json.loads(L.emit[arm].read_text(encoding="utf-8"))
+        for c in d["Conflicts"]:
+            for x in c.get("Alternative") or []:
+                x.pop("Triangle", None)
+        for p in d.get("Predicates") or []:
+            p.pop("OtherTriangle", None)
+        old[arm] = L.tmp / f"el-{arm}.pre-change.json"
+        old[arm].write_text(json.dumps(d), encoding="utf-8")
+    r = run([exe(PROBES, "conflictdiff"), old["base"], L.emit["fix"]])
+    refused = [x for x in r.stdout.splitlines() if "REFUSED" in x]
+    assert r.returncode == 3 and len(refused) == 1 and "re-run that arm on the current build" in refused[0],         f"exit {r.returncode}: {refused or r.stdout[-600:]}"
+    r2 = run([exe(PROBES, "conflictdiff"), old["base"], old["fix"]])
+    assert r2.returncode == 0, f"two pre-change emits: exit {r2.returncode}: {r2.stdout[-600:]}"
+
+
 CASES = [
     ("1390 every identity of the emit is one record", t1390),
     ("1391 S's three broken links: three conflicts, each naming its triangle", t1391),
@@ -358,6 +381,7 @@ CASES = [
     ("1402 control: another kind's rows and identities as today", t1402),
     ("1403 control: another probe's rows byte-identical", t1403),
     ("1404 control: an in-range link is no row; two sources are two rows", t1404),
+    ("1405 conflictdiff refuses a pre-change emit against a per-link one", t1405),
 ]
 
 if __name__ == "__main__":
