@@ -1005,11 +1005,20 @@ def requested_providers(scope_providers: list[dict], view_mods: list[str] | None
             + [v for v in rows if kind(v) not in ("overwrite", "mod")])
 
 
+def given_path(p) -> Path:
+    """An input path as the plan stores it: absolute against the folder `plan` runs in, as typed otherwise (a mapped
+    drive or a junction is kept, not resolved), so `run` and `resume` read the same file from any folder."""
+    return Path(os.path.abspath(p))
+
+
 def cmd_plan(a) -> int:
     run = Path(a.out)
-    registry_path = Path(a.registry)
-    scope_path = Path(a.scope) if a.scope else None
-    cdir = Path(a.candidates)
+    registry_path = given_path(a.registry)
+    scope_path = given_path(a.scope) if a.scope else None
+    cdir = given_path(a.candidates)
+    a.settings = str(given_path(a.settings)) if a.settings else a.settings
+    a.instance = str(given_path(a.instance)) if a.instance else a.instance
+    a.game = str(given_path(a.game)) if a.game else a.game
 
     try:
         reg = RegistryView(registry_path)
@@ -1463,7 +1472,7 @@ def cmd_plan(a) -> int:
             "selectImplied": implied,
             "exclude": excluded,
             **({"optIn": sorted(opted), "optInSource": opt_in_source} if opted else {}),
-            "settings": settings.record(),
+            "settings": {**settings.record(), "path": str(given_path(settings.path))},
             "touched": touched,
             "note": "--select narrows what RUNS, never what is PLANNED: a check that was not selected "
                     "is skipped-user and stays visible, and a required one keeps the evaluation "
@@ -1562,10 +1571,28 @@ def refusal_cause(why: str) -> str:
     return head if re.fullmatch(r"[a-z][a-z-]*", head or "") else "plan-changed"
 
 
+def relative_path_refusal(plan: dict) -> str | None:
+    """A plan written before `plan` stored absolute paths keeps its inputs as typed. Where such a path does not resolve
+    from the folder this command runs in, the plan cannot say where it was made, so it is refused by name rather than
+    reported as a missing input."""
+    stored = [("registry", (plan.get("registry") or {}).get("path")), ("scope", (plan.get("scope") or {}).get("path")),
+              ("candidates folder", plan.get("candidatesDir"))]
+    stored += [(f"candidate (arm {a.get('armId')})", a.get("candidatePath")) for a in plan.get("arms") or []]
+    for what, p in stored:
+        if p and not Path(p).is_absolute() and not Path(p).exists():
+            return (f"plan-path-relative: this plan stores the {what} path '{p}' relative to the folder it was planned "
+                    f"from, which the plan does not record, and it does not resolve from {Path.cwd()}; run from the "
+                    "folder the plan was made in, or plan again (plans now store absolute paths).")
+    return None
+
+
 def premise_refusal(plan: dict) -> str | None:
     """D5: the registry and the scope are PREMISES of a frozen plan, not inputs a verb may re-read.
     A checklist or a measured scope that changed after the plan froze changes which checks apply, and
     that is a new plan — never reuse of the old applicability."""
+    rel = relative_path_refusal(plan)
+    if rel:
+        return rel
     reg = Path(plan["registry"]["path"])
     nxt = "Next action: re-run scopeprobe and plan again."
     if not reg.exists():
