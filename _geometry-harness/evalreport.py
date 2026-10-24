@@ -4280,6 +4280,20 @@ def build_prediction(ctx: dict) -> dict:
             if e.get("findingId") and e["findingId"] not in s_["findingIds"]:
                 s_["findingIds"].append(e["findingId"])
 
+    def sup_put_back(e):
+        """(tenth review, Snazzy S2) A supplied patch's version wins the superseded row's field in the setup with the
+        patches and holds the losing plugin's value (the record import's chain of that setup, read-same rule)."""
+        if not patched_arm:
+            return False
+        ch_ = (chains_of(e["checkId"], patched_arm) or {}).get(str(e["formKey"]))
+        if not ch_ or e.get("field") not in (ch_.get("values") or {}) or not ch_["providers"]:
+            return False
+        low_ = [str(x).lower() for x in ch_["providers"]]
+        vals_ = ch_["values"][e["field"]]
+        return (str(e["A"]).lower() in low_ and low_[-1] in {str(x).lower() for x in patch_names}
+                and low_[-1] != str(e["A"]).lower() and vals_[low_.index(str(e["A"]).lower())] == vals_[-1])
+    sup_back_ = collections.OrderedDict()      # winner -> the superseded rows a patch puts back
+
     def u_range(xs):
         lo_, hi_ = fmt_units(min(xs)), fmt_units(max(xs))
         return lo_ if lo_ == hi_ else f"{lo_[:-2]}-{hi_}"
@@ -4310,9 +4324,16 @@ def build_prediction(ctx: dict) -> dict:
                              "supersededDown" if not any(f_["up"] for _, f_ in place_rows) else "supersededSeat"],
                 "examples": ", ".join(str(e["formKey"]) for e, _ in place_rows[:2])}))
         n_ = len(s_["rows"])
-        loss_lines.append({"text": bind(words["supersededLine"], {
+        # (tenth review, Snazzy S2) where a supplied patch puts the losing value back, the line says so and does not
+        # call that change one that no longer applies (the patch author's call is the opposite)
+        back_ = [e for e in s_["rows"] if sup_put_back(e)]
+        if back_:
+            sup_back_[winner_] = back_
+        loss_lines.append({"text": bind(words["supersededLinePatched"] if back_ and words.get("supersededLinePatched")
+                                        else words["supersededLine"], {
             "winner": winner_, "count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1],
             "losers": ", ".join(m_ if len(losers_) == 1 else f"{m_} {fmt_n(c_)}" for m_, c_ in losers_.most_common()),
+            "patch": patch_text, "back": fmt_n(len(back_)), "examples": ", ".join(str(e["formKey"]) for e in back_[:2]),
             "facts": " ".join(facts_)}),
             "findingIds": s_["findingIds"][:1]})
     # P53: the clashes already there with one mod alone, one line per check: each pair with its count and the mod it
@@ -5993,6 +6014,14 @@ def build_prediction(ctx: dict) -> dict:
                           for s in blind]
         if removes_sentence:
             sentences.append(removes_sentence)
+        # (tenth review, Snazzy S2) superseded rows a supplied patch puts back: named in the comparison
+        for w_, rows_ in sup_back_.items():
+            if words.get("validationSupersededBack"):
+                sentences.append(bind(words["validationSupersededBack"], {
+                    "winner": w_, "patch": patch, "count": fmt_n(len(rows_)),
+                    "noun": words["fieldNoun"][0 if len(rows_) == 1 else 1],
+                    "losers": and_list(list(dict.fromkeys(e["A"] for e in rows_))),
+                    "examples": "; ".join(f"{e['formKey']} ({field_word(e.get('field'))})" for e in rows_[:3])}))
         if over_sentence:
             # (page budget) said in the undone line where there is one, as its own clause
             if undone_sentence in sentences and words.get("validationBaseOverChangeClause"):
