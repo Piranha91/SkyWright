@@ -9723,7 +9723,7 @@ def main():
                 MOD_B: plugin_file_of(MOD_B, [BASE], []),
                 PATCH: plugin_file_of(PATCH, [BASE], [])}
 
-    def door_link_bundle(files=None, loser_own_nav=False):
+    def door_link_bundle(files=None, loser_own_nav=False, unread=None):
         D = f"00D226:{BASE}"
         nav_ = f"0C1227:{OTHER}" if loser_own_nav else f"0C1226:{BASE}"
         win_ = {"NavigationDoorLink.NavMesh": "(absent)"} if loser_own_nav else {
@@ -9740,6 +9740,10 @@ def main():
                  arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
         if files is not False:
             arms_ = with_files(arms_, files or door_link_files(loser_own_nav=loser_own_nav))
+        for a_ in arms_ if unread else []:     # (C1228b) one plugin's recorded bytes differ from its file: not read
+            for pl_ in a_["requested"]["plugins"]:
+                if pl_["name"] == unread:
+                    pl_["sha256"] = "0" * 64
         plan, md, _ = core_bundle([r_], [], p_chains=chains, masters=MASTERS_, arms=arms_)
         pred = reader(plan).get("prediction") or {}
         return plan, md, pred, D
@@ -9761,6 +9765,16 @@ def main():
         plan, md, pred, D = door_link_bundle(files=False)
         got = [e["admission"] for e in rec_of(plan, D)]
         return got == ["admitted"], f"{got}"
+
+    # C1228b (Gate C, the fail-safe's second gate): the losing door's version is read, but the plugin whose navmesh
+    # version wins (ModA) is not (its recorded bytes differ from its file): nothing is decided, the row stays counted.
+    def c1228b_winning_navmesh_unread_not_decided():
+        plan, md, pred, D = door_link_bundle(unread=MOD_A)
+        got = [e["admission"] for e in rec_of(plan, D)]
+        return got == ["admitted"], f"{got}"
+
+    for name, fn in [("tenth-review/C1228b-winning-navmesh-unread-not-decided", c1228b_winning_navmesh_unread_not_decided)]:
+        cell(name, fn)
 
     for name, fn in [("tenth-review/C1226-door-link-off-the-winning-navmesh-set-aside",
                       c1226_door_link_off_the_winning_navmesh_set_aside),
