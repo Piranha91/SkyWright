@@ -1,4 +1,4 @@
-"""navownprobe writes one EDGE-IDX row per broken edge link, and every identity-keyed reader keeps each one (1390-1404).
+"""navownprobe writes one EDGE-IDX row per broken edge link, and every identity-keyed reader keeps each one (1390-1405).
 
     python _geometry-harness/tests/test_navown_edge_identity.py
 
