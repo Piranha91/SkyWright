@@ -79,7 +79,7 @@ DEFAULT_PROBES = ["navownprobe", "overlapprobe", "contactprobe"]
 VERDICT_RE = re.compile(r"verdict\s*:\s*(DIFFERENTIAL-[A-Z]+)")
 COUNT_RE = re.compile(r"^\s*(repaired|reclassified|created|unmeasured|unchanged)\s*:\s*([\d,]+)", re.M)
 # A refusal, in any case, but not a count: "refused 50" and "3 refused" are tallies (overlapprobe's timer line, review summaries).
-REFUSED_RE = re.compile(r"MISSING MASTER|(?<![\d,] )\brefused\b(?!\s*[\d,]*\d)", re.I)
+REFUSED_RE = re.compile(r"MISSING MASTER|CANNOT ENABLE|PROFILE MISMATCH|(?<![\d,] )\brefused\b(?!\s*[\d,]*\d)", re.I)
 NOT_PROOF = "No passing order found within the budget is not proof that none exists."
 
 

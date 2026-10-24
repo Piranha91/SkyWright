@@ -40,8 +40,8 @@ public static class RunPin
         if (!string.Equals(Norm(game), Norm(cfgGame), StringComparison.OrdinalIgnoreCase))
             return $"--game {Norm(game)} is not the game directory this instance is configured for ({Norm(cfgGame)})";
         foreach (var (f, bp) in orders)
-            if (!string.Equals(bp, profile, StringComparison.OrdinalIgnoreCase))
-                return $"--profile {profile} is not the BaseProfile '{bp}' named by {Path.GetFileName(f)}";
+            if (HarnessShared.HarnessOrderCli.ProfileMismatch(bp, f, profile) is { } mismatch)
+                return mismatch;
         if (!Directory.Exists(Path.Combine(instance, "profiles", profile))) return $"profile folder {profile} does not exist in the instance";
         return null;
     }

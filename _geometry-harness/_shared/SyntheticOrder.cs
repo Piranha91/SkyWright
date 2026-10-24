@@ -44,7 +44,15 @@ public sealed record SyntheticResult(
     /// <summary>Plugins asked for with --enable that were kept off because a master they declare is not loaded. The
     /// order built without them is not the order asked for, so the shared reader refuses on any (ruling 12).</summary>
     public IReadOnlyList<MasterGap> RefusedForMasters { get; init; } = Array.Empty<MasterGap>();
+
+    /// <summary>Plugins asked for with --enable that are not in the order built, in the order they were asked for: no
+    /// load-order position, or no file. The order without them is not the order asked for, so the shared reader refuses.</summary>
+    public IReadOnlyList<EnableGap> Unbuildable { get; init; } = Array.Empty<EnableGap>();
 }
+
+/// <summary>One --enable the order could not take. <paramref name="Listed"/>: loadorder.txt lists it;
+/// <paramref name="Installed"/>: some layer of the install (a switched-off folder included) has the file.</summary>
+public sealed record EnableGap(string Plugin, bool Listed, bool Installed);
 
 public static class SyntheticOrder
 {
@@ -122,6 +130,7 @@ public static class SyntheticOrder
 
         var orderedPaths = new List<string>(comp.OrderedPluginNames.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var listedAbsent = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int loaded = 0;
 
         foreach (var name in comp.OrderedPluginNames)
@@ -134,7 +143,11 @@ public static class SyntheticOrder
 
             loaded++;
             if (map.TryGetValue(name, out var path)) orderedPaths.Add(path);
-            else warnings.Add($"'{name}' is in the load order but no mod folder, overwrite or Data provides it.");
+            else
+            {
+                warnings.Add($"'{name}' is in the load order but no mod folder, overwrite or Data provides it.");
+                if (!wasLoaded && enableSet.Contains(name)) listedAbsent.Add(name);
+            }
         }
 
         // A name asked for that loadorder.txt never mentions has NO position. Appending it puts it at
@@ -152,7 +165,15 @@ public static class SyntheticOrder
             if (!seen.Contains(name))
                 warnings.Add($"'{name}' was asked to be disabled but is not in loadorder.txt; nothing to do.");
 
-        return new SyntheticResult(orderedPaths, warnings, applied, loaded) { RefusedForMasters = refusedForMasters };
+        var unbuildable = new List<EnableGap>();
+        foreach (var name in (enable ?? Array.Empty<string>()).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!seen.Contains(name)) unbuildable.Add(new EnableGap(name, false, map.ContainsKey(name)));
+            else if (listedAbsent.Contains(name)) unbuildable.Add(new EnableGap(name, true, false));
+        }
+
+        return new SyntheticResult(orderedPaths, warnings, applied, loaded)
+            { RefusedForMasters = refusedForMasters, Unbuildable = unbuildable };
     }
 
     /// <summary>filename → winning real path, in MO2's own precedence: overwrite, then enabled mods by

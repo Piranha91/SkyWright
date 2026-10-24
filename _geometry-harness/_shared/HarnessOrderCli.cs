@@ -34,6 +34,11 @@ namespace HarnessShared;
 // (including a --enable that SyntheticOrder had to leave off) and a candidate. The reason is OrderMasters' one sentence,
 // starting "MISSING MASTER"; the caller prints it and exits 2 with nothing written.
 //
+// SO IS A REQUEST THIS READER CANNOT BUILD AS ASKED (2026-10-24), in the same shape: a --enable that loadorder.txt does
+// not list or that no layer provides ("CANNOT ENABLE"), and a --order candidate whose BaseProfile is not --profile
+// ("PROFILE MISMATCH"). Each used to be answered with a different order: without the plugin, or through the other
+// profile's lists.
+//
 // WHAT IT ALLOWS AND RECORDS INSTEAD (ConfigurationIdentity.Limits — read before believing a geometry or
 // script result computed under one):
 //   - a plugin whose winning provider is a mod folder that is NOT in the asset view (a disabled folder, or
@@ -147,6 +152,10 @@ public static class HarnessOrderCli
             CandidateFile cand;
             try { cand = CandidateFile.Read(orderFile); }
             catch (Exception ex) { return Refuse(ex.Message); }
+            // A candidate is names resolved through ONE profile's lists: through another profile's, the same names can
+            // mean other files and another asset priority, and nothing downstream would say so.
+            var mismatch = ProfileMismatch(cand.BaseProfile, orderFile, profileName);
+            if (mismatch is not null) return Refuse(mismatch);
 
             source = $"candidate:{Path.GetFileName(orderFile)}";
             viewMods = cand.Mods ?? comp.EnabledMods;
@@ -194,6 +203,8 @@ public static class HarnessOrderCli
             source = $"synthetic:{profileName}";
             viewMods = comp.EnabledMods;
             var syn = SyntheticOrder.Build(profileDir, modsDir, dataDir, overwriteDir, enable, disable);
+            // A --enable the order could not take would leave the run measuring the order without it.
+            if (syn.Unbuildable.Count > 0) return Refuse(EnableRefusal(syn.Unbuildable));
             if (syn.RefusedForMasters.Count > 0)
                 return Refuse(OrderMasters.Sentence(syn.RefusedForMasters,
                     g => $"also --enable {OrderMasters.Names(g.Masters)} (install it first if no folder has it) or leave '{g.Plugin}' off"));
@@ -466,6 +477,43 @@ public static class HarnessOrderCli
     {
         if (_headers.TryGetValue(path, out var hit)) return hit;
         return _headers[path] = PluginHeader.TryRead(path);
+    }
+
+    /// <summary>The one sentence for a candidate whose BaseProfile is not the profile this run resolves it through (letter
+    /// case aside, as MO2 profile folders are on Windows), or null when they match. Starts "PROFILE MISMATCH" so the
+    /// controllers' refusal marker finds it; exit 2, nothing written.</summary>
+    public static string? ProfileMismatch(string? baseProfile, string candidateFile, string profileName)
+    {
+        var file = Path.GetFileName(candidateFile);
+        if (string.IsNullOrWhiteSpace(baseProfile))
+            return $"PROFILE MISMATCH - candidate '{file}' names no BaseProfile, so nothing says which profile its plugin and "
+                 + $"mod names belong to; add \"BaseProfile\": \"{profileName}\" if it was built on profile '{profileName}', "
+                 + "or rebuild it there, then run again.";
+        if (string.Equals(baseProfile, profileName, StringComparison.OrdinalIgnoreCase)) return null;
+        return $"PROFILE MISMATCH - candidate BaseProfile '{baseProfile}' does not match --profile '{profileName}' ('{file}'), "
+             + $"so its plugins and mod folders would be resolved through the lists of profile '{profileName}', not the "
+             + $"profile it was built on; run with --profile '{baseProfile}', or rebuild the candidate on profile "
+             + $"'{profileName}', then run again.";
+    }
+
+    /// <summary>The one sentence for the --enable requests the order could not take (non-empty, in the order asked):
+    /// the first named with its remedy, chosen from whether loadorder.txt lists it and whether any layer has the file;
+    /// the rest counted. Starts "CANNOT ENABLE"; exit 2, nothing written.</summary>
+    public static string EnableRefusal(IReadOnlyList<EnableGap> gaps)
+    {
+        var g = gaps[0];
+        var p = g.Plugin;
+        var more = gaps.Count == 1 ? ""
+            : $" (and {gaps.Count - 1} more --enable request(s) cannot be built, first '{gaps[1].Plugin}')";
+        const string nowhere = "no mod folder, the overwrite layer or the game Data folder";
+        if (g.Listed)
+            return $"CANNOT ENABLE - '{p}' is listed in loadorder.txt, but {nowhere} provides it{more}, so this run would "
+                 + $"measure the order without it; install the mod that provides '{p}', then run again.";
+        var remedy = g.Installed
+            ? $"switch '{p}' on once in MO2 so loadorder.txt lists it, or give it a position in an --order candidate"
+            : $"install the mod that provides '{p}' ({nowhere} has a file by that name)";
+        return $"CANNOT ENABLE - '{p}' has no load-order position: loadorder.txt does not list it{more}, so this run would "
+             + $"measure the order without it; {remedy}, then run again.";
     }
 
     static string Concise(Exception ex) => $"{ex.GetType().Name}: {ex.Message}";

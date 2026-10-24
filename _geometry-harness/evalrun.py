@@ -79,10 +79,11 @@ EXIT_OK = 0
 EXIT_REFUSED_INPUT = 2
 EXIT_REFUSED_RESULT = 3
 
-# A refusal MARKER, anchored at the start of a log line: `REFUSED`, `! ...REFUSED`, `MISSING MASTER`.
+# A refusal MARKER, anchored at the start of a log line: `REFUSED`, `! ...REFUSED`, `MISSING MASTER`, and the shared
+# order reader's `CANNOT ENABLE` and `PROFILE MISMATCH`.
 # The word inside a probe's own prose ("with a function the decompiler refused 0") is not a refusal,
 # and rejecting a receipt that exited 0 with a valid output because of it is a false negative.
-REFUSED_RE = re.compile(r"^.{0,40}?(REFUSED|MISSING MASTER)", re.M)
+REFUSED_RE = re.compile(r"^.{0,40}?(REFUSED|MISSING MASTER|CANNOT ENABLE|PROFILE MISMATCH)", re.M)
 
 #: How much of conflictdiff's refusal a diff receipt quotes; its longest (no configuration) is 392 characters.
 REFUSAL_QUOTE_CHARS = 600
