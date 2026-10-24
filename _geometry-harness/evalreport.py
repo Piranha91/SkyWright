@@ -839,7 +839,7 @@ def missing_assets(b: "Bundle", check_id: str, arm_id: str) -> list[dict] | None
         calls = {(bt, m.get("id")): (m.get("params") or {}).get("name")
                  for bt, m in _transcript_messages((b.dir / req).read_text(encoding="utf-8"))
                  if m.get("method") == "tools/call"}
-        owners, absent = collections.defaultdict(list), []
+        owners, absent, records_of = collections.defaultdict(list), [], collections.defaultdict(list)
         for bt, m in _transcript_messages((b.dir / resp).read_text(encoding="utf-8")):
             name = calls.get((bt, m.get("id")))
             if name not in ("housecarl_records", "housecarl_asset_status"):
@@ -857,9 +857,12 @@ def missing_assets(b: "Bundle", check_id: str, arm_id: str) -> list[dict] | None
                         v = (v if v.lower().startswith("meshes/") else "meshes/" + v).lower()
                         if rec.get("source") and rec["source"] not in owners[v]:
                             owners[v].append(rec["source"])
+                        if rec.get("formid") and rec["formid"] not in records_of[v]:
+                            records_of[v].append(str(rec["formid"]))
     except (OSError, ValueError):
         return None
-    return [{"path": p_, "namedBy": owners.get(p_.replace("\\", "/").lower(), [])} for p_ in dict.fromkeys(absent)]
+    return [{"path": p_, "namedBy": owners.get(p_.replace("\\", "/").lower(), []),
+             "records": records_of.get(p_.replace("\\", "/").lower(), [])} for p_ in dict.fromkeys(absent)]
 
 
 def asset_view_read_whole(b: "Bundle", check_id: str, arm_id: str) -> bool:
@@ -1057,6 +1060,43 @@ def setup_version(plugins: list, fk: str, reads: list | None = None):
         if got_ is not None:
             last_ = (x.get("name"), got_)
     return last_
+
+
+def setup_placed_users(plugins: list, base_keys: list, reads: list | None = None):
+    """(ninth review, BPT 33) {reference: (plugin, its placementFull)}: the last version of every placed reference a
+    plugin of the setup places with one of `base_keys` as its base, where that last version still has such a base. Read
+    from every plugin file of the setup that is or masters a base's plugin, each only where its bytes are the recorded
+    ones (sha256); None where a file of the setup is missing, differs or does not read."""
+    origins_ = {str(b_).split(":", 1)[-1].lower() for b_ in base_keys}
+    bases_low_ = {str(b_).lower() for b_ in base_keys}
+    refs_ = set()
+    for x in plugins or []:
+        path_ = str(x.get("path") or "")
+        if not path_ or not Path(path_).is_file():
+            return None
+        if path_ not in _PLUGIN_SHA:
+            _PLUGIN_SHA[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+        if _PLUGIN_SHA[path_] != str(x.get("sha256") or "").lower():
+            return None
+        try:
+            masters_, _ = pluginread._index(Path(path_), pluginread.PLACED_TYPES)
+            if not ({str(m_).lower() for m_ in masters_} | {str(x.get("name")).lower()}) & origins_:
+                continue
+            got_ = pluginread.placed_of_bases(path_, list(base_keys))
+        except pluginread.PluginReadError:
+            return None
+        if reads is not None:
+            reads.append({"plugin": x.get("name"), "sha256": _PLUGIN_SHA[path_], "record": ",".join(base_keys),
+                          "read": "placedOfBases", "found": sorted(got_["refs"])})
+        refs_ |= set(got_["refs"])
+    out_ = {}
+    for r_ in sorted(refs_):
+        v_ = setup_version(plugins, r_, reads)
+        if v_ is None:
+            return None
+        if v_[0] is not None and str((v_[1] or {}).get("base") or "").lower() in bases_low_:
+            out_[r_] = v_
+    return out_
 
 
 def placement_off_for_good(v: dict, words: dict) -> bool:
@@ -3742,6 +3782,36 @@ def build_prediction(ctx: dict) -> dict:
                 main_b, check_id, p_arm) else words.get("missingAssetHedge") or ""})
         if where == "only" and got_w:
             text += " " + bind(words["missingAssetWithPatch"], {"patch": patch_text, "count": fmt_n(len(got_w))})
+        # (ninth review, BPT 33; gate A answer 3) what uses each missing mesh, read from every plugin file of each setup:
+        # a placed user switched off for good in every setup is not drawn while off; a mesh no placed object uses is said
+        # so, with the other uses (a script or a list creating the object) not read. A mesh with a placed user drawn, or a
+        # setup whose files do not read, is said as before.
+        uw_ = words.get("missingAssetUsers") or {}
+        if uw_:
+            arms_u_ = [p_arm] + ([patched_arm] if patched_arm and got_w is not None else [])
+            plans_ = {a_.get("armId"): (a_.get("requested") or {}).get("plugins") or []
+                      for a_ in (main_b.plan.get("arms") or [])}
+            none_, off_ = [], []
+            for x in got_p:
+                if not x.get("records"):
+                    continue
+                per_ = [setup_placed_users(plans_.get(a_) or [], x["records"], plugin_reads) for a_ in arms_u_]
+                if any(u_ is None for u_ in per_):
+                    continue
+                users_ = sorted({r_ for u_ in per_ for r_ in u_})
+                if not users_:
+                    none_.append(x["path"])
+                elif all(placement_off_for_good(v_[1], words) or v_[1].get("deleted") for u_ in per_ for v_ in u_.values()):
+                    off_.append((x["path"], users_))
+            where_u_ = (uw_.get("where") or {}).get("both" if len(arms_u_) > 1 else "one") or ["", ""]
+            for path_, users_ in off_:
+                text += " " + bind(uw_["off"][0 if len(users_) == 1 else 1], {
+                    "paths": path_, "refs": ", ".join(users_[:3]) + (f" and {fmt_n(len(users_) - 3)} more" if len(users_) > 3 else ""),
+                    "where": where_u_[0]})
+            if none_:
+                text += " " + (bind(uw_["noneAll"][0 if len(none_) == 1 else 1], {"where": where_u_[1]})
+                               if len(none_) == len(got_p) else
+                               bind(uw_["none"], {"where": where_u_[1], "paths": "; ".join(none_)}))
         loss_lines.append({"text": text, "findingIds": [f_.get("id") for f_ in findings if f_.get("checkId") == check_id
                                                         and f_.get("armId") == p_arm and f_.get("id")][:1]})
     # Sewers review S2: an evaluated mod's own geometry clashes with base-game objects no other mod edits are not

@@ -230,6 +230,38 @@ def placements_full(path, form_keys):
     return _read(path, PLACED_TYPES, form_keys, _placement_full)
 
 
+def placed_of_bases(path, base_keys):
+    """(ninth review, BPT 33) Every placed reference this plugin holds a version of whose base (NAME) is one of
+    `base_keys`: {"plugin", "masters", "refs": {reference formKey: base formKey}}. Read through the cell and worldspace
+    groups; a compressed record is decompressed."""
+    p = Path(path)
+    masters, places = _index(p, PLACED_TYPES)
+    want = {str(b).lower() for b in base_keys}
+
+    def global_(fid):
+        idx = fid >> 24
+        return f"{fid & 0xFFFFFF:06X}:{masters[idx] if idx < len(masters) else p.name}"
+    refs = {}
+    try:
+        with p.open("rb") as fh:
+            for (typ, fid), (at, size, flags) in places.items():
+                fh.seek(at)
+                data = fh.read(size)
+                if flags & COMPRESSED:
+                    try:
+                        data = zlib.decompress(data[4:])
+                    except zlib.error as e:
+                        raise PluginReadError(f"record {global_(fid)}: a compressed record does not decompress: {e}") from e
+                name = dict(_subrecords(data)).get("NAME")
+                if name and len(name) >= 4:
+                    b_ = global_(struct.unpack_from("<I", name, 0)[0])
+                    if b_.lower() in want:
+                        refs[global_(fid)] = b_
+    except OSError as e:
+        raise PluginReadError(f"cannot read {p}: {e}") from e
+    return {"plugin": p.name, "masters": masters, "refs": refs}
+
+
 def navmesh_links(path, form_keys):
     return _read(path, b"NAVM", form_keys, _navmesh)
 
