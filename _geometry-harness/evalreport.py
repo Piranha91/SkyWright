@@ -8228,7 +8228,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                           for cc_ in em_.get("Conflicts") or [] for r_ in conflict_rows(cc_, None)}
                 n_ = sum(1 for e_ in es_ if (str(e_["formKey"]), frozenset(map(str, e_.get("other") or ()))) in there_)
                 unit_v_ = ((reader_data.get("kindPhrases") or {}).get(k_, {}).get("unitPlural" if len(es_) != 1 else "unitSingular")
-                           or ("clashes" if len(es_) != 1 else "clash"))       # (round 3) the unit agrees with its count
+                           or bind(pw_also.get("alsoVariantUnitOfCheck") or "{unit}", {
+                               "unit": "clashes" if len(es_) != 1 else "clash",        # (round 3) agrees with its count
+                               # a kind with no unit of its own names its check, so two checks' groups read apart
+                               "title": check_titles.get(str(c_), str(c_))}))
                 parts_v_.append(bind(pw_also["alsoVariantPart"], {
                     "found": fmt_n(n_), "count": fmt_n(len(es_)), "unit": unit_v_, "a": a_, "b": b2_}))
                 if not n_:
