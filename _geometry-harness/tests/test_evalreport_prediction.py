@@ -8749,6 +8749,20 @@ def main():
         return ("Walls.esp's change, which Later.esp carries" in un_ and "also fix" not in md_
                 and "Whether that is intended is not recorded" in un_), un_[:500] or md_[-1500:]
 
+    # C1202 (Gate A review of 225871bb): a value lost to the patch with neither the record's versions nor its values
+    # recorded is not told as undone or as anyone's replacement: said as not told.
+    def c1202_unread_value_not_called_replacement():
+        R0, R1 = f"00C002:{BASE}", f"00C202:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, R0, "LocationReference", "a0", "b0", "v0")]
+        w_rows = [lost_row(MOD_A, PATCH, R1, "Owner", "a1", PH, PH)]
+        plan, md, _ = core_bundle(p_rows, w_rows, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]}, targets=(MOD_A, MOD_B))
+        lines = [x for x in md.splitlines() if R1 in x]
+        return (len(lines) == 1 and "not told" in lines[0] and "own value" not in lines[0]
+                and not lines[0].startswith("- Undone by") and not lines[0].startswith("- Set by")), str(lines)[:500]
+
+    for name, fn in [("eighth-review/C1202-unread-value-not-called-replacement", c1202_unread_value_not_called_replacement)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1180-base-put-back-over-carried-change", c1180_base_put_back_over_carried_change)]:
         cell(name, fn)
 
