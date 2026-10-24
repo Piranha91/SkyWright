@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -32,7 +33,17 @@ import test_evalreport_comparison_kinds as K  # noqa: E402  (sets the settings e
 import evalrun  # noqa: E402
 
 FAILURES: list[str] = []
-MAIN, VARIANT, SKYRIM = b"main plugin bytes", b"variant plugin bytes", b"skyrim bytes"
+
+
+def tes4(author: str) -> bytes:
+    """A TES4-only plugin (HEDR, CNAM): a real header the probes can open; the author keeps two copies' bytes apart."""
+    body = b"HEDR" + struct.pack("<H", 12) + struct.pack("<fiI", 1.7, 0, 0x800)
+    cnam = author.encode("ascii") + b"\0"
+    body += b"CNAM" + struct.pack("<H", len(cnam)) + cnam
+    return b"TES4" + struct.pack("<IIIIHH", len(body), 0, 0, 0, 44, 0) + body
+
+
+MAIN, VARIANT, SKYRIM = tes4("main plugin bytes"), tes4("variant plugin bytes"), b"skyrim bytes"
 
 
 def check(ok, label):
