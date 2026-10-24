@@ -9113,6 +9113,38 @@ def main():
         also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
         return (f"With that version, the 2 overlap pairs between {OTHER} and {MOD_A} are not found" in also_), also_[-400:]
 
+    # C1198 (eighth review, Pilgrim 27): where the asset reads report every archive read (no archive failure), a path the
+    # evaluated mod's records name and no file in the setup provides is said as searched in its folders and archives, the
+    # mod's own included, never "may be missing from this install"; with an archive read failure the hedge stays.
+    def c1198_missing_asset_says_what_was_searched():
+        MA = "loadability.missing-assets"
+
+        def call(i, name, args):
+            return {"jsonrpc": "2.0", "id": i, "method": "tools/call", "params": {"name": name, "arguments": args}}
+
+        def answer(i, doc):
+            return {"jsonrpc": "2.0", "id": i, "result": {"content": [{"type": "text", "text": json.dumps(doc)}]}}
+
+        def line_with(failures):
+            req = [{"batchMarker": "b6-models"}, call(1, "housecarl_records", {"fields": ["Model.File"]}),
+                   {"batchMarker": "b7-assets"}, call(1, "housecarl_asset_status", {"asset_paths": ["x"]})]
+            resp = [{"batchMarker": "b6-models"},
+                    answer(1, {"matches": [{"source": MOD_A, "fields": [{"path": "Model.File", "value": "Arch\\House98.nif"}]}]}),
+                    {"batchMarker": "b7-assets"},
+                    answer(1, {"results": [{"path": "meshes/Arch/House98.nif", "exists": False}],
+                               "bsa_failures": failures, "bsa_failures_omitted": 0})]
+            results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+            plan, md, _ = compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH],
+                                             count_only={(MA, "baseline"): 1, (MA, "without-patch"): 1},
+                                             transcripts={(MA, "baseline"): (req, resp), (MA, "without-patch"): (req, resp)})
+            return next((ln for ln in md.splitlines() if "House98.nif" in ln), "")
+        ok_, bad_ = line_with([]), line_with(["Broken.bsa: unreadable"])
+        return ("may be missing from this install" not in ok_ and "archives" in ok_
+                and "may be missing from this install" in bad_), f"{ok_[-250:]} || {bad_[-200:]}"
+
+    for name, fn in [("eighth-review/C1198-missing-asset-says-what-was-searched", c1198_missing_asset_says_what_was_searched)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1196-also-variant-says-what-it-lacks", c1196_also_variant_says_what_it_lacks)]:
         cell(name, fn)
 
