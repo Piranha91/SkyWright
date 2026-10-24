@@ -287,6 +287,33 @@ def navmesh_doors_all(path):
     return {fk: [d for d, _ in (v or {}).get("doors") or []] for fk, v in got.items()}
 
 
+def navmesh_places_all(path):
+    """(tenth review) Every navmesh record the plugin holds, with its triangle count and place (see _navmesh):
+    {formKey: {"triangles": n, "place": [...]}} (a navmesh without geometry: triangles None, place None)."""
+    p = Path(path)
+    masters, places = _index(p, (b"NAVM", b"CELL"))
+    want = [f"{fid & 0xFFFFFF:06X}:{masters[fid >> 24] if (fid >> 24) < len(masters) else p.name}"
+            for (t, fid) in places if t == b"NAVM"]
+    got = _read(p, b"NAVM", want, _navmesh_place)["records"]
+    return {fk: v or {"triangles": None, "place": None} for fk, v in got.items()}
+
+
+def _navmesh_place(subs, fk, global_):
+    """(tenth review) A navmesh's triangle count and where it lies, from its geometry's header: an interior cell
+    (worldspace 0, then the cell's FormID) or a worldspace and its grid cell (two int16)."""
+    data = subs.get("NVNM")
+    if data is None or len(data) < 24:
+        return {"triangles": None, "place": None}
+    try:
+        nv = struct.unpack_from("<I", data, 16)[0]
+        nt = struct.unpack_from("<I", data, 20 + 12 * nv)[0]
+    except struct.error as e:
+        raise PluginReadError(f"navmesh {fk}: its geometry ends before its counts say: {e}") from e
+    world_ = struct.unpack_from("<I", data, 8)[0]
+    return {"triangles": nt, "place": (["cell", global_(struct.unpack_from("<I", data, 12)[0])] if world_ == 0 else
+                                       ["grid", global_(world_), *struct.unpack_from("<hh", data, 12)])}
+
+
 _TOP = {}
 
 

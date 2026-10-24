@@ -3670,6 +3670,41 @@ def build_prediction(ctx: dict) -> dict:
                     and (base_ is None or base_.get("triangles") is None or int(base_["triangles"]) > int(lim_)
                          or int(base_["triangles"]) == int(mine_["triangles"])))
 
+    def navmesh_base_single(plugin, fk):
+        """(tenth review) The plugin's single-triangle version of a base-game navmesh has the base game's own triangle
+        count: that version is the base game's single triangle, not a removal (read from both plugin files)."""
+        fk_ = str(fk or "")
+        lim_ = words.get("navmeshStubTriangles")
+        if lim_ is None or ":" not in fk_:
+            return False
+        origin_ = fk_.split(":", 1)[1]
+        if not is_base_game(origin_, words):
+            return False
+        mine_ = plugin_record(plugin, "navmesh", fk_)
+        base_ = plugin_record(next((x for x in all_orders.get(p_arm) or [] if x.lower() == origin_.lower()), origin_),
+                              "navmesh", fk_)
+        return bool(mine_ and base_ and mine_.get("triangles") is not None
+                    and mine_.get("triangles") == base_.get("triangles") and int(mine_["triangles"]) <= int(lim_))
+
+    own_nav_cache = {}
+
+    def own_navmeshes(plugin):
+        """(tenth review) {formKey: {triangles, place}} of every navmesh record the plugin's file holds (its own records
+        and its overrides), read from its file (sha256 checked); None where the file is not read."""
+        key_ = str(plugin).lower()
+        if key_ not in own_nav_cache:
+            own_nav_cache[key_] = None
+            path_, sha_ = plugin_file(plugin)
+            if path_ and sha_ and Path(path_).is_file():
+                if path_ not in sha_cache:
+                    sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+                if sha_cache[path_] == sha_:
+                    try:
+                        own_nav_cache[key_] = pluginread.navmesh_places_all(path_)
+                    except pluginread.PluginReadError:
+                        pass
+        return own_nav_cache[key_]
+
     def tri_label(label):
         m = re.match(r"^(.*?)\s+(\d+) tris -> (\d+)$", str(label or ""))
         return f"{m.group(1)} {fmt_n(int(m.group(2)))} -> {fmt_n(int(m.group(3)))} triangles" if m else str(label or "")
@@ -3696,6 +3731,10 @@ def build_prediction(ctx: dict) -> dict:
         # (blind round 1, Winterhold S1) a losing version that is a stub of a navmesh (skill data navmeshStubTriangles,
         # read from the losing plugin's file) is how a mod removes a navmesh: no ground of the losing mod's is lost there
         stubs = [h for h in held_all if navmesh_stub(loser, h["row"].get("formKey"))]
+        # (tenth review, Winterhold S2; Gate A condition a) a single-triangle version that is the base game's own
+        # single triangle is no removal: said apart
+        stubs_base_ = [h for h in stubs if navmesh_base_single(loser, h["row"].get("formKey"))]
+        stubs = [h for h in stubs if h not in stubs_base_]
         held = [h for h in held_all if h not in stubs]
         if not held and not stubs:
             continue
@@ -3749,6 +3788,28 @@ def build_prediction(ctx: dict) -> dict:
                 "count": fmt_n(len(stubs)), "loser": loser, "version": "version is" if len(stubs) == 1 else "versions are",
                 "records": ", ".join(str(h["row"].get("formKey")) for h in stubs[:3])
                 + (f" and {fmt_n(len(stubs) - 3)} more" if len(stubs) > 3 else "")})
+        if stubs_base_ and words.get("historyLossStubBase"):
+            text += " " + bind(words["historyLossStubBase"], {
+                "count": fmt_n(len(stubs_base_)), "loser": loser,
+                "version": "version is" if len(stubs_base_) == 1 else "versions are",
+                "records": ", ".join(str(h["row"].get("formKey")) for h in stubs_base_[:3])
+                + (f" and {fmt_n(len(stubs_base_) - 3)} more" if len(stubs_base_) > 3 else "")})
+        # (tenth review, Winterhold S2) the losing mod's own navmesh records in the cells of the navmeshes it removed,
+        # loaded beside the winning version; read from the plugin files, overlap not measured
+        own_ = own_navmeshes(loser)
+        if stubs and own_ is not None and words.get("historyLossStubOwnBeside"):
+            beside_ = []
+            for h in stubs:
+                pl_ = (own_.get(str(h["row"].get("formKey"))) or {}).get("place")
+                mates_ = [fk2_ for fk2_, v2_ in own_.items() if pl_ and v2_.get("place") == pl_
+                          and fk2_.split(":", 1)[1].lower() == str(loser).lower()
+                          and (v2_.get("triangles") or 0) > int(words.get("navmeshStubTriangles") or 1)]
+                if mates_:
+                    beside_.append((str(h["row"].get("formKey")), mates_))
+            if beside_:
+                text += " " + bind(words["historyLossStubOwnBeside"], {
+                    "count": fmt_n(len(beside_)), "loser": loser, "winner": winner,
+                    "examples": "; ".join(f"{m_[0]} beside {r_}" for r_, m_ in beside_[:2])})
         # (sixth review, Sewers r6 S1) a stub whose winning version has the base game's triangle count: the winner puts
         # back the base game's navmesh where the losing mod removed it, read from both plugin files
         put_back_ = []
