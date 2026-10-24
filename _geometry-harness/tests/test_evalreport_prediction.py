@@ -9187,6 +9187,26 @@ def main():
         return (f"still there with Neighbour.esp and {OTHER} lies on records, navmeshes or objects that no supplied patch "
                 f"edits" in ln and "a supplied patch edits" not in ln.replace("no supplied patch edits", "")), ln[:500]
 
+    # C1205 (eighth review, page budget; the coordinator's lever i): at the ladder's last step (layout with "aside") the
+    # pointer to the evidence index's further notes is one short sentence with no heading of its own; before that
+    # step the "Further notes" section keeps its heading.
+    def c1205_last_step_tail_pointer_has_no_heading():
+        plan, _, _ = core_bundle([lost_row(MOD_A, MOD_B, f"00C205:{BASE}", "Owner", "a", "b", "v")], [])
+        pr_ = priorities()
+        out_ = {}
+        for lay_ in ("compact tail order", "compact tail order aside"):
+            with tempfile.TemporaryDirectory() as td:
+                view = R.effective_view(plan, 3, 1, pr_, lay_)
+                o_ = R.render_all(plan, view, Path(td) / "out", "")
+                out_[lay_] = (o_["report.md"], o_["report.html"])
+        md4, html4 = out_["compact tail order aside"]
+        md3, _ = out_["compact tail order"]
+        return ("## Further notes" in md3 and "## Further notes" not in md4 and "<h2>Further notes</h2>" not in html4
+                and "Everything else is in the evidence index." in md4), md4[-300:]
+
+    for name, fn in [("eighth-review/C1205-last-step-tail-pointer-has-no-heading", c1205_last_step_tail_pointer_has_no_heading)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1200-cell-record-alone-is-not-scope", c1200_cell_record_alone_is_not_scope)]:
         cell(name, fn)
 
