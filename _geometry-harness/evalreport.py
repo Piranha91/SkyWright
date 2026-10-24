@@ -5498,20 +5498,49 @@ def build_prediction(ctx: dict) -> dict:
         enable_examples = list(dict.fromkeys(str(rk[4]) for rk in switched_on))[:3]
         switched_on_r = [rk for rk, h_ in replaced if off_at_load((h_["row"].get("values") or {}).get("lost"))
                          and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
+        def problem_owners(xs):
+            """(ninth review, BPT 68 / 76 / 79) the check each new object of a by-object check is counted under: the first
+            by-object check that names it, in the order the tallies print (most new objects first)."""
+            n_of_ = collections.Counter(rk_[0] for rk_ in xs if rk_[0] in by_object)
+            owner_ = {}
+            for c_ in sorted(n_of_, key=lambda c_: -n_of_[c_]):
+                for rk_ in xs:
+                    if rk_[0] == c_:
+                        owner_.setdefault(str(rk_[4]), c_)
+            return owner_
+
         def problems_text(with_checks=False, xs=None):
             """The new problems with the patch in their units: an object of a by-object check is counted as an object,
-            with its pairs beside it (BPT review S3); with_checks names each check. xs: a subset of the problems."""
+            with its pairs beside it (BPT review S3); with_checks names each check. xs: a subset of the problems.
+            (ninth review) an object two by-object checks find is counted once, under the first; the later check's rows
+            on it are said as on an object already counted."""
+            xs = problems if xs is None else xs
+            owner_ = problem_owners(xs)
             per = collections.OrderedDict()
-            for rk_ in (problems if xs is None else xs):
+            for rk_ in xs:
                 ident_ = ident_of.get(rk_, tuple(rk_[:5]))
-                c_ = per.setdefault((rk_[0], rk_[1] if rk_[0] not in by_object else ""), [0, 0])
-                c_[0] += 1
-                c_[1] += problem_rows.get(ident_, 1)
+                c_ = per.setdefault((rk_[0], rk_[1] if rk_[0] not in by_object else ""), [0, 0, 0, 0])
+                rows1_ = problem_rows.get(ident_, 1)
+                if rk_[0] in by_object and owner_.get(str(rk_[4]), rk_[0]) != rk_[0]:
+                    c_[2] += 1
+                    c_[3] += rows1_
+                else:
+                    c_[0] += 1
+                    c_[1] += rows1_
             parts_ = []
-            for (check_, kind_), (n_, rows_) in sorted(per.items(), key=lambda kv: -kv[1][0]):
+            for (check_, kind_), (n_, rows_, sn_, srows_) in sorted(per.items(), key=lambda kv: -(kv[1][0] + kv[1][2])):
                 if check_ in by_object:
-                    t_ = f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}" + (
-                        f" ({fmt_n(rows_)} {unit_noun(check_, kind_, rows_)})" if rows_ != n_ else "")
+                    t_ = (f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}" + (
+                        f" ({fmt_n(rows_)} {unit_noun(check_, kind_, rows_)})" if rows_ != n_ else "")) if n_ else ""
+                    if sn_ and words.get("validationProblemShared"):
+                        # a check whose every new object is counted above names itself in the shared phrase
+                        by_ = with_checks and not n_ and words.get("validationProblemSharedBy")
+                        t_ += (" and " if t_ else "") + bind(words["validationProblemSharedBy" if by_ else "validationProblemShared"], {
+                            "rows": f"{fmt_n(srows_)} {unit_noun(check_, kind_, srows_)}", "count": fmt_n(sn_),
+                            "noun": "object" if sn_ == 1 else "objects", "title": title_of(check_)})
+                        if by_:
+                            parts_.append(t_)
+                            continue
                 else:
                     t_ = f"{fmt_n(n_)} {unit_noun(check_, kind_, n_)}"
                 parts_.append(bind(words["validationProblemInCheck"], {"count": t_, "title": title_of(check_)})
@@ -5976,9 +6005,21 @@ def build_prediction(ctx: dict) -> dict:
                      and effect_pair(rk[4], ((patched_rows.get(rk) or {}).get("row") or {}).get("other")))
             return bind(words["newByCheckEffect"], {"count": fmt_n(n_)}) if n_ and words.get("newByCheckEffect") else ""
 
+        # (ninth review, BPT 79) a check's new objects already counted under another check are said as the same objects
+        owners_all_ = problem_owners(problems)
+
+        def same_note(c):
+            sh_ = collections.Counter(owners_all_[str(rk[4])] for rk in problems if rk[0] == c and c in by_object
+                                      and owners_all_.get(str(rk[4]), c) != c)
+            if not sh_ or not words.get("newByCheckSameObjects"):
+                return None
+            n_ = sum(sh_.values())
+            all_ = n_ == sum(1 for rk in problems if rk[0] == c)
+            return bind(words["newByCheckSameObjects"][0 if not all_ else 1 if n_ == 1 else 2], {
+                "count": fmt_n(n_), "titles": and_list([f'"{title_of(c2_)}"' for c2_ in sorted(sh_, key=title_of)])})
         new_by_check = [{"title": title_of(c), "count": sum(1 for rk in problems if rk[0] == c),
-                         "objectsNote": "; ".join(x_ for x_ in (split_note(c) or objects_note(c), new_effect(c), new_in_game(c))
-                                                  if x_) or None,
+                         "objectsNote": "; ".join(x_ for x_ in (same_note(c), split_note(c) or objects_note(c), new_effect(c),
+                                                                new_in_game(c)) if x_) or None,
                          "masterNote": (bind(words["newByCheckOwnMaster"], {"count": fmt_n(problem_master[c])})
                                         if problem_master.get(c) else None),
                          "findingIds": [x for x in dict.fromkeys(fids) if x]}
@@ -6306,7 +6347,9 @@ def build_prediction(ctx: dict) -> dict:
                           e["checkId"] for e in judged if e["kind"] != "LOST-EDIT" and outcome.get(id(e)) == "resolved"
                           and ((ctx.get("comparisonState") or {}).get((e["checkId"], diff_arm)) or {}).get("refused"))),
                       "falseAlarms": None,
-                      "patchProblems": len(problems),
+                      "patchProblems": len(problems) - sum(
+                          1 for rk in problems if rk[0] in by_object
+                          and problem_owners(problems).get(str(rk[4]), rk[0]) != rk[0]),
                       "notNewWithPatch": len(not_new), "notNewSentence": not_new_sentence,
                       "patchChoices": choices,
                       "notMeasured": len(not_measured), "blindSpots": blind, "noLongerFound": ct_, "sentences": sentences,
