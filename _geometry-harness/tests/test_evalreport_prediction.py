@@ -8653,6 +8653,88 @@ def main():
                      ("round2/C1163-master-alone-is-not-scope", c1163_master_alone_is_not_scope)]:
         cell(name, fn)
 
+    # ---------------------------------------------------------------- after the eighth review (2026-10-23)
+    # A comparison that refused its verdict (the share it could not judge rose), whose emit still re-measured each
+    # predicted row in the setup with the patch: three predicted support clashes, one measured Gone, one Holds, one with
+    # no re-measure.
+    def refused_measured_bundle():
+        pair = [row("CONTACT", MOD_B, MOD_A, f"00C17{i}:{MOD_A}", other=f"00D17{i}:{MOD_B}") for i in (1, 2, 3)]
+        preds = [{"Kind": "CONTACT", "A": MOD_B, "B": MOD_A, "FormKey": f"00C17{i}:{MOD_A}", "Other": f"00D17{i}:{MOD_B}",
+                  "Physical": p_} for i, p_ in ((1, "Gone"), (2, "Holds"))]
+        order = {"with-patch": {"contactprobe": dict(verdict="DIFFERENTIAL-UNJUDGED", repaired=1, reclassified=0,
+                                                     created=0, newDefect=0, attributed=0, unmeasured=0)}}
+        log = ("   repaired     : 1 record(s)\n   ! REFUSED: dependent-host pairs: unjudgeable 8.33% -> 23.47% "
+               "(313 of 3,757 -> 1,461 of 6,226) — rose by more than 1.00%\n")
+        return compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): pair, (CONTACT, "with-patch"): [pair[1]]},
+                                  [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                  predicates={(CONTACT, "with-patch"): preds},
+                                  missing=[(CONTACT, "with-patch", "completed", "diff")],
+                                  diff_logs={(CONTACT, "with-patch"): log})
+
+    # C1177 (eighth review, Snazzy 13 / 75): each row is judged by its own re-measure whatever the comparison's verdict:
+    # Gone is resolved, Holds is left, and only the row with no re-measure cannot be told ("could not be measured: 1").
+    def c1177_refused_comparison_rows_judged_by_remeasure():
+        plan, md, _ = get("refused-measured", refused_measured_bundle)
+        val = reader(plan).get("validation") or {}
+        w = sorted(str(e.get("withPatch")) for e in (reader(plan).get("prediction") or {}).get("record") or []
+                   if e.get("checkId") == CONTACT and e.get("admission") == "admitted")
+        cant = re.search(r"could not be measured: (\d+)", md)
+        return (w == ["cannot-tell", "left", "resolved"] and val.get("cannotTell") == 1
+                and cant is not None and cant.group(1) == "1" and "cannot tell 3" not in md), \
+            f"{w}; cannotTell {val.get('cannotTell')}; {cant.group(0) if cant else None}"
+
+    # C1178 (eighth review, Snazzy 150): the refused comparison's own line no longer says it reports no repair where
+    # predicted clashes were re-measured gone; it gives that count beside the refusal.
+    def c1178_refused_line_gives_measured_gone():
+        plan, md, _ = get("refused-measured", refused_measured_bundle)
+        ln = next((x for x in md.splitlines() if "refused a verdict" in x and "rose from 8.33% to 23.47%" in x
+                   and x.startswith("- ") and not x.startswith("- **") and " — " in x), "")
+        return (bool(ln) and "no repair" not in ln and re.search(r"\b1 predicted clash[^.;]* gone", ln) is not None), ln[:400]
+
+    # C1179 (eighth review, BPT 77 / Snazzy 70): "undone" is the patch putting back the value the mod's change replaced.
+    # R1: the patch sets a value of its own over ModA's change (neither ModA's nor the base game's): never counted as
+    # undone, said as the patch's own value. R2: the patch puts back the base game's value over ModB's change: undone,
+    # and the line says what undone means.
+    def c1179_patch_own_value_not_undone():
+        R0, R1, R2 = f"00C079:{BASE}", f"00C179:{BASE}", f"00C279:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, R0, "LocationReference", "a0", "b0", "v0")]
+        w_rows = [lost_row(MOD_A, PATCH, R1, "Primitive", ["Primitive.Bounds=2,2,2"], ["Primitive.Bounds=3,3,3"],
+                           ["Primitive.Bounds=1,1,1"], before=BASE),
+                  lost_row(MOD_B, PATCH, R2, "Primitive", ["Primitive.Bounds=5,5,5"], ["Primitive.Bounds=4,4,4"],
+                           ["Primitive.Bounds=4,4,4"], before=BASE)]
+        w_ch = [(R1, "PlacedObject", [(BASE, {"Primitive.Bounds": "1,1,1"}), (MOD_A, {"Primitive.Bounds": "2,2,2"}),
+                                      (PATCH, {"Primitive.Bounds": "3,3,3"})]),
+                (R2, "PlacedObject", [(BASE, {"Primitive.Bounds": "4,4,4"}), (MOD_B, {"Primitive.Bounds": "5,5,5"}),
+                                      (PATCH, {"Primitive.Bounds": "4,4,4"})])]
+        plan, md, _ = core_bundle(p_rows, w_rows, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]},
+                                  targets=(MOD_A, MOD_B))
+        un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
+        own_ln = next((x for x in md.splitlines() if x.startswith("- ") and "own value" in x and R1 in x), "")
+        return (": 1 record field" in un and MOD_B in un and MOD_A not in un and "put back" in un
+                and MOD_A in own_ln), f"undone {un[:300]!r}; own {own_ln[:300]!r}"
+
+    # C1181 (eighth review, BPT 77, 0EB5B2): a value the patch puts back on an object its own version sets off for good
+    # (enabled opposite to the player) has no effect in game while the object is off: the undone line says so.
+    def c1181_put_back_on_object_patch_sets_off():
+        R0, R4 = f"00C081:{BASE}", f"00C181:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, R0, "LocationReference", "a0", "b0", "v0")]
+        w_rows = [lost_row(MOD_B, PATCH, R4, "Primitive", ["Primitive.Bounds=5,5,5"], ["Primitive.Bounds=4,4,4"],
+                           ["Primitive.Bounds=4,4,4"], before=BASE)]
+        b_, m_ = {**offs(0), "Primitive.Bounds": "4,4,4"}, {**offs(0), "Primitive.Bounds": "5,5,5"}
+        pt_ = {**offs(0, "0", "000014:Skyrim.esm"), "Primitive.Bounds": "4,4,4"}
+        w_ch = [(R4, "PlacedObject", [(BASE, b_), (MOD_B, m_), (PATCH, pt_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]},
+                                  targets=(MOD_A, MOD_B))
+        un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
+        return (re.search(r"1 [^;]*sets? off for good", un) is not None), un[:400]
+
+    for name, fn in [("eighth-review/C1177-refused-comparison-rows-judged-by-remeasure",
+                      c1177_refused_comparison_rows_judged_by_remeasure),
+                     ("eighth-review/C1178-refused-line-gives-measured-gone", c1178_refused_line_gives_measured_gone),
+                     ("eighth-review/C1179-patch-own-value-not-undone", c1179_patch_own_value_not_undone),
+                     ("eighth-review/C1181-put-back-on-object-patch-sets-off", c1181_put_back_on_object_patch_sets_off)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
