@@ -8995,9 +8995,9 @@ def main():
         rows_ = [row("EMPTY-SPACE", MOD_B, MOD_A, F1, other=H1), row("EMPTY-SPACE", MOD_B, MOD_A, F2, other=H2)]
         refs = {F1: {"base": f"0B0F87:{MOD_A}"}, F2: {"base": f"0B0F87:{MOD_A}"}, H1: {"base": f"0B0B87:{BASE}"},
                 H2: {"base": f"0B0W87:{BASE}"}}
-        bases = {f"0B0F87:{MOD_A}": {"type": "Static", "editorId": "WeaponRack", "model": "Clutter\Rack.nif"},
-                 f"0B0B87:{BASE}": {"type": "Static", "editorId": "BarrelStatic", "model": "Clutter\Barrel02.nif"},
-                 f"0B0W87:{BASE}": {"type": "Static", "editorId": "FarmWall", "model": "Architecture\Farmhouse\Wall01.nif"}}
+        bases = {f"0B0F87:{MOD_A}": {"type": "Static", "editorId": "WeaponRack", "model": "Clutter/Rack.nif"},
+                 f"0B0B87:{BASE}": {"type": "Static", "editorId": "BarrelStatic", "model": "Clutter/Barrel02.nif"},
+                 f"0B0W87:{BASE}": {"type": "Static", "editorId": "FarmWall", "model": "Architecture/Farmhouse/Wall01.nif"}}
         res = {(FIXTURE, "without-patch"): rows_, (FIXTURE, "baseline"): []}
         plan, md, _ = compile_and_render(WP_ARMS, res, [MOD_A], patches=[PATCH], names={"refs": refs, "bases": bases})
         it = next((g for g in (reader(plan).get("prediction") or {}).get("items") or [] if g.get("checkId") == FIXTURE), {})

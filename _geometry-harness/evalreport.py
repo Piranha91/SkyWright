@@ -2665,6 +2665,7 @@ def build_prediction(ctx: dict) -> dict:
         if rk[1] != "LOST-EDIT" and hit["row"].get("other"):
             g.setdefault("_partners", []).extend(o_ for o_ in [str(rk[4])] + [str(x_) for x_ in hit["row"]["other"]]
                                                  if o_.split(":", 1)[-1].lower() not in pt_lower)
+            g.setdefault("_hosts", []).append(str(hit["row"]["other"][0]))     # (eighth review) each row's named host
         if rk[1] != "LOST-EDIT" and hit["row"].get("other"):
             # the objects by name (Missives review 6) and whether every row is against one object (BPT review S6)
             o0_ = str(hit["row"]["other"][0])
@@ -2942,6 +2943,18 @@ def build_prediction(ctx: dict) -> dict:
     for g in groups.values():
         g["title"] = title_of(g["checkId"])
         g["inGame"] = in_game.get(f"{g['checkId']}|{g['kind']}") or in_game.get(g["checkId"])
+        # (eighth review, Winterhold 19) a fixture's named host whose model is no building piece (skill data: the folders
+        # of floors and walls) is no floor or wall: the item says the host's kind, with how many rows and an example
+        fh_ = words.get("fixtureHosts") or {}
+        if g["checkId"] in (fh_.get("checks") or []) and fh_.get("structuralModelPattern") and fh_.get("inGameOther"):
+            st_re_ = re.compile(fh_["structuralModelPattern"], re.I)
+            hb_ = [(h_, name_bases.get((name_refs.get(h_) or {}).get("base") or "") or {}) for h_ in g.get("_hosts") or []]
+            non_ = [(h_, b_) for h_, b_ in hb_ if b_.get("model") and not st_re_.search(str(b_["model"]).replace("\\", "/"))]
+            if non_:
+                g["inGame"] = bind(fh_["inGameOther"], {
+                    "count": fmt_n(len(non_)), "total": fmt_n(len(hb_)),
+                    "example": named(non_[0][0])})
+        g.pop("_hosts", None)
         ph = phrases.get(g["kind"]) or {}
         noun = (ph.get("unitSingular") if g["count"] == 1 else ph.get("unitPlural")) or ("clash" if g["count"] == 1 else "clashes")
         attr_key, replaced_ = g["attribution"], 0
