@@ -3427,6 +3427,22 @@ def build_prediction(ctx: dict) -> dict:
                     if enc_ and len(objs_) == 1 and (g.get("_rowOthers") or {}).get(objs_[0]):
                         objs_ = [(g.get("_rowOthers") or {})[objs_[0]]]
                         dm_ = enc_
+                    # (eighth review, Sewers 27) a direction the check did not find, settled by the plugin files: the
+                    # object's enable parent is the switch, not opposite, and the switch starts enabled with no parent
+                    # of its own, so an object that leaves with the flip is there from load until the switch turns off
+                    sw_ref_ = re.match(r"^[^@]*@([0-9A-Fa-f]{6}:\S+)@Unknown$", row_kinds_[0][0]) if unknown_ and row_kinds_ else None
+                    if (sw_ref_ and len(objs_) == 1 and not enc_ and re.search(r"\] leaves\b", sm_)
+                            and st_words.get("lineFromLoad")):
+                        ch_ = plugin_record(objs_[0].split(":", 1)[1], "placementFull", objs_[0]) or {}
+                        par_ = plugin_record(sw_ref_.group(1).split(":", 1)[1], "placementFull", sw_ref_.group(1)) or {}
+                        ep_ = ch_.get("enableParent") or []
+                        if (ep_ and str(ep_[0]).lower() == sw_ref_.group(1).lower() and not ep_[1]
+                                and not ch_.get("initiallyDisabled") and par_ and not par_.get("initiallyDisabled")
+                                and not par_.get("enableParent") and not par_.get("deleted")):
+                            line_ = st_words["lineFromLoad"]
+                            oth_ = (g.get("_rowOthers") or {}).get(objs_[0])
+                            if oth_ and (st_words.get("statesOwnOther") or {}).get(m_.group("state")):
+                                what_o_ = st_words["statesOwnOther"][m_.group("state")].replace("{other}", named(oth_))
                     g["inGame"] = bind(line_, {"switch": m_.group("switch"), "what": bind(what_o_ if what_o_ and len(ds_) <= 1
                                                                                         else what_, {
                         "depth": f"{dm_.group(1)} u" if dm_ else "", "object": named(objs_[0]) if objs_ else ""})})
