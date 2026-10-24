@@ -3211,7 +3211,10 @@ def build_prediction(ctx: dict) -> dict:
         n_dis_own = g.pop("_disablesOwn", 0)
         dis_of[id(g)] = n_dis                  # (third review, BPT S1) the headline carries the same count
         dis_own_of[id(g)] = n_dis_own
-        if n_dis and words.get("itemDisables"):
+        if n_dis and n_dis_own == n_dis and words.get("itemDisablesAllOwn"):
+            # every one the winner's own removal: said in one sentence (page budget)
+            detail.append(bind(words["itemDisablesAllOwn"], {"count": fmt_n(n_dis)}))
+        elif n_dis and words.get("itemDisables"):
             detail.append(bind(words["itemDisables"], {"count": fmt_n(n_dis)})
                           + (" " + bind(words["itemDisablesOwn"], {"count": fmt_n(n_dis_own),
                                                                    "lead": "All" if n_dis_own == n_dis else f"In {fmt_n(n_dis_own)}"})
@@ -8156,6 +8159,10 @@ def once_on_page(reader: dict, pr: dict) -> dict:
         xs = list(dict.fromkeys(f'"{x}"' for x in xs if x))
         return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
     once = []
+    if (reused and missing_look and titles(reused) == titles(missing_look) and conc.get("onceReusedInGameMissing")):
+        # the same checks both reused and without an in-game description: said in one sentence (page budget)
+        once.append(bind(conc["onceReusedInGameMissing"], {"titles": titles(reused)}))
+        reused, missing_look = [], []
     if reused and conc.get("onceReused"):
         once.append(bind(conc["onceReused"], {"titles": titles(reused)}))
     if missing_look and conc.get("onceInGameMissing"):

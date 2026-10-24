@@ -7949,7 +7949,7 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         scope = next((ln for ln in md.splitlines() if "outside what" in ln), "")
         # (seventh review round 2) one owner, said in the same terms everywhere: "one ThirdMod.esp made first"
-        return (f"{OTHER}'s value is one {THIRD} made first, which {OTHER} only carries" in it and OTHER not in scope), f"{it[-300:]} || {scope}"
+        return (f"{OTHER} only carries a value {THIRD} made first" in it and OTHER not in scope), f"{it[-300:]} || {scope}"
 
     for name, fn in [("sixth-review/C1116-carried-winner-value-named-by-owner", c1116_carried_winner_value_named_by_owner)]:
         cell(name, fn)
@@ -8472,7 +8472,7 @@ def main():
         E_, L_ = "Earlier.esp", "LaterSame.esp"
         it, st = owner_bundle([(BASE, "00"), (E_, "0B"), (MOD_A, "0A"), (L_, "0B")], MOD_A, L_,
                               {E_: [BASE], MOD_A: [BASE], L_: [BASE]})
-        return (f"{L_}'s value is one {E_} made first, which {L_} only carries" in it
+        return (f"{L_} only carries a value {E_} made first" in it
                 and f"{L_} changed the field itself" not in it and f"one {E_} made first" in st), f"{it[-400:]} || {st[:200]}"
 
     def c1165_others_carry_the_losers_value():
