@@ -5337,8 +5337,8 @@ def build_prediction(ctx: dict) -> dict:
                      # new problems in their units, an object of a by-object check with its pairs (BPT review S3)
                      bind(words["validationPatchProblems"], {"patch": patch, "count": problems_text(), "undone": ""})]
         new_idx = len(sentences) - 1                   # the new-clashes sentence
-        # (fourth review, Sewers S3) which other mods the patches cover (their masters besides the base game and the
-        # evaluated mods): what is still there with a mod they do not cover is outside what they set out to fix
+        # (fourth review, Sewers S3; round 3) what is still there with a mod on records, navmeshes or objects no supplied
+        # patch edits, and what lies on ones a patch edits: what the records show, never what a patch sets out to do
         if masters is not None and open_ and words.get("validationPatchScope"):
             covered_ = list(dict.fromkeys(m_ for p_ in patch_names for m_ in (masters.get(str(p_).lower()) or [])
                                           if not is_base_game(m_, words) and str(m_).lower() not in pt_lower

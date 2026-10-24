@@ -7069,8 +7069,9 @@ def main():
                                                                    PATCH: [BASE, OTHER, MOD_A]})
         val = reader(plan).get("validation") or {}
         txt = " ".join(val.get("sentences") or [])
-        ln = next((x for x in (val.get("sentences") or []) if "masters" in x), "")
-        return (OTHER in ln and O2 in ln and "outside" in ln), ln[:400] or txt[:300]
+        # (round 3) the scope line says what the records show, not the patch's intent or its masters
+        ln = next((x for x in (val.get("sentences") or []) if "supplied patch edit" in x), "")
+        return (O2 in ln and "lies on records, navmeshes or objects that no supplied patch edits" in ln), ln[:400] or txt[:300]
 
     # C1060 (Sewers S5): a clash set aside because its object's base record was not read names that object (and the
     # place its row gives), so a modder can look at it.
@@ -7950,7 +7951,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
                                   masters={THIRD: [BASE], MOD_A: [BASE], OTHER: [BASE, THIRD], PATCH: [BASE, THIRD]})
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
-        scope = next((ln for ln in md.splitlines() if "outside what" in ln), "")
+        scope = next((ln for ln in md.splitlines() if "no supplied patch edits" in ln), "")
         # (seventh review round 2) one owner, said in the same terms everywhere: "one ThirdMod.esp made first"
         return (f"{OTHER} only carries a value {THIRD} made first" in it and OTHER not in scope), f"{it[-300:]} || {scope}"
 
@@ -8415,18 +8416,18 @@ def main():
         plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rs_, (OVERLAP, "without-patch"): rs_},
                                          [MOD_A], patches=[PATCH], masters={OTHER: [BASE], O2: [BASE], MOD_A: [BASE],
                                                                             PATCH: [BASE, OTHER, MOD_A]})
-        return next((x for x in ((reader(plan).get("validation") or {}).get("sentences") or []) if "masters" in x), "")
+        return next((x for x in ((reader(plan).get("validation") or {}).get("sentences") or []) if "supplied patch edit" in x), "")
 
     def c1157_scope_line_says_inside_left():
         # (round 2, Clockwork 77) inside only where the patch edits the pair's object
         ln = scope_bundle(True)
-        return (f"still there with {OTHER} (1 overlap pair) is inside what it sets out to fix" in ln), ln[:500]
+        return (f"still there with {OTHER} (1 overlap pair) lies on records, navmeshes or objects a supplied patch edits" in ln), ln[:500]
 
     # C1163 (round 2, Clockwork line 77): the patch lists OtherMod.esp as a master but edits none of the pair's objects:
     # the remainder is outside what the patch sets out to fix, said with Neighbour.esp's, never inside.
     def c1163_master_alone_is_not_scope():
         ln = scope_bundle(False)
-        return ("is inside what" not in ln and f"still there with Neighbour.esp and {OTHER} is outside" in ln), ln[:500]
+        return ("lies on records, navmeshes or objects a supplied patch edits" not in ln and f"still there with Neighbour.esp and {OTHER} lies on records, navmeshes or objects that no supplied patch edits" in ln), ln[:500]
 
     for name, fn in [("seventh-review/C1160-lost-value-named-by-editor-id", c1160_lost_value_named_by_editor_id),
                      ("seventh-review/C1157-scope-line-says-inside-left", c1157_scope_line_says_inside_left),
@@ -8536,15 +8537,22 @@ def main():
         plan, md, _ = core_bundle([r_], [r_], arms=arms, p_chains=ch_, w_chains=ch_,
                                   masters={MOD_A: [BASE], L_: [BASE], PATCH: [BASE, L_]})
         val_ = (reader(plan).get("validation") or {}).get("sentences") or []
-        sc_ = [x for x in val_ if "out to fix" in x]
-        return (val_ != [] and not any("the base game is outside" in x for x in sc_)), " | ".join(sc_)[:500] or "no scope line"
+        sc_ = [x for x in val_ if "supplied patch edit" in x or "out to fix" in x]
+        return (val_ != [] and not any("the base game" in x.split("still there with", 1)[-1] for x in sc_)), " | ".join(sc_)[:500] or "no scope line"
 
     # C1169 (round 2, regen-r7c BPT line 75): OtherMod.esp has one pair the patch edits and one it does not: the scope line
     # names OtherMod.esp outside with the count of the part outside, beside the part inside, never the bare name in both.
     def c1169_mod_on_both_sides_says_each_part():
         ln = scope_bundle(True, second_other=True)
-        return (re.search(re.escape(OTHER) + r" \(1 overlap pair\)[^.]* is outside what", ln) is not None
-                and f"still there with {OTHER} (1 overlap pair) is inside what" in ln), ln[:600]
+        return (f"{OTHER} (1 overlap pair) lies on records, navmeshes or objects that no supplied patch edits" in ln
+                and f"still there with {OTHER} (1 overlap pair) lies on records, navmeshes or objects a supplied patch edits" in ln), ln[:600]
+
+    # C1171 (round 3, BPT 75, Clockwork 77, Missives 75, Sewers 74): the scope line says only what the records show:
+    # which leftovers lie on records, navmeshes or objects no supplied patch edits; never what a patch sets out to do.
+    def c1171_scope_line_says_records_not_intent():
+        ln = scope_bundle(True)
+        return (ln != "" and not re.search(r"set out|sets out|intend|job|masters", ln)
+                and "Neighbour.esp lies on records, navmeshes or objects that no supplied patch edits" in ln), ln[:500]
 
     for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
                      ("round2/C1167-patch-without-the-field-holds-no-later-change",
@@ -8552,7 +8560,8 @@ def main():
                      ("round2/C1165-others-carry-the-losers-value", c1165_others_carry_the_losers_value),
                      ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner),
                      ("round2/C1168-base-game-owner-is-not-outside-scope", c1168_base_game_owner_is_not_outside_scope),
-                     ("round2/C1169-mod-on-both-sides-says-each-part", c1169_mod_on_both_sides_says_each_part)]:
+                     ("round2/C1169-mod-on-both-sides-says-each-part", c1169_mod_on_both_sides_says_each_part),
+                     ("round3/C1171-scope-line-says-records-not-intent", c1171_scope_line_says_records_not_intent)]:
         cell(name, fn)
 
     for name, fn in [("round2/C1162-switch-off-either-object-counted", c1162_switch_off_either_object_counted),
