@@ -135,7 +135,8 @@ def tree_transcript(chains):
 def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unjudgeable=(), order=None,
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
-                diff_logs=None, states_not_explored=None, transcripts=None, masters=None, coverage_pops=None):
+                diff_logs=None, states_not_explored=None, transcripts=None, masters=None, coverage_pops=None,
+                single_run=()):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -157,7 +158,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     `count_only` names, written as `NN-request.jsonl` / `NN-response.jsonl` emits its receipt records.
     masters: {plugin: [its masters]} -- each emit's configuration lists every plugin of its setup with these master
     lists (none listed: no masters); False writes no configuration, as an emit that records no master lists.
-    missing rows may carry a fourth element, the part (default `arm`)."""
+    missing rows may carry a fourth element, the part (default `arm`).
+    single_run: check ids run once per setup, whose receipts record no part (`<check>__<arm>`, part null), as the
+    controller writes them for a check with no comparison step."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
 
@@ -178,8 +181,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
         plan["patches"] = list(patches)
     evidence, findings, nulls = [], [], []
     for n, ((check_id, arm_id), rows) in enumerate(sorted(results.items())):
-        rid = f"{check_id}__{arm_id}__arm"
-        receipt = {"receiptId": rid, "checkId": check_id, "armId": arm_id, "part": "arm", "schemaVersion": 1,
+        part_ = None if check_id in single_run else "arm"
+        rid = f"{check_id}__{arm_id}" + ("" if part_ is None else "__arm")
+        receipt = {"receiptId": rid, "checkId": check_id, "armId": arm_id, "part": part_, "schemaVersion": 1,
                    "exitCode": 0, "validation": {"accepted": True, "identityLimits": []},
                    "result": {"detector": "finding" if rows else "null", "findings": len(rows),
                               # coverage_pops: {(checkId, armId): [coverage lines]} replaces the one default line
@@ -201,10 +205,10 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
         evidence.append({"id": f"{2 * n + 1:016x}", "kind": "emit", "path": f"evidence/{rid}.json", "sha256": "1" * 64,
                          "checkId": check_id, "armId": arm_id, "recordedBy": rid, "strength": "geometric-measurement"})
         if rows:
-            findings.append({"checkId": check_id, "armId": arm_id, "part": "arm", "findings": len(rows),
+            findings.append({"checkId": check_id, "armId": arm_id, "part": part_, "findings": len(rows),
                              "verdict": None, "strength": "geometric-measurement"})
         else:
-            nulls.append({"checkId": check_id, "armId": arm_id, "part": "arm", "coverage": 1})
+            nulls.append({"checkId": check_id, "armId": arm_id, "part": part_, "coverage": 1})
     for n, ((check_id, arm_id), count) in enumerate(sorted(count_only.items()), start=len(results)):
         rid = f"{check_id}__{arm_id}__arm"
         receipt = {"receiptId": rid, "checkId": check_id, "armId": arm_id, "part": "arm", "schemaVersion": 1,
@@ -9270,7 +9274,8 @@ def main():
     def c1210_patch_wins_rows_relation_said():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
         ls = patch_wins_lines(md)
-        return any("2 rows linked, one per plugin pair" in x for x in ls), " || ".join(ls)[:600]   # page budget wording
+        # (round 3, review12 S1) a row is one record field in one plugin pair
+        return any("2 rows linked, one per record field and plugin pair" in x for x in ls), " || ".join(ls)[:600]
 
     # C1211 (round 2 item 7, Sewers 39): with one evaluated mod the other version is compared on every counted group,
     # those already there with the mod alone too, and a counted check that version did not measure is named.
@@ -9321,6 +9326,51 @@ def main():
         # (page budget) said with the rows' own count, in the set-aside line, so both counts read together
         ln = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
         return ("(the further results listed in the detail count one per check, plugin pair and setup)" in ln), ln[:400]
+
+    # C1214 (round 3 item 1, review12 S1): the linked rows include rows the line does not count (a field the losing
+    # plugin only carries, in a linked pair's finding); the line says how many of them it counts.
+    def c1214_patch_wins_rows_say_how_many_counted():
+        R1, R3 = f"00C214:{BASE}", f"00C314:{BASE}"
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B])]
+        a_ = lost_row(MOD_A, PATCH, R1, "Owner", "a", "p", "v", before=BASE)
+        b_ = lost_row(MOD_B, PATCH, R1, "Owner", "b", "p", "v", before=BASE)
+        c_ = lost_row(MOD_A, PATCH, R3, "Owner", "v", "p", "v", before=BASE)     # ModA only carries the base value
+        chains = [(R1, "PlacedObject", [(BASE, {"Owner": "v"}), (MOD_A, {"Owner": "a"}), (MOD_B, {"Owner": "b"}),
+                                        (PATCH, {"Owner": "p"})]),
+                  (R3, "PlacedObject", [(BASE, {"Owner": "v"}), (MOD_A, {"Owner": "v"}), (PATCH, {"Owner": "p"})])]
+        enr = {(RECORDS, "without-patch"): [lost_row(MOD_B, MOD_A, f"00C414:{BASE}", "Owner", "b", "a", "v")],
+               (RECORDS, "baseline"): [a_, b_, c_]}
+        plan, md, _ = compile_and_render(arms, {(CONTACT, a2_): [] for a2_ in ("baseline", "without-patch")},
+                                         [MOD_A, MOD_B], patches=[PATCH],
+                                         count_only={k: max(1, len(v)) for k, v in enr.items()}, enrichment=enr,
+                                         transcripts={(RECORDS, "baseline"): records_transcript(chains)},
+                                         masters={MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]})
+        ls = patch_wins_lines(md)
+        return any("3 rows linked, one per record field and plugin pair, 2 of them counted" in x and "1 more only carried"
+                   in x for x in ls), " || ".join(ls)[:600]
+
+    # C1215 (round 3 item 2, review12 S2): a check the other version ran once per setup (its receipt records no part)
+    # is read and compared like the others, never called not measured.
+    def c1215_also_variant_reads_single_run_checks():
+        X1, T_ = f"000X21:{MOD_A}", f"000T21:{OTHER}"
+        pair_ = row("OVERLAP", OTHER, MOD_A, X1, other=T_)
+        st_ = row("STATE-CONTACT@000S21:ModA.esp@Unknown", MOD_A, OTHER, f"000X25:{MOD_A}", label="Camp (ext)",
+                  other=f"000T25:{OTHER}")
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, OTHER, MOD_A]),
+                arm("without-other", [BASE, MOD_A])]
+        v_arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline", shas={MOD_A: "b" * 64})]
+        v_res = {(OVERLAP, "baseline"): [pair_], (STATE, "baseline"): []}
+        res = {(OVERLAP, "baseline"): [pair_], (OVERLAP, "without-patch"): [pair_], (OVERLAP, "without-other"): [],
+               (STATE, "baseline"): [st_], (STATE, "without-patch"): [st_], (STATE, "without-other"): []}
+        plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH],
+                                         also=[(v_arms, v_res, [MOD_A], {"single_run": (STATE,)})])
+        also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
+        return ("0 of the 1" in also_ and "between ModA.esp and OtherMod.esp" in also_
+                and "not measured with that version" not in also_.lower()), also_[-500:]
+
+    for name, fn in [("round3-8/C1214-patch-wins-rows-say-how-many-counted", c1214_patch_wins_rows_say_how_many_counted),
+                     ("round3-8/C1215-also-variant-reads-single-run-checks", c1215_also_variant_reads_single_run_checks)]:
+        cell(name, fn)
 
     for name, fn in [("round2-8/C1206-set-aside-unit-names-prediction-setup", c1206_set_aside_unit_names_prediction_setup),
                      ("round2-8/C1207-patch-wins-base-owned-loser-is-carried", c1207_patch_wins_base_owned_loser_is_carried),
