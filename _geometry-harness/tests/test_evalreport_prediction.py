@@ -9654,6 +9654,33 @@ def main():
     for name, fn in [("ninth-review/C1224-changes-entries-one-setup-unlabelled", c1224_changes_entries_one_setup_unlabelled)]:
         cell(name, fn)
 
+    # C1225 (Gate C, the own-layout rule's order): a fixture whose nearest floor or wall's box reaches it (0u) cannot be
+    # told to hang; it stays "cannot tell" even where one plugin's versions win for it and its removed host. The own-layout
+    # rule runs after the cannot-tell rule (the first ordering took 18 such Winterhold rows).
+    def c1225_cannot_tell_before_own_layout():
+        FX, HO = f"000C25:{BASE}", f"000C26:{BASE}"
+        dat = lambda z: ("DATA", struct.pack("<6f", 100.0, 200.0, z, 0.0, 0.0, 0.0))  # noqa: E731
+        fa_ = plugin_file_of(MOD_A, [BASE], [("REFR", 0x00000C25, [("NAME", struct.pack("<I", 0x101)), dat(256.0)], False),
+                                             ("REFR", 0x00000C26, [("NAME", struct.pack("<I", 0x102)), dat(-30000.0)], False)],
+                             group="CELL")
+        fb_ = plugin_file_of(MOD_B, [BASE], [("REFR", 0x00000C26, [("NAME", struct.pack("<I", 0x102)), dat(-30000.0)], False)],
+                             group="CELL")
+        fs_ = plugin_file_of(BASE, [], [("REFR", 0x00000C25 + i_, [("NAME", struct.pack("<I", 0x101)), dat(0.0)], False)
+                                        for i_ in range(2)], group="CELL")
+        arms_ = with_files([arm("baseline", [BASE, MOD_B, MOD_A], kind="baseline"), arm("without-a", [BASE, MOD_B]),
+                            arm("without-b", [BASE, MOD_A])], {MOD_A: fa_, MOD_B: fb_, BASE: fs_})
+        r_ = row("EMPTY-SPACE", MOD_A, MOD_B, FX, other=HO)
+        r_["Summary"] = (f"LeftInEmptySpace: Static Fx (fixed) in Cell (int); {MOD_B} removed or moved {HO}; its assembly "
+                         f"of 1 touches no floor or wall now (nearest floor or wall 0u)")
+        plan, md, _ = compile_and_render(arms_, {(FIXTURE, "baseline"): [r_], (FIXTURE, "without-a"): [],
+                                                 (FIXTURE, "without-b"): []}, [MOD_A, MOD_B])
+        adm = {e["formKey"]: e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
+               if e["checkId"] == FIXTURE}
+        return adm.get(FX) == "anchorUnclear", f"{adm}"
+
+    for name, fn in [("ninth-review/C1225-cannot-tell-before-own-layout", c1225_cannot_tell_before_own_layout)]:
+        cell(name, fn)
+
     for name, fn in [("ninth-review/C1221-fixture-own-layout-set-aside", c1221_fixture_own_layout_set_aside)]:
         cell(name, fn)
 
