@@ -8391,7 +8391,7 @@ def main():
                                                      "actual render surfaces: crossing; containment unassessed; 12 triangle pairs [mm]"],
                                             before=["crossing; 40 triangle pairs [mm]", "crossing; 3 triangle pairs [mm]"])
         ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
-        return ("Re-measured there with" in ln and "43 triangle pairs without the patch and 50 with it" in ln), ln[:400]
+        return ("Re-measured there with" in ln and "43 triangle pairs without it, 50 with it" in ln), ln[:400]
 
     # C1170 (round 3, Missives 73): one pair, 21 triangle pairs in its own row without the patch and 1 in its re-measure
     # with it; its partner's other rows (another pair of the same object, 1) never give the before figure.
@@ -8399,7 +8399,7 @@ def main():
         plan, md, X = placed_overlap_bundle(details=["crossing; 1 triangle pairs [mm]", "crossing; 1 triangle pairs [mm]"],
                                             before=["crossing; 21 triangle pairs [mm]", "crossing; 1 triangle pairs [mm]"])
         ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
-        return ("22 triangle pairs without the patch and 2 with it" in ln and "1 to 1" not in ln), ln[:400]
+        return ("22 triangle pairs without it, 2 with it" in ln and "1 to 1" not in ln), ln[:400]
 
     # C1157 (Clockwork S4): the patch lists OtherMod.esp as a master, and a clash with it is still there with the patch,
     # beside one with Neighbour.esp, which it does not list: the scope line says the OtherMod one is inside what the
@@ -8559,8 +8559,9 @@ def main():
                 and "Neighbour.esp lies on records, navmeshes or objects that no supplied patch edits" in ln), ln[:500]
 
     # C1172 (round 3, Winterhold 17): two records of one item; on R1 the winner only carries a value Earlier.esp made
-    # first, on R2 the winner's value is its own. The carried sentence names R1 as its example, and the item's other
-    # examples never follow it as if they were its own.
+    # first, on R2 the winner's value is its own. The item's examples (R1 and R2) come before the carried sentence, so
+    # they never read as its own; the sentence names no record of the other rows (the skill data's template may name one
+    # of its own, {example}; the page budget leaves it out).
     def c1172_carried_example_from_its_rows():
         E_, L_ = "Earlier.esp", "LaterWin.esp"
         R1, R2 = f"00CA70:{BASE}", f"00CA71:{BASE}"
@@ -8580,7 +8581,8 @@ def main():
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         s_ = next((x for x in re.split(r"(?<=\.) ", it) if "only carries a value" in x), "")
         nxt_ = it.split(s_, 1)[-1].lstrip()[:12] if s_ else ""
-        return (R1 in s_ and R2 not in s_ and not nxt_.startswith("For example")), f"{s_} || next: {nxt_} || {it[-500:]}"
+        return (s_ != "" and R2 not in s_ and not nxt_.startswith("For example")
+                and it.index("For example") < it.index(s_)), f"{s_} || next: {nxt_} || {it[-500:]}"
 
     # C1173 (round 3, BPT 15 / 71 / 85 / 88): both mods' changes are lost to the patch, whose value is the base game's
     # (the record's own value, put back): said as the base game's value put back, never as the patch's own value.
