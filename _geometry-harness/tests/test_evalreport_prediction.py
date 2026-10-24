@@ -6290,21 +6290,25 @@ def main():
     # C985, C986 (round 2, R2: Missives review S1, Snazzy review S2): the earlier clashes a patch also fixes are counted as
     # distinct changes in game: one field lost by two plugins is one; a Grid change only in bytes the game does not read
     # is none. Where the patch has no such field at all, the clash is said as the patch removing it, not as a fix.
-    def earlier_fix_bundle(patch_has_field, whole=False, o2_carries=False, fourth=False, base_value=False):
+    def earlier_fix_bundle(patch_has_field, whole=False, o2_carries=False, fourth=False, base_value=False,
+                           later_carries=False):
         """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight's cell data 05, ModA 09, the patch 05. Removal:
         OtherMod and Neighbour have no MaxHeight, ModA has 09, the patch has none. Without ModA both lose to Later.esp too (already
         there). A Grid row differing only in unused bytes is lost the same way and fixed too. fourth: Fourth.esp, after
         Neighbour, carries OtherMod's value too (built with OtherMod as a master)."""
         O2, O3 = "Neighbour.esp", "Later.esp"
         O4s = ["Fourth.esp"] if fourth else []
+        # later_carries (eighth review): Walls.esp, before Later.esp, makes the 07 change; Later.esp only carries it
+        O5s = ["Walls.esp"] if later_carries else []
         W1, C2 = f"00C985:{BASE}", f"00C986:{BASE}"
-        arms_ = [arm("baseline", [BASE, OTHER, O2, *O4s, O3, MOD_A, PATCH], kind="baseline"),
-                 arm("without-patch", [BASE, OTHER, O2, *O4s, O3, MOD_A]), arm("without-a", [BASE, OTHER, O2, *O4s, O3])]
+        arms_ = [arm("baseline", [BASE, OTHER, O2, *O4s, *O5s, O3, MOD_A, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, OTHER, O2, *O4s, *O5s, O3, MOD_A]),
+                 arm("without-a", [BASE, OTHER, O2, *O4s, *O5s, O3])]
         mh_ = lambda x: {"MaxHeight.CellData": x, "MaxHeight.Offset": "0"} if x else {}  # noqa: E731
         # base_value (round 3): the earlier losers and the patch hold the base game's own value, 00
         lose_ = ("00" if base_value else "05") if patch_has_field else None
         chain_ = [(BASE, mh_("00")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), *[(x_, mh_(lose_)) for x_ in O4s],
-                  (O3, mh_("07")), (MOD_A, mh_("09"))]
+                  *[(x_, mh_("07")) for x_ in O5s], (O3, mh_("07")), (MOD_A, mh_("09"))]
         p_ch = [(W1, "Worldspace", chain_)]
         # a tree answer writes the field the patch lacks as the import captures it ("has X ABSENT", "has no X")
         w_ch = [(W1, "Worldspace", chain_ + [(PATCH, mh_(lose_) if patch_has_field else {
@@ -6334,7 +6338,8 @@ def main():
         plan, md, _ = compile_and_render(arms_, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch", "without-a")},
                                          [MOD_A], patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
                                          enrichment=enr, transcripts=tr, masters={**MASTERS_, O2: [BASE, OTHER] if o2_carries
-                                                                                  else [BASE], O3: [BASE], PATCH: [BASE],
+                                                                                  else [BASE],
+                                                   O3: [BASE, *O5s], PATCH: [BASE], **{x_: [BASE] for x_ in O5s},
                                                    **{x_: [BASE, OTHER] for x_ in O4s}})
         if whole:
             return md
@@ -8634,8 +8639,12 @@ def main():
     # C1174 (round 3, BPT 78): an earlier loss whose lost value is the base game's own, which the patch holds: said as
     # the base game's value the patch puts back, never as "the base game's change" lost to the later plugin.
     def c1174_earlier_base_value_put_back():
-        ln = earlier_fix_bundle(True, base_value=True)
-        return ("the base game's change" not in ln and "the base game's value, put back over Later.esp's" in ln), ln[:500]
+        md_ = earlier_fix_bundle(True, base_value=True, whole=True)
+        # (eighth review, BPT 78) putting the base game's value back over Later.esp's own change undoes that change: said
+        # in the undone family, never as an earlier clash the patch fixes
+        un_ = next((x for x in md_.splitlines() if x.startswith("- Undone by") and "already so without" in x), "")
+        return ("the base game's change" not in md_ and "Later.esp's change" in un_
+                and "also fix" not in md_), un_[:500]
 
     for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
                      ("round2/C1167-patch-without-the-field-holds-no-later-change",
@@ -8729,6 +8738,19 @@ def main():
                                   targets=(MOD_A, MOD_B))
         un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
         return (re.search(r"1 [^;]*sets? off for good", un) is not None), un[:400]
+
+    # C1180 (eighth review, BPT 78): an earlier loss whose lost value is the base game's own, where the value it loses to
+    # without the evaluated mods is another plugin's change (Walls.esp's, which Later.esp only carries): the patch putting
+    # the base game's value back undoes that change. Said neutrally in the undone family, naming whose change it is and
+    # who carries it, never as an earlier clash the patch also fixes.
+    def c1180_base_put_back_over_carried_change():
+        md_ = earlier_fix_bundle(True, base_value=True, whole=True, later_carries=True)
+        un_ = next((x for x in md_.splitlines() if x.startswith("- Undone by") and "already so without" in x), "")
+        return ("Walls.esp's change, which Later.esp carries" in un_ and "also fix" not in md_
+                and "Whether that is intended is not recorded" in un_), un_[:500] or md_[-1500:]
+
+    for name, fn in [("eighth-review/C1180-base-put-back-over-carried-change", c1180_base_put_back_over_carried_change)]:
+        cell(name, fn)
 
     for name, fn in [("eighth-review/C1177-refused-comparison-rows-judged-by-remeasure",
                       c1177_refused_comparison_rows_judged_by_remeasure),
