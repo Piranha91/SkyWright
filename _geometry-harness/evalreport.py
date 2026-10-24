@@ -8579,7 +8579,15 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         placed_seen_.add(str(f.get("checkId")))
         ph_ = ((pr.get("reader") or {}).get("kindPhrases") or {}).get(next((e_["kind"] for e_ in pred_.get("record") or []
                                                                             if e_.get("checkId") == f.get("checkId")), ""), {})
+        # (eighth review, Winterhold 88 / 145) with two evaluated mods, how many the top counts and how many were already
+        # there with one mod alone, so the note reconciles with the patch comparison's count
+        alone_ = collections.Counter((e_["A"], e_["B"]) for e_ in pred_.get("record") or []
+                                     if e_.get("checkId") == f.get("checkId") and e_.get("withPatch") == "patchPlaced"
+                                     and len(pred_.get("mods") or []) > 1 and e_.get("attribution") == "single-mod")
         parts_ = [f"{fmt_n(n_)} {('pair' if n_ == 1 else 'pairs') if not ph_ else (ph_.get('unitSingular') if n_ == 1 else ph_.get('unitPlural'))} between {a_} and {b_}"
+                  + (bind(conc.get("detailPatchPlacedSplit") or "", {"counted": fmt_n(n_ - alone_[(a_, b_)]),
+                                                                    "alone": fmt_n(alone_[(a_, b_)])})
+                     if alone_.get((a_, b_)) else "")
                   for (a_, b_), n_ in by_.items()]
         return bind(conc["detailPatchPlaced"], {"parts": "; ".join(parts_)})
 
