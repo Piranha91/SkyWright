@@ -4174,7 +4174,9 @@ def build_prediction(ctx: dict) -> dict:
     # one counts only its other objects and says how many it shares
     # (round 2, Snazzy B2) every entry counted before holds its objects: a record entry its records, a pair check both
     # objects of each pair, a by-object check its objects; the shared ones are all of them, by construction
-    seen_objects = set()
+    # (eighth review, Snazzy 14) each object with the entry that counted it first, so a later entry names, per object,
+    # where it is counted
+    seen_objects = {}
     for i, e in enumerate(verdict_counts):
         rows_of, held_ = collections.Counter(), set()
         for g in counted:
@@ -4182,11 +4184,14 @@ def build_prediction(ctx: dict) -> dict:
                 rows_of.update(subject_rows_of[id(g)])
                 held_ |= pair_objects_of.get(id(g)) or set()
         if e["checkId"] not in by_object:
-            seen_objects |= {str(x) for x in rows_of if isinstance(x, str)} | {str(x) for x in held_}
+            for x_ in [str(x) for x in rows_of if isinstance(x, str)] + [str(x) for x in held_]:
+                seen_objects.setdefault(x_, title_of(e["checkId"]))
             continue
         subj = set(rows_of)
-        shared_objects = subj & seen_objects
-        seen_objects |= subj
+        shared_objects = subj & set(seen_objects)
+        shared_with_ = collections.Counter(seen_objects[o_] for o_ in shared_objects)
+        for x_ in subj:
+            seen_objects.setdefault(x_, title_of(e["checkId"]))
         if not shared_objects:
             continue
         shared = len(shared_objects)
@@ -4204,7 +4209,8 @@ def build_prediction(ctx: dict) -> dict:
                       sorted(str(x) for x in shared_objects)[:3]) + (", ..." if shared > 3 else "")}) if new else
                   bind(words["verdictSameObjects"][0 if shared == 1 else 1], {
                       "count": fmt_n(shared), "title": title_of(e["checkId"])}))
-        verdict_counts[i] = {**e, "count": total, "newObjects": new, "sharedObjects": shared, "phrase": phrase}
+        verdict_counts[i] = {**e, "count": total, "newObjects": new, "sharedObjects": shared, "phrase": phrase,
+                             "sharedWith": dict(shared_with_)}
     unseparated = stated(counts["notSeparable"]) if multi else []
     checks_on_p = sorted({c for (c, a) in measured if a == p_of(c)})
     if verdict_counts:
@@ -5368,15 +5374,16 @@ def build_prediction(ctx: dict) -> dict:
         # counted once there in the comparison too: said beside the others, never added
         shared_kinds = {}
         for i_, v_ in enumerate(prediction.get("verdictCounts") or []):
-            if v_.get("sharedObjects") and not v_.get("newObjects"):
-                first_ = next((w_ for w_ in (prediction.get("verdictCounts") or [])[:i_] if w_["checkId"] in by_object), None)
-                if first_ is not None:
-                    shared_kinds[(v_["checkId"], v_["kind"])] = title_of(first_["checkId"])
+            if v_.get("sharedObjects") and not v_.get("newObjects") and v_.get("sharedWith"):
+                # (eighth review, Snazzy 14) each earlier entry that counted some of its objects, with how many
+                sw_ = v_["sharedWith"]
+                shared_kinds[(v_["checkId"], v_["kind"])] = (f'"{next(iter(sw_))}"' if len(sw_) == 1 else and_list(
+                    [f'"{t_}" ({fmt_n(n_)})' for t_, n_ in sorted(sw_.items(), key=lambda kv: -kv[1])]))
 
         def shared_note(xs):
             c_ = collections.Counter((e["checkId"], e["kind"]) for e in xs if (e["checkId"], e["kind"]) in shared_kinds)
             return "".join(bind(words["byUnitSameObjects"], {"count": fmt_n(n_), "noun": unit_noun(k_[0], k_[1], n_),
-                                                           "title": shared_kinds[k_]})
+                                                           "titles": shared_kinds[k_]})
                            for k_, n_ in c_.items() if words.get("byUnitSameObjects"))
 
         def by_unit(xs, named=False):
@@ -5912,7 +5919,7 @@ def build_prediction(ctx: dict) -> dict:
             kind_lines.append(bind(words["withPatchKindLine"], {
                 "title": title_of(check_id), "total": fmt_n(total), "unit": unit_noun(check_id, kind, total)
                 + (", " + bind(words["stillThereEffect"], {"count": fmt_n(eff_t_)}) if eff_t_ and words.get("stillThereEffect") else "")
-                + (bind(words["kindLineSameObjects"], {"title": shared_kinds[(check_id, kind)]})
+                + (bind(words["kindLineSameObjects"], {"titles": shared_kinds[(check_id, kind)]})
                    if (check_id, kind) in shared_kinds and words.get("kindLineSameObjects") else ""),
                 "outcomes": outcome_text({**agg, "switchedBy": dict(sw_by), "keptBy": kp_by,
                                          "offKeptBy": ok_by, "offKeptObjs": ob_by})}))
