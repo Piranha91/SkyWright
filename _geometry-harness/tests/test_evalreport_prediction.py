@@ -9988,20 +9988,30 @@ def main():
     for name, fn in [("tenth-review/C1238-inside-something-else-not-named", c1238_inside_something_else_not_named)]:
         cell(name, fn)
 
-    # C1236 (Missives S1): the patch-wins detail line names the rows it counts (record, field, and whose value is lost to
-    # which patch), so its count can be found; here OtherMod's Owner of 00C362, lost to the patch, is the one counted.
+    # C1236 (Missives S1): a patch-wins row of the detail line that is counted but holds no predicted clash, because the
+    # same loss is already there without the evaluated mods (the prediction sets it aside so), is named on the line with
+    # that, so its count can be found and is not read as a loss the patch makes. OtherMod's Owner of 00C362 is lost to
+    # ModA in the measured order and to ModB without ModA (already there); with the patch it is lost to the patch.
     def c1236_patch_wins_counted_rows_named():
         G9, O9 = f"00C361:{BASE}", f"00C362:{BASE}"
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, MOD_B, MOD_A]), arm("without-a", [BASE, OTHER, MOD_B])]
         p_rows = [lost_row(OTHER, MOD_A, O9, "Owner", "o", "a", "v")]
+        n_rows = [lost_row(OTHER, MOD_B, O9, "Owner", "o", "b", "v")]
         w_rows = [lost_row(MOD_B, PATCH, G9, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"]),
                   lost_row(OTHER, PATCH, O9, "Owner", "o", "p", "v")]
-        for r_ in p_rows + w_rows:
+        for r_ in p_rows + n_rows + w_rows:
             r_["Summary"] = r_["Summary"].replace("PlacedObject", "Cell")
-        plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
+        enr = {(CELLATTR, "without-patch"): p_rows, (CELLATTR, "without-a"): n_rows, (CELLATTR, "baseline"): w_rows}
+        results = {(CONTACT, a_): [] for a_ in ("baseline", "without-patch", "without-a")}
+        plan, md, _ = compile_and_render(arms, results, [MOD_A], patches=[PATCH], enrichment=enr,
+                                         count_only={k: max(1, len(v)) for k, v in enr.items()})
+        adm = [e["admission"] for e in rec_of(plan, O9)]
         ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
-        ok = ("1 counted" in ln and re.search(r"00C362:Skyrim\.esm[^;]*Owner[^;]*" + re.escape(OTHER) + r"[^;]*" + re.escape(PATCH), ln)
-              is not None and "00C361" not in ln)
-        return ok, f"line {ln[:400]!r}"
+        ok = (adm == ["alreadyPresent"] and "1 counted" in ln
+              and re.search(r"00C362:Skyrim\.esm[^;]*Owner[^;]*" + re.escape(OTHER) + r"[^;]*" + re.escape(PATCH)
+                            + r"[^;]*without the evaluated mods", ln) is not None and "00C361" not in ln)
+        return ok, f"{adm}; line {ln[:420]!r}"
 
     for name, fn in [("tenth-review/C1236-patch-wins-counted-rows-named", c1236_patch_wins_counted_rows_named)]:
         cell(name, fn)
