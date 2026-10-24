@@ -4712,6 +4712,14 @@ def build_prediction(ctx: dict) -> dict:
         # placeholder, so the chain decides)
         case_only_rows = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
                                 for rk, h_ in patched_rows.items() if rk[1] == "LOST-EDIT" and reads_same_patched(rk, h_))
+        # (eighth review, Clockwork 135 / 139) lost edits a declared patch wins whose losing value is no change of the
+        # losing plugin's own (it only carries an earlier value): nothing of its own is lost; the measured-order line
+        # says them apart (the prediction's own-change rule)
+        patch_carried = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
+                               for rk, h_ in patched_rows.items()
+                               if rk[1] == "LOST-EDIT" and str(rk[3]).lower() in {str(x).lower() for x in patch_names}
+                               and str(rk[2]).lower() not in {str(x).lower() for x in patch_names}
+                               and (own_edit(patched_arm, rk, rk[2]) or {"changed": True})["changed"] is False)
         patch_noise = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
                              for rk, h_ in patched_rows.items()
                              if rk[1] == "LOST-EDIT" and str(rk[3]).lower() in {str(x).lower() for x in patch_names}
@@ -6098,7 +6106,7 @@ def build_prediction(ctx: dict) -> dict:
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
-                      "patchChoiceNoise": patch_noise, "caseOnlyRows": case_only_rows,
+                      "patchChoiceNoise": patch_noise, "patchChoiceCarried": patch_carried, "caseOnlyRows": case_only_rows,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "stands": len(stands), "undone": len(undone), "undoneBy": dict(undone_by), "replaced": len(replaced),
                       "replacedWhose": {f"{k_[1]}": n_ for k_, n_ in replaced_whose.items()}, "undoneOff": len(undone_off), "undoneUnread": len(undone_unread),
@@ -8593,6 +8601,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         if not pred_arm_ or not k_ or k_ >= n_rows or not conc.get("countedAboveNote"):
             return ""
         return bind(conc["countedAboveNote"], {"counted": fmt_n(k_), "rest": fmt_n(n_rows - k_)})
+    seen_choice_ = {}                  # (eighth review) setup -> {(record, field): the check line that counted it first}
     for cb in blocks.values():
         parts = sorted(cb["parts"].values(), key=lambda x: (arm_sort_key(x["armId"] or "", arm_kinds), PART_ORDER.get(x["part"], 9)))
         if mode != "exhaustive":
@@ -8608,19 +8617,33 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     # (Pilgrim's second review, S4)
                     # rows whose values show no change in game are set aside here as in the prediction (D2)
                     noise_ = {tuple(x) for x in ((plan.get("reader") or {}).get("validation") or {}).get("patchChoiceNoise") or []}
+                    # (eighth review, Clockwork 135 / 139) rows whose losing plugin only carries an earlier value
+                    carried_ = {tuple(x) for x in ((plan.get("reader") or {}).get("validation") or {}).get("patchChoiceCarried") or []}
+
+                    def row_key(f, r_):
+                        c_ = f.get("counts") or {}
+                        return (str(f.get("checkId")), str(r_.get("formKey")), str(r_.get("field")), str(c_.get("A")),
+                                str(c_.get("B")))
 
                     def kept_rows(f):
-                        c_ = f.get("counts") or {}
-                        return [r_ for r_ in f.get("allRows") or [] if isinstance(r_, dict) and (
-                            str(f.get("checkId")), str(r_.get("formKey")), str(r_.get("field")), str(c_.get("A")),
-                            str(c_.get("B"))) not in noise_]
+                        return [r_ for r_ in f.get("allRows") or [] if isinstance(r_, dict)
+                                and row_key(f, r_) not in noise_ and row_key(f, r_) not in carried_]
                     all_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices
                             for r_ in f.get("allRows") or [] if isinstance(r_, dict)}
                     fields_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices for r_ in kept_rows(f)}
-                    n_aside = len(all_ - fields_)
+                    carried_f_ = {(str(r_.get("formKey")), str(r_.get("field"))) for f in choices
+                                  for r_ in f.get("allRows") or [] if isinstance(r_, dict) and row_key(f, r_) in carried_
+                                  and row_key(f, r_) not in noise_} - fields_
+                    n_aside = len(all_ - fields_ - carried_f_)
                     n_fields = len(fields_) if all_ else sum(int(f.get("rowsTotal") or 0) for f in choices)
-                    if n_aside:
-                        choices = [f for f in choices if kept_rows(f)]
+                    n_rows_ = sum(len(kept_rows(f)) for f in choices)
+                    # (eighth review, Clockwork F-215 / F-167) a field an earlier record check's line counted is said there
+                    seen_ = seen_choice_.setdefault(part.get("armId"), {})
+                    again_ = collections.Counter(seen_[x] for x in fields_ if x in seen_)
+                    for x in fields_:
+                        seen_.setdefault(x, ((pr.get("reader") or {}).get("checkTitles") or {}).get(str(choices[0].get("checkId")), str(choices[0].get("title") or "")))
+                    if n_aside or carried_f_:
+                        choices = [f for f in choices if kept_rows(f)] or choices[:1]
                     # (third review, Clockwork S3) every pair counted is linked, so the count recomputes from the rows
                     ids_ = [f["id"] for f in choices] or [f["id"] for f in part["groups"] if f.get("readerPatchChoice")][:1]
                     compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
@@ -8630,9 +8653,17 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                         "pairs": fmt_n(len(choices)),
                                         "fieldNoun": "field" if n_fields == 1 else "fields",
                                         "pairNoun": "pair" if len(choices) == 1 else "pairs",
-                                        "aside": bind(conc.get("patchChoicesAside") or " ({count} more not counted)", {
+                                        "aside": (bind(conc.get("patchChoicesRows") or "", {"rows": fmt_n(n_rows_)})
+                                                  if n_fields and n_rows_ > n_fields else "")
+                                        + (bind(conc.get("patchChoicesAside") or " ({count} more not counted)", {
                                             "count": fmt_n(n_aside), "fieldNoun": "field" if n_aside == 1 else "fields"})
-                                        if n_aside else ""}),
+                                           if n_aside else "")
+                                        + (bind(conc.get("patchChoicesCarried") or "", {
+                                            "count": fmt_n(len(carried_f_)),
+                                            "fieldNoun": "field" if len(carried_f_) == 1 else "fields"})
+                                           if carried_f_ else "")
+                                        + "".join(bind(conc.get("patchChoicesAgain") or "", {
+                                            "count": fmt_n(n_), "title": t_}) for t_, n_ in again_.items())}),
                                     "ids": ids_})
                 relevant = [f for f in rest if f.get("readerRelevant")]
                 if len(relevant) > compact_over:
