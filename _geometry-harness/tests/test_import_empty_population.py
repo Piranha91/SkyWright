@@ -1,29 +1,34 @@
-"""An import that judged nothing stays refused, and says why and what to try (cases 1340-1344).
+"""A judged-0 import is "nothing to judge" only on two independent facts (cases 1340-1346).
 
     python _geometry-harness/tests/test_import_empty_population.py
 
-`evalrun import-results` refuses an import whose coverage judged 0 as `extraction-failed`. A shakedown found it refusing
-on arms that load none of the plan's targets, where 0 looked like the honest count. The Gate A review asked for the
-accept to be shown per check from what the import covers. It cannot be shown for any of the five mcp-only checks from
-what evalrun holds:
-- every such import is bound to the arm's requested population ('load-time' here), not to the targets;
-- no registry row declares a population, and their triggers differ (always, masters, record types).
+`evalrun import-results` refused every import whose coverage judged 0 as `extraction-failed`, so a check stayed open
+for ever on an arm that holds none of its population (a shakedown finding). evalrun cannot tell that from its own data
+alone: an mcp-only import is bound to the arm's whole population, and no registry row narrows it to the targets. The
+importer is the one party that knows how many members its population held, so an import may state `Members` per
+coverage line. A judged-0 import is accepted as nothing to judge, and recorded not-applicable with one sentence, only
+when both of these hold:
+- every coverage line states `Members: 0`;
+- the arm loads none of the plan's target plugins.
 
-So a judged-0 import is refused on every arm, target or not. The refusal now says that 0 cannot be told from a capture
-that read nothing and what to try. On an arm without the targets it also says why that does not make 0 the answer.
+Anything else stays refused, and the refusal names a step that can succeed.
 
-Drives the REAL evalrun.py over the evalrun fixtures: the shipped registry trimmed to loadability.masters-and-order (the
-prerequisite), records.registration-and-dialogue (record-type trigger; the fixture target carries a QUST) and
-loadability.missing-assets (trigger `always`), both mcp-only. Also the fixture scopeprobe stand-in, and three arms: the
-baseline and a reorder (both load FixtureTarget.esp) and one without it.
+Drives the REAL evalrun.py over the evalrun fixtures:
+- the shipped registry, trimmed to loadability.masters-and-order (the prerequisite) and two mcp-only checks:
+  records.registration-and-dialogue (record-type trigger; the fixture target carries a QUST) and
+  loadability.missing-assets (trigger `always`);
+- the fixture scopeprobe stand-in;
+- three arms: the baseline and a reorder (both load FixtureTarget.esp) and one without it.
 
-    1340  dialogue, judged 0 on the arm without the target: refused, one sentence naming the target, the population the
-          import is bound to and what to try; the check stays open.
-    1341  dialogue, judged 0 with unjudgeable members on that arm: refused.
-    1342  dialogue, judged 0 on the baseline, which loads the target: refused with what to try, without the no-target note.
-    1343  finalize holds the dialogue check open on all three arms.
-    1344  missing-assets, judged 0 on the arm without the target: refused the same way (a second check whose
-          population evalrun cannot show empty).
+    1340  dialogue, judged 0, Members 0 on every line, on the arm without the target: accepted, not-applicable with one
+          sentence naming the target, printed once; a second import of the answered row is a duplicate.
+    1341  dialogue, judged 0 with unjudgeable members on that arm: refused, re-capture.
+    1342  dialogue, judged 0 on the baseline, members unstated: refused, re-capture, no no-target remedy.
+    1343  after 1340, resume keeps the answer and finalize holds the check open only on the two target arms.
+    1344  missing-assets, judged 0 on the arm without the target, members unstated: refused, naming Members: 0 as the step.
+    1345  dialogue, judged 0 on the arm without the target, members unstated: refused the same way (before 1340).
+    1346  dialogue, judged 0, Members 0, on the baseline, which loads the target: refused (the target's records are the
+          population there).
 """
 from __future__ import annotations
 
@@ -47,8 +52,9 @@ DIALOGUE = "records.registration-and-dialogue"
 ASSETS = "loadability.missing-assets"
 KEEP = ["loadability.masters-and-order", DIALOGUE, ASSETS]
 NO_TARGET = "candidate-02-notarget"
-NOTE = "this arm loads none of the plan's target plugins, 'FixtureTarget.esp', but this import is bound to the population 'load-time'"
-REMEDY = "check that the capture read this arm's records and import it again"
+STATE_MEMBERS = "state Members: 0 on each coverage line and import again"
+RECAPTURE = "re-capture this arm's evidence and import it again"
+ACCEPTED = "nothing to judge: the import states that its population held no member on this arm"
 
 FAILURES: list[str] = []
 
@@ -78,7 +84,8 @@ def fingerprint(cfg: dict) -> str:
     return hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
 
 
-def make_import(folder: Path, plan: dict, cid: str, arm: dict, judged: int, unjudgeable: dict) -> Path:
+def make_import(folder: Path, plan: dict, cid: str, arm: dict, judged: int, unjudgeable: dict,
+                members: int | None = None) -> Path:
     """A schema-1 no-finding import of `cid` for `arm`, everything stated from the arm's frozen request."""
     folder.mkdir(parents=True, exist_ok=True)
     request, response = folder / "request.json", folder / "response.json"
@@ -94,11 +101,13 @@ def make_import(folder: Path, plan: dict, cid: str, arm: dict, judged: int, unju
            "providers": [dict(v) for v in req["providers"]], "overlays": req["overlays"],
            "population": req["population"], "state": "baseline"}
     cfg["fingerprint"] = fingerprint(cfg)
+    line = {"Population": "records", "Judged": judged, "Unjudgeable": unjudgeable}
+    if members is not None:
+        line["Members"] = members
     doc = {"schemaVersion": 1, "planId": plan["planId"], "checkId": cid, "armId": arm["armId"], "state": "baseline",
            "origin": "fresh", "capturedUtc": datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"),
            "tool": {"name": "fixture_mcp", "version": "1"}, "configuration": cfg,
-           "result": {"detector": "no-finding", "findings": 0,
-                      "coverage": [{"Population": "records", "Judged": judged, "Unjudgeable": unjudgeable}]},
+           "result": {"detector": "no-finding", "findings": 0, "coverage": [line]},
            "outputs": [{"role": role, "path": p.name, "sha256": sha(p)}
                        for role, p in (("request", request), ("response", response))]}
     manifest = folder / "import.json"
@@ -106,13 +115,13 @@ def make_import(folder: Path, plan: dict, cid: str, arm: dict, judged: int, unju
     return manifest
 
 
-def setup(tmp: Path) -> dict:
+def setup(tmp: Path, keep: list[str] = KEEP) -> dict:
     gen = tmp / "fx"
     subprocess.run([sys.executable, str(FIXT / "make_fixtures.py"), "--out", str(gen)], check=True,
                    capture_output=True, text=True)
     real = json.loads(REGISTRY.read_text(encoding="utf-8"))
-    keep = [c for c in real["checks"] if c["id"] in KEEP]
-    reg = dict(real, checks=keep, families=[f for f in real["families"] if f["id"] in {c["family"] for c in keep}])
+    kept = [c for c in real["checks"] if c["id"] in keep]
+    reg = dict(real, checks=kept, families=[f for f in real["families"] if f["id"] in {c["family"] for c in kept}])
     (tmp / "registry.json").write_text(json.dumps(reg, indent=1), encoding="utf-8")
     case = gen / "cases" / "case-01-geometry-and-quest"
     cands = tmp / "candidates"
@@ -158,45 +167,73 @@ def main() -> int:
         if not no_target:
             return 1
 
-        def imp(tag, cid, arm, judged, unjudgeable):
-            m = make_import(tmp / tag, plan, cid, arm, judged, unjudgeable)
+        def imp(tag, cid, arm, judged, unjudgeable, members=None):
+            m = make_import(tmp / tag, plan, cid, arm, judged, unjudgeable, members)
             return evalrun(["import-results", "--run", run, "--file", m], env)
 
-        print("\n=== case-1340: dialogue, judged 0 on the arm without the target ===")
-        r = imp("i1340", DIALOGUE, no_target, 0, {})
+        print("\n=== case-1345: dialogue, judged 0 on the arm without the target, members unstated ===")
+        r = imp("i1345", DIALOGUE, no_target, 0, {})
         msg = r.stderr.strip()
-        check(r.returncode == 2 and "extraction-failed: imported evidence judged 0" in msg and msg.count(NOTE) == 1
-              and REMEDY in msg and entry(run, DIALOGUE, NO_TARGET).get("status") == "mcp-only",
-              f"1340: refused in one sentence naming the target, the bound population and what to try; still open "
-              f"(exit {r.returncode}; {msg[-500:]!r})")
+        check(r.returncode == 2 and msg.count(STATE_MEMBERS) == 1 and "'FixtureTarget.esp'" in msg
+              and entry(run, DIALOGUE, NO_TARGET).get("status") == "mcp-only",
+              f"1345: refused; the step it names is stating Members: 0 (exit {r.returncode}; {msg[-400:]!r})")
 
         print("\n=== case-1341: dialogue, judged 0 with unjudgeable members on that arm ===")
-        r = imp("i1341", DIALOGUE, no_target, 0, {"unreadable record": 3})
-        check(r.returncode == 2 and "extraction-failed" in r.stderr and entry(run, DIALOGUE, NO_TARGET).get("status") == "mcp-only",
-              f"1341: refused, the check stays open (exit {r.returncode}; {r.stderr.strip()[-240:]!r})")
+        r = imp("i1341", DIALOGUE, no_target, 0, {"unreadable record": 3}, 0)
+        msg = r.stderr.strip()
+        check(r.returncode == 2 and "extraction-failed" in msg and RECAPTURE in msg and STATE_MEMBERS not in msg
+              and entry(run, DIALOGUE, NO_TARGET).get("status") == "mcp-only",
+              f"1341: refused, re-capture, the check stays open (exit {r.returncode}; {msg[-300:]!r})")
 
-        print("\n=== case-1342: dialogue, judged 0 on the baseline, which loads the target ===")
+        print("\n=== case-1342: dialogue, judged 0 on the baseline, members unstated ===")
         r = imp("i1342", DIALOGUE, arms["baseline"], 0, {})
         msg = r.stderr.strip()
-        check(r.returncode == 2 and "extraction-failed: imported evidence judged 0" in msg and REMEDY in msg
-              and "loads none of the plan's target plugins" not in msg
-              and entry(run, DIALOGUE, "baseline").get("status") == "mcp-only",
-              f"1342: refused with what to try and no no-target note (exit {r.returncode}; {msg[-300:]!r})")
+        check(r.returncode == 2 and "extraction-failed: imported evidence judged 0" in msg and RECAPTURE in msg
+              and STATE_MEMBERS not in msg and entry(run, DIALOGUE, "baseline").get("status") == "mcp-only",
+              f"1342: refused, re-capture, no no-target remedy (exit {r.returncode}; {msg[-300:]!r})")
 
-        print("\n=== case-1344: missing-assets, judged 0 on the arm without the target ===")
+        print("\n=== case-1346: dialogue, judged 0, Members 0, on the baseline, which loads the target ===")
+        r = imp("i1346", DIALOGUE, arms["baseline"], 0, {}, 0)
+        msg = r.stderr.strip()
+        check(r.returncode == 2 and "loads the plan's target 'FixtureTarget.esp'" in msg and RECAPTURE in msg
+              and entry(run, DIALOGUE, "baseline").get("status") == "mcp-only",
+              f"1346: refused although Members is 0 (exit {r.returncode}; {msg[-300:]!r})")
+
+        print("\n=== case-1344: missing-assets, judged 0 on the arm without the target, members unstated ===")
         r = imp("i1344", ASSETS, no_target, 0, {})
         msg = r.stderr.strip()
-        check(r.returncode == 2 and msg.count(NOTE) == 1 and REMEDY in msg
+        check(r.returncode == 2 and msg.count(STATE_MEMBERS) == 1
               and entry(run, ASSETS, NO_TARGET).get("status") == "mcp-only",
               f"1344: refused the same way (exit {r.returncode}; {msg[-300:]!r})")
 
-        print("\n=== case-1343: finalize holds the dialogue check open on every arm ===")
+        print("\n=== case-1340: dialogue, judged 0, Members 0, on the arm without the target ===")
+        r = imp("i1340", DIALOGUE, no_target, 0, {}, 0)
+        rec_path = run / "receipts" / f"{DIALOGUE}__{NO_TARGET}.json"
+        rec = json.loads(rec_path.read_text(encoding="utf-8")) if rec_path.exists() else {}
+        res = rec.get("result") or {}
+        e = entry(run, DIALOGUE, NO_TARGET)
+        check(r.returncode == 0 and r.stdout.count(ACCEPTED) == 1,
+              f"1340: accepted, one sentence printed (exit {r.returncode}; {(r.stdout + r.stderr).strip()[-300:]!r})")
+        check(e.get("status") == "not-applicable" and res.get("execution") == "not-applicable"
+              and res.get("detector") is None and ACCEPTED in (res.get("note") or "")
+              and "'FixtureTarget.esp'" in (res.get("note") or "") and (rec.get("validation") or {}).get("accepted") is True,
+              f"1340: entry and receipt not-applicable, the sentence naming the target ({e.get('status')}; "
+              f"{res.get('execution')}: {res.get('note')!r})")
+        r = imp("i1340b", DIALOGUE, no_target, 0, {}, 0)
+        check(r.returncode == 2 and "duplicate-receipt" in r.stderr,
+              f"1340: a second import of the answered row is a duplicate (exit {r.returncode})")
+
+        print("\n=== case-1343: resume keeps the answer; finalize holds it open only where the target loads ===")
+        r = evalrun(["resume", "--run", run], env)
+        e = entry(run, DIALOGUE, NO_TARGET)
+        check(r.returncode == 0 and e.get("status") == "not-applicable",
+              f"1343: after resume the entry is still not-applicable (resume {r.returncode}; {e.get('status')})")
         evalrun(["finalize", "--run", run], env)
         disp = json.loads((run / "disposition.json").read_text(encoding="utf-8")) if (run / "disposition.json").exists() else {}
         missing = (disp.get("evaluation") or {}).get("missing")
         held = sorted(x.get("armId") for x in (missing or []) if x.get("checkId") == DIALOGUE)
-        check(isinstance(missing, list) and held == ["baseline", "candidate-01-reorder", NO_TARGET],
-              f"1343: open on all three arms ({held})")
+        check(isinstance(missing, list) and held == ["baseline", "candidate-01-reorder"],
+              f"1343: open on the two target arms only ({held})")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     if FAILURES:

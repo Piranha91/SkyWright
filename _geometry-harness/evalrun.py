@@ -2669,7 +2669,8 @@ def execute(ex: Executor, parent) -> None:
 
     def already_done(cid: str, aid: str, part: str | None) -> bool:
         e = ledger.entry(cid, aid, part)
-        return bool(e and e.get("status") in TERMINAL_OK)
+        # an accepted import that found nothing to judge (`not-applicable`) answers its row as a completed one does
+        return bool(e and (e.get("status") in TERMINAL_OK or (e.get("status") == "not-applicable" and e.get("imported"))))
 
     def mark_reused(cid: str, aid: str, part: str | None) -> None:
         e = ledger.entry(cid, aid, part)
@@ -4646,6 +4647,33 @@ def origin_refusals(doc: dict, plan: dict, arm_id, captured_time, request: tuple
                                 "capturedUtc": doc.get("capturedUtc"), "planCreatedUtc": plan.get("createdUtc")}}
 
 
+def empty_population(plan: dict, arm: dict, members: list, unjudgeable: int) -> tuple[str | None, str]:
+    """A judged-0 import is "nothing to judge" only on two independent facts: the importer states, on every coverage
+    line, that its population held no member on this arm (`Members: 0`, the one thing only the importer knows), and the
+    arm loads none of the plan's target plugins (the plan's own data). Returns the sentence recorded on acceptance, or
+    None and the rest of the refusal: why not, and a "what to try" that can succeed."""
+    targets = [str(t.get("name")) for t in plan.get("targets") or [] if isinstance(t, dict) and t.get("name")]
+    loads = arm_requested_plugins(arm)
+    loaded = [t for t in targets if t.lower() in loads]
+    names = ", ".join(repr(t) for t in targets)
+    recapture = "re-capture this arm's evidence and import it again"
+    if unjudgeable > 0 or any(m is not None and m > 0 for m in members):
+        return None, ("so members of the population were found and none was judged, which is a failed extraction; "
+                      + recapture)
+    if not targets:
+        return None, ("and this plan names no target plugin, so nothing shows the arm holds none of the check's "
+                      "population; " + recapture)
+    if loaded:
+        return None, (f"and this arm loads the plan's target {', '.join(repr(t) for t in loaded)}, whose records are the "
+                      f"check's population, so 0 judged is a capture that read nothing; " + recapture)
+    if not members or any(m is None for m in members):
+        return None, (f"which cannot be told from a capture that read nothing; this arm loads none of the plan's target "
+                      f"plugins ({names}), so if the capture is right and this arm holds none of the check's "
+                      "population, state Members: 0 on each coverage line and import again, otherwise " + recapture)
+    return (f"nothing to judge: the import states that its population held no member on this arm, and this arm loads "
+            f"none of the plan's target plugins ({names}); recorded as not applicable on this arm."), ""
+
+
 def rows_output_errors(path: Path, arm: dict | None) -> list[str]:
     """An import's `rows` output: the conflict-file shape, every pair naming plugins of the arm it is imported for."""
     doc = load_json(path)
@@ -4712,10 +4740,12 @@ def _cmd_import_results(a, runlog: Run) -> int:
                          and check.get("applicabilityEvidence") else "")
                       + ". An import completes a check the plan left open; it never overrides the plan's answer")
     key = Ledger.key(cid, aid, None)
-    if (ledger.entry(cid, aid, None) or {}).get("status") in TERMINAL_OK:
+    prior = ledger.entry(cid, aid, None) or {}
+    if prior.get("status") in TERMINAL_OK or (prior.get("status") == "not-applicable" and prior.get("imported")):
         return refuse(f"duplicate-receipt: {key} already has accepted evidence")
 
     captured, tool = doc.get("capturedUtc"), doc.get("tool")
+    nothing_to_judge = None
     try:
         identity = Validator.emit_identity({"configuration": doc.get("configuration")})
     except (AttributeError, TypeError):
@@ -4750,6 +4780,7 @@ def _cmd_import_results(a, runlog: Run) -> int:
         errors.append("coverage-missing: result.coverage must contain at least one population")
     else:
         judged = unjudgeable = 0
+        members = []                    # each line's stated member count; None where the line states none
         for i, line in enumerate(coverage):
             if not isinstance(line, dict):
                 errors.append(f"coverage-invalid: result.coverage[{i}] must be an object")
@@ -4769,20 +4800,16 @@ def _cmd_import_results(a, runlog: Run) -> int:
                               "non-negative integers")
             else:
                 unjudgeable += sum(reasons.values())
+            m = line.get("Members", line.get("members"))
+            if m is not None and (not isinstance(m, int) or isinstance(m, bool) or m < 0):
+                errors.append(f"coverage-invalid: result.coverage[{i}].Members must be a non-negative integer")
+                m = None
+            members.append(m)
         if not errors and judged <= 0:
-            # Nothing the plan holds shows any mcp-only check's population empty on an arm: every such import is bound
-            # to the arm's population, and no registry row narrows it to the targets. So 0 stays a refusal everywhere;
-            # on an arm without the targets the sentence says why that does not change it.
-            targets = [str(t.get("name")) for t in plan.get("targets") or [] if isinstance(t, dict) and t.get("name")]
-            loads = arm_requested_plugins(arm)
-            note = ""
-            if targets and not any(t.lower() in loads for t in targets):
-                note = (f" (this arm loads none of the plan's target plugins, {', '.join(repr(t) for t in targets)}, but "
-                        f"this import is bound to the population {(arm.get('requested') or {}).get('population')!r}, "
-                        "which that does not empty, so 0 is not shown to be the answer)")
-            errors.append(f"extraction-failed: imported evidence judged {judged} with {unjudgeable} unjudgeable, which "
-                          f"cannot be told from a capture that read nothing{note}; check that the capture read this "
-                          "arm's records and import it again")
+            nothing_to_judge, why_not = empty_population(plan, arm, members, unjudgeable)
+            if nothing_to_judge is None:
+                errors.append(f"extraction-failed: imported evidence judged {judged} with {unjudgeable} unjudgeable, "
+                              f"{why_not}")
     roles = [str(x.get("role")) for x in rows if isinstance(x, dict)] if isinstance(rows, list) else []
     if not isinstance(rows, list) or len(rows) not in (2, 3):
         errors.append("output-missing: outputs must include the raw MCP request and response files, and may add rows")
@@ -4900,15 +4927,20 @@ def _cmd_import_results(a, runlog: Run) -> int:
                   "optionsSha256": sha256_text(canonical(plan["options"])),
                   "scopeSha256": plan["scope"]["sha256"]},
         validation={"accepted": True, "rejections": [], "identityLimits": limits},
-        result={"execution": "completed", "detector": detector, "findings": findings,
+        result={"execution": "not-applicable" if nothing_to_judge else "completed",
+                "detector": None if nothing_to_judge else detector, "findings": findings,
                 "coverage": coverage, "strength": (check.get("evidence") or {}).get("strength"),
-                "verdict": result.get("verdict"), "note": result.get("note")},
+                "verdict": result.get("verdict"), "note": nothing_to_judge or result.get("note")},
         extra={"imported": {"sourceSha256": sha256_file(manifest_copy),
                             "capturedUtc": captured, "tool": tool, **origin_fields}})
-    ledger.transition(cid, aid, None, "completed", receipt_id=receipt["receiptId"],
-                      detector=detector, extra={"imported": True, "importOrigin": origin_fields["origin"]})
+    ledger.transition(cid, aid, None, "not-applicable" if nothing_to_judge else "completed",
+                      receipt_id=receipt["receiptId"], detector=None if nothing_to_judge else detector,
+                      detail=nothing_to_judge, extra={"imported": True, "importOrigin": origin_fields["origin"]})
     runlog.artifact(str(manifest_copy))
     runlog.advance()
+    if nothing_to_judge:
+        print(f"imported {cid} [{aid}]: not-applicable - {nothing_to_judge}")
+        return EXIT_OK
     print(f"imported {cid} [{aid}]: {detector}, {findings} finding(s), "
           f"{len(copied)} evidence file(s), origin {origin_fields['origin']}"
           + (f" (declared source: plan {origin_fields['reusedFrom']['planId']} arm "
