@@ -3137,7 +3137,8 @@ def main():
             r_["Summary"] = r_["Summary"].replace("PlacedObject", "Cell")
         plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
         ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
-        ok = "1 record field, lost by 1 plugin pair in all," in ln and "1 more" in ln   # (fourth review) wording
+        # (fourth review) wording; (round 3, finding 7) the row set aside said in the line's one unit, rows
+        ok = "1 record field, lost by 1 plugin pair in all," in ln and "1 counted, 1 with no change in game" in ln
         return ok, f"line {ln[:240]!r}"
 
     for name, fn in [("w2-cw/C620-no-change-never-dropped", c620_no_change_never_dropped),
@@ -8896,14 +8897,14 @@ def main():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
         ls = patch_wins_lines(md)
         return (len(ls) == 2 and any(re.search(r"\b1 record field\b", x) and "only carried" in x for x in ls)  # wording: page budget
-                and any("1 also counted above" in x for x in ls)), " || ".join(ls)[:700]   # wording: page budget
+                and any("1 of the fields also counted above" in x for x in ls)), " || ".join(ls)[:700]   # round 3: its unit named
 
     # C1189 (eighth review, Winterhold 154 / 159): the line gives its rows beside its fields when they differ (a field
     # two plugins lose to the patch is one field, two rows), so the count matches what its links hold.
     def c1189_patch_wins_line_gives_rows():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
         ls = patch_wins_lines(md)
-        return any("2 rows linked" in x for x in ls), " || ".join(ls)[:700]   # wording: page budget
+        return any("2 rows, one per record field and plugin pair" in x for x in ls), " || ".join(ls)[:700]   # round 3 wording
 
     # C1188 (eighth review, Winterhold 88 / 145): the detail's note of pairs still crossing where a patch places one says,
     # with two evaluated mods, how many are counted at the top and how many were already there with one mod alone, so it
@@ -9275,7 +9276,7 @@ def main():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
         ls = patch_wins_lines(md)
         # (round 3, review12 S1) a row is one record field in one plugin pair
-        return any("2 rows linked, one per record field and plugin pair" in x for x in ls), " || ".join(ls)[:600]
+        return any("2 rows, one per record field and plugin pair" in x for x in ls), " || ".join(ls)[:600]
 
     # C1211 (round 2 item 7, Sewers 39): with one evaluated mod the other version is compared on every counted group,
     # those already there with the mod alone too, and a counted check that version did not measure is named.
@@ -9327,8 +9328,8 @@ def main():
         ln = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
         return ("(the further results listed in the detail count one per check, plugin pair and setup)" in ln), ln[:400]
 
-    # C1214 (round 3 item 1, review12 S1): the linked rows include rows the line does not count (a field the losing
-    # plugin only carries, in a linked pair's finding); the line says how many of them it counts.
+    # C1214 (round 3 item 1, review12 S1 and finding 7): the rows include rows the line does not count (a field the
+    # losing plugin only carries); the line splits them, in one unit, so the parts add up to the whole.
     def c1214_patch_wins_rows_say_how_many_counted():
         R1, R3 = f"00C214:{BASE}", f"00C314:{BASE}"
         arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B])]
@@ -9346,8 +9347,9 @@ def main():
                                          transcripts={(RECORDS, "baseline"): records_transcript(chains)},
                                          masters={MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, MOD_A, MOD_B]})
         ls = patch_wins_lines(md)
-        return any("3 rows linked, one per record field and plugin pair, 2 of them counted" in x and "1 more only carried"
-                   in x for x in ls), " || ".join(ls)[:600]
+        # (round 3, finding 7) every figure in rows, the parts adding up to the whole; no second unit beside them
+        return any("(3 rows, one per record field and plugin pair: 2 counted, 1 only carried by the loser)" in x
+                   for x in ls), " || ".join(ls)[:600]
 
     # C1215 (round 3 item 2, review12 S2): a check the other version ran once per setup (its receipt records no part)
     # is read and compared like the others, never called not measured.
@@ -9365,7 +9367,9 @@ def main():
         plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH],
                                          also=[(v_arms, v_res, [MOD_A], {"single_run": (STATE,)})])
         also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
-        return ("0 of the 1" in also_ and "between ModA.esp and OtherMod.esp" in also_
+        # the unit agrees with its count (Sewers 39 at regen-r8g read "0 of the 1 clashes"); a state kind carries the
+        # row's own state after "@", grouped by its kind
+        return ("0 of the 1 clash between ModA.esp and OtherMod.esp" in also_ and "1 clashes" not in also_
                 and "not measured with that version" not in also_.lower()), also_[-500:]
 
     for name, fn in [("round3-8/C1214-patch-wins-rows-say-how-many-counted", c1214_patch_wins_rows_say_how_many_counted),
