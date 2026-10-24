@@ -8972,6 +8972,24 @@ def main():
         ex = next((m.group(0) for ln in md.splitlines() for m in [re.search(r"For example: .*?\)\.", ln)] if m and D1 in m.group(0)), "")
         return (re.search(re.escape(D1) + r" \([^)]*off for good", ex) is not None), ex[:300] or md[:1500]
 
+    # C1191 (eighth review, Missives 23): a switch clash whose row says "the arriving host encloses the dependent N u
+    # deep" says the dependent (the row's other object) sits N u inside, never the arriving host itself, with no depth.
+    def c1191_enclosed_dependent_is_the_subject():
+        H, D = f"000H91:{BASE}", f"000D91:{MOD_A}"
+        st_ = row("STATE-CONTACT@000S91:Skyrim.esm@Unknown", MOD_B, MOD_A, H, label="Market (ext)", other=D)
+        st_["Summary"] = (f"Contact StateConditional under StallSwitch (Skyrim.esm): {H} [Static MarketStall] arrives - "
+                          f"Sunk: the arriving host encloses the dependent 6.8u deep in Market (ext)")
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_A, MOD_B])]
+        res = {(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch")}
+        plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH])
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        it = next((ln for ln in md.splitlines() if ln.startswith(f"- **{title}")), "")
+        ig = it.split("In game", 1)[-1]
+        return ("000D91" in ig and "6.8 u inside" in ig and "000H91" not in ig.split("inside", 1)[0].split(",", 1)[-1]), ig[:300]
+
+    for name, fn in [("eighth-review/C1191-enclosed-dependent-is-the-subject", c1191_enclosed_dependent_is_the_subject)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1186-examples-say-off-for-good", c1186_examples_say_off_for_good)]:
         cell(name, fn)
 
