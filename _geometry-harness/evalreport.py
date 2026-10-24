@@ -3879,7 +3879,7 @@ def build_prediction(ctx: dict) -> dict:
         n_ = len(d_["fields"])
         # (fourth review, Clockwork r3 S1) what the setup with the patch has: whether its winner holds the base-game
         # plugin's value, read by the record chain's read-same rule
-        kept_, later_, none_ = None, collections.OrderedDict(), 0
+        kept_, later_, none_ = None, collections.OrderedDict(), collections.Counter()
         if patched_arm and words.get("baseValueDroppedPatch"):
             kept_ = 0
             for rk_ in (d_.get("rows") or {}).values():
@@ -3898,7 +3898,8 @@ def build_prediction(ctx: dict) -> dict:
                     held_last_ = {k_: v_ for k_, v_ in recordrows.provider_fields(ch_, f_, len(low_) - 1).items()
                                   if not re.match(r"^has (?:no \S|.* ABSENT$)", str(v_))}
                     if not held_last_ and any(recordrows.provider_fields(ch_, f_, j_) for j_ in range(len(low_) - 1)):
-                        none_ += 1
+                        # (eighth review, Missives 30) whose version holds none: the winning one, a patch or not
+                        none_[str(ch_["providers"][-1])] += 1
                     elif (vs_[-1] != vs_[b_] and (str(mod_).lower() not in low_
                                                   or vs_[-1] != vs_[low_.index(str(mod_).lower())])):
                         # the value's one owner (round 2), where it comes after the base plugin
@@ -3919,7 +3920,10 @@ def build_prediction(ctx: dict) -> dict:
                 "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_})
             + "".join(bind(words.get("baseValueDroppedLater") or "", {
                 "count": fmt_n(c_), "later": l_, "base": base_}) for l_, c_ in later_.items())
-            + (bind(words.get("baseValueDroppedNone") or "", {"count": fmt_n(none_), "base": base_}) if none_ else ""),
+            + "".join(bind(words.get("baseValueDroppedNone") or "", {
+                "count": fmt_n(c_), "base": base_,
+                "who": words.get("baseValueDroppedNonePatch") or "" if str(w_).lower() in {str(x_).lower() for x_ in patch_names}
+                else bind(words.get("baseValueDroppedNoneOther") or "", {"winner": w_})}) for w_, c_ in none_.items()),
             "carriers": carriers_text(per_c_, n_c_)})
             + (" " + bind(words["waterHeightOutside"]["line"], {"examples": "; ".join(
                 f"{fk_} ({v_})" for fk_, v_ in list(d_["outside"].items())[:2])})
