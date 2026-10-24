@@ -8858,6 +8858,49 @@ def main():
         sc_ = [x for x in val_ if "supplied patch edit" in x]
         return any(f"still there with {L_}" in x and "a supplied patch edits" in x for x in sc_), " | ".join(sc_)[:500] or str(val_)[:500]
 
+    # The measured-load-order line of record fields a declared patch's value wins (Clockwork 135 / 139, Winterhold 154 /
+    # 159). R1: ModA's and ModB's own changes lost to the patch (1 field, 2 plugin-pair rows), listed by both record
+    # checks. R2: OtherMod only carries the base game's value there, lost to the patch.
+    def patch_wins_line_bundle():
+        R0, R1, R2 = f"00C090:{BASE}", f"00C190:{BASE}", f"00C290:{BASE}"
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        a_ = lost_row(MOD_A, PATCH, R1, "Owner", "a", "p", "v", before=BASE)
+        b_ = lost_row(MOD_B, PATCH, R1, "Owner", "b", "p", "v", before=BASE)
+        o_ = lost_row(OTHER, PATCH, R2, "Owner", "1", "p", "1", before=BASE)
+        chains = [(R1, "PlacedObject", [(BASE, {"Owner": "v"}), (MOD_A, {"Owner": "a"}), (MOD_B, {"Owner": "b"}),
+                                        (PATCH, {"Owner": "p"})]),
+                  (R2, "PlacedObject", [(BASE, {"Owner": "1"}), (OTHER, {"Owner": "1"}), (PATCH, {"Owner": "p"})])]
+        enr = {(RECORDS, "without-patch"): [lost_row(MOD_B, MOD_A, R0, "Owner", "b", "a", "v")],
+               (RECORDS, "baseline"): [a_, b_, o_], (CELLATTR, "without-patch"): [], (CELLATTR, "baseline"): [a_, b_]}
+        tr = {(RECORDS, "baseline"): records_transcript(chains), (CELLATTR, "baseline"): records_transcript(chains[:1])}
+        return compile_and_render(arms, {(CONTACT, a2_): [] for a2_ in ("baseline", "without-patch")}, [MOD_A, MOD_B],
+                                  patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                  enrichment=enr, transcripts=tr,
+                                  masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE, OTHER, MOD_A, MOD_B]})
+
+    def patch_wins_lines(md):
+        return [x for x in md.splitlines() if "where a declared patch's value wins" in x]
+
+    # C1190 (eighth review, Clockwork 135 / 139): a losing value the losing plugin only carries is no change of its own:
+    # not counted as lost, said apart; a field two record checks list is counted once, the second line saying so.
+    def c1190_patch_wins_line_carried_and_once():
+        plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
+        ls = patch_wins_lines(md)
+        return (len(ls) == 2 and any(re.search(r"\b1 record field\b", x) and "only carries" in x for x in ls)
+                and any("also counted" in x for x in ls)), " || ".join(ls)[:700]
+
+    # C1189 (eighth review, Winterhold 154 / 159): the line gives its rows beside its fields when they differ (a field
+    # two plugins lose to the patch is one field, two rows), so the count matches what its links hold.
+    def c1189_patch_wins_line_gives_rows():
+        plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
+        ls = patch_wins_lines(md)
+        return any("2 plugin-pair rows" in x for x in ls), " || ".join(ls)[:700]
+
+    for name, fn in [("eighth-review/C1190-patch-wins-line-carried-and-once", c1190_patch_wins_line_carried_and_once),
+                     ("eighth-review/C1189-patch-wins-line-gives-rows", c1189_patch_wins_line_gives_rows)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1185-base-owned-remainder-in-scope-line", c1185_base_owned_remainder_in_scope_line)]:
         cell(name, fn)
 
