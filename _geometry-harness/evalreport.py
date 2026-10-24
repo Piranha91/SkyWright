@@ -5173,7 +5173,7 @@ def build_prediction(ctx: dict) -> dict:
                              and patch_removes(e) else e["admission"]) for e in spot_rows}
 
         def spot_unit(e):
-            if spot_kind[id(e)] in ("alreadyPresent", "patchRemoves") and e["kind"] == "LOST-EDIT":
+            if spot_kind[id(e)] in ("alreadyPresent", "patchRemoves", "baseOverChange") and e["kind"] == "LOST-EDIT":
                 return ("change", str(e["formKey"]), str(e.get("field") or ""))
             return ("row", id(e))
         spot_units = collections.defaultdict(dict)
@@ -5197,6 +5197,35 @@ def build_prediction(ctx: dict) -> dict:
             for rk2_, h2_ in rs2_.items():
                 if rk2_[1] == "LOST-EDIT":
                     w_wins[(str(rk2_[4]), h2_["row"].get("field"), str(rk2_[2]).lower())].append(rk2_[3])
+
+        # (eighth review, BPT 78) an earlier loss whose lost value is the base game's own, where the value it loses to
+        # without the evaluated mods is another plugin's own change: the patch putting the base game's value back undoes
+        # that change. Said in the undone family, neutral (whether intended is not recorded), never as a fix.
+        bg_name_ = words.get("baseGameOwner") or "the base game"
+        over_ = {}
+
+        def owner_in(arm_, e, plugin_):
+            got_ = whose_value(arm_, e["checkId"], e["formKey"], e.get("field"), plugin_)
+            return None if got_ is None else owner_of(got_[0], got_[1], got_[2]["origin"])[1]
+        for e in spot_rows:
+            if spot_kind.get(id(e)) != "alreadyPresent" or e["kind"] != "LOST-EDIT" or not w_arm:
+                continue
+            ls_ = losers_of_unit.get(spot_unit(e)) or [e["A"]]
+            if {owner_in(p_of(e["checkId"]), e, l_) or l_ for l_ in ls_} != {bg_name_}:
+                continue
+            for w_ in dict.fromkeys(w_ for l_ in ls_ for w_ in w_wins.get(
+                    (str(e["formKey"]), e.get("field"), str(l_).lower()), [])):
+                # that setup's own chain; where it holds none, the same plugin's value in the prediction setup
+                o_ = owner_in(w_arm, e, w_) or owner_in(p_of(e["checkId"]), e, w_)
+                if o_ and o_ != bg_name_ and not is_base_game(o_, words):
+                    over_[id(e)] = (o_, w_)
+                    spot_kind[id(e)] = "baseOverChange"
+                    break
+        if over_:
+            spot_units = collections.defaultdict(dict)
+            for e in spot_rows:
+                spot_units[spot_kind[id(e)]].setdefault(spot_unit(e), e)
+            spots = collections.Counter({k: len(v) for k, v in spot_units.items()})
 
         def spot_pairs(k):
             c_, change_ = collections.Counter(), set()
@@ -5239,7 +5268,18 @@ def build_prediction(ctx: dict) -> dict:
         # never under "resolved"
         blind = [{"admission": k, "count": n, "why": bind(words["blindSpotWhy"][k], {"patch": patch, "pairs": spot_pairs(k),
                                                                                      "fixes": fixes_})}
-                 for k, n in sorted(spots.items()) if k not in ("history", "patchRemoves")]
+                 for k, n in sorted(spots.items()) if k not in ("history", "patchRemoves", "baseOverChange")]
+        over_items_ = list(dict.fromkeys(
+            bind(words.get("validationBaseOverChangeItem") or "", {
+                "owner": over_[id(e)][0], "winner": over_[id(e)][1],
+                "carried": "" if str(over_[id(e)][0]).lower() == str(over_[id(e)][1]).lower()
+                else bind(words.get("validationBaseOverChangeCarried") or "", {"winner": over_[id(e)][1]}),
+                "field": field_word(e.get("field")), "record": str(e["formKey"])})
+            for e in (spot_units.get("baseOverChange") or {}).values()))
+        over_sentence = (bind(words["validationBaseOverChange"], {
+            "patch": patch, "count": fmt_n(spots["baseOverChange"]),
+            "noun": words["fieldNoun"][0 if spots["baseOverChange"] == 1 else 1], "items": "; ".join(over_items_)})
+            if spots.get("baseOverChange") and words.get("validationBaseOverChange") else None)
         removes_sentence = (bind(words["validationPatchRemoves"], {
             "patch": patch, "count": fmt_n(spots["patchRemoves"]),
             "noun": words["fieldNoun"][0 if spots["patchRemoves"] == 1 else 1], "pairs": spot_pairs("patchRemoves")})
@@ -5256,13 +5296,15 @@ def build_prediction(ctx: dict) -> dict:
         # the patches: undone only where it reads the same as the value the mod's change replaced (the losing plugin's
         # inherited value); a value the patch or another plugin owns is no undo and is said apart, by its owner
         def undone_what(rk):
+            # (Gate A review of 225871bb) no chain and no recorded values: whether it is undone is not told, said so,
+            # never a replacement by anyone (field_chain already falls back to the row's own recorded values)
             got_ = field_chain(patched_arm, rk, rk[2])
             if got_ is None:
-                return "replaced", None
+                return "unread", None
             provs_, vals_, _ = got_
             low_ = [str(x).lower() for x in provs_]
             if str(rk[3]).lower() not in low_:
-                return "replaced", None
+                return "unread", None
             i_, w_ = low_.index(str(rk[2]).lower()), low_.index(str(rk[3]).lower())
             _, j_ = recordrows.own_change(provs_, vals_, i_, (masters or {}).get(str(rk[2]).lower())
                                           if masters is not None else None)
@@ -5277,6 +5319,7 @@ def build_prediction(ctx: dict) -> dict:
             return bool(ch_) and str(rk[3]).lower() in low_ and provider_disables(ch_, low_.index(str(rk[3]).lower()))
         what_ = {id(h_): undone_what(rk) for rk, h_ in undone}
         replaced = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "replaced"]
+        undone_unread = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "unread"]
         undone = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "putBack"]
         replaced_whose = collections.Counter(
             "own" if what_[id(h_)][1] is not None and str(what_[id(h_)][1]).lower() in patch_lower
@@ -5530,6 +5573,10 @@ def build_prediction(ctx: dict) -> dict:
                                    for k_, n_ in replaced_whose.most_common()),
                 "enables": enables_text(switched_on_r)}))
             replaced_sentence = sentences[-1]
+        if undone_unread and words.get("validationUndoneUnread"):
+            sentences.append(bind(words["validationUndoneUnread"], {
+                "patch": patch, "count": fmt_n(len(undone_unread)),
+                "noun": words["fieldNoun"][0 if len(undone_unread) == 1 else 1], "by": by_plugin(undone_unread)}))
         # (fifth review, Snazzy pelts) a row set aside as cannot tell that the setup with the patch no longer lists is no
         # longer found there, never "resolved": whether it was a problem was not told
         ct_set_ = set(words.get("cannotTellAdmissions") or [])
@@ -5549,6 +5596,8 @@ def build_prediction(ctx: dict) -> dict:
                           for s in blind]
         if removes_sentence:
             sentences.append(removes_sentence)
+        if over_sentence:
+            sentences.append(over_sentence)
         if spots.get("history"):
             sentences.append(bind(words["validationHistoryHolds"], {"count": fmt_n(history_holds), "patch": patch,
                                                                     "total": fmt_n(spots.get("history", 0))}))
@@ -6028,7 +6077,7 @@ def build_prediction(ctx: dict) -> dict:
                       "patchChoiceNoise": patch_noise, "caseOnlyRows": case_only_rows,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "stands": len(stands), "undone": len(undone), "undoneBy": dict(undone_by), "replaced": len(replaced),
-                      "replacedWhose": dict(replaced_whose), "undoneOff": len(undone_off),
+                      "replacedWhose": dict(replaced_whose), "undoneOff": len(undone_off), "undoneUnread": len(undone_unread),
                       "undoneSentence": undone_sentence, "replacedSentence": replaced_sentence,
                       "replacedFindingIds": [f_ for f_, _ in collections.Counter(
                           h_["finding"].get("id") for _, h_ in replaced if h_["finding"].get("id")).most_common()],
