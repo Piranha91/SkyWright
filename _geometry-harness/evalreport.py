@@ -8211,8 +8211,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 if (e_.get("admission") == "admitted" and e_.get("other") and e_.get("kind") != "LOST-EDIT"
                         and (len((reader.get("prediction") or {}).get("mods") or []) <= 1
                              or e_.get("attribution") != "single-mod")):
-                    # (round 3) a state kind carries the row's own state after "@": grouped by its kind
-                    groups_.setdefault((e_["checkId"], e_["A"], e_["B"], str(e_["kind"]).split("@", 1)[0]), []).append(e_)
+                    groups_.setdefault((e_["checkId"], e_["A"], e_["B"], e_["kind"]), []).append(e_)
             loaded_ = {str(q.get("name")).lower() for q in (arm_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict)}
             parts_v_, none_v_, unmeasured_v_ = [], [], []
             for (c_, a_, b2_, k_), es_ in groups_.items():

@@ -9367,8 +9367,7 @@ def main():
         plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH],
                                          also=[(v_arms, v_res, [MOD_A], {"single_run": (STATE,)})])
         also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
-        # the unit agrees with its count (Sewers 39 at regen-r8g read "0 of the 1 clashes"); a state kind carries the
-        # row's own state after "@", grouped by its kind
+        # the unit agrees with its count (Sewers 39 at regen-r8g read "0 of the 1 clashes")
         # a kind with no unit of its own names its check, so two checks' groups between one pair read apart
         title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
         return (f'0 of the 1 clash of the check "{title}" between ModA.esp and OtherMod.esp' in also_
