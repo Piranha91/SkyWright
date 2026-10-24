@@ -9044,6 +9044,35 @@ def main():
         ln = next((x for x in md.splitlines() if x.startswith("- **") and cell_ in x), "")
         return (f"{cell_} (ext) in TestWorld, grid cell 2, 1" in ln), ln[:500] or md[:800]
 
+    # C1194 (eighth review, Sewers 27): a switch clash whose direction the check did not find is settled by the records
+    # where they settle it: the object's enable parent is the switch, not opposite, and the switch is not initially
+    # disabled and has no parent of its own, so the object is there from load and the overlap ends when the switch
+    # turns it off; the line says so and names the other object, never "which way was not found".
+    def c1194_switch_direction_from_records():
+        X = f"000X94:{MOD_A}"
+        C_, P_ = f"000E01:{MOD_B}", f"000E02:{MOD_B}"
+        f_ = plugin_file_of(MOD_B, [BASE], [
+            ("REFR", 0x01000E01, [("NAME", struct.pack("<I", 0x01000E03)), ("DATA", struct.pack("<6f", 0, 0, 0, 0, 0, 0)),
+                                  ("XESP", struct.pack("<IB", 0x01000E02, 0))], False),
+            ("REFR", 0x01000E02, [("NAME", struct.pack("<I", 0x01000E04)), ("DATA", struct.pack("<6f", 9, 9, 0, 0, 0, 0))],
+             False)], group="CELL")
+        st_ = row(f"STATE-CONTACT@{P_}@Unknown", MOD_B, MOD_A, C_, label="Camp (ext)", other=X)
+        st_["Summary"] = (f"Contact StateConditional under PlankSwitch ({MOD_B}): {C_} [Static Scaffold] leaves - Sunk: the "
+                          f"host leaves with the flip - hung from the host as authored (0u gap); under the winner it sits "
+                          f"26.9u inside something else in Camp (ext)")
+        arms = with_files([arm("baseline", [BASE, MOD_A, MOD_B, PATCH], kind="baseline"),
+                           arm("without-patch", [BASE, MOD_A, MOD_B])], {MOD_B: f_})
+        res = {(STATE, a_): ([st_] if a_ == "without-patch" else []) for a_ in ("baseline", "without-patch")}
+        plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH])
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        it = next((ln for ln in md.splitlines() if ln.startswith(f"- **{title}")), "")
+        ig = it.split("In game", 1)[-1]
+        return ("which way was not found" not in ig and "from the moment the game loads" in ig and "000X94" in ig
+                and "26.9 u" in ig), ig[:400]
+
+    for name, fn in [("eighth-review/C1194-switch-direction-from-records", c1194_switch_direction_from_records)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1192-persistent-cell-names-its-world", c1192_persistent_cell_names_its_world)]:
         cell(name, fn)
 
