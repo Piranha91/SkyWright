@@ -8821,6 +8821,26 @@ def main():
         return ("holds none of that field" in line and "the patch removes it" not in line
                 and f"{MOD_A}'s version" in line), line[-400:]
 
+    # C1197 (eighth review, Pilgrim 116): removing the patch brings back every predicted outcome it changes, the field
+    # where it keeps the losing mod's value (switched) as well as the resolved one: 2 record fields, never 1.
+    def c1197_removing_brings_back_switched_too():
+        R1, R2 = f"00C297:{BASE}", f"00C298:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, R1, "Placement", "o1", "v1", "v1"),
+                  lost_row(OTHER, MOD_A, R2, "Placement", "o2", "a2", "v2")]
+        w_rows = [lost_row(MOD_A, PATCH, R1, "Placement", "v1", "o1", "o1"),
+                  lost_row(MOD_A, PATCH, R2, "Placement", "a2", "o2", "o2")]
+        chains = [(R1, "PlacedObject", [(BASE, {"Placement": "v1"}), (OTHER, {"Placement": "o1"}),
+                                        (MOD_A, {"Placement": "v1"})]),
+                  (R2, "PlacedObject", [(BASE, {"Placement": "v2"}), (OTHER, {"Placement": "o2"}),
+                                        (MOD_A, {"Placement": "a2"})])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
+        w = sorted(str(e.get("withPatch")) for e in (reader(plan).get("prediction") or {}).get("record") or [])
+        ln = (reader(plan).get("validation") or {}).get("noRegressionLine") or ""
+        return (w == ["resolved", "switched"] and "brings back the 2 record fields" in ln), f"{w}; {ln[:300]}"
+
+    for name, fn in [("eighth-review/C1197-removing-brings-back-switched-too", c1197_removing_brings_back_switched_too)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1183-none-held-names-the-winner", c1183_none_held_names_the_winner)]:
         cell(name, fn)
 
