@@ -9592,6 +9592,18 @@ def main():
                      ("ninth-review/C1220-missing-mesh-no-placed-user", c1220_missing_mesh_no_placed_user)]:
         cell(name, fn)
 
+    # C1224 (ninth review, page fit): with one alternative setup, the changes section's heading names it, so its entries
+    # do not repeat the setup's label (BPT's two entries repeated three patch names each).
+    def c1224_changes_entries_one_setup_unlabelled():
+        plan, md, html = new_by_object_bundle(repaired=2)
+        sec = section_text(md, (reader(plan).get("sectionHeadings") or {}).get("changes") or "Changes made by")
+        title = priorities()["reader"]["checkTitles"][CONTACT]
+        return (f"- **{title}:**" in sec and "Tested alternative setup" not in sec
+                and f"<li><strong>{title}:</strong>" in html), sec.strip()[:300]
+
+    for name, fn in [("ninth-review/C1224-changes-entries-one-setup-unlabelled", c1224_changes_entries_one_setup_unlabelled)]:
+        cell(name, fn)
+
     for name, fn in [("ninth-review/C1221-fixture-own-layout-set-aside", c1221_fixture_own_layout_set_aside)]:
         cell(name, fn)
 
