@@ -3735,8 +3735,8 @@ def build_prediction(ctx: dict) -> dict:
         # single triangle is no removal: said apart
         stubs_base_ = [h for h in stubs if navmesh_base_single(loser, h["row"].get("formKey"))]
         stubs = [h for h in stubs if h not in stubs_base_]
-        held = [h for h in held_all if h not in stubs]
-        if not held and not stubs:
+        held = [h for h in held_all if h not in stubs and h not in stubs_base_]
+        if not held and not stubs and not stubs_base_:
             continue
         drops, lost_ = [], []
         for h in held:
