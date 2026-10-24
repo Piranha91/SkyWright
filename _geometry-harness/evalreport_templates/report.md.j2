@@ -146,16 +146,19 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 
 *Evidence image.* [Image provenance](evidence-index.md#{{ m.id }}).
 {% endif %}{% endfor %}{% endfor %}{% endfor %}{% endfor %}
-{% if p.reader.get("detailAsideLine") %}
+{% if "aside" in (p.layout or "").split() and (p.reader.get("detailAsideLine") or p.reader.get("detailSingleModLine")) %}
+{{ p.reader.get("detailAsideShort") or "Further results set aside from this list, with their counts:" }} [in the evidence index](evidence-index.md#detail-set-aside).
+{% else %}{% if p.reader.get("detailAsideLine") %}
 {{ p.reader.detailAsideLine }} [Set aside from this list](evidence-index.md#detail-set-aside).
 {% endif %}
 {% if p.reader.get("detailSingleModLine") %}
 {{ p.reader.detailSingleModLine }} [Set aside from this list](evidence-index.md#detail-set-aside).
 {% endif %}
+{% endif %}
 
 ## {{ p.reader.sectionHeadings.changes }}
 
-{% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{% if not p.reader.changesOneSetup %}{{ f.readerArmLabel }} — {% endif %}{{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {{ f.readerPlain }} [Full evidence](evidence-index.md#{{ f.id }}).
+{% set changes = p.findings|selectattr("kind", "in", ["repaired", "reclassified"])|selectattr("readerRelevant")|list %}{% if changes %}{% for f in changes %}- **{% if not p.reader.changesOneSetup %}{{ f.readerArmLabel }} — {% endif %}{{ (p.reader.checkTitles or {}).get(f.checkId, 'Additional check') }}:** {% if "aside" not in (p.layout or "").split() %}{{ f.readerPlain }} {% endif %}[Full evidence](evidence-index.md#{{ f.id }}).
 {% endfor %}{% else %}{{ val.get("noChangeLine") or "No measured repair or ownership change was recorded." }}
 {% endif %}
 {% if "tail" not in (p.layout or "").split() %}{% for item in p.reader.comparisonSummary %}- {{ item }}
