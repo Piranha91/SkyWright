@@ -5687,8 +5687,8 @@ def build_prediction(ctx: dict) -> dict:
                     list(dict.fromkeys(str(rk_[4]) for rk_, _ in rows_ if rk_[2] == m_)))})
                 for m_, n_ in sorted(by_.items(), key=lambda kv: (-kv[1], kv[0].lower())))
 
-        def enables_text(on_):
-            return bind(words["validationUndoneEnables"], {
+        def enables_text(on_, key_="validationUndoneEnables"):
+            return bind(words.get(key_) or words["validationUndoneEnables"], {
                 "count": fmt_n(len(on_)), "examples": "; ".join(list(dict.fromkeys(str(rk[4]) for rk in on_))[:3]),
                 "objects": (lambda n_: f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}")(
                     len({str(rk[4]) for rk in on_}))}) if on_ else ""
@@ -5719,7 +5719,8 @@ def build_prediction(ctx: dict) -> dict:
                     ", ".join(bind(words["validationReplacedOf"], {"count": fmt_n(n_), "owner": k_[1]})
                               for k_, n_ in replaced_whose.most_common() if k_[0] != "own"))
                     if x_ and x_ != (words.get("validationReplacedOwnLead") or "")),
-                "enables": enables_text(switched_on_r)}))
+                # (page budget, coordinator) the count only: the undone part names the examples
+                "enables": enables_text(switched_on_r, "validationReplacedEnables")}))
             replaced_sentence = sentences[-1]
             if in_undone_:
                 tail_ = words.get("validationUndoneTail") or ""
