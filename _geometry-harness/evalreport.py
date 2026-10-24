@@ -3086,6 +3086,7 @@ def build_prediction(ctx: dict) -> dict:
             if small_ and len(read_) == len(changes_) and words.get("itemOtherNudged"):
                 # "only" where every partner it carries is a small move and nothing else
                 ds_ = sorted(v_["moved"] for v_ in read_.values())
+                g["nudged"] = True             # (eighth review) the report says once how such pairs are counted
                 detail.append(bind(words["itemOtherNudged"], {
                     "mod": other_mod, "count": fmt_n(len(read_)), "objects": "object" if len(read_) == 1 else "objects",
                     "range": (f"{ds_[0]:,.1f} u" if ds_[-1] - ds_[0] < 0.05 else f"{ds_[0]:,.1f} u to {ds_[-1]:,.1f} u"),
@@ -4794,6 +4795,9 @@ def build_prediction(ctx: dict) -> dict:
     if cannot_run:
         lines.append({"reason": reasons["checksCannotRun"], "count": len(cannot_run),
                       "subject": "; ".join(sorted(title_of(c) for c in cannot_run))})
+    # (eighth review, standing nudge set-aside) how a nudged partner's pair is counted, said once, whatever is set aside
+    if words.get("nudgeCountedNote") and any(i_.get("nudged") for i_ in items):
+        prediction["setAsideLine"] = (prediction["setAsideLine"] or "") + " " + words["nudgeCountedNote"]
     prediction["setAsideLine"] = (prediction["setAsideLine"] or "").strip() or None
     coverage = {"lines": lines, "notes": list(ctx["limitations"]), "setAsideLine": prediction["setAsideLine"],
                 "checksOnPrediction": len(checks_on_p), "relevantArms": sorted(relevant_arms)}
