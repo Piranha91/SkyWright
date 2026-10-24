@@ -8803,6 +8803,27 @@ def main():
         return ("undoes 1 record field" in sm and "sets 1 record field" in sm
                 and "nothing new the checks can see" not in sm), sm[:500]
 
+    # C1183 (eighth review, Missives 30): with the patches the winning version is still the mod's own, which holds none
+    # of the field, and no patch holds the record: the line names that version, never "the patch removes it".
+    def c1183_none_held_names_the_winner():
+        L1, LF = f"00CA83:{BASE}", "LaterFix.esp"
+        arms = [arm("baseline", [BASE, HF_, LF, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, HF_, LF, OTHER, MOD_A, MOD_B])]
+        pre_ = [(BASE, {"Location": ""}), (HF_, {"Location": "018A59:Skyrim.esm"}), (LF, {"Location": "has no Location"}),
+                (OTHER, {"Location": "018A59:Skyrim.esm"}), (MOD_A, {"Location": "has no Location"})]
+        p_rows = [lost_row(HF_, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH),
+                  lost_row(OTHER, MOD_A, L1, "Location", ["Location=018A59:Skyrim.esm"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, [], check=CELLATTR, arms=arms, p_chains=[(L1, "Cell", pre_)],
+                                  w_chains=[(L1, "Cell", pre_)],
+                                  masters={HF_: [BASE], LF: [BASE, HF_], OTHER: [BASE, HF_], MOD_A: [BASE], MOD_B: [BASE],
+                                           PATCH: [BASE, MOD_A]})
+        line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
+        return ("holds none of that field" in line and "the patch removes it" not in line
+                and f"{MOD_A}'s version" in line), line[-400:]
+
+    for name, fn in [("eighth-review/C1183-none-held-names-the-winner", c1183_none_held_names_the_winner)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1182-summary-says-record-effects", c1182_summary_says_record_effects)]:
         cell(name, fn)
 
