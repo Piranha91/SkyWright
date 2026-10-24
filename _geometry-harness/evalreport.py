@@ -5364,6 +5364,7 @@ def build_prediction(ctx: dict) -> dict:
             edited_ = {id(e): patch_edits(e) for e in open_}
             outside_ = list(dict.fromkeys(m_ for e in open_ for m_ in (owner_(e, e["A"]), owner_(e, e["B"]))
                                           if str(m_).lower() not in pt_lower and not is_base_game(m_, words)
+                                          and str(m_).lower() != str(words.get("baseGameOwner") or "the base game").lower()
                                           and str(m_).lower() not in patch_lower
                                           and (str(m_).lower() not in cov_low_ or not edited_[id(e)])))
             # (seventh review, Clockwork S4) what is still there with a mod the patches do list as a master is inside what

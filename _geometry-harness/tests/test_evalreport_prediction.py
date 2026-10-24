@@ -8506,11 +8506,30 @@ def main():
         line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
         return ("holds none of that field" in line and "later value" not in line), line[-400:]
 
+    # C1168 (round 2, regen-r7c Winterhold, Clockwork, Missives): a winning value that is the base game's has the base
+    # game as its owner, which is no mod: the scope line never names the base game as a mod outside what the patch fixes.
+    def c1168_base_game_owner_is_not_outside_scope():
+        R_, L_ = f"00CA64:{BASE}", "LaterUndo.esp"
+        mh_ = lambda x: {"MaxHeight.CellData": x}  # noqa: E731
+        chain_vals = [(BASE, "00"), (MOD_A, "0A"), (L_, "00")]
+        names_ = [p_ for p_, _ in chain_vals]
+        arms = [arm("baseline", names_ + [PATCH], kind="baseline"), arm("without-patch", names_)]
+        ch_ = [(R_, "Worldspace", [(p_, mh_(v_)) for p_, v_ in chain_vals])]
+        r_ = lost_row(MOD_A, L_, R_, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=00"],
+                      ["MaxHeight.CellData=00"])
+        r_["Summary"] = f"Worldspace Tamriel: MaxHeight - {MOD_A}'s value lost to {L_}'s"
+        plan, md, _ = core_bundle([r_], [r_], arms=arms, p_chains=ch_, w_chains=ch_,
+                                  masters={MOD_A: [BASE], L_: [BASE], PATCH: [BASE, L_]})
+        val_ = (reader(plan).get("validation") or {}).get("sentences") or []
+        sc_ = [x for x in val_ if "out to fix" in x]
+        return (val_ != [] and not any("the base game is outside" in x for x in sc_)), " | ".join(sc_)[:500] or "no scope line"
+
     for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
                      ("round2/C1167-patch-without-the-field-holds-no-later-change",
                       c1167_patch_without_the_field_holds_no_later_change),
                      ("round2/C1165-others-carry-the-losers-value", c1165_others_carry_the_losers_value),
-                     ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner)]:
+                     ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner),
+                     ("round2/C1168-base-game-owner-is-not-outside-scope", c1168_base_game_owner_is_not_outside_scope)]:
         cell(name, fn)
 
     for name, fn in [("round2/C1162-switch-off-either-object-counted", c1162_switch_off_either_object_counted),
