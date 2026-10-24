@@ -9803,6 +9803,29 @@ def main():
                      ("tenth-review/C1230-superseded-kept-by-patch-no-clause", c1230_superseded_kept_by_patch_no_clause)]:
         cell(name, fn)
 
+    # C1231 (Snazzy S4): the set-aside says the door links the navmesh replacements drop are "said in their own line
+    # above" only when that line is printed. Here ModA's winning navmesh lists every door ModB's did: the door links were
+    # read and none is dropped, so the set-aside says that, and promises no line.
+    def c1231_no_dropped_door_link_no_promised_line():
+        files_ = door_files()
+        files_[MOD_A] = plugin_file_of(MOD_A, [BASE], [("NAVM", N_D1, [("NVNM", nvnm_d(9, [
+            (5, 0x00000C3A00), (6, 0x01000D01), (7, 0x01000D02), (2, 0x01000D03), (1, 0x01000D04)]))], False)])
+        N1 = f"0C3907:{BASE}"
+        r_ = lost_row(MOD_B, MOD_A, N1, "Data", ["Data.Max=1,2,3"], PH, ["Data.Max=0,0,0"])
+        r_["Summary"] = f"NavigationMesh {N1}: Data - {MOD_B}'s value lost to {MOD_A}'s"
+        arms_ = with_files([arm("baseline", [BASE, OTHER, MOD_B, MOD_A, PATCH], kind="baseline"),
+                            arm("without-patch", [BASE, OTHER, MOD_B, MOD_A])], files_)
+        plan, md, _ = cw_bundle([r_], extra_results={(NAVOWN, "baseline"): [], (NAVOWN, "without-patch"): []}, arms=arms_)
+        sec = md.split("## What the checks could not judge")[0]
+        aside = str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+        ok = ("said in their own line above" not in aside and "none" in aside.split("door links", 1)[-1]
+              and "no navmesh in this order links those" not in sec)
+        return ok, f"aside {aside[-300:]!r}"
+
+    for name, fn in [("tenth-review/C1231-no-dropped-door-link-no-promised-line",
+                      c1231_no_dropped_door_link_no_promised_line)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
