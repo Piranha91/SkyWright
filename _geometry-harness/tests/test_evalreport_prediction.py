@@ -10110,6 +10110,40 @@ def main():
     for name, fn in [("tenth-review/C1240-linked-anchors-written", c1240_linked_anchors_written)]:
         cell(name, fn)
 
+    # C1241 (page fit, tenth review): at the ladder's aside step the set-aside notes of the detail list become one link
+    # line (their counts are in the index's set-aside section), and a change entry keeps its check and its link, its text
+    # in the index; at the normal step both are printed in full.
+    def render_at(plan, layout):
+        pr_ = json.loads(PRIORITIES.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as td_:
+            view_ = R.effective_view(plan, 3, 1, pr_, layout)
+            return R.render_all(plan, view_, Path(td_) / "out", "")
+
+    def c1241_aside_step_moves_notes_and_change_text():
+        plan = detail_bundle()[0]
+        note_ = str(reader(plan).get("detailAsideLine") or "")
+        aside_ = render_at(plan, "compact tail order aside")
+        normal_ = render_at(plan, "normal")
+        rows_ = [{"Kind": "EDGE-IDX", "A": MOD_A, "B": MOD_B, "Summary": f"EDGE-IDX between {MOD_A} and {MOD_B}",
+                  "Necessary": [{"FormKey": f"0C1{i}41:{BASE}", "Label": "Hall (int)", "Physical": "Holds"}]} for i in (1, 2, 3)]
+        order = {"without-patch": {"navownprobe": dict(verdict="DIFFERENTIAL-HELPFUL", repaired=3, reclassified=0,
+                                                       created=0, newDefect=0, attributed=0, unmeasured=0)}}
+        log = f"GONE    EDGE-IDX    {MOD_A}  x  {MOD_B}   -3 record(s): repaired 3\n"
+        plan2, _, _ = compile_and_render(PATCHED_ARMS, {(NAVOWN, "without-patch"): [], (NAVOWN, "baseline"): rows_},
+                                         [MOD_A, MOD_B], patches=[PATCH], order=order,
+                                         diff_logs={(NAVOWN, "without-patch"): log})
+        ch_ = next((f for f in plan2.get("findings") or [] if f.get("kind") == "repaired"), {})
+        plain_ = str(ch_.get("readerPlain") or "")
+        aside2_, normal2_ = render_at(plan2, "compact tail order aside"), render_at(plan2, "normal")
+        ok = (bool(note_) and note_ in normal_["report.html"] and note_ not in aside_["report.html"]
+              and 'href="evidence-index.html#detail-set-aside"' in aside_["report.html"]
+              and bool(plain_) and plain_ in normal2_["report.html"] and plain_ not in aside2_["report.html"]
+              and f'href="evidence-index.html#{ch_.get("id")}"' in aside2_["report.html"])
+        return ok, f"note {note_[:80]!r}; change {plain_[:80]!r}"
+
+    for name, fn in [("tenth-review/C1241-aside-step-moves-notes-and-change-text", c1241_aside_step_moves_notes_and_change_text)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
