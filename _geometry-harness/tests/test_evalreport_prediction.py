@@ -2878,7 +2878,7 @@ def main():
 
     def core_bundle(p_rows, w_rows=(), check=RECORDS, arms=None, masters=None, p_chains=(), w_chains=(),
                     extra_results=None, targets=(MOD_A,), patches=(PATCH,), p_arm="without-patch", w_arm="baseline",
-                    p_tr=None, names=None):
+                    p_tr=None, names=None, w_tr=None):
         enr = {(check, p_arm): list(p_rows)}
         tr = {(check, p_arm): records_transcript(p_chains)} if p_chains else {}
         if p_tr is not None:
@@ -2887,6 +2887,8 @@ def main():
             enr[(check, w_arm)] = list(w_rows)
             if w_chains:
                 tr[(check, w_arm)] = records_transcript(w_chains)
+            if w_tr is not None:
+                tr[(check, w_arm)] = w_tr
         count_only = {k: max(1, len(v)) for k, v in enr.items()}
         results = {(CONTACT, a_): [] for (_, a_) in enr}
         results.update(extra_results or {})
@@ -8759,6 +8761,31 @@ def main():
         lines = [x for x in md.splitlines() if R1 in x]
         return (len(lines) == 1 and "not told" in lines[0] and "own value" not in lines[0]
                 and not lines[0].startswith("- Undone by") and not lines[0].startswith("- Set by")), str(lines)[:500]
+
+    # C1203 (eighth review, BPT 0EB5B2 in the regeneration): a tree answer writes a field the winner has and another
+    # provider lacks only as "<field> only in <winner>: <value>"; that is the winner's value too. The patch's version
+    # enabled opposite to the player, said so only that way, sets the object off for good: the undone line says it.
+    def c1203_winner_value_from_only_in():
+        R0, R4 = f"00C003:{BASE}", f"00C203:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, R0, "LocationReference", "a0", "b0", "v0")]
+        w_rows = [lost_row(MOD_B, PATCH, R4, "Primitive", ["Primitive.Bounds=5,5,5"], ["Primitive.Bounds=4,4,4"],
+                           ["Primitive.Bounds=4,4,4"], before=BASE)]
+        b_, m_ = {"Primitive.Bounds": "4,4,4"}, {"Primitive.Bounds": "5,5,5"}
+        pt_ = {"Primitive.Bounds": "4,4,4"}
+        req_, resp_ = tree_transcript([(R4, "PlacedObject", [(BASE, b_), (MOD_B, m_), (PATCH, pt_)])])
+        body_ = json.loads(resp_[1]["result"]["content"][0]["text"])
+        for n_ in body_["rows"][0]["nodes"]:
+            if not n_["is_winner"]:
+                n_["deltas"] += [f"EnableParent.Reference only in {PATCH}: 000014:Skyrim.esm",
+                                 f"EnableParent.Flags only in {PATCH}: SetEnableStateToOppositeOfParent"]
+        resp_[1]["result"]["content"][0]["text"] = json.dumps(body_)
+        plan, md, _ = core_bundle(p_rows, w_rows, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]},
+                                  targets=(MOD_A, MOD_B), w_tr=(req_, resp_))
+        un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
+        return (re.search(r"1 [^;]*sets? off for good", un) is not None), un[:400]
+
+    for name, fn in [("eighth-review/C1203-winner-value-from-only-in", c1203_winner_value_from_only_in)]:
+        cell(name, fn)
 
     for name, fn in [("eighth-review/C1202-unread-value-not-called-replacement", c1202_unread_value_not_called_replacement)]:
         cell(name, fn)
