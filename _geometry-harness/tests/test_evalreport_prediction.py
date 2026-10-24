@@ -8987,6 +8987,26 @@ def main():
         ig = it.split("In game", 1)[-1]
         return ("000D91" in ig and "6.8 u inside" in ig and "000H91" not in ig.split("inside", 1)[0].split(",", 1)[-1]), ig[:300]
 
+    # C1187 (eighth review, Winterhold 19): a fixture whose named host is no floor or wall (skill data: the host's model
+    # is outside the building and dungeon folders) is never said to hang because a floor or wall was removed; the item
+    # says the host's kind with an example. Hosts whose model is a building piece keep the floor-or-wall sentence.
+    def c1187_fixture_host_kind_from_model():
+        F1, F2, H1, H2 = f"000F87:{MOD_A}", f"000F88:{MOD_A}", f"000H87:{BASE}", f"000H88:{BASE}"
+        rows_ = [row("EMPTY-SPACE", MOD_B, MOD_A, F1, other=H1), row("EMPTY-SPACE", MOD_B, MOD_A, F2, other=H2)]
+        refs = {F1: {"base": f"0B0F87:{MOD_A}"}, F2: {"base": f"0B0F87:{MOD_A}"}, H1: {"base": f"0B0B87:{BASE}"},
+                H2: {"base": f"0B0W87:{BASE}"}}
+        bases = {f"0B0F87:{MOD_A}": {"type": "Static", "editorId": "WeaponRack", "model": "Clutter\Rack.nif"},
+                 f"0B0B87:{BASE}": {"type": "Static", "editorId": "BarrelStatic", "model": "Clutter\Barrel02.nif"},
+                 f"0B0W87:{BASE}": {"type": "Static", "editorId": "FarmWall", "model": "Architecture\Farmhouse\Wall01.nif"}}
+        res = {(FIXTURE, "without-patch"): rows_, (FIXTURE, "baseline"): []}
+        plan, md, _ = compile_and_render(WP_ARMS, res, [MOD_A], patches=[PATCH], names={"refs": refs, "bases": bases})
+        it = next((g for g in (reader(plan).get("prediction") or {}).get("items") or [] if g.get("checkId") == FIXTURE), {})
+        ig = str(it.get("inGameText") or "")
+        return ("BarrelStatic" in ig and "1 of them" in ig and "floor or wall it was fixed to" not in ig), ig[:400]
+
+    for name, fn in [("eighth-review/C1187-fixture-host-kind-from-model", c1187_fixture_host_kind_from_model)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1191-enclosed-dependent-is-the-subject", c1191_enclosed_dependent_is_the_subject)]:
         cell(name, fn)
 
