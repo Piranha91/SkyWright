@@ -9204,6 +9204,132 @@ def main():
         return ("## Further notes" in md3 and "## Further notes" not in md4 and "<h2>Further notes</h2>" not in html4
                 and "Everything else is in the evidence index." in md4), md4[-300:]
 
+    # ---------------------------------------------------------------- eighth review, round 2 (2026-10-24)
+    # C1206 (round 2 item 1, Pilgrim 63; a regression of C1193): the set-aside line's unit is the prediction setup by its own
+    # label; in a bundle whose measured load order is the setup with the patch, it is not "the measured load order".
+    def c1206_set_aside_unit_names_prediction_setup():
+        plan, md, _ = compile_and_render(PATCHED_ARMS, {(CONTACT, "baseline"): [],
+                                                        (CONTACT, "without-patch"): [row("CONTACT", MOD_B, MOD_A, f"000G06:{MOD_A}"),
+                                                                                     row("CONTACT", BASE, MOD_A, f"000G07:{MOD_A}")]},
+                                         [MOD_A, MOD_B], patches=[PATCH])
+        line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
+        return ("in rows of the measured load order" not in line and "in rows of the setup without the patch" in line), line[:300]
+
+    # C1207 (round 2 item 3, Clockwork 139): a losing value that is the base game's original (absent), put back over the
+    # loser's master's change, is owned by the base game: the loser only carries it, so the patch-wins line counts nothing
+    # of the loser's own there.
+    def c1207_patch_wins_base_owned_loser_is_carried():
+        R1 = f"00C207:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, MOD_A, MOD_B])]
+        a_ = lost_row(MOD_A, PATCH, R1, "MaxHeight", ["MaxHeight: ABSENT here"], ["MaxHeight.CellData=0C"],
+                      ["MaxHeight.CellData=0U"], before=UPD)
+        chains = [(R1, "Worldspace", [(BASE, {"MaxHeight": "has MaxHeight ABSENT"}), (UPD, {"MaxHeight.CellData": "0U"}),
+                                      (MOD_A, {"MaxHeight": "has MaxHeight ABSENT"}), (PATCH, {"MaxHeight.CellData": "0C"})])]
+        enr = {(RECORDS, "without-patch"): [lost_row(MOD_B, MOD_A, f"00C208:{BASE}", "Owner", "b", "a", "v")],
+               (RECORDS, "baseline"): [a_]}
+        plan, md, _ = compile_and_render(arms, {(CONTACT, x_): [] for x_ in ("baseline", "without-patch")}, [MOD_A, MOD_B],
+                                         patches=[PATCH], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                         enrichment=enr, transcripts={(RECORDS, "baseline"): records_transcript(chains)},
+                                         masters={UPD: [BASE], MOD_A: [BASE, UPD], MOD_B: [BASE], PATCH: [BASE, UPD, MOD_A]})
+        ls = [x for x in md.splitlines() if "where a declared patch's value wins" in x]
+        return (len(ls) == 1 and "1 more only carried by the loser" in ls[0]), " || ".join(ls)[:500]
+
+    # C1208 (round 2 item 4, Snazzy 7): the headline's shared-objects phrase names the earlier items that count them, as
+    # the kind line does, never only the check that found them.
+    def c1208_headline_same_objects_names_items():
+        X, Y = f"000X08:{BASE}", f"000Y08:{BASE}"
+        p_res = {(CONTACT, "baseline"): [row("CONTACT", MOD_B, MOD_A, X, other=f"000H{i}8:{MOD_B}") for i in (1, 2, 3)],
+                 (FIXTURE, "baseline"): [row("FIXTURE", MOD_B, MOD_A, X, other=f"000H58:{MOD_B}"),
+                                         row("FIXTURE", MOD_B, MOD_A, Y, other=f"000H68:{MOD_B}")],
+                 (CONTACT, "with-patch"): [], (FIXTURE, "with-patch"): []}
+        enr = {(RECORDS, "baseline"): [lost_row(MOD_A, MOD_B, r_, "Owner", "a", "b", "v")
+                                       for r_ in (Y, f"000R08:{BASE}", f"000R18:{BASE}", f"000R28:{BASE}", f"000R38:{BASE}")],
+               (RECORDS, "with-patch"): []}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, p_res, [MOD_A], patches=[PATCH], enrichment=enr,
+                                         count_only={k: max(1, len(v)) for k, v in enr.items()})
+        titles = priorities()["reader"]["checkTitles"]
+        v_ = str((reader(plan).get("prediction") or {}).get("verdict") or "")
+        return (f'counted once, above, under "{titles[CONTACT]}" (1) and "{titles[RECORDS]}" (1)' in v_), v_[-400:]
+
+    # C1209 (round 2 item 5, Snazzy 70 / Winterhold 91): the objects switched back on are counted against the whole line,
+    # never read as a subset of the off-for-good count before them.
+    def c1209_switched_on_counted_of_the_line():
+        p_rows = [lost_row(MOD_A, MOD_B, f"000709:{BASE}", "LocationReference", "a1", "b1", "v")]
+        w_rows = [lost_row(MOD_A, PATCH, f"000719:{BASE}", "SkyrimMajorRecordFlags", "InitiallyDisabled", "0", "0"),
+                  lost_row(MOD_B, PATCH, f"000729:{BASE}", "Placement", "Position=1,2,3; Rotation=0,0,0",
+                           "Position=4,5,6; Rotation=0,0,0", "Position=4,5,6; Rotation=0,0,0")]
+        enr = {(RECORDS, "baseline"): p_rows, (RECORDS, "with-patch"): w_rows}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []},
+                                         [MOD_A, MOD_B], patches=[PATCH],
+                                         count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 2}, enrichment=enr)
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
+        return ("1 of the 2, on 1 object, switch the object back on" in line and "1 of them" not in line), line[:400]
+
+    # C1210 (round 2 item 6, Winterhold 154 / 159): the patch-wins line says how its rows relate to its fields.
+    def c1210_patch_wins_rows_relation_said():
+        plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
+        ls = patch_wins_lines(md)
+        return any("2 rows linked, one per losing plugin and field" in x for x in ls), " || ".join(ls)[:600]
+
+    # C1211 (round 2 item 7, Sewers 39): with one evaluated mod the other version is compared on every counted group,
+    # those already there with the mod alone too, and a counted check that version did not measure is named.
+    def c1211_also_variant_every_counted_group():
+        X1, T_, X3, U_ = f"000X11:{MOD_A}", f"000T11:{OTHER}", f"000X13:{MOD_A}", f"000U13:{BASE}"
+        pair_ = row("OVERLAP", OTHER, MOD_A, X1, other=T_)
+        alone_ = row("OVERLAP", OTHER, MOD_A, X3, other=U_)       # OtherMod only edits the base-game partner U
+        alone_b_ = row("OVERLAP", BASE, MOD_A, X3, other=U_)      # the same pair without OtherMod: from ModA alone
+        st_ = row("STATE-CONTACT@000S11:ModA.esp@Unknown", MOD_A, OTHER, X1, label="Camp (ext)", other=T_)
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, OTHER, MOD_A]),
+                arm("without-other", [BASE, MOD_A])]
+        v_arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline", shas={MOD_A: "b" * 64})]
+        v_res = {(OVERLAP, "baseline"): [pair_, row("OVERLAP", OTHER, MOD_A, f"000X19:{MOD_A}", other=f"000T19:{OTHER}")]}
+        res = {(OVERLAP, "baseline"): [pair_, alone_], (OVERLAP, "without-patch"): [pair_, alone_],
+               (OVERLAP, "without-other"): [alone_b_],
+               (STATE, "baseline"): [st_], (STATE, "without-patch"): [st_], (STATE, "without-other"): []}
+        plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH], also=[(v_arms, v_res, [MOD_A], {})])
+        also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        return ("of the 2 overlap pairs between OtherMod.esp and ModA.esp" in also_ and f'"{title}"' in also_
+                and "not measured" in also_), also_[-500:]
+
+    # C1212 (round 2 item 8, Pilgrim 74): a set-aside row on a field an admitted predicted row already counts is not
+    # counted again among the clashes resolved but not predicted.
+    def c1212_resolved_not_predicted_counts_a_field_once():
+        R1 = f"00C212:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, R1, "Owner", "o", "a", "v", before=BASE),
+                  lost_row(THIRD, MOD_A, R1, "Owner", "o", "a", "o", before=OTHER)]
+        chains = [(R1, "PlacedObject", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (THIRD, {"Owner": "o"}),
+                                        (MOD_A, {"Owner": "a"})])]
+        arms_ = [arm("baseline", [BASE, OTHER, THIRD, MOD_A, MOD_B, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, OTHER, THIRD, MOD_A, MOD_B])]
+        plan, md, _ = core_bundle(p_rows, [], arms=arms_, p_chains=chains,
+                                  masters={OTHER: [BASE], THIRD: [BASE, OTHER], MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE]})
+        adm = sorted(e["admission"] for e in rec_of(plan, R1))
+        spots = (reader(plan).get("validation") or {}).get("blindSpots") or []
+        return (adm == ["admitted", "notOwnEdit"] and not any(x.get("admission") == "notOwnEdit" for x in spots)), f"{adm} {spots}"
+
+    # C1213 (round 2 item 2, Missives 67 / 149): the detail's set-aside count says what it counts (results, one check's
+    # finding per pair of plugins in one setup), apart from the rows the set-aside line counts.
+    def c1213_detail_aside_says_its_unit():
+        arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        plan, md, _ = compile_and_render(arms, {(CONTACT, "baseline"): [row("CONTACT", MOD_B, MOD_A, f"000G13:{MOD_A}"),
+                                                                       row("CONTACT", BASE, MOD_A, f"000G14:{MOD_A}")],
+                                                (CONTACT, "with-patch"): [row("CONTACT", BASE, MOD_A, f"000G14:{MOD_A}")]},
+                                         [MOD_A, MOD_B], patches=[PATCH])
+        ln = next((x for x in md.splitlines() if "further result" in x), "")
+        return ("one check's finding for one pair of plugins in one setup" in ln), ln[:400] or md[-600:]
+
+    for name, fn in [("round2-8/C1206-set-aside-unit-names-prediction-setup", c1206_set_aside_unit_names_prediction_setup),
+                     ("round2-8/C1207-patch-wins-base-owned-loser-is-carried", c1207_patch_wins_base_owned_loser_is_carried),
+                     ("round2-8/C1208-headline-same-objects-names-items", c1208_headline_same_objects_names_items),
+                     ("round2-8/C1209-switched-on-counted-of-the-line", c1209_switched_on_counted_of_the_line),
+                     ("round2-8/C1210-patch-wins-rows-relation-said", c1210_patch_wins_rows_relation_said),
+                     ("round2-8/C1211-also-variant-every-counted-group", c1211_also_variant_every_counted_group),
+                     ("round2-8/C1212-resolved-not-predicted-counts-a-field-once", c1212_resolved_not_predicted_counts_a_field_once),
+                     ("round2-8/C1213-detail-aside-says-its-unit", c1213_detail_aside_says_its_unit)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1205-last-step-tail-pointer-has-no-heading", c1205_last_step_tail_pointer_has_no_heading)]:
         cell(name, fn)
 
