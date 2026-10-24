@@ -9912,6 +9912,32 @@ def main():
     for name, fn in [("tenth-review/C1232-linked-lost-split-by-basis", c1232_linked_lost_split_by_basis)]:
         cell(name, fn)
 
+    # C1233 (BPT S2): the summary's "undoes" counts only the fields the patch undoes; the base game's value put back over
+    # another plugin's change is said apart (its own count), and the undone line's off-for-good part reads as part of
+    # the undone fields ("of them").
+    def c1233_summary_undone_parts_apart():
+        md_ = earlier_fix_bundle(True, base_value=True, whole=True, later_carries=True)
+        sm_ = next((x for x in md_.splitlines() if x.startswith("In short")), "")
+        return ("undoes 1 record field" not in sm_ and re.search(r"base game's value back over another plugin's change on 1\b", sm_)
+                is not None), sm_[-400:]
+
+    def c1233b_undone_off_reads_as_part():
+        R0, R4 = f"00C233:{BASE}", f"00C234:{BASE}"
+        p_rows = [lost_row(MOD_A, MOD_B, R0, "LocationReference", "a0", "b0", "v0")]
+        w_rows = [lost_row(MOD_B, PATCH, R4, "Primitive", ["Primitive.Bounds=5,5,5"], ["Primitive.Bounds=4,4,4"],
+                           ["Primitive.Bounds=4,4,4"], before=BASE)]
+        b_, m_ = {**offs(0), "Primitive.Bounds": "4,4,4"}, {**offs(0), "Primitive.Bounds": "5,5,5"}
+        pt_ = {**offs(0, "0", "000014:Skyrim.esm"), "Primitive.Bounds": "4,4,4"}
+        w_ch = [(R4, "PlacedObject", [(BASE, b_), (MOD_B, m_), (PATCH, pt_)])]
+        plan, md, _ = core_bundle(p_rows, w_rows, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE, MOD_A, MOD_B]},
+                                  targets=(MOD_A, MOD_B))
+        un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
+        return re.search(r"; 1 of them on objects [^;]*sets? off for good", un) is not None, un[:400]
+
+    for name, fn in [("tenth-review/C1233-summary-undone-parts-apart", c1233_summary_undone_parts_apart),
+                     ("tenth-review/C1233b-undone-off-reads-as-part", c1233b_undone_off_reads_as_part)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
