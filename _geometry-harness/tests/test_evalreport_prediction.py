@@ -6289,7 +6289,7 @@ def main():
     # C985, C986 (round 2, R2: Missives review S1, Snazzy review S2): the earlier clashes a patch also fixes are counted as
     # distinct changes in game: one field lost by two plugins is one; a Grid change only in bytes the game does not read
     # is none. Where the patch has no such field at all, the clash is said as the patch removing it, not as a fix.
-    def earlier_fix_bundle(patch_has_field, whole=False, o2_carries=False, fourth=False):
+    def earlier_fix_bundle(patch_has_field, whole=False, o2_carries=False, fourth=False, base_value=False):
         """Fix (patch_has_field): OtherMod and Neighbour set MaxHeight's cell data 05, ModA 09, the patch 05. Removal:
         OtherMod and Neighbour have no MaxHeight, ModA has 09, the patch has none. Without ModA both lose to Later.esp too (already
         there). A Grid row differing only in unused bytes is lost the same way and fixed too. fourth: Fourth.esp, after
@@ -6300,14 +6300,15 @@ def main():
         arms_ = [arm("baseline", [BASE, OTHER, O2, *O4s, O3, MOD_A, PATCH], kind="baseline"),
                  arm("without-patch", [BASE, OTHER, O2, *O4s, O3, MOD_A]), arm("without-a", [BASE, OTHER, O2, *O4s, O3])]
         mh_ = lambda x: {"MaxHeight.CellData": x, "MaxHeight.Offset": "0"} if x else {}  # noqa: E731
-        lose_ = "05" if patch_has_field else None
+        # base_value (round 3): the earlier losers and the patch hold the base game's own value, 00
+        lose_ = ("00" if base_value else "05") if patch_has_field else None
         chain_ = [(BASE, mh_("00")), (OTHER, mh_(lose_)), (O2, mh_(lose_)), *[(x_, mh_(lose_)) for x_ in O4s],
                   (O3, mh_("07")), (MOD_A, mh_("09"))]
         p_ch = [(W1, "Worldspace", chain_)]
         # a tree answer writes the field the patch lacks as the import captures it ("has X ABSENT", "has no X")
         w_ch = [(W1, "Worldspace", chain_ + [(PATCH, mh_(lose_) if patch_has_field else {
             "MaxHeight": "has MaxHeight ABSENT", "MaxHeight.CellData": "has no MaxHeight.CellData"})])]
-        lost_ = ["MaxHeight.CellData=05"] if patch_has_field else [f"MaxHeight.CellData only in {MOD_A}: 09"]
+        lost_ = ([f"MaxHeight.CellData={lose_}"] if patch_has_field else [f"MaxHeight.CellData only in {MOD_A}: 09"])
         mh_row = lambda a_, b_: lost_row(a_, b_, W1, "MaxHeight", lost_, PH, ["MaxHeight.CellData=00"])  # noqa: E731
         def grid_(a_, b_):
             r_ = lost_row(a_, b_, C2, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"])
@@ -8581,6 +8582,33 @@ def main():
         nxt_ = it.split(s_, 1)[-1].lstrip()[:12] if s_ else ""
         return (R1 in s_ and R2 not in s_ and not nxt_.startswith("For example")), f"{s_} || next: {nxt_} || {it[-500:]}"
 
+    # C1173 (round 3, BPT 15 / 71 / 85 / 88): both mods' changes are lost to the patch, whose value is the base game's
+    # (the record's own value, put back): said as the base game's value put back, never as the patch's own value.
+    def c1173_patch_value_base_put_back():
+        R_ = f"00CA73:{BASE}"
+        mh_ = lambda x: {"MaxHeight.CellData": x}  # noqa: E731
+        p_rows = [lost_row(MOD_A, MOD_B, R_, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=0B"],
+                           ["MaxHeight.CellData=00"], before=BASE)]
+        w_rows = [lost_row(m_, PATCH, R_, "MaxHeight", [f"MaxHeight.CellData={v_}"], ["MaxHeight.CellData=00"],
+                           ["MaxHeight.CellData=00"], before=BASE) for m_, v_ in ((MOD_A, "0A"), (MOD_B, "0B"))]
+        for r_ in p_rows + w_rows:
+            r_["Summary"] = r_["Summary"].replace("PlacedObject", "Worldspace")
+        p_ch = [(R_, "Worldspace", [(BASE, mh_("00")), (MOD_A, mh_("0A")), (MOD_B, mh_("0B"))])]
+        w_ch = [(R_, "Worldspace", [(BASE, mh_("00")), (MOD_A, mh_("0A")), (MOD_B, mh_("0B")), (PATCH, mh_("00"))])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=p_ch, w_chains=w_ch, masters={**MASTERS_, PATCH: [BASE]},
+                                  targets=(MOD_A, MOD_B))
+        pr_ = reader(plan).get("prediction") or {}
+        kl = next((x for x in pr_.get("withPatchLines") or [] if x.startswith("Record fields")), "")
+        vo = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch") and "both mods' values" in x), "")
+        return ("puts back the base game's value 1" in kl and "own value" not in kl
+                and "puts back the base game's value over both mods' values: 1" in vo and "its own value" not in vo), f"{kl} || {vo}"
+
+    # C1174 (round 3, BPT 78): an earlier loss whose lost value is the base game's own, which the patch holds: said as
+    # the base game's value the patch puts back, never as "the base game's change" lost to the later plugin.
+    def c1174_earlier_base_value_put_back():
+        ln = earlier_fix_bundle(True, base_value=True)
+        return ("the base game's change" not in ln and "the base game's value, put back over Later.esp's" in ln), ln[:500]
+
     for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
                      ("round2/C1167-patch-without-the-field-holds-no-later-change",
                       c1167_patch_without_the_field_holds_no_later_change),
@@ -8588,6 +8616,8 @@ def main():
                      ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner),
                      ("round2/C1168-base-game-owner-is-not-outside-scope", c1168_base_game_owner_is_not_outside_scope),
                      ("round3/C1172-carried-example-from-its-rows", c1172_carried_example_from_its_rows),
+                     ("round3/C1173-patch-value-base-put-back", c1173_patch_value_base_put_back),
+                     ("round3/C1174-earlier-base-value-put-back", c1174_earlier_base_value_put_back),
                      ("round2/C1169-mod-on-both-sides-says-each-part", c1169_mod_on_both_sides_says_each_part),
                      ("round3/C1171-scope-line-says-records-not-intent", c1171_scope_line_says_records_not_intent)]:
         cell(name, fn)

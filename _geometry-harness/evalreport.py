@@ -4741,6 +4741,18 @@ def build_prediction(ctx: dict) -> dict:
             oe = own_edit(p_of(e["checkId"]), keyof(e), e["B"])
             return oe is not None and not oe["changed"]
 
+        def base_put_back(e):
+            """(round 3, BPT 15 / 71 / 85 / 88) the patch's winning value is the base game's own value (its one owner, by
+            the read, is the record's base-game version): the patch puts the base game's value back."""
+            rows_w = lost_w.get((e["checkId"], e["formKey"], e.get("field")))
+            if not rows_w:
+                return False
+            rk_ = rows_w[0]["_rk"]
+            got_ = field_chain(patched_arm, rk_, rk_[3])
+            if got_ is None or not got_[0] or not is_base_game(got_[0][0], words):
+                return False
+            return owner_of(got_[0], got_[1], len(got_[0]) - 1)[0] == 0
+
         def lost_outcome(e):
             rows_w = lost_w.get((e["checkId"], e["formKey"], e.get("field")))
             if not rows_w:
@@ -5204,7 +5216,11 @@ def build_prediction(ctx: dict) -> dict:
                                 return l_
                             return owner_of(got_[0], got_[1], got_[2]["origin"])[1]
                         ls_ = list(dict.fromkeys(own_of(l_) for l_ in ls_))
-                        if ws_:
+                        bg_ = words.get("baseGameOwner") or "the base game"
+                        if ws_ and ls_ == [bg_] and words.get("blindSpotBasePutBack"):
+                            # (round 3, BPT 78) the lost value is the base game's own: the patch puts it back
+                            key_ += bind(words["blindSpotBasePutBack"], {"winners": and_list([f"{w_}'s" for w_ in ws_[:2]])})
+                        elif ws_:
                             key_ += bind(words["blindSpotLostTo"], {"losers": and_list([f"{l_}'s" for l_ in ls_[:2]]) + (
                                 f" and {fmt_n(len(ls_) - 2)} more" if len(ls_) > 2 else ""), "winners": and_list(ws_[:2])})
                     change_.add(key_)
@@ -5309,7 +5325,12 @@ def build_prediction(ctx: dict) -> dict:
                 bind(words["validationSwitchedBy"], {"keeper": k_.split("|")[0], "dropped": k_.split("|")[1],
                                                      "count": fmt_n(n_)}) for k_, n_ in pair_by(switched))}))
         if own:
-            sentences.append(bind(words["validationOwn"], {"patch": patch, "count": len(own)}))
+            n_ob_ = sum(1 for e in own if base_put_back(e))
+            sentences.append(bind(words["validationOwnAllBase"], {"patch": patch, "count": fmt_n(len(own))})
+                             if n_ob_ == len(own) and words.get("validationOwnAllBase") else
+                             bind(words["validationOwn"], {"patch": patch, "count": str(len(own)) + (
+                bind(words.get("validationOwnBase") or "", {"count": fmt_n(n_ob_), "all": "all" if n_ob_ == len(own)
+                                                            else fmt_n(n_ob_)}) if n_ob_ else "")}))
         if kept:
             kept_by = collections.Counter(e["A"] for e in kept)
             # whose change: named in the with-patch line and each item line; here only when several mods lose
@@ -5564,6 +5585,7 @@ def build_prediction(ctx: dict) -> dict:
                             "switchedBy": dict(collections.Counter(f"{e['A']}|{e['B']}" for e in all_["switched"]
                                                                    if item_of(e) == k)),
                             "own": sum(1 for e in all_["own"] if item_of(e) == k),
+                            "ownBase": sum(1 for e in all_["own"] if item_of(e) == k and base_put_back(e)),
                             "open": sum(1 for e in all_["open"] if item_of(e) == k),
                             "stands": sum(1 for e in all_["stands"] if item_of(e) == k),
                             # (sixth review, Pilgrim S2, BPT S2) left pairs with a visual-effect model
@@ -5676,6 +5698,12 @@ def build_prediction(ctx: dict) -> dict:
                     return (bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + off_text(off_from(bi, "offOpen"))
                             + (" (" + bind(words["stillThereEffect"], {"count": fmt_n(bi["openEffect"])}) + ")"
                                if bi.get("openEffect") and words.get("stillThereEffect") else ""))
+                if k == "own" and bi.get("ownBase") and ow.get("ownBase"):
+                    # (round 3) a patch value that is the base game's own is the base game's value put back
+                    n_b_, n_o_ = bi["ownBase"], (bi.get("own") or 0) - bi["ownBase"]
+                    return ", ".join(x_ for x_ in (
+                        bind(ow["own"], {"count": fmt_n(n_o_)}) if n_o_ else "",
+                        bind(ow["ownBase"], {"count": fmt_n(n_b_)})) if x_)
                 if k in ("hits", "own") and bi.get(f"{k}Off") and ow.get(f"{k}Off"):
                     # (blind round 1, Snazzy S1) how many the patch resolves by switching an object off: its choice
                     return bind(ow[k], {"count": fmt_n(bi.get(k) or 0)}) + bind(ow[f"{k}Off"], {"count": fmt_n(bi[f"{k}Off"])})
@@ -5889,7 +5917,12 @@ def build_prediction(ctx: dict) -> dict:
         if switched:
             sum_parts.append(bind(words["validationSummarySwitched"], {"count": by_unit(switched, True)}))
         if own:
-            sum_parts.append(bind(words["validationSummaryOwn"], {"count": by_unit(own, True)}))
+            own_b_ = [e for e in own if base_put_back(e)]
+            own_o_ = [e for e in own if not base_put_back(e)]
+            if own_o_:
+                sum_parts.append(bind(words["validationSummaryOwn"], {"count": by_unit(own_o_, True)}))
+            if own_b_ and words.get("validationSummaryOwnBase"):
+                sum_parts.append(bind(words["validationSummaryOwnBase"], {"count": by_unit(own_b_, True)}))
         if kept:
             # a patch carrying the winning value is said apart, never as left (Winterhold review 1, BPT review 3)
             sum_parts.append(bind(words["validationSummaryCarried"], {"count": by_unit_note(kept)}))
