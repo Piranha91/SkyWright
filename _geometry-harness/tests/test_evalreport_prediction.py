@@ -9988,6 +9988,24 @@ def main():
     for name, fn in [("tenth-review/C1238-inside-something-else-not-named", c1238_inside_something_else_not_named)]:
         cell(name, fn)
 
+    # C1236 (Missives S1): the patch-wins detail line names the rows it counts (record, field, and whose value is lost to
+    # which patch), so its count can be found; here OtherMod's Owner of 00C362, lost to the patch, is the one counted.
+    def c1236_patch_wins_counted_rows_named():
+        G9, O9 = f"00C361:{BASE}", f"00C362:{BASE}"
+        p_rows = [lost_row(OTHER, MOD_A, O9, "Owner", "o", "a", "v")]
+        w_rows = [lost_row(MOD_B, PATCH, G9, "Grid", ["Grid.Flags=327680"], PH, ["Grid.Flags=5504256"]),
+                  lost_row(OTHER, PATCH, O9, "Owner", "o", "p", "v")]
+        for r_ in p_rows + w_rows:
+            r_["Summary"] = r_["Summary"].replace("PlacedObject", "Cell")
+        plan, md, _ = cw_bundle(p_rows, w_rows, check=CELLATTR)
+        ln = next((x for x in md.splitlines() if "where a declared patch's value wins" in x), "")
+        ok = ("1 counted" in ln and re.search(r"00C362:Skyrim\.esm[^;]*Owner[^;]*" + re.escape(OTHER) + r"[^;]*" + re.escape(PATCH), ln)
+              is not None and "00C361" not in ln)
+        return ok, f"line {ln[:400]!r}"
+
+    for name, fn in [("tenth-review/C1236-patch-wins-counted-rows-named", c1236_patch_wins_counted_rows_named)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
