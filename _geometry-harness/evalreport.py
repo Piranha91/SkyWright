@@ -9237,6 +9237,19 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     n_noise_rows_ = sum(1 for k_ in rows_all_ if k_ in noise_)
                     n_carried_rows_ = sum(1 for k_ in rows_all_ if k_ in carried_ and k_ not in noise_)
                     n_kept_rows_ = n_rows_ - n_noise_rows_ - n_carried_rows_
+                    # (tenth review, Missives S1) a counted row whose loss the prediction holds as already there without
+                    # the evaluated mods (so no predicted clash and no line of the patch comparison holds it) is named
+                    already_ = {(str(e.get("formKey")), str(e.get("field")), str(e.get("A")).lower())
+                                for e in pred_.get("record") or [] if e.get("admission") == "alreadyPresent"}
+                    counted_named_ = [k_ for k_ in dict.fromkeys(rows_all_) if k_ not in noise_ and k_ not in carried_
+                                      and (k_[1], k_[2], k_[3].lower()) in already_]
+                    named_cnt_ = (bind(conc.get("patchChoicesCountedNamed") or "", {"items": "; ".join(
+                        bind(conc.get("patchChoicesCountedItem") or "", {
+                            "record": k_[1], "field": k_[2], "loser": k_[3], "patch": k_[4],
+                            "already": conc.get("patchChoicesCountedAlready") or ""}) for k_ in counted_named_[:2])
+                        + (bind(conc.get("patchChoicesCountedMore") or "", {"count": fmt_n(len(counted_named_) - 2)})
+                           if len(counted_named_) > 2 else "")})
+                        if counted_named_ and conc.get("patchChoicesCountedNamed") else "")
                     rows_said_ = bool(n_fields and n_rows_ > n_fields)
                     if n_aside or carried_f_:
                         choices = [f for f in choices if kept_rows(f)] or choices[:1]
@@ -9258,6 +9271,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                                         ("patchChoicesRowsNoise", n_noise_rows_),
                                                         ("patchChoicesRowsCarried", n_carried_rows_)) if n_])})
                                             if rows_said_ else "",
+                                            named_cnt_,
                                             # with the rows said, the fields not counted are among them, never in a
                                             # second unit
                                             bind(conc.get("patchChoicesAside") or "{count} more not counted", {
