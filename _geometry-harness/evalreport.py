@@ -701,6 +701,11 @@ class Bundle:
                     return e["path"]
         return emits[0] if emits else None
 
+    def arm_output_path(self, check_id: str, arm_id: str) -> str | None:
+        """A setup's own result of a check: its `arm` part, or the one run a check with no comparison step records
+        without a part."""
+        return self.output_emit_path(check_id, arm_id, "arm") or self.output_emit_path(check_id, arm_id, None)
+
     def enrichment(self) -> list[dict]:
         return [e for e in self.evidence if e.get("kind") == "enrichment"]
 
@@ -8212,7 +8217,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             for (c_, a_, b2_, k_), es_ in groups_.items():
                 if str(a_).lower() not in loaded_ or str(b2_).lower() not in loaded_:
                     continue                   # a pair that setup does not load: nothing to say
-                path_ = ab_.output_emit_path(c_, arm_.get("armId"), "arm")
+                # (round 3, review12 S2) a check that version ran once per setup is read too
+                path_ = ab_.arm_output_path(c_, arm_.get("armId"))
                 em_ = ab_.emit(path_) if path_ else None
                 if not isinstance(em_, dict):
                     unmeasured_v_.append(f'"{check_titles.get(str(c_), str(c_))}"')     # said, never dropped
@@ -8846,6 +8852,8 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                     if n_aside or carried_f_:
                         choices = [f for f in choices if kept_rows(f)] or choices[:1]
                     n_rows_ = sum(len([r_ for r_ in f.get("allRows") or [] if isinstance(r_, dict)]) for f in choices)
+                    # (round 3, review12 S1) the linked findings' rows the line counts, said when some are not
+                    n_kept_rows_ = sum(len(kept_rows(f)) for f in choices)
                     # (third review, Clockwork S3) every pair counted is linked, so the count recomputes from the rows
                     ids_ = [f["id"] for f in choices] or [f["id"] for f in part["groups"] if f.get("readerPatchChoice")][:1]
                     compact.append({"id": choices[0]["id"], "readerArmLabel": choices[0].get("readerArmLabel"),
@@ -8858,6 +8866,8 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                                         # (eighth review, page budget) the line's notes in one parenthesis
                                         "aside": (lambda ps_: f" ({'; '.join(ps_)})" if ps_ else "")([x_ for x_ in [
                                             bind(conc.get("patchChoicesRows") or "", {"rows": fmt_n(n_rows_)})
+                                            + (bind(conc.get("patchChoicesRowsCounted") or "", {"count": fmt_n(n_kept_rows_)})
+                                               if n_kept_rows_ < n_rows_ else "")
                                             if n_fields and n_rows_ > n_fields else "",
                                             bind(conc.get("patchChoicesAside") or "{count} more not counted", {
                                                 "count": fmt_n(n_aside), "fieldNoun": "field" if n_aside == 1 else "fields"})
