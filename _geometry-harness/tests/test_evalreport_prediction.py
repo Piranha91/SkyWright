@@ -9882,6 +9882,36 @@ def main():
                      ("tenth-review/C1235-placed-remeasure-says-basis-and-source", c1235_placed_remeasure_says_basis_and_source)]:
         cell(name, fn)
 
+    # C1232 (Snazzy S3): a by-object check's pairs on lost-record objects, where some count only through the partner,
+    # are split by basis: the object itself (the headline's shared count) and only the object it rests on.
+    def c1232_linked_lost_split_by_basis():
+        X1, X2 = f"00CB31:{BASE}", f"00CB32:{BASE}"
+        S1, S2 = f"000S31:{MOD_B}", f"00CB34:{BASE}"
+        ct_ = [row("CONTACT", MOD_B, MOD_A, X1, other=S1), row("CONTACT", MOD_B, MOD_A, X2, other=S2)]
+        lrs_, ch_ = [], []
+        for T in (X1, S2):
+            a_, b_ = offs(0), offs(0)
+            a_["Placement.Position"], b_["Placement.Position"] = "300,100,0", "700,100,0"
+            lrs_.append(lost_row(MOD_B, MOD_A, T, "Placement", off_txt(b_), off_txt(a_), off_txt(offs(0)), before=BASE))
+            ch_.append((T, "PlacedObject", [(BASE, offs(0)), (MOD_B, b_), (MOD_A, a_)]))
+        arms = [arm("baseline", [BASE, MOD_B, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, MOD_B, MOD_A]),
+                arm("without-b", [BASE, MOD_A])]
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [], (OVERLAP, "without-patch"): [],
+                                                (OVERLAP, "without-b"): [], (CONTACT, "baseline"): [],
+                                                (CONTACT, "without-patch"): ct_, (CONTACT, "without-b"): []},
+                                         [MOD_A], patches=[PATCH],
+                                         count_only={(RECORDS, "without-patch"): 2, (RECORDS, "without-b"): 1},
+                                         enrichment={(RECORDS, "without-patch"): lrs_, (RECORDS, "without-b"): []},
+                                         transcripts={(RECORDS, "without-patch"): records_transcript(ch_)},
+                                         masters={MOD_A: [BASE], MOD_B: [BASE], PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Objects left without their supporting surface")), "")
+        ok = (re.search(r"\b2 of these pairs are on an object whose own record change", it) is not None
+              and re.search(r"\b1 the object itself\b", it) is not None and re.search(r"\b1 only\b", it) is not None)
+        return ok, it[-500:]
+
+    for name, fn in [("tenth-review/C1232-linked-lost-split-by-basis", c1232_linked_lost_split_by_basis)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
