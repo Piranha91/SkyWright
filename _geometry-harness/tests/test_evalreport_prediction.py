@@ -9938,6 +9938,28 @@ def main():
                      ("tenth-review/C1233b-undone-off-reads-as-part", c1233b_undone_off_reads_as_part)]:
         cell(name, fn)
 
+    # C1237 (Missives S2): the carriers a line names leave the base game's own plugins out of the names; how many of
+    # them also carry the value is said, so the count is not read as every carrier. Dawnguard.esm carries Update.esm's
+    # value in R1 beside OtherMod.esp.
+    def c1237_base_game_carriers_counted():
+        DG = "Dawnguard.esm"
+        R1 = f"00CA37:{BASE}"
+        arms = [arm("baseline", [BASE, UPD, DG, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                arm("without-patch", [BASE, UPD, DG, OTHER, MOD_A, MOD_B])]
+        b0, a0, u0 = offs(0), offs(0), offs(0)
+        u0["Placement.Position"] = "100,100,12"
+        chains = [(R1, "PlacedObject", [(BASE, b0), (UPD, u0), (DG, u0), (OTHER, u0), (MOD_A, a0)])]
+        p_rows = [lost_row(UPD, MOD_A, R1, "Placement", ["Placement.Position=100,100,12"], PH, PH),
+                  lost_row(OTHER, MOD_A, R1, "Placement", ["Placement.Position=100,100,12"], PH, PH)]
+        plan, md, _ = core_bundle(p_rows, list(p_rows), arms=arms, p_chains=chains, w_chains=chains,
+                                  masters={UPD: [BASE], DG: [BASE, UPD], OTHER: [BASE, UPD], MOD_A: [BASE, UPD],
+                                           MOD_B: [BASE], PATCH: [BASE]})
+        line = next((ln for ln in md.splitlines() if f"{MOD_A} undoes its master {UPD}'s fix" in ln), "")
+        return (OTHER in line and "1 of the base game's own plugins" in line and DG not in line), line[:600]
+
+    for name, fn in [("tenth-review/C1237-base-game-carriers-counted", c1237_base_game_carriers_counted)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
