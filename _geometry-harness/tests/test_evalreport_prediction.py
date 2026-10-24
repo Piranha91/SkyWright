@@ -6878,7 +6878,7 @@ def main():
                                                 (ALIAS, "without-a"): nb_}, [MOD_A], patches=[PATCH])
         summ = str((reader(plan).get("validation") or {}).get("summary") or "")
         det = next((ln for ln in md.splitlines() if "quest scene" in ln and "Measured load order" in ln), "")
-        ok = ("1 clash brought back" in summ and "nothing else new" in summ and "(2 new with the patch)" not in det
+        ok = ("1 clash brought back" in summ and "no other new clash" in summ and "(2 new with the patch)" not in det
               and "(1 new with the patch)" in det)
         return ok, f"{summ[:200]} || {det[-200:]}"
 

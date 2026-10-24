@@ -6047,6 +6047,16 @@ def build_prediction(ctx: dict) -> dict:
         sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True, new_rest)}) if new_rest
                          else words["validationSummaryNoNewBeyond"] if not_new and words.get("validationSummaryNoNewBeyond")
                          else words["validationSummaryNoNew"])
+        # (eighth review, Snazzy 63 / 69) record fields the patch undoes, sets to another value or removes beside the
+        # predicted clashes are said in the summary with their counts, never left behind "nothing new"
+        n_undo_ = len(undone) + int(spots.get("baseOverChange") or 0)
+        rec_fx_ = [bind(words[k_], {"count": fmt_n(n_), "noun": words["fieldNoun"][0 if n_ == 1 else 1]})
+                   for k_, n_ in (("validationSummaryUndoes", n_undo_), ("validationSummarySets", len(replaced)),
+                                  ("validationSummaryRemoves", int(spots.get("patchRemoves") or 0)))
+                   if n_ and words.get(k_)]
+        if rec_fx_ and words.get("validationSummaryRecordEffects"):
+            sum_parts.insert(len(sum_parts) - 1, bind(words["validationSummaryRecordEffects"], {
+                "parts": and_list(rec_fx_)}))
         if not_new:
             sum_parts.insert(len(sum_parts) - 1, bind(words["validationSummaryBroughtBack"], {
                 "count": problems_text(False, [rk_ for rk_, _ in not_new])}))
