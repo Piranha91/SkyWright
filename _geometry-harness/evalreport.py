@@ -2721,6 +2721,7 @@ def build_prediction(ctx: dict) -> dict:
         g.setdefault("_subjectRows", collections.Counter())[rk[4] if rk[4] is not None else ("row", rk[5])] += 1
         g.setdefault("_rowSummaries", []).append(str(rk[5] or ""))
         g.setdefault("_rowKinds", []).append((str(rk[1]), str(rk[4])))
+        g.setdefault("_rowOthers", {})[str(rk[4])] = str((hit["row"].get("other") or [""])[0] or "")
         fid = hit["finding"].get("id") if rk[0] not in sib_only else None
         if fid and fid not in g["findingIds"]:
             g["findingIds"].append(fid)
@@ -3388,6 +3389,9 @@ def build_prediction(ctx: dict) -> dict:
                     if len(ds_) > 1 and rng_:
                         what_ = bind(rng_, {"low": f"{ds_[0]:g} u", "high": f"{ds_[-1]:g} u"})
                     dm_ = re.search(r"(\d+(?:\.\d+)?)\s*u inside", sm_)
+                    # (eighth review, Missives 23) "the arriving host encloses the dependent N u deep": the dependent,
+                    # the row's other object, sits N u inside the host
+                    enc_ = re.search(r"encloses the dependent (\d+(?:\.\d+)?)\s*u deep", sm_)
                     # (seventh review, Sewers S1) a switch state whose direction the check did not find is said without
                     # one, and the depth is the row's own object's, against something the check does not name
                     row_kinds_ = g.get("_rowKinds") or []
@@ -3395,11 +3399,15 @@ def build_prediction(ctx: dict) -> dict:
                     objs_ = list(dict.fromkeys(f_ for _, f_ in row_kinds_))
                     line_ = st_words.get("lineUnknown") if unknown_ and st_words.get("lineUnknown") else st_words["line"]
                     what_o_ = (st_words.get("statesOwn") or {}).get(m_.group("state")) if len(objs_) == 1 else None
+                    if enc_ and len(objs_) == 1 and (g.get("_rowOthers") or {}).get(objs_[0]):
+                        objs_ = [(g.get("_rowOthers") or {})[objs_[0]]]
+                        dm_ = enc_
                     g["inGame"] = bind(line_, {"switch": m_.group("switch"), "what": bind(what_o_ if what_o_ and len(ds_) <= 1
                                                                                         else what_, {
                         "depth": f"{dm_.group(1)} u" if dm_ else "", "object": named(objs_[0]) if objs_ else ""})})
                     break
         g.pop("_rowKinds", None)
+        g.pop("_rowOthers", None)
         g["inGameText"] = (f"In game: {g['inGame']}." if g["inGame"] else "" if g.pop("_meaningAll", False)
                            else words["inGameMissing"])
         n_eff_ = g.pop("_effN", 0)
