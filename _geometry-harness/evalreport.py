@@ -4014,6 +4014,7 @@ def build_prediction(ctx: dict) -> dict:
     # last version still leads somewhere (a teleport) and is not off for good (gate A condition R2); with the patch,
     # how many still have none. A measured line, not counted (no check judges door links), no NPC claim.
     door_lines_read = False
+    door_lines_said = False                    # (tenth review, Snazzy S4) a door-links line was printed
     nav_rows_ = [e for e in record if e["admission"] == "navmeshCheck"]
     main_b6_ = ctx.get("mainBundle")
     arm_rows6_ = {a_.get("armId"): (a_.get("requested") or {}).get("plugins") or []
@@ -4066,6 +4067,7 @@ def build_prediction(ctx: dict) -> dict:
                     lost_by_.setdefault(e["B"], collections.OrderedDict()).setdefault(e["A"], collections.OrderedDict())[dfk_] = str(e["formKey"])
             last_w_ = setup_doors(patched_arm)[0] if patched_arm else None
             for winner_, by_loser_ in lost_by_.items():
+                door_lines_said = True
                 doors_ = [d_ for m_ in by_loser_.values() for d_ in m_]
                 navs_ = {n_ for m_ in by_loser_.values() for n_ in m_.values()}
                 still_ = ([d_ for d_ in doors_ if not any(d_.lower() in ds_ for _, ds_ in last_w_.values())]
@@ -4794,8 +4796,12 @@ def build_prediction(ctx: dict) -> dict:
                                                "examples": "; ".join(sorted(set(carried_notown))[:2])})
                                            if carried_notown else "")}) if aside["notOwnEdit"] else "")
                                    + "".join(" " + bind(words["setAsideNoiseNavmeshDoorsRead"]
-                                                        if (k_ == "navmeshCheck" and door_lines_read
+                                                        if (k_ == "navmeshCheck" and door_lines_said
                                                             and words.get("setAsideNoiseNavmeshDoorsRead"))
+                                                        # (tenth review, Snazzy S4) read, and no door left without one
+                                                        else words["setAsideNoiseNavmeshDoorsNone"]
+                                                        if (k_ == "navmeshCheck" and door_lines_read
+                                                            and words.get("setAsideNoiseNavmeshDoorsNone"))
                                                         else words["setAsideNoise"][k_], {
                                        "count": fmt_n(aside_n(k_)[0]), "noun": aside_noun(k_),
                                        # (tenth review) an example where a sentence names one
