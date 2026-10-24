@@ -3950,6 +3950,7 @@ def build_prediction(ctx: dict) -> dict:
         value, not base-game plugins. {carrier: fields it carries in}, and how many fields were read; where no field's
         chain was read, the rows' own losers (fallback), each said for every field."""
         per_, read_ = collections.OrderedDict(), 0
+        base_c_ = set()                        # (tenth review, Missives S2) base-game plugins carrying it, counted
         for rk_ in rks_:
             got_ = whose_value(p_of(rk_[0]), rk_[0], rk_[4], ((p_rows.get(rk_) or {}).get("row") or {}).get("field"),
                                plugin=base_)
@@ -3964,16 +3965,25 @@ def build_prediction(ctx: dict) -> dict:
             for k_ in range(b_ + 1, d_):
                 if vals_[k_] == vals_[b_] and not is_base_game(provs_[k_], words):
                     per_[provs_[k_]] = per_.get(provs_[k_], 0) + 1
+                elif vals_[k_] == vals_[b_]:
+                    base_c_.add(str(provs_[k_]).lower())
         if not read_:
             return collections.OrderedDict((c_, len(rks_)) for c_ in fallback), len(rks_)
+        per_.base_n = len(base_c_)
         return per_, read_
+
+    def carriers_verb(per_):
+        return "carries" if len(per_) + (1 if getattr(per_, "base_n", 0) else 0) == 1 else "carry"
 
     def carriers_text(per_, n_):
         """The carriers, each with its count of fields where it carries the value in fewer than all of them."""
         names_ = [c_ if k_ >= n_ else bind(words.get("carrierInSome") or "{carrier} (in {count} of them)",
                                           {"carrier": c_, "count": fmt_n(k_)}) for c_, k_ in per_.items()]
-        return " and ".join(names_[:3]) + (bind(words.get("carrierMore") or " and {count} more",
-                                                  {"count": fmt_n(len(names_) - 3)}) if len(names_) > 3 else "")
+        return (" and ".join(names_[:3]) + (bind(words.get("carrierMore") or " and {count} more",
+                                                   {"count": fmt_n(len(names_) - 3)}) if len(names_) > 3 else "")
+                # (tenth review, Missives S2) the base game's own plugins carrying it, counted, not named
+                + (bind(words["carrierBaseGame"], {"count": fmt_n(per_.base_n)})
+                   if getattr(per_, "base_n", 0) and words.get("carrierBaseGame") else ""))
 
     # coordinator D1: a mod undoing its own master's fix (it puts back the value from before that master's change) is a
     # measured effect, one line per mod and master: the fields, examples, and how many are still so with the patch
@@ -4008,7 +4018,7 @@ def build_prediction(ctx: dict) -> dict:
         # (seventh review, Missives S1) read per field from the chain: each carrier for the fields it carries in
         per_c_, n_c_ = field_carriers(list(u_["fields"].values()), mas_, mod_, carr_)
         rework_ += (bind(words["undoesMasterCarried"], {"carriers": carriers_text(per_c_, n_c_), "master": mas_,
-                                                         "verb": "carries" if len(per_c_) == 1 else "carry"})
+                                                         "verb": carriers_verb(per_c_)})
                     if per_c_ and words.get("undoesMasterCarried") else "")
         loss_lines.append({"text": bind(words["undoesMasterLine"], {
             "rework": rework_,
@@ -4192,7 +4202,7 @@ def build_prediction(ctx: dict) -> dict:
             "examples": "; ".join(f"{fk_} ({f_}" + (f": {with_editor_ids((d_.get('lostIds') or {})[(fk_, f_)])}"
                                                     if (fk_, f_) in (d_.get("lostIds") or {}) else "") + ")"
                                   for fk_, f_ in list(d_["fields"])[:2]),
-            "verb": "carries" if len(per_c_) == 1 else "carry",
+            "verb": carriers_verb(per_c_),
             "patch": "" if kept_ is None else bind(words["baseValueDroppedPatch"], {
                 "patch": patch_text, "kept": fmt_n(kept_), "count": fmt_n(n_), "base": base_})
             + "".join(bind(words.get("baseValueDroppedLater") or "", {
