@@ -9369,7 +9369,10 @@ def main():
         also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
         # the unit agrees with its count (Sewers 39 at regen-r8g read "0 of the 1 clashes"); a state kind carries the
         # row's own state after "@", grouped by its kind
-        return ("0 of the 1 clash between ModA.esp and OtherMod.esp" in also_ and "1 clashes" not in also_
+        # a kind with no unit of its own names its check, so two checks' groups between one pair read apart
+        title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
+        return (f'0 of the 1 clash of the check "{title}" between ModA.esp and OtherMod.esp' in also_
+                and "1 clashes" not in also_
                 and "not measured with that version" not in also_.lower()), also_[-500:]
 
     for name, fn in [("round3-8/C1214-patch-wins-rows-say-how-many-counted", c1214_patch_wins_rows_say_how_many_counted),
