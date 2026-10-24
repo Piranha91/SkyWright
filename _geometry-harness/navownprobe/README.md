@@ -43,6 +43,21 @@ The findings line, the count line and the emit are the same with or without the 
 both modes. `--plugin` filters this listing as it filters the findings. The listing is not capped by `--list`: asking for
 it is asking for all of it.
 
+## Broken edge links: one EDGE-IDX row per link
+
+A navmesh's edge links are its crossings into neighbouring navmeshes, each naming one triangle on the far side. When a
+link names a triangle past the end of the neighbour's winning version, the emit writes one EDGE-IDX row for that link,
+and the row's other end carries the target triangle (`"Triangle"` on its `Alternative` record; `--base` predicates carry
+it as `"OtherTriangle"`). The row's identity is the linking navmesh, the target and that triangle, so conflictdiff and
+ordersweep keep every link. A patch that repairs some links of a navmesh is credited per link, and a patch that renumbers
+the linking navmesh but keeps its links reads unchanged. Links into the same missing triangle are one row that says how
+many ("(2 links)"). What the game does at a broken crossing is not measured; the probe judges the link table, not whether
+any triangle edge reaches an entry.
+
+conflictdiff refuses (exit 3) to compare an emit written before 2026-10-24, whose EDGE-IDX rows carry no triangle, with
+one whose rows do; re-run the older arm. `--write-edge-link-fixture DIR` writes the fixture
+`_geometry-harness/tests/test_navown_edge_identity.py` runs the probe on.
+
 ## Self-test
 
 `navownprobe --moved-ref-selftest` runs the probe's own code on a synthetic load order (`_shared/MovedRefFixture.cs`).

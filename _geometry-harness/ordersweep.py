@@ -175,13 +175,16 @@ def candidate_files(cdir: Path, baseline: Path | None, limit: int | None) -> tup
 
 # ---------------------------------------------------------------- emit reading (ConflictReport.cs shapes)
 
-def row_identity(kind: str, form_key: str, other: str | None, a: str) -> str:
+def row_identity(kind: str, form_key: str, other: str | None, a: str, part: int | None = None) -> str:
     """ConflictIo.RowIdentity, mirrored: the records a predicate is about, never the plugin pair; case-insensitive,
-    as the C# key is since 2026-09-11 (a filename's letter case differs between providers)."""
+    as the C# key is since 2026-09-11 (a filename's letter case differs between providers). With a part (an EDGE-IDX
+    row's target triangle, since 2026-10-24) the row is one link: the two records in their roles and the part."""
     kind, form_key, a = kind.lower(), form_key.lower(), a.lower()
     other = other.lower() if other is not None else None
     if other is None:
         return f"{kind}|{form_key}|{a}"
+    if part is not None:
+        return f"{kind}|{form_key}|{other}|{part}"
     return f"{kind}|{form_key}|{other}" if form_key <= other else f"{kind}|{other}|{form_key}"
 
 
@@ -192,8 +195,9 @@ def emit_rows(emit: Path) -> dict[str, str | None]:
     for c in doc.get("Conflicts", []):
         alt = c.get("Alternative") or []
         other = alt[0]["FormKey"] if alt else None
+        part = alt[0].get("Triangle") if alt else None
         for r in c.get("Necessary", []):
-            rows.setdefault(row_identity(c["Kind"], r["FormKey"], other, c["A"]), r.get("Physical"))
+            rows.setdefault(row_identity(c["Kind"], r["FormKey"], other, c["A"], part), r.get("Physical"))
     return rows
 
 
@@ -202,7 +206,8 @@ def emit_predicates(emit: Path) -> dict[str, str]:
     doc = load_json(emit) or {}
     out: dict[str, str] = {}
     for p in doc.get("Predicates", []) or []:
-        out.setdefault(row_identity(p["Kind"], p["FormKey"], p.get("Other"), p["A"]), p.get("Physical", "Unmeasured"))
+        out.setdefault(row_identity(p["Kind"], p["FormKey"], p.get("Other"), p["A"], p.get("OtherTriangle")),
+                       p.get("Physical", "Unmeasured"))
     return out
 
 

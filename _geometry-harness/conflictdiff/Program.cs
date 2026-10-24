@@ -83,8 +83,9 @@ static List<Row> Rows(ConflictFile f)
     foreach (var c in f.Conflicts)
     {
         string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+        int? part = c.Alternative is { Count: > 0 } alt2 ? alt2[0].Triangle : null;   // an EDGE-IDX row's target triangle
         foreach (var r in c.Necessary)
-            rows.Add(new Row(ConflictIo.RowIdentity(c.Kind, r.FormKey, other, c.A), c.Kind, c.A, c.B, r.FormKey, other, r.Physical, r.PhysicalDetail));
+            rows.Add(new Row(ConflictIo.RowIdentity(c.Kind, r.FormKey, other, c.A, part), c.Kind, c.A, c.B, r.FormKey, other, r.Physical, r.PhysicalDetail));
     }
     return rows;
 }
@@ -92,7 +93,7 @@ static List<Row> Rows(ConflictFile f)
 var before = Rows(baseFile).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
 var after = Rows(changedFile).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
 var predicates = (changedFile.Predicates ?? Array.Empty<Predicate>())
-    .GroupBy(p => ConflictIo.RowIdentity(p.Kind, p.FormKey, p.Other, p.A)).ToDictionary(g => g.Key, g => g.First());
+    .GroupBy(p => ConflictIo.RowIdentity(p.Kind, p.FormKey, p.Other, p.A, p.OtherTriangle)).ToDictionary(g => g.Key, g => g.First());
 
 int basePredicated = before.Values.Count(r => r.Physical is not null);
 Console.WriteLine($"base    : {basePath}  ({baseFile.Conflicts.Count:N0} conflicts, {before.Count:N0} rows; predicates on {basePredicated:N0})");
@@ -124,6 +125,14 @@ if (compareStates && !identitySame) Console.WriteLine("   (--compare-states: run
 // two runs judged, this asks which plugins, in what order, over which assets they read to judge them. A named difference
 // is printed and the run proceeds — the delta IS what the differential is of. An emit that names no configuration, or a
 // pair from different probes, is refused: a comparison that cannot state what it compares states nothing.
+// An EDGE-IDX row is one broken link since 2026-10-24 (its other end names the target triangle); an emit written before
+// then keys the links of one navmesh pair as one row. Read from the rows themselves: two emits written under the two
+// identities cannot be compared row for row.
+if (EdgeLinkIdentity.PerLink(baseFile) is bool bl && EdgeLinkIdentity.PerLink(changedFile) is bool cl && bl != cl)
+{
+    Console.WriteLine($"   ! REFUSED: the {(bl ? "changed" : "base")} emit's EDGE-IDX rows name no target triangle (written before 2026-10-24, one row per navmesh pair), so they cannot be compared with one row per link; re-run that arm on the current build.");
+    return 3;
+}
 var gate = ConfigurationGate.Check(baseFile, changedFile);
 foreach (var line in gate.Lines) Console.WriteLine($"   {line}");
 if (gate.Refused) return 3;

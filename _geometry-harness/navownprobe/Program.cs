@@ -337,7 +337,7 @@ static (List<System.Numerics.Vector3> V, List<(int A, int B, int C, int Flags)> 
 // The physical predicate of a dangling-link row: the same exact check the finding came from, re-asked of the winning
 // state under this arm. Exact, no geometry: the index still exceeds the winning count (or still points into a navmesh the
 // winning state lacks), or it does not.
-(PhysicalState State, string Detail) DanglePredicate(string kind, FormKey rec, FormKey other) => links.Predicate(kind, rec, other);
+(PhysicalState State, string Detail) DanglePredicate(string kind, FormKey rec, FormKey other, int? tri = null) => links.Predicate(kind, rec, other, tri);
 var coverageExtra = new List<CoverageLine>();
 
 // ---------------------------------------------------------------------------------------
@@ -911,12 +911,13 @@ if (emitPath is not null)
     {
         // A fix has to override the record carrying the bad index. The other end is context: a
         // patch that only re-states the target navmesh has not repaired the pointer into it.
-        var (st, why) = DanglePredicate(d.Kind, d.Rec, d.Other);
+        var (st, why) = DanglePredicate(d.Kind, d.Rec, d.Other, d.Tri);
         var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec)), st, why) };
         // For an unpaired finding this chain IS the deliverable: it names every plugin that already
         // touches the broken record, which is where a fix would have to go.
         var chain = Overriders(d.Rec, d.RecRole);
-        var other = new List<ConflictRecord> { new(d.Other.ToString(), d.OtherRole, null) };
+        // An EDGE-IDX row's other end names the target triangle: the row is that one link (ConflictIo.RowIdentity's part).
+        var other = new List<ConflictRecord> { new(d.Other.ToString(), d.OtherRole, null, Triangle: d.Tri) };
         conflicts.Add(new Conflict(
             d.Kind,
             d.PluginA >= 0 ? pluginKey[d.PluginA].FileName.String : "",
@@ -953,11 +954,12 @@ if (emitPath is not null)
             else
             {
                 string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+                int? otherTri = c.Alternative is { Count: > 0 } alt2 ? alt2[0].Triangle : null;
                 foreach (var r in c.Necessary)
                 {
                     if (other is null) { predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "the base row names no second record to re-ask the link of")); continue; }
-                    var (st, why) = DanglePredicate(c.Kind, FormKey.Factory(r.FormKey), FormKey.Factory(other));
-                    predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, other, st, why));
+                    var (st, why) = DanglePredicate(c.Kind, FormKey.Factory(r.FormKey), FormKey.Factory(other), otherTri);
+                    predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, other, st, why, otherTri));
                 }
             }
         }

@@ -61,7 +61,7 @@ sealed class DanglingLinks
     }
 
     public sealed record Found(List<string> Lines,
-        List<(string Kind, FormKey Rec, string RecRole, FormKey Other, string OtherRole, int PluginA, int PluginB, string Summary)> Rows,
+        List<(string Kind, FormKey Rec, string RecRole, FormKey Other, string OtherRole, int PluginA, int PluginB, string Summary, int? Tri)> Rows,
         int DoorTriChecked, int DoorLinkChecked, int EdgeChecked, int DoorIdxSuppressed);
 
     /// <summary>Every dangling link in the winning state. <paramref name="navOwner"/> names a navmesh's winning plugin
@@ -71,7 +71,7 @@ sealed class DanglingLinks
         var dangling = new List<string>();
         // The same findings, structurally, for --emit. Plugin indices are -1 where the detector genuinely
         // cannot name a second party (a link into a navmesh that is simply absent names no culprit).
-        var dangleStruct = new List<(string Kind, FormKey Rec, string RecRole, FormKey Other, string OtherRole, int PluginA, int PluginB, string Summary)>();
+        var dangleStruct = new List<(string Kind, FormKey Rec, string RecRole, FormKey Other, string OtherRole, int PluginA, int PluginB, string Summary, int? Tri)>();
         int doorTriChecked = 0, doorLinkChecked = 0, edgeChecked = 0;
         int doorIdxSuppressed = 0;
 
@@ -85,13 +85,13 @@ sealed class DanglingLinks
                 {
                     dangling.Add($"   DOOR-TRI   navmesh {nav} in {cellOf(nav)} points at triangle {tri} of {count}");
                     dangleStruct.Add(("DOOR-TRI", nav, "navmesh", door, "door", navOwner(nav), -1,
-                                      $"navmesh {nav} in {cellOf(nav)} points at triangle {tri} of {count}"));
+                                      $"navmesh {nav} in {cellOf(nav)} points at triangle {tri} of {count}", null));
                 }
                 else if (!door.IsNull && RefGone.Contains(door))
                 {
                     dangling.Add($"   DOOR-GONE  navmesh {nav} in {cellOf(nav)} links door {door}, which is DELETED in the winning state");
                     dangleStruct.Add(("DOOR-GONE", nav, "navmesh", door, "door", navOwner(nav), -1,
-                                      $"navmesh {nav} in {cellOf(nav)} links door {door}, deleted in the winning state"));
+                                      $"navmesh {nav} in {cellOf(nav)} links door {door}, deleted in the winning state", null));
                 }
             }
         }
@@ -103,7 +103,7 @@ sealed class DanglingLinks
             {
                 dangling.Add($"   DOOR-NAV   door {door} links navmesh {link.Nav}, which is not in the winning state");
                 dangleStruct.Add(("DOOR-NAV", door, "door", link.Nav, "navmesh", link.Plugin, -1,
-                                  $"door {door} links navmesh {link.Nav}, which is not in the winning state"));
+                                  $"door {door} links navmesh {link.Nav}, which is not in the winning state", null));
             }
             else if (link.Tri >= count)
             {
@@ -126,12 +126,16 @@ sealed class DanglingLinks
                 {
                     dangling.Add($"   DOOR-IDX   door {door} in {cellOf(link.Nav)} points at triangle {link.Tri} of {count}");
                     dangleStruct.Add(("DOOR-IDX", door, "door", link.Nav, "navmesh", link.Plugin, navOwner(link.Nav),
-                                      $"door {door} in {cellOf(link.Nav)} points at triangle {link.Tri} of {count}"));
+                                      $"door {door} in {cellOf(link.Nav)} points at triangle {link.Tri} of {count}", null));
                 }
             }
         }
 
         foreach (var (nav, links) in EdgeLinks)
+        {
+            // One row per broken link, keyed by its target triangle: entries naming the same missing triangle are one row
+            // that says how many (the target triangle is the link's identity; the table position renumbers with the source).
+            var sameTri = new Dictionary<(FormKey Mesh, int Tri), (int Line, int Row, int N)>();
             foreach (var (mesh, tri) in links)
             {
                 if (mesh.IsNull) continue;
@@ -140,19 +144,31 @@ sealed class DanglingLinks
                 {
                     dangling.Add($"   EDGE-NAV   navmesh {nav} in {cellOf(nav)} edge-links {mesh}, which is not in the winning state");
                     dangleStruct.Add(("EDGE-NAV", nav, "navmesh", mesh, "navmesh", navOwner(nav), -1,
-                                      $"navmesh {nav} in {cellOf(nav)} edge-links {mesh}, which is not in the winning state"));
+                                      $"navmesh {nav} in {cellOf(nav)} edge-links {mesh}, which is not in the winning state", null));
                 }
                 else if (tri >= count)
                 {
-                    dangling.Add($"   EDGE-IDX   navmesh {nav} in {cellOf(nav)} edge-links {mesh} triangle {tri} of {count}");
-                    dangleStruct.Add(("EDGE-IDX", nav, "navmesh", mesh, "navmesh", navOwner(nav), navOwner(mesh),
-                                      $"navmesh {nav} in {cellOf(nav)} edge-links {mesh} triangle {tri} of {count}"));
+                    string text = $"navmesh {nav} in {cellOf(nav)} edge-links {mesh} triangle {tri} of {count}";
+                    if (sameTri.TryGetValue((mesh, tri), out var seen))
+                    {
+                        int n = seen.N + 1;
+                        sameTri[(mesh, tri)] = (seen.Line, seen.Row, n);
+                        dangling[seen.Line] = $"   EDGE-IDX   {text} ({n} links)";
+                        dangleStruct[seen.Row] = dangleStruct[seen.Row] with { Summary = $"{text} ({n} links)" };
+                        continue;
+                    }
+                    sameTri[(mesh, tri)] = (dangling.Count, dangleStruct.Count, 1);
+                    dangling.Add($"   EDGE-IDX   {text}");
+                    dangleStruct.Add(("EDGE-IDX", nav, "navmesh", mesh, "navmesh", navOwner(nav), navOwner(mesh), text, tri));
                 }
             }
+        }
         return new Found(dangling, dangleStruct, doorTriChecked, doorLinkChecked, edgeChecked, doorIdxSuppressed);
     }
 
-    public (PhysicalState State, string Detail) Predicate(string kind, FormKey rec, FormKey other)
+    /// <summary>The physical half under this arm. <paramref name="tri"/> is an EDGE-IDX row's target triangle: with it the
+    /// question is that one link; without it (a base row written before 2026-10-24) any link into the target.</summary>
+    public (PhysicalState State, string Detail) Predicate(string kind, FormKey rec, FormKey other, int? tri = null)
     {
         switch (kind)
         {
@@ -178,7 +194,7 @@ sealed class DanglingLinks
                     ? (PhysicalState.Holds, "the edge link still points into a navmesh the winning state lacks")
                     : (PhysicalState.Gone, "the edge link is gone, or the target navmesh is provided now");
             case "EDGE-IDX":
-                return EdgeLinks.TryGetValue(rec, out var ei) && TriCount.TryGetValue(other, out var eiCount) && ei.Any(x => x.Mesh == other && x.Tri >= eiCount)
+                return EdgeLinks.TryGetValue(rec, out var ei) && TriCount.TryGetValue(other, out var eiCount) && ei.Any(x => x.Mesh == other && x.Tri >= eiCount && (tri is null || x.Tri == tri))
                     ? (PhysicalState.Holds, $"the edge link's triangle index still exceeds the target's winning count ({eiCount})")
                     : (PhysicalState.Gone, "the edge link is within the target's winning count, or gone");
             default:

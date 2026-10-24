@@ -41,8 +41,10 @@ namespace HarnessShared;
 /// <param name="PhysicalDetail">The number the predicate was read from, in words. Never load-bearing.</param>
 /// <param name="Wind">The record's render geometry includes shapes with the Tree_Anim (wind) shader flag: the shapes and
 /// their vertex-alpha facts (<c>NifWind</c>). Null otherwise, and then omitted. Never load-bearing.</param>
+/// <param name="Triangle">On an EDGE-IDX row's other end: the target triangle the broken link names, part of the row's
+/// identity (2026-10-24: one row per broken link). Null on every other record, and then omitted.</param>
 public sealed record ConflictRecord(string FormKey, string Role, string? Label, PhysicalState? Physical = null, string? PhysicalDetail = null,
-                                    string? Wind = null);
+                                    string? Wind = null, int? Triangle = null);
 
 /// <summary>One detected conflict between two plugins, with the records that carry it.</summary>
 /// <param name="Kind">CLOBBERED / DOOR-IDX / EDGE-IDX / SPLIT / OVERLAP / CONTACT — the detector's own class name.</param>
@@ -62,8 +64,10 @@ public sealed record Conflict(
 
 /// <summary>A base emit's record re-measured under THIS emit's arm (the probe's <c>--base</c>). Keyed the way
 /// <see cref="ConflictIo.RowIdentity"/> keys a row; <paramref name="A"/>/<paramref name="B"/> are the base
-/// row's attribution, carried so a reader can print it.</summary>
-public sealed record Predicate(string Kind, string A, string B, string FormKey, string? Other, PhysicalState Physical, string? Detail);
+/// row's attribution, carried so a reader can print it. <paramref name="OtherTriangle"/> is the base row's
+/// <see cref="ConflictRecord.Triangle"/> (an EDGE-IDX link's target triangle); null, and omitted, otherwise.</summary>
+public sealed record Predicate(string Kind, string A, string B, string FormKey, string? Other, PhysicalState Physical, string? Detail,
+                               int? OtherTriangle = null);
 
 /// <summary>One population a probe judged. <paramref name="Judged"/> and <paramref name="Unjudgeable"/> share the
 /// unit <paramref name="Population"/> names; <paramref name="SetAside"/> lists what the class excludes by
@@ -146,11 +150,27 @@ public static class ConflictIo
     /// `ccBGSSSE025-AdvDSGS.esm` from one provider and `ccbgssse025-advdsgs.esm` from another, split into GONE + NEW,
     /// and turned a no-op what-if into DIFFERENTIAL-RECLASSIFIED. The engine and MO2 treat the names as one file;
     /// so does the key.</para>
-    public static string RowIdentity(string kind, string formKey, string? other, string a)
+    /// <para>A PART (2026-10-24): an EDGE-IDX row is one broken link, so its identity is the linking navmesh, the target in
+    /// their roles (direction kept) and the target triangle; without a part the string is exactly what it was.</para>
+    public static string RowIdentity(string kind, string formKey, string? other, string a, int? part = null)
     {
         kind = kind.ToLowerInvariant(); formKey = formKey.ToLowerInvariant(); a = a.ToLowerInvariant(); other = other?.ToLowerInvariant();
         if (other is null) return $"{kind}|{formKey}|{a}";
+        if (part is not null) return $"{kind}|{formKey}|{other}|{part}";
         return string.CompareOrdinal(formKey, other) <= 0 ? $"{kind}|{formKey}|{other}" : $"{kind}|{other}|{formKey}";
+    }
+}
+
+/// <summary>WHICH IDENTITY an emit's EDGE-IDX rows were written under (2026-10-24): <c>true</c> when every EDGE-IDX row names its
+/// target triangle, <c>false</c> when one does not (an emit written before then keys the links of one navmesh pair as one
+/// row), <c>null</c> when the emit has no EDGE-IDX row. Read from the data, never from the probe's version.</summary>
+public static class EdgeLinkIdentity
+{
+    public static bool? PerLink(ConflictFile f)
+    {
+        var edge = f.Conflicts.Where(c => c.Kind == "EDGE-IDX").ToList();
+        if (edge.Count == 0) return null;
+        return edge.All(c => c.Alternative is { Count: > 0 } alt && alt[0].Triangle is not null);
     }
 }
 
