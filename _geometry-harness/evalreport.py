@@ -3581,8 +3581,13 @@ def build_prediction(ctx: dict) -> dict:
                                 and not par_.get("enableParent") and not par_.get("deleted")):
                             line_ = st_words["lineFromLoad"]
                             oth_ = (g.get("_rowOthers") or {}).get(objs_[0])
-                            if oth_ and (st_words.get("statesOwnOther") or {}).get(m_.group("state")):
-                                what_o_ = st_words["statesOwnOther"][m_.group("state")].replace("{other}", named(oth_))
+                            # (tenth review, Sewers S1) the other object is what the object sits inside only where the
+                            # row says so; a row that says "something else" names nothing it is inside
+                            unn_ = st_words.get("insideUnnamedPattern")
+                            own_w_ = ((st_words.get("statesOwnUnnamed") if unn_ and re.search(unn_, sm_) else None)
+                                      or st_words.get("statesOwnOther") or {})
+                            if oth_ and own_w_.get(m_.group("state")):
+                                what_o_ = own_w_[m_.group("state")].replace("{other}", named(oth_))
                     g["inGame"] = bind(line_, {"switch": m_.group("switch"), "what": bind(what_o_ if what_o_ and len(ds_) <= 1
                                                                                         else what_, {
                         "depth": f"{dm_.group(1)} u" if dm_ else "", "object": named(objs_[0]) if objs_ else ""})})
