@@ -3616,6 +3616,22 @@ def build_prediction(ctx: dict) -> dict:
         if put_back_ and words.get("historyLossStubPutBack"):
             text += " " + bind(words["historyLossStubPutBack"], {"winner": winner, "loser": loser,
                                                                   "records": ", ".join(x_.split(" ", 1)[0] for x_ in put_back_[:3])})
+            # (eighth review, Sewers 30; Gate A condition b) what it means in game, from each setup's winning version read
+            # from the plugin files: without the patch NPCs path on the winner's base-size navmesh; with it, the winning
+            # version there, a single triangle again or still full
+            if words.get("historyLossStubPutBackInGame"):
+                text += " " + bind(words["historyLossStubPutBackInGame"], {"winner": winner, "loser": loser})
+            if patched_arm and words.get("historyLossStubPatchStub") and words.get("historyLossStubPatchFull"):
+                stub_n_ = int(words.get("navmeshStubTriangles") or 1)
+                for x_ in put_back_[:3]:
+                    fk2_ = x_.split(" ", 1)[0]
+                    pw_ = next(((pl_, got2_) for pl_ in reversed([str(y_) for y_ in all_orders.get(patched_arm) or []])
+                                for got2_ in [plugin_record(pl_, "navmesh", fk2_)] if got2_ and got2_.get("triangles") is not None), None)
+                    if pw_ is None:
+                        continue
+                    text += " " + bind(words["historyLossStubPatchStub" if int(pw_[1]["triangles"]) <= stub_n_
+                                             else "historyLossStubPatchFull"], {
+                        "patch": patch_text, "winner": pw_[0], "record": fk2_, "triangles": fmt_n(int(pw_[1]["triangles"]))})
             base_same_ += put_back_
         if base_same_ and words.get("historyLossBaseCount"):
             text += " " + bind(words["historyLossBaseCount"], {"count": fmt_n(len(base_same_)), "winner": winner,
