@@ -9527,8 +9527,11 @@ def main():
         fb_ = plugin_file_of(MOD_B, [BASE], [("REFR", 0x00000C22, [("NAME", struct.pack("<I", 0x102)), dat(-30000.0)], False),
                                              ("REFR", 0x00000C24, [("NAME", struct.pack("<I", 0x102)), dat(-30000.0)], False)],
                              group="CELL")
+        # every version from the record's origin on is read (the base game's file too), as in a real bundle
+        fs_ = plugin_file_of(BASE, [], [("REFR", 0x00000C21 + i_, [("NAME", struct.pack("<I", 0x101)), dat(0.0)], False)
+                                        for i_ in range(4)], group="CELL")
         arms_ = with_files([arm("baseline", [BASE, MOD_B, MOD_A], kind="baseline"), arm("without-a", [BASE, MOD_B]),
-                            arm("without-b", [BASE, MOD_A])], {MOD_A: fa_, MOD_B: fb_})
+                            arm("without-b", [BASE, MOD_A])], {MOD_A: fa_, MOD_B: fb_, BASE: fs_})
         rows_ = [row("EMPTY-SPACE", MOD_A, MOD_B, FX, other=HO), row("EMPTY-SPACE", MOD_A, MOD_B, FX2, other=HO2)]
         plan, md, _ = compile_and_render(arms_, {(FIXTURE, "baseline"): rows_, (FIXTURE, "without-a"): [],
                                                  (FIXTURE, "without-b"): []}, [MOD_A, MOD_B])
