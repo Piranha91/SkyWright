@@ -1,4 +1,4 @@
-"""An arm whose plugins name meshes that only a folder outside its asset view provides is refused (cases 1350-1365).
+"""An arm whose plugins name meshes that only a folder outside its asset view provides is refused (cases 1350-1366).
 
     python _geometry-harness/tests/test_plan_view_mesh_gaps.py [case-13NN]
 
@@ -405,7 +405,20 @@ def case_1365(root: Path):
           f"1365: the plugin's own folder is named ({reason!r})")
 
 
-CASES = {f"case-{n}": globals()[f"case_{n}"] for n in range(1350, 1366)}
+def case_1366(root: Path):
+    """Two records naming the same missing mesh count it once: the sentence counts distinct paths."""
+    inst, game = make_instance(root, ["+Variant", "+Parent"], ["Variant.esp"])
+    plugin(inst / "mods" / "Variant" / "Variant.esp", [model_of(M1), model_of(M1).upper()])
+    mesh(inst / "mods" / "Parent", M1)
+    c = candidate(root / "c", "twice", ["Variant.esp"], ["Variant"])
+    r, doc = preflight(c, inst, game, root / "v.json")
+    reason = doc.get("reason") or ""
+    check(refused_here(doc, r), f"1366: refused {say(doc, r)}")
+    check("names 1 mesh that no folder in the candidate's Mods provides" in reason and "has it" in reason,
+          f"1366: one distinct path, counted once ({reason!r})")
+
+
+CASES = {f"case-{n}": globals()[f"case_{n}"] for n in range(1350, 1367)}
 
 
 def main() -> int:
