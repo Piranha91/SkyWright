@@ -2877,10 +2877,14 @@ def build_prediction(ctx: dict) -> dict:
             # examples: a field skill data prefers (a placed object's position) before any other (Snazzy review 3:
             # a worldspace texture path is no example a modder can act on)
             nm_ = object_name(rk[4], rk[5])
-            ex = (f"{rk[4]} ({nm_ + ', ' if nm_ else ''}{field_word(hit['row'].get('field'))})" if hit["row"].get("field")
+            # (eighth review, BPT 19) an example whose winning version sets the object off for good says so, and comes
+            # after examples that are drawn
+            off_ex_ = bool(side_disables(rk, rk[3])) and bool(words.get("exampleOffForGood"))
+            ex = (f"{rk[4]} ({nm_ + ', ' if nm_ else ''}{field_word(hit['row'].get('field'))}"
+                  + (words.get("exampleOffForGood") or "" if off_ex_ else "") + ")" if hit["row"].get("field")
                   else named(rk[4], rk[5]))
-            rank = 0 if hit["row"].get("field") in preferred_example_fields else 1
-            pool = g.setdefault("_recordPool", ([], []))[rank]
+            rank = (0 if hit["row"].get("field") in preferred_example_fields else 1) + (2 if off_ex_ else 0)
+            pool = g.setdefault("_recordPool", ([], [], [], []))[rank]
             if len(pool) < 2 and ex not in pool:
                 pool.append(ex)
         if master_of(masters, rk[2], rk[3]):
@@ -3166,7 +3170,7 @@ def build_prediction(ctx: dict) -> dict:
                         detail.append(bind(dep_["readFrom"], {"plugin": read_}))
         pool = g.pop("_recordPool", None)
         if pool:
-            g["_records"] = (pool[0] + pool[1])[:2]
+            g["_records"] = (pool[0] + pool[1] + pool[2] + pool[3])[:2]
         if g.get("_records"):
             detail.append(bind(words["itemExamples"], {"examples": "; ".join(g["_records"])}))
         detail.extend(carried_lines_)
