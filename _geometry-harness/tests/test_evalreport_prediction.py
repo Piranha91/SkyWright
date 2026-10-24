@@ -8940,6 +8940,28 @@ def main():
         line = (reader(plan).get("prediction") or {}).get("setAsideLine") or ""
         return ("rows of the measured load order" in line and "1 with the base game" in line), line[:300]
 
+    # C1184 (eighth review, Snazzy 14 / 63 / 64): a by-object item whose objects earlier items already count names, per
+    # object, the item that counted it first: X under the support check, Y under the record item, never all under one.
+    def c1184_counted_once_names_each_first_item():
+        X, Y = f"000X84:{BASE}", f"000Y84:{BASE}"
+        # (the items run largest first, as in the report the review read: records, then support, then fixtures)
+        p_res = {(CONTACT, "baseline"): [row("CONTACT", MOD_B, MOD_A, X, other=f"000H{i}4:{MOD_B}") for i in (1, 2, 3)],
+                 (FIXTURE, "baseline"): [row("FIXTURE", MOD_B, MOD_A, X, other=f"000H85:{MOD_B}"),
+                                         row("FIXTURE", MOD_B, MOD_A, Y, other=f"000H86:{MOD_B}")],
+                 (CONTACT, "with-patch"): [], (FIXTURE, "with-patch"): []}
+        enr = {(RECORDS, "baseline"): [lost_row(MOD_A, MOD_B, r_, "Owner", "a", "b", "v")
+                                       for r_ in (Y, f"000R84:{BASE}", f"000R85:{BASE}", f"000R86:{BASE}", f"000R87:{BASE}")],
+               (RECORDS, "with-patch"): []}
+        plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, p_res, [MOD_A], patches=[PATCH], enrichment=enr,
+                                         count_only={k: max(1, len(v)) for k, v in enr.items()})
+        titles = priorities()["reader"]["checkTitles"]
+        kl = next((x for x in (reader(plan).get("prediction") or {}).get("withPatchLines") or []
+                   if x.startswith(titles[FIXTURE])), "")
+        return (titles[CONTACT] in kl and titles[RECORDS] in kl), kl[:400]
+
+    for name, fn in [("eighth-review/C1184-counted-once-names-each-first-item", c1184_counted_once_names_each_first_item)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1193-set-aside-line-names-its-unit", c1193_set_aside_line_names_its_unit)]:
         cell(name, fn)
 
