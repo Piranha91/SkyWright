@@ -8995,14 +8995,18 @@ def main():
         rows_ = [row("EMPTY-SPACE", MOD_B, MOD_A, F1, other=H1), row("EMPTY-SPACE", MOD_B, MOD_A, F2, other=H2)]
         refs = {F1: {"base": f"0B0F87:{MOD_A}"}, F2: {"base": f"0B0F87:{MOD_A}"}, H1: {"base": f"0B0B87:{BASE}"},
                 H2: {"base": f"0B0W87:{BASE}"}}
-        bases = {f"0B0F87:{MOD_A}": {"type": "Static", "editorId": "WeaponRack", "model": "Clutter/Rack.nif"},
-                 f"0B0B87:{BASE}": {"type": "Static", "editorId": "BarrelStatic", "model": "Clutter/Barrel02.nif"},
-                 f"0B0W87:{BASE}": {"type": "Static", "editorId": "FarmWall", "model": "Architecture/Farmhouse/Wall01.nif"}}
+        # model paths as the names enrichment records them (backslashes); the editor IDs point the wrong way on purpose,
+        # so only the model can decide (Gate A condition d)
+        bases = {f"0B0F87:{MOD_A}": {"type": "Static", "editorId": "WeaponRack", "model": "Clutter\\Rack.nif"},
+                 f"0B0B87:{BASE}": {"type": "Static", "editorId": "FloorWallPiece", "model": "Clutter\\Barrel02.nif"},
+                 f"0B0W87:{BASE}": {"type": "Static", "editorId": "ClutterBarrel",
+                                    "model": "Architecture\\Farmhouse\\Wall01.nif"}}
         res = {(FIXTURE, "without-patch"): rows_, (FIXTURE, "baseline"): []}
         plan, md, _ = compile_and_render(WP_ARMS, res, [MOD_A], patches=[PATCH], names={"refs": refs, "bases": bases})
         it = next((g for g in (reader(plan).get("prediction") or {}).get("items") or [] if g.get("checkId") == FIXTURE), {})
         ig = str(it.get("inGameText") or "")
-        return ("BarrelStatic" in ig and "1 of them" in ig and "floor or wall it was fixed to" not in ig), ig[:400]
+        return ("000H87" in ig and "000H88" not in ig and "1 of them" in ig
+                and "floor or wall it was fixed to" not in ig), ig[:400]
 
     for name, fn in [("eighth-review/C1187-fixture-host-kind-from-model", c1187_fixture_host_kind_from_model)]:
         cell(name, fn)
