@@ -7098,8 +7098,11 @@ def main():
         plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r_], (OVERLAP, "without-patch"): [r_]}, [MOD_A],
                                          patches=[PATCH], masters={OTHER: [BASE], O2: [BASE], O3: [BASE], O4: [BASE],
                                                                    MOD_A: [BASE], PATCH: [BASE, O3, OTHER, O2, MOD_A]})
-        ln = next((x for x in (reader(plan).get("validation") or {}).get("sentences") or [] if "masters" in x), "")
-        return f"only {OTHER}, {O2} and {O3};" in ln, ln[:300]
+        # (round 3) the masters list is no longer said (the scope reads edits, and says what the records show): the
+        # leftover with Fourth.esp, which no supplied patch edits, is named in the scope line
+        val_ = (reader(plan).get("validation") or {}).get("sentences") or []
+        ln = next((x for x in val_ if "supplied patch edit" in x), "")
+        return (f"still there with {O4} lies on records" in ln and not any("masters" in x for x in val_)), ln[:300]
 
     for name, fn in [("fourth-review/C1059-patch-scope-said", c1059_patch_scope_said),
                      ("fourth-review/C1067-patch-scope-in-load-order", c1067_patch_scope_in_load_order)]:
@@ -8554,12 +8557,37 @@ def main():
         return (ln != "" and not re.search(r"set out|sets out|intend|job|masters", ln)
                 and "Neighbour.esp lies on records, navmeshes or objects that no supplied patch edits" in ln), ln[:500]
 
+    # C1172 (round 3, Winterhold 17): two records of one item; on R1 the winner only carries a value Earlier.esp made
+    # first, on R2 the winner's value is its own. The carried sentence names R1 as its example, and the item's other
+    # examples never follow it as if they were its own.
+    def c1172_carried_example_from_its_rows():
+        E_, L_ = "Earlier.esp", "LaterWin.esp"
+        R1, R2 = f"00CA70:{BASE}", f"00CA71:{BASE}"
+        mh_ = lambda x: {"MaxHeight.CellData": x}  # noqa: E731
+        names_ = [BASE, E_, MOD_A, L_]
+        arms = [arm("baseline", names_ + [PATCH], kind="baseline"), arm("without-patch", names_)]
+        ch_ = [(R1, "Worldspace", [(BASE, mh_("00")), (E_, mh_("0B")), (MOD_A, mh_("0A")), (L_, mh_("0B"))]),
+               (R2, "Worldspace", [(BASE, mh_("00")), (E_, mh_("00")), (MOD_A, mh_("0A")), (L_, mh_("0C"))])]
+        rows_ = []
+        for R_, w_ in ((R1, "0B"), (R2, "0C")):
+            r_ = lost_row(MOD_A, L_, R_, "MaxHeight", ["MaxHeight.CellData=0A"], [f"MaxHeight.CellData={w_}"],
+                          ["MaxHeight.CellData=00"])
+            r_["Summary"] = f"Worldspace {R_[:6]}: MaxHeight - {MOD_A}'s value lost to {L_}'s"
+            rows_.append(r_)
+        plan, md, _ = core_bundle(rows_, rows_, arms=arms, p_chains=ch_, w_chains=ch_,
+                                  masters={E_: [BASE], MOD_A: [BASE], L_: [BASE], PATCH: [BASE]})
+        it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
+        s_ = next((x for x in re.split(r"(?<=\.) ", it) if "only carries a value" in x), "")
+        nxt_ = it.split(s_, 1)[-1].lstrip()[:12] if s_ else ""
+        return (R1 in s_ and R2 not in s_ and not nxt_.startswith("For example")), f"{s_} || next: {nxt_} || {it[-500:]}"
+
     for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
                      ("round2/C1167-patch-without-the-field-holds-no-later-change",
                       c1167_patch_without_the_field_holds_no_later_change),
                      ("round2/C1165-others-carry-the-losers-value", c1165_others_carry_the_losers_value),
                      ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner),
                      ("round2/C1168-base-game-owner-is-not-outside-scope", c1168_base_game_owner_is_not_outside_scope),
+                     ("round3/C1172-carried-example-from-its-rows", c1172_carried_example_from_its_rows),
                      ("round2/C1169-mod-on-both-sides-says-each-part", c1169_mod_on_both_sides_says_each_part),
                      ("round3/C1171-scope-line-says-records-not-intent", c1171_scope_line_says_records_not_intent)]:
         cell(name, fn)

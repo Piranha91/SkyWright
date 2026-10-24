@@ -2842,6 +2842,9 @@ def build_prediction(ctx: dict) -> dict:
                     org_ = ow3_[1] if ow3_[0] != w3 else None
                     if org_ is not None and ow3_[0] != 0:
                         g.setdefault("_winnerCarries", collections.Counter())[(rk[3], org_)] += 1
+                        # (round 3, Winterhold 17) its example is a record of its own rows
+                        g.setdefault("_winnerCarriesEx", {}).setdefault(
+                            (rk[3], org_), (str(rk[4]), field_word(hit["row"].get("field"))))
                     if (vals3[w3] == vals3[0] and not recordrows.own_change(
                             provs3, vals3, w3, (masters or {}).get(low3[w3]) if masters is not None else None)[0]):
                         g.setdefault("_winnerBase", collections.Counter())[field_word(hit["row"].get("field"))] += 1
@@ -3104,10 +3107,18 @@ def build_prediction(ctx: dict) -> dict:
                     "example": bind(words["itemWinnerBaseExample"], {"example": ex_wb_, "field": win_base[0]})
                     if ex_wb_ and words.get("itemWinnerBaseExample") else ""}))
         g.pop("_winnerBaseEx", None)
+        # (round 3, Winterhold 17) said after the item's examples, with an example of its own rows, so the item's
+        # examples never read as this sentence's
+        carried_lines_ = []
+        ex_wc_ = g.pop("_winnerCarriesEx", None) or {}
         for (wc_, oc_), nc_ in (g.pop("_winnerCarries", None) or {}).items():
             if words.get("itemWinnerCarries"):
-                detail.append(bind(words["itemWinnerCarries"], {"winner": wc_, "origin": oc_, "count": fmt_n(nc_),
-                                                                "all": "every one" if nc_ == g["count"] else f"{fmt_n(nc_)} of them"}))
+                ex_ = ex_wc_.get((wc_, oc_))
+                carried_lines_.append(bind(words["itemWinnerCarries"], {
+                    "winner": wc_, "origin": oc_, "count": fmt_n(nc_),
+                    "all": "every one" if nc_ == g["count"] else f"{fmt_n(nc_)} of them",
+                    "example": bind(words["itemWinnerBaseExample"], {"example": ex_[0], "field": ex_[1]})
+                    if ex_ and words.get("itemWinnerBaseExample") else ""}))
         n_undecided = g.pop("_notDecided", 0)
         if n_undecided and len(directions) == 1:
             loser, winner = next(iter(directions))
@@ -3158,6 +3169,7 @@ def build_prediction(ctx: dict) -> dict:
             g["_records"] = (pool[0] + pool[1])[:2]
         if g.get("_records"):
             detail.append(bind(words["itemExamples"], {"examples": "; ".join(g["_records"])}))
+        detail.extend(carried_lines_)
         places = g.pop("_places", None)
         if places:
             top = places.most_common(2)
