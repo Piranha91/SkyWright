@@ -8107,7 +8107,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                         and e_.get("attribution") != "single-mod"):
                     groups_.setdefault((e_["checkId"], e_["A"], e_["B"], e_["kind"]), []).append(e_)
             loaded_ = {str(q.get("name")).lower() for q in (arm_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict)}
-            parts_v_ = []
+            parts_v_, none_v_ = [], []
             for (c_, a_, b2_, k_), es_ in groups_.items():
                 if str(a_).lower() not in loaded_ or str(b2_).lower() not in loaded_:
                     continue                   # a pair that setup does not load: nothing to say
@@ -8118,10 +8118,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 there_ = {(str(r_.get("formKey")), frozenset(map(str, r_.get("other") or ())))
                           for cc_ in em_.get("Conflicts") or [] for r_ in conflict_rows(cc_, None)}
                 n_ = sum(1 for e_ in es_ if (str(e_["formKey"]), frozenset(map(str, e_.get("other") or ()))) in there_)
+                unit_v_ = ((reader_data.get("kindPhrases") or {}).get(k_, {}).get("unitPlural" if len(es_) != 1 else "unitSingular")
+                           or "clashes")
                 parts_v_.append(bind(pw_also["alsoVariantPart"], {
-                    "found": fmt_n(n_), "count": fmt_n(len(es_)),
-                    "unit": (reader_data.get("kindPhrases") or {}).get(k_, {}).get("unitPlural" if len(es_) != 1 else "unitSingular")
-                    or "clashes", "a": a_, "b": b2_}))
+                    "found": fmt_n(n_), "count": fmt_n(len(es_)), "unit": unit_v_, "a": a_, "b": b2_}))
+                if not n_:
+                    # (eighth review, Sewers 39) a counted group that version finds none of, said in plain words
+                    none_v_.append(f"{'the ' if len(es_) != 1 else ''}{fmt_n(len(es_))} {unit_v_} between {a_} and {b2_}")
             if parts_v_:
                 # one sentence per setup, its parts joined (page budget)
                 # (sixth review, Sewers r5 S1) the other version named by the folder that setup loads it from
@@ -8129,7 +8132,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                             (arm_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict) and str(q.get("name")) in var_]
                 also_lines.append(bind(pw_also["alsoVariantFinds"], {"arm": arm_.get("armId"), "plugin": " and ".join(var_),
                                                                      "folder": " and ".join(f_ for f_ in folders_ if f_) or "-",
-                                                                     "parts": "; ".join(parts_v_)}))
+                                                                     "parts": "; ".join(parts_v_)})
+                                  + (" " + bind(pw_also["alsoVariantNone"], {"groups": and_list(none_v_),
+                                                                              "be": "are" if len(none_v_) > 1 or not none_v_[0].startswith("1 ") else "is"})
+                                     if none_v_ and pw_also.get("alsoVariantNone") else ""))
     reader["prediction"]["alsoEvaluations"] = also_lines
     # Evidence derived after measurement (bundle standard §8, enrichment): listed in the evidence index with what
     # it was derived from; names reach the plan so a reader's page needs no side input.
