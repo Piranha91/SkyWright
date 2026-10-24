@@ -10006,6 +10006,49 @@ def main():
     for name, fn in [("tenth-review/C1236-patch-wins-counted-rows-named", c1236_patch_wins_counted_rows_named)]:
         cell(name, fn)
 
+    # C1239 (Winterhold S2; Gate A condition a). ModA's versions of two navmeshes are a single triangle. 000E95's base-game
+    # version has 600 triangles: ModA's is a placeholder (how a mod removes a navmesh). 000E96's base-game version is
+    # itself one triangle: ModA's is that version, not a removal, and is said apart (C1239). Where the removed navmesh's
+    # cell holds a navmesh record of ModA's own (000E99, 50 triangles), loaded beside the winning version, the line says
+    # so and that whether they overlap was not measured (C1239b).
+    def nvnm_cell(n_tris, cell):
+        return (struct.pack("<IIII", 12, 0xA5E9A03C, 0, cell) + struct.pack("<I", 0) + struct.pack("<I", n_tris)
+                + b"\x00" * 16 * n_tris + struct.pack("<I", 0) + struct.pack("<I", 0))
+
+    def stub_cell_bundle():
+        n1, n2 = f"000E95:{BASE}", f"000E96:{BASE}"
+        p_rows = [row("CLOBBERED", MOD_A, MOD_B, n1, label="TempleInterior (int)  1 tris -> 600"),
+                  row("CLOBBERED", MOD_A, MOD_B, n2, label="TempleCellar (int)  1 tris -> 1")]
+        for r_ in p_rows:
+            r_["Necessary"][0]["Detail"] = "victim-only ground: 900 sample(s) of the loser's mesh farther than 120u"
+        arms_ = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("with-patch", [BASE, MOD_A, MOD_B, PATCH])]
+        C1, C2 = 0x00000C39, 0x00000C3A
+        fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E95, [("NVNM", nvnm_cell(600, C1))], False),
+                                               ("NAVM", 0x00000E96, [("NVNM", nvnm_cell(1, C2))], False)]),
+               MOD_A: plugin_file_of(MOD_A, [BASE], [("NAVM", 0x00000E95, [("NVNM", nvnm_cell(1, C1))], False),
+                                                      ("NAVM", 0x00000E96, [("NVNM", nvnm_cell(1, C2))], False),
+                                                      ("NAVM", 0x01000E99, [("NVNM", nvnm_cell(50, C1))], False)]),
+               MOD_B: plugin_file_of(MOD_B, [BASE], [("NAVM", 0x00000E95, [("NVNM", nvnm_cell(600, C1))], False),
+                                                      ("NAVM", 0x00000E96, [("NVNM", nvnm_cell(1, C2))], False)]),
+               PATCH: plugin_file_of(PATCH, [BASE], [])}
+        with_files(arms_, fs_)
+        plan, md, html = compile_and_render(arms_, {(NAVOWN, "baseline"): p_rows, (NAVOWN, "with-patch"): []},
+                                            [MOD_A, MOD_B], patches=[PATCH])
+        return " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
+
+    def c1239_base_single_triangle_not_a_removal():
+        top = stub_cell_bundle()
+        rem = next((x for x in re.split(r"(?<=\.) ", top) if "how a mod removes a navmesh" in x), "")
+        return ("000E95" in rem and "000E96" not in rem and "000E96" in top), top[-700:]
+
+    def c1239b_own_navmesh_beside_winner_said():
+        top = stub_cell_bundle()
+        return ("000E99:ModA.esp" in top and "not measured" in top), top[-700:]
+
+    for name, fn in [("tenth-review/C1239-base-single-triangle-not-a-removal", c1239_base_single_triangle_not_a_removal),
+                     ("tenth-review/C1239b-own-navmesh-beside-winner-said", c1239b_own_navmesh_beside_winner_said)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
