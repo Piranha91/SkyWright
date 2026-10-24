@@ -8234,11 +8234,18 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for idx_, ck_, arm_, st_ in refused_at:
         n_ = int(gone_.get(ck_) or 0)
         if n_ and arm_ == (lead["validation"] or {}).get("withPatchArm") and cmp_words.get("refusedLineMeasured"):
-            comparison_summary[idx_] = (f"{check_titles.get(str(ck_), b.check_title(ck_))} — "
-                                        f"{arm_labels.get(arm_, 'Measured setup')}: "
-                                        + bind(cmp_words["refusedLineMeasured"], {
-                                            "count": fmt_n(n_), "noun": "clash" if n_ == 1 else "clashes",
-                                            "them": "it" if n_ == 1 else "them", "why": refused_words(st_)}))
+            # the reader's list may have been rebuilt since (labels rewritten): the refused line is found by its words
+            old_ = comparison_summary[idx_]
+            head_ = old_.split(": ", 1)[0] if ": " in old_ else ""
+            new_ = (head_ + ": " + bind(cmp_words["refusedLineMeasured"], {
+                "count": fmt_n(n_), "noun": "clash" if n_ == 1 else "clashes",
+                "them": "it" if n_ == 1 else "them", "why": refused_words(st_)}))
+            refused_tail_ = bind(cmp_words["refusedLine"], {"why": refused_words(st_)})
+            for lst_ in (comparison_summary, reader.get("comparisonSummary")):
+                if isinstance(lst_, list):
+                    for j_, x_ in enumerate(lst_):
+                        if str(x_).endswith(refused_tail_) and str(x_).startswith(check_titles.get(str(ck_), b.check_title(ck_))):
+                            lst_[j_] = str(x_)[:-len(refused_tail_)] + new_.split(": ", 1)[1]
     reader["sectionHeadings"].update(lead["headings"])
     pw = reader_data.get("prediction") or {}
     aside_total = sum(aside_counts.values())
