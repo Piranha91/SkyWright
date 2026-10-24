@@ -6068,8 +6068,11 @@ def build_prediction(ctx: dict) -> dict:
                                                                                 + sum_parts[-1]) if len(sum_parts) > 1
                                                                                else sum_parts[0])})
         removing_ = patched_arm == "baseline"
+        # (eighth review, Pilgrim 116) removing the patch brings back every predicted outcome it changes: resolved, the
+        # losing mod's value kept (switched) and the patch's own value
+        changed_ = hits + switched + own
         side_lines = ({"noRegressionLine": bind(words["validationRemovingNoRegression"], {
-                           "patch": patch, "count": by_unit(hits, True)}) if hits else None,
+                           "patch": patch, "count": by_unit(changed_, True)}) if changed_ else None,
                        "noChangeLine": bind(words["validationRemovingNoChange"], {
                            "patch": patch, "count": problems_text()}) if problems else
                        bind(words["validationRemovingNoChangeNone"], {"patch": patch}) if hits else None}

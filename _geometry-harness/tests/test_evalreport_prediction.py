@@ -3819,7 +3819,7 @@ def main():
         ok = (str(val.get("summary", "")).startswith(f"In short, with {PATCH}: resolved 1 record field")
               and "do not establish" not in md and "did not report a newly introduced" not in md
               and "No measured repair or ownership change was recorded." not in md
-              and f"Removing {PATCH} brings back the 1 record field it resolves" in md)
+              and f"Removing {PATCH} brings back the 1 record field whose outcome it changes" in md)  # wording, eighth review
         return ok, f"summary {val.get('summary')!r}; headline {val.get('headline')!r}"
 
     # C815 (BPT review S2/S3): the summary names every check with new problems; a by-object check counts objects, with
@@ -8836,7 +8836,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, w_rows, p_chains=chains, masters={OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         w = sorted(str(e.get("withPatch")) for e in (reader(plan).get("prediction") or {}).get("record") or [])
         ln = (reader(plan).get("validation") or {}).get("noRegressionLine") or ""
-        return (w == ["resolved", "switched"] and "brings back the 2 record fields" in ln), f"{w}; {ln[:300]}"
+        return (w == ["resolved", "switched"] and "brings back the 2 record fields whose outcome it changes" in ln), f"{w}; {ln[:300]}"
 
     for name, fn in [("eighth-review/C1197-removing-brings-back-switched-too", c1197_removing_brings_back_switched_too)]:
         cell(name, fn)
