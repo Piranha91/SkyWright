@@ -3805,11 +3805,12 @@ def build_prediction(ctx: dict) -> dict:
                           and fk2_.split(":", 1)[1].lower() == str(loser).lower()
                           and (v2_.get("triangles") or 0) > int(words.get("navmeshStubTriangles") or 1)]
                 if mates_:
-                    beside_.append((str(h["row"].get("formKey")), mates_))
+                    beside_.append((str(h["row"].get("formKey")),
+                                    sorted(mates_, key=lambda x_: -(own_[x_].get("triangles") or 0))))
             if beside_:
                 text += " " + bind(words["historyLossStubOwnBeside"], {
                     "count": fmt_n(len(beside_)), "loser": loser, "winner": winner,
-                    "examples": "; ".join(f"{m_[0]} beside {r_}" for r_, m_ in beside_[:2])})
+                    "examples": "; ".join(f"{m_[0]} beside {r_}" for r_, m_ in beside_[:1])})
         # (sixth review, Sewers r6 S1) a stub whose winning version has the base game's triangle count: the winner puts
         # back the base game's navmesh where the losing mod removed it, read from both plugin files
         put_back_ = []
