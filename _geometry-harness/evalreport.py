@@ -5295,11 +5295,10 @@ def build_prediction(ctx: dict) -> dict:
                      # overwrite history is said by whether it is still flagged; its measured loss, apart (W-S1)
                      and not (present if e["admission"] == "history" else there)(patched_arm, keyof(e))]
         # (eighth review round 2, Pilgrim 74) a set-aside lost edit on a field an admitted predicted row counts is that
-        # field, counted once there
+        # field, counted once there: never again among the clashes resolved but not predicted (applied below, after the
+        # undone family takes its rows: a change the patch undoes there is said, not counted)
         counted_fields_ = {(str(e["formKey"]), e.get("field")) for e in record
                            if e["admission"] == "admitted" and e["kind"] == "LOST-EDIT"}
-        spot_rows = [e for e in spot_rows if not (e["kind"] == "LOST-EDIT"
-                                                  and (str(e["formKey"]), e.get("field")) in counted_fields_)]
         # (round 2, Missives S1 and Snazzy S2) an earlier record clash a patch also fixes is a change in game: one field of
         # one record, however many plugins' values or record checks name it; one whose values differ only in bytes the game
         # does not read is none; and where the patch holds none of the field, the patch removes it, said as a removal
@@ -5382,6 +5381,11 @@ def build_prediction(ctx: dict) -> dict:
             for e in spot_rows:
                 spot_units[spot_kind[id(e)]].setdefault(spot_unit(e), e)
             spots = collections.Counter({k: len(v) for k, v in spot_units.items()})
+
+        for k_ in [k_ for k_ in spot_units if k_ not in ("baseOverChange", "patchRemoves", "history")]:
+            spot_units[k_] = {u_: e for u_, e in spot_units[k_].items()
+                              if not (e["kind"] == "LOST-EDIT" and (str(e["formKey"]), e.get("field")) in counted_fields_)}
+        spots = collections.Counter({k: len(v) for k, v in spot_units.items() if v})
 
         def spot_pairs(k):
             c_, change_ = collections.Counter(), set()
