@@ -8838,6 +8838,29 @@ def main():
         ln = (reader(plan).get("validation") or {}).get("noRegressionLine") or ""
         return (w == ["resolved", "switched"] and "brings back the 2 record fields whose outcome it changes" in ln), f"{w}; {ln[:300]}"
 
+    # C1185 (eighth review, BPT 75 / review10 S1): a lost change still there, whose winning value is the base game's (its
+    # owner is no mod), on a record a supplied patch holds (the patch carries ModA's value but loads before the winner):
+    # the scope line says it, with the plugin whose version wins, never drops it.
+    def c1185_base_owned_remainder_in_scope_line():
+        R_, L_ = f"00CA85:{BASE}", "LaterUndo.esp"
+        mh_ = lambda x: {"MaxHeight.CellData": x}  # noqa: E731
+        p_vals = [(BASE, "00"), (MOD_A, "0A"), (L_, "00")]
+        w_vals = [(BASE, "00"), (MOD_A, "0A"), (PATCH, "0A"), (L_, "00")]
+        arms = [arm("baseline", [p_ for p_, _ in w_vals], kind="baseline"), arm("without-patch", [p_ for p_, _ in p_vals])]
+        r_ = lost_row(MOD_A, L_, R_, "MaxHeight", ["MaxHeight.CellData=0A"], ["MaxHeight.CellData=00"],
+                      ["MaxHeight.CellData=00"])
+        r_["Summary"] = f"Worldspace Tamriel: MaxHeight - {MOD_A}'s value lost to {L_}'s"
+        plan, md, _ = core_bundle([r_], [r_], arms=arms,
+                                  p_chains=[(R_, "Worldspace", [(p_, mh_(v_)) for p_, v_ in p_vals])],
+                                  w_chains=[(R_, "Worldspace", [(p_, mh_(v_)) for p_, v_ in w_vals])],
+                                  masters={MOD_A: [BASE], L_: [BASE], PATCH: [BASE, MOD_A]})
+        val_ = (reader(plan).get("validation") or {}).get("sentences") or []
+        sc_ = [x for x in val_ if "supplied patch edit" in x]
+        return any(f"still there with {L_}" in x and "a supplied patch edits" in x for x in sc_), " | ".join(sc_)[:500] or str(val_)[:500]
+
+    for name, fn in [("eighth-review/C1185-base-owned-remainder-in-scope-line", c1185_base_owned_remainder_in_scope_line)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1197-removing-brings-back-switched-too", c1197_removing_brings_back_switched_too)]:
         cell(name, fn)
 
