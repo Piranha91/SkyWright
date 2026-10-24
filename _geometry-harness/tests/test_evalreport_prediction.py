@@ -9514,6 +9514,34 @@ def main():
         nb = {n["title"]: n["count"] for n in val.get("newByCheck") or []}
         return (val.get("patchProblems") == 2 and sorted(nb.values()) == [1, 2]), f"patchProblems {val.get('patchProblems')}; by check {nb}"
 
+    # C1221 (ninth review, Winterhold F-039): a fixture whose winning version and whose removed host's winning version are
+    # the same plugin's hangs as that plugin ships it: set aside, never a clash between the mods; a fixture whose host
+    # another plugin's winning version removes stays counted.
+    def c1221_fixture_own_layout_set_aside():
+        FX, HO, FX2, HO2 = (f"000C21:{BASE}", f"000C22:{BASE}", f"000C23:{BASE}", f"000C24:{BASE}")
+        dat = lambda z: ("DATA", struct.pack("<6f", 100.0, 200.0, z, 0.0, 0.0, 0.0))  # noqa: E731
+        fa_ = plugin_file_of(MOD_A, [BASE], [("REFR", 0x00000C21, [("NAME", struct.pack("<I", 0x101)), dat(256.0)], False),
+                                             ("REFR", 0x00000C22, [("NAME", struct.pack("<I", 0x102)), dat(-30000.0)], False),
+                                             ("REFR", 0x00000C23, [("NAME", struct.pack("<I", 0x101)), dat(256.0)], False)],
+                             group="CELL")
+        fb_ = plugin_file_of(MOD_B, [BASE], [("REFR", 0x00000C22, [("NAME", struct.pack("<I", 0x102)), dat(-30000.0)], False),
+                                             ("REFR", 0x00000C24, [("NAME", struct.pack("<I", 0x102)), dat(-30000.0)], False)],
+                             group="CELL")
+        arms_ = with_files([arm("baseline", [BASE, MOD_B, MOD_A], kind="baseline"), arm("without-a", [BASE, MOD_B]),
+                            arm("without-b", [BASE, MOD_A])], {MOD_A: fa_, MOD_B: fb_})
+        rows_ = [row("EMPTY-SPACE", MOD_A, MOD_B, FX, other=HO), row("EMPTY-SPACE", MOD_A, MOD_B, FX2, other=HO2)]
+        plan, md, _ = compile_and_render(arms_, {(FIXTURE, "baseline"): rows_, (FIXTURE, "without-a"): [],
+                                                 (FIXTURE, "without-b"): []}, [MOD_A, MOD_B])
+        p = reader(plan).get("prediction") or {}
+        adm = {e["formKey"]: e["admission"] for e in p.get("record") or [] if e["checkId"] == FIXTURE}
+        line = p.get("setAsideLine") or ""
+        ok = (adm.get(FX) == "ownLayout" and adm.get(FX2) == "admitted"
+              and f"one plugin's versions win for both the fixture and its removed host ({MOD_A}" in line)
+        return ok, f"{adm}; {line[-400:]!r}"
+
+    for name, fn in [("ninth-review/C1221-fixture-own-layout-set-aside", c1221_fixture_own_layout_set_aside)]:
+        cell(name, fn)
+
     for name, fn in [("ninth-review/C1216-new-with-patch-object-counted-once", c1216_new_with_patch_object_counted_once),
                      ("ninth-review/C1217-new-by-check-names-shared-object", c1217_new_by_check_names_shared_object),
                      ("ninth-review/C1218-patch-problems-count-object-once", c1218_patch_problems_count_object_once)]:
