@@ -9466,6 +9466,59 @@ def main():
                      ("eighth-review/C1181-put-back-on-object-patch-sets-off", c1181_put_back_on_object_patch_sets_off)]:
         cell(name, fn)
 
+    # ---------------------------------------- ninth review (blind reviews of regen-r8c / regen-r8f)
+    def shared_new_object_bundle():
+        """C1216-C1218. With the patch, X1 is left without support against two hosts and also hangs as a fixture against
+        one; X2 is left without support against one host. Two objects, under two by-object checks."""
+        X1, X2 = f"000X61:{MOD_A}", f"000X62:{MOD_A}"
+        ct = [row("CONTACT", MOD_B, MOD_A, X1, other=f"000H61:{MOD_B}"), row("CONTACT", MOD_B, MOD_A, X1, other=f"000H62:{MOD_B}"),
+              row("CONTACT", MOD_B, MOD_A, X2, other=f"000H63:{MOD_B}")]
+        fx = [row("EMPTY-SPACE", MOD_A, MOD_B, X1, other=f"000H64:{MOD_B}")]
+        return compile_and_render(PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): ct,
+                                                     (FIXTURE, "baseline"): [], (FIXTURE, "with-patch"): fx},
+                                  [MOD_A, MOD_B], patches=[PATCH])
+
+    def stated_objects(text):
+        """The objects a count line adds up: every "N object(s)" not said as already counted."""
+        return sum(int(m_.group(1)) for m_ in re.finditer(r"\b(\d+) objects?\b(?! already counted)", text))
+
+    # C1216 (ninth review, BPT 68 / 76): an object two by-object checks find new with the patch is counted once: the
+    # summary's and the new-clashes line's objects add up to the distinct objects, the later check's pairs said as on an
+    # object already counted.
+    def c1216_new_with_patch_object_counted_once():
+        plan, md, _ = shared_new_object_bundle()
+        val = reader(plan).get("validation") or {}
+        head = str(val.get("summary", ""))
+        new_part = head[head.rfind(" new "):] if " new " in head else head
+        line = next((ln for ln in md.splitlines() if ln.startswith(f"- New clashes in the setup with {PATCH}")), "")
+        ok = (stated_objects(line) == 2 and stated_objects(new_part) == 2
+              and "1 fixture-and-host pair on 1 object already counted" in line
+              and "1 fixture-and-host pair on 1 object already counted" in new_part)
+        return ok, f"line {line!r}; summary new part {new_part!r}"
+
+    # C1217 (ninth review, BPT 79): the by-check line says a check's new object is one already counted under another.
+    def c1217_new_by_check_names_shared_object():
+        plan, md, _ = shared_new_object_bundle()
+        fx_title = priorities()["reader"]["checkTitles"][FIXTURE]
+        ct_title = priorities()["reader"]["checkTitles"][CONTACT]
+        line = next((ln for ln in md.splitlines() if ln.startswith("- New clashes with the patch, by check")), "")
+        seg = line[line.find(fx_title):] if fx_title in line else ""
+        seg = seg[:seg.find(ct_title + " ")] if seg.find(ct_title + " ") > 0 else seg
+        ok = f'the same object as one in "{ct_title}", counted once' in seg
+        return ok, f"fixture segment {seg[:300]!r}"
+
+    # C1218 (ninth review, BPT 68): the patch's own new-problem count (the install advice reads it) counts the object once.
+    def c1218_patch_problems_count_object_once():
+        plan, md, _ = shared_new_object_bundle()
+        val = reader(plan).get("validation") or {}
+        nb = {n["title"]: n["count"] for n in val.get("newByCheck") or []}
+        return (val.get("patchProblems") == 2 and sorted(nb.values()) == [1, 2]), f"patchProblems {val.get('patchProblems')}; by check {nb}"
+
+    for name, fn in [("ninth-review/C1216-new-with-patch-object-counted-once", c1216_new_with_patch_object_counted_once),
+                     ("ninth-review/C1217-new-by-check-names-shared-object", c1217_new_by_check_names_shared_object),
+                     ("ninth-review/C1218-patch-problems-count-object-once", c1218_patch_problems_count_object_once)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
