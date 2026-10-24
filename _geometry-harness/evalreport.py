@@ -5348,10 +5348,11 @@ def build_prediction(ctx: dict) -> dict:
             for e in placed:
                 rm_ = (remeasure_with_patch(e["checkId"]) or {}).get(
                     (e["kind"], e["A"], e["B"], e["formKey"], (e.get("other") or [None])[0]))
-                m_ = re.search(r"(\d+) triangle pairs", rm_[1]) if rm_ and rm_[0] == "Holds" else None
-                b_ = re.search(r"(\d+) triangle pairs", str(((p_rows.get(keyof(e)) or {}).get("row") or {}).get(
+                # (round 4, Winterhold 88) the whole number, thousands separator included
+                m_ = re.search(r"(\d[\d,]*) triangle pairs", rm_[1]) if rm_ and rm_[0] == "Holds" else None
+                b_ = re.search(r"(\d[\d,]*) triangle pairs", str(((p_rows.get(keyof(e)) or {}).get("row") or {}).get(
                     "physicalDetail") or ""))
-                tri_.append((int(b_.group(1)), int(m_.group(1))) if m_ and b_ else None)
+                tri_.append((int(b_.group(1).replace(",", "")), int(m_.group(1).replace(",", ""))) if m_ and b_ else None)
             sentences.append(bind(words["validationPlaced"], {"patch": patch, "count": by_unit(placed)})
                              + (" " + bind(words["validationPlacedMeasured"], {
                                  "patch": patch, "before": fmt_n(sum(x_[0] for x_ in tri_)),

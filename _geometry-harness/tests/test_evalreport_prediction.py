@@ -8393,6 +8393,14 @@ def main():
         ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
         return ("Re-measured there with" in ln and "43 triangle pairs without it, 50 with it" in ln), ln[:400]
 
+    # C1176 (round 4, Winterhold 88): figures of a thousand or more are written with a separator ("2,682 triangle
+    # pairs"); both sides read the whole number, never its last three digits.
+    def c1176_triangle_pairs_with_thousands():
+        plan, md, X = placed_overlap_bundle(details=["crossing; 1,200 triangle pairs [mm]", "crossing; 13 triangle pairs [mm]"],
+                                            before=["crossing; 2,682 triangle pairs [mm]", "crossing; 1,961 triangle pairs [mm]"])
+        ln = next((x for x in md.splitlines() if x.startswith("- Predicted, where a patch places one")), "")
+        return ("4,643 triangle pairs without it, 1,213 with it" in ln), ln[:400]
+
     # C1170 (round 3, Missives 73): one pair, 21 triangle pairs in its own row without the patch and 1 in its re-measure
     # with it; its partner's other rows (another pair of the same object, 1) never give the before figure.
     def c1170_before_after_from_the_pair_own_rows():
@@ -8437,6 +8445,7 @@ def main():
                      ("seventh-review/C1157-scope-line-says-inside-left", c1157_scope_line_says_inside_left),
                      ("seventh-review/C1156-patch-placed-says-remeasure", c1156_patch_placed_says_remeasure),
                      ("round3/C1170-before-after-from-the-pair-own-rows", c1170_before_after_from_the_pair_own_rows),
+                     ("round4/C1176-triangle-pairs-with-thousands", c1176_triangle_pairs_with_thousands),
                      ("seventh-review/C1154-marker-model-has-no-body", c1154_marker_model_has_no_body),
                      ("seventh-review/C1153-null-says-navmesh-judged-elsewhere", c1153_null_says_navmesh_judged_elsewhere),
                      ("seventh-review/C1152-shared-objects-counted-once-in-comparison",
