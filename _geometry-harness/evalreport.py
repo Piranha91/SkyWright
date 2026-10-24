@@ -4015,6 +4015,7 @@ def build_prediction(ctx: dict) -> dict:
     # how many still have none. A measured line, not counted (no check judges door links), no NPC claim.
     door_lines_read = False
     door_lines_said = False                    # (tenth review, Snazzy S4) a door-links line was printed
+    door_entries_ = []                         # (tenth review, Clockwork S1) each line's evidence-index entry
     nav_rows_ = [e for e in record if e["admission"] == "navmeshCheck"]
     main_b6_ = ctx.get("mainBundle")
     arm_rows6_ = {a_.get("armId"): (a_.get("requested") or {}).get("plugins") or []
@@ -4082,7 +4083,14 @@ def build_prediction(ctx: dict) -> dict:
                     "patch": "" if still_ is None else bind(words["doorLinksPatch"], {
                         "patch": patch_text, "count": fmt_n(len(still_)), "has": "has" if len(still_) == 1 else "have",
                         "examples": ", ".join(still_) or "-"})}),
-                    "findingIds": list(dict.fromkeys(e.get("findingId") for e in nav_rows_ if e.get("findingId")))[:1]})
+                    # (tenth review, Clockwork S1) the line links its own entry in the evidence index: each door with
+                    # the navmesh record that dropped its link, the plugin whose version held it and the winner's
+                    "findingIds": [f"door-links-{len(door_entries_) + 1}"]})
+                door_entries_.append({"anchor": f"door-links-{len(door_entries_) + 1}", "winner": winner_,
+                                      "rows": [{"door": d_, "navmesh": n_, "held": l_, "wins": winner_,
+                                                "still": still_ is not None and d_ in still_}
+                                               for l_, m_ in by_loser_.items() for d_, n_ in m_.items()],
+                                      "patchRead": still_ is not None})
     # (third review, Missives S1) a base-game plugin's own fix that the winner's value drops, where the losing mod only
     # carries or restores it: one line per winner and base-game plugin, naming the plugins that carry the value
     base_drop = collections.OrderedDict()
@@ -4813,6 +4821,7 @@ def build_prediction(ctx: dict) -> dict:
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
                       "subject": subject}),
                   "record": record, "detailAsideWords": words.get("detailAside") or {},
+                  "doorLinkEntries": door_entries_,
                   "sibling": ({**sibling_record, "rows": sibling_rows()} if sibling_record else sibling_record),
                   "withoutPartnerArms": dict(partner_arms),
                   "siblingSource": sibling_source(),

@@ -48,6 +48,14 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 {% for r in sf.rows %}- {{ r.kind }} {{ r.A }} x {{ r.B }} `{{ r.formKey|txt }}`{% if r.other %} against `{{ r.other|join(", ")|txt }}`{% endif %}: {{ r.admission }}. {{ r.summary|txt }}
 {% endfor %}{% endfor %}
 {% endif %}
+{% for dl in p.reader.prediction.get("doorLinkEntries") or [] %}
+<a id="{{ dl.anchor }}"></a>
+### Door links dropped by {{ dl.winner }}'s navmesh records
+
+Each door whose navmesh door link a navmesh record of {{ dl.winner }} drops, read from the plugin files: the navmesh record, the plugin whose version links the door, and the plugin whose version wins.{% if dl.patchRead %} "Still none with the patches": no navmesh links the door at its last version in the setup with the patches either.{% endif %}
+
+{% for r in dl.rows %}- `{{ r.door|txt }}`: navmesh `{{ r.navmesh|txt }}`; linked by {{ r.held }}'s version; {{ r.wins }}'s version wins{% if dl.patchRead %}; {{ "still none with the patches" if r.still else "linked again with the patches" }}{% endif %}
+{% endfor %}{% endfor %}
 
 {% if p.reader.get("enrichment") %}
 <a id="derived-after-measurement"></a>
