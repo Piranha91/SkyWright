@@ -8421,13 +8421,15 @@ def main():
     # C1157 (Clockwork S4): the patch lists OtherMod.esp as a master, and a clash with it is still there with the patch,
     # beside one with Neighbour.esp, which it does not list: the scope line says the OtherMod one is inside what the
     # patch sets out to fix and stays with it, not only that the Neighbour one is outside.
-    def scope_bundle(patch_edits_it, second_other=False):
+    def scope_bundle(patch_edits_it, second_other=False, cell_only=False):
         """Neighbour.esp's pair (the patch neither lists nor edits it) and OtherMod.esp's pair (the patch lists OtherMod
         as a master; with patch_edits_it its own file holds a version of OtherMod's object)."""
         O2 = "Neighbour.esp"
         recs_ = ([("REFR", (1 << 24) | 0x000E58, [("NAME", struct.pack("<I", 0x0B0A79)),
                                                  ("DATA", struct.pack("<6f", 1.0, 2.0, 3.0, 0.0, 0.0, 0.0))], False)]
                  if patch_edits_it else [])
+        # cell_only (eighth review, G1): the patch holds only the cell record the pairs stand in, no object of them
+        recs_ += [("CELL", 0x000E5C, [("DATA", struct.pack("<H", 0x0001))], False)] if cell_only else []
         arms = with_files([arm("baseline", [BASE, OTHER, O2, MOD_A, PATCH], kind="baseline"),
                            arm("without-patch", [BASE, OTHER, O2, MOD_A])],
                           {PATCH: plugin_file_of(PATCH, [BASE, OTHER, MOD_A], recs_, group="CELL")})
@@ -9174,6 +9176,17 @@ def main():
         md_, it_ = nudge_bundle([near_])
         n_ = md_.count("keeping its turn, is counted as a clash between")
         return (n_ == 1 and "1 overlap pair" in it_), f"{n_} || {it_[:200]}"
+
+    # C1200 (eighth review, G1; a guard, accepted at Gate A): a patch that holds only the cell record a geometry remainder
+    # stands in edits none of its objects: the remainder is said as on objects no supplied patch edits. Passes on the
+    # code before this task: it pins the rule, it is no red.
+    def c1200_cell_record_alone_is_not_scope():
+        ln = scope_bundle(False, cell_only=True)
+        return (f"still there with Neighbour.esp and {OTHER} lies on records, navmeshes or objects that no supplied patch "
+                f"edits" in ln and "a supplied patch edits" not in ln.replace("no supplied patch edits", "")), ln[:500]
+
+    for name, fn in [("eighth-review/C1200-cell-record-alone-is-not-scope", c1200_cell_record_alone_is_not_scope)]:
+        cell(name, fn)
 
     for name, fn in [("eighth-review/C1201-nudge-counting-said-once", c1201_nudge_counting_said_once)]:
         cell(name, fn)
