@@ -41,6 +41,12 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 {% endfor %}
 {% for c in sib.checks %}- `{{ c.checkId }}`: {{ "joined" if c.joined else "not joined — " ~ c.why }}
 {% endfor %}
+{% for sf in sib.get("rows") or [] %}
+<a id="{{ sf.anchor }}"></a>
+### Rows taken from its finding {{ sf.id }} (`{{ sf.checkId }}`, file `{{ sf.file|txt }}`)
+
+{% for r in sf.rows %}- {{ r.kind }} {{ r.A }} x {{ r.B }} `{{ r.formKey|txt }}`{% if r.other %} against `{{ r.other|join(", ")|txt }}`{% endif %}: {{ r.admission }}. {{ r.summary|txt }}
+{% endfor %}{% endfor %}
 {% endif %}
 
 {% if p.reader.get("enrichment") %}

@@ -2842,7 +2842,9 @@ def build_prediction(ctx: dict) -> dict:
         g.setdefault("_rowSummaries", []).append(str(rk[5] or ""))
         g.setdefault("_rowKinds", []).append((str(rk[1]), str(rk[4])))
         g.setdefault("_rowOthers", {})[str(rk[4])] = str((hit["row"].get("other") or [""])[0] or "")
-        fid = hit["finding"].get("id") if rk[0] not in sib_only else None
+        # (ninth review, Sewers 27) a row from the separate evaluation links its entry in this index, never that plan's id
+        fid = hit["finding"].get("id") if rk[0] not in sib_only else (
+            f"sibling-{hit['finding'].get('id')}" if hit["finding"].get("id") else None)
         if fid and fid not in g["findingIds"]:
             g["findingIds"].append(fid)
         label = hit["row"].get("label")
@@ -4480,6 +4482,22 @@ def build_prediction(ctx: dict) -> dict:
              "superseded": set_aside["superseded"], "sameClash": set_aside["sameClash"],
              "sameValue": set_aside["sameValue"], "samePair": set_aside["samePair"],
              **{k_: set_aside[k_] for k_ in NOISE_ADMISSIONS}}
+    def sibling_rows():
+        """(ninth review, Sewers 27) the separate evaluation's findings this report counts or sets aside rows from, each
+        with its anchor in this index, its check, pair, file and rows (the items link them)."""
+        out_ = collections.OrderedDict()
+        s_b_ = (sibling or {}).get("bundle")
+        for e in record:
+            if e.get("source") != "sibling" or not e.get("siblingFindingId"):
+                continue
+            x_ = out_.setdefault(e["siblingFindingId"], {
+                "anchor": f"sibling-{e['siblingFindingId']}", "id": e["siblingFindingId"], "checkId": e["checkId"],
+                "file": (s_b_.output_emit_path(e["checkId"], anchor, "arm") or s_b_.output_emit_path(e["checkId"], anchor, None)
+                         if s_b_ is not None else None) or "", "rows": []})
+            x_["rows"].append({"kind": e["kind"], "A": e["A"], "B": e["B"], "formKey": e["formKey"],
+                               "other": e.get("other") or [], "admission": e["admission"], "summary": e.get("summary")})
+        return list(out_.values())
+
     def base_links_total(mod_):
         """(sixth review, Sewers r5 S3) the evaluated mod's broken links of base-game navmeshes said as one figure: the
         base-game line's and the carried ones, and how many the setup with the patch still has."""
@@ -4719,7 +4737,8 @@ def build_prediction(ctx: dict) -> dict:
                       "checks": len(checks_on_p), "checkNoun": "check" if len(checks_on_p) == 1 else "checks",
                       "subject": subject}),
                   "record": record, "detailAsideWords": words.get("detailAside") or {},
-                  "sibling": sibling_record, "withoutPartnerArms": dict(partner_arms),
+                  "sibling": ({**sibling_record, "rows": sibling_rows()} if sibling_record else sibling_record),
+                  "withoutPartnerArms": dict(partner_arms),
                   "siblingSource": sibling_source(),
                   "orderRiskLines": order_lines, "orderRisks": order_record}
 
