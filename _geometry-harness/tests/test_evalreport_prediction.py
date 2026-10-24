@@ -8897,6 +8897,41 @@ def main():
         ls = patch_wins_lines(md)
         return any("2 plugin-pair rows" in x for x in ls), " || ".join(ls)[:700]
 
+    # C1188 (eighth review, Winterhold 88 / 145): the detail's note of pairs still crossing where a patch places one says,
+    # with two evaluated mods, how many are counted at the top and how many were already there with one mod alone, so it
+    # reconciles with the patch comparison's count. The record is rendered again with one of the two pairs marked as
+    # already there with one mod alone (the attribution the prediction gives such a pair).
+    def c1188_placed_note_splits_counted_and_alone():
+        X = f"000X88:{MOD_A}"
+        ys = [f"000Y8{i}:{MOD_B}" for i in (1, 2)]
+        p_rows = [row("OVERLAP", MOD_B, MOD_A, X, other=y) for y in ys]
+        extra = row("OVERLAP", OTHER, MOD_A, f"000Z88:{MOD_A}", other=f"000W88:{OTHER}")
+        preds = [{"Kind": "OVERLAP", "A": MOD_B, "B": MOD_A, "FormKey": X, "Other": y, "Physical": "Holds"} for y in ys]
+        other_ = f"00C988:{BASE}"
+        enr = {(RECORDS, "baseline"): [], (RECORDS, "with-patch"): [lost_row(OTHER, PATCH, other_, "Owner", "o", "p", "v")]}
+        tr = {(RECORDS, "with-patch"): tree_transcript([
+            (X, "PlacedObject", [(MOD_A, {"Placement.Position": "1,1,1"}), (PATCH, {"Placement.Position": "9,9,9"})]),
+            (other_, "PlacedObject", [(BASE, {"Owner": "v"}), (OTHER, {"Owner": "o"}), (PATCH, {"Owner": "p"})])])}
+        plan, _, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): [extra]},
+                                        [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds},
+                                        enrichment=enr, count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                        transcripts=tr)
+        rec = [e for e in (reader(plan).get("prediction") or {}).get("record") or []
+               if e.get("formKey") == X and e.get("withPatch") == "patchPlaced"]
+        if len(rec) != 2:
+            return False, f"fixture: {[(e.get('formKey'), e.get('withPatch')) for e in rec]}"
+        rec[0]["attribution"], rec[1]["attribution"] = "needs-both", "single-mod"
+        pr_ = priorities()
+        with tempfile.TemporaryDirectory() as td:
+            view = R.effective_view(plan, 3, 1, pr_, "normal")
+            md = R.render_all(plan, view, Path(td) / "out", "")["report.md"]
+        ln = next((x for x in md.splitlines() if "still crossing where a patch places one of the objects" in x), "")
+        return ("2 overlap pairs between" in ln and "1 counted at the top" in ln
+                and "1 already there with one mod alone" in ln), ln[-400:] or md[-800:]
+
+    for name, fn in [("eighth-review/C1188-placed-note-splits-counted-and-alone", c1188_placed_note_splits_counted_and_alone)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1190-patch-wins-line-carried-and-once", c1190_patch_wins_line_carried_and_once),
                      ("eighth-review/C1189-patch-wins-line-gives-rows", c1189_patch_wins_line_gives_rows)]:
         cell(name, fn)
