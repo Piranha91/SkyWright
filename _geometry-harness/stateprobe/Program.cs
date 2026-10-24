@@ -49,6 +49,8 @@ using var __run = RunLog.BeginProcess("stateprobe", args);
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return RouteSelfTest.Run();
 // Known answers for the class, emit and route-obstacle decisions over a synthetic order (_shared/StateFixture.cs).
 if (args.Length >= 1 && args[0] == "--self-test") return StateSelfTest.Run();
+// The row identity fixture: written for tests/test_state_row_identity.py, which runs the real probe on it.
+if (args.Length >= 2 && args[0] == "--write-row-identity-fixture") { var w = RowIdentityFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 // The scope fixture (window 2): written for tests/test_population_scope.py, which runs the real probes on it.
 if (args.Length >= 2 && args[0] == "--write-scope-fixture") { var w = ScopeFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.RacePlugin).Append(w.ModsDir))); return 0; }
 const string StateMeasurementPolicy = "state-contact-route-v1|state-overlap-unmeasured-v1";
