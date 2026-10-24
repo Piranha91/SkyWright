@@ -9098,6 +9098,24 @@ def main():
         return ("NPCs there path on ModB.esp's navmesh" in top and "still has 600 triangles" in top
                 and "single triangle again" not in top), top[-600:]
 
+    # C1196 (eighth review, Sewers 39): where the other version's setup finds none of a counted group, the line says it
+    # in plain words (with that version that group is not found), not only as "0 of the N".
+    def c1196_also_variant_says_what_it_lacks():
+        X1, X2, T_ = f"000X96:{MOD_A}", f"000X97:{MOD_A}", f"000T96:{OTHER}"
+        rows_ = [row("OVERLAP", OTHER, MOD_A, x_, other=T_) for x_ in (X1, X2)]
+        arms = [arm("baseline", [BASE, OTHER, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, OTHER, MOD_A]),
+                arm("without-other", [BASE, MOD_A])]
+        v_arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline", shas={MOD_A: "b" * 64})]
+        v_res = {(OVERLAP, "baseline"): [row("OVERLAP", OTHER, MOD_A, f"000X98:{MOD_A}", other=f"000T98:{OTHER}")]}
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): list(rows_), (OVERLAP, "without-patch"): rows_,
+                                                (OVERLAP, "without-other"): []}, [MOD_A], patches=[PATCH],
+                                         also=[(v_arms, v_res, [MOD_A], {})])
+        also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
+        return (f"With that version, the 2 overlap pairs between {OTHER} and {MOD_A} are not found" in also_), also_[-400:]
+
+    for name, fn in [("eighth-review/C1196-also-variant-says-what-it-lacks", c1196_also_variant_says_what_it_lacks)]:
+        cell(name, fn)
+
     for name, fn in [("eighth-review/C1195-stub-put-back-meaning-patch-stub", c1195_stub_put_back_meaning_patch_stub),
                      ("eighth-review/C1204-stub-put-back-meaning-patch-full", c1204_stub_put_back_meaning_patch_full)]:
         cell(name, fn)
