@@ -8724,7 +8724,7 @@ def main():
         un = next((x for x in md.splitlines() if x.startswith("- Undone by ")), "")
         own_ln = next((x for x in md.splitlines() if x.startswith("- ") and "own value" in x and R1 in x), "")
         return (": 1 record field" in un and MOD_B in un and MOD_A not in un and "put back" in un
-                and MOD_A in own_ln and "(evidence-index.md#F-" in own_ln), f"undone {un[:300]!r}; own {own_ln[:300]!r}"
+                and MOD_A in own_ln and "(evidence-index.md#F-" in own_ln and f"{PATCH}'s own value on 1" in own_ln), f"undone {un[:300]!r}; own {own_ln[:300]!r}"
 
     # C1181 (eighth review, BPT 77, 0EB5B2): a value the patch puts back on an object its own version sets off for good
     # (enabled opposite to the player) has no effect in game while the object is off: the undone line says so.

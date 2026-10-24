@@ -5321,9 +5321,9 @@ def build_prediction(ctx: dict) -> dict:
         replaced = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "replaced"]
         undone_unread = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "unread"]
         undone = [(rk, h_) for rk, h_ in undone if what_[id(h_)][0] == "putBack"]
+        # (Gate A review, finding 4) the owning patch is named, as every other line names plugins
         replaced_whose = collections.Counter(
-            "own" if what_[id(h_)][1] is not None and str(what_[id(h_)][1]).lower() in patch_lower
-            else (what_[id(h_)][1] or "") for rk, h_ in replaced)
+            ("own" if str(what_[id(h_)][1]).lower() in patch_lower else "of", what_[id(h_)][1]) for rk, h_ in replaced)
         undone_off = [rk for rk, _ in undone if patch_sets_off(rk)]
         undone_by = collections.Counter(rk[2] for rk, _ in undone)
         switched_on = [rk for rk, h_ in undone if off_at_load((h_["row"].get("values") or {}).get("lost"))
@@ -5568,8 +5568,8 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationReplaced"], {
                 "patch": patch, "count": fmt_n(len(replaced)), "noun": words["fieldNoun"][0 if len(replaced) == 1 else 1],
                 "by": by_plugin(replaced),
-                "whose": ", ".join(bind(words["validationReplacedOwn" if k_ == "own" else "validationReplacedOf"
-                                              if k_ else "validationReplacedUnread"], {"count": fmt_n(n_), "owner": k_})
+                "whose": ", ".join(bind(words["validationReplacedOwn" if k_[0] == "own" else "validationReplacedOf"],
+                                        {"count": fmt_n(n_), "owner": k_[1]})
                                    for k_, n_ in replaced_whose.most_common()),
                 "enables": enables_text(switched_on_r)}))
             replaced_sentence = sentences[-1]
@@ -6077,7 +6077,7 @@ def build_prediction(ctx: dict) -> dict:
                       "patchChoiceNoise": patch_noise, "caseOnlyRows": case_only_rows,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "stands": len(stands), "undone": len(undone), "undoneBy": dict(undone_by), "replaced": len(replaced),
-                      "replacedWhose": dict(replaced_whose), "undoneOff": len(undone_off), "undoneUnread": len(undone_unread),
+                      "replacedWhose": {f"{k_[1]}": n_ for k_, n_ in replaced_whose.items()}, "undoneOff": len(undone_off), "undoneUnread": len(undone_unread),
                       "undoneSentence": undone_sentence, "replacedSentence": replaced_sentence,
                       "replacedFindingIds": [f_ for f_, _ in collections.Counter(
                           h_["finding"].get("id") for _, h_ in replaced if h_["finding"].get("id")).most_common()],
