@@ -4088,6 +4088,27 @@ def build_prediction(ctx: dict) -> dict:
                 d_["carriers"].append(e["A"])
             if e.get("findingId") and e["findingId"] not in d_["findingIds"]:
                 d_["findingIds"].append(e["findingId"])
+    def base_drop_meaning(d_):
+        """(ninth review, Missives 30; gate A answer 1) each field the line names: what it does in game where the skill
+        data holds it (fieldInGame), else that it is not read here; a water height the outside clause covers is skipped."""
+        if not words.get("baseValueDroppedNotRead"):
+            return ""
+        means_, unread_ = [], []
+        wf_ = set((words.get("waterHeightOutside") or {}).get("fields") or [])
+        for fk_, f_ in list(d_["fields"])[:2]:
+            if f_ in wf_ and fk_ in (d_.get("outside") or {}):
+                continue
+            rk_ = (d_.get("rows") or {}).get((fk_, f_))
+            m_ = field_meaning([record_type_of(rk_[5])] if rk_ else [], f_)
+            if m_:
+                t_ = bind(words["itemFieldInGame"], {"field": field_word(f_), "meaning": m_})
+                if t_ not in means_:
+                    means_.append(t_)
+            elif field_word(f_) not in unread_:
+                unread_.append(field_word(f_))
+        return "".join(" " + t_ for t_ in means_) + (" " + bind(words["baseValueDroppedNotRead"], {
+            "fields": and_list(unread_), "verb": "does" if len(unread_) == 1 else "do"}) if unread_ else "")
+
     for (mod_, base_), d_ in base_drop.items():
         n_ = len(d_["fields"])
         # (fourth review, Clockwork r3 S1) what the setup with the patch has: whether its winner holds the base-game
@@ -4140,7 +4161,8 @@ def build_prediction(ctx: dict) -> dict:
             "carriers": carriers_text(per_c_, n_c_)})
             + (" " + bind(words["waterHeightOutside"]["line"], {"examples": "; ".join(
                 f"{fk_} ({v_})" for fk_, v_ in list(d_["outside"].items())[:2])})
-               if d_.get("outside") and (words.get("waterHeightOutside") or {}).get("line") else ""),
+               if d_.get("outside") and (words.get("waterHeightOutside") or {}).get("line") else "")
+            + base_drop_meaning(d_),
             "findingIds": d_["findingIds"][:1]})
     # (sixth review, Missives r5 S2; R4) an evaluated mod's list dropping items the base game's version holds, against
     # versions that only carry the base game's items: its own change against the base game, one line per mod
