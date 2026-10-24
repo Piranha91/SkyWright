@@ -5473,7 +5473,12 @@ def build_prediction(ctx: dict) -> dict:
                     return m_
                 # (seventh review) the attribution read, by setup, record and field
                 got_ = whose_value(p_of(e["checkId"]), e["checkId"], e["formKey"], e.get("field"), m_)
-                return owner_of(got_[0], got_[1], got_[2]["origin"])[1] if got_ is not None else m_
+                o_ = owner_of(got_[0], got_[1], got_[2]["origin"])[1] if got_ is not None else m_
+                # (eighth review, BPT 75) a winning value whose owner is the base game is no mod's: the remainder is
+                # said with the plugin whose version wins, never dropped
+                if is_base_game(o_, words) or str(o_).lower() == str(words.get("baseGameOwner") or "the base game").lower():
+                    return m_
+                return o_
             def patch_edits(e):
                 """(seventh review round 2, Clockwork 77) a declared patch holds a version of what the remainder is
                 about: the record of a lost change (the chain with the patches), a navmesh, or an object of a geometry
@@ -5493,13 +5498,13 @@ def build_prediction(ctx: dict) -> dict:
                                           if str(m_).lower() not in pt_lower and not is_base_game(m_, words)
                                           and str(m_).lower() != str(words.get("baseGameOwner") or "the base game").lower()
                                           and str(m_).lower() not in patch_lower
-                                          and (str(m_).lower() not in cov_low_ or not edited_[id(e)])))
+                                          and not edited_[id(e)]))
             # (seventh review, Clockwork S4) what is still there with a mod the patches do list as a master is inside what
             # they set out to fix and left by them: said too, in its units
             inside_ = collections.OrderedDict()
             for e in open_:
                 for m_ in dict.fromkeys((owner_(e, e["A"]), owner_(e, e["B"]))):
-                    if str(m_).lower() in cov_low_ and str(m_).lower() not in pt_lower and edited_[id(e)]:
+                    if str(m_).lower() not in pt_lower and edited_[id(e)] and not is_base_game(m_, words)                             and str(m_).lower() not in patch_lower:
                         inside_.setdefault(disp_.get(str(m_).lower(), m_), []).append(e)
             inside_text_ = ("".join(" " + bind(words["validationPatchScopeInside"], {
                 "inside": m_, "count": by_unit(es_, True), "it": "they set" if len(patch_names) > 1 else "it sets",
