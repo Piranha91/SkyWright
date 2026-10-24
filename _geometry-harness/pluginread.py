@@ -351,3 +351,55 @@ def editor_ids(path, form_keys):
         ed = dict(_subrecords(data)).get("EDID")
         out[str(fk)] = ed.rstrip(b"\x00").decode("latin-1") if ed else None
     return out
+
+
+_WORLDS = {}
+
+
+def cell_worlds(path, form_keys):
+    """(eighth review, Missives) The worldspace each named cell record is filed under: the world-children group (type 1)
+    holding it, whose label is the worldspace's FormID: {formKey: "XXXXXX:Origin.esm", or None where the plugin holds no
+    such cell or files it under no worldspace (an interior)}. Group headers only; the file is indexed once per state."""
+    p = Path(path)
+    try:
+        st = p.stat()
+        key = (str(p).lower(), st.st_size, st.st_mtime_ns)
+        if key not in _WORLDS:
+            buf = p.read_bytes()
+            if buf[:4] != b"TES4":
+                raise PluginReadError(f"{p.name} is not a plugin file (no TES4 header)")
+            hsize = struct.unpack_from("<I", buf, 4)[0]
+            masters = [d.rstrip(b"\x00").decode("latin-1") for s_, d in _subrecords(buf[24:24 + hsize]) if s_ == "MAST"]
+            got = {}
+
+            def walk(i, end, world):
+                while i + 24 <= end:
+                    size = struct.unpack_from("<I", buf, i + 4)[0]
+                    if buf[i:i + 4] == b"GRUP":
+                        if size < 24 or i + size > end:
+                            raise PluginReadError("a group whose size does not fit the file")
+                        gtype = struct.unpack_from("<I", buf, i + 12)[0]
+                        walk(i + 24, i + size, struct.unpack_from("<I", buf, i + 8)[0] if gtype == 1 else world)
+                        i += size
+                        continue
+                    if buf[i:i + 4] == b"CELL" and world is not None:
+                        got[struct.unpack_from("<I", buf, i + 12)[0]] = world
+                    i += 24 + size
+            walk(24 + hsize, len(buf), None)
+            _WORLDS[key] = (masters, got)
+    except (OSError, struct.error) as e:
+        raise PluginReadError(f"cannot read {p}: {e}") from e
+    masters, got = _WORLDS[key]
+    low = [m.lower() for m in masters]
+
+    def global_(fid):
+        idx = fid >> 24
+        return f"{fid & 0xFFFFFF:06X}:{masters[idx] if idx < len(masters) else p.name}"
+    out = {}
+    for fk in form_keys:
+        obj, _, origin = str(fk).partition(":")
+        idx = low.index(origin.lower()) if origin.lower() in low else (
+            len(masters) if origin.lower() == p.name.lower() else None)
+        w_ = got.get((idx << 24) | int(obj, 16)) if idx is not None and len(obj) == 6 else None
+        out[str(fk)] = global_(w_) if w_ is not None else None
+    return out

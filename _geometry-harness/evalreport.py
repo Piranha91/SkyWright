@@ -1974,6 +1974,8 @@ def build_prediction(ctx: dict) -> dict:
                     try:
                         if what == "editorId":          # (seventh review, Missives S2) a record's editor ID
                             res_ = {"records": pluginread.editor_ids(path_, [str(fk)])}
+                        elif what == "cellWorld":       # (eighth review) the worldspace a cell is filed under
+                            res_ = {"records": pluginread.cell_worlds(path_, [str(fk)])}
                         else:
                             res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements,
                                     "placementFull": pluginread.placements_full}.get(
@@ -2014,6 +2016,16 @@ def build_prediction(ctx: dict) -> dict:
         pos_ = (got_ or {}).get("position")
         if not pos_:
             return label
+        # (eighth review, Missives) the worldspace the persistent cell is filed under, by its editor ID, read from the
+        # cell's own plugin file; the grid alone would send a modder to another worldspace's cell
+        m_ = re.match(r"^([0-9A-Fa-f]{6}):(\S+)", str(label))
+        w_ = plugin_record(m_.group(2), "cellWorld", f"{m_.group(1).upper()}:{m_.group(2)}") if m_ else None
+        w_name_ = (plugin_record(str(w_).split(":", 1)[1], "editorId", str(w_))
+                   if isinstance(w_, str) and ":" in w_ else None)
+        if isinstance(w_name_, str) and w_name_ and words.get("persistentPlaceGridWorld"):
+            return bind(words["persistentPlaceGridWorld"], {"label": label, "world": w_name_,
+                                                            "x": fmt_n(math.floor(pos_[0] / 4096)),
+                                                            "y": fmt_n(math.floor(pos_[1] / 4096))})
         return bind(words["persistentPlaceGrid"], {"label": label, "x": fmt_n(math.floor(pos_[0] / 4096)),
                                                    "y": fmt_n(math.floor(pos_[1] / 4096))})
 
