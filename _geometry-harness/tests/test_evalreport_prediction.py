@@ -9689,6 +9689,120 @@ def main():
                      ("ninth-review/C1218-patch-problems-count-object-once", c1218_patch_problems_count_object_once)]:
         cell(name, fn)
 
+    # ------------------------------------------------ tenth review (C1226-C1279)
+    # C1226-C1228 (Snazzy S1): a door's navmesh door link (XNDP: a navmesh and its triangle at the door) only means
+    # something against the version of that navmesh that wins. OtherMod rebuilt navmesh 0C1226 and links the base game's
+    # door 00D226 at its own triangle 6; ModA's navmesh wins and lists the door at triangle 9, where ModA's door links it.
+    # OtherMod's value fits only OtherMod's own navmesh, which does not win: no clash to forward (C1226). Where the losing
+    # value fits the navmesh that wins (OtherMod's own new navmesh, which nothing overrides) and the winner's door has no
+    # link, the loss stays counted (C1227). Where the plugin files are not read, nothing is decided from them (C1228).
+    def door_link_files(win_nav_door_tri=9, loser_own_nav=False):
+        D, N = 0x0000D226, 0x000C1226
+        N_OWN = 0x010C1227                         # OtherMod's own navmesh (its own record)
+
+        def nav(fid, tri):
+            return ("NAVM", fid, [("NVNM", nvnm_d(16, [(tri, D)]))], False)
+
+        def door(navfid, tri):
+            subs = [("NAME", struct.pack("<I", 0x00000B10)), ("DATA", struct.pack("<6f", 10.0, 20.0, 0.0, 0.0, 0.0, 0.0))]
+            if navfid is not None:
+                subs.append(("XNDP", struct.pack("<IhH", navfid, tri, 0)))
+            return ("REFR", D, subs, False)
+        if loser_own_nav:
+            # OtherMod links the door to its own new navmesh; ModA's door has no navmesh link at all
+            return {BASE: plugin_file_of(BASE, [], [nav(N, 5), door(N, 5)]),
+                    OTHER: plugin_file_of(OTHER, [BASE], [nav(N_OWN, 6), door(N_OWN, 6)]),
+                    MOD_A: plugin_file_of(MOD_A, [BASE], [door(None, 0)]),
+                    MOD_B: plugin_file_of(MOD_B, [BASE], []),
+                    PATCH: plugin_file_of(PATCH, [BASE], [])}
+        return {BASE: plugin_file_of(BASE, [], [nav(N, 5), door(N, 5)]),
+                OTHER: plugin_file_of(OTHER, [BASE], [nav(N, 6), door(N, 6)]),
+                MOD_A: plugin_file_of(MOD_A, [BASE], [nav(N, win_nav_door_tri), door(N, win_nav_door_tri)]),
+                MOD_B: plugin_file_of(MOD_B, [BASE], []),
+                PATCH: plugin_file_of(PATCH, [BASE], [])}
+
+    def door_link_bundle(files=None, loser_own_nav=False):
+        D = f"00D226:{BASE}"
+        nav_ = f"0C1227:{OTHER}" if loser_own_nav else f"0C1226:{BASE}"
+        win_ = {"NavigationDoorLink.NavMesh": "(absent)"} if loser_own_nav else {
+            "NavigationDoorLink.NavMesh": f"0C1226:{BASE}", "NavigationDoorLink.TeleportMarkerTriangle": "9"}
+        chains = [(D, "PlacedObject", [
+            (BASE, {"NavigationDoorLink.NavMesh": f"0C1226:{BASE}", "NavigationDoorLink.TeleportMarkerTriangle": "5"}),
+            (OTHER, {"NavigationDoorLink.NavMesh": nav_, "NavigationDoorLink.TeleportMarkerTriangle": "6"}),
+            (MOD_A, win_)])]
+        r_ = lost_row(OTHER, MOD_A, D, "NavigationDoorLink",
+                      [f"NavigationDoorLink.NavMesh={nav_}", "NavigationDoorLink.TeleportMarkerTriangle=6"], PH,
+                      [f"NavigationDoorLink.NavMesh=0C1226:{BASE}", "NavigationDoorLink.TeleportMarkerTriangle=5"],
+                      before=BASE)
+        arms_ = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        if files is not False:
+            arms_ = with_files(arms_, files or door_link_files(loser_own_nav=loser_own_nav))
+        plan, md, _ = core_bundle([r_], [], p_chains=chains, masters=MASTERS_, arms=arms_)
+        pred = reader(plan).get("prediction") or {}
+        return plan, md, pred, D
+
+    def c1226_door_link_off_the_winning_navmesh_set_aside():
+        plan, md, pred, D = door_link_bundle()
+        got = [e["admission"] for e in rec_of(plan, D)]
+        aside = str(pred.get("setAsideLine") or "")
+        ok = (got == ["doorLinkNavmesh"] and "record field" not in str(pred.get("verdict") or "")
+              and "door link" in aside and D[:6] in aside)
+        return ok, f"{got}; verdict {str(pred.get('verdict'))[:200]!r}; aside {aside[-400:]!r}"
+
+    def c1227_door_link_fitting_the_winning_navmesh_counted():
+        plan, md, pred, D = door_link_bundle(loser_own_nav=True)
+        got = [e["admission"] for e in rec_of(plan, D)]
+        return got == ["admitted"], f"{got}"
+
+    def c1228_door_link_files_unread_not_decided():
+        plan, md, pred, D = door_link_bundle(files=False)
+        got = [e["admission"] for e in rec_of(plan, D)]
+        return got == ["admitted"], f"{got}"
+
+    for name, fn in [("tenth-review/C1226-door-link-off-the-winning-navmesh-set-aside",
+                      c1226_door_link_off_the_winning_navmesh_set_aside),
+                     ("tenth-review/C1227-door-link-fitting-the-winning-navmesh-counted",
+                      c1227_door_link_fitting_the_winning_navmesh_counted),
+                     ("tenth-review/C1228-door-link-files-unread-not-decided", c1228_door_link_files_unread_not_decided)]:
+        cell(name, fn)
+
+    # C1229-C1230 (Snazzy S2): a row set aside because ModA rebuilt the record (OtherMod only seated the object; ModA moved
+    # it across) whose losing value the supplied patch puts back. The superseded line says the patch puts that value
+    # back, names the record, and does not call the change one that "no longer applies"; the patch comparison names the
+    # record (C1229). Where the patch keeps ModA's value, the line has no such clause (C1230).
+    def superseded_patch_bundle(patch_back=True):
+        P = f"00C229:{BASE}"
+        b_, o_, a_ = pl(-9153.3, 5547.1, -241.065), pl(-9153.3, 5547.1, -241.395), pl(-9170.2, 5452.3, -227.85)
+        chains = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_)])]
+        w_val = o_ if patch_back else a_
+        w_chains = [(P, "PlacedObject", [(BASE, b_), (OTHER, o_), (MOD_A, a_), (PATCH, w_val)])]
+        p_rows = [pl_row(P, OTHER, MOD_A, b_, o_, a_)]
+        w_rows = [pl_row(P, MOD_A, PATCH, o_, a_, w_val)] if patch_back else [pl_row(P, OTHER, PATCH, b_, o_, a_)]
+        arms_ = [arm("baseline", [BASE, OTHER, MOD_A, MOD_B, PATCH], kind="baseline"),
+                 arm("without-patch", [BASE, OTHER, MOD_A, MOD_B])]
+        plan, md, _ = core_bundle(p_rows, w_rows, p_chains=chains, w_chains=w_chains, masters=MASTERS_, arms=arms_)
+        return plan, md, P
+
+    def c1229_superseded_put_back_by_patch_said():
+        plan, md, P = superseded_patch_bundle()
+        got = [e["admission"] for e in rec_of(plan, P)]
+        line = superseded_line(md)
+        cmp_ = md.split("## How the patch compares", 1)[1] if "## How the patch compares" in md else ""
+        ok = (got == ["superseded"] and PATCH in line and P[:6] in line and "no longer applies" not in line
+              and P[:6] in cmp_)
+        return ok, f"{got}; line {line[:400]!r}; comparison names it {P[:6] in cmp_}"
+
+    def c1230_superseded_kept_by_patch_no_clause():
+        plan, md, P = superseded_patch_bundle(patch_back=False)
+        got = [e["admission"] for e in rec_of(plan, P)]
+        line = superseded_line(md)
+        return got == ["superseded"] and PATCH not in line and "rebuilt" in line, f"{got}; {line[:300]!r}"
+
+    for name, fn in [("tenth-review/C1229-superseded-put-back-by-patch-said", c1229_superseded_put_back_by_patch_said),
+                     ("tenth-review/C1230-superseded-kept-by-patch-no-clause", c1230_superseded_kept_by_patch_no_clause)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
