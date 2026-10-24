@@ -345,13 +345,9 @@ public static class ConfigurationProof
                   && synArm.Identity("load-time", "baseline").Fingerprint != prof.Identity("load-time", "baseline").Fingerprint,
                   $"{synArm.Source} {synArm.Identity("load-time", "baseline").Fingerprint[..12]} vs {prof.Identity("load-time", "baseline").Fingerprint[..12]}");
 
-            // A --enable of a plugin loadorder.txt does not list is REFUSED by SyntheticOrder (it has no position, and
-            // position decides who wins a record) — so the arm is the profile, and the identity says the same thing.
-            var noPos = R(null, enable: new[] { "Extra.esp" });
-            check("candidate/synthetic: --enable of a plugin with no load-order position changes nothing, and the identity says so",
-                  !noPos.Refused && noPos.Warnings.Any(w => w.Contains("REFUSED to enable 'Extra.esp'"))
-                  && noPos.Identity("load-time", "baseline").Fingerprint == prof.Identity("load-time", "baseline").Fingerprint,
-                  noPos.Warnings.FirstOrDefault(w => w.Contains("REFUSED"))?[..60] ?? "(no warning)");
+            // The check that stood here until 2026-10-24 asserted that a --enable of a plugin loadorder.txt does not list is
+            // NOT refused and measures the profile without it. That is the silent different-order defect; case 1300 below
+            // replaces it.
 
             // --- cases 350-355: an order whose plugin lacks a master is refused from every source (ruling 12) ---
             string Prof(string name, string[] modlist, string[] loadorder, string[] plugins)
@@ -422,6 +418,80 @@ public static class ConfigurationProof
             check("355 control: every master present (profile, a --disable that orphans nothing, a candidate) -> none refused",
                   !c355a.Refused && !c355b.Refused && !c355c.Refused && c355a.Plugins.Count == 3 && c355b.Plugins.Count == 2,
                   $"{Show(c355a)} | {Show(c355b)} | {Show(c355c)}");
+
+            // --- cases 1300-1313: a requested order the reader cannot build as asked is refused, not answered with another ---
+            bool OneLine(string? r, string start, string remedy)
+                => r is not null && r.StartsWith(start) && r.Contains(remedy) && r.EndsWith(", then run again.")
+                   && r.Count(c => c == ';') == 1 && !r.Contains('\n');
+
+            // 1300 replaces the check above that asserted the defect: the arm is refused, never measured without Extra.esp.
+            var c1300 = R(null, enable: new[] { "Extra.esp" });
+            check("1300 --enable Extra.esp, installed in a switched-off folder but not in loadorder.txt -> REFUSED in one sentence: switch it on once in MO2 or give it a position with --order",
+                  c1300.Refused && OneLine(c1300.RefusedReason, "CANNOT ENABLE - 'Extra.esp' has no load-order position: loadorder.txt does not list it",
+                                           "switch 'Extra.esp' on once in MO2 so loadorder.txt lists it, or give it a position in an --order candidate"),
+                  Show(c1300));
+
+            var c1301 = R(null, enable: new[] { "Absent.esp" });
+            check("1301 --enable Absent.esp, which no layer of the install holds and loadorder.txt does not list -> REFUSED: install it",
+                  c1301.Refused && OneLine(c1301.RefusedReason, "CANNOT ENABLE - 'Absent.esp' has no load-order position: loadorder.txt does not list it",
+                                           "install the mod that provides 'Absent.esp'"),
+                  Show(c1301));
+
+            var c1302 = RP(Prof("EN-lost", mmMods, new[] { "Base.esm", "Parent.esp", "Child.esp", "Lost.esp" },
+                                new[] { "*Base.esm", "*Parent.esp", "*Child.esp", "Lost.esp" }), enable: new[] { "Lost.esp" });
+            check("1302 --enable Lost.esp, listed in loadorder.txt but provided by no layer -> REFUSED (not measured without it): install it",
+                  c1302.Refused && OneLine(c1302.RefusedReason, "CANNOT ENABLE - 'Lost.esp' is listed in loadorder.txt, but no mod folder, the overwrite layer or the game Data folder provides it",
+                                           "install the mod that provides 'Lost.esp'"),
+                  Show(c1302));
+
+            var c1303 = R(null, enable: new[] { "Off.esp", "Extra.esp", "Absent.esp" });
+            check("1303 --enable of one listed and two unlisted plugins -> REFUSED in ONE sentence naming the first and counting the other",
+                  c1303.Refused && OneLine(c1303.RefusedReason, "CANNOT ENABLE - 'Extra.esp' has no load-order position",
+                                           "(and 1 more --enable request(s) cannot be built, first 'Absent.esp')"),
+                  Show(c1303));
+
+            var c1304 = R(null, enable: new[] { "Off.esp" });
+            check("1304 control: --enable Off.esp, listed and installed -> not refused, and Off.esp is loaded",
+                  !c1304.Refused && c1304.Plugins.Any(p => p.Name == "Off.esp"), Show(c1304));
+
+            // F2: two profiles that differ in one mod's priority. P ranks ModB above ModA; Q ranks ModA above ModB, so
+            // meshes\x.nif is ModA's under Q and ModB's under P. A candidate built on Q with no Mods list takes its asset
+            // priority from its base profile, so resolving it under --profile P would serve the other copy.
+            Prof("Q", new[] { "+ModA", "+ModB", "+ModC", "-ModOff" },
+                 new[] { "Base.esm", "Shared.esp", "Both.esp", "Off.esp", "Parent.esp", "Child.esp" },
+                 new[] { "*Base.esm", "*Shared.esp", "*Both.esp", "Off.esp", "*Parent.esp", "*Child.esp" });
+            string CandidateOn(string name, string? baseProfile, IReadOnlyList<string> plugins)
+            {
+                var path = Path.Combine(root, name + ".json");
+                File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+                {
+                    ["SchemaVersion"] = ConfigurationIdentity.CurrentSchema, ["Name"] = name,
+                    ["BaseProfile"] = baseProfile, ["Plugins"] = plugins, ["Changes"] = Array.Empty<string>(),
+                }.Where(kv => kv.Value is not null).ToDictionary(kv => kv.Key, kv => kv.Value)));
+                return path;
+            }
+            var qOrder = new[] { "Base.esm", "Shared.esp", "Both.esp", "Parent.esp", "Child.esp" };
+            var c1310 = R(CandidateOn("onq", "Q", qOrder));
+            check("1310 --order candidate built on profile Q, run under --profile P (the two rank ModA and ModB the other way) -> REFUSED in one sentence, never resolved through P",
+                  c1310.Refused && OneLine(c1310.RefusedReason, "PROFILE MISMATCH - candidate BaseProfile 'Q' does not match --profile 'P' ('onq.json')",
+                                           "run with --profile 'Q', or rebuild the candidate on profile 'P'"),
+                  c1310.Refused ? c1310.RefusedReason! : $"not refused: asset view {string.Join(" > ", c1310.EnabledMods)} (profile P's; Q says ModA > ModB > ModC)");
+
+            var c1311 = R(CandidateOn("nobase", null, qOrder));
+            check("1311 --order candidate that names no BaseProfile -> REFUSED: nothing says which profile its names belong to",
+                  c1311.Refused && OneLine(c1311.RefusedReason, "PROFILE MISMATCH - candidate 'nobase.json' names no BaseProfile",
+                                           "add \"BaseProfile\": \"P\" if it was built on profile 'P', or rebuild it there"),
+                  Show(c1311));
+
+            var c1312 = R(CandidateOn("onp-case", "p", qOrder));
+            check("1312 control: a candidate whose BaseProfile differs from --profile only in letter case -> not refused (MO2 profile names are case-insensitive on Windows)",
+                  !c1312.Refused, Show(c1312));
+
+            var c1313 = R(CandidateOn("onq-nope", "Q", new[] { "Base.esm", "Parent.esp", "Nope.esp" }));
+            check("1313 a mismatched candidate that also names a plugin nothing provides -> the one PROFILE MISMATCH sentence, no second refusal",
+                  c1313.Refused && OneLine(c1313.RefusedReason, "PROFILE MISMATCH - candidate BaseProfile 'Q' does not match --profile 'P'",
+                                           "run with --profile 'Q'") && !c1313.RefusedReason!.Contains("Nope.esp"),
+                  Show(c1313));
         }
         finally { try { Directory.Delete(root, true); } catch { } }
     }
