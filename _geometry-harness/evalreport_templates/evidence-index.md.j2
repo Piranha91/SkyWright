@@ -48,6 +48,14 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 {% for r in sf.rows %}- {{ r.kind }} {{ r.A }} x {{ r.B }} `{{ r.formKey|txt }}`{% if r.other %} against `{{ r.other|join(", ")|txt }}`{% endif %}: {{ r.admission }}. {{ r.summary|txt }}
 {% endfor %}{% endfor %}
 {% endif %}
+{% set vp = (p.reader.get("validation") or {}).get("placedPairs") or [] %}{% if vp %}
+<a id="patch-placed-pairs"></a>
+### Pairs a patch places that still cross, re-measured with the patch
+
+Triangle pairs of the actual render surfaces, as the report counts them: without the patch from each pair's own row, with it from the re-measure of that row in the setup with the patch. The probe's summary line counts the pairs another way; its figure is given beside them.
+
+{% for r in vp %}- `{{ r.object|txt }}` against `{{ r.other|txt }}` ({{ r.A }} x {{ r.B }}): {{ r.before or "not read" }} without the patch (summary {{ r.summary or "not read" }}; `{{ (r.beforeFile or "not read")|txt }}`), {{ r.after or "not read" }} with it (`{{ (r.afterFile or "not read")|txt }}`)
+{% endfor %}{% endif %}
 {% for dl in p.reader.prediction.get("doorLinkEntries") or [] %}
 <a id="{{ dl.anchor }}"></a>
 ### Door links dropped by {{ dl.winner }}'s navmesh records

@@ -3620,6 +3620,8 @@ def build_prediction(ctx: dict) -> dict:
     # the overwritten mod a master, with the same ground lost (fifth blind review, W-S1).
     remeasure_with_patch_cache = {}
 
+    remeasure_with_patch_path = {}
+
     def remeasure_with_patch(check_id):
         if check_id not in remeasure_with_patch_cache:
             remeasure_with_patch_cache[check_id] = None
@@ -3633,6 +3635,7 @@ def build_prediction(ctx: dict) -> dict:
                         bundle.output_emit_path(check_id, where[0], None) if where[1] == "arm" else None)
                 emit = bundle.emit(path) if path else None
                 preds = emit.get("Predicates") if isinstance(emit, dict) else None
+                remeasure_with_patch_path[check_id] = path      # (tenth review) the file, said in the evidence index
                 if isinstance(preds, list):
                     remeasure_with_patch_cache[check_id] = {
                         (x.get("Kind"), x.get("A"), x.get("B"), x.get("FormKey"), x.get("Other")):
@@ -5831,6 +5834,7 @@ def build_prediction(ctx: dict) -> dict:
                 for m_, n_ in sorted(kept_by.items(), key=lambda kv: (-kv[1], kv[0].lower()))) + ")") if len(kept_by) > 1 else ""
             n_kept_ = fmt_n(len(kept)) + off_note(kept)
             sentences.append(bind(words["validationKept"], {"patch": patch, "count": n_kept_, "by": by_}))
+        placed_pairs, placed_sentence_ = [], None      # (tenth review) the re-measured pairs, for the index
         if placed:
             # (seventh review, Clockwork S3) where the setup with the patch measured each again, what it found there
             # (seventh review round 3, Missives 73) each pair's figures before and after come from that same pair's own
@@ -5844,12 +5848,25 @@ def build_prediction(ctx: dict) -> dict:
                 b_ = re.search(r"(\d[\d,]*) triangle pairs", str(((p_rows.get(keyof(e)) or {}).get("row") or {}).get(
                     "physicalDetail") or ""))
                 tri_.append((int(b_.group(1).replace(",", "")), int(m_.group(1).replace(",", ""))) if m_ and b_ else None)
+                # (tenth review, Clockwork 75 / Winterhold 88) each pair's figures and files, for the evidence index;
+                # the probe's summary count beside them, as the files print both
+                s_ = re.search(r"(\d[\d,]*) triangle pairs", str(e.get("summary") or ""))
+                main_b10_ = ctx.get("mainBundle")
+                placed_pairs.append({
+                    "object": str(e["formKey"]), "other": str((e.get("other") or [""])[0] or ""), "A": e["A"], "B": e["B"],
+                    "before": b_.group(1) if b_ else None, "summary": s_.group(1) if s_ else None,
+                    "after": m_.group(1) if m_ else None,
+                    "beforeFile": (main_b10_.output_emit_path(e["checkId"], p_arm, "arm")
+                                   or main_b10_.output_emit_path(e["checkId"], p_arm, None)) if main_b10_ else None,
+                    "afterFile": remeasure_with_patch_path.get(e["checkId"])})
+            placed_sentence_ = True
             sentences.append(bind(words["validationPlaced"], {"patch": patch, "count": by_unit(placed)})
                              + (" " + bind(words["validationPlacedMeasured"], {
                                  "patch": patch, "before": fmt_n(sum(x_[0] for x_ in tri_)),
                                  "after": fmt_n(sum(x_[1] for x_ in tri_)),
                                  "each": words.get("validationPlacedEach") or "" if len(tri_) > 1 else ""})
                                 if tri_ and None not in tri_ and words.get("validationPlacedMeasured") else ""))
+            placed_sentence_ = sentences[-1] if placed_pairs and tri_ and None not in tri_ else None
         if stands:
             sentences.append(bind(words["validationStands"], {"patch": patch, "count": by_unit(stands)}))
         # still present: left untouched never counts a clash whose objects a patch edits (round 4)
@@ -6559,6 +6576,7 @@ def build_prediction(ctx: dict) -> dict:
                           h_["finding"].get("id") for _, h_ in replaced if h_["finding"].get("id")).most_common()],
                       # (Winterhold review 3) the finding holding the objects named as switched back on first, then
                       # the others by how many undone changes they hold
+                      "placedSentence": placed_sentence_ or None, "placedPairs": placed_pairs if placed_sentence_ else [],
                       "undoneFindingIds": list(dict.fromkeys(
                           [h_["finding"].get("id") for rk_, h_ in undone
                            if h_["finding"].get("id") and str(rk_[4]) in enable_examples]
