@@ -1772,7 +1772,7 @@ def main():
         plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
         v = (reader(plan).get("prediction") or {}).get("verdict") or ""
         ok = ("3 cases of objects left floating" in v and "the same 2 objects also found by the check "
-              f"\"{priorities()['reader']['checkTitles'].get(FIXTURE)}\" (counted once, above)" in v)
+              f"\"{priorities()['reader']['checkTitles'].get(FIXTURE)}\" (counted once, above, under " in v)   # round 2 item 4
         return ok, f"verdict {v!r}"
 
     # C488. A lost edit whose two values name the same file, differing only in letter case or slashes, is not a lost
@@ -2341,7 +2341,7 @@ def main():
               # (fifth review) its unit named; (seventh review, BPT S1) each plugin's fields and records named
               and f"2 record fields the mods changed ({MOD_A} 1: record flags of 000702:{BASE}; {MOD_B} 1: position of "
                   f"000703:{BASE})" in line
-              and f"1 of them, on 1 object, switch the object back on, for example 000702:{BASE}" in line
+              and f"1 of the 2, on 1 object, switch the object back on, for example 000702:{BASE}" in line   # round 2 item 5
               and new.endswith(": 0.") and "undo" not in new and val.get("patchProblems") == 0)
         return ok, f"undone {val.get('undone')} {val.get('undoneBy')}; line {line!r}; new clashes {new!r}"
 
@@ -5997,7 +5997,7 @@ def main():
                                             [MOD_A, MOD_B], patches=[PATCH], enrichment=enr,
                                             count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 2})
         line = next((ln for ln in md.splitlines() if ln.startswith(f"- Undone by {PATCH}")), "")
-        return ("2 record fields the mods changed" in line and "2 of them, on 1 object, switch" in line), line[:300]
+        return ("2 record fields the mods changed" in line and "2 of the 2, on 1 object, switch" in line), line[:300]   # round 2 item 5
 
     for name, fn in [("fifth-review/C1091-undone-line-units", c1091_undone_line_units)]:
         cell(name, fn)
@@ -9279,7 +9279,8 @@ def main():
         pair_ = row("OVERLAP", OTHER, MOD_A, X1, other=T_)
         alone_ = row("OVERLAP", OTHER, MOD_A, X3, other=U_)       # OtherMod only edits the base-game partner U
         alone_b_ = row("OVERLAP", BASE, MOD_A, X3, other=U_)      # the same pair without OtherMod: from ModA alone
-        st_ = row("STATE-CONTACT@000S11:ModA.esp@Unknown", MOD_A, OTHER, X1, label="Camp (ext)", other=T_)
+        st_ = row("STATE-CONTACT@000S11:ModA.esp@Unknown", MOD_A, OTHER, f"000X15:{MOD_A}", label="Camp (ext)",
+                  other=f"000T15:{OTHER}")
         arms = [arm("baseline", [BASE, OTHER, MOD_A, PATCH], kind="baseline"), arm("without-patch", [BASE, OTHER, MOD_A]),
                 arm("without-other", [BASE, MOD_A])]
         v_arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline", shas={MOD_A: "b" * 64})]
@@ -9291,7 +9292,7 @@ def main():
         also_ = " ".join((reader(plan).get("prediction") or {}).get("alsoEvaluations") or [])
         title = priorities()["reader"]["checkTitles"].get(STATE) or STATE
         return ("of the 2 overlap pairs between OtherMod.esp and ModA.esp" in also_ and f'"{title}"' in also_
-                and "not measured" in also_), also_[-500:]
+                and "not measured with that version" in also_.lower()), also_[-500:]
 
     # C1212 (round 2 item 8, Pilgrim 74): a set-aside row on a field an admitted predicted row already counts is not
     # counted again among the clashes resolved but not predicted.

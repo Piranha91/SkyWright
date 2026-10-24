@@ -4311,7 +4311,10 @@ def build_prediction(ctx: dict) -> dict:
                   + " " + bind(words["verdictSharedObjects"], {"count": fmt_n(shared), "noun": "object" if shared == 1 else "objects", "examples": ", ".join(
                       sorted(str(x) for x in shared_objects)[:3]) + (", ..." if shared > 3 else "")}) if new else
                   bind(words["verdictSameObjects"][0 if shared == 1 else 1], {
-                      "count": fmt_n(shared), "title": title_of(e["checkId"])}))
+                      "count": fmt_n(shared), "title": title_of(e["checkId"]),
+                      # (eighth review round 2, Snazzy 7) the earlier items that count them, as the kind line names them
+                      "titles": (f'"{next(iter(shared_with_))}"' if len(shared_with_) == 1 else and_list(
+                          [f'"{t_}" ({fmt_n(n_)})' for t_, n_ in sorted(shared_with_.items(), key=lambda kv: (-kv[1], kv[0]))]))}))
         verdict_counts[i] = {**e, "count": total, "newObjects": new, "sharedObjects": shared, "phrase": phrase,
                              "sharedWith": dict(shared_with_)}
     unseparated = stated(counts["notSeparable"]) if multi else []
@@ -4539,7 +4542,10 @@ def build_prediction(ctx: dict) -> dict:
                   "setAside": aside,
                   # only the kinds that occur are named (a list of zeros says nothing and read as a contradiction
                   # beside a clash counted elsewhere, P64 lane / review 17)
-                  "setAsideLine": ((bind(words["setAsideLine"], {"parts": ", ".join(
+                  # (eighth review round 2, Pilgrim 63) the unit names the setup the prediction is made on
+                  "setAsideLine": ((bind(words["setAsideLine"], {"setup": (
+                      words.get("setAsideSetupMeasured") or "the measured load order") if p_arm == "baseline" else (
+                      words.get("setAsideSetupWithout") or "the setup without the patch"), "parts": ", ".join(
                       bind(t_, {"n": fmt_n(aside[k_])}) for k_, t_ in words["setAsideParts"].items() if aside.get(k_))})
                       if any(aside.get(k_) for k_ in words["setAsideParts"]) else "")
                                    + (" " + bind(words["setAsideNoBody"], aside)
@@ -4835,11 +4841,23 @@ def build_prediction(ctx: dict) -> dict:
         # (eighth review, Clockwork 135 / 139) lost edits a declared patch wins whose losing value is no change of the
         # losing plugin's own (it only carries an earlier value): nothing of its own is lost; the measured-order line
         # says them apart (the prediction's own-change rule)
+        def carried_loser_(rk):
+            """The losing value is no change of the loser's own (the value it inherits), or its one owner is an earlier
+            plugin (eighth review round 2, Clockwork 139: an absent value the base game holds from the start)."""
+            oe_ = own_edit(patched_arm, rk, rk[2])
+            if oe_ is not None and oe_["changed"] is False:
+                return True
+            got_ = field_chain(patched_arm, rk, rk[2])
+            if got_ is None:
+                return False
+            low_ = [str(x).lower() for x in got_[0]]
+            i_ = low_.index(str(rk[2]).lower())
+            return owner_of(got_[0], got_[1], i_)[0] != i_
         patch_carried = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
                                for rk, h_ in patched_rows.items()
                                if rk[1] == "LOST-EDIT" and str(rk[3]).lower() in {str(x).lower() for x in patch_names}
                                and str(rk[2]).lower() not in {str(x).lower() for x in patch_names}
-                               and (own_edit(patched_arm, rk, rk[2]) or {"changed": True})["changed"] is False)
+                               and carried_loser_(rk))
         patch_noise = sorted([str(rk[0]), str(rk[4]), str(h_["row"].get("field")), str(rk[2]), str(rk[3])]
                              for rk, h_ in patched_rows.items()
                              if rk[1] == "LOST-EDIT" and str(rk[3]).lower() in {str(x).lower() for x in patch_names}
@@ -5276,6 +5294,12 @@ def build_prediction(ctx: dict) -> dict:
                      and (e["checkId"], patched_arm) in measured
                      # overwrite history is said by whether it is still flagged; its measured loss, apart (W-S1)
                      and not (present if e["admission"] == "history" else there)(patched_arm, keyof(e))]
+        # (eighth review round 2, Pilgrim 74) a set-aside lost edit on a field an admitted predicted row counts is that
+        # field, counted once there
+        counted_fields_ = {(str(e["formKey"]), e.get("field")) for e in record
+                           if e["admission"] == "admitted" and e["kind"] == "LOST-EDIT"}
+        spot_rows = [e for e in spot_rows if not (e["kind"] == "LOST-EDIT"
+                                                  and (str(e["formKey"]), e.get("field")) in counted_fields_)]
         # (round 2, Missives S1 and Snazzy S2) an earlier record clash a patch also fixes is a change in game: one field of
         # one record, however many plugins' values or record checks name it; one whose values differ only in bytes the game
         # does not read is none; and where the patch holds none of the field, the patch removes it, said as a removal
@@ -5493,7 +5517,7 @@ def build_prediction(ctx: dict) -> dict:
                 # (eighth review, Snazzy 14) each earlier entry that counted some of its objects, with how many
                 sw_ = v_["sharedWith"]
                 shared_kinds[(v_["checkId"], v_["kind"])] = (f'"{next(iter(sw_))}"' if len(sw_) == 1 else and_list(
-                    [f'"{t_}" ({fmt_n(n_)})' for t_, n_ in sorted(sw_.items(), key=lambda kv: -kv[1])]))
+                    [f'"{t_}" ({fmt_n(n_)})' for t_, n_ in sorted(sw_.items(), key=lambda kv: (-kv[1], kv[0]))]))
 
         def shared_note(xs):
             c_ = collections.Counter((e["checkId"], e["kind"]) for e in xs if (e["checkId"], e["kind"]) in shared_kinds)
@@ -5687,8 +5711,8 @@ def build_prediction(ctx: dict) -> dict:
                     list(dict.fromkeys(str(rk_[4]) for rk_, _ in rows_ if rk_[2] == m_)))})
                 for m_, n_ in sorted(by_.items(), key=lambda kv: (-kv[1], kv[0].lower())))
 
-        def enables_text(on_, key_="validationUndoneEnables"):
-            return bind(words.get(key_) or words["validationUndoneEnables"], {
+        def enables_text(on_, key_="validationUndoneEnables", total_=None):
+            return bind(words.get(key_) or words["validationUndoneEnables"], {"total": fmt_n(total_ or len(on_)),
                 "count": fmt_n(len(on_)), "examples": "; ".join(list(dict.fromkeys(str(rk[4]) for rk in on_))[:3]),
                 "objects": (lambda n_: f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}")(
                     len({str(rk[4]) for rk in on_}))}) if on_ else ""
@@ -5702,7 +5726,7 @@ def build_prediction(ctx: dict) -> dict:
                                                                       "patch": (lambda ps_: ps_[0] if len(ps_) == 1 else "a patch")(
                                                                           list(dict.fromkeys(str(rk_[3]) for rk_ in undone_off)))})
                 if undone_off else "",
-                "enables": enables_text(switched_on)}))
+                "enables": enables_text(switched_on, total_=len(undone))}))
             undone_sentence = sentences[-1]
         replaced_sentence = None
         if replaced and words.get("validationReplaced"):
@@ -5720,7 +5744,7 @@ def build_prediction(ctx: dict) -> dict:
                               for k_, n_ in replaced_whose.most_common() if k_[0] != "own"))
                     if x_ and x_ != (words.get("validationReplacedOwnLead") or "")),
                 # (page budget, coordinator) the count only: the undone part names the examples
-                "enables": enables_text(switched_on_r, "validationReplacedEnables")}))
+                "enables": enables_text(switched_on_r, "validationReplacedEnables", len(replaced))}))
             replaced_sentence = sentences[-1]
             if in_undone_:
                 tail_ = words.get("validationUndoneTail") or ""
@@ -8173,17 +8197,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 continue
             groups_ = collections.OrderedDict()
             for e_ in (reader.get("prediction") or {}).get("record") or []:
-                if (e_.get("admission") == "admitted" and str(e_.get("checkId")).startswith("geometry.") and e_.get("other")
-                        and e_.get("attribution") != "single-mod"):
+                # (eighth review round 2, Sewers 39) every counted group: with one evaluated mod those from it alone
+                # are counted too; checks of any family whose rows name two objects
+                if (e_.get("admission") == "admitted" and e_.get("other") and e_.get("kind") != "LOST-EDIT"
+                        and (len((reader.get("prediction") or {}).get("mods") or []) <= 1
+                             or e_.get("attribution") != "single-mod")):
                     groups_.setdefault((e_["checkId"], e_["A"], e_["B"], e_["kind"]), []).append(e_)
             loaded_ = {str(q.get("name")).lower() for q in (arm_.get("requested") or {}).get("plugins") or [] if isinstance(q, dict)}
-            parts_v_, none_v_ = [], []
+            parts_v_, none_v_, unmeasured_v_ = [], [], []
             for (c_, a_, b2_, k_), es_ in groups_.items():
                 if str(a_).lower() not in loaded_ or str(b2_).lower() not in loaded_:
                     continue                   # a pair that setup does not load: nothing to say
                 path_ = ab_.output_emit_path(c_, arm_.get("armId"), "arm")
                 em_ = ab_.emit(path_) if path_ else None
                 if not isinstance(em_, dict):
+                    unmeasured_v_.append(f'"{check_titles.get(str(c_), str(c_))}"')     # said, never dropped
                     continue
                 there_ = {(str(r_.get("formKey")), frozenset(map(str, r_.get("other") or ())))
                           for cc_ in em_.get("Conflicts") or [] for r_ in conflict_rows(cc_, None)}
@@ -8205,7 +8233,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                                                      "parts": "; ".join(parts_v_)})
                                   + (" " + bind(pw_also["alsoVariantNone"], {"groups": and_list(none_v_),
                                                                               "be": "are" if len(none_v_) > 1 or not none_v_[0].startswith("1 ") else "is"})
-                                     if none_v_ and pw_also.get("alsoVariantNone") else ""))
+                                     if none_v_ and pw_also.get("alsoVariantNone") else "")
+                                  + (" " + bind(pw_also["alsoVariantUnmeasured"], {"checks": and_list(list(dict.fromkeys(unmeasured_v_)))})
+                                     if unmeasured_v_ and pw_also.get("alsoVariantUnmeasured") else ""))
     reader["prediction"]["alsoEvaluations"] = also_lines
     # Evidence derived after measurement (bundle standard §8, enrichment): listed in the evidence index with what
     # it was derived from; names reach the plan so a reader's page needs no side input.
