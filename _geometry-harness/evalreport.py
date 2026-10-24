@@ -5381,10 +5381,18 @@ def build_prediction(ctx: dict) -> dict:
                 "inside": m_, "count": by_unit(es_, True), "it": "they set" if len(patch_names) > 1 else "it sets",
                 "them": "them" if len(patch_names) > 1 else "it"})
                 for m_, es_ in inside_.items()) if words.get("validationPatchScopeInside") else "")
+            # (seventh review round 2) a mod with remainders on both sides is said with the count of each, so one name
+            # is never both outside and inside without saying which part
+            def outside_part_(m_):
+                if disp_.get(str(m_).lower(), m_) not in inside_:
+                    return m_
+                es_ = [e for e in open_ if not edited_[id(e)]
+                       and str(m_).lower() in {str(x_).lower() for x_ in (owner_(e, e["A"]), owner_(e, e["B"]))}]
+                return f"{m_} ({by_unit(es_, True)})" if es_ else m_
             if outside_:
                 sentences.insert(new_idx, bind(words["validationPatchScope"], {
                     "patch": patch, "covered": and_list(covered_) if covered_ else words.get("validationPatchScopeNone") or "none",
-                    "outside": and_list(outside_), "lists": "list" if len(patch_names) > 1 else "lists",
+                    "outside": and_list([outside_part_(m_) for m_ in outside_]), "lists": "list" if len(patch_names) > 1 else "lists",
                     "it": "they set" if len(patch_names) > 1 else "it sets"})
                     + inside_text_)
                 new_idx += 1

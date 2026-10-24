@@ -8386,7 +8386,7 @@ def main():
     # C1157 (Clockwork S4): the patch lists OtherMod.esp as a master, and a clash with it is still there with the patch,
     # beside one with Neighbour.esp, which it does not list: the scope line says the OtherMod one is inside what the
     # patch sets out to fix and stays with it, not only that the Neighbour one is outside.
-    def scope_bundle(patch_edits_it):
+    def scope_bundle(patch_edits_it, second_other=False):
         """Neighbour.esp's pair (the patch neither lists nor edits it) and OtherMod.esp's pair (the patch lists OtherMod
         as a master; with patch_edits_it its own file holds a version of OtherMod's object)."""
         O2 = "Neighbour.esp"
@@ -8398,7 +8398,8 @@ def main():
                           {PATCH: plugin_file_of(PATCH, [BASE, OTHER, MOD_A], recs_, group="CELL")})
         r1 = row("OVERLAP", O2, MOD_A, f"000E57:{MOD_A}", other=f"000E59:{O2}")
         r2 = row("OVERLAP", OTHER, MOD_A, f"000E56:{MOD_A}", other=f"000E58:{OTHER}")
-        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): [r1, r2], (OVERLAP, "without-patch"): [r1, r2]},
+        rs_ = [r1, r2] + ([row("OVERLAP", OTHER, MOD_A, f"000E55:{MOD_A}", other=f"000E5A:{OTHER}")] if second_other else [])
+        plan, md, _ = compile_and_render(arms, {(OVERLAP, "baseline"): rs_, (OVERLAP, "without-patch"): rs_},
                                          [MOD_A], patches=[PATCH], masters={OTHER: [BASE], O2: [BASE], MOD_A: [BASE],
                                                                             PATCH: [BASE, OTHER, MOD_A]})
         return next((x for x in ((reader(plan).get("validation") or {}).get("sentences") or []) if "masters" in x), "")
@@ -8524,12 +8525,20 @@ def main():
         sc_ = [x for x in val_ if "out to fix" in x]
         return (val_ != [] and not any("the base game is outside" in x for x in sc_)), " | ".join(sc_)[:500] or "no scope line"
 
+    # C1169 (round 2, regen-r7c BPT line 75): OtherMod.esp has one pair the patch edits and one it does not: the scope line
+    # names OtherMod.esp outside with the count of the part outside, beside the part inside, never the bare name in both.
+    def c1169_mod_on_both_sides_says_each_part():
+        ln = scope_bundle(True, second_other=True)
+        return (re.search(re.escape(OTHER) + r" \(1 overlap pair\)[^.]* is outside what", ln) is not None
+                and f"still there with {OTHER} (1 overlap pair) is inside what" in ln), ln[:600]
+
     for name, fn in [("round2/C1164-same-bytes-have-one-owner", c1164_same_bytes_have_one_owner),
                      ("round2/C1167-patch-without-the-field-holds-no-later-change",
                       c1167_patch_without_the_field_holds_no_later_change),
                      ("round2/C1165-others-carry-the-losers-value", c1165_others_carry_the_losers_value),
                      ("round2/C1166-value-used-without-winner-named-by-owner", c1166_value_used_without_winner_named_by_owner),
-                     ("round2/C1168-base-game-owner-is-not-outside-scope", c1168_base_game_owner_is_not_outside_scope)]:
+                     ("round2/C1168-base-game-owner-is-not-outside-scope", c1168_base_game_owner_is_not_outside_scope),
+                     ("round2/C1169-mod-on-both-sides-says-each-part", c1169_mod_on_both_sides_says_each_part)]:
         cell(name, fn)
 
     for name, fn in [("round2/C1162-switch-off-either-object-counted", c1162_switch_off_either_object_counted),
