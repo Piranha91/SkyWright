@@ -9480,7 +9480,7 @@ def main():
 
     def stated_objects(text):
         """The objects a count line adds up: every "N object(s)" not said as already counted."""
-        return sum(int(m_.group(1)) for m_ in re.finditer(r"\b(\d+) objects?\b(?! already counted)", text))
+        return sum(int(m_.group(1)) for m_ in re.finditer(r"\b(\d+) objects?(?![-\w])(?! already counted)", text))
 
     # C1216 (ninth review, BPT 68 / 76): an object two by-object checks find new with the patch is counted once: the
     # summary's and the new-clashes line's objects add up to the distinct objects, the later check's pairs said as on an
