@@ -6668,6 +6668,8 @@ def build_prediction(ctx: dict) -> dict:
                       # (Winterhold review 3) the finding holding the objects named as switched back on first, then
                       # the others by how many undone changes they hold
                       "placedSentence": placed_sentence_ or None, "placedPairs": placed_pairs if placed_sentence_ else [],
+                      # the one anchor both the report's link and the index's entry are written from
+                      "placedAnchor": "patch-placed-pairs" if placed_sentence_ else None,
                       "undoneFindingIds": list(dict.fromkeys(
                           [h_["finding"].get("id") for rk_, h_ in undone
                            if h_["finding"].get("id") and str(rk_[4]) in enable_examples]

@@ -49,7 +49,7 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 {% endfor %}{% endfor %}
 {% endif %}
 {% set vp = (p.reader.get("validation") or {}).get("placedPairs") or [] %}{% if vp %}
-<a id="patch-placed-pairs"></a>
+<a id="{{ p.reader.validation.placedAnchor }}"></a>
 ### Pairs a patch places that still cross, re-measured with the patch
 
 Triangle pairs of the actual render surfaces, as the report counts them: without the patch from each pair's own row, with it from the re-measure of that row in the setup with the patch. The probe's summary line counts the pairs another way; its figure is given beside them.
