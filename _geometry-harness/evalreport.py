@@ -2416,7 +2416,7 @@ def build_prediction(ctx: dict) -> dict:
         bi_, li_ = list_items_(vals_[0]), list_items_(vals_[low_.index(rk[2].lower())])
         return sorted(bi_) if bi_ and li_ == bi_ else None
 
-    own_layout_cache, own_layout_by = {}, collections.OrderedDict()
+    own_layout_cache, own_layout_by = {}, {}
 
     def own_layout(rk, other):
         """(ninth review, Winterhold F-039) A fixture left hanging whose winning version (on) and whose removed host's
@@ -2512,15 +2512,16 @@ def build_prediction(ctx: dict) -> dict:
                 return "listKept"              # every item it added or removed the winning list keeps so
             if (supersede(rk) or {}).get("kind") in ("kind", "place"):
                 return "superseded"            # the winner rebuilt the record after the loser's small fix
-        lay_ = own_layout(rk, other)
-        if lay_:
-            own_layout_by.setdefault(lay_, []).append(str(rk[4]))
-            return "ownLayout"
         # (fifth review, Winterhold S3) the same rule for a quest-or-switch row of a fixture left in empty space
         if ((rk[0] == "geometry.fixture-empty-space"
              or str(rk[1]).split("@", 1)[0] in set(words.get("fixtureAnchorUnclearKinds") or []))
                 and anchor_unclear_re is not None and anchor_unclear_re.search(rk[5])):
             return "anchorUnclear"             # a floor or wall's box reaches it though no touch was found: cannot tell
+        # (ninth review, Winterhold F-039) one plugin's versions win for the fixture and its removed host: its own layout
+        lay_ = own_layout(rk, other)
+        if lay_:
+            own_layout_by[str(rk[4])] = lay_
+            return "ownLayout"
         return "admitted"
 
     without_cache, partner_arms, put_back = {}, {}, set()
@@ -4614,8 +4615,10 @@ def build_prediction(ctx: dict) -> dict:
                                    + (" " + bind(words["setAsideOwnLayout"], {
                                        "count": fmt_n(aside["ownLayout"]),
                                        "noun": "fixture" if aside["ownLayout"] == 1 else "fixtures",
-                                       "plugins": and_list(list(own_layout_by)),
-                                       "examples": "; ".join(list(dict.fromkeys(f for v_ in own_layout_by.values() for f in v_))[:2])})
+                                       "plugins": and_list(list(dict.fromkeys(
+                                           own_layout_by[str(e["formKey"])] for e in record if e["admission"] == "ownLayout"))),
+                                       "examples": "; ".join(list(dict.fromkeys(
+                                           str(e["formKey"]) for e in record if e["admission"] == "ownLayout"))[:2])})
                                       if aside["ownLayout"] and words.get("setAsideOwnLayout") else "")
                                    + (" " + bind(words["setAsideNotOwnEditAllCarried"], {
                                        "count": fmt_n(aside_n("notOwnEdit")[0]), "noun": aside_noun("notOwnEdit"),
