@@ -9249,7 +9249,10 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
                             "already": conc.get("patchChoicesCountedAlready") or ""}) for k_ in counted_named_[:2])
                         + (bind(conc.get("patchChoicesCountedMore") or "", {"count": fmt_n(len(counted_named_) - 2)})
                            if len(counted_named_) > 2 else "")})
-                        if counted_named_ and conc.get("patchChoicesCountedNamed") else "")
+                        # every counted row is such a row, and few enough to name (page budget, skill data)
+                        if counted_named_ and len(counted_named_) == n_kept_rows_
+                        and n_kept_rows_ <= int(conc.get("patchChoicesCountedMax") or 0)
+                        and conc.get("patchChoicesCountedNamed") else "")
                     rows_said_ = bool(n_fields and n_rows_ > n_fields)
                     if n_aside or carried_f_:
                         choices = [f for f in choices if kept_rows(f)] or choices[:1]
