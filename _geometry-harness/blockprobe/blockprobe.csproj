@@ -16,6 +16,7 @@
     <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
     <Compile Include="..\_shared\ProbeSelfTest.cs" Link="ProbeSelfTest.cs" />
     <Compile Include="..\_shared\BlockFixture.cs" Link="BlockFixture.cs" />
+    <Compile Include="..\_shared\RouteCutFixture.cs" Link="RouteCutFixture.cs" />
     <Compile Include="..\_shared\NifBoxFixture.cs" Link="NifBoxFixture.cs" />
     <Compile Include="..\_shared\MovedRefFloorCheck.cs" Link="MovedRefFloorCheck.cs" />
     <Compile Include="..\_shared\FloorReachFixture.cs" Link="FloorReachFixture.cs" />

@@ -52,8 +52,9 @@ OVERLAP = "geometry.object-overlap"
 PROBE = {CONTACT: "contactprobe", SEAMS: "seamprobe", WATER: "waterprobe", RECORDS: None, CELLATTR: None,
          FIXTURE: None, OVERLAP: "overlapprobe", "geometry.navmesh-ownership": "navownprobe",
          "loadability.missing-assets": None, "state.conditional-geometry": "stateprobe",
-         "functional.quest-alias-split": "aliasprobe"}
+         "functional.quest-alias-split": "aliasprobe", "geometry.route-cut": "blockprobe"}
 NAVOWN = "geometry.navmesh-ownership"
+ROUTE_CUT = "geometry.route-cut"
 MOD_A, MOD_B = "ModA.esp", "ModB.esp"
 OTHER = "OtherMod.esp"                       # a mod already in the order, not evaluated
 PATCH = "ModA - ModB patch.esp"
@@ -136,7 +137,7 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
                 diff_logs=None, states_not_explored=None, transcripts=None, masters=None, coverage_pops=None,
-                single_run=()):
+                single_run=(), route_rows=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -160,7 +161,11 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     lists (none listed: no masters); False writes no configuration, as an emit that records no master lists.
     missing rows may carry a fourth element, the part (default `arm`).
     single_run: check ids run once per setup, whose receipts record no part (`<check>__<arm>`, part null), as the
-    controller writes them for a check with no comparison step."""
+    controller writes them for a check with no comparison step.
+    route_rows: {armId: (rows document or None, detector)} -- the route-cut check (a text probe) run once on that arm: its
+    receipt records the log and, when a document is given, the rows file blockprobe --rows writes
+    (`outputs/geometry.route-cut/<arm>.route-cut-rows.json`); detector None is a run that reached no verdict (name it in
+    `missing` with status "completed"), "no-finding" a run with a verdict (counted as a completed null check)."""
     root.mkdir(parents=True, exist_ok=True)
     arm_plugins = {a["armId"]: a["requested"]["plugins"] for a in arms}
 
@@ -169,7 +174,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     (root / "receipts").mkdir(exist_ok=True)
     (root / "evidence").mkdir(exist_ok=True)
     count_only = dict(count_only or {})
-    checks = sorted({c for c, _ in results} | {m[0] for m in missing} | {c for c, _ in count_only})
+    checks = sorted({c for c, _ in results} | {m[0] for m in missing} | {c for c, _ in count_only}
+                    | ({ROUTE_CUT} if route_rows else set()))
     plan_targets = [{"name": t} for t in targets]
     if cells and plan_targets:
         plan_targets[0]["footprint"] = {"placed": {"cells": list(cells)}}
@@ -255,6 +261,34 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
         evidence.append({"id": f"e{n:015x}", "kind": "enrichment", "enrichment": "record-rows", "path": rel,
                          "sha256": "2" * 64, "checkId": check_id, "armId": arm_id,
                          "recordedBy": "enrichment:record-rows", "derivedFrom": [{"path": src, "sha256": "1" * 64}]})
+    for n, (arm_id, (doc, detector)) in enumerate(sorted((route_rows or {}).items())):
+        rid = f"{ROUTE_CUT}__{arm_id}"
+        log_rel = f"logs/{rid}.txt"
+        outs = [{"path": log_rel, "sha256": "4" * 64}]
+        (root / "evidence" / "logs").mkdir(parents=True, exist_ok=True)
+        (root / "evidence" / log_rel).write_text("   ---- rule comparison, all on the same 9 references ----\n",
+                                                 encoding="utf-8")
+        evidence.append({"id": f"r{2 * n:015x}", "kind": "log", "path": f"evidence/{log_rel}", "sha256": "4" * 64,
+                         "checkId": ROUTE_CUT, "armId": arm_id, "recordedBy": rid})
+        if doc is not None:
+            rows_rel = f"outputs/{ROUTE_CUT}/{arm_id}.route-cut-rows.json"
+            (root / "evidence" / rows_rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / "evidence" / rows_rel).write_text(json.dumps(doc), encoding="utf-8")
+            outs.append({"path": rows_rel, "sha256": "5" * 64})
+            evidence.append({"id": f"r{2 * n + 1:015x}", "kind": "emit", "path": f"evidence/{rows_rel}",
+                             "sha256": "5" * 64, "checkId": ROUTE_CUT, "armId": arm_id, "recordedBy": rid,
+                             "strength": "calibrated-inference"})
+        receipt = {"receiptId": rid, "checkId": ROUTE_CUT, "armId": arm_id, "part": None, "schemaVersion": 1,
+                   "exitCode": 0, "validation": {"accepted": True, "identityLimits": []}, "outputs": outs, "log": log_rel,
+                   "result": {"execution": "completed", "detector": detector, "findings": 0 if detector else None,
+                              "coverage": [{"Population": "rows", "Judged": 9, "Unjudgeable": {}}]},
+                   "consumed": {"tool": {"exe": "blockprobe", "dllSha256": "d" * 64, "coreDllSha256": "c" * 64},
+                                "configuration": {"plugins": config_of(ROUTE_CUT, arm_id)}}}
+        (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipt), encoding="utf-8")
+        evidence.append({"id": f"q{n:015x}", "kind": "receipt", "path": f"receipts/{rid}.json", "sha256": "0" * 64,
+                         "checkId": ROUTE_CUT, "armId": arm_id, "recordedBy": rid})
+        if detector == "no-finding":
+            nulls.append({"checkId": ROUTE_CUT, "armId": arm_id, "part": None, "coverage": 1})
     if names is not None:
         rel = "enrichment/names/names.json"
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -851,6 +885,32 @@ def priorities():
 
 
 # -------------------------------------------------------------------------------------------- cells
+
+def route_row(verdict, n, cell_, passage=None, share=None, navcut=False, mesh="Clutter\\BarrelA.nif"):
+    return {"Verdict": verdict, "OldRule": "Clipped", "FormKey": f"000A0{n}:{MOD_A}", "Cell": cell_, "Mesh": mesh,
+            "By": [MOD_A], "Touched": 12, "Passage": passage, "PassageLeft": passage, "PassageRight": passage,
+            "PassageCap": 160, "PassageShare": share, "Navcut": navcut, "Why": f"{verdict} by the route-cut rule"}
+
+
+# blockprobe --rows, as written for one arm: one Blocked and two LikelyBlocked objects (one at the passage cap), and two rows
+# that are not leads (a NoLine object, and a LikelyBlocked navcut box, an unconfirmed candidate of its own).
+ROUTE_CUT_ROWS = {"Probe": "blockprobe", "Targets": [MOD_A], "Rows": [
+    route_row("Blocked", 1, "HallA", 32),
+    route_row("LikelyBlocked", 2, "YardB", 160, "about half the time"),
+    route_row("LikelyBlocked", 3, "YardB", 72, "about half the time"),
+    route_row("NoLine", 4, "HallA"),
+    route_row("LikelyBlocked", 5, "YardB", 96, "about half the time", navcut=True, mesh="")]}
+
+
+def route_cut_bundle(detector, doc):
+    """MOD_A added to an order; one contact clash; the route-cut check run on the baseline arm with `detector` (None: no
+    verdict) and the rows document `doc` (None: no rows file, as every bundle before blockprobe --rows)."""
+    arms = [arm("baseline", [BASE, OTHER, MOD_A], kind="baseline"), arm("dependency-only", [BASE, OTHER])]
+    results = {(CONTACT, "baseline"): [row("CONTACT", OTHER, MOD_A, f"000801:{MOD_A}")], (CONTACT, "dependency-only"): []}
+    missing = [(ROUTE_CUT, "baseline", "completed", None)] if detector is None else []
+    return compile_and_render(arms, results, [MOD_A], want_index=True, missing=missing,
+                              route_rows={"baseline": (doc, detector)})
+
 
 def main():
     cells = []
@@ -10165,6 +10225,58 @@ def main():
         return re.search(r"\bin 0 of them ground\b", top) is not None, top[:400]
 
     for name, fn in [("tenth-review/C1242-base-single-not-losing-ground", c1242_base_single_not_losing_ground)]:
+        cell(name, fn)
+
+    # C1444-C1448 (task 2026-10-17-report-route-cut-leads): when the route-cut check reaches no verdict, the objects
+    # blockprobe rated as blocking or likely to block a route (its --rows file) are listed as leads for an in-game check,
+    # never as clashes, with the object, its cell and the passage the probe states; a check with a verdict, and a bundle
+    # with no rows file, are as before.
+    def c1444_route_cut_leads_listed():
+        plan, md, html, index = route_cut_bundle(None, ROUTE_CUT_ROWS)
+        sec_ = section_text(md, "What the checks could not judge")
+        want_ = [f"000A01:{MOD_A}", f"000A02:{MOD_A}", f"000A03:{MOD_A}"]
+        ok = ("Leads for an in-game check, not clashes" in sec_
+              and all(k_ in sec_ and k_ in html for k_ in want_)
+              and "HallA" in sec_ and "YardB" in sec_
+              and "32 u" in sec_ and "72 u" in sec_ and "about half the time" in sec_)
+        return ok, sec_[-900:]
+
+    def c1445_route_cut_leads_only_blocking_objects():
+        plan, md, html, index = route_cut_bundle(None, ROUTE_CUT_ROWS)
+        sec_ = section_text(md, "What the checks could not judge")
+        lead_ = next((ln for ln in sec_.splitlines() if "Leads for an in-game check" in ln), "")
+        pred_ = section_text(md, next(h for h in md_heading_order(md) if h.startswith("What adding")))
+        ok = (bool(lead_) and f"000A04:{MOD_A}" not in lead_ and f"000A05:{MOD_A}" not in lead_
+              and not any(f"000A0{i}:{MOD_A}" in pred_ for i in range(1, 6))
+              and "at least 160 u" in lead_)
+        return ok, f"lead {lead_[:600]!r}"
+
+    def c1446_route_cut_leads_in_evidence_index():
+        plan, md, html, index = route_cut_bundle(None, ROUTE_CUT_ROWS)
+        part_ = index_section(index, "route-cut-leads")
+        ok = (bool(part_) and all(f"000A0{i}:{MOD_A}" in part_ for i in (1, 2, 3))
+              and "Clutter\\BarrelA.nif" in part_ and "evidence-index.md#route-cut-leads" in md)
+        return ok, (part_ or index[-600:])[:600]
+
+    def c1447_route_cut_with_verdict_unchanged():
+        plan, md, html, index = route_cut_bundle("no-finding", ROUTE_CUT_ROWS)
+        plan0, md0, html0, index0 = route_cut_bundle("no-finding", None)
+        ok = (md == md0 and html == html0 and "Leads for an in-game check" not in md
+              and not any(f"000A0{i}:{MOD_A}" in md for i in range(1, 6)))
+        return ok, "identical" if md == md0 else "the report differs with the rows file present"
+
+    def c1448_route_cut_no_rows_file_unchanged():
+        plan, md, html, index = route_cut_bundle(None, None)
+        sec_ = section_text(md, "What the checks could not judge")
+        ok = ("ran, but could not decide" in sec_ and "Whether a single object blocks an NPC route" in sec_
+              and "Leads for an in-game check" not in md)
+        return ok, sec_[:600]
+
+    for name, fn in [("route-cut-leads/C1444-leads-listed-with-object-cell-passage", c1444_route_cut_leads_listed),
+                     ("route-cut-leads/C1445-only-blocking-objects-never-clashes", c1445_route_cut_leads_only_blocking_objects),
+                     ("route-cut-leads/C1446-leads-in-evidence-index", c1446_route_cut_leads_in_evidence_index),
+                     ("route-cut-leads/C1447-control-verdict-unchanged", c1447_route_cut_with_verdict_unchanged),
+                     ("route-cut-leads/C1448-control-no-rows-file", c1448_route_cut_no_rows_file_unchanged)]:
         cell(name, fn)
 
     for name, ok, detail in cells:

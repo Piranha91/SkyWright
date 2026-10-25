@@ -139,6 +139,23 @@ def main() -> int:
         res = rec.get("result") or {}
         check(res.get("execution") == "not-applicable" and "loads none of the plan's target plugins" in (res.get("note") or ""),
               f"454: not-applicable with the sentence ({res.get('execution')}: {res.get('note')}; run exit {r.returncode})")
+        print("\n=== case-1443: blockprobe is told to write its route-cut rows, and the rows file is the arm's evidence ===")
+        for aid in ("baseline", "candidate-01-reorder"):
+            want = str(arms.get(aid, {}).get("candidatePath"))
+            hit = [a for a in argvs if "--order" in a and a[a.index("--order") + 1] == want]
+            rows_arg = hit[0][hit[0].index("--rows") + 1].replace("\\", "/") if hit and "--rows" in hit[0] else None
+            check(rows_arg is not None and rows_arg.endswith(f"outputs/geometry.route-cut/{aid}.route-cut-rows.json"),
+                  f"1443: {aid}: blockprobe gets --rows <run>/outputs/geometry.route-cut/{aid}.route-cut-rows.json ({rows_arg})")
+            outs = [(o.get("path") or "").replace("\\", "/") for o in (receipts.get(f"geometry.route-cut__{aid}") or {}).get("outputs") or []]
+            rel = f"outputs/geometry.route-cut/{aid}.route-cut-rows.json"
+            check(rel in outs, f"1443: {aid}: the receipt records the rows file as an output ({outs})")
+        evalrun(["finalize", "--run", run], env)
+        b = evalrun(["bundle", "--run", run, "--no-names"], env)
+        bdir = run / "bundle"
+        man = json.loads((bdir / "manifest.json").read_text(encoding="utf-8")) if (bdir / "manifest.json").exists() else {}
+        carried = [e.get("path") for e in man.get("evidence") or [] if "route-cut-rows" in str(e.get("path"))]
+        check(len(carried) == 2 and all((bdir / p).exists() for p in carried),
+              f"1443: the bundle carries both arms' rows files ({carried}; bundle exit {b.returncode} {b.stderr[-200:]})")
         case_455(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

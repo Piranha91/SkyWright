@@ -60,6 +60,8 @@ using var __run = RunLog.BeginProcess("blockprobe", args);
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return BlockSelfTest.Run();
 // Known answers for the per-reference decisions over a synthetic two-room order (_shared/BlockFixture.cs).
 if (args.Length >= 1 && args[0] == "--self-test") return BlockRouteSelfTest.Run();
+// The route-cut fixture: written for tests/test_route_cut_rows.py, which runs the real probe on it.
+if (args.Length >= 2 && args[0] == "--write-route-cut-fixture") { var w = RouteCutFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 
 string Instance = HarnessTarget.Require(HarnessTarget.Instance, "MO2 instance directory", "instance");
 string GamePath = HarnessTarget.Require(HarnessTarget.Game, "game directory", "game");
