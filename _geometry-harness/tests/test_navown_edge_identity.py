@@ -322,7 +322,10 @@ def t1402():
 # The canonical sha256 of stateprobe's row-identity fixture emit (Conflicts, Predicates, Coverage, sorted keys). Was
 # fe4fa6b9... from the base build of piranharim-harness 00c692ab; since 2026-10-24 (lights with no model set aside by name,
 # Gate C review M3) "changed references with a box" also carries SetAside {"LightWithNoModel": 0}, and nothing else differs.
-STATE_ROWS_SHA = "d87e7975c42f2c53052d2ff2c1a848c3a459d5d3647b52a0d1cee198baabe804"
+# Was d87e7975... until 2026-10-25 (activators, doors and editor markers set aside by name; a marker carrying a primitive unjudged
+# apart): the same line also carries SetAside ActivatorWithNoModel, DoorWithNoModel, EditorMarker and Unjudgeable MarkerPrimitive,
+# all 0 on this fixture, and nothing else differs.
+STATE_ROWS_SHA = "f30ce37cff4bf41c45802aaf5cadb38e7c9a48da77ea4ab654640404783022f6"
 
 
 def t1403():
