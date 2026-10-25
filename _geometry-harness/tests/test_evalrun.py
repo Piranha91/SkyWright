@@ -28,8 +28,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
-sys.path.insert(0, str(HARNESS))
-import toolidentity  # noqa: E402  (the program identity rule, for keys a case recomputes)
 FIXT = HERE / "fixtures" / "evalrun"          # tracked: the generator, the fakes, the expectations
 EXPECTED = FIXT / "expected"
 GEN = FIXT / "_generated"                     # generated per run; never tracked (set in main())
@@ -7685,6 +7683,8 @@ def case_416(tmp):
 
     def sha(pth):
         return hashlib.sha256(Path(pth).read_bytes()).hexdigest()
+    sys.path.insert(0, str(HARNESS))
+    import toolidentity  # the program identity rule (imported here: case-46 copies only part of the harness)
     cdir = run / "candidates"
     want = set()
     jobs = [json.loads(ln) for ln in (sweep / "jobs.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
