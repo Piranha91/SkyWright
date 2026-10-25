@@ -592,7 +592,12 @@
         "kind": "probe-target",
         "exe": "blockprobe",
         "args": [
-          "{target}"
+          "{target}",
+          "--rows",
+          "{out}/{arm}.route-cut-rows.json"
+        ],
+        "files": [
+          "{out}/{arm}.route-cut-rows.json"
         ],
         "reverse": false,
         "output": "text",
@@ -601,7 +606,7 @@
           "findings": null,
           "judged": "regex:rule comparison, all on the same (?P<n>[\\d,]+) references",
           "unjudgeable": "regex:navmesh triangles that could not be judged \\(inset consumed them\\): (?P<n>[\\d,]+)",
-          "note": "blockprobe prints its route-cut verdicts as a per-reference listing with no total line, so findings has no spec to read; the count must come from the listing or from a --json blockprobe does not have. Named here rather than matched out of a line that means something else."
+          "note": "blockprobe prints its route-cut verdicts as a per-reference listing with no total line, so findings has no spec to read and the check reaches no verdict. Its --rows file (adapter.files) carries every listed row; the report shows the Blocked and LikelyBlocked objects in it as leads for an in-game check, never as findings."
         },
         "commonFlags": false
       },

@@ -1952,6 +1952,19 @@ class Validator:
 
         if out_kind == "text":
             produced = True  # the log IS the output; `output-missing` does not apply to it
+            for p in outputs[1:]:
+                # adapter.files: written by this child, never left over from an earlier run
+                if not p.exists() or started is None:
+                    continue
+                pre = pre_hashes.get(str(p))
+                if p.stat().st_mtime + 2.0 < started:
+                    rej.append({"cause": "output-stale",
+                                "detail": f"{rel_to(self.run, p)} was last written {iso_of(p.stat().st_mtime)}, "
+                                          f"before the child started {iso_of(started)}"})
+                elif pre is not None and sha256_file(p) == pre:
+                    rej.append({"cause": "output-stale",
+                                "detail": f"{rel_to(self.run, p)} is byte-identical to the file that "
+                                          f"existed before the child started: nothing was produced"})
         if produced and out_kind != "text":
             doc = load_json(primary)
             if doc is None or not isinstance(doc, dict):
@@ -2512,7 +2525,7 @@ class Executor:
         ended_iso = utcnow()
         text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
         if (adapter.get("output") or "conflict-file") == "text" and log.exists():
-            outputs = [log]
+            outputs = [log, *outputs]          # the log, then any adapter.files (run_probe)
         v = self.validator.validate(check=check, arm=arm, part=part, adapter=adapter,
                                     exit_code=res["exitCode"], log_text=text, outputs=outputs,
                                     pre_hashes=pre, started=started_mono)
@@ -3208,8 +3221,15 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
     outputs = [emit]
     if out_kind == "text":
         # A text probe prints its answer; the child's LOG is the output, and demanding an emit path
-        # from it would reject every run it ever makes. run_child records the log in outputs[].
+        # from it would reject every run it ever makes. run_child records the log in outputs[], first.
+        # adapter.files: what the probe writes besides its printed output (blockprobe --rows), recorded after the log,
+        # each one required and fresh, and copied into the bundle with it.
+        fsubs = {"out": str(out_dir), "run": str(ex.run), "arm": arm["armId"]}
         outputs = []
+        for f_ in adapter.get("files") or []:
+            for k, v in fsubs.items():
+                f_ = f_.replace("{" + k + "}", v)
+            outputs.append(Path(f_))
     elif "--out" in argv and out_kind == "json":
         nid = plan_nexus_id(ex.plan)
         named = out_dir / f"report-{nid}.json" if nid else None

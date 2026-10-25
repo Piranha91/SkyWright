@@ -280,6 +280,17 @@ def validate(registry):
 
         output = adapter.get("output")
         result = adapter.get("result")
+        # adapter.files: the files a text probe writes besides its printed output (blockprobe --rows), named with the
+        # {out}, {run} and {arm} placeholders; evalrun records each as an output and the bundle carries it.
+        if "files" in adapter:
+            files = adapter["files"]
+            if output != "text" or kind != "probe-target":
+                problems.append(f"{cid}: adapter.files is read only for a probe-target adapter whose output is text")
+            elif not (isinstance(files, list) and files and all(isinstance(f, str) and f.strip() for f in files)):
+                problems.append(f"{cid}: adapter.files must be a non-empty list of file paths")
+            elif not all(any(p in f for p in ("{out}", "{run}")) and "{arm}" in f for f in files):
+                problems.append(f"{cid}: each adapter.files path names the arm ({{arm}}) under the run ({{out}} or {{run}}), "
+                                "so two arms never write one file")
         if kind in KINDS_WITHOUT_OUTPUT and output is not None:
             problems.append(f"{cid}: kind {kind} runs no child, so adapter.output must be null")
         elif output in ("json", "text") and kind != "scopeprobe":

@@ -127,7 +127,7 @@ def main() -> int:
         for aid in ("baseline", "candidate-01-reorder"):
             want = str(arms.get(aid, {}).get("candidatePath"))
             hit = [a for a in argvs if "--order" in a and a[a.index("--order") + 1] == want]
-            pos = [x for i, x in enumerate(hit[0]) if not x.startswith("--") and (i == 0 or hit[0][i - 1] != "--order")] if hit else []
+            pos = [x for i, x in enumerate(hit[0]) if not x.startswith("--") and (i == 0 or hit[0][i - 1] not in ("--order", "--rows"))] if hit else []
             check(len(hit) == 1 and pos == ["FixtureTarget.esp"] and "--instance" not in hit[0],
                   f"453: {aid}: one blockprobe run with --order <its candidate> and the target ({hit})")
             ex = (receipts.get(f"geometry.route-cut__{aid}") or {}).get("result", {}).get("execution")

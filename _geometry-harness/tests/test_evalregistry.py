@@ -303,7 +303,9 @@ def test_positional_target_is_a_bare_placeholder():
     option and the probe would exit 2."""
     registry = load_registry()
     route = R.check_by_id(registry, "geometry.route-cut")["adapter"]
-    assert route["args"] == ["{target}"], route["args"]
+    # the target is the bare positional placeholder; the only other args are the rows file (blockprobe --rows, 2026-10-24)
+    assert route["args"] == ["{target}", "--rows", "{out}/{arm}.route-cut-rows.json"], route["args"]
+    assert "--target" not in route["args"] and route["files"] == ["{out}/{arm}.route-cut-rows.json"], route
     scope = R.check_by_id(registry, "loadability.masters-and-order")["adapter"]
     assert "--order" in scope["args"], scope["args"]
 
@@ -366,6 +368,23 @@ def test_refusal_common_flags_on_a_kind_that_runs_nothing():
         target["adapter"]["commonFlags"] = True
     problems = mutated(mutate)
     assert any("means nothing" in p for p in problems), problems
+
+
+def test_refusal_files_outside_a_text_probe_target():
+    """adapter.files (the files a text probe writes besides its printed output) means nothing on an emitting adapter."""
+    def mutate(r):
+        c = next(c for c in r["checks"] if c["id"] == "state.conditional-geometry")
+        c["adapter"]["files"] = ["{out}/{arm}.extra.json"]
+    problems = mutated(mutate)
+    assert any("adapter.files is read only for a probe-target" in p for p in problems), problems
+
+
+def test_refusal_files_shared_between_arms():
+    """A rows file that does not name its arm would be written by every arm into one place."""
+    def mutate(r):
+        R.check_by_id(r, "geometry.route-cut")["adapter"]["files"] = ["{out}/route-cut-rows.json"]
+    problems = mutated(mutate)
+    assert any("names the arm" in p for p in problems), problems
 
 
 def test_refusal_empty_population_declaration():
