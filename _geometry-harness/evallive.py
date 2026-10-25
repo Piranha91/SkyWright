@@ -90,7 +90,7 @@ def derive_result(readings: dict) -> dict:
 
 
 def import_live(E, *, a, runlog, run: Path, src: Path, plan: dict, ledger, check: dict, arm: dict | None,
-                doc: dict, manifest_bytes: bytes) -> int:
+                doc: dict, manifest_bytes: bytes, programs: dict | None = None) -> int:
     """Validate one live import against the frozen plan and write a normal receipt. E is the evalrun module."""
     cid, aid = check["checkId"], doc.get("armId")
     if arm is None or aid not in [x.get("armId") for x in check.get("arms") or []]:
@@ -262,7 +262,9 @@ def import_live(E, *, a, runlog, run: Path, src: Path, plan: dict, ledger, check
                   "configuration": identity, "configurationSource": "live-driver",
                   "registrySha256": plan["registry"]["sha256"], "tool": tool,
                   "optionsSha256": E.sha256_text(E.canonical(plan["options"])),
-                  "scopeSha256": plan["scope"]["sha256"]},
+                  "scopeSha256": plan["scope"]["sha256"],
+                  # the controller identity evalrun checked before this import (toolidentity.py's rule)
+                  **({"programs": programs} if programs is not None else {})},
         validation={"accepted": True, "rejections": [], "identityLimits": limits},
         result={"execution": "completed", "detector": derived["detector"], "findings": derived["findings"],
                 "coverage": derived["coverage"], "strength": (check.get("evidence") or {}).get("strength"),

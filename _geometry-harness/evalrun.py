@@ -62,6 +62,7 @@ import evalregistry  # noqa: E402
 import evalsettings  # noqa: E402
 import stategen  # noqa: E402
 import switchflip_scope  # noqa: E402
+import toolidentity  # noqa: E402
 
 #: Schema 2 is the evidence-chain schema: the plan freezes a per-arm REQUESTED identity, receipts record
 #: their comparison inputs, and finalize/bundle/verify walk the receipt-to-evidence chain. A schema-1
@@ -73,6 +74,10 @@ BUNDLE_SCHEMA = 2
 #: reads — its own `Mods` view when the candidate declares one. A plan without this marker froze the scope's
 #: providers onto every arm, so `run`, `resume` and `import-results` refuse it by name (`request_refusal`).
 REQUEST_PROVIDERS = "arm-view"
+#: The tool identity contract a plan's `toolIdentity` follows (toolidentity.py's rule). A plan without it is refused by
+#: name where it would run or import (`identity_contract_refusal`); `finalize`, `bundle` and `verify-bundle` read it under
+#: the legacy guarantee, labelled as such.
+TOOL_IDENTITY_CONTRACT = 1
 
 # Exit codes, spelled once.
 EXIT_OK = 0
@@ -127,7 +132,7 @@ REJECTION_CAUSES = (
     "schema-unsupported", "identity-missing", "identity-mismatch", "wrong-check",
     "duplicate-receipt", "foreign-run", "population-mismatch", "coverage-missing",
     "extraction-failed", "stale-inputs", "mixed-snapshot", "budget-exhausted",
-    "blocked-prerequisite", "completion-missing",
+    "blocked-prerequisite", "completion-missing", "tool-changed",
 )
 #: Kinds that consume a load order, and can therefore refuse the CONFIGURATION itself. A refusal
 #: from a probe that never reads an order (adviceprobe, patchprobe) is just `refused`.
@@ -625,6 +630,183 @@ def tool_identity(harness: Path, probe: str) -> dict:
              "coreDllSha256": sha256_file(folder / "housecarl-core.dll")}
     ident["present"] = ident["exeSha256"] is not None
     return ident
+
+
+# ------------------------------------------------------------------------- program identity --
+#
+# The identity of every program a plan can launch is frozen into `plan.toolIdentity` (toolidentity.py's one rule) and
+# compared with the disk before `run` / `resume` / `import-results` write anything, again when each child launches and
+# before its result is accepted. Every accepted receipt binds the identity it was accepted under, per role, and
+# finalize / bundle / verify-bundle compare those bindings with the plan offline.
+
+#: Adapter kinds whose check launches its probe as a child.
+LAUNCH_KINDS = {"scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "adviceprobe", "patchprobe"}
+CONTROLLER = "controller"
+COMPARATOR = "helper:conflictdiff"
+IDENTITY_ACTION = "Restore the recorded build, or make a new plan in a new directory."
+
+
+class ToolChanged(Exception):
+    """A program's identity changed during a run: the invocation stops, with this sentence as its refusal."""
+
+
+def program_id(exe: str) -> str:
+    return COMPARATOR if exe == "conflictdiff" else f"probe:{exe}"
+
+
+def program_label(pid: str) -> str:
+    if pid == CONTROLLER:
+        return "the controller (evalrun.py and the scripts it runs)"
+    kind, _, name = pid.partition(":")
+    return f"{'helper' if kind == 'helper' else 'probe'} {name}"
+
+
+def measure_program(opts: dict, harness: Path, pid: str) -> dict:
+    """A program's identity on disk now, located the way its launch locates it. Raises toolidentity.Unreadable."""
+    if pid == CONTROLLER:
+        return toolidentity.scripts(HERE.parent)
+    name = pid.split(":", 1)[1]
+    override = (opts.get("probeCmd") or {}).get(name)
+    if override:
+        return toolidentity.probe_cmd(override)
+    return toolidentity.package(probe_exe(harness, name).parent)
+
+
+def launchable_programs(checks: list[dict], arm_kinds: dict) -> set[str]:
+    """Every program that can launch under a plan: the controller; the probe of every child-launching check with a
+    planned arm; conflictdiff when a swept check plans a non-baseline arm (a diff can run). A tool whose checks are all
+    excluded, skipped, not applicable or never executable is not here, and is never gated."""
+    out = {CONTROLLER}
+    for c in checks:
+        ad = c.get("adapter") or {}
+        planned = [r for r in c.get("arms") or [] if r.get("status") == "planned"]
+        if not planned:
+            continue
+        if ad.get("kind") in LAUNCH_KINDS and ad.get("exe"):
+            out.add(program_id(ad["exe"]))
+        if ad.get("kind") == "ordersweep-probe" and any(arm_kinds.get(r["armId"]) != "baseline" for r in planned):
+            out.add(COMPARATOR)
+    return out
+
+
+def receipt_roles(receipt: dict) -> dict:
+    """role -> program a receipt's result rests on: a probe child's emitter, a swept diff's comparator, and always the
+    controller that decided the result. An import names no local emitter: its declared tool is not a local apphost."""
+    ad = receipt.get("adapter") or {}
+    if ad.get("kind") == "ordersweep-probe" and receipt.get("part") == "diff":
+        return {"comparator": COMPARATOR, "controller": CONTROLLER}
+    if ad.get("kind") in LAUNCH_KINDS and ad.get("exe"):
+        return {"emitter": program_id(ad["exe"]), "controller": CONTROLLER}
+    return {"controller": CONTROLLER}
+
+
+def identity_drift(pid: str, recorded, now: dict) -> str | None:
+    """None when `now` is the identity the plan recorded for `pid`, else the cause and what differs, in one clause."""
+    label = program_label(pid)
+    if not isinstance(recorded, dict) or recorded.get("state") not in ("present", "absent", "unverifiable") \
+            or (recorded.get("state") == "present" and not recorded.get("digest")):
+        return (f"tool-identity-missing: plan.json records no identity for {label}, which this plan can launch or whose "
+                f"work it retains")
+    if "unverifiable" in (recorded.get("state"), now.get("state")):
+        return (f"tool-unverifiable: the --probe-cmd for {pid.split(':', 1)[-1]} ({recorded.get('command')!r}) names no "
+                f"file whose content can be checked, so the program that would run cannot be identified")
+    rs, ns = recorded.get("state"), now.get("state")
+    if rs == ns == "absent":
+        return None          # recorded absent and still absent: its checks are blocked(tool-missing), nothing runs
+    if rs == "absent":
+        return f"tool-changed: {label} had no build when this plan was made and has one now at {now.get('locator')}"
+    if ns == "absent":
+        return (f"tool-missing: {label} was recorded at {toolidentity.short(recorded.get('digest'))}, and "
+                f"{recorded.get('locator')} is gone")
+    if recorded.get("digest") == now.get("digest"):
+        return None
+    diffs = toolidentity.differences(recorded, now)
+    return (f"tool-changed: {label} is not the build this plan recorded ({'; '.join(diffs) or 'its content differs'}; "
+            f"digest {toolidentity.short(recorded.get('digest'))} -> {toolidentity.short(now.get('digest'))})")
+
+
+def unreadable_sentence(pid: str, ex: "toolidentity.Unreadable") -> str:
+    why = getattr(ex.error, "strerror", None) or str(ex.error)
+    return (f"tool-unreadable: {ex.path.name} of {program_label(pid)} could not be read ({why}) at {ex.path}, so the "
+            f"code that would run cannot be identified")
+
+
+def identity_contract_refusal(plan: dict) -> str | None:
+    """A plan without the tool identity contract cannot run, resume or import under it: what it would launch cannot be
+    compared with what it was planned with. Its old results still finalize and verify, labelled legacy."""
+    ti = plan.get("toolIdentity")
+    if isinstance(ti, dict) and ti.get("contract") == TOOL_IDENTITY_CONTRACT and isinstance(ti.get("programs"), dict):
+        return None
+    return (f"plan-identity-outdated: plan.json records no tool identity (toolIdentity contract "
+            f"{TOOL_IDENTITY_CONTRACT}), so the programs this would launch cannot be compared with the ones it was "
+            f"planned with. Make a new plan in a new directory.")
+
+
+def tool_preflight(run: Path, plan: dict, only: set[str] | None = None) -> tuple[str | None, dict]:
+    """(refusal, measured identities). Every program that can launch under the plan, plus every program a retained receipt
+    of this plan names, compared by content with the plan's record. Reads files; writes nothing."""
+    progs = plan["toolIdentity"]["programs"]
+    if only is not None:
+        need = set(only)
+    else:
+        need = launchable_programs(plan["checks"], {a["armId"]: a["kind"] for a in plan["arms"]})
+        for r in read_receipts(run).values():
+            if r.get("planId") != plan["planId"]:
+                continue
+            for row in (((r.get("consumed") or {}).get("programs")) or {}).values():
+                if isinstance(row, dict) and row.get("program") in progs:
+                    need.add(row["program"])
+    opts, harness = plan["options"], Path(plan["options"]["harness"])
+    measured, problems, unread = {}, [], []
+    for pid in sorted(need):
+        rec = progs.get(pid)
+        if not isinstance(rec, dict):
+            problems.append(identity_drift(pid, None, {}))
+            continue
+        try:
+            now = measure_program(opts, harness, pid)
+        except toolidentity.Unreadable as ex:
+            unread.append(unreadable_sentence(pid, ex))
+            continue
+        measured[pid] = now
+        why = identity_drift(pid, rec, now)
+        if why:
+            problems.append(why)
+    if not problems and not unread:
+        return None, measured
+    action = IDENTITY_ACTION if problems else "Make the file readable and run again, or make a new plan in a new directory."
+    return "; ".join(problems + unread) + ". " + action, measured
+
+
+def identity_defects(plan: dict, receipt: dict) -> list[tuple]:
+    """Offline, from retained metadata only: (role, program, kind, recorded, found) for every role of an accepted receipt
+    whose bound identity is not the plan's. A role with no digest is `tool-identity-missing`; two absent digests are
+    never equal. A plan without the contract has nothing to compare (the legacy guarantee)."""
+    if identity_contract_refusal(plan):
+        return []
+    progs = plan["toolIdentity"]["programs"]
+    bound = (receipt.get("consumed") or {}).get("programs")
+    out = []
+    for role, pid in receipt_roles(receipt).items():
+        want = progs.get(pid) if isinstance(progs.get(pid), dict) else {}
+        wd = want.get("digest")
+        row = bound.get(role) if isinstance(bound, dict) else None
+        got = row.get("digest") if isinstance(row, dict) else None
+        if not isinstance(got, str) or not got:
+            out.append((role, pid, "tool-identity-missing", wd, got))
+        elif not isinstance(wd, str) or not wd or want.get("state") != "present" or got != wd \
+                or row.get("program") != pid:
+            out.append((role, pid, "tool-identity-mismatch", wd, got))
+    return out
+
+
+def identity_guarantee(plan: dict) -> dict:
+    if identity_contract_refusal(plan):
+        return {"guarantee": "legacy",
+                "detail": "this plan predates tool identity: which build produced each result was not checked"}
+    return {"guarantee": "verified",
+            "detail": "every accepted local result is bound, per role, to the program identity this plan froze; "
+                      "evaluation.integrity lists any receipt that is not"}
 
 
 def argv_shape(argv: list[str], run: Path) -> list[str]:
@@ -1396,6 +1578,15 @@ def cmd_plan(a) -> int:
             "status": base_status,
         })
 
+    # The identity of every program this plan can launch, frozen with it (toolidentity.py's rule).
+    try:
+        programs = {pid: measure_program(options, harness, pid)
+                    for pid in sorted(launchable_programs(checks, {x["armId"]: x["kind"] for x in arms}))}
+    except toolidentity.Unreadable as ex:
+        return refuse(f"tool-unreadable: {ex.path} could not be read "
+                      f"({getattr(ex.error, 'strerror', None) or ex.error}), so this plan cannot record which program "
+                      f"would run. Make the file readable and plan again.")
+
     population_block, population_text = plan_population(checks, arms, (scope or {}).get("targets", []), population,
                                                         a.instance)
     if getattr(a, "population_from", None):
@@ -1425,6 +1616,12 @@ def cmd_plan(a) -> int:
         "createdUtc": utcnow(),
         "registry": {"path": str(registry_path), "registryVersion": reg.version, "sha256": reg.sha256},
         "tools": tools,
+        "toolIdentity": {
+            "contract": TOOL_IDENTITY_CONTRACT,
+            "rule": "package: every top-level non-PDB file and runtimes/**, by lower-cased relative path and sha256; "
+                    "probe-cmd: the command text and the files it names; scripts: the controller's scripts",
+            "programs": programs,
+        },
         "runner": {
             "evalrun.py": sha256_file(HERE / "evalrun.py"),
             "evalregistry.py": sha256_file(HERE / "evalregistry.py"),
@@ -1504,6 +1701,12 @@ def cmd_plan(a) -> int:
         print(s)
     for line in preflight_notes:
         print(line)
+    for pid, rec in programs.items():
+        if rec.get("state") == "absent":
+            print(f"   {program_label(pid)}: no build at {rec.get('locator')}; its checks will be blocked(tool-missing)")
+        elif rec.get("state") == "unverifiable":
+            print(f"   {program_label(pid)}: its --probe-cmd names no file whose content can be checked; run and "
+                  f"resume will refuse it (tool-unverifiable)")
     if live_choice == "ask" and LIVE_CHECK_ID not in opted:
         print("The live switch check is set to ask each evaluation and was not opted in "
               "(`--opt-in " + LIVE_CHECK_ID + "` opts in).")
@@ -2353,6 +2556,53 @@ class Executor:
         self.arms = {a["armId"]: a for a in plan["arms"]}
         self.options_sha = sha256_text(canonical(self.opts))
         self.children = 0
+        # Program identity: the plan's record, what the preflight measured, the latest launch measurement per program,
+        # programs found changed at an acceptance check, and how the identity bound into the next receipt was checked.
+        self.programs = (plan.get("toolIdentity") or {}).get("programs") or {}
+        self.preflight: dict = {}
+        self.measured: dict = {}
+        self.changed: dict = {}
+        self.checked = ["preflight"]
+
+    # -- program identity at the launch boundary and at acceptance ---------------------------
+
+    def check_launch(self, pids, what: str) -> None:
+        """Before a child starts: every program it uses is still the plan's, or nothing is launched and the run stops."""
+        for pid in pids:
+            try:
+                now = measure_program(self.opts, self.harness, pid)
+            except toolidentity.Unreadable as ex:
+                raise ToolChanged(f"{unreadable_sentence(pid, ex)}, before {what} was launched. {IDENTITY_ACTION}")
+            why = identity_drift(pid, self.programs.get(pid), now)
+            if why:
+                raise ToolChanged(f"{why}, before {what} was launched. {IDENTITY_ACTION}")
+            self.measured[pid] = now
+
+    def check_accept(self, pids, what: str) -> None:
+        """After a child returns, before its result can be accepted: a program that changed while it ran is recorded in
+        `changed`, and every receipt resting on it is rejected(tool-changed) by `finish`."""
+        for pid in pids:
+            try:
+                now = measure_program(self.opts, self.harness, pid)
+            except toolidentity.Unreadable as ex:
+                self.changed[pid] = f"{unreadable_sentence(pid, ex)}, after {what} ran"
+                continue
+            why = identity_drift(pid, self.programs.get(pid), now)
+            if why:
+                self.changed[pid] = f"{why}, while {what} ran"
+
+    def stop_if_changed(self) -> None:
+        if self.changed:
+            raise ToolChanged("; ".join(self.changed[p] for p in sorted(self.changed)) + f". {IDENTITY_ACTION}")
+
+    def bind(self, roles: dict) -> dict:
+        """The identity a receipt was accepted under, per role, as measured (never copied from the plan)."""
+        out = {}
+        for role, pid in roles.items():
+            src = self.measured.get(pid) or self.preflight.get(pid) or {}
+            out[role] = {"program": pid, "kind": src.get("kind"), "digest": src.get("digest"),
+                         "checked": list(self.checked)}
+        return out
 
     # -- budgeting ------------------------------------------------------------------------
 
@@ -2401,7 +2651,8 @@ class Executor:
     # -- the common consumed block ---------------------------------------------------------
 
     def consumed_for(self, arm: dict, adapter: dict, *, base_emit: Path | None = None,
-                     identity: dict | None = None, inputs: list | None = None) -> dict:
+                     identity: dict | None = None, inputs: list | None = None,
+                     programs: dict | None = None, tool: dict | None = None) -> dict:
         """What this child actually read, as strongly as the child stated it.
 
         D3: a child that states no identity — a json / text / probe-target adapter, or an accounting
@@ -2411,7 +2662,8 @@ class Executor:
         The baseline arm is the one place where the scope's configuration IS this arm's, so it is
         recorded verbatim with `configurationSource: "scope"`."""
         exe = adapter.get("exe")
-        tool = self.plan["tools"].get(exe) if exe else None
+        if tool is None:
+            tool = self.plan["tools"].get(exe) if exe else None
         if identity is not None:
             cfg, source = dict(identity), "emit"
         elif arm.get("kind") == "baseline":
@@ -2471,6 +2723,8 @@ class Executor:
         # D4: the comparison a receipt IS. A diff rests on two emits; reuse must follow both.
         if inputs is not None:
             block["inputs"] = inputs
+        if programs is not None:
+            block["programs"] = programs
         return block
 
     # -- the accounting adapters (never run a child) ---------------------------------------
@@ -2505,6 +2759,9 @@ class Executor:
         adapter = check["adapter"]
         key = Ledger.key(check["checkId"], arm["armId"], part)
         job_id = (key + job_suffix)[:100]
+        what = f"check {check['checkId']} [{arm['armId']}]"
+        pids = list(receipt_roles({"adapter": adapter, "part": part}).values())
+        self.check_launch(pids, what)          # before anything of this job is written
         for p in outputs:
             p.parent.mkdir(parents=True, exist_ok=True)
         pre = {str(p): sha256_file(p) for p in outputs}
@@ -2523,18 +2780,31 @@ class Executor:
             return {}
         self.children += 1
         ended_iso = utcnow()
+        self.check_accept(pids, what)
         text = log.read_text(encoding="utf-8", errors="replace") if log.exists() else ""
         if (adapter.get("output") or "conflict-file") == "text" and log.exists():
             outputs = [log, *outputs]          # the log, then any adapter.files (run_probe)
         v = self.validator.validate(check=check, arm=arm, part=part, adapter=adapter,
                                     exit_code=res["exitCode"], log_text=text, outputs=outputs,
                                     pre_hashes=pre, started=started_mono)
-        return self.finish(check, arm, part, adapter, argv, res, started_iso, ended_iso, outputs,
-                           log, v, base_emit=base_emit,
-                           extra={"states": states} if states else None)
+        self.checked = ["launch", "acceptance"]
+        try:
+            receipt = self.finish(check, arm, part, adapter, argv, res, started_iso, ended_iso, outputs,
+                                  log, v, base_emit=base_emit,
+                                  extra={"states": states} if states else None)
+        finally:
+            self.checked = ["preflight"]
+        self.stop_if_changed()
+        return receipt
 
     def finish(self, check, arm, part, adapter, argv, res, started_iso, ended_iso, outputs, log, v,
                *, base_emit=None, extra=None, verdict=None, execution=None, inputs=None) -> dict:
+        roles = receipt_roles({"adapter": adapter, "part": part})
+        drift = [self.changed[pid] for pid in roles.values() if pid in self.changed]
+        if drift and v["accepted"]:
+            # A program this result rests on changed while it was produced: it is not accepted as the plan's build.
+            v = dict(v, accepted=False,
+                     rejections=[{"cause": "tool-changed", "detail": "; ".join(drift)}] + list(v.get("rejections") or []))
         if v["accepted"]:
             status = execution or "completed"
         elif v["rejections"]:
@@ -2554,8 +2824,11 @@ class Executor:
                                 run_id=(res or {}).get("runId"), parent_run_id=self.parent_run_id,
                                 started=started_iso, ended=ended_iso,
                                 exit_code=(res or {}).get("exitCode"), outputs=outputs, log=log,
-                                consumed=self.consumed_for(arm, adapter, base_emit=base_emit,
-                                                           identity=v.get("identity"), inputs=inputs),
+                                consumed=self.consumed_for(
+                                    arm, adapter, base_emit=base_emit, identity=v.get("identity"), inputs=inputs,
+                                    programs=self.bind(roles),
+                                    tool=(tool_identity(self.harness, adapter["exe"])
+                                          if adapter.get("exe") and adapter.get("kind") in LAUNCH_KINDS else None)),
                                 validation=v, result=result, extra=extra)
         self.ledger.transition(check["checkId"], arm["armId"], part, status,
                                cause=(v["rejections"][0]["cause"] if v["rejections"] else None),
@@ -2598,6 +2871,15 @@ def cmd_run(a, *, resuming: bool = False) -> int:
     why = request_refusal(plan)
     if why:
         return refuse(why)
+    # The programs this plan can launch, and those its retained work came from, are the ones it recorded: checked by
+    # content before anything below writes (the ledger rebuild, the run store, the invocation, healing, revalidation,
+    # invalidation, any child or output).
+    why = identity_contract_refusal(plan)
+    if why:
+        return refuse(why)
+    why, measured = tool_preflight(run, plan)
+    if why:
+        return refuse(why)
     # The plan's premises are read before anything is written: `--rebuild-ledger` writes the ledger.
     bad = premise_refusal(plan)
     if bad:
@@ -2613,6 +2895,7 @@ def cmd_run(a, *, resuming: bool = False) -> int:
         ledger.open_invocation("resume" if resuming else "run", parent.run_id, None)
         ex = Executor(run, plan, ledger, resume=resuming)
         ex.parent_run_id = parent.run_id
+        ex.preflight = measured
         healed = ledger.heal_interrupted()
         if healed:
             print(f"   {healed} interrupted entr{'y' if healed == 1 else 'ies'} re-queued")
@@ -2630,7 +2913,15 @@ def cmd_run(a, *, resuming: bool = False) -> int:
         parent.feature("probes", len(plan["ordersweepProbes"]), "probes")
         parent.stage("checks", total=sum(len(c["arms"]) for c in planned), unit="check-arms")
 
-        execute(ex, parent)
+        try:
+            execute(ex, parent)
+        except ToolChanged as tc:
+            # Launches stop here. What this invocation accepted earlier stands; a child whose program changed while it
+            # ran was recorded rejected(tool-changed).
+            msg = f"{tc} Results accepted before this point stand; nothing further was launched."
+            print(f"REFUSED: {msg}", file=sys.stderr)
+            parent.refuse(msg, EXIT_REFUSED_INPUT)
+            return EXIT_REFUSED_INPUT
         if ex.deadline_stops:
             parent.note(f"deadline: {ex.deadline_stops} running child(ren) stopped at the budget's deadline")
             print(f"   deadline: {ex.deadline_stops} running child(ren) stopped when the plan's budget of "
@@ -3520,6 +3811,11 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
     cdir.mkdir(parents=True, exist_ok=True)
 
     allowed = allowed or {}
+    # The launch boundary: every program this child can run (the swept probes, conflictdiff, ordersweep.py and the rest of
+    # the controller) is the plan's, before anything of this sweep is written.
+    sweep_pids = sorted({program_id(c["adapter"]["exe"]) for c in sweep_checks if c["adapter"].get("exe")})
+    sweep_pids += ([COMPARATOR] if COMPARATOR in ex.programs else []) + [CONTROLLER]
+    ex.check_launch(sweep_pids, "the ordersweep child")
     account_sweep_kept_out(ex, sweep_checks, allowed)
     runnable = {a for a, v in allowed.items() if v == "ok"} if allowed else None
     if runnable is not None and "baseline" not in runnable:
@@ -3691,9 +3987,20 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
         return
     ex.children += 1
     ended_iso = utcnow()
+    ex.check_accept(sweep_pids, "the ordersweep child")
     summary = load_json(inv / "summary.json") or {}
     jobs = read_sweep_jobs(inv)
+    ex.checked = ["launch", "acceptance"]
+    try:
+        _split_sweep(ex, sweep_checks, parent, stale_arms, runnable, inv, jobs, summary, res, started_iso, ended_iso,
+                     started_mono, log)
+    finally:
+        ex.checked = ["preflight"]
+    ex.stop_if_changed()
 
+
+def _split_sweep(ex, sweep_checks, parent, stale_arms, runnable, inv, jobs, summary, res, started_iso, ended_iso,
+                 started_mono, log) -> None:
     for check in sweep_checks:
         probe = check["adapter"]["exe"]
         # the baseline arm first: every candidate part is credited only on the baseline arm emit this split accepted
@@ -4718,6 +5025,15 @@ def _cmd_import_results(a, runlog: Run) -> int:
     why = request_refusal(plan)
     if why:
         return refuse(why)
+    # An import is accepted by the controller's own code: that code is the plan's, checked before anything is written.
+    why = identity_contract_refusal(plan)
+    if why:
+        return refuse(why)
+    why, measured = tool_preflight(run, plan, only={CONTROLLER})
+    if why:
+        return refuse(why)
+    programs = {"controller": {"program": CONTROLLER, "kind": measured[CONTROLLER].get("kind"),
+                               "digest": measured[CONTROLLER].get("digest"), "checked": ["preflight"]}}
     ledger = Ledger(run, plan)
     if ledger.refusal():
         return refuse(ledger.refusal())
@@ -4744,7 +5060,8 @@ def _cmd_import_results(a, runlog: Run) -> int:
         # A live game driver's receipt: its own validator (evallive.py), which re-reads every launch.
         import evallive
         return evallive.import_live(sys.modules[__name__], a=a, runlog=runlog, run=run, src=src, plan=plan,
-                                    ledger=ledger, check=check, arm=arm, doc=doc, manifest_bytes=manifest_bytes)
+                                    ledger=ledger, check=check, arm=arm, doc=doc, manifest_bytes=manifest_bytes,
+                                    programs=programs)
     if (check.get("adapter") or {}).get("kind") != "mcp-only":
         return refuse(f"wrong-check: {cid} is {(check.get('adapter') or {}).get('kind')!r}, not mcp-only; "
                       "import-results cannot replace a runnable or unsupported detector")
@@ -4945,7 +5262,7 @@ def _cmd_import_results(a, runlog: Run) -> int:
                   "configuration": identity, "configurationSource": "emit",
                   "registrySha256": plan["registry"]["sha256"], "tool": tool,
                   "optionsSha256": sha256_text(canonical(plan["options"])),
-                  "scopeSha256": plan["scope"]["sha256"]},
+                  "scopeSha256": plan["scope"]["sha256"], "programs": programs},
         validation={"accepted": True, "rejections": [], "identityLimits": limits},
         result={"execution": "not-applicable" if nothing_to_judge else "completed",
                 "detector": None if nothing_to_judge else detector, "findings": findings,
@@ -5097,6 +5414,18 @@ def evidence_integrity(run: Path, plan: dict, ledger: Ledger, receipts: dict) ->
                             "nextAction": "resume: a terminal-ok entry whose receipt was not accepted "
                                           "cannot complete a check"})
             bad[k] = "receipt-mismatch"
+            continue
+        # The programs it was accepted under, per role, against the identities the plan froze: retained metadata only,
+        # so a consistent evaluation still finalizes after its tools change or disappear, and a mixed one never does.
+        idd = identity_defects(plan, r)
+        if idd:
+            role, pid, kind, want, got = idd[0]
+            defects.append({"key": k, "kind": kind, "path": rel_to(run, rpath), "role": role, "program": pid,
+                            "recorded": want, "found": got,
+                            "nextAction": f"this result's {role} is not {program_label(pid)} as the plan recorded it, "
+                                          f"so it cannot be credited under this plan; make a new plan in a new "
+                                          f"directory and run it"})
+            bad[k] = f"{kind}({role})"
             continue
         # Its own outputs AND the run-internal inputs it was measured against: a diff whose arm emit
         # is gone is not a diff of anything, whatever its own log still says.
@@ -5407,6 +5736,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
         "evaluation": {"complete": complete, "claim": claim, "missing": missing,
                        "unknownApplicability": unknown_app,
                        "integrity": integrity, "refused": evaluation_refused,
+                       "toolIdentity": identity_guarantee(plan),
                        "findings": findings_rows, "completedNullChecks": null_checks,
                        "completedCatalogues": catalogues,
                        "claimVocabulary": list(CLAIMS),
@@ -5480,7 +5810,9 @@ def status_md(plan: dict, disp: dict) -> str:
          f"- registry version {plan['registry']['registryVersion']} (`{plan['registry']['sha256'][:12]}`)",
          f"- arms: " + ", ".join(f"`{a['armId']}` ({a['kind']})" for a in plan["arms"]),
          f"- states selected: " + ", ".join(plan["states"]["selected"]),
-         f"- **evaluation.complete: {ev['complete']}**   claim: `{ev['claim']}`", "",
+         f"- **evaluation.complete: {ev['complete']}**   claim: `{ev['claim']}`",
+         f"- tool identity: {(ev.get('toolIdentity') or {}).get('guarantee', 'legacy')} — "
+         f"{(ev.get('toolIdentity') or {}).get('detail', identity_guarantee({})['detail'])}", "",
          "This is the review index, not the report. Every line below is derived from the ledger and the "
          "validated receipts; nothing here is a judgement this runner made about the mod.", ""]
     integrity = ev.get("integrity") or {"ok": True, "defects": []}
@@ -5667,6 +5999,9 @@ def bundle_refusal(run: Path, plan: dict, ledger: Ledger, receipts: dict, decisi
         if d["kind"] == "evidence-dependency":
             return (f"evidence-missing: {d['key']} rests on {d['recorded']}, whose evidence is not what "
                     f"was measured. Next action: {d['nextAction']}.")
+        if d["kind"] in ("tool-identity-missing", "tool-identity-mismatch"):
+            return (f"{d['kind']}: {d['key']} names {d.get('role')} {toolidentity.short(d['found'])}, the plan recorded "
+                    f"{toolidentity.short(d['recorded'])} for {d.get('program')}. Next action: {d['nextAction']}.")
         return (f"receipt-mismatch: {d['key']} — recorded {d['recorded']}, found {d['found']}. "
                 f"Next action: {d['nextAction']}.")
     for d in decisions:
@@ -6007,6 +6342,8 @@ def cmd_verify_bundle(a) -> int:
     mismatched: list[dict] = []
     ok = 0
     memo = HashMemo()
+    identity_count = 0
+    guarantee = None
 
     def defect(kind: str, path: str | None, detail: str) -> None:
         defects.append({"kind": kind, "path": path, "detail": detail})
@@ -6048,6 +6385,7 @@ def cmd_verify_bundle(a) -> int:
 
         # (3) the plan's own immutability and the planId every document agrees on
         plan = load_json(d / "plan.json") or {}
+        guarantee = identity_guarantee(plan)["guarantee"]
         recorded_plan = (d / "plan.sha256")
         if not (d / "plan.json").exists() or not recorded_plan.exists():
             defect("plan-missing", "plan.json", "the bundle carries no plan and its recorded hash")
@@ -6091,6 +6429,12 @@ def cmd_verify_bundle(a) -> int:
             if not (rec.get("validation") or {}).get("accepted"):
                 defect("receipt-mismatch", f"receipts/{k}.json",
                        "a terminal-ok ledger entry whose receipt was not accepted")
+            # the identity each role was accepted under, against the bundle's own plan: no tool is read
+            for role, pid, kind, want, got in identity_defects(plan, rec):
+                identity_count += 1
+                defect(kind, f"receipts/{k}.json",
+                       f"receipt {rec.get('receiptId')} names its {role} {pid} at {toolidentity.short(got)}; the plan "
+                       f"recorded {toolidentity.short(want)}")
             # Its outputs AND the run-internal emits it was compared against: a diff whose arm emit the
             # bundle omits cannot be re-read as a diff of anything.
             chain = [(o.get("path"), o.get("sha256"), True) for o in (rec.get("outputs") or [])]
@@ -6162,6 +6506,9 @@ def cmd_verify_bundle(a) -> int:
               "bundle": {"schemaSupported": schema_supported, "structurallyValid": structurally_valid,
                          "complete": complete, "verified": ok,
                          "missing": missing, "mismatched": mismatched, "defects": defects},
+              # verified: the bundle's plan froze program identities and every accepted local receipt was compared with
+              # them here; legacy: the plan predates that contract, so which build produced each result is not checked
+              "toolIdentity": {"guarantee": guarantee, "defects": identity_count},
               # READ from the bundle's disposition, never recomputed: verify-bundle says whether the
               # package is intact, not whether the evaluation was finished.
               "evaluation": {"complete": ev.get("complete"), "claim": ev.get("claim"),
