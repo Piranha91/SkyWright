@@ -58,7 +58,9 @@ if (args.Length >= 2 && args[0] == "--write-row-identity-fixture") { var w = Row
 if (args.Length >= 2 && args[0] == "--write-scope-fixture") { var w = ScopeFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.RacePlugin).Append(w.ModsDir))); return 0; }
 // state-contact-route-v2 (2026-10-24): a light whose base record has no model is no dependent (ContactIndex.IsBodiless), so
 // conflictdiff refuses a pair of emits across the change rather than credit the vanished rows.
-const string StateMeasurementPolicy = "state-contact-route-v2|state-overlap-unmeasured-v1";
+// state-contact-route-v3 (2026-10-25): nor is an activator or a door with no model (station AD), and the changed references
+// with no box are split by name (editor markers set aside; markers carrying a primitive unjudged apart).
+const string StateMeasurementPolicy = "state-contact-route-v3|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -449,9 +451,10 @@ try { cidx.RefreshAutomaticBudget(); }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 Console.WriteLine("   memory after state geometry preparation: " + cidx.AutomaticBudgetReport());
 Console.WriteLine($"evaluator: {ev.Boxed:N0} refs boxed (meshes measured {geo.MeshesMeasured:N0}, OBND fallback {geo.ObndFallback:N0}, no geometry {geo.NoGeometry:N0}; markers set aside {ev.BoxedMarkers:N0}, effect volumes kept out of the overlap role {ev.BoxedFxVolumes:N0})  ({sw.Elapsed.TotalSeconds:0.0}s)");
-// The placed lights whose base record has no model (ContactIndex.IsBodiless): no body, so never a dependent; counted, not judged.
-int bodilessLights = cidx.BodilessReferences();
-Console.WriteLine($"   {bodilessLights:N0} placed lights with no model: no body, not judged");
+// The placed lights, activators and doors whose base record has no model (ContactIndex.IsBodiless): no body, so never a
+// dependent or host; counted by type, not judged.
+var (bodilessLights, bodilessActivators, bodilessDoors) = cidx.BodilessReferences();
+Console.WriteLine($"   {bodilessLights:N0} placed lights, {bodilessActivators:N0} activators and {bodilessDoors:N0} doors with no model: no body, not judged");
 sw.Restart();
 var tally = new StateTally();
 var rows = new List<StateRow>();
@@ -471,7 +474,7 @@ foreach (var arm in arms)
 static void Merge(StateTally a, StateTally b)
 {
     a.States += b.States; a.Changes += b.Changes; a.Arrivals += b.Arrivals; a.Departures += b.Departures; a.SwitchesThemselves += b.SwitchesThemselves;
-    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NoBody += b.NoBody; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
+    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NoBody += b.NoBody; a.NoBodyActivator += b.NoBodyActivator; a.NoBodyDoor += b.NoBodyDoor; a.EditorMarker += b.EditorMarker; a.MarkerPrimitive += b.MarkerPrimitive; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
     a.HostsLeaving += b.HostsLeaving; a.HostsArriving += b.HostsArriving; a.DepsArriving += b.DepsArriving; a.DepsLeaving += b.DepsLeaving; a.ReSupported += b.ReSupported; a.FloatingOnArrival += b.FloatingOnArrival; a.TouchingOnArrival += b.TouchingOnArrival; a.ContactUnmeasured += b.ContactUnmeasured;
     a.RouteAsked += b.RouteAsked; a.RouteUnjudged += b.RouteUnjudged; a.RouteNoLine += b.RouteNoLine; a.RouteClipped += b.RouteClipped; a.RouteNone += b.RouteNone; a.ElapsedMs += b.ElapsedMs;
     a.OutsidePopulation += b.OutsidePopulation; a.MergedContactRows += b.MergedContactRows;
@@ -489,7 +492,7 @@ if (population is not null)
     Console.WriteLine($"   population: {tally.OutsidePopulation:N0} changed reference-states not processed; distinct changed references kept by rule "
                     + string.Join(", ", new[] { "contact", "route-interior", "route-ring", "large-ref" }.Select(k => $"{k} {keptByRule.GetValueOrDefault(k):N0}"))
                     + $", dropped {keysDropped:N0}");
-Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry, a marker, or a navcut without a primitive); {tally.NoBody:N0} changed lights with no model (no body); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
+Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry or a navcut without a primitive); {tally.MarkerPrimitive:N0} changed markers carrying a primitive (unjudged); {tally.EditorMarker:N0} changed editor markers; {tally.NoBody:N0} changed lights, {tally.NoBodyActivator:N0} activators and {tally.NoBodyDoor:N0} doors with no model (no body); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
 Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasured:N0} changed obstructing reference-state(s); strict placed render-surface migration is pending, so no box overlap is a finding or repair predicate");
 
 // ---- LEFT IN EMPTY SPACE per state (--empty-space): each state's arriving fixtures against every plugin that stepped on a
@@ -624,8 +627,8 @@ if (jsonPath is not null)
     {
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, plugins = paths.Count,
         measurementPolicy = StateMeasurementPolicy,
-        states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured, bodilessLights,
-        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.NoBody, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
+        states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured, bodilessLights, bodilessActivators, bodilessDoors,
+        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.NoBody, tally.NoBodyActivator, tally.NoBodyDoor, tally.EditorMarker, tally.MarkerPrimitive, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
         perState = perState.Select(p => new { state = p.Arm.Name, flips = p.Arm.Flips.Select(f => f.ToString()), p.Changes, p.Rows, p.Conditional, ms = p.Ms }),
         rows = rows.Select(r => new
         {
@@ -660,8 +663,10 @@ if (emitPath is not null)
     {
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
         new("states", arms.Count, null, null, $"{tally.Changes:N0} changed references"),
-        new("changed references with a box", tally.Changes - tally.NoBox - tally.NoBody, new Dictionary<string, long> { ["NoBox"] = tally.NoBox },
-            new Dictionary<string, long> { ["LightWithNoModel"] = tally.NoBody }),
+        new("changed references with a box", tally.Changes - tally.NoBox - tally.MarkerPrimitive - tally.NoBody - tally.NoBodyActivator - tally.NoBodyDoor - tally.EditorMarker,
+            new Dictionary<string, long> { ["NoBox"] = tally.NoBox, ["MarkerPrimitive"] = tally.MarkerPrimitive },
+            new Dictionary<string, long> { ["LightWithNoModel"] = tally.NoBody, ["ActivatorWithNoModel"] = tally.NoBodyActivator,
+                                           ["DoorWithNoModel"] = tally.NoBodyDoor, ["EditorMarker"] = tally.EditorMarker }),
         new("state-overlap changed obstructing references", 0,
             new Dictionary<string, long> { ["ActualSurfacePredicateUnavailable"] = tally.StateOverlapUnmeasured }, null,
             "STATE-OVERLAP is withheld: this evaluator does not yet carry strict placed render surfaces; diagnostic boxes provide no finding or repair credit"),

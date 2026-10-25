@@ -12,7 +12,8 @@ static class ContactCredit
     /// version and every option that changes the emit's rows or coverage. conflictdiff refuses two emits whose policies differ, and
     /// --reverse-of refuses a baseline measured under another. Bump the version when the sweep's contact rule changes.</summary>
     /// v2 (2026-10-24): a light whose base record has no model is no dependent (ContactIndex.IsBodiless).
-    public const string SweepPolicyVersion = "placement_contact_v2";
+    /// v3 (2026-10-25): nor is an activator or a door whose base record has no model, and such a door is no host (station AD).
+    public const string SweepPolicyVersion = "placement_contact_v3";
 
     public static string SweepPolicy(float eps, float reach, bool radius, bool bos, bool allRows, IEnumerable<string> forceEnable)
     {
@@ -36,7 +37,8 @@ static class ContactCredit
     /// <summary>The rule the --empty-space emit was measured under: its version, the contact and search options, and the anchor
     /// gate's stated parameters.</summary>
     /// v2 (2026-10-24): a light whose base record has no model is no fixture and no member of an assembly (ContactIndex.IsBodiless).
-    public const string EmptySpacePolicyVersion = "empty_space_v2";
+    /// v3 (2026-10-25): nor is an activator or a door whose base record has no model (station AD).
+    public const string EmptySpacePolicyVersion = "empty_space_v3";
 
     public static string EmptySpacePolicy(float eps, float reach, float minAnchorDim, int maxMembers, float anchorReport, bool radius, bool bos,
                                           IEnumerable<string> forceEnable)

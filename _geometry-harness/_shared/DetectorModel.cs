@@ -666,11 +666,13 @@ public static class DetectorModel
         };
     }
 
-    /// <summary>A base with no body in game, decided from the record's model field, never a name (2026-10-24): a light whose
-    /// record has no model is drawn as nothing and collides with nothing, so it rests on, hangs from and sinks into nothing.
-    /// Only lights: a modelless static or activator takes its body from its reference's collision primitive, and a modelless
-    /// door is not measured. <paramref name="hasModel"/> null (the record was not read) is never bodiless.</summary>
-    public static bool HasNoBody(string? baseType, bool? hasModel) => baseType == "Light" && hasModel == false;
+    /// <summary>A base with no body in game, decided from the record's model field, never a name. A light whose record has no
+    /// model is drawn as nothing and collides with nothing (2026-10-24). An activator or a door whose record has no model is the
+    /// same: in the lab an item and the player passed through every activator primitive layer that occurs on them, a sphere,
+    /// one with no primitive, and both modelless door bases, while a CollisionMarker box held both (station AD, 2026-10-25).
+    /// A modelless static is not this: a CollisionMarker's box blocks (station Q). <paramref name="hasModel"/> null (the record
+    /// was not read) is never bodiless.</summary>
+    public static bool HasNoBody(string? baseType, bool? hasModel) => baseType is "Light" or "Activator" or "Door" && hasModel == false;
 
     /// <summary>What a DEPENDENT is — the split the first live run showed the host class alone cannot make. Every
     /// physical-host LeftBehind row on the first order had an actor or a trigger as the dependent: an NPC linked

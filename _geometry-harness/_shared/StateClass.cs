@@ -64,6 +64,14 @@ public sealed class StateTally
     /// <summary>Changed references that are a light with no model (ContactIndex.IsBodiless): no body, so not judged as an object,
     /// and set aside by name — never counted with the references the check could not judge (NoBox).</summary>
     public int NoBody;
+    /// <summary>The same for an activator, and for a door, whose base record has no model (station AD, 2026-10-25).</summary>
+    public int NoBodyActivator, NoBodyDoor;
+    /// <summary>Changed references whose base carries the Is-Marker flag and whose reference carries no collision primitive: drawn
+    /// as nothing and colliding with nothing, set aside by name.</summary>
+    public int EditorMarker;
+    /// <summary>Changed references whose base carries the Is-Marker flag and whose reference carries a collision primitive (a
+    /// CollisionMarker's box, which may block: station Q): the check does not measure primitives, so unjudged, by name.</summary>
+    public int MarkerPrimitive;
 }
 
 /// <summary>Opt-in phase timers for <see cref="StateEvaluator.Evaluate"/> (stateprobe --phase-timers): ticks of
@@ -135,9 +143,11 @@ public sealed class StateEvaluator
                 _boxes.Add(s.Space, nbox, key);
                 continue;
             }
-            if (cidx.IsMarker(b)) { BoxedMarkers++; continue; }
-            // A light with no model has no body: nothing to box, and nothing the check failed to judge (Gate C review M3).
-            if (cidx.IsBodiless(b)) { _bodiless.Add(key); continue; }
+            // A marker draws nothing; one whose reference carries a primitive may still block by it (station Q), so the two are
+            // counted apart: the first set aside, the second unjudged.
+            if (cidx.IsMarker(b)) { BoxedMarkers++; (Index.RefPrimitive.ContainsKey(key) ? _markerPrimitive : _marker).Add(key); continue; }
+            // A light, activator or door with no model has no body: nothing to box, and nothing the check failed to judge.
+            if (cidx.IsBodiless(b)) { _bodiless[key] = cidx.BodilessType(b); continue; }
             string type = Index.BaseInfo.TryGetValue(b, out var bi) ? bi.Type : "?";
             // Preserve the state class's declared effects exclusion while counting every other obstructing
             // reference as unmeasured, including missing geometry and formerly size-filtered surfaces.
@@ -163,7 +173,8 @@ public sealed class StateEvaluator
     }
 
     public bool HasBox(FormKey k) => _facts.ContainsKey(k);
-    readonly HashSet<FormKey> _bodiless = new();
+    readonly Dictionary<FormKey, string> _bodiless = new();
+    readonly HashSet<FormKey> _marker = new(), _markerPrimitive = new();
 
     /// <summary>Whether any boxed reference within <paramref name="reach"/> of <paramref name="k"/>'s winning box (its winning space)
     /// satisfies <paramref name="pred"/>: the neighbourhood the contact half reads.</summary>
@@ -212,7 +223,14 @@ public sealed class StateEvaluator
             if (after) tally.Arrivals++; else tally.Departures++;
             if (member is null) tally.SwitchesThemselves++;
             if (!_allowLegacyBoundsOverlapForProof && _stateOverlapScope.Contains(key)) tally.StateOverlapUnmeasured++;
-            if (!_facts.TryGetValue(key, out var f)) { if (_bodiless.Contains(key)) tally.NoBody++; else tally.NoBox++; continue; }
+            if (!_facts.TryGetValue(key, out var f))
+            {
+                if (_bodiless.TryGetValue(key, out var bt)) { if (bt == "Light") tally.NoBody++; else if (bt == "Activator") tally.NoBodyActivator++; else tally.NoBodyDoor++; }
+                else if (_marker.Contains(key)) tally.EditorMarker++;
+                else if (_markerPrimitive.Contains(key)) tally.MarkerPrimitive++;
+                else tally.NoBox++;
+                continue;
+            }
             var win = Index.History.Winning(key)!.Value;
             int placer = PlacerOf(key), attacher = member?.Attacher ?? sx.AttacherOf(key), resp = ResponsibleOf(key);
             bool interior = win.Interior;
