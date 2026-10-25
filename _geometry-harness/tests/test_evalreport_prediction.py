@@ -10260,10 +10260,14 @@ def main():
         sec_ = section_text(md, "What the checks could not judge")
         lead_ = next((ln for ln in sec_.splitlines() if "Leads for an in-game check" in ln), "")
         pred_ = section_text(md, next(h for h in md_heading_order(md) if h.startswith("What adding")))
+        leads_ = [r_.get("FormKey") for g_ in (reader(plan).get("coverage") or {}).get("routeCutLeads") or []
+                  for r_ in g_.get("rows") or []]
         ok = (bool(lead_) and f"000A04:{MOD_A}" not in lead_ and f"000A05:{MOD_A}" not in lead_
+              and sorted(leads_) == [f"000A0{i}:{MOD_A}" for i in (1, 2, 3)] and "rated 3 objects" in lead_
+              and f"000A04:{MOD_A}" not in index and f"000A05:{MOD_A}" not in index
               and not any(f"000A0{i}:{MOD_A}" in pred_ for i in range(1, 6))
               and "at least 160 u" in lead_)
-        return ok, f"lead {lead_[:600]!r}"
+        return ok, f"leads {leads_}; lead {lead_[:600]!r}"
 
     def c1446_route_cut_leads_in_evidence_index():
         plan, md, html, index = route_cut_bundle(None, ROUTE_CUT_ROWS)
