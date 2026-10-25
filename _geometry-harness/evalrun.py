@@ -2500,7 +2500,8 @@ def write_receipt(run: Path, *, plan: dict, check: dict, arm: dict, part: str | 
                   adapter: dict, argv: list[str] | None, run_id: str | None, parent_run_id: str | None,
                   started: str | None, ended: str | None, exit_code: int | None,
                   outputs: list[Path], log: Path | None, consumed: dict,
-                  validation: dict, result: dict, extra: dict | None = None) -> dict:
+                  validation: dict, result: dict, extra: dict | None = None, keep_same: bool = False) -> dict:
+    """keep_same: an accounting receipt equal to the one already at its path but for INVOCATION_FIELDS is not rewritten."""
     key = Ledger.key(check["checkId"], arm["armId"], part)
     out_rows = []
     for p in outputs:
@@ -2527,8 +2528,27 @@ def write_receipt(run: Path, *, plan: dict, check: dict, arm: dict, part: str | 
         "result": result,
     }
     receipt.update(extra or {})
-    write_json(run / "receipts" / f"{key}.json", receipt)
+    path = run / "receipts" / f"{key}.json"
+    if keep_same:
+        prev = load_json(path) if path.exists() else None
+        if same_account(prev, receipt):
+            return prev
+    write_json(path, receipt)
     return receipt
+
+
+#: The fields that say which invocation wrote an accounting receipt, not what it states.
+INVOCATION_FIELDS = ("receiptId", "endedUtc", "parentRunId")
+
+
+def same_account(prev, new: dict) -> bool:
+    """The receipt on disk states exactly what `new` states, for this plan and (check, arm, part)."""
+    if not isinstance(prev, dict):
+        return False
+    if any(prev.get(k) != new.get(k) for k in ("planId", "checkId", "armId", "part")):
+        return False
+    strip = lambda d: {k: v for k, v in d.items() if k not in INVOCATION_FIELDS}  # noqa: E731
+    return canonical(strip(prev)) == canonical(strip(new))
 
 
 # --------------------------------------------------------------------------- the executor --
@@ -2741,7 +2761,7 @@ class Executor:
                       argv=None, run_id=run_id, parent_run_id=self.parent_run_id,
                       started=None, ended=utcnow(), exit_code=exit_code, outputs=[], log=log,
                       consumed=self.consumed_for(arm, adapter), validation=validation, result=result,
-                      extra=extra)
+                      extra=extra, keep_same=True)
         stopped = status == "stopped(deadline)"
         uncontained = status == "blocked(uncontained)"
         self.ledger.transition(check["checkId"], arm["armId"], part, status, cause=cause,

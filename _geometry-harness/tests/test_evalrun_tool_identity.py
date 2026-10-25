@@ -44,6 +44,14 @@ append to a sentinel file instead.
     1488  ordersweep's cache key for an override follows the script's bytes, not only the command text.
     1489  accepted receipts bind the measured identity per role, equal to the plan's.
     1490  import-results with a changed controller script refuses; RUN bytes unchanged.
+
+Cases 1500-1503 are the stability of accounting receipts (rows that ran nothing) across invocations:
+
+    1500  run, run, resume on an unchanged plan keep every receipt byte-identical, accounting receipts included.
+    1501  control: an accounting row whose state changes between invocations (candidate changed, then gone, then
+          restored) gets a new receipt that says so each time.
+    1502  control: an mcp-only row later imported keeps the import's receipt on the next run and resume.
+    1503  a candidate changed after planning and left changed: run, resume keep both blocked receipts byte-identical.
 """
 from __future__ import annotations
 
@@ -152,10 +160,9 @@ def touch(path: Path, mode: str = "change") -> None:
         path.write_bytes(b"an added file")
 
 
-def measured_file(rel: str) -> bool:
-    """A measured receipt or its evidence (accounting receipts of rows that never ran are rewritten by every invocation,
-    which is existing behaviour outside this suite's subject)."""
-    return rel.startswith((f"receipts/{MAO}__", f"receipts/{NAV}__", "outputs/", "sweep/"))
+def evidence_file(rel: str) -> bool:
+    """A receipt, measured or accounting, or a measured output."""
+    return rel.startswith(("receipts/", "outputs/", "sweep/"))
 
 
 def reseal(run: Path) -> None:
@@ -704,10 +711,11 @@ def case_1482(tmp):
     rc, out, err = env.inproc(["bundle", "--run", env.run, "--out", env.root / "bundle", "--no-names"])
     check(rc == 0, f"1482 fixture: bundle exits 0 (got {rc!r})")
     r = env.copy("1482-run-copy")
-    before = {k: v for k, v in snap(r).items() if measured_file(k)}
+    before = {k: v for k, v in snap(r).items() if evidence_file(k)}
+    next_second(env._module())
     rc, out, err = env.inproc(["run", "--run", r])
     check(rc == 0 and not env.jobs, f"1482: the copied RUN reuses with no child (exit {rc!r}, jobs {env.jobs[:4]})")
-    after = {k: v for k, v in snap(r).items() if measured_file(k)}
+    after = {k: v for k, v in snap(r).items() if evidence_file(k)}
     check(after == before, f"1482: the copy's receipts and evidence unchanged ({snap_diff(before, after)})")
     rc, out, err = env.inproc(["verify-bundle", env.root / "bundle"])
     v1 = load(env.root / "bundle" / "verify.json") or {}
@@ -873,14 +881,15 @@ def case_1485(tmp):
 
 def case_1486(tmp):
     env = completed_run(tmp, "1486")
-    ids = {k: (load(env.run / "receipts" / f"{k}.json") or {}).get("receiptId") for k in entries(env.run) if k.startswith((MAO, NAV))}
-    before = {k: v for k, v in snap(env.run).items() if measured_file(k)}
+    ids = {k: (load(env.run / "receipts" / f"{k}.json") or {}).get("receiptId") for k in entries(env.run)}
+    before = {k: v for k, v in snap(env.run).items() if evidence_file(k)}
     for verb in ("run", "resume"):
+        next_second(env._module())
         rc, out, err = env.inproc([verb, "--run", env.run])
         check(rc == 0 and not env.jobs, f"1486 {verb}: exit 0 and no child (exit {rc!r}, jobs {env.jobs[:4]})")
-    after = {k: v for k, v in snap(env.run).items() if measured_file(k)}
+    after = {k: v for k, v in snap(env.run).items() if evidence_file(k)}
     check(after == before, f"1486: receipts and evidence bytes unchanged ({snap_diff(before, after)})")
-    ids2 = {k: (load(env.run / "receipts" / f"{k}.json") or {}).get("receiptId") for k in entries(env.run) if k.startswith((MAO, NAV))}
+    ids2 = {k: (load(env.run / "receipts" / f"{k}.json") or {}).get("receiptId") for k in entries(env.run)}
     check(ids == ids2, "1486: every receipt id is stable")
     check(all(e.get("status") in ("reused", "completed") for e in entries(env.run).values()
               if e.get("checkId") in (MAO, NAV)), "1486: the measured entries read reused")
@@ -1011,7 +1020,149 @@ def case_1490(tmp):
         f.write_bytes(orig)
 
 
-CASES = {f"{n}": globals()[f"case_{n}"] for n in range(1470, 1491)}
+def receipt_docs(run: Path) -> dict:
+    return {p.stem: load(p) or {} for p in sorted((Path(run) / "receipts").glob("*.json"))}
+
+
+def changed_fields(a: dict, b: dict, pre: str = "") -> list[str]:
+    out = []
+    for k in sorted(set(a) | set(b)):
+        if a.get(k) == b.get(k):
+            continue
+        if isinstance(a.get(k), dict) and isinstance(b.get(k), dict):
+            out += changed_fields(a[k], b[k], pre + k + ".")
+        else:
+            out.append(pre + k)
+    return out
+
+
+def next_second(mod) -> None:
+    """Wait until the controller's own clock (whole seconds) reads a later value, so a time-stamped field can differ."""
+    t = mod.utcnow()
+    while mod.utcnow() == t:
+        time.sleep(0.05)
+
+
+ACCOUNTING_KINDS = ("manual", "unsupported", "skipped-user", "not-applicable", "mcp-only")
+
+
+def case_1500(tmp):
+    env = completed_run(tmp, "1500")
+    mod = env._module()
+    docs = receipt_docs(env.run)
+    acct = {k: d for k, d in docs.items() if not (d.get("validation") or {}).get("accepted")}
+    kinds = {s: sum(1 for d in acct.values() if (d.get("result") or {}).get("execution") == s) for s in ACCOUNTING_KINDS}
+    check(all(kinds.values()), f"1500 fixture: accounting receipts of every kind are present ({kinds})")
+    before = {k: v for k, v in snap(env.run).items() if k.startswith("receipts/")}
+    print(f"  receipts: {len(before)} ({len(acct)} accounting)")
+    for verb in ("run", "resume"):
+        next_second(mod)
+        rc, out, err = env.inproc([verb, "--run", env.run])
+        check(rc == 0 and not env.jobs, f"1500 {verb}: exit 0 and no child (exit {rc!r}, jobs {env.jobs[:4]})")
+        after = {k: v for k, v in snap(env.run).items() if k.startswith("receipts/")}
+        now = receipt_docs(env.run)
+        moved = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+        why = sorted({f for k in moved for f in changed_fields(docs.get(Path(k).stem) or {}, now.get(Path(k).stem) or {})})
+        check(not moved, f"1500 {verb}: every receipt byte-identical, accounting included ({len(moved)} changed: "
+                         f"{', '.join(Path(k).stem for k in moved[:3])}{' ...' if len(moved) > 3 else ''}; fields {why})")
+        check({k: d.get("receiptId") for k, d in now.items()} == {k: d.get("receiptId") for k, d in docs.items()},
+              f"1500 {verb}: every receipt id is stable")
+        check(all(status(env.run, d["checkId"], d["armId"], d.get("part")) == (d.get("result") or {}).get("execution")
+                  for d in acct.values()), f"1500 {verb}: each accounting entry still reads its receipt's status")
+
+
+def case_1501(tmp):
+    env = sweep_env(tmp, "1501")
+    plan = env.plan() or {}
+    mod = env._module()
+    arm = next(a for a in plan["arms"] if a["armId"] == CAND)
+    src = Path(arm["candidatePath"])
+    original = src.read_bytes()
+    keys = (f"{MAO}__{CAND}", f"{NAV}__{CAND}")
+
+    def rid(k):
+        return (load(env.run / "receipts" / f"{k}.json") or {}).get("receiptId")
+
+    def execution(k):
+        return ((load(env.run / "receipts" / f"{k}.json") or {}).get("result") or {}).get("execution")
+    try:
+        src.write_bytes(original + b"\n ")              # the live candidate changes after planning
+        rc, out, err = env.inproc(["run", "--run", env.run])
+        check(rc == 0, f"1501 changed: run exits 0 (got {rc!r}; {err[-300:]!r})")
+        changed = {k: rid(k) for k in keys}
+        check(all(execution(k) == "blocked(candidate-changed)" for k in keys),
+              f"1501 changed: both rows read blocked(candidate-changed) ({[execution(k) for k in keys]})")
+        src.unlink()                                     # then it is gone
+        next_second(mod)
+        rc, out, err = env.inproc(["run", "--run", env.run])
+        check(rc == 0, f"1501 gone: run exits 0 (got {rc!r}; {err[-300:]!r})")
+        nav = f"{NAV}__{CAND}"
+        check(execution(nav) == "blocked(candidate-missing)" and status(env.run, NAV, CAND) == execution(nav),
+              f"1501 gone: the swept row's receipt and entry read blocked(candidate-missing) ({execution(nav)})")
+        check(rid(nav) != changed[nav], f"1501 gone: the swept row's receipt is a new one ({changed[nav]} -> {rid(nav)})")
+        mao = f"{MAO}__{CAND}"
+        note = str(((load(env.run / "receipts" / f"{mao}.json") or {}).get("result") or {}).get("note"))
+        check(rid(mao) != changed[mao] and "gone" in note,
+              f"1501 gone: {MAO}'s receipt is a new one naming the missing file ({changed[mao]} -> {rid(mao)}; {note[:120]!r})")
+    finally:
+        src.write_bytes(original)                        # the fixture is shared by later cases
+    rc, out, err = env.inproc(["run", "--run", env.run])
+    check(rc == 0, f"1501 restored: run exits 0 (got {rc!r}; {err[-300:]!r})")
+    done = load(env.run / "receipts" / f"{MAO}__{CAND}.json") or {}
+    check((done.get("result") or {}).get("execution") == "completed" and (done.get("validation") or {}).get("accepted"),
+          f"1501 restored: {MAO} on {CAND} is measured and accepted ({(done.get('result') or {}).get('execution')})")
+
+
+def case_1502(tmp):
+    env = completed_run(tmp, "1502")
+    plan = load(env.run / "plan.json") or {}
+    arm = next(a for a in plan["arms"] if a["armId"] == "baseline")
+    k = f"{DANGLING}__baseline"
+    before = load(env.run / "receipts" / f"{k}.json") or {}
+    check((before.get("result") or {}).get("execution") == "mcp-only", f"1502 fixture: {DANGLING} reads mcp-only")
+    manifest = IMP.make_import(env.root / "import", plan, DANGLING, arm, 5, {})
+    rc, out, err = env.inproc(["import-results", "--run", env.run, "--file", manifest])
+    check(rc == 0, f"1502: the import is accepted (exit {rc!r}; {err[-300:]!r})")
+    imported = (env.run / "receipts" / f"{k}.json").read_bytes()
+    doc = load(env.run / "receipts" / f"{k}.json") or {}
+    check(isinstance(doc.get("imported"), dict) and (doc.get("validation") or {}).get("accepted")
+          and doc.get("receiptId") != before.get("receiptId"),
+          f"1502: the row's receipt is the import's, under a new id ({before.get('receiptId')} -> {doc.get('receiptId')})")
+    for verb in ("run", "resume"):
+        next_second(env._module())
+        rc, out, err = env.inproc([verb, "--run", env.run])
+        check(rc == 0, f"1502 {verb}: exit 0 (got {rc!r})")
+        check((env.run / "receipts" / f"{k}.json").read_bytes() == imported,
+              f"1502 {verb}: the import's receipt is kept byte-identical")
+        check(status(env.run, DANGLING, "baseline") in ("reused", "completed"),
+              f"1502 {verb}: the entry reads reused ({status(env.run, DANGLING, 'baseline')})")
+
+
+def case_1503(tmp):
+    env = sweep_env(tmp, "1503")
+    plan = env.plan() or {}
+    mod = env._module()
+    arm = next(a for a in plan["arms"] if a["armId"] == CAND)
+    src = Path(arm["candidatePath"])
+    original = src.read_bytes()
+    keys = (f"{MAO}__{CAND}", f"{NAV}__{CAND}")
+    try:
+        src.write_bytes(original + b"\n ")              # changed after planning, and left changed
+        rc, out, err = env.inproc(["run", "--run", env.run])
+        check(rc == 0, f"1503 fixture: run exits 0 (got {rc!r})")
+        first = {k: (env.run / "receipts" / f"{k}.json").read_bytes() for k in keys}
+        for verb in ("run", "resume"):
+            next_second(mod)
+            rc, out, err = env.inproc([verb, "--run", env.run])
+            check(rc == 0 and not env.jobs, f"1503 {verb}: exit 0 and no child (exit {rc!r}, jobs {env.jobs[:4]})")
+            same = [k for k in keys if (env.run / "receipts" / f"{k}.json").read_bytes() == first[k]]
+            check(len(same) == len(keys), f"1503 {verb}: the blocked(candidate-changed) receipts are byte-identical "
+                                          f"({len(same)} of {len(keys)} unchanged; changed: {sorted(set(keys) - set(same))})")
+    finally:
+        src.write_bytes(original)                        # the fixture is shared by later cases
+
+
+CASES = {f"{n}": globals()[f"case_{n}"] for n in list(range(1470, 1491)) + [1500, 1501, 1502, 1503]}
 
 
 def main() -> int:
