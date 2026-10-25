@@ -40,6 +40,8 @@ public static class ModellessLightFixture
         SwB = KL(0x904), XB = KL(0x905), SwL = KL(0x906), XL = KL(0x907), SwM = KL(0x908), XM = KL(0x909);
     public const string WallMesh = "ml\\wall.nif", LanternMesh = "ml\\lantern.nif", MissingMesh = "ml\\missing.nif";
     public static readonly string[] Order = { "MlRoom.esm", "MlLights.esp", "MlMover.esp" };
+    public static readonly ModKey MoreKey = new("MlMoreLights", ModType.Plugin);
+    static FormKey KM(uint id) => new(MoreKey, id);
 
     public sealed record Written(IReadOnlyList<string> Order, string ModsDir);
 
@@ -113,6 +115,16 @@ public static class ModellessLightFixture
         Room(mover, CL, "MlRoomCL", Ref(WL, Wall, 1000, 0, 0));
         Room(mover, CM, "MlRoomCM", Ref(WM, Wall, 1000, 0, 0));
         Save(mover, roomOv);
+
+        // MlMoreLights.esp [MlRoom, MlLights] (2026-10-24, Gate C review M3): three more bare lights that arrive with MlSwL, inside
+        // its slab. Loaded only by the test's candidate order, so a setup that adds lights with no model can be compared with
+        // one that does not: what the state check could not judge must not move.
+        var lightsPath = Path.Combine(d, LightsKey.FileName.String);
+        using var lightsOv = SkyrimMod.CreateFromBinaryOverlay(lightsPath, Rel);
+        var more = new SkyrimMod(MoreKey, Rel);
+        Room(more, SL, "MlRoomSL", Ref(KM(0x901), Bare, 0, 0, 30, null, SwL), Ref(KM(0x902), Bare, 0, 0, -30, null, SwL),
+             Ref(KM(0x903), Bare, 30, 0, 0, null, SwL));
+        Save(more, roomOv, lightsOv);
 
         var mods = Path.Combine(d, "mods");
         var meshes = Path.Combine(mods, "MlRoom", "meshes");

@@ -24,6 +24,9 @@ states) and contactprobe (the default pass, and --empty-space) on it:
     1438b (Gate A review M2) conflictdiff refuses, both ways round and with a sentence, each probe's emit against the same
           emit as a build before this change records it (its rule's earlier policy version): the light rows that vanish
           with the change must never be credited as repaired, nor reappear as created.
+    1438c (Gate C review M3) a setup that adds three lights with no model (MlMoreLights.esp, arriving with MlSwL) leaves
+          stateprobe's "changed references with a box" exactly as unjudged as the setup without them: the lights are set
+          aside by name, never counted as references without a box; conflictdiff does not refuse the pair for it.
 
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_ML_HARNESS names another
 harness folder.
@@ -105,12 +108,23 @@ class Lab:
         mods = [Path(n).stem for n in reversed(ORDER)]
         (prof / "plugins.txt").write_text("".join("*" + n + "\n" for n in ORDER), encoding="utf-8")
         (prof / "loadorder.txt").write_text("".join(n + "\n" for n in ORDER), encoding="utf-8")
-        (prof / "modlist.txt").write_text("".join("+" + m + "\n" for m in mods), encoding="utf-8")
+        (prof / "modlist.txt").write_text("".join("+" + m + "\n" for m in mods + ["MlMoreLights"]), encoding="utf-8")
+        # (1438c) the plugin that adds three more lights with no model, in its own mod folder; only the candidate below loads it
+        (self.inst / "mods" / "MlMoreLights").mkdir(parents=True)
+        shutil.copyfile(ml / "MlMoreLights.esp", self.inst / "mods" / "MlMoreLights" / "MlMoreLights.esp")
         self.cand = tmp / "candidate-ml.json"
         self.cand.write_text(json.dumps({"SchemaVersion": 1, "Name": "ml", "BaseProfile": "P", "Plugins": ORDER, "Mods": mods,
                                          "Changes": []}), encoding="utf-8")
         common = ["--order", self.cand, "--instance", self.inst, "--game", self.game, "--profile", "P"]
+        self.cand_more = tmp / "candidate-ml-more.json"
+        self.cand_more.write_text(json.dumps({"SchemaVersion": 1, "Name": "ml-more", "BaseProfile": "P",
+                                              "Plugins": ORDER + ["MlMoreLights.esp"], "Mods": ["MlMoreLights"] + mods,
+                                              "Changes": ["added MlMoreLights.esp"]}), encoding="utf-8")
         self.logs = {}
+        tail = ["--instance", self.inst, "--game", self.game, "--profile", "P", "--route", "off", "--state", "MlSwL"]
+        self.sl_base, self.sl_more = tmp / "sl-base.json", tmp / "sl-more.json"
+        self.logs["sl-base"] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", self.sl_base, *tail])
+        self.logs["sl-more"] = run([exe(PROBES, "stateprobe"), "--order", self.cand_more, "--emit", self.sl_more, *tail])
 
         self.state_emit, self.state_json = tmp / "state-emit.json", tmp / "state-rows.json"
         argv = [exe(PROBES, "stateprobe"), *common, "--route", "off", "--emit", self.state_emit, "--json", self.state_json]
@@ -227,6 +241,24 @@ def main() -> int:
             assert len(rows) == 1 and rows[0]["Kind"] == "EMPTY-SPACE", \
                 f"want one EMPTY-SPACE row for the light LM whose model file is missing; got {show(rows)}"
 
+        def c1438c():
+            # Rejects: lights with no model counted as references the check could not judge (NoBox), so a setup that adds
+            # them reads as less judged than one without, and a comparison is refused for a correct decision.
+            line = "changed references with a box"
+
+            def cov(path):
+                assert path.exists(), f"stateprobe wrote no emit at {path}: {L.logs}"
+                doc = json.loads(path.read_text(encoding="utf-8"))
+                return next(c for c in doc["Coverage"] if c["Population"] == line)
+            a, b = cov(L.sl_base), cov(L.sl_more)
+            ua, ub = sum((a.get("Unjudgeable") or {}).values()), sum((b.get("Unjudgeable") or {}).values())
+            share_a, share_b = ua / max(1, a["Judged"] + ua), ub / max(1, b["Judged"] + ub)
+            assert share_a == share_b and ua == ub, f"unjudged moved: without the lights {a}; with them {b}"
+            assert 3 in (b.get("SetAside") or {}).values(), f"the three added lights are not set aside by name: {b}"
+            r = run([exe(PROBES, "conflictdiff"), L.sl_base, L.sl_more])
+            assert line not in "".join(x for x in r.stdout.splitlines(True) if "rose by more than" in x), \
+                f"conflictdiff refused the pair on that line: {r.stdout[-800:]}"
+
         def c1438b():
             # Rejects: a comparison across the change that proceeds, crediting the vanished light rows as repaired (old -> new)
             # or created (new -> old).
@@ -253,7 +285,8 @@ def main() -> int:
                          ("1436 control: a light whose model could not be read keeps its stateprobe row", c1436),
                          ("1437 control: a light whose model could not be read keeps its CONTACT row", c1437),
                          ("1438 control: a light whose model could not be read keeps its EMPTY-SPACE row", c1438),
-                         ("1438b conflictdiff refuses a pre-change emit against a current one, both ways", c1438b)]:
+                         ("1438b conflictdiff refuses a pre-change emit against a current one, both ways", c1438b),
+                         ("1438c adding lights with no model does not move what the state check could not judge", c1438c)]:
             check(name, fn)
         if os.environ.get("HC_ML_DUMP"):
             d = Path(os.environ["HC_ML_DUMP"])
