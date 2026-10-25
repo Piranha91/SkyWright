@@ -810,7 +810,7 @@ public sealed class ContactIndex
     {
         int n = 0;
         foreach (var (key, snaps) in Index.History.Refs)
-            if (snaps.Count > 0 && !snaps[^1].Deleted && WinnerBase(key) is var b && !b.IsNull && IsBodiless(b)) n++;
+            if (snaps.Count > 0 && !snaps[^1].Deleted && !Index.IsDeletedNow(key) && WinnerBase(key) is var b && !b.IsNull && IsBodiless(b)) n++;
         return n;
     }
 
