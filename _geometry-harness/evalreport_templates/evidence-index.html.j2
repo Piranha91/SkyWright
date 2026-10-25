@@ -27,7 +27,13 @@
 {% endfor %}
 </ul>
 
-<h2 id="missing-results">Missing results</h2>
+{% set rcl = (p.reader.get("coverage") or {}).get("routeCutLeads") or [] %}{% if rcl %}<h2 id="route-cut-leads">{{ p.reader.routeCutLeadsWords.indexHeading }}</h2>
+<p>{{ p.reader.routeCutLeadsWords.indexIntro }}</p>
+{% for g in rcl %}<p>{{ g.check }}, for {{ g.setup }} (<code>{{ g.path }}</code>, <code>{{ (g.sha256 or "")[:12] }}</code>):</p>
+<table><tr><th>Object</th><th>Cell</th><th>Model</th><th>Verdict</th><th>Passage (left / right)</th><th>Share</th><th>Why</th></tr>
+{% for r in g.rows %}<tr><td><code>{{ r.FormKey }}</code> {{ r.objectWords }}</td><td>{{ r.Cell }}</td><td><code>{{ r.Mesh or "-" }}</code></td><td>{{ r.Verdict }}</td><td>{{ r.Passage if r.Passage is not none else "-" }} ({{ r.PassageLeft if r.PassageLeft is not none else "-" }} / {{ r.PassageRight if r.PassageRight is not none else "-" }})</td><td>{{ r.PassageShare or "-" }}</td><td>{{ r.Why or "" }}</td></tr>
+{% endfor %}</table>
+{% endfor %}{% endif %}<h2 id="missing-results">Missing results</h2>
 
 <ul>
 {% for f in p.findings if f.kind == "missing" %}<li><a href="#{{ f.id }}">{{ f.id }}</a>: {{ f.plain }}</li>

@@ -4958,6 +4958,70 @@ def build_prediction(ctx: dict) -> dict:
             subjects.append(title_of(check_id) + where)
         lines.append({"reason": bind(reasons["missing"], {"reason": reason}), "count": len(by_check),
                       "unit": "check" if len(by_check) == 1 else "checks", "subject": "; ".join(subjects)})
+    # (2026-10-24, task report-route-cut-leads) A check that ran and reached no verdict may still have rated objects as
+    # blocking or likely to block a route (blockprobe --rows). Those are LEADS for an in-game check, never clashes: listed
+    # here per setup, each object with its own plugin, its cell and the passage the probe states, and in the evidence
+    # index. Nothing else in the report reads them. A check with a verdict, or a bundle with no rows file, prints nothing.
+    lw = words.get("routeCutLeads") or {}
+    route_leads = []
+    arm_order = list(dict.fromkeys(a for a in [p_arm, patched_arm, w_arm, *s_arms.values()] if a))
+    for m in ctx["missing"] if lw else []:
+        cid_, aid_ = str(m.get("checkId")), m.get("armId")
+        if (cid_ not in (lw.get("checks") or []) or aid_ not in arm_order or str(m.get("status")) not in ("completed", "completed(undetermined)")
+                or m.get("part") not in (None, "arm")):
+            continue
+        b_ = ctx.get("mainBundle")
+        rc_ = b_.receipt_by_key.get((cid_, aid_, m.get("part"))) if b_ is not None else None
+        if not rc_ or ((rc_.get("result") or {}).get("detector")) is not None:
+            continue
+        ev_ = next((e for e in b_.evidence if e.get("recordedBy") == rc_["receiptId"]
+                    and str(e.get("path", "")).endswith(lw.get("rowsSuffix") or ".route-cut-rows.json")), None)
+        doc_ = b_.emit(ev_["path"]) if ev_ else None
+        if not isinstance(doc_, dict):
+            continue
+        rows_ = [r for r in doc_.get("Rows") or [] if isinstance(r, dict) and not r.get("Navcut")
+                 and r.get("Verdict") in (lw.get("verdicts") or [])]
+        if not rows_:
+            continue
+        label_ = labels.get(aid_)
+        setup_ = ("the " + label_[:1].lower() + label_[1:]) if label_ else "a tested setup"
+        targets_ = [str(t) for t in doc_.get("Targets") or []]
+
+        def lead_words(r):
+            fk_ = str(r.get("FormKey"))
+            owner_ = fk_.split(":", 1)[1] if ":" in fk_ else ""
+            n_ = object_name(fk_)
+            obj_ = f"{fk_} ({n_})" if n_ else (f"{fk_} ({r['Mesh']})" if r.get("Mesh") else fk_)
+            by_ = [str(x) for x in r.get("By") or []]
+            if owner_ and owner_.lower() in {x.lower() for x in by_}:
+                whose_ = bind(lw["own"], {"plugin": owner_})
+            elif by_:
+                whose_ = bind(lw["other"], {"owner": owner_, "by": " and ".join(by_)})
+            else:
+                whose_ = bind(lw["unplaced"], {"owner": owner_})
+            p_, cap_ = r.get("Passage"), r.get("PassageCap")
+            if r.get("Verdict") == "Blocked":
+                pass_ = bind(lw["blocked"], {"passage": fmt_n(p_)})
+            else:
+                pass_ = bind(lw["atCap"] if (p_ is not None and cap_ is not None and p_ >= cap_) else lw["likely"],
+                             {"passage": fmt_n(p_), "share": str(r.get("PassageShare") or "")})
+            return {"object": obj_, "text": bind(lw["item"], {"object": obj_, "whose": whose_, "cell": str(r.get("Cell")),
+                                                               "passage": pass_})}
+        shown_ = [lead_words(r) for r in rows_]
+        cap_n = int(lw.get("pageMax") or 3)
+        objects_ = "; ".join(x["text"] for x in shown_[:cap_n])
+        if len(shown_) > cap_n:
+            objects_ += bind(lw["more"], {"count": fmt_n(len(shown_) - cap_n)})
+        verdicts_ = {r.get("Verdict") for r in rows_}
+        rating_ = lw["rating"]["both" if len(verdicts_) > 1 else ("blocked" if verdicts_ == {"Blocked"} else "likely")]
+        one_ = len(rows_) == 1
+        line_ = bind(lw["lead"], {"check": title_of(cid_), "setup": setup_, "count": fmt_n(len(rows_)),
+                                  "noun": lw["noun"][0 if one_ else 1], "targets": " and ".join(targets_) or lw["targetsUnknown"],
+                                  "rating": rating_, "objects": objects_, "them": lw["them"][0 if one_ else 1]})
+        lines.append({"reason": lw["reason"], "count": None, "subject": line_, "anchor": lw.get("anchor") or "route-cut-leads"})
+        route_leads.append({"checkId": cid_, "check": title_of(cid_), "armId": aid_, "setup": setup_,
+                            "path": ev_["path"], "sha256": ev_.get("sha256"),
+                            "rows": [{**r, "objectWords": w_["object"]} for r, w_ in zip(rows_, shown_)]})
     # What P's own measurement could not judge, read from P's own receipt (the disposition's list also carries
     # each comparison's receipts, which counted one population two or three times), one clause per population in
     # its own unit, never summed across populations. A reason that names another check is not "could not be
@@ -5113,7 +5177,8 @@ def build_prediction(ctx: dict) -> dict:
         prediction["setAsideLine"] = (prediction["setAsideLine"] or "") + " " + words["nudgeCountedNote"]
     prediction["setAsideLine"] = (prediction["setAsideLine"] or "").strip() or None
     coverage = {"lines": lines, "notes": list(ctx["limitations"]), "setAsideLine": prediction["setAsideLine"],
-                "checksOnPrediction": len(checks_on_p), "relevantArms": sorted(relevant_arms)}
+                "checksOnPrediction": len(checks_on_p), "relevantArms": sorted(relevant_arms),
+                "routeCutLeads": route_leads}
 
     # --- validation against the patch
     if patched_arm is None:
@@ -8461,6 +8526,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
              f"{title_subject} within the measured load order — conflict review")
     reader = {"title": title,
               "scopeLine": scope_line, "verdict": verdict, "limitations": limitations,
+              "routeCutLeadsWords": (reader_data.get("prediction") or {}).get("routeCutLeads") or {},
               "sectionHeadings": {"regressions": f"Problems introduced by {alternative_subject}",
                                   "changes": f"Changes made by {alternative_subject}"},
               # (ninth review, page fit) with one alternative setup the section heading names it: its entries do not repeat it
