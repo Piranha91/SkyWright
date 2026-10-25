@@ -42,6 +42,15 @@ using Image = SixLabors.ImageSharp.Image;
 // the render at a different MO2 layout, which is how a field-test shot shows the exact state the
 // tester will see rather than the state of whatever list happens to be configured. Require() runs
 // AFTER the flags, so passing --instance never trips it.
+// TEXTURE ROUTE PIN. CharacterViewer.Rendering's default DDS route is authored-mip compressed
+// uploads, which change captured pixels (mostly normal-mapped surfaces and alpha edges) while
+// geometry, depth and masks stay exact. Retained captures, frozen hashes and receipts were all made
+// on the decoded route, and the configuration fingerprint does not yet record the texture policy,
+// so viewprobe stays decoded until it does. The library reads this once per CharacterPreviewCache
+// construction, so it must be set before the first scene is built. An explicitly set value wins,
+// which is how a run opts in to compressed uploads deliberately.
+if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CVR_DDS_MAX_FINAL_MIP_DIMENSION")))
+    Environment.SetEnvironmentVariable("CVR_DDS_MAX_FINAL_MIP_DIMENSION", "decoded");
 // LAUNCHED FROM EXPLORER — a double-click, or a worklist DROPPED ON THE ICON. Registered FIRST,
 // ahead of the Require() calls just below, because an unconfigured harness exits from inside those:
 // a window that closes on the one message explaining how to configure it has taught nobody
