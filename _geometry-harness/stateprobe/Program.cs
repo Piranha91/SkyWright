@@ -50,6 +50,7 @@ if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return RouteSelfTest.
 // Known answers for the class, emit and route-obstacle decisions over a synthetic order (_shared/StateFixture.cs).
 if (args.Length >= 1 && args[0] == "--self-test") return StateSelfTest.Run();
 // The modelless light fixture: written for tests/test_modelless_light.py, which runs the real stateprobe and contactprobe on it.
+if (args.Length >= 2 && args[0] == "--write-modelless-activator-fixture") { var w = ModellessActivatorFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 if (args.Length >= 2 && args[0] == "--write-modelless-light-fixture") { var w = ModellessLightFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 // The row identity fixture: written for tests/test_state_row_identity.py, which runs the real probe on it.
 if (args.Length >= 2 && args[0] == "--write-row-identity-fixture") { var w = RowIdentityFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }

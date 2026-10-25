@@ -10317,6 +10317,85 @@ def main():
                      ("route-cut-leads/C1448-control-no-rows-file", c1448_route_cut_no_rows_file_unchanged)]:
         cell(name, fn)
 
+    # ------------------------------------------- the report's bodiless rule agrees with the probes' (cases 1450-1453)
+    # A CollisionMarker is a Static with no model whose reference carries a collision primitive: it blocks in game (Part 3b
+    # station Q: the player and an item stood on its box). Having no model is not having no body; the probes set aside only
+    # the types measured to have none. The report sets aside the same set, never every type with no model.
+    SG_ = "state.conditional-geometry"
+    CM1, LT1, AM1 = (f"000{x}:{MOD_A}" for x in ("C01", "L01", "A01"))
+
+    def body_rule_bundle():
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER, MOD_B])]
+        p = [row(f"STATE-ROUTE@0S0W01:{MOD_A}@Triggered", MOD_A, MOD_B, CM1),
+             row(f"STATE-CONTACT@0S0W01:{MOD_A}@Triggered", MOD_A, MOD_B, LT1, other=f"000H01:{MOD_B}"),
+             row(f"STATE-CONTACT@0S0W02:{MOD_A}@Triggered", MOD_A, MOD_B, AM1, other=f"000H02:{MOD_B}")]
+        refs = {CM1: {"base": f"000021:{BASE}"}, LT1: {"base": f"0B0L01:{MOD_A}"}, AM1: {"base": f"0B0A01:{MOD_A}"},
+                f"000H01:{MOD_B}": {"base": f"0B0S01:{MOD_B}"}, f"000H02:{MOD_B}": {"base": f"0B0S01:{MOD_B}"}}
+        bases = {f"000021:{BASE}": {"type": "Static", "editorId": "CollisionMarker", "model": ""},
+                 f"0B0L01:{MOD_A}": {"type": "Light", "editorId": "TestLightNoModel", "model": ""},
+                 f"0B0A01:{MOD_A}": {"type": "Activator", "editorId": "TestLever", "model": "lever.nif"},
+                 f"0B0S01:{MOD_B}": {"type": "Static", "editorId": "TestWall", "model": "wall.nif"}}
+        return compile_and_render(arms, {(SG_, "baseline"): p, (SG_, "without-a"): []}, [MOD_A],
+                                  names={"refs": refs, "bases": bases})
+
+    def body_rule_of(plan, fk):
+        adm_ = [e.get("admission") for e in (reader(plan).get("prediction") or {}).get("record") or []
+                if e.get("checkId") == SG_ and e.get("formKey") == fk]
+        fs_ = [f for f in plan.get("findings") or [] if f.get("checkId") == SG_
+               and any(r.get("formKey") == fk for r in (f.get("allRows") or f.get("rows") or []))]
+        return adm_, [(f.get("id"), f.get("rowsTotal"), f.get("rowsNoBody"), f.get("readerRows")) for f in fs_]
+
+    # C1450. Rejects: a route row of a CollisionMarker (no model, a blocking box) set aside as "no body" in the prediction or
+    # left out of its finding's count.
+    def c1450_collision_marker_route_row_kept():
+        plan, md, html = get("bodyrule", body_rule_bundle)
+        adm_, fs_ = body_rule_of(plan, CM1)
+        ok = adm_ == ["admitted"] and len(fs_) >= 1 and all(not nb_ and rd_ == tot_ for _, tot_, nb_, rd_ in fs_)
+        return ok, f"CollisionMarker route row: admission {adm_}; findings (id, rows, no body, reader rows) {fs_}"
+
+    # C1451. Control: a light with no model is still set aside as having no body, in the prediction and in its finding.
+    def c1451_modelless_light_still_set_aside():
+        plan, md, html = get("bodyrule", body_rule_bundle)
+        adm_, fs_ = body_rule_of(plan, LT1)
+        ok = adm_ == ["noBody"] and len(fs_) >= 1 and all(nb_ == tot_ and rd_ == 0 for _, tot_, nb_, rd_ in fs_)
+        return ok, f"light with no model: admission {adm_}; findings {fs_}"
+
+    # C1452. Control: an activator with a model is unchanged: admitted and counted.
+    def c1452_modelled_activator_unchanged():
+        plan, md, html = get("bodyrule", body_rule_bundle)
+        adm_, fs_ = body_rule_of(plan, AM1)
+        ok = adm_ == ["admitted"] and len(fs_) >= 1 and all(not nb_ and rd_ == tot_ for _, tot_, nb_, rd_ in fs_)
+        return ok, f"activator with a model: admission {adm_}; findings {fs_}"
+
+    # C1453. Rejects: a CollisionMarker route row the patch comparison created, left out of the new problems as "no model".
+    # Without the patch ModA's CollisionMarker and its static each cut a route that the measured order does not.
+    def c1453_collision_marker_counted_in_comparison():
+        C1, S1, C3, S3 = (f"000{x}:{MOD_A}" for x in ("C11", "S11", "C13", "S13"))
+        kind = f"STATE-ROUTE@0S0W01:{MOD_A}@Triggered"
+        p_rows = [row(kind, MOD_B, MOD_A, C1), row(kind, MOD_B, MOD_A, S1)]
+        w_rows = [row(kind, MOD_B, MOD_A, C3), row(kind, MOD_B, MOD_A, S3)]
+        refs = {C1: {"base": f"000021:{BASE}"}, C3: {"base": f"000021:{BASE}"}, S1: {"base": f"0B0S01:{MOD_A}"},
+                S3: {"base": f"0B0S01:{MOD_A}"}}
+        bases = {f"000021:{BASE}": {"type": "Static", "editorId": "CollisionMarker", "model": ""},
+                 f"0B0S01:{MOD_A}": {"type": "Static", "editorId": "TestRock", "model": "rock.nif"}}
+        order = {"without-patch": {"stateprobe": dict(verdict="DIFFERENTIAL-HARMFUL", repaired=0, reclassified=0,
+                                                      created=2, newDefect=2, attributed=0, unmeasured=0)}}
+        log = f"NEW     {kind}    {MOD_B}  x  {MOD_A}   +2 record(s): created 2\n"
+        plan, md, html = compile_and_render(PATCHED_ARMS, {(SG_, "without-patch"): p_rows, (SG_, "baseline"): w_rows},
+                                            [MOD_A, MOD_B], patches=[PATCH], names={"refs": refs, "bases": bases},
+                                            order=order, diff_logs={(SG_, "without-patch"): log})
+        reg = next((f for f in plan.get("findings") or [] if f.get("kind") == "regression" and f.get("checkId") == SG_), {})
+        rc_ = (reg.get("counts") or {}).get("readerCreated")
+        nm_ = [x for x in md.splitlines() if "has no model" in x or "have no model" in x]
+        ok = rc_ == 2 and not nm_
+        return ok, f"comparison readerCreated {rc_} (want 2); lines saying no model: {[x[:200] for x in nm_]}"
+
+    for name, fn in [("modelless-bodiless/C1450-collision-marker-route-row-kept", c1450_collision_marker_route_row_kept),
+                     ("modelless-bodiless/C1451-control-modelless-light-set-aside", c1451_modelless_light_still_set_aside),
+                     ("modelless-bodiless/C1452-control-modelled-activator-unchanged", c1452_modelled_activator_unchanged),
+                     ("modelless-bodiless/C1453-collision-marker-counted-in-comparison", c1453_collision_marker_counted_in_comparison)]:
+        cell(name, fn)
+
     for name, ok, detail in cells:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}: {detail}")
     failed = sum(1 for _, ok, _ in cells if not ok)
