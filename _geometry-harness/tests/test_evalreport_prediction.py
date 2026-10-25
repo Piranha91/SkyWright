@@ -137,14 +137,16 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
                 diff_logs=None, states_not_explored=None, transcripts=None, masters=None, coverage_pops=None,
-                single_run=(), route_rows=None):
+                single_run=(), route_rows=None, programs=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
     count_only: {(checkId, armId): n} -- a check that reported n findings with no conflict rows (no `Conflicts`).
     cells: the first target's placed cells [{worldspace, x, y}] -- the locations every setup's load-order list covers.
     tool_builds: {(checkId, armId): dllSha256} -- the probe build a receipt records; every other receipt records one
-    shared build.
+    shared build. None records no dll hash.
+    programs: {(checkId, armId): {role: {program, kind, digest, checked}}} -- the program identities a receipt binds in
+    `consumed.programs` (a receipt under the tool identity contract); every other receipt binds none (a legacy receipt).
     enrichment: {(checkId, armId): [conflict rows]} -- rows derived after measurement for a check `count_only` names,
     written as `enrichment/record-rows/<check>__<arm>.json` with a manifest row of kind `enrichment`.
     receipt_configs: {(checkId, armId): [plugin rows]} -- the configuration a receipt records it consumed; every other
@@ -197,7 +199,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                               or [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}]},
                    "consumed": {"tool": {"exe": PROBE[check_id], "dllSha256": (tool_builds or {}).get(
                        (check_id, arm_id), "d" * 64), "coreDllSha256": "c" * 64},
-                                "configuration": {"plugins": config_of(check_id, arm_id)}}}
+                                "configuration": {"plugins": config_of(check_id, arm_id)},
+                                **({"programs": programs[(check_id, arm_id)]} if (check_id, arm_id) in (programs or {})
+                                   else {})}}
         emit = {"Population": "placed references", "State": "baseline", "Conflicts": rows,
                 "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}],
                 **({"Predicates": predicates[(check_id, arm_id)]} if (check_id, arm_id) in (predicates or {}) else {}),
@@ -542,14 +546,14 @@ UNPATCHED_ROWS = ([row("CONTACT", MOD_B, MOD_A, f"00080{i}:{MOD_A}") for i in (1
                   + [row("CONTACT", BASE, MOD_A, f"000A01:{MOD_A}")])
 
 
-def patched_with_sibling(variant="same"):
+def patched_with_sibling(variant="same", main_extra=None, sib_extra=None):
     """The patched bundle (the patched order and the same order without the patch; no single-mod setup) compiled with
     a sibling: the evaluation of the unpatched order, which measured both mods, each alone and neither.
     variant `same`: the sibling's setup with both mods is the patched bundle's setup without the patch, plugin for
     plugin and hash for hash, and measured the same rows there. `foreign`: the sibling's ModA has other bytes, so no
     sibling setup is the one without the patch. `disagrees`: same plugins, but on that setup the sibling measured
     only two of the three clashes. `build`: same plugins and rows, but the sibling ran the check with another probe
-    build on that setup."""
+    build on that setup. main_extra / sib_extra: further make_bundle arguments for the patched bundle / the sibling."""
     patched = [row("CONTACT", MOD_B, MOD_A, "000803:" + MOD_A), row("CONTACT", PATCH, MOD_A, f"000E01:{PATCH}")]
     results = {(CONTACT, "baseline"): patched, (CONTACT, "without-patch"): UNPATCHED_ROWS}
     shas = {MOD_A: "a" * 64} if variant == "foreign" else None
@@ -561,9 +565,11 @@ def patched_with_sibling(variant="same"):
     s_results = {(CONTACT, "baseline"): s_base, (CONTACT, "dependency-only"): [],
                  (CONTACT, "plus-a"): [row("CONTACT", BASE, MOD_A, f"000A01:{MOD_A}")], (CONTACT, "plus-b"): []}
     return compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], want_index=True, patches=[PATCH],
+                              **(main_extra or {}),
                               sibling=(s_arms, s_results, [MOD_A, MOD_B], {
                                   "plan_id": "sibl00000000",
-                                  "tool_builds": {(CONTACT, "baseline"): "e" * 64} if variant == "build" else None}))
+                                  "tool_builds": {(CONTACT, "baseline"): "e" * 64} if variant == "build" else None,
+                                  **(sib_extra or {})}))
 
 
 def busy_third_mod_bundle():
@@ -653,6 +659,27 @@ def sibling_only_bundle(variant="same"):
                               sibling=(s_arms, s_results, [MOD_A, MOD_B], {
                                   "plan_id": "sibl00000000", "enrichment": s_enr, "receipt_configs": cfg,
                                   "count_only": {(RECORDS, a["armId"]): 1 for a in s_arms}}))
+
+
+def sibling_record_join_bundle():
+    """A check that runs no probe (the record check, read through the MCP server), measured by both evaluations on
+    the shared setup with the same rows: neither receipt records a probe build, because there is none."""
+    nb = [lost_row(MOD_A, MOD_B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", f"b{i}", "v") for i in (1, 2)]
+    w_rows = [lost_row(MOD_B, PATCH, f"000701:{BASE}", "LocationReference", "b1", "a1", "a1")]
+    main_enr = {(RECORDS, "baseline"): w_rows, (RECORDS, "without-patch"): nb}
+    results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}
+    s_arms = [arm("baseline", [BASE, MOD_A, MOD_B], kind="baseline"), arm("dependency-only", [BASE]),
+              arm("plus-a", [BASE, MOD_A]), arm("plus-b", [BASE, MOD_B])]
+    s_enr = {(RECORDS, "baseline"): nb, (RECORDS, "dependency-only"): [], (RECORDS, "plus-a"): [],
+             (RECORDS, "plus-b"): []}
+    s_results = {(CONTACT, a["armId"]): [] for a in s_arms}
+    return compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], want_index=True, patches=[PATCH],
+                              count_only={(RECORDS, "baseline"): 1, (RECORDS, "without-patch"): 2},
+                              enrichment=main_enr,
+                              sibling=(s_arms, s_results, [MOD_A, MOD_B], {
+                                  "plan_id": "sibl00000000", "enrichment": s_enr,
+                                  "count_only": {(RECORDS, a["armId"]): max(1, len(s_enr[(RECORDS, a["armId"])]))
+                                                 for a in s_arms}}))
 
 
 NAMES_DOC = {"schema": "names-v1",
@@ -10421,6 +10448,167 @@ def main():
                      ("modelless-bodiless/C1451-control-modelless-light-set-aside", c1451_modelless_light_still_set_aside),
                      ("modelless-bodiless/C1452-control-modelled-activator-unchanged", c1452_modelled_activator_unchanged),
                      ("modelless-bodiless/C1453-collision-marker-counted-in-comparison", c1453_collision_marker_counted_in_comparison)]:
+        cell(name, fn)
+
+    # C1510-C1517. The sibling join compares probe builds by the program identity receipts bind (`consumed.programs`,
+    # the emitter role), falls back to the dll fields only when both receipts are legacy, and refuses to join a check
+    # whose two receipts cannot be compared, saying so in the join record.
+    def prog_rows(emitter_digest, controller_digest="scripts:" + "5" * 64, emitter=True):
+        rows_ = {"controller": {"program": "controller", "kind": "scripts", "digest": controller_digest,
+                                "checked": ["launch", "acceptance"]}}
+        if emitter:
+            rows_["emitter"] = {"program": "probe:contactprobe", "kind": "package", "digest": emitter_digest,
+                                "checked": ["launch", "acceptance"]}
+        return rows_
+
+    MAIN_ARMS_, SIB_ARMS_ = ("baseline", "without-patch"), ("baseline", "dependency-only", "plus-a", "plus-b")
+
+    def bound(arms_, digest, **kw_):
+        return {(CONTACT, a_): prog_rows(digest, **kw_) for a_ in arms_}
+
+    def join_of(plan, check_id=CONTACT):
+        sib_ = (reader(plan).get("prediction") or {}).get("sibling") or {}
+        return next((c_ for c_ in sib_.get("checks") or [] if c_.get("checkId") == check_id), None)
+
+    def contact_items(plan):
+        return [(i.get("attribution"), i.get("count")) for i in (reader(plan).get("prediction") or {}).get("items") or []
+                if i.get("checkId") == CONTACT]
+
+    def index_line(index, check_id=CONTACT):
+        return next((ln for ln in index.splitlines() if ln.startswith(f"- `{check_id}`:")), "")
+
+    DIFFERENT_ = "the two evaluations ran this check with different probe builds"
+
+    # C1510. Rejects: two evaluations whose probe dll is equal but whose emitter program differs (a changed dependency,
+    # runtime file or copied data) joined as the same build.
+    def c1510_equal_dll_different_program_not_joined():
+        plan, md, html, index = patched_with_sibling(
+            "same", main_extra={"programs": bound(MAIN_ARMS_, "folder:" + "1" * 64)},
+            sib_extra={"programs": bound(SIB_ARMS_, "folder:" + "2" * 64)})
+        j_ = join_of(plan) or {}
+        ok = (j_.get("joined") is False and j_.get("why") == DIFFERENT_ and j_.get("buildBasis") == "program"
+              and contact_items(plan) == [("not-separable", 3)])
+        return ok, f"join record {j_}; contact items {contact_items(plan)}"
+
+    # C1511. Rejects: a mixed pair (one evaluation under the tool identity contract, one legacy) joined with no word that
+    # only the dlls were compared. Rule: the dll fallback, which every receipt still carries -- equal dlls join with
+    # basis `dll` and a note that one side predates program identity (record and index line); different dlls do not.
+    def c1511_mixed_pair_compared_by_dll():
+        plan, md, html, index = patched_with_sibling(
+            "same", main_extra={"programs": bound(MAIN_ARMS_, "folder:" + "1" * 64)})
+        j_ = join_of(plan) or {}
+        note_ = str(j_.get("buildBasisNote") or "")
+        same_ok = (j_.get("joined") is True and j_.get("buildBasis") == "dll" and "predates program identity" in note_
+                   and note_ in index_line(index) and contact_items(plan) == [("needs-both", 3)])
+        plan2, _, _, index2 = patched_with_sibling(
+            "same", main_extra={"programs": bound(MAIN_ARMS_, "folder:" + "1" * 64)},
+            sib_extra={"tool_builds": {(CONTACT, "baseline"): "e" * 64}})
+        j2_ = join_of(plan2) or {}
+        diff_ok = (j2_.get("joined") is False and j2_.get("why") == DIFFERENT_ and j2_.get("buildBasis") == "dll"
+                   and contact_items(plan2) == [("not-separable", 3)])
+        return same_ok and diff_ok, (f"equal dlls: {j_}, index {index_line(index)!r}, items {contact_items(plan)}; "
+                                     f"different dlls: {j2_}, items {contact_items(plan2)}")
+
+    # C1512. Rejects: a legacy pair where the sibling's receipt on the shared setup records no dll hash, joined as the
+    # same build (the old `mt[0] and st[0]` test fell through to a join).
+    def c1512_missing_dll_not_comparable():
+        plan, md, html, index = patched_with_sibling("same", sib_extra={"tool_builds": {(CONTACT, "baseline"): None}})
+        j_ = join_of(plan) or {}
+        why_ = str(j_.get("why") or "")
+        ok = (j_.get("joined") is False and j_.get("buildBasis") == "not-comparable" and "cannot be told" in why_
+              and why_ in index_line(index) and contact_items(plan) == [("not-separable", 3)])
+        return ok, f"join record {j_}; index line {index_line(index)!r}; contact items {contact_items(plan)}"
+
+    # C1513. Rejects: two receipts under the contract where the sibling's binds no emitter digest on the shared setup
+    # (only the controller) and records no dll either, joined. Rule: missing hash -- neither basis is on both sides.
+    def c1513_missing_emitter_digest_and_dll_not_comparable():
+        sib_p = bound(SIB_ARMS_, "folder:" + "1" * 64)
+        sib_p[(CONTACT, "baseline")] = prog_rows(None, emitter=False)
+        plan, md, html, index = patched_with_sibling(
+            "same", main_extra={"programs": bound(MAIN_ARMS_, "folder:" + "1" * 64)},
+            sib_extra={"programs": sib_p, "tool_builds": {(CONTACT, "baseline"): None}})
+        j_ = join_of(plan) or {}
+        ok = (j_.get("joined") is False and j_.get("buildBasis") == "not-comparable"
+              and "cannot be told" in str(j_.get("why") or "") and contact_items(plan) == [("not-separable", 3)])
+        return ok, f"join record {j_}; contact items {contact_items(plan)}"
+
+    # C1519. Rejects: two receipts under the contract where the sibling's binds no emitter digest but records its dll,
+    # joined with no word that only the dlls were compared. Rule: the dll fallback -- basis `dll`, joined on equal dlls,
+    # with a note that one side binds no program identity for its probe (record and index line).
+    def c1519_contract_receipt_without_emitter_falls_back_to_dll():
+        sib_p = bound(SIB_ARMS_, "folder:" + "1" * 64)
+        sib_p[(CONTACT, "baseline")] = prog_rows(None, emitter=False)
+        plan, md, html, index = patched_with_sibling(
+            "same", main_extra={"programs": bound(MAIN_ARMS_, "folder:" + "1" * 64)}, sib_extra={"programs": sib_p})
+        j_ = join_of(plan) or {}
+        note_ = str(j_.get("buildBasisNote") or "")
+        ok = (j_.get("joined") is True and j_.get("buildBasis") == "dll" and "binds no program identity" in note_
+              and note_ in index_line(index) and contact_items(plan) == [("needs-both", 3)])
+        return ok, f"join record {j_}; index line {index_line(index)!r}; contact items {contact_items(plan)}"
+
+    # C1514. Control: identical emitter digests join, whatever the controller digest (it is not a build of the probe).
+    def c1514_control_identical_programs_join():
+        plan, md, html, index = patched_with_sibling(
+            "same", main_extra={"programs": bound(MAIN_ARMS_, "folder:" + "1" * 64)},
+            sib_extra={"programs": bound(SIB_ARMS_, "folder:" + "1" * 64, controller_digest="scripts:" + "6" * 64)})
+        j_ = join_of(plan) or {}
+        ok = j_.get("joined") is True and contact_items(plan) == [("needs-both", 3)]
+        return ok, f"join record {j_}; contact items {contact_items(plan)}"
+
+    # C1515. Control: two legacy receipts with equal dlls join as before.
+    def c1515_control_legacy_equal_dll_join():
+        plan, md, html, index = patched_with_sibling("same")
+        j_ = join_of(plan) or {}
+        ok = j_.get("joined") is True and contact_items(plan) == [("needs-both", 3)]
+        return ok, f"join record {j_}; contact items {contact_items(plan)}"
+
+    # C1516. Control: a check that runs no probe (the record check) joins on its rows as before: there is no probe
+    # build to compare, and that is not a missing hash.
+    def c1516_control_no_probe_check_joins():
+        plan, md, html, index = sibling_record_join_bundle()
+        j_ = join_of(plan, RECORDS) or {}
+        return j_.get("joined") is True, f"record check join record {j_}"
+
+    # C1517. Rejects: a join record that does not say which basis the build comparison used: program identity, the
+    # legacy dll fields, or none because the check runs no probe; on the plan and on the evidence index line.
+    def c1517_join_record_names_its_basis():
+        got = {}
+        plan, _, _, index = patched_with_sibling(
+            "same", main_extra={"programs": bound(MAIN_ARMS_, "folder:" + "1" * 64)},
+            sib_extra={"programs": bound(SIB_ARMS_, "folder:" + "1" * 64)})
+        got["program"] = ((join_of(plan) or {}).get("buildBasis"), index_line(index))
+        plan, _, _, index = patched_with_sibling("same")
+        got["dll"] = ((join_of(plan) or {}).get("buildBasis"), index_line(index))
+        plan, _, _, index = sibling_record_join_bundle()
+        got["no-probe"] = ((join_of(plan, RECORDS) or {}).get("buildBasis"), index_line(index, RECORDS))
+        words_ = {"program": "program identity", "dll": "dll", "no-probe": "no probe"}
+        ok = all(b_ == k_ and words_[k_] in ln_ for k_, (b_, ln_) in got.items())
+        return ok, f"basis and index line per case: {got}"
+
+    # C1518. Rejects: a check left unseparated because the two builds cannot be compared, told on the page as the sibling
+    # having "measured this check differently" (`siblingDisagrees`); it has its own words, and the page prints them.
+    def c1518_page_says_builds_cannot_be_compared():
+        plan, md, html, index = patched_with_sibling("same", sib_extra={"tool_builds": {(CONTACT, "baseline"): None}})
+        nsw_ = (priorities().get("reader") or {}).get("prediction", {}).get("notSeparableWhy") or {}
+        want_ = nsw_.get("siblingNotComparable")
+        whys_ = [i.get("attributionWhy") for i in (reader(plan).get("prediction") or {}).get("items") or []
+                 if i.get("checkId") == CONTACT]
+        text = section_text(md, headings(plan).get("prediction") or "\0")
+        ok = bool(want_) and want_ != nsw_.get("siblingDisagrees") and whys_ == [want_] and want_ in text
+        return ok, f"words {want_!r}; contact item why {whys_}"
+
+    for name, fn in [("sibling-build/C1510-equal-dll-different-program-not-joined", c1510_equal_dll_different_program_not_joined),
+                     ("sibling-build/C1518-page-says-builds-cannot-be-compared", c1518_page_says_builds_cannot_be_compared),
+                     ("sibling-build/C1511-mixed-legacy-and-new-pair-compared-by-dll", c1511_mixed_pair_compared_by_dll),
+                     ("sibling-build/C1512-missing-dll-hash-not-comparable", c1512_missing_dll_not_comparable),
+                     ("sibling-build/C1513-missing-emitter-digest-and-dll-not-comparable",
+                      c1513_missing_emitter_digest_and_dll_not_comparable),
+                     ("sibling-build/C1519-contract-receipt-without-emitter-falls-back-to-dll",
+                      c1519_contract_receipt_without_emitter_falls_back_to_dll),
+                     ("sibling-build/C1514-control-identical-programs-join", c1514_control_identical_programs_join),
+                     ("sibling-build/C1515-control-legacy-equal-dll-join", c1515_control_legacy_equal_dll_join),
+                     ("sibling-build/C1516-control-no-probe-check-joins", c1516_control_no_probe_check_joins),
+                     ("sibling-build/C1517-join-record-names-its-basis", c1517_join_record_names_its_basis)]:
         cell(name, fn)
 
     for name, ok, detail in cells:

@@ -50,7 +50,7 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 
 {% for role, arm in sib.roles.items() %}- {{ role }}: `{{ arm|txt }}`
 {% endfor %}
-{% for c in sib.checks %}- `{{ c.checkId }}`: {{ "joined" if c.joined else "not joined — " ~ c.why }}
+{% set bw_ = {"program": " (probe builds compared by program identity)", "dll": " (probe builds compared by the probe dll)", "no-probe": " (this check runs no probe, so there is no probe build to compare)"} %}{% for c in sib.checks %}- `{{ c.checkId }}`: {{ (("joined" ~ bw_.get(c.get("buildBasis"), "")) if c.joined else "not joined — " ~ c.why) ~ (("; " ~ c.buildBasisNote) if c.get("buildBasisNote") else "") }}
 {% endfor %}
 {% for sf in sib.get("rows") or [] %}
 <a id="{{ sf.anchor }}"></a>

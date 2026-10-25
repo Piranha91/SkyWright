@@ -1469,6 +1469,7 @@ def build_prediction(ctx: dict) -> dict:
     #     hash for hash, and a check is used only where both ran the same adapter and probe build and measured the
     #     same rows on that shared setup. Otherwise nothing is joined (refusal) or the check stays unseparated.
     sibling, sib_ok, sibling_record = ctx.get("sibling"), {}, None
+    sib_not_comparable = set()                 # checks not joined because the two probe builds cannot be compared
     sib_setup_plugins, p_plugin_names = {}, []
     sib_role_ref = []
     sib_only, anchor = set(), None
@@ -1512,10 +1513,37 @@ def build_prediction(ctx: dict) -> dict:
                 if s_sib:
                     s_arms[t] = roles[f"only {t}"] = "sibling:" + s_sib
 
-        def receipt_tool(bundle, check_id, arm_id):
+        def receipt_build(bundle, check_id, arm_id):
+            """(program, dll, legacy): the probe build a receipt records -- the emitter's bound program identity
+            (program id, digest) or None, the measured (dll, core dll) or None, and whether the receipt predates
+            program identity (no `consumed.programs`)."""
             rc = bundle.receipt_by_key.get((check_id, arm_id, "arm")) or bundle.receipt_by_key.get((check_id, arm_id, None))
-            t = ((rc or {}).get("consumed") or {}).get("tool") or {}
-            return t.get("dllSha256"), t.get("coreDllSha256")
+            consumed = (rc or {}).get("consumed") or {}
+            progs, t = consumed.get("programs"), consumed.get("tool") or {}
+            em = progs.get("emitter") if isinstance(progs, dict) else None
+            program = ((em.get("program"), em["digest"]) if isinstance(em, dict) and isinstance(em.get("digest"), str)
+                       and em["digest"] else None)
+            dll = (t.get("dllSha256"), t.get("coreDllSha256")) if t.get("dllSha256") else None
+            return program, dll, not isinstance(progs, dict)
+
+        def build_compare(check_id, main_arm, sib_arm):
+            """(basis, note, why): how the two receipts' probe builds compare. Program identity where both bind it,
+            else the dll fields where both record them (the note says one side has no program identity), else nothing
+            when the check runs no probe; otherwise the builds cannot be compared and the check is not joined."""
+            (mp, md_, ml), (sp, sd, sl) = receipt_build(main_b, check_id, main_arm), receipt_build(sib_b, check_id, sib_arm)
+            if mp and sp:
+                return "program", None, None if mp == sp else "the two evaluations ran this check with different probe builds"
+            if md_ and sd:
+                note = None
+                if not (ml and sl):
+                    note = ("one side predates program identity, so only the probe dll was compared" if (ml or sl) else
+                            "a receipt binds no program identity for its probe, so only the probe dll was compared")
+                return "dll", note, None if md_ == sd else "the two evaluations ran this check with different probe builds"
+            if not (mp or sp or md_ or sd) and not ((main_b.checks.get(check_id) or {}).get("adapter") or {}).get("exe"):
+                return "no-probe", None, None
+            return "not-comparable", None, ("a receipt for this check on the shared setup records no probe build that "
+                                            "can be compared with the other's, so whether the two evaluations ran the "
+                                            "same probe build cannot be told")
 
         def receipt_config(bundle, check_id, arm_id):
             rc = bundle.receipt_by_key.get((check_id, arm_id, "arm")) or bundle.receipt_by_key.get((check_id, arm_id, None))
@@ -1526,7 +1554,7 @@ def build_prediction(ctx: dict) -> dict:
 
         checks_record = []
         for check_id in sorted({c for c, _ in measured if c}):
-            why, how = None, None
+            why, how, basis, note = None, None, None, None
             if (main_b.checks.get(check_id) or {}).get("adapter") != (sib_b.checks.get(check_id) or {}).get("adapter"):
                 why = "the two evaluations ran this check with different adapters"
             elif (check_id, p_arm) not in measured and (check_id, "sibling:" + anchor) in measured:
@@ -1545,14 +1573,15 @@ def build_prediction(ctx: dict) -> dict:
             elif (check_id, p_arm) not in measured or (check_id, "sibling:" + anchor) not in measured:
                 why = "one of the two evaluations did not measure this check on the shared setup"
             else:
-                mt, st = receipt_tool(main_b, check_id, p_arm), receipt_tool(sib_b, check_id, anchor)
-                if mt[0] and st[0] and mt != st:
-                    why = "the two evaluations ran this check with different probe builds"
-                elif (prefixes.get((check_id, p_arm)) or set()) != (prefixes.get((check_id, "sibling:" + anchor)) or set()):
+                basis, note, why = build_compare(check_id, p_arm, anchor)
+                if basis == "not-comparable":
+                    sib_not_comparable.add(check_id)
+                elif why is None and ((prefixes.get((check_id, p_arm)) or set())
+                                      != (prefixes.get((check_id, "sibling:" + anchor)) or set())):
                     why = "the two evaluations measured different results for this check on the shared setup"
             sib_ok[check_id] = why is None
-            checks_record.append({"checkId": check_id, "joined": why is None, "why": why,
-                                  **({"how": how} if how else {})})
+            checks_record.append({"checkId": check_id, "joined": why is None, "why": why, "buildBasis": basis,
+                                  **({"buildBasisNote": note} if note else {}), **({"how": how} if how else {})})
         sib_setup_plugins = {a_: [x[0] for x in v_[0]] for a_, v_ in sib_idents.items()}
         p_plugin_names = [x[0] for x in p_plugs]
         sibling_record = {"pathAsGiven": sibling.get("pathAsGiven"), "planId": sibling.get("planId"),
@@ -2650,7 +2679,8 @@ def build_prediction(ctx: dict) -> dict:
                         return "single-mod", t, ["chain", provs_[rest_[-1]], miss_]
             return "needs-both", t, None
         if any(str(s_arms.get(t)).startswith("sibling:") for t in p_targets) and not sib_ok.get(rk[0]):
-            return "not-separable", None, words["notSeparableWhy"]["siblingDisagrees"]
+            return "not-separable", None, words["notSeparableWhy"][
+                "siblingNotComparable" if rk[0] in sib_not_comparable else "siblingDisagrees"]
         unmeasured = [t for t in p_targets if s_arms.get(t) is None or (rk[0], s_arms[t]) not in measured]
         if unmeasured:
             if all(s_arms.get(t) is None for t in p_targets):
