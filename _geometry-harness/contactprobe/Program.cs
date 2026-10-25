@@ -698,7 +698,11 @@ void WriteGeomReport()
 }
 string AgainstLabel(ArmContact? a) => a is null ? "" : $"{BaseLabel(cidx!.WinnerBase(a.Against))} {a.Against}";
 string GeometryLine() => $"geometry: {meshesMeasured:N0} meshes measured (host soup collision {hostColl:N0} / render {hostRender:N0}; dependent soup collision {depColl:N0} / render {depRender:N0}; "
-                       + $"no soup {meshNoSoup:N0}; incomplete collision decode {incompleteCollision:N0}; phantom-only {phantomOnly:N0}), {obndFallback:N0} bases on an OBND box (labelled 'o'), {noGeometry:N0} with nothing";
+                       + $"no soup {meshNoSoup:N0}; incomplete collision decode {incompleteCollision:N0}; phantom-only {phantomOnly:N0}), {obndFallback:N0} bases on an OBND box (labelled 'o'), {noGeometry:N0} with nothing"
+                       + $"; {BodilessCount():N0} placed lights with no model: no body, not judged";
+// The placed lights whose base record has no model (ContactIndex.IsBodiless): not a dependent, counted once per run.
+int? bodilessCount = null;
+int BodilessCount() => bodilessCount ??= cidx?.BodilessReferences() ?? 0;
 
 // ---------------------------------------------------------------------------------------
 // --overlap-json: the milestone 6 ranker upgrade — 4.1's broad-phase hits through the narrow phase.

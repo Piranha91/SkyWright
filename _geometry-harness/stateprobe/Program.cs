@@ -446,6 +446,9 @@ try { cidx.RefreshAutomaticBudget(); }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 Console.WriteLine("   memory after state geometry preparation: " + cidx.AutomaticBudgetReport());
 Console.WriteLine($"evaluator: {ev.Boxed:N0} refs boxed (meshes measured {geo.MeshesMeasured:N0}, OBND fallback {geo.ObndFallback:N0}, no geometry {geo.NoGeometry:N0}; markers set aside {ev.BoxedMarkers:N0}, effect volumes kept out of the overlap role {ev.BoxedFxVolumes:N0})  ({sw.Elapsed.TotalSeconds:0.0}s)");
+// The placed lights whose base record has no model (ContactIndex.IsBodiless): no body, so never a dependent; counted, not judged.
+int bodilessLights = cidx.BodilessReferences();
+Console.WriteLine($"   {bodilessLights:N0} placed lights with no model: no body, not judged");
 sw.Restart();
 var tally = new StateTally();
 var rows = new List<StateRow>();
@@ -618,7 +621,7 @@ if (jsonPath is not null)
     {
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, plugins = paths.Count,
         measurementPolicy = StateMeasurementPolicy,
-        states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured,
+        states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured, bodilessLights,
         tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
         perState = perState.Select(p => new { state = p.Arm.Name, flips = p.Arm.Flips.Select(f => f.ToString()), p.Changes, p.Rows, p.Conditional, ms = p.Ms }),
         rows = rows.Select(r => new

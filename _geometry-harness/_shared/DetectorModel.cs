@@ -676,6 +676,12 @@ public static class DetectorModel
     /// it — <paramref name="markerFlag"/> — else "marker" in the editor id, the same split <see cref="ClassifyHost"/>
     /// makes), a trigger, an idle marker or an FX object by editor id; Physical is a static, furniture, container,
     /// door, light, activator, tree, flora or any item type; Other is the rest, an unresolved base included.</summary>
+    /// <summary>A base with no body in game, decided from the record's model field, never a name (2026-10-24): a light whose
+    /// record has no model is drawn as nothing and collides with nothing, so it rests on, hangs from and sinks into nothing.
+    /// Only lights: a modelless static or activator takes its body from its reference's collision primitive, and a modelless
+    /// door is not measured. <paramref name="hasModel"/> null (the record was not read) is never bodiless.</summary>
+    public static bool HasNoBody(string? baseType, bool? hasModel) => baseType == "Light" && hasModel == false;
+
     public static DependentClass ClassifyDependent(string? recordType, string? baseType, string? baseEditorId, bool? markerFlag = null)
     {
         if (recordType == "PlacedNpc" || baseType is "Npc" or "LeveledNpc") return DependentClass.Actor;

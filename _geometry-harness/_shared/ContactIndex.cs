@@ -795,7 +795,23 @@ public sealed class ContactIndex
         var (t, e) = BaseInfoOf(baseKey);
         bool m = IsMarker(baseKey);
         return DetectorModel.ClassifyDependent("PlacedObject", t, e, m) == DependentClass.Physical
-            && DetectorModel.ClassifyHost(t, e, m) != HostClass.Marker;
+            && DetectorModel.ClassifyHost(t, e, m) != HostClass.Marker
+            && !IsBodiless(baseKey);
+    }
+
+    /// <summary>A base with no body in game: a light whose record has no model (DetectorModel.HasNoBody). A model path the
+    /// reader could not load is not this: that base keeps its labelled bounds box. An unread base is never bodiless.</summary>
+    public bool IsBodiless(FormKey baseKey)
+        => DetectorModel.HasNoBody(BaseInfoOf(baseKey).Type, Index.BaseInfo.ContainsKey(baseKey) ? Index.BaseMesh.ContainsKey(baseKey) : null);
+
+    /// <summary>The placed references whose winning base has no body (IsBodiless), counted once each: what the run leaves
+    /// out as not a physical object, for the console and --json.</summary>
+    public int BodilessReferences()
+    {
+        int n = 0;
+        foreach (var (key, snaps) in Index.History.Refs)
+            if (snaps.Count > 0 && !snaps[^1].Deleted && WinnerBase(key) is var b && !b.IsNull && IsBodiless(b)) n++;
+        return n;
     }
 
     /// <summary>Any physical thing a dependent could be re-supported by under the winner: hosts and dependents both.</summary>
@@ -1078,7 +1094,7 @@ public sealed class ContactIndex
                 bool last = i == snaps.Count - 1;
                 if (s.Deleted) { if (last) (lastOutcome, lastRule) = (TraceOutcome.Never, "DeletedSnap"); continue; }
                 var b = BaseAt(key, s.Plugin);
-                if (!IsDependentType(b)) { if (last) (lastOutcome, lastRule) = (TraceOutcome.Never, "NotDependentType"); continue; }
+                if (!IsDependentType(b)) { if (last) (lastOutcome, lastRule) = (TraceOutcome.Never, IsBodiless(b) ? "NoModelLight" : "NotDependentType"); continue; }
                 var box = WorldBox(b, s);
                 if (box.IsEmpty) { if (last) { skips.DepNoGeometry++; (lastOutcome, lastRule) = (TraceOutcome.Unjudgeable, "NoGeometry"); } continue; }
                 if (MaxDim(box) > MaxDependentDim)
