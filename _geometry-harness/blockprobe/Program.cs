@@ -20,7 +20,9 @@ using HousecarlCore.Progress;
 // If those two rates come out the same, the detector is not measuring what it claims to.
 //
 // usage: blockprobe <TargetPlugin.esp> [<Target2.esp> ...] [--exclude Other.esp ...] [--list N] [--geometry collision|render] [--bos on|off]
-//                   [--state SPEC] [--switch-map FILE] [--flags] [--order FILE]
+//                   [--state SPEC] [--switch-map FILE] [--flags] [--order FILE] [--rows FILE]
+//   --rows     also write every listed route-cut row (Blocked, LikelyBlocked, NoLine, Unjudgeable; objects and navcut boxes)
+//              to FILE as JSON, uncapped by --list (RouteCutRows.cs). The printed output gains one line naming the file.
 //   targets   one or more plugins, judged as ONE set (P51): the union of their cells and references; each listed row
 //              names the target(s) that place it in the cell it is judged in ({by ...}), and the route-cut verdicts
 //              are tallied per target. An unknown argument is refused (exit 2), never skipped.
@@ -80,7 +82,7 @@ int listN = 25;
 string geometrySource = "collision";
 bool controllerBand = true;   // --band controller|nominal: the route rules' band top (the surface rules keep the nominal, as every run before)
 bool bosOn = true;
-string? stateSpec = null, switchMapPath = null, orderFile = null;
+string? stateSpec = null, switchMapPath = null, orderFile = null, rowsPath = null;
 bool flagsOnly = false;
 for (int i = 0; i < args.Length; i++)
 {
@@ -90,6 +92,7 @@ for (int i = 0; i < args.Length; i++)
         continue;
     }
     if (args[i] == "--order" && i + 1 < args.Length) { orderFile = args[++i]; continue; }
+    if (args[i] == "--rows" && i + 1 < args.Length) { rowsPath = args[++i]; continue; }
     if (args[i] == "--state" && i + 1 < args.Length) { stateSpec = args[++i]; continue; }
     if (args[i] == "--switch-map" && i + 1 < args.Length) { switchMapPath = args[++i]; continue; }
     if (args[i] == "--flags") { flagsOnly = true; continue; }
@@ -786,6 +789,19 @@ if (cutHits.Count > 0)
     static string Pass(RouteLine? l) => l is null || float.IsNaN(l.Passage) ? "   -" : l.Passage >= l.PassageCap ? $"≥{l.PassageCap:0}" : $"{l.Passage,4:0}";
     foreach (var h in cutHits.OrderBy(h => h.V == RouteCutVerdict.Blocked ? 0 : h.V == RouteCutVerdict.LikelyBlocked ? 1 : h.V == RouteCutVerdict.NoLine ? 2 : 3).ThenBy(h => h.Cell).Take(listN * 3))
         Console.WriteLine($"   {h.V,-14} was {h.Old,-9} touched {h.Touched,4} passage {Pass(h.Line)} (L {(h.Line is null || float.IsNaN(h.Line.PassageLeft) ? "-" : h.Line.PassageLeft.ToString("0")),3} / R {(h.Line is null || float.IsNaN(h.Line.PassageRight) ? "-" : h.Line.PassageRight.ToString("0")),3})  {h.Cell,-26} {Short(h.Mesh, 44),-44} {h.Fk} {By(h.Fk)}   {h.Why}");
+}
+
+// --rows: every listed route-cut row, objects and navcut boxes, uncapped (RouteCutRows.cs); the console above is unchanged.
+if (rowsPath is not null)
+{
+    var cutRows = new List<RouteCutRows.Row>();
+    foreach (var h in cutHits.Where(h => RouteCutRows.Listed(h.V)))
+        cutRows.Add(RouteCutRows.Of(h.V, h.Old.ToString(), h.Cell, h.Mesh, h.Fk,
+                                    judgedBy.TryGetValue(h.Fk, out var jb) ? jb.ToList() : new List<string>(), h.Touched, h.Line, h.Why, navcut: false));
+    foreach (var h in navcutHits.Where(h => RouteCutRows.Listed(h.V)))
+        cutRows.Add(RouteCutRows.Of(h.V, null, h.Cell, null, h.Fk, new[] { h.Plugin }, h.Touched, h.Line, h.Why, navcut: true));
+    RouteCutRows.Write(rowsPath, targets, pop.StateName, cutTally, cutRows);
+    Console.WriteLine($"\n   wrote {cutRows.Count:N0} route-cut rows -> {rowsPath}");
 }
 
 if (severHits.Count > 0)

@@ -1097,8 +1097,12 @@ public static class DetectorModel
             : cutOnStairs ? "" : StepBandClause(cutRise);
         if (passage < blockedBelow)
             return (RouteCutVerdict.Blocked, $"cuts the path line at capsule width with {passage:0} u open beside it (under {blockedBelow:0} u){band}");
-        return (RouteCutVerdict.LikelyBlocked, $"cuts the path line at capsule width with {passage:0} u open beside it — the engine takes such a passage about half the time{band}");
+        return (RouteCutVerdict.LikelyBlocked, $"cuts the path line at capsule width with {passage:0} u open beside it — the engine takes such a passage {LikelyBlockedPassageShare}{band}");
     }
+
+    /// <summary>How often the engine takes a passage the route-cut rule calls LikelyBlocked: the rule's sentence and blockprobe's
+    /// rows file (--rows) both read it here, so the two cannot drift.</summary>
+    public const string LikelyBlockedPassageShare = "about half the time";
 
     /// <summary>The actor band's bottom — the step height, above the navmesh. MEASURED 2026-09-05 (Q23 Part A, five
     /// fresh games, ~230 arms; Research/ACTOR-BAND-BOTTOM-2026-09-05.md): 48 u is the highest beam every walking
