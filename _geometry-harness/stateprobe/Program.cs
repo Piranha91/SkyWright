@@ -55,7 +55,9 @@ if (args.Length >= 2 && args[0] == "--write-modelless-light-fixture") { var w = 
 if (args.Length >= 2 && args[0] == "--write-row-identity-fixture") { var w = RowIdentityFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 // The scope fixture (window 2): written for tests/test_population_scope.py, which runs the real probes on it.
 if (args.Length >= 2 && args[0] == "--write-scope-fixture") { var w = ScopeFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.RacePlugin).Append(w.ModsDir))); return 0; }
-const string StateMeasurementPolicy = "state-contact-route-v1|state-overlap-unmeasured-v1";
+// state-contact-route-v2 (2026-10-24): a light whose base record has no model is no dependent (ContactIndex.IsBodiless), so
+// conflictdiff refuses a pair of emits across the change rather than credit the vanished rows.
+const string StateMeasurementPolicy = "state-contact-route-v2|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
