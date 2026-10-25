@@ -470,7 +470,7 @@ foreach (var arm in arms)
 static void Merge(StateTally a, StateTally b)
 {
     a.States += b.States; a.Changes += b.Changes; a.Arrivals += b.Arrivals; a.Departures += b.Departures; a.SwitchesThemselves += b.SwitchesThemselves;
-    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
+    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NoBody += b.NoBody; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
     a.HostsLeaving += b.HostsLeaving; a.HostsArriving += b.HostsArriving; a.DepsArriving += b.DepsArriving; a.DepsLeaving += b.DepsLeaving; a.ReSupported += b.ReSupported; a.FloatingOnArrival += b.FloatingOnArrival; a.TouchingOnArrival += b.TouchingOnArrival; a.ContactUnmeasured += b.ContactUnmeasured;
     a.RouteAsked += b.RouteAsked; a.RouteUnjudged += b.RouteUnjudged; a.RouteNoLine += b.RouteNoLine; a.RouteClipped += b.RouteClipped; a.RouteNone += b.RouteNone; a.ElapsedMs += b.ElapsedMs;
     a.OutsidePopulation += b.OutsidePopulation; a.MergedContactRows += b.MergedContactRows;
@@ -488,7 +488,7 @@ if (population is not null)
     Console.WriteLine($"   population: {tally.OutsidePopulation:N0} changed reference-states not processed; distinct changed references kept by rule "
                     + string.Join(", ", new[] { "contact", "route-interior", "route-ring", "large-ref" }.Select(k => $"{k} {keptByRule.GetValueOrDefault(k):N0}"))
                     + $", dropped {keysDropped:N0}");
-Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry, a marker, or a navcut without a primitive); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
+Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry, a marker, or a navcut without a primitive); {tally.NoBody:N0} changed lights with no model (no body); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
 Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasured:N0} changed obstructing reference-state(s); strict placed render-surface migration is pending, so no box overlap is a finding or repair predicate");
 
 // ---- LEFT IN EMPTY SPACE per state (--empty-space): each state's arriving fixtures against every plugin that stepped on a
@@ -624,7 +624,7 @@ if (jsonPath is not null)
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, plugins = paths.Count,
         measurementPolicy = StateMeasurementPolicy,
         states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured, bodilessLights,
-        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
+        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.NoBody, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
         perState = perState.Select(p => new { state = p.Arm.Name, flips = p.Arm.Flips.Select(f => f.ToString()), p.Changes, p.Rows, p.Conditional, ms = p.Ms }),
         rows = rows.Select(r => new
         {
@@ -659,7 +659,8 @@ if (emitPath is not null)
     {
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
         new("states", arms.Count, null, null, $"{tally.Changes:N0} changed references"),
-        new("changed references with a box", tally.Changes - tally.NoBox, new Dictionary<string, long> { ["NoBox"] = tally.NoBox }),
+        new("changed references with a box", tally.Changes - tally.NoBox - tally.NoBody, new Dictionary<string, long> { ["NoBox"] = tally.NoBox },
+            new Dictionary<string, long> { ["LightWithNoModel"] = tally.NoBody }),
         new("state-overlap changed obstructing references", 0,
             new Dictionary<string, long> { ["ActualSurfacePredicateUnavailable"] = tally.StateOverlapUnmeasured }, null,
             "STATE-OVERLAP is withheld: this evaluator does not yet carry strict placed render surfaces; diagnostic boxes provide no finding or repair credit"),
