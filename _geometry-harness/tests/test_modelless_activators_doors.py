@@ -33,6 +33,9 @@ CollisionMarker box held both). So no probe measures them, and stateprobe sets t
           (ActivatorWithNoModel 3, DoorWithNoModel 1), never as NoBox.
     1463  contactprobe: the door with no model is not counted as a dependent the pass could not judge (trace: no Unjudgeable
           NoGeometry event; its rule names it as having no model).
+    1467  (Gate B review B1) a crate against the moved wall whose only link to the wall that stays is a modelless activator's
+          bounds is left in empty space: one EMPTY-SPACE row names it, its assembly of 1. Today the activator's bounds join its
+          assembly to the second wall and no row is written; in game the activator is nothing (station AD).
     1464  conflictdiff refuses, both ways round and with a sentence, each probe's emit against the same emit as a build before
           this change records it (its rule's earlier policy version).
 
@@ -70,7 +73,7 @@ def fk(hexid, plugin):
 R = {**{f"C{o}": fk(f"{0x901 + i:06X}", "MaObjects.esp") for i, o in enumerate(OBJECTS)},
      **{f"S{o}": fk(f"{0x921 + i:06X}", "MaObjects.esp") for i, o in enumerate(OBJECTS)},
      "XMarker": fk("000926", "MaObjects.esp"), "BareMarker": fk("000927", "MaObjects.esp"),
-     "NoGeom": fk("000928", "MaObjects.esp")}
+     "NoGeom": fk("000928", "MaObjects.esp"), "Crate": fk("00092A", "MaObjects.esp"), "UnderAct": fk("00092B", "MaObjects.esp")}
 
 
 def check(name, fn):
@@ -263,6 +266,13 @@ def main() -> int:
                     out.append((k, a.name, r.returncode == 3 and "measurement policy" in r.stdout and "REFUSED" in r.stdout, r.returncode))
             assert all(o[2] for o in out), f"conflictdiff did not refuse every pre-change pair: {out}"
 
+        def c1467():
+            # Rejects: a thing with no body counted as joining a fixture to a wall, so the crate the moved wall left reads as held.
+            rows = naming(L.empty, "Crate")
+            assert len(rows) == 1 and "assembly of 1 " in rows[0]["Summary"], \
+                f"want one EMPTY-SPACE row for the crate, its assembly of 1: {show(rows)}"
+            assert not naming(L.empty, "UnderAct"), f"a row names the modelless activator: {show(naming(L.empty, 'UnderAct'))}"
+
         def c1456():
             # Rejects: a fix that sets aside every reference without a box, so what the check cannot measure disappears.
             c = cov(L.sm_base)
@@ -277,6 +287,7 @@ def main() -> int:
                          ("1461 control: an activator with a model keeps its row in each probe", c1461),
                          ("1462 stateprobe sets activators and doors with no model aside by name", c1462),
                          ("1463 contactprobe: a door with no model is not an unjudged dependent", c1463),
+                         ("1467 a crate whose only other support has no body is unsupported", c1467),
                          ("1464 conflictdiff refuses a pre-change emit against a current one, both ways", c1464),
                          ("1456 control: a reference with no geometry that is not a marker stays unjudged", c1456)]:
             check(name, fn)
