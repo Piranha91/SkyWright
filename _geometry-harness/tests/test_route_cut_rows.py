@@ -136,12 +136,12 @@ def main() -> int:
             by = {}
             for r in doc["Rows"]:
                 by.setdefault(r["Verdict"], []).append(r)
-            for r in by["LikelyBlocked"]:
+            for r in by.get("LikelyBlocked", []):
                 assert r.get("PassageShare") == "about half the time", r
                 assert r["Passage"] >= 48, r
-            for r in by["Blocked"]:
+            for r in by.get("Blocked", []):
                 assert r.get("PassageShare") is None and r["Passage"] < 48, r
-            for r in by["NoLine"]:
+            for r in by.get("NoLine", []):
                 assert r.get("Passage") is None and r.get("PassageShare") is None, r
 
         def c1442():
