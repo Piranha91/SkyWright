@@ -21,6 +21,9 @@ states) and contactprobe (the default pass, and --empty-space) on it:
     1436  control: the light XM whose model file is missing keeps its Sunk row (unknown, not bodiless).
     1437  control: the light LM whose model file is missing keeps its CONTACT Orphaned row.
     1438  control: the light LM whose model file is missing keeps its EMPTY-SPACE row.
+    1438b (Gate A review M2) conflictdiff refuses, both ways round and with a sentence, each probe's emit against the same
+          emit as a build before this change records it (its rule's earlier policy version): the light rows that vanish
+          with the change must never be credited as repaired, nor reappear as created.
 
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_ML_HARNESS names another
 harness folder.
@@ -167,6 +170,10 @@ def json_rows_naming(rows_doc, name):
     return out
 
 
+# The policy version each probe's emit recorded before a light with no model stopped being a dependent (2026-10-24).
+PRE_CHANGE_VERSION = {"state": "state-contact-route-v1", "contact": "placement_contact_v1", "empty": "empty_space_v1"}
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         L = Lab(Path(td))
@@ -220,6 +227,23 @@ def main() -> int:
             assert len(rows) == 1 and rows[0]["Kind"] == "EMPTY-SPACE", \
                 f"want one EMPTY-SPACE row for the light LM whose model file is missing; got {show(rows)}"
 
+        def c1438b():
+            # Rejects: a comparison across the change that proceeds, crediting the vanished light rows as repaired (old -> new)
+            # or created (new -> old).
+            out = []
+            for k, emit in (("state", L.state_emit), ("contact", L.contact_emit), ("empty", L.empty_emit)):
+                doc = json.loads(emit.read_text(encoding="utf-8"))
+                cur = str(doc.get("MeasurementPolicy") or "")
+                version = cur.split("|", 1)[0]
+                old = dict(doc, MeasurementPolicy=PRE_CHANGE_VERSION[k] + cur[len(version):])
+                old_path = L.tmp / f"{k}-pre-change.json"
+                old_path.write_text(json.dumps(old), encoding="utf-8")
+                for a, b in ((old_path, emit), (emit, old_path)):
+                    r = run([exe(PROBES, "conflictdiff"), a, b])
+                    ok = r.returncode == 3 and "measurement policy" in r.stdout and "REFUSED" in r.stdout
+                    out.append((k, a.name, ok, r.returncode))
+            assert all(o[2] for o in out), f"conflictdiff did not refuse every pre-change pair: {out}"
+
         for name, fn in [("1430 stateprobe: no row for a light with no model", c1430),
                          ("1431 contactprobe: no CONTACT row for a light with no model", c1431),
                          ("1432 contactprobe --empty-space: no row for a light with no model", c1432),
@@ -228,7 +252,8 @@ def main() -> int:
                          ("1435 control: a light with a model keeps its EMPTY-SPACE row", c1435),
                          ("1436 control: a light whose model could not be read keeps its stateprobe row", c1436),
                          ("1437 control: a light whose model could not be read keeps its CONTACT row", c1437),
-                         ("1438 control: a light whose model could not be read keeps its EMPTY-SPACE row", c1438)]:
+                         ("1438 control: a light whose model could not be read keeps its EMPTY-SPACE row", c1438),
+                         ("1438b conflictdiff refuses a pre-change emit against a current one, both ways", c1438b)]:
             check(name, fn)
         if os.environ.get("HC_ML_DUMP"):
             d = Path(os.environ["HC_ML_DUMP"])
