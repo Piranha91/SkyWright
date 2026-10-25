@@ -28,6 +28,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
+sys.path.insert(0, str(HARNESS))
+import toolidentity  # noqa: E402  (the program identity rule, for keys a case recomputes)
 FIXT = HERE / "fixtures" / "evalrun"          # tracked: the generator, the fakes, the expectations
 EXPECTED = FIXT / "expected"
 GEN = FIXT / "_generated"                     # generated per run; never tracked (set in main())
@@ -7690,7 +7692,9 @@ def case_416(tmp):
         if j.get("kind") != "probe":
             continue
         probe = j["job"].split("-")[0]
-        prog = "probe-cmd:" + hashlib.sha256(f"python {FIXT / 'fakeprobes' / probe}.py".encode("utf-8")).hexdigest()
+        # the program key is the override's identity (toolidentity.probe_cmd: its text and the script it names); the
+        # population term is this case's subject, not the program key's form
+        prog = toolidentity.probe_cmd(f"python {FIXT / 'fakeprobes' / probe}.py")["digest"]
         order = j["inputs"]["order"]
         base = j["inputs"].get("base")
         parts = [probe, prog, sha(order), sha(base) if base else "-", ""]

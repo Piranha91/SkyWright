@@ -117,6 +117,17 @@ def override_keeps_its_text_key():
     assert k.startswith("probe-cmd:"), k
 
 
+def override_key_follows_its_script():
+    # rejects: an override keyed by its command text alone (a changed script under the same text is another program)
+    with tempfile.TemporaryDirectory() as t:
+        script = Path(t) / "fake.py"
+        script.write_text("print(1)", encoding="utf-8")
+        text = {"fakeprobe": f"python {script}"}
+        k1 = O.program_key(Path("."), "fakeprobe", text)
+        script.write_text("print(2)", encoding="utf-8")
+        assert O.program_key(Path("."), "fakeprobe", text) != k1, "the same command text over a changed script gave one key"
+
+
 for name, fn in [("same build in two folders: same key", same_build_same_key),
                  ("equal exes, different probe dll: different keys", probe_dll_changes_key),
                  ("equal exes, different housecarl-core.dll: different keys", core_dll_changes_key),
@@ -126,7 +137,8 @@ for name, fn in [("same build in two folders: same key", same_build_same_key),
                  ("one unchanged folder keyed twice: same key", same_folder_same_key_twice),
                  ("files a run writes in a subfolder: same key", run_time_subfolder_does_not_change_key),
                  ("a different copied data file: different keys", copied_data_file_changes_key),
-                 ("a --probe-cmd override keys by its text", override_keeps_its_text_key)]:
+                 ("a --probe-cmd override is keyed as an override", override_keeps_its_text_key),
+                 ("a --probe-cmd override's key follows its script's bytes", override_key_follows_its_script)]:
     check(name, fn)
 
 print(f"\n{len(PASSED)} passed, {len(FAILURES)} failed")

@@ -75,6 +75,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run, Runner  # noqa: E402
 
+sys.path.insert(0, str(HERE))
+import toolidentity  # noqa: E402
+
 DEFAULT_PROBES = ["navownprobe", "overlapprobe", "contactprobe"]
 VERDICT_RE = re.compile(r"verdict\s*:\s*(DIFFERENTIAL-[A-Z]+)")
 COUNT_RE = re.compile(r"^\s*(repaired|reclassified|created|unmeasured|unchanged)\s*:\s*([\d,]+)", re.M)
@@ -125,22 +128,17 @@ PAIR_RESULTS_SUFFIX = ".pair-results.jsonl.gz"
 
 
 def program_key(harness: Path, probe: str, overrides: dict[str, str]) -> str:
-    """What the cache must key a program by: the files a build puts in its Release folder, by relative path and hash:
-    every top-level file (the exe apphost, the dlls, the runtime json, data files the project copies to output) and the
-    runtimes/ tree; debug symbols are left out. Other subfolders are not build output (viewprobe writes shots/ there at
-    run time), so a run never changes its own key. The exe alone is the same launcher for every build of a project, so a
-    deploy that replaces only the dlls must still change the key. A fixture that stood a program in is keyed by the
-    override's own text (its identity is the command line)."""
+    """What the cache must key a program by: its identity under toolidentity's one rule, the digest evalrun freezes into
+    a plan and binds into receipts. A Release folder is keyed by the files a build puts there, by relative path and hash
+    (every top-level file but debug symbols, and the runtimes/ tree; other subfolders are run-time output, so a run never
+    changes its own key). The exe alone is the same launcher for every build of a project, so a deploy that replaces
+    only the dlls changes the key. A fixture that stood a program in is keyed by its command text AND the bytes of the
+    files that text names, so a changed script under the same command line is another program."""
     override = overrides.get(probe)
     if override:
-        return "probe-cmd:" + hashlib.sha256(override.encode("utf-8")).hexdigest()
-    folder = probe_exe(harness, probe).parent
-    h = hashlib.sha256()
-    built = [q for q in folder.iterdir() if q.is_file()] + [q for q in (folder / "runtimes").rglob("*") if q.is_file()]
-    for p in sorted((q for q in built if q.suffix.lower() != ".pdb"),
-                    key=lambda q: q.relative_to(folder).as_posix().lower()):
-        h.update(f"{p.relative_to(folder).as_posix().lower()}\0{sha256_file(p)}\n".encode("utf-8"))
-    return "folder:" + h.hexdigest()
+        rec = toolidentity.probe_cmd(override)
+        return rec["digest"] or ("probe-cmd:unverifiable:" + hashlib.sha256(override.encode("utf-8")).hexdigest())
+    return toolidentity.package(probe_exe(harness, probe).parent)["digest"]
 
 
 def load_json(p: Path):
@@ -464,8 +462,10 @@ def main() -> int:
 
     def record_job(job: str, kind: str, outcome: str, exit_code, emit: Path | None, *, written: bool,
                    reused_from: Path | None = None, stopped=None, log: Path | None = None, inputs: dict | None = None,
-                   runner: dict | None = None):
+                   runner: dict | None = None, program: str | None = None):
         rec = {"job": job, "kind": kind, "outcome": outcome, "exitCode": exit_code, "stopped": stopped,
+               # the program's key at this launch's start (toolidentity's rule): which build this job's result came from
+               "program": program,
                # what the Runner said about a stop (why, how long, whether the tree was confirmed gone), so a reader
                # names the real cause - a containment refusal is not a budget stop
                "stop": ({k: runner.get(k) for k in ("seconds", "treeStopped", "refused", "launchedExitCode")}
@@ -498,6 +498,7 @@ def main() -> int:
     exes = {p: probe_program(harness, p, overrides) for p in probes}
     exe_sha = {p: program_key(harness, p, overrides) for p in probes}
     diff_exe = probe_program(harness, "conflictdiff", overrides)
+    diff_key = program_key(harness, "conflictdiff", overrides)
     logs = out / "logs"
 
     def key_for(probe: str, order_file: Path, base_emit: Path | None, reverse_of: Path | None = None) -> str:
@@ -530,7 +531,8 @@ def main() -> int:
             inputs["baselineEmit"] = reverse_of
         if hit:
             reused, src = hit
-            record_job(job_id, "probe", "reused", 0, reused, written=False, reused_from=src, inputs=inputs)
+            record_job(job_id, "probe", "reused", 0, reused, written=False, reused_from=src, inputs=inputs,
+                       program=exe_sha[probe])
             return 0, False, False, reused, True
         argv = exes[probe] + ["--order", str(order_file)] + (["--base", str(base_emit)] if base_emit else []) + ["--emit", str(emit)] + common + extra
         if reverse_of is not None:
@@ -557,7 +559,7 @@ def main() -> int:
         if res.get("stopped"):
             # stopped at (or refused by) the caller's deadline: not finished, never cached, never a clean exit
             record_job(job_id, "probe", "stopped", res["exitCode"], emit, written=written, stopped=res["stopped"],
-                       log=log, inputs=inputs, runner=res)
+                       log=log, inputs=inputs, runner=res, program=exe_sha[probe])
             return (res["exitCode"] if res["exitCode"] not in (None, 0) else -1), refused, False, emit, False
         if res["exitCode"] == 0 and emit.exists():
             if written:
@@ -565,7 +567,8 @@ def main() -> int:
             else:
                 cache.note(f"NOT-RECORDED {job_id}: exited 0 but did not write {emit.name}; the file at that path "
                            f"is an earlier run's and is neither cached nor measured as this request's result")
-        record_job(job_id, "probe", "ran", res["exitCode"], emit, written=written, log=log, inputs=inputs)
+        record_job(job_id, "probe", "ran", res["exitCode"], emit, written=written, log=log, inputs=inputs,
+                   program=exe_sha[probe])
         return res["exitCode"], refused, illegal, emit, res["exitCode"] == 0 and written
 
     results: dict[str, list[dict]] = {}
@@ -625,7 +628,8 @@ def main() -> int:
                     # arm, and the created rows were split by the reverse emit (none when it was not measured).
                     record_job(djob, "diff", "stopped" if dres.get("stopped") else "ran", dres["exitCode"], dlog,
                                written=dafter is not None and dafter != dbefore, stopped=dres.get("stopped"),
-                               log=dlog, inputs={"base": base_emit, "arm": got, "reverse": reverse}, runner=dres)
+                               log=dlog, inputs={"base": base_emit, "arm": got, "reverse": reverse}, runner=dres,
+                               program=diff_key)
                     plan.advance()
                 else:
                     plan.advance(arms - 1)
