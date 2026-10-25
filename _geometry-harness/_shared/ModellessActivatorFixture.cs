@@ -29,6 +29,8 @@ namespace HarnessShared;
 //   SA..SE slab (0,0,0), half 70 u     a switch (enabled) at (0,0,400); the same five objects at (0,0,0), each the opposite
 //                                      of its switch (it arrives when the switch flips), inside the slab
 //   SK     slab, the same              a switch; the two markers at (0,0,0), arriving with it
+//   SP     slab, the same              a switch; a marker-flagged static with no model whose reference carries a Box primitive
+//                                      (the CollisionMarker shape: a box that may block), arriving with it
 //   SG     slab, the same              a switch; a static whose model file is missing and has no bounds (no geometry, not a
 //                                      marker: what the check cannot judge), arriving with it
 public static class ModellessActivatorFixture
@@ -40,7 +42,7 @@ public static class ModellessActivatorFixture
     static FormKey KO(uint id) => new(ObjectsKey, id);
     static FormKey KM(uint id) => new(MoreKey, id);
     public static readonly FormKey Wall = K(0x801), Switch = K(0x802), ActBox = K(0x803), ActModel = K(0x804), DoorBare = K(0x805),
-        XMarker = K(0x806), BareMarker = K(0x807), NoGeom = K(0x808), LayerNc = K(0x809), LayerTrigger = K(0x80A), LayerStatic = K(0x80B);
+        XMarker = K(0x806), BareMarker = K(0x807), NoGeom = K(0x808), CollisionBox = K(0x80C), LayerNc = K(0x809), LayerTrigger = K(0x80A), LayerStatic = K(0x80B);
     public static readonly string[] Objects = { "A", "N", "B", "M", "D" };   // act-box, act-nc, act-bare, act-model, door-bare
     public const string WallMesh = "ma\\wall.nif", LeverMesh = "ma\\lever.nif", XMarkerMesh = "ma\\xmarker.nif", MissingMesh = "ma\\missing.nif";
     public static readonly string[] Order = { "MaRoom.esm", "MaObjects.esp", "MaMover.esp" };
@@ -51,13 +53,14 @@ public static class ModellessActivatorFixture
 
     // Form ids: contact cells 0x811+i, state cells 0x821+i (i = 0..4 for A N B M D), SK 0x826, SG 0x827; walls 0x901+i, slabs
     // 0x911+i, SK slab 0x916, SG slab 0x917. Objects in MaObjects: contact refs 0x901+i, state switches 0x911+i and refs 0x921+i,
-    // SK switch 0x916, markers 0x926 (XMarker) and 0x927 (bare marker), SG switch 0x917, no-geometry static 0x928.
+    // SK switch 0x916, markers 0x926 (XMarker) and 0x927 (bare marker), SG switch 0x917, no-geometry static 0x928; SP (cell 0x828, slab 0x918) switch 0x918, collision box 0x929.
     public static FormKey ContactCell(int i) => K(0x811u + (uint)i);
     public static FormKey StateCell(int i) => K(0x821u + (uint)i);
     public static FormKey ContactRef(int i) => KO(0x901u + (uint)i);
     public static FormKey StateSwitch(int i) => KO(0x911u + (uint)i);
     public static FormKey StateRef(int i) => KO(0x921u + (uint)i);
-    public static readonly FormKey SwK = KO(0x916), SwG = KO(0x917), XMarkerRef = KO(0x926), BareMarkerRef = KO(0x927), NoGeomRef = KO(0x928);
+    public static readonly FormKey SwK = KO(0x916), SwG = KO(0x917), XMarkerRef = KO(0x926), BareMarkerRef = KO(0x927), NoGeomRef = KO(0x928),
+        SwP = KO(0x918), CollisionBoxRef = KO(0x929);
 
     static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y, float z, string? edid = null, FormKey? parent = null)
     {
@@ -120,6 +123,7 @@ public static class ModellessActivatorFixture
         room.Statics.Add(new Static(XMarker, Rel) { EditorID = "MaXMarker", Model = new Model { File = XMarkerMesh }, ObjectBounds = Box10(),
                                                     MajorRecordFlagsRaw = IsMarkerFlag });
         room.Statics.Add(new Static(BareMarker, Rel) { EditorID = "MaBareMarker", MajorRecordFlagsRaw = IsMarkerFlag });
+        room.Statics.Add(new Static(CollisionBox, Rel) { EditorID = "MaCollisionMarker", MajorRecordFlagsRaw = IsMarkerFlag });
         room.Statics.Add(new Static(NoGeom, Rel) { EditorID = "MaMissingModel", Model = new Model { File = MissingMesh } });
         room.CollisionLayers.Add(new CollisionLayer(LayerNc, Rel) { EditorID = "L_NONCOLLIDABLE", Name = "L_NONCOLLIDABLE", Index = NoncollidableIndex, Description = "collides with nothing" });
         room.CollisionLayers.Add(new CollisionLayer(LayerTrigger, Rel) { EditorID = "L_TRIGGER", Name = "L_TRIGGER", Index = 12, Flags = CollisionLayer.Flag.TriggerVolume, Description = "a trigger" });
@@ -131,6 +135,7 @@ public static class ModellessActivatorFixture
         }
         Room(room, K(0x826), "MaRoomSK", Ref(K(0x916), Wall, 0, 0, 0));
         Room(room, K(0x827), "MaRoomSG", Ref(K(0x917), Wall, 0, 0, 0));
+        Room(room, K(0x828), "MaRoomSP", Ref(K(0x918), Wall, 0, 0, 0));
         var roomPath = Save(room);
         using var roomOv = SkyrimMod.CreateFromBinaryOverlay(roomPath, Rel);
 
@@ -144,6 +149,10 @@ public static class ModellessActivatorFixture
         Room(objs, K(0x826), "MaRoomSK", Ref(SwK, Switch, 0, 0, 400, "MaSwK"), Ref(XMarkerRef, XMarker, 0, 0, 0, null, SwK),
              Ref(BareMarkerRef, BareMarker, 0, 0, 20, null, SwK));
         Room(objs, K(0x827), "MaRoomSG", Ref(SwG, Switch, 0, 0, 400, "MaSwG"), Ref(NoGeomRef, NoGeom, 0, 0, 0, null, SwG));
+        var cbox = Ref(CollisionBoxRef, CollisionBox, 0, 0, 0, null, SwP);
+        cbox.Primitive = new PlacedPrimitive { Type = PlacedPrimitive.TypeEnum.Box, Bounds = new P3Float(40, 40, 40),
+                                               Color = System.Drawing.Color.FromArgb(255, 0, 255, 0), Unknown = 0.15f };
+        Room(objs, K(0x828), "MaRoomSP", Ref(SwP, Switch, 0, 0, 400, "MaSwP"), cbox);
         Save(objs, roomOv);
 
         var mover = new SkyrimMod(MoverKey, Rel);

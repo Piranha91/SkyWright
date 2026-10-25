@@ -10390,7 +10390,33 @@ def main():
         ok = rc_ == 2 and not nm_
         return ok, f"comparison readerCreated {rc_} (want 2); lines saying no model: {[x[:200] for x in nm_]}"
 
+    # C1465. Control: a door with no model (station AD: no body in game) is set aside as having no body, as an activator with no
+    # model is (C494).
+    def c1465_modelless_door_set_aside():
+        D1, H1 = f"000D01:{MOD_A}", f"000H05:{MOD_B}"
+        arms = [arm("baseline", [BASE, OTHER, MOD_B, MOD_A], kind="baseline"), arm("without-a", [BASE, OTHER, MOD_B])]
+        p = [row(f"STATE-CONTACT@0S0W03:{MOD_A}@Triggered", MOD_A, MOD_B, D1, other=H1)]
+        refs = {D1: {"base": f"0B0D01:{MOD_A}"}, H1: {"base": f"0B0S01:{MOD_B}"}}
+        bases = {f"0B0D01:{MOD_A}": {"type": "Door", "editorId": "TestPlaceholderDoor", "model": ""},
+                 f"0B0S01:{MOD_B}": {"type": "Static", "editorId": "TestWall", "model": "wall.nif"}}
+        plan, md, html = compile_and_render(arms, {(SG_, "baseline"): p, (SG_, "without-a"): []}, [MOD_A],
+                                            names={"refs": refs, "bases": bases})
+        adm_, fs_ = body_rule_of(plan, D1)
+        ok = adm_ == ["noBody"] and len(fs_) >= 1 and all(nb_ == tot_ for _, tot_, nb_, _ in fs_)
+        return ok, f"door with no model: admission {adm_}; findings {fs_}"
+
+    # C1466. Rejects: the report's "no body" sentence naming markers as having no body (a CollisionMarker is a marker with no
+    # model and a body); it names the types decided in game.
+    def c1466_no_body_words_name_decided_types():
+        plan, md, html = get("bodyrule", body_rule_bundle)
+        lines = [x for x in md.splitlines() if "has no model" in x or "have no model" in x]
+        bad = [x for x in lines if re.search(r"no model \([^)]*\bmarker\b", x)]
+        ok = bool(lines) and not bad
+        return ok, f"lines naming a marker as having no body: {[x[:220] for x in bad]}; no-model lines {len(lines)}"
+
     for name, fn in [("modelless-bodiless/C1450-collision-marker-route-row-kept", c1450_collision_marker_route_row_kept),
+                     ("modelless-bodiless/C1465-control-modelless-door-set-aside", c1465_modelless_door_set_aside),
+                     ("modelless-bodiless/C1466-no-body-words-name-decided-types", c1466_no_body_words_name_decided_types),
                      ("modelless-bodiless/C1451-control-modelless-light-set-aside", c1451_modelless_light_still_set_aside),
                      ("modelless-bodiless/C1452-control-modelled-activator-unchanged", c1452_modelled_activator_unchanged),
                      ("modelless-bodiless/C1453-collision-marker-counted-in-comparison", c1453_collision_marker_counted_in_comparison)]:
