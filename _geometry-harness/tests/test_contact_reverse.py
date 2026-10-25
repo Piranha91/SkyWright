@@ -144,7 +144,8 @@ def same_as_full_reverse(scope):
             assert f[k] == g[k], f"{k} differs: full {json.dumps(f[k])[:500]} vs reverse-of {json.dumps(g[k])[:500]}"
         assert f.get("Predicates"), "the fixture's reverse re-measured no --base row: the case proves nothing"
         assert f.get("Conflicts"), "the fixture's baseline has no row: the case proves nothing"
-        assert f.get("MeasurementPolicy", "").startswith("placement_contact_v2|"), f"no sweep policy recorded: {f.get('MeasurementPolicy')}"
+        # the sweep policy's version (v3 since 2026-10-25: activators and doors with no model are no dependent, no host)
+        assert f.get("MeasurementPolicy", "").startswith("placement_contact_v3|"), f"no sweep policy recorded: {f.get('MeasurementPolicy')}"
     return t
 
 
@@ -208,7 +209,7 @@ def diff_gate_policy():
     cd = exe(PROBES, "conflictdiff")
     b, c, full, fast, pop = L.runs[("whole", "paths")]
     same = run([cd, b, c])
-    assert same.returncode == 0 and "measurement policy: placement_contact_v2|" in same.stdout, f"equal policies: exit {same.returncode}: {same.stdout[-400:]}"
+    assert same.returncode == 0 and "measurement policy: placement_contact_v3|" in same.stdout, f"equal policies: exit {same.returncode}: {same.stdout[-400:]}"
     for name, mutate in (("other", lambda d: d.__setitem__("MeasurementPolicy", "placement_contact_v0|eps 4")),
                          ("missing", lambda d: d.pop("MeasurementPolicy"))):
         doc = load(c); mutate(doc)
@@ -221,7 +222,8 @@ def diff_gate_policy():
 TERRAIN_FLAGS = ["--terrain", "--float-threshold", "8", "--burial-threshold", "8", "--burial-share", "0.5"]
 MODE_POLICY = {
     "terrain": "terrain_support_v1|eps 4|float 8|burial 8|burial-share 0.5|sample 1|absolute off|support-reach 256|radius on|bos on|force-enable none",
-    "empty-space": "empty_space_v2|eps 4|reach 128|min-anchor 64|max-members 256|anchor-report 512|radius on|bos on|force-enable none",
+    # v3 since 2026-10-25: activators and doors with no model are no fixture and no assembly member (station AD)
+    "empty-space": "empty_space_v3|eps 4|reach 128|min-anchor 64|max-members 256|anchor-report 512|radius on|bos on|force-enable none",
 }
 # a real run under one changed option per mode, and the words its policy then carries
 MODE_OTHER = {"terrain": (["--float-threshold", "16"], "|float 16|"), "empty-space": (["--eps", "6"], "|eps 6|")}
