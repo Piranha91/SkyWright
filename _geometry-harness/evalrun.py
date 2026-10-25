@@ -2598,14 +2598,14 @@ def cmd_run(a, *, resuming: bool = False) -> int:
     why = request_refusal(plan)
     if why:
         return refuse(why)
+    # The plan's premises are read before anything is written: `--rebuild-ledger` writes the ledger.
+    bad = premise_refusal(plan)
+    if bad:
+        return refuse(bad)
     ledger = Ledger(run, plan)
     if getattr(a, "rebuild_ledger", False):
         ledger.rebuild()
     bad = ledger.refusal()
-    if bad:
-        return refuse(bad)
-
-    bad = premise_refusal(plan)
     if bad:
         return refuse(bad)
 
