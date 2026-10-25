@@ -912,6 +912,20 @@ def route_cut_bundle(detector, doc):
                               route_rows={"baseline": (doc, detector)})
 
 
+def route_cut_two_arm_bundle():
+    """(Gate A review M1, L1) The patched order and the order without the patch, the route-cut check without a verdict on
+    both. The baseline's leads include a base-game object the evaluated mod changes (000B01:Skyrim.esm), which is not the
+    mod's own object; the arm without the patch has one lead of its own."""
+    doc_b = {"Probe": "blockprobe", "Targets": [MOD_A, MOD_B], "Rows": [
+        route_row("LikelyBlocked", 2, "YardB", 72, "about half the time"),
+        dict(route_row("Blocked", 1, "HallA", 32), FormKey=f"000B01:{BASE}", By=[MOD_A], Mesh="Plants\\Garlic01.nif")]}
+    doc_w = {"Probe": "blockprobe", "Targets": [MOD_A, MOD_B], "Rows": [route_row("LikelyBlocked", 3, "YardB", 96, "about half the time")]}
+    results = {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): [row("CONTACT", MOD_B, MOD_A, f"000801:{MOD_A}")]}
+    missing = [(ROUTE_CUT, "baseline", "completed", None), (ROUTE_CUT, "without-patch", "completed", None)]
+    return compile_and_render(PATCHED_ARMS, results, [MOD_A, MOD_B], patches=[PATCH], want_index=True, missing=missing,
+                              route_rows={"baseline": (doc_b, None), "without-patch": (doc_w, None)})
+
+
 def main():
     cells = []
 
@@ -10271,6 +10285,26 @@ def main():
         ok = ("ran, but could not decide" in sec_ and "Whether a single object blocks an NPC route" in sec_
               and "Leads for an in-game check" not in md)
         return ok, sec_[:600]
+
+    def c1449_route_cut_leads_own_plugin_and_setup():
+        # Rejects (Gate A review M1): a lead sentence that calls every object the evaluated mod's ("rated N objects of
+        # ModA.esp"), when one is a base-game object the mod only changes. Rejects (L1): a lead that does not say which
+        # setup it measured, in the report's own words for the two setups.
+        plan, md, html, index = route_cut_two_arm_bundle()
+        sec_ = section_text(md, "What the checks could not judge")
+        leads_ = [ln for ln in sec_.splitlines() if "Leads for an in-game check" in ln]
+        # the report's own words for each setup, as its coverage lines write them mid-sentence ("for the measured load order")
+        setups_ = ["for the " + a_["readerLabel"][:1].lower() + a_["readerLabel"][1:]
+                   for a_ in (plan.get("scope") or {}).get("arms") or [] if a_.get("readerLabel")]
+        own_ = [ln for ln in leads_ if f"000B01:{BASE}" in ln]
+        ok = (len(leads_) == 2 and len(setups_) == 2
+              and all(sum(1 for ln in leads_ if su_ in ln) == 1 for su_ in setups_)
+              and not any(f"objects of {MOD_A}" in ln for ln in leads_)
+              and len(own_) == 1 and f"a {BASE} object {MOD_A} changes" in own_[0])
+        return ok, f"setups {setups_}; leads {[ln[:300] for ln in leads_]}"
+
+    for name, fn in [("route-cut-leads/C1449-lead-names-its-own-plugin-and-setup", c1449_route_cut_leads_own_plugin_and_setup)]:
+        cell(name, fn)
 
     for name, fn in [("route-cut-leads/C1444-leads-listed-with-object-cell-passage", c1444_route_cut_leads_listed),
                      ("route-cut-leads/C1445-only-blocking-objects-never-clashes", c1445_route_cut_leads_only_blocking_objects),
