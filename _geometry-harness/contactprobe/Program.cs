@@ -988,6 +988,8 @@ Func<Snap, bool>? winScope = null;
 var winHash = cidx.PhysicalWinners(winScope, skips);
 MemStages.Print("winner arm hashed", cidx, 0, 0);
 Console.WriteLine($"   dependents hashed: {depHash.Count:N0} undeleted snaps of clutter- and furniture-scale physical refs — the arm decides which exist at runtime ({skips.DepNoGeometry:N0} winning refs without geometry, {skips.DepVolume:N0} over {cidx.MaxDependentDim:0}u set aside)");
+// The refs left out as no body (ContactIndex.IsBodiless), by type: no coverage key, so they are counted here (station AD).
+Console.WriteLine($"   no body, not judged: dependents {skips.DepBodilessLight:N0} lights, {skips.DepBodilessActivator:N0} activators, {skips.DepBodilessDoor:N0} doors with no model; moved hosts {skips.HostBodilessLight:N0} lights, {skips.HostBodilessActivator:N0} activators, {skips.HostBodilessDoor:N0} doors with no model");
 Console.WriteLine($"   winner arm: {winHash.Count:N0} physical refs placed, undeleted and enabled at runtime under the winner, any size (R3); left out: {skips.WinnerRuntimeDisabled:N0} disabled at runtime (R1), {skips.WinnerEnableUnresolved:N0} with an unresolved chain  ({sw.Elapsed.TotalSeconds:0.0}s)");
 
 // The emit's coverage lines fixed before the host loop: a --reverse-of baseline must carry these equal to this run's own.

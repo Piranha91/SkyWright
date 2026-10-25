@@ -235,6 +235,16 @@ public sealed class ContactSkips
 {
     public long HostNoGeometry, HostNoCollision, HostVolume, HostTooSmall, DepNoGeometry, DepVolume, DepIntroducedByMover, DepAbsentInArm, DepOtherSpace, BoxesApart;
     public long HostRuntimeDisabled, HostEnableUnresolved, DepEnableUnresolved, WinnerRuntimeDisabled, WinnerEnableUnresolved;
+    /// <summary>Moved hosts and last dependent snaps left out because their base has no body (ContactIndex.IsBodiless), by the
+    /// base's type: no coverage key (as for lights), counted for the console so they leave NoGeometry visibly.</summary>
+    public long HostBodilessLight, HostBodilessActivator, HostBodilessDoor, DepBodilessLight, DepBodilessActivator, DepBodilessDoor;
+
+    /// <summary>Count one bodiless base of type <paramref name="type"/> left out as a host or as a dependent.</summary>
+    public void Bodiless(string type, bool host)
+    {
+        if (host) { if (type == "Light") HostBodilessLight++; else if (type == "Activator") HostBodilessActivator++; else HostBodilessDoor++; }
+        else { if (type == "Light") DepBodilessLight++; else if (type == "Activator") DepBodilessActivator++; else DepBodilessDoor++; }
+    }
 }
 
 /// <summary>A tile hash of world boxes inside a space partition (interior cell | worldspace) — the OverlapIndex pair
@@ -1062,7 +1072,13 @@ public sealed class ContactIndex
             var prevBase = ArmBase(key, mover, closure);
             var winBase = WinnerBase(key);
             if (prevBase.IsNull) { if (tw) Te(key, MH, TraceOutcome.Never, "NoArmBase"); continue; }
-            if (!IsHostType(prevBase)) { if (tw) Te(key, MH, TraceOutcome.Never, "NotHostType", detail: $"base {prevBase}"); continue; }
+            if (!IsHostType(prevBase))
+            {
+                bool nb = IsBodiless(prevBase);
+                if (nb) skips.Bodiless(BodilessType(prevBase), host: true);
+                if (tw) Te(key, MH, TraceOutcome.Never, nb ? "NoModel" + BodilessType(prevBase) : "NotHostType", detail: $"base {prevBase}");
+                continue;
+            }
             var armEn = ArmEnable(key, mover, closure);
             if (!armEn.Resolved) { skips.HostEnableUnresolved++; if (tw) Te(key, MH, TraceOutcome.Unjudgeable, "EnableChainUnresolved"); continue; }
             if (!armEn.Enabled) { skips.HostRuntimeDisabled++; if (tw) Te(key, MH, TraceOutcome.SetAside, "RuntimeDisabledInArm"); continue; }   // it did not exist before either
@@ -1101,7 +1117,11 @@ public sealed class ContactIndex
                 bool last = i == snaps.Count - 1;
                 if (s.Deleted) { if (last) (lastOutcome, lastRule) = (TraceOutcome.Never, "DeletedSnap"); continue; }
                 var b = BaseAt(key, s.Plugin);
-                if (!IsDependentType(b)) { if (last) (lastOutcome, lastRule) = (TraceOutcome.Never, IsBodiless(b) ? "NoModel" + BodilessType(b) : "NotDependentType"); continue; }
+                if (!IsDependentType(b))
+                {
+                    if (last) { bool nb = IsBodiless(b); if (nb) skips.Bodiless(BodilessType(b), host: false); (lastOutcome, lastRule) = (TraceOutcome.Never, nb ? "NoModel" + BodilessType(b) : "NotDependentType"); }
+                    continue;
+                }
                 var box = WorldBox(b, s);
                 if (box.IsEmpty) { if (last) { skips.DepNoGeometry++; (lastOutcome, lastRule) = (TraceOutcome.Unjudgeable, "NoGeometry"); } continue; }
                 if (MaxDim(box) > MaxDependentDim)
