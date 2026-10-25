@@ -751,8 +751,8 @@ def parse_diff_log(text: str) -> list[dict]:
 
 
 def base_has_no_model(names: dict | None, fk) -> bool:
-    """A placed object whose base record the names enrichment read with no model (the field absent, "") has no body,
-    whatever the record's type: a light, a marker, an activator with no mesh (round 4 ruling)."""
+    """A placed object whose base record the names enrichment read with no model (the field absent, ""): nothing is drawn for
+    it. Whether it has a body is base_has_no_body's question, by type."""
     if not isinstance(names, dict):
         return False
     base = ((names.get("bases") or {}).get(((names.get("refs") or {}).get(str(fk)) or {}).get("base") or "") or {})
@@ -767,9 +767,20 @@ def no_model_type(names: dict | None, fk) -> str | None:
                .get("type"))
 
 
-def row_has_no_body(names: dict | None, r: dict) -> bool:
-    """A geometry row whose object, or any partner object, has no body (see base_has_no_model)."""
-    return any(base_has_no_model(names, x) for x in [r.get("formKey"), *(r.get("other") or ())] if x)
+def base_has_no_body(names: dict | None, fk, types) -> bool:
+    """A placed object with no body in game: its base record has no model AND is of a type measured to have none without one
+    (skill data reader.prediction.bodilessTypes, the probes' rule DetectorModel.HasNoBody: a light; an activator or a door,
+    station AD 2026-10-25). This replaces the round 4 ruling (2026-10-17: any type with no model has no body, decided from the
+    record field alone): a CollisionMarker is a static with no model whose box blocks in game (station Q)."""
+    if not base_has_no_model(names, fk):
+        return False
+    return str(((names.get("bases") or {}).get(((names.get("refs") or {}).get(str(fk)) or {}).get("base") or "") or {})
+               .get("type")) in set(types or ())
+
+
+def row_has_no_body(names: dict | None, r: dict, types) -> bool:
+    """A geometry row whose object, or any partner object, has no body (see base_has_no_body)."""
+    return any(base_has_no_body(names, x, types) for x in [r.get("formKey"), *(r.get("other") or ())] if x)
 
 
 NAV_LINK_ID = re.compile(r"navmesh ([0-9A-Fa-f]{6}:.+?) in .*? edge-links ([0-9A-Fa-f]{6}:.+?) triangle (\d+)")
@@ -1676,9 +1687,10 @@ def build_prediction(ctx: dict) -> dict:
         return bool(m_) and (m_ in marker_models or (m_.startswith("meshes/") and m_[7:] in marker_models))
 
     def bodiless(fk):
-        """An object whose base record has no model has no body to clash, whatever its type (W-B3, round 4): decided
-        from the record's model field, never a name. (seventh review) Nor has one whose model the game does not draw."""
-        return base_has_no_model(names, fk) or marker_model(fk)
+        """An object with no body to clash: its base record has no model and its type has none without one (base_has_no_body,
+        skill data bodilessTypes), decided from the record, never a name. (seventh review) Nor has one whose model the game
+        does not draw."""
+        return base_has_no_body(names, fk, words.get("bodilessTypes")) or marker_model(fk)
 
     marker_cache = {}
 
@@ -6827,6 +6839,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     names_row0 = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
     names_doc0 = load_json(bundle_dir / names_row0["path"]) if names_row0 else None
     body_checks = set(((pr.get("reader") or {}).get("prediction") or {}).get("bodyChecks") or [])
+    bodiless_types = set(((pr.get("reader") or {}).get("prediction") or {}).get("bodilessTypes") or [])
     by_object_checks = set(((pr.get("reader") or {}).get("prediction") or {}).get("identityByObject") or [])
     sibling = None
     if sibling_dir is not None:
@@ -7204,7 +7217,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                  for x in conflict_rows(c, None) if x.get("formKey") and x.get("formKey") not in still]
         if not rows_:
             return None
-        bodied_ = {x.get("formKey") for x in rows_ if not row_has_no_body(names_doc0, x)}
+        bodied_ = {x.get("formKey") for x in rows_ if not row_has_no_body(names_doc0, x, bodiless_types)}
         # (sixth review, Sewers r6 S4) the pairs those bodied objects were listed in, so the unit can be said
         return (len(bodied_), len({x.get("formKey") for x in rows_} - bodied_),
                 sum(1 for x in rows_ if x.get("formKey") in bodied_))
@@ -7217,7 +7230,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         f["rowsTotal"] = len(f["rows"])
         if f.get("kind") == "finding" and f.get("checkId") in body_checks:
             # rows whose object (or partner) has no model: not counted on the page, kept in the evidence index
-            f["rowsNoBody"] = sum(1 for r in f["rows"] if row_has_no_body(names_doc0, r))
+            f["rowsNoBody"] = sum(1 for r in f["rows"] if row_has_no_body(names_doc0, r, bodiless_types))
         f["readerRows"] = f["rowsTotal"] - int(f.get("rowsNoBody") or 0)
         f.setdefault("mediaIds", [])
         f.setdefault("evidenceIds", [])
@@ -7306,7 +7319,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 had_objects = ({x.get("formKey") for c in base_emit.get("Conflicts") or [] for x in conflict_rows(c, None)}
                                if check_id in by_object_checks and isinstance(base_emit, dict) else set())
                 known_objects = {what(x) for x in known_rows} - had_objects
-                bodied = {what(x) for x in known_rows if not row_has_no_body(names_doc0, x)} - had_objects
+                bodied = {what(x) for x in known_rows if not row_has_no_body(names_doc0, x, bodiless_types)} - had_objects
                 no_body_created = len(known_objects - bodied)
                 # (sixth review, Winterhold r6 S1) an object whose support is off for good in the setup compared with too,
                 # where it stands on and unmoved, is no new problem: that setup's check does not list it
@@ -7663,7 +7676,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                      if repaired_count else ""))
         elif f["kind"] == "finding" and c.get("A") and c.get("B"):
             sample = next((r.get("label") for r in f.get("rows") or [] if r.get("label")
-                           and not (f.get("rowsNoBody") and row_has_no_body(names_doc0, r))
+                           and not (f.get("rowsNoBody") and row_has_no_body(names_doc0, r, bodiless_types))
                            and " tris" not in str(r.get("label")).lower()
                            and not re.match(r"^[0-9a-f]{6}:", str(r.get("label")), re.I)), None)
             unit = phrases.get("unitSingular") if count_rows == 1 else phrases.get("unitPlural")

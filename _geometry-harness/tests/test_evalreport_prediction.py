@@ -1782,8 +1782,9 @@ def main():
                                             names={"refs": refs, "bases": bases})
         p, val = reader(plan).get("prediction") or {}, reader(plan).get("validation") or {}
         adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in p.get("record") or [])
+        # (2026-10-25, station AD) the sentence names the types with no body, not "any record with no model"
         ok = (adm == [("000L01", "noBody"), ("000L02", "admitted"), ("000S01", "admitted")]
-              and val.get("patchProblems") == 1 and "Also not counted: 1 clashes between the mods whose object's record has no model" in md
+              and val.get("patchProblems") == 1 and "Also not counted: 1 clashes between the mods whose object is a light, activator or door whose record has no model" in md
               and "Not counted as new clashes" in md)
         return ok, f"admission {adm}; new clashes {val.get('patchProblems')}"
 
