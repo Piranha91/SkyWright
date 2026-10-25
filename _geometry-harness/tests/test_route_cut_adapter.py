@@ -7,6 +7,9 @@ the selected profile held and a mod not installed there lost the check. evalrun 
 the plan targets that arm loads; an arm that loads none is not-applicable. Drives the REAL evalrun.py with the shipped
 registry's own check objects (trimmed to masters-and-order and route-cut) over the evalrun fixtures, with stand-ins for
 scopeprobe and blockprobe that record their argv. No game, instance or real probe is needed.
+
+Case 1443 (2026-10-24): the adapter passes blockprobe --rows <run>/outputs/<check>/<arm>.route-cut-rows.json, the receipt
+records that file as an output after the log (adapter.files), and the bundle carries it.
 """
 from __future__ import annotations
 
