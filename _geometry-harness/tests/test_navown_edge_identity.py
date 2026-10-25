@@ -319,9 +319,10 @@ def t1402():
         assert old in keys, f"{old} not among ordersweep's keys"
 
 
-# The canonical sha256 of stateprobe's row-identity fixture emit (Conflicts, Predicates, Coverage, sorted keys), from the base
-# build of piranharim-harness 00c692ab.
-STATE_ROWS_SHA = "fe4fa6b9ee63034fef96a2515b21c2d2cbc6612999025e084aa67fc10766ed8e"
+# The canonical sha256 of stateprobe's row-identity fixture emit (Conflicts, Predicates, Coverage, sorted keys). Was
+# fe4fa6b9... from the base build of piranharim-harness 00c692ab; since 2026-10-24 (lights with no model set aside by name,
+# Gate C review M3) "changed references with a box" also carries SetAside {"LightWithNoModel": 0}, and nothing else differs.
+STATE_ROWS_SHA = "d87e7975c42f2c53052d2ff2c1a848c3a459d5d3647b52a0d1cee198baabe804"
 
 
 def t1403():
