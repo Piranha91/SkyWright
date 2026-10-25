@@ -4965,14 +4965,13 @@ def build_prediction(ctx: dict) -> dict:
     lw = words.get("routeCutLeads") or {}
     route_leads = []
     arm_order = list(dict.fromkeys(a for a in [p_arm, patched_arm, w_arm, *s_arms.values()] if a))
-    for m in ctx["missing"] if lw else []:
-        cid_, aid_ = str(m.get("checkId")), m.get("armId")
-        if (cid_ not in (lw.get("checks") or []) or aid_ not in arm_order or str(m.get("status")) not in ("completed", "completed(undetermined)")
-                or m.get("part") not in (None, "arm")):
-            continue
-        b_ = ctx.get("mainBundle")
-        rc_ = b_.receipt_by_key.get((cid_, aid_, m.get("part"))) if b_ is not None else None
-        if not rc_ or ((rc_.get("result") or {}).get("detector")) is not None:
+    b_ = ctx.get("mainBundle")
+    for cid_, aid_ in [(c_, a_) for a_ in arm_order for c_ in (lw.get("checks") or [])] if lw and b_ is not None else []:
+        # the setup's own run of the check (no comparison part): it ran to the end and its detector reached no verdict
+        rc_ = b_.receipt_by_key.get((cid_, aid_, None)) or b_.receipt_by_key.get((cid_, aid_, "arm"))
+        res_ = (rc_ or {}).get("result") or {}
+        if (not rc_ or not (rc_.get("validation") or {}).get("accepted", True) or res_.get("execution") != "completed"
+                or res_.get("detector") is not None):
             continue
         ev_ = next((e for e in b_.evidence if e.get("recordedBy") == rc_["receiptId"]
                     and str(e.get("path", "")).endswith(lw.get("rowsSuffix") or ".route-cut-rows.json")), None)
