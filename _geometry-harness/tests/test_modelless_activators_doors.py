@@ -36,6 +36,8 @@ CollisionMarker box held both). So no probe measures them, and stateprobe sets t
     1467  (Gate B review B1) a crate against the moved wall whose only link to the wall that stays is a modelless activator's
           bounds is left in empty space: one EMPTY-SPACE row names it, its assembly of 1. Today the activator's bounds join its
           assembly to the second wall and no row is written; in game the activator is nothing (station AD).
+    1468  contactprobe's console counts the references it leaves out as having no body, by type: the fixture's 7 activator
+          references and 2 door references with no model are named as dependents not judged (no coverage key carries them).
     1464  conflictdiff refuses, both ways round and with a sentence, each probe's emit against the same emit as a build before
           this change records it (its rule's earlier policy version).
 
@@ -273,6 +275,12 @@ def main() -> int:
                 f"want one EMPTY-SPACE row for the crate, its assembly of 1: {show(rows)}"
             assert not naming(L.empty, "UnderAct"), f"a row names the modelless activator: {show(naming(L.empty, 'UnderAct'))}"
 
+        def c1468():
+            # Rejects: activators and doors leaving the dependent coverage's NoGeometry without a trace in the run's output.
+            out = L.logs["contact"].stdout
+            line = next((x for x in out.splitlines() if "no body, not judged: dependents" in x), "")
+            assert "0 lights, 7 activators, 2 doors with no model" in line, f"console line: {line or '(none)'}"
+
         def c1456():
             # Rejects: a fix that sets aside every reference without a box, so what the check cannot measure disappears.
             c = cov(L.sm_base)
@@ -288,6 +296,7 @@ def main() -> int:
                          ("1462 stateprobe sets activators and doors with no model aside by name", c1462),
                          ("1463 contactprobe: a door with no model is not an unjudged dependent", c1463),
                          ("1467 a crate whose only other support has no body is unsupported", c1467),
+                         ("1468 contactprobe's console counts bodiless dependents by type", c1468),
                          ("1464 conflictdiff refuses a pre-change emit against a current one, both ways", c1464),
                          ("1456 control: a reference with no geometry that is not a marker stays unjudged", c1456)]:
             check(name, fn)
