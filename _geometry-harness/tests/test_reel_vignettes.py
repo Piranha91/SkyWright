@@ -614,7 +614,8 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         obj = spoken_ref(names, fk, r["summary"])
         A, B = r["A"], r["B"]
         pl = ref(fk).get("placements") or {}
-        basev, av, bv = pl.get(fk.split(":", 1)[1]), pl.get(A), pl.get(B)
+        added = fk.split(":", 1)[1].lower() in {A.lower(), B.lower()}      # a new reference: no base-game spot
+        basev, av, bv = (None if added else pl.get(fk.split(":", 1)[1])), pl.get(A), pl.get(B)
         tol = policy["storeyTolerance"]
 
         def same(u, v):
@@ -1288,13 +1289,14 @@ def case_planner():
     oracle_checks(gg, gv, oracle(gp, gn, gm, gs, gmods), tag="grouped: ")
 
     # N9: the split orients the viewer from data, and says less when the data is missing
-    def orient_case(tag, mut):
+    def orient_case(tag, mut, fk=None):
         op_, on_, om_, os_, omods_ = synthetic_group()
         mut(op_, on_)
         g_ = planned(op_, on_, om_, os_, omods_)
         v_ = reel_view(g_)
         oracle_checks(g_, v_, oracle(op_, on_, om_, os_, omods_), tag=f"{tag}: ")
-        return next((c["narration"] for c in v_ if c["kind"] == "split"), "")
+        return next((c["narration"] for c in v_ if c["kind"] == "split"
+                     and (fk is None or c["clash"].get("formKey") == fk)), "")
     t_up = orient_case("structure up", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"].update(
         cellOverrides={"Beta.esp": {"dz": [1424.0, 1424.0, 1420.0, 0.0]}}))
     check("N9-structure", "Beta Mod raises The Lamp Room and moves Lamp with it; Target Mod keeps the original spot." in t_up,
@@ -1343,6 +1345,47 @@ def case_planner():
     t_base = orient_case("no base", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"].pop("placements"))
     check("N9-no-base", "keeps the original spot" not in t_base and "in different spots" in t_base,
           f"without the base game's value the mover is not named ({t_base[:160]!r})")
+    # (d) the base game's value alone is unreadable (the two mods' values are read): no mover, the spots still said
+    t_unread = orient_case("base unreadable", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"]["placements"].pop("Skyrim.esm"))
+    check("N9-base-unreadable", "keeps the original spot" not in t_unread and " moves Lamp" not in t_unread
+          and "in different spots" in t_unread and "metres below" in t_unread,
+          f"with the base game's value unreadable the mover clause is dropped and the spots still said ({t_unread[:220]!r})")
+
+    # (c) a new reference one of the two mods adds has no base-game value: the two spots, no mover clause
+    def new_ref(pr, nm):
+        old, new = "000403:Skyrim.esm", "000803:Beta.esp"
+        pr["reader"]["prediction"]["record"] = [r for r in pr["reader"]["prediction"]["record"] if r["formKey"]
+                                                not in ("000406:Skyrim.esm", "000407:Skyrim.esm", "000409:Skyrim.esm")]
+        for r in pr["reader"]["prediction"]["record"]:
+            if r["formKey"] == old:
+                r["formKey"] = new
+        for m in pr["media"]:
+            if (m.get("subject") or {}).get("formKey") == old:
+                m["subject"]["formKey"] = new
+        e = nm["refs"].pop(old)
+        e["carriedBy"] = ["Beta.esp", "Target.esp"]
+        e["cells"] = {"Beta.esp": "000A01:Skyrim.esm", "Target.esp": "000A01:Skyrim.esm"}
+        e["placements"] = {"Beta.esp": [0.0, 0.0, 1424.0], "Target.esp": [0.0, 0.0, 0.0]}
+        nm["refs"][new] = e
+    t_new = orient_case("new reference", new_ref, fk="000803:Beta.esp")
+    check("N9-new-ref", t_new != "" and "keeps the original spot" not in t_new and " moves Lamp" not in t_new
+          and "in different spots" in t_new and "metres" in t_new,
+          f"a reference one of the mods adds has no base-game spot: the two spots, no mover ({t_new[:220]!r})")
+
+    # exterior: nothing under the spot and no terrain above it is in the air; an interior never gets the ground clause
+    def air(pr, nm):
+        for m in pr["media"]:
+            m["provenance"]["support"] = {"down": None, "terrainAbove": False, "interior": False}
+    t_air = orient_case("air", air)
+    check("N9-air", WORDS["spotExtra"]["inAir"] + "." in t_air and "no floor" not in t_air and "below the ground" not in t_air,
+          f"an exterior spot with nothing under it is in the air ({t_air[-160:]!r})")
+
+    def ground_interior(pr, nm):
+        for m in pr["media"]:
+            m["provenance"]["support"] = {"down": None, "terrainAbove": True, "interior": True}
+    t_gi = orient_case("ground interior", ground_interior)
+    check("N9-ground-interior", "below the ground" not in t_gi and WORDS["spotExtra"]["noFloor"] + "." in t_gi,
+          f"an interior has no map: never below the ground, only no floor ({t_gi[-160:]!r})")
 
     # N3: one clash the reel cannot picture is said in the singular
     op1, on1, om1, os1, omods1 = synthetic()
@@ -1795,7 +1838,18 @@ CODE_SABOTAGE = {
     "code-structure-any-share": ("planner", "N9-structure-still", [("_geometry-harness/reel_plan.py",
         '            elif dzs and share >= float(policy.get("structureShare") or 1.0) and abs(dz_obj) > tol:',
         "            elif dzs and abs(dz_obj) > tol:")]),
-    "code-probe-dropped": ("capture", "N9-probe-argv", [("_geometry-harness/capture_acquire.py",
+    "code-new-ref-mover": ("planner", "N9-new-ref", [("_geometry-harness/reel_plan.py",
+        "        basev = None if definer.lower() in (A.lower(), B.lower()) else pl.get(definer)\n",
+        "        basev = pl.get(definer)\n")]),
+    "code-base-fallback": ("planner", "N9-base-unreadable", [("_geometry-harness/reel_plan.py",
+        "else pl.get(definer)\n", "else (pl.get(definer) or pl.get(B))\n")]),
+    "code-both-dropped": ("planner", "N9-who-both", [("_geometry-harness/reel_plan.py",
+        "        elif moved is not None and len(moved) == 2:\n", "        elif False:\n")]),
+    "code-air-as-floor": ("planner", "N9-air", [("_geometry-harness/reel_plan.py",
+        'extra = words["spotExtra"]["noFloor" if sup.get("interior") else "inAir"]', 'extra = words["spotExtra"]["noFloor"]')]),
+    "code-ground-interior": ("planner", "N9-ground-interior", [("_geometry-harness/reel_plan.py",
+        'if sup.get("terrainAbove") and not sup.get("interior"):', 'if sup.get("terrainAbove"):')]),
+    "code-probe-dropped":("capture", "N9-probe-argv", [("_geometry-harness/capture_acquire.py",
         '            argv += ["--clear-at", f"{float(spot[0]):g},{float(spot[1]):g},{float(spot[2]) + 64:g}"]', "            pass")]),
     "code-f3-states": ("capture", "F3-states", [(REF + "/scene-policy.json",
         '"states": ["without", "with", "highlight"],', '"states": ["highlighted", "unhighlighted", "highlighted"],')]),

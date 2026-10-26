@@ -386,7 +386,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         obj = spoken_ref(fk, r.get("summary"))
         A, B = r["A"], r["B"]
         pl = ref_of(fk).get("placements") or {}
-        basev, av, bv = pl.get(fk.split(":", 1)[1]), pl.get(A), pl.get(B)
+        definer = fk.split(":", 1)[1]
+        # a reference one of the two mods adds has no base-game spot to keep, so no mover is named
+        basev = None if definer.lower() in (A.lower(), B.lower()) else pl.get(definer)
+        av, bv = pl.get(A), pl.get(B)
         tol = float(policy.get("storeyTolerance") or 96.0)
 
         def same(u, v):
