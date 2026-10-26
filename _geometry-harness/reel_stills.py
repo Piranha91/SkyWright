@@ -64,7 +64,7 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
     lay = page.get("layout")
     if lay == "types":
         for r in page.get("rows") or []:
-            out.append(("head", f"{r.get('count')}   {r.get('label')}", 1.15))
+            out.append(("head", f"{r.get('label')}: {r.get('count')}", 1.15))
             if r.get("pairs"):
                 out.append(("dim", "between " + "; ".join(r["pairs"]), 0.8))
         if (page.get("leftOut") or {}).get("line"):
