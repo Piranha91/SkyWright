@@ -48,7 +48,7 @@ defect support remain unreviewed, and admitting media still goes through the est
 workflow. Nothing here admits synthetic or newly planned media as qualified, and no gate
 threshold is touched.
 
-The request's highlighted / unhighlighted / highlighted states share ONE camera: the same eye,
+The request's without / with / highlight states share ONE camera: the same eye,
 yaw, pitch, fov, aspect, canvas and pose id are emitted per state, because the only property the
 sequence may change is the diagnostic highlight.
 """
@@ -60,6 +60,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -585,8 +586,9 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
                             f"--pitch {chosen['pitch']:.1f} --fov {pose.get('fov')}"
                             + shotplan_mod.aspect_flag(pose.get("aspect")))}
     sequence = request.get("sequence") or {}
-    states = [{"state": s, "poseId": plan["poseId"], "camera": camera,
-               "onlyChangedProperty": sequence.get("onlyChangedProperty")}
+    setups = sequence.get("setups") or {}
+    states = [{"state": s, "poseId": plan["poseId"], "camera": camera, "setup": setups.get(s),
+               "highlight": s == "highlight"}
               for s in (sequence.get("states") or [])]
 
     return {
@@ -633,8 +635,8 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
         "states": states,
         "sequence": sequence,
         "statesNote": ("One camera serves every state: the pose, projection and canvas above are "
-                       "identical across the request's sequence, and the only property the "
-                       "sequence may change is the diagnostic highlight."),
+                       "identical across the request's sequence. The states differ only in the measured setup "
+                       "rendered (without / with the evaluated mod) and the diagnostic highlight."),
         "visualQualification": {
             "status": "pending",
             "note": ("A verified camera is geometry, not qualified media. Subject recognition, "
@@ -800,6 +802,112 @@ def cmd_acquire(a) -> int:
     return EXIT_OK
 
 
+VIEWPROBE = HERE / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+
+
+def cmd_capture(a) -> int:
+    """Render one vignette's states at its acquired camera and write the media items for each setup's bundle.
+
+    The camera comes verbatim from the acquisition (`camera.viewprobe`, `camera.cell`); nothing here composes or
+    adjusts a pose. Each state is one viewprobe process: `without` renders the setup without the evaluated mod
+    (--without-order), `with` and `highlight` the prediction setup (--with-order); `highlight` adds the request's
+    colour roles as the policy's highlight mode (ghost: coloured --ref, no --ref-surface). The replay pose each PNG
+    reports must be identical across the states, or the capture refuses. A refusal is a result: it is written to
+    capture-result.json with its sentence, for evalreport plan --capture-results."""
+    out = Path(a.out).resolve()
+    out.mkdir(parents=True, exist_ok=True)
+    result = {"schemaVersion": 1, "kind": "vignette-capture", "request": a.request, "status": "refused", "reason": None,
+              "states": [], "generatedUtc": utcnow()}
+
+    def finish(code):
+        write_json(out / "capture-result.json", result)
+        print(f"{result['status']} {a.request}" + (f": {result['reason']}" if result.get("reason") else ""))
+        return code
+    try:
+        acq = load_json(Path(a.acquisition).resolve())
+        packet = load_json(Path(a.packet).resolve())
+        request, _ = find_request(packet, a.request)
+    except (OSError, ValueError, Refused) as exc:
+        result["reason"] = f"the acquisition or the request could not be read: {exc}"
+        return finish(EXIT_REFUSED)
+    result["formKey"] = (request.get("recordKeys") or [None])[0]
+    if acq.get("status") != "camera-ready" or (acq.get("request") or {}).get("id") != a.request:
+        result["reason"] = (f"the acquisition is {acq.get('status')!r} for request "
+                            f"{(acq.get('request') or {}).get('id')!r}, not camera-ready for {a.request}")
+        return finish(EXIT_REFUSED)
+    cam = acq["camera"]
+    seq = request.get("sequence") or {}
+    states = list(seq.get("states") or [])
+    vig = request.get("vignette") or {}
+    arms = {"without": vig.get("withoutArmId"), "with": request.get("armId"), "highlight": request.get("armId")}
+    orders = {"without": a.without_order, "with": a.with_order, "highlight": a.with_order}
+    if states != ["without", "with", "highlight"] or not arms["without"]:
+        result["reason"] = (f"the request's sequence is {states} with setup without the mod {arms['without']!r}; "
+                            f"this step captures the reel's without / with / highlight states of a vignette request")
+        return finish(EXIT_REFUSED)
+    marks = []
+    for h in request.get("highlights") or []:
+        marks += ["--ref", f"{h['formKey']}={h['color']}"]
+    if seq.get("highlightMode") != "ghost":
+        marks.append("--ref-surface")
+    vp = Path(a.vp) if a.vp else VIEWPROBE
+    renderer = {n: sha256_file(vp.parent / n) for n in ("viewprobe.exe", "viewprobe.dll", "housecarl-core.dll")
+                if (vp.parent / n).is_file()}
+    media = {}
+    poses = set()
+    for state in states:
+        d = out / state
+        d.mkdir(parents=True, exist_ok=True)
+        argv = ([str(vp), cam["cell"], *a.passthrough, "--order", str(Path(orders[state]).resolve()),
+                 *shlex.split(cam["viewprobe"]), "--nav", "off", "--size", str(a.size), "--msaa", "4", "--report-mode"]
+                + (marks if state == "highlight" else []) + ["--out", str(d)])
+        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        text = r.stdout + "\n--stderr--\n" + r.stderr
+        (d / "console.txt").write_text(" ".join(argv) + "\n" + text, encoding="utf-8")
+        pngs = sorted(d.glob("*.png"), key=lambda f: f.stat().st_mtime)
+        fp = next((ln.split("capture input configuration:")[1].strip().split()[0] for ln in text.splitlines()
+                   if "capture input configuration:" in ln), None)
+        refusals = [ln.strip() for ln in text.splitlines() if "refused" in ln.lower()]
+        row = {"state": state, "armId": arms[state], "exit": r.returncode, "png": str(pngs[-1]) if pngs else None,
+               "sha256": sha256_file(pngs[-1]) if pngs else None, "configurationFingerprint": fp, "refusals": refusals,
+               "argv": argv}
+        result["states"].append(row)
+        if r.returncode != 0 or not pngs or not fp:
+            result["reason"] = (f"viewprobe could not render the {state} state (exit {r.returncode}"
+                                + (f"; {refusals[0]}" if refusals else "") + ("" if fp else "; no configuration line") + ")")
+            return finish(EXIT_REFUSED)
+        # the pose the renderer itself wrote into the PNG ("... | pose: ..."), and the pixel size it drew
+        from PIL import Image
+        with Image.open(pngs[-1]) as im:
+            meta, size = str(im.info.get("viewprobe") or ""), im.size
+        reported = meta.split("| pose:", 1)[1].split("|", 1)[0].strip() if "| pose:" in meta else None
+        if not reported:
+            result["reason"] = f"the {state} PNG carries no replay pose in its viewprobe metadata"
+            return finish(EXIT_REFUSED)
+        row["reportedPose"], row["size"] = reported, list(size)
+        poses.add((reported, size))
+        side = next(iter(sorted(d.glob("*-configuration.json"))), None)
+        overlays = ((load_json(side) or {}).get("Configuration") or {}).get("Overlays") if side else None
+        media.setdefault(arms[state], []).append({
+            "path": str(pngs[-1]), "mediaKind": "offline-render",
+            "subject": {"checkId": request.get("checkId"), "armId": arms[state], "formKey": result["formKey"],
+                        "description": f"vignette {vig.get('chapterId')} {state}: request {a.request}"},
+            "state": request.get("state") or "baseline", "configurationFingerprint": fp, "fingerprintSource": "emitted",
+            "provenance": {"tool": "viewprobe", "capturedUtc": utcnow(), "argv": argv, "rendererHashes": renderer,
+                           "captureRequest": a.request, "request": a.request, "poseId": acq.get("poseId"),
+                           "vignetteState": state, "camera": cam, "configurationSidecar": str(side) if side else None,
+                           "runtimeOverlayMods": sorted({str(o.get("Mod") or o.get("Provider") or o.get("Name"))
+                                                         for o in overlays or [] if isinstance(o, dict)})}})
+    if len(poses) != 1:
+        result["reason"] = "the states were not rendered at one pose and canvas"
+        return finish(EXIT_REFUSED)
+    for arm, items in media.items():
+        write_json(out / f"media-{arm}.json", {"schemaVersion": 2, "items": items})
+    result.update(status="captured", reason=None, poseId=acq.get("poseId"),
+                  media={arm: str(out / f"media-{arm}.json") for arm in media})
+    return finish(EXIT_OK)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="capture_acquire.py",
                                  description=__doc__.split("\n\n")[0],
@@ -829,6 +937,16 @@ def main(argv=None) -> int:
                    help="also write a copy of the packet with this request's camera.pose filled in")
     p.add_argument("--vp", default=None, help="viewprobe command, passed straight to shotplan")
     p.set_defaults(fn=cmd_acquire)
+    c = sub.add_parser("capture", help="render a vignette request's without / with / highlight states at its acquired camera")
+    c.add_argument("--acquisition", required=True, help="the camera-ready result of `acquire` for this request")
+    c.add_argument("--packet", required=True, help="the storyboard packet holding the request")
+    c.add_argument("--request", required=True)
+    c.add_argument("--with-order", required=True, help="the prediction setup's candidate file (viewprobe --order)")
+    c.add_argument("--without-order", required=True, help="the setup without the evaluated mod's candidate file")
+    c.add_argument("--out", required=True, help="state folders, media-<arm>.json per setup, capture-result.json")
+    c.add_argument("--size", type=int, default=1280)
+    c.add_argument("--vp", default=None, help="viewprobe.exe (default: the production build)")
+    c.set_defaults(fn=cmd_capture)
     argv = list(sys.argv[1:] if argv is None else argv)
     passthrough = []
     if "--" in argv:

@@ -121,6 +121,26 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
                         candidates[rid] = row
                         groups.setdefault(key, []).append(rid)
     requests = []
+    reel = presentation.get("reel") if isinstance(presentation.get("reel"), dict) else {}
+    if reel.get("status") == "planned":
+        # the vignette reel decides what is pictured: exactly its vignettes, one request each, with the setup the
+        # "without" frame is rendered from (skill data: the overlap rule's sequence.setups)
+        wanted = {}
+        for ch in reel.get("chapters") or []:
+            if ch.get("kind") == "vignette":
+                c = ch.get("clash") or {}
+                wanted[(c.get("armId"), c.get("formKey"))] = ch
+        for row in sorted(candidates.values(), key=lambda r: r["id"]):
+            ch = wanted.get((row["armId"], row["recordKeys"][0]))
+            if ch is None:
+                continue
+            row["vignette"] = {"chapterId": ch.get("id"), "withoutArmId": (ch.get("clash") or {}).get("withoutArmId"),
+                               "states": [f.get("state") for f in ch.get("frames") or []]}
+            row["selection"] = {"eligible": 1, "selected": 1, "omitted": 0, "unranked": int(row["ranking"]["value"] is None),
+                                "rule": "the reel plan's vignette selection"}
+            requests.append(row)
+        return {"policySha256": hashlib.sha256(policy_bytes).hexdigest(), "requests": requests, "limitations": limits,
+                "note": "One request per vignette of the reel plan. A camera and frames are measurements; a request is not media."}
     for key in sorted(groups):
         group = sorted((candidates[rid] for rid in groups[key]), key=lambda r: (not r["newProblem"], r["ranking"]["value"] is None,
                         -(r["ranking"]["value"] or 0), r["id"]))

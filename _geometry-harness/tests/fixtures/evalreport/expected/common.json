@@ -20,7 +20,7 @@
    "mode": "concise", "maxPages": 8,
    "page": {"size": "A4", "marginMm": 16, "baseFontPt": 10.5},
    "rowsPerGroup": 3, "figuresPerFinding": 1,
-   "reel": {"maxSeconds": 120, "fps": 30, "width": 1280, "height": 720}
+   "reel": {"maxSeconds": 600, "fps": 30, "width": 1280, "height": 720}
   },
   "scope": {
    "completionCompleteEqualsDisposition": true,

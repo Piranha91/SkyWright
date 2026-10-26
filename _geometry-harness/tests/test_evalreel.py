@@ -59,10 +59,10 @@ def capture_selection(root):
     check(evalreel.capture_requests(reversed_plan,root)["requests"]==rows,"unranked object-pair selection is stable across finding-row order")
     check(all(r["camera"]["reportMode"] and r["camera"]["lockPoseAndFramingAcrossViews"] and r["camera"]["pose"] is None for r in rows),"capture requests require clean frames and measured camera planning")
     sequence=rows[0]["sequence"]; review=rows[0]["review"]; model=review["imageModel"]
-    check(sequence["states"]==["highlighted","unhighlighted","highlighted"] and
-          sequence["onlyChangedProperty"]=="diagnosticHighlight" and
-          set(sequence["locked"]) >= {"recordIdentities","objects","underlyingMaterials","geometry","worldState","lighting","pose","projection","canvas","imageFit"},
-          "overlap sequence restores normal appearance between the same highlights with scene and framing locked")
+    check(sequence["states"]==["without","with","highlight"] and sequence["highlightMode"]=="ghost" and
+          sequence["setups"]=={"without":"withoutArm","with":"predictionArm","highlight":"predictionArm"} and
+          set(sequence["locked"]) >= {"worldState","lighting","pose","projection","canvas","imageFit"},
+          "overlap sequence shows the setup without the mod, the setup with it, then the ghost highlight, at one locked view")
     check(model["required"] and model["input"]=="actual-candidate-frame" and model["firstPassBlind"] and
           set(model["withhold"]) >= {"expectedObjectNames","recordAndMeshNames","expectedConcern","captions","narration"} and
           all(word in model["prompt"] for word in ["objects","location","concern","uncertainty"]),

@@ -212,9 +212,10 @@ def case_ready(root: Path, packet: Path, rid: str, request: dict):
     states = doc["states"]
     one = {json.dumps(s["camera"], sort_keys=True) for s in states}
     check("the same camera, canvas and pose id serve every comparison state",
-          [s["state"] for s in states] == ["highlighted", "unhighlighted", "highlighted"]
+          [s["state"] for s in states] == ["without", "with", "highlight"]
           and len(one) == 1 and {s["poseId"] for s in states} == {doc["poseId"]}
-          and all(s["onlyChangedProperty"] == "diagnosticHighlight" for s in states))
+          and [s["setup"] for s in states] == ["withoutArm", "predictionArm", "predictionArm"]
+          and [s["highlight"] for s in states] == [False, False, True])
     check("visual qualification stays pending and names what is unreviewed",
           doc["visualQualification"]["status"] == "pending"
           and "objectComprehension" in (doc["visualQualification"]["outstanding"] or [])
