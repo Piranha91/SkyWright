@@ -744,12 +744,34 @@ def capture_argv(request: dict, camera: dict, state: str, order: str, passthroug
     if split:
         fk = request["highlights"][0]["formKey"]
         argv += (["--npc", fk, "--npc-puck", "on"] if request.get("actor") else ["--ref", f"{fk}=cyan"])
+        spot = (request.get("placements") or {}).get(state)
+        if spot:
+            # what stands under this half's placement: a downward probe 64 u up (parse_support reads it back)
+            argv += ["--clear-at", f"{float(spot[0]):g},{float(spot[1]):g},{float(spot[2]) + 64:g}"]
     elif state == "highlight":
         for h in request.get("highlights") or []:
             argv += ["--ref", f"{h['formKey']}={h['color']}"]
         if (request.get("sequence") or {}).get("highlightMode") != "ghost":
             argv.append("--ref-surface")
     return argv
+
+
+def parse_support(text: str, spot) -> dict | None:
+    """A split half's downward probe, read back from its render's console: `down` the distance from the probe point
+    (64 u above the placement) to the first geometry below it (None when nothing is within the probe's reach), `terrainAbove` when the first thing above is
+    the terrain (an exterior placement under the ground), `interior` from the render's own cell line."""
+    shot = _load_shotplan()
+    probe = type("ProbeText", (), {"stdout": text})()
+    rows = shot.Probe.clear(probe)
+    key = (int(round(float(spot[0]))), int(round(float(spot[1]))), int(round(float(spot[2]) + 64)))
+    e = rows.get(key)
+    if e is None:
+        return None
+    down = (e["axes"].get("down") or {})
+    up = (e["axes"].get("up") or {})
+    interior = bool(re.search(r"^cell .*\(interior\)", text, re.M))
+    return {"at": list(key), "down": down.get("dist"),          # from the probe point, 64 u above the placement
+            "downHit": down.get("formkey"), "terrainAbove": up.get("formkey") == "000000:TERRAIN", "interior": interior}
 
 
 def _cell_of(request: dict, side: str) -> str:
@@ -1076,6 +1098,8 @@ def _capture(a) -> int:
         side = next(iter(sorted(d.glob("*-configuration.json"))), None)
         overlays = ((load_json(side) or {}).get("Configuration") or {}).get("Overlays") if side else None
         relative = split and (acq.get("split") or {}).get("mode") in ("relative", "fallback")
+        support = parse_support(text, (request.get("placements") or {}).get(state)) if split and             (request.get("placements") or {}).get(state) else None
+        row["support"] = support
         media.setdefault(arms[state], []).append({
             "path": str(pngs[-1]), "mediaKind": "offline-render",
             "subject": {"checkId": request.get("checkId"), "armId": arms[state], "formKey": result["formKey"],
@@ -1085,6 +1109,7 @@ def _capture(a) -> int:
                            "captureRequest": a.request, "request": a.request,
                            "poseId": acq.get("poseId") if not relative else f"{acq.get('poseId')}:{state}",
                            "relativePose": bool(relative), "splitMode": (acq.get("split") or {}).get("mode") if split else None,
+                           "support": support,
                            "vignetteState": state, "camera": cams[state], "configurationSidecar": str(side) if side else None,
                            "runtimeOverlayMods": sorted({str(o.get("Mod") or o.get("Provider") or o.get("Name"))
                                                          for o in overlays or [] if isinstance(o, dict)})}})
