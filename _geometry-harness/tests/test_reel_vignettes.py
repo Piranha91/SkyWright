@@ -178,7 +178,8 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
                   "pairs": [{"pair": [x, "Target.esp"], "hits": [],
                              "queries": [{"tool": t, "query": f"{x} {t}", "responseSha256": "0" * 64, "date": "2026-10-26"}
                                          for t in POLICY["patchSearch"]["requiredTools"]]} for x in ("Alpha.esp", "Beta.esp")],
-                  "knownAnswer": {"pair": ["Alpha.esp", "Target.esp"], "patch": "Alpha - Target patch.esp", "found": known_found}}
+                  "knownAnswer": {"pair": ["Alpha.esp", "Target.esp"], "patch": "Alpha - Target patch.esp",
+                                  "hits": [{"file": "Alpha - Target patch", "page": "Alpha Patches"}] if known_found else []}}
     mods = {"Target.esp": {"name": "Target Mod", "source": "mo2-folder"}, "Alpha.esp": {"name": "Alpha Mod", "source": "mo2-folder"},
             "Beta.esp": {"name": "Beta Mod", "source": "mo2-folder"},
             "Alpha - Target patch.esp": {"name": "Alpha Patches", "source": "mo2-folder"}}
@@ -292,7 +293,10 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS):
         lead = words["patch"]["leaves"].format(patch=patch_display(mods, own[0], words)) + " " if own else ""
         if hits:
             return lead + words["patch"]["listed"].format(file=hits[0]["file"])
-        if ((search or {}).get("knownAnswer") or {}).get("found") is True and not entry.get("unreadSources"):
+        known = (search or {}).get("knownAnswer") or {}
+        want = re.sub(r"\.(esp|esm|esl)$", "", str(known.get("patch") or ""), flags=re.I).lower()
+        found = bool(want) and any(want in json.dumps(h).lower() for h in known.get("hits") or [])
+        if found and not entry.get("unreadSources"):
             return lead + words["patch"]["noneOther" if own else "none"]
         return lead + words["patch"]["notFoundOther" if own else "notFound"]
 
@@ -641,7 +645,14 @@ def case_planner():
     check("known-answer", bool(texts) and not any("No patch exists" in x or "No other patch exists" in x for x in texts)
           and any(WORDS["patch"]["notFound"] in x for x in texts),
           "a patch search that did not find its own known patch says a patch was not found, never that none exists")
-    ks2 = copy.deepcopy(ks); ks2["knownAnswer"]["found"] = True
+    # a search file that states found=true with no hit behind it is not believed
+    ks3 = copy.deepcopy(ks); ks3["knownAnswer"]["found"] = True
+    gf = planned(kp, kn, km, ks3, kmods)
+    texts3 = [c["narration"] for c in reel_view(gf)]
+    check("known-answer-derived", bool(texts3) and not any("No patch exists" in x for x in texts3)
+          and any(WORDS["patch"]["notFound"] in x for x in texts3),
+          "a search file stating found=true with no matching hit still says a patch was not found")
+    ks2 = copy.deepcopy(ks); ks2["knownAnswer"]["hits"] = [{"file": "Alpha - Target patch"}]
     ks2["pairs"][1]["unreadSources"] = [{"source": "a page description", "why": "cut short"}]
     gu = planned(kp, kn, km, ks2, kmods)
     beta = [c["narration"] for c in reel_view(gu) if c["kind"] == "vignette" and "Beta.esp" in (c["clash"].get("pair") or [])]
@@ -835,7 +846,9 @@ CODE_SABOTAGE = {
         ("_geometry-harness/reel_plan.py", "if selected and patch_search is None:", "if False:"),
         ("_geometry-harness/reel_plan.py", "if entry is None or not need_tools <= tools:", "if False:")]),
     "code-known-answer": ("planner", "known-answer", [("_geometry-harness/reel_plan.py",
-        'if known.get("found") is True and not unread:', "if True:")]),
+        "if known_found and not unread:", "if True:")]),
+    "code-known-stated": ("planner", "known-answer-derived", [("_geometry-harness/reel_plan.py",
+        "    known_found = bool(want) and any(", '    known_found = known.get("found") is True or bool(want) and any(')]),
     "code-no-effect": ("planner", "F2-no-effect", [("_geometry-harness/reel_plan.py",
         'kept_rows = [r for r in rows if r.get("field") not in no_effect]', "kept_rows = list(rows)")]),
     "code-verdict-opening": ("planner", "1-opening", [("_geometry-harness/reel_plan.py",

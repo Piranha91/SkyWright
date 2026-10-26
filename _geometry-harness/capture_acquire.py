@@ -806,6 +806,18 @@ VIEWPROBE = HERE / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0
 
 
 def cmd_capture(a) -> int:
+    with _run("capture-acquire", mode="capture", stage_source="counted") as run:
+        run.stage("capture", total=1, unit="requests")
+        code = _capture(a)
+        run.advance(1)
+        if code == EXIT_OK:
+            run.tally(ok=1)
+        else:
+            run.refuse("the vignette capture refused; see capture-result.json", code)
+        return code
+
+
+def _capture(a) -> int:
     """Render one vignette's states at its acquired camera and write the media items for each setup's bundle.
 
     The camera comes verbatim from the acquisition (`camera.viewprobe`, `camera.cell`); nothing here composes or

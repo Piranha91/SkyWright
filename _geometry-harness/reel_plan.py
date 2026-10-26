@@ -167,6 +167,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                           f"{', '.join(sorted(need_tools))}; search it and record the queries")
 
     supplied = list(reader.get("suppliedPatches") or [])
+    # the search's known answer is derived here from its recorded hits, never taken from a flag the file states:
+    # found means a recorded hit names the expected patch (its plugin name without the extension)
+    known = (patch_search or {}).get("knownAnswer") or {}
+    want = re.sub(r"\.(esp|esm|esl)$", "", str(known.get("patch") or ""), flags=re.I).lower()
+    known_found = bool(want) and any(want in json.dumps(h, ensure_ascii=False).lower() for h in known.get("hits") or [])
 
     def own_patches(c):
         other = [m for m in c["pair"] if m != target][0]
@@ -192,12 +197,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if hits:
             return lead + words["patch"]["listed"].format(file=hits[0].get("file")), {**ev, "case": "listed", "hit": hits[0]}
         # "No patch exists" only on a search that found its own known answer and read every source of this pair
-        known = (patch_search or {}).get("knownAnswer") or {}
         unread = entry.get("unreadSources") or []
-        if known.get("found") is True and not unread:
+        if known_found and not unread:
             return lead + words["patch"]["noneOther" if own else "none"], {**ev, "case": "none-searched"}
         return (lead + words["patch"]["notFoundOther" if own else "notFound"],
-                {**ev, "case": "not-found", "knownAnswerFound": known.get("found"), "unreadSources": unread})
+                {**ev, "case": "not-found", "knownAnswerFound": known_found, "unreadSources": unread})
 
     def owner(fk, r):
         pair = [r["A"], r["B"]]
