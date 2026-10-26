@@ -1,7 +1,7 @@
 """The review reel's plan: which clashes it shows, how, and what it says (Piranha's vignette format, task
 2026-10-19-review-reel-vignettes).
 
-    plan_reel(pres, names, masters, policy, words, patch_search, mod_names, capture_results=None) -> dict
+    plan_reel(pres, names, masters, policy, words, patch_search, mod_names, capture_results=None, markers=, switches=) -> dict
 
 `pres` is the presentation evalreport is compiling (its `reader.prediction`, `reader.missingSummary`,
 `reader.suppliedPatches`, `scope.arms` and `media`); `names` the bundle's names enrichment (refs, bases, objects,
@@ -9,7 +9,13 @@ places); `masters` each plugin's own master list (lower case); `policy` the skil
 block (plus the report's `effectModelPattern`); `words` the skill's `report-priorities.json` `reel.words`;
 `patch_search` the recorded Nexus search (`evalreport plan --patch-search`); `mod_names` {plugin: {name, source}}
 (evalreport --mod-name, else the MO2 mod folder the evaluation recorded for the plugin); `capture_results` the
-capture step's per-request results, whose refusals turn a vignette into a still and are listed on the closing.
+capture step's per-request results: a refused clash is counted as one that cannot be pictured and the next drawable
+clash of its type takes its place (at most `captureAttemptsPerType` are tried); `switches` the prediction setup's
+switch census, for a world-state clash's condition.
+
+Every kept clash is pictured (an overlap, contact or world-state vignette: without, with, highlight; a placement split:
+the other mod's spot on the left, the winner's with the mod added on the right), represented by its type's "There are
+N cases" sentence, or counted in the one statement of clashes the reel cannot picture. `accounting` records which.
 
 The narration is built only from the skill's templates and typed slots: mod names, in-game place and object names
 (else the editor id in words), field labels and patch names. No report sentence (verdict, scope, limitations, finding
@@ -83,17 +89,40 @@ def _sha(obj) -> str:
 
 def plan_reel(pres: dict, names: dict | None, masters: dict | None, policy: dict, words: dict,
               patch_search: dict | None, mod_names: dict | None = None, capture_results: list | None = None,
-              markers: set | None = None) -> dict:
+              markers: set | None = None, switches: dict | None = None) -> dict:
     """`markers`: the references evalreport's marker rule calls editor-only (skill data markerModels / markerFlags,
-    read from the records); a clash on one is no clash a player meets, so it is left out with a count."""
+    read from the records); a clash on one is no clash a player meets, so it is left out with a count. `switches`: the
+    prediction setup's switch census rows by switch FormKey (edid, baselineEnabled, trigger), for a world-state clash's
+    condition."""
     try:
         return _plan(pres, names or {}, masters or {}, policy, words, patch_search, mod_names or {}, capture_results or [],
-                     set(markers or ()))
+                     set(markers or ()), switches or {})
     except Refused as e:
         return {"schemaVersion": SCHEMA, "status": "refused", "reason": str(e), "chapters": []}
 
 
-def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_results, markers):
+STATE_KIND = re.compile(r"^STATE-[A-Z]+@([0-9A-Fa-f]{6}:[^@]+)@")
+TRIGGER = re.compile(r"^quest (\S+) stage (\d+) .*\.(Enable|Disable)\(\)")
+
+
+def condition(row: dict, names: dict, switches: dict, place: str, words: dict) -> str:
+    """A world-state clash's condition: the quest and stage by in-game name when the census names a trigger that flips the
+    switch INTO the clash state (Enable on a switch disabled at load, Disable on one enabled at load) and the quest has an
+    in-game name; otherwise the fallback sentence. An editor id is never spoken."""
+    m = STATE_KIND.match(str(row.get("kind") or ""))
+    sw = switches.get(m.group(1)) if m else None
+    for by in ((sw or {}).get("trigger") or {}).get("by") or []:
+        t = TRIGGER.match(str(by))
+        if not t:
+            continue
+        into = (t.group(3) == "Enable") != bool(sw.get("baselineEnabled"))
+        quest = ((names.get("quests") or {}).get(t.group(1)) or {}).get("name")
+        if into and quest:
+            return words["conditionQuest"].format(quest=quest, stage=t.group(2))
+    return words["conditionFallback"].format(place=place)
+
+
+def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_results, markers, switches):
     reader = pres.get("reader") or {}
     pred = reader.get("prediction") or {}
     target = pred.get("subject")
@@ -120,20 +149,28 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         folder = mod(plugin)
         return stem if folder.lower() == stem.lower() else words["patchName"].format(plugin=stem, mod=folder)
 
+    def ref_of(fk):
+        return refs.get(str(fk)) or {}
+
     def base_of(fk):
-        return bases.get((refs.get(str(fk)) or {}).get("base")) or {}
+        return bases.get(ref_of(fk).get("base")) or {}
 
     def spoken_ref(fk, summary=None):
         eid = base_of(fk).get("editorId")
         if eid:
             return (objects.get(eid) or {}).get("name") or humanize(eid)
         m = re.match(r"^\w+ (\S+?):", summary or "")
-        return humanize(m.group(1)) if m else "a record"
+        return humanize(m.group(1)) if m else "record"
 
     def place_of(summary):
         m = re.search(r" in ([A-Za-z0-9_]+) \((?:int|ext)\)", summary or "") or re.search(r"^Cell ([A-Za-z0-9_]+):", summary or "")
         cell = m.group(1) if m else None
         return (places.get(cell) or {}).get("name") or humanize(cell) or "this place"
+
+    with_arm = pred.get("predictionArm")
+    without_arm = str(pred.get("withoutArm") or "").split(":", 1)[-1] or None
+    order = next((a.get("locationPluginOrder") for a in (pres.get("scope") or {}).get("arms") or []
+                  if a.get("armId") == with_arm), None) or []
 
     rows = [r for r in pred.get("record") or [] if r.get("admission") == "admitted"]
     no_effect = set(policy.get("noInGameEffectFields") or [])
@@ -142,9 +179,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     kept_rows = [r for r in rows if r.get("field") not in no_effect and r not in marker_rows]
     left_out = len([r for r in rows if r.get("field") in no_effect])
     left_markers = len({r["formKey"] for r in marker_rows})
+    types = policy.get("types") or {}
     clashes = {}
     for r in kept_rows:
-        t = (policy.get("types") or {}).get(r.get("checkId"))
+        t = types.get(r.get("checkId"))
         if t is None:
             continue
         key = (t, r["formKey"]) if t in ("record", "cell") else (t, r["formKey"], tuple(r.get("other") or []))
@@ -152,37 +190,74 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                                  "pair": tuple(sorted({r["A"], r["B"]} - {target})) + (target,)})["rows"].append(r)
     effect_re = re.compile(policy["effectModelPattern"], re.I) if policy.get("effectModelPattern") else None
 
-    def still_reason(c):
-        """None for a clash the reel can picture; else the skill's reason it is shown as data."""
-        if c["type"] in (policy.get("pictureTypes") or []):
-            r = c["rows"][0]
-            if effect_re and any(effect_re.search(str(base_of(fk).get("model") or "")) for fk in [r["formKey"], *(r.get("other") or [])]):
-                return "effect"
-            return None
-        return c["type"] if c["type"] in (policy.get("stillReasons") or {}) else "record"
+    def effect(fk):
+        return bool(effect_re and effect_re.search(str(base_of(fk).get("model") or "")))
 
-    selected = []
+    def unpictured_reason(c):
+        """None for a clash a picture can show; else the skill's reason it cannot (stillReasons keys)."""
+        if c["type"] not in (policy.get("pictureTypes") or []):
+            return c["type"]
+        r = c["rows"][0]
+        if c["type"] == "record":
+            if r.get("field") not in (policy.get("drawableFields") or []):
+                return "record"
+            b = base_of(r["formKey"])
+            if b.get("type") not in (policy.get("actorTypes") or []) and not b.get("model"):
+                return "notDrawn"
+            if effect(r["formKey"]):
+                return "effect"
+            # the left half shows the other mod's spot only when its version wins once the mod being added is gone
+            carriers = [p for p in ref_of(r["formKey"]).get("carriedBy") or [] if p in order and p != target]
+            if not carriers or carriers[-1] != r["A"]:
+                return "leftNotLoser"
+            return None
+        if any(effect(fk) for fk in [r["formKey"], *(r.get("other") or [])]):
+            return "effect"
+        return None
+
+    refused = {str(x.get("formKey")) for x in capture_results if x.get("status") == "refused" and x.get("formKey")}
+    attempts = int(policy.get("captureAttemptsPerType") or policy.get("perType") or 1)
+    chosen_by_type, unpictured, represented, candidates = {}, [], {}, {}
     for t in policy.get("typeOrder") or []:
         cs = [c for c in clashes.values() if c["type"] == t]
         if not cs:
             continue
+        draw = [c for c in cs if unpictured_reason(c) is None]
+        unpictured += [(c, unpictured_reason(c)) for c in cs if unpictured_reason(c) is not None]
         pairs: dict = {}
-        for c in cs:
+        for c in draw:
             pairs.setdefault(c["pair"], []).append(c)
         pair_order = sorted(pairs, key=lambda p: (-len(pairs[p]), p))
         for p in pair_order:
-            pairs[p].sort(key=lambda c: (still_reason(c) is not None, c["rows"][0]["formKey"]))
-        if len(cs) <= policy["allUpTo"]:
-            chosen = [c for p in pair_order for c in pairs[p]]
-        else:
-            chosen, i = [], 0
-            while len(chosen) < policy["perType"] and any(pairs.values()):
-                p = pair_order[i % len(pair_order)]
-                if pairs[p]:
-                    chosen.append(pairs[p].pop(0))
-                i += 1
-        selected += chosen
-    selected = selected[:policy["maxVignettes"]]
+            pairs[p].sort(key=lambda c: c["rows"][0]["formKey"])
+        ordering, i = [], 0                                 # round the pairs until every drawable clash has a place
+        while any(pairs.values()):
+            p = pair_order[i % len(pair_order)]
+            if pairs[p]:
+                ordering.append(pairs[p].pop(0))
+            i += 1
+        quota = len(draw) if len(draw) <= policy["allUpTo"] else policy["perType"]
+        chosen, tried_refused = [], []
+        for c in ordering[:attempts]:
+            if len(chosen) >= quota:
+                break
+            if c["rows"][0]["formKey"] in refused:
+                tried_refused.append(c)
+                continue
+            chosen.append(c)
+        unpictured += [(c, "captureRefused") for c in tried_refused]
+        chosen_by_type[t] = chosen
+        if t in (policy.get("pictureTypes") or []):
+            candidates[t] = [c["rows"][0]["formKey"] for c in ordering[:attempts]]
+        represented[t] = [c for c in draw if c not in chosen and c not in tried_refused]
+    budget = int(policy["maxVignettes"])
+    for t in policy.get("typeOrder") or []:
+        keep = chosen_by_type.get(t, [])[:max(budget, 0)]
+        represented.setdefault(t, [])
+        represented[t] += [c for c in chosen_by_type.get(t, []) if c not in keep]
+        chosen_by_type[t] = keep
+        budget -= len(keep)
+    selected = [c for t in policy.get("typeOrder") or [] for c in chosen_by_type.get(t, [])]
 
     # the patch search covers every pair the reel speaks about (skill data: patchSearch.requiredTools)
     searched = {}
@@ -212,7 +287,6 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         return [p for p in supplied if {other.lower(), target.lower()} <= set(masters.get(p.lower(), set()))]
 
     def patch_sentence(c):
-        other = [m for m in c["pair"] if m != target][0]
         own = own_patches(c)
         r = c["rows"][0]
         wp = r.get("withPatch")
@@ -243,7 +317,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         hit = [m for m in pair if m.lower() == made]
         if hit:
             return hit[0]
-        carried = [m for m in (refs.get(str(fk)) or {}).get("carriedBy") or [] if m in pair]
+        carried = [m for m in ref_of(fk).get("carriedBy") or [] if m in pair]
         return carried[-1] if carried else pair[0]
 
     def geometry_slots(c):
@@ -255,58 +329,37 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         return {"place": place_of(r.get("summary")), "modA": mod(first[1]), "objectA": spoken_ref(first[0]),
                 "modB": mod(second[1]), "objectB": spoken_ref(second[0])}
 
-    def record_parts(c):
-        """(template key, winner, loser, detail, object) per row of a record or cell clash."""
-        out = []
-        for r in c["rows"]:
-            winner, loser = mod(r["B"]), mod(r["A"])
-            if c["type"] == "cell":
-                out.append(("cell", winner, loser, place_of(r.get("summary")), None))
-            elif r.get("field") == "Placement":
-                b = _position((r.get("values") or {}).get("winner"))
-                base = base_of(r["formKey"])
-                key = ("placementRemoved" if b and b[2] <= float(policy.get("disabledZ", -30000.0)) else
-                       "placementNpc" if base.get("type") in (policy.get("actorTypes") or []) else "placement")
-                out.append((key, winner, loser, None, spoken_ref(r["formKey"], r.get("summary"))))
-            else:
-                out.append(("field", winner, loser, (words.get("fieldLabels") or {}).get(r.get("field"), "settings"),
-                            spoken_ref(r["formKey"], r.get("summary"))))
-        return out
+    def volume(fk):
+        b = base_of(fk).get("bounds")
+        if not b or len(b) != 6:
+            return None
+        s = float(ref_of(fk).get("scale") or 1.0)
+        return abs((b[3] - b[0]) * (b[4] - b[1]) * (b[5] - b[2])) * s ** 3
 
-    def say(key, winner, loser, detail, objs):
-        if key == "cell":
-            return words["cell"].format(winner=winner, loser=loser, place=detail)
-        if key == "field":
-            return words["field"].format(winner=winner, loser=loser, field=detail, object=joined(objs))
-        return words[key].format(winner=winner, loser=loser, object=joined(objs))
-
-    def still_row(c):
+    def highlight(c):
         r = c["rows"][0]
-        row = {"formKey": r["formKey"], "type": c["type"], "pair": [mod(m) for m in c["pair"]],
-               "field": (words.get("fieldLabels") or {}).get(r.get("field"), r.get("field")) if r.get("field") else None,
-               "object": spoken_ref(r["formKey"], r.get("summary")),
-               "reason": (policy.get("stillReasons") or {}).get(c.get("_reason") or still_reason(c) or c["type"])}
-        if c["type"] in ("overlap", "contact", "state"):
-            s = geometry_slots(c)
-            row.update(object=f"{s['objectA']} ({s['modA']}) and {s['objectB']} ({s['modB']})", place=s["place"])
-        elif c["type"] == "cell":
-            row["place"] = place_of(r.get("summary"))
-        if r.get("field") in (policy.get("showValuesFields") or []):
-            row["values"] = {mod(r["A"]): (r.get("values") or {}).get("lost"), mod(r["B"]): (r.get("values") or {}).get("winner")}
-        row["winner"] = mod(r["B"]) if c["type"] in ("record", "cell") else None
-        if row.get("place") and row["place"].lower() in str(row.get("object") or "").lower():
-            row["object"], row["place"] = row["place"], None          # the subject is the place: say it once
-        return row
+        if c["type"] == "record":
+            return [r["formKey"]]
+        fks = [r["formKey"], *(r.get("other") or [])]
+        vols = [volume(fk) for fk in fks]
+        if len(fks) == 2 and all(vols) and max(vols) >= float(policy.get("volumeFactor") or 0) * min(vols) > 0:
+            return [fks[vols.index(min(vols))]]
+        return fks
 
-    refusals = {}
-    for res in capture_results:
-        if res.get("status") == "refused" and res.get("formKey"):
-            refusals[str(res["formKey"])] = res
+    def sentence(c):
+        r = c["rows"][0]
+        if c["type"] == "record":
+            return words["placementSplit"].format(loser=mod(r["A"]), winner=mod(r["B"]),
+                                                  object=spoken_ref(r["formKey"], r.get("summary")), mod=mod(target))
+        s = geometry_slots(c)
+        if c["type"] == "state":
+            return words["stateClash"].format(condition=condition(r, names, switches, s["place"], words),
+                                              **{k: v for k, v in s.items() if k != "place"})
+        return words["overlap"].format(**s)
+
     game = {(m.get("subject") or {}).get("formKey") for m in pres.get("media") or []
             if m.get("assessed") and m.get("mediaKind") == "game-video"}
-    with_arm = pred.get("predictionArm")
-    without_arm = str(pred.get("withoutArm") or "").split(":", 1)[-1] or None
-    arm_of = {"without": without_arm, "with": with_arm, "highlight": with_arm}
+    arm_of = {"without": without_arm, "with": with_arm, "highlight": with_arm, "left": without_arm, "right": with_arm}
 
     def frame_media(c, state):
         fks = {c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])}
@@ -323,8 +376,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         counts.setdefault(c["type"], {"count": 0, "pairs": set()})
         counts[c["type"]]["count"] += 1
         counts[c["type"]]["pairs"].add(" and ".join(mod(m) for m in c["pair"]))
-    order = next((a.get("locationPluginOrder") for a in (pres.get("scope") or {}).get("arms") or []
-                  if a.get("armId") == with_arm), None) or []
+    affected = {target} | {p for r in kept_rows if types.get(r.get("checkId")) is not None for p in (r["A"], r["B"])}
     runtime_mods = sorted({o for m in pres.get("media") or [] for o in ((m.get("provenance") or {}).get("runtimeOverlayMods") or [])})
     opening_pages = [
         {"layout": "types", "title": words["stillTitles"]["types"].format(mod=mod(target)),
@@ -335,92 +387,73 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                      if left_out else None,
                      "markersLine": words["leftOutMarkers"].format(count=left_markers, noun="clash" if left_markers == 1 else "clashes")
                      if left_markers else None}},
-        {"layout": "load-order", "title": words["stillTitles"]["loadOrder"], "plugins": order, "targets": [target],
+        {"layout": "load-order", "title": words["stillTitles"]["loadOrder"], "legend": words["stillTitles"]["affected"],
+         "plugins": order, "targets": [target], "affected": [p for p in order if p in affected] or sorted(affected),
          "runtimeMods": runtime_mods, "runtimeTitle": words["stillTitles"]["runtime"] if runtime_mods else None}]
     chapters = [{"id": "R-01", "kind": "opening",
                  "narration": (words["opening"] if counts else words["openingNone"]).format(mod=mod(target)),
                  "still": {"pages": opening_pages}}]
-    stills: dict = {}
-    closing_extra = []
-    for c in selected:
-        reason = still_reason(c)
-        fk = c["rows"][0]["formKey"]
-        if reason is None and fk in refusals:
-            gs = geometry_slots(c)
-            closing_extra.append({"reason": words["closingLines"]["captureRefused"],
-                                  "subjects": [words["closingLines"]["refusedSubject"].format(**gs)]})
-            reason = c["_reason"] = "captureRefused"
-        if reason is None:
-            sentence = words["overlap"].format(**geometry_slots(c))
+    accounting = {}
+    for t in policy.get("typeOrder") or []:
+        if t not in counts:
+            continue
+        chosen = chosen_by_type.get(t) or []
+        accounting[t] = {"pictured": [c["rows"][0]["formKey"] for c in chosen],
+                         "unpictured": [c["rows"][0]["formKey"] for c, _ in unpictured if c["type"] == t],
+                         "represented": [c["rows"][0]["formKey"] for c in represented.get(t, [])]}
+        for i, c in enumerate(chosen):
             patch, evidence = patch_sentence(c)
-            text = sentence + " " + patch
+            text = sentence(c) + " " + patch
+            if i == 0:
+                n, shown = counts[t]["count"], len(chosen)
+                intro = words["cases"]["one" if n == 1 else "many"].format(count=n, label=words["caseLabels"][t])
+                lead = ("" if n == 1 else words["lead"]["all"] if shown == n else
+                        words["lead"]["one"] if shown == 1 else words["lead"]["some"].format(count=shown))
+                text = " ".join(x for x in (intro, lead, text) if x)
             if any(r["formKey"] in game for r in c["rows"]):
                 text += " " + words["playTime"]
             r = c["rows"][0]
+            split = t == "record"
+            states = ["left", "right"] if split else list(policy["sequence"])
             frames = []
-            for state in policy["sequence"]:
+            for state in states:
                 m = frame_media(c, state)
                 frames.append({"state": state, "armId": arm_of[state], "mediaId": (m or {}).get("id")})
-            chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "vignette", "narration": text,
-                             "clash": {"type": c["type"], "checkId": r["checkId"], "formKey": r["formKey"],
-                                       "other": list(r.get("other") or []), "pair": list(c["pair"]), "armId": with_arm,
-                                       "withoutArmId": without_arm, "place": geometry_slots(c)["place"],
-                                       "findingId": r.get("findingId")},
-                             "frames": frames, "patch": evidence})
-        else:
-            if c["type"] in ("record", "cell"):
-                parts = record_parts(c)
+            clash = {"type": t, "checkId": r["checkId"], "formKey": r["formKey"], "other": list(r.get("other") or []),
+                     "pair": list(c["pair"]), "armId": with_arm, "withoutArmId": without_arm,
+                     "findingId": r.get("findingId"), "highlight": highlight(c)}
+            if split:
+                lost, won = _position((r.get("values") or {}).get("lost")), _position((r.get("values") or {}).get("winner"))
+                clash.update(place=None, actor=base_of(r["formKey"]).get("type") in (policy.get("actorTypes") or []),
+                             placements={"left": list(lost) if lost else None, "right": list(won) if won else None},
+                             # the cell each version is filed in (names enrichment, read from the plugin files)
+                             cells={"left": (ref_of(r["formKey"]).get("cells") or {}).get(r["A"]),
+                                    "right": (ref_of(r["formKey"]).get("cells") or {}).get(r["B"])},
+                             labels={k: v.format(loser=mod(r["A"]), winner=mod(r["B"]), mod=mod(target))
+                                     for k, v in words["splitLabels"].items()})
             else:
-                parts = [("geometry", None, None, None, (words["state" if c["type"] == "state" else "overlap"]).format(**geometry_slots(c)))]
-            patch, evidence = patch_sentence(c)
-            stills.setdefault(c["type"], []).append((c, parts, patch, evidence))
-    for t in policy["typeOrder"]:
-        if t not in stills:
-            continue
-        groups: dict = {}
-        for c, parts, patch, evidence in stills[t]:
-            groups.setdefault((c["pair"], patch), {"parts": [], "evidence": evidence, "clashes": []})
-            groups[(c["pair"], patch)]["parts"] += parts
-            groups[(c["pair"], patch)]["clashes"].append(c)
-        said = []
-        for (_pair, patch), g in groups.items():
-            merged: dict = {}
-            for key, winner, loser, detail, obj in g["parts"]:
-                if key == "geometry":
-                    merged.setdefault((key, obj), [])
-                else:
-                    merged.setdefault((key, winner, loser, detail), []).append(obj)
-            for k, objs in merged.items():
-                said.append(k[1] if k[0] == "geometry" else say(k[0], k[1], k[2], k[3], [o for o in objs if o] or ["this"]))
-            said.append(patch)
-        chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "data-still", "type": t, "narration": " ".join(said),
-                         "clash": {"type": t},
-                         "still": {"pages": [{"layout": "rows", "title": type_labels[t],
-                                              "rows": [still_row(c) for c, _, _, _ in stills[t]]}]},
-                         "patches": [g["evidence"] for g in groups.values()]})
-    # "and N more": every count on the opening is accounted for in the body (on the type's still, else its row)
-    shown: dict = {}
-    for ch in chapters:
-        t = (ch.get("clash") or {}).get("type")
-        if ch["kind"] == "vignette":
-            shown[t] = shown.get(t, 0) + 1
-        elif ch["kind"] == "data-still":
-            shown[t] = shown.get(t, 0) + sum(len(pg.get("rows") or []) for pg in ch["still"]["pages"])
-    for row in opening_pages[0]["rows"]:
-        t = next(k for k, v in type_labels.items() if v == row["label"])
-        hidden = row["count"] - shown.get(t, 0)
-        if hidden <= 0:
-            continue
-        still = next((ch for ch in chapters if ch["kind"] == "data-still" and ch["clash"]["type"] == t), None)
-        target_ = still["still"]["pages"][-1] if still else row
-        target_["more"], target_["moreLine"] = hidden, words["more"].format(count=hidden)
+                clash["place"] = geometry_slots(c)["place"]
+                if t == "state":
+                    m_ = STATE_KIND.match(str(r.get("kind") or ""))
+                    clash.update(kind=r.get("kind"), state=m_.group(1) if m_ else None)
+            chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "split" if split else "vignette", "narration": text,
+                             "clash": clash, "frames": frames, "patch": evidence})
+    if unpictured:
+        n_un = len(unpictured)
+        sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un)
+        chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "unpictured", "narration": sentence_un, "count": n_un,
+                         "clashes": [{"formKey": c["rows"][0]["formKey"], "type": c["type"], "reason": why,
+                                      "field": c["rows"][0].get("field"), "pair": [mod(m) for m in c["pair"]],
+                                      "reasonText": (policy.get("stillReasons") or {}).get(why)}
+                                     for c, why in unpictured],
+                         "still": {"pages": [{"layout": "statement", "text": sentence_un}]}})
     checks = closing_checks(reader, pres, mod, patch_name, words)
     chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": words["closing"],
-                     "still": {"pages": [{"layout": "checks", "title": words["stillTitles"]["checks"],
-                                          "rows": checks + closing_extra}]}})
+                     "still": {"pages": [{"layout": "checks", "title": words["stillTitles"]["checks"], "rows": checks}]}})
     return {"schemaVersion": SCHEMA, "status": "planned", "reason": None,
             "policySha256": _sha(policy), "wordsSha256": _sha(words),
             "patchSearchSha256": _sha(patch_search) if patch_search is not None else None,
             "modNames": {k: v for k, v in mod_names.items()}, "markers": sorted(markers),
             "sequence": list(policy["sequence"]), "holdSeconds": dict(policy.get("holdSeconds") or {}),
+            "captureCandidates": candidates, "accounting": accounting,
             "chapters": chapters}

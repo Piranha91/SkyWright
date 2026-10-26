@@ -55,9 +55,13 @@ POLICY = {
               "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
               "records.cell-attributes": "cell", "state.conditional-geometry": "state",
               "geometry.navmesh-ownership": "navmesh"},
-    "pictureTypes": ["overlap", "contact"],
+    "pictureTypes": ["overlap", "contact", "record", "state"],          # phase 2: placements and world states are pictured
+    "drawableFields": ["Placement"],                                     # a record clash is pictured only for these fields
+    "captureAttemptsPerType": 5,                                         # Gate A2 Q3
+    "volumeFactor": 50,                                                  # Gate A2 Q6: mark only the smaller participant above it
     "effectModelPattern": r"^(?:effects|sky)[\\/]",          # the report's own pattern (report-priorities.json)
-    "stillReasons": {"effect": "effect", "record": "record", "cell": "cell", "state": "state", "navmesh": "navmesh"},
+    "stillReasons": {"effect": "effect", "record": "record", "cell": "cell", "state": "state", "navmesh": "navmesh",
+                     "captureRefused": "captureRefused", "notDrawn": "notDrawn", "leftNotLoser": "leftNotLoser"},
     "actorTypes": ["Npc"], "disabledZ": -30000.0, "showValuesFields": ["Description", "Name"],
     "patchSearch": {"requiredTools": ["housecarl_nexus_mod", "housecarl_nexus_file_search"]},
     "noInGameEffectFields": ["EditorID"],
@@ -75,13 +79,24 @@ WORDS = {
     "placement": "{winner} moves {object} that {loser} places.",
     "placementRemoved": "{winner} moves {object} that {loser} places out of the world.",
     "placementNpc": "{loser} and {winner} place {object} in different spots.",
-    "state": "When a quest or switch changes {place}, {modA}'s {objectA} and {modB}'s {objectB} occupy the same space.",
+    "stateClash": "{condition}, {modA}'s {objectA} and {modB}'s {objectB} occupy the same space.",
+    "conditionQuest": "When {quest} reaches stage {stage}",
+    "conditionFallback": "In one state of the world, when these objects appear in {place}",
+    "placementSplit": "{loser} and {winner} place {object} in different spots: {loser}'s on the left, {winner}'s on the right.",
+    "splitLabels": {"left": "Without {mod}", "right": "With {mod}"},
+    "caseLabels": {"overlap": "objects in the same space", "contact": "objects touching or blocking",
+                   "record": "record clashes", "state": "objects that clash when a quest or switch changes the world"},
+    "cases": {"one": "There is {count} case of {label}.", "many": "There are {count} cases of {label}."},
+    "lead": {"one": "Here is a representative example.", "some": "Here are {count} representative examples.",
+             "all": "Here are all of them."},
+    "unpictured": {"one": "{count} clash can't be visualized; find it in the accompanying report.",
+                   "many": "{count} clashes can't be visualized; find them in the accompanying report."},
     "field": "{winner} replaces {loser}'s {field} of {object}.",
     "cell": "{winner} replaces {loser}'s settings for {place}.",
     "fieldLabels": {"Description": "description", "Conditions": "conditions", "Name": "name", "Placement": "position",
                     "OcclusionData": "occlusion settings"},
     "patchName": "{plugin} from {mod}",
-    "stillTitles": {"types": "Clashes predicted from adding {mod}", "loadOrder": "Plugins analysed, in load order",
+    "stillTitles": {"types": "Clashes predicted from adding {mod}", "loadOrder": "Plugins analysed", "affected": "(affected)",
                     "checks": "Checks that could not run or could not decide",
                     "leftOut": "Not shown: {count} {noun} with no effect in play", "runtime": "Mods changing these scenes at run time"},
     "patch": {"fixes": "Get {patch}; it fixes this.", "keeps": "Get {patch}; it keeps {kept}'s version.",
@@ -90,9 +105,7 @@ WORDS = {
               "none": "No patch exists for these two mods.", "noneOther": "No other patch exists for these two mods.",
               "notFound": "No patch for these two mods was found.", "notFoundOther": "No other patch for these two mods was found."},
     "playTime": "This was also recorded in play.",
-    "closingLines": {"withSetup": "{check}, with {patch}", "withoutSetup": "{check}, without {patch}",
-                     "captureRefused": "No camera could see both objects", "refusedSubject": "{objectA} and {objectB} in {place}"},
-    "more": "and {count} more",
+    "closingLines": {"withSetup": "{check}, with {patch}", "withoutSetup": "{check}, without {patch}"},
     "leftOutMarkers": "Not shown: {count} {noun} on editor-only markers",
     "forbidden": ["compared", "candidate", "offline", "render", "gameplay", "not tested", "testing is incomplete",
                   "OcclusionData", "EditorID", ".esp", ".esm", ".esl"],
@@ -133,7 +146,14 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
               rec("000501:Skyrim.esm", "Beta.esp", "OcclusionData", "00ff", "ff00", "left",
                   "Cell CellFour: OcclusionData - Beta.esp's value lost to Target.esp's", check="records.cell-attributes"),
               {"checkId": "geometry.object-overlap", "kind": "OVERLAP", "A": "Target.esp", "B": "Target.esp",
-               "formKey": "000901:Target.esp", "admission": "sameMod", "summary": "same mod"}]
+               "formKey": "000901:Target.esp", "admission": "sameMod", "summary": "same mod"},
+              # phase 2: an overlap with a visual effect (never pictured) and a world-state contact (pictured in its state)
+              ov(6, "000303:Beta.esp", "CellThree", "left", b="Beta.esp"),
+              {"checkId": "state.conditional-geometry", "kind": "STATE-CONTACT@000701:Skyrim.esm@Triggered",
+               "A": "Target.esp", "B": "Beta.esp", "formKey": "000601:Target.esp", "other": ["000602:Beta.esp"],
+               "admission": "admitted", "findingId": "F-S1", "withPatch": "left", "physical": "Holds",
+               "summary": "Contact StateConditional under CampEnable (Skyrim.esm): 000601:Target.esp [Static Target_Cairn01] "
+                          "arrives - Sunk: the arriving dependent sits 9.3u inside something enabled in the state in CellFive (ext)"}]
     verdict_counts = [
         {"checkId": "geometry.object-overlap", "kind": "OVERLAP", "count": 5, "unit": "relationships", "fieldNames": {}},
         {"checkId": "records.contested-fields", "kind": "LOST-EDIT", "count": 5, "unit": "objects",
@@ -177,13 +197,25 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
                       "000301:Beta.esp": {"base": "B3", "carriedBy": ["Beta.esp"]},
                       "000401:Skyrim.esm": {"base": "B4", "carriedBy": ["Skyrim.esm", "Alpha.esp", "Target.esp"]},
                       "000403:Skyrim.esm": {"base": "B5", "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"]},
-                      "000405:Skyrim.esm": {"base": "B6", "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"]}},
-             "bases": {"B1": {"type": "Activator", "editorId": "Target_Altar01"}, "B2": {"type": "Door", "editorId": "AlphaDoor01"},
-                       "B3": {"type": "Static", "editorId": "BetaPillar01"}, "B4": {"type": "Static", "editorId": "MAG_StoneBench02"},
-                       "B5": {"type": "Static", "editorId": "SomeLamp01"},
-                       "B6": {"type": "Static", "editorId": "XMarkerHeading", "model": "XMarkerHeading.nif"}},
-             "objects": {"Target_Altar01": {"name": "Altar"}, "SomeLamp01": {"name": "Lamp"}},
-             "places": {"CellOne": {"name": "The First Hall"}}}
+                      "000405:Skyrim.esm": {"base": "B6", "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"]},
+                      "000106:Target.esp": {"base": "B9", "carriedBy": ["Target.esp"]},
+                      "000303:Beta.esp": {"base": "B3", "carriedBy": ["Beta.esp"]},
+                      "000601:Target.esp": {"base": "B7", "carriedBy": ["Target.esp"], "scale": 1.0},
+                      "000602:Beta.esp": {"base": "B8", "carriedBy": ["Beta.esp"], "scale": 1.0}},
+             "bases": {"B1": {"type": "Activator", "editorId": "Target_Altar01", "model": "Target\\Altar01.nif"},
+                       "B2": {"type": "Door", "editorId": "AlphaDoor01", "model": "Alpha\\Door01.nif"},
+                       "B3": {"type": "Static", "editorId": "BetaPillar01", "model": "Beta\\Pillar01.nif"},
+                       "B4": {"type": "Static", "editorId": "MAG_StoneBench02", "model": ""},
+                       "B5": {"type": "Static", "editorId": "SomeLamp01", "model": "Clutter\\Lamp01.nif"},
+                       "B6": {"type": "Static", "editorId": "XMarkerHeading", "model": "XMarkerHeading.nif"},
+                       "B7": {"type": "Static", "editorId": "Target_Cairn01", "model": "Target\\Cairn01.nif",
+                              "bounds": [-40, -40, 0, 40, 40, 90]},
+                       "B8": {"type": "Static", "editorId": "BetaArch01", "model": "Beta\\Arch01.nif",
+                              "bounds": [-3000, -6000, -4000, 3000, 6000, 2000]},
+                       "B9": {"type": "MoveableStatic", "editorId": "FXMistLow", "model": "Effects\\FXMistLow.nif"}},
+             "objects": {"Target_Altar01": {"name": "Altar"}, "SomeLamp01": {"name": "Lamp"}, "Target_Cairn01": {"name": "Cairn"},
+                         "BetaArch01": {"name": "Rock Arch"}},
+             "places": {"CellOne": {"name": "The First Hall"}, "CellFive": {"name": "The Camp"}}}
     masters = {"alpha - target patch.esp": {"skyrim.esm", "alpha.esp", "target.esp"}, "target.esp": {"skyrim.esm"},
                "alpha.esp": {"skyrim.esm"}, "beta.esp": {"skyrim.esm"}}
     search = None
@@ -281,9 +313,52 @@ def merged_checks(pres, mods, words=WORDS):
     return rows
 
 
-def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, markers=MARKERS):
-    """The expected reel for an evaluation: selection, kinds, sentences. Written from the Gate B rules (with the Gate B
-    review's S1 and S2), not from the planner."""
+# the switch census rows the planner reads for a world-state clash's condition (state.switch-census, the prediction setup)
+SWITCHES = {"000701:Skyrim.esm": {"edid": "CampEnable", "baselineEnabled": False,
+                                  "trigger": {"status": "Triggered", "kind": "quest stage",
+                                              "by": ["quest SomeQuest stage 10 (QF_SomeQuest_00012345.Fragment_1: "
+                                                     "Alias_Camp.GetReference().Disable()"]}}}
+
+
+def affected_plugins(pres, policy=POLICY, markers=MARKERS):
+    """The plugins the load-order page draws in the highlight colour: the mod being added and every plugin named as A or B
+    of a counted clash row (not a marker row, not a no-effect field)."""
+    pred = pres["reader"]["prediction"]
+    no_effect = set(policy["noInGameEffectFields"])
+    out = {pred["subject"]}
+    for r in pred.get("record") or []:
+        if r.get("admission") != "admitted" or r.get("field") in no_effect:
+            continue
+        if {r["formKey"], *(r.get("other") or [])} & set(markers):
+            continue
+        if (policy.get("types") or {}).get(r.get("checkId")) is None:
+            continue
+        out |= {r["A"], r["B"]}
+    return out
+
+
+def condition_words(row, names, switches, place, words=WORDS):
+    """A world-state clash's condition: the quest and stage by in-game name when the census names a trigger that flips the
+    switch INTO the clash state (Enable on a switch disabled at load, Disable on one enabled at load) and the quest has an
+    in-game name; otherwise the fallback sentence. Never an editor id."""
+    m = re.match(r"^STATE-[A-Z]+@([0-9A-Fa-f]{6}:[^@]+)@", str(row.get("kind") or ""))
+    sw = (switches or {}).get(m.group(1)) if m else None
+    for by in ((sw or {}).get("trigger") or {}).get("by") or []:
+        t = re.match(r"^quest (\S+) stage (\d+) .*\.(Enable|Disable)\(\)", by)
+        if not t:
+            continue
+        into = (t.group(3) == "Enable") != bool(sw.get("baselineEnabled"))
+        quest = ((names.get("quests") or {}).get(t.group(1)) or {}).get("name")
+        if into and quest:
+            return words["conditionQuest"].format(quest=quest, stage=t.group(2))
+    return words["conditionFallback"].format(place=place)
+
+
+def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, markers=MARKERS, switches=None, captures=None):
+    """The expected reel for an evaluation (phase 2: Piranha's viewing notes and the Gate A2 answers): selection over the
+    clashes a picture can show, the without/with/highlight vignette or the placement split, the "There are N cases" opening
+    of each pictured type, one count of what cannot be pictured, and the closing. Written from the rules, not the planner."""
+    switches = SWITCHES if switches is None else switches
     pred = pres["reader"]["prediction"]
     target = pred["subject"]
     rows = [r for r in pred["record"] if r.get("admission") == "admitted"]
@@ -298,38 +373,80 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         t = policy["types"][r["checkId"]]
         key = (t, r["formKey"]) if t in ("record", "cell") else (t, r["formKey"], tuple(r.get("other") or []))
         clashes.setdefault(key, {"type": t, "rows": [], "pair": tuple(sorted({r["A"], r["B"]} - {target})) + (target,)})["rows"].append(r)
+    order = next(a["locationPluginOrder"] for a in pres["scope"]["arms"] if a["armId"] == pred["predictionArm"])
+
+    def ref(fk):
+        return (names.get("refs") or {}).get(fk) or {}
 
     def base(fk):
-        return (names.get("bases") or {}).get(((names.get("refs") or {}).get(fk) or {}).get("base")) or {}
+        return (names.get("bases") or {}).get(ref(fk).get("base")) or {}
 
-    def picture(c):                                        # S1: only object pairs without a visual effect are pictured
+    def effect(fk):
+        return bool(re.search(policy["effectModelPattern"], str(base(fk).get("model") or ""), re.I))
+
+    def drawable(c):
+        """None when a picture can show this clash; else why not."""
         if c["type"] not in policy["pictureTypes"]:
-            return False
+            return c["type"]
         r = c["rows"][0]
-        return not any(re.search(policy["effectModelPattern"], str(base(fk).get("model") or ""), re.I)
-                       for fk in [r["formKey"], *(r.get("other") or [])])
-    selected = []
+        if c["type"] == "record":
+            if r.get("field") not in policy["drawableFields"]:
+                return "record"
+            b = base(r["formKey"])
+            if b.get("type") not in policy["actorTypes"] and not b.get("model"):
+                return "notDrawn"
+            if effect(r["formKey"]):
+                return "effect"
+            # the left half shows the other mod's spot only when that mod's version wins once the mod being added is gone
+            carriers = [p for p in ref(r["formKey"]).get("carriedBy") or [] if p in order and p != target]
+            if not carriers or carriers[-1] != r["A"]:
+                return "leftNotLoser"
+            return None
+        if any(effect(fk) for fk in [r["formKey"], *(r.get("other") or [])]):
+            return "effect"
+        return None
+
+    refused = {str(x.get("formKey")) for x in captures or [] if x.get("status") == "refused"}
+    chosen_by_type, unpictured, represented, candidates = {}, [], {}, {}
     for t in policy["typeOrder"]:
         cs = [c for c in clashes.values() if c["type"] == t]
         if not cs:
             continue
+        draw = [c for c in cs if drawable(c) is None]
+        unpictured += [(c, drawable(c)) for c in cs if drawable(c) is not None]
         pairs = {}
-        for c in cs:
+        for c in draw:
             pairs.setdefault(c["pair"], []).append(c)
         pair_order = sorted(pairs, key=lambda p: (-len(pairs[p]), p))
         for p in pair_order:
-            pairs[p].sort(key=lambda c: (not picture(c), c["rows"][0]["formKey"]))
-        if len(cs) <= policy["allUpTo"]:
-            chosen = [c for p in pair_order for c in pairs[p]]
-        else:
-            chosen, i = [], 0
-            while len(chosen) < policy["perType"] and any(pairs.values()):
-                p = pair_order[i % len(pair_order)]
-                if pairs[p]:
-                    chosen.append(pairs[p].pop(0))
-                i += 1
-        selected += chosen
-    selected = selected[:policy["maxVignettes"]]
+            pairs[p].sort(key=lambda c: c["rows"][0]["formKey"])
+        ordering, i = [], 0                                # round the pairs until every drawable clash has a place
+        while any(pairs.values()):
+            p = pair_order[i % len(pair_order)]
+            if pairs[p]:
+                ordering.append(pairs[p].pop(0))
+            i += 1
+        quota = len(draw) if len(draw) <= policy["allUpTo"] else policy["perType"]
+        chosen = []
+        for c in ordering[:policy["captureAttemptsPerType"]]:
+            if len(chosen) >= quota:
+                break
+            if c["rows"][0]["formKey"] in refused:
+                unpictured.append((c, "captureRefused"))
+                continue
+            chosen.append(c)
+        chosen_by_type[t] = chosen
+        if t in policy["pictureTypes"]:
+            candidates[t] = [c["rows"][0]["formKey"] for c in ordering[:policy["captureAttemptsPerType"]]]
+        represented[t] = [c for c in draw if c not in chosen and (c, "captureRefused") not in unpictured]
+    # maxVignettes caps the pictured scenes in type order; what it drops is represented
+    budget = policy["maxVignettes"]
+    for t in policy["typeOrder"]:
+        keep = chosen_by_type.get(t, [])[:max(budget, 0)]
+        represented.setdefault(t, [])
+        represented[t] += [c for c in chosen_by_type.get(t, []) if c not in keep]
+        chosen_by_type[t] = keep
+        budget -= len(keep)
 
     def patch_sentence(c):
         other = [m for m in c["pair"] if m != target][0]
@@ -360,78 +477,82 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         hit = [m for m in pair if m.lower() == made]
         if hit:
             return hit[0]
-        carried = [m for m in ((names.get("refs") or {}).get(fk) or {}).get("carriedBy") or [] if m in pair]
+        carried = [m for m in ref(fk).get("carriedBy") or [] if m in pair]
         return carried[-1] if carried else pair[0]
 
-    def geometry(c):
+    def slots(c):
         r = c["rows"][0]
         o_fk = (r.get("other") or [None])[0]
         a_owner, o_owner = owner(r["formKey"], r), owner(o_fk, r)
         first = (r["formKey"], a_owner) if a_owner == target else (o_fk, o_owner)
         second = (o_fk, o_owner) if first[0] == r["formKey"] else (r["formKey"], a_owner)
-        return words["state" if c["type"] == "state" else "overlap"].format(
-            place=place_of(names, r["summary"]), modA=mod_name(mods, first[1]), objectA=spoken_ref(names, first[0]),
-            modB=mod_name(mods, second[1]), objectB=spoken_ref(names, second[0]))
+        return {"place": place_of(names, r["summary"]), "modA": mod_name(mods, first[1]), "objectA": spoken_ref(names, first[0]),
+                "modB": mod_name(mods, second[1]), "objectB": spoken_ref(names, second[0])}
 
-    def record_parts(c):
-        out = []
-        for r in c["rows"]:
-            winner, loser = mod_name(mods, r["B"]), mod_name(mods, r["A"])
-            if c["type"] == "cell":
-                out.append(("cell", winner, loser, place_of(names, r["summary"]), None))
-            elif r.get("field") == "Placement":
-                b = position((r.get("values") or {}).get("winner"))
-                key = ("placementRemoved" if b and b[2] <= policy["disabledZ"] else
-                       "placementNpc" if base(r["formKey"]).get("type") in policy["actorTypes"] else "placement")
-                out.append((key, winner, loser, None, spoken_ref(names, r["formKey"], r["summary"])))
-            else:
-                out.append(("field", winner, loser, words["fieldLabels"].get(r["field"], "settings"),
-                            spoken_ref(names, r["formKey"], r["summary"])))
-        return out
+    def volume(fk):
+        b = base(fk).get("bounds")
+        if not b:
+            return None
+        s = float(ref(fk).get("scale") or 1.0)
+        return abs((b[3] - b[0]) * (b[4] - b[1]) * (b[5] - b[2])) * s ** 3
+
+    def highlight(c):
+        r = c["rows"][0]
+        fks = [r["formKey"], *(r.get("other") or [])]
+        if c["type"] == "record":
+            return [r["formKey"]]
+        vols = [volume(fk) for fk in fks]
+        if len(fks) == 2 and all(vols) and max(vols) >= policy["volumeFactor"] * min(vols):
+            return [fks[vols.index(min(vols))]]
+        return fks
+
+    def sentence(c):
+        r = c["rows"][0]
+        if c["type"] == "record":
+            return words["placementSplit"].format(loser=mod_name(mods, r["A"]), winner=mod_name(mods, r["B"]),
+                                                  object=spoken_ref(names, r["formKey"], r["summary"]), mod=mod_name(mods, target))
+        s = slots(c)
+        if c["type"] == "state":
+            return words["stateClash"].format(condition=condition_words(r, names, switches, s["place"], words), **{
+                k: v for k, v in s.items() if k != "place"})
+        return words["overlap"].format(**s)
 
     game = {(m.get("subject") or {}).get("formKey") for m in pres.get("media") or []
             if m.get("assessed") and m.get("mediaKind") == "game-video"}
+    counts = {t: len([c for c in clashes.values() if c["type"] == t]) for t in policy["typeOrder"]
+              if any(c["type"] == t for c in clashes.values())}
     chapters = [{"kind": "opening", "narration": words["opening"].format(mod=mod_name(mods, target)),
-                 "types": {words["typeLabels"][t]: len([c for c in clashes.values() if c["type"] == t]) for t in policy["typeOrder"]
-                           if any(c["type"] == t for c in clashes.values())},
-                 "leftOut": left_out, "leftMarkers": left_markers,
-                 "loadOrder": next(a["locationPluginOrder"] for a in pres["scope"]["arms"] if a["armId"] == pred["predictionArm"])}]
-    stills = {}
-    for c in selected:
-        if picture(c):
-            text = geometry(c) + " " + patch_sentence(c)
+                 "types": {words["typeLabels"][t]: n for t, n in counts.items()},
+                 "leftOut": left_out, "leftMarkers": left_markers, "loadOrder": order,
+                 "affected": sorted(affected_plugins(pres, policy, markers))}]
+    accounting = {}
+    for t in policy["typeOrder"]:
+        chosen = chosen_by_type.get(t) or []
+        accounting[t] = {"pictured": [c["rows"][0]["formKey"] for c in chosen],
+                         "unpictured": [c["rows"][0]["formKey"] for c, _ in unpictured if c["type"] == t],
+                         "represented": [c["rows"][0]["formKey"] for c in represented.get(t, [])]}
+        for i, c in enumerate(chosen):
+            text = sentence(c) + " " + patch_sentence(c)
+            if i == 0:
+                n, shown = counts[t], len(chosen)
+                intro = words["cases"]["one" if n == 1 else "many"].format(count=n, label=words["caseLabels"][t])
+                lead = ("" if n == 1 else words["lead"]["all"] if shown == n else
+                        words["lead"]["one"] if shown == 1 else words["lead"]["some"].format(count=shown))
+                text = " ".join(x for x in (intro, lead, text) if x)
             if any(r["formKey"] in game for r in c["rows"]):
                 text += " " + words["playTime"]
-            chapters.append({"kind": "vignette", "type": c["type"], "formKey": c["rows"][0]["formKey"],
-                             "pair": list(c["pair"]), "narration": text})
-        else:
-            parts = record_parts(c) if c["type"] in ("record", "cell") else [("geometry", None, None, None, geometry(c))]
-            stills.setdefault(c["type"], []).append((c, parts, patch_sentence(c)))
-    for t in policy["typeOrder"]:
-        if t not in stills:
-            continue
-        groups = {}                                        # per pair and patch sentence; one sentence per template
-        for c, parts, patch in stills[t]:
-            groups.setdefault((c["pair"], patch), []).extend(parts)
-        said = []
-        for (_pair, patch), parts in groups.items():
-            merged = {}
-            for key, winner, loser, detail, obj in parts:
-                merged.setdefault((key, obj) if key == "geometry" else (key, winner, loser, detail), []).append(obj)
-            for k, objs in merged.items():
-                if k[0] == "geometry":
-                    said.append(k[1])
-                elif k[0] == "cell":
-                    said.append(words["cell"].format(winner=k[1], loser=k[2], place=k[3]))
-                elif k[0] == "field":
-                    said.append(words["field"].format(winner=k[1], loser=k[2], field=k[3], object=joined(objs)))
-                else:
-                    said.append(words[k[0]].format(winner=k[1], loser=k[2], object=joined(objs)))
-            said.append(patch)
-        chapters.append({"kind": "data-still", "type": t, "formKeys": [c["rows"][0]["formKey"] for c, _, _ in stills[t]],
-                         "narration": " ".join(said)})
+            r = c["rows"][0]
+            chapters.append({"kind": "split" if t == "record" else "vignette", "type": t, "formKey": r["formKey"],
+                             "pair": list(c["pair"]), "narration": text, "highlight": highlight(c)})
+    n_un = len(unpictured)
+    if n_un:
+        chapters.append({"kind": "unpictured", "count": n_un,
+                         "narration": words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un),
+                         "clashes": [(c["rows"][0]["formKey"], c["type"], why) for c, why in unpictured]})
     chapters.append({"kind": "closing", "narration": words["closing"],
                      "checks": [(m["reason"], m["subjects"]) for m in merged_checks(pres, mods, words)]})
+    chapters[0]["accounting"] = accounting
+    chapters[0]["candidates"] = candidates
     return chapters
 
 
@@ -446,14 +567,15 @@ def reel_view(pres: dict) -> list[dict]:
             out.append({"kind": ch.get("kind"), "narration": " ".join(str(ch.get("narration") or "").split()),
                         "pages": pages, "frames": ch.get("frames") or [], "clash": ch.get("clash") or {},
                         "patch": ch.get("patch") or {}, "patches": ch.get("patches") or [],
-                        "rows": [r for p in pages for r in p.get("rows") or []]})
+                        "rows": [r for p in pages for r in p.get("rows") or []] + list(ch.get("clashes") or []),
+                        "count": ch.get("count")})
         return out
     out = []
     for ch in pres.get("chapters") or []:
         for cap in ch.get("captions") or []:
             out.append({"kind": {"finding": "clash", "comparison": "clash"}.get(ch.get("kind"), ch.get("kind")),
                         "narration": " ".join(str(cap.get("narration") or "").split()), "pages": [], "frames": [],
-                        "clash": {}, "patch": {}, "patches": [], "rows": []})
+                        "clash": {}, "patch": {}, "patches": [], "rows": [], "count": None})
     return out
 
 
@@ -464,13 +586,17 @@ def report_sentences(pres):
     return [" ".join(str(x).split()) for x in xs if x and len(str(x)) >= 20]
 
 
+PICTURED = ("vignette", "split")
+
+
 # ------------------------------------------------------------------------------------------ the rule checks
 def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag="", mods=None):
     pred = (pres.get("reader") or {}).get("prediction") or {}
     target = pred.get("subject") or ""
-    mods = mods if mods is not None else ((pres.get("reel") or {}).get("modNames") or {})
+    reel = pres.get("reel") or {}
+    mods = mods if mods is not None else (reel.get("modNames") or {})
     narr = [c["narration"] for c in view]
-    clash_scenes = [c for c in view if c["kind"] in ("vignette", "data-still", "clash")]
+    clash_scenes = [c for c in view if c["kind"] in PICTURED + ("data-still", "clash")]
     # 1 opening still
     op = view[0] if view else {}
     layouts = [p.get("layout") for p in op.get("pages") or []]
@@ -479,9 +605,30 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     lo = next((p for p in op.get("pages") or [] if p.get("layout") == "load-order"), {})
     check("1-opening", op.get("kind") == "opening" and layouts[:2] == ["types", "load-order"]
           and bool(mod_name(mods, target)) and op.get("narration") == words["opening"].format(mod=mod_name(mods, target))
-          and lo.get("plugins") == order,
-          f"{tag}the opening is a two-page still (clash types, then the load order) with only the fixed sentence "
-          f"(narration {op.get('narration', '')[:90]!r}, pages {layouts})")
+          and lo.get("plugins") == order and lo.get("title") == words["stillTitles"]["loadOrder"]
+          and lo.get("legend") == words["stillTitles"]["affected"],
+          f"{tag}the opening is a two-page still (clash types, then 'Plugins analysed' with the '(affected)' legend) with "
+          f"only the fixed sentence (narration {op.get('narration', '')[:90]!r}, pages {layouts}, load-order title "
+          f"{lo.get('title')!r}, legend {lo.get('legend')!r})")
+    # N2: the mod being added and every plugin of a counted clash drawn in the highlight colour, on the drawn page
+    want_aff = affected_plugins(pres, policy, set(reel.get("markers") or [])) if pred.get("record") is not None else set()
+    got_aff = set(lo.get("affected") or [])
+    styles = {}
+    try:
+        import reel_stills
+        for style, text, _ in reel_stills._blocks(lo):
+            m = re.match(r"^\s*\d+\s+(.+)$", text)
+            if m:
+                styles[m.group(1)] = style
+        legend_marked = any(style == "mark" and text == words["stillTitles"]["affected"] for style, text, _ in reel_stills._blocks(lo))
+    except Exception as exc:  # noqa: BLE001 - a still that cannot be drawn is a failed check, recorded below
+        legend_marked = False
+        styles = {"<draw failed>": str(exc)}
+    wrong = sorted(p for p in order or [] if (styles.get(p) == "mark") != (p in want_aff))
+    check("N2-affected", bool(want_aff) and got_aff == want_aff and not wrong and legend_marked,
+          f"{tag}the load-order page marks exactly the mod being added and the plugins of counted clashes, and draws its "
+          f"'(affected)' legend in the same colour (want {sorted(want_aff)}, page {sorted(got_aff)}, drawn wrongly {wrong[:4]}, "
+          f"legend marked {legend_marked})")
     # 2 plain wording: no report sentence, no internal term
     leaked = sorted({s[:60] for s in report_sentences(pres) for n in narr if s in n})
     bad = sorted({w for w in words["forbidden"] for n in narr if w.lower() in n.lower()}
@@ -489,17 +636,21 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     check("2-wording", any(narr) and not leaked and not bad,
           f"{tag}no report sentence and no internal term is spoken (narrated scenes {sum(1 for n in narr if n)}; an empty reel has "
           f"nothing to check and fails; report sentences {leaked[:3]}, terms {bad})")
-    # 3 vignettes: without -> with -> highlight, one narration each
+    # 3 vignettes: without -> with -> highlight; a placement split shows left then right
     vig = [c for c in view if c["kind"] == "vignette"]
+    spl = [c for c in view if c["kind"] == "split"]
     shapes = [[f.get("state") for f in c["frames"]] for c in vig]
+    sshapes = [[f.get("state") for f in c["frames"]] for c in spl]
     check("3-vignettes", bool(vig) and all(s == policy["sequence"] for s in shapes)
-          and all(len({f.get("mediaId") for f in c["frames"] if f.get("mediaId")}) == len([f for f in c["frames"] if f.get("mediaId")]) for c in vig),
-          f"{tag}every vignette shows {policy['sequence']} once, with one narration ({len(vig)} vignettes, shapes {shapes[:3]})")
+          and all(s == ["left", "right"] for s in sshapes)
+          and all(len({f.get("mediaId") for f in c["frames"] if f.get("mediaId")}) == len([f for f in c["frames"] if f.get("mediaId")]) for c in vig + spl),
+          f"{tag}every vignette shows {policy['sequence']} once and every split shows left then right, one narration each "
+          f"({len(vig)} vignettes, shapes {shapes[:3]}; {len(spl)} splits, shapes {sshapes[:2]})")
     # 4 patches: every clash scene ends with a patch sentence; a named patch is that pair's patch
     pat = [re.escape(v).replace(r"\{patch\}", ".+?").replace(r"\{kept\}", ".+?").replace(r"\{file\}", ".+?") for v in words["patch"].values()]
     no_patch = [c["narration"][:60] for c in clash_scenes if not any(re.search(p, c["narration"]) for p in pat)]
     foreign = []
-    for c in vig + [c for c in view if c["kind"] == "data-still"]:
+    for c in clash_scenes:
         for p in [c.get("patch") or {}] + list(c.get("patches") or []):
             if p.get("patch") and not {m.lower() for m in p.get("pair") or []} <= {m.lower() for m in p.get("masters") or []}:
                 foreign.append(c["narration"][:60])
@@ -514,14 +665,14 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     check("5-disclaimers", any(narr) and not disc and (game or not play),
           f"{tag}no disclaimer or limitation is spoken and play-time is mentioned only with play-time media (narrated scenes "
           f"{sum(1 for n in narr if n)}; an empty reel fails; {disc[:3]})")
-    # 6 closing still
+    # 6 closing still: the checks that could not run or decide, and nothing else (capture refusals are counted, Gate A2 Q4)
     cl = view[-1] if view else {}
     want = [(m.get("reason"), list(m.get("subjects") or [])) for m in merged_checks(pres, mods, words)]
     got = [(r.get("reason"), list(r.get("subjects") or [])) for p in cl.get("pages") or [] if p.get("layout") == "checks"
            for r in p.get("rows") or []]
-    check("6-closing", cl.get("kind") == "closing" and got[:len(want)] == want and cl.get("narration") == words["closing"],
-          f"{tag}the closing is a still listing each check that could not run or decide with its reason, and says only "
-          f"the fixed sentence (narration {cl.get('narration', '')[:90]!r}, {len(got)} of {len(want)} rows)")
+    check("6-closing", cl.get("kind") == "closing" and got == want and cl.get("narration") == words["closing"],
+          f"{tag}the closing is a still listing each check that could not run or decide with its reason and nothing else, "
+          f"and says only the fixed sentence (narration {cl.get('narration', '')[:90]!r}, {len(got)} rows, {len(want)} expected)")
     # C1: no still speaks the tool: no form key, no "request", no setup role label
     labels = {a.get("displayLabel") for a in (pres.get("scope") or {}).get("arms") or [] if a.get("displayLabel")}
     labels |= {"Measured load order", "Tested alternative setup"}
@@ -532,40 +683,72 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     check("C1-stills-plain", bool(view) and any(c["pages"] for c in view) and not fk_hits
           and "request" not in still_text.lower() and not bad_lbl,
           f"{tag}no still shows a form key, a capture request or a setup role label (form keys {fk_hits[:2]}, labels {bad_lbl})")
-    # C2: a place is said once: a row whose subject is the place itself carries no "in {place}"
-    twice = [r.get("object") for c in view for r in c["rows"] if r.get("place") and r.get("object")
-             and r["place"].lower() in str(r["object"]).lower()]
-    check("C2-place-once", bool(view) and any(c["rows"] for c in view) and not twice,
-          f"{tag}no still row names its place twice ({twice[:2]})")
-    # C3: every count on the opening is accounted for in the body: shown, plus a stated "and N more"
-    lbl_type = {v: k for k, v in words["typeLabels"].items()}
-    shown, more = {}, {}
-    for c in view:
-        t = (c.get("clash") or {}).get("type")
-        if c["kind"] == "vignette":
-            shown[t] = shown.get(t, 0) + 1
-        elif c["kind"] == "data-still":
-            for p in c["pages"]:
-                shown[t] = shown.get(t, 0) + len(p.get("rows") or [])
-                more[t] = more.get(t, 0) + int(p.get("more") or 0)
+    # N3: no data stills; one statement of what cannot be pictured, after the pictured scenes, before the closing
+    data = [c["kind"] for c in view if c["kind"] in ("data-still",)] + [p.get("layout") for c in view for p in c["pages"]
+                                                                        if p.get("layout") == "rows"]
+    refusal_rows = [s for p in cl.get("pages") or [] for r in p.get("rows") or [] for s in r.get("subjects") or []
+                    if " and " in s and " in " in s and "camera" in str(r.get("reason")).lower()]
+    check("N3-no-data-stills", bool(view) and not data and not refusal_rows,
+          f"{tag}no clash is shown as a data still and the closing lists no capture refusal ({data[:3]}, {refusal_rows[:2]})")
+    acc = reel.get("accounting") or {}
+    n_un = sum(len((acc.get(t) or {}).get("unpictured") or []) for t in acc)
+    un = [i for i, c in enumerate(view) if c["kind"] == "unpictured"]
+    last_pic = max([i for i, c in enumerate(view) if c["kind"] in PICTURED], default=0)
+    if un:
+        u = view[un[0]]
+        form = words["unpictured"]["one" if u.get("count") == 1 else "many"].format(count=u.get("count"))
+        drawn = " ".join(line for pg in u["pages"] for _, line, _ in reel_stills._blocks(pg) if line)
+        ok_un = (len(un) == 1 and u.get("count") == n_un == len(u["rows"]) and u["narration"] == form
+                 and form in drawn and last_pic < un[0] == len(view) - 2)
+    else:
+        u, form, ok_un = {}, None, bool(acc) and n_un == 0
+    check("N3-unpictured", ok_un,
+          f"{tag}every clash a picture cannot show is counted once in one sentence, spoken and on screen, singular for one, "
+          f"after the pictured scenes and before the closing (scenes {len(un)}, count {u.get('count')}, accounted {n_un}, "
+          f"narration {u.get('narration', '')[:80]!r}, want {form!r})")
+    # N3-partition: every count on the opening is pictured, unpictured or represented, exactly once
     tp0 = next((p for p in op.get("pages") or [] if p.get("layout") == "types"), {})
-    off = [(x.get("label"), x.get("count"), shown.get(lbl_type.get(x.get("label")), 0),
-            more.get(lbl_type.get(x.get("label")), 0) + int(x.get("more") or 0)) for x in tp0.get("rows") or []]
-    check("C3-counts", bool(off) and all(n == s_ + m_ for _, n, s_, m_ in off),
-          f"{tag}every count on the opening equals the clashes shown plus the stated 'and N more' "
-          f"(label, count, shown, more: {off})")
+    lbl_type = {v: k for k, v in words["typeLabels"].items()}
+    off = []
+    for x in tp0.get("rows") or []:
+        t = lbl_type.get(x.get("label"))
+        a_ = acc.get(t) or {}
+        sets = [list(a_.get(k) or []) for k in ("pictured", "unpictured", "represented")]
+        flat = [fk for s_ in sets for fk in s_]
+        scenes = [c["clash"].get("formKey") for c in view if c["kind"] in PICTURED and c["clash"].get("type") == t]
+        if x.get("count") != len(flat) or len(set(flat)) != len(flat) or sorted(sets[0]) != sorted(scenes):
+            off.append((x.get("label"), x.get("count"), [len(s_) for s_ in sets], len(scenes)))
+    check("N3-partition", bool(tp0.get("rows")) and bool(acc) and not off,
+          f"{tag}each opening count equals its pictured, unpictured and represented clashes, each clash once, and the "
+          f"pictured ones are the scenes (mismatches: {off[:3]})")
+    # N6: the first pictured scene of each type says how many cases there are, with the opening's count
+    counts = {lbl_type.get(x.get("label")): x.get("count") for x in tp0.get("rows") or []}
+    first = {}
+    for c in view:
+        if c["kind"] in PICTURED:
+            first.setdefault(c["clash"].get("type"), c)
+    bad6, bad_n = [], []
+    for t, c in first.items():
+        n = counts.get(t)
+        want6 = words["cases"]["one" if n == 1 else "many"].format(count=n, label=words["caseLabels"].get(t, "?"))
+        if not c["narration"].startswith(want6):
+            bad6.append((t, c["narration"][:70]))
+        m = re.match(r"^There (?:are|is) (\d+) cases? of ", c["narration"])
+        if not m or int(m.group(1)) != n:
+            bad_n.append((t, m.group(1) if m else None, n))
+    check("N6-cases", bool(first) and not bad6,
+          f"{tag}the first pictured scene of each type opens with 'There are N cases of ...' ({bad6[:2]})")
+    check("N6-count-agree", bool(first) and not bad_n,
+          f"{tag}each spoken case count equals the opening still's count for that type (type, spoken, opening: {bad_n[:3]})")
     # F2 no in-game effect
     no_eff = set(policy["noInGameEffectFields"])
     shown = [r for c in view for r in c["rows"] if r.get("field") in no_eff]
     spoken = [c["narration"][:60] for c in view if any(f in c["narration"] for f in no_eff)]
     rows = [r for r in pred.get("record") or [] if r.get("admission") == "admitted"]
     left = len([r for r in rows if r.get("field") in no_eff])
-    # the counted clashes' own field tally (verdictCounts.fieldNames) must agree with the admitted rows, so the expected
-    # number cannot be 0 on a presentation whose counted clashes include a no-effect field
     counted = sum(int(n) for v in pred.get("verdictCounts") or [] for f, n in (v.get("fieldNames") or {}).items() if f in no_eff)
-    tp = next((p for p in op.get("pages") or [] if p.get("layout") == "types"), {})
-    # the record clashes the opening counts are the records with a counted field that has an effect in play
-    marks = set(((pres.get("reel") or {}).get("markers")) or [])
+    tp = tp0
+    marks = set(reel.get("markers") or [])
     rec_want = len({r["formKey"] for r in rows if (policy["types"].get(r.get("checkId")) == "record")
                     and r.get("field") not in no_eff and not ({r["formKey"], *(r.get("other") or [])} & marks)})
     rec_got = next((x.get("count") for x in tp.get("rows") or [] if x.get("label") == words["typeLabels"]["record"]), 0)
@@ -579,11 +762,11 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
 
 
 def oracle_checks(pres, view, expected, tag=""):
-    got = [(c["kind"], c["clash"].get("type") if c["kind"] != "data-still" else c.get("type") or (c["clash"] or {}).get("type"),
-            c["clash"].get("formKey") if c["kind"] == "vignette" else None) for c in view]
-    want = [(e["kind"], e.get("type"), e.get("formKey")) for e in expected]
-    check("3-selection", [g[0] for g in got] == [w[0] for w in want] and [g[2] for g in got] == [w[2] for w in want],
-          f"{tag}the selection and order follow the rule (got {got}, want {want})")
+    got = [(c["kind"], c["clash"].get("type") if c["kind"] in PICTURED else None,
+            c["clash"].get("formKey") if c["kind"] in PICTURED else None) for c in view]
+    want = [(e["kind"], e.get("type") if e["kind"] in PICTURED else None,
+             e.get("formKey") if e["kind"] in PICTURED else None) for e in expected]
+    check("3-selection", got == want, f"{tag}the selection and order follow the rule (got {got}, want {want})")
     diffs = [(i, g["narration"], e["narration"]) for i, (g, e) in enumerate(zip(view, expected)) if g["narration"] != e["narration"]]
     check("sentences", len(view) == len(expected) and not diffs,
           f"{tag}every sentence is the skill template filled with the evaluation's names (first difference: {diffs[:1]})")
@@ -592,12 +775,24 @@ def oracle_checks(pres, view, expected, tag=""):
     rows = {r.get("label"): r.get("count") for r in tp.get("rows") or []}
     check("1-counts", rows == expected[0]["types"],
           f"{tag}the opening still's counts per clash type are the prediction's, without no-effect fields (got {rows}, want {expected[0]['types']})")
+    hl = [(c["clash"].get("formKey"), list(c["clash"].get("highlight") or [])) for c in view if c["kind"] in PICTURED]
+    hl_want = [(e["formKey"], e["highlight"]) for e in expected if e["kind"] in PICTURED]
+    check("Q6-highlight", hl == hl_want, f"{tag}each pictured clash marks the participants the volume rule names (got {hl}, want {hl_want})")
+    un = next((c for c in view if c["kind"] == "unpictured"), None)
+    un_want = next((e for e in expected if e["kind"] == "unpictured"), None)
+    got_un = sorted((r.get("formKey"), r.get("type"), r.get("reason")) for r in (un or {}).get("rows") or [])
+    want_un = sorted(un_want["clashes"]) if un_want else []
+    check("N3-which", got_un == want_un, f"{tag}the clashes counted as unpictured, and why, follow the rule (got {got_un}, want {want_un})")
+    cand = (pres.get("reel") or {}).get("captureCandidates")
+    check("N3-candidates", cand == expected[0]["candidates"],
+          f"{tag}the plan lists, per pictured type, the clashes capture may try in order, at most captureAttemptsPerType "
+          f"(got {cand}, want {expected[0]['candidates']})")
 
 
 # ------------------------------------------------------------------------------------------ the expected reel (reference)
-def reference_presentation(pres, names, masters, search, mods):
+def reference_presentation(pres, names, masters, search, mods, captures=None):
     """The expected reel written out in the planner's output shape, from the oracle: shows every check can pass."""
-    exp = oracle(pres, names, masters, search, mods)
+    exp = oracle(pres, names, masters, search, mods, captures=captures)
     target = pres["reader"]["prediction"]["subject"]
     out = copy.deepcopy(pres)
     chs = []
@@ -606,37 +801,24 @@ def reference_presentation(pres, names, masters, search, mods):
             chs.append({"kind": "opening", "narration": e["narration"], "still": {"pages": [
                 {"layout": "types", "rows": [{"label": k, "count": v} for k, v in e["types"].items()],
                  "leftOut": {"noInGameEffect": e["leftOut"], "markers": e["leftMarkers"]}},
-                {"layout": "load-order", "plugins": e["loadOrder"], "targets": [target]}]}})
-        elif e["kind"] == "vignette":
+                {"layout": "load-order", "title": WORDS["stillTitles"]["loadOrder"], "legend": WORDS["stillTitles"]["affected"],
+                 "plugins": e["loadOrder"], "targets": [target], "affected": e["affected"]}]}})
+        elif e["kind"] in PICTURED:
             own = [p for p in pres["reader"]["suppliedPatches"] if set(x.lower() for x in e["pair"]) <= masters.get(p.lower(), set())]
-            chs.append({"kind": "vignette", "narration": e["narration"],
-                        "clash": {"type": e["type"], "formKey": e["formKey"], "pair": e["pair"]},
-                        "frames": [{"state": s, "mediaId": f"M-{e['formKey'][:6]}-{s}"} for s in POLICY["sequence"]],
+            states = POLICY["sequence"] if e["kind"] == "vignette" else ["left", "right"]
+            chs.append({"kind": e["kind"], "narration": e["narration"],
+                        "clash": {"type": e["type"], "formKey": e["formKey"], "pair": e["pair"], "highlight": e["highlight"]},
+                        "frames": [{"state": s, "mediaId": f"M-{e['formKey'][:6]}-{s}"} for s in states],
                         "patch": {"patch": own[0], "pair": e["pair"], "masters": sorted(masters[own[0].lower()])} if own and "Get " in e["narration"] else {}})
-        elif e["kind"] == "data-still":
-            chs.append({"kind": "data-still", "type": e["type"], "narration": e["narration"], "clash": {"type": e["type"]},
-                        "still": {"pages": [{"layout": "rows", "rows": [{"formKey": fk} for fk in e["formKeys"]]}]}})
+        elif e["kind"] == "unpictured":
+            chs.append({"kind": "unpictured", "narration": e["narration"], "count": e["count"],
+                        "clashes": [{"formKey": fk, "type": t, "reason": why} for fk, t, why in e["clashes"]],
+                        "still": {"pages": [{"layout": "statement", "text": e["narration"]}]}})
         else:
             chs.append({"kind": "closing", "narration": e["narration"], "still": {"pages": [
                 {"layout": "checks", "rows": [{"reason": r, "subjects": s} for r, s in e["checks"]]}]}})
-    # "and N more" on each type's still (or its opening row when the type has no still): what selection left out
-    shown = {}
-    for c in chs:
-        t = (c.get("clash") or {}).get("type")
-        if c["kind"] == "vignette":
-            shown[t] = shown.get(t, 0) + 1
-        elif c["kind"] == "data-still":
-            shown[t] = shown.get(t, 0) + len(c["still"]["pages"][0]["rows"])
-    lbl_type = {v: k for k, v in WORDS["typeLabels"].items()}
-    for row in chs[0]["still"]["pages"][0]["rows"]:
-        t = lbl_type[row["label"]]
-        hidden = row["count"] - shown.get(t, 0)
-        still = next((c for c in chs if c["kind"] == "data-still" and c["clash"]["type"] == t), None)
-        if hidden and still:
-            still["still"]["pages"][0]["more"] = hidden
-        elif hidden:
-            row["more"] = hidden
-    out["reel"] = {"schemaVersion": 1, "status": "planned", "modNames": mods, "markers": sorted(MARKERS), "chapters": chs}
+    out["reel"] = {"schemaVersion": 1, "status": "planned", "modNames": mods, "markers": sorted(MARKERS), "chapters": chs,
+                   "accounting": exp[0]["accounting"], "captureCandidates": exp[0]["candidates"]}
     return out
 
 
@@ -646,6 +828,9 @@ def sabotage(pres: dict, name: str) -> tuple[dict, str]:
     p = copy.deepcopy(pres)
     chs = p["reel"]["chapters"]
     vig = [c for c in chs if c["kind"] == "vignette"]
+    pic = [c for c in chs if c["kind"] in PICTURED]
+    unp = next((c for c in chs if c["kind"] == "unpictured"), None)
+    lo = next(pg for pg in chs[0]["still"]["pages"] if pg.get("layout") == "load-order")
     if name == "verdict-opening":
         chs[0]["narration"] = p["reader"]["verdict"] + " " + chs[0]["narration"]; return p, "1-opening"
     if name == "report-sentence":
@@ -671,49 +856,101 @@ def sabotage(pres: dict, name: str) -> tuple[dict, str]:
     if name == "closing-narrated":
         chs[-1]["narration"] = "Testing is incomplete; outstanding areas are listed below."; return p, "6-closing"
     if name == "editorid":
-        st = next(c for c in chs if c["kind"] == "data-still" and c["type"] == "record")
-        st["still"]["pages"][0]["rows"].append({"formKey": "000404:Skyrim.esm", "field": "EditorID"}); return p, "F2-no-effect"
+        unp["clashes"].append({"formKey": "000404:Skyrim.esm", "type": "record", "reason": "record", "field": "EditorID"})
+        return p, "F2-no-effect"
     if name == "formkey-on-still":
-        chs[-1]["still"]["pages"][0]["rows"].append({"reason": "picture could not be captured",
+        chs[-1]["still"]["pages"][0]["rows"].append({"reason": "ran, but could not decide",
                                                      "subjects": ["027582:Lux.esp shows a measurable face"]})
         return p, "C1-stills-plain"
-    if name == "place-twice":
-        st = next(c for c in chs if c["kind"] == "data-still")
-        st["still"]["pages"][0]["rows"].append({"object": "The First Hall", "place": "The First Hall"}); return p, "C2-place-once"
-    if name == "silent-more":
-        for c in chs:
-            if c["kind"] == "data-still":
-                c["still"]["pages"][0].pop("more", None)
-        for r in chs[0]["still"]["pages"][0]["rows"]:
-            r.pop("more", None)
-        return p, "C3-counts"
     if name == "leftout-zero":                             # a reel that claims nothing was left out beside an EditorID clash
         chs[0]["still"]["pages"][0]["leftOut"]["noInGameEffect"] = 0; return p, "F2-no-effect"
     if name == "empty-reel":                               # nothing narrated: the wording and disclaimer checks must not pass
         for c in chs:
             c["narration"] = ""
         return p, "2-wording"
+    # phase 2
+    if name == "affected-drop":
+        lo["affected"] = [x for x in lo["affected"] if x != "Beta.esp"]; return p, "N2-affected"
+    if name == "old-title":
+        lo["title"] = "Plugins analysed, in load order"; return p, "1-opening"
+    if name == "unpictured-off":
+        unp["count"] += 1
+        unp["narration"] = WORDS["unpictured"]["many"].format(count=unp["count"])
+        unp["still"]["pages"][0]["text"] = unp["narration"]; return p, "N3-unpictured"
+    if name == "unpictured-plural":
+        one = next(c for c in chs if c["kind"] == "unpictured")
+        keep = one["clashes"][:1]
+        dropped = {x["formKey"] for x in one["clashes"][1:]}
+        one["clashes"], one["count"] = keep, 1
+        one["narration"] = WORDS["unpictured"]["many"].format(count=1)
+        one["still"]["pages"][0]["text"] = one["narration"]
+        for t, a_ in p["reel"]["accounting"].items():
+            a_["unpictured"] = [fk for fk in a_["unpictured"] if fk not in dropped]
+        return p, "N3-unpictured"
+    if name == "data-still-back":
+        chs.insert(len(chs) - 2, {"kind": "data-still", "narration": "Beta Mod replaces Target Mod's settings. No patch for these two mods was found.",
+                                  "clash": {"type": "cell"}, "still": {"pages": [{"layout": "rows", "rows": [{"formKey": "000501:Skyrim.esm"}]}]}})
+        return p, "N3-no-data-stills"
+    if name == "refusal-on-closing":
+        chs[-1]["still"]["pages"][0]["rows"].append({"reason": "No camera could see both objects",
+                                                     "subjects": ["Giant Root and Shadow in Pelagius Wing"]})
+        return p, "N3-no-data-stills"
+    if name == "split-swapped":
+        s = next(c for c in chs if c["kind"] == "split")
+        s["frames"] = list(reversed(s["frames"])); return p, "3-vignettes"
+    if name == "spoken-shown-count":
+        for c in pic:
+            m = re.match(r"^There (?:are|is) (\d+) cases? of ", c["narration"])
+            if m and int(m.group(1)) > 1:
+                c["narration"] = c["narration"].replace(m.group(0), f"There are 1 cases of ", 1)
+                break
+        return p, "N6-count-agree"
+    if name == "no-cases":
+        for c in pic:
+            c["narration"] = re.sub(r"^There (?:are|is) \d+ cases? of [^.]+\. (?:Here[^.]+\. )?", "", c["narration"])
+        return p, "N6-cases"
+    if name == "represented-lost":
+        for a_ in p["reel"]["accounting"].values():
+            if a_["represented"]:
+                a_["represented"].pop(); break
+        return p, "N3-partition"
+    if name == "both-marked":
+        st = next(c for c in chs if c["kind"] == "vignette" and c["clash"].get("type") == "state")
+        st["clash"]["highlight"] = ["000601:Target.esp", "000602:Beta.esp"]; return p, "Q6-highlight"
     raise SystemExit(f"unknown sabotage arm {name}")
 
 
 SABOTAGE = ["verdict-opening", "report-sentence", "hnh", "drop-pair", "patch-any-pair", "compared", "disclaimer",
-            "closing-narrated", "editorid", "leftout-zero", "empty-reel", "formkey-on-still", "place-twice", "silent-more"]
+            "closing-narrated", "editorid", "leftout-zero", "empty-reel", "formkey-on-still",
+            "affected-drop", "old-title", "unpictured-off", "unpictured-plural", "data-still-back", "refusal-on-closing",
+            "split-swapped", "spoken-shown-count", "no-cases", "represented-lost", "both-marked"]
 
 
 # ------------------------------------------------------------------------------------------ the planner cases
-def planned(pres, names, masters, search, mods, policy=POLICY, words=WORDS):
-    """The planner's reel for an evaluation (the new `reel_plan.plan_reel`); on a head without it, the reel the base
-    renders for that evaluation (its `chapters`, empty here), so every check below fails on its own assertion."""
+def planned(pres, names, masters, search, mods, policy=POLICY, words=WORDS, captures=None, switches=None):
+    """The planner's reel for an evaluation (`reel_plan.plan_reel`), given the switch census and capture results the
+    phase 2 rules read; a planner from before them is called without (so its reel fails the new checks by assertion)."""
     try:
         import reel_plan  # noqa: F401
     except ImportError:
         print("  NOTE  no reel planner on this head (module reel_plan absent): checking the reel the base renders")
         return copy.deepcopy(pres)
     out = copy.deepcopy(pres)
+    switches = SWITCHES if switches is None else switches
     try:
-        out["reel"] = reel_plan.plan_reel(out, names, masters, policy, words, search, mods, markers=MARKERS)
-    except TypeError:                                  # a planner from before the marker rule
-        out["reel"] = reel_plan.plan_reel(out, names, masters, policy, words, search, mods)
+        out["reel"] = reel_plan.plan_reel(out, names, masters, policy, words, search, mods, captures or [], markers=MARKERS,
+                                          switches=switches)
+    except TypeError:                                  # a planner from before the switch census
+        print("  NOTE  this planner takes no switch census (phase 1): planned without it")
+        # its words are the shipped skill's at that head, overlaid with this file's, so it plans what it can and the
+        # phase 2 checks read its actual output
+        shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+        merged = {**shipped, **{k: ({**shipped.get(k, {}), **v} if isinstance(v, dict) else v) for k, v in words.items()}}
+        try:
+            out["reel"] = reel_plan.plan_reel(out, names, masters, policy, merged, search, mods, captures or [], markers=MARKERS)
+        except Exception as exc:  # noqa: BLE001 - a planner that cannot plan these rules plans nothing; the checks then fail
+            print(f"  NOTE  the planner raised on the phase 2 rules ({type(exc).__name__}: {exc}); checking an empty reel")
+            out["reel"] = {"status": "refused", "reason": str(exc), "chapters": []}
     return out
 
 
@@ -786,13 +1023,65 @@ def case_planner():
     check("C3-markers", lo_.get("markers") == 1 and rec_n == 3 and "000405" not in json.dumps(reel_view(got)),
           f"a marker's clash is out of the scenes and counts (record clashes {rec_n}, 3 expected), with the number left "
           f"out on the opening still ({lo_})")
-    # S2: an actor's placement says the two mods place the NPC in different spots, never where it stands in play
+    # S2 / N4: an actor's placement is a split screen that says the two mods place the NPC in different spots
     ap, an, am, as_, amods = synthetic()
-    an["bases"]["B5"] = {"type": "Npc", "editorId": "SomeGuard"}
+    an["bases"]["B5"] = {"type": "Npc", "editorId": "SomeGuard", "model": None}
     ga = planned(ap, an, am, as_, amods)
     text = " ".join(c["narration"] for c in reel_view(ga))
-    check("S2-actor", "Beta Mod and Target Mod place Some Guard in different spots." in text and "moves Some Guard" not in text,
-          "an NPC placement clash says the two mods place the NPC in different spots, not that it stands elsewhere")
+    check("S2-actor", "Beta Mod and Target Mod place Some Guard in different spots" in text and "moves Some Guard" not in text
+          and " stands" not in text,
+          "an NPC placement clash says the two mods place the NPC in different spots, never where it stands in play")
+    oracle_checks(ga, reel_view(ga), oracle(ap, an, am, as_, amods), tag="actor: ")
+    # N4: a placement split takes its left half from the setup without the mod and its right half from the prediction, with
+    # the row's two placements and the other mod's name for each half's label
+    sp_ = next((ch for ch in (got.get("reel") or {}).get("chapters") or [] if ch.get("kind") == "split"), {})
+    fr = {f.get("state"): f.get("armId") for f in sp_.get("frames") or []}
+    pl = (sp_.get("clash") or {}).get("placements") or {}
+    lab = (sp_.get("clash") or {}).get("labels") or {}
+    check("N4-split", (sp_.get("clash") or {}).get("formKey") == "000403:Skyrim.esm"
+          and fr == {"left": "without-target", "right": "with-target"}
+          and pl == {"left": [0.0, 0.0, 0.0], "right": [10.0, 0.0, 0.0]}
+          and lab == {"left": "Without Target Mod", "right": "With Target Mod"},
+          f"a drawn object's placement clash is a split: left from the setup without the mod at the other mod's position, "
+          f"right from the prediction at the winner's, labelled (frames {fr}, placements {pl}, labels {lab})")
+    # N4: when another plugin's version would win without the mod, the left half cannot show the other mod's spot
+    lp, ln_, lm, ls, lmods = synthetic()
+    ln_["refs"]["000403:Skyrim.esm"]["carriedBy"] = ["Skyrim.esm", "Beta.esp", "Alpha.esp", "Target.esp"]
+    gl = planned(lp, ln_, lm, ls, lmods)
+    oracle_checks(gl, reel_view(gl), oracle(lp, ln_, lm, ls, lmods), tag="left not the loser's: ")
+    # N5: a world-state clash is pictured in its state; its condition is spoken by in-game names only for a trigger into
+    # the clash state, otherwise the fallback; never an editor id
+    st_ = next((c for c in reel_view(got) if c["kind"] == "vignette" and c["clash"].get("type") == "state"), None)
+    check("N5-state", st_ is not None and [f.get("state") for f in st_["frames"]] == POLICY["sequence"]
+          and (st_["clash"].get("state") == "000701:Skyrim.esm")
+          and WORDS["conditionFallback"].format(place="The Camp") in st_["narration"]
+          and not re.search(r"Camp ?Enable|Some ?Quest", st_["narration"]),
+          f"a world-state clash is a vignette in its state (000701:Skyrim.esm) and names its condition without an editor id "
+          f"({(st_ or {}).get('narration', '')[:120]!r}, state {(st_ or {}).get('clash', {}).get('state')!r})")
+    qn = copy.deepcopy(names)
+    qn["quests"] = {"SomeQuest": {"name": "The Camp Quest"}}
+    sw_en = copy.deepcopy(SWITCHES)
+    sw_en["000701:Skyrim.esm"]["trigger"]["by"] = [b.replace("Disable()", "Enable()") for b in sw_en["000701:Skyrim.esm"]["trigger"]["by"]]
+    gq = planned(pres, qn, masters, search, mods, switches=sw_en)
+    gd = planned(pres, qn, masters, search, mods)
+    tq = " ".join(c["narration"] for c in reel_view(gq))
+    td = " ".join(c["narration"] for c in reel_view(gd))
+    check("N5-condition", WORDS["conditionQuest"].format(quest="The Camp Quest", stage="10") in tq
+          and WORDS["conditionFallback"].format(place="The Camp") in td and "The Camp Quest" not in td,
+          "a quest that switches the clash on is named with its stage; one that only switches it off is not")
+    # N3: one clash the reel cannot picture is said in the singular
+    op1, on1, om1, os1, omods1 = synthetic()
+    op1["reader"]["prediction"]["record"] = [r for r in op1["reader"]["prediction"]["record"]
+                                             if r["formKey"] not in ("000106:Target.esp", "000401:Skyrim.esm", "000402:Skyrim.esm")]
+    g1_ = planned(op1, on1, om1, os1, omods1)
+    un1 = [c for c in reel_view(g1_) if c["kind"] == "unpictured"]
+    check("N3-singular", len(un1) == 1 and un1[0]["narration"] == WORDS["unpictured"]["one"].format(count=1),
+          f"one clash the reel cannot picture is said in the singular ({[c['narration'] for c in un1]})")
+    # N3 / Q3: a refused capture moves that clash into the unpictured count and the next drawable clash takes its place
+    caps = [{"formKey": "000101:Target.esp", "status": "refused", "reason": "no camera"}]
+    gr = planned(pres, names, masters, search, mods, captures=caps)
+    oracle_checks(gr, reel_view(gr), oracle(pres, names, masters, search, mods, captures=caps), tag="refused capture: ")
+    rule_checks(gr, reel_view(gr), tag="refused capture: ", mods=mods)
 
 
 def case_reference():
@@ -853,6 +1142,100 @@ def case_capture_plan():
               f"{rule.get('sequence', {}).get('states')}, requests {states[:2]})")
         check("F3-selected", [r["recordKeys"][0] for r in reqs] == ["000102:Target.esp"],
               f"the capture plan asks for exactly the selected vignettes ({[r['recordKeys'][0] for r in reqs]})")
+        # phase 2: a placement split and a world-state vignette get their own requests, bound to their findings' evidence
+        result = {"configuration": {"fingerprint": "f" * 64}, "checkId": "records.contested-fields", "armId": "with-target"}
+        (root / "result.json").write_text(json.dumps(result))
+        semit = {"Probe": "stateprobe", "State": "baseline",
+                 "Configuration": {"Fingerprint": "s" * 64, "Population": "load-time", "State": "baseline", "Plugins": []},
+                 "Conflicts": [{"Kind": "STATE-CONTACT@000701:Skyrim.esm@Triggered", "A": "Target.esp", "B": "Beta.esp",
+                                "Necessary": [{"FormKey": "000601:Target.esp", "Physical": "Holds", "Label": "CellFive (ext)"}],
+                                "Alternative": [{"FormKey": "000602:Beta.esp"}]}]}
+        (root / "state.json").write_text(json.dumps(semit))
+        def ev(i, path):
+            return {"id": i, "kind": "emit", "part": "arm", "armId": "with-target", "path": path,
+                    "sha256": hashlib.sha256((root / path).read_bytes()).hexdigest()}
+        p2 = copy.deepcopy(p)
+        p2["evidence"] += [ev("E-2", "result.json"), ev("E-3", "state.json")]
+        p2["findings"] += [{"id": "F-R", "kind": "finding", "checkId": "records.contested-fields", "armId": "with-target",
+                            "allRows": [{"formKey": "000403:Skyrim.esm"}], "evidenceIds": ["E-2"]},
+                           {"id": "F-S1", "kind": "finding", "checkId": "state.conditional-geometry", "armId": "with-target",
+                            "allRows": [{"formKey": "000601:Target.esp"}], "evidenceIds": ["E-3"],
+                            "counts": {"A": "Target.esp", "B": "Beta.esp"}}]
+        p2["reel"]["withoutArmId"] = "without-target"
+        p2["reel"]["chapters"] += [
+            {"kind": "split", "clash": {"type": "record", "formKey": "000403:Skyrim.esm", "findingId": "F-R", "armId": "with-target",
+                                        "withoutArmId": "without-target", "actor": False, "highlight": ["000403:Skyrim.esm"],
+                                        "placements": {"left": [0.0, 0.0, 0.0], "right": [10.0, 0.0, 0.0]},
+                                        "pair": ["Beta.esp", "Target.esp"]},
+             "frames": [{"state": "left"}, {"state": "right"}]},
+            {"kind": "vignette", "clash": {"type": "state", "formKey": "000601:Target.esp", "other": ["000602:Beta.esp"],
+                                           "findingId": "F-S1", "armId": "with-target", "withoutArmId": "without-target",
+                                           "state": "000701:Skyrim.esm", "highlight": ["000601:Target.esp"],
+                                           "pair": ["Beta.esp", "Target.esp"]},
+             "frames": [{"state": s} for s in POLICY["sequence"]]}]
+        try:
+            reqs2 = report_scenes.capture_requests(p2, root)["requests"]
+        except Exception as exc:  # noqa: BLE001 - a capture plan that cannot read these chapters fails the checks below
+            print(f"  NOTE  capture_requests raised on the phase 2 chapters: {type(exc).__name__}: {exc}")
+            reqs2 = []
+        sp = next((r for r in reqs2 if r.get("requestType") == "placement-split"), {})
+        check("N4-capture-placement", sp.get("recordKeys") == ["000403:Skyrim.esm"]
+              and [h.get("formKey") for h in sp.get("highlights") or []] == ["000403:Skyrim.esm"]
+              and (sp.get("sequence") or {}).get("states") == ["left", "right"]
+              and (sp.get("sequence") or {}).get("setups") == {"left": "without-target", "right": "with-target"}
+              and sp.get("placements") == {"left": [0.0, 0.0, 0.0], "right": [10.0, 0.0, 0.0]}
+              and sp.get("configurationFingerprint") == "f" * 64 and (sp.get("source") or {}).get("path") == "result.json",
+              f"a placement split is one request with one participant, both placements, the two setups and its finding's "
+              f"recorded configuration ({ {k: sp.get(k) for k in ('requestType', 'recordKeys', 'placements')} })")
+        st = next((r for r in reqs2 if r.get("checkId") == "state.conditional-geometry"), {})
+        check("N5-capture-state", st.get("state") == "000701:Skyrim.esm"
+              and [h.get("formKey") for h in st.get("highlights") or []] == ["000601:Target.esp"]
+              and (st.get("sequence") or {}).get("states") == POLICY["sequence"]
+              and (st.get("source") or {}).get("path") == "state.json",
+              f"a world-state vignette's request carries its switch, marks only the participants the plan names and is "
+              f"bound to the stateprobe emit ({ {k: st.get(k) for k in ('state', 'highlights')} })")
+        import capture_acquire
+        try:
+            one = capture_acquire.participants({"requestType": "placement-split", "recordKeys": ["000403:Skyrim.esm"],
+                                                "highlights": [{"formKey": "000403:Skyrim.esm", "color": "cyan"}]})
+        except Exception as exc:  # noqa: BLE001
+            one = f"refused: {exc}"
+        check("N4-one-participant", one == [{"formKey": "000403:Skyrim.esm", "color": "cyan"}],
+              f"a placement split has one participant ({one})")
+        argv_of = getattr(capture_acquire, "capture_argv", None)
+        cam = {"cell": "CellFive", "viewprobe": "--eye 1.0,2.0,3.0 --yaw 10.0 --pitch -5.0 --fov 65 --aspect 16:9"}
+        try:
+            a_state = argv_of({**st, "requestType": st.get("requestType")}, cam, "highlight", "order.json", ["--profile", "P"], 1280) if argv_of else []
+            a_left = argv_of({**sp, "actor": True}, cam, "left", "without.json", [], 638) if argv_of else []
+        except Exception as exc:  # noqa: BLE001
+            print(f"  NOTE  capture_argv raised: {type(exc).__name__}: {exc}")
+            a_state, a_left = [], []
+        def has(a_, *seq):
+            return any(a_[i:i + len(seq)] == list(seq) for i in range(len(a_)))
+        check("N5-capture-argv", has(a_state, "--state", "000701:Skyrim.esm") and "--no-cell-outline" in a_state
+              and has(a_state, "--ref", "000601:Target.esp=cyan") and not any("000602" in x for x in a_state)
+              and has(a_state, "--order", "order.json"),
+              f"a state frame is rendered in its state, without the cell outline, marking only the named participant ({a_state})")
+        check("N4-capture-argv", has(a_left, "--npc", "000403:Skyrim.esm") and has(a_left, "--npc-puck", "on")
+              and has(a_left, "--size", "638") and has(a_left, "--aspect", "638:680") and "--no-cell-outline" in a_left
+              and has(a_left, "--order", "without.json"),
+              f"a split half of an actor draws the actor with its puck at the half's canvas ({a_left})")
+        # the state scene identity: the stateprobe emit's configuration with the population read by the renderer and the
+        # state the clash was measured in (Gate B first check: equal to the renderer's own for the same state)
+        fp = capture_acquire._load_evalrun().configuration_fingerprint
+        cfg = {"SchemaVersion": 1, "Plugins": [{"Name": "Target.esp", "Sha256": "a" * 64}], "Providers": [], "Overlays": [],
+               "Population": "load-time+population:0123456789ab", "State": "baseline"}
+        cfg["Fingerprint"] = fp([{"name": "Target.esp", "sha256": "a" * 64}], [], [], cfg["Population"], "baseline", 1)
+        (root / "scoped.json").write_text(json.dumps({"Configuration": cfg}))
+        want_fp = fp([{"name": "Target.esp", "sha256": "a" * 64}], [], [], "load-time", "000701:Skyrim.esm", 1)
+        try:
+            got_id = capture_acquire.scene_identity({"absolutePath": str(root / "scoped.json")}, cfg["Fingerprint"],
+                                                    state="000701:Skyrim.esm")
+        except Exception as exc:  # noqa: BLE001
+            got_id = {"error": f"{type(exc).__name__}: {exc}"}
+        check("N5-identity", (got_id or {}).get("sceneFingerprint") == want_fp,
+              f"a state request's scene identity is the emit's configuration with the renderer's population and the clash's "
+              f"state ({got_id})")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -869,7 +1252,8 @@ def case_skill_data():
     check("data-policy", all(k in vign for k in ("allUpTo", "perType", "maxVignettes", "noInGameEffectFields", "stillReasons",
                                                   "sequence", "holdSeconds", "patchSearch")) and vign.get("sequence") == POLICY["sequence"]
           and all(vign.get(k) == POLICY[k] for k in ("allUpTo", "perType", "maxVignettes", "typeOrder", "types", "pictureTypes",
-                                                       "actorTypes", "noInGameEffectFields", "sequence")),
+                                                       "actorTypes", "noInGameEffectFields", "sequence", "drawableFields",
+                                                       "captureAttemptsPerType", "volumeFactor")),
           f"scene-policy.json vignettes carries the selection numbers, the no-effect fields and the sequence (has {sorted(vign)})")
     check("data-length", (pr.get("reel") or {}).get("maxSeconds") == 600 and bool((pr.get("reel") or {}).get("stillFont")),
           f"reel.maxSeconds is 600 and the still font file is named ({(pr.get('reel') or {}).get('maxSeconds')}, "
@@ -877,7 +1261,7 @@ def case_skill_data():
     docs = (SKILL / "SKILL.md").read_text(encoding="utf-8") + (SKILL / "references/reel-layout.md").read_text(encoding="utf-8")
     old = [x for x in ("highlighted -> unhighlighted -> highlighted", "highlighted → unhighlighted → highlighted",
                        "highlighted -> normal -> highlighted", "must start with `reader.verdict`", "starts with `reader.verdict` verbatim",
-                       "no title cards") if x in docs]
+                       "no title cards", "become data stills", "and N more", "shown as data") if x in docs]
     check("data-docs", not old, f"the skill no longer states the rules the vignette format supersedes (still present: {old})")
 
 
@@ -958,6 +1342,64 @@ def case_render():
         rp = render(bp, root / "pose")
         check("3-same-pose", rp.returncode == 2 and "pose" in (rp.stdout + rp.stderr).lower(),
               f"a vignette whose frames were taken at different poses refuses (exit {rp.returncode})")
+        # phase 2: a placement split (two halves side by side over a label strip) and the one unpictured statement
+        def half(name, colour):
+            subprocess.run([ff, "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c={colour}:size=638x680", "-frames:v", "1",
+                            str(root / "media" / name)], check=True, capture_output=True)
+            return hashlib.sha256((root / "media" / name).read_bytes()).hexdigest()
+        halves = [{"id": "M-left", "path": "media/left.png", "sha256": half("left.png", "red"), "assessed": True,
+                   "mediaKind": "offline-render", "subject": {"armId": "without-target"},
+                   "provenance": {"poseId": "pose-L", "relativePose": True, "state": "left", "argv": ["--report-mode"]}},
+                  {"id": "M-right", "path": "media/right.png", "sha256": half("right.png", "blue"), "assessed": True,
+                   "mediaKind": "offline-render", "subject": {"armId": "with-target"},
+                   "provenance": {"poseId": "pose-R", "relativePose": True, "state": "right", "argv": ["--report-mode"]}}]
+        unp = "1 clash can't be visualized; find it in the accompanying report."
+        p2 = copy.deepcopy(pres)
+        p2["media"] = halves
+        p2["reel"]["media"] = []
+        p2["reel"]["chapters"] = [pres["reel"]["chapters"][0],
+            {"id": "R-02", "kind": "split", "narration": "Beta Mod and Target Mod place Lamp in different spots.",
+             "narrationAudio": "media/n.wav",
+             "clash": {"type": "record", "formKey": "000403:Skyrim.esm", "camera": "relative",
+                       "labels": {"left": "Without Target Mod", "right": "With Target Mod"}},
+             "frames": [{"state": "left", "mediaId": "M-left"}, {"state": "right", "mediaId": "M-right"}]},
+            {"id": "R-03", "kind": "unpictured", "narration": unp, "narrationAudio": "media/n.wav", "count": 1,
+             "clashes": [{"formKey": "000501:Skyrim.esm", "type": "cell", "reason": "cell"}],
+             "still": {"pages": [{"layout": "statement", "text": unp}]}},
+            pres["reel"]["chapters"][-1]]
+        p2p = root / "split.json"
+        p2p.write_text(json.dumps(p2))
+        r2 = render(p2p, root / "reel2")
+        ok2 = r2.returncode == 0 and (root / "reel2/reel-map.json").is_file()
+        kinds2, px = [], {}
+        if ok2:
+            mp2 = json.loads((root / "reel2/reel-map.json").read_text(encoding="utf-8"))
+            kinds2 = [s.get("kind") for s in mp2["segments"]]
+            sg = next((s for s in mp2["segments"] if s.get("kind") == "split"), None)
+            if sg:
+                fr0 = (sg.get("frames") or [{}])[0].get("reelInterval") or sg.get("reelInterval") or {}
+                n = int(fr0.get("startFrame", 0)) + int(fr0.get("frames", 2)) // 2
+                full = subprocess.run([ff, "-v", "error", "-i", str(root / "reel2/reel.mp4"), "-vf", f"select=eq(n\\,{n})",
+                                       "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True).stdout
+                def at(x, y):
+                    o = (y * 1280 + x) * 3
+                    raw = full[o:o + 3]
+                    return tuple(raw) if len(raw) == 3 else None
+                px = {"left": at(300, 340), "right": at(980, 340), "strip": at(4, 716)}
+        lr = px.get("left") and max(range(3), key=lambda i: px["left"][i]) == 0
+        rb = px.get("right") and max(range(3), key=lambda i: px["right"][i]) == 2
+        strip = px.get("strip") and max(px["strip"]) < 90
+        check("N4-split-render", ok2 and kinds2 == ["still", "split", "still", "still"] and bool(lr) and bool(rb) and bool(strip),
+              f"a split renders as one 1280x720 scene: the left half from the setup without the mod, the right from the "
+              f"prediction, over a dark label strip (exit {r2.returncode}: {' '.join((r2.stdout + r2.stderr).split())[-160:]}; "
+              f"kinds {kinds2}; pixels {px})")
+        if ok2:
+            un_seg = next((s for s in mp2["segments"] if s.get("chapterKind") == "unpictured"), {})
+            check("N3-unpictured-render", un_seg.get("kind") == "still" and un_seg.get("narration") == unp,
+                  f"the unpictured statement renders as a still with the same sentence spoken ({un_seg.get('kind')}, "
+                  f"{un_seg.get('narration')!r})")
+        else:
+            check("N3-unpictured-render", False, "the reel with the unpictured statement did not render")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -986,10 +1428,34 @@ CODE_SABOTAGE = {
         '"narration": str(reader.get("verdict")) + " " + (words["opening"] if counts else words["openingNone"]).format(mod=mod(target)),')]),
     "code-c1-labels": ("planner", "C1-stills-plain", [("_geometry-harness/reel_plan.py",
         "            line = check_\n", "            line = str(subj)\n")]),
-    "code-c2-place": ("planner", "C2-place-once", [("_geometry-harness/reel_plan.py",
-        'if row.get("place") and row["place"].lower() in str(row.get("object") or "").lower():', "if False:")]),
-    "code-c3-more": ("planner", "C3-counts", [("_geometry-harness/reel_plan.py",
-        "        if hidden <= 0:\n            continue", "        if True:\n            continue")]),
+    # phase 2
+    "code-affected": ("planner", "N2-affected", [("_geometry-harness/reel_plan.py",
+        '    affected = {target} | {p for r in kept_rows if types.get(r.get("checkId")) is not None for p in (r["A"], r["B"])}',
+        "    affected = {target}")]),
+    "code-unpictured-plural": ("planner", "N3-singular", [("_geometry-harness/reel_plan.py",
+        'words["unpictured"]["one" if n_un == 1 else "many"]', 'words["unpictured"]["many"]')]),
+    "code-unpictured-dropped": ("planner", "N3-unpictured", [("_geometry-harness/reel_plan.py",
+        "    if unpictured:\n        n_un = len(unpictured)", "    if False:\n        n_un = len(unpictured)")]),
+    "code-cases-shown": ("planner", "N6-count-agree", [("_geometry-harness/reel_plan.py",
+        'n, shown = counts[t]["count"], len(chosen)', "n, shown = len(chosen), len(chosen)")]),
+    "code-left-loser": ("planner", "N3-which", [("_geometry-harness/reel_plan.py",
+        'if not carriers or carriers[-1] != r["A"]:', "if False:")]),
+    "code-attempts": ("planner", "N3-which", [("_geometry-harness/reel_plan.py",
+        'if c["rows"][0]["formKey"] in refused:', "if False:")]),
+    "code-volume": ("planner", "Q6-highlight", [("_geometry-harness/reel_plan.py",
+        'if len(fks) == 2 and all(vols) and max(vols) >= float(policy.get("volumeFactor") or 0) * min(vols) > 0:', "if False:")]),
+    "code-condition": ("planner", "N5-condition", [("_geometry-harness/reel_plan.py",
+        'into = (t.group(3) == "Enable") != bool(sw.get("baselineEnabled"))', "into = True")]),
+    "code-split-left-arm": ("planner", "N4-split", [("_geometry-harness/reel_plan.py",
+        '"left": without_arm, "right": with_arm}', '"left": with_arm, "right": with_arm}')]),
+    "code-state-token": ("capture", "N5-capture-argv", [("_geometry-harness/capture_acquire.py",
+        '        argv += ["--state", str(request["state"])]', "        pass")]),
+    "code-cell-outline": ("capture", "N5-capture-argv", [("_geometry-harness/capture_acquire.py",
+        '"--report-mode", "--no-cell-outline"]', '"--report-mode"]')]),
+    "code-identity-state": ("capture", "N5-identity", [("_geometry-harness/capture_acquire.py",
+        'pop, cfg.get("State") if st is None else st, cfg.get("SchemaVersion"))', 'pop, cfg.get("State"), cfg.get("SchemaVersion"))')]),
+    "code-split-order": ("render", "N4-split-render", [("_geometry-harness/evalreel.py",
+        "[0:v][3:v][1:v]hstack", "[1:v][3:v][0:v]hstack")]),
     "code-c3-markers": ("planner", "C3-markers", [("_geometry-harness/reel_plan.py",
         "and r not in marker_rows]", "]")]),
     "code-f3-states": ("capture", "F3-states", [(REF + "/scene-policy.json",

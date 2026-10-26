@@ -1,4 +1,5 @@
-"""The review reel's stills: the opening infographic, the load order, data stills and the closing checks, drawn with
+"""The review reel's stills: the opening infographic, the load order, the statement of clashes it cannot picture, the
+closing checks and a split's label strip, drawn with
 Pillow from the reel plan's page data (task 2026-10-19-review-reel-vignettes).
 
     draw_page(page: dict, font: Path, bold: Path, size=(1280, 720)) -> PIL.Image
@@ -73,28 +74,17 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
             if (page.get("leftOut") or {}).get(key):
                 out.append(("dim", page["leftOut"][key], 0.8))
     elif lay == "load-order":
-        targets = set(page.get("targets") or [])
+        # the mod being added and every plugin of a counted clash in the highlight colour, under the same-colour legend
+        marked = set(page.get("affected") or page.get("targets") or [])
+        if page.get("legend"):
+            out.append(("mark", page["legend"], 0.9))
         for i, p in enumerate(page.get("plugins") or []):
-            out.append(("mark" if p in targets else "body", f"{i + 1:>3}  {p}", 0.75))
+            out.append(("mark" if p in marked else "body", f"{i + 1:>3}  {p}", 0.75))
         if page.get("runtimeMods"):
             out.append(("head", page.get("runtimeTitle") or "", 0.9))
             out += [("body", m, 0.75) for m in page["runtimeMods"]]
-    elif lay == "rows":
-        for r in page.get("rows") or []:
-            where = f" in {r['place']}" if r.get("place") else ""
-            out.append(("head", f"{r.get('object')}{where}", 1.0))
-            bits = [" and ".join(r.get("pair") or [])]
-            if r.get("field"):
-                bits.append(str(r["field"]))
-            if r.get("winner"):
-                bits.append(f"{r['winner']} wins")
-            out.append(("body", " | ".join(bits), 0.85))
-            for k, v in (r.get("values") or {}).items():
-                out.append(("dim", f"{k}: {v}", 0.8))
-            if r.get("reason"):
-                out.append(("dim", r["reason"], 0.7))
-        if page.get("moreLine"):
-            out.append(("head", page["moreLine"], 0.9))
+    elif lay == "statement":
+        out = [("head", page.get("text") or "", 1.3)]           # one sentence, no title: what the narration says
     elif lay == "checks":
         for r in page.get("rows") or []:
             out.append(("head", str(r.get("reason") or "")[:1].upper() + str(r.get("reason") or "")[1:], 0.95))
@@ -102,10 +92,32 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
     return out
 
 
+def draw_strip(labels: dict, font: Path, bold: Path, size=(1280, 40), split_at: int = 640) -> Image.Image:
+    """The label strip under a split: each half's label centred under it, from the plan's typed slots."""
+    w, h = size
+    img = Image.new("RGB", size, BG)
+    d = ImageDraw.Draw(img)
+    f = ImageFont.truetype(str(bold), 22)
+    for text, (x0, x1) in ((labels.get("left") or "", (0, split_at)), (labels.get("right") or "", (split_at, w))):
+        tw = d.textlength(text, font=f)
+        d.text((x0 + (x1 - x0 - tw) / 2, (h - 26) / 2), text, font=f, fill=FG)
+    return img
+
+
 def draw_page(page: dict, font: Path, bold: Path, size=(1280, 720)) -> Image.Image:
     w, h = size
     margin = 64
     blocks = _blocks(page)
+    if page.get("layout") == "statement":
+        img = Image.new("RGB", size, BG)
+        d = ImageDraw.Draw(img)
+        f = ImageFont.truetype(str(bold), 40)
+        lines = _wrap(d, page.get("text") or "", f, w - 2 * margin)
+        y = (h - len(lines) * 52) / 2
+        for line in lines:
+            d.text(((w - d.textlength(line, font=f)) / 2, y), line, font=f, fill=FG)
+            y += 52
+        return img
     columns = 2 if page.get("layout") == "load-order" and len(page.get("plugins") or []) > 18 else 1
     base = 34
     while base >= 10:
