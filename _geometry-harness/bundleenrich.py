@@ -207,6 +207,62 @@ def _catalogue_name(nexus_id) -> tuple[str | None, dict | None]:
     return None, None
 
 
+def filed_cells(path: Path, fks: list[str]) -> dict:
+    """{FormKey: cell FormKey} for the placed references of `fks` this plugin file carries: the cell whose children group
+    the reference is filed in, read from the file's raw group tree (groups are never compressed, so record headers
+    suffice). A reference filed in a worldspace's persistent cell maps to that cell, marked with a trailing `!persistent`
+    so a caller can tell it names no place a camera can stand in. Plugin names in FormKeys follow the file's own master
+    list; the file's own records belong to the file."""
+    import struct
+    data = path.read_bytes()
+    if data[:4] != b"TES4":
+        return {}
+    hsize = struct.unpack_from("<I", data, 4)[0]
+    masters, q = [], 24
+    while q < 24 + hsize:
+        sig, ssz = data[q:q + 4], struct.unpack_from("<H", data, q + 4)[0]
+        if sig == b"MAST":
+            masters.append(data[q + 6:q + 6 + ssz].rstrip(b"\0").decode("cp1252"))
+        q += 6 + ssz
+    names_ = masters + [path.name]
+
+    def fk_of(raw: int) -> str | None:
+        idx = raw >> 24
+        return f"{raw & 0xFFFFFF:06X}:{names_[idx]}" if idx < len(names_) else None
+    want = {}
+    for fk in fks:
+        local, plugin = fk.split(":", 1)
+        low = [n.lower() for n in names_]
+        if plugin.lower() in low:
+            want[(low.index(plugin.lower()) << 24) | int(local, 16)] = fk
+    out = {}
+
+    def walk(pos, end, stack):
+        while pos < end:
+            sig = data[pos:pos + 4]
+            size = struct.unpack_from("<I", data, pos + 4)[0]
+            if sig == b"GRUP":
+                label = struct.unpack_from("<I", data, pos + 8)[0]
+                gtype = struct.unpack_from("<i", data, pos + 12)[0]
+                walk(pos + 24, pos + size, stack + [(gtype, label)])
+                pos += size
+            else:
+                fid = struct.unpack_from("<I", data, pos + 12)[0]
+                if fid in want and sig in (b"REFR", b"ACHR", b"PGRE", b"PHZD", b"PMIS", b"PARW", b"PBAR", b"PBEA",
+                                           b"PCON", b"PFLA"):
+                    cell = next((lab for gt, lab in reversed(stack) if gt == 6), None)
+                    persistent = bool(stack) and len(stack) >= 2 and stack[-2][0] == 6 and any(gt == 1 for gt, _ in stack) \
+                        and not any(gt in (4, 5) for gt, _ in stack)
+                    if cell is not None and fk_of(cell):
+                        out[want[fid]] = fk_of(cell) + ("!persistent" if persistent else "")
+                pos += 24 + size
+    walk(24 + hsize, len(data), [])
+    return out
+
+
+QUEST_TRIGGER = re.compile(r"^quest (\S+) stage \d+ ")
+
+
 def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | None = None) -> dict:
     manifest = _guard(d, "names")
     plan = _load(d / "plan.json") or {}
@@ -238,6 +294,26 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             for k in ("FormKey", "Other"):
                 if isinstance(p_, dict) and FK.match(str(p_.get(k) or "")):
                     fks.add(p_[k])
+    # the quests a world-state clash's switch is triggered by (switch census), named for the reel's condition sentence
+    state_switches, quest_edids = set(), set()
+    for e in manifest.get("evidence") or []:
+        if not str(e.get("path", "")).endswith(".json") or e.get("kind") not in ("emit", "enrichment"):
+            continue
+        doc = _load(d / e["path"])
+        for c in (doc.get("Conflicts") if isinstance(doc, dict) else None) or []:
+            m = re.match(r"^STATE-[A-Z]+@([0-9A-Fa-f]{6}:[^@]+)@", str(c.get("Kind") or ""))
+            if m:
+                state_switches.add(m.group(1))
+    for e in manifest.get("evidence") or []:
+        if not str(e.get("path", "")).endswith(".json") or e.get("kind") not in ("emit", "enrichment"):
+            continue
+        doc = _load(d / e["path"])
+        for sw in (doc.get("switches") if isinstance(doc, dict) else None) or []:
+            if isinstance(sw, dict) and sw.get("key") in state_switches:
+                for by in (sw.get("trigger") or {}).get("by") or []:
+                    m = QUEST_TRIGGER.match(str(by))
+                    if m:
+                        quest_edids.add(m.group(1))
     for t in scope.get("targets") or []:
         for c in ((t.get("footprint") or {}).get("placed") or {}).get("cells") or []:
             if c.get("cell") and FK.match(str(c["cell"])):
@@ -257,7 +333,7 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
     tmp = tempfile.TemporaryDirectory(prefix="enrich-names-")
     env = reader_env or private_instance(Path(tmp.name))
     reader = Reader(reader_cmd, env)
-    found, bases = {}, {}
+    found, bases, quests = {}, {}, {}
     try:
         def read(x, wanted, fields, chunk=100):
             out = []
@@ -291,15 +367,23 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             # the model a later version carries wins; a version that reads the field as absent has none
             model = (fl.get("Model.File") if "Model.File" in fl else "" if "Model.File" in absent
                      else prev.get("model"))
+            bounds = prev.get("bounds")
+            if fl.get("ObjectBounds.First") is not None and fl.get("ObjectBounds.Second") is not None:
+                try:
+                    bounds = [float(v) for v in f"{fl['ObjectBounds.First']},{fl['ObjectBounds.Second']}".split(",")]
+                except ValueError:
+                    bounds = prev.get("bounds")
+            scale = (float(fl["Scale"]) if fl.get("Scale") not in (None, "") else
+                     1.0 if "Scale" in absent else prev.get("scale"))
             found[rec["formid"]] = {"type": rec.get("type") or prev.get("type"),
                                     "editorId": rec.get("editorid") or prev.get("editorId"),
                                     "name": fl.get("Name") or prev.get("name"),
                                     "from": x["name"] if fl.get("Name") else prev.get("from"),
-                                    "model": model,
+                                    "model": model, "bounds": bounds, "scale": scale,
                                     "carriedBy": (prev.get("carriedBy") or []) + [x["name"]]}
             return fl
         for x in order:
-            for rec in read(x, targets_fk, ["Name", "Base"]):
+            for rec in read(x, targets_fk, ["Name", "Base", "Scale"]):
                 fl = keep(rec, x)
                 if fl and fl.get("Base") and FK.match(str(fl["Base"])):
                     bases[rec["formid"]] = fl["Base"]
@@ -307,8 +391,23 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
         if base_fks:
             for x in [p for p in plugins if str(p.get("name")).lower() in
                       {b.split(":", 1)[1].lower() for b in base_fks} | {t.lower() for t in targets}]:
-                for rec in read(x, base_fks, ["Name", "Model.File"]):
+                for rec in read(x, base_fks, ["Name", "Model.File", "ObjectBounds.First", "ObjectBounds.Second"]):
                     keep(rec, x)
+        # a quest's in-game name, by the editor id the switch census names it by (the last version in the order wins)
+        for x in [p for p in plugins if quest_edids]:
+            r = reader.call("tools/call", {"name": "housecarl_records", "arguments": {
+                "types": ["QUST"], "where": ["editorid in [" + ", ".join(sorted(quest_edids)) + "]"], "source": x["path"],
+                "format": "json", "limit": 500, "max_chars": 4000000, "project": {"form": "fields", "fields": ["Name"]}}})
+            text = "".join(c.get("text", "") for c in ((r.get("result") or {}).get("content") or []))
+            body = json.loads(text) if text.strip().startswith("{") else {}
+            if body.get("ok") is False or body.get("truncated"):
+                raise Refused(f"the reader could not read quest names from {x['name']}: {str(body.get('error') or text)[:300]}")
+            for rec in body.get("matches") or body.get("records") or []:
+                fl = {f.get("path"): f.get("value") for f in rec.get("fields") or [] if f.get("value") is not None}
+                if rec.get("editorid") in quest_edids:
+                    prev = quests.get(rec["editorid"]) or {}
+                    quests[rec["editorid"]] = {"name": fl.get("Name") or None if "Name" in fl else prev.get("name"),
+                                               "formKey": rec.get("formid"), "from": x["name"]}
     finally:
         reader.close()
         tmp.cleanup()
@@ -344,16 +443,22 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                for x in order]
     # every object a row names: its base and the plugins read that carry a version of it, in load order (the last is
     # the winner among them); every base: its type and model ("" when the record has none, null when not read)
-    refs = {fk: {"base": bases.get(fk), "carriedBy": list(dict.fromkeys((found.get(fk) or {}).get("carriedBy") or []))}
+    cells_by = {}
+    for x in order:
+        for fk, cell in filed_cells(Path(str(x["path"])), [fk for fk in targets_fk if fk in found and fk in bases]).items():
+            cells_by.setdefault(fk, {})[x["name"]] = cell
+    refs = {fk: {"base": bases.get(fk), "carriedBy": list(dict.fromkeys((found.get(fk) or {}).get("carriedBy") or [])),
+                 "scale": (found.get(fk) or {}).get("scale"), "cells": cells_by.get(fk) or {}}
             for fk in targets_fk if fk in found}
     base_rows = {fk: {"type": (found.get(fk) or {}).get("type"), "editorId": (found.get(fk) or {}).get("editorId"),
-                      "model": (found.get(fk) or {}).get("model")} for fk in sorted(set(bases.values())) if fk in found}
+                      "model": (found.get(fk) or {}).get("model"), "bounds": (found.get(fk) or {}).get("bounds")}
+                 for fk in sorted(set(bases.values())) if fk in found}
     # what could not be read: an object no plugin read carries, a base no plugin read carries (the report counts their
     # clashes as cannot-tell); the names step states the counts
     unread = {"objects": sorted(fk for fk in fks if fk not in found),
               "bases": sorted(fk for fk in set(bases.values()) if not (found.get(fk) or {}).get("type"))}
     _write(d / out_rel, {"schema": "names-v1", "places": places, "objects": objects, "mods": mods,
-                         "refs": refs, "bases": base_rows, "unread": unread, "readOrder": [x["name"] for x in order],
+                         "refs": refs, "bases": base_rows, "quests": quests, "unread": unread, "readOrder": [x["name"] for x in order],
                          "missing": missing, "derivedFrom": derived,
                          "capture": [{"path": req_rel, "sha256": sha(d / req_rel)},
                                      {"path": resp_rel, "sha256": sha(d / resp_rel)}],

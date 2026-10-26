@@ -9068,7 +9068,20 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     extra_media = bundle_media_rows(sb, sibling_roles) if sb is not None else []
     view = dict(plan, media=list(plan.get("media") or []) + extra_media)
     markers = reel_markers(plan, names, [b.plan] + ([sb.plan] if sb is not None else []), pr)
-    reel = reel_plan.plan_reel(view, names, masters, policy, words, search, mod_names, captures, markers=markers)
+    # the prediction setup's switch census: a world-state clash's condition is read from its switch's trigger
+    arm = str(((plan.get("reader") or {}).get("prediction") or {}).get("predictionArm") or "")
+    census_bundle, census_arm = (sibling, arm.split(":", 1)[1]) if arm.startswith("sibling:") else (bundle, arm)
+    census_path = (census_bundle / "evidence" / "outputs" / "state.switch-census" / f"{census_arm}.json") if census_bundle else None
+    switches = {}
+    if census_path is not None and census_path.is_file():
+        for sw in (load_json(census_path) or {}).get("switches") or []:
+            if isinstance(sw, dict) and sw.get("key"):
+                switches[sw["key"]] = {"edid": sw.get("edid"), "baselineEnabled": sw.get("baselineEnabled"),
+                                       "trigger": sw.get("trigger")}
+    reel = reel_plan.plan_reel(view, names, masters, policy, words, search, mod_names, captures, markers=markers,
+                               switches=switches)
+    reel["switchCensus"] = ({"path": str(census_path), "sha256": sha256_file(census_path), "switches": len(switches)}
+                            if census_path is not None and census_path.is_file() else None)
     reel["media"] = extra_media
     reel["patchSearch"] = search_ref
     reel["captureResults"] = [{"formKey": c.get("formKey"), "status": c.get("status"), "reason": c.get("reason")} for c in captures]
