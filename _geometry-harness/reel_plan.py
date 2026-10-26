@@ -217,38 +217,56 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
 
     refused = {str(x.get("formKey")) for x in capture_results if x.get("status") == "refused" and x.get("formKey")}
     attempts = int(policy.get("captureAttemptsPerType") or policy.get("perType") or 1)
-    chosen_by_type, unpictured, represented, candidates = {}, [], {}, {}
+    chosen_by_type, unpictured, represented, candidates, others = {}, [], {}, {}, {}
+
+    def group_key(c):
+        """Instances of one problem (skill data vignettes.groupKey): the type, the mod pair, the cell, and a record
+        clash's field. A record clash's cell is the one the other mod's version is filed in (names enrichment); a
+        geometry clash's is the cell its row names."""
+        r = c["rows"][0]
+        if c["type"] == "record":
+            cell = (ref_of(r["formKey"]).get("cells") or {}).get(r["A"])
+            return (c["type"], c["pair"], cell or r["formKey"], r.get("field"))
+        m = re.search(r" in ([A-Za-z0-9_]+) \((?:int|ext)\)", r.get("summary") or "")
+        return (c["type"], c["pair"], m.group(1) if m else r["formKey"], None)
     for t in policy.get("typeOrder") or []:
         cs = [c for c in clashes.values() if c["type"] == t]
         if not cs:
             continue
         draw = [c for c in cs if unpictured_reason(c) is None]
         unpictured += [(c, unpictured_reason(c)) for c in cs if unpictured_reason(c) is not None]
+        groups: dict = {}
+        for c in sorted(draw, key=lambda c: c["rows"][0]["formKey"]):
+            groups.setdefault(group_key(c), []).append(c)
         pairs: dict = {}
-        for c in draw:
-            pairs.setdefault(c["pair"], []).append(c)
+        for g in groups.values():
+            pairs.setdefault(g[0]["pair"], []).append(g)
         pair_order = sorted(pairs, key=lambda p: (-len(pairs[p]), p))
-        for p in pair_order:
-            pairs[p].sort(key=lambda c: c["rows"][0]["formKey"])
-        ordering, i = [], 0                                 # round the pairs until every drawable clash has a place
+        ordering, i = [], 0                                 # round the pairs until every group has a place
         while any(pairs.values()):
             p = pair_order[i % len(pair_order)]
             if pairs[p]:
                 ordering.append(pairs[p].pop(0))
             i += 1
-        quota = len(draw) if len(draw) <= policy["allUpTo"] else policy["perType"]
-        chosen, tried_refused = [], []
-        for c in ordering[:attempts]:
-            if len(chosen) >= quota:
+        quota = len(ordering) if len(ordering) <= policy["allUpTo"] else policy["perType"]
+        chosen, tried_refused, tried = [], [], 0
+        for g in ordering:
+            if len(chosen) >= quota or tried >= attempts:
                 break
-            if c["rows"][0]["formKey"] in refused:
-                tried_refused.append(c)
-                continue
-            chosen.append(c)
+            for c in g:                                     # a group's next member is its capture fallback
+                if tried >= attempts:
+                    break
+                tried += 1
+                if c["rows"][0]["formKey"] in refused:
+                    tried_refused.append(c)
+                    continue
+                chosen.append(c)
+                others[c["rows"][0]["formKey"]] = [x for x in g if x is not c]
+                break
         unpictured += [(c, "captureRefused") for c in tried_refused]
         chosen_by_type[t] = chosen
         if t in (policy.get("pictureTypes") or []):
-            candidates[t] = [c["rows"][0]["formKey"] for c in ordering[:attempts]]
+            candidates[t] = [c["rows"][0]["formKey"] for g in ordering for c in g][:attempts]
         represented[t] = [c for c in draw if c not in chosen and c not in tried_refused]
     budget = int(policy["maxVignettes"])
     for t in policy.get("typeOrder") or []:
@@ -286,6 +304,17 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         other = [m for m in c["pair"] if m != target][0]
         return [p for p in supplied if {other.lower(), target.lower()} <= set(masters.get(p.lower(), set()))]
 
+    used: dict = {}
+
+    def pick(case):
+        """The k-th patch sentence of a case in reel order takes phrasing k mod the pool's size (skill data
+        reel.words.patch): deterministic, and never the same phrasing twice in a row for one case."""
+        pool = words["patch"][case]
+        pool = pool if isinstance(pool, list) else [pool]
+        k = used.get(case, 0)
+        used[case] = k + 1
+        return pool[k % len(pool)]
+
     def patch_sentence(c):
         own = own_patches(c)
         r = c["rows"][0]
@@ -297,18 +326,18 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if own and wp in ("resolved", "kept", "switched", "own"):
             kept = mod(r["B"] if wp == "kept" else r["A"])
             key = {"resolved": "fixes", "kept": "keeps", "switched": "keeps", "own": "own"}[wp]
-            return (words["patch"][key].format(patch=patch_name(own[0]), kept=kept),
+            return (pick(key).format(patch=patch_name(own[0]), kept=kept),
                     {**evidence, "case": "own-" + key, "patch": own[0], "masters": sorted(masters.get(own[0].lower(), set()))})
-        lead = words["patch"]["leaves"].format(patch=patch_name(own[0])) + " " if own else ""
+        lead = pick("leaves").format(patch=patch_name(own[0])) + " " if own else ""
         ev = {**evidence, "patch": own[0] if own else None,
               "masters": sorted(masters.get(own[0].lower(), set())) if own else None}
         if hits:
-            return lead + words["patch"]["listed"].format(file=hits[0].get("file")), {**ev, "case": "listed", "hit": hits[0]}
+            return lead + pick("listed").format(file=hits[0].get("file")), {**ev, "case": "listed", "hit": hits[0]}
         # "No patch exists" only on a search that found its own known answer and read every source of this pair
         unread = entry.get("unreadSources") or []
         if known_found and not unread:
-            return lead + words["patch"]["noneOther" if own else "none"], {**ev, "case": "none-searched"}
-        return (lead + words["patch"]["notFoundOther" if own else "notFound"],
+            return lead + pick("noneOther" if own else "none"), {**ev, "case": "none-searched"}
+        return (lead + pick("notFoundOther" if own else "notFound"),
                 {**ev, "case": "not-found", "knownAnswerFound": known_found, "unreadSources": unread})
 
     def owner(fk, r):
@@ -346,11 +375,78 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             return [fks[vols.index(min(vols))]]
         return fks
 
+    def orient(c):
+        """A placement split's narration, from data only (Piranha's note 3): who moved the object (each version against
+        the base game's, from the names enrichment's per-carrier placements), whether the structure moved with it (the
+        mover's own overrides in that cell shifting by the object's height), where the other spot is (the row's two
+        positions, in metres) and what is there (the right half's downward probe, from its capture provenance). A clause
+        whose data is missing is not said."""
+        r = c["rows"][0]
+        fk = r["formKey"]
+        obj = spoken_ref(fk, r.get("summary"))
+        A, B = r["A"], r["B"]
+        pl = ref_of(fk).get("placements") or {}
+        basev, av, bv = pl.get(fk.split(":", 1)[1]), pl.get(A), pl.get(B)
+        tol = float(policy.get("storeyTolerance") or 96.0)
+
+        def same(u, v):
+            return max(abs(float(u[i]) - float(v[i])) for i in range(3)) <= 1.0
+        moved = [m for m, v in ((A, av), (B, bv)) if not same(v, basev)] if (basev and av and bv) else None
+        if moved is not None and len(moved) == 1:
+            mover = moved[0]
+            keeper = B if mover == A else A
+            dz_obj = float((av if mover == A else bv)[2]) - float(basev[2])
+            ov = (ref_of(fk).get("cellOverrides") or {}).get(mover) or {}
+            dzs = ov.get("dz") or []
+            share = len([d for d in dzs if abs(float(d) - dz_obj) <= tol]) / len(dzs) if dzs else 0.0
+            off = float(ov.get("disabled") or 0) / float(ov["count"]) if ov.get("count") else 0.0
+            cell = (ref_of(fk).get("cells") or {}).get(mover)
+            place = next((v.get("name") for v in places.values() if v.get("formKey") == cell), None) \
+                or words["structurePlace"].format(object=obj)
+            if off >= float(policy.get("structureShare") or 1.0):
+                who = words["structureReplaced"].format(mover=mod(mover), keeper=mod(keeper), place=place, object=obj)
+            elif dzs and share >= float(policy.get("structureShare") or 1.0) and abs(dz_obj) > tol:
+                who = words["structureUp" if dz_obj > 0 else "structureDown"].format(
+                    mover=mod(mover), keeper=mod(keeper), place=place, object=obj)
+            else:
+                who = words["moverOne"].format(mover=mod(mover), keeper=mod(keeper), object=obj)
+        elif moved is not None and len(moved) == 2:
+            who = words["moverBoth"].format(a=mod(A), b=mod(B), object=obj)
+        else:
+            who = words["placementSplit"].format(loser=mod(A), winner=mod(B), object=obj, mod=mod(target))
+        text = who
+        lost, won = _position((r.get("values") or {}).get("lost")), _position((r.get("values") or {}).get("winner"))
+        if lost and won:
+            dx, dy, dz = (won[i] - lost[i] for i in range(3))
+            dist = (dx * dx + dy * dy + dz * dz) ** 0.5
+            mpu = float(policy.get("metresPerUnit") or 0.01428)
+            if dist * mpu < 5:
+                where = words["where"]["close"]
+            elif abs(dz) >= 0.5 * dist:
+                where = words["where"]["below" if dz < 0 else "above"].format(m=int(round(abs(dz) * mpu / 5.0) * 5))
+            else:
+                where = words["where"]["away"].format(m=int(round(dist * mpu / 5.0) * 5))
+            sup = ((frame_media(c, "right") or {}).get("provenance") or {}).get("support")
+            extra = ""
+            if sup:
+                if sup.get("terrainAbove") and not sup.get("interior"):
+                    extra = words["spotExtra"]["belowGround"]
+                elif sup.get("down") is None:
+                    extra = words["spotExtra"]["noFloor" if sup.get("interior") else "inAir"]
+            text += " " + words["rightSpot"].format(mod=mod(target), where=where) + extra + "."
+        rest = [spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary")) for x in others.get(fk) or []]
+        if rest:
+            nm = joined(rest[:3])
+            if len(rest) > 3:
+                text += " " + words["groupOthers"]["more"].format(names=nm, count=len(rest) - 3)
+            else:
+                text += " " + words["groupOthers"]["one" if len(rest) == 1 else "many"].format(names=nm)
+        return text
+
     def sentence(c):
         r = c["rows"][0]
         if c["type"] == "record":
-            return words["placementSplit"].format(loser=mod(r["A"]), winner=mod(r["B"]),
-                                                  object=spoken_ref(r["formKey"], r.get("summary")), mod=mod(target))
+            return orient(c)
         s = geometry_slots(c)
         if c["type"] == "state":
             return words["stateClash"].format(condition=condition(r, names, switches, s["place"], words),

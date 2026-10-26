@@ -57,6 +57,8 @@ POLICY = {
               "geometry.navmesh-ownership": "navmesh"},
     "pictureTypes": ["overlap", "contact", "record", "state"],          # phase 2: placements and world states are pictured
     "drawableFields": ["Placement"],                                     # a record clash is pictured only for these fields
+    "groupKey": ["type", "pair", "cell", "field"],                       # phase 3: instances of one problem
+    "structureShare": 0.5, "storeyTolerance": 96.0, "metresPerUnit": 0.01428,
     "captureAttemptsPerType": 5,                                         # Gate A2 Q3
     "volumeFactor": 50,                                                  # Gate A2 Q6: mark only the smaller participant above it
     "effectModelPattern": r"^(?:effects|sky)[\\/]",          # the report's own pattern (report-priorities.json)
@@ -83,6 +85,18 @@ WORDS = {
     "conditionQuest": "When {quest} reaches stage {stage}",
     "conditionFallback": "In one state of the world, when these objects appear in {place}",
     "placementSplit": "{loser} and {winner} place {object} in different spots: {loser}'s on the left, {winner}'s on the right.",
+    "moverOne": "{mover} moves {object}; {keeper} keeps the original spot.",
+    "moverBoth": "{a} and {b} both move {object}, to different spots.",
+    "structureUp": "{mover} raises {place} and moves {object} with it; {keeper} keeps the original spot.",
+    "structureDown": "{mover} lowers {place} and moves {object} with it; {keeper} keeps the original spot.",
+    "structureReplaced": "{mover} replaces {place} with its own, turning the original off, and moves {object} into it; {keeper} keeps the original spot.",
+    "structurePlace": "the building around {object}",
+    "rightSpot": "The right half shows the spot with {mod} added, {where} the left one",
+    "where": {"below": "about {m} metres below", "above": "about {m} metres above", "away": "about {m} metres away from",
+              "close": "close to"},
+    "spotExtra": {"noFloor": ", where there is no floor", "belowGround": ", below the ground", "inAir": ", in the air"},
+    "groupOthers": {"one": "{names} is placed the same way.", "many": "{names} are placed the same way.",
+                    "more": "{names} and {count} more are placed the same way."},
     "splitLabels": {"left": "Without {mod}", "right": "With {mod}"},
     "caseLabels": {"overlap": "objects in the same space", "contact": "objects touching or blocking",
                    "record": "record clashes", "state": "objects that clash when a quest or switch changes the world"},
@@ -99,11 +113,15 @@ WORDS = {
     "stillTitles": {"types": "Clashes predicted from adding {mod}", "loadOrder": "Plugins analysed", "affected": "(affected)",
                     "checks": "Checks that could not run or could not decide",
                     "leftOut": "Not shown: {count} {noun} with no effect in play", "runtime": "Mods changing these scenes at run time"},
-    "patch": {"fixes": "Get {patch}; it fixes this.", "keeps": "Get {patch}; it keeps {kept}'s version.",
-              "own": "Get {patch}; it sets its own version.", "leaves": "{patch} does not fix this one.",
-              "listed": "A patch for these two mods is listed on Nexus: {file}.",
-              "none": "No patch exists for these two mods.", "noneOther": "No other patch exists for these two mods.",
-              "notFound": "No patch for these two mods was found.", "notFoundOther": "No other patch for these two mods was found."},
+    "patch": {"fixes": ["Get {patch}; it fixes this.", "Installing {patch} fixes this.", "Install {patch} to fix this."],
+              "keeps": ["Get {patch}; it keeps {kept}'s version.", "Installing {patch} keeps {kept}'s version."],
+              "own": ["Get {patch}; it sets its own version.", "Installing {patch} sets its own version."],
+              "leaves": ["{patch} does not fix this one.", "{patch} leaves this one as it is."],
+              "listed": ["A patch for these two mods is listed on Nexus: {file}.", "Nexus lists a patch for these two mods: {file}."],
+              "none": ["No patch exists for these two mods.", "There is no patch for these two mods."],
+              "noneOther": ["No other patch exists for these two mods.", "There is no other patch for these two mods."],
+              "notFound": ["No patch for these two mods was found.", "A patch for these two mods was not found."],
+              "notFoundOther": ["No other patch for these two mods was found.", "Another patch for these two mods was not found."]},
     "playTime": "This was also recorded in play.",
     "closingLines": {"withSetup": "{check}, with {patch}", "withoutSetup": "{check}, without {patch}"},
     "leftOutMarkers": "Not shown: {count} {noun} on editor-only markers",
@@ -229,6 +247,56 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
     mods = {"Target.esp": {"name": "Target Mod", "source": "mo2-folder"}, "Alpha.esp": {"name": "Alpha Mod", "source": "mo2-folder"},
             "Beta.esp": {"name": "Beta Mod", "source": "mo2-folder"},
             "Alpha - Target patch.esp": {"name": "Alpha Patches", "source": "mo2-folder"}}
+    return pres, names, masters, search, mods
+
+
+def says(text, case, words=None):
+    """Whether a narration says a patch case, in any of its pool's phrasings (the patch filled in as anything)."""
+    vs = (words or WORDS)["patch"][case]
+    for v in (vs if isinstance(vs, list) else [vs]):
+        rx = re.escape(v).replace(r"\{patch\}", ".+?").replace(r"\{kept\}", ".+?").replace(r"\{file\}", ".+?")
+        if re.search(rx, text):
+            return True
+    return False
+
+
+def patch_phrasings(text, words=None):
+    """(case, index) of every patch phrasing a narration uses, in order of appearance."""
+    out = []
+    for case, vs in (words or WORDS)["patch"].items():
+        for i, v in enumerate(vs if isinstance(vs, list) else [vs]):
+            rx = re.escape(v).replace(r"\{patch\}", ".+?").replace(r"\{kept\}", ".+?").replace(r"\{file\}", ".+?")
+            for m in re.finditer(rx, text):
+                out.append((m.start(), case, i))
+    return [(c, i) for _, c, i in sorted(out)]
+
+
+def synthetic_group():
+    """The synthetic evaluation plus a group: three placements of the Beta x Target pair in one cell (the lamp and two
+    more), one in another cell; each version's placement and cell; the right half's probe on the lamp's split."""
+    pres, names, masters, search, mods = synthetic()
+    rec = pres["reader"]["prediction"]["record"]
+    lamp = next(r for r in rec if r["formKey"] == "000403:Skyrim.esm")
+    lamp["values"] = {"lost": "Position=0,0,1424; Rotation=0,0,0", "winner": "Position=0,0,0; Rotation=0,0,0"}
+    for fk, edid, nm in (("000406:Skyrim.esm", "LampTwo", "Lamp Two"), ("000407:Skyrim.esm", "LampThree", "Lamp Three"),
+                         ("000409:Skyrim.esm", "LampFour", "Lamp Four")):
+        rec.append({**lamp, "formKey": fk, "findingId": "F-" + fk[:6],
+                    "summary": f"PlacedObject {edid}: Placement - Beta.esp's value lost to Target.esp's"})
+        names["refs"][fk] = {"base": "B-" + edid, "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"]}
+        names["bases"]["B-" + edid] = {"type": "Static", "editorId": edid, "model": f"Clutter\\{edid}.nif"}
+        names["objects"][edid] = {"name": nm}
+    cells = {"000403:Skyrim.esm": "000A01:Skyrim.esm", "000406:Skyrim.esm": "000A01:Skyrim.esm",
+             "000407:Skyrim.esm": "000A01:Skyrim.esm", "000409:Skyrim.esm": "000A02:Skyrim.esm"}
+    for fk, cell in cells.items():
+        names["refs"][fk]["cells"] = {"Skyrim.esm": cell, "Beta.esp": cell, "Target.esp": cell}
+    # the base game and Target keep the lamp at z 0; Beta raised it to z 1424 (the lost value): Beta moved it
+    names["refs"]["000403:Skyrim.esm"]["placements"] = {"Skyrim.esm": [0.0, 0.0, 0.0], "Beta.esp": [0.0, 0.0, 1424.0],
+                                                        "Target.esp": [0.0, 0.0, 0.0]}
+    names["places"]["LampRoom"] = {"name": "The Lamp Room", "formKey": "000A01:Skyrim.esm"}
+    pres["media"] += [{"id": "M-right-403", "assessed": True, "mediaKind": "offline-render",
+                       "subject": {"formKey": "000403:Skyrim.esm", "armId": "with-target"},
+                       "provenance": {"vignetteState": "right",
+                                      "support": {"down": None, "terrainAbove": False, "interior": True}}}]
     return pres, names, masters, search, mods
 
 
@@ -407,37 +475,52 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         return None
 
     refused = {str(x.get("formKey")) for x in captures or [] if x.get("status") == "refused"}
-    chosen_by_type, unpictured, represented, candidates = {}, [], {}, {}
+    chosen_by_type, unpictured, represented, candidates, others = {}, [], {}, {}, {}
     for t in policy["typeOrder"]:
         cs = [c for c in clashes.values() if c["type"] == t]
         if not cs:
             continue
         draw = [c for c in cs if drawable(c) is None]
         unpictured += [(c, drawable(c)) for c in cs if drawable(c) is not None]
+        def gkey(c):
+            """Instances of one problem (skill data groupKey): type, mod pair, cell, and the field of a record clash."""
+            r = c["rows"][0]
+            if c["type"] == "record":
+                cell = (ref(r["formKey"]).get("cells") or {}).get(r["A"])
+                return (c["type"], c["pair"], cell or r["formKey"], r.get("field"))
+            m = re.search(r" in ([A-Za-z0-9_]+) \((?:int|ext)\)", r.get("summary") or "")
+            return (c["type"], c["pair"], m.group(1) if m else r["formKey"], None)
+        groups = {}
+        for c in sorted(draw, key=lambda c: c["rows"][0]["formKey"]):
+            groups.setdefault(gkey(c), []).append(c)
         pairs = {}
-        for c in draw:
-            pairs.setdefault(c["pair"], []).append(c)
+        for g in groups.values():
+            pairs.setdefault(g[0]["pair"], []).append(g)
         pair_order = sorted(pairs, key=lambda p: (-len(pairs[p]), p))
-        for p in pair_order:
-            pairs[p].sort(key=lambda c: c["rows"][0]["formKey"])
-        ordering, i = [], 0                                # round the pairs until every drawable clash has a place
+        ordering, i = [], 0                                # round the pairs until every group has a place
         while any(pairs.values()):
             p = pair_order[i % len(pair_order)]
             if pairs[p]:
                 ordering.append(pairs[p].pop(0))
             i += 1
-        quota = len(draw) if len(draw) <= policy["allUpTo"] else policy["perType"]
-        chosen = []
-        for c in ordering[:policy["captureAttemptsPerType"]]:
-            if len(chosen) >= quota:
+        quota = len(ordering) if len(ordering) <= policy["allUpTo"] else policy["perType"]
+        chosen, tried = [], 0
+        for g in ordering:
+            if len(chosen) >= quota or tried >= policy["captureAttemptsPerType"]:
                 break
-            if c["rows"][0]["formKey"] in refused:
-                unpictured.append((c, "captureRefused"))
-                continue
-            chosen.append(c)
+            for c in g:                                    # a group's next member is its capture fallback
+                if tried >= policy["captureAttemptsPerType"]:
+                    break
+                tried += 1
+                if c["rows"][0]["formKey"] in refused:
+                    unpictured.append((c, "captureRefused"))
+                    continue
+                chosen.append(c)
+                others[c["rows"][0]["formKey"]] = [x for x in g if x is not c]
+                break
         chosen_by_type[t] = chosen
         if t in policy["pictureTypes"]:
-            candidates[t] = [c["rows"][0]["formKey"] for c in ordering[:policy["captureAttemptsPerType"]]]
+            candidates[t] = [c["rows"][0]["formKey"] for g in ordering for c in g][:policy["captureAttemptsPerType"]]
         represented[t] = [c for c in draw if c not in chosen and (c, "captureRefused") not in unpictured]
     # maxVignettes caps the pictured scenes in type order; what it drops is represented
     budget = policy["maxVignettes"]
@@ -447,6 +530,15 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         represented[t] += [c for c in chosen_by_type.get(t, []) if c not in keep]
         chosen_by_type[t] = keep
         budget -= len(keep)
+
+    used = {}
+
+    def pick(case):
+        """The k-th sentence of a case in reel order takes phrasing k mod the pool's size (skill data)."""
+        pool = words["patch"][case]
+        k = used.get(case, 0)
+        used[case] = k + 1
+        return pool[k % len(pool)]
 
     def patch_sentence(c):
         other = [m for m in c["pair"] if m != target][0]
@@ -459,16 +551,16 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
             r = c["rows"][0]
             kept = mod_name(mods, r["B"] if wp == "kept" else r["A"])
             key = {"resolved": "fixes", "kept": "keeps", "switched": "keeps", "own": "own"}[wp]
-            return words["patch"][key].format(patch=patch_display(mods, own[0], words), kept=kept)
-        lead = words["patch"]["leaves"].format(patch=patch_display(mods, own[0], words)) + " " if own else ""
+            return pick(key).format(patch=patch_display(mods, own[0], words), kept=kept)
+        lead = pick("leaves").format(patch=patch_display(mods, own[0], words)) + " " if own else ""
         if hits:
-            return lead + words["patch"]["listed"].format(file=hits[0]["file"])
+            return lead + pick("listed").format(file=hits[0]["file"])
         known = (search or {}).get("knownAnswer") or {}
         want = re.sub(r"\.(esp|esm|esl)$", "", str(known.get("patch") or ""), flags=re.I).lower()
         found = bool(want) and any(want in json.dumps(h).lower() for h in known.get("hits") or [])
         if found and not entry.get("unreadSources"):
-            return lead + words["patch"]["noneOther" if own else "none"]
-        return lead + words["patch"]["notFoundOther" if own else "notFound"]
+            return lead + pick("noneOther" if own else "none")
+        return lead + pick("notFoundOther" if own else "notFound")
 
     def owner(fk, r):
         """The pair's plugin a reference belongs to: the plugin that made it, else its last carrier in the pair."""
@@ -506,11 +598,89 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
             return [fks[vols.index(min(vols))]]
         return fks
 
+    def right_support(fk):
+        for m in pres.get("media") or []:
+            prov = m.get("provenance") or {}
+            if (m.get("assessed") and prov.get("vignetteState") == "right" and (m.get("subject") or {}).get("formKey") == fk
+                    and (m.get("subject") or {}).get("armId") == pred["predictionArm"]):
+                return prov.get("support")
+        return None
+
+    def orient(c):
+        """Who moved it (against the base game's value), whether the structure moved with it (the mover's overrides in
+        the cell), where the other spot is (the row's positions) and what is there (the right half's probe)."""
+        r = c["rows"][0]
+        fk = r["formKey"]
+        obj = spoken_ref(names, fk, r["summary"])
+        A, B = r["A"], r["B"]
+        pl = ref(fk).get("placements") or {}
+        basev, av, bv = pl.get(fk.split(":", 1)[1]), pl.get(A), pl.get(B)
+        tol = policy["storeyTolerance"]
+
+        def same(u, v):
+            return max(abs(float(u[i]) - float(v[i])) for i in range(3)) <= 1.0
+        if basev and av and bv:
+            moved = [m for m, v in ((A, av), (B, bv)) if not same(v, basev)]
+        else:
+            moved = None
+        if moved is not None and len(moved) == 1:
+            mover = moved[0]
+            keeper = B if mover == A else A
+            dz_obj = float((av if mover == A else bv)[2]) - float(basev[2])
+            ov = (ref(fk).get("cellOverrides") or {}).get(mover) or {}
+            dzs = ov.get("dz") or []
+            share = len([d for d in dzs if abs(float(d) - dz_obj) <= tol]) / len(dzs) if dzs else 0.0
+            off = (ov.get("disabled") or 0) / ov["count"] if ov.get("count") else 0.0
+            cell = (ref(fk).get("cells") or {}).get(mover)
+            place = next((v.get("name") for v in (names.get("places") or {}).values() if v.get("formKey") == cell), None) \
+                or words["structurePlace"].format(object=obj)
+            if off >= policy["structureShare"]:
+                who = words["structureReplaced"].format(mover=mod_name(mods, mover), keeper=mod_name(mods, keeper),
+                                                        place=place, object=obj)
+            elif dzs and share >= policy["structureShare"] and abs(dz_obj) > tol:
+                who = words["structureUp" if dz_obj > 0 else "structureDown"].format(
+                    mover=mod_name(mods, mover), keeper=mod_name(mods, keeper), place=place, object=obj)
+            else:
+                who = words["moverOne"].format(mover=mod_name(mods, mover), keeper=mod_name(mods, keeper), object=obj)
+        elif moved is not None and len(moved) == 2:
+            who = words["moverBoth"].format(a=mod_name(mods, A), b=mod_name(mods, B), object=obj)
+        else:
+            who = words["placementSplit"].format(loser=mod_name(mods, A), winner=mod_name(mods, B), object=obj,
+                                                 mod=mod_name(mods, target))
+        lost, won = position((r.get("values") or {}).get("lost")), position((r.get("values") or {}).get("winner"))
+        text = who
+        if lost and won:
+            dx, dy, dz = (won[i] - lost[i] for i in range(3))
+            dist = (dx * dx + dy * dy + dz * dz) ** 0.5
+            mpu = policy["metresPerUnit"]
+            if dist * mpu < 5:
+                where = words["where"]["close"]
+            elif abs(dz) >= 0.5 * dist:
+                where = words["where"]["below" if dz < 0 else "above"].format(m=int(round(abs(dz) * mpu / 5.0) * 5))
+            else:
+                where = words["where"]["away"].format(m=int(round(dist * mpu / 5.0) * 5))
+            sup = right_support(fk)
+            extra = ""
+            if sup:
+                if sup.get("terrainAbove") and not sup.get("interior"):
+                    extra = words["spotExtra"]["belowGround"]
+                elif sup.get("down") is None:
+                    extra = words["spotExtra"]["noFloor" if sup.get("interior") else "inAir"]
+            text += " " + words["rightSpot"].format(mod=mod_name(mods, target), where=where) + extra + "."
+        rest = [spoken_ref(names, x["rows"][0]["formKey"], x["rows"][0]["summary"]) for x in others.get(fk) or []]
+        if rest:
+            named = rest[:3]
+            nm = joined(named)
+            if len(rest) > 3:
+                text += " " + words["groupOthers"]["more"].format(names=nm, count=len(rest) - 3)
+            else:
+                text += " " + words["groupOthers"]["one" if len(rest) == 1 else "many"].format(names=nm)
+        return text
+
     def sentence(c):
         r = c["rows"][0]
         if c["type"] == "record":
-            return words["placementSplit"].format(loser=mod_name(mods, r["A"]), winner=mod_name(mods, r["B"]),
-                                                  object=spoken_ref(names, r["formKey"], r["summary"]), mod=mod_name(mods, target))
+            return orient(c)
         s = slots(c)
         if c["type"] == "state":
             return words["stateClash"].format(condition=condition_words(r, names, switches, s["place"], words), **{
@@ -647,7 +817,8 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
           f"{tag}every vignette shows {policy['sequence']} once and every split shows left then right, one narration each "
           f"({len(vig)} vignettes, shapes {shapes[:3]}; {len(spl)} splits, shapes {sshapes[:2]})")
     # 4 patches: every clash scene ends with a patch sentence; a named patch is that pair's patch
-    pat = [re.escape(v).replace(r"\{patch\}", ".+?").replace(r"\{kept\}", ".+?").replace(r"\{file\}", ".+?") for v in words["patch"].values()]
+    pat = [re.escape(v).replace(r"\{patch\}", ".+?").replace(r"\{kept\}", ".+?").replace(r"\{file\}", ".+?")
+           for vs in words["patch"].values() for v in (vs if isinstance(vs, list) else [vs])]
     no_patch = [c["narration"][:60] for c in clash_scenes if not any(re.search(p, c["narration"]) for p in pat)]
     foreign = []
     for c in clash_scenes:
@@ -740,6 +911,15 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
           f"{tag}the first pictured scene of each type opens with 'There are N cases of ...' ({bad6[:2]})")
     check("N6-count-agree", bool(first) and not bad_n,
           f"{tag}each spoken case count equals the opening still's count for that type (type, spoken, opening: {bad_n[:3]})")
+    # N8: one pictured scene per problem (type, mod pair, cell, and a record clash's field)
+    keys = []
+    for c in view:
+        if c["kind"] in PICTURED:
+            cl = c["clash"]
+            cell = (cl.get("cells") or {}).get("left") if cl.get("type") == "record" else cl.get("place")
+            keys.append((cl.get("type"), tuple(cl.get("pair") or []), cell or cl.get("formKey"), cl.get("checkId")))
+    dup = sorted({k for k in keys if keys.count(k) > 1}, key=str)
+    check("N8-once", bool(keys) and not dup, f"{tag}no two pictured scenes are the same problem ({dup[:2]})")
     # F2 no in-game effect
     no_eff = set(policy["noInGameEffectFields"])
     shown = [r for c in view for r in c["rows"] if r.get("field") in no_eff]
@@ -928,8 +1108,10 @@ SABOTAGE = ["verdict-opening", "report-sentence", "hnh", "drop-pair", "patch-any
 
 # ------------------------------------------------------------------------------------------ the planner cases
 def planned(pres, names, masters, search, mods, policy=POLICY, words=WORDS, captures=None, switches=None):
-    """The planner's reel for an evaluation (`reel_plan.plan_reel`), given the switch census and capture results the
-    phase 2 rules read; a planner from before them is called without (so its reel fails the new checks by assertion)."""
+    """The planner's reel for an evaluation (`reel_plan.plan_reel`), given the switch census and capture results.
+    An older planner that cannot read the newer words or arguments is called with what it can read -- each phrasing
+    pool's first sentence, the shipped words at that head, no switch census -- so its actual output fails the newer
+    checks by assertion rather than by a crash."""
     try:
         import reel_plan  # noqa: F401
     except ImportError:
@@ -937,20 +1119,27 @@ def planned(pres, names, masters, search, mods, policy=POLICY, words=WORDS, capt
         return copy.deepcopy(pres)
     out = copy.deepcopy(pres)
     switches = SWITCHES if switches is None else switches
-    try:
-        out["reel"] = reel_plan.plan_reel(out, names, masters, policy, words, search, mods, captures or [], markers=MARKERS,
-                                          switches=switches)
-    except TypeError:                                  # a planner from before the switch census
-        print("  NOTE  this planner takes no switch census (phase 1): planned without it")
-        # its words are the shipped skill's at that head, overlaid with this file's, so it plans what it can and the
-        # phase 2 checks read its actual output
-        shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
-        merged = {**shipped, **{k: ({**shipped.get(k, {}), **v} if isinstance(v, dict) else v) for k, v in words.items()}}
+    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    first = {**words, "patch": {k: (v[0] if isinstance(v, list) else v) for k, v in words["patch"].items()}}
+    merged = {**shipped, **{k: ({**shipped.get(k, {}), **v} if isinstance(v, dict) else v) for k, v in first.items()}}
+    attempts = [("as given", words, {"switches": switches}), ("each pool's first phrasing", first, {"switches": switches}),
+                ("no switch census, the shipped words overlaid", merged, {})]
+    last = None
+    for label, w, kw in attempts:
         try:
-            out["reel"] = reel_plan.plan_reel(out, names, masters, policy, merged, search, mods, captures or [], markers=MARKERS)
-        except Exception as exc:  # noqa: BLE001 - a planner that cannot plan these rules plans nothing; the checks then fail
-            print(f"  NOTE  the planner raised on the phase 2 rules ({type(exc).__name__}: {exc}); checking an empty reel")
-            out["reel"] = {"status": "refused", "reason": str(exc), "chapters": []}
+            got = reel_plan.plan_reel(out, names, masters, policy, w, search, mods, captures or [], markers=MARKERS, **kw)
+        except Exception as exc:  # noqa: BLE001 - try what an older planner can read
+            last = exc
+            continue
+        if got.get("status") != "planned" and "patch" in str(got.get("reason")) and label == "as given":
+            last = ValueError(got.get("reason"))
+            continue
+        if label != "as given":
+            print(f"  NOTE  this planner cannot read the newer words or arguments ({type(last).__name__}): planned with {label}")
+        out["reel"] = got
+        return out
+    print(f"  NOTE  the planner raised ({type(last).__name__}: {last}); checking an empty reel")
+    out["reel"] = {"status": "refused", "reason": str(last), "chapters": []}
     return out
 
 
@@ -962,7 +1151,7 @@ def case_planner():
     # F1 (Gate A review): the Beta overlap, a pair the supplied patch does not master, never names that patch
     beta = [c for c in reel_view(got) if c["kind"] == "vignette" and "Beta.esp" in (c["clash"].get("pair") or [])]
     check("F1-own-pair", bool(beta) and all("Alpha - Target patch" not in c["narration"] for c in beta)
-          and all(WORDS["patch"]["none"] in c["narration"] for c in beta),
+          and all(says(c["narration"], "none") for c in beta),
           "a supplied patch for another pair is not spoken over this pair's clash; it says no patch exists")
     # 3 the numbers are data: a policy allowing one per type selects one per type
     one = dict(POLICY, allUpTo=1, perType=1)
@@ -1000,20 +1189,20 @@ def case_planner():
     gk = planned(kp, kn, km, ks, kmods)
     texts = [c["narration"] for c in reel_view(gk)]
     check("known-answer", bool(texts) and not any("No patch exists" in x or "No other patch exists" in x for x in texts)
-          and any(WORDS["patch"]["notFound"] in x for x in texts),
+          and any(says(x, "notFound") for x in texts),
           "a patch search that did not find its own known patch says a patch was not found, never that none exists")
     # a search file that states found=true with no hit behind it is not believed
     ks3 = copy.deepcopy(ks); ks3["knownAnswer"]["found"] = True
     gf = planned(kp, kn, km, ks3, kmods)
     texts3 = [c["narration"] for c in reel_view(gf)]
     check("known-answer-derived", bool(texts3) and not any("No patch exists" in x for x in texts3)
-          and any(WORDS["patch"]["notFound"] in x for x in texts3),
+          and any(says(x, "notFound") for x in texts3),
           "a search file stating found=true with no matching hit still says a patch was not found")
     ks2 = copy.deepcopy(ks); ks2["knownAnswer"]["hits"] = [{"file": "Alpha - Target patch"}]
     ks2["pairs"][1]["unreadSources"] = [{"source": "a page description", "why": "cut short"}]
     gu = planned(kp, kn, km, ks2, kmods)
     beta = [c["narration"] for c in reel_view(gu) if c["kind"] == "vignette" and "Beta.esp" in (c["clash"].get("pair") or [])]
-    check("unread-source", bool(beta) and all(WORDS["patch"]["notFound"] in x for x in beta),
+    check("unread-source", bool(beta) and all(says(x, "notFound") for x in beta),
           "a pair with an unread source says a patch was not found, even when the known answer was found")
     # C3a: a clash on an editor-only marker is left out of the counts, and how many is on the opening still
     op_ = next((c for c in reel_view(got) if c["kind"] == "opening"), {})
@@ -1069,6 +1258,92 @@ def case_planner():
     check("N5-condition", WORDS["conditionQuest"].format(quest="The Camp Quest", stage="10") in tq
           and WORDS["conditionFallback"].format(place="The Camp") in td and "The Camp Quest" not in td,
           "a quest that switches the clash on is named with its stage; one that only switches it off is not")
+    # ---------------------------------------------------------------- phase 3
+    # N7: patch phrasings rotate through the pool, never the same one twice in a row; the same plan every time
+    phr = [x for c in reel_view(got) for x in patch_phrasings(c["narration"])]
+    rep_ = [(a, b) for a, b in zip(phr, phr[1:]) if a == b]
+    check("N7-pool", len(phr) >= 3 and len({c for c, _ in phr}) >= 1 and not rep_
+          and any(i > 0 for _, i in phr),
+          f"no two consecutive patch sentences use the same phrasing, and the pool is used (phrasings {phr}, repeats {rep_})")
+    again = planned(pres, names, masters, search, mods)
+    check("N7-deterministic", json.dumps((again.get("reel") or {}).get("chapters"), sort_keys=True)
+          == json.dumps((got.get("reel") or {}).get("chapters"), sort_keys=True),
+          "two plans of one presentation are identical")
+    # N8: placements of one pair in one cell are one problem: one split, the count said, the others named once
+    gp, gn, gm, gs, gmods = synthetic_group()
+    gg = planned(gp, gn, gm, gs, gmods)
+    gv = reel_view(gg)
+    spl = [c for c in gv if c["kind"] == "split"]
+    rec_n = next((x.get("count") for c in gv[:1] for pg in c["pages"] if pg.get("layout") == "types"
+                  for x in pg.get("rows") or [] if x.get("label") == WORDS["typeLabels"]["record"]), None)
+    first = spl[0]["narration"] if spl else ""
+    check("N8-group", len(spl) == 2 and first.startswith(WORDS["cases"]["many"].format(count=rec_n, label=WORDS["caseLabels"]["record"]))
+          and WORDS["lead"]["some"].format(count=2) in first
+          and WORDS["groupOthers"]["many"].format(names="Lamp Two and Lamp Three") in first,
+          f"three placements of one pair in one cell are one split naming the other two, with the count said "
+          f"({len(spl)} splits; {first[:220]!r})")
+    check("N8-key", len(spl) == 2 and (spl[1]["clash"].get("formKey") == "000409:Skyrim.esm")
+          and "placed the same way" not in spl[1]["narration"],
+          f"a placement of the same pair in another cell is its own split ({[c['clash'].get('formKey') for c in spl]})")
+    oracle_checks(gg, gv, oracle(gp, gn, gm, gs, gmods), tag="grouped: ")
+
+    # N9: the split orients the viewer from data, and says less when the data is missing
+    def orient_case(tag, mut):
+        op_, on_, om_, os_, omods_ = synthetic_group()
+        mut(op_, on_)
+        g_ = planned(op_, on_, om_, os_, omods_)
+        v_ = reel_view(g_)
+        oracle_checks(g_, v_, oracle(op_, on_, om_, os_, omods_), tag=f"{tag}: ")
+        return next((c["narration"] for c in v_ if c["kind"] == "split"), "")
+    t_up = orient_case("structure up", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"].update(
+        cellOverrides={"Beta.esp": {"dz": [1424.0, 1424.0, 1420.0, 0.0]}}))
+    check("N9-structure", "Beta Mod raises The Lamp Room and moves Lamp with it; Target Mod keeps the original spot." in t_up,
+          f"when most of the mover's overrides in the cell shift by the object's height, the structure moved ({t_up[:200]!r})")
+    t_off = orient_case("structure replaced", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"].update(
+        cellOverrides={"Beta.esp": {"dz": [0.0], "disabled": 9, "count": 10}}))
+    check("N9-structure-replaced", WORDS["structureReplaced"].format(mover="Beta Mod", keeper="Target Mod",
+                                                                   place="The Lamp Room", object="Lamp") in t_off,
+          f"when the mover turns off most of the original references in the cell, it replaced the structure ({t_off[:200]!r})")
+    t_alone = orient_case("structure still", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"].update(
+        cellOverrides={"Beta.esp": {"dz": [0.0, 0.0, 0.0, 1424.0]}}))
+    check("N9-structure-still", "raises" not in t_alone and "Beta Mod moves Lamp; Target Mod keeps the original spot." in t_alone,
+          f"an object moved alone never gets the structure clause ({t_alone[:200]!r})")
+    t_who = orient_case("who", lambda pr, nm: None)
+    check("N9-who", "Beta Mod moves Lamp; Target Mod keeps the original spot." in t_who,
+          f"the mover is the plugin whose value differs from the base game's ({t_who[:160]!r})")
+    t_both = orient_case("both", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"]["placements"].update({"Target.esp": [5.0, 5.0, 0.0]}))
+    check("N9-who-both", WORDS["moverBoth"].format(a="Beta Mod", b="Target Mod", object="Lamp") in t_both,
+          f"when both versions differ from the base game's, both moved it ({t_both[:160]!r})")
+    t_where = orient_case("where", lambda pr, nm: None)
+    check("N9-where", WORDS["rightSpot"].format(mod="Target Mod", where=WORDS["where"]["below"].format(m=20)) in t_where
+          and ", where there is no floor." in t_where,
+          f"the other spot's height in metres and the probe's empty space ({t_where[:260]!r})")
+
+    def ground(pr, nm):
+        for m in pr["media"]:
+            m["provenance"]["support"] = {"down": None, "terrainAbove": True, "interior": False}
+    t_ground = orient_case("ground", ground)
+    check("N9-ground", WORDS["spotExtra"]["belowGround"] + "." in t_ground and "no floor" not in t_ground,
+          f"an exterior spot under the terrain is below the ground ({t_ground[-160:]!r})")
+
+    def floor(pr, nm):
+        for m in pr["media"]:
+            m["provenance"]["support"] = {"down": 64.0, "terrainAbove": False, "interior": True}
+    t_floor = orient_case("floor", floor)
+    check("N9-empty", "no floor" not in t_floor and "below the ground" not in t_floor and "in the air" not in t_floor,
+          f"a floor under the spot adds nothing ({t_floor[-160:]!r})")
+    t_silent = orient_case("silent", lambda pr, nm: pr.update(media=[]))
+    check("N9-silent", "no floor" not in t_silent and "below the ground" not in t_silent and "in the air" not in t_silent
+          and "metres below" in t_silent,
+          f"with no probe data the empty-space clause is not said ({t_silent[-160:]!r})")
+    t_close = orient_case("close", lambda pr, nm: [r.update(values={"lost": "Position=0,0,0; Rotation=0,0,0",
+                                                                   "winner": "Position=100,0,0; Rotation=0,0,0"})
+                                                  for r in pr["reader"]["prediction"]["record"] if r["formKey"] == "000403:Skyrim.esm"])
+    check("N9-where-close", WORDS["where"]["close"] in t_close, f"a spot under 5 metres away is close by ({t_close[-160:]!r})")
+    t_base = orient_case("no base", lambda pr, nm: nm["refs"]["000403:Skyrim.esm"].pop("placements"))
+    check("N9-no-base", "keeps the original spot" not in t_base and "in different spots" in t_base,
+          f"without the base game's value the mover is not named ({t_base[:160]!r})")
+
     # N3: one clash the reel cannot picture is said in the singular
     op1, on1, om1, os1, omods1 = synthetic()
     op1["reader"]["prediction"]["record"] = [r for r in op1["reader"]["prediction"]["record"]
@@ -1220,6 +1495,33 @@ def case_capture_plan():
               and has(a_left, "--size", "638") and has(a_left, "--aspect", "638:680") and "--no-cell-outline" in a_left
               and has(a_left, "--order", "without.json"),
               f"a split half of an actor draws the actor with its puck at the half's canvas ({a_left})")
+        # N9: each split half probes straight down from its own placement, and the probe is read back
+        a_right = []
+        try:
+            a_right = argv_of({**sp, "actor": True}, cam, "right", "with.json", [], 638) if argv_of else []
+        except Exception as exc:  # noqa: BLE001
+            print(f"  NOTE  capture_argv raised: {type(exc).__name__}: {exc}")
+        check("N9-probe-argv", has(a_left, "--clear-at", "0,0,64") and has(a_right, "--clear-at", "10,0,64"),
+              f"each split half carries a --clear-at at its own placement, 64 u up ({a_left[-6:]}, {a_right[-6:]})")
+        head = ("   clear-at 10,0,64: nearest placed geometry on each world axis within 2048 u - 10 candidate(s) in the broad "
+                "phase, 10 with a readable mesh, 0 unreadable, 0 physical ref(s) skipped for want of a usable OBND, 0 physical "
+                "ref(s) with no model at all, 0 selected by record OBND because their mesh could not be read, 0 admitted by "
+                "mesh bounds that the record box alone would have excluded; terrain: none (broad phase)")
+        empty = "cell SomeCell (interior)  000A01:Skyrim.esm\n" + head + "\n      down    - nothing within 2048 u\n"
+        under = ("cell SomeOut (exterior)  000A02:Skyrim.esm\n" + head +
+                 "\n      up      40.0 u  000000:TERRAIN  LandHeightmap  at 10,0,104\n      down    - nothing within 2048 u\n")
+        floor_ = "cell SomeCell (interior)  000A01:Skyrim.esm\n" + head + "\n      down    64.0 u  000501:Test.esp  Floor01  at 10,0,0\n"
+        ps = getattr(capture_acquire, "parse_support", None)
+        try:
+            got_s = [ps(t_, [10.0, 0.0, 0.0]) for t_ in (empty, under, floor_)] if ps else []
+        except Exception as exc:  # noqa: BLE001
+            got_s = [f"raised {type(exc).__name__}: {exc}"]
+        want_s = [{"down": None, "terrainAbove": False, "interior": True},
+                  {"down": None, "terrainAbove": True, "interior": False},
+                  {"down": 64.0, "terrainAbove": False, "interior": True}]
+        check("N9-support-parse", len(got_s) == 3 and all(isinstance(g, dict) and all(g.get(k) == w[k] for k in w)
+                                                          for g, w in zip(got_s, want_s)),
+              f"the probe reads back as nothing below, terrain above, or a floor below ({got_s})")
         # the state scene identity: the stateprobe emit's configuration with the population read by the renderer and the
         # state the clash was measured in (Gate B first check: equal to the renderer's own for the same state)
         fp = capture_acquire._load_evalrun().configuration_fingerprint
@@ -1267,7 +1569,9 @@ def case_skill_data():
     sp = json.loads((SKILL / "references/scene-policy.json").read_text(encoding="utf-8"))
     words = ((pr.get("reel") or {}).get("words")) or {}
     vign = sp.get("vignettes") or {}
-    check("data-words", set(WORDS) - {"forbidden", "forbiddenPatterns"} <= set(words) and set(WORDS["patch"]) <= set(words.get("patch") or {}),
+    pools_ok = all(isinstance(v, list) and len(v) >= 2 for v in (words.get("patch") or {}).values()) and bool(words.get("patch"))
+    check("data-words", set(WORDS) - {"forbidden", "forbiddenPatterns"} <= set(words) and set(WORDS["patch"]) <= set(words.get("patch") or {})
+          and pools_ok,
           f"report-priorities.json reel.words carries every sentence and label the planner uses (missing "
           f"{sorted(set(WORDS) - {'forbidden', 'forbiddenPatterns'} - set(words))[:6]})")
     check("data-policy", all(k in vign for k in ("allUpTo", "perType", "maxVignettes", "noInGameEffectFields", "stillReasons",
@@ -1479,6 +1783,20 @@ CODE_SABOTAGE = {
         "[0:v][3:v][1:v]hstack", "[1:v][3:v][0:v]hstack")]),
     "code-c3-markers": ("planner", "C3-markers", [("_geometry-harness/reel_plan.py",
         "and r not in marker_rows]", "]")]),
+    # phase 3
+    "code-pool-fixed": ("planner", "N7-pool", [("_geometry-harness/reel_plan.py",
+        "        return pool[k % len(pool)]", "        return pool[0]")]),
+    "code-group-no-cell": ("planner", "N8-key", [("_geometry-harness/reel_plan.py",
+        'return (c["type"], c["pair"], cell or r["formKey"], r.get("field"))', 'return (c["type"], c["pair"], None, r.get("field"))')]),
+    "code-mover-from-row": ("planner", "N9-who", [("_geometry-harness/reel_plan.py",
+        "            mover = moved[0]\n", "            mover = B\n")]),
+    "code-empty-without-support": ("planner", "N9-silent", [("_geometry-harness/reel_plan.py",
+        '            extra = ""\n            if sup:', '            extra = words["spotExtra"]["noFloor"]\n            if sup:')]),
+    "code-structure-any-share": ("planner", "N9-structure-still", [("_geometry-harness/reel_plan.py",
+        '            elif dzs and share >= float(policy.get("structureShare") or 1.0) and abs(dz_obj) > tol:',
+        "            elif dzs and abs(dz_obj) > tol:")]),
+    "code-probe-dropped": ("capture", "N9-probe-argv", [("_geometry-harness/capture_acquire.py",
+        '            argv += ["--clear-at", f"{float(spot[0]):g},{float(spot[1]):g},{float(spot[2]) + 64:g}"]', "            pass")]),
     "code-f3-states": ("capture", "F3-states", [(REF + "/scene-policy.json",
         '"states": ["without", "with", "highlight"],', '"states": ["highlighted", "unhighlighted", "highlighted"],')]),
     "code-f3-selected": ("capture", "F3-selected", [("_geometry-harness/report_scenes.py",
