@@ -250,7 +250,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         r = c["rows"][0]
         row = {"formKey": r["formKey"], "type": c["type"], "pair": [mod(m) for m in c["pair"]],
                "field": (words.get("fieldLabels") or {}).get(r.get("field"), r.get("field")) if r.get("field") else None,
-               "object": spoken_ref(r["formKey"], r.get("summary")), "reason": (policy.get("stillReasons") or {}).get(still_reason(c) or c["type"])}
+               "object": spoken_ref(r["formKey"], r.get("summary")),
+               "reason": (policy.get("stillReasons") or {}).get(c.get("_reason") or still_reason(c) or c["type"])}
         if c["type"] in ("overlap", "contact", "state"):
             s = geometry_slots(c)
             row.update(object=f"{s['objectA']} ({s['modA']}) and {s['objectB']} ({s['modB']})", place=s["place"])
@@ -310,7 +311,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             closing_extra.append({"reason": "picture could not be captured: " + str(refusals[fk].get("reason")),
                                   "subjects": [geometry_slots(c)["objectA"] + " and " + geometry_slots(c)["objectB"]
                                                + " in " + geometry_slots(c)["place"]]})
-            reason = "captureRefused"
+            reason = c["_reason"] = "captureRefused"
         if reason is None:
             sentence = words["overlap"].format(**geometry_slots(c))
             patch, evidence = patch_sentence(c)
