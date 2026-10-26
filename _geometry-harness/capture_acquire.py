@@ -175,7 +175,8 @@ class Refused(Exception):
 
 # ---------------------------------------------------------------- the request side --
 
-SUPPORTED_REQUEST_TYPES = ("overlap-pair",)
+SUPPORTED_REQUEST_TYPES = ("overlap-pair", "state-pair", "placement-split")
+SPLIT_SIZE, SPLIT_ASPECT = 638, "638:680"      # a split half (skill data scene-policy vignettes.split.half)
 
 
 def find_request(packet: dict, request_id: str) -> tuple[dict, dict]:
@@ -203,7 +204,15 @@ def participants(request: dict) -> list[dict]:
     Corroboration keys that ride along in `recordKeys` are context, not subjects, so they are not
     demanded as feature points; every highlighted key is.
     """
-    highlights = request.get("highlights") or []
+    if request.get("requestType") == "placement-split":
+        # one placed object or actor, shown at two placements: its own highlight is the one participant
+        rows = [h for h in request.get("highlights") or [] if isinstance(h, dict) and h.get("formKey")]
+        if len(rows) != 1 or rows[0]["formKey"] not in (request.get("recordKeys") or []):
+            raise Refused("request-participants-unusable",
+                          f"a placement split names one highlighted participant among its recordKeys (highlights={rows!r})")
+        return [{"formKey": rows[0]["formKey"], "color": rows[0].get("color")}]
+    # a world-state pair may mark only its smaller participant, but its camera is planned on both (pointParticipants)
+    highlights = request.get("pointParticipants") or request.get("highlights") or []
     keys = [h.get("formKey") for h in highlights if isinstance(h, dict) and h.get("formKey")]
     if len(keys) != len(highlights) or len(set(keys)) != len(keys) or len(keys) < 2:
         raise Refused("request-participants-unusable",
@@ -248,7 +257,7 @@ def verify_source(request: dict, bundle: Path) -> dict:
 SCOPED_POPULATION = re.compile(r"^(?P<base>.+)\+population:[0-9a-f]{12}$")
 
 
-def scene_identity(source: dict, expected: str) -> dict | None:
+def scene_identity(source: dict, expected: str, state: str | None = None) -> dict | None:
     """For a request whose source emit was measured on a plan's POPULATION (P25), the identity of the SCENE it was measured
     in: the same configuration with the population line set back to the enable population the renderer reads. None when the
     source's population is not of that form (the ordinary comparison then stands alone).
@@ -264,22 +273,25 @@ def scene_identity(source: dict, expected: str) -> dict | None:
     cfg = doc.get("Configuration") if isinstance(doc, dict) else None
     population = (cfg or {}).get("Population")
     m = SCOPED_POPULATION.match(population or "")
-    if not m:
+    if not m and state is None:
         return None
+    base = m.group("base") if m else population
     fp = _load_evalrun().configuration_fingerprint
 
-    def recompute(pop: str) -> str:
+    def recompute(pop: str, st=None) -> str:
         return fp([{"name": x.get("Name"), "sha256": x.get("Sha256")} for x in cfg.get("Plugins") or []],
                   [{"kind": x.get("Kind"), "name": x.get("Name")} for x in cfg.get("Providers") or []],
                   [{"kind": x.get("Kind"), "sha256": x.get("Sha256")} for x in cfg.get("Overlays") or []],
-                  pop, cfg.get("State"), cfg.get("SchemaVersion"))
+                  pop, cfg.get("State") if st is None else st, cfg.get("SchemaVersion"))
     own = recompute(population)
     if own != cfg.get("Fingerprint") or own != expected:
         raise Refused("source-configuration-inconsistent",
                       f"the source emit's configuration recomputes to {own[:16]}…, not to its recorded fingerprint "
                       f"{str(cfg.get('Fingerprint'))[:16]}… and the request's {str(expected)[:16]}…, so the scene it was "
                       "measured in cannot be rebuilt from it", recomputedFingerprint=own, expectedFingerprint=expected)
-    return {"population": population, "base": m.group("base"), "sceneFingerprint": recompute(m.group("base")),
+    # a world-state request: stateprobe measures every flip in one run, so its emit's state line is "baseline" and the
+    # clash's state is the switch its conflict Kind names; the scene is the emit's configuration in that state
+    return {"population": population, "base": base, "state": state, "sceneFingerprint": recompute(base, state),
             "rule": ("the request's fingerprint is population-bound (P25): the source emit's own configuration was "
                      "recomputed to it, then with the population line set to the enable population the renderer reads; "
                      "the renderer's fingerprint equals that, so the plugins, their hashes and order, the providers, "
@@ -559,7 +571,7 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
                       "renderer's against", observedFingerprint=observed)
     scoped = None
     if observed != expected:
-        scoped = scene_identity(source, expected)
+        scoped = scene_identity(source, expected, state=request.get("state") if request.get("requestType") == "state-pair" else None)
         if scoped is None or scoped["sceneFingerprint"] != observed:
             raise Refused("configuration-mismatch",
                           f"the renderer read configuration {observed[:16]}… but this finding was "
@@ -700,6 +712,137 @@ def bind_packet(packet: dict, request_id: str, result: dict, result_path: Path) 
     return out
 
 
+# ---------------------------------------------------------------- one frame's viewprobe argv --
+
+def _strip_flag(args: list[str], flag: str) -> list[str]:
+    out, i = [], 0
+    while i < len(args):
+        if args[i] == flag:
+            i += 2
+            continue
+        out.append(args[i])
+        i += 1
+    return out
+
+
+def capture_argv(request: dict, camera: dict, state: str, order: str, passthrough: list[str], size: int) -> list[str]:
+    """The viewprobe arguments (after the executable, before --out) for one frame of a request.
+
+    Every frame: the camera verbatim, --report-mode, no navmesh, no cell outline (exteriors draw it otherwise, and it reads
+    as part of a building), and a world-state request's --state on every state. The highlight state marks the request's
+    highlights (ghost: coloured --ref). A placement split's halves both mark the one participant -- an actor by --npc with
+    its puck, an object by a cyan --ref -- on the split's half canvas."""
+    cam = shlex.split(camera["viewprobe"])
+    split = request.get("requestType") == "placement-split"
+    if split:
+        cam = _strip_flag(cam, "--aspect") + ["--aspect", SPLIT_ASPECT]
+        size = SPLIT_SIZE
+    argv = [camera["cell"], *passthrough, "--order", str(order), *cam, "--nav", "off", "--size", str(size), "--msaa", "4",
+            "--report-mode", "--no-cell-outline"]
+    if request.get("state") and request.get("requestType") == "state-pair":
+        argv += ["--state", str(request["state"])]
+    if split:
+        fk = request["highlights"][0]["formKey"]
+        argv += (["--npc", fk, "--npc-puck", "on"] if request.get("actor") else ["--ref", f"{fk}=cyan"])
+    elif state == "highlight":
+        for h in request.get("highlights") or []:
+            argv += ["--ref", f"{h['formKey']}={h['color']}"]
+        if (request.get("sequence") or {}).get("highlightMode") != "ghost":
+            argv.append("--ref-surface")
+    return argv
+
+
+def _cell_of(request: dict, side: str) -> str:
+    cell = str((request.get("cells") or {}).get(side) or "")
+    if not cell or cell.endswith("!persistent"):
+        raise Refused("placement-no-cell",
+                      f"the {side} placement's reference is filed in "
+                      + ("a worldspace's persistent cell" if cell else "no cell the names enrichment read")
+                      + ", so there is no cell to render it in")
+    return cell
+
+
+def _pose_cam(cell: str, eye, yaw, pitch, fov, cull=None) -> dict:
+    vp = f"--eye {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f} --yaw {float(yaw):.1f} --pitch {float(pitch):.1f} --fov {fov}"
+    if cull is not None:
+        vp += f" --cull-above {float(cull):.1f}"
+    return {"cell": cell, "eye": [float(v) for v in eye], "yaw": float(yaw), "pitch": float(pitch), "fov": fov,
+            "cullAbove": cull, "aspect": SPLIT_ASPECT, "viewprobe": vp}
+
+
+def acquire_split(a, request: dict, source: dict, receipts_dir: Path, shotplan_mod) -> dict:
+    """A placement split's camera, by the Gate A2 rule (Q5): one shared camera when the planner verifies one seeing both
+    placements; otherwise the left placement's camera, reused by the right half moved by (right - left); when even that
+    is refused, the left placement's labelled top-down fallback, moved the same way (the blind review decides whether it
+    reads). Every plan runs on the prediction setup, so the camera is judged against the configuration the finding was
+    measured in; the observed fingerprint must equal the request's."""
+    left, right = (request.get("placements") or {}).get("left"), (request.get("placements") or {}).get("right")
+    if not left or not right:
+        raise Refused("placement-unknown", "the split names no left or right placement")
+    cell_l, cell_r = _cell_of(request, "left"), _cell_of(request, "right")
+    expected = request.get("configurationFingerprint")
+    attempts = []
+
+    def plan(name, cell, subjects):
+        d = receipts_dir / name
+        d.mkdir(parents=True, exist_ok=True)
+        pj, wl = d / "shotplan-plan.json", d / "shotplan-worklist.json"
+        shotplan_mod.claim_outputs([str(pj), str(wl)], request["id"])
+        argv = [sys.executable, str(SHOTPLAN), "plan", cell]
+        for (x, y, z), lab in subjects:
+            argv.append(f"--subject={x:g},{y:g},{z:g}={lab}")
+        argv += ["--fov", "65", "--aspect", SPLIT_ASPECT, "--json", str(pj), "--worklist", str(wl),
+                 "--label", f"capture request {request['id']} {name}"]
+        if a.vp:
+            argv += ["--vp", a.vp]
+        if a.passthrough:
+            argv += ["--"] + list(a.passthrough)
+        call = call_planner(argv, d)
+        doc = load_json(pj) if pj.is_file() else {}
+        wdoc = load_json(wl) if wl.is_file() else {}
+        observed = ((doc.get("scene") or {}).get("renderer")) if isinstance(doc, dict) else None
+        attempts.append({"name": name, "cell": cell, "exitCode": call["exitCode"], "status": (doc or {}).get("status"),
+                         "observedFingerprint": observed, "planJson": str(pj), "worklist": str(wl)})
+        return doc or {}, wdoc or {}, observed
+
+    def verified_cam(doc, cell, observed):
+        if doc.get("status") != "verified" or not (doc.get("chosen") or {}).get("ok"):
+            return None
+        if observed != expected:
+            raise Refused("configuration-mismatch",
+                          f"the renderer read configuration {str(observed)[:16]}… but this finding was measured in "
+                          f"{str(expected)[:16]}…", expectedFingerprint=expected, observedFingerprint=observed)
+        ch, pose = doc["chosen"], (doc.get("verification") or {}).get("pose") or {}
+        return _pose_cam(cell, ch["eye"], ch["yaw"], ch["pitch"], pose.get("fov") or 65), doc.get("poseId")
+
+    shift = [float(right[i]) - float(left[i]) for i in range(3)]
+    if cell_l == cell_r:
+        doc, _w, obs = plan("shared", cell_l, [(left, "left"), (right, "right")])
+        got = verified_cam(doc, cell_l, obs)
+        if got:
+            cam, pid = got
+            return {"mode": "shared", "left": cam, "right": {**cam, "cell": cell_r}, "poseIds": [pid, pid],
+                    "shift": None, "attempts": attempts}
+    doc, wdoc, obs = plan("left", cell_l, [(left, "left")])
+    got = verified_cam(doc, cell_l, obs)
+    mode = "relative"
+    if got:
+        cam, pid = got
+    else:
+        shots = [x for c_ in wdoc.get("cells") or [] for x in c_.get("shots") or []
+                 if isinstance(x, dict) and x.get("status") == "fallback"]
+        shot = shots[0] if shots and shots[0].get("eye") else None
+        if shot is None:
+            raise Refused("planner-not-verified", "no camera was verified for the left placement and the planner left no "
+                          "top-down fallback", attempts=attempts)
+        cam = _pose_cam(cell_l, shot["eye"], shot.get("yaw", 0), shot["pitch"], shot.get("fov", 65), shot.get("cullAbove"))
+        pid, mode = shot.get("poseId"), "fallback"
+    eye_r = [cam["eye"][i] + shift[i] for i in range(3)]
+    cam_r = _pose_cam(cell_r, eye_r, cam["yaw"], cam["pitch"], cam["fov"],
+                      None if cam.get("cullAbove") is None else cam["cullAbove"] + shift[2])
+    return {"mode": mode, "left": cam, "right": cam_r, "poseIds": [pid, pid], "shift": shift, "attempts": attempts}
+
+
 # ---------------------------------------------------------------- the command --
 
 def cmd_acquire(a) -> int:
@@ -739,6 +882,31 @@ def cmd_acquire(a) -> int:
             parts = participants(request)
             bundle = Path(a.bundle).resolve() if a.bundle else packet_path.parent
             source = verify_source(request, bundle)
+            if request.get("requestType") == "state-pair":
+                # the camera is planned and verified in the state the clash was measured in, without the cell outline
+                a.passthrough = list(a.passthrough) + ["--state", str(request["state"]), "--no-cell-outline"]
+            if request.get("requestType") == "placement-split":
+                split = acquire_split(a, request, source, receipts_dir, shotplan_mod)
+                result = {"schemaVersion": 1, "kind": "capture-acquisition", "status": "camera-ready",
+                          "generatedUtc": utcnow(), "synthetic": False,
+                          "request": {"id": request["id"], "requestType": request.get("requestType"),
+                                      "checkId": request.get("checkId"), "armId": request.get("armId"),
+                                      "findingIds": request.get("findingIds"), "recordKeys": request.get("recordKeys")},
+                          "source": source, "poseId": split["poseIds"][0], "camera": split["left"], "split": split,
+                          "configuration": {"expected": request.get("configurationFingerprint"),
+                                            "observed": next((x["observedFingerprint"] for x in split["attempts"]
+                                                              if x["observedFingerprint"]), None),
+                                            "match": split["mode"] != "fallback" or None},
+                          "visualQualification": {"status": "pending",
+                                                  "note": "a split's halves are reviewed blind; a fallback top-down that "
+                                                          "does not read counts the clash as not pictured"},
+                          "receipts": {"receiptsDir": str(receipts_dir), "worklist": None}}
+                write_json(out, result)
+                run.advance(1)
+                run.artifact(str(out))
+                run.tally(ok=1)
+                print(f"camera-ready {a.request}: split {split['mode']}, left {split['left']['viewprobe']}")
+                return EXIT_OK
             if a.points == "auto":
                 CP = _load_points()
                 try:
@@ -818,14 +986,17 @@ def cmd_capture(a) -> int:
 
 
 def _capture(a) -> int:
-    """Render one vignette's states at its acquired camera and write the media items for each setup's bundle.
+    """Render one request's frames at its acquired camera and write the media items for each setup's bundle.
 
-    The camera comes verbatim from the acquisition (`camera.viewprobe`, `camera.cell`); nothing here composes or
-    adjusts a pose. Each state is one viewprobe process: `without` renders the setup without the evaluated mod
-    (--without-order), `with` and `highlight` the prediction setup (--with-order); `highlight` adds the request's
-    colour roles as the policy's highlight mode (ghost: coloured --ref, no --ref-surface). The replay pose each PNG
-    reports must be identical across the states, or the capture refuses. A refusal is a result: it is written to
-    capture-result.json with its sentence, for evalreport plan --capture-results."""
+    The camera comes verbatim from the acquisition; nothing here composes or adjusts a pose. Each frame is one viewprobe
+    process with the argv `capture_argv` builds:
+      - a vignette (overlap or world state): `without` renders the setup without the evaluated mod (--without-order),
+        `with` and `highlight` the prediction setup (--with-order); `highlight` adds the request's highlights; a world
+        state renders every state in its switch's state. The replay pose each PNG reports must be identical across states.
+      - a placement split: `left` renders the setup without the mod at the left camera, `right` the prediction at the
+        right camera (the same camera when shared; moved by the placements' difference when relative, and then each
+        half's media says so). Both halves mark the one participant.
+    A refusal is a result: it is written to capture-result.json with its sentence, for evalreport plan --capture-results."""
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     result = {"schemaVersion": 1, "kind": "vignette-capture", "request": a.request, "status": "refused", "reason": None,
@@ -847,21 +1018,26 @@ def _capture(a) -> int:
         result["reason"] = (f"the acquisition is {acq.get('status')!r} for request "
                             f"{(acq.get('request') or {}).get('id')!r}, not camera-ready for {a.request}")
         return finish(EXIT_REFUSED)
-    cam = acq["camera"]
     seq = request.get("sequence") or {}
     states = list(seq.get("states") or [])
     vig = request.get("vignette") or {}
-    arms = {"without": vig.get("withoutArmId"), "with": request.get("armId"), "highlight": request.get("armId")}
-    orders = {"without": a.without_order, "with": a.with_order, "highlight": a.with_order}
-    if states != ["without", "with", "highlight"] or not arms["without"]:
-        result["reason"] = (f"the request's sequence is {states} with setup without the mod {arms['without']!r}; "
-                            f"this step captures the reel's without / with / highlight states of a vignette request")
-        return finish(EXIT_REFUSED)
-    marks = []
-    for h in request.get("highlights") or []:
-        marks += ["--ref", f"{h['formKey']}={h['color']}"]
-    if seq.get("highlightMode") != "ghost":
-        marks.append("--ref-surface")
+    split = request.get("requestType") == "placement-split"
+    if split:
+        sp = acq.get("split") or {}
+        arms = {"left": vig.get("withoutArmId"), "right": request.get("armId")}
+        orders = {"left": a.without_order, "right": a.with_order}
+        cams = {"left": sp.get("left"), "right": sp.get("right")}
+        if states != ["left", "right"] or not arms["left"] or not cams["left"] or not cams["right"]:
+            result["reason"] = f"the split's sequence is {states} with cameras {sorted(k for k, v in cams.items() if v)}"
+            return finish(EXIT_REFUSED)
+    else:
+        arms = {"without": vig.get("withoutArmId"), "with": request.get("armId"), "highlight": request.get("armId")}
+        orders = {"without": a.without_order, "with": a.with_order, "highlight": a.with_order}
+        cams = {s_: acq["camera"] for s_ in ("without", "with", "highlight")}
+        if states != ["without", "with", "highlight"] or not arms["without"]:
+            result["reason"] = (f"the request's sequence is {states} with setup without the mod {arms['without']!r}; "
+                                f"this step captures the reel's without / with / highlight states of a vignette request")
+            return finish(EXIT_REFUSED)
     vp = Path(a.vp) if a.vp else VIEWPROBE
     renderer = {n: sha256_file(vp.parent / n) for n in ("viewprobe.exe", "viewprobe.dll", "housecarl-core.dll")
                 if (vp.parent / n).is_file()}
@@ -870,9 +1046,8 @@ def _capture(a) -> int:
     for state in states:
         d = out / state
         d.mkdir(parents=True, exist_ok=True)
-        argv = ([str(vp), cam["cell"], *a.passthrough, "--order", str(Path(orders[state]).resolve()),
-                 *shlex.split(cam["viewprobe"]), "--nav", "off", "--size", str(a.size), "--msaa", "4", "--report-mode"]
-                + (marks if state == "highlight" else []) + ["--out", str(d)])
+        argv = ([str(vp)] + capture_argv(request, cams[state], state, str(Path(orders[state]).resolve()), a.passthrough, a.size)
+                + ["--out", str(d)])
         r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
         text = r.stdout + "\n--stderr--\n" + r.stderr
         (d / "console.txt").write_text(" ".join(argv) + "\n" + text, encoding="utf-8")
@@ -882,7 +1057,7 @@ def _capture(a) -> int:
         refusals = [ln.strip() for ln in text.splitlines() if "refused" in ln.lower()]
         row = {"state": state, "armId": arms[state], "exit": r.returncode, "png": str(pngs[-1]) if pngs else None,
                "sha256": sha256_file(pngs[-1]) if pngs else None, "configurationFingerprint": fp, "refusals": refusals,
-               "argv": argv}
+               "hidden": [ln.strip() for ln in text.splitlines() if "HIDDEN" in ln], "argv": argv}
         result["states"].append(row)
         if r.returncode != 0 or not pngs or not fp:
             result["reason"] = (f"viewprobe could not render the {state} state (exit {r.returncode}"
@@ -897,25 +1072,33 @@ def _capture(a) -> int:
             result["reason"] = f"the {state} PNG carries no replay pose in its viewprobe metadata"
             return finish(EXIT_REFUSED)
         row["reportedPose"], row["size"] = reported, list(size)
-        poses.add((reported, size))
+        poses.add((reported, tuple(size)))
         side = next(iter(sorted(d.glob("*-configuration.json"))), None)
         overlays = ((load_json(side) or {}).get("Configuration") or {}).get("Overlays") if side else None
+        relative = split and (acq.get("split") or {}).get("mode") in ("relative", "fallback")
         media.setdefault(arms[state], []).append({
             "path": str(pngs[-1]), "mediaKind": "offline-render",
             "subject": {"checkId": request.get("checkId"), "armId": arms[state], "formKey": result["formKey"],
-                        "description": f"vignette {vig.get('chapterId')} {state}: request {a.request}"},
+                        "description": f"{'split' if split else 'vignette'} {vig.get('chapterId')} {state}: request {a.request}"},
             "state": request.get("state") or "baseline", "configurationFingerprint": fp, "fingerprintSource": "emitted",
             "provenance": {"tool": "viewprobe", "capturedUtc": utcnow(), "argv": argv, "rendererHashes": renderer,
-                           "captureRequest": a.request, "request": a.request, "poseId": acq.get("poseId"),
-                           "vignetteState": state, "camera": cam, "configurationSidecar": str(side) if side else None,
+                           "captureRequest": a.request, "request": a.request,
+                           "poseId": acq.get("poseId") if not relative else f"{acq.get('poseId')}:{state}",
+                           "relativePose": bool(relative), "splitMode": (acq.get("split") or {}).get("mode") if split else None,
+                           "vignetteState": state, "camera": cams[state], "configurationSidecar": str(side) if side else None,
                            "runtimeOverlayMods": sorted({str(o.get("Mod") or o.get("Provider") or o.get("Name"))
                                                          for o in overlays or [] if isinstance(o, dict)})}})
-    if len(poses) != 1:
+    shared = not split or (acq.get("split") or {}).get("mode") == "shared"
+    if shared and len(poses) != 1:
         result["reason"] = "the states were not rendered at one pose and canvas"
+        return finish(EXIT_REFUSED)
+    if not shared and len({p_[1] for p_ in poses}) != 1:
+        result["reason"] = "the split's halves were not rendered on one canvas"
         return finish(EXIT_REFUSED)
     for arm, items in media.items():
         write_json(out / f"media-{arm}.json", {"schemaVersion": 2, "items": items})
     result.update(status="captured", reason=None, poseId=acq.get("poseId"),
+                  splitMode=(acq.get("split") or {}).get("mode") if split else None,
                   media={arm: str(out / f"media-{arm}.json") for arm in media})
     return finish(EXIT_OK)
 
@@ -949,7 +1132,8 @@ def main(argv=None) -> int:
                    help="also write a copy of the packet with this request's camera.pose filled in")
     p.add_argument("--vp", default=None, help="viewprobe command, passed straight to shotplan")
     p.set_defaults(fn=cmd_acquire)
-    c = sub.add_parser("capture", help="render a vignette request's without / with / highlight states at its acquired camera")
+    c = sub.add_parser("capture", help="render a request's frames at its acquired camera: a vignette's without / with / "
+                                         "highlight states, or a placement split's left and right halves")
     c.add_argument("--acquisition", required=True, help="the camera-ready result of `acquire` for this request")
     c.add_argument("--packet", required=True, help="the storyboard packet holding the request")
     c.add_argument("--request", required=True)

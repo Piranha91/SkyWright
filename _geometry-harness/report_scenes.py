@@ -15,6 +15,100 @@ from pathlib import Path
 POLICY = Path(__file__).resolve().parent.parent / ".claude/skills/evaluation-reporting/references/scene-policy.json"
 
 
+COLOURS = ("cyan", "magenta")
+
+
+def _source(presentation: dict, bundle: Path, finding_id: str | None, want) -> tuple[dict, dict] | None:
+    """The finding's own evidence file that `want(path, doc)` accepts, re-hashed against the presentation's record."""
+    finding = next((f for f in presentation.get("findings") or [] if f.get("id") == finding_id), None)
+    evidence = {e["id"]: e for e in presentation.get("evidence") or []}
+    for eid in (finding or {}).get("evidenceIds") or []:
+        e = evidence.get(eid) or {}
+        if e.get("kind") != "emit" or not str(e.get("path", "")).endswith(".json"):
+            continue
+        path = (bundle / e["path"]).resolve()
+        if not path.is_relative_to(bundle.resolve()):
+            raise ValueError("capture-source-refused: evidence path escapes its bundle")
+        if not path.is_file():
+            continue
+        raw = path.read_bytes()
+        if not e.get("sha256") or hashlib.sha256(raw).hexdigest() != e["sha256"]:
+            raise ValueError("capture-source-refused: evidence changed since presentation planning")
+        doc = json.loads(raw)
+        if want(e["path"], doc):
+            return {"evidenceId": eid, "path": e["path"], "sha256": e["sha256"]}, doc
+    return None
+
+
+def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[dict], list[dict]]:
+    """The reel's placement splits and world-state vignettes as capture requests: what to show from the chapter, what
+    binds it from its finding's own evidence (a placement: the record import's result.json and its configuration; a
+    world state: the stateprobe emit's conflict whose Kind the chapter names)."""
+    out, limits = [], []
+    reel = presentation.get("reel") or {}
+    for ch in reel.get("chapters") or []:
+        c = ch.get("clash") or {}
+        if ch.get("kind") == "split":
+            got = _source(presentation, bundle, c.get("findingId"),
+                          lambda path, doc: path.endswith("result.json") and bool((doc.get("configuration") or {}).get("fingerprint")))
+            if got is None:
+                limits.append({"findingId": c.get("findingId"), "reason": "The placement's record import names no configuration."})
+                continue
+            source, doc = got
+            fk = c.get("formKey")
+            identity = json.dumps(["placement-split", c.get("armId"), fk, source["sha256"]], separators=(",", ":"))
+            out.append({"id": "capture-" + hashlib.sha256(identity.encode()).hexdigest()[:12],
+                        "requestType": "placement-split", "checkId": c.get("checkId") or "records.contested-fields",
+                        "armId": c.get("armId"), "findingIds": [c.get("findingId")], "newProblem": False,
+                        "location": None, "recordKeys": [fk], "plugins": list(c.get("pair") or []),
+                        "state": doc.get("state") or "baseline",
+                        "configurationFingerprint": doc["configuration"]["fingerprint"], "source": source,
+                        "highlights": [{"formKey": fk, "color": COLOURS[0]}], "actor": bool(c.get("actor")),
+                        "placements": c.get("placements"), "cells": c.get("cells"), "labels": c.get("labels"),
+                        "camera": deepcopy(policy.get("camera") or {}),
+                        "sequence": {"states": ["left", "right"],
+                                     "setups": {"left": c.get("withoutArmId"), "right": c.get("armId")}},
+                        "vignette": {"chapterId": ch.get("id"), "withoutArmId": c.get("withoutArmId"), "states": ["left", "right"]},
+                        "selection": {"eligible": 1, "selected": 1, "omitted": 0, "unranked": 1,
+                                      "rule": "the reel plan's split selection"},
+                        "status": "needs-capture-and-visual-review"})
+        elif ch.get("kind") == "vignette" and c.get("type") == "state" and c.get("state"):
+            def match(path, doc):
+                return doc.get("Probe") in (None, "stateprobe") and any(
+                    x.get("Kind") == c.get("kind") or str(x.get("Kind", "")).startswith(f"STATE-") and f"@{c['state']}@" in str(x.get("Kind"))
+                    for x in doc.get("Conflicts") or [])
+            got = _source(presentation, bundle, c.get("findingId"), match)
+            if got is None:
+                limits.append({"findingId": c.get("findingId"), "reason": "The world-state clash's stateprobe emit was not found."})
+                continue
+            source, doc = got
+            conflict = next(x for x in doc.get("Conflicts") or []
+                            if (x.get("Kind") == c.get("kind") or f"@{c['state']}@" in str(x.get("Kind")))
+                            and any(n.get("FormKey") == c.get("formKey") for n in x.get("Necessary") or []))
+            pair = [c.get("formKey"), *(c.get("other") or [])][:2]
+            marks = [fk for fk in pair if fk in (c.get("highlight") or pair)]
+            identity = json.dumps(["state-pair", c.get("armId"), pair, c.get("state"), source["sha256"]], separators=(",", ":"))
+            label = ((conflict.get("Necessary") or [{}])[0]).get("Label")
+            rule = next((r for r in policy.get("rules") or [] if r.get("checkId") == "geometry.object-overlap"), {})
+            out.append({"id": "capture-" + hashlib.sha256(identity.encode()).hexdigest()[:12],
+                        "requestType": "state-pair", "checkId": "state.conditional-geometry", "armId": c.get("armId"),
+                        "findingIds": [c.get("findingId")], "newProblem": False, "location": label,
+                        "recordKeys": pair, "plugins": [conflict.get("A"), conflict.get("B")],
+                        "state": c.get("state"), "kind": conflict.get("Kind"),
+                        "configurationFingerprint": (doc.get("Configuration") or {}).get("Fingerprint"), "source": source,
+                        "highlights": [{"formKey": fk, "color": COLOURS[pair.index(fk)]} for fk in marks],
+                        "pointParticipants": [{"formKey": fk, "color": COLOURS[i]} for i, fk in enumerate(pair)],
+                        "camera": deepcopy({**(policy.get("camera") or {}), **(rule.get("camera") or {})}),
+                        "sequence": {**deepcopy(rule.get("sequence") or {}), "states": list((policy.get("vignettes") or {}).get("sequence") or []),
+                                     "setups": {"without": c.get("withoutArmId"), "with": c.get("armId"), "highlight": c.get("armId")}},
+                        "vignette": {"chapterId": ch.get("id"), "withoutArmId": c.get("withoutArmId"),
+                                     "states": [f.get("state") for f in ch.get("frames") or []]},
+                        "selection": {"eligible": 1, "selected": 1, "omitted": 0, "unranked": 1,
+                                      "rule": "the reel plan's world-state selection"},
+                        "status": "needs-capture-and-visual-review"})
+    return out, limits
+
+
 def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLICY) -> dict:
     policy_bytes = policy_path.read_bytes()
     policy = json.loads(policy_bytes)
@@ -127,8 +221,8 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
         # "without" frame is rendered from (skill data: the overlap rule's sequence.setups)
         wanted = {}
         for ch in reel.get("chapters") or []:
-            if ch.get("kind") == "vignette":
-                c = ch.get("clash") or {}
+            c = ch.get("clash") or {}
+            if ch.get("kind") == "vignette" and c.get("type") in (None, "overlap", "contact"):
                 wanted[(c.get("armId"), c.get("formKey"))] = ch
         for row in sorted(candidates.values(), key=lambda r: r["id"]):
             ch = wanted.get((row["armId"], row["recordKeys"][0]))
@@ -139,6 +233,9 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
             row["selection"] = {"eligible": 1, "selected": 1, "omitted": 0, "unranked": int(row["ranking"]["value"] is None),
                                 "rule": "the reel plan's vignette selection"}
             requests.append(row)
+        more, more_limits = reel_requests(presentation, bundle, policy)
+        requests += more
+        limits += more_limits
         return {"policySha256": hashlib.sha256(policy_bytes).hexdigest(), "requests": requests, "limitations": limits,
                 "note": "One request per vignette of the reel plan. A camera and frames are measurements; a request is not media."}
     for key in sorted(groups):

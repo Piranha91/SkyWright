@@ -133,7 +133,8 @@ def request_cell(request: dict) -> str:
 
 
 def request_participants(request: dict) -> list[dict]:
-    rows = [h for h in (request.get("highlights") or []) if isinstance(h, dict) and h.get("formKey")]
+    # a world-state pair may mark only its smaller participant; its points are measured on both (pointParticipants)
+    rows = [h for h in (request.get("pointParticipants") or request.get("highlights") or []) if isinstance(h, dict) and h.get("formKey")]
     if len(rows) != 2 or rows[0]["formKey"] == rows[1]["formKey"]:
         raise Unpickable("points-participants-unusable",
                          "the picker measures a pair: the request must highlight exactly two distinct records")
