@@ -1188,7 +1188,7 @@ def case_capture_plan():
               f"a placement split is one request with one participant, both placements, the two setups and its finding's "
               f"recorded configuration ({ {k: sp.get(k) for k in ('requestType', 'recordKeys', 'placements')} })")
         st = next((r for r in reqs2 if r.get("checkId") == "state.conditional-geometry"), {})
-        check("N5-capture-state", st.get("state") == "000701:Skyrim.esm"
+        check("N5-capture-state", st.get("state") == "000701:Skyrim.esm" and st.get("focus") == "000601:Target.esp"
               and [h.get("formKey") for h in st.get("highlights") or []] == ["000601:Target.esp"]
               and (st.get("sequence") or {}).get("states") == POLICY["sequence"]
               and (st.get("source") or {}).get("path") == "state.json",

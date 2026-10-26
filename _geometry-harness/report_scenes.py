@@ -98,6 +98,8 @@ def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[
                         "configurationFingerprint": (doc.get("Configuration") or {}).get("Fingerprint"), "source": source,
                         "highlights": [{"formKey": fk, "color": COLOURS[pair.index(fk)]} for fk in marks],
                         "pointParticipants": [{"formKey": fk, "color": COLOURS[i]} for i, fk in enumerate(pair)],
+                        # one marked participant: the other is landscape-scale, so the camera rings the marked one
+                        "focus": marks[0] if len(marks) == 1 else None,
                         "camera": deepcopy({**(policy.get("camera") or {}), **(rule.get("camera") or {})}),
                         "sequence": {**deepcopy(rule.get("sequence") or {}), "states": list((policy.get("vignettes") or {}).get("sequence") or []),
                                      "setups": {"without": c.get("withoutArmId"), "with": c.get("armId"), "highlight": c.get("armId")}},

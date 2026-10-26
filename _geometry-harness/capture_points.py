@@ -273,6 +273,11 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
     pos = {A: (float(m[1]), float(m[2]), float(m[3])), B: (float(m[4]), float(m[5]), float(m[6]) - LOOK_LIFT)}
     mid = tuple((pos[A][k] + pos[B][k]) / 2.0 for k in range(3))
     minz, maxz = min(pos[A][2], pos[B][2]), max(pos[A][2], pos[B][2])
+    focus = request.get("focus")
+    if focus in pos:
+        # a landscape-scale partner (the reel's volume rule marks only the smaller participant): its origin says nothing
+        # about where the clash is, so the stations ring the smaller participant, at its level
+        mid, minz, maxz = pos[focus], pos[focus][2], pos[focus][2]
     ring = stations(mid, bearings, standoffs)
 
     # 2. floor, drawn, opaque
