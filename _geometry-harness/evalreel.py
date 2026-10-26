@@ -575,8 +575,17 @@ def cmd_storyboard_packet(a) -> int:
     pres = load_json(Path(a.presentation))
     if not isinstance(pres, dict) or not isinstance(pres.get("chapters"), list):
         return refuse("presentation-unreadable: storyboard packet needs a presentation with chapters")
+    reel = pres.get("reel")
+    if isinstance(reel, dict) and reel.get("status") == "refused":
+        return refuse(f"reel-refused: {reel.get('reason')}")
     scenes = []
-    for ch in pres["chapters"]:
+    if isinstance(reel, dict) and reel.get("status") == "planned":
+        # the vignette reel: one narrated scene per reel chapter, its words the planner's
+        for ch in reel.get("chapters") or []:
+            scenes.append({"chapterId": ch.get("id"), "captionIndex": 0, "occurrenceIndex": 0, "mediaId": None,
+                           "kind": ch.get("kind"), "narration": ch.get("narration"),
+                           "narrationAudio": ch.get("narrationAudio"), "omitFromReel": False, "omissionReason": None})
+    for ch in ([] if scenes else pres["chapters"]):
         for i, cap in enumerate(ch.get("captions") or []):
             scenes.append({"chapterId": ch.get("id"), "captionIndex": i, "occurrenceIndex": 0, "mediaId": cap.get("mediaId"),
                            "narration": cap.get("narration"), "storyboard": cap.get("storyboard"),
@@ -603,6 +612,21 @@ def apply_storyboard_answers(pres: dict, path: Path) -> str | None:
         return "storyboard-answers-unreadable: expected an object with scenes[]"
     if answers.get("presentationId") != pres.get("presentationId"):
         return "storyboard-answers-foreign: presentationId does not match"
+    reel = pres.get("reel") if isinstance(pres.get("reel"), dict) else {}
+    reel_chapters = {c.get("id"): c for c in reel.get("chapters") or []} if reel.get("status") == "planned" else {}
+    if reel_chapters:
+        # the vignette reel takes only audio (and, listed as an overlay, words) from the answers; its selection,
+        # frames and stills stay the planner's
+        for row in answers["scenes"]:
+            ch = reel_chapters.get(row.get("chapterId")) if isinstance(row, dict) else None
+            if ch is None:
+                return f"storyboard-answers-invalid: unknown reel scene {row.get('chapterId') if isinstance(row, dict) else row!r}"
+            if row.get("narrationAudio"):
+                ch["narrationAudio"] = row["narrationAudio"]
+            text = " ".join(str(row.get("narration") or "").split())
+            if text and text != " ".join(str(ch.get("narration") or "").split()):
+                ch["narration"], ch["narrationOverlaid"] = text, True
+        return None
     chapters = {c.get("id"): c for c in pres.get("chapters") or []}
     replacements = {}
     for row in answers["scenes"]:
@@ -711,6 +735,8 @@ def render_reel(a, run) -> int:
         return refuse(f"ffmpeg-incapable: {found['exe']} ({ffmpeg['version']}) lacks "
                       f"{', '.join(lacking + ([] if ffmpeg['libx264'] else ['libx264']))}; the reel needs "
                       f"scene-layout filters and an H.264 encoder", out)
+    if isinstance(pres.get("reel"), dict):
+        return render_vignettes(a, run, pres, pres_path, out, ffmpeg)
     settings_reel = ((pres.get("settings") or {}).get("reel") or {})
     max_seconds = a.max_seconds if a.max_seconds is not None else settings_reel.get("maxSeconds")
     chapter_filter = {c.strip() for c in a.chapters.split(",") if c.strip()} if a.chapters else None
@@ -919,6 +945,255 @@ def render_reel(a, run) -> int:
     return EXIT_OK if status_doc["status"] == "rendered" else EXIT_NOT_RENDERED
 
 
+# ---------------------------------------------------------------------------------------------- the vignette reel
+STILL_KINDS = ("opening", "data-still", "closing")
+
+
+def frame_is_clean(media: dict, board: dict | None) -> bool:
+    """An evidence frame carries no added text: it came from viewprobe --report-mode (the capture step records its
+    argv), or a reviewed storyboard declares the clean frame and the visible subject."""
+    argv = (media.get("provenance") or {}).get("argv") or []
+    if "--report-mode" in argv:
+        return True
+    board = board or {}
+    review = board.get("visualReview") or {}
+    return board.get("cleanFrame") is True and review.get("subjectVisible") is True and review.get("addedText") == "none"
+
+
+def sequence_command(items: list[tuple[str, int]], audio: str, total_frames: int) -> list[str]:
+    """N still images, each held for its frame count, then one narration: the vignette and still-page segment."""
+    args, chains = [], []
+    for i, (path, frames) in enumerate(items):
+        args += ["-loop", "1", "-framerate", str(FPS), "-t", f"{frames / FPS + 0.5:.3f}", "-i", path]
+        chains.append(f"[{i}:v]{FIT},pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2:{CANVAS_COLOUR},setsar=1,fps={FPS},"
+                      f"trim=end_frame={frames},setpts=PTS-STARTPTS[v{i}]")
+    n = len(items)
+    d = f"{total_frames / FPS:.3f}"
+    graph = ";".join(chains) + ";" + "".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0,format=yuv420p[out];" \
+        + f"[{n}:a]apad=whole_dur={d}[aud]"
+    return (args + ["-i", audio, "-filter_complex", graph, "-map", "[out]", "-map", "[aud]", "-t", d,
+                    "-frames:v", str(total_frames)] + ENCODE + ["seg.mp4"])
+
+
+def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dict) -> int:
+    """Cut the vignette reel the plan's `reel` block describes: generated stills and without/with/highlight
+    vignettes, one narration each. Refuses rather than substituting anything."""
+    import reel_stills
+    reel = pres["reel"]
+    if reel.get("status") != "planned":
+        return refuse(f"reel-refused: {reel.get('reason') or 'the reel plan is not planned'}", out)
+    chapters = reel.get("chapters") or []
+    if not chapters or chapters[0].get("kind") != "opening" or chapters[-1].get("kind") != "closing":
+        return refuse("storyboard-refused: the reel plan must open with the opening still and end with the closing still", out)
+    settings_reel = ((pres.get("settings") or {}).get("reel") or {})
+    max_seconds = a.max_seconds if a.max_seconds is not None else settings_reel.get("maxSeconds")
+    try:
+        font, bold = reel_stills.font_files(getattr(a, "font", None), settings_reel)
+    except reel_stills.FontMissing as e:
+        return refuse(f"font-missing: {e}", out)
+    font_doc = {"path": str(font), "sha256": sha256_file(font), "boldPath": str(bold), "boldSha256": sha256_file(bold)}
+    bundle_dir = resolve_bundle_dir(pres, pres_path, a.bundle)
+    media_by_id = {m.get("id"): m for m in pres.get("media") or []}
+    hold = reel.get("holdSeconds") or {}
+    stills_dir = out / "stills"
+    stills_dir.mkdir(parents=True, exist_ok=True)
+    audio_dir = out / "narration"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    segments, errors = [], []
+    for ch in chapters:
+        cid, kind = ch.get("id"), ch.get("kind")
+        narration = " ".join(str(ch.get("narration") or "").split())
+        if not narration:
+            errors.append(f"{cid}: scene has no narration")
+            continue
+        seg = {"chapterId": cid, "chapterKind": kind, "narration": narration, "narrationOverlaid": bool(ch.get("narrationOverlaid")),
+               "narrationAudio": ch.get("narrationAudio"), "items": [], "clash": ch.get("clash"), "patch": ch.get("patch")}
+        if kind in STILL_KINDS:
+            pages = (ch.get("still") or {}).get("pages") or []
+            if not pages:
+                errors.append(f"{cid}: still scene has no pages")
+                continue
+            seg["kind"] = "still"
+            seg["dataSha256"] = sha256_text(json.dumps(pages, sort_keys=True, ensure_ascii=False))
+            for n, page in enumerate(pages):
+                ph = reel_stills.page_hash(page)
+                png = stills_dir / f"{cid}-p{n}-{ph[:10]}-{font_doc['sha256'][:8]}.png"
+                if not png.is_file():
+                    try:
+                        reel_stills.draw_page(page, font, bold).save(str(png), format="PNG")
+                    except ValueError as e:
+                        errors.append(f"{cid}: {e}")
+                        break
+                seg["items"].append({"page": n, "layout": page.get("layout"), "path": str(png), "sha256": sha256_file(png),
+                                     "dataSha256": ph})
+        elif kind == "vignette":
+            seg["kind"] = "sequence"
+            frames = ch.get("frames") or []
+            poses, sizes = set(), set()
+            for fr in frames:
+                mid = fr.get("mediaId")
+                m = media_by_id.get(mid)
+                if not mid or m is None:
+                    errors.append(f"{cid}: the {fr.get('state')} frame has no captured media yet (run capture_acquire.py "
+                                  f"capture for this vignette, or record its refusal with evalreport plan --capture-results)")
+                    break
+                if m.get("assessed") is not True:
+                    errors.append(f"{cid}: media {mid} is unassessed ({m.get('reason')})")
+                    break
+                path = (bundle_dir / m.get("path", "")) if bundle_dir else Path(m.get("path", ""))
+                if not path.is_file() or (m.get("sha256") and sha256_file(path) != m["sha256"]):
+                    errors.append(f"{cid}: media file {m.get('path')} is missing or changed since planning")
+                    break
+                if not frame_is_clean(m, fr.get("storyboard")):
+                    errors.append(f"{cid}: the {fr.get('state')} frame is not shown to be a clean frame (no --report-mode "
+                                  f"capture and no reviewed storyboard)")
+                    break
+                poses.add((m.get("provenance") or {}).get("poseId"))
+                hdr = probe_header(ffmpeg["path"], path)
+                sizes.add((hdr.get("width"), hdr.get("height")))
+                seg["items"].append({"state": fr.get("state"), "mediaId": mid, "armId": (m.get("subject") or {}).get("armId"),
+                                     "path": str(path), "sha256": sha256_file(path), "poseId": (m.get("provenance") or {}).get("poseId")})
+            else:
+                if len(poses) != 1 or None in poses or len(sizes) != 1:
+                    errors.append(f"{cid}: the vignette's frames were not taken at one pose and canvas "
+                                  f"(poses {sorted(map(str, poses))}, sizes {sorted(map(str, sizes))})")
+        else:
+            errors.append(f"{cid}: unknown reel scene kind {kind!r}")
+            continue
+        segments.append(seg)
+    if errors:
+        return refuse("storyboard-refused: " + "; ".join(errors), out)
+    # narration audio, then the frame count of every item from it
+    for i, s in enumerate(segments):
+        s["index"] = i
+        supplied = s.get("narrationAudio")
+        if supplied:
+            apath, method = ((bundle_dir / supplied) if bundle_dir and not Path(supplied).is_absolute() else Path(supplied)), "supplied"
+        else:
+            if not a.voice or not a.voice.strip():
+                return refuse(f"narration-refused: {s['chapterId']}: prepare narrationAudio with evalspeech.py, or select an "
+                              "installed Windows voice with --voice; no automatic voice fallback", out)
+            helper = HERE / "winrt-tts" / "Program.cs"
+            key = sha256_text(s["narration"] + "\n" + a.voice + "\n" + sha256_file(helper))[:12]
+            apath, method = audio_dir / f"{i:03d}-{key}.wav", "Windows WinRT " + a.voice
+            if not apath.is_file():
+                ok, detail = synthesize_windows(s["narration"], apath, a.voice, run.run_id)
+                if not ok:
+                    return refuse(f"narration-refused: {s['chapterId']}: {detail}", out)
+                method = detail
+        if not apath.is_file():
+            return refuse(f"narration-refused: {s['chapterId']}: audio file {apath} is absent", out)
+        ah = probe_header(ffmpeg["path"], apath)
+        if not ah.get("hasAudio") or not ah.get("durationSeconds"):
+            return refuse(f"narration-refused: {s['chapterId']}: audio file {apath} is not decodable audio", out)
+        s["audioPath"], s["audioSha256"], s["audioMethod"] = str(apath), sha256_file(apath), method
+        speech = float(ah["durationSeconds"])
+        if s["kind"] == "still":
+            first = speech + float(hold.get("stillPause", 1.5))
+            secs = [first] + [float(hold.get("loadOrderPage", 6.0))] * (len(s["items"]) - 1)
+        else:
+            w, wi = float(hold.get("without", 2.5)), float(hold.get("with", 2.5))
+            secs = [w, wi, max(float(hold.get("highlightMin", 4.0)), speech + 0.25 - w - wi)]
+            secs = secs[:len(s["items"])]
+        for it, sec in zip(s["items"], secs):
+            it["frames"] = int(round(sec * FPS))
+        s["plannedFrames"] = sum(it["frames"] for it in s["items"])
+        s["durationSeconds"] = round(s["plannedFrames"] / FPS, 3)
+    planned_seconds = round(sum(s["durationSeconds"] for s in segments), 3)
+    if max_seconds is not None and planned_seconds > float(max_seconds):
+        return refuse(f"storyboard-refused: the reel's narrated scenes take {planned_seconds} s, over the {max_seconds} s budget", out)
+    if a.dry_run:
+        print(f"dry run: {len(segments)} reel scene(s), {planned_seconds} s planned; ffmpeg {ffmpeg['version']}")
+        for s in segments:
+            print(f"  #{s['index']:>2} {s['chapterId']:<5} {s['kind']:<9} {s['durationSeconds']:>6.2f}s  "
+                  + ", ".join(str(it.get('state') or it.get('layout')) for it in s["items"]) + f"  {s['narration'][:70]}")
+        return EXIT_OK
+    status_doc = {"schemaVersion": 1, "status": "failed", "presentationId": pres.get("presentationId"), "format": "vignettes",
+                  "generatedUtc": utcnow(), "out": str(out), "ffmpeg": {"path": ffmpeg["path"], "version": ffmpeg["version"]},
+                  "planned": {"seconds": planned_seconds, "segments": len(segments)}, "errors": [], "outputs": {}}
+    cursor, failed = 0, False
+    run.stage("segments", total=len(segments), unit="segments")
+    for s in segments:
+        key = sha256_text(json.dumps({"layout": LAYOUT_VERSION + "-vignettes", "items": [(it["sha256"], it["frames"]) for it in s["items"]],
+                                      "audio": s["audioSha256"], "ffmpeg": ffmpeg["version"]}, sort_keys=True))[:16]
+        work = out / "cache" / key
+        mp4 = work / "seg.mp4"
+        s["cacheKey"], s["file"] = key, f"cache/{key}/seg.mp4"
+        side = load_json(work / "seg.json")
+        if not (side and mp4.is_file() and side.get("sha256") == sha256_file(mp4)):
+            work.mkdir(parents=True, exist_ok=True)
+            r = run_ffmpeg(ffmpeg["path"], ["-loglevel", "warning"] + sequence_command(
+                [(it["path"], it["frames"]) for it in s["items"]], s["audioPath"], s["plannedFrames"]), cwd=work)
+            if r.returncode != 0 or not mp4.is_file():
+                failed = True
+                status_doc["errors"].append(f"segment {s['index']} ({s['chapterId']}): ffmpeg exit {r.returncode}: "
+                                            + " ".join(r.stderr.split())[-400:])
+                run.advance()
+                continue
+            side = {"frames": count_frames(ffmpeg["path"], mp4), "sha256": sha256_file(mp4)}
+            write_json(work / "seg.json", side)
+        if side.get("frames") != s["plannedFrames"]:
+            failed = True
+            status_doc["errors"].append(f"segment {s['index']} ({s['chapterId']}): {side.get('frames')} frames decoded, "
+                                        f"{s['plannedFrames']} planned")
+        s["reelInterval"] = {"startFrame": cursor, "frames": s["plannedFrames"], "startSeconds": round(cursor / FPS, 3),
+                             "endSeconds": round((cursor + s["plannedFrames"]) / FPS, 3)}
+        inner = cursor
+        for it in s["items"]:
+            it["reelInterval"] = {"startFrame": inner, "frames": it["frames"]}
+            inner += it["frames"]
+        cursor += s["plannedFrames"]
+        run.advance()
+    reel_path, probe = out / "reel.mp4", None
+    if not failed:
+        (out / "concat.txt").write_text("".join(f"file '{s['file']}'\n" for s in segments), encoding="utf-8")
+        r = run_ffmpeg(ffmpeg["path"], ["-loglevel", "error", "-f", "concat", "-safe", "0", "-i", "concat.txt", "-c", "copy",
+                                        "-movflags", "+faststart", "reel.mp4"], cwd=out)
+        if r.returncode != 0 or not reel_path.is_file():
+            failed = True
+            status_doc["errors"].append("concat: " + " ".join(r.stderr.split())[-400:])
+        else:
+            probe = probe_video(ffmpeg["path"], reel_path)
+            probe["sha256"] = sha256_file(reel_path)
+            status_doc["probe"] = probe
+            checks = []
+            if probe.get("frames") != cursor:
+                checks.append(f"frames {probe.get('frames')} decoded, {cursor} expected")
+            if (probe.get("width"), probe.get("height")) != (WIDTH, HEIGHT) or probe.get("fps") != FPS:
+                checks.append(f"{probe.get('width')}x{probe.get('height')} at {probe.get('fps')} fps")
+            if not probe.get("hasAudio") or not probe.get("audioDecoded"):
+                checks.append("no independently decoded audio stream")
+            if checks:
+                failed = True
+                status_doc["errors"].append("reel.mp4 does not match the plan: " + "; ".join(checks))
+    seg_out = [{"index": s["index"], "chapterId": s["chapterId"], "chapterKind": s["chapterKind"], "kind": s["kind"],
+                "narration": s["narration"], "narrationOverlaid": s["narrationOverlaid"], "clash": s.get("clash"),
+                "patch": s.get("patch"), "dataSha256": s.get("dataSha256"), "reelInterval": s.get("reelInterval"),
+                "frames": [{k: v for k, v in it.items() if k != "path"} for it in s["items"]],
+                "audio": {"sha256": s["audioSha256"], "method": s["audioMethod"]}, "cacheKey": s.get("cacheKey"),
+                "file": s.get("file")} for s in segments]
+    write_json(out / "reel-map.json", {"schemaVersion": 2, "format": "vignettes", "presentationId": pres.get("presentationId"),
+                                       "generatedUtc": utcnow(), "stillFont": font_doc,
+                                       "canvas": {"width": WIDTH, "height": HEIGHT, "fps": FPS, "layoutVersion": LAYOUT_VERSION + "-vignettes"},
+                                       "reel": ({"path": "reel.mp4", "sha256": probe.get("sha256"), "frames": probe.get("frames"),
+                                                 "durationSeconds": probe.get("durationSeconds")} if probe else None),
+                                       "segments": seg_out})
+    for s in segments:
+        s.setdefault("reelInterval", None)
+    write_srt(out / "reel.srt", segments)
+    status_doc["status"] = "failed" if failed else "rendered"
+    for name in ("reel.mp4", "reel.srt", "reel-map.json"):
+        if (out / name).is_file():
+            status_doc["outputs"][name] = {"sha256": sha256_file(out / name), "bytes": (out / name).stat().st_size}
+            run.artifact(str(out / name))
+    write_json(out / "reel-status.json", status_doc)
+    print(f"reel: {status_doc['status']} - {len(segments)} scene(s)" + (f", {probe.get('durationSeconds')} s / {probe.get('frames')} frames"
+                                                                         if probe else "") + f"; {out / 'reel-status.json'}")
+    for e in status_doc["errors"]:
+        print("  " + e, file=sys.stderr)
+    return EXIT_OK if status_doc["status"] == "rendered" else EXIT_NOT_RENDERED
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="evalreel", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -940,6 +1215,8 @@ def main(argv=None) -> int:
     r.add_argument("--voice", default=None, help="explicitly opt into an installed Windows WinRT voice; otherwise supply narrationAudio from evalspeech.py")
     r.add_argument("--storyboard", default=None, help="reviewed storyboard packet; overlays visual direction in memory without changing presentation.json")
     r.add_argument("--dry-run", action="store_true", help="print the segment plan and render nothing")
+    r.add_argument("--font", default=None, help="the TrueType font the reel's stills are drawn with (default: "
+                                                "HOUSECARL_REEL_FONT, then the skill's reel.stillFont; never a built-in font)")
     r.set_defaults(fn=cmd_render)
     a = ap.parse_args(argv)
     return a.fn(a)
