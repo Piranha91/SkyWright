@@ -946,7 +946,9 @@ def render_reel(a, run) -> int:
 
 
 # ---------------------------------------------------------------------------------------------- the vignette reel
-STILL_KINDS = ("opening", "data-still", "closing")
+STILL_KINDS = ("opening", "unpictured", "closing")
+SPLIT_HALF = (638, 680)              # a placement split's half (skill data scene-policy vignettes.split): two halves, a
+SPLIT_DIVIDER, SPLIT_STRIP = 4, 40   # 4 px divider and a 40 px label strip make the 1280x720 frame with nothing scaled
 
 
 def frame_is_clean(media: dict, board: dict | None) -> bool:
@@ -971,6 +973,21 @@ def sequence_command(items: list[tuple[str, int]], audio: str, total_frames: int
     d = f"{total_frames / FPS:.3f}"
     graph = ";".join(chains) + ";" + "".join(f"[v{i}]" for i in range(n)) + f"concat=n={n}:v=1:a=0,format=yuv420p[out];" \
         + f"[{n}:a]apad=whole_dur={d}[aud]"
+    return (args + ["-i", audio, "-filter_complex", graph, "-map", "[out]", "-map", "[aud]", "-t", d,
+                    "-frames:v", str(total_frames)] + ENCODE + ["seg.mp4"])
+
+
+def split_command(left: str, right: str, strip: str, audio: str, total_frames: int) -> list[str]:
+    """A placement split: the left half (the setup without the mod), a divider, the right half (the prediction), over the
+    label strip, held for one narration. No evidence pixel is scaled."""
+    d = f"{total_frames / FPS:.3f}"
+    hold = f"{total_frames / FPS + 0.5:.3f}"
+    args = []
+    for path in (left, right, strip):
+        args += ["-loop", "1", "-framerate", str(FPS), "-t", hold, "-i", path]
+    args += ["-f", "lavfi", "-t", hold, "-i", f"color=c={CANVAS_COLOUR}:s={SPLIT_DIVIDER}x{SPLIT_HALF[1]}:r={FPS}"]
+    graph = (f"[0:v][3:v][1:v]hstack=inputs=3[top];[top][2:v]vstack=inputs=2,setsar=1,fps={FPS},"
+             f"trim=end_frame={total_frames},setpts=PTS-STARTPTS,format=yuv420p[out];[4:a]apad=whole_dur={d}[aud]")
     return (args + ["-i", audio, "-filter_complex", graph, "-map", "[out]", "-map", "[aud]", "-t", d,
                     "-frames:v", str(total_frames)] + ENCODE + ["seg.mp4"])
 
@@ -1058,6 +1075,58 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                 if len(poses) != 1 or None in poses or len(sizes) != 1:
                     errors.append(f"{cid}: the vignette's frames were not taken at one pose and canvas "
                                   f"(poses {sorted(map(str, poses))}, sizes {sorted(map(str, sizes))})")
+        elif kind == "split":
+            seg["kind"] = "split"
+            clash = ch.get("clash") or {}
+            frames = ch.get("frames") or []
+            if [f.get("state") for f in frames] != ["left", "right"]:
+                errors.append(f"{cid}: a split shows its left then its right half, got {[f.get('state') for f in frames]}")
+                continue
+            poses, rel = set(), []
+            for fr in frames:
+                mid = fr.get("mediaId")
+                m = media_by_id.get(mid)
+                if not mid or m is None:
+                    errors.append(f"{cid}: the {fr.get('state')} half has no captured media yet (run capture_acquire.py "
+                                  f"capture for this split, or record its refusal with evalreport plan --capture-results)")
+                    break
+                if m.get("assessed") is not True:
+                    errors.append(f"{cid}: media {mid} is unassessed ({m.get('reason')})")
+                    break
+                path = (bundle_dir / m.get("path", "")) if bundle_dir else Path(m.get("path", ""))
+                if not path.is_file() or (m.get("sha256") and sha256_file(path) != m["sha256"]):
+                    errors.append(f"{cid}: media file {m.get('path')} is missing or changed since planning")
+                    break
+                if not frame_is_clean(m, fr.get("storyboard")):
+                    errors.append(f"{cid}: the {fr.get('state')} half is not shown to be a clean frame")
+                    break
+                hdr = probe_header(ffmpeg["path"], path)
+                if (hdr.get("width"), hdr.get("height")) != SPLIT_HALF:
+                    errors.append(f"{cid}: the {fr.get('state')} half is {hdr.get('width')}x{hdr.get('height')}, "
+                                  f"not {SPLIT_HALF[0]}x{SPLIT_HALF[1]}")
+                    break
+                prov = m.get("provenance") or {}
+                poses.add(prov.get("poseId"))
+                rel.append(bool(prov.get("relativePose")))
+                seg["items"].append({"state": fr.get("state"), "mediaId": mid, "armId": (m.get("subject") or {}).get("armId"),
+                                     "path": str(path), "sha256": sha256_file(path), "poseId": prov.get("poseId"),
+                                     "relativePose": bool(prov.get("relativePose"))})
+            if len(seg["items"]) != 2:
+                continue
+            labels = clash.get("labels") or {}
+            relative = clash.get("camera") == "relative" and all(rel)
+            if not (len(poses) == 1 and None not in poses) and not relative:
+                errors.append(f"{cid}: the split's halves were not taken at one pose, nor marked as the same pose "
+                              f"relative to each placement (poses {sorted(map(str, poses))})")
+                continue
+            if not (labels.get("left") and labels.get("right")):
+                errors.append(f"{cid}: a split needs its left and right labels")
+                continue
+            strip = reel_stills.draw_strip(labels, font, bold, size=(WIDTH, SPLIT_STRIP),
+                                           split_at=SPLIT_HALF[0] + SPLIT_DIVIDER // 2)
+            sp = stills_dir / f"{cid}-strip-{sha256_text(json.dumps(labels, sort_keys=True))[:10]}-{font_doc['sha256'][:8]}.png"
+            strip.save(str(sp), format="PNG")
+            seg["strip"] = {"path": str(sp), "sha256": sha256_file(sp), "labels": labels}
         else:
             errors.append(f"{cid}: unknown reel scene kind {kind!r}")
             continue
@@ -1089,7 +1158,9 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
             return refuse(f"narration-refused: {s['chapterId']}: audio file {apath} is not decodable audio", out)
         s["audioPath"], s["audioSha256"], s["audioMethod"] = str(apath), sha256_file(apath), method
         speech = float(ah["durationSeconds"])
-        if s["kind"] == "still":
+        if s["kind"] == "split":
+            secs = [speech + float(hold.get("stillPause", 1.5))] * 2          # both halves for the whole scene
+        elif s["kind"] == "still":
             first = speech + float(hold.get("stillPause", 1.5))
             secs = [first] + [float(hold.get("loadOrderPage", 6.0))] * (len(s["items"]) - 1)
         else:
@@ -1098,7 +1169,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
             secs = secs[:len(s["items"])]
         for it, sec in zip(s["items"], secs):
             it["frames"] = int(round(sec * FPS))
-        s["plannedFrames"] = sum(it["frames"] for it in s["items"])
+        s["plannedFrames"] = s["items"][0]["frames"] if s["kind"] == "split" else sum(it["frames"] for it in s["items"])
         s["durationSeconds"] = round(s["plannedFrames"] / FPS, 3)
     planned_seconds = round(sum(s["durationSeconds"] for s in segments), 3)
     if max_seconds is not None and planned_seconds > float(max_seconds):
@@ -1116,6 +1187,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
     run.stage("segments", total=len(segments), unit="segments")
     for s in segments:
         key = sha256_text(json.dumps({"layout": LAYOUT_VERSION + "-vignettes", "items": [(it["sha256"], it["frames"]) for it in s["items"]],
+                                      "kind": s["kind"], "strip": (s.get("strip") or {}).get("sha256"),
                                       "audio": s["audioSha256"], "ffmpeg": ffmpeg["version"]}, sort_keys=True))[:16]
         work = out / "cache" / key
         mp4 = work / "seg.mp4"
@@ -1123,8 +1195,10 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
         side = load_json(work / "seg.json")
         if not (side and mp4.is_file() and side.get("sha256") == sha256_file(mp4)):
             work.mkdir(parents=True, exist_ok=True)
-            r = run_ffmpeg(ffmpeg["path"], ["-loglevel", "warning"] + sequence_command(
-                [(it["path"], it["frames"]) for it in s["items"]], s["audioPath"], s["plannedFrames"]), cwd=work)
+            cmd = (split_command(s["items"][0]["path"], s["items"][1]["path"], s["strip"]["path"], s["audioPath"], s["plannedFrames"])
+                   if s["kind"] == "split" else
+                   sequence_command([(it["path"], it["frames"]) for it in s["items"]], s["audioPath"], s["plannedFrames"]))
+            r = run_ffmpeg(ffmpeg["path"], ["-loglevel", "warning"] + cmd, cwd=work)
             if r.returncode != 0 or not mp4.is_file():
                 failed = True
                 status_doc["errors"].append(f"segment {s['index']} ({s['chapterId']}): ffmpeg exit {r.returncode}: "
@@ -1142,7 +1216,8 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
         inner = cursor
         for it in s["items"]:
             it["reelInterval"] = {"startFrame": inner, "frames": it["frames"]}
-            inner += it["frames"]
+            if s["kind"] != "split":                       # a split's halves share the scene's whole interval
+                inner += it["frames"]
         cursor += s["plannedFrames"]
         run.advance()
     reel_path, probe = out / "reel.mp4", None
@@ -1171,6 +1246,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                 "narration": s["narration"], "narrationOverlaid": s["narrationOverlaid"], "clash": s.get("clash"),
                 "patch": s.get("patch"), "dataSha256": s.get("dataSha256"), "reelInterval": s.get("reelInterval"),
                 "frames": [{k: v for k, v in it.items() if k != "path"} for it in s["items"]],
+                "strip": ({k: v for k, v in s["strip"].items() if k != "path"} if s.get("strip") else None),
                 "audio": {"sha256": s["audioSha256"], "method": s["audioMethod"]}, "cacheKey": s.get("cacheKey"),
                 "file": s.get("file")} for s in segments]
     write_json(out / "reel-map.json", {"schemaVersion": 2, "format": "vignettes", "presentationId": pres.get("presentationId"),
