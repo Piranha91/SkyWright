@@ -8956,11 +8956,92 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     return plan
 
 
+SCENE_POLICY = HERE.parent / ".claude" / "skills" / "evaluation-reporting" / "references" / "scene-policy.json"
+
+
+def plugin_mod_folders(plans: list[dict]) -> dict:
+    """{plugin: MO2 mod folder} from the evaluation's own record of where each arm's plugins were read (a plan's
+    arms[].requested.plugins[].path: <instance>/mods/<folder>/<plugin>). A plugin read from the game's Data folder has
+    none."""
+    out = {}
+    for plan in plans:
+        for arm in (plan or {}).get("arms") or []:
+            for p in ((arm.get("requested") or {}).get("plugins") or []):
+                parts = re.split(r"[\\/]+", str(p.get("path") or ""))
+                if len(parts) >= 3 and parts[-3].lower() == "mods" and p.get("name"):
+                    out.setdefault(str(p["name"]), parts[-2])
+    return out
+
+
+def bundle_media_rows(b: "Bundle", arms: set) -> list[dict]:
+    """A bundle's admitted media for some of its arms, with absolute paths (a sibling bundle's frames for the reel)."""
+    rows = []
+    for e in b.evidence:
+        if e.get("strength") != "supplied-media" or (e.get("subject") or {}).get("armId") not in arms:
+            continue
+        sha = e.get("sha256") or ""
+        rows.append({"id": f"M-{sha[:12]}", "manifestId": e.get("id"), "path": str((b.dir / e.get("path")).resolve()),
+                     "sha256": sha, "mediaKind": e.get("mediaKind"), "subject": e.get("subject"), "state": e.get("state"),
+                     "configurationFingerprint": e.get("configurationFingerprint"), "provenance": e.get("provenance"),
+                     "assessed": True, "fromBundle": str(b.dir)})
+    return rows
+
+
+def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out: Path) -> dict:
+    """The review reel's plan (reel_plan.py) from the compiled presentation, the bundle's names and masters, the
+    skill's vignette policy and words, the recorded patch search and the evaluation's mod names."""
+    import reel_plan
+    b = Bundle(bundle)
+    names_row = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
+    names = load_json(bundle / names_row["path"]) if names_row else {}
+    masters = plugin_masters(b) or {}
+    sb = Bundle(sibling) if sibling is not None else None
+    if sb is not None:
+        for k, v in (plugin_masters(sb) or {}).items():
+            masters.setdefault(k, v)
+    policy = dict((load_json(SCENE_POLICY) or {}).get("vignettes") or {})
+    policy["effectModelPattern"] = ((pr.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")
+    words = (pr.get("reel") or {}).get("words") or {}
+    folders = plugin_mod_folders([b.plan] + ([sb.plan] if sb is not None else []))
+    mod_names = {k: {"name": v, "source": "mo2-folder"} for k, v in folders.items()}
+    for k, v in ((names or {}).get("mods") or {}).items():
+        if v.get("source") == "declared":
+            mod_names[k] = {"name": v["name"], "source": "declared"}
+    for pair in list(getattr(a, "mod_name", None) or []):
+        if "=" not in pair:
+            raise InputRefused(f"mod-name-invalid: --mod-name takes PLUGIN=NAME, got {pair!r}")
+        k, v = pair.split("=", 1)
+        mod_names[k.strip()] = {"name": v.strip(), "source": "declared"}
+    search, search_ref = None, None
+    if getattr(a, "patch_search", None):
+        sp = Path(a.patch_search)
+        search = load_json(sp)
+        if not isinstance(search, dict) or not isinstance(search.get("pairs"), list):
+            raise InputRefused(f"patch-search-unreadable: {sp} is not a patch-search document with a `pairs` list")
+        dest = out / "evidence" / "patch-search.json"
+        write_json(dest, search)
+        search_ref = {"path": dest.relative_to(out).as_posix(), "sha256": sha256_file(dest), "source": str(sp)}
+    captures = []
+    for f in list(getattr(a, "capture_results", None) or []):
+        doc = load_json(Path(f))
+        captures += doc if isinstance(doc, list) else [doc] if isinstance(doc, dict) else []
+    sibling_roles = set(((((plan.get("reader") or {}).get("prediction") or {}).get("sibling") or {}).get("roles") or {}).values())
+    extra_media = bundle_media_rows(sb, sibling_roles) if sb is not None else []
+    view = dict(plan, media=list(plan.get("media") or []) + extra_media)
+    reel = reel_plan.plan_reel(view, names, masters, policy, words, search, mod_names, captures)
+    reel["media"] = extra_media
+    reel["patchSearch"] = search_ref
+    reel["captureResults"] = [{"formKey": c.get("formKey"), "status": c.get("status"), "reason": c.get("reason")} for c in captures]
+    return reel
+
+
 def compiler_hashes() -> dict:
     out = {"evalreport.py": sha256_file(Path(__file__).resolve())}
     for t in sorted(TEMPLATES.glob("*")) if TEMPLATES.exists() else []:
         out[f"templates/{t.name}"] = sha256_file(t)
     out["report-priorities.json"] = sha256_file(PRIORITIES)
+    out["scene-policy.json"] = sha256_file(SCENE_POLICY)
+    out["reel_plan.py"] = sha256_file(HERE / "reel_plan.py")
     return out
 
 
@@ -9718,6 +9799,10 @@ def cmd_plan(a) -> int:
                                      "bytes": dest.stat().st_size, "checkId": None, "armId": o_["armId"],
                                      "part": None, "strength": "measured-records", "recordedBy": "record lane",
                                      "storage": "presentation"})
+        try:
+            plan["reel"] = reel_block(plan, bundle, sibling, pr, a, out)
+        except InputRefused as ex:
+            return refuse(r, str(ex))
         stamp(plan)
         write_json(out / "presentation.json", plan)
         r.artifact(str(out / "presentation.json"))
@@ -10304,6 +10389,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sibling-bundle", default=None, metavar="DIR",
                    help="a bundle of the same order without the patch; its single-mod setups attribute this report's "
                         "prediction when its setup matches this bundle's setup without the patch plugin for plugin")
+    p.add_argument("--patch-search", default=None, metavar="FILE",
+                   help="the recorded Nexus patch search the review reel's patch sentences rest on (scene-policy.json "
+                        "vignettes.patchSearch); without it the reel plan is refused and the report still compiles")
+    p.add_argument("--mod-name", action="append", default=[], metavar="PLUGIN=NAME",
+                   help="the name the review reel speaks for a plugin's mod, over the MO2 mod folder the evaluation recorded")
+    p.add_argument("--capture-results", action="append", default=[], metavar="FILE",
+                   help="capture_acquire.py capture results: a refused vignette becomes a still, its reason on the closing")
     p.add_argument("--declare-patch", action="append", default=[], metavar="PLUGIN",
                    help="declare a plugin as a patch under evaluation; repeat for several. Patch "
                         "identity is never inferred from plugin membership, so an arm that differs "
