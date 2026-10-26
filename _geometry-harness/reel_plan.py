@@ -439,7 +439,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             text += " " + words["rightSpot"].format(mod=mod(target), where=where) + extra + "."
         rest = [spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary")) for x in others.get(fk) or []]
         if rest:
-            nm = joined(rest[:3])
+            # with more to count, the three names are a list the count ends: "A, B, C and 2 more"
+            nm = ", ".join(rest[:3]) if len(rest) > 3 else joined(rest)
             if len(rest) > 3:
                 text += " " + words["groupOthers"]["more"].format(names=nm, count=len(rest) - 3)
             else:

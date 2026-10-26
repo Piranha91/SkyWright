@@ -671,7 +671,7 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         rest = [spoken_ref(names, x["rows"][0]["formKey"], x["rows"][0]["summary"]) for x in others.get(fk) or []]
         if rest:
             named = rest[:3]
-            nm = joined(named)
+            nm = ", ".join(named) if len(rest) > 3 else joined(named)
             if len(rest) > 3:
                 text += " " + words["groupOthers"]["more"].format(names=nm, count=len(rest) - 3)
             else:
@@ -1372,6 +1372,47 @@ def case_planner():
           and "in different spots" in t_new and "metres" in t_new,
           f"a reference one of the mods adds has no base-game spot: the two spots, no mover ({t_new[:220]!r})")
 
+    # the remaining structure and where branches: lowered with the structure; the other spot above; beside
+    def lowered(pr, nm):
+        nm["refs"]["000403:Skyrim.esm"]["placements"]["Beta.esp"] = [0.0, 0.0, -1424.0]
+        nm["refs"]["000403:Skyrim.esm"]["cellOverrides"] = {"Beta.esp": {"dz": [-1424.0, -1424.0, -1420.0, 0.0]}}
+        for r in pr["reader"]["prediction"]["record"]:
+            if r["formKey"] == "000403:Skyrim.esm":
+                r["values"] = {"lost": "Position=0,0,-1424; Rotation=0,0,0", "winner": "Position=0,0,0; Rotation=0,0,0"}
+    t_down = orient_case("structure down", lowered)
+    check("N9-structure-down", WORDS["structureDown"].format(mover="Beta Mod", keeper="Target Mod", place="The Lamp Room",
+                                                             object="Lamp") in t_down
+          and WORDS["where"]["above"].format(m=20) in t_down,
+          f"a mover that lowers the structure lowers it, and the kept spot is above ({t_down[:300]!r})")
+    t_away = orient_case("away", lambda pr, nm: [r.update(values={"lost": "Position=1424,0,0; Rotation=0,0,0",
+                                                                  "winner": "Position=0,0,0; Rotation=0,0,0"})
+                                                 for r in pr["reader"]["prediction"]["record"] if r["formKey"] == "000403:Skyrim.esm"])
+    check("N9-where-away", WORDS["where"]["away"].format(m=20) in t_away and "below" not in t_away and "above" not in t_away,
+          f"a spot mostly beside the other is away from it, not above or below ({t_away[-200:]!r})")
+
+    # the group's other members: one named alone; more than three named three and counted
+    t_one = orient_case("others one", lambda pr, nm: pr["reader"]["prediction"].update(
+        record=[r for r in pr["reader"]["prediction"]["record"] if r["formKey"] != "000407:Skyrim.esm"]))
+    check("N8-others-one", WORDS["groupOthers"]["one"].format(names="Lamp Two") in t_one,
+          f"one other member is named in the singular ({t_one[-160:]!r})")
+
+    def five_more(pr, nm):
+        rec_ = pr["reader"]["prediction"]["record"]
+        lamp = next(r for r in rec_ if r["formKey"] == "000403:Skyrim.esm")
+        for i in range(3):
+            fk, edid = f"00041{i}:Skyrim.esm", f"LampX{i}"
+            rec_.append({**lamp, "formKey": fk, "findingId": "F-" + fk[:6],
+                         "summary": f"PlacedObject {edid}: Placement - Beta.esp's value lost to Target.esp's"})
+            nm["refs"][fk] = {"base": "B-" + edid, "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"],
+                              "cells": {"Skyrim.esm": "000A01:Skyrim.esm", "Beta.esp": "000A01:Skyrim.esm",
+                                        "Target.esp": "000A01:Skyrim.esm"}}
+            nm["bases"]["B-" + edid] = {"type": "Static", "editorId": edid, "model": f"Clutter\\{edid}.nif"}
+            nm["objects"][edid] = {"name": f"Lamp X{i}"}
+    t_more = orient_case("others more", five_more)
+    check("N8-others-more", t_more.count(" and 2 more are placed the same way.") == 1 and "Lamp X2" not in t_more
+          and ", Lamp Three, Lamp X0 and 2 more are placed the same way." in t_more,
+          f"five other members: three named, two counted ({t_more[-200:]!r})")
+
     # exterior: nothing under the spot and no terrain above it is in the air; an interior never gets the ground clause
     def air(pr, nm):
         for m in pr["media"]:
@@ -1849,7 +1890,17 @@ CODE_SABOTAGE = {
         'extra = words["spotExtra"]["noFloor" if sup.get("interior") else "inAir"]', 'extra = words["spotExtra"]["noFloor"]')]),
     "code-ground-interior": ("planner", "N9-ground-interior", [("_geometry-harness/reel_plan.py",
         'if sup.get("terrainAbove") and not sup.get("interior"):', 'if sup.get("terrainAbove"):')]),
-    "code-probe-dropped":("capture", "N9-probe-argv", [("_geometry-harness/capture_acquire.py",
+    "code-structure-down": ("planner", "N9-structure-down", [("_geometry-harness/reel_plan.py",
+        'words["structureUp" if dz_obj > 0 else "structureDown"]', 'words["structureUp"]')]),
+    "code-where-above": ("planner", "N9-structure-down", [("_geometry-harness/reel_plan.py",
+        'words["where"]["below" if dz < 0 else "above"]', 'words["where"]["below"]')]),
+    "code-where-away": ("planner", "N9-where-away", [("_geometry-harness/reel_plan.py",
+        "            elif abs(dz) >= 0.5 * dist:\n", "            elif True:\n")]),
+    "code-others-one": ("planner", "N8-others-one", [("_geometry-harness/reel_plan.py",
+        'words["groupOthers"]["one" if len(rest) == 1 else "many"]', 'words["groupOthers"]["many"]')]),
+    "code-others-more": ("planner", "N8-others-more", [("_geometry-harness/reel_plan.py",
+        'nm = ", ".join(rest[:3]) if len(rest) > 3 else joined(rest)', "nm = joined(rest[:3])")]),
+    "code-probe-dropped": ("capture", "N9-probe-argv", [("_geometry-harness/capture_acquire.py",
         '            argv += ["--clear-at", f"{float(spot[0]):g},{float(spot[1]):g},{float(spot[2]) + 64:g}"]', "            pass")]),
     "code-f3-states": ("capture", "F3-states", [(REF + "/scene-policy.json",
         '"states": ["without", "with", "highlight"],', '"states": ["highlighted", "unhighlighted", "highlighted"],')]),
