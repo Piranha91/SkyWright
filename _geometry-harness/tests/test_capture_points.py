@@ -380,13 +380,25 @@ def c715(fx):
           and ref.get("detail", "").endswith("view."), ref.get("detail", tail(proc)))
 
 
+def c717(fx):
+    """C717. The ground the pair stands on is at z 0, and the only navmesh lies 180 u below it (a path under a rock).
+    A camera on that navmesh would stand inside the ground: the picker either takes the ground as the floor or refuses,
+    and never publishes a floor 180 u under the pair."""
+    sc = side_by_side(fx.cy, fx.mg, floor=0.0, nav_z=-180.0)
+    proc, doc = pick(fx, sc, "c717")
+    fz = (doc or {}).get("floorZ")
+    refused = proc.returncode != 0 and "points-no-station" in tail(proc)
+    check("C717 a navmesh below the ground is not the camera storey: the floor is the ground, or the picker refuses",
+          refused or (proc.returncode == 0 and fz is not None and abs(float(fz)) <= 8.0), f"floorZ {fz}; {tail(proc)}")
+
+
 def run_cases(root: Path, picker=PICKER, only=None):
     fx = Fixture(root)
     if only == "sabotage":
         c700(fx, picker)
         c703(fx, picker)
         return
-    for fn in (c700, c701, c702, c703, c704, c705, c706, c707, c708, c709_c710, c711, c712, c713, c714, c715):
+    for fn in (c700, c701, c702, c703, c704, c705, c706, c707, c708, c709_c710, c711, c712, c713, c714, c715, c717):
         fn(fx)
 
 

@@ -305,6 +305,17 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
     levels = [z for e in nav.values() for z in e["levels"]]
     floor = choose_floor(levels, minz, maxz, 300.0, args.storey_tol)
     floor_src = "navmesh"
+    # the ground actually under the stations (the first surface straight down, terrain or a placed ref, a participant
+    # included: a landscape-scale participant IS the ground there). A navmesh level well below it is another storey --
+    # a path under a rock, a cellar -- and a camera standing on it would stand inside the ground.
+    ground = sorted(z - d["dist"] for (x, y, z), e in p1.clear().items()
+                    if (d := (e["axes"].get("down") or {})).get("dist") is not None)
+    if floor is not None and ground:
+        g = ground[len(ground) // 2]
+        if g - floor > args.storey_tol:
+            under = choose_floor(ground, minz, maxz, 300.0, args.storey_tol)
+            if under is not None:
+                floor, floor_src = under, "the ground under the stations (the navmesh found lies below it)"
     if floor is None:
         downs = []
         for (x, y, z), e in p1.clear().items():
