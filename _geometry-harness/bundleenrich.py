@@ -260,6 +260,95 @@ def filed_cells(path: Path, fks: list[str]) -> dict:
     return out
 
 
+PLACED_SIGS = (b"REFR", b"ACHR", b"PGRE", b"PHZD", b"PMIS", b"PARW", b"PBAR", b"PBEA", b"PCON", b"PFLA")
+
+
+def _records(path: Path):
+    """(masters + own name, data, the group walk) of a plugin file: yields (sig, raw formid, flags, body bytes, stack)
+    for every record, with a compressed body inflated."""
+    import struct
+    import zlib
+    data = path.read_bytes()
+    if data[:4] != b"TES4":
+        return [], []
+    hsize = struct.unpack_from("<I", data, 4)[0]
+    masters, q = [], 24
+    while q < 24 + hsize:
+        sig, ssz = data[q:q + 4], struct.unpack_from("<H", data, q + 4)[0]
+        if sig == b"MAST":
+            masters.append(data[q + 6:q + 6 + ssz].rstrip(b"\0").decode("cp1252"))
+        q += 6 + ssz
+    out = []
+
+    def walk(pos, end, stack):
+        while pos < end:
+            sig = data[pos:pos + 4]
+            size = struct.unpack_from("<I", data, pos + 4)[0]
+            if sig == b"GRUP":
+                label = struct.unpack_from("<I", data, pos + 8)[0]
+                gtype = struct.unpack_from("<i", data, pos + 12)[0]
+                walk(pos + 24, pos + size, stack + [(gtype, label)])
+                pos += size
+            else:
+                flags = struct.unpack_from("<I", data, pos + 8)[0]
+                fid = struct.unpack_from("<I", data, pos + 12)[0]
+                if sig in PLACED_SIGS:
+                    body = data[pos + 24:pos + 24 + size]
+                    if flags & 0x40000:
+                        try:
+                            body = zlib.decompress(body[4:])
+                        except zlib.error:
+                            body = b""
+                    out.append((sig, fid, flags, body, tuple(stack)))
+                pos += 24 + size
+    walk(24 + hsize, len(data), [])
+    return masters + [path.name], out
+
+
+def _position(body: bytes):
+    """A placed record's DATA position, or None."""
+    import struct
+    q = 0
+    while q + 6 <= len(body):
+        ssig, ssz = body[q:q + 4], struct.unpack_from("<H", body, q + 4)[0]
+        if ssig == b"DATA" and ssz >= 12:
+            return [round(v, 3) for v in struct.unpack_from("<fff", body, q + 6)]
+        q += 6 + ssz
+    return None
+
+
+def cell_overrides(path: Path, cells: set, base_positions) -> dict:
+    """{cell FormKey: {dz: [...], disabled, count}} for the references this plugin OVERRIDES (filed under a master's
+    FormID) inside the given cells: each one's height change against the base game's position (`base_positions(fk)`),
+    and how many of them it turns off (initially disabled or deleted). The reel's orienting sentence reads it: when most
+    of a mover's overrides in a cell shift by the object's height, the structure moved with it; when most are turned
+    off, the mover replaced the original structure."""
+    names_, recs = _records(path)
+    own = len(names_) - 1
+    out: dict = {}
+    for sig, fid, flags, body, stack in recs:
+        idx = fid >> 24
+        if idx >= own or idx >= len(names_):
+            continue                                    # the plugin's own new references are not overrides
+        cell = next((lab for gt, lab in reversed(stack) if gt == 6), None)
+        if cell is None or cell >> 24 >= len(names_):
+            continue
+        ck = f"{cell & 0xFFFFFF:06X}:{names_[cell >> 24]}"
+        if ck not in cells:
+            continue
+        e = out.setdefault(ck, {"dz": [], "disabled": 0, "count": 0})
+        e["count"] += 1
+        if flags & 0x800 or flags & 0x20:
+            e["disabled"] += 1
+            continue
+        pos = _position(body)
+        fk = f"{fid & 0xFFFFFF:06X}:{names_[idx]}"
+        base = base_positions(fk)
+        if pos and base:
+            e["dz"].append(round(pos[2] - base[2], 1))
+    return out
+
+
 QUEST_TRIGGER = re.compile(r"^quest (\S+) stage \d+ \(QF_\S+?_([0-9A-Fa-f]{8})\.")
 
 
@@ -290,12 +379,18 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
             for n in (c.get("Necessary") or []) + (c.get("Alternative") or []):
                 if isinstance(n, dict) and FK.match(str(n.get("FormKey") or "")):
                     fks.add(n["FormKey"])
+        for c in (doc.get("Conflicts") if isinstance(doc, dict) else None) or []:
+            if c.get("Field") == "Placement":
+                for n in c.get("Necessary") or []:
+                    if isinstance(n, dict) and FK.match(str(n.get("FormKey") or "")):
+                        placement_fks.add(n["FormKey"])
         for p_ in (doc.get("Predicates") if isinstance(doc, dict) else None) or []:
             for k in ("FormKey", "Other"):
                 if isinstance(p_, dict) and FK.match(str(p_.get(k) or "")):
                     fks.add(p_[k])
     # the quests a world-state clash's switch is triggered by (switch census), named for the reel's condition sentence
     state_switches, quest_edids = set(), {}
+    placement_fks = set()
     for e in manifest.get("evidence") or []:
         if not str(e.get("path", "")).endswith(".json") or e.get("kind") not in ("emit", "enrichment"):
             continue
@@ -375,15 +470,21 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                     bounds = prev.get("bounds")
             scale = (float(fl["Scale"]) if fl.get("Scale") not in (None, "") else
                      1.0 if "Scale" in absent else prev.get("scale"))
+            placements = dict(prev.get("placements") or {})
+            if fl.get("Placement.Position") is not None:
+                try:
+                    placements[x["name"]] = [float(v) for v in str(fl["Placement.Position"]).split(",")][:3]
+                except ValueError:
+                    pass
             found[rec["formid"]] = {"type": rec.get("type") or prev.get("type"),
                                     "editorId": rec.get("editorid") or prev.get("editorId"),
                                     "name": fl.get("Name") or prev.get("name"),
                                     "from": x["name"] if fl.get("Name") else prev.get("from"),
-                                    "model": model, "bounds": bounds, "scale": scale,
+                                    "model": model, "bounds": bounds, "scale": scale, "placements": placements,
                                     "carriedBy": (prev.get("carriedBy") or []) + [x["name"]]}
             return fl
         for x in order:
-            for rec in read(x, targets_fk, ["Name", "Base", "Scale"]):
+            for rec in read(x, targets_fk, ["Name", "Base", "Scale", "Placement.Position"]):
                 fl = keep(rec, x)
                 if fl and fl.get("Base") and FK.match(str(fl["Base"])):
                     bases[rec["formid"]] = fl["Base"]
@@ -454,8 +555,38 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
     for x in order:
         for fk, cell in filed_cells(Path(str(x["path"])), [fk for fk in targets_fk if fk in found and fk in bases]).items():
             cells_by.setdefault(fk, {})[x["name"]] = cell
+    # for each placement row's reference: every carrier's own placement (the base game's is its defining master's), and
+    # each non-defining carrier's overrides in the cell that version is filed in, as height changes against the base game
+    by_name = {str(x["name"]).lower(): x for x in order}
+    base_cache: dict = {}
+
+    def base_positions(fk):
+        plugin = fk.split(":", 1)[1].lower()
+        if plugin not in base_cache:
+            x = by_name.get(plugin)
+            pos = {}
+            if x is not None:
+                names_, recs = _records(Path(str(x["path"])))
+                for sig, fid, flags, body, stack in recs:
+                    if fid >> 24 == len(names_) - 1:
+                        pos[f"{fid & 0xFFFFFF:06X}:{names_[-1]}".lower()] = _position(body)
+            base_cache[plugin] = pos
+        return base_cache[plugin].get(fk.lower())
+    overrides: dict = {}
+    for fk in sorted(placement_fks):
+        for plugin, cell in (cells_by.get(fk) or {}).items():
+            if plugin.lower() == fk.split(":", 1)[1].lower() or not cell or cell.endswith("!persistent"):
+                continue
+            if (plugin, cell) not in overrides:
+                x = by_name.get(plugin.lower())
+                got = cell_overrides(Path(str(x["path"])), {cell}, base_positions) if x is not None else {}
+                overrides[(plugin, cell)] = got.get(cell) or {"dz": [], "disabled": 0, "count": 0}
     refs = {fk: {"base": bases.get(fk), "carriedBy": list(dict.fromkeys((found.get(fk) or {}).get("carriedBy") or [])),
-                 "scale": (found.get(fk) or {}).get("scale"), "cells": cells_by.get(fk) or {}}
+                 "scale": (found.get(fk) or {}).get("scale"), "cells": cells_by.get(fk) or {},
+                 **({"placements": (found.get(fk) or {}).get("placements") or {},
+                     "cellOverrides": {pl: {"cell": cl, **overrides[(pl, cl)]}
+                                       for pl, cl in (cells_by.get(fk) or {}).items() if (pl, cl) in overrides}}
+                    if fk in placement_fks else {})}
             for fk in targets_fk if fk in found}
     base_rows = {fk: {"type": (found.get(fk) or {}).get("type"), "editorId": (found.get(fk) or {}).get("editorId"),
                       "model": (found.get(fk) or {}).get("model"), "bounds": (found.get(fk) or {}).get("bounds")}
