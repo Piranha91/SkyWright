@@ -993,7 +993,8 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
         return refuse(f"font-missing: {e}", out)
     font_doc = {"path": str(font), "sha256": sha256_file(font), "boldPath": str(bold), "boldSha256": sha256_file(bold)}
     bundle_dir = resolve_bundle_dir(pres, pres_path, a.bundle)
-    media_by_id = {m.get("id"): m for m in pres.get("media") or []}
+    # the plan's own media and the sibling bundle's frames the reel joined (the "without" setup's)
+    media_by_id = {m.get("id"): m for m in list(pres.get("media") or []) + list(reel.get("media") or [])}
     hold = reel.get("holdSeconds") or {}
     stills_dir = out / "stills"
     stills_dir.mkdir(parents=True, exist_ok=True)

@@ -778,8 +778,9 @@ def case_render():
         clean = {"cleanFrame": True, "visualReview": {"subjectVisible": True, "addedText": "none"}}
         pres = {"schemaVersion": 1, "presentationId": "render-fixture", "source": {"bundleDir": "."},
                 "reader": {"verdict": "Verdict sentence."}, "settings": {"reel": {"maxSeconds": 600, "stillFont": "C:/Windows/Fonts/arial.ttf"}},
-                "media": media, "chapters": [],
-                "reel": {"schemaVersion": 1, "status": "planned", "chapters": [
+                "media": media[1:], "chapters": [],
+                # the "without" frame comes from the sibling bundle, as the plan joins it
+                "reel": {"schemaVersion": 1, "status": "planned", "media": media[:1], "chapters": [
                     {"id": "R-01", "kind": "opening", "narration": "Here are the types of clashes that are predicted from adding Target Mod.",
                      "narrationAudio": "media/n.wav",
                      "still": {"pages": [{"layout": "types", "rows": [{"label": "Objects in the same space", "count": 1}],
@@ -823,7 +824,7 @@ def case_render():
         check("F4-font-missing", rf.returncode == 2 and "font" in msg.lower() and "absent.ttf" in msg,
               f"an absent still font refuses in one sentence naming the file, never a default font (exit {rf.returncode}: {msg[-160:]})")
         bad = copy.deepcopy(pres)
-        bad["media"][2]["provenance"]["poseId"] = "pose-2"
+        bad["media"][1]["provenance"]["poseId"] = "pose-2"
         bp = root / "pose.json"
         bp.write_text(json.dumps(bad))
         rp = render(bp, root / "pose")

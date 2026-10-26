@@ -9751,7 +9751,7 @@ def cmd_plan(a) -> int:
                     "declaredPatches": list(a.declare_patch or []),
                     "rowsPerGroup": (a.rows_per_group if a.rows_per_group is not None else conc.get("rowsPerGroup", 3)),
                     "figuresPerFinding": (a.figures_per_finding if a.figures_per_finding is not None else conc.get("figuresPerFinding", 1)),
-                    "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height")},
+                    "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height", "stillFont", "stillFontBold")},
                     "singleMod": a.single_mod, "headlineUnit": a.headline_unit,
                     "alsoBundles": list(getattr(a, "also_bundle", None) or [])}
         if a.mode == "exhaustive":
