@@ -370,6 +370,7 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                if x["name"] not in targets and not all(k in s_ for s_ in arm_sets)]
     # what to name: every FormKey a row of the bundle names, and every placed cell of the targets
     fks, cells = set(), {}
+    placement_fks = set()                      # the references of placement rows (the reel's orienting sentence)
     for e in manifest.get("evidence") or []:
         if not str(e.get("path", "")).endswith(".json") or e.get("kind") not in ("emit", "enrichment"):
             continue
@@ -390,7 +391,6 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                     fks.add(p_[k])
     # the quests a world-state clash's switch is triggered by (switch census), named for the reel's condition sentence
     state_switches, quest_edids = set(), {}
-    placement_fks = set()
     for e in manifest.get("evidence") or []:
         if not str(e.get("path", "")).endswith(".json") or e.get("kind") not in ("emit", "enrichment"):
             continue
