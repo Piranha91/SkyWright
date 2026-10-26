@@ -6044,8 +6044,24 @@ MEDIA_REASONS = ("file-missing", "kind-missing", "subject-missing", "state-missi
                  "fingerprint-mismatch", "source-missing", "original-missing")
 
 
+def state_media_fingerprints(own_configs: list, measured_states: set, state: str) -> set:
+    """The configurations a picture rendered in a world state may carry: the arm's own accepted configurations, the
+    population line as recorded and as the renderer reads it (a scoped population's base), with only the state line
+    set to that state -- and only for a state this run's state checks measured (a switch a state row's Kind names)."""
+    if state not in measured_states:
+        return set()
+    out = set()
+    for cfg in own_configs:
+        pop = str(cfg.get("population") or "")
+        base = re.sub(r"\+population:[0-9a-f]{12}$", "", pop)
+        for p_ in {pop, base}:
+            out.add(configuration_fingerprint(cfg.get("plugins"), cfg.get("providers"), cfg.get("overlays"),
+                                              p_, state, cfg.get("schemaVersion")))
+    return out
+
+
 def media_item_refusal(item: dict, src: Path, fingerprints: dict,
-                       other_fingerprints: dict | None = None) -> tuple[str | None, str | None]:
+                       other_fingerprints: dict | None = None, state_fingerprints=None) -> tuple[str | None, str | None]:
     """Why a media item is unassessed: ONE closed reason from MEDIA_REASONS plus a plain sentence, or
     (None, None) when it is accepted. The checks run in the standard's order — the file, then the
     schema-2 fields (kind, subject, state, fingerprint, fingerprint source, provenance), then the arm's
@@ -6054,7 +6070,8 @@ def media_item_refusal(item: dict, src: Path, fingerprints: dict,
 
     `fingerprints` is each arm's OWN configuration (its accepted part-null / part-arm receipts);
     `other_fingerprints` is what the arm's reverse / diff parts consumed — the other order — and only ever
-    explains a refusal (A-3)."""
+    explains a refusal (A-3). `state_fingerprints(arm, state)` gives, for a picture taken in a world state this run's
+    state checks measured, the arm's own accepted configurations with only the state line set to that state."""
     other_fingerprints = other_fingerprints or {}
     def r(reason: str, detail: str) -> tuple[str, str]:
         assert reason in MEDIA_REASONS, reason
@@ -6088,7 +6105,9 @@ def media_item_refusal(item: dict, src: Path, fingerprints: dict,
         return r("no-accepted-receipt-on-arm",
                  f"no accepted receipt measured arm {aid!r}'s own configuration"
                  + (" (its reverse / diff parts measured the other order)" if aid in other_fingerprints else ""))
-    if fp not in fingerprints[aid]:
+    in_state = (item.get("state") not in (None, "baseline") and state_fingerprints is not None
+                 and fp in state_fingerprints(aid, item["state"]))
+    if fp not in fingerprints[aid] and not in_state:
         if fp in other_fingerprints.get(aid, set()):
             return r("fingerprint-mismatch",
                      f"the fingerprint {str(fp)[:12]} belongs to the other order this arm's reverse part "
@@ -6239,12 +6258,28 @@ def cmd_bundle(a) -> int:
         # only to say why an item was refused.
         fingerprints: dict[str, set] = {}
         other_fingerprints: dict[str, set] = {}
+        own_configs: dict[str, list] = {}
+        measured_states: set = set()
         for rec in receipts.values():
             if rec["validation"]["accepted"]:
-                fp = (rec.get("consumed") or {}).get("configuration", {}).get("fingerprint")
+                cfg = (rec.get("consumed") or {}).get("configuration") or {}
+                fp = cfg.get("fingerprint")
                 if fp:
                     target = fingerprints if rec.get("part") in (None, "arm") else other_fingerprints
                     target.setdefault(rec["armId"], set()).add(fp)
+                    if rec.get("part") in (None, "arm"):
+                        own_configs.setdefault(rec["armId"], []).append(cfg)
+                if rec.get("checkId") == "state.conditional-geometry":
+                    # the world states this run measured: every switch a state row's Kind names
+                    for o in rec.get("outputs") or []:
+                        doc = load_json(run / o["path"]) if o.get("path") else None
+                        for c in (doc or {}).get("Conflicts") or [] if isinstance(doc, dict) else []:
+                            m = re.match(r"^STATE-[A-Z]+@([0-9A-Fa-f]{6}:[^@]+)@", str(c.get("Kind") or ""))
+                            if m:
+                                measured_states.add(m.group(1))
+
+        def state_fingerprints(arm: str, state: str) -> set:
+            return state_media_fingerprints(own_configs.get(arm, []), measured_states, state)
         media_items = media_doc if isinstance(media_doc, list) else (media_doc or {}).get("items") or []
         for item in media_items:
             if not isinstance(item, dict):
@@ -6253,7 +6288,7 @@ def cmd_bundle(a) -> int:
             if src.suffix.lower() in BINARY_SUFFIXES:
                 return refuse(f"--media {a.media}: {src.name} has a suffix that is never copied by policy "
                               f"({src.suffix}); a media item is an image or video file")
-            reason, detail = media_item_refusal(item, src, fingerprints, other_fingerprints)
+            reason, detail = media_item_refusal(item, src, fingerprints, other_fingerprints, state_fingerprints)
             if reason:
                 unassessed_media.append({**item, "reason": reason, "detail": detail})
                 continue
