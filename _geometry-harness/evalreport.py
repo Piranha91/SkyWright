@@ -8987,6 +8987,45 @@ def bundle_media_rows(b: "Bundle", arms: set) -> list[dict]:
     return rows
 
 
+def reel_markers(plan: dict, names: dict, plans: list[dict], pr: dict) -> set:
+    """The references of the reel's clashes that the report's marker rule calls editor-only: the base's model is one the
+    game does not draw (skill data markerModels), or the base carries the marker record flag (markerFlags), read from
+    the base's own plugin file as the evaluation recorded it (path and sha256 must match)."""
+    words = (pr.get("reader") or {}).get("prediction") or {}
+    models = {str(x).replace("\\", "/").lower() for x in (words.get("markerModels") or {}).get("models") or []}
+    flags, rtypes = words.get("markerFlags") or {}, words.get("markerRecordTypes") or {}
+    files = {}
+    for pl in plans:
+        for arm in (pl or {}).get("arms") or []:
+            for x in ((arm.get("requested") or {}).get("plugins") or []):
+                files.setdefault(str(x.get("name")).lower(), (str(x.get("path") or ""), str(x.get("sha256") or "").lower()))
+    refs, bases = (names or {}).get("refs") or {}, (names or {}).get("bases") or {}
+    rows = [r for r in (((plan.get("reader") or {}).get("prediction") or {}).get("record") or []) if r.get("admission") == "admitted"]
+    out, checked = set(), {}
+    for fk in sorted({str(r["formKey"]) for r in rows} | {str(o) for r in rows for o in r.get("other") or []}):
+        b_ = (refs.get(fk) or {}).get("base")
+        base = bases.get(b_ or "") or {}
+        model = str(base.get("model") or "").replace("\\", "/").lower()
+        if model and (model in models or (model.startswith("meshes/") and model[7:] in models)):
+            out.add(fk)
+            continue
+        bit = flags.get(str(base.get("type") or ""))
+        if not b_ or not bit:
+            continue
+        if b_ not in checked:
+            path, sha = files.get(str(b_).split(":", 1)[-1].lower(), ("", ""))
+            got = None
+            if path and sha and Path(path).is_file() and sha256_file(Path(path)).lower() == sha:
+                try:
+                    got = pluginread.record_flags(path, [b_], str(rtypes.get(str(base.get("type")), "STAT")).encode()).get(b_)
+                except pluginread.PluginReadError:
+                    got = None
+            checked[b_] = bool(got is not None and int(got) & int(bit))
+        if checked[b_]:
+            out.add(fk)
+    return out
+
+
 def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out: Path) -> dict:
     """The review reel's plan (reel_plan.py) from the compiled presentation, the bundle's names and masters, the
     skill's vignette policy and words, the recorded patch search and the evaluation's mod names."""
@@ -9028,7 +9067,8 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     sibling_roles = set(((((plan.get("reader") or {}).get("prediction") or {}).get("sibling") or {}).get("roles") or {}).values())
     extra_media = bundle_media_rows(sb, sibling_roles) if sb is not None else []
     view = dict(plan, media=list(plan.get("media") or []) + extra_media)
-    reel = reel_plan.plan_reel(view, names, masters, policy, words, search, mod_names, captures)
+    markers = reel_markers(plan, names, [b.plan] + ([sb.plan] if sb is not None else []), pr)
+    reel = reel_plan.plan_reel(view, names, masters, policy, words, search, mod_names, captures, markers=markers)
     reel["media"] = extra_media
     reel["patchSearch"] = search_ref
     reel["captureResults"] = [{"formKey": c.get("formKey"), "status": c.get("status"), "reason": c.get("reason")} for c in captures]

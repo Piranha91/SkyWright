@@ -67,8 +67,11 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
             out.append(("head", f"{r.get('label')}: {r.get('count')}", 1.15))
             if r.get("pairs"):
                 out.append(("dim", "between " + "; ".join(r["pairs"]), 0.8))
-        if (page.get("leftOut") or {}).get("line"):
-            out.append(("dim", page["leftOut"]["line"], 0.8))
+            if r.get("moreLine"):
+                out.append(("dim", r["moreLine"], 0.8))
+        for key in ("line", "markersLine"):
+            if (page.get("leftOut") or {}).get(key):
+                out.append(("dim", page["leftOut"][key], 0.8))
     elif lay == "load-order":
         targets = set(page.get("targets") or [])
         for i, p in enumerate(page.get("plugins") or []):
@@ -90,6 +93,8 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
                 out.append(("dim", f"{k}: {v}", 0.8))
             if r.get("reason"):
                 out.append(("dim", r["reason"], 0.7))
+        if page.get("moreLine"):
+            out.append(("head", page["moreLine"], 0.9))
     elif lay == "checks":
         for r in page.get("rows") or []:
             out.append(("head", str(r.get("reason") or "")[:1].upper() + str(r.get("reason") or "")[1:], 0.95))

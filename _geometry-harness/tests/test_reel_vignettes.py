@@ -90,6 +90,10 @@ WORDS = {
               "none": "No patch exists for these two mods.", "noneOther": "No other patch exists for these two mods.",
               "notFound": "No patch for these two mods was found.", "notFoundOther": "No other patch for these two mods was found."},
     "playTime": "This was also recorded in play.",
+    "closingLines": {"withSetup": "{check}, with {patch}", "withoutSetup": "{check}, without {patch}",
+                     "captureRefused": "No camera could see both objects", "refusedSubject": "{objectA} and {objectB} in {place}"},
+    "more": "and {count} more",
+    "leftOutMarkers": "Not shown: {count} {noun} on editor-only markers",
     "forbidden": ["compared", "candidate", "offline", "render", "gameplay", "not tested", "testing is incomplete",
                   "OcclusionData", "EditorID", ".esp", ".esm", ".esl"],
     "forbiddenPatterns": [r"\b(geometry|records|state|environment|functional|patch|runtime)\.[a-z-]+\b",
@@ -124,14 +128,16 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
                   "Position=10,0,0; Rotation=0,0,0", "left", "PlacedObject SomeLamp01: Placement - Beta.esp's value lost to Target.esp's"),
               rec("000404:Skyrim.esm", "Beta.esp", "EditorID", "BetaName", "TargetName", "left",
                   "PlacedObject BetaName: EditorID - Beta.esp's value lost to Target.esp's"),
+              rec("000405:Skyrim.esm", "Beta.esp", "Placement", "Position=0,0,0; Rotation=0,0,0",
+                  "Position=500,0,0; Rotation=0,0,0", "left", "PlacedObject XMarkerHeading: Placement - Beta.esp's value lost to Target.esp's"),
               rec("000501:Skyrim.esm", "Beta.esp", "OcclusionData", "00ff", "ff00", "left",
                   "Cell CellFour: OcclusionData - Beta.esp's value lost to Target.esp's", check="records.cell-attributes"),
               {"checkId": "geometry.object-overlap", "kind": "OVERLAP", "A": "Target.esp", "B": "Target.esp",
                "formKey": "000901:Target.esp", "admission": "sameMod", "summary": "same mod"}]
     verdict_counts = [
         {"checkId": "geometry.object-overlap", "kind": "OVERLAP", "count": 5, "unit": "relationships", "fieldNames": {}},
-        {"checkId": "records.contested-fields", "kind": "LOST-EDIT", "count": 4, "unit": "objects",
-         "fieldNames": {"Placement": 2, "Description": 1, "EditorID": 1}},
+        {"checkId": "records.contested-fields", "kind": "LOST-EDIT", "count": 5, "unit": "objects",
+         "fieldNames": {"Placement": 3, "Description": 1, "EditorID": 1}},
         {"checkId": "records.cell-attributes", "kind": "LOST-EDIT", "count": 1, "unit": "objects", "fieldNames": {"OcclusionData": 1}}]
     order = ["Skyrim.esm", "Update.esm", "Alpha.esp", "Beta.esp", "Target.esp", "Alpha - Target patch.esp"]
     pres = {
@@ -143,14 +149,20 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
             "limitations": [S] if sentinel else ["Testing is incomplete; outstanding areas are listed below.",
                                                  "No matching play-time evidence was supplied, so this does not show what happened during play."],
             "suppliedPatches": ["Alpha - Target patch.esp"],
-            "missingSummary": [{"reason": "ran, but could not decide", "subjects": ["Whether a single object blocks an NPC route — Measured load order"]},
-                               {"reason": "cannot yet be measured by this evaluator", "subjects": ["Whether several changes together disconnect an NPC route — Measured load order"]}],
+            "missingSummary": [{"reason": "ran, but could not decide",
+                                "subjects": ["Whether a single object blocks an NPC route — Measured load order",
+                                             "Whether a single object blocks an NPC route — Tested alternative setup",
+                                             "Connected doors — Measured load order"]},
+                               {"reason": "cannot yet be measured by this evaluator",
+                                "subjects": ["Whether several changes together disconnect an NPC route — Measured load order",
+                                             "Whether several changes together disconnect an NPC route — Tested alternative setup",
+                                             "Connected doors — Tested alternative setup"]}],
             "prediction": {"subject": "Target.esp", "mods": ["Target.esp"], "predictionArm": "with-target",
                            "withoutArm": "sibling:without-target", "verdictCounts": verdict_counts, "record": record,
                            "items": []},
         },
-        "scope": {"arms": [{"armId": "with-target", "locationPluginOrder": order},
-                           {"armId": "baseline", "locationPluginOrder": order[:-1]}]},
+        "scope": {"arms": [{"armId": "with-target", "displayLabel": "Tested alternative setup", "locationPluginOrder": order},
+                           {"armId": "baseline", "displayLabel": "Measured load order", "locationPluginOrder": order[:-1]}]},
         "findings": [{"id": "F-O1", "kind": "finding", "readerPlain": S if sentinel else "4 overlap pairs between Alpha.esp and Target.esp."}],
         "media": [], "chapters": [],
     }
@@ -164,10 +176,12 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
                       "000105:Target.esp": {"base": "B1", "carriedBy": ["Target.esp"]},
                       "000301:Beta.esp": {"base": "B3", "carriedBy": ["Beta.esp"]},
                       "000401:Skyrim.esm": {"base": "B4", "carriedBy": ["Skyrim.esm", "Alpha.esp", "Target.esp"]},
-                      "000403:Skyrim.esm": {"base": "B5", "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"]}},
+                      "000403:Skyrim.esm": {"base": "B5", "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"]},
+                      "000405:Skyrim.esm": {"base": "B6", "carriedBy": ["Skyrim.esm", "Beta.esp", "Target.esp"]}},
              "bases": {"B1": {"type": "Activator", "editorId": "Target_Altar01"}, "B2": {"type": "Door", "editorId": "AlphaDoor01"},
                        "B3": {"type": "Static", "editorId": "BetaPillar01"}, "B4": {"type": "Static", "editorId": "MAG_StoneBench02"},
-                       "B5": {"type": "Static", "editorId": "SomeLamp01"}},
+                       "B5": {"type": "Static", "editorId": "SomeLamp01"},
+                       "B6": {"type": "Static", "editorId": "XMarkerHeading", "model": "XMarkerHeading.nif"}},
              "objects": {"Target_Altar01": {"name": "Altar"}, "SomeLamp01": {"name": "Lamp"}},
              "places": {"CellOne": {"name": "The First Hall"}}}
     masters = {"alpha - target patch.esp": {"skyrim.esm", "alpha.esp", "target.esp"}, "target.esp": {"skyrim.esm"},
@@ -231,15 +245,54 @@ def joined(xs):
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
 
 
-def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS):
+MARKERS = {"000405:Skyrim.esm"}                       # what evalreport's marker rule says of the synthetic refs
+
+
+def setup_words(pres, label, words=WORDS):
+    """A setup said in plain words: with or without the supplied patch, from the setup's own plugin order."""
+    arm = next((a for a in (pres.get("scope") or {}).get("arms") or [] if a.get("displayLabel") == label), {})
+    patches = list((pres.get("reader") or {}).get("suppliedPatches") or [])
+    has = [p for p in patches if p in (arm.get("locationPluginOrder") or [])]
+    return has, patches
+
+
+def merged_checks(pres, mods, words=WORDS):
+    """The closing's rows: one line per check and reason; a setup is named only where the check's reasons differ."""
+    reasons_of = {}
+    for m in (pres.get("reader") or {}).get("missingSummary") or []:
+        for subj in m.get("subjects") or []:
+            check_, _, setup = str(subj).partition(" — ")
+            reasons_of.setdefault(check_, {}).setdefault(m.get("reason"), []).append(setup)
+    rows = []
+    for m in (pres.get("reader") or {}).get("missingSummary") or []:
+        subs = []
+        for subj in m.get("subjects") or []:
+            check_, _, setup = str(subj).partition(" — ")
+            if len(reasons_of[check_]) == 1:
+                line = check_
+            else:
+                has, patches = setup_words(pres, setup, words)
+                name = patch_display(mods, (has or patches)[0], words) if patches else None
+                line = (words["closingLines"]["withSetup" if has else "withoutSetup"].format(check=check_, patch=name)
+                        if name else check_)
+            if line not in subs:
+                subs.append(line)
+        rows.append({"reason": m.get("reason"), "subjects": subs})
+    return rows
+
+
+def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, markers=MARKERS):
     """The expected reel for an evaluation: selection, kinds, sentences. Written from the Gate B rules (with the Gate B
     review's S1 and S2), not from the planner."""
     pred = pres["reader"]["prediction"]
     target = pred["subject"]
     rows = [r for r in pred["record"] if r.get("admission") == "admitted"]
     no_effect = set(policy["noInGameEffectFields"])
-    kept_rows = [r for r in rows if r.get("field") not in no_effect]
+    marker_rows = [r for r in rows if r.get("field") not in no_effect and
+                   ({r["formKey"], *(r.get("other") or [])} & set(markers))]
+    kept_rows = [r for r in rows if r.get("field") not in no_effect and r not in marker_rows]
     left_out = len([r for r in rows if r.get("field") in no_effect])        # record fields left out, on screen only
+    left_markers = len({r["formKey"] for r in marker_rows})
     clashes = {}                                           # one clash per record (record types) or per row (geometry)
     for r in kept_rows:
         t = policy["types"][r["checkId"]]
@@ -341,7 +394,7 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS):
     chapters = [{"kind": "opening", "narration": words["opening"].format(mod=mod_name(mods, target)),
                  "types": {words["typeLabels"][t]: len([c for c in clashes.values() if c["type"] == t]) for t in policy["typeOrder"]
                            if any(c["type"] == t for c in clashes.values())},
-                 "leftOut": left_out,
+                 "leftOut": left_out, "leftMarkers": left_markers,
                  "loadOrder": next(a["locationPluginOrder"] for a in pres["scope"]["arms"] if a["armId"] == pred["predictionArm"])}]
     stills = {}
     for c in selected:
@@ -378,7 +431,7 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS):
         chapters.append({"kind": "data-still", "type": t, "formKeys": [c["rows"][0]["formKey"] for c, _, _ in stills[t]],
                          "narration": " ".join(said)})
     chapters.append({"kind": "closing", "narration": words["closing"],
-                     "checks": [(m["reason"], m["subjects"]) for m in pres["reader"]["missingSummary"]]})
+                     "checks": [(m["reason"], m["subjects"]) for m in merged_checks(pres, mods, words)]})
     return chapters
 
 
@@ -463,12 +516,44 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
           f"{sum(1 for n in narr if n)}; an empty reel fails; {disc[:3]})")
     # 6 closing still
     cl = view[-1] if view else {}
-    want = [(m.get("reason"), list(m.get("subjects") or [])) for m in (pres.get("reader") or {}).get("missingSummary") or []]
+    want = [(m.get("reason"), list(m.get("subjects") or [])) for m in merged_checks(pres, mods, words)]
     got = [(r.get("reason"), list(r.get("subjects") or [])) for p in cl.get("pages") or [] if p.get("layout") == "checks"
            for r in p.get("rows") or []]
     check("6-closing", cl.get("kind") == "closing" and got[:len(want)] == want and cl.get("narration") == words["closing"],
           f"{tag}the closing is a still listing each check that could not run or decide with its reason, and says only "
           f"the fixed sentence (narration {cl.get('narration', '')[:90]!r}, {len(got)} of {len(want)} rows)")
+    # C1: no still speaks the tool: no form key, no "request", no setup role label
+    labels = {a.get("displayLabel") for a in (pres.get("scope") or {}).get("arms") or [] if a.get("displayLabel")}
+    labels |= {"Measured load order", "Tested alternative setup"}
+    import reel_stills                                     # the text a still actually draws, not its page data
+    still_text = " | ".join(line for c in view for pg in c["pages"] for _, line, _ in reel_stills._blocks(pg))
+    fk_hits = re.findall(r"\b[0-9A-Fa-f]{6}:[^\s\"]+?\.(?:esp|esm|esl)\b", still_text)
+    bad_lbl = sorted(x for x in labels if x in still_text)
+    check("C1-stills-plain", bool(view) and any(c["pages"] for c in view) and not fk_hits
+          and "request" not in still_text.lower() and not bad_lbl,
+          f"{tag}no still shows a form key, a capture request or a setup role label (form keys {fk_hits[:2]}, labels {bad_lbl})")
+    # C2: a place is said once: a row whose subject is the place itself carries no "in {place}"
+    twice = [r.get("object") for c in view for r in c["rows"] if r.get("place") and r.get("object")
+             and r["place"].lower() in str(r["object"]).lower()]
+    check("C2-place-once", bool(view) and any(c["rows"] for c in view) and not twice,
+          f"{tag}no still row names its place twice ({twice[:2]})")
+    # C3: every count on the opening is accounted for in the body: shown, plus a stated "and N more"
+    lbl_type = {v: k for k, v in words["typeLabels"].items()}
+    shown, more = {}, {}
+    for c in view:
+        t = (c.get("clash") or {}).get("type")
+        if c["kind"] == "vignette":
+            shown[t] = shown.get(t, 0) + 1
+        elif c["kind"] == "data-still":
+            for p in c["pages"]:
+                shown[t] = shown.get(t, 0) + len(p.get("rows") or [])
+                more[t] = more.get(t, 0) + int(p.get("more") or 0)
+    tp0 = next((p for p in op.get("pages") or [] if p.get("layout") == "types"), {})
+    off = [(x.get("label"), x.get("count"), shown.get(lbl_type.get(x.get("label")), 0),
+            more.get(lbl_type.get(x.get("label")), 0) + int(x.get("more") or 0)) for x in tp0.get("rows") or []]
+    check("C3-counts", bool(off) and all(n == s_ + m_ for _, n, s_, m_ in off),
+          f"{tag}every count on the opening equals the clashes shown plus the stated 'and N more' "
+          f"(label, count, shown, more: {off})")
     # F2 no in-game effect
     no_eff = set(policy["noInGameEffectFields"])
     shown = [r for c in view for r in c["rows"] if r.get("field") in no_eff]
@@ -480,8 +565,9 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     counted = sum(int(n) for v in pred.get("verdictCounts") or [] for f, n in (v.get("fieldNames") or {}).items() if f in no_eff)
     tp = next((p for p in op.get("pages") or [] if p.get("layout") == "types"), {})
     # the record clashes the opening counts are the records with a counted field that has an effect in play
+    marks = set(((pres.get("reel") or {}).get("markers")) or [])
     rec_want = len({r["formKey"] for r in rows if (policy["types"].get(r.get("checkId")) == "record")
-                    and r.get("field") not in no_eff})
+                    and r.get("field") not in no_eff and not ({r["formKey"], *(r.get("other") or [])} & marks)})
     rec_got = next((x.get("count") for x in tp.get("rows") or [] if x.get("label") == words["typeLabels"]["record"]), 0)
     check("F2-no-effect", counted == left and rec_got == rec_want and not shown and not spoken
           and tp.get("leftOut", {}).get("noInGameEffect") == left
@@ -519,7 +605,7 @@ def reference_presentation(pres, names, masters, search, mods):
         if e["kind"] == "opening":
             chs.append({"kind": "opening", "narration": e["narration"], "still": {"pages": [
                 {"layout": "types", "rows": [{"label": k, "count": v} for k, v in e["types"].items()],
-                 "leftOut": {"noInGameEffect": e["leftOut"]}},
+                 "leftOut": {"noInGameEffect": e["leftOut"], "markers": e["leftMarkers"]}},
                 {"layout": "load-order", "plugins": e["loadOrder"], "targets": [target]}]}})
         elif e["kind"] == "vignette":
             own = [p for p in pres["reader"]["suppliedPatches"] if set(x.lower() for x in e["pair"]) <= masters.get(p.lower(), set())]
@@ -533,7 +619,24 @@ def reference_presentation(pres, names, masters, search, mods):
         else:
             chs.append({"kind": "closing", "narration": e["narration"], "still": {"pages": [
                 {"layout": "checks", "rows": [{"reason": r, "subjects": s} for r, s in e["checks"]]}]}})
-    out["reel"] = {"schemaVersion": 1, "status": "planned", "modNames": mods, "chapters": chs}
+    # "and N more" on each type's still (or its opening row when the type has no still): what selection left out
+    shown = {}
+    for c in chs:
+        t = (c.get("clash") or {}).get("type")
+        if c["kind"] == "vignette":
+            shown[t] = shown.get(t, 0) + 1
+        elif c["kind"] == "data-still":
+            shown[t] = shown.get(t, 0) + len(c["still"]["pages"][0]["rows"])
+    lbl_type = {v: k for k, v in WORDS["typeLabels"].items()}
+    for row in chs[0]["still"]["pages"][0]["rows"]:
+        t = lbl_type[row["label"]]
+        hidden = row["count"] - shown.get(t, 0)
+        still = next((c for c in chs if c["kind"] == "data-still" and c["clash"]["type"] == t), None)
+        if hidden and still:
+            still["still"]["pages"][0]["more"] = hidden
+        elif hidden:
+            row["more"] = hidden
+    out["reel"] = {"schemaVersion": 1, "status": "planned", "modNames": mods, "markers": sorted(MARKERS), "chapters": chs}
     return out
 
 
@@ -570,6 +673,20 @@ def sabotage(pres: dict, name: str) -> tuple[dict, str]:
     if name == "editorid":
         st = next(c for c in chs if c["kind"] == "data-still" and c["type"] == "record")
         st["still"]["pages"][0]["rows"].append({"formKey": "000404:Skyrim.esm", "field": "EditorID"}); return p, "F2-no-effect"
+    if name == "formkey-on-still":
+        chs[-1]["still"]["pages"][0]["rows"].append({"reason": "picture could not be captured",
+                                                     "subjects": ["027582:Lux.esp shows a measurable face"]})
+        return p, "C1-stills-plain"
+    if name == "place-twice":
+        st = next(c for c in chs if c["kind"] == "data-still")
+        st["still"]["pages"][0]["rows"].append({"object": "The First Hall", "place": "The First Hall"}); return p, "C2-place-once"
+    if name == "silent-more":
+        for c in chs:
+            if c["kind"] == "data-still":
+                c["still"]["pages"][0].pop("more", None)
+        for r in chs[0]["still"]["pages"][0]["rows"]:
+            r.pop("more", None)
+        return p, "C3-counts"
     if name == "leftout-zero":                             # a reel that claims nothing was left out beside an EditorID clash
         chs[0]["still"]["pages"][0]["leftOut"]["noInGameEffect"] = 0; return p, "F2-no-effect"
     if name == "empty-reel":                               # nothing narrated: the wording and disclaimer checks must not pass
@@ -580,7 +697,7 @@ def sabotage(pres: dict, name: str) -> tuple[dict, str]:
 
 
 SABOTAGE = ["verdict-opening", "report-sentence", "hnh", "drop-pair", "patch-any-pair", "compared", "disclaimer",
-            "closing-narrated", "editorid", "leftout-zero", "empty-reel"]
+            "closing-narrated", "editorid", "leftout-zero", "empty-reel", "formkey-on-still", "place-twice", "silent-more"]
 
 
 # ------------------------------------------------------------------------------------------ the planner cases
@@ -593,7 +710,10 @@ def planned(pres, names, masters, search, mods, policy=POLICY, words=WORDS):
         print("  NOTE  no reel planner on this head (module reel_plan absent): checking the reel the base renders")
         return copy.deepcopy(pres)
     out = copy.deepcopy(pres)
-    out["reel"] = reel_plan.plan_reel(out, names, masters, policy, words, search, mods)
+    try:
+        out["reel"] = reel_plan.plan_reel(out, names, masters, policy, words, search, mods, markers=MARKERS)
+    except TypeError:                                  # a planner from before the marker rule
+        out["reel"] = reel_plan.plan_reel(out, names, masters, policy, words, search, mods)
     return out
 
 
@@ -658,6 +778,14 @@ def case_planner():
     beta = [c["narration"] for c in reel_view(gu) if c["kind"] == "vignette" and "Beta.esp" in (c["clash"].get("pair") or [])]
     check("unread-source", bool(beta) and all(WORDS["patch"]["notFound"] in x for x in beta),
           "a pair with an unread source says a patch was not found, even when the known answer was found")
+    # C3a: a clash on an editor-only marker is left out of the counts, and how many is on the opening still
+    op_ = next((c for c in reel_view(got) if c["kind"] == "opening"), {})
+    lo_ = next((p_ for p_ in op_.get("pages") or [] if p_.get("layout") == "types"), {}).get("leftOut") or {}
+    rec_n = next((x.get("count") for p_ in op_.get("pages") or [] if p_.get("layout") == "types" for x in p_.get("rows") or []
+                  if x.get("label") == WORDS["typeLabels"]["record"]), None)
+    check("C3-markers", lo_.get("markers") == 1 and rec_n == 3 and "000405" not in json.dumps(reel_view(got)),
+          f"a marker's clash is out of the scenes and counts (record clashes {rec_n}, 3 expected), with the number left "
+          f"out on the opening still ({lo_})")
     # S2: an actor's placement says the two mods place the NPC in different spots, never where it stands in play
     ap, an, am, as_, amods = synthetic()
     an["bases"]["B5"] = {"type": "Npc", "editorId": "SomeGuard"}
@@ -851,10 +979,19 @@ CODE_SABOTAGE = {
     "code-known-stated": ("planner", "known-answer-derived", [("_geometry-harness/reel_plan.py",
         "    known_found = bool(want) and any(", '    known_found = known.get("found") is True or bool(want) and any(')]),
     "code-no-effect": ("planner", "F2-no-effect", [("_geometry-harness/reel_plan.py",
-        'kept_rows = [r for r in rows if r.get("field") not in no_effect]', "kept_rows = list(rows)")]),
+        'kept_rows = [r for r in rows if r.get("field") not in no_effect and r not in marker_rows]',
+        "kept_rows = [r for r in rows if r not in marker_rows]")]),
     "code-verdict-opening": ("planner", "1-opening", [("_geometry-harness/reel_plan.py",
         '"narration": (words["opening"] if counts else words["openingNone"]).format(mod=mod(target)),',
         '"narration": str(reader.get("verdict")) + " " + (words["opening"] if counts else words["openingNone"]).format(mod=mod(target)),')]),
+    "code-c1-labels": ("planner", "C1-stills-plain", [("_geometry-harness/reel_plan.py",
+        "            line = check_\n", "            line = str(subj)\n")]),
+    "code-c2-place": ("planner", "C2-place-once", [("_geometry-harness/reel_plan.py",
+        'if row.get("place") and row["place"].lower() in str(row.get("object") or "").lower():', "if False:")]),
+    "code-c3-more": ("planner", "C3-counts", [("_geometry-harness/reel_plan.py",
+        "        if hidden <= 0:\n            continue", "        if True:\n            continue")]),
+    "code-c3-markers": ("planner", "C3-markers", [("_geometry-harness/reel_plan.py",
+        "and r not in marker_rows]", "]")]),
     "code-f3-states": ("capture", "F3-states", [(REF + "/scene-policy.json",
         '"states": ["without", "with", "highlight"],', '"states": ["highlighted", "unhighlighted", "highlighted"],')]),
     "code-f3-selected": ("capture", "F3-selected", [("_geometry-harness/report_scenes.py",

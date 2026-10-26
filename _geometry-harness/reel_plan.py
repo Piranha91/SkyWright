@@ -50,19 +50,50 @@ def _position(v):
     return tuple(float(x) for x in m.groups()) if m else None
 
 
+def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> list[dict]:
+    """The closing's rows: one line per check and reason, the report's setup labels dropped. A setup is named only where
+    a check's reasons differ between setups, in plain words: with or without the supplied patch, from the setup's own
+    plugin order."""
+    reasons_of: dict = {}
+    for m in reader.get("missingSummary") or []:
+        for subj in m.get("subjects") or []:
+            check_, _, setup = str(subj).partition(" — ")
+            reasons_of.setdefault(check_, {}).setdefault(m.get("reason"), []).append(setup)
+    patches = list(reader.get("suppliedPatches") or [])
+    arms = {a.get("displayLabel"): a for a in (pres.get("scope") or {}).get("arms") or []}
+    rows = []
+    for m in reader.get("missingSummary") or []:
+        subs = []
+        for subj in m.get("subjects") or []:
+            check_, _, setup = str(subj).partition(" — ")
+            line = check_
+            if len(reasons_of[check_]) > 1 and patches:
+                has = [p for p in patches if p in ((arms.get(setup) or {}).get("locationPluginOrder") or [])]
+                line = words["closingLines"]["withSetup" if has else "withoutSetup"].format(
+                    check=check_, patch=patch_name((has or patches)[0]))
+            if line not in subs:
+                subs.append(line)
+        rows.append({"reason": m.get("reason"), "subjects": subs})
+    return rows
+
+
 def _sha(obj) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def plan_reel(pres: dict, names: dict | None, masters: dict | None, policy: dict, words: dict,
-              patch_search: dict | None, mod_names: dict | None = None, capture_results: list | None = None) -> dict:
+              patch_search: dict | None, mod_names: dict | None = None, capture_results: list | None = None,
+              markers: set | None = None) -> dict:
+    """`markers`: the references evalreport's marker rule calls editor-only (skill data markerModels / markerFlags,
+    read from the records); a clash on one is no clash a player meets, so it is left out with a count."""
     try:
-        return _plan(pres, names or {}, masters or {}, policy, words, patch_search, mod_names or {}, capture_results or [])
+        return _plan(pres, names or {}, masters or {}, policy, words, patch_search, mod_names or {}, capture_results or [],
+                     set(markers or ()))
     except Refused as e:
         return {"schemaVersion": SCHEMA, "status": "refused", "reason": str(e), "chapters": []}
 
 
-def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_results):
+def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_results, markers):
     reader = pres.get("reader") or {}
     pred = reader.get("prediction") or {}
     target = pred.get("subject")
@@ -106,8 +137,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
 
     rows = [r for r in pred.get("record") or [] if r.get("admission") == "admitted"]
     no_effect = set(policy.get("noInGameEffectFields") or [])
-    kept_rows = [r for r in rows if r.get("field") not in no_effect]
+    marker_rows = [r for r in rows if r.get("field") not in no_effect
+                   and ({str(r["formKey"]), *map(str, r.get("other") or [])} & markers)]
+    kept_rows = [r for r in rows if r.get("field") not in no_effect and r not in marker_rows]
     left_out = len([r for r in rows if r.get("field") in no_effect])
+    left_markers = len({r["formKey"] for r in marker_rows})
     clashes = {}
     for r in kept_rows:
         t = (policy.get("types") or {}).get(r.get("checkId"))
@@ -260,6 +294,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if r.get("field") in (policy.get("showValuesFields") or []):
             row["values"] = {mod(r["A"]): (r.get("values") or {}).get("lost"), mod(r["B"]): (r.get("values") or {}).get("winner")}
         row["winner"] = mod(r["B"]) if c["type"] in ("record", "cell") else None
+        if row.get("place") and row["place"].lower() in str(row.get("object") or "").lower():
+            row["object"], row["place"] = row["place"], None          # the subject is the place: say it once
         return row
 
     refusals = {}
@@ -294,9 +330,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         {"layout": "types", "title": words["stillTitles"]["types"].format(mod=mod(target)),
          "rows": [{"label": type_labels[t], "count": counts[t]["count"], "pairs": sorted(counts[t]["pairs"])}
                   for t in policy["typeOrder"] if t in counts],
-         "leftOut": {"noInGameEffect": left_out,
+         "leftOut": {"noInGameEffect": left_out, "markers": left_markers,
                      "line": words["stillTitles"]["leftOut"].format(count=left_out, noun="record field" if left_out == 1 else "record fields")
-                     if left_out else None}},
+                     if left_out else None,
+                     "markersLine": words["leftOutMarkers"].format(count=left_markers, noun="clash" if left_markers == 1 else "clashes")
+                     if left_markers else None}},
         {"layout": "load-order", "title": words["stillTitles"]["loadOrder"], "plugins": order, "targets": [target],
          "runtimeMods": runtime_mods, "runtimeTitle": words["stillTitles"]["runtime"] if runtime_mods else None}]
     chapters = [{"id": "R-01", "kind": "opening",
@@ -308,9 +346,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         reason = still_reason(c)
         fk = c["rows"][0]["formKey"]
         if reason is None and fk in refusals:
-            closing_extra.append({"reason": "picture could not be captured: " + str(refusals[fk].get("reason")),
-                                  "subjects": [geometry_slots(c)["objectA"] + " and " + geometry_slots(c)["objectB"]
-                                               + " in " + geometry_slots(c)["place"]]})
+            gs = geometry_slots(c)
+            closing_extra.append({"reason": words["closingLines"]["captureRefused"],
+                                  "subjects": [words["closingLines"]["refusedSubject"].format(**gs)]})
             reason = c["_reason"] = "captureRefused"
         if reason is None:
             sentence = words["overlap"].format(**geometry_slots(c))
@@ -360,13 +398,29 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                          "still": {"pages": [{"layout": "rows", "title": type_labels[t],
                                               "rows": [still_row(c) for c, _, _, _ in stills[t]]}]},
                          "patches": [g["evidence"] for g in groups.values()]})
-    checks = [{"reason": m.get("reason"), "subjects": list(m.get("subjects") or [])} for m in reader.get("missingSummary") or []]
+    # "and N more": every count on the opening is accounted for in the body (on the type's still, else its row)
+    shown: dict = {}
+    for ch in chapters:
+        t = (ch.get("clash") or {}).get("type")
+        if ch["kind"] == "vignette":
+            shown[t] = shown.get(t, 0) + 1
+        elif ch["kind"] == "data-still":
+            shown[t] = shown.get(t, 0) + sum(len(pg.get("rows") or []) for pg in ch["still"]["pages"])
+    for row in opening_pages[0]["rows"]:
+        t = next(k for k, v in type_labels.items() if v == row["label"])
+        hidden = row["count"] - shown.get(t, 0)
+        if hidden <= 0:
+            continue
+        still = next((ch for ch in chapters if ch["kind"] == "data-still" and ch["clash"]["type"] == t), None)
+        target_ = still["still"]["pages"][-1] if still else row
+        target_["more"], target_["moreLine"] = hidden, words["more"].format(count=hidden)
+    checks = closing_checks(reader, pres, mod, patch_name, words)
     chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": words["closing"],
                      "still": {"pages": [{"layout": "checks", "title": words["stillTitles"]["checks"],
                                           "rows": checks + closing_extra}]}})
     return {"schemaVersion": SCHEMA, "status": "planned", "reason": None,
             "policySha256": _sha(policy), "wordsSha256": _sha(words),
             "patchSearchSha256": _sha(patch_search) if patch_search is not None else None,
-            "modNames": {k: v for k, v in mod_names.items()},
+            "modNames": {k: v for k, v in mod_names.items()}, "markers": sorted(markers),
             "sequence": list(policy["sequence"]), "holdSeconds": dict(policy.get("holdSeconds") or {}),
             "chapters": chapters}
