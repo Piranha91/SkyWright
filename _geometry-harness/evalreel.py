@@ -1114,7 +1114,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
             if len(seg["items"]) != 2:
                 continue
             labels = clash.get("labels") or {}
-            relative = clash.get("camera") == "relative" and all(rel)
+            relative = len(rel) == 2 and all(rel)           # both halves say so in their own capture provenance
             if not (len(poses) == 1 and None not in poses) and not relative:
                 errors.append(f"{cid}: the split's halves were not taken at one pose, nor marked as the same pose "
                               f"relative to each placement (poses {sorted(map(str, poses))})")
