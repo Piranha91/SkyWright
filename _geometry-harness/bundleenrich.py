@@ -260,7 +260,7 @@ def filed_cells(path: Path, fks: list[str]) -> dict:
     return out
 
 
-QUEST_TRIGGER = re.compile(r"^quest (\S+) stage \d+ ")
+QUEST_TRIGGER = re.compile(r"^quest (\S+) stage \d+ \(QF_\S+?_([0-9A-Fa-f]{8})\.")
 
 
 def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | None = None) -> dict:
@@ -295,7 +295,7 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                 if isinstance(p_, dict) and FK.match(str(p_.get(k) or "")):
                     fks.add(p_[k])
     # the quests a world-state clash's switch is triggered by (switch census), named for the reel's condition sentence
-    state_switches, quest_edids = set(), set()
+    state_switches, quest_edids = set(), {}
     for e in manifest.get("evidence") or []:
         if not str(e.get("path", "")).endswith(".json") or e.get("kind") not in ("emit", "enrichment"):
             continue
@@ -313,7 +313,7 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                 for by in (sw.get("trigger") or {}).get("by") or []:
                     m = QUEST_TRIGGER.match(str(by))
                     if m:
-                        quest_edids.add(m.group(1))
+                        quest_edids[m.group(1)] = m.group(2)[-6:].upper()        # the fragment's FormID, low 24 bits
     for t in scope.get("targets") or []:
         for c in ((t.get("footprint") or {}).get("placed") or {}).get("cells") or []:
             if c.get("cell") and FK.match(str(c["cell"])):
@@ -393,21 +393,28 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
                       {b.split(":", 1)[1].lower() for b in base_fks} | {t.lower() for t in targets}]:
                 for rec in read(x, base_fks, ["Name", "Model.File", "ObjectBounds.First", "ObjectBounds.Second"]):
                     keep(rec, x)
-        # a quest's in-game name, by the editor id the switch census names it by (the last version in the order wins)
-        for x in [p for p in plugins if quest_edids]:
-            r = reader.call("tools/call", {"name": "housecarl_records", "arguments": {
-                "types": ["QUST"], "where": ["editorid in [" + ", ".join(sorted(quest_edids)) + "]"], "source": x["path"],
-                "format": "json", "limit": 500, "max_chars": 4000000, "project": {"form": "fields", "fields": ["Name"]}}})
-            text = "".join(c.get("text", "") for c in ((r.get("result") or {}).get("content") or []))
-            body = json.loads(text) if text.strip().startswith("{") else {}
-            if body.get("ok") is False or body.get("truncated"):
-                raise Refused(f"the reader could not read quest names from {x['name']}: {str(body.get('error') or text)[:300]}")
-            for rec in body.get("matches") or body.get("records") or []:
-                fl = {f.get("path"): f.get("value") for f in rec.get("fields") or [] if f.get("value") is not None}
-                if rec.get("editorid") in quest_edids:
-                    prev = quests.get(rec["editorid"]) or {}
-                    quests[rec["editorid"]] = {"name": fl.get("Name") or None if "Name" in fl else prev.get("name"),
-                                               "formKey": rec.get("formid"), "from": x["name"]}
+        # a quest's in-game name, for the quests the switch census names. The census gives the editor id and the quest
+        # fragment's FormID (QF_<edid>_<FormID>); its plugin index is the author's load order, so the defining plugin is
+        # found by reading that FormID from each plugin's own file and keeping the one whose editor id matches; then the
+        # last version in the order with a name wins.
+        for edid, low in sorted(quest_edids.items()):
+            owner = None
+            for x in plugins:
+                got = read(x, [f"{low}:{x['name']}"], ["Name"])
+                if got and not got[0].get("error") and got[0].get("editorid") == edid:
+                    owner = f"{low}:{x['name']}"
+                    break
+            if owner is None:
+                continue
+            entry = {"name": None, "formKey": owner, "from": None}
+            for x in plugins:
+                for rec in read(x, [owner], ["Name"]):
+                    if rec.get("error") or not rec.get("formid"):
+                        continue
+                    fl = {f.get("path"): f.get("value") for f in rec.get("fields") or [] if f.get("value") is not None}
+                    if fl.get("Name"):
+                        entry.update(name=fl["Name"], **{"from": x["name"]})
+            quests[edid] = entry
     finally:
         reader.close()
         tmp.cleanup()
