@@ -448,7 +448,7 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 ### The extraction scratch, and why it is not beside the exe
 
 The rendering library cannot read an asset out of a BSA in place: it extracts it to disk first. The
-destination it picks is `AppContext.BaseDirectory\CharacterViewerCache`, captured once when the
+destination it picks is `AppContext.BaseDirectory\SkyRenderCache`, captured once when the
 resolver is constructed — the same folder for **every** process started from one build. Two renders
 started together therefore wrote the same files at the same moment, and because a failed read on
 that path is swallowed (a mesh that will not parse becomes "no geometry", a texture that will not
@@ -482,7 +482,7 @@ leaving you to find it.
 The path the limit applies to is the extracted one, and it is built like this:
 
 ```
-<scratch root>\CharacterViewerCache\<8-char source token>\<the asset's own path>
+<scratch root>\SkyRenderCache\<8-char source token>\<the asset's own path>
     ^-- <data directory>\viewprobe-extract\vp-<pid>-<8 hex>
 ```
 
@@ -557,7 +557,7 @@ The library's own `ClearExtractedFiles()` is deliberately not called. Deleting t
 folder is strictly stronger, and the library documents that method as unsafe to call while a render
 is in progress — which at process exit is not something the host can establish.
 
-**An existing `CharacterViewerCache` beside an older build is no longer read or written.** Nothing
+**An existing `SkyRenderCache` (or `CharacterViewerCache`, the folder's name before the library's rename) beside an older build is no longer read or written.** Nothing
 deletes it for you, because it sits inside your binaries and this tool does not delete things it
 did not create; remove it by hand when you want the space back.
 

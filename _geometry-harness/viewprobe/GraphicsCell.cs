@@ -1,4 +1,5 @@
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
@@ -62,7 +63,7 @@ internal sealed class GraphicsCell : IDisposable
     }
 
     internal BuiltScene BeginShot(string staticKey, AssetCache cache,
-        ICharacterViewerLogger logger, GraphicsReuseRed.ShotScope? evidence)
+        IRenderLogger logger, GraphicsReuseRed.ShotScope? evidence)
     {
         MakeCurrent();
         bool created = resident is null;

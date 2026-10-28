@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HarnessShared;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;

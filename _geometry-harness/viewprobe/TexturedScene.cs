@@ -1,5 +1,6 @@
 ﻿using System.Numerics;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;
@@ -113,7 +114,7 @@ sealed class HcBsaProvider(AssetResolver assets) : IBsaArchiveProvider
     }
 }
 
-sealed class ConsoleCvLogger : ICharacterViewerLogger
+sealed class ConsoleCvLogger : IRenderLogger
 {
     public void LogMessage(string message) { if (Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1") Console.Error.WriteLine($"   [cv] {message}"); }
     public void LogError(string message) => Console.Error.WriteLine($"   [cv] {message}");
@@ -125,8 +126,8 @@ sealed class CvSettings : ICharacterViewerSettings
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged { add { } remove { } }
     public string CharacterViewerLightingLayout { get; set; } = "";
     public string CharacterViewerLightingColorScheme { get; set; } = "";
-    public IList<CharacterViewerLightingLayout> UserLightingLayouts { get; } = new List<CharacterViewerLightingLayout>();
-    public IList<CharacterViewerLightingColorScheme> UserLightingColorSchemes { get; } = new List<CharacterViewerLightingColorScheme>();
+    public IList<LightingLayout> UserLightingLayouts { get; } = new List<LightingLayout>();
+    public IList<LightingColorScheme> UserLightingColorSchemes { get; } = new List<LightingColorScheme>();
     public bool CharacterViewerVerboseLog { get; set; } = false;
 }
 
@@ -547,12 +548,12 @@ static class TexturedScene
             PlanePopulation: planes.Count,
             SubjectMaskPopulation: refs.Count(x => x.Highlight)));
         var logger = new ConsoleCvLogger();
-        var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
+        var gate = new RenderLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
 
         var folders = ResolverFolders(modFoldersHighestFirst, overwriteDir);
 
         // The bracket. GameAssetResolver captures Path.Combine(AppContext.BaseDirectory,
-        // "CharacterViewerCache") in its constructor and never re-reads it, so this is the one line
+        // "SkyRenderCache") in its constructor and never re-reads it, so this is the one line
         // in the run where the redirect has to be in force — see ExtractionScratch.cs.
         GameAssetResolver MakeResolver()
         {

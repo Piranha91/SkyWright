@@ -4018,7 +4018,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (rn is null) continue;
                 string label = string.IsNullOrEmpty(labelHint) ? rn.Name : labelHint;
                 ViewProbe.NpcOutfitResult? outfit = null;
-                List<CharacterViewer.Rendering.MeshOverride>? overrides = null;
+                List<SkyRender.Character.MeshOverride>? overrides = null;
                 if (!npcNoOutfit)
                 {
                     outfit = outfitStack.Resolve(rn.Winner, rn.Facts);
@@ -4678,7 +4678,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     appearance = shotDepthMeasurement?.Appearance() ?? (object)new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
                         reason = "Texture/material inputs and renderer fallbacks are not qualified; geometry visibility is not a claim of matching game appearance." },
                     plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,
-                        typeof(CharacterViewer.Rendering.GlMesh).Assembly.Location }
+                        typeof(SkyRender.GlMesh).Assembly.Location }
                         .Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray(),
                     cell = cellLabel, cellFormKey = cellKey.ToString(), worldspace = targetWorldspace.ToString(),
                     state = stateSpec ?? "load-time", stateView, bosMode,

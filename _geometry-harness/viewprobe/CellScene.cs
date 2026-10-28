@@ -1,4 +1,5 @@
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 
 namespace ViewProbe;
 
@@ -180,7 +181,7 @@ public static class CellSceneSelfTest
     static CellAssets MakePair()
     {
         var logger = new ConsoleCvLogger();
-        var gate = new CharacterViewerLogGate();
+        var gate = new RenderLogGate();
         // No extraction-scratch bracket, deliberately: the resolver's constructor only captures the
         // extraction directory as a string, and nothing here extracts, so there is no destination
         // for the redirect to protect.

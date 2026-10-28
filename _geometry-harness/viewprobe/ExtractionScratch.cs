@@ -8,7 +8,7 @@ namespace ViewProbe;
 /// WHERE THE RENDERING LIBRARY EXTRACTS BSA ASSETS, AND WHY IT IS NOT BESIDE THE EXE.
 ///
 /// The library extracts an archived asset to disk before it can read it, and the destination it
-/// picks is <c>Path.Combine(AppContext.BaseDirectory, "CharacterViewerCache")</c>, captured once in
+/// picks is <c>Path.Combine(AppContext.BaseDirectory, "SkyRenderCache")</c>, captured once in
 /// <c>GameAssetResolver</c>'s constructor. Beside the exe, in other words — the SAME folder for every
 /// process started from that build. Two renders started together therefore write the same files at
 /// the same moment: one truncates a file while the other reads it, and because every failure on that

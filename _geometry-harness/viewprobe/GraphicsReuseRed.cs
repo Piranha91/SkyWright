@@ -2,7 +2,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using OpenTK.Graphics.OpenGL4;
 
 namespace ViewProbe;

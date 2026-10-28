@@ -1,4 +1,5 @@
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using OpenTK.Graphics.OpenGL4;
 
 namespace ViewProbe;

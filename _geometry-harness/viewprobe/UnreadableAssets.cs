@@ -1,5 +1,6 @@
 using System.Text.Json;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HousecarlCore;
 using HousecarlCore.Progress;
 

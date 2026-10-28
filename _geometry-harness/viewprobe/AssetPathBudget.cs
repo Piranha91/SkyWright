@@ -14,7 +14,7 @@ namespace ViewProbe;
 /// useless to act on, because the file is not the problem: its path is.
 ///
 /// The length is the caller's, not ours. The library extracts to
-/// <c>&lt;this process's scratch&gt;\CharacterViewerCache\&lt;source token&gt;\&lt;the asset's own
+/// <c>&lt;this process's scratch&gt;\SkyRenderCache\&lt;source token&gt;\&lt;the asset's own
 /// path&gt;</c>, and the scratch lives under <c>HOUSECARL_DATA_DIR</c> when that is set — so a data
 /// directory buried a few folders deep can push ordinary assets past the limit while the default
 /// location has room to spare.
@@ -43,7 +43,7 @@ static class AssetPathBudget
     /// <summary>The folder the library appends to the directory it extracts under, and the length of
     /// the per-source token it puts inside that (a SHA256 prefix, four bytes as hex). Both are the
     /// library's, read from its source rather than guessed from a sample of paths.</summary>
-    public const string LibraryCacheFolder = "CharacterViewerCache";
+    public const string LibraryCacheFolder = "SkyRenderCache";
     public const int LibrarySourceTokenLength = 8;
 
     /// <summary>How many characters an asset's OWN path may have, once a scratch root has spent its

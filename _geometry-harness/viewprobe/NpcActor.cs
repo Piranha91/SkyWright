@@ -1,5 +1,6 @@
 using System.Numerics;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HousecarlCore;
 using OpenTK.Graphics.OpenGL4;
 using ReactiveUI.Builder;               // WithWpf()/BuildApp() are extension methods here
@@ -54,7 +55,7 @@ static class NpcActorBuilder
     {
         public required GameAssetResolver Resolver { get; init; }
         public required CharacterPreviewCache Cache { get; init; }
-        public required CharacterViewerLogGate Gate { get; init; }
+        public required RenderLogGate Gate { get; init; }
         public required ConsoleCvLogger Logger { get; init; }
         public List<VM_CharacterViewer> Vms { get; } = new();
 
@@ -93,7 +94,7 @@ static class NpcActorBuilder
         }
 
         var logger = new ConsoleCvLogger();
-        var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
+        var gate = new RenderLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
         // The same bracket as TexturedScene's: this constructor captures the extraction directory
         // too, and an NPC render that skipped it would go on sharing the folder beside the exe.
         GameAssetResolver resolver;
