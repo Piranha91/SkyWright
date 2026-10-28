@@ -56,9 +56,6 @@ static class NpcActorBuilder
         public required CharacterPreviewCache Cache { get; init; }
         public required CharacterViewerLogGate Gate { get; init; }
         public required ConsoleCvLogger Logger { get; init; }
-        public required BodySlideDeformer Deformer { get; init; }
-        public required BsdFileParser Bsd { get; init; }
-        public required BodyTriFileParser Tri { get; init; }
         public List<VM_CharacterViewer> Vms { get; } = new();
 
         /// <summary>Dispose every VM (deletes their meshes' VAOs and textures).
@@ -110,9 +107,6 @@ static class NpcActorBuilder
             Cache = cache,
             Gate = gate,
             Logger = logger,
-            Deformer = new BodySlideDeformer(logger, gate),
-            Bsd = new BsdFileParser(logger, gate),
-            Tri = new BodyTriFileParser(logger),
         };
     }
 
@@ -122,7 +116,7 @@ static class NpcActorBuilder
     public static NpcActorRender? Build(Host host, ResolvedNpc npc,
         IReadOnlyList<MeshOverride>? outfitOverrides, NpcPlacement placement, string label, Vector3 puckColor)
     {
-        var vm = new VM_CharacterViewer(host.Deformer, host.Bsd, host.Tri, host.Resolver,
+        var vm = new VM_CharacterViewer(host.Resolver,
             new CvSettings(), host.Cache, host.Gate, host.Logger);
         host.Vms.Add(vm);                                  // disposal owns it from here, success or not
         vm.IsOffscreenRenderInstance = true;
