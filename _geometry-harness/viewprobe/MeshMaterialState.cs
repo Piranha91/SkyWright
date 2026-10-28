@@ -37,11 +37,8 @@ internal sealed class MeshMaterialState
     int DstBlendIndex;
     bool IsHairTintShader;
     bool IsEye;
-    int BipedSlots;
-    int HidesSlots;
-    int SlotDrawPriority;
-    string? OverrideKey;
-    bool HiddenBySlotOccupancy;
+    bool IsHiddenByHost;
+    object? HostData;
     bool ShowWireframe;
     bool RenderAsWireframeFallback;
     System.Numerics.Vector3? WireframeColorOverride;
@@ -117,11 +114,8 @@ internal sealed class MeshMaterialState
         DstBlendIndex = m.DstBlendIndex,
         IsHairTintShader = m.IsHairTintShader,
         IsEye = m.IsEye,
-        BipedSlots = m.BipedSlots,
-        HidesSlots = m.HidesSlots,
-        SlotDrawPriority = m.SlotDrawPriority,
-        OverrideKey = m.OverrideKey,
-        HiddenBySlotOccupancy = m.HiddenBySlotOccupancy,
+        IsHiddenByHost = m.IsHiddenByHost,
+        HostData = m.HostData,
         ShowWireframe = m.ShowWireframe,
         RenderAsWireframeFallback = m.RenderAsWireframeFallback,
         WireframeColorOverride = m.WireframeColorOverride,
@@ -198,11 +192,8 @@ internal sealed class MeshMaterialState
         m.DstBlendIndex = DstBlendIndex;
         m.IsHairTintShader = IsHairTintShader;
         m.IsEye = IsEye;
-        m.BipedSlots = BipedSlots;
-        m.HidesSlots = HidesSlots;
-        m.SlotDrawPriority = SlotDrawPriority;
-        m.OverrideKey = OverrideKey;
-        m.HiddenBySlotOccupancy = HiddenBySlotOccupancy;
+        m.IsHiddenByHost = IsHiddenByHost;
+        m.HostData = HostData;
         m.ShowWireframe = ShowWireframe;
         m.RenderAsWireframeFallback = RenderAsWireframeFallback;
         m.WireframeColorOverride = WireframeColorOverride;
@@ -249,5 +240,5 @@ internal sealed class MeshMaterialState
         m.MeshSource = MeshSource;
     }
 
-    internal const int PropertyCount = 77;
+    internal const int PropertyCount = 74;
 }
