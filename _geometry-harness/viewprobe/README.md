@@ -812,9 +812,9 @@ worklist cell at cell end, on every exit path: the cell's index and target, its 
 cache's budget and repoll counter at that moment, and how the shot loop ended — `completed`; `stopped` with the exit code
 of the shot that returned nonzero; or `fault` when an exception left the loop. The record describes how the shot loop
 ended, not how the cell tore down: it is written before the cell's graphics owners are disposed, so a teardown failure
-after it shows only in the process exit code, and a reader must check that the two agree. The rendering library exposes
-no accessor for the repoll counter, so it is read from the library's private field; a library without that field gives
-`"counterField": "absent"` and a null value rather than a guess. With `--no-reuse-cell` each cell still gets a line, with
+after it shows only in the process exit code, and a reader must check that the two agree. The repoll counter is read from
+the library's public `ResidentTextureCache.RendersSinceRepoll` (`"counterField": "RendersSinceRepoll"`; earlier builds read
+a private field and named it `"_rendersSinceRepoll"`). With `--no-reuse-cell` each cell still gets a line, with
 the cache fields null. Unset, nothing is written or printed.
 
 ### An asset that was found and could not be read fails the run

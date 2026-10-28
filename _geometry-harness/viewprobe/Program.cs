@@ -46,7 +46,7 @@ using Image = SixLabors.ImageSharp.Image;
 // uploads, which change captured pixels (mostly normal-mapped surfaces and alpha edges) while
 // geometry, depth and masks stay exact. Retained captures, frozen hashes and receipts were all made
 // on the decoded route, and the configuration fingerprint does not yet record the texture policy,
-// so viewprobe stays decoded until it does. The library reads this once per CharacterPreviewCache
+// so viewprobe stays decoded until it does. The library reads this once per AssetCache
 // construction, so it must be set before the first scene is built. An explicitly set value wins,
 // which is how a run opts in to compressed uploads deliberately.
 if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CVR_DDS_MAX_FINAL_MIP_DIMENSION")))

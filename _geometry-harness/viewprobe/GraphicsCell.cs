@@ -61,7 +61,7 @@ internal sealed class GraphicsCell : IDisposable
             throw new InvalidOperationException("graphics cell failed to make its context current");
     }
 
-    internal BuiltScene BeginShot(string staticKey, CharacterPreviewCache cache,
+    internal BuiltScene BeginShot(string staticKey, AssetCache cache,
         ICharacterViewerLogger logger, GraphicsReuseRed.ShotScope? evidence)
     {
         MakeCurrent();

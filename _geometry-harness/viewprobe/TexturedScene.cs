@@ -573,7 +573,7 @@ static class TexturedScene
         {
             var made = MakeResolver();
             return new CellAssets(made,
-                new CharacterPreviewCache(new NullNpcSource(), made, logger, gate, new CvSettings()));
+                new AssetCache(made, logger, gate, new CvSettings()));
         }
         var (resolver, cache) = cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
 

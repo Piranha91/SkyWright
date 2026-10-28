@@ -150,7 +150,7 @@ internal sealed record MeshOutcome(List<NifMeshBuilder.BuiltMesh>? Built, string
 /// </summary>
 /// <param name="Resolver">The asset resolver this cell's shots resolve through.</param>
 /// <param name="Cache">The decoded-pixel cache built ON that resolver.</param>
-public sealed record CellAssets(GameAssetResolver Resolver, CharacterPreviewCache Cache);
+public sealed record CellAssets(GameAssetResolver Resolver, AssetCache Cache);
 
 /// <summary>
 /// The lease's three promises — one set of shared objects per cell, a NEW set for the next cell,
@@ -188,7 +188,7 @@ public static class CellSceneSelfTest
             new HcDataFolder(Path.Combine(Path.GetTempPath(), "viewprobe-cell-scene-selftest")),
             new NoBsa(), gate, logger);
         return new CellAssets(resolver,
-            new CharacterPreviewCache(new NullNpcSource(), resolver, logger, gate, new CvSettings()));
+            new AssetCache(resolver, logger, gate, new CvSettings()));
     }
 
     public static int Run()
