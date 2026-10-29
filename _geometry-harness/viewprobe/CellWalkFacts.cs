@@ -65,7 +65,8 @@ internal sealed class CellWalkFacts
         float NoiseUv)> Mato { get; init; }
     internal required Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
         System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep, System.Numerics.Vector3 Reflect,
-        float Reflectivity, byte Opacity, float Fresnel)> WaterRecords { get; init; }
+        float Reflectivity, byte Opacity, float Fresnel,
+        float FogNear, float FogFar, float FogAmount, float NoiseFalloff)> WaterRecords { get; init; }
 
     internal required Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)> CellWater { get; set; }
     internal required FormKey? WorldWater { get; set; }

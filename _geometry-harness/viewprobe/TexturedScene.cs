@@ -210,7 +210,9 @@ readonly record struct WaterPlane(float Z,                                      
                                   Vector3 ReflectionColor,                        // 0..1, WATR's own
                                   float Reflectivity, float Opacity,              // 0..1
                                   float Fresnel,                                  // WATR.WaterFresnel, used as Schlick F0
-                                  string Label);
+                                  string Label,
+                                  float FogNear, float FogFar, float FogAmount,   // WATR above-water fog (depth fog)
+                                  float NoiseFalloff);                            // WATR.NoiseFalloff (reflection distance blend)
 
 static class TexturedScene
 {
@@ -638,6 +640,28 @@ static class TexturedScene
         renderer.SetAmbientIntensity(0.55f);
         renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 0.85f, new GlVec3(1f, 0.98f, 0.92f));
         renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0.35f, new GlVec3(0.85f, 0.9f, 1f));
+        // --weather (SceneWeather.cs): the WTHR's sky, sun, ambient and fog replace the fixed studio
+        // lights. The sun keeps the fixed direction above; there is no fill light in the engine.
+        renderer.Fog = null;
+        renderer.SkyColor = null;
+        if (SceneWeather.Requested is not null && SceneWeather.Current is null)
+            Console.WriteLine($"   weather: no WTHR '{SceneWeather.Requested}' in the load order (or this walk was retained) - studio lights kept");
+        if (SceneWeather.Current is { } sw)
+        {
+            if (!SceneWeather.SkyGiven) renderer.ClearColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
+            renderer.SkyColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
+            renderer.Lights[0].Color = new GlVec3(sw.AmbientUp.X, sw.AmbientUp.Y, sw.AmbientUp.Z);
+            renderer.SetAmbientIntensity(1f);
+            renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 1f,
+                                 new GlVec3(sw.Sunlight.X, sw.Sunlight.Y, sw.Sunlight.Z));
+            renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
+            renderer.Fog = sw.FogFar > sw.FogNear
+                ? new DistanceFog(new GlVec3(sw.FogNearColor.X, sw.FogNearColor.Y, sw.FogNearColor.Z),
+                                  new GlVec3(sw.FogFarColor.X, sw.FogFarColor.Y, sw.FogFarColor.Z),
+                                  sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
+                : null;
+            Console.WriteLine($"   weather: {sw}");
+        }
         var meshes = new List<GlMesh>();
         var borrowedNpcMeshes = new List<GlMesh>();
         using var shotResources = new ShotResourceScope(renderer, meshes, borrowedNpcMeshes, graphicsShot,
@@ -1562,6 +1586,7 @@ static class TexturedScene
             // real body of water permanently in the "shallow" half of both ramps and is why the
             // sea read as tinted glass.
             const float ShallowBand = 192f;
+            bool waterLegacy = Environment.GetEnvironmentVariable("VP_WATER_LEGACY") == "1";
             // The alpha at zero depth. 1 = opaque everywhere, matching the engine's opaque draw.
             float shoreAlpha = float.TryParse(Environment.GetEnvironmentVariable("VP_WATER_SHALLOW_ALPHA"),
                                               out var sa) ? Math.Clamp(sa, 0f, 1f) : 1f;
@@ -1573,6 +1598,14 @@ static class TexturedScene
             {
                 NoiseTexturePath = wpl.NoiseTexture, NoiseUvScale = wpl.NoiseUvScale,
                 ShallowBand = ShallowBand, ShoreAlpha = shoreAlpha, GridResolution = WaterGrid,
+                // The engine's water terms (SkyRender RENDERING_PIPELINE.md, "Water"): the reflection is
+                // the sky (water reflections are on in the game's default settings), blended by Fresnel
+                // near the camera and as a mirror beyond the WATR's noise falloff; the WATR's
+                // above-water fog sets the body colour and how far the ground shows through.
+                // VP_WATER_LEGACY=1 draws the earlier opaque ShallowBand water for comparison.
+                ReflectsSky = !waterLegacy,
+                NoiseFalloff = waterLegacy ? 0f : wpl.NoiseFalloff,
+                DepthFog = waterLegacy || wpl.FogFar <= 0f ? null : new WaterDepthFog(wpl.FogNear, wpl.FogFar, wpl.FogAmount),
             };
             var wdata = WorldMeshBuilder.BuildWater(
                 new WaterSurface(wpl.Z, wpl.X0, wpl.Y0, wpl.X1, wpl.Y1, wmat) { Label = wpl.Label }, terrainHeightAt);
@@ -1591,7 +1624,12 @@ static class TexturedScene
                             + $"{waterPlanes[0].Label} at z {waterPlanes[0].Z:0}"
                             + (waterPlanes.Any(w => w.NoiseTexture is { Length: > 0 })
                                 ? ", noise layer bound as a wave normal map" : ", no noise texture resolved")
-                            + " (no reflection/refraction/flow — see README)");
+                            + " (sky reflection, Fresnel and WATR depth fog; no reflection/refraction buffers or flow — see README)");
+        foreach (var wk in waterPlanes.GroupBy(w => w.Label).Select(g => g.First()))
+            Console.WriteLine($"      {wk.Label}: shallow {wk.ShallowColor:0.000} deep {wk.DeepColor:0.000} "
+                            + $"reflection {wk.ReflectionColor:0.000} reflectivity {wk.Reflectivity:0.###} "
+                            + $"fresnel {wk.Fresnel:0.###} opacity {wk.Opacity:0.###} "
+                            + $"fog near {wk.FogNear:0.#} far {wk.FogFar:0.#} amount {wk.FogAmount:0.###} noise falloff {wk.NoiseFalloff:0.#}");
         // HOW MUCH of the water footprint is actually below the surface. The number that tells a
         // wrong HEIGHT from an honest absence: a sea whose floor is mostly above the surface is a
         // height bug, while a low percentage over a mountain cell is just a mountain. Without it,

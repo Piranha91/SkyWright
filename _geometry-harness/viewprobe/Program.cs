@@ -643,8 +643,11 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--no-water") drawWater = false;
     else if (args[i] == "--no-coverings") drawCoverings = false;
     else if (args[i] == "--no-terrain-layers") drawTerrainLayers = false;
+    else if (args[i] == "--weather" && i + 1 < args.Length) ViewProbe.SceneWeather.Requested = args[++i];
+    else if (args[i] == "--weather-slot" && i + 1 < args.Length) ViewProbe.SceneWeather.RequestedSlot = args[++i].ToLowerInvariant();
     else if (args[i] == "--sky" && i + 1 < args.Length)
     {
+        ViewProbe.SceneWeather.SkyGiven = true;
         var p = args[++i].Split(',');
         if (p.Length == 3)
         {
@@ -1383,7 +1386,8 @@ var matoRec = new Dictionary<FormKey, (string Ed, System.Numerics.Vector3 Projec
 var watrRec = new Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
                                        System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep,
                                        System.Numerics.Vector3 Reflect, float Reflectivity,
-                                       byte Opacity, float Fresnel)>();
+                                       byte Opacity, float Fresnel,
+                                       float FogNear, float FogFar, float FogAmount, float NoiseFalloff)>();
 // Per-cell water, keyed by grid point, plus the worldspace fallbacks the cells defer to.
 var cellWater = new Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)>();
 // --stations only. WHICH cell each grid square is (the pose names the cell the STATION stands in,
@@ -1918,6 +1922,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // WATR — the water body's own colours and wave-noise layers. Values are COPIED
                 // out, never held: the overlay is disposed at the end of this using block, and a
                 // retained getter would read freed memory.
+                // --weather (SceneWeather.cs): the named WTHR, winner-takes-all in load order.
+                if (rec is IWeatherGetter wthr && ViewProbe.SceneWeather.Matches(wthr))
+                {
+                    ViewProbe.SceneWeather.Current = ViewProbe.SceneWeather.From(wthr, ViewProbe.SceneWeather.RequestedSlot);
+                    continue;
+                }
                 if (rec is IWaterGetter wtr)
                 {
                     watrRec[wtr.FormKey] = (wtr.EditorID ?? wtr.FormKey.ToString(),
@@ -1925,7 +1935,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                             wtr.NoiseLayerOneUvScale,
                                             Rgb(wtr.ShallowColor), Rgb(wtr.DeepColor),
                                             Rgb(wtr.ReflectionColor), wtr.WaterReflectivity,
-                                            wtr.Opacity, wtr.WaterFresnel);
+                                            wtr.Opacity, wtr.WaterFresnel,
+                                            wtr.FogAboveWaterDistanceNearPlane, wtr.FogAboveWaterDistanceFarPlane,
+                                            wtr.FogAboveWaterAmount, wtr.NoiseFalloff);
                     continue;
                 }
                 // MATO — the projected covering itself (snow, ash, moss). Reached only through
@@ -4472,13 +4484,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                           : ("(no WATR record)", (string?)null, 1024f,
                              new System.Numerics.Vector3(0.14f, 0.25f, 0.25f),
                              new System.Numerics.Vector3(0.03f, 0.13f, 0.13f),
-                             new System.Numerics.Vector3(0.30f, 0.30f, 0.30f), 0.4f, (byte)50, 0.07f);
+                             new System.Numerics.Vector3(0.30f, 0.30f, 0.30f), 0.4f, (byte)50, 0.07f,
+                             0f, 0f, 0f, 0f);
                     string? noise = w.Item2 is { Length: > 0 } np ? NormalizeTexPath(np) : null;
                     waterPlanes.Add(new ViewProbe.WaterPlane(
                         z, key.Item1 * 4096f, key.Item2 * 4096f, key.Item1 * 4096f + 4096f, key.Item2 * 4096f + 4096f,
                         noise, w.Item3, w.Item4, w.Item5, w.Item6, w.Item7,
                         // WATR.Opacity is a 0..100 percentage in the CK, not a 0..255 byte.
-                        Math.Clamp(w.Item8 / 100f, 0f, 1f), w.Item9, w.Item1));
+                        Math.Clamp(w.Item8 / 100f, 0f, 1f), w.Item9, w.Item1,
+                        w.Item10, w.Item11, w.Item12, w.Item13));
                 }
             // The two arms side by side, per ring cell, with the share of the cell's LAND vertices under each surface —
             // waterprobe's visible-share number, so a surface that is drawn but under the ground is called out here.

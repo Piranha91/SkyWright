@@ -239,6 +239,15 @@ A successful save or size check alone does not establish clean pixels.
   with nothing anchoring them); turn both off for an in-game-like interior shot.
 - **Look:** `--sky R,G,B` (0-255 or 0-1; default a pale sky blue `0.70,0.82,0.92`), `--msaa N`
   (default 4, clamped to the context's `GL_MAX_SAMPLES`; 0/1 = off).
+- **Weather:** `--weather NAME` (a WTHR EditorID such as `SkyrimClear`, or a FormKey such as
+  `00081A:Skyrim.esm`) and `--weather-slot day|sunrise|sunset|night` (default `day`) light the
+  scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky
+  colour (and what water reflects) is its sky-upper colour, the sun colour its sunlight colour, the
+  ambient its directional ambient's +Z colour, and SkyRender's distance fog takes its fog near/far
+  colours and the day (or night) fog distances, power and max. The sun keeps the fixed direction;
+  `--sky` still wins for the background. Not modelled: the weather's image space (eye adaptation,
+  cinematic brightness), so a weather-lit render reads darker than the game (about 1.6-2x in the
+  Riverwood aerial). Off by default; a retained walk cannot see the WTHR and says so.
 - **Troubleshooting overlay:** `--conflicts emit.json` (paints implicated navmeshes red, doors
   orange, prints the red centroid and a suggested camera), `--red "FORMKEY[:tri]"` by hand.
 - **Compare:** `--compare "A.esp,B.esp"` renders three panels with one camera and stitches them.
@@ -3755,7 +3764,15 @@ pictures, where "shallow reads lighter than deep" is the readable, camera-indepe
 Opaque water joins the OPAQUE pass and writes depth. (Consequence worth knowing: `--pick` over water
 reports the water surface, where a blended one used to report the bed.)
 
-Colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
+**Since 2026-10-29 the engine's own terms are used** (SkyRender RENDERING_PIPELINE.md, "Water"; set
+`VP_WATER_LEGACY=1` for the earlier opaque picture described below). The WATR's above-water fog
+(near / far / amount) gives the body colour (shallow to deep by depth / far) and the opacity (the
+shader's refraction weight, so a ford shows its bed and deep water closes up by about 150 units);
+the reflection is the sky, mixed over the lit body by `lerp(1, fresnel, distanceFactor)`, which is
+Fresnel near the camera and a mirror beyond 8192 units for a river whose noise falloff is ~4000.
+The Riverwood aerial's river reads as the sky in game; it does here too, at the sky colour given.
+
+Earlier: colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
 `ReflectionColor` and weighted by **Schlick Fresnel with `WaterFresnel` as F0**. That replaced a flat
 `lerp(body, sky, WaterReflectivity)` which mixed 40% pale sky into every vertex regardless of angle:
 the water drew correctly and simply did not READ as water — a failure mode worth naming, because it
