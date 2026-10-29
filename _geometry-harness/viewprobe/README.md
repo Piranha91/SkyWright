@@ -269,7 +269,9 @@ A successful save or size check alone does not establish clean pixels.
   drawn ground by the engine's rules (density times each texture's share of the ground, candidate spacing from the
   position range capped by `iMinGrassSize`, slope and water rules, size, turn, fit to slope, brightness from the LAND
   vertex colour) and draws each type and model shape as one instanced mesh, lit by the sun under its shadows plus
-  the ambient, alpha-faded out at `fGrassStartFadeDistance` + `fGrassFadeRange`, casting no shadow.
+  the ambient, alpha-faded out at `fGrassStartFadeDistance` + `fGrassFadeRange`, casting no shadow. The sun on
+  grass is the weather's plain sunlight colour, without the image space's sunlight scale the engine leaves off
+  grass (SkyRender RENDERING_PIPELINE "Grass"); the clear-noon close-up still reads about 1.3x the game's light.
   - **Positions are not the game's.** The engine draws them from a shared random generator whose state no source
     gives; SkyRender seeds its own per cell, texture, grass and patch, so a frame is repeatable and the density and
     spread follow the GRAS records, but individual tufts do not line up with a game screenshot. Clashes with grass
@@ -279,6 +281,9 @@ A successful save or size check alone does not establish clean pixels.
     take the engine defaults (20, 2, 7000, 1000, 0). The lab profile sets only the start fade (7000). The console's
     `grass:` line names what it read, the instance counts per GRAS, and `grass timing:` the cost.
     `VP_GRASS_SHAPES=1` prints each grass model's shapes (vertices, vertex colours, alpha test, texture).
+    `VP_SHADER_DIR=<folder>` loads the renderer's shaders from that folder instead of the embedded copies (a copy of
+    the bin `Shaders` folder with one edit), to try a shader change, such as a disabled debug constant, without a
+    rebuild.
   - **Where:** the drawn terrain cells (the 3x3, or `--ring` cells), with the cell's water height for the water
     rules; patches beyond the fade from the eye are skipped (they draw nothing), except in `--interactive`. Not drawn
     with `--no-terrain`, `--depth-measurement`, in interiors, or on a retained walk (`--reuse-*`: the retained sheets

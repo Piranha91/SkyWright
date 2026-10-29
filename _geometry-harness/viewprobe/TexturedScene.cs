@@ -630,7 +630,9 @@ static class TexturedScene
         graphicsShot?.RendererMembership("shot-start", renderer);   // G3 RED, measurement only
         if (localRenderer is not null)
         {
-            renderer.Initialize(null);                  // embedded shaders
+            // Embedded shaders; VP_SHADER_DIR=<folder> loads basic.vert/.frag etc. from disk instead
+            // (a diagnostic: try a shader edit without rebuilding).
+            renderer.Initialize(Environment.GetEnvironmentVariable("VP_SHADER_DIR"));
             graphicsShot?.RendererReady(renderer, initializedNow: true);
         }
         renderer.EnableBloom = false;                    // deterministic output; no post FX

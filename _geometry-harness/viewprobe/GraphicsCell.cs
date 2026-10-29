@@ -1,4 +1,4 @@
-using SkyRender;
+﻿using SkyRender;
 using SkyRender.Character;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
@@ -73,7 +73,7 @@ internal sealed class GraphicsCell : IDisposable
             installTextures = new GlTextureManager(cache, logger, resident);
             installTextures.Initialize();
             renderer = new GlRenderer();
-            renderer.Initialize(null);
+            renderer.Initialize(Environment.GetEnvironmentVariable("VP_SHADER_DIR"));   // null: embedded shaders
             rendererBaseline = RendererSettings.Capture(renderer);
         }
         evidence?.ResidentOwnerReady(resident!, created);
