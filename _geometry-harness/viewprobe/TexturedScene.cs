@@ -329,6 +329,7 @@ static class TexturedScene
             EffectSoftFalloffDepth = b.EffectSoftFalloffDepth, EffectLightingInfluence = b.EffectLightingInfluence,
             EffectUvScale = b.EffectUvScale, EffectUvOffset = b.EffectUvOffset,
             EffectTextureClampMode = b.EffectTextureClampMode, HasVertexColors = b.HasVertexColors, BillboardMode = b.BillboardMode,
+            BillboardFrame = b.BillboardFrame,
             EmissiveColor = b.EmissiveColor, EmissiveMultiple = b.EmissiveMultiple,
             ShaderFlags1 = b.ShaderFlags1, ShaderFlags2 = b.ShaderFlags2, ShaderType = b.ShaderType,
         }).ToList();
@@ -701,7 +702,7 @@ static class TexturedScene
                                   new GlVec3(sw.FogFarColor.X, sw.FogFarColor.Y, sw.FogFarColor.Z),
                                   sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
                 : null;
-            Console.WriteLine($"   weather: {sw}");
+            Console.WriteLine($"   weather: {sw}" + (SceneWeather.CurrentWhy is { } why ? $"  [{why}; --no-weather for the studio lights]" : ""));
             if (SceneWeather.ImageSpaceText is { } ist)
                 Console.WriteLine($"   weather image space ({(isd is null ? "not applied" : $"applied, adapted luminance {SceneWeather.AdaptedLuminance:0.###}; bloom and eye adaptation not modelled; sky scale on the sky gradient only")}): {ist}");
         }
@@ -1347,12 +1348,32 @@ static class TexturedScene
                     if (greyTex == staticWhite) greyTex = 0;
                     NifMaterialBinder.ApplyEffectMaterial(mesh, b, mesh.DiffuseTexture,
                         mesh.DiffuseTexture != staticWhite, greyTex);
+                    // Billboards: the builder's frame is in NIF root space, but this mesh's vertices
+                    // are already placed in the world, so the frame takes the same placement (each
+                    // axis row rotated and scaled, the origin placed). SkyRender then turns the shape
+                    // about that origin toward the camera each draw. VP_NO_BILLBOARD=1 keeps the
+                    // authored pose.
+                    if (mesh.BillboardFrame is { } bfr && Environment.GetEnvironmentVariable("VP_NO_BILLBOARD") != "1")
+                    {
+                        GlVec3 Axis(GlVec3 a)
+                        {
+                            var w = YUp(Vector3.TransformNormal(new Vector3(a.X, -a.Z, a.Y) * r.Scale, rot));
+                            return new GlVec3(w.X, w.Y, w.Z);
+                        }
+                        var bo = bfr.Row3.Xyz;
+                        var wo = YUp(Vector3.Transform(new Vector3(bo.X, -bo.Z, bo.Y) * r.Scale, rot) + pos);
+                        mesh.BillboardFrame = new OpenTK.Mathematics.Matrix4(
+                            new GlVec4(Axis(bfr.Row0.Xyz), 0f), new GlVec4(Axis(bfr.Row1.Xyz), 0f),
+                            new GlVec4(Axis(bfr.Row2.Xyz), 0f), new GlVec4(wo.X, wo.Y, wo.Z, 1f));
+                    }
+                    else mesh.BillboardFrame = null;
                     // env VP_FX_DOUBLESIDED=1 — diagnostic: draw every effect shape double-sided, to
                     // tell a back-face-culled quad from one the shading itself hides.
                     if (Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED") == "1") mesh.IsDoubleSided = true;
                     if (shapeDump is { Length: > 0 } && rel.Contains(shapeDump, StringComparison.OrdinalIgnoreCase))
                         Console.WriteLine($"      effect drawn: {b.ShapeName} ref {r.RefKey} render={mesh.ShouldRender} blend={mesh.HasAlphaBlend} "
-                                        + $"test={mesh.UseAlphaTest}@{mesh.AlphaThreshold:0.00} tris={tri.Length / 3}");
+                                        + $"test={mesh.UseAlphaTest}@{mesh.AlphaThreshold:0.00} tris={tri.Length / 3}"
+                                        + (mesh.BillboardFrame is { } dbf ? $" billboard {mesh.BillboardMode} frame X{dbf.Row0.Xyz:0.00} Y{dbf.Row1.Xyz:0.00} Z{dbf.Row2.Xyz:0.00} o{dbf.Row3.Xyz:0.0}" : ""));
                     fxStaticShapes++;
                     refHadFxStatic = true;
                 }

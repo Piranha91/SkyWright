@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using V3 = System.Numerics.Vector3;
@@ -6,10 +7,15 @@ using V3 = System.Numerics.Vector3;
 namespace ViewProbe;
 
 /// <summary>
-/// --weather NAME [--weather-slot day|sunrise|sunset|night]: one WTHR's colours and fog for one
-/// time of day, read from the winning record. It sets the frame's sky (also what water reflects),
-/// the sun's colour, the ambient colour and SkyRender's distance fog. Without --weather nothing
-/// changes. Values are copied out of the record, never held (the walk disposes its overlays).
+/// The exterior's weather (on by default; --no-weather turns it off): one WTHR's colours and fog for
+/// one time of day (--weather-slot day|sunrise|sunset|night), read from the winning record. It sets
+/// the frame's sky (also what water reflects), the sun's colour, the ambient colour and SkyRender's
+/// distance fog. Which WTHR: --weather NAME; else the most likely weather of the target cell's
+/// region (CELL XCLR -> REGN weather data: the highest-priority region that has weather, its
+/// highest-chance entry), which is where vanilla exteriors get their weather (the Tamriel climate
+/// lists SkyrimCloudy alone); else the most likely weather of the worldspace's climate (WRLD CNAM
+/// -> CLMT); else SkyrimClear. Interiors take no weather (their own lighting is --cell-lighting). Values are
+/// copied out of the record, never held (the walk disposes its overlays).
 ///
 /// What is used, and how far it goes: the sky is a gradient by elevation (SkyKeys; the flat sky-upper colour with VP_SKY_FLAT=1: what a water
 /// surface seen from above reflects); the ambient is the directional ambient's "Z-" colour, the
@@ -46,21 +52,122 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
     internal static float AdaptedLuminance = 0.367f;
     /// <summary>The --weather argument (an EditorID or a FormKey such as 00081A:Skyrim.esm), or null.</summary>
     internal static string? Requested;
+    /// <summary>Without --weather: pick the exterior's weather from its climate (default on;
+    /// --no-weather turns it off).</summary>
+    internal static bool Auto = true;
+    /// <summary>The weather used when the climate gives none (EditorID).</summary>
+    internal const string FallbackWeather = "SkyrimClear";
+    /// <summary>Where <see cref="Current"/> came from, for the console line.</summary>
+    internal static string? CurrentWhy;
+    /// <summary>Every WTHR's values for the requested slot, winner-takes-all, keyed by FormKey; and
+    /// EditorID -> FormKey. Kept so the weather can be chosen after the walk (it depends on the
+    /// worldspace's climate, which the walk reaches at any point).</summary>
+    internal static readonly System.Collections.Generic.Dictionary<FormKey, SceneWeather> Weathers = new();
+    internal static readonly System.Collections.Generic.Dictionary<string, FormKey> WeatherIds = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Every climate's weather list (weather, chance), winner-takes-all.</summary>
+    internal static readonly System.Collections.Generic.Dictionary<FormKey, (FormKey Weather, int Chance)[]> ClimateWeathers = new();
+    /// <summary>Every region's weather data (priority, list), winner-takes-all; and every cell's
+    /// region list (XCLR), winner-takes-all.</summary>
+    internal static readonly System.Collections.Generic.Dictionary<FormKey, (int Priority, string Name, (FormKey Weather, int Chance)[] List)> RegionWeathers = new();
+    internal static readonly System.Collections.Generic.Dictionary<FormKey, FormKey[]> CellRegions = new();
+
+    /// <summary>The walk calls this for every REGN.</summary>
+    internal static void NoteRegion(IRegionGetter r)
+    {
+        if (r.Weather is { } rw && rw.Weathers is { Count: > 0 } ws)
+            RegionWeathers[r.FormKey] = (rw.Priority, r.EditorID ?? r.FormKey.ToString(), ws.Select(t => (t.Weather.FormKey, t.Chance)).ToArray());
+        else RegionWeathers.Remove(r.FormKey);
+    }
+
+    /// <summary>The walk calls this for every CELL.</summary>
+    internal static void NoteCell(ICellGetter c)
+    {
+        if (c.Regions is { Count: > 0 } rs) CellRegions[c.FormKey] = rs.Select(l => l.FormKey).ToArray();
+        else CellRegions.Remove(c.FormKey);
+    }
+
+    /// <summary>Every IMGS's values and text, winner-takes-all.</summary>
+    internal static readonly System.Collections.Generic.Dictionary<FormKey, (ImageSpaceValues Values, string Text)> ImageSpaces = new();
+
+    /// <summary>The walk calls this for every WTHR.</summary>
+    internal static void NoteWeather(IWeatherGetter w)
+    {
+        Weathers[w.FormKey] = From(w, RequestedSlot);
+        if (!string.IsNullOrWhiteSpace(w.EditorID)) WeatherIds[w.EditorID!] = w.FormKey;
+    }
+
+    /// <summary>After the walk: choose <see cref="Current"/> (and its image space) for the target.
+    /// --weather wins; otherwise, for an exterior with <see cref="Auto"/>, the climate's most likely
+    /// weather, else <see cref="FallbackWeather"/>. An interior gets none unless --weather names one.</summary>
+    internal static void Resolve(bool interior, FormKey? cell)
+    {
+        Current = null; CurrentWhy = null; ImageSpaceData = null; ImageSpaceText = null;
+        FormKey? pick = null;
+        if (Requested is { } rq)
+        {
+            if (WeatherIds.TryGetValue(rq, out var byId)) pick = byId;
+            else if (FormKey.TryFactory(rq, out var fk) && Weathers.ContainsKey(fk)) pick = fk;
+            CurrentWhy = "--weather";
+        }
+        else if (Auto && !interior)
+        {
+            if (cell is { } cfk && CellRegions.TryGetValue(cfk, out var regions))
+            {
+                var best = regions.Where(RegionWeathers.ContainsKey).Select(k => RegionWeathers[k])
+                                  .OrderByDescending(r => r.Priority).FirstOrDefault();
+                if (best.List is { Length: > 0 })
+                    foreach (var e in best.List.OrderByDescending(e => e.Chance))
+                        if (Weathers.ContainsKey(e.Weather))
+                        {
+                            pick = e.Weather;
+                            CurrentWhy = $"the cell's region {best.Name}'s most likely weather (chance {e.Chance} of {best.List.Sum(x => x.Chance)})";
+                            break;
+                        }
+            }
+            if (pick is null && WorldClimate is { } ck && ClimateWeathers.TryGetValue(ck, out var list))
+            {
+                if (Environment.GetEnvironmentVariable("VP_WEATHER_LIST") == "1")
+                    foreach (var e in list)
+                        Console.WriteLine($"   climate weather: {e.Weather} {(Weathers.TryGetValue(e.Weather, out var lw) ? lw.Name : "?")} chance {e.Chance}");
+                foreach (var e in list.OrderByDescending(e => e.Chance))
+                    if (Weathers.ContainsKey(e.Weather))
+                    {
+                        pick = e.Weather;
+                        CurrentWhy = $"the worldspace climate {(Climates.TryGetValue(ck, out var cn) ? cn.Name : ck.ToString())}'s most likely weather (chance {e.Chance} of {list.Sum(x => x.Chance)})";
+                        break;
+                    }
+            }
+            if (pick is null && WeatherIds.TryGetValue(FallbackWeather, out var fb))
+            {
+                pick = fb;
+                CurrentWhy = "fallback (no climate weather)";
+            }
+        }
+        if (pick is { } k && Weathers.TryGetValue(k, out var sw))
+        {
+            Current = sw;
+            if (sw.ImageSpace is { } ik && ImageSpaces.TryGetValue(ik, out var isv))
+            {
+                ImageSpaceData = isv.Values;
+                ImageSpaceText = isv.Text;
+            }
+        }
+    }
     /// <summary>The --weather-slot argument.</summary>
     internal static string RequestedSlot = "day";
     /// <summary>--sky was given: it wins over the weather's sky colour.</summary>
     internal static bool SkyGiven;
     /// <summary>The winning record's values once the walk has seen it.</summary>
     internal static SceneWeather? Current;
-    /// <summary>--shadows / --no-shadows: the sun's shadow map. Unset, it is on with --weather and off
-    /// without (so the default output and interior renders are unchanged).</summary>
+    /// <summary>--shadows / --no-shadows: the sun's shadow map. Unset, it is on whenever a weather lights
+    /// the frame (the default for exteriors) and off without one (interiors).</summary>
     internal static bool? ShadowsRequested;
     /// <summary>--shadow-distance D: how far from the eye the sun's shadow map reaches (default 10000,
     /// the lab profile's fShadowDistance).</summary>
     internal static float ShadowDistance = 10000f;
     /// <summary>How far beyond the frame's ground the shadow map reaches for casters (world units).</summary>
     internal static float CasterMargin = 1500f;
-    internal static bool ShadowsOn => ShadowsRequested ?? Requested is not null;
+    internal static bool ShadowsOn => ShadowsRequested ?? Current is not null;
 
     /// <summary>The sphere (Skyrim coordinates) the sun's shadow map covers for one frame: the eye and
     /// the frame's view rays out to where they meet the ground (the terrain under the eye, or the
@@ -103,6 +210,7 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
     {
         static float H(TimeOnly t) => t.Hour + t.Minute / 60f;
         Climates[c.FormKey] = (H(c.SunriseBegin), H(c.SunriseEnd), H(c.SunsetBegin), H(c.SunsetEnd), c.EditorID ?? c.FormKey.ToString());
+        ClimateWeathers[c.FormKey] = c.WeatherTypes.Select(t => (t.Weather.FormKey, t.Chance)).ToArray();
     }
 
     /// <summary>The sun's direction at <see cref="GameHour"/> under the worldspace's climate, as
@@ -195,21 +303,21 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
         return keys;
     }
 
-    /// <summary>Notes an IMGS's values when it is the weather's image space (the walk calls this for
-    /// every IMGS; the last, winning, one is kept).</summary>
-    internal static void NoteImageSpace(IImageSpaceGetter i, FormKey? wanted)
+    /// <summary>Notes an IMGS's values (the walk calls this for every IMGS; the last, winning, one is
+    /// kept); <see cref="Resolve"/> picks the weather's.</summary>
+    internal static void NoteImageSpace(IImageSpaceGetter i)
     {
-        if (wanted is not { } k || i.FormKey != k) return;
         var h = i.Hdr; var c = i.Cinematic; var t = i.Tint;
-        ImageSpaceData = new ImageSpaceValues(i.EditorID ?? i.FormKey.ToString(),
+        var values = new ImageSpaceValues(i.EditorID ?? i.FormKey.ToString(),
             h?.White ?? 1f, h?.SunlightScale ?? 1f, h?.SkyScale ?? 1f,
             c?.Saturation ?? 1f, c?.Brightness ?? 1f, c?.Contrast ?? 1f,
             t is null ? V3.One : new V3(t.Color.R / 255f, t.Color.G / 255f, t.Color.B / 255f), t?.Amount ?? 0f);
-        ImageSpaceText = $"{i.EditorID ?? i.FormKey.ToString()}: HDR eye adapt speed {h?.EyeAdaptSpeed:0.###} strength {h?.EyeAdaptStrength:0.###}, "
+        var text = $"{i.EditorID ?? i.FormKey.ToString()}: HDR eye adapt speed {h?.EyeAdaptSpeed:0.###} strength {h?.EyeAdaptStrength:0.###}, "
                        + $"bloom blur {h?.BloomBlurRadius:0.###} scale {h?.BloomScale:0.###} threshold {h?.BloomThreshold:0.###} receive {h?.ReceiveBloomThreshold:0.###}, "
                        + $"white {h?.White:0.###}, sunlight scale {h?.SunlightScale:0.###}, sky scale {h?.SkyScale:0.###}; "
                        + $"cinematic saturation {c?.Saturation:0.###} brightness {c?.Brightness:0.###} contrast {c?.Contrast:0.###}; "
                        + $"tint {t?.Color} x {t?.Amount:0.###}";
+        ImageSpaces[i.FormKey] = (values, text);
     }
 
     /// <summary>One IMGS's values, copied out of the record.</summary>

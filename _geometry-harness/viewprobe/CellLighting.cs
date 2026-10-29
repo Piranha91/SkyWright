@@ -8,14 +8,14 @@ using V3 = System.Numerics.Vector3;
 namespace ViewProbe;
 
 /// <summary>
-/// --cell-lighting: light an interior from its own records instead of the fixed studio lights. The
+/// Interior cell lighting (on by default; --no-cell-lighting keeps the fixed studio lights): light an
+/// interior from its own records. The
 /// target cell's XCLL (ambient, directional colour and rotation, fog), with each value the cell marks
 /// as inherited taken from its lighting template (LTMP -> LGTM); the cell's image space (XCIM) as
 /// SkyRender's image-space finish; and every drawn LIGH reference as a SkyRender point light (the
 /// base's colour times its fade plus the reference's XLIG fade offset, its radius plus the reference's
-/// XRDS; negative lights subtract; shadow-casting lights cast shadows). Off by default, so the
-/// default output and the interior verify render are unchanged. Values are copied out of the
-/// records during the walk, never held.
+/// XRDS; negative lights subtract; shadow-casting lights cast shadows). Values are copied out of
+/// the records during the walk, never held.
 ///
 /// Not modelled: the six-direction ambient (the XCLL ambient colour lights every surface), light
 /// fade distances, flicker, spot lights' cones, shadows from point lights, the per-object light
@@ -40,7 +40,7 @@ internal static class CellLighting
         bool Rotation, bool Fade, bool FogPower, bool FogMax);
 
     /// <summary>--cell-lighting was given.</summary>
-    internal static bool Requested;
+    internal static bool Requested = true;
     internal static readonly Dictionary<FormKey, (V3 Color, float Fade, float Radius, bool Negative, bool Shadowed, string Name)> Bases = new();
     /// <summary>Per placed light: its XLIG fade offset (added to the base's fade) and its XRDS radius
     /// offset (added to the base's radius), winner-takes-all.</summary>

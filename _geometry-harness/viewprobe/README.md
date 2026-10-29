@@ -239,8 +239,26 @@ A successful save or size check alone does not establish clean pixels.
   with nothing anchoring them); turn both off for an in-game-like interior shot.
 - **Look:** `--sky R,G,B` (0-255 or 0-1; default a pale sky blue `0.70,0.82,0.92`), `--msaa N`
   (default 4, clamped to the context's `GL_MAX_SAMPLES`; 0/1 = off).
-- **Cell lighting (interiors):** `--cell-lighting` lights an interior from its own records instead of
-  the fixed studio lights (`CellLighting.cs`): the cell's XCLL ambient, directional colour (times
+- **Defaults (2026-10-29):** viewprobe exists to find local clashes quickly, so every cheap
+  feature is on and anything that significantly delays loading is opt-in. Measured on the lab
+  instance (1920 px, wall time per render, two runs each): Riverwood aerial 18.2-18.5 s before, 18.6-18.8 s
+  with the defaults below; WhiterunBanneredMare kitchen 16.2-16.6 s before, 16.4 s after.
+
+  | Feature | Default | Opt out / in |
+  |---|---|---|
+  | Exterior weather (sky gradient, sun on the climate's path, ambient, fog) | on: the cell's region's most likely weather, else the worldspace climate's, else SkyrimClear | `--no-weather`; `--weather NAME` picks one |
+  | Weather / cell image space | on | `--no-imagespace` |
+  | Sun shadows | on whenever a weather lights the frame | `--no-shadows` (`--shadows` forces them) |
+  | Interior cell lighting (XCLL, image space, placed lights) | on | `--no-cell-lighting` |
+  | Effect shapes (engine effect shading, billboards turned to the camera) | on | `--no-fx`; `VP_NO_BILLBOARD=1` keeps the authored pose |
+  | Visible-cell ring | off (the 3x3) | `--ring visible` / `--ring N` (load time grows with the cells) |
+  | Distant LOD | not yet (to come as opt-in `--lod`) | - |
+
+  The default exterior weather follows the region, as the game picks it: Riverwood's region
+  WeatherPineForest gives SkyrimCloudy (35 of 100), so match an in-game capture taken with
+  `fw 81A` by passing `--weather SkyrimClear`.
+- **Cell lighting (interiors):** on by default (`--no-cell-lighting` keeps the fixed studio lights);
+  lights an interior from its own records (`CellLighting.cs`): the cell's XCLL ambient, directional colour (times
   its fade, at its rotation) and fog, each value the cell marks as inherited taken from its
   lighting template (LTMP); its image space (XCIM) as SkyRender's image-space finish (adapted
   luminance from `--adapt-lum`, default 0.367); and every drawn LIGH reference as a SkyRender point
@@ -252,14 +270,18 @@ A successful save or size check alone does not establish clean pixels.
   The console prints the resolved lighting and how many lights were drawn;
   `VP_CELL_LIGHTS_LIST=1` lists them, `VP_CELL_LIGHTS=unshadowed|none` drops the shadow-casting
   ones or all of them (diagnostics). Not modelled: the six-direction ambient, light fade
-  distances, flicker, spot cones, the per-object light limit, eye adaptation. Off by default (the
-  default output and the interior verify render are unchanged). Bannered Mare against the game
+  distances, flicker, spot cones, the per-object light limit, eye adaptation. Bannered Mare against the game
   (frame mean, ours vs game): kitchen 50,39,24 vs 46,37,24; candle shot 71,58,38 vs 62,50,34;
   candle close-up 54,44,27 vs 59,48,31, with the pillar beside the central hearth unlit as in game
   (with XRDS read as a replacement radius these were 56,43,24, 100,84,52 and 76,60,35).
-- **Weather:** `--weather NAME` (a WTHR EditorID such as `SkyrimClear`, or a FormKey such as
-  `00081A:Skyrim.esm`) and `--weather-slot day|sunrise|sunset|night` (default `day`) light the
-  scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky is a
+- **Weather:** on by default for exteriors (`--no-weather` keeps the fixed studio lights). Without
+  `--weather` the WTHR is the target cell's region's most likely weather (CELL XCLR -> REGN weather
+  data, the highest-priority region with weather, its highest-chance entry), else the worldspace
+  climate's (WRLD CNAM -> CLMT; the Tamriel climate lists SkyrimCloudy alone), else SkyrimClear; the
+  console says which and why (`VP_WEATHER_LIST=1` prints the climate's list). `--weather NAME` (a
+  WTHR EditorID such as `SkyrimClear`, or a FormKey such as `00081A:Skyrim.esm`) picks one, and
+  `--weather-slot day|sunrise|sunset|night` (default `day`) the time of day. The scene is lit from
+  the winning WTHR (`SceneWeather.cs`): the sky is a
   gradient by elevation (SkyRender `SkyGradient`), what sky-reflecting water reflects per pixel and
   the background (at 20 degrees). Its keys follow the engine's sky dome: the vanilla
   `meshes/sky/atmosphere.nif` blend masks (horizon at the rim, sky-lower around 18 degrees,
@@ -283,11 +305,9 @@ A successful save or size check alone does not establish clean pixels.
   0.367, the value read from the retail adaptation texture at SkyrimClear noon; `--adapt-lum X`
   overrides it and `--no-imagespace` leaves the frame ungraded (the earlier output). Not modelled:
   bloom, eye adaptation over time, clouds; a weather-lit Riverwood render is still a little
-  darker and more saturated than the game. Off by default; a retained walk cannot see the WTHR and
-  says so.
-  Sun shadows: with `--weather` the sun casts (SkyRender's directional shadow map, `--shadows` /
-  `--no-shadows` to force either; off without `--weather`, so the default output and interior
-  renders are unchanged). One 2048-texel map is fitted per frame to a sphere around the eye and the
+  darker and more saturated than the game. A retained walk cannot see the WTHR and says so.
+  Sun shadows: whenever a weather lights the frame the sun casts (SkyRender's directional shadow
+  map, `--shadows` / `--no-shadows` to force either; interiors have none). One 2048-texel map is fitted per frame to a sphere around the eye and the
   frame's view rays out to the ground under the eye or `--shadow-distance D` (default 10000, the
   lab profile's fShadowDistance), widened by 1,500 units for casters beside the frame; the engine
   uses cascades (iNumFocusShadow 4, 4096 texels), so far shadows here are softer. Only the sun is
@@ -2140,17 +2160,22 @@ source texture × `baseColor` × vertex colour; with the greyscale-to-palette fl
 `BSEffectShaderProperty.greyscaleTexture` — a fire's orange lives in that palette, and `baseColor.r`
 picks the ROW (vanilla flames sit near 0.2, the dark-red-to-white row of `gradfireexplosion.dds`);
 view-angle falloff; the material's own depth-test / depth-write / double-sided flags; the
-`NiAlphaProperty` blend (`6->0` additive for flames). Billboard sprites (`NiBillboardNode`, which the
-engine turns to face the camera) are drawn double-sided in their authored pose, so a flame authored
-facing away is not culled. Soft-effect depth fades need the SSAO prepass, which viewprobe leaves off,
+`NiAlphaProperty` blend (`6->0` additive for flames). Billboard sprites (`NiBillboardNode`) are
+turned toward the camera every draw, as the engine does (SkyRender `GlRenderer.Billboards`, per
+billboard mode; viewprobe hands it the billboard node's frame placed with the ref), and then follow
+their own double-sided flag; `VP_NO_BILLBOARD=1` draws them in their authored pose, double-sided. Soft-effect depth fades need the SSAO prepass, which viewprobe leaves off,
 so soft effects draw hard-edged.
 
 Checked against in-game captures (vanilla Bannered Mare kitchen hearth,
 `S:\Dev\skyrender-split\_ingame\shaderflags_20261029-021047\compare_*.jpg`): flame colour and placement
 match; flame SHAPE is one frozen atlas frame at the authored angle.
 
-**Limits.** No billboarding (a sprite keeps its authored angle, so one seen edge-on is a sliver
-where the game shows a full flame); no animation; and **particle systems can never be drawn**: a
+Billboards, against the same captures
+(`S:\Dev\skyrender-split\_ingame\billboard_20261029-085750\cmp_{I,J,K,L}_billboard.jpg`): the
+kitchen hearth's right-hand flame, a sliver in the authored pose from the close-up, is now a full
+flame where the game has one, and both flame masses show from the side.
+
+**Limits.** No animation; and **particle systems can never be drawn**: a
 `NiParticleSystem` at rest has zero live particles, so there is no first frame — no sparks, no smoke
 plume, and vanilla `Campfire01Burning.nif` (the Bannered Mare's central pit) shows only its ember
 glow. Heat-shimmer planes are lighting shapes with a normal map in slot 0 (kind 2) and stay skipped.

@@ -107,6 +107,8 @@ internal sealed class MeshMaterialState
     bool EffectDepthTest;
     bool EffectLit;
     int EffectBillboard;
+    int BillboardMode;
+    OpenTK.Mathematics.Matrix4? BillboardFrame;
 
     internal static MeshMaterialState Capture(GlMesh m) => new()
     {
@@ -207,6 +209,8 @@ internal sealed class MeshMaterialState
         EffectDepthTest = m.EffectDepthTest,
         EffectLit = m.EffectLit,
         EffectBillboard = m.EffectBillboard,
+        BillboardMode = m.BillboardMode,
+        BillboardFrame = m.BillboardFrame,
     };
 
     internal void ApplyTo(GlMesh m)
@@ -307,6 +311,8 @@ internal sealed class MeshMaterialState
         m.EffectDepthTest = EffectDepthTest;
         m.EffectLit = EffectLit;
         m.EffectBillboard = EffectBillboard;
+        m.BillboardMode = BillboardMode;
+        m.BillboardFrame = BillboardFrame;
         m.MeshSource = MeshSource;
     }
 

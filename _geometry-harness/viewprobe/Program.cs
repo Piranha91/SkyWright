@@ -646,7 +646,9 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--weather" && i + 1 < args.Length) ViewProbe.SceneWeather.Requested = args[++i];
     else if (args[i] == "--weather-slot" && i + 1 < args.Length) ViewProbe.SceneWeather.RequestedSlot = args[++i].ToLowerInvariant();
     else if (args[i] == "--no-imagespace") ViewProbe.SceneWeather.ImageSpaceOff = true;
+    else if (args[i] == "--no-weather") { ViewProbe.SceneWeather.Auto = false; ViewProbe.SceneWeather.Requested = null; }
     else if (args[i] == "--cell-lighting") ViewProbe.CellLighting.Requested = true;
+    else if (args[i] == "--no-cell-lighting") ViewProbe.CellLighting.Requested = false;
     else if (args[i] == "--shadows") ViewProbe.SceneWeather.ShadowsRequested = true;
     else if (args[i] == "--no-shadows") ViewProbe.SceneWeather.ShadowsRequested = false;
     else if (args[i] == "--shadow-distance" && i + 1 < args.Length) ViewProbe.SceneWeather.ShadowDistance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
@@ -1932,13 +1934,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // out, never held: the overlay is disposed at the end of this using block, and a
                 // retained getter would read freed memory.
                 // --weather (SceneWeather.cs): the named WTHR, winner-takes-all in load order.
-                if (rec is IImageSpaceGetter imgs) ViewProbe.SceneWeather.NoteImageSpace(imgs, ViewProbe.SceneWeather.Current?.ImageSpace);
+                if (rec is IImageSpaceGetter imgs) ViewProbe.SceneWeather.NoteImageSpace(imgs);
                 // The sun's path (--weather): the target worldspace's climate and that climate's timing.
                 if (rec is IClimateGetter clmt) ViewProbe.SceneWeather.NoteClimate(clmt);
+                // The exterior's default weather comes from the cell's region (SceneWeather.Resolve).
+                if (rec is IRegionGetter regn) ViewProbe.SceneWeather.NoteRegion(regn);
+                if (rec is ICellGetter wcell && !wcell.Flags.HasFlag(Cell.Flag.IsInteriorCell)) ViewProbe.SceneWeather.NoteCell(wcell);
                 if (rec is IWorldspaceGetter wrld && wrld.FormKey == targetWorldspace) ViewProbe.SceneWeather.WorldClimate = wrld.Climate.FormKeyNullable;
-                if (rec is IWeatherGetter wthr && ViewProbe.SceneWeather.Matches(wthr))
+                // Every WTHR is kept; SceneWeather.Resolve picks one once the target is known.
+                if (rec is IWeatherGetter wthr)
                 {
-                    ViewProbe.SceneWeather.Current = ViewProbe.SceneWeather.From(wthr, ViewProbe.SceneWeather.RequestedSlot);
+                    ViewProbe.SceneWeather.NoteWeather(wthr);
                     continue;
                 }
                 if (rec is IWaterGetter wtr)
@@ -2497,6 +2503,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         var scene = new List<ViewProbe.SceneRef>();
         ViewProbe.CellLighting.Placed.Clear();
         ViewProbe.CellLighting.TargetCell = interior ? cellKey : null;
+        ViewProbe.SceneWeather.Resolve(interior, cellKey);
         int fxSkipped = 0, markerSkipped = 0;
         int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
         int bosSwapped = 0, bosRandomCount = 0, bosTransformed = 0, bosReflagged = 0;
