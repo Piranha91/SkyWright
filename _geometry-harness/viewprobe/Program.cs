@@ -1923,6 +1923,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // out, never held: the overlay is disposed at the end of this using block, and a
                 // retained getter would read freed memory.
                 // --weather (SceneWeather.cs): the named WTHR, winner-takes-all in load order.
+                if (rec is IImageSpaceGetter imgs) ViewProbe.SceneWeather.NoteImageSpace(imgs, ViewProbe.SceneWeather.Current?.ImageSpace);
                 if (rec is IWeatherGetter wthr && ViewProbe.SceneWeather.Matches(wthr))
                 {
                     ViewProbe.SceneWeather.Current = ViewProbe.SceneWeather.From(wthr, ViewProbe.SceneWeather.RequestedSlot);

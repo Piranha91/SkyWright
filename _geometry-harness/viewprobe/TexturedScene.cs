@@ -644,6 +644,7 @@ static class TexturedScene
         // lights. The sun keeps the fixed direction above; there is no fill light in the engine.
         renderer.Fog = null;
         renderer.SkyColor = null;
+        renderer.Lights[0].Color = new GlVec3(1f, 1f, 1f);   // a reused renderer may carry a weather's ambient
         if (SceneWeather.Requested is not null && SceneWeather.Current is null)
             Console.WriteLine($"   weather: no WTHR '{SceneWeather.Requested}' in the load order (or this walk was retained) - studio lights kept");
         if (SceneWeather.Current is { } sw)
@@ -661,6 +662,7 @@ static class TexturedScene
                                   sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
                 : null;
             Console.WriteLine($"   weather: {sw}");
+            if (SceneWeather.ImageSpaceText is { } ist) Console.WriteLine($"   weather image space (not applied): {ist}");
         }
         var meshes = new List<GlMesh>();
         var borrowedNpcMeshes = new List<GlMesh>();
