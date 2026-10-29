@@ -2089,6 +2089,15 @@ where the game shows a full flame); no animation; and **particle systems can nev
 plume, and vanilla `Campfire01Burning.nif` (the Bannered Mare's central pit) shows only its ember
 glow. Heat-shimmer planes are lighting shapes with a normal map in slot 0 (kind 2) and stay skipped.
 
+### Emissive and glow maps (lighting shapes)
+
+Since 2026-10-29 a lighting-shader shape with `SLSF1_Own_Emit` draws its emissive term
+(`emissiveColor × emissiveMultiple`, absorbed by the albedo), modulated by the slot-2 glow map
+under `SLSF2_Glow_Map` on non-skin shader types: candle wax, chandelier chains, enchanted gear.
+Shapes with `SLSF1_External_Emittance` (interior windows, whose glow the engine takes from the
+cell's window light) stay unlit, as before. The console reports `emissive shapes: N`. The
+highlight and occlusion washes that ride the same term save and restore these settings.
+
 ---
 
 ## Occlusion planes (`--planes`)

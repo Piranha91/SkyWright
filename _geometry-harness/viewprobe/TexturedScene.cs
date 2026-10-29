@@ -772,7 +772,7 @@ static class TexturedScene
         // however many refs place that mesh).
         int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
         int fxStaticShapes = 0, fxStaticRefCount = 0;
-        int editorMarkerShapes = 0;
+        int editorMarkerShapes = 0, emissiveShapes = 0;
         int cullTrisDropped = 0, cullShapesDropped = 0;
         int coveringShapes = 0, coveringRefs = 0, projectedShapes = 0;
         var coveringByMato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1237,6 +1237,33 @@ static class TexturedScene
                         var colour = r.HighlightColor == default ? haloOrange : r.HighlightColor;
                         foreach (var index in tri) Overlay.Vertex(surface, wp[index], colour, Vector3.Zero);
                     }
+                }
+
+                // ---- EMISSIVE AND GLOW MAP (lighting shapes) ----------------------------------
+                // SLSF1_Own_Emit adds emissiveColor x emissiveMultiple (x the slot-2 glow map under
+                // SLSF2_Glow_Map on non-skin shader types), absorbed by the albedo, as SkyRender's
+                // NifMaterialBinder does. Candle wax, chandelier chains, enchanted gear. Skipped when
+                // SLSF1_External_Emittance is set: the engine then takes the colour from outside the
+                // NIF (interior windows: the cell's window light), which this tool does not model, so
+                // those keep drawing unlit as before. Set on every bind: a retained mesh keeps whatever
+                // the last bind wrote. Never under --depth-measurement (lighting only).
+                mesh.HasEmissive = false;
+                mesh.HasGlowMap = false;
+                mesh.GlowTexture = 0;
+                bool ownEmit = (b.ShaderFlags1 & (1u << 22)) != 0 && (b.ShaderFlags1 & (1u << 29)) == 0;
+                if (ownEmit && !b.HasEffectShader && depthMeasurement is null && !r.Marker)
+                {
+                    mesh.HasEmissive = true;
+                    mesh.EmissiveColor = b.EmissiveColor;
+                    mesh.EmissiveMultiple = b.EmissiveMultiple;
+                    bool skin = b.ShaderType == 4 || b.ShaderType == 5;
+                    if ((b.ShaderFlags2 & (1u << 6)) != 0 && !skin && b.TexturePaths.TryGetValue(2, out var glowPath)
+                        && glowPath.Length > 0)
+                    {
+                        int g = LoadObservedTexture("static-ref-glow", glowPath);
+                        if (g != staticWhite) { mesh.GlowTexture = g; mesh.HasGlowMap = true; }
+                    }
+                    emissiveShapes++;
                 }
 
                 if (drawStatic)
@@ -2949,6 +2976,8 @@ static class TexturedScene
                 Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
                                 + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
             }
+            if (emissiveShapes > 0)
+                Console.WriteLine($"   emissive shapes: {emissiveShapes:N0} (SLSF1_Own_Emit, glow map where flagged; External_Emittance shapes stay unlit)");
             if (editorMarkerShapes > 0)
                 Console.WriteLine($"   editor-marker shapes: {editorMarkerShapes:N0} not drawn (shape named EditorMarker; the game hides it)");
             if (fxStaticShapes > 0)
