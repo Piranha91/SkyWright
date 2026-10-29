@@ -1747,6 +1747,59 @@ static class TexturedScene
             Console.WriteLine($"      {100.0 * waterSubmerged / waterSamples:0.0}% of the water footprint has LAND "
                             + $"BELOW the surface (the rest is dry ground, and correctly hides it)");
 
+        // ---- DISTANT LOD (--lod, opt-in; DistantLodLayer.cs) --------------------------------
+        // Terrain, object and tree LOD beyond the loaded cells, picked for this camera the way the
+        // engine picks blocks, and cut away under every cell whose terrain this frame draws (and the
+        // walk's loaded set), so the full cells and the LOD never overlap. SkyRender builds and
+        // shades it; textures load through the same observed loader as everything else.
+        if (DistantLodLayer.Requested)
+        {
+            var lodSw = System.Diagnostics.Stopwatch.StartNew();
+            string? lodWorld = DistantLodLayer.LodWorldspace(out var lodWhy);
+            if (lodWorld is null) Console.WriteLine($"   lod: not drawn - {lodWhy}");
+            else
+            {
+                var loadedCells = new HashSet<(int X, int Y)>(DistantLodLayer.WalkCells ?? Array.Empty<(int, int)>());
+                foreach (var tris in terrainPatches.Values)
+                    foreach (var (a, b, c) in tris)
+                        loadedCells.Add(((int)MathF.Floor((a.X + b.X + c.X) / 3f / TerrainCell.CellSize),
+                                         (int)MathF.Floor((a.Y + b.Y + c.Y) / 3f / TerrainCell.CellSize)));
+                var lodData = DistantLodLoader.Load(new DistantLodRequest
+                {
+                    Worldspace = lodWorld,
+                    Eye = cam.Eye,
+                    LoadedCells = new LoadedCells(loadedCells),
+                    Kinds = DistantLodLayer.Kinds(),
+                    MaxDistance = DistantLodLayer.FarPlane,
+                }, p => cache.ResolveAssetPath(p));
+                double lodBuildMs = lodSw.Elapsed.TotalMilliseconds;
+                if (lodData.Problem is { } lp) Console.WriteLine($"   lod: not drawn - {lp}");
+                else
+                {
+                    int lodTexBefore = textures.MissingTexturePaths.Count;
+                    var glLod = GlWorldFactory.CreateDistantLod(lodData, path =>
+                    {
+                        int h = LoadObservedTexture("dynamic-lod", path);
+                        return h == textures.WhiteTexture ? null : h;
+                    }, textures.WhiteTexture);
+                    foreach (var m in glLod.Meshes)
+                    {
+                        renderer.AddMesh(m);
+                        meshes.Add(m);
+                    }
+                    var ls = lodData.Settings!;
+                    Console.WriteLine($"   lod: {lodWorld}{lodWhy} - lodsettings SW cell ({ls.SouthWestCellX}, {ls.SouthWestCellY}), stride {ls.Stride}, levels {ls.MinLevel}..{ls.MaxLevel}; "
+                                    + $"cut under {loadedCells.Count} loaded cell(s); reach {DistantLodLayer.FarPlane:0} (also the far plane)");
+                    foreach (var line in DistantLodLayer.Describe(lodData)) Console.WriteLine(line);
+                    foreach (var e in lodData.Errors.Take(5)) Console.WriteLine($"   lod: {e}");
+                    if (lodData.Errors.Count > 5) Console.WriteLine($"   lod: ... {lodData.Errors.Count - 5} more file problem(s)");
+                    int lodMissing = textures.MissingTexturePaths.Count - lodTexBefore;
+                    Console.WriteLine($"   lod timing: read + build {lodBuildMs:0} ms, textures + upload {lodSw.Elapsed.TotalMilliseconds - lodBuildMs:0} ms"
+                                    + (lodMissing > 0 ? $"; {lodMissing} LOD texture(s) not found (drawn white)" : ""));
+                }
+            }
+        }
+
         // ── THE NAVMESH OVERLAY — the probe's whole point ──────────────────────────────
         // Looks: filled = the translucent sheet; wire = every triangle outlined; both.
         //
@@ -1820,7 +1873,9 @@ static class TexturedScene
         // compiled-in default, no profile ini sets it; first person uses `fNear1stPersonDistance` 5). It was 4 u
         // before, which drew geometry the game clips in a close-up. That the free camera uses the third-person
         // value is assumed, not measured.
-        const float NearPlane = 15f, FarPlane = 131072f;
+        const float NearPlane = 15f;
+        // --lod draws to about 100 cells (DistantLodLayer.FarPlane); without it the far plane is unchanged.
+        float FarPlane = DistantLodLayer.Requested ? DistantLodLayer.FarPlane : 131072f;
         var eyeY = YUp(cam.Eye); var lookY = YUp(cam.Look);
         var camOff = eyeY - lookY;
         float camDist = MathF.Max(camOff.Length(), 1f);
@@ -2533,7 +2588,7 @@ static class TexturedScene
 
         // Window depth -> distance along the view axis, so the compare happens in world units
         // instead of in the wildly non-linear depth encoding a 4..131072 frustum produces.
-        static float ViewDist(float winZ)
+        float ViewDist(float winZ)
         {
             float zn = winZ * 2f - 1f;
             return 2f * NearPlane * FarPlane / (FarPlane + NearPlane - zn * (FarPlane - NearPlane));
@@ -3252,7 +3307,10 @@ static class TexturedScene
         }
 
         float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 || depthDumpPath is not null ? new float[sizeW * sizeH] : null;
+        var frameSw = System.Diagnostics.Stopwatch.StartNew();
         var pixels = Draw(pickDepth);
+        // --lod: the final frame's draw time (GL.Finish inside Draw), since LOD is what adds draws.
+        if (DistantLodLayer.Requested) Console.WriteLine($"   lod timing: final frame drawn in {frameSw.Elapsed.TotalMilliseconds:0} ms");
         // --depth-dump: the finished frame's depth buffer, exactly as --pick reads it below — size*size
         // float32 window depth in [0,1], GL row order (row 0 = the BOTTOM image row), 1.0 = background.
         // A distance along the view axis is the standard perspective inverse with the near/far printed

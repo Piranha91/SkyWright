@@ -228,6 +228,30 @@ A successful save or size check alone does not establish clean pixels.
     set from 3.8 GB to 4.3–4.7 GB (two runs). Against the in-game A frame, edge maps register to within 4 px at
     1920 wide in the centre and all four quadrants at `--fov 50.534`. The aerial only looked wider in game because
     the 3×3 render was an island in sky.
+- **Distant LOD: `--lod`** (exteriors only, opt-in, 2026-10-29; `DistantLodLayer.cs`, SkyRender.World
+  `DistantLodLoader` / `GlWorldFactory.CreateDistantLod`). Draws the worldspace's terrain LOD (`.btr`), object LOD
+  (`.bto`) and tree LOD (`.btt` + `.lst` + tree atlas) beyond the loaded cells, plain or with `--ring visible`.
+  - **Which files.** The target worldspace's EditorID names them (its parent's, when the WRLD uses its parent's LOD
+    data); `lodsettings\<w>.lod` gives the grid. They resolve through the same load order and archives as every other
+    asset. A block the selector picks but no source ships draws nothing, as in the game.
+  - **Which blocks.** SkyRender's quadtree on the `[TerrainManager]` distances (fBlockLevel0/1Distance,
+    fBlockMaximumDistance, fSplitDistanceMult for terrain, fTreeLoadDistance; the defaults equal the lab profile's
+    SkyrimPrefs.ini: 60000, 90000, 250000, 1.5, 75000), out to 409,600 u (about 100 cells), which also becomes the
+    camera's far plane (131,072 without `--lod`).
+  - **Under the loaded cells.** Every cell whose terrain the frame draws, plus the walk's `--ring` set: terrain LOD is
+    lowered there by the engine's 230 model units and covered triangles are dropped; level-4 object LOD loses those
+    cells' segments; LOD trees standing in them are dropped. With `--ring visible` the loaded area can exceed the
+    game's ±2 grid, so full detail stands where the game would draw LOD.
+  - **Console.** `lod: <world> - lodsettings ...`, one `lod terrain|objects|trees:` line each (blocks picked / on disk,
+    meshes per level, triangles, what was cut), file problems, and `lod timing:` (read + build, textures + upload,
+    final frame). `VP_LOD_KINDS=terrain,objects,trees` limits the kinds (diagnostic).
+  - **Not drawn:** LOD water (the BTR `WATER` quads), grass LOD, DynDOLOD's dynamic LOD. LOD is not shown to the
+    interactive window's picker.
+  - **Cost, measured on the Riverwood aerial** (A pose, `--weather SkyrimClear`, 1920×1080, two runs each): 18.6–18.8 s
+    without `--lod` (unchanged from before the feature: 19.6–20.7 s on the same machine earlier, identical pixels and
+    console), 27.6–28.1 s with it: read + build 4.3–4.4 s, textures + upload 3.9 s, final frame 63 ms. About 308 terrain,
+    370 object and 80 tree meshes (1.5 M triangles). `--ring visible --lod` on the same pose: 29.6 s; on the
+    horizon pose (eye 17000,-47000,8000, yaw 0, pitch 8): 36.0 s, final frame 267 ms.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
   navmesh vertex positions one plugin's version has and the other's does not, drawn in every panel
   that contains them, always visible. `--no-nav-diff` drops them.
@@ -253,7 +277,7 @@ A successful save or size check alone does not establish clean pixels.
   | Effect shapes (engine effect shading, billboards turned to the camera) | on | `--no-fx`; `VP_NO_BILLBOARD=1` keeps the authored pose |
   | Environment maps (slot-4 cube map, slot-5 mask) on lighting shapes | on | `VP_NO_ENVMAP=1` |
   | Visible-cell ring | off (the 3x3) | `--ring visible` / `--ring N` (load time grows with the cells) |
-  | Distant LOD | not yet (to come as opt-in `--lod`) | - |
+  | Distant LOD (terrain, objects, trees beyond the loaded cells) | off | `--lod` (adds about 9 s on the Riverwood aerial) |
 
   The default exterior weather follows the region, as the game picks it: Riverwood's region
   WeatherPineForest gives SkyrimCloudy (35 of 100), so match an in-game capture taken with

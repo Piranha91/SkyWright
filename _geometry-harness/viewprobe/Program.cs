@@ -674,6 +674,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
+    else if (args[i] == "--lod") ViewProbe.DistantLodLayer.Requested = true;
     else if (args[i] == "--ring" && i + 1 < args.Length)
     {
         ringMode = args[++i].ToLowerInvariant();
@@ -1889,6 +1890,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     }
     // The ring edge is measured from the target found above (WinningRefs.cs TrackEdge); interiors have none.
     if (!interior && targetGrid is { } edgeGrid) { winWalk.TrackEdge(targetWorldspace, edgeGrid, ringRefs); winWalk.SetVisible(visibleSet); }
+    // --lod (DistantLodLayer.cs): the worldspace and the walk's loaded cells, for the LOD drawn beyond them.
+    ViewProbe.DistantLodLayer.Target = !interior && targetGrid is not null ? targetWorldspace : FormKey.Null;
+    ViewProbe.DistantLodLayer.WalkCells = visibleSet;
     ViewProbe.RenderStages.Open(ViewProbe.RenderStages.RecordWalk,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
@@ -1941,6 +1945,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (rec is IRegionGetter regn) ViewProbe.SceneWeather.NoteRegion(regn);
                 if (rec is ICellGetter wcell && !wcell.Flags.HasFlag(Cell.Flag.IsInteriorCell)) ViewProbe.SceneWeather.NoteCell(wcell);
                 if (rec is IWorldspaceGetter wrld && wrld.FormKey == targetWorldspace) ViewProbe.SceneWeather.WorldClimate = wrld.Climate.FormKeyNullable;
+                if (rec is IWorldspaceGetter wrldAny) ViewProbe.DistantLodLayer.Note(wrldAny);   // --lod: which LOD files (DistantLodLayer.cs)
                 // Every WTHR is kept; SceneWeather.Resolve picks one once the target is known.
                 if (rec is IWeatherGetter wthr)
                 {
