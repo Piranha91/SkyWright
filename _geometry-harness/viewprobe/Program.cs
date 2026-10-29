@@ -1389,7 +1389,8 @@ var watrRec = new Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
                                        System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep,
                                        System.Numerics.Vector3 Reflect, float Reflectivity,
                                        byte Opacity, float Fresnel,
-                                       float FogNear, float FogFar, float FogAmount, float NoiseFalloff)>();
+                                       float FogNear, float FogFar, float FogAmount, float NoiseFalloff,
+                                       System.Numerics.Vector3 Spec)>();   // (sun specular power, sun specular magnitude, depth specular lighting)
 // Per-cell water, keyed by grid point, plus the worldspace fallbacks the cells defer to.
 var cellWater = new Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)>();
 // --stations only. WHICH cell each grid square is (the pose names the cell the STATION stands in,
@@ -1940,7 +1941,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                             Rgb(wtr.ReflectionColor), wtr.WaterReflectivity,
                                             wtr.Opacity, wtr.WaterFresnel,
                                             wtr.FogAboveWaterDistanceNearPlane, wtr.FogAboveWaterDistanceFarPlane,
-                                            wtr.FogAboveWaterAmount, wtr.NoiseFalloff);
+                                            wtr.FogAboveWaterAmount, wtr.NoiseFalloff,
+                                            new System.Numerics.Vector3(wtr.SpecularSunPower, wtr.SpecularSunSpecularMagnitude,
+                                                                        wtr.DepthSpecularLighting));
                     continue;
                 }
                 // MATO — the projected covering itself (snow, ash, moss). Reached only through
@@ -4488,14 +4491,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                              new System.Numerics.Vector3(0.14f, 0.25f, 0.25f),
                              new System.Numerics.Vector3(0.03f, 0.13f, 0.13f),
                              new System.Numerics.Vector3(0.30f, 0.30f, 0.30f), 0.4f, (byte)50, 0.07f,
-                             0f, 0f, 0f, 0f);
+                             0f, 0f, 0f, 0f, System.Numerics.Vector3.Zero);
                     string? noise = w.Item2 is { Length: > 0 } np ? NormalizeTexPath(np) : null;
                     waterPlanes.Add(new ViewProbe.WaterPlane(
                         z, key.Item1 * 4096f, key.Item2 * 4096f, key.Item1 * 4096f + 4096f, key.Item2 * 4096f + 4096f,
                         noise, w.Item3, w.Item4, w.Item5, w.Item6, w.Item7,
                         // WATR.Opacity is a 0..100 percentage in the CK, not a 0..255 byte.
                         Math.Clamp(w.Item8 / 100f, 0f, 1f), w.Item9, w.Item1,
-                        w.Item10, w.Item11, w.Item12, w.Item13));
+                        w.Item10, w.Item11, w.Item12, w.Item13, w.Item14));
                 }
             // The two arms side by side, per ring cell, with the share of the cell's LAND vertices under each surface —
             // waterprobe's visible-share number, so a surface that is drawn but under the ground is called out here.

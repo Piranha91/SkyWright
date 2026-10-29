@@ -3778,6 +3778,15 @@ the reflection is the sky, mixed over the lit body by `lerp(1, fresnel, distance
 Fresnel near the camera and a mirror beyond 8192 units for a river whose noise falloff is ~4000.
 The Riverwood aerial's river reads as the sky in game; it does here too, at the sky colour given.
 
+**Per pixel (default since the same night):** the depth is measured along each pixel's view ray
+against SkyRender's depth prepass of the opaque scene (`WaterMaterial.PerPixelDepth`), not
+vertically at the 85-unit grid vertices, and the composition is the engine's: far away the river is
+all reflection with the bed hidden (the high aerial now draws an opaque river, as the game does),
+near the camera the bed shows by the refraction weight. The WATR's sun specular (power, magnitude,
+depth specular lighting) adds the sun glints. `VP_WATER_VERTEX=1` keeps the per-vertex path.
+Use `--ring visible` for water close-ups: a river cell outside the target's 3x3 has no terrain, and
+water over an empty cell reads as deep (opaque) water.
+
 Earlier: colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
 `ReflectionColor` and weighted by **Schlick Fresnel with `WaterFresnel` as F0**. That replaced a flat
 `lerp(body, sky, WaterReflectivity)` which mixed 40% pale sky into every vertex regardless of angle:
@@ -3785,7 +3794,7 @@ the water drew correctly and simply did not READ as water — a failure mode wor
 looks exactly like "no water was drawn". The Fresnel term is evaluated in SkyRender's vertex shader
 from the live camera, so it also follows the camera in the fly-through.
 
-Not modelled: no reflection or refraction buffer, no flow, no sun sparkle.
+Not modelled: no reflection or refraction buffer (the reflection is one sky colour), no flow, one noise layer of three.
 
 ### Projected coverings — MATO (`--no-coverings` to drop)
 

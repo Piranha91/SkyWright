@@ -212,7 +212,8 @@ readonly record struct WaterPlane(float Z,                                      
                                   float Fresnel,                                  // WATR.WaterFresnel, used as Schlick F0
                                   string Label,
                                   float FogNear, float FogFar, float FogAmount,   // WATR above-water fog (depth fog)
-                                  float NoiseFalloff);                            // WATR.NoiseFalloff (reflection distance blend)
+                                  float NoiseFalloff,                             // WATR.NoiseFalloff (reflection distance blend)
+                                  Vector3 Spec);                                  // WATR sun specular power, sun specular magnitude, depth specular lighting
 
 static class TexturedScene
 {
@@ -1616,6 +1617,11 @@ static class TexturedScene
                 ReflectsSky = !waterLegacy,
                 NoiseFalloff = waterLegacy ? 0f : wpl.NoiseFalloff,
                 DepthFog = waterLegacy || wpl.FogFar <= 0f ? null : new WaterDepthFog(wpl.FogNear, wpl.FogFar, wpl.FogAmount),
+                // Per pixel (the default): the water depth along each pixel's view ray against the
+                // opaque scene, the engine's refraction weight and far-distance mirror, and the WATR's
+                // sun specular. VP_WATER_VERTEX=1 keeps the earlier per-vertex vertical-depth path.
+                PerPixelDepth = !waterLegacy && Environment.GetEnvironmentVariable("VP_WATER_VERTEX") != "1",
+                SunSpecularPower = wpl.Spec.X, SunSpecularMagnitude = wpl.Spec.Y, DepthSpecularLighting = wpl.Spec.Z,
             };
             var wdata = WorldMeshBuilder.BuildWater(
                 new WaterSurface(wpl.Z, wpl.X0, wpl.Y0, wpl.X1, wpl.Y1, wmat) { Label = wpl.Label }, terrainHeightAt);
@@ -1634,12 +1640,15 @@ static class TexturedScene
                             + $"{waterPlanes[0].Label} at z {waterPlanes[0].Z:0}"
                             + (waterPlanes.Any(w => w.NoiseTexture is { Length: > 0 })
                                 ? ", noise layer bound as a wave normal map" : ", no noise texture resolved")
-                            + " (sky reflection, Fresnel and WATR depth fog; no reflection/refraction buffers or flow — see README)");
+                            + (Environment.GetEnvironmentVariable("VP_WATER_VERTEX") == "1"
+                                ? " (sky reflection, Fresnel and WATR depth fog per vertex; no reflection/refraction buffers or flow — see README)"
+                                : " (sky reflection, Fresnel, sun specular, WATR depth fog per pixel along the view ray; no reflection/refraction buffers or flow — see README)"));
         foreach (var wk in waterPlanes.GroupBy(w => w.Label).Select(g => g.First()))
             Console.WriteLine($"      {wk.Label}: shallow {wk.ShallowColor:0.000} deep {wk.DeepColor:0.000} "
                             + $"reflection {wk.ReflectionColor:0.000} reflectivity {wk.Reflectivity:0.###} "
                             + $"fresnel {wk.Fresnel:0.###} opacity {wk.Opacity:0.###} "
-                            + $"fog near {wk.FogNear:0.#} far {wk.FogFar:0.#} amount {wk.FogAmount:0.###} noise falloff {wk.NoiseFalloff:0.#}");
+                            + $"fog near {wk.FogNear:0.#} far {wk.FogFar:0.#} amount {wk.FogAmount:0.###} noise falloff {wk.NoiseFalloff:0.#} "
+                            + $"sun specular power {wk.Spec.X:0.##} magnitude {wk.Spec.Y:0.###} depth specular {wk.Spec.Z:0.###}");
         // HOW MUCH of the water footprint is actually below the surface. The number that tells a
         // wrong HEIGHT from an honest absence: a sea whose floor is mostly above the surface is a
         // height bug, while a low percentage over a mountain cell is just a mountain. Without it,
