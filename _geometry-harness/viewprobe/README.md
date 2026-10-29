@@ -256,13 +256,41 @@ A successful save or size check alone does not establish clean pixels.
   - **Grass LOD** has no switch of its own: vanilla has none, and DynDOLOD bakes it into level-4 object LOD
     (`grasspassthru` shapes), so it draws with `--lod` when that output is in the load order. The lab order has
     none, so it is untested here.
-  - **Not drawn:** DynDOLOD's dynamic LOD (DynDOLOD.esp references switched by its SKSE plugin), and full grass
-    (LAND-placed GRAS) in the loaded cells, LOD or not. LOD is not shown to the interactive window's picker.
+  - **Not drawn:** DynDOLOD's dynamic LOD (DynDOLOD.esp references switched by its SKSE plugin). Full grass in the
+    drawn cells is the grass layer below, not LOD. LOD is not shown to the interactive window's picker.
   - **Cost, measured on the Riverwood aerial** (A pose, `--weather SkyrimClear`, 1920×1080, two runs each): 18.6–18.8 s
     without `--lod` (unchanged from before the feature: 19.6–20.7 s on the same machine earlier, identical pixels and
     console), 27.6–28.1 s with it: read + build 4.3–4.4 s, textures + upload 3.9 s, final frame 63 ms. About 308 terrain,
     370 object and 80 tree meshes (1.5 M triangles). `--ring visible --lod` on the same pose: 29.6 s; on the
     horizon pose (eye 17000,-47000,8000, yaw 0, pitch 8): 36.0 s, final frame 267 ms.
+- **Grass: on by default, `--no-grass` to leave it out** (exteriors; 2026-10-29; `GrassLayer.cs`, SkyRender.World
+  `GrassPlacer` + `GlWorldFactory.CreateGrass`). The grass the game draws in loaded exterior cells: each drawn cell's
+  base and alpha layers name their LTEX, whose grass list (GNAM) names the GRAS records; SkyRender grows them on the
+  drawn ground by the engine's rules (density times each texture's share of the ground, candidate spacing from the
+  position range capped by `iMinGrassSize`, slope and water rules, size, turn, fit to slope, brightness from the LAND
+  vertex colour) and draws each type and model shape as one instanced mesh, lit by the sun under its shadows plus
+  the ambient, alpha-faded out at `fGrassStartFadeDistance` + `fGrassFadeRange`, casting no shadow.
+  - **Positions are not the game's.** The engine draws them from a shared random generator whose state no source
+    gives; SkyRender seeds its own per cell, texture, grass and patch, so a frame is repeatable and the density and
+    spread follow the GRAS records, but individual tufts do not line up with a game screenshot. Clashes with grass
+    therefore read as "grass grows here", not "this tuft is there".
+  - **Settings:** the profile's `Skyrim.ini` then `SkyrimPrefs.ini` `[Grass]` keys `iMinGrassSize`,
+    `iMaxGrassTypesPerTexure`, `fGrassStartFadeDistance`, `fGrassFadeRange`, `fTexturePctThreshold`; absent keys
+    take the engine defaults (20, 2, 7000, 1000, 0). The lab profile sets only the start fade (7000). The console's
+    `grass:` line names what it read, the instance counts per GRAS, and `grass timing:` the cost.
+    `VP_GRASS_SHAPES=1` prints each grass model's shapes (vertices, vertex colours, alpha test, texture).
+  - **Where:** the drawn terrain cells (the 3x3, or `--ring` cells), with the cell's water height for the water
+    rules; patches beyond the fade from the eye are skipped (they draw nothing), except in `--interactive`. Not drawn
+    with `--no-terrain`, `--depth-measurement`, in interiors, or on a retained walk (`--reuse-*`: the retained sheets
+    keep no landscape-texture identities; the console says so). No wind (a still frame).
+  - **Cost, measured on Riverwood** (lab, 1920 px, the game running in parallel): aerial A pose 18.5-19.0 s without
+    grass, 18.7-19.0 s with it (place 19 ms, models + textures + upload 75-83 ms; 14,900 instances of 7 types on 9
+    cells, all beyond the fade from that eye, so the frame is pixel-identical); close-up C pose 15,906 instances,
+    place 22 ms, upload 132 ms. That is far under "a few seconds", so grass is on by default.
+  - **Against the game** (lab, SkyrimClear noon, grass on, 2026-10-29; sheets in
+    `S:\Dev\skyrender-split\_ingame\grass_20261029-140936\`): grass grows where the game has it, but draws about
+    2.5x too bright (yellow where the game is a dark green). The cause is open (see SkyRender's RENDERING_PIPELINE
+    "Grass"); judge grass by where it grows, not by its colour.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
   navmesh vertex positions one plugin's version has and the other's does not, drawn in every panel
   that contains them, always visible. `--no-nav-diff` drops them.
@@ -289,6 +317,7 @@ A successful save or size check alone does not establish clean pixels.
   | Environment maps (slot-4 cube map, slot-5 mask) on lighting shapes | on | `VP_NO_ENVMAP=1` |
   | Visible-cell ring | off (the 3x3) | `--ring visible` / `--ring N` (load time grows with the cells) |
   | Distant LOD (terrain, objects, trees beyond the loaded cells) | off | `--lod` (adds about 9 s on the Riverwood aerial) |
+  | Near-field grass (LAND-placed GRAS in the drawn cells) | on | `--no-grass` (costs about 0.1 s on Riverwood) |
 
   The default exterior weather follows the region, as the game picks it: Riverwood's region
   WeatherPineForest gives SkyrimCloudy (35 of 100), so match an in-game capture taken with

@@ -175,6 +175,7 @@ Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance",
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
 profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
 string profileDir = Path.Combine(Instance, "profiles", profileName);
+ViewProbe.GrassLayer.ProfileDir = profileDir;   // grass reads the profile's [Grass] INI settings (GrassLayer.cs)
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
@@ -675,6 +676,8 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
     else if (args[i] == "--lod") ViewProbe.DistantLodLayer.Requested = true;
+    else if (args[i] == "--no-grass") ViewProbe.GrassLayer.Requested = false;
+    else if (args[i] == "--grass") ViewProbe.GrassLayer.Requested = true;
     else if (args[i] == "--ring" && i + 1 < args.Length)
     {
         ringMode = args[++i].ToLowerInvariant();
@@ -1924,6 +1927,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // order, so terrain quadrants can be drawn with their real winning textures.
                 if (rec is ILandscapeTextureGetter lt)
                 {
+                    ViewProbe.GrassLayer.NoteLtex(lt);   // its grasses (LTEX GNAM), for the grass layer
                     if (lt.TextureSet.FormKeyNullable is { } ts) ltexToTxst[lt.FormKey] = ts;
                     if (!string.IsNullOrWhiteSpace(lt.EditorID)) ltexEditorId[lt.FormKey] = lt.EditorID!;
                     continue;
@@ -1945,7 +1949,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (rec is IRegionGetter regn) ViewProbe.SceneWeather.NoteRegion(regn);
                 if (rec is ICellGetter wcell && !wcell.Flags.HasFlag(Cell.Flag.IsInteriorCell)) ViewProbe.SceneWeather.NoteCell(wcell);
                 if (rec is IWorldspaceGetter wrld && wrld.FormKey == targetWorldspace) ViewProbe.SceneWeather.WorldClimate = wrld.Climate.FormKeyNullable;
-                if (rec is IWorldspaceGetter wrldAny) ViewProbe.DistantLodLayer.Note(wrldAny);   // --lod: which LOD files (DistantLodLayer.cs)
+                if (rec is IWorldspaceGetter wrldAny) ViewProbe.DistantLodLayer.Note(wrldAny);
+                if (rec is IGrassGetter gras) ViewProbe.GrassLayer.NoteGrass(gras);   // GRAS: the grass layer's types (GrassLayer.cs)   // --lod: which LOD files (DistantLodLayer.cs)
                 // Every WTHR is kept; SceneWeather.Resolve picks one once the target is known.
                 if (rec is IWeatherGetter wthr)
                 {
@@ -2915,6 +2920,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // LAND layer census callback and therefore cannot enter this retained branch.
         if (retainedWalkHit && (drawTerrain || drawWater) && !interior && targetGrid is not null)
         {
+            // The retained walk keeps the terrain sheets, not each layer's LTEX: no grass lists to grow from.
+            ViewProbe.GrassLayer.NoCellsWhy = "a retained walk keeps no landscape-texture identities (run without the reuse options)";
             foreach (var p in retainedWalk!.TerrainPatches)
                 terrainPatches[p.Diffuse] = p.Triangles.ToList();
             foreach (var l in retainedWalk.TerrainLayers)
@@ -3163,6 +3170,47 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     if (tris.Count > 0) terrainLayers.Add((lyrTex, tris));
                 }
             }
+            // ---- GRASS (GrassLayer.cs): one TerrainCell per drawn cell, each quadrant's base and alpha layers
+            // named by their LTEX so each carries that texture's grass list (LTEX GNAM), in the terrain's blend
+            // order; the water height each cell's grass water rule tests (the cell's own, else the worldspace
+            // default; none for a cell without water).
+            ViewProbe.GrassLayer.Cells.Clear();
+            ViewProbe.GrassLayer.WaterHeights.Clear();
+            if (ViewProbe.GrassLayer.Requested && drawTerrain)
+                foreach (var ((gx, gy), _) in landWin.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
+                {
+                    var hgt = landHeights[(gx, gy)];
+                    var flat = new float[SkyRender.World.TerrainCell.Side * SkyRender.World.TerrainCell.Side];
+                    for (int y = 0; y < SkyRender.World.TerrainCell.Side; y++)
+                        for (int x = 0; x < SkyRender.World.TerrainCell.Side; x++)
+                            flat[y * SkyRender.World.TerrainCell.Side + x] = hgt[x, y];
+                    var gcell = new SkyRender.World.TerrainCell(gx, gy, flat)
+                    {
+                        Normals = terrainExtras.Normals.TryGetValue((gx, gy), out var gn) ? gn : null,
+                        Colors = terrainExtras.Colors.TryGetValue((gx, gy), out var gc) ? gc : null,
+                    };
+                    var census = landLayers.TryGetValue((gx, gy), out var cl) ? cl : new();
+                    for (int q = 0; q < 4; q++)
+                    {
+                        var baseLayer = census.Where(l => !l.Alpha && l.Quadrant == q).Select(l => l.Tex).FirstOrDefault();
+                        var alpha = census.Where(l => l.Alpha && l.Quadrant == q && l.Opacity is not null).OrderBy(l => l.Layer)
+                            .Select(l => new SkyRender.World.TerrainLayer(
+                                new SkyRender.World.TerrainTexture(QuadDiffuse(l.Tex) ?? "") { Grasses = ViewProbe.GrassLayer.GrassesFor(l.Tex) },
+                                l.Opacity!))
+                            .ToList();
+                        gcell.Quadrants[q] = new SkyRender.World.TerrainQuadrant
+                        {
+                            Base = new SkyRender.World.TerrainTexture(QuadDiffuse(baseLayer) ?? "") { Grasses = ViewProbe.GrassLayer.GrassesFor(baseLayer) },
+                            Layers = alpha,
+                        };
+                    }
+                    ViewProbe.GrassLayer.Cells.Add(gcell);
+                    if (cellWater.TryGetValue((gx, gy), out var cw) && cw.Has)
+                    {
+                        float wh = cw.Height != float.MaxValue ? cw.Height : wsDefaultWaterHeight;
+                        if (wh != float.MaxValue) ViewProbe.GrassLayer.WaterHeights[(gx, gy)] = wh;
+                    }
+                }
             // VP_ALPHA_DUMP=gx,gy prints every alpha layer of that cell as a 17x17 opacity grid, in
             // the SAME orientation the geometry builder reads it (lx fastest, ly down). It exists to
             // settle one question that no amount of looking at a render can: whether Position is

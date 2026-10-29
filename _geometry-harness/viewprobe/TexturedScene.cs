@@ -1747,6 +1747,84 @@ static class TexturedScene
             Console.WriteLine($"      {100.0 * waterSubmerged / waterSamples:0.0}% of the water footprint has LAND "
                             + $"BELOW the surface (the rest is dry ground, and correctly hides it)");
 
+        // ---- GRASS (default on, --no-grass; GrassLayer.cs) -------------------------------------
+        // The GRAS the drawn cells' landscape textures list, placed by SkyRender.World's GrassPlacer on the
+        // same ground the terrain draws and drawn instanced: one mesh per grass type and model shape. The
+        // models load through the same NIF builder and resolver as every static, in their own space (the
+        // instances place them). Cells beyond the grass fade from the eye are skipped (they would draw
+        // nothing), except in the fly-through, which can move the eye.
+        if (GrassLayer.Requested && depthMeasurement is null)
+        {
+            var grassSw = System.Diagnostics.Stopwatch.StartNew();
+            if (GrassLayer.Cells.Count == 0)
+            {
+                if (GrassLayer.NoCellsWhy is { } gw) Console.WriteLine($"   grass: not drawn - {gw}");
+            }
+            else
+            {
+                var gset = GrassLayer.Settings(out var gsrc);
+                var placement = GrassPlacer.Place(GrassLayer.Cells, gset,
+                    c => GrassLayer.WaterHeights.TryGetValue((c.GridX, c.GridY), out var wh) ? wh : null,
+                    interactive is null ? cam.Eye : null);
+                double placeMs = grassSw.Elapsed.TotalMilliseconds;
+                int grassShapes = 0, grassNoTexture = 0;
+                var glGrass = GlWorldFactory.CreateGrass(placement, type =>
+                {
+                    string? abs = resolver.ResolveAssetPath(type.ModelPath);
+                    if (abs is null) return null;
+                    List<NifMeshBuilder.BuiltMesh> built;
+                    try { built = builder.BuildFromFile(abs).ToList(); }
+                    catch (Exception ex) { logger.LogError($"grass model '{type.ModelPath}'", ex); return null; }
+                    var shapes = new List<GlMesh>();
+                    foreach (var b in built)
+                    {
+                        if (b.Positions.Length == 0 || b.Indices.Length == 0 || b.HasEffectShader) continue;
+                        var gm = new GlMesh();
+                        gm.Upload(Interleave(b.Positions, b.Normals, b.TextureCoordinates, b.Tangents, b.Bitangents, b.VertexColors), b.Indices);
+                        gm.ShapeName = $"grass:{Path.GetFileNameWithoutExtension(type.ModelPath)}:{b.ShapeName}";
+                        gm.HasVertexColors = b.VertexColors is { Length: > 0 };
+                        gm.IsDoubleSided = b.IsDoubleSided;
+                        int dh = b.TexturePaths.TryGetValue(0, out var gt0) && gt0 is { Length: > 0 }
+                            ? LoadObservedTexture("dynamic-grass", gt0) : textures.WhiteTexture;
+                        if (dh == textures.WhiteTexture) grassNoTexture++;
+                        gm.DiffuseTexture = dh;
+                        // The NIF's own alpha-test threshold; 128 (the usual cutout reference) when it has none.
+                        gm.AlphaThreshold = b.HasAlphaTest ? b.AlphaThreshold : 128f / 255f;
+                        if (Environment.GetEnvironmentVariable("VP_GRASS_SHAPES") == "1")
+                        {
+                            var vc = b.VertexColors;
+                            string vcs = vc is { Length: > 0 }
+                                ? $"vc mean ({vc.Average(c => c.X):0.00},{vc.Average(c => c.Y):0.00},{vc.Average(c => c.Z):0.00},a{vc.Average(c => c.W):0.00})"
+                                : "no vc";
+                            Console.WriteLine($"     grass shape {gm.ShapeName}: {b.Positions.Length} verts, {b.Indices.Length / 3} tris, {vcs}, "
+                                            + $"alpha test {b.HasAlphaTest} {b.AlphaThreshold * 255f:0}, blend {b.HasAlphaBlend}, two-sided {b.IsDoubleSided}, "
+                                            + $"sf1=0x{b.ShaderFlags1:X8} sf2=0x{b.ShaderFlags2:X8} type {b.ShaderType}, tex0 {gt0}, "
+                                            + $"y {b.Positions.Min(v => v.Y):0}..{b.Positions.Max(v => v.Y):0}");
+                        }
+                        shapes.Add(gm);
+                        grassShapes++;
+                    }
+                    return shapes;
+                });
+                foreach (var m in glGrass.Meshes)
+                {
+                    renderer.AddMesh(m);
+                    meshes.Add(m);
+                }
+                Console.WriteLine($"   grass: {placement.InstanceCount:N0} instance(s) of {placement.Types.Count(t => t.Instances.Count > 0)} type(s) "
+                                + $"({glGrass.Meshes.Count} instanced mesh(es)) on {placement.CellsPlaced} cell(s), {placement.PatchesPlaced:N0} patch(es); "
+                                + $"{placement.CellsOutOfReach} cell(s) beyond the fade ({gset.Reach:0} u); settings: {gsrc}"
+                                + $"; {GrassLayer.TypesSeen} GRAS in the load order");
+                foreach (var t in placement.Types.Where(t => t.Instances.Count > 0).OrderByDescending(t => t.Instances.Count))
+                    Console.WriteLine($"     grass {t.Type.ModelPath}: {t.Instances.Count:N0} of {t.Candidates:N0} candidate(s); density {t.Type.Density}%, "
+                                    + $"position range {t.Type.PositionRange:0.#}, height range {t.Type.HeightRange:0.##}, colour range {t.Type.ColorRange:0.##}, "
+                                    + $"slope {t.Type.MinSlope}-{t.Type.MaxSlope}, flags {t.Type.Flags}, brightness mean {t.Instances.Average(i => i.Shade):0.00}"
+                                    + (glGrass.MissingModels.Contains(t.Type) ? " - MODEL NOT FOUND, not drawn" : ""));
+                if (grassNoTexture > 0) Console.WriteLine($"   grass: {grassNoTexture} shape(s) without a diffuse (drawn white)");
+                Console.WriteLine($"   grass timing: place {placeMs:0} ms, models + textures + upload {grassSw.Elapsed.TotalMilliseconds - placeMs:0} ms");
+            }
+        }
+
         // ---- DISTANT LOD (--lod, opt-in; DistantLodLayer.cs) --------------------------------
         // Terrain, object and tree LOD beyond the loaded cells, picked for this camera the way the
         // engine picks blocks, and cut away under every cell whose terrain this frame draws (and the
