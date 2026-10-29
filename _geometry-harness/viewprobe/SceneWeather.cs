@@ -15,16 +15,26 @@ namespace ViewProbe;
 /// surface seen from above reflects); the ambient is the directional ambient's +Z colour (what an
 /// up-facing surface receives), not the six-direction ambient; fog is the slot's fog near/far
 /// colours with the day or night fog distances (WTHR has only those two; sunrise and sunset take
-/// the day distances). Not modelled: the weather's image space (HDR, tint, exposure), clouds, the
-/// sun's direction from the climate, and blending between slots.
+/// the day distances). The slot's image space (IMGS) scales the sun by its HDR sunlight scale and
+/// grades the frame (SkyRender ImageSpaceFinish; --no-imagespace turns it off). Not modelled: bloom,
+/// eye adaptation over time, clouds, the sun's direction from the climate, and blending between slots.
 /// </summary>
 internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Sunlight, V3 AmbientUp,
     V3 FogNearColor, V3 FogFarColor, float FogNear, float FogFar, float FogPower, float FogMax)
 {
     /// <summary>The slot's image space (IMGS), or null.</summary>
     internal FormKey? ImageSpace { get; init; }
-    /// <summary>That image space's values once the walk has seen it (diagnostic: printed, not applied).</summary>
+    /// <summary>That image space's values once the walk has seen it (printed).</summary>
     internal static string? ImageSpaceText;
+    /// <summary>That image space's HDR / cinematic / tint values, applied as SkyRender's image-space
+    /// finish (and its sunlight scale on the sun) unless --no-imagespace.</summary>
+    internal static ImageSpaceValues? ImageSpaceData;
+    /// <summary>--no-imagespace: light from the weather but leave the frame ungraded.</summary>
+    internal static bool ImageSpaceOff;
+    /// <summary>--adapt-lum X: the adapted scene luminance (the engine's contrast pivot). The default
+    /// is the value read from the retail adaptation texture at SkyrimClear noon (0.36-0.375 over
+    /// the frame; see the viewprobe README), since one frame has no adaptation history.</summary>
+    internal static float AdaptedLuminance = 0.367f;
     /// <summary>The --weather argument (an EditorID or a FormKey such as 00081A:Skyrim.esm), or null.</summary>
     internal static string? Requested;
     /// <summary>The --weather-slot argument.</summary>
@@ -66,12 +76,20 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
     {
         if (wanted is not { } k || i.FormKey != k) return;
         var h = i.Hdr; var c = i.Cinematic; var t = i.Tint;
+        ImageSpaceData = new ImageSpaceValues(i.EditorID ?? i.FormKey.ToString(),
+            h?.White ?? 1f, h?.SunlightScale ?? 1f, h?.SkyScale ?? 1f,
+            c?.Saturation ?? 1f, c?.Brightness ?? 1f, c?.Contrast ?? 1f,
+            t is null ? V3.One : new V3(t.Color.R / 255f, t.Color.G / 255f, t.Color.B / 255f), t?.Amount ?? 0f);
         ImageSpaceText = $"{i.EditorID ?? i.FormKey.ToString()}: HDR eye adapt speed {h?.EyeAdaptSpeed:0.###} strength {h?.EyeAdaptStrength:0.###}, "
                        + $"bloom blur {h?.BloomBlurRadius:0.###} scale {h?.BloomScale:0.###} threshold {h?.BloomThreshold:0.###} receive {h?.ReceiveBloomThreshold:0.###}, "
                        + $"white {h?.White:0.###}, sunlight scale {h?.SunlightScale:0.###}, sky scale {h?.SkyScale:0.###}; "
                        + $"cinematic saturation {c?.Saturation:0.###} brightness {c?.Brightness:0.###} contrast {c?.Contrast:0.###}; "
                        + $"tint {t?.Color} x {t?.Amount:0.###}";
     }
+
+    /// <summary>One IMGS's values, copied out of the record.</summary>
+    internal sealed record ImageSpaceValues(string Name, float White, float SunlightScale, float SkyScale,
+        float Saturation, float Brightness, float Contrast, V3 TintColor, float TintAmount);
 
     public override string ToString()
         => $"{Name} ({Slot}): sky {SkyUpper:0.000}, sun {Sunlight:0.000}, ambient +Z {AmbientUp:0.000}, "

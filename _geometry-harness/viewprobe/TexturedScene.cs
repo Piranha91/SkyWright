@@ -643,6 +643,7 @@ static class TexturedScene
         // --weather (SceneWeather.cs): the WTHR's sky, sun, ambient and fog replace the fixed studio
         // lights. The sun keeps the fixed direction above; there is no fill light in the engine.
         renderer.Fog = null;
+        renderer.ImageSpace = null;
         renderer.SkyColor = null;
         renderer.Lights[0].Color = new GlVec3(1f, 1f, 1f);   // a reused renderer may carry a weather's ambient
         if (SceneWeather.Requested is not null && SceneWeather.Current is null)
@@ -653,8 +654,14 @@ static class TexturedScene
             renderer.SkyColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
             renderer.Lights[0].Color = new GlVec3(sw.AmbientUp.X, sw.AmbientUp.Y, sw.AmbientUp.Z);
             renderer.SetAmbientIntensity(1f);
-            renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 1f,
+            // The image space: the engine scales the sun's colour by its HDR sunlight scale and
+            // finishes the frame with its tone map and cinematic grade (SkyRender ImageSpaceFinish).
+            var isd = SceneWeather.ImageSpaceOff ? null : SceneWeather.ImageSpaceData;
+            renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: isd?.SunlightScale ?? 1f,
                                  new GlVec3(sw.Sunlight.X, sw.Sunlight.Y, sw.Sunlight.Z));
+            if (isd is not null)
+                renderer.ImageSpace = new ImageSpaceFinish(isd.White, isd.Saturation, isd.Brightness, isd.Contrast,
+                    new GlVec3(isd.TintColor.X, isd.TintColor.Y, isd.TintColor.Z), isd.TintAmount, SceneWeather.AdaptedLuminance);
             renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
             renderer.Fog = sw.FogFar > sw.FogNear
                 ? new DistanceFog(new GlVec3(sw.FogNearColor.X, sw.FogNearColor.Y, sw.FogNearColor.Z),
@@ -662,7 +669,8 @@ static class TexturedScene
                                   sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
                 : null;
             Console.WriteLine($"   weather: {sw}");
-            if (SceneWeather.ImageSpaceText is { } ist) Console.WriteLine($"   weather image space (not applied): {ist}");
+            if (SceneWeather.ImageSpaceText is { } ist)
+                Console.WriteLine($"   weather image space ({(isd is null ? "not applied" : $"applied, adapted luminance {SceneWeather.AdaptedLuminance:0.###}; bloom, eye adaptation and sky scale not modelled")}): {ist}");
         }
         var meshes = new List<GlMesh>();
         var borrowedNpcMeshes = new List<GlMesh>();

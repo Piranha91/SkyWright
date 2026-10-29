@@ -245,9 +245,15 @@ A successful save or size check alone does not establish clean pixels.
   colour (and what water reflects) is its sky-upper colour, the sun colour its sunlight colour, the
   ambient its directional ambient's +Z colour, and SkyRender's distance fog takes its fog near/far
   colours and the day (or night) fog distances, power and max. The sun keeps the fixed direction;
-  `--sky` still wins for the background. Not modelled: the weather's image space (eye adaptation,
-  cinematic brightness), so a weather-lit render reads darker than the game (about 1.6-2x in the
-  Riverwood aerial). Off by default; a retained walk cannot see the WTHR and says so.
+  `--sky` still wins for the background. The slot's image space (IMGS) is applied too: its HDR
+  sunlight scale multiplies the sun, and SkyRender's `ImageSpaceFinish` grades the frame with its
+  white, saturation, brightness, contrast and tint (the engine's tone map; see SkyRender's
+  RENDERING_PIPELINE.md, "Image space"). The adapted luminance (the contrast pivot) is fixed at
+  0.367, the value read from the retail adaptation texture at SkyrimClear noon; `--adapt-lum X`
+  overrides it and `--no-imagespace` leaves the frame ungraded (the earlier output). Not modelled:
+  bloom, eye adaptation over time, sky scale; a weather-lit Riverwood render is still a little
+  darker and more saturated than the game. Off by default; a retained walk cannot see the WTHR and
+  says so.
 - **Troubleshooting overlay:** `--conflicts emit.json` (paints implicated navmeshes red, doors
   orange, prints the red centroid and a suggested camera), `--red "FORMKEY[:tri]"` by hand.
 - **Compare:** `--compare "A.esp,B.esp"` renders three panels with one camera and stitches them.

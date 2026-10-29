@@ -645,6 +645,8 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--no-terrain-layers") drawTerrainLayers = false;
     else if (args[i] == "--weather" && i + 1 < args.Length) ViewProbe.SceneWeather.Requested = args[++i];
     else if (args[i] == "--weather-slot" && i + 1 < args.Length) ViewProbe.SceneWeather.RequestedSlot = args[++i].ToLowerInvariant();
+    else if (args[i] == "--no-imagespace") ViewProbe.SceneWeather.ImageSpaceOff = true;
+    else if (args[i] == "--adapt-lum" && i + 1 < args.Length) ViewProbe.SceneWeather.AdaptedLuminance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
     else if (args[i] == "--sky" && i + 1 < args.Length)
     {
         ViewProbe.SceneWeather.SkyGiven = true;
