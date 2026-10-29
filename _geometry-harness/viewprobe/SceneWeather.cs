@@ -12,8 +12,9 @@ namespace ViewProbe;
 /// changes. Values are copied out of the record, never held (the walk disposes its overlays).
 ///
 /// What is used, and how far it goes: the sky colour is WTHR's sky-upper colour (what a water
-/// surface seen from above reflects); the ambient is the directional ambient's +Z colour (what an
-/// up-facing surface receives), not the six-direction ambient; fog is the slot's fog near/far
+/// surface seen from above reflects); the ambient is the directional ambient's "Z-" colour, the
+/// light travelling from the sky down (what an up-facing surface receives), not the six-direction
+/// ambient; fog is the slot's fog near/far
 /// colours with the day or night fog distances (WTHR has only those two; sunrise and sunset take
 /// the day distances). The slot's image space (IMGS) scales the sun by its HDR sunlight scale and
 /// grades the frame (SkyRender ImageSpaceFinish; --no-imagespace turns it off). Not modelled: bloom,
@@ -99,7 +100,10 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
         var isp = w.ImageSpaces;
         var ispKey = isp is null ? null : (slot switch { "sunrise" => isp.Sunrise, "sunset" => isp.Sunset, "night" => isp.Night, _ => isp.Day }).FormKeyNullable;
         return new SceneWeather(w.EditorID ?? w.FormKey.ToString(), slot,
-            Pick(w.SkyUpperColor), Pick(w.SunlightColor), C(ambSlot.DirectionalZPlus),
+            // The ambient on an up-facing surface: the DALC "Z-" colour, the light travelling from the
+            // sky to the ground (the Step weather reference's definition of DALC Z-; the in-game
+            // Riverwood aerial matches it, where "Z+" left the ground underlit and cyan).
+            Pick(w.SkyUpperColor), Pick(w.SunlightColor), C(ambSlot.DirectionalZMinus),
             Pick(w.FogNearColor), Pick(w.FogFarColor),
             night ? w.FogDistanceNightNear : w.FogDistanceDayNear,
             night ? w.FogDistanceNightFar : w.FogDistanceDayFar,
@@ -134,7 +138,7 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
         float Saturation, float Brightness, float Contrast, V3 TintColor, float TintAmount);
 
     public override string ToString()
-        => $"{Name} ({Slot}): sky {SkyUpper:0.000}, sun {Sunlight:0.000}, ambient +Z {AmbientUp:0.000}, "
+        => $"{Name} ({Slot}): sky {SkyUpper:0.000}, sun {Sunlight:0.000}, ambient (up-facing, DALC Z-) {AmbientUp:0.000}, "
          + $"fog {FogNearColor:0.000} -> {FogFarColor:0.000} over {FogNear:0}..{FogFar:0} u, power {FogPower:0.##}, max {FogMax:0.##}"
          + (Ambient6.Length == 6 ? $"; directional ambient +X {Ambient6[0]:0.000} -X {Ambient6[1]:0.000} +Y {Ambient6[2]:0.000} "
                                  + $"-Y {Ambient6[3]:0.000} +Z {Ambient6[4]:0.000} -Z {Ambient6[5]:0.000}" : "");

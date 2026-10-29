@@ -675,7 +675,7 @@ static class TexturedScene
                                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ambScale))
                 renderer.SetAmbientIntensity(ambScale);
             // VP_WEATHER_AMBIENT_FROM=0..5: take the ambient from another of the six directional
-            // ambient colours (+X, -X, +Y, -Y, +Z, -Z) instead of +Z, or 6 = their mean.
+            // ambient colours (+X, -X, +Y, -Y, +Z, -Z) instead of -Z, or 6 = their mean.
             if (int.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_FROM"), out var ambFrom)
                 && sw.Ambient6.Length == 6 && ambFrom >= 0 && ambFrom <= 6)
             {

@@ -243,7 +243,9 @@ A successful save or size check alone does not establish clean pixels.
   `00081A:Skyrim.esm`) and `--weather-slot day|sunrise|sunset|night` (default `day`) light the
   scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky
   colour (and what water reflects) is its sky-upper colour, the sun colour its sunlight colour, the
-  ambient its directional ambient's +Z colour, and SkyRender's distance fog takes its fog near/far
+  ambient its directional ambient's "Z-" colour (the light travelling from the sky to the ground,
+  per the Step weather reference; it lights up-facing ground — "Z+" left the Riverwood aerial
+  underlit and cyan against the game), and SkyRender's distance fog takes its fog near/far
   colours and the day (or night) fog distances, power and max. The sun's direction follows the
   target worldspace's climate (CLMT sunrise/sunset) at `--game-hour H` (default 12, the hour the
   in-game captures use), on Community Shaders' sun path (SkySync, its "vanilla" trajectory: east at
@@ -261,7 +263,7 @@ A successful save or size check alone does not establish clean pixels.
   The console also prints the slot's six directional ambient colours. Colour-balance diagnostics
   (not engine behaviour): `VP_WEATHER_NO_FOG=1` drops the fog, `VP_WEATHER_AMBIENT_SCALE=X` scales
   the ambient, `VP_WEATHER_AMBIENT_FROM=0..5` takes the ambient from +X, -X, +Y, -Y, +Z or -Z instead
-  of +Z (6 = their mean).
+  of -Z (6 = their mean; 4 = the earlier +Z).
 - **Troubleshooting overlay:** `--conflicts emit.json` (paints implicated navmeshes red, doors
   orange, prints the red centroid and a suggested camera), `--red "FORMKEY[:tri]"` by hand.
 - **Compare:** `--compare "A.esp,B.esp"` renders three panels with one camera and stitches them.
