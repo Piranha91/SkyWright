@@ -634,6 +634,7 @@ static class TexturedScene
         renderer.EnableBloom = false;                    // deterministic output; no post FX
         renderer.EnableShadows = false;
         renderer.ShadowBounds = null;
+        renderer.PointLights.Clear();
         renderer.EnableAmbientOcclusion = false;
         // The sky. GlRenderer.Render() clears the frame AGAIN with its own ClearColor, so this
         // is the setting that decides the background — the GL.ClearColor in Draw() below only
@@ -1781,6 +1782,52 @@ static class TexturedScene
             FarPlane = FarPlane,
             MaxDistance = 1_000_000f,
         };
+
+        // --cell-lighting (CellLighting.cs): an interior lit by its own XCLL (with the lighting
+        // template's inherited values), its image space and its placed LIGH references.
+        if (CellLighting.Requested && CellLighting.TargetCell is { } litCell)
+        {
+            if (CellLighting.Resolve(litCell) is not { } cl)
+                Console.WriteLine("   cell lighting: the cell has no XCLL (or this walk was retained) - studio lights kept");
+            else
+            {
+                var v = cl.Lighting;
+                renderer.Lights[0].Color = new GlVec3(v.Ambient.X, v.Ambient.Y, v.Ambient.Z);
+                renderer.SetAmbientIntensity(1f);
+                renderer.SetKeyLight(azimuthDeg: v.RotXY, elevationDeg: v.RotZ, intensity01: v.DirectionalFade,
+                                     new GlVec3(v.Directional.X, v.Directional.Y, v.Directional.Z));
+                renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
+                renderer.Fog = v.FogFar > v.FogNear
+                    ? new DistanceFog(new GlVec3(v.FogNearColor.X, v.FogNearColor.Y, v.FogNearColor.Z),
+                                      new GlVec3(v.FogFarColor.X, v.FogFarColor.Y, v.FogFarColor.Z),
+                                      v.FogNear, v.FogFar, v.FogPower > 0f ? v.FogPower : 1f, v.FogMax > 0f ? v.FogMax : 1f)
+                    : null;
+                if (cl.ImageSpace is { } cis && !SceneWeather.ImageSpaceOff)
+                    renderer.ImageSpace = new ImageSpaceFinish(cis.White, cis.Saturation, cis.Brightness, cis.Contrast,
+                        new GlVec3(cis.TintColor.X, cis.TintColor.Y, cis.TintColor.Z), cis.TintAmount, SceneWeather.AdaptedLuminance);
+                // Point lights, nearest the eye first, up to the renderer's limit.
+                var lit = CellLighting.Placed
+                    .Select(p => (P: new Vector3(p.Position.X, p.Position.Y, p.Position.Z), B: CellLighting.Effective(p.Base, p.Ref)))
+                    .Where(p => p.B.Radius > 0f)
+                    // Diagnostic: VP_CELL_LIGHTS=unshadowed drops the shadow-casting lights (drawn unshadowed here).
+                    .Where(p => Environment.GetEnvironmentVariable("VP_CELL_LIGHTS") != "unshadowed" || !p.B.Shadowed)
+                    .Where(p => Environment.GetEnvironmentVariable("VP_CELL_LIGHTS") != "none")
+                    .OrderBy(p => Vector3.Distance(p.P, cam.Eye))
+                    .Take(GlRenderer.MaxPointLights).ToList();
+                foreach (var (p, b) in lit)
+                {
+                    var py = YUp(p);
+                    var col = b.Negative ? -b.Color : b.Color;
+                    renderer.PointLights.Add(new PointLight(new GlVec3(py.X, py.Y, py.Z), new GlVec3(col.X, col.Y, col.Z), b.Radius) { CastsShadow = b.Shadowed });
+                }
+                Console.WriteLine($"   cell lighting: {cl.Text}");
+                if (Environment.GetEnvironmentVariable("VP_CELL_LIGHTS_LIST") == "1")
+                    foreach (var (p, b) in lit)
+                        Console.WriteLine($"     light {b.Name} at ({p.X:0}, {p.Y:0}, {p.Z:0}) colour x fade {b.Color:0.###} radius {b.Radius:0}{(b.Negative ? " NEGATIVE" : "")}{(b.Shadowed ? " shadow-casting" : "")}, {Vector3.Distance(p, cam.Eye):0} u from the eye");
+                Console.WriteLine($"   cell lighting: {lit.Count} of {CellLighting.Placed.Count} placed light(s) drawn as point lights (nearest first)"
+                                  + (lit.Count > 0 ? $"; nearest {lit[0].B.Name} radius {lit[0].B.Radius:0}" : ""));
+            }
+        }
 
         // The sun's shadow (--shadows; on by default with --weather): SkyRender's directional shadow
         // map, fitted to the part of the frame within --shadow-distance. Only the sun casts; the

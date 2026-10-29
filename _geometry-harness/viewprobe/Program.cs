@@ -646,6 +646,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--weather" && i + 1 < args.Length) ViewProbe.SceneWeather.Requested = args[++i];
     else if (args[i] == "--weather-slot" && i + 1 < args.Length) ViewProbe.SceneWeather.RequestedSlot = args[++i].ToLowerInvariant();
     else if (args[i] == "--no-imagespace") ViewProbe.SceneWeather.ImageSpaceOff = true;
+    else if (args[i] == "--cell-lighting") ViewProbe.CellLighting.Requested = true;
     else if (args[i] == "--shadows") ViewProbe.SceneWeather.ShadowsRequested = true;
     else if (args[i] == "--no-shadows") ViewProbe.SceneWeather.ShadowsRequested = false;
     else if (args[i] == "--shadow-distance" && i + 1 < args.Length) ViewProbe.SceneWeather.ShadowDistance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
@@ -1911,6 +1912,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var rec in m.EnumerateMajorRecords())
             {
                 if (bosFill) bosIdx!.Note(rec);
+                ViewProbe.CellLighting.Note(rec);   // --cell-lighting: LIGH, LGTM, IMGS and interior XCLL (CellLighting.cs)
                 stationFloor?.NoteBase(rec);   // the station floor reach's base boxes (FloorFeed)
                 // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
                 // order, so terrain quadrants can be drawn with their real winning textures.
@@ -2493,6 +2495,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         }
 
         var scene = new List<ViewProbe.SceneRef>();
+        ViewProbe.CellLighting.Placed.Clear();
+        ViewProbe.CellLighting.TargetCell = interior ? cellKey : null;
         int fxSkipped = 0, markerSkipped = 0;
         int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
         int bosSwapped = 0, bosRandomCount = 0, bosTransformed = 0, bosReflagged = 0;
@@ -2565,6 +2569,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     bosLabel = BosLabelOf(res, bk0);
                 }
             }
+            // --cell-lighting: every drawn LIGH reference is a point light (CellLighting.cs), model or not.
+            if (ViewProbe.CellLighting.Requested && ViewProbe.CellLighting.Bases.ContainsKey(bk)) ViewProbe.CellLighting.Placed.Add((rPos, bk, r.FormKey));
             if (!baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
             // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
             // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,

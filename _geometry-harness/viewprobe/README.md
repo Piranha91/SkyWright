@@ -239,6 +239,21 @@ A successful save or size check alone does not establish clean pixels.
   with nothing anchoring them); turn both off for an in-game-like interior shot.
 - **Look:** `--sky R,G,B` (0-255 or 0-1; default a pale sky blue `0.70,0.82,0.92`), `--msaa N`
   (default 4, clamped to the context's `GL_MAX_SAMPLES`; 0/1 = off).
+- **Cell lighting (interiors):** `--cell-lighting` lights an interior from its own records instead of
+  the fixed studio lights (`CellLighting.cs`): the cell's XCLL ambient, directional colour (times
+  its fade, at its rotation) and fog, each value the cell marks as inherited taken from its
+  lighting template (LTMP); its image space (XCIM) as SkyRender's image-space finish (adapted
+  luminance from `--adapt-lum`, default 0.367); and every drawn LIGH reference as a SkyRender point
+  light: the base's colour times its fade plus the reference's XLIG fade offset, the base's radius
+  or the reference's XRDS, negative lights subtracting, shadow-casting lights (shadow spot /
+  hemisphere / omni flags) with a cube shadow map (up to four), nearest the eye first, up to 32.
+  The console prints the resolved lighting and how many lights were drawn;
+  `VP_CELL_LIGHTS_LIST=1` lists them, `VP_CELL_LIGHTS=unshadowed|none` drops the shadow-casting
+  ones or all of them (diagnostics). Not modelled: the six-direction ambient, light fade
+  distances, flicker, spot cones, the per-object light limit, eye adaptation. Off by default (the
+  default output and the interior verify render are unchanged). Bannered Mare against the game:
+  warm and shadowed like the game's kitchen and candle shots, but lit surfaces too bright (kitchen
+  frame 56,43,24 vs 46,37,24; beside the central hearth about twice the game's).
 - **Weather:** `--weather NAME` (a WTHR EditorID such as `SkyrimClear`, or a FormKey such as
   `00081A:Skyrim.esm`) and `--weather-slot day|sunrise|sunset|night` (default `day`) light the
   scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky is a
