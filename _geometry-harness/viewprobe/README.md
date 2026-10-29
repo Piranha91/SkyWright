@@ -1065,25 +1065,27 @@ flag someone typed, which is why neither is allowed to be silent.
   refs with a PortalBox or Box primitive, which the marker filter drops and the game never draws —
   as a layer of their own, coloured by provenance, hover-identifiable in the window, counted on the
   console whether drawn or not. Its own section below.
-- **Terrain:** winning LAND heightmaps for the target cell ± 1 ring, painted with each quadrant's
-  winning base landscape texture (LTEX → TXST → diffuse, winner-takes-all), tiled ~256 u/repeat.
-  The heightmaps are kept as a queryable field (`terrainHeightAt`, same 128 u quads and diagonal
-  split the mesh is built from) so the overlay can ask what is buried.
-- **Painted layers (roads) — rendered since 2026-08-27, on by default** (`--no-terrain-layers` turns them off). A Skyrim road is not a placed mesh — it is a landscape texture
-  (`LDirtPath01` and friends) painted onto the terrain as a LAND alpha layer with a 17×17
-  per-quadrant opacity map, so base-layer-only rendering drops every road, path and ground blend.
-  Each alpha layer is its own textured sheet over the base, opacity carried in vertex alpha,
-  triangles nobody painted dropped.
-  - They ride the library's **decal** channel: blended decals draw after the distance-sorted
-    transparent set, in insertion order — the one thing coplanar sheets need, since a distance sort
-    between two layers painted on the same triangle is a coin flip and layer order is the author's
-    stated intent. The navmesh sheet joins the same channel, added after them.
+- **Terrain — drawn by SkyRender natively since 2026-10-29** (`SkyRender.World`; `NativeTerrain.cs`
+  rebuilds per-cell `TerrainCell` data from the walk's terrain sheets, so a retained walk feeds it
+  exactly as a fresh one does). Winning LAND heightmaps for the target cell ± 1 ring; each quadrant's
+  winning base texture (LTEX → TXST, winner-takes-all) with its normal map (TXST `NormalOrGloss`), the
+  LAND vertex normals (VNML) and vertex colours (VCLR). One mesh per cell quadrant, opaque, shadowed
+  like any static. The heightmaps are also kept as a queryable field (`terrainHeightAt`, same 128 u
+  quads and diagonal split the mesh is built from) so the overlay can ask what is buried.
+- **Painted layers (roads), on by default** (`--no-terrain-layers` turns them off). A Skyrim road is not
+  a placed mesh: it is a landscape texture (`LDirtPath01` and friends) painted onto the terrain as a
+  LAND alpha layer with a 17×17 per-quadrant opacity map. SkyRender blends up to eight layers per
+  quadrant **in the shader**, in record order, each "over" the result so far by its opacity, with
+  their normal maps blended the same way. Blend rule and tiling (2048/12 u per repeat) were chosen
+  against in-game DevBench captures of Riverwood (SkyRender's RENDERING_PIPELINE.md, Part 6):
+  the earlier hand-built sheets multiplied each layer by
+  its texture alpha, which is what washed overlapping layers out.
   - **Opacity `Position` is decoded x-fastest** (`ly*17 + lx`). Settled by seam continuity across a
     cell boundary, not by eye — a transposed decode still draws a road-shaped ribbon, so a picture
     cannot settle it; a seam can. `VP_ALPHA_DUMP` re-runs that test.
   - A quadrant with **no base layer** states no ground at all; the stand-in is its most-painted
     alpha layer.
-- Where no texture resolves at all, terrain falls back to an **off-white slope tint**.
+- Where no base texture resolves, the quadrant draws on the white texture (shaded by its normals).
 - **Navmesh overlay:** filled / wire / both; conflict red is reserved for findings and always wins.
   The wire is drawn by viewprobe itself, in its own flat-shaded pass, so an outline is the exact
   palette colour and the hidden layers can drop the depth test. Every edge is walked in short,
@@ -3616,19 +3618,14 @@ cell's structure.
 - Terrain beyond the ±1-cell ring doesn't exist → distant hills show as sky or the off-white
   fallback at frame edges. Ring radius is hardcoded. Small worldspaces show bare sky where the
   worldspace itself ends.
-- The off-white fallback is keyed on "no base texture resolved", not on distance, so a near-field
-  untextured quadrant reads as a bright slab in the foreground.
+- A quadrant whose base texture does not resolve draws white, which reads as a bright slab in the
+  foreground.
 - The behind-geometry test still carries a little slack, so a navmesh a unit or two behind a surface
   is attributed to the wrong dash CATEGORY. With both categories dashed (the default) that has no
   visual effect at all — but it does show up in the counts, and it decides what a single
   `--no-nav-*` toggle suppresses.
-- Painted layers composite as N separately-lit transparent sheets, not as one weighted blend the way
-  the engine does it. Where four or five overlap the result washes out. Baking the layers into one
-  per-cell texture on the CPU would fix that and remove the MSAA non-determinism with it.
-- Layer sheets are coplanar with the base and rely on LEQUAL depth; not z-fight-proof if the base
-  and layer vertices are ever computed differently.
-- Terrain vertex colours (LAND `VertexColors`) are read by the API but not applied. The 256 u/repeat
-  tiling is an eyeballed constant.
+- The terrain tiling (2048/12 u per repeat) and the layer blend rule are empirical matches to
+  in-game captures, not documented engine constants.
 - `--nav both` drops the fill to alpha 0.16, which is present in the data but invisible in the
   picture: measured against `--nav wire` it differs on ~31% of pixels by at most 6/255. Effectively
   a synonym for `wire`.
@@ -3642,8 +3639,8 @@ cell's structure.
 
 ### Water (`--no-water` to drop)
 
-One grid per loaded cell that has water, at that cell's own surface height, depth-tested and never
-depth-writing. A GRID, not a quad: the shallow→deep colour is a function of the real distance down
+One grid per loaded cell that has water, at that cell's own surface height, built and drawn by
+SkyRender (`WorldMeshBuilder.BuildWater`). A GRID, not a quad: the shallow→deep colour is a function of the real distance down
 to the LAND underneath, so a shoreline needs vertices along it to shade against.
 
 Height follows the engine's precedence — `CELL.WaterHeight` when the cell states one, the
@@ -3703,21 +3700,17 @@ that is a refraction effect this renderer cannot do honestly.
 
 Honest divergence, stated rather than buried: in the engine the driving factor is camera distance
 and fog, not depth to the bottom. Depth is used here because this renders floor plans and site
-pictures, where "shallow reads lighter than deep" is the readable, camera-independent behaviour,
-and because a camera-distance ramp would bake into vertex colours and freeze at the entry camera.
+pictures, where "shallow reads lighter than deep" is the readable, camera-independent behaviour.
 
-Opaque water joins the OPAQUE pass and writes depth. Not tidiness — it fixed a layering bug the
-opaque default exposed: terrain paint layers ride the DECAL channel, and decals draw AFTER the
-distance-sorted blend set, so while water was blended the roads and ground blends composited
-straight over the river as quadrant-shaped rectangles of differing tint. (Consequence worth knowing:
-`--pick` over water now reports the water surface, where a blended one used to report the bed.)
+Opaque water joins the OPAQUE pass and writes depth. (Consequence worth knowing: `--pick` over water
+reports the water surface, where a blended one used to report the bed.)
 
 Colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
 `ReflectionColor` and weighted by **Schlick Fresnel with `WaterFresnel` as F0**. That replaced a flat
 `lerp(body, sky, WaterReflectivity)` which mixed 40% pale sky into every vertex regardless of angle:
 the water drew correctly and simply did not READ as water — a failure mode worth naming, because it
-looks exactly like "no water was drawn". Camera-dependent and therefore baked at the ENTRY camera, like the rest of this
-renderer's view-dependent overlay work — exact for a static render, frozen in the fly-through.
+looks exactly like "no water was drawn". The Fresnel term is evaluated in SkyRender's vertex shader
+from the live camera, so it also follows the camera in the fly-through.
 
 Not modelled: no reflection or refraction buffer, no flow, no sun sparkle.
 

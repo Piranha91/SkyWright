@@ -1349,180 +1349,27 @@ static class TexturedScene
             if (refHadCovering) coveringRefs++;
         }
 
-        // TERRAIN — winning LAND heightmap, drawn with each quadrant's winning base landscape
-        // texture (LTEX -> TXST diffuse). Patches whose texture cannot be resolved fall back to
-        // the off-white snow slope tint. Opaque, depth-written.
-        int terrainTexturedPatches = 0, terrainFallbackPatches = 0;
-        // Terrain and water are drawn by SkyRender natively (SkyRender.World): one mesh per cell
-        // quadrant that blends its painted layers in the shader. VP_LEGACY_TERRAIN=1 restores the
-        // hand-built sheets below for side-by-side comparison; they go once the move is signed off.
-        bool legacyTerrain = Environment.GetEnvironmentVariable("VP_LEGACY_TERRAIN") == "1";
-        foreach (var (texPath, patchTris) in terrainPatches)
-        {
-            if (!legacyTerrain) break;
-            if (patchTris.Count == 0) continue;
-            // Terrain has no alpha test, so its texture never reaches depth.
-            int texHandle = texPath.Length > 0 && depthMeasurement is null ? LoadObservedTexture("static-terrain-diffuse", texPath) : staticWhite;
-            bool textured = texPath.Length > 0 && texHandle != staticWhite;
-            if (textured) terrainTexturedPatches++; else terrainFallbackPatches++;
-
-            var tv = new List<Vector3>(); var ti = new List<int>();
-            var tn = new List<Vector3>(); var tc = new List<Vector4>();
-            var tuv = new List<Vector2>();
-            foreach (var (a, b, c) in patchTris)
-            {
-                var nrm = Vector3.Cross(b - a, c - a);
-                nrm = nrm.LengthSquared() > 1e-10f ? Vector3.Normalize(nrm) : Vector3.UnitZ;
-                float flatness = MathF.Max(0f, nrm.Z);                    // Z-up before the swap
-                // Textured ground: near-white vertex colour, slightly darker on steeps so relief
-                // still reads. Where no base texture resolves — which in practice is the far
-                // cells at the edge of the ring — the fallback is an OFF-WHITE slope tint that
-                // reads as distant snow rather than as a green slab pretending to be foreground.
-                var col = textured
-                    ? Vector4.Lerp(new Vector4(0.75f, 0.74f, 0.72f, 1f), new Vector4(1f, 1f, 1f, 1f), flatness * flatness)
-                    : Vector4.Lerp(new Vector4(0.46f, 0.48f, 0.52f, 1f), new Vector4(0.62f, 0.64f, 0.68f, 1f), flatness * flatness);
-                int at = tv.Count;
-                tv.Add(YUp(a)); tv.Add(YUp(b)); tv.Add(YUp(c));
-                // Landscape textures tile; ~2 grid squares (256 units) per repeat reads close to
-                // the game's default land tiling.
-                tuv.Add(new Vector2(a.X / 256f, a.Y / 256f));
-                tuv.Add(new Vector2(b.X / 256f, b.Y / 256f));
-                tuv.Add(new Vector2(c.X / 256f, c.Y / 256f));
-                var ny = YUp(nrm);
-                tn.Add(ny); tn.Add(ny); tn.Add(ny);
-                tc.Add(col); tc.Add(col); tc.Add(col);
-                ti.Add(at); ti.Add(at + 1); ti.Add(at + 2);
-            }
-            var terrainIndices = ti.ToArray();
-            var terrainVertices = Interleave(tv.ToArray(), tn.ToArray(), tuv.ToArray(), tn.ToArray(), tn.ToArray(), tc.ToArray());
-            var retainedTerrain = builtScene?.AcquireMesh("static-terrain", terrainVertices, terrainIndices);
-            var terra = retainedTerrain?.Mesh ?? new GlMesh();
-            bool terrainCreatedNow = retainedTerrain?.CreatedNow ?? true;
-            string? terrainUploadHash = retainedTerrain?.InputSha256;
-            if (graphicsShot is not null && terrainUploadHash is null)
-                terrainUploadHash = BuiltScene.HashArrays(terrainVertices, terrainIndices);
-            if (terrainCreatedNow)
-            {
-                terra.Upload(terrainVertices, terrainIndices);
-                graphicsShot?.MeshUploaded("static-terrain", terra, terrainVertices, terrainIndices);
-            }
-            terra.ShapeName = texPath.Length > 0 ? $"terrain:{texPath}" : "terrain";
-            terra.DiffuseTexture = texHandle;
-            terra.HasVertexColors = true;
-            terra.IsDoubleSided = true;
-            if (terrainCreatedNow)
-            {
-                renderer.AddMesh(terra);
-                builtScene?.AddedToRenderer(terra);
-                graphicsShot?.MeshAdded("static-terrain", terra);
-            }
-            if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain", terra, terrainUploadHash!);
-            if (builtScene is null) meshes.Add(terra);
-            if (interactive is not null)
-            {
-                var ps = new PickShape { Kind = PickKind.Terrain, Verts = tv.ToArray(), Tris = ti.ToArray(), TerrainTex = texPath };
-                ps.ComputeBounds();
-                interactive.PickShapes.Add(ps);
-            }
-        }
-        // PAINTED LAYERS over the base. Roads, paths and every ground blend in Skyrim live here
-        // and nowhere else, so a render without them is a render with no roads in it.
-        //
-        // They ride the library's DECAL channel: blended decals are drawn after the distance-
-        // sorted transparent set, in the order they were added, which is the one thing coplanar
-        // sheets actually need — a distance sort between two layers painted on the same triangle
-        // is a coin flip, and layer order is the author's stated intent. Depth test on (a rock in
-        // front still hides the road), depth write off (they are surface, not occluders).
+        // TERRAIN — drawn by SkyRender natively (SkyRender.World): one mesh per cell quadrant, its
+        // painted layers (roads, paths, every ground blend) blended in the shader over the quadrant's
+        // winning base texture (LTEX -> TXST). Opaque, depth-written, shadowed like any static.
         // Two env toggles for answering "is that wash really this texture, or is something wrong":
         // VP_LAYER_ONLY=<substr> keeps only layers whose diffuse path matches, and
         // VP_LAYER_SOLID=1 ignores the opacity map so the texture is drawn at full strength.
         // Together they isolate one painted layer and show it as itself.
+        int terrainTexturedPatches = 0, terrainFallbackPatches = 0;
         string? layerOnly = Environment.GetEnvironmentVariable("VP_LAYER_ONLY");
         bool layerSolid = Environment.GetEnvironmentVariable("VP_LAYER_SOLID") == "1";
         int layerMeshes = 0;
-        // Paint layers are blended decals that never write depth: the depth-measurement mode does not build them.
+        // The depth-measurement mode reads depth only: painted layers do not change it.
         if (depthMeasurement is not null && terrainLayers.Count > 0)
-            Console.WriteLine($"   terrain paint: {terrainLayers.Count} layer(s) not drawn (--depth-measurement; they write no depth)");
-        foreach (var (texPath, layerTris) in terrainLayers)
+            Console.WriteLine($"   terrain paint: {terrainLayers.Count} layer(s) not drawn (--depth-measurement)");
+        if (terrainPatches.Count > 0)
         {
-            if (!legacyTerrain || depthMeasurement is not null) break;
-            if (layerTris.Count == 0) continue;
-            if (layerOnly is { Length: > 0 } && !texPath.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
-            int texHandle = LoadObservedTexture("static-terrain-layer", texPath);
-            if (texHandle == staticWhite) continue;   // unresolvable: a white sheet is worse than none
-            var lv = new List<Vector3>(); var li = new List<int>();
-            var ln = new List<Vector3>(); var lc = new List<Vector4>();
-            var luv = new List<Vector2>();
-            foreach (var (a, b, c, oa, ob, oc) in layerTris)
-            {
-                var nrm = Vector3.Cross(b - a, c - a);
-                nrm = nrm.LengthSquared() > 1e-10f ? Vector3.Normalize(nrm) : Vector3.UnitZ;
-                float flatness = MathF.Max(0f, nrm.Z);
-                float shade = 0.75f + 0.25f * flatness * flatness;   // same relief cue as the base
-                int at = lv.Count;
-                lv.Add(YUp(a)); lv.Add(YUp(b)); lv.Add(YUp(c));
-                luv.Add(new Vector2(a.X / 256f, a.Y / 256f));
-                luv.Add(new Vector2(b.X / 256f, b.Y / 256f));
-                luv.Add(new Vector2(c.X / 256f, c.Y / 256f));
-                var ny = YUp(nrm);
-                ln.Add(ny); ln.Add(ny); ln.Add(ny);
-                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : oa));
-                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : ob));
-                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : oc));
-                li.Add(at); li.Add(at + 1); li.Add(at + 2);
-            }
-            var layerIndices = li.ToArray();
-            var layerVertices = Interleave(lv.ToArray(), ln.ToArray(), luv.ToArray(), ln.ToArray(), ln.ToArray(), lc.ToArray());
-            var retainedLayer = builtScene?.AcquireMesh("static-terrain-layer", layerVertices, layerIndices);
-            var sheet = retainedLayer?.Mesh ?? new GlMesh();
-            bool layerCreatedNow = retainedLayer?.CreatedNow ?? true;
-            string? layerUploadHash = retainedLayer?.InputSha256;
-            if (graphicsShot is not null && layerUploadHash is null)
-                layerUploadHash = BuiltScene.HashArrays(layerVertices, layerIndices);
-            if (layerCreatedNow)
-            {
-                sheet.Upload(layerVertices, layerIndices);
-                graphicsShot?.MeshUploaded("static-terrain-layer", sheet, layerVertices, layerIndices);
-            }
-            sheet.ShapeName = $"terrain-layer:{texPath}";
-            sheet.DiffuseTexture = texHandle;
-            sheet.HasVertexColors = true;      // the opacity map rides in vertex alpha
-            sheet.HasAlphaBlend = true;
-            sheet.IsDecal = true;              // draw after the sorted set, in insertion order
-            sheet.DepthWrite = false;
-            sheet.IsDoubleSided = true;
-            if (layerCreatedNow)
-            {
-                renderer.AddMesh(sheet);
-                builtScene?.AddedToRenderer(sheet);
-                graphicsShot?.MeshAdded("static-terrain-layer", sheet);
-            }
-            if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain-layer", sheet, layerUploadHash!);
-            if (builtScene is null) meshes.Add(sheet);
-            layerMeshes++;
-        }
-        if (!legacyTerrain && terrainPatches.Count > 0)
-        {
-            // NATIVE TERRAIN. The cells are rebuilt from the same sheets (NativeTerrain), so the
-            // fresh and the retained walk feed it alike; textures load through the same observed
-            // categories as before.
-            // Engine-faithful by default: layers "over" each other by opacity and a 2048/12 texture
-            // repeat, both matched against in-game captures (TERRAIN_WATER_PLAN.md). Comparison knobs:
-            // VP_TERRAIN_BLEND = over (default) | over-alpha (the old sheets' result) | sum, and
-            // VP_TERRAIN_REPEAT = world units per texture repeat.
-            var blendMode = Environment.GetEnvironmentVariable("VP_TERRAIN_BLEND") switch
-            {
-                "over-alpha" => TerrainBlendMode.OverWithTextureAlpha,
-                "sum" => TerrainBlendMode.NormalizedSum,
-                _ => TerrainBlendMode.Over,
-            };
-            var buildOptions = new TerrainBuildOptions
-            {
-                TextureRepeat = float.TryParse(Environment.GetEnvironmentVariable("VP_TERRAIN_REPEAT"),
-                    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rep) && rep > 0f
-                    ? rep : new TerrainBuildOptions().TextureRepeat,
-                Blend = blendMode,
-            };
+            // The cells are rebuilt from the walk's terrain sheets (NativeTerrain), so the fresh and
+            // the retained walk feed it alike; textures load through the observed categories. Blend
+            // and tiling are SkyRender's defaults, matched against in-game captures.
+            var buildOptions = new TerrainBuildOptions();
+            var blendMode = buildOptions.Blend;
             int? LoadNormal(string? path) => path is { Length: > 0 } && depthMeasurement is null
                 && LoadObservedTexture("static-terrain-normal", path) is var nh && nh != staticWhite ? nh : null;
             foreach (var cell in NativeTerrain.FromSheets(terrainPatches, terrainLayers, terrainExtras))
@@ -1582,7 +1429,6 @@ static class TexturedScene
                 }
             if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer(s) blended natively over their quadrants");
         }
-        else if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer sheet(s) drawn over the base");
 
         if (terrainTexturedPatches + terrainFallbackPatches > 0)
             Console.WriteLine($"   terrain paint: {terrainTexturedPatches} textured patch(es), {terrainFallbackPatches} untextured (snow fallback)");
@@ -1598,8 +1444,9 @@ static class TexturedScene
         // to shade against. A single quad would paint the whole sea one flat colour and lose the
         // one cue that makes water read as water from above.
         //
-        // Depth-tested, never depth-writing: terrain and statics standing above the surface hide
-        // it for free, exactly as they should, so there is no need to clip the grid to the coast.
+        // Built and drawn by SkyRender (WorldMeshBuilder.BuildWater): opaque by default, as the engine
+        // draws water, so terrain and statics above the surface hide it without clipping the grid to
+        // the coast. The Fresnel sky mix follows the live camera.
         foreach (var wpl in waterPlanes)
         {
             const int WaterGrid = 48;                 // 4096/48 ~ 85 u per quad — fine enough for a shoreline
@@ -1615,149 +1462,22 @@ static class TexturedScene
                 ? LoadObservedTexture("dynamic-water-normal", wtx) : 0;   // a normal map; never depth
             bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
 
-            if (!legacyTerrain)
+            var wmat = new WaterMaterial(wpl.ShallowColor, wpl.DeepColor, wpl.ReflectionColor, wpl.Reflectivity, wpl.Fresnel)
             {
-                // NATIVE WATER: the same grid, colours and alpha (SkyRender.World); the Fresnel sky
-                // mix is evaluated in the shader from the live camera, so it no longer freezes.
-                var wmat = new WaterMaterial(wpl.ShallowColor, wpl.DeepColor, wpl.ReflectionColor, wpl.Reflectivity, wpl.Fresnel)
-                {
-                    NoiseTexturePath = wpl.NoiseTexture, NoiseUvScale = wpl.NoiseUvScale,
-                    ShallowBand = ShallowBand, ShoreAlpha = shoreAlpha, GridResolution = WaterGrid,
-                };
-                var wdata = WorldMeshBuilder.BuildWater(
-                    new WaterSurface(wpl.Z, wpl.X0, wpl.Y0, wpl.X1, wpl.Y1, wmat) { Label = wpl.Label }, terrainHeightAt);
-                var nwater = new GlMesh();
-                GlWorldFactory.UploadWater(nwater, wdata);
-                graphicsShot?.MeshUploaded("dynamic-water", nwater, wdata.Vertices, wdata.Indices);
-                GlWorldFactory.ApplyWaterMaterial(nwater, wmat, textures.WhiteTexture, hasNoise ? texHandle : null);
-                renderer.AddMesh(nwater);
-                graphicsShot?.MeshAdded("dynamic-water", nwater);
-                meshes.Add(nwater);
-                waterMeshes++; waterTris += wdata.Indices.Length / 3;
-                waterSubmerged += wdata.SubmergedVertexCount; waterSamples += wdata.Positions.Length;
-                continue;
-            }
-            int side = WaterGrid + 1;
-            int submerged = 0;                        // grid points whose LAND sits BELOW the surface
-            var pv = new Vector3[side * side]; var nv = new Vector3[side * side];
-            var uvv = new Vector2[side * side]; var cvv2 = new Vector4[side * side];
-            var tgt = new Vector3[side * side]; var btg = new Vector3[side * side];
-            var idxs = new List<int>(WaterGrid * WaterGrid * 6);
-            float uvScale = wpl.NoiseUvScale > 1e-3f ? wpl.NoiseUvScale : 1024f;
-            for (int gy = 0; gy < side; gy++)
-                for (int gx = 0; gx < side; gx++)
-                {
-                    int i = gy * side + gx;
-                    float x = wpl.X0 + (wpl.X1 - wpl.X0) * gx / WaterGrid;
-                    float y = wpl.Y0 + (wpl.Y1 - wpl.Y0) * gy / WaterGrid;
-                    // Depth to the ground below. No LAND here (off the heightmap) reads as deep
-                    // ocean rather than as shallow — the conservative direction for a coastline.
-                    float? groundZ = terrainHeightAt?.Invoke(x, y);
-                    float depth = groundZ is { } gz ? wpl.Z - gz : ShallowBand;
-                    if (depth > 0f) submerged++;
-                    float t = Math.Clamp(depth / ShallowBand, 0f, 1f);
-                    var body = Vector3.Lerp(wpl.ShallowColor, wpl.DeepColor, t);
-
-                    // SKY REFLECTION, Fresnel-weighted by the record's own WaterFresnel as F0
-                    // (Schlick). This replaced a flat `lerp(body, sky, WaterReflectivity)` that
-                    // mixed 40% pale sky into every vertex regardless of angle and turned the
-                    // Riverwood ford into a grey-green film over sand — the water was drawing
-                    // correctly and simply did not READ as water. Top-down, Schlick with an F0 of
-                    // 0.07 returns almost nothing, so the surface shows its own dark teal, which
-                    // is what water looks like from above; at grazing angles it goes bright.
-                    // Camera-dependent and therefore baked at the ENTRY camera, like the rest of
-                    // this renderer's view-dependent overlay work — exact for a static render,
-                    // frozen in the fly-through.
-                    var toEye = Unit(new Vector3(cam.Eye.X - x, cam.Eye.Y - y, cam.Eye.Z - wpl.Z));
-                    float cosI = MathF.Max(toEye.Z, 0f);              // surface normal is +Z
-                    float f0 = Math.Clamp(wpl.Fresnel, 0f, 1f);
-                    float fres = f0 + (1f - f0) * MathF.Pow(1f - cosI, 5f);
-                    var reflected = skyColor * wpl.ReflectionColor;   // sky, tinted by WATR's own reflection colour
-                    var rgb = Vector3.Lerp(body, reflected, Math.Clamp(fres * wpl.Reflectivity * 4f, 0f, 1f));
-
-                    pv[i] = YUp(new Vector3(x, y, wpl.Z));
-                    nv[i] = YUp(Vector3.UnitZ);
-                    tgt[i] = YUp(Vector3.UnitX);
-                    btg[i] = YUp(Vector3.UnitY);
-                    uvv[i] = new Vector2(x / uvScale, y / uvScale);
-                    // ALPHA. Grounded in the game's own water shader (Community Shaders'
-                    // `package/Shaders/Water.hlsl`), which settles a question guesswork got wrong
-                    // twice here: **Skyrim does not alpha-blend its water at all.** The pixel
-                    // shader writes `psout.Lighting = float4(finalColor, isSpecular)` — the alpha
-                    // channel carries a specular FLAG, not opacity — so the surface is an OPAQUE
-                    // draw, and everything that looks like transparency is done inside the shader
-                    // as `lerp(refractionColor, finalColorPreFog, refractionMul)` against a
-                    // refraction sample. Framebuffer blending is the wrong instrument; it is only
-                    // used here because this renderer has no refraction buffer to lerp against,
-                    // and a blend IS that same lerp with the framebuffer standing in for it.
-                    //
-                    // The shape of the ramp is the shader's too. `VarAmounts` is documented in its
-                    // own cbuffer as "alpha in z", and that value is a FLOOR rather than a level:
-                    //     distanceMul = saturate(lerp(VarAmounts.z, 1, -(distanceFactor - 1)))
-                    // i.e. it starts at the record's alpha and rises to 1 — fully opaque, no
-                    // refraction — as the driving factor closes. So WATR.Opacity is the MOST
-                    // transparent the water ever gets, not how transparent it is. Using it as a
-                    // flat 50% everywhere (the previous version) made an ocean out of tinted air.
-                    //
-                    // Honest divergence, stated rather than buried: in the engine that driving
-                    // factor is camera distance and fog, not depth to the bottom. Depth is used
-                    // here instead because this is a renderer for floor plans and site pictures,
-                    // where "you can see the riverbed through a ford but not through a fjord" is
-                    // the readable, camera-independent behaviour, and because a camera-distance
-                    // ramp would bake into vertex colours and freeze at the entry camera.
-                    // So: OPAQUE by default, which is what the engine draws. The shallow/deep
-                    // information is not lost by that — it rides the COLOUR ramp above, which is
-                    // the shader's own `lerp(ShallowColor, DeepColor, distanceMul)`. What is lost
-                    // is seeing the bed through a ford, and that is a refraction effect this
-                    // renderer cannot do honestly. VP_WATER_SHALLOW_ALPHA=<0..1> puts a
-                    // see-through shore margin back for anyone who wants it for a floor plan.
-                    cvv2[i] = new Vector4(rgb.X, rgb.Y, rgb.Z, shoreAlpha + (1f - shoreAlpha) * t);
-                }
-            for (int gy = 0; gy < WaterGrid; gy++)
-                for (int gx = 0; gx < WaterGrid; gx++)
-                {
-                    // Wind so the geometric normal comes out +Y (up) in viewer space, agreeing
-                    // with the vertex normals. Viewer Z is -y, so advancing gy walks -Z and the
-                    // "obvious" order faces the surface at the sea floor instead of the sky.
-                    int a = gy * side + gx, b2 = a + 1, c2 = a + side, d2 = c2 + 1;
-                    idxs.Add(a); idxs.Add(b2); idxs.Add(c2);
-                    idxs.Add(b2); idxs.Add(d2); idxs.Add(c2);
-            }
-            var water = new GlMesh();
-            var waterIndices = idxs.ToArray();
-            var waterVertices = Interleave(pv, nv, uvv, tgt, btg, cvv2);
-            water.Upload(waterVertices, waterIndices);
-            graphicsShot?.MeshUploaded("dynamic-water", water, waterVertices, waterIndices);
-            water.ShapeName = $"water:{wpl.Label}";
-            water.DiffuseTexture = textures.WhiteTexture;   // WATR has NO diffuse field; colour is the record's
-            if (hasNoise)
-            {
-                // The noise layer is a WAVE NORMAL MAP, bound as one. Binding it as a diffuse
-                // would paint the sea normal-map lilac — the exact defect class this renderer
-                // already carries a filter for.
-                water.NormalTexture = texHandle;
-                water.HasNormalMap = true;
-            }
-            water.HasVertexColors = true;
-            // OPAQUE water joins the opaque pass and writes depth; only a see-through shore margin
-            // needs blending. This is not just tidiness — it fixes a layering bug that the opaque
-            // default exposed. Terrain paint layers ride the DECAL channel, and decals are drawn
-            // AFTER the distance-sorted blend set, so while water was blended the roads and
-            // ground blends composited straight over the top of it: quadrant-shaped rectangles of
-            // differing tint sitting on the river. As opaque geometry the water is simply in the
-            // depth buffer before they draw, and they are correctly hidden beneath it.
-            bool opaqueWater = shoreAlpha >= 0.999f;
-            water.HasAlphaBlend = !opaqueWater;
-            water.SrcBlendIndex = 6; water.DstBlendIndex = 7;
-            water.DepthWrite = opaqueWater;
-            water.IsDoubleSided = true;                     // readable from under the surface too
-            water.MaterialGlossiness = 80f;
-            water.MaterialSpecularStrength = 0.5f;
-            renderer.AddMesh(water);
-            graphicsShot?.MeshAdded("dynamic-water", water);
-            meshes.Add(water);
-            waterMeshes++; waterTris += idxs.Count / 3;
-            waterSubmerged += submerged; waterSamples += side * side;
+                NoiseTexturePath = wpl.NoiseTexture, NoiseUvScale = wpl.NoiseUvScale,
+                ShallowBand = ShallowBand, ShoreAlpha = shoreAlpha, GridResolution = WaterGrid,
+            };
+            var wdata = WorldMeshBuilder.BuildWater(
+                new WaterSurface(wpl.Z, wpl.X0, wpl.Y0, wpl.X1, wpl.Y1, wmat) { Label = wpl.Label }, terrainHeightAt);
+            var nwater = new GlMesh();
+            GlWorldFactory.UploadWater(nwater, wdata);
+            graphicsShot?.MeshUploaded("dynamic-water", nwater, wdata.Vertices, wdata.Indices);
+            GlWorldFactory.ApplyWaterMaterial(nwater, wmat, textures.WhiteTexture, hasNoise ? texHandle : null);
+            renderer.AddMesh(nwater);
+            graphicsShot?.MeshAdded("dynamic-water", nwater);
+            meshes.Add(nwater);
+            waterMeshes++; waterTris += wdata.Indices.Length / 3;
+            waterSubmerged += wdata.SubmergedVertexCount; waterSamples += wdata.Positions.Length;
         }
         if (waterMeshes > 0)
             Console.WriteLine($"   water: {waterMeshes} cell surface(s), {waterTris:N0} triangles — "
