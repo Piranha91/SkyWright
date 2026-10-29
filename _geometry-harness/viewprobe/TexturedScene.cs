@@ -316,6 +316,7 @@ static class TexturedScene
             HasEffectShader = b.HasEffectShader, EffectBaseColor = b.EffectBaseColor,
             EffectBaseColorAlpha = b.EffectBaseColorAlpha, EffectBaseColorScale = b.EffectBaseColorScale,
             EmissiveColor = b.EmissiveColor, EmissiveMultiple = b.EmissiveMultiple,
+            ShaderFlags1 = b.ShaderFlags1, ShaderFlags2 = b.ShaderFlags2, ShaderType = b.ShaderType,
         }).ToList();
     }
 
@@ -518,7 +519,8 @@ static class TexturedScene
         GraphicsReuseRed? graphicsReuseRed = null,      // private graphics-lifetime RED; null is the production path
         GraphicsCell? graphicsCell = null,              // opt-in retained GL owner; null preserves the per-shot path
         string? preparedIdentity = null,                // retained CPU-walk identity; required with graphicsCell
-        DepthMeasurement? depthMeasurement = null)      // --depth-measurement: only alpha-tested diffuses load (DepthMeasurement.cs)
+        DepthMeasurement? depthMeasurement = null,      // --depth-measurement: only alpha-tested diffuses load (DepthMeasurement.cs)
+        NativeTerrainExtras? terrainExtras = null)      // LAND normals / colours and TXST normal maps for the native terrain
     {
         // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
         // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
@@ -1060,6 +1062,9 @@ static class TexturedScene
                 }
                 mesh.ShapeName = b.ShapeName;
                 mesh.HasVertexColors = b.VertexColors is { Length: > 0 };
+                // SLSF2_Tree_Anim: vertex alpha is the wind-sway weight, not opacity. Reading it as
+                // opacity cut most leaf cards away under the alpha test (trees drew as bare trunks).
+                mesh.VertexAlphaIsWindWeight = (b.ShaderFlags2 & (1u << 29)) != 0;
                 mesh.UseAlphaTest = b.HasAlphaTest;
                 mesh.AlphaThreshold = b.AlphaThreshold;
                 mesh.HasAlphaBlend = b.HasAlphaBlend;
@@ -1501,31 +1506,38 @@ static class TexturedScene
             // NATIVE TERRAIN. The cells are rebuilt from the same sheets (NativeTerrain), so the
             // fresh and the retained walk feed it alike; textures load through the same observed
             // categories as before.
-            // Comparison knobs while the engine-faithful blend is chosen: VP_TERRAIN_BLEND =
-            // over-alpha (default, the old sheets' result) | over | sum, and VP_TERRAIN_REPEAT =
-            // world units per texture repeat (default 256).
+            // Engine-faithful by default: layers "over" each other by opacity and a 2048/12 texture
+            // repeat, both matched against in-game captures (TERRAIN_WATER_PLAN.md). Comparison knobs:
+            // VP_TERRAIN_BLEND = over (default) | over-alpha (the old sheets' result) | sum, and
+            // VP_TERRAIN_REPEAT = world units per texture repeat.
             var blendMode = Environment.GetEnvironmentVariable("VP_TERRAIN_BLEND") switch
             {
-                "over" => TerrainBlendMode.Over,
+                "over-alpha" => TerrainBlendMode.OverWithTextureAlpha,
                 "sum" => TerrainBlendMode.NormalizedSum,
-                _ => TerrainBlendMode.OverWithTextureAlpha,
+                _ => TerrainBlendMode.Over,
             };
             var buildOptions = new TerrainBuildOptions
             {
                 TextureRepeat = float.TryParse(Environment.GetEnvironmentVariable("VP_TERRAIN_REPEAT"),
-                    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rep) && rep > 0f ? rep : 256f,
+                    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rep) && rep > 0f
+                    ? rep : new TerrainBuildOptions().TextureRepeat,
+                Blend = blendMode,
             };
-            foreach (var cell in NativeTerrain.FromSheets(terrainPatches, terrainLayers))
+            int? LoadNormal(string? path) => path is { Length: > 0 } && depthMeasurement is null
+                && LoadObservedTexture("static-terrain-normal", path) is var nh && nh != staticWhite ? nh : null;
+            foreach (var cell in NativeTerrain.FromSheets(terrainPatches, terrainLayers, terrainExtras))
                 for (int q = 0; q < 4; q++)
                 {
                     var quad = cell.Quadrants[q]!;
                     string basePath = quad.Base?.DiffusePath ?? "";
                     int baseHandle = basePath.Length > 0 && depthMeasurement is null
                         ? LoadObservedTexture("static-terrain-diffuse", basePath) : staticWhite;
+                    int? baseNormal = LoadNormal(quad.Base?.NormalPath);
                     if (basePath.Length > 0 && baseHandle != staticWhite) terrainTexturedPatches++; else terrainFallbackPatches++;
 
                     var kept = new List<TerrainLayer>();
                     var keptHandles = new List<int>();
+                    var keptNormals = new List<int?>();
                     if (depthMeasurement is null)
                         foreach (var layer in quad.Layers)
                         {
@@ -1536,6 +1548,7 @@ static class TexturedScene
                             if (lh == staticWhite) continue;   // unresolvable: a white layer is worse than none
                             kept.Add(layerSolid ? layer with { Opacity = layer.Opacity.Select(o => o > 0f ? 1f : 0f).ToArray() } : layer);
                             keptHandles.Add(lh);
+                            keptNormals.Add(LoadNormal(layer.Texture.NormalPath));
                         }
                     layerMeshes += kept.Count;
 
@@ -1551,7 +1564,7 @@ static class TexturedScene
                         GlWorldFactory.UploadTerrain(mesh, data);
                         graphicsShot?.MeshUploaded("static-terrain", mesh, data.Vertices, data.Indices);
                     }
-                    GlWorldFactory.ApplyTerrainMaterial(mesh, baseHandle, keptHandles, blendMode);
+                    GlWorldFactory.ApplyTerrainMaterial(mesh, baseHandle, keptHandles, blendMode, baseNormal, keptNormals);
                     if (createdNow)
                     {
                         renderer.AddMesh(mesh);

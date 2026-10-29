@@ -1332,6 +1332,7 @@ var insideMesh = new Dictionary<string, (Aabb? Bounds, TriangleSoup? Soup)>(Stri
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
 var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
+var txstNormal = new Dictionary<FormKey, string>();
 
 // ---- projected coverings (MATO) and water, both winner-takes-all over the load-order walk ----
 // Values are COPIED out of the record getters, never referenced: every mod overlay is opened in a
@@ -1587,7 +1588,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     navVersionPlugins.Clear(); foreach (var plugin in cliNavVersionPlugins) navVersionPlugins.Add(plugin);
     refCellOf.Clear();
     baseMesh.Clear(); baseIsMarker.Clear(); baseEditorId.Clear(); baseType.Clear(); baseObnd.Clear();
-    ltexToTxst.Clear(); ltexEditorId.Clear(); txstDiffuse.Clear();
+    ltexToTxst.Clear(); ltexEditorId.Clear(); txstDiffuse.Clear(); txstNormal.Clear();
     baseMato.Clear(); matoRec.Clear(); watrRec.Clear(); cellWater.Clear();
     wsWater = null; wsDefaultWaterHeight = float.MaxValue;
     cellWaterTruth.Clear(); wsWaterTruth = null; wsDefaultWaterHeightTruth = float.MaxValue;
@@ -1829,7 +1830,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     continue;
                 }
                 if (rec is ITextureSetGetter txst)
-                { if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath; continue; }
+                {
+                    if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath;
+                    if (!string.IsNullOrWhiteSpace(txst.NormalOrGloss?.GivenPath)) txstNormal[txst.FormKey] = txst.NormalOrGloss!.GivenPath;
+                    continue;
+                }
                 // WATR — the water body's own colours and wave-noise layers. Values are COPIED
                 // out, never held: the overlay is disposed at the end of this using block, and a
                 // retained getter would read freed memory.
@@ -1985,6 +1990,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         foreach (var x in f.LtexToTxst) ltexToTxst[x.Key] = x.Value;
         foreach (var x in f.LtexEditorIds) ltexEditorId[x.Key] = x.Value;
         foreach (var x in f.TxstDiffuse) txstDiffuse[x.Key] = x.Value;
+        foreach (var x in f.TxstNormal) txstNormal[x.Key] = x.Value;
         foreach (var x in f.BaseMato) baseMato[x.Key] = x.Value;
         foreach (var x in f.Mato) matoRec[x.Key] = x.Value;
         foreach (var x in f.WaterRecords) watrRec[x.Key] = x.Value;
@@ -2029,7 +2035,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             Navigation = navGraph,
             BaseMeshes = new(baseMesh), MarkerBases = baseIsMarker.ToHashSet(),
             BaseEditorIds = new(baseEditorId), BaseTypes = new(baseType), BaseBounds = new(baseObnd),
-            LtexToTxst = new(ltexToTxst), LtexEditorIds = new(ltexEditorId), TxstDiffuse = new(txstDiffuse),
+            LtexToTxst = new(ltexToTxst), LtexEditorIds = new(ltexEditorId), TxstDiffuse = new(txstDiffuse), TxstNormal = new(txstNormal),
             BaseMato = new(baseMato), Mato = new(matoRec), WaterRecords = new(watrRec),
             CellWater = new(), WorldWater = null, WorldDefaultWaterHeight = float.MaxValue,
             CellWaterTruth = new(), WorldWaterTruth = null, WorldDefaultWaterHeightTruth = float.MaxValue,
@@ -2776,6 +2782,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // whether a triangle is BELOW the ground that gets drawn, which is what separates "buried"
         // from "behind a rock" and earns the two different dashed layers.
         var landHeights = new Dictionary<(int X, int Y), float[,]>();
+        // What the native terrain reads beyond the sheets: LAND normals / colours per square and
+        // each landscape diffuse's TXST normal map.
+        var terrainExtras = new ViewProbe.NativeTerrainExtras();
         // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
         // inside the terrain block (it captures the walked LAND census); null on interiors.
         Func<float, float, string?>? terrainDescribeAt = null;
@@ -2788,7 +2797,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var l in retainedWalk.TerrainLayers)
                 terrainLayers.Add((l.Diffuse, l.Triangles.ToList()));
             foreach (var h in retainedWalk.LandHeights)
+            {
                 landHeights[(h.X, h.Y)] = (float[,])h.Heights.Clone();
+                if (h.Normals is { } hn) terrainExtras.Normals[(h.X, h.Y)] = hn.ToArray();
+                if (h.Colors is { } hc) terrainExtras.Colors[(h.X, h.Y)] = hc.ToArray();
+            }
             int terrTotal = terrainPatches.Values.Sum(v => v.Count);
             if (terrTotal > 0)
                 Console.WriteLine($"   terrain: {landHeights.Count} cell(s) of LAND, {terrTotal:N0} triangles, "
@@ -2880,7 +2893,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             // One rule (TerrainLand.cs, the core's LandHeight.Classify): no LAND leaves the earlier
                             // terrain; a LAND that declares no heights removes it, so nothing is drawn there (the engine
                             // draws no ground); an unreadable one is refused (skipping it drew the earlier plugin's heights).
-                            if (ViewProbe.TerrainLand.Step(c.Landscape, m2Name, (gp.X, gp.Y), landWin, landLayers, landPromoted) is not { } lcT) continue;
+                            if (ViewProbe.TerrainLand.Step(c.Landscape, m2Name, (gp.X, gp.Y), landWin, landLayers, landPromoted,
+                                    terrainExtras.Normals, terrainExtras.Colors) is not { } lcT) continue;
+                            terrainExtras.TakeLand(c.Landscape!, (gp.X, gp.Y));
                             var grad = lcT.Gradients!;
                             // Base layer per quadrant (a non-alpha layer names the quadrant's ground
                             // texture; alpha layers blend on top and are out of scope for this pass).
@@ -3105,6 +3120,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // actually drawn, not below some second opinion about where the ground is. Null outside the
         // ring of cells that has LAND, which leaves those segments to the depth test instead.
         Func<float, float, float?>? terrainHeightAt = null;
+        // Each landscape diffuse's normal map (TXST NormalOrGloss), keyed by the diffuse path in the
+        // same normalised form QuadDiffuse gives the sheets. Fresh and retained walks both have
+        // txstDiffuse / txstNormal by now.
+        static string TexPath(string p)
+        {
+            p = p.Replace('/', '\\');
+            return p.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase) ? p : "textures\\" + p;
+        }
+        foreach (var (tsKey, tsDiffuse) in txstDiffuse)
+            if (txstNormal.TryGetValue(tsKey, out var tsNormal))
+                terrainExtras.NormalForDiffuse.TryAdd(TexPath(tsDiffuse), TexPath(tsNormal));
         if (landHeights.Count > 0)
             terrainHeightAt = (wx, wy) =>
             {
@@ -4458,7 +4484,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             builtWalkCore.TerrainLayers = terrainLayers.Select(x =>
                 new ViewProbe.TerrainLayerFact(x.Diffuse, x.Tris.ToArray())).ToArray();
             builtWalkCore.LandHeights = landHeights.Select(x =>
-                new ViewProbe.LandHeightFact(x.Key.X, x.Key.Y, (float[,])x.Value.Clone())).ToArray();
+                new ViewProbe.LandHeightFact(x.Key.X, x.Key.Y, (float[,])x.Value.Clone(),
+                    terrainExtras.Normals.TryGetValue(x.Key, out var fn) ? fn.ToArray() : null,
+                    terrainExtras.Colors.TryGetValue(x.Key, out var fc) ? fc.ToArray() : null)).ToArray();
             cellScene!.StoreFacts(preparedKey!, builtWalkCore, factsProbe);
         }
         ViewProbe.CellFactsRed.ThrowAfterPublishIfRequested();
@@ -4746,7 +4774,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                    refSurfaceOpacity: refSurfaceOpacity,
                    depthDumpPath: depthDump, sizeHeight: canvasH, cellScene: cellScene,
                    graphicsReuseRed: graphicsReuseRed, graphicsCell: graphicsCell,
-                   preparedIdentity: preparedKey, depthMeasurement: shotDepthMeasurement);
+                   preparedIdentity: preparedKey, depthMeasurement: shotDepthMeasurement, terrainExtras: terrainExtras);
             if (collectArtifacts) completedArtifacts.AddClosed(outFile, "frame");
             return rendered;
         }
@@ -4934,7 +4962,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
                 reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups,
                 refSurface: refSurface, refSurfaceOpacity: refSurfaceOpacity, graphicsReuseRed: graphicsReuseRed,
-                graphicsCell: graphicsCell, preparedIdentity: preparedKey);
+                graphicsCell: graphicsCell, preparedIdentity: preparedKey, terrainExtras: terrainExtras);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             return 0;
