@@ -1,6 +1,7 @@
 ﻿using System.Numerics;
 using SkyRender;
 using SkyRender.Character;
+using SkyRender.World;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;
@@ -1347,8 +1348,13 @@ static class TexturedScene
         // texture (LTEX -> TXST diffuse). Patches whose texture cannot be resolved fall back to
         // the off-white snow slope tint. Opaque, depth-written.
         int terrainTexturedPatches = 0, terrainFallbackPatches = 0;
+        // Terrain and water are drawn by SkyRender natively (SkyRender.World): one mesh per cell
+        // quadrant that blends its painted layers in the shader. VP_LEGACY_TERRAIN=1 restores the
+        // hand-built sheets below for side-by-side comparison; they go once the move is signed off.
+        bool legacyTerrain = Environment.GetEnvironmentVariable("VP_LEGACY_TERRAIN") == "1";
         foreach (var (texPath, patchTris) in terrainPatches)
         {
+            if (!legacyTerrain) break;
             if (patchTris.Count == 0) continue;
             // Terrain has no alpha test, so its texture never reaches depth.
             int texHandle = texPath.Length > 0 && depthMeasurement is null ? LoadObservedTexture("static-terrain-diffuse", texPath) : staticWhite;
@@ -1434,7 +1440,7 @@ static class TexturedScene
             Console.WriteLine($"   terrain paint: {terrainLayers.Count} layer(s) not drawn (--depth-measurement; they write no depth)");
         foreach (var (texPath, layerTris) in terrainLayers)
         {
-            if (depthMeasurement is not null) break;
+            if (!legacyTerrain || depthMeasurement is not null) break;
             if (layerTris.Count == 0) continue;
             if (layerOnly is { Length: > 0 } && !texPath.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
             int texHandle = LoadObservedTexture("static-terrain-layer", texPath);
@@ -1490,7 +1496,80 @@ static class TexturedScene
             if (builtScene is null) meshes.Add(sheet);
             layerMeshes++;
         }
-        if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer sheet(s) drawn over the base");
+        if (!legacyTerrain && terrainPatches.Count > 0)
+        {
+            // NATIVE TERRAIN. The cells are rebuilt from the same sheets (NativeTerrain), so the
+            // fresh and the retained walk feed it alike; textures load through the same observed
+            // categories as before.
+            // Comparison knobs while the engine-faithful blend is chosen: VP_TERRAIN_BLEND =
+            // over-alpha (default, the old sheets' result) | over | sum, and VP_TERRAIN_REPEAT =
+            // world units per texture repeat (default 256).
+            var blendMode = Environment.GetEnvironmentVariable("VP_TERRAIN_BLEND") switch
+            {
+                "over" => TerrainBlendMode.Over,
+                "sum" => TerrainBlendMode.NormalizedSum,
+                _ => TerrainBlendMode.OverWithTextureAlpha,
+            };
+            var buildOptions = new TerrainBuildOptions
+            {
+                TextureRepeat = float.TryParse(Environment.GetEnvironmentVariable("VP_TERRAIN_REPEAT"),
+                    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rep) && rep > 0f ? rep : 256f,
+            };
+            foreach (var cell in NativeTerrain.FromSheets(terrainPatches, terrainLayers))
+                for (int q = 0; q < 4; q++)
+                {
+                    var quad = cell.Quadrants[q]!;
+                    string basePath = quad.Base?.DiffusePath ?? "";
+                    int baseHandle = basePath.Length > 0 && depthMeasurement is null
+                        ? LoadObservedTexture("static-terrain-diffuse", basePath) : staticWhite;
+                    if (basePath.Length > 0 && baseHandle != staticWhite) terrainTexturedPatches++; else terrainFallbackPatches++;
+
+                    var kept = new List<TerrainLayer>();
+                    var keptHandles = new List<int>();
+                    if (depthMeasurement is null)
+                        foreach (var layer in quad.Layers)
+                        {
+                            if (kept.Count == TerrainQuadrant.MaxLayers) break;
+                            string lp = layer.Texture.DiffusePath;
+                            if (layerOnly is { Length: > 0 } && !lp.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
+                            int lh = LoadObservedTexture("static-terrain-layer", lp);
+                            if (lh == staticWhite) continue;   // unresolvable: a white layer is worse than none
+                            kept.Add(layerSolid ? layer with { Opacity = layer.Opacity.Select(o => o > 0f ? 1f : 0f).ToArray() } : layer);
+                            keptHandles.Add(lh);
+                        }
+                    layerMeshes += kept.Count;
+
+                    var data = WorldMeshBuilder.BuildTerrainQuadrant(cell, (TerrainQuadrantIndex)q, kept, buildOptions);
+                    var retained = builtScene?.AcquireMesh("static-terrain", data.Vertices, data.Indices);
+                    var mesh = retained?.Mesh ?? new GlMesh();
+                    bool createdNow = retained?.CreatedNow ?? true;
+                    string? uploadHash = retained?.InputSha256;
+                    if (graphicsShot is not null && uploadHash is null)
+                        uploadHash = BuiltScene.HashArrays(data.Vertices, data.Indices);
+                    if (createdNow)
+                    {
+                        GlWorldFactory.UploadTerrain(mesh, data);
+                        graphicsShot?.MeshUploaded("static-terrain", mesh, data.Vertices, data.Indices);
+                    }
+                    GlWorldFactory.ApplyTerrainMaterial(mesh, baseHandle, keptHandles, blendMode);
+                    if (createdNow)
+                    {
+                        renderer.AddMesh(mesh);
+                        builtScene?.AddedToRenderer(mesh);
+                        graphicsShot?.MeshAdded("static-terrain", mesh);
+                    }
+                    if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain", mesh, uploadHash!);
+                    if (builtScene is null) meshes.Add(mesh);
+                    if (interactive is not null)
+                    {
+                        var ps = new PickShape { Kind = PickKind.Terrain, Verts = data.Positions, Tris = data.Indices, TerrainTex = basePath };
+                        ps.ComputeBounds();
+                        interactive.PickShapes.Add(ps);
+                    }
+                }
+            if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer(s) blended natively over their quadrants");
+        }
+        else if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer sheet(s) drawn over the base");
 
         if (terrainTexturedPatches + terrainFallbackPatches > 0)
             Console.WriteLine($"   terrain paint: {terrainTexturedPatches} textured patch(es), {terrainFallbackPatches} untextured (snow fallback)");
@@ -1523,6 +1602,28 @@ static class TexturedScene
                 ? LoadObservedTexture("dynamic-water-normal", wtx) : 0;   // a normal map; never depth
             bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
 
+            if (!legacyTerrain)
+            {
+                // NATIVE WATER: the same grid, colours and alpha (SkyRender.World); the Fresnel sky
+                // mix is evaluated in the shader from the live camera, so it no longer freezes.
+                var wmat = new WaterMaterial(wpl.ShallowColor, wpl.DeepColor, wpl.ReflectionColor, wpl.Reflectivity, wpl.Fresnel)
+                {
+                    NoiseTexturePath = wpl.NoiseTexture, NoiseUvScale = wpl.NoiseUvScale,
+                    ShallowBand = ShallowBand, ShoreAlpha = shoreAlpha, GridResolution = WaterGrid,
+                };
+                var wdata = WorldMeshBuilder.BuildWater(
+                    new WaterSurface(wpl.Z, wpl.X0, wpl.Y0, wpl.X1, wpl.Y1, wmat) { Label = wpl.Label }, terrainHeightAt);
+                var nwater = new GlMesh();
+                GlWorldFactory.UploadWater(nwater, wdata);
+                graphicsShot?.MeshUploaded("dynamic-water", nwater, wdata.Vertices, wdata.Indices);
+                GlWorldFactory.ApplyWaterMaterial(nwater, wmat, textures.WhiteTexture, hasNoise ? texHandle : null);
+                renderer.AddMesh(nwater);
+                graphicsShot?.MeshAdded("dynamic-water", nwater);
+                meshes.Add(nwater);
+                waterMeshes++; waterTris += wdata.Indices.Length / 3;
+                waterSubmerged += wdata.SubmergedVertexCount; waterSamples += wdata.Positions.Length;
+                continue;
+            }
             int side = WaterGrid + 1;
             int submerged = 0;                        // grid points whose LAND sits BELOW the surface
             var pv = new Vector3[side * side]; var nv = new Vector3[side * side];
