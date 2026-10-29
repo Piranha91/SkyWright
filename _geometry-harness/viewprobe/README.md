@@ -230,7 +230,8 @@ A successful save or size check alone does not establish clean pixels.
     the 3×3 render was an island in sky.
 - **Distant LOD: `--lod`** (exteriors only, opt-in, 2026-10-29; `DistantLodLayer.cs`, SkyRender.World
   `DistantLodLoader` / `GlWorldFactory.CreateDistantLod`). Draws the worldspace's terrain LOD (`.btr`), object LOD
-  (`.bto`) and tree LOD (`.btt` + `.lst` + tree atlas) beyond the loaded cells, plain or with `--ring visible`.
+  (`.bto`), tree LOD (`.btt` + `.lst` + tree atlas) and LOD water (the `.btr` files' `WATER` quads) beyond the
+  loaded cells, plain or with `--ring visible`.
   - **Which files.** The target worldspace's EditorID names them (its parent's, when the WRLD uses its parent's LOD
     data); `lodsettings\<w>.lod` gives the grid. They resolve through the same load order and archives as every other
     asset. A block the selector picks but no source ships draws nothing, as in the game.
@@ -239,14 +240,24 @@ A successful save or size check alone does not establish clean pixels.
     SkyrimPrefs.ini: 60000, 90000, 250000, 1.5, 75000), out to 409,600 u (about 100 cells), which also becomes the
     camera's far plane (131,072 without `--lod`).
   - **Under the loaded cells.** Every cell whose terrain the frame draws, plus the walk's `--ring` set: terrain LOD is
-    lowered there by the engine's 230 model units and covered triangles are dropped; level-4 object LOD loses those
-    cells' segments; LOD trees standing in them are dropped. With `--ring visible` the loaded area can exceed the
+    lowered there by the engine's 230 model units and covered triangles are dropped; level-4 object LOD and LOD water
+    lose those cells' segments (the cells draw their own water); LOD trees standing in them are dropped. With `--ring visible` the loaded area can exceed the
     game's ±2 grid, so full detail stands where the game would draw LOD.
-  - **Console.** `lod: <world> - lodsettings ...`, one `lod terrain|objects|trees:` line each (blocks picked / on disk,
+  - **Console.** `lod: <world> - lodsettings ...`, one `lod terrain|water|objects|trees:` line each (blocks picked / on disk,
     meshes per level, triangles, what was cut), file problems, and `lod timing:` (read + build, textures + upload,
-    final frame). `VP_LOD_KINDS=terrain,objects,trees` limits the kinds (diagnostic).
-  - **Not drawn:** LOD water (the BTR `WATER` quads), grass LOD, DynDOLOD's dynamic LOD. LOD is not shown to the
-    interactive window's picker.
+    final frame). `VP_LOD_KINDS=terrain,objects,trees,water` limits the kinds (diagnostic).
+  - **LOD water** (2026-10-29): each quad at its own height (the generator's per-cell water height), drawn with the
+    worldspace's LOD water type (WRLD NAM3, the parent's under "Use LOD Data"; Tamriel: `DefaultWater`) as the engine's
+    LOD water technique: opaque, sky-gradient reflection, the WATR's sun specular, fog; no depth fog or refraction.
+    Not drawn when the WRLD has "No LOD Water", the WATR is missing, or with `--no-water` (the console's
+    `lod water:` line says why). `VP_WATER_LEGACY=1` reflects the WATR's reflection colour instead of the sky.
+  - **Object LOD vertex colours:** shapes with `SLSF2_Vertex_Colors` multiply their diffuse by them (vanilla's HD
+    mountain LOD; DynDOLOD's object and grass LOD); the `lod objects:` line counts them.
+  - **Grass LOD** has no switch of its own: vanilla has none, and DynDOLOD bakes it into level-4 object LOD
+    (`grasspassthru` shapes), so it draws with `--lod` when that output is in the load order. The lab order has
+    none, so it is untested here.
+  - **Not drawn:** DynDOLOD's dynamic LOD (DynDOLOD.esp references switched by its SKSE plugin), and full grass
+    (LAND-placed GRAS) in the loaded cells, LOD or not. LOD is not shown to the interactive window's picker.
   - **Cost, measured on the Riverwood aerial** (A pose, `--weather SkyrimClear`, 1920×1080, two runs each): 18.6–18.8 s
     without `--lod` (unchanged from before the feature: 19.6–20.7 s on the same machine earlier, identical pixels and
     console), 27.6–28.1 s with it: read + build 4.3–4.4 s, textures + upload 3.9 s, final frame 63 ms. About 308 terrain,

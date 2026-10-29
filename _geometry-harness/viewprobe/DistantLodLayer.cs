@@ -8,8 +8,8 @@ using SkyRender.World;
 namespace ViewProbe;
 
 /// <summary>
-/// --lod (opt-in, like --ring visible): the worldspace's distant LOD -- terrain (.btr), objects (.bto)
-/// and trees (.btt) -- drawn beyond the loaded cells, through SkyRender.World's DistantLodLoader and
+/// --lod (opt-in, like --ring visible): the worldspace's distant LOD -- terrain (.btr), objects (.bto),
+/// trees (.btt) and LOD water (the .btr WATER quads) -- drawn beyond the loaded cells, through SkyRender.World's DistantLodLoader and
 /// GlWorldFactory.CreateDistantLod. viewprobe's job is local clashes, so its default frame and load
 /// time do not change: without --lod nothing here runs.
 ///
@@ -20,7 +20,9 @@ namespace ViewProbe;
 /// loaded set the walk chose (--ring). Blocks and distances follow the engine's [TerrainManager]
 /// settings (SkyRender's LodDistances defaults; the lab profile's SkyrimPrefs.ini carries the same
 /// values), out to <see cref="FarPlane"/>, which also becomes the camera's far plane.
-/// VP_LOD_KINDS=terrain,objects,trees picks kinds (diagnostic).
+/// LOD water takes the worldspace's LOD water type (WRLD NAM3, the parent's when the WRLD uses its parent's
+/// LOD data) and is not drawn when the WRLD has the "No LOD Water" flag, the WATR is missing, or --no-water.
+/// VP_LOD_KINDS=terrain,objects,trees,water picks kinds (diagnostic).
 /// </summary>
 internal static class DistantLodLayer
 {
@@ -35,7 +37,13 @@ internal static class DistantLodLayer
     /// <summary>The loaded exterior cells the walk chose (--ring), if any.</summary>
     internal static IReadOnlyCollection<(int X, int Y)>? WalkCells;
 
-    private static readonly Dictionary<FormKey, (string? EditorId, FormKey Parent, bool UsesParentLod)> Seen = new();
+    private static readonly Dictionary<FormKey, (string? EditorId, FormKey Parent, bool UsesParentLod, FormKey LodWater, bool NoLodWater)> Seen = new();
+
+    /// <summary>The LOD water type as a water plane's material fields (footprint unused), set by
+    /// Program.cs once the walk has seen the WATR records; null when LOD water is not drawn.</summary>
+    internal static WaterPlane? LodWater;
+    /// <summary>Why <see cref="LodWater"/> is null, for the console.</summary>
+    internal static string LodWaterWhy = "";
 
     /// <summary>The walk's sighting of a WRLD record (later plugins replace earlier ones).</summary>
     internal static void Note(IWorldspaceGetter w)
@@ -44,7 +52,27 @@ internal static class DistantLodLayer
         var parent = w.Parent;
         bool useParent = parent is not null && parent.Flags.HasFlag(WorldspaceParent.Flag.UseLodData)
                          && !parent.Worldspace.IsNull;
-        Seen[w.FormKey] = (w.EditorID, useParent ? parent!.Worldspace.FormKey : FormKey.Null, useParent);
+        Seen[w.FormKey] = (w.EditorID, useParent ? parent!.Worldspace.FormKey : FormKey.Null, useParent,
+                           w.LodWater.FormKeyNullable ?? FormKey.Null, w.Flags.HasFlag(Worldspace.Flag.NoLodWater));
+    }
+
+    /// <summary>The target's LOD water type (NAM3), following "Use LOD Data" to the parent like the LOD
+    /// files do; null with the reason when there is none or the target's "No LOD Water" flag is set.</summary>
+    internal static FormKey? LodWaterKey(out string why)
+    {
+        why = "";
+        var key = Target;
+        if (key.IsNull || !Seen.TryGetValue(key, out var t)) { why = "no target worldspace"; return null; }
+        if (t.NoLodWater) { why = "the worldspace has the No LOD Water flag"; return null; }
+        for (int hops = 0; hops < 4; hops++)
+        {
+            if (!Seen.TryGetValue(key, out var w)) { why = $"the walk did not see WRLD {key}"; return null; }
+            if (w.UsesParentLod) { key = w.Parent; continue; }
+            if (w.LodWater.IsNull) { why = $"WRLD {key} names no LOD water type (NAM3)"; return null; }
+            return w.LodWater;
+        }
+        why = "parent LOD chain too deep";
+        return null;
     }
 
     /// <summary>The LOD file name for the target, or null with the reason.</summary>
@@ -77,6 +105,7 @@ internal static class DistantLodLayer
                 "terrain" => LodKinds.Terrain,
                 "objects" => LodKinds.Objects,
                 "trees" => LodKinds.Trees,
+                "water" => LodKinds.Water,
                 _ => LodKinds.None,
             };
         return k;
@@ -85,7 +114,7 @@ internal static class DistantLodLayer
     /// <summary>One console line per kind: blocks picked / found, meshes, triangles, what was cut.</summary>
     internal static IEnumerable<string> Describe(DistantLodData d)
     {
-        foreach (var kind in new[] { LodKind.Terrain, LodKind.Objects, LodKind.Trees })
+        foreach (var kind in new[] { LodKind.Terrain, LodKind.Water, LodKind.Objects, LodKind.Trees })
         {
             if (!d.BlocksSelected.TryGetValue(kind, out int sel)) continue;
             var parts = d.Parts.Where(p => p.Kind == kind).ToList();
@@ -93,10 +122,14 @@ internal static class DistantLodLayer
             string cut = kind switch
             {
                 LodKind.Terrain => $"{parts.Sum(p => p.Cut):N0} triangle(s) under the loaded cells dropped, {parts.Sum(p => p.Sunk):N0} seam vertex(es) lowered",
-                LodKind.Objects => $"{parts.Sum(p => p.Cut):N0} triangle(s) of loaded cells' objects dropped",
+                LodKind.Objects => $"{parts.Sum(p => p.Cut):N0} triangle(s) of loaded cells' objects dropped"
+                                   + (parts.Count(p => p.HasVertexColors) is > 0 and var vc ? $"; {vc} with vertex colours" : ""),
+                LodKind.Water => $"{parts.Sum(p => p.Cut):N0} triangle(s) of loaded cells' water dropped; "
+                                 + (LodWater is { } lw ? $"LOD water type {lw.Label}" : $"not drawn - {LodWaterWhy}"),
                 _ => $"{parts.Sum(p => p.Cut):N0} tree(s) in loaded cells dropped",
             };
-            yield return $"   lod {kind.ToString().ToLowerInvariant()}: {sel} block(s) picked, {d.BlocksFound.GetValueOrDefault(kind)} on disk, "
+            string onDisk = kind == LodKind.Water ? "with water quads" : "on disk";
+            yield return $"   lod {kind.ToString().ToLowerInvariant()}: {sel} block(s) picked, {d.BlocksFound.GetValueOrDefault(kind)} {onDisk}, "
                        + $"{parts.Count} mesh(es) [{levels}], {parts.Sum(p => p.Data.Indices.Length / 3):N0} triangles; {cut}";
         }
     }

@@ -4470,6 +4470,21 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 : $"   seams: {edges} mismatched edge(s) in the ring at eps {seamEps:0.#} u, {runs} run(s) drawn, worst {worst:0} u (yellow < 32, orange < 128, red beyond)");
         }
 
+        // --lod: the worldspace's LOD water type (WRLD NAM3) for the terrain LOD blocks' WATER quads
+        // (DistantLodLayer.cs). The quads carry their own heights; only the material comes from here.
+        if (ViewProbe.DistantLodLayer.Requested && !interior)
+        {
+            ViewProbe.DistantLodLayer.LodWater = null;
+            if (!drawWater) ViewProbe.DistantLodLayer.LodWaterWhy = "--no-water";
+            else if (ViewProbe.DistantLodLayer.LodWaterKey(out var lwWhy) is not { } lwk) ViewProbe.DistantLodLayer.LodWaterWhy = lwWhy;
+            else if (!watrRec.TryGetValue(lwk, out var lw)) ViewProbe.DistantLodLayer.LodWaterWhy = $"WATR {lwk} not found in the load order";
+            else
+                ViewProbe.DistantLodLayer.LodWater = new ViewProbe.WaterPlane(
+                    0f, 0f, 0f, 0f, 0f,
+                    lw.Noise is { Length: > 0 } lwn ? NormalizeTexPath(lwn) : null, lw.NoiseUv, lw.Shallow, lw.Deep, lw.Reflect,
+                    lw.Reflectivity, Math.Clamp(lw.Opacity / 100f, 0f, 1f), lw.Fresnel, lw.Ed,
+                    lw.FogNear, lw.FogFar, lw.FogAmount, lw.NoiseFalloff, lw.Spec);
+        }
         // ---- WATER: one surface per loaded cell that has any -----------------------------------
         // Exteriors only. An interior's water is a placed basin with no grid footprint to span, so
         // there is nothing honest to draw a plane across; say so rather than inventing a rectangle.
