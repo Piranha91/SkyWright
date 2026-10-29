@@ -1340,7 +1340,8 @@ var txstNormal = new Dictionary<FormKey, string>();
 // happens to work until it doesn't.
 var baseMato = new Dictionary<FormKey, (FormKey Mato, float MaxAngle)>();
 var matoRec = new Dictionary<FormKey, (string Ed, System.Numerics.Vector3 Projection, float Bias, float Scale,
-                                       float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model)>();
+                                       float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model,
+                                       float NoiseUv)>();
 var watrRec = new Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
                                        System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep,
                                        System.Numerics.Vector3 Reflect, float Reflectivity,
@@ -1858,7 +1859,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                              mato.FalloffBias, mato.FalloffScale, mato.MaterialUvScale,
                                              Rgb(mato.SinglePassColor),
                                              mato.Flags.HasFlag(MaterialObject.Flag.SinglePass),
-                                             mato.Model?.File.GivenPath);
+                                             mato.Model?.File.GivenPath, mato.NoiseUvScale);
                     // NOT continue: MATO is modeled, and the block below wants its model path too.
                 }
                 bool collectedModel = false;
@@ -4430,6 +4431,27 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         if (drawCoverings)
         {
             int coveringNoMato = 0;
+            // The single-pass path's two display settings, as the engine reads them
+            // (fProjectedUVDiffuseNormalTilingScale:Display, bEnableProjecteUVDiffuseNormals:Display,
+            // spelled as the engine spells it). Absent keys take the engine defaults (0.5, on).
+            static string? PrefsValue(string dir, string key)
+            {
+                var ini = Directory.Exists(dir)
+                    ? Directory.EnumerateFiles(dir, "*.ini").FirstOrDefault(f =>
+                        string.Equals(Path.GetFileName(f), "SkyrimPrefs.ini", StringComparison.OrdinalIgnoreCase))
+                    : null;
+                if (ini is null) return null;
+                foreach (var line in File.ReadLines(ini))
+                {
+                    int eq = line.IndexOf('=');
+                    if (eq > 0 && string.Equals(line[..eq].Trim(), key, StringComparison.OrdinalIgnoreCase))
+                        return line[(eq + 1)..].Trim();
+                }
+                return null;
+            }
+            float projTiling = float.TryParse(PrefsValue(profileDir, "fProjectedUVDiffuseNormalTilingScale"),
+                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pt) ? pt : 0.5f;
+            bool projDiffuse = PrefsValue(profileDir, "bEnableProjecteUVDiffuseNormals") is not { } pdv || pdv != "0";
             foreach (var bk in scene.Select(s => s.BaseKey).Distinct())
             {
                 if (!baseMato.TryGetValue(bk, out var link)) continue;
@@ -4443,7 +4465,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     mt.Projection, link.MaxAngle, mt.Bias, mt.Scale, mt.UvScale,
                     tinted ? new System.Numerics.Vector4(mt.Color.X, mt.Color.Y, mt.Color.Z, 1f)
                            : System.Numerics.Vector4.One,
-                    mt.Model, mt.Ed);
+                    mt.Model, mt.Ed, mt.SinglePass, mt.NoiseUv, projTiling, projDiffuse);
             }
             if (coveringNoMato > 0)
                 Console.WriteLine($"   coverings: {coveringNoMato} base(s) name a MaterialObject no active plugin defines");

@@ -61,7 +61,8 @@ internal sealed class CellWalkFacts
     internal Dictionary<FormKey, string> TxstNormal { get; init; } = new();
     internal required Dictionary<FormKey, (FormKey Mato, float MaxAngle)> BaseMato { get; init; }
     internal required Dictionary<FormKey, (string Ed, System.Numerics.Vector3 Projection, float Bias,
-        float Scale, float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model)> Mato { get; init; }
+        float Scale, float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model,
+        float NoiseUv)> Mato { get; init; }
     internal required Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
         System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep, System.Numerics.Vector3 Reflect,
         float Reflectivity, byte Opacity, float Fresnel)> WaterRecords { get; init; }

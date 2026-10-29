@@ -3725,7 +3725,26 @@ construction against the whole modeled record library — Static is the only typ
 `FormLink<IMaterialObjectGetter>` — so coverings land on statics and nothing else, and a bare patch
 on a non-STAT is correct rather than a gap.
 
-Each covered shape gets a second shell sharing its triangles, per SHAPE not per ref, because
+**Single-pass materials (the `…1P` snow on every mountain, rock and roof) draw inside the base
+shape's own shader since 2026-10-29**, through SkyRender's projected material (its
+RENDERING_PIPELINE.md, Stage 2b): coverage per PIXEL against the normal-mapped normal, broken by
+the engine's own coverage noise, with the engine's global `textures\effects\projecteddiffuse.dds`
+as the albedo times `SinglePassColor`. Noise and diffuse are planar in world X/Y at
+`1 / NoiseUvScale` per unit (diffuse further scaled by `fProjectedUVDiffuseNormalTilingScale` from
+the profile's SkyrimPrefs.ini; `bEnableProjecteUVDiffuseNormals=0` selects the flat-colour path),
+and the direction is world up — the single-pass path never reads the MATO's projection vector.
+That replaced the shell below for single-pass materials, which smeared on the Riverwood
+mountains: per-vertex coverage interpolated across faces thousands of units wide, with the
+snowmatshader texture planar-projected and so stretched down every steep face. The scale / bias
+falloff is the engine's (`GlMesh.ProjectedParamsFor`); the STAT's MaxAngle is NOT folded in by
+default, because the reverse-engineered fold under-covered against the in-game close-ups
+(`_ingame/mountain_snow_20261029-012329`, judged by eye); `VP_PROJ_MAXANGLE=stat` restores it. The
+census line reports single-pass shapes and shells separately. Still short of the game: covered
+snow reads darker and greyer than in game (its albedo is right by the engine's numbers; the
+gap is lighting), and Community Shaders' triplanar sampling is not modelled.
+
+Multi-pass materials, and single-pass ones whose global textures cannot be loaded, keep the shell:
+each covered shape gets a second shell sharing its triangles, per SHAPE not per ref, because
 coverage is a function of each face's normal — one mesh can have a snowed roof and bare undersides
 and that difference IS the effect. Coverage is `d = dot(faceNormal, −ProjectionVector)`, hard-gated
 by the STAT's `MaxAngle`, then ramped. **The bias/scale ramp is FITTED, not engine-exact**, and the

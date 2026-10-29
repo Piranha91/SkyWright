@@ -84,6 +84,13 @@ internal sealed class MeshMaterialState
     float SkinTintAlpha;
     bool IsFaceWithEmptyDetailSlot;
     AssetSource? MeshSource;
+    bool HasProjectedMaterial;
+    System.Numerics.Vector3 ProjectedDirection;
+    System.Numerics.Vector4 ProjectedParams;
+    System.Numerics.Vector3 ProjectedColor;
+    float ProjectedDiffuseTiling;
+    int ProjectedNoiseTexture;
+    int ProjectedDiffuseTexture;
 
     internal static MeshMaterialState Capture(GlMesh m) => new()
     {
@@ -161,6 +168,13 @@ internal sealed class MeshMaterialState
         SkinTintAlpha = m.SkinTintAlpha,
         IsFaceWithEmptyDetailSlot = m.IsFaceWithEmptyDetailSlot,
         MeshSource = m.MeshSource,
+        HasProjectedMaterial = m.HasProjectedMaterial,
+        ProjectedDirection = m.ProjectedDirection,
+        ProjectedParams = m.ProjectedParams,
+        ProjectedColor = m.ProjectedColor,
+        ProjectedDiffuseTiling = m.ProjectedDiffuseTiling,
+        ProjectedNoiseTexture = m.ProjectedNoiseTexture,
+        ProjectedDiffuseTexture = m.ProjectedDiffuseTexture,
     };
 
     internal void ApplyTo(GlMesh m)
@@ -238,6 +252,13 @@ internal sealed class MeshMaterialState
         m.IsSkinShape = IsSkinShape;
         m.SkinTintAlpha = SkinTintAlpha;
         m.IsFaceWithEmptyDetailSlot = IsFaceWithEmptyDetailSlot;
+        m.HasProjectedMaterial = HasProjectedMaterial;
+        m.ProjectedDirection = ProjectedDirection;
+        m.ProjectedParams = ProjectedParams;
+        m.ProjectedColor = ProjectedColor;
+        m.ProjectedDiffuseTiling = ProjectedDiffuseTiling;
+        m.ProjectedNoiseTexture = ProjectedNoiseTexture;
+        m.ProjectedDiffuseTexture = ProjectedDiffuseTexture;
         m.MeshSource = MeshSource;
     }
 

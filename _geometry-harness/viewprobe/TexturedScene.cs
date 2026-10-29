@@ -169,14 +169,20 @@ readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation
 /// data's own spread rather than guessed: vanilla snow is bias 0.40, and the deliberately-thinner
 /// variants climb monotonically (Windhelm's "Light" 0.92, "EvenLess" 0.94, "Minimal" 0.98), so a
 /// HIGHER bias means LESS coverage and bias is a threshold on d with scale as the ramp width.
-/// Say so in the docs rather than implying the curve is the engine's.</summary>
+/// Say so in the docs rather than implying the curve is the engine's. That fitted ramp now serves
+/// only the multi-pass shell: a SINGLE-PASS material is drawn per pixel inside the base shape's own
+/// shader with the engine's formula (SkyRender's projected material; see the per-shape block).</summary>
 readonly record struct Covering(Vector3 ProjectionVector,     // Skyrim space, direction of travel
                                 float MaxAngleDeg,            // STAT.MaxAngle — the hard gate
                                 float FalloffBias, float FalloffScale,
                                 float UvScale,                // MATO.MaterialUvScale, world u per tile
                                 Vector4 Color,                // SinglePassColor, or white when a texture carries it
                                 string? ModelPath,            // the MATO's own model NIF; its slot-0 diffuse IS the covering texture
-                                string Label);                // MATO EditorID, for the census
+                                string Label,                 // MATO EditorID, for the census
+                                bool SinglePass,              // MATO flag: drawn by the base's own shader, not a second shell
+                                float NoiseUvScale,           // MATO.NoiseUvScale, world u per noise tile (single pass)
+                                float DiffuseTiling,          // fProjectedUVDiffuseNormalTilingScale (SkyrimPrefs.ini)
+                                bool ProjectedDiffuse);       // bEnableProjecteUVDiffuseNormals (SkyrimPrefs.ini)
 
 /// <summary>WATER over one loaded cell. Drawn because its ABSENCE was the bug: with nothing at the
 /// water height, sea reads as sky, and this project's standing rule is that empty background is a
@@ -455,7 +461,7 @@ static class TexturedScene
             var c = pair.Value;
             Add(string.Join("|", pair.Key, V(c.ProjectionVector), F(c.MaxAngleDeg), F(c.FalloffBias),
                 F(c.FalloffScale), F(c.UvScale), F(c.Color.X), F(c.Color.Y), F(c.Color.Z), F(c.Color.W),
-                c.ModelPath, c.Label));
+                c.ModelPath, c.Label, c.SinglePass, F(c.NoiseUvScale), F(c.DiffuseTiling), c.ProjectedDiffuse));
         }
         return Convert.ToHexString(hash.GetHashAndReset());
     }
@@ -738,6 +744,23 @@ static class TexturedScene
             matoTexCache[modelPath] = handle;
             return handle;
         }
+        // A SINGLE-PASS material has no texture of its own: the engine binds the same global
+        // textures from textures\effects for every projected draw, whatever was projected, and
+        // its lighting path reads two of them (the coverage noise and the projected diffuse).
+        // Loaded once, on first use. A missing noise leaves the material to the shell fallback.
+        int projectedNoise = -1, projectedDiffuse = -1;
+        (int Noise, int Diffuse) ProjectedTextures()
+        {
+            if (depthMeasurement is not null) return (0, 0);   // colour only; depth never reads it
+            if (projectedNoise < 0)
+            {
+                int nz = LoadObservedTexture("static-covering-noise", @"textures\effects\projectednoise.dds");
+                int df = LoadObservedTexture("static-covering-diffuse", @"textures\effects\projecteddiffuse.dds");
+                projectedNoise = nz == staticWhite ? 0 : nz;
+                projectedDiffuse = df == staticWhite ? 0 : df;
+            }
+            return (projectedNoise, projectedDiffuse);
+        }
         int shapes = 0, missingMesh = 0, texturedShapes = 0;
         // Effect-shader shapes dropped this render: the total shape-draws, and how many such
         // shapes each distinct mesh carries (a per-file property, so it is SET, not accumulated,
@@ -745,7 +768,7 @@ static class TexturedScene
         int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
         int fxStaticShapes = 0, fxStaticRefCount = 0;
         int cullTrisDropped = 0, cullShapesDropped = 0;
-        int coveringShapes = 0, coveringRefs = 0;
+        int coveringShapes = 0, coveringRefs = 0, projectedShapes = 0;
         var coveringByMato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int waterMeshes = 0; long waterTris = 0;
         long waterSubmerged = 0, waterSamples = 0;
@@ -1221,6 +1244,40 @@ static class TexturedScene
                     refHadFxStatic = true;
                 }
 
+                // ---- SINGLE-PASS COVERING (MATO) -------------------------------------------
+                // The engine draws a single-pass material inside the base shape's OWN lighting
+                // shader (Projected_UV), per pixel against the normal-mapped normal, so the snow
+                // settles into the rock's relief with a noise-broken edge. SkyRender's projected
+                // material is that path. The direction is world up: the single-pass path reads
+                // only scale, bias, noise scale, colour and the STAT's max angle, never the
+                // MATO's projection vector. Set on every bind and cleared when absent, because a
+                // retained mesh keeps whatever the last bind wrote.
+                mesh.HasProjectedMaterial = false;
+                bool projectedDrawn = false;
+                if (cover is { SinglePass: true } spc && ProjectedTextures() is { Noise: > 0 } ptx)
+                {
+                    mesh.HasProjectedMaterial = true;
+                    mesh.ProjectedDirection = Vector3.UnitY;
+                    // MAX ANGLE. The reverse-engineered account SkyRender cites folds the STAT's
+                    // max angle into the threshold (cos + (1 - cos) * ...). Against the game it
+                    // under-covers: the 2026-10-29 close-up of MountainCliff03_LightSN (max angle
+                    // 70) shows snow on faces that fold admits nowhere near, while dropping the
+                    // fold (equivalently, angle 90) matches by eye. So 90 by default, judged
+                    // in game rather than settled by a source; VP_PROJ_MAXANGLE=stat restores the
+                    // fold for the next comparison.
+                    float projAngle = Environment.GetEnvironmentVariable("VP_PROJ_MAXANGLE") == "stat" ? spc.MaxAngleDeg : 90f;
+                    mesh.ProjectedParams = GlMesh.ProjectedParamsFor(spc.FalloffScale, spc.FalloffBias,
+                                                                     spc.NoiseUvScale, projAngle);
+                    mesh.ProjectedColor = new Vector3(spc.Color.X, spc.Color.Y, spc.Color.Z);
+                    mesh.ProjectedDiffuseTiling = spc.DiffuseTiling;
+                    mesh.ProjectedNoiseTexture = ptx.Noise;
+                    mesh.ProjectedDiffuseTexture = spc.ProjectedDiffuse ? ptx.Diffuse : 0;
+                    projectedDrawn = true;
+                    projectedShapes++;
+                    refHadCovering = true;
+                    coveringByMato[spc.Label] = coveringByMato.TryGetValue(spc.Label, out var pcn) ? pcn + 1 : 1;
+                }
+
                 if (meshCreatedNow)
                 {
                     renderer.AddMesh(mesh);
@@ -1250,13 +1307,16 @@ static class TexturedScene
                     basePick = ps;                       // the covering below hangs itself off this
                 }
 
-                // ---- PROJECTED COVERING (MATO) ------------------------------------------------
+                // ---- PROJECTED COVERING SHELL (multi-pass MATO) ---------------------------------
+                // A MULTI-PASS material builds a second piece of geometry in the engine; a
+                // single-pass one is drawn above, inside the base shader, and lands here only
+                // when the global projected textures could not be loaded.
                 // A second shell over the shape just drawn, sharing its triangles: same verts,
                 // per-vertex coverage in the ALPHA channel, UVs planar-projected along the
                 // material's own projection vector. Emitted per SHAPE rather than per ref because
                 // coverage is a function of each face's normal — one mesh can have a snowed roof
                 // and bare undersides, and that difference IS the effect.
-                if (cover is { } cv)
+                if (cover is { } cv && !projectedDrawn)
                 {
                     var cu = new Vector2[n];
                     var cc = new Vector4[n];
@@ -2872,12 +2932,13 @@ static class TexturedScene
             if (fxStaticShapes > 0)
                 Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
                                 + "— --fx-static, frozen at the authored frame, additive, no depth write");
-            if (coveringShapes > 0)
+            if (coveringShapes + projectedShapes > 0)
             {
-                Console.WriteLine($"   projected coverings (MATO): {coveringShapes:N0} shell(s) on {coveringRefs:N0} ref(s) "
+                Console.WriteLine($"   projected coverings (MATO): {projectedShapes:N0} single-pass shape(s) covered per pixel, "
+                                + $"{coveringShapes:N0} shell(s), on {coveringRefs:N0} ref(s) "
                                 + $"of {coveringByMato.Count} material(s) — STAT.Material + MaxAngle, --no-coverings to drop");
                 foreach (var kv in coveringByMato.OrderByDescending(k => k.Value))
-                    Console.WriteLine($"      {kv.Value,5} shell(s)  {kv.Key}");
+                    Console.WriteLine($"      {kv.Value,5} shape(s)  {kv.Key}");
             }
             if (fxShapesSkipped + nmShapesSkipped > 0)
             {
