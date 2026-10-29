@@ -46,4 +46,27 @@ internal static class RingReach
         }
         return mx0 < x1 && mx1 > x0 && my0 < y1 && my1 > y0;
     }
+
+    /// <summary>viewprobe's --ring visible: the placed box (the same placement as EntersSquare) overlaps any of
+    /// <paramref name="cells"/> in XY. A separate method so EntersSquare, and every caller of it, stays as it was.</summary>
+    internal static bool EntersCells(PlacedRef r, (Vec3 Min, Vec3 Max) b, IReadOnlySet<(int X, int Y)> cells)
+    {
+        var rot = SpatialOverlap.RefrRotation(r.Rotation);
+        var pos = new System.Numerics.Vector3(r.Position.X, r.Position.Y, r.Position.Z);
+        float mx0 = float.MaxValue, my0 = float.MaxValue, mx1 = float.MinValue, my1 = float.MinValue;
+        for (int i = 0; i < 8; i++)
+        {
+            var c = new System.Numerics.Vector3((i & 1) == 0 ? b.Min.X : b.Max.X, (i & 2) == 0 ? b.Min.Y : b.Max.Y,
+                                                (i & 4) == 0 ? b.Min.Z : b.Max.Z);
+            var w = System.Numerics.Vector3.Transform(c * r.Scale, rot) + pos;
+            mx0 = MathF.Min(mx0, w.X); my0 = MathF.Min(my0, w.Y); mx1 = MathF.Max(mx1, w.X); my1 = MathF.Max(my1, w.Y);
+        }
+        // Open on the far side, as EntersSquare's strict test is: a box ending exactly on a cell's edge does not enter it.
+        int cx0 = (int)MathF.Floor(mx0 / 4096f), cy0 = (int)MathF.Floor(my0 / 4096f);
+        int cx1 = (int)MathF.Ceiling(mx1 / 4096f) - 1, cy1 = (int)MathF.Ceiling(my1 / 4096f) - 1;
+        for (int x = cx0; x <= cx1; x++)
+            for (int y = cy0; y <= cy1; y++)
+                if (cells.Contains((x, y))) return true;
+        return false;
+    }
 }

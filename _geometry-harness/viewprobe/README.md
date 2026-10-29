@@ -161,7 +161,7 @@ A successful save or size check alone does not establish clean pixels.
     `u` settings). Beyond ±2 only listed large references are admitted (next item). The console line `+N
     reference(s) anchored two cells out …`, the planes report's `sceneScope` (`edgeRadius`, `edgeRadiusBasis:
     "inferred"`, `edgeAdmitted`, `edgePlanesAdmitted`) and its coverage line all say so.
-  - **Deliberately unchanged at 3×3:** `--nav-cell`, terrain and water. Those answer questions about the cells' own
+  - **Deliberately unchanged at 3×3** (unless `--ring visible|N` widens the whole loaded area): `--nav-cell`, terrain and water. Those answer questions about the cells' own
     ground. The `--stations` and route-station floors take the same ring (and the large references below) through
     `FloorFeed`'s reach: a reference beyond the 3×3 is a floor candidate when its placed box enters it (the rule lives
     in `_shared/RingReach.cs`, shared with this merge).
@@ -184,12 +184,50 @@ A successful save or size check alone does not establish clean pixels.
   - **The report:** `sceneScope` gains `largeRadius` (5), `largeRadiusBasis`, `largeList` (`union`/`none`),
     `largeListBasis`, `largeListed`, `largeAdmitted`, `largePlanesAdmitted` and `largePrimitives: "by record"`; the
     console prints `+N large reference(s) anchored 3-5 cells out …` when any is admitted.
-  - **Scene-scope limit: content beyond the 3×3 is not modelled for any ring.** A listed reference whose box misses
+  - **Scene-scope limit: content beyond the 3×3 is not modelled for any ring** (by default; `--ring visible|N`, next
+    item, widens the loaded area itself). A listed reference whose box misses
     the 3×3 is not drawn even when it stands in the view (distant mountains): the game draws it, this render does not.
     It cannot hide content inside the 3×3 (the convexity argument above), but a plane cannot be credited with hiding
     it either. On the G4/G5 predictive views such references reach the view wedge at about 4,078 of 4,556 views (a
     mean of 83 per view); admitting them would also need terrain and LOD beyond the 3×3.
   - **Tests:** `--winning-refs-selftest` cases L1–L12.
+- **Wider loaded area: `--ring visible|N`** (exteriors only, 2026-10-29; `VisibleCells.cs`). The 3×3 is right for an
+  eye-level shot; from a high camera the game shows ground to the frame's edges and the 3×3 is an island in sky.
+
+  | Option | Effect |
+  |---|---|
+  | `--ring 1` (the default) | The target and its ±1 ring, through exactly the old code path. |
+  | `--ring N` (2..16) | The square of radius N around the target. |
+  | `--ring visible` (alias `auto`) | Every cell whose ground the frame can see, plus the target's 3×3. |
+  | `--ring-reach N` (default 8) | `visible` looks no farther than N cells (Chebyshev) from the eye's own cell. |
+  | `--ring-cap N` (default 160) | `visible` loads at most N cells; the ones nearest the eye are kept. |
+
+  - **How `visible` picks.** Before the winning-state walk, one pass over the order reads the winning LAND of every
+    cell within the reach and keeps its lowest and highest vertex. A 97×55 grid of rays through the frame (the
+    render's own camera: vertical `--fov`, the `--aspect`, world Z up) is marched from the eye in 256 u steps. A cell
+    joins when a ray passes over it no higher than its highest ground + 2,048 u (a tree or roof standing there can
+    meet the ray). The ray stops below the cell's lowest ground, on leaving the reach, or when it rises above every
+    band. A square with no LAND stands in at the lowest ground seen. The console prints
+    `visible cells: N loaded (x .., y ..) - F under the frame's R rays …; cut: …` naming the rays that left the reach
+    and the cells the cap dropped, or `nothing cut`.
+  - **What loads in them.** Terrain (LAND, paint layers), water (one surface per cell) and **full references in every
+    loaded cell**, including cells beyond the game's ±2 grid, where the game draws LOD or nothing instead. The console
+    says how many of the cells lie beyond ±2. The persistent merge takes the persistent refs whose position falls in
+    a loaded cell. The ring edge becomes the one-cell border around the set: a reference anchored there joins when its
+    placed box enters any loaded cell (`RingReach.EntersCells`). Large references stay those anchored within 5 cells
+    of the target, outside that border, listed and entering the set. The navmesh, cell outline and `--nav-cell`
+    annotations stay where they were.
+  - **The camera must be known before the walk**: `--eye X,Y,Z` with `--yaw/--pitch` or `--look X,Y,Z`, or a worklist
+    shot. `--eye-ref`/`--look-ref` are refused, because they are resolved from the walk the cells are chosen for.
+  - **Refused combinations.** `--no-ring-refs` with any `--ring` other than 1. A static worklist under cell reuse
+    (the default) is refused too, because the set follows each shot's camera and a retained walk is shared by every
+    shot of the cell; pass `--no-reuse-cell` and every shot walks the order for its own cells.
+  - **Cost, measured on the Riverwood aerial** (A pose, eye 15000,-47000,10000, yaw 76°, pitch 68.1°, 1920×1080,
+    vanilla DevBench order): 22 cells (x 3..6, y −14..−9), nothing cut. The LAND-band pass took 0.2 s. The scene
+    grew from 1,731 to 2,681 refs and from 2,614 to 4,240 shapes. Wall time went from 18 s to 20 s and the peak working
+    set from 3.8 GB to 4.3–4.7 GB (two runs). Against the in-game A frame, edge maps register to within 4 px at
+    1920 wide in the centre and all four quadrants at `--fov 50.534`. The aerial only looked wider in game because
+    the 3×3 render was an island in sky.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
   navmesh vertex positions one plugin's version has and the other's does not, drawn in every panel
   that contains them, always visible. `--no-nav-diff` drops them.

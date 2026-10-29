@@ -82,8 +82,11 @@ internal sealed class WinningRefWalk
     }
 
     /// <summary>Is this cell the target, or one of the target's ±1 ring neighbours whose refs load with it?</summary>
+    /// <remarks><paramref name="visible"/> (--ring visible|N, VisibleCells.cs) replaces the ±1 square with the cells the
+    /// camera's frame can see; null keeps the ring.</remarks>
     internal static (bool IsTarget, bool InRing) Classify(CellPlacements cp, FormKey? cellKey, bool interior, bool ringRefs,
-                                                          FormKey targetWorldspace, (int X, int Y)? targetGrid)
+                                                          FormKey targetWorldspace, (int X, int Y)? targetGrid,
+                                                          IReadOnlySet<(int X, int Y)>? visible = null)
     {
         bool isTarget = cp.Cell == cellKey;
         // ±1-ring neighbours (exteriors): their refs are in frame from any eye-level
@@ -94,7 +97,8 @@ internal sealed class WinningRefWalk
         bool inRing = !isTarget && ringRefs && !interior && !cp.Interior
             && cp.Worldspace == targetWorldspace && cp.Worldspace != FormKey.Null
             && targetGrid is { } tg && cp.Grid is { } cg
-            && Math.Abs(cg.X - tg.X) <= 1 && Math.Abs(cg.Y - tg.Y) <= 1;
+            && (visible is not null ? visible.Contains((cg.X, cg.Y))
+                                    : Math.Abs(cg.X - tg.X) <= 1 && Math.Abs(cg.Y - tg.Y) <= 1);
         return (isTarget, inRing);
     }
 
@@ -150,12 +154,35 @@ internal sealed class WinningRefWalk
         bool on = ringRefs && !targetWorldspace.IsNull;
         _edgeWs = on ? targetWorldspace : FormKey.Null;
         _edgeGrid = on ? targetGrid : null;
+        _visible = null;
+    }
+
+    /// <summary>After TrackEdge, before the walk: --ring visible|N's loaded cells (null keeps the 3x3). A no-op when
+    /// TrackEdge left the edge off (ring refs off, no worldspace). Separate from TrackEdge so that signature, which the
+    /// selftest calls by reflection, stays as it was.</summary>
+    internal void SetVisible(IReadOnlySet<(int X, int Y)>? visible) =>
+        _visible = _edgeGrid is not null && visible is not null ? new HashSet<(int X, int Y)>(visible) : null;
+
+    // --ring visible|N (VisibleCells.cs): the loaded area is this set instead of the 3x3 around the target. The ring edge
+    // becomes the one-cell border around the set (EdgeRadius - 1 cells out, as the 3x3's edge is), the large references
+    // stay those anchored within LargeRadius of the target and outside that border, and both admit by the placed box
+    // overlapping any cell of the set. Null: the 3x3 rules above, unchanged.
+    HashSet<(int X, int Y)>? _visible;
+
+    bool NearVisible((int X, int Y) a, int reach)
+    {
+        for (int dx = -reach; dx <= reach; dx++)
+            for (int dy = -reach; dy <= reach; dy++)
+                if (_visible!.Contains((a.X + dx, a.Y + dy))) return true;
+        return false;
     }
 
     bool IsEdge(CellPlacements cp, PlacedRef r)
     {
         if (_edgeGrid is not { } g || cp.Interior || cp.Worldspace != _edgeWs) return false;
-        int d = RingReach.Ring(RingReach.AnchorOf(cp, r), g);
+        var a = RingReach.AnchorOf(cp, r);
+        if (_visible is { } v) return !v.Contains(a) && NearVisible(a, EdgeRadius - 1);
+        int d = RingReach.Ring(a, g);
         return d > 1 && d <= EdgeRadius;
     }
 
@@ -184,7 +211,9 @@ internal sealed class WinningRefWalk
     bool IsFar(CellPlacements cp, PlacedRef r)
     {
         if (_edgeGrid is not { } g || cp.Interior || cp.Worldspace != _edgeWs) return false;
-        int d = RingReach.Ring(RingReach.AnchorOf(cp, r), g);
+        var a = RingReach.AnchorOf(cp, r);
+        int d = RingReach.Ring(a, g);
+        if (_visible is { } v) return d <= LargeRadius && !v.Contains(a) && !NearVisible(a, EdgeRadius - 1);
         return d > EdgeRadius && d <= LargeRadius;
     }
 
@@ -223,7 +252,8 @@ internal sealed class WinningRefWalk
 
     // The placed box overlaps the 3x3 square around g in XY: the ONE box test of both merges and of FloorFeed's reach
     // (_shared/RingReach.cs), so a convention fixed there holds for all of them (lane V's yaw-only arm edits it).
-    static bool EntersSquare(PlacedRef r, (Vec3 Min, Vec3 Max) b, (int X, int Y) g) => RingReach.EntersSquare(r, b, g);
+    bool EntersSquare(PlacedRef r, (Vec3 Min, Vec3 Max) b, (int X, int Y) g) =>
+        _visible is { } v ? RingReach.EntersCells(r, b, v) : RingReach.EntersSquare(r, b, g);
 
     internal IReadOnlyList<FormKey> LargeAdmittedKeys => _largeAdmitted;
     /// <summary>The tracked worldspace is a child (its winning record has a Parent).</summary>
@@ -272,7 +302,7 @@ internal sealed class WinningRefWalk
     {
         _takenOut.Clear();
         _everAdmitted.Clear();
-        _edge.Clear(); _edgeAdmitted.Clear(); _edgeWs = FormKey.Null; _edgeGrid = null;
+        _edge.Clear(); _edgeAdmitted.Clear(); _edgeWs = FormKey.Null; _edgeGrid = null; _visible = null;
         _far.Clear(); _largeAdmitted.Clear(); _lists = new();
         if (retained is not null) _takenOut.UnionWith(retained);
     }
@@ -282,6 +312,16 @@ internal sealed class WinningRefWalk
     /// drop exterior doors standing in a neighbour cell that visibly renders. Returns how many were added.</summary>
     internal int MergePersistent(FormKey targetWorldspace, (int X, int Y) tgp, bool ringRefs)
     {
+        if (_visible is { } vis)
+        {
+            int addedVis = 0;
+            foreach (var (pws, pr) in _persistentWin.Values)
+                if (pws == targetWorldspace
+                    && vis.Contains(((int)MathF.Floor(pr.Position.X / 4096f), (int)MathF.Floor(pr.Position.Y / 4096f)))
+                    && !_winRef.ContainsKey(pr.FormKey))
+                { _winRef[pr.FormKey] = pr; addedVis++; }
+            return addedVis;
+        }
         int ringR = ringRefs ? 1 : 0;
         float px0 = (tgp.X - ringR) * 4096f, py0 = (tgp.Y - ringR) * 4096f;
         float pspan = 4096f * (1 + 2 * ringR);

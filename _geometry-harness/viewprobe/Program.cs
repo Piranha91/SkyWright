@@ -398,6 +398,14 @@ bool drawCoverings = true;
 // layer for the cell under examination, same scoping as the cell outline. --no-ring-refs goes
 // back to target-cell-only refs (the old, cheaper behaviour). Interiors have no ring.
 bool ringRefs = true;
+// --ring visible|N (VisibleCells.cs): the loaded exterior cells. Unset (or 1) is the target and its ±1 ring, as above,
+// through exactly the old code. N > 1 loads the square of radius N; visible loads every cell whose ground the frame can
+// see (rays through the frame against each cell's LAND height band), out to --ring-reach cells from the eye's cell and at
+// most --ring-cap cells, the target's 3x3 always included. Terrain, water and full references are loaded in all of them,
+// beyond the game's ±2 grid too (the game draws LOD there); the console says how many cells and why any were cut.
+string ringMode = "1";
+int ringReach = ViewProbe.VisibleCells.DefaultReach, ringCap = ViewProbe.VisibleCells.DefaultCap;
+HashSet<(int X, int Y)>? visibleSet = null;   // per shot: null = the ±1 ring
 // --large-refs-child union|none: which large-reference list a CHILD worldspace (a city) uses (WinningRefs.cs). union,
 // the default, is what lane L read in game: the city's own listed references loaded beyond ring 2.
 bool largeChildUnion = true;
@@ -653,6 +661,22 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
+    else if (args[i] == "--ring" && i + 1 < args.Length)
+    {
+        ringMode = args[++i].ToLowerInvariant();
+        if (ringMode == "auto") ringMode = "visible";
+        if (ringMode != "visible" && !(int.TryParse(ringMode, out var rn) && rn is >= 1 and <= 16))
+        { Console.Error.WriteLine($"--ring takes visible (or auto) or a radius 1..16, not '{ringMode}'."); return 2; }
+        if (ringMode != "visible") ringMode = int.Parse(ringMode, System.Globalization.CultureInfo.InvariantCulture).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+    else if (args[i] is "--ring-reach" or "--ring-cap")
+    {
+        var opt = args[i];
+        int lim = opt == "--ring-reach" ? 32 : 2000;
+        if (i + 1 >= args.Length || !int.TryParse(args[++i], out var rv) || rv < 1 || rv > lim)
+        { Console.Error.WriteLine($"{opt} takes a whole number in 1..{lim}."); return 2; }
+        if (opt == "--ring-reach") ringReach = rv; else ringCap = rv;
+    }
     else if (args[i] == "--large-refs-child" && i + 1 < args.Length)
     {
         var v = args[++i];
@@ -855,6 +879,19 @@ for (int i = argStart; i < args.Length; i++)
                               + "not `--eye=X,Y,Z` — the second is not a flag this reads.");
         return 2;
     }
+}
+if (ringMode != "1" && !ringRefs)
+{
+    Console.Error.WriteLine($"--ring {ringMode} widens the loaded references and --no-ring-refs takes them away; pass one.");
+    return 2;
+}
+// A retained walk (--reuse-cell, on by default for a static worklist) is shared by every shot of a cell, and the visible
+// set follows each shot's camera, so the two cannot be combined: refused rather than drawing shot 2 with shot 1's cells.
+if (ringMode == "visible" && worklistPaths.Count > 0 && reuseCell && !interactiveMode)
+{
+    Console.Error.WriteLine("--ring visible chooses the loaded cells from each shot's camera, so a worklist cannot share one walk "
+                          + "across its shots: pass --no-reuse-cell with it (every shot then walks the order for its own cells).");
+    return 2;
 }
 if (reuseCellExplicit && noReuseCell)
 {
@@ -1598,6 +1635,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     enableMemo.Clear();
     targetWorldspace = FormKey.Null; targetGrid = null;
     cellKey = null; cellLabel = cellTarget; interior = false;
+    visibleSet = null;
     sw.Restart();
 
     // The shot's route, or the command line's. A LOCAL, like the shot spec below. navMode and
@@ -1706,6 +1744,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     {
         yield return cellTarget.Trim();
         yield return $"ring={ringRefs};stations={stationsSpec is not null};terrain={drawTerrain};water={drawWater};stateRecords={stateSpec is not null}";
+        if (ringMode != "1") yield return $"ringMode={ringMode};reach={ringReach};cap={ringCap}";
         foreach (var x in shotNpcWatch.Order()) yield return "npc:" + x;
         foreach (var x in doorWatchKeys.Order()) yield return "door:" + x;
         foreach (var x in cliNavVersionPlugins.Order(StringComparer.OrdinalIgnoreCase)) yield return "navsource:" + x;
@@ -1794,8 +1833,47 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
 
     // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
     bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
+    // --ring visible|N (VisibleCells.cs): the loaded cells, before the walk whose admission rule reads them.
+    if (ringMode != "1" && !interior && targetGrid is { } vtg)
+    {
+        if (ringMode == "visible")
+        {
+            if (eye is not { } vEye)
+            {
+                Console.Error.WriteLine("--ring visible needs the camera before the walk: give --eye X,Y,Z (with --yaw/--pitch or --look X,Y,Z), "
+                                      + "not --eye-ref/--look-ref, which are resolved from the walk it would choose the cells for.");
+                return 2;
+            }
+            if (look is null && lookRef is not null)
+            { Console.Error.WriteLine("--ring visible cannot use --look-ref (resolved after the walk); give --look X,Y,Z or --yaw/--pitch."); return 2; }
+            System.Numerics.Vector3 vLook;
+            if (look is { } lk0) vLook = lk0;
+            else
+            {
+                // The camera rule of the render (first-person block below): 0 = +Y, clockwise; positive pitch looks down.
+                float yr0 = float.DegreesToRadians(yaw ?? 0f), pr0 = float.DegreesToRadians(pitch);
+                vLook = vEye + new System.Numerics.Vector3(MathF.Sin(yr0) * MathF.Cos(pr0), MathF.Cos(yr0) * MathF.Cos(pr0), -MathF.Sin(pr0)) * 512f;
+            }
+            var eyeCell0 = ((int)MathF.Floor(vEye.X / 4096f), (int)MathF.Floor(vEye.Y / 4096f));
+            var bandSw = System.Diagnostics.Stopwatch.StartNew();
+            var bands = ViewProbe.VisibleCells.Bands(order.OrderedPaths, targetWorldspace, eyeCell0, ringReach);
+            var sel = ViewProbe.VisibleCells.Select(vEye, vLook, fov, canvasAspect, vtg, bands, ringReach, ringCap, bandSw.Elapsed.TotalSeconds);
+            visibleSet = sel.Cells;
+            Console.WriteLine(ViewProbe.VisibleCells.Describe(sel, ringReach, ringCap, vtg));
+        }
+        else
+        {
+            int rr = int.Parse(ringMode, System.Globalization.CultureInfo.InvariantCulture);
+            visibleSet = new HashSet<(int X, int Y)>();
+            for (int dx = -rr; dx <= rr; dx++)
+                for (int dy = -rr; dy <= rr; dy++)
+                    visibleSet.Add((vtg.X + dx, vtg.Y + dy));
+            Console.WriteLine($"   ring {rr}: {visibleSet.Count} cells loaded ({2 * rr + 1}x{2 * rr + 1} around the target); full references, terrain and water in all of them"
+                            + (rr > ViewProbe.WinningRefWalk.EdgeRadius ? $", beyond the game's ±{ViewProbe.WinningRefWalk.EdgeRadius} grid too (the game draws LOD there)" : ""));
+        }
+    }
     // The ring edge is measured from the target found above (WinningRefs.cs TrackEdge); interiors have none.
-    if (!interior && targetGrid is { } edgeGrid) winWalk.TrackEdge(targetWorldspace, edgeGrid, ringRefs);
+    if (!interior && targetGrid is { } edgeGrid) { winWalk.TrackEdge(targetWorldspace, edgeGrid, ringRefs); winWalk.SetVisible(visibleSet); }
     ViewProbe.RenderStages.Open(ViewProbe.RenderStages.RecordWalk,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
@@ -1928,7 +2006,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 }
                 // Which refs the winning state admits, and where: WinningRefs.cs (persistent refs are
                 // filed for the by-position merge; target and ring cells admit theirs).
-                var (isTarget, inRing) = ViewProbe.WinningRefWalk.Classify(cp, cellKey, interior, ringRefs, targetWorldspace, targetGrid);
+                var (isTarget, inRing) = ViewProbe.WinningRefWalk.Classify(cp, cellKey, interior, ringRefs, targetWorldspace, targetGrid, visibleSet);
                 winWalk.Observe(cp, isTarget, inRing);
                 // The "where is it" tables: deletions, watched NPCs by reference and by base, watched doors (WalkSideTables.cs).
                 ViewProbe.RefWhere.Observe(cp, plgName, whereTables, shotNpcWatch, doorWatchKeys, m.ModKey);
@@ -2172,12 +2250,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         int ringR = ringRefs ? 1 : 0;
         int addedPersist = winWalk.MergePersistent(targetWorldspace, tgp, ringRefs);
         if (addedPersist > 0)
-            Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
+            Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(visibleSet is not null ? $"{visibleSet.Count} cells'" : ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
         if (edgeAdmittedCount > 0)
-            Console.WriteLine($"   +{edgeAdmittedCount} reference(s) anchored two cells out whose bounds enter the loaded 3x3 ({edgePlanesAdmittedCount} occlusion plane(s); "
+            Console.WriteLine($"   +{edgeAdmittedCount} reference(s) anchored {(visibleSet is not null ? "one cell outside the loaded cells whose bounds enter them" : "two cells out whose bounds enter the loaded 3x3")} ({edgePlanesAdmittedCount} occlusion plane(s); "
                             + $"game grid ±{ViewProbe.WinningRefWalk.EdgeRadius}, inferred: uGridsToLoad is unset in the INIs)");
         if (largeAdmittedCount > 0)
-            Console.WriteLine($"   +{largeAdmittedCount} large reference(s) anchored 3-{ViewProbe.WinningRefWalk.LargeRadius} cells out whose bounds enter the loaded 3x3 "
+            Console.WriteLine($"   +{largeAdmittedCount} large reference(s) anchored {(visibleSet is not null ? $"up to {ViewProbe.WinningRefWalk.LargeRadius} cells out, beyond the loaded cells' border, whose bounds enter them" : $"3-{ViewProbe.WinningRefWalk.LargeRadius} cells out whose bounds enter the loaded 3x3")} "
                             + $"({largePlanesAdmittedCount} occlusion primitive(s), by record; list: {(largeIsChild ? (largeChildUnion ? "child worldspace, its own lists' union" : "child worldspace, none") : "union of every plugin's list")}, "
                             + $"{largeListedCount:N0} listed)");
     }
@@ -2873,8 +2951,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         foreach (var c in Cells())
                         {
                             if (c.Grid?.Point is not { } gp) continue;
-                            if (Math.Abs(gp.X - tg.X) > stationCellRadius
-                                || Math.Abs(gp.Y - tg.Y) > stationCellRadius) continue;
+                            bool inVisible = visibleSet is not null && visibleSet.Contains((gp.X, gp.Y));
+                            if (!inVisible && (Math.Abs(gp.X - tg.X) > stationCellRadius
+                                || Math.Abs(gp.Y - tg.Y) > stationCellRadius)) continue;
                             // WHICH cell this grid square is, for --stations: a pose names the cell
                             // the STATION stands in, and one ladder reaches across a cell border.
                             // In load order, so the last plugin to state the square wins it.
@@ -2890,7 +2969,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             // renderer's, and --stations gets its heightmaps from FloorFeed's own
                             // filing instead. Widening it would decode a 7x7 block of LAND for a
                             // mode that draws nothing.
-                            if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
+                            if (visibleSet is not null ? !inVisible : Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
                             // One rule (TerrainLand.cs, the core's LandHeight.Classify): no LAND leaves the earlier
                             // terrain; a LAND that declares no heights removes it, so nothing is drawn there (the engine
                             // draws no ground); an unreadable one is refused (skipping it drew the earlier plugin's heights).
@@ -4334,10 +4413,20 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             var armWater = waterArm == "truth" ? cellWaterTruth : cellWater;
             var wref = waterArm == "truth" ? wsWaterTruth : wsWater;
             float wsDefault = waterArm == "truth" ? wsDefaultWaterHeightTruth : wsDefaultWaterHeight;
-            for (int dx = -1; dx <= 1; dx++)
-                for (int dy = -1; dy <= 1; dy++)
+            // The loaded cells in the order the ±1 loops have always walked them (dx outer, or dy outer); --ring's set
+            // (which always holds the 3x3) adds its other cells after them, sorted the same way.
+            IEnumerable<(int X, int Y)> LoadedCells(bool dxOuter)
+            {
+                for (int a = -1; a <= 1; a++)
+                    for (int b = -1; b <= 1; b++)
+                        yield return dxOuter ? (wg.X + a, wg.Y + b) : (wg.X + b, wg.Y + a);
+                if (visibleSet is null) yield break;
+                var rest = visibleSet.Where(c => Math.Abs(c.X - wg.X) > 1 || Math.Abs(c.Y - wg.Y) > 1);
+                foreach (var c in dxOuter ? rest.OrderBy(c => c.X).ThenBy(c => c.Y) : rest.OrderBy(c => c.Y).ThenBy(c => c.X))
+                    yield return c;
+            }
+            foreach (var key in LoadedCells(true))
                 {
-                    var key = (wg.X + dx, wg.Y + dy);
                     if (!armWater.TryGetValue(key, out var cw) || !cw.Has) continue;
                     // The engine's own precedence: the cell's height when it states one, the
                     // worldspace default when it holds the sentinel.
@@ -4372,10 +4461,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             {
                 bool differ = false;
                 var lines = new List<string>();
-                for (int dy = -1; dy <= 1; dy++)
-                    for (int dx = -1; dx <= 1; dx++)
+                foreach (var k in LoadedCells(false))
                     {
-                        var k = (wg.X + dx, wg.Y + dy);
                         cellWater.TryGetValue(k, out var win); cellWaterTruth.TryGetValue(k, out var tru);
                         string Arm((bool Has, float Height, FormKey? Water) t, FormKey? wsw2, float wsd)
                         {
@@ -4414,10 +4501,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // A water plane at the wrong height is invisible, not wrong-looking, so when the sea
             // is missing this is the line that says whether the height or the drawing is at fault.
             if (Environment.GetEnvironmentVariable("VP_WATER_DUMP") == "1")
-                for (int dx = -1; dx <= 1; dx++)
-                    for (int dy = -1; dy <= 1; dy++)
+                foreach (var k in LoadedCells(true))
                     {
-                        var k = (wg.X + dx, wg.Y + dy);
                         if (!cellWater.TryGetValue(k, out var cwd))
                         { Console.WriteLine($"      cell ({k.Item1},{k.Item2}): no CELL record found in the walk"); continue; }
                         Console.WriteLine($"      cell ({k.Item1},{k.Item2}): HasWater={cwd.Has}  "
