@@ -222,6 +222,9 @@ def predict_readback(yaw_deg: float, pitch_deg: float):
     them as ABSENT there, not as zero. Compare a readback against THIS, never against the
     commanded angles: at yaw 90 the reported pitch is zero for every pitch, and comparing it to
     the command would call a correct pose 30 degrees wrong.
+
+    This is the `camAngles: "worldEuler"` readback (every readback on DevBench 1.24 and older).
+    On 1.25+ a free camera DevBench owns reads back `"freeCameraState"`, the driven radians.
     """
     y, p = math.radians(yaw_deg), math.radians(pitch_deg)
     sy, cy, sp, cp = math.sin(y), math.cos(y), math.sin(p), math.cos(p)
@@ -3091,6 +3094,8 @@ def cmd_devbench(args):
         print(f"# shot {s['n']} -- {s['cell']}: {s['label']}")
         print(f"#   yaw {s['yawDeg']} deg -> {s['drive']['yaw']} rad, "
               f"pitch {s['pitchDeg']} deg -> {s['drive']['pitch']} rad  (DevBench wants RADIANS)")
+        print("#   DevBench 1.25+ with its own free camera reads back camAngles=freeCameraState: "
+              "camYaw/camPitch then equal the drive values above; the line below is the worldEuler case")
         if s["expectReadback"] is None:
             print("#   camera action=get will report NEITHER camYaw NOR camPitch at this pose "
                   "(the Euler extraction fails); check the aim in the image.")
