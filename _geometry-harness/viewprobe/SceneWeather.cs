@@ -11,7 +11,7 @@ namespace ViewProbe;
 /// the sun's colour, the ambient colour and SkyRender's distance fog. Without --weather nothing
 /// changes. Values are copied out of the record, never held (the walk disposes its overlays).
 ///
-/// What is used, and how far it goes: the sky colour is WTHR's sky-upper colour (what a water
+/// What is used, and how far it goes: the sky is a gradient by elevation (SkyKeys; the flat sky-upper colour with VP_SKY_FLAT=1: what a water
 /// surface seen from above reflects); the ambient is the directional ambient's "Z-" colour, the
 /// light travelling from the sky down (what an up-facing surface receives), not the six-direction
 /// ambient; fog is the slot's fog near/far
@@ -26,6 +26,11 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
 {
     /// <summary>The slot's image space (IMGS), or null.</summary>
     internal FormKey? ImageSpace { get; init; }
+    /// <summary>The slot's sky-lower and horizon colours (the sky dome's other two gradient colours).</summary>
+    internal V3 SkyLower { get; init; }
+    internal V3 Horizon { get; init; }
+    /// <summary>The slot's water-multiplier colour (printed).</summary>
+    internal V3 WaterMultiplier { get; init; }
     /// <summary>The slot's six directional ambient colours (+X, -X, +Y, -Y, +Z, -Z), printed.</summary>
     internal V3[] Ambient6 { get; init; } = Array.Empty<V3>();
     /// <summary>That image space's values once the walk has seen it (printed).</summary>
@@ -111,9 +116,43 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
             night ? w.FogDistanceNightMax : w.FogDistanceDayMax)
         {
             ImageSpace = ispKey,
+            SkyLower = Pick(w.SkyLowerColor), Horizon = Pick(w.HorizonColor), WaterMultiplier = Pick(w.WaterMultiplierColor),
             Ambient6 = new[] { C(ambSlot.DirectionalXPlus), C(ambSlot.DirectionalXMinus), C(ambSlot.DirectionalYPlus),
                                C(ambSlot.DirectionalYMinus), C(ambSlot.DirectionalZPlus), C(ambSlot.DirectionalZMinus) },
         };
+    }
+
+    /// <summary>The vanilla sky dome's blend masks by elevation (degrees above the dome's rim): the
+    /// vertex colours of <c>meshes/sky/atmosphere.nif</c> (Skyrim - Meshes0.bsa), averaged per ring.
+    /// Red weights the horizon colour, green the sky-lower colour, blue the sky-upper colour; the
+    /// engine's sky shader sums BlendColor[i] x mask[i] per vertex (Community Shaders Sky.hlsl).</summary>
+    internal static readonly (float El, float H, float L, float U)[] DomeMasks =
+    {
+        (0f, 1f, 0f, 0f), (2.1f, 1f, 0f, 0f), (3.6f, 0.933f, 0.071f, 0f), (5.6f, 0.804f, 0.220f, 0f),
+        (9.7f, 0.490f, 0.573f, 0f), (14.5f, 0.157f, 0.910f, 0f), (18.0f, 0.020f, 1f, 0.016f),
+        (26.8f, 0f, 0.769f, 0.306f), (34.9f, 0f, 0.471f, 0.584f), (47.0f, 0f, 0.184f, 0.831f),
+        (59.1f, 0f, 0.063f, 0.941f), (74.0f, 0f, 0.012f, 0.984f), (90f, 0f, 0f, 1f),
+    };
+
+    /// <summary>The sky by elevation for SkyRender's SkyGradient (what sky-reflecting water reflects),
+    /// one key per dome ring. Each key is the dome colour (horizon, sky-lower and sky-upper mixed by
+    /// the ring's masks) plus the image space's sky scale (the sky shader adds it after the gradient),
+    /// seen through the weather's far fog at its maximum: (1 - max) x dome + max x fog far, then the
+    /// sky scale. The fog over the sky is NOT sourced: it is what makes the sky in the in-game
+    /// Riverwood captures match (the bare dome is far darker and bluer than the game's sky and
+    /// river); the engine's Atmosphere object does carry a BSFogProperty (CommonLibSSE). With
+    /// <paramref name="fog"/> false the keys are the bare dome plus the sky scale.</summary>
+    internal (float El, V3 Color)[] SkyKeys(float skyScale, bool fog)
+    {
+        var keys = new (float, V3)[DomeMasks.Length];
+        for (int i = 0; i < DomeMasks.Length; i++)
+        {
+            var m = DomeMasks[i];
+            var dome = Horizon * m.H + SkyLower * m.L + SkyUpper * m.U;
+            var c = fog ? dome * (1f - FogMax) + FogFarColor * FogMax : dome;
+            keys[i] = (m.El, c + new V3(skyScale));
+        }
+        return keys;
     }
 
     /// <summary>Notes an IMGS's values when it is the weather's image space (the walk calls this for
@@ -139,6 +178,7 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
 
     public override string ToString()
         => $"{Name} ({Slot}): sky {SkyUpper:0.000}, sun {Sunlight:0.000}, ambient (up-facing, DALC Z-) {AmbientUp:0.000}, "
+         + $"sky lower {SkyLower:0.000}, horizon {Horizon:0.000}, water multiplier {WaterMultiplier:0.000}, "
          + $"fog {FogNearColor:0.000} -> {FogFarColor:0.000} over {FogNear:0}..{FogFar:0} u, power {FogPower:0.##}, max {FogMax:0.##}"
          + (Ambient6.Length == 6 ? $"; directional ambient +X {Ambient6[0]:0.000} -X {Ambient6[1]:0.000} +Y {Ambient6[2]:0.000} "
                                  + $"-Y {Ambient6[3]:0.000} +Z {Ambient6[4]:0.000} -Z {Ambient6[5]:0.000}" : "");

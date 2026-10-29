@@ -241,8 +241,15 @@ A successful save or size check alone does not establish clean pixels.
   (default 4, clamped to the context's `GL_MAX_SAMPLES`; 0/1 = off).
 - **Weather:** `--weather NAME` (a WTHR EditorID such as `SkyrimClear`, or a FormKey such as
   `00081A:Skyrim.esm`) and `--weather-slot day|sunrise|sunset|night` (default `day`) light the
-  scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky
-  colour (and what water reflects) is its sky-upper colour, the sun colour its sunlight colour, the
+  scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky is a
+  gradient by elevation (SkyRender `SkyGradient`), what sky-reflecting water reflects per pixel and
+  the background (at 20 degrees). Its keys follow the engine's sky dome: the vanilla
+  `meshes/sky/atmosphere.nif` blend masks (horizon at the rim, sky-lower around 18 degrees,
+  sky-upper at the zenith) over the WTHR's horizon, sky-lower and sky-upper colours, plus the image
+  space's sky scale; the dome is seen through the far fog colour at the fog max, which is an
+  in-game fit (it brings the Riverwood sky to within about 10 RGB of the game's and the aerial river
+  from 35,106,148 to 104,170,206 against the game's 105,162,204), not sourced. `VP_SKY_FLAT=1` keeps
+  the single sky-upper colour, `VP_SKY_NO_FOG=1` the bare dome. The sun colour is its sunlight colour, the
   ambient its directional ambient's "Z-" colour (the light travelling from the sky to the ground,
   per the Step weather reference; it lights up-facing ground — "Z+" left the Riverwood aerial
   underlit and cyan against the game), and SkyRender's distance fog takes its fog near/far
@@ -257,7 +264,7 @@ A successful save or size check alone does not establish clean pixels.
   RENDERING_PIPELINE.md, "Image space"). The adapted luminance (the contrast pivot) is fixed at
   0.367, the value read from the retail adaptation texture at SkyrimClear noon; `--adapt-lum X`
   overrides it and `--no-imagespace` leaves the frame ungraded (the earlier output). Not modelled:
-  bloom, eye adaptation over time, sky scale; a weather-lit Riverwood render is still a little
+  bloom, eye adaptation over time, clouds; a weather-lit Riverwood render is still a little
   darker and more saturated than the game. Off by default; a retained walk cannot see the WTHR and
   says so.
   The console also prints the slot's six directional ambient colours. Colour-balance diagnostics

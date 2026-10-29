@@ -646,6 +646,7 @@ static class TexturedScene
         renderer.Fog = null;
         renderer.ImageSpace = null;
         renderer.SkyColor = null;
+        renderer.SkyGradient = null;
         renderer.Lights[0].Color = new GlVec3(1f, 1f, 1f);   // a reused renderer may carry a weather's ambient
         if (SceneWeather.Requested is not null && SceneWeather.Current is null)
             Console.WriteLine($"   weather: no WTHR '{SceneWeather.Requested}' in the load order (or this walk was retained) - studio lights kept");
@@ -670,6 +671,16 @@ static class TexturedScene
                 renderer.ImageSpace = new ImageSpaceFinish(isd.White, isd.Saturation, isd.Brightness, isd.Contrast,
                     new GlVec3(isd.TintColor.X, isd.TintColor.Y, isd.TintColor.Z), isd.TintAmount, SceneWeather.AdaptedLuminance);
             renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
+            // The sky by elevation (SceneWeather.SkyKeys): what sky-reflecting water reflects, per pixel,
+            // and the frame's background (the dome at 20 degrees; the fogged sky is nearly flat).
+            // VP_SKY_FLAT=1 keeps the single sky-upper colour; VP_SKY_NO_FOG=1 drops the fog over the sky.
+            if (Environment.GetEnvironmentVariable("VP_SKY_FLAT") != "1")
+            {
+                var skyKeys = sw.SkyKeys(isd?.SkyScale ?? 0f, fog: Environment.GetEnvironmentVariable("VP_SKY_NO_FOG") != "1");
+                renderer.SkyGradient = new SkyGradient(skyKeys.Select(k => new SkyGradientKey(k.El, new GlVec3(k.Color.X, k.Color.Y, k.Color.Z))).ToArray());
+                if (!SceneWeather.SkyGiven) renderer.ClearColor = renderer.SkyGradient.At(20f);
+                Console.WriteLine($"   weather sky: gradient of {skyKeys.Length} keys, horizon {skyKeys[0].Color:0.000}, 20 deg {renderer.SkyGradient.At(20f):0.000}, zenith {skyKeys[^1].Color:0.000}");
+            }
             // Diagnostics for the colour balance (README, VP_WEATHER_*): drop the fog, or scale the ambient.
             if (float.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_SCALE"),
                                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ambScale))
@@ -690,7 +701,7 @@ static class TexturedScene
                 : null;
             Console.WriteLine($"   weather: {sw}");
             if (SceneWeather.ImageSpaceText is { } ist)
-                Console.WriteLine($"   weather image space ({(isd is null ? "not applied" : $"applied, adapted luminance {SceneWeather.AdaptedLuminance:0.###}; bloom, eye adaptation and sky scale not modelled")}): {ist}");
+                Console.WriteLine($"   weather image space ({(isd is null ? "not applied" : $"applied, adapted luminance {SceneWeather.AdaptedLuminance:0.###}; bloom and eye adaptation not modelled; sky scale on the sky gradient only")}): {ist}");
         }
         var meshes = new List<GlMesh>();
         var borrowedNpcMeshes = new List<GlMesh>();
