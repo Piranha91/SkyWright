@@ -299,7 +299,7 @@ A successful save or size check alone does not establish clean pixels.
   `--no-water` drops the water surfaces, `--no-coverings` drops the MATO projected snow/ash/moss.
   Both change every exterior render, so both announce themselves on the console. See *Water* and
   *Projected coverings* under *Known rough edges* — **the water HEIGHT is a known open defect.**
-- **Scene filters:** `--fx` / `--fx-static` (see *Effect geometry*), `--markers` (translucent
+- **Scene filters:** `--no-fx` / `--fx` (see *Effect geometry*; effect shapes are drawn by default), `--markers` (translucent
   editor markers), `--list-meshes` (per-mesh census with its WHOLE-FILE class, `FX-file` vs
   `geometry`), `--out DIR`, `--size N` (default 2560; the render resolution as well as the PNG's —
   there is no downsample step, so `--size` IS the sharpness knob, with `--msaa` for the edges).
@@ -414,11 +414,12 @@ all knowledge.
 
 | Var | Effect |
 |---|---|
-| `VP_SHAPE_DUMP=<substr>` | for every mesh whose path matches, one line per BUILT shape: effect-vs-lighting shader, triangles, blend mode (Bethesda src→dst; `6->0` is additive), material alpha, colour × multiple, depth-write, slot-0 texture. The SHAPE-level companion to `--list-meshes` — that says which files are in the cell, this says why one of their shapes draws the way it does. Printed at build time, before any skip decision, so it shows skipped shapes too |
+| `VP_SHAPE_DUMP=<substr>` | for every mesh whose path matches, one line per BUILT shape: effect-vs-lighting shader, triangles, local bounding box, blend mode (Bethesda src→dst; `6->0` is additive), material alpha, colour × multiple, depth-write, `DECAL` / `BILLBOARDn`, both shader-flag words, slot-0 texture, and for effect shapes their flags, falloff, soft depth, lighting influence, clamp mode, UV transform and greyscale palette; also one `effect drawn:` line per drawn effect shape. The SHAPE-level companion to `--list-meshes` — that says which files are in the cell, this says why one of their shapes draws the way it does. Printed at build time, before any skip decision, so it shows skipped shapes too |
 | `VP_WATER_DUMP=1` | the raw per-cell water read — HasWater, XCLW at full precision, the WATR link, and whether the height was used or rejected. A plane at the wrong height is INVISIBLE rather than wrong-looking (terrain simply covers it), so this is the line that says whether the height or the drawing is at fault |
 | `VP_WATER_SHALLOW_ALPHA=<0..1>` | alpha at ZERO water depth. Default 1 = opaque everywhere, which is what the engine draws. Lower it for a see-through shore margin on a floor plan; below ~0.8 the sea starts reading as tinted glass |
 | `VP_WATER_Z=<z>` | force every water surface to one height. The other half of the pair above: if the surface appears here and not at the resolved height, the renderer is fine and the height is wrong |
-| `VP_FXSTATIC_EMIT=<float>` | taste multiplier on `--fx-static` brightness (default 1 = the authored `baseColorScale`). Below ~0.25 the fire stops reading; above ~2 it blows out |
+| `VP_FX_DOUBLESIDED=1` | diagnostic: draw every effect shape double-sided, to tell a back-face-culled sprite from one its shading hides |
+| `VP_NIF_DUMP=<substr>` | the block-level companion to `VP_SHAPE_DUMP`: SkyRender's full NIF dump (scene graph with transforms, every block's fields) for each matching mesh, once, before it is built. Where a billboard parent, a controller or a particle system shows up |
 | `VP_ALPHA_DUMP=gx,gy` | every alpha layer of that cell as a 17×17 ASCII opacity grid |
 | `VP_LAYER_ONLY=<substr>` + `VP_LAYER_SOLID=1` | draw only the painted layers whose diffuse matches, at full opacity — isolates one layer so "is that wash really this texture?" has an answer |
 | `VP_OCCL_SLACK="rel,abs"` | override the behind-geometry depth-compare slack (default `1.002,1.5`) |
@@ -781,8 +782,8 @@ For the life of the cell it keeps:
 The static scene is keyed on the prepared cell identity (the record-walk key above) and on every
 input that decides its geometry or materials without depending on the camera: each reference's
 mesh, placement, scale, highlight, marker, BOS and state labels; the terrain patches and layers; the
-coverings; `--fx` and `--fx-static`; `--cull-above` (the cut is applied before upload);
-`--ref-surface` and its opacity; and the `VP_LAYER_ONLY`, `VP_LAYER_SOLID` and `VP_FXSTATIC_EMIT`
+coverings; `--fx` and `--no-fx`; `--cull-above` (the cut is applied before upload);
+`--ref-surface` and its opacity; and the `VP_LAYER_ONLY`, `VP_LAYER_SOLID` and `VP_FX_DOUBLESIDED`
 variables. A shot whose key differs from the retained one disposes that scene and builds a new one,
 so no shot draws a scene built for other inputs.
 
@@ -2024,7 +2025,9 @@ scale-1 human) or the console reports the actor `HIDDEN behind scene geometry` a
 ## Effect geometry: two filters, because it comes in two shapes
 
 "Is this an effect?" cannot be answered from the model path — that describes where a file lives,
-not what is in it. Effect geometry is filtered in two places, and `--fx` switches both off:
+not what is in it. Effect geometry is filtered in two places, and `--fx` switches both off. Since
+2026-10-29 the default draws whole-file effects and effect-shader shapes with engine effect shading
+(see *Effect shading* below), so both filters below apply only under `--no-fx`, except kind 2:
 
 - **whole file, at the ref** (`Program.cs`) — the model path contains `effects\`. Beams, mists,
   glows: files that are nothing but effect. Dropped before the scene is assembled.
@@ -2052,46 +2055,39 @@ Two independent tests, both framed as **"this renderer provably cannot shade it"
    hard convention — no legitimate diffuse carries it — and the count is reported separately so the
    rule's reach stays visible rather than assumed.
 
-### `--fx-static` — a frozen fire
+### Effect shading (default since 2026-10-29) — a frozen fire
 
-The middle setting between dropping the fire and drawing it wrong: per-shape effect geometry is
-DRAWN, frozen at the frame the NIF stores. **Off by default** — an additive flame still paints over
-the navmesh behind it, and the navmesh is what this tool is for. Kind 2 stays skipped under it: a
-normal map in the diffuse slot is unshadeable however it is blended.
+Effect-shader shapes are DRAWN by default through SkyRender's engine effect shading
+(`NifMaterialBinder.ApplyEffectMaterial`, see SkyRender's RENDERING_PIPELINE.md, "Effect shaders"),
+frozen at the frame the NIF stores, and whole-file `effects\` refs (light shafts, mists, dust
+beams) are drawn too. `--no-fx` restores the old default — both kinds dropped — for a frame where
+an additive flame must not paint over the navmesh. `--fx-static` is accepted as an explicit
+spelling of the default. Kind 2 (a normal map in the diffuse slot) stays skipped: no blend mode
+makes it shadeable. `--depth-measurement` keeps effect shapes out, as before.
 
-"First frame" costs nothing to obtain: the block's stored values ARE the base state, and the
-`BSEffectShaderPropertyFloatController`s that would animate UV/alpha are simply never run.
+"First frame" costs nothing: the block's stored values ARE the base state, and the
+`BSEffectShaderProperty*Controller`s that would animate UV, alpha and colour are never run.
 
-Three of the four ingredients were already present, which is why this was cheap:
+What the shading does, per the engine's effect pixel shader (Community Shaders' `Effect.hlsl`):
+source texture × `baseColor` × vertex colour; with the greyscale-to-palette flags the colour is
+`baseColorScale × palette(source.g, baseColor.r)` and the alpha `palette(source.a, alpha).a` from
+`BSEffectShaderProperty.greyscaleTexture` — a fire's orange lives in that palette, and `baseColor.r`
+picks the ROW (vanilla flames sit near 0.2, the dark-red-to-white row of `gradfireexplosion.dds`);
+view-angle falloff; the material's own depth-test / depth-write / double-sided flags; the
+`NiAlphaProperty` blend (`6->0` additive for flames). Billboard sprites (`NiBillboardNode`, which the
+engine turns to face the camera) are drawn double-sided in their authored pose, so a flame authored
+facing away is not culled. Soft-effect depth fades need the SSAO prepass, which viewprobe leaves off,
+so soft effects draw hard-edged.
 
-- **Geometry** — flame quads are real `BSTriShape`/`BSLODTriShape`.
-- **Texture** — already resolving: nifly's `GetTexturePathByIndex` maps slot 0 to
-  `BSEffectShaderProperty.sourceTexture`.
-- **Blend state** — `NiAlphaProperty` is a separate block, so the builder reads it fine: `6->0` =
-  SRC_ALPHA → ONE, additive, depth-write off. Additive is order-independent, so no sorting work.
-- **Missing:** the material, plus three smaller things:
-  1. `DstBlendIndex` was never copied to `GlMesh` (only `Src`), so it kept its default
-     INV_SRC_ALPHA and every additive shape in the game was composited as ordinary alpha blending.
-     Invisible on solid geometry, fatal for a flame.
-  2. `BSEffectShaderProperty` was never read — now `EffectBaseColor` / `EffectBaseColorScale` /
-     `EffectBaseColorAlpha` on `BuiltMesh`.
-  3. **Effect atlases are commonly greyscale.** A fire atlas is white flame shapes and the orange
-     lives entirely in `baseColor`, so drawn with a white emissive the flames come out as white
-     ghosts however bright you make them.
-  4. `SLSF2_Double_Sided` lives on the shader block the builder never reads, so effect quads arrive
-     single-sided and half a flame rosette is back-face culled. `--fx-static` forces double-sided.
+Checked against in-game captures (vanilla Bannered Mare kitchen hearth,
+`S:\Dev\skyrender-split\_ingame\shaderflags_20261029-021047\compare_*.jpg`): flame colour and placement
+match; flame SHAPE is one frozen atlas frame at the authored angle.
 
-**Intensity.** `baseColorScale` is an HDR number the engine tonemaps and viewprobe cannot, so it
-clips — but it clips *along the baseColor hue*, which is what a fire core looks like anyway. A
-hand-swept ladder (×1 invisible, ×2 faint, ×4 legible, ×8 right) landed on the authored value,
-which is the reason to use the author's number rather than a chosen constant.
-
-**Limits.** It is a stand-in, not the effect pipeline: the shader computes
-`albedo * (diffuse + emissive)`, not `source * baseColor * baseColorScale`, so the result is paler
-and less saturated than the game's. There is no billboarding — `NiBillboardNode` quads draw at their
-authored angles rather than facing the camera (viewprobe *could* compute this; it knows the camera
-before it builds the scene). And **particle systems can never be drawn**: a `NiParticleSystem` at
-rest has zero live particles, so there is no first frame — no sparks, no smoke plume, no glow point.
+**Limits.** No billboarding (a sprite keeps its authored angle, so one seen edge-on is a sliver
+where the game shows a full flame); no animation; and **particle systems can never be drawn**: a
+`NiParticleSystem` at rest has zero live particles, so there is no first frame — no sparks, no smoke
+plume, and vanilla `Campfire01Burning.nif` (the Bannered Mare's central pit) shows only its ember
+glow. Heat-shimmer planes are lighting shapes with a normal map in slot 0 (kind 2) and stay skipped.
 
 ---
 

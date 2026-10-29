@@ -255,14 +255,14 @@ float fov = 65f;                              // viewprobe's own default (the VE
 // values off BSLightingShaderProperty ONLY — an effect-shader shape arrives fully lit and opaque.
 // --fx switches BOTH filters off.
 bool keepFx = false;
-// --fx-static is the middle setting between "drop the fire" and "draw it wrong": effect-shader
-// shapes inside otherwise-solid meshes are DRAWN, frozen at the frame the NIF stores, additive and
-// never writing depth. It rescues only the effect-shader kind — a normal map in the diffuse slot
-// stays skipped, since no blend mode makes that shadeable. It does NOT bring back whole-file
-// `effects\` refs either; those are ambient dust beams and mists, which is a different question.
-// Off by default: an additive flame still paints over the navmesh behind it, and the navmesh is
-// what this tool is for.
-bool fxStatic = false;
+// fxStatic (the default since 2026-10-29; --no-fx turns it off): effect-shader shapes are DRAWN
+// through SkyRender's engine effect shading, frozen at the frame the NIF stores — flames, smoke,
+// light shafts and mists, including whole-file `effects\` refs. It covers only the effect-shader
+// kind: a normal map in the diffuse slot stays skipped, since no blend mode makes that shadeable.
+// --no-fx restores the old default (both kinds and `effects\` files dropped), for a frame where an
+// additive flame must not paint over the navmesh. --fx-static is kept as an explicit spelling of
+// the default.
+bool fxStatic = true;
 // Navmesh render mode (textured mode): filled = the translucent green sheet; wire = transparent
 // triangles with SOLID outlines so the surface underneath stays readable; both = faint fill +
 // outlines; off = none. --no-nav remains an alias for off.
@@ -624,6 +624,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--fov" && i + 1 < args.Length) fov = float.Parse(args[++i]);
     else if (args[i] == "--fx") keepFx = true;
     else if (args[i] == "--fx-static") fxStatic = true;
+    else if (args[i] == "--no-fx") fxStatic = false;
     else if (args[i] == "--nav" && i + 1 < args.Length) { navMode = args[++i].ToLowerInvariant(); navModeExplicit = true; }
     else if (args[i] == "--conflicts" && i + 1 < args.Length) conflictsPath = args[++i];
     else if (args[i] == "--red" && i + 1 < args.Length) redSpecs.Add(args[++i]);
@@ -2554,7 +2555,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 var cls = isMarker ? "MARKER" : isFx ? "FX-file" : "geometry";
                 meshCensus[rel] = (meshCensus.TryGetValue(rel, out var c) ? c.Count + 1 : 1, cls);
             }
-            if (!keepFx && isFx) { fxSkipped++; continue; }
+            if (!keepFx && !fxStatic && isFx) { fxSkipped++; continue; }
             // Editor markers are not world geometry; the game never draws them. --markers keeps them
             // as a translucent extra layer instead of dropping them.
             if (isMarker && !showMarkers) { markerSkipped++; continue; }
@@ -2580,7 +2581,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                            : r.Base is not { } bk0 ? "NOT DRAWN: no base"
                            : !baseMesh.TryGetValue(bk0, out _) ? "NOT DRAWN: base carries no model"
                            : baseIsMarker.Contains(bk0) && !showMarkers ? "not drawn: editor marker (--markers)"
-                           : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx ? "not drawn: FX (--fx)"
+                           : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx && !fxStatic ? "not drawn: FX (--no-fx)"
                            : r.InitiallyDisabled ? "drawn (enable parent resolves ENABLED)"
                            : "drawn";
                 // base TYPE first, then FormKey, then EditorID or '-': a parser can take the row
@@ -2709,7 +2710,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var kv in bosByIni.OrderByDescending(k => k.Value).Take(10)) Console.WriteLine($"      {kv.Value,6:N0}  swaps from {kv.Key}");
         }
         else Console.WriteLine("   BOS off: record bases (--bos on|diff for the bases the game loads)");
-        if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
+        if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped by --no-fx; --fx or the default draws them)");
         if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
         if (meshCensus is not null)
         {

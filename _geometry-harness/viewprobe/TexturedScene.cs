@@ -321,6 +321,11 @@ static class TexturedScene
             SrcBlendIndex = b.SrcBlendIndex, DstBlendIndex = b.DstBlendIndex,
             HasEffectShader = b.HasEffectShader, EffectBaseColor = b.EffectBaseColor,
             EffectBaseColorAlpha = b.EffectBaseColorAlpha, EffectBaseColorScale = b.EffectBaseColorScale,
+            EffectShaderFlags1 = b.EffectShaderFlags1, EffectShaderFlags2 = b.EffectShaderFlags2,
+            EffectGreyscaleTexture = b.EffectGreyscaleTexture, EffectFalloff = b.EffectFalloff,
+            EffectSoftFalloffDepth = b.EffectSoftFalloffDepth, EffectLightingInfluence = b.EffectLightingInfluence,
+            EffectUvScale = b.EffectUvScale, EffectUvOffset = b.EffectUvOffset,
+            EffectTextureClampMode = b.EffectTextureClampMode, HasVertexColors = b.HasVertexColors, BillboardMode = b.BillboardMode,
             EmissiveColor = b.EmissiveColor, EmissiveMultiple = b.EmissiveMultiple,
             ShaderFlags1 = b.ShaderFlags1, ShaderFlags2 = b.ShaderFlags2, ShaderType = b.ShaderType,
         }).ToList();
@@ -440,7 +445,7 @@ static class TexturedScene
         static string H(Vec3 value) => $"{F(value.X)},{F(value.Y)},{F(value.Z)}";
         Add(preparedIdentity); Add($"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}");
         Add(Environment.GetEnvironmentVariable("VP_LAYER_ONLY")); Add(Environment.GetEnvironmentVariable("VP_LAYER_SOLID"));
-        Add(Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT"));
+        Add(Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED"));
         foreach (var r in refs)
             Add(string.Join("|", r.MeshRelPath, r.RefKey, r.BaseKey, r.BaseEditorId, H(r.Position), H(r.Rotation),
                 F(r.Scale), r.Highlight, r.Marker, r.BosRecordBase, r.BosLabel, r.BosRandom, r.StateChange,
@@ -767,22 +772,28 @@ static class TexturedScene
         // however many refs place that mesh).
         int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
         int fxStaticShapes = 0, fxStaticRefCount = 0;
+        int editorMarkerShapes = 0;
         int cullTrisDropped = 0, cullShapesDropped = 0;
         int coveringShapes = 0, coveringRefs = 0, projectedShapes = 0;
         var coveringByMato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int waterMeshes = 0; long waterTris = 0;
         long waterSubmerged = 0, waterSamples = 0;
-        // env VP_FXSTATIC_EMIT — brightness of the --fx-static stand-in. The real number is
-        // BSEffectShaderProperty.baseColorScale, which the builder does not read; until it does,
-        // this is the knob that stands in for it.
-        float fxStaticEmit = float.TryParse(Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT"),
-                                            out var fse) ? fse : 1f;
         var fxByMesh = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         // env VP_SHAPE_DUMP=<substr> — the SHAPE-level companion to --list-meshes: for every mesh
         // whose path matches, print what the builder actually read off each shape. --list-meshes
         // says which files are in the cell; this says why one of their shapes draws as it does.
         // Printed once per distinct mesh, at build time, before any skip decision.
         string? shapeDump = Environment.GetEnvironmentVariable("VP_SHAPE_DUMP");
+        // env VP_NIF_DUMP=<substr> — the block-level companion to VP_SHAPE_DUMP: SkyRender's full NIF
+        // dump (scene graph, every block's fields) for each matching mesh, once, before it is built.
+        string? nifDump = Environment.GetEnvironmentVariable("VP_NIF_DUMP");
+        var nifDumped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void NifDumpIfAsked(string rel, string abs)
+        {
+            if (nifDump is not { Length: > 0 } || !rel.Contains(nifDump, StringComparison.OrdinalIgnoreCase) || !nifDumped.Add(rel)) return;
+            try { Console.WriteLine($"   ---- NIF dump of {rel} ----"); Console.WriteLine(NifDumpApi.DumpFileToString(abs)); }
+            catch (Exception ex) { Console.WriteLine($"   ---- NIF dump of {rel} failed: {ex.Message}"); }
+        }
         var shapeDumped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Highlighted refs keep their own texture; their halo (an inflated inverted hull) is
         // emitted here and drawn by the OVERLAY pass, whose zero-normal vertices render as the
@@ -857,6 +868,7 @@ static class TexturedScene
                     {
                         try
                         {
+                            NifDumpIfAsked(rel, abs);
                             built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
                             StripNifRootTransform(abs, built);
                             if (needOcclusion && source.Hash.Length > 0)
@@ -892,6 +904,7 @@ static class TexturedScene
                             Exception? identityFailure = null;
                             try
                             {
+                                NifDumpIfAsked(rel, abs);
                                 built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
                                 StripNifRootTransform(abs, built);
                                 built = NormalizeMeshes(built);
@@ -950,13 +963,27 @@ static class TexturedScene
                     Console.WriteLine(
                         $"      {(b.HasEffectShader ? "EFFECT " : "lighting")}  {b.ShapeName,-22}"
                       + $"  {b.Indices.Length / 3,6:N0} tri"
+                      + (b.Positions.Length > 0
+                          ? $"  box=({b.Positions.Min(v => v.X):0},{b.Positions.Min(v => v.Y):0},{b.Positions.Min(v => v.Z):0})"
+                            + $"..({b.Positions.Max(v => v.X):0},{b.Positions.Max(v => v.Y):0},{b.Positions.Max(v => v.Z):0})"
+                          : "")
                       + $"  blend={(b.HasAlphaBlend ? $"{b.SrcBlendIndex}->{b.DstBlendIndex}" : "off")}"
                       + $"  matAlpha={b.MaterialAlpha:0.00}"
                       + (b.HasEffectShader
                           ? $"  base=({b.EffectBaseColor.X:0.00},{b.EffectBaseColor.Y:0.00},{b.EffectBaseColor.Z:0.00},a{b.EffectBaseColorAlpha:0.00})x{b.EffectBaseColorScale:0.00}"
                           : $"  emis=({b.EmissiveColor.X:0.00},{b.EmissiveColor.Y:0.00},{b.EmissiveColor.Z:0.00})x{b.EmissiveMultiple:0.00}")
                       + $"  zwrite={b.ZBufferWrite}"
-                      + $"  tex0={(b.TexturePaths.TryGetValue(0, out var t0) && t0.Length > 0 ? t0 : "(none)")}");
+                      + (b.IsDecal ? "  DECAL" : "")
+                      + (b.BillboardMode >= 0 ? $"  BILLBOARD{b.BillboardMode}" : "")
+                      + $"  sf1=0x{b.ShaderFlags1:X8} sf2=0x{b.ShaderFlags2:X8}"
+                      + $"  tex0={(b.TexturePaths.TryGetValue(0, out var t0) && t0.Length > 0 ? t0 : "(none)")}"
+                      + (b.HasEffectShader
+                          ? $"  fx1=0x{b.EffectShaderFlags1:X8} fx2=0x{b.EffectShaderFlags2:X8}"
+                            + $" falloff=({b.EffectFalloff.X:0.00},{b.EffectFalloff.Y:0.00},{b.EffectFalloff.Z:0.00},{b.EffectFalloff.W:0.00})"
+                            + $" soft={b.EffectSoftFalloffDepth:0.#} light={b.EffectLightingInfluence:0.00} clamp={b.EffectTextureClampMode}"
+                            + $" uv=({b.EffectUvScale.X:0.##},{b.EffectUvScale.Y:0.##})+({b.EffectUvOffset.X:0.##},{b.EffectUvOffset.Y:0.##})"
+                            + $" grey={b.EffectGreyscaleTexture ?? "(none)"}"
+                          : ""));
             }
 
             // Skyrim-space placement — see SpatialOverlap.RefrRotation, which derives the whole
@@ -989,6 +1016,12 @@ static class TexturedScene
                     part.Issue ??= "transparent, alpha-tested, effect or non-depth-writing material unsupported";
                 int n = b.Positions.Length;
                 if (n == 0 || b.Indices.Length == 0) { part.Issue ??= "empty rendered geometry"; continue; }
+                // A shape named "EditorMarker" is the editor's stand-in (the Creation Kit draws it, the
+                // game hides it). Unseen while effect shapes were dropped wholesale; with them drawn, the
+                // fishing-spot markers (an untextured orange effect cone) painted orange wisps over
+                // Riverwood's river bank (2026-10-29).
+                if (b.ShapeName.StartsWith("EditorMarker", StringComparison.OrdinalIgnoreCase) && !r.Marker)
+                { part.Issue ??= "editor-marker shape is not gameplay render geometry"; editorMarkerShapes++; continue; }
 
                 // UNSHADEABLE SHAPES — two kinds, both meaning "this renderer provably cannot
                 // draw this shape's material, so drawing it is worse than omitting it". Per
@@ -1016,7 +1049,11 @@ static class TexturedScene
                 // --fx-static rescues kind 1 ONLY. Kind 2 stays skipped under it: a normal map in
                 // the diffuse slot is unshadeable however it is blended, and the warp plane is
                 // exactly the slab this whole thread was about.
-                bool drawStatic = fxStatic && b.HasEffectShader && !normalAsDiffuse;
+                // Effect-shader shapes draw through SkyRender's effect shading whenever they are drawn
+                // at all (default, --fx-static, --fx); --no-fx clears fxStatic and drops them again.
+                // Depth measurement keeps its old exclusion: effects are not surfaces.
+                bool drawStatic = (fxStatic || keepFx) && b.HasEffectShader && !normalAsDiffuse
+                                  && depthMeasurement is null;
                 if (!keepFx && !drawStatic && (b.HasEffectShader || normalAsDiffuse))
                 {
                     part.Issue ??= "unrenderable material omitted";
@@ -1204,45 +1241,28 @@ static class TexturedScene
 
                 if (drawStatic)
                 {
-                    // THE STATIC-FRAME STAND-IN. Everything an effect shape needs is already in
-                    // hand except its material: the source texture resolves (nifly maps slot 0 to
-                    // BSEffectShaderProperty.sourceTexture), and the NiAlphaProperty — a separate
-                    // block, so the builder reads it fine — already says additive with no depth
-                    // write. What is missing is that BSEffectShaderProperty is never read, so the
-                    // shape arrives emissive-zero and draws LIT: a dark quad, and a dark quad added
-                    // to the frame adds nothing, which is why --fx showed no flames at all.
-                    //
-                    // So: force it unlit-ish by driving the existing emissive term (the shader
-                    // computes albedo * (diffuse + emissive), so a white emissive x1 yields roughly
-                    // albedo — the fire atlas's own colour — with the lighting no longer able to
-                    // darken it toward nothing). This is a STAND-IN, not the real thing: the real
-                    // thing reads baseColor / baseColorScale off the block and needs an unlit
-                    // branch in basic.frag. It is deliberately cheap and reversible.
-                    //
-                    // "First frame" is free: the block's stored values ARE the base state, and the
-                    // BSEffectShaderPropertyFloatControllers that would animate UV/alpha are simply
-                    // never run. Nothing here has to fake a clock.
-                    mesh.HasEmissive = true;
-                    mesh.EmissiveColor = b.EffectBaseColor;
-                    // The author's own baseColorScale (8-10 on this fire) is used as the intensity.
-                    // It is an HDR number the engine tonemaps and viewprobe cannot, so it DOES
-                    // clip — but it clips along the baseColor hue, which is what a fire core looks
-                    // like anyway. The earlier attempt blew out to flat white only because the
-                    // emissive was left WHITE, so every channel clipped equally; tinted, the same
-                    // magnitude reads as flame. Measured against a hand-swept ladder (x1 too faint
-                    // to see, x2 faint, x4 legible, x8 right) — and the authored value landing in
-                    // that window is the reason to use it rather than a constant of my choosing.
-                    // VP_FXSTATIC_EMIT scales it for taste.
-                    mesh.EmissiveMultiple = b.EffectBaseColorScale * fxStaticEmit;
-                    mesh.MaterialAlpha = b.EffectBaseColorAlpha;
-                    mesh.DepthWrite = false;          // never let a frozen flame occlude the room
-                    // Effect quads are authored double-sided (SLSF2_Double_Sided), but that flag
-                    // lives on the shader block the builder never reads, so they arrive
-                    // single-sided and roughly half of a flame rosette is back-face culled.
-                    mesh.IsDoubleSided = true;
+                    // ENGINE EFFECT SHADING (SkyRender's effect path, frozen at the authored frame:
+                    // the BSEffectShaderPropertyFloatControllers that animate UV/alpha are never
+                    // run, so the block's stored values ARE the frame). Source texture x baseColor,
+                    // the greyscale palette and baseColorScale, view-angle falloff, the material's
+                    // own double-sided / depth flags, and the NiAlphaProperty blend (6->0 additive
+                    // for flames). Replaces the 2026-08-28 emissive stand-in, which drew
+                    // albedo x (lighting + emissive) and needed VP_FXSTATIC_EMIT to look like fire.
+                    string? grey = b.EffectGreyscaleTexture;
+                    int greyTex = grey is { Length: > 0 } ? LoadObservedTexture("static-ref-effect-greyscale", grey) : 0;
+                    if (greyTex == staticWhite) greyTex = 0;
+                    NifMaterialBinder.ApplyEffectMaterial(mesh, b, mesh.DiffuseTexture,
+                        mesh.DiffuseTexture != staticWhite, greyTex);
+                    // env VP_FX_DOUBLESIDED=1 — diagnostic: draw every effect shape double-sided, to
+                    // tell a back-face-culled quad from one the shading itself hides.
+                    if (Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED") == "1") mesh.IsDoubleSided = true;
+                    if (shapeDump is { Length: > 0 } && rel.Contains(shapeDump, StringComparison.OrdinalIgnoreCase))
+                        Console.WriteLine($"      effect drawn: {b.ShapeName} ref {r.RefKey} render={mesh.ShouldRender} blend={mesh.HasAlphaBlend} "
+                                        + $"test={mesh.UseAlphaTest}@{mesh.AlphaThreshold:0.00} tris={tri.Length / 3}");
                     fxStaticShapes++;
                     refHadFxStatic = true;
                 }
+                else mesh.IsEffectShader = false;   // a retained mesh keeps whatever the last bind wrote
 
                 // ---- SINGLE-PASS COVERING (MATO) -------------------------------------------
                 // The engine draws a single-pass material inside the base shape's OWN lighting
@@ -2929,9 +2949,11 @@ static class TexturedScene
                 Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
                                 + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
             }
+            if (editorMarkerShapes > 0)
+                Console.WriteLine($"   editor-marker shapes: {editorMarkerShapes:N0} not drawn (shape named EditorMarker; the game hides it)");
             if (fxStaticShapes > 0)
                 Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
-                                + "— --fx-static, frozen at the authored frame, additive, no depth write");
+                                + "— engine effect shading, frozen at the authored frame (--no-fx drops them)");
             if (coveringShapes + projectedShapes > 0)
             {
                 Console.WriteLine($"   projected coverings (MATO): {projectedShapes:N0} single-pass shape(s) covered per pixel, "

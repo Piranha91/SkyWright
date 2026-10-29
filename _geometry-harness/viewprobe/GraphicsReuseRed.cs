@@ -733,7 +733,7 @@ internal sealed class GraphicsReuseRed : IDisposable
                 key, D([preparedIdentity]),
                 $"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}",
                 D([Environment.GetEnvironmentVariable("VP_LAYER_ONLY") ?? "<null>", Environment.GetEnvironmentVariable("VP_LAYER_SOLID") ?? "<null>",
-                   Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT") ?? "<null>"]),
+                   Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED") ?? "<null>"]),
                 refs.Count, D(refs.Select(r => r.ToString())),
                 D(refs.Select(r => $"{r.MeshRelPath}|{r.RefKey}|{r.BaseKey}|{r.Position}|{r.Rotation}|{F(r.Scale)}")),
                 refs.Count(r => r.Highlight),
