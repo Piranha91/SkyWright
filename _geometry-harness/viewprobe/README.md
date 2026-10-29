@@ -251,6 +251,7 @@ A successful save or size check alone does not establish clean pixels.
   | Sun shadows | on whenever a weather lights the frame | `--no-shadows` (`--shadows` forces them) |
   | Interior cell lighting (XCLL, image space, placed lights) | on | `--no-cell-lighting` |
   | Effect shapes (engine effect shading, billboards turned to the camera) | on | `--no-fx`; `VP_NO_BILLBOARD=1` keeps the authored pose |
+  | Environment maps (slot-4 cube map, slot-5 mask) on lighting shapes | on | `VP_NO_ENVMAP=1` |
   | Visible-cell ring | off (the 3x3) | `--ring visible` / `--ring N` (load time grows with the cells) |
   | Distant LOD | not yet (to come as opt-in `--lod`) | - |
 
@@ -2188,6 +2189,16 @@ under `SLSF2_Glow_Map` on non-skin shader types: candle wax, chandelier chains, 
 Shapes with `SLSF1_External_Emittance` (interior windows, whose glow the engine takes from the
 cell's window light) stay unlit, as before. The console reports `emissive shapes: N`. The
 highlight and occlusion washes that ride the same term save and restore these settings.
+
+### Environment maps (lighting shapes)
+
+Since 2026-10-29 a lighting-shader shape with `SLSF1_Environment_Mapping` (or
+`SLSF1_Eye_Environment_Mapping`) and a slot-4 texture draws its reflection: the cube map (or a
+2D fallback), the slot-5 mask and the NIF's `envMapScale` / `eyeCubemapScale`, through SkyRender's
+environment-mapping stage (looked up in game axes, scaled by the light reaching the surface).
+Metal fittings, glass, ice, polished stone. Before this, statics never bound slot 4 and
+`NormalizeMeshes` dropped the two scales. The console reports `env-mapped shapes: N`;
+`VP_NO_ENVMAP=1` leaves them off. Never under `--depth-measurement`.
 
 ---
 

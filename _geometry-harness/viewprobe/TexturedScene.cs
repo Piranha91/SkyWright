@@ -331,6 +331,7 @@ static class TexturedScene
             EffectTextureClampMode = b.EffectTextureClampMode, HasVertexColors = b.HasVertexColors, BillboardMode = b.BillboardMode,
             BillboardFrame = b.BillboardFrame,
             EmissiveColor = b.EmissiveColor, EmissiveMultiple = b.EmissiveMultiple,
+            EnvironmentMapScale = b.EnvironmentMapScale, EyeCubemapScale = b.EyeCubemapScale,
             ShaderFlags1 = b.ShaderFlags1, ShaderFlags2 = b.ShaderFlags2, ShaderType = b.ShaderType,
         }).ToList();
     }
@@ -840,7 +841,7 @@ static class TexturedScene
         // however many refs place that mesh).
         int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
         int fxStaticShapes = 0, fxStaticRefCount = 0;
-        int editorMarkerShapes = 0, emissiveShapes = 0;
+        int editorMarkerShapes = 0, emissiveShapes = 0, envMappedShapes = 0;
         int cullTrisDropped = 0, cullShapesDropped = 0;
         int coveringShapes = 0, coveringRefs = 0, projectedShapes = 0;
         var coveringByMato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1332,6 +1333,42 @@ static class TexturedScene
                         if (g != staticWhite) { mesh.GlowTexture = g; mesh.HasGlowMap = true; }
                     }
                     emissiveShapes++;
+                }
+
+                // ---- ENVIRONMENT MAP (lighting shapes) -----------------------------------------
+                // SLSF1_Environment_Mapping (bit 7) or SLSF1_Eye_Environment_Mapping (bit 17) with a
+                // slot-4 texture: the cube map (or the 2D fallback) and the slot-5 mask, with the
+                // NIF's scales, as SkyRender's NifMaterialBinder does for characters. Metal fittings,
+                // glass, ice, polished stone. Set on every bind (a retained mesh keeps whatever the
+                // last bind wrote). The handles live in the texture manager's own cache, not in a
+                // scene lease. Never under --depth-measurement. VP_NO_ENVMAP=1 leaves them off.
+                mesh.HasEnvironmentMap = false;
+                mesh.HasEnvMask = false;
+                mesh.IsEnvMap2D = false;
+                mesh.EnvMapTexture = 0;
+                mesh.EnvMaskTexture = 0;
+                bool envFlag = (b.ShaderFlags1 & ((1u << 7) | (1u << 17))) != 0;
+                if (envFlag && !b.HasEffectShader && depthMeasurement is null && !r.Marker
+                    && b.TexturePaths.TryGetValue(4, out var envPath) && envPath.Length > 0
+                    && Environment.GetEnvironmentVariable("VP_NO_ENVMAP") != "1")
+                {
+                    var envManager = graphicsCell is not null ? graphicsCell.InstallTextures : textures;
+                    var (envTex, envIsCube) = envManager.LoadEnvMap(envPath);
+                    if (envTex != 0)
+                    {
+                        mesh.EnvMapTexture = envTex;
+                        mesh.HasEnvironmentMap = true;
+                        mesh.IsEnvMap2D = !envIsCube;
+                        mesh.EnvMapScale = b.EnvironmentMapScale;
+                        mesh.EyeCubemapScale = b.EyeCubemapScale;
+                        mesh.UseEyeCubemapScale = b.ShaderType == 16;   // BSLSP_EYE
+                        if (b.TexturePaths.TryGetValue(5, out var maskPath) && maskPath.Length > 0)
+                        {
+                            int m = LoadObservedTexture("static-ref-envmask", maskPath);
+                            if (m != staticWhite) { mesh.EnvMaskTexture = m; mesh.HasEnvMask = true; }
+                        }
+                        envMappedShapes++;
+                    }
                 }
 
                 if (drawStatic)
@@ -3147,6 +3184,8 @@ static class TexturedScene
             }
             if (emissiveShapes > 0)
                 Console.WriteLine($"   emissive shapes: {emissiveShapes:N0} (SLSF1_Own_Emit, glow map where flagged; External_Emittance shapes stay unlit)");
+            if (envMappedShapes > 0)
+                Console.WriteLine($"   env-mapped shapes: {envMappedShapes:N0} (slot-4 cube map, slot-5 mask, NIF envMapScale)");
             if (editorMarkerShapes > 0)
                 Console.WriteLine($"   editor-marker shapes: {editorMarkerShapes:N0} not drawn (shape named EditorMarker; the game hides it)");
             if (fxStaticShapes > 0)
