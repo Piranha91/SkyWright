@@ -92,6 +92,8 @@ internal static class TerrainLayerFailures
         Console.WriteLine($"   terrain layer(s) could not be read: {plugin} cell ({gx},{gy}) in {walk}, after {layersRead} "
                         + $"layer(s): {ex.GetType().Name}: {ex.Message}. The layers read before it are used; the rest of "
                         + $"that LAND's paint is missing.");
+        // VP_TERRAIN_LAYER_STACK=1 prints where the read failed (diagnostic; off by default).
+        if (Environment.GetEnvironmentVariable("VP_TERRAIN_LAYER_STACK") == "1") Console.WriteLine(ex.ToString());
     }
 
     internal static int Count => _shot.Count;

@@ -34,4 +34,10 @@ internal static class TerrainLand
                 throw new TerrainUnreadable(plugin, g.X, g.Y, lc.Error ?? new InvalidDataException(lc.Reason));
         }
     }
+
+    /// <summary>An alpha layer's opacity points. An ATXT that no VTXT follows reads back with null data (Update.esm has
+    /// such layers around Riverwood); it paints nothing, as OpenMW's ESM4 loader treats it, and reading it must not throw:
+    /// the throw used to drop every later layer of the LAND, base layers included, leaving whole quadrants unpainted.</summary>
+    internal static IEnumerable<IAlphaLayerDataGetter> AlphaPoints(IAlphaLayerGetter layer)
+        => (IEnumerable<IAlphaLayerDataGetter>?)layer.AlphaLayerData ?? Array.Empty<IAlphaLayerDataGetter>();
 }

@@ -2823,7 +2823,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                         if (layer.Header?.Texture.FormKeyNullable is { } lk && wanted.ContainsKey(lk))
                                         {
                                             if (layer is IAlphaLayerGetter al)
-                                                painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
+                                                painted += ViewProbe.TerrainLand.AlphaPoints(al).Count(pt => pt.Opacity > 0.004f);
                                             else { isBase = true; painted += 289; }
                                         }
                                         layersRead++;
@@ -2994,7 +2994,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                         // 17x17 opacity points per quadrant, addressed by Position.
                                         var op = new float[289];
                                         int painted = 0; float maxOp = 0f;
-                                        foreach (var pt in al.AlphaLayerData)
+                                        // An ATXT with no VTXT after it reads as null data: it paints nothing.
+                                        foreach (var pt in ViewProbe.TerrainLand.AlphaPoints(al))
                                         {
                                             if (pt.Position < op.Length) op[pt.Position] = pt.Opacity;
                                             if (pt.Opacity > 0.004f) { painted++; if (pt.Opacity > maxOp) maxOp = pt.Opacity; }
@@ -3005,12 +3006,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                     census.Add((qi, layer.Header?.LayerNumber ?? -1, false, tex, 289, 1f, null));
                                     if (qi is >= 0 and < 4 && quad[qi] is null && tex is { } lf) quad[qi] = lf;
                                 }
-                                // No base layer for a quadrant: stand in the alpha layer that paints the
-                                // most of it, and remember which, so it is not also drawn on top of itself.
-                                // Gated on the same switch as the overlays — --no-terrain-layers means
-                                // "ignore the alpha layers entirely", base stand-ins included, which is
-                                // what makes it a clean revert to the base-only picture.
-                                for (int q = 0; drawTerrainLayers && q < 4; q++)
+                                // No base layer for a quadrant: the engine draws its default landscape
+                                // texture there (QuadDiffuse below; OpenMW's ESM4 loader starts every
+                                // quadrant's base at form 0 for the same reason). VP_TERRAIN_PROMOTE=1 keeps
+                                // the older stand-in for comparison: the alpha layer that paints the most of
+                                // the quadrant, remembered so it is not also drawn on top of itself. Gated on
+                                // the same switch as the overlays — --no-terrain-layers means "ignore the
+                                // alpha layers entirely", base stand-ins included.
+                                bool promoteStandIn = Environment.GetEnvironmentVariable("VP_TERRAIN_PROMOTE") == "1";
+                                for (int q = 0; promoteStandIn && drawTerrainLayers && q < 4; q++)
                                 {
                                     if (quad[q] is not null) continue;
                                     var best = census.Where(l => l.Alpha && l.Quadrant == q && l.Tex is not null)
@@ -3032,9 +3036,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 { throw ViewProbe.PluginRead.Failed(path, terrIndex, order.OrderedPaths.Count, "the terrain walk", ex); }
             }
 
+            // The engine's default landscape texture (its sDefaultLandDiffuseTexture setting): what it draws for a
+            // quadrant with no BTXT and for a BTXT or ATXT whose texture reference is zero (UESP, LAND: "If the
+            // reference is zero the engine falls back to dirt02.dds"; OpenMW's ESM4 loader, the same for Skyrim).
+            // Its normal map is found like any other diffuse's, through the TXST that names it (NormalForDiffuse).
+            const string DefaultLandDiffuse = @"textures\landscape\dirt02.dds";
             string? QuadDiffuse(FormKey? ltex)
             {
-                if (ltex is not { } lk) return null;
+                if (ltex is not { } lk || lk.IsNull) return DefaultLandDiffuse;
                 if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
                 if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
                 var p = d.Replace('/', '\\');
@@ -3045,7 +3054,21 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var pr in landPromoted.Values) promotedQuads += pr.Count(v => v >= 0);
             if (promotedQuads > 0)
                 Console.WriteLine($"   terrain: {promotedQuads} quadrant(s) carry no base layer — "
-                                + $"stood in with their most-painted alpha layer");
+                                + $"stood in with their most-painted alpha layer (VP_TERRAIN_PROMOTE)");
+            {
+                int noBase = 0, zeroRef = 0;
+                foreach (var (grid, census) in landLayers)
+                    for (int q = 0; q < 4; q++)
+                    {
+                        var bl = census.Where(l => !l.Alpha && l.Quadrant == q).ToList();
+                        if (bl.Count == 0) { if (!landPromoted.TryGetValue(grid, out var pr) || pr[q] < 0) noBase++; }
+                        else if (bl[0].Tex is not { } bk || bk.IsNull) zeroRef++;
+                    }
+                int zeroAlpha = landLayers.Values.Sum(c => c.Count(l => l.Alpha && (l.Tex is not { } ak || ak.IsNull)));
+                if (noBase + zeroRef + zeroAlpha > 0)
+                    Console.WriteLine($"   terrain: default landscape texture ({DefaultLandDiffuse}) drawn for {noBase} quadrant(s) "
+                                    + $"with no base layer, {zeroRef} base layer(s) and {zeroAlpha} alpha layer(s) whose texture is zero");
+            }
 
             foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
             {

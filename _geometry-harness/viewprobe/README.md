@@ -294,7 +294,7 @@ A successful save or size check alone does not establish clean pixels.
   variable, so asking the question never changes the order, the asset view or the archives the
   capture draws from. A run that predates the flag ignores it and reports no identity.
 - **Terrain:** `--no-terrain` (off entirely), `--no-terrain-layers` (base layer only — no painted
-  alpha layers and no base stand-ins).
+  alpha layers; quadrants with no base layer still draw the default landscape texture).
 - **Water and coverings** (both ON by default — their ABSENCE was the bug, not their look):
   `--no-water` drops the water surfaces, `--no-coverings` drops the MATO projected snow/ash/moss.
   Both change every exterior render, so both announce themselves on the console. See *Water* and
@@ -1122,9 +1122,16 @@ flag someone typed, which is why neither is allowed to be silent.
   - **Opacity `Position` is decoded x-fastest** (`ly*17 + lx`). Settled by seam continuity across a
     cell boundary, not by eye — a transposed decode still draws a road-shaped ribbon, so a picture
     cannot settle it; a seam can. `VP_ALPHA_DUMP` re-runs that test.
-  - A quadrant with **no base layer** states no ground at all; the stand-in is its most-painted
-    alpha layer.
-- Where no base texture resolves, the quadrant draws on the white texture (shaded by its normals).
+  - A quadrant with **no base layer**, and a base or alpha layer whose texture reference is zero,
+    draw the engine's default landscape texture, `textures\landscape\dirt02.dds` (UESP's LAND page;
+    OpenMW's ESM4 loader does the same). `VP_TERRAIN_PROMOTE=1` brings back the older stand-in (the
+    quadrant's most-painted alpha layer) for comparison.
+  - An alpha layer with no opacity data (an ATXT that no VTXT follows; Update.esm has some around
+    Riverwood) paints nothing. Reading one used to throw, which dropped the rest of that LAND's
+    layers and left whole quadrants white. `VP_TERRAIN_LAYER_STACK=1` prints the stack of any layer
+    read that still fails.
+- Where an LTEX's texture set does not resolve, the quadrant draws on the white texture (shaded by
+  its normals).
 - **Navmesh overlay:** filled / wire / both; conflict red is reserved for findings and always wins.
   The wire is drawn by viewprobe itself, in its own flat-shaded pass, so an outline is the exact
   palette colour and the hidden layers can drop the depth test. Every edge is walked in short,
