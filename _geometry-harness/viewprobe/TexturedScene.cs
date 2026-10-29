@@ -633,6 +633,7 @@ static class TexturedScene
         }
         renderer.EnableBloom = false;                    // deterministic output; no post FX
         renderer.EnableShadows = false;
+        renderer.ShadowBounds = null;
         renderer.EnableAmbientOcclusion = false;
         // The sky. GlRenderer.Render() clears the frame AGAIN with its own ClearColor, so this
         // is the setting that decides the background — the GL.ClearColor in Draw() below only
@@ -1780,6 +1781,19 @@ static class TexturedScene
             FarPlane = FarPlane,
             MaxDistance = 1_000_000f,
         };
+
+        // The sun's shadow (--shadows; on by default with --weather): SkyRender's directional shadow
+        // map, fitted to the part of the frame within --shadow-distance. Only the sun casts; the
+        // ambient is unshadowed, as in the engine.
+        if (SceneWeather.ShadowsOn && SceneWeather.Current is not null)
+        {
+            float groundZ = terrainHeightAt?.Invoke(cam.Eye.X, cam.Eye.Y) ?? MathF.Min(cam.Look.Z, cam.Eye.Z - 100f);
+            var (sc, sr) = SceneWeather.ShadowSphere(cam.Eye, cam.Look, cam.FovDeg, sizeW / (float)sizeH, groundZ, SceneWeather.ShadowDistance);
+            var scY = YUp(sc);
+            renderer.EnableShadows = true;
+            renderer.ShadowBounds = (new GlVec3(scY.X, scY.Y, scY.Z), sr);
+            Console.WriteLine($"   sun shadow: map over a {sr:0}-unit sphere at ({sc.X:0}, {sc.Y:0}, {sc.Z:0}), ground {groundZ:0}, reach {SceneWeather.ShadowDistance:0}");
+        }
 
         // Offscreen target + readback (same pattern as the flat path). With MSAA the scene is
         // drawn into a multisampled PAIR and resolved into this one: --size buys detail, but the

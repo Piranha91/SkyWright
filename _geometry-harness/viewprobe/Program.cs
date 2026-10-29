@@ -646,6 +646,9 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--weather" && i + 1 < args.Length) ViewProbe.SceneWeather.Requested = args[++i];
     else if (args[i] == "--weather-slot" && i + 1 < args.Length) ViewProbe.SceneWeather.RequestedSlot = args[++i].ToLowerInvariant();
     else if (args[i] == "--no-imagespace") ViewProbe.SceneWeather.ImageSpaceOff = true;
+    else if (args[i] == "--shadows") ViewProbe.SceneWeather.ShadowsRequested = true;
+    else if (args[i] == "--no-shadows") ViewProbe.SceneWeather.ShadowsRequested = false;
+    else if (args[i] == "--shadow-distance" && i + 1 < args.Length) ViewProbe.SceneWeather.ShadowDistance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
     else if (args[i] == "--adapt-lum" && i + 1 < args.Length) ViewProbe.SceneWeather.AdaptedLuminance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
     else if (args[i] == "--game-hour" && i + 1 < args.Length) ViewProbe.SceneWeather.GameHour = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
     else if (args[i] == "--sky" && i + 1 < args.Length)

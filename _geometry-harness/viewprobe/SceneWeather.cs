@@ -52,6 +52,46 @@ internal sealed record SceneWeather(string Name, string Slot, V3 SkyUpper, V3 Su
     internal static bool SkyGiven;
     /// <summary>The winning record's values once the walk has seen it.</summary>
     internal static SceneWeather? Current;
+    /// <summary>--shadows / --no-shadows: the sun's shadow map. Unset, it is on with --weather and off
+    /// without (so the default output and interior renders are unchanged).</summary>
+    internal static bool? ShadowsRequested;
+    /// <summary>--shadow-distance D: how far from the eye the sun's shadow map reaches (default 10000,
+    /// the lab profile's fShadowDistance).</summary>
+    internal static float ShadowDistance = 10000f;
+    /// <summary>How far beyond the frame's ground the shadow map reaches for casters (world units).</summary>
+    internal static float CasterMargin = 1500f;
+    internal static bool ShadowsOn => ShadowsRequested ?? Requested is not null;
+
+    /// <summary>The sphere (Skyrim coordinates) the sun's shadow map covers for one frame: the eye and
+    /// the frame's view rays out to where they meet the ground (the terrain under the eye, or the
+    /// look point's height) or <paramref name="reach"/>, whichever is nearer. One 2048-texel map
+    /// over that sphere stands in for the engine's cascades.</summary>
+    internal static (V3 Center, float Radius) ShadowSphere(V3 eye, V3 look, float vfovDeg, float aspect, float groundZ, float reach)
+    {
+        var fwd = V3.Normalize(look - eye);
+        var right = V3.Normalize(V3.Cross(fwd, V3.UnitZ));
+        if (float.IsNaN(right.X)) right = V3.UnitX;
+        var up = V3.Cross(right, fwd);
+        float ty = MathF.Tan(vfovDeg * MathF.PI / 360f), tx = ty * aspect;
+        var pts = new System.Collections.Generic.List<V3> { eye };
+        for (int iy = -2; iy <= 2; iy++)
+            for (int ix = -2; ix <= 2; ix++)
+            {
+                var d = V3.Normalize(fwd + right * (tx * ix / 2f) + up * (ty * iy / 2f));
+                float t = reach;
+                if (d.Z < -1e-4f) t = MathF.Min(t, (groundZ - eye.Z) / d.Z);
+                pts.Add(eye + d * MathF.Max(t, 0f));
+            }
+        var min = pts[0]; var max = pts[0];
+        foreach (var p in pts) { min = V3.Min(min, p); max = V3.Max(max, p); }
+        var c = (min + max) * 0.5f;
+        float r = 0f;
+        foreach (var p in pts) r = MathF.Max(r, V3.Distance(p, c));
+        // Casters stand outside the frame too (a tree beside it shades the ground in it): widen by
+        // CasterMargin, a tall tree's height.
+        return (c, r + CasterMargin);
+    }
+
     /// <summary>--game-hour H: the hour the sun is placed for (default 12, the in-game captures').</summary>
     internal static float GameHour = 12f;
     /// <summary>The target worldspace's climate (WRLD.Climate), once the walk has seen the worldspace.</summary>

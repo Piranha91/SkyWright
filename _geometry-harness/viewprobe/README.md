@@ -267,6 +267,15 @@ A successful save or size check alone does not establish clean pixels.
   bloom, eye adaptation over time, clouds; a weather-lit Riverwood render is still a little
   darker and more saturated than the game. Off by default; a retained walk cannot see the WTHR and
   says so.
+  Sun shadows: with `--weather` the sun casts (SkyRender's directional shadow map, `--shadows` /
+  `--no-shadows` to force either; off without `--weather`, so the default output and interior
+  renders are unchanged). One 2048-texel map is fitted per frame to a sphere around the eye and the
+  frame's view rays out to the ground under the eye or `--shadow-distance D` (default 10000, the
+  lab profile's fShadowDistance), widened by 1,500 units for casters beside the frame; the engine
+  uses cascades (iNumFocusShadow 4, 4096 texels), so far shadows here are softer. Only the sun is
+  shadowed; the ambient is not. Against the Riverwood noon close-up the shadowed grass matches the
+  game's tone (38,51,37 vs 33,45,34) but covers less of the frame (37% vs 59%: tree crowns cast
+  thinner shadows here), and the sunlit grass stays about 13% bright. Costs one depth pass per frame.
   The console also prints the slot's six directional ambient colours. Colour-balance diagnostics
   (not engine behaviour): `VP_WEATHER_NO_FOG=1` drops the fog, `VP_WEATHER_AMBIENT_SCALE=X` scales
   the ambient, `VP_WEATHER_AMBIENT_FROM=0..5` takes the ambient from +X, -X, +Y, -Y, +Z or -Z instead
