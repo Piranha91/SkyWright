@@ -647,6 +647,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--weather-slot" && i + 1 < args.Length) ViewProbe.SceneWeather.RequestedSlot = args[++i].ToLowerInvariant();
     else if (args[i] == "--no-imagespace") ViewProbe.SceneWeather.ImageSpaceOff = true;
     else if (args[i] == "--adapt-lum" && i + 1 < args.Length) ViewProbe.SceneWeather.AdaptedLuminance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+    else if (args[i] == "--game-hour" && i + 1 < args.Length) ViewProbe.SceneWeather.GameHour = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
     else if (args[i] == "--sky" && i + 1 < args.Length)
     {
         ViewProbe.SceneWeather.SkyGiven = true;
@@ -1927,6 +1928,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // retained getter would read freed memory.
                 // --weather (SceneWeather.cs): the named WTHR, winner-takes-all in load order.
                 if (rec is IImageSpaceGetter imgs) ViewProbe.SceneWeather.NoteImageSpace(imgs, ViewProbe.SceneWeather.Current?.ImageSpace);
+                // The sun's path (--weather): the target worldspace's climate and that climate's timing.
+                if (rec is IClimateGetter clmt) ViewProbe.SceneWeather.NoteClimate(clmt);
+                if (rec is IWorldspaceGetter wrld && wrld.FormKey == targetWorldspace) ViewProbe.SceneWeather.WorldClimate = wrld.Climate.FormKeyNullable;
                 if (rec is IWeatherGetter wthr && ViewProbe.SceneWeather.Matches(wthr))
                 {
                     ViewProbe.SceneWeather.Current = ViewProbe.SceneWeather.From(wthr, ViewProbe.SceneWeather.RequestedSlot);

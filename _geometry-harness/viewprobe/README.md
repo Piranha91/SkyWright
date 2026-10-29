@@ -244,8 +244,12 @@ A successful save or size check alone does not establish clean pixels.
   scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky
   colour (and what water reflects) is its sky-upper colour, the sun colour its sunlight colour, the
   ambient its directional ambient's +Z colour, and SkyRender's distance fog takes its fog near/far
-  colours and the day (or night) fog distances, power and max. The sun keeps the fixed direction;
-  `--sky` still wins for the background. The slot's image space (IMGS) is applied too: its HDR
+  colours and the day (or night) fog distances, power and max. The sun's direction follows the
+  target worldspace's climate (CLMT sunrise/sunset) at `--game-hour H` (default 12, the hour the
+  in-game captures use), on Community Shaders' sun path (SkySync, its "vanilla" trajectory: east at
+  sunrise, 5 degrees off the zenith at the top of the arc; for Tamriel at noon, azimuth 106.5,
+  elevation 72.9; the console prints it). `VP_SUN_FIXED=1` keeps the earlier fixed direction
+  (azimuth 135, elevation 55). `--sky` still wins for the background. The slot's image space (IMGS) is applied too: its HDR
   sunlight scale multiplies the sun, and SkyRender's `ImageSpaceFinish` grades the frame with its
   white, saturation, brightness, contrast and tint (the engine's tone map; see SkyRender's
   RENDERING_PIPELINE.md, "Image space"). The adapted luminance (the contrast pivot) is fixed at
@@ -254,6 +258,10 @@ A successful save or size check alone does not establish clean pixels.
   bloom, eye adaptation over time, sky scale; a weather-lit Riverwood render is still a little
   darker and more saturated than the game. Off by default; a retained walk cannot see the WTHR and
   says so.
+  The console also prints the slot's six directional ambient colours. Colour-balance diagnostics
+  (not engine behaviour): `VP_WEATHER_NO_FOG=1` drops the fog, `VP_WEATHER_AMBIENT_SCALE=X` scales
+  the ambient, `VP_WEATHER_AMBIENT_FROM=0..5` takes the ambient from +X, -X, +Y, -Y, +Z or -Z instead
+  of +Z (6 = their mean).
 - **Troubleshooting overlay:** `--conflicts emit.json` (paints implicated navmeshes red, doors
   orange, prints the red centroid and a suggested camera), `--red "FORMKEY[:tri]"` by hand.
 - **Compare:** `--compare "A.esp,B.esp"` renders three panels with one camera and stitches them.

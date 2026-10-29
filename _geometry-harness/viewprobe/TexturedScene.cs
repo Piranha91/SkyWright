@@ -642,7 +642,7 @@ static class TexturedScene
         renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 0.85f, new GlVec3(1f, 0.98f, 0.92f));
         renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0.35f, new GlVec3(0.85f, 0.9f, 1f));
         // --weather (SceneWeather.cs): the WTHR's sky, sun, ambient and fog replace the fixed studio
-        // lights. The sun keeps the fixed direction above; there is no fill light in the engine.
+        // lights. The sun is placed from the worldspace's climate (below); there is no fill light in the engine.
         renderer.Fog = null;
         renderer.ImageSpace = null;
         renderer.SkyColor = null;
@@ -658,13 +658,32 @@ static class TexturedScene
             // The image space: the engine scales the sun's colour by its HDR sunlight scale and
             // finishes the frame with its tone map and cinematic grade (SkyRender ImageSpaceFinish).
             var isd = SceneWeather.ImageSpaceOff ? null : SceneWeather.ImageSpaceData;
-            renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: isd?.SunlightScale ?? 1f,
+            // The sun's direction from the worldspace's climate at --game-hour (SceneWeather.SunPath);
+            // the fixed studio direction when there is no climate. VP_SUN_FIXED=1 keeps the fixed one.
+            var sunPath = Environment.GetEnvironmentVariable("VP_SUN_FIXED") == "1" ? null : SceneWeather.SunPath();
+            renderer.SetKeyLight(azimuthDeg: sunPath?.Azimuth ?? 135f, elevationDeg: sunPath?.Elevation ?? 55f,
+                                 intensity01: isd?.SunlightScale ?? 1f,
                                  new GlVec3(sw.Sunlight.X, sw.Sunlight.Y, sw.Sunlight.Z));
+            Console.WriteLine(sunPath is { } spx ? $"   weather sun: {spx.Text}"
+                                                 : "   weather sun: fixed studio direction (azimuth 135, elevation 55) - no climate read");
             if (isd is not null)
                 renderer.ImageSpace = new ImageSpaceFinish(isd.White, isd.Saturation, isd.Brightness, isd.Contrast,
                     new GlVec3(isd.TintColor.X, isd.TintColor.Y, isd.TintColor.Z), isd.TintAmount, SceneWeather.AdaptedLuminance);
             renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
-            renderer.Fog = sw.FogFar > sw.FogNear
+            // Diagnostics for the colour balance (README, VP_WEATHER_*): drop the fog, or scale the ambient.
+            if (float.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_SCALE"),
+                               System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ambScale))
+                renderer.SetAmbientIntensity(ambScale);
+            // VP_WEATHER_AMBIENT_FROM=0..5: take the ambient from another of the six directional
+            // ambient colours (+X, -X, +Y, -Y, +Z, -Z) instead of +Z, or 6 = their mean.
+            if (int.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_FROM"), out var ambFrom)
+                && sw.Ambient6.Length == 6 && ambFrom >= 0 && ambFrom <= 6)
+            {
+                var ac = ambFrom == 6 ? (sw.Ambient6[0] + sw.Ambient6[1] + sw.Ambient6[2] + sw.Ambient6[3] + sw.Ambient6[4] + sw.Ambient6[5]) / 6f
+                                      : sw.Ambient6[ambFrom];
+                renderer.Lights[0].Color = new GlVec3(ac.X, ac.Y, ac.Z);
+            }
+            renderer.Fog = Environment.GetEnvironmentVariable("VP_WEATHER_NO_FOG") == "1" ? null : sw.FogFar > sw.FogNear
                 ? new DistanceFog(new GlVec3(sw.FogNearColor.X, sw.FogNearColor.Y, sw.FogNearColor.Z),
                                   new GlVec3(sw.FogFarColor.X, sw.FogFarColor.Y, sw.FogFarColor.Z),
                                   sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
