@@ -245,15 +245,18 @@ A successful save or size check alone does not establish clean pixels.
   lighting template (LTMP); its image space (XCIM) as SkyRender's image-space finish (adapted
   luminance from `--adapt-lum`, default 0.367); and every drawn LIGH reference as a SkyRender point
   light: the base's colour times its fade plus the reference's XLIG fade offset, the base's radius
-  or the reference's XRDS, negative lights subtracting, shadow-casting lights (shadow spot /
+  plus the reference's XRDS (an offset, read so from the in-game match: the Bannered Mare's
+  hearths carry -189 and -304, its candles +80, -3.4, +8.5; `VP_XRDS=override|abs|ignore` reads it
+  the earlier way or others, for diagnosis), negative lights subtracting, shadow-casting lights (shadow spot /
   hemisphere / omni flags) with a cube shadow map (up to four), nearest the eye first, up to 32.
   The console prints the resolved lighting and how many lights were drawn;
   `VP_CELL_LIGHTS_LIST=1` lists them, `VP_CELL_LIGHTS=unshadowed|none` drops the shadow-casting
   ones or all of them (diagnostics). Not modelled: the six-direction ambient, light fade
   distances, flicker, spot cones, the per-object light limit, eye adaptation. Off by default (the
-  default output and the interior verify render are unchanged). Bannered Mare against the game:
-  warm and shadowed like the game's kitchen and candle shots, but lit surfaces too bright (kitchen
-  frame 56,43,24 vs 46,37,24; beside the central hearth about twice the game's).
+  default output and the interior verify render are unchanged). Bannered Mare against the game
+  (frame mean, ours vs game): kitchen 50,39,24 vs 46,37,24; candle shot 71,58,38 vs 62,50,34;
+  candle close-up 54,44,27 vs 59,48,31, with the pillar beside the central hearth unlit as in game
+  (with XRDS read as a replacement radius these were 56,43,24, 100,84,52 and 76,60,35).
 - **Weather:** `--weather NAME` (a WTHR EditorID such as `SkyrimClear`, or a FormKey such as
   `00081A:Skyrim.esm`) and `--weather-slot day|sunrise|sunset|night` (default `day`) light the
   scene from the winning WTHR instead of the fixed studio lights (`SceneWeather.cs`): the sky is a

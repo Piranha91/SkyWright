@@ -12,7 +12,7 @@ namespace ViewProbe;
 /// target cell's XCLL (ambient, directional colour and rotation, fog), with each value the cell marks
 /// as inherited taken from its lighting template (LTMP -> LGTM); the cell's image space (XCIM) as
 /// SkyRender's image-space finish; and every drawn LIGH reference as a SkyRender point light (the
-/// base's colour times its fade plus the reference's XLIG fade offset, its radius or the reference's
+/// base's colour times its fade plus the reference's XLIG fade offset, its radius plus the reference's
 /// XRDS; negative lights subtract; shadow-casting lights cast shadows). Off by default, so the
 /// default output and the interior verify render are unchanged. Values are copied out of the
 /// records during the walk, never held.
@@ -43,7 +43,7 @@ internal static class CellLighting
     internal static bool Requested;
     internal static readonly Dictionary<FormKey, (V3 Color, float Fade, float Radius, bool Negative, bool Shadowed, string Name)> Bases = new();
     /// <summary>Per placed light: its XLIG fade offset (added to the base's fade) and its XRDS radius
-    /// (0 = the base's), winner-takes-all.</summary>
+    /// offset (added to the base's radius), winner-takes-all.</summary>
     internal static readonly Dictionary<FormKey, (float FadeOffset, float Radius)> RefOverrides = new();
     internal static readonly Dictionary<FormKey, CellRecord> Cells = new();
     internal static readonly Dictionary<FormKey, Values> Templates = new();
@@ -54,7 +54,7 @@ internal static class CellLighting
     internal static readonly List<(HousecarlCore.Vec3 Position, FormKey Base, FormKey Ref)> Placed = new();
 
     /// <summary>One placed light's colour (times its fade, base fade plus the reference's offset),
-    /// radius (the reference's XRDS when it has one) and flags.</summary>
+    /// radius (the base's plus the reference's XRDS) and flags.</summary>
     internal static (V3 Color, float Radius, bool Negative, bool Shadowed, string Name) Effective(FormKey baseKey, FormKey refKey)
     {
         var b = Bases[baseKey];
@@ -62,7 +62,19 @@ internal static class CellLighting
         if (RefOverrides.TryGetValue(refKey, out var o))
         {
             fade += o.FadeOffset;
-            if (o.Radius > 0f) radius = o.Radius;
+            // A placed light's XRDS is an offset to the base's radius, not a replacement: the
+            // Bannered Mare's values (candles +80, -3.4, +8.5; the hearths -189 and -304) only make
+            // sense as offsets, and read so the in-game captures match (hearth-lit surfaces and the
+            // unlit pillar beside the hearth; no source states it). Diagnostic: VP_XRDS=override
+            // (a positive XRDS replaces the radius, a negative one is ignored: the earlier reading),
+            // abs or ignore.
+            switch (Environment.GetEnvironmentVariable("VP_XRDS"))
+            {
+                case "ignore": break;
+                case "abs": if (o.Radius != 0f) radius = MathF.Abs(o.Radius); break;
+                case "override": if (o.Radius > 0f) radius = o.Radius; break;
+                default: radius = MathF.Max(radius + o.Radius, 0f); break;
+            }
         }
         return (b.Color * MathF.Max(fade, 0f), radius, b.Negative, b.Shadowed, b.Name);
     }
@@ -87,7 +99,7 @@ internal static class CellLighting
                 break;
             case IPlacedObjectGetter po:
                 float fo = po.LightData?.FadeOffset ?? 0f, rr = po.Radius ?? 0f;
-                if (fo != 0f || rr > 0f) RefOverrides[po.FormKey] = (fo, rr);
+                if (fo != 0f || rr != 0f) RefOverrides[po.FormKey] = (fo, rr);
                 else RefOverrides.Remove(po.FormKey);
                 break;
             case ILightingTemplateGetter t:
