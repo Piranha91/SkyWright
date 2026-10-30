@@ -829,9 +829,9 @@ def stage_precedent(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"bundle": sha256_file(bundle_dir(ctx) / "manifest.json")}, [out]
 
 
-def report_plan_argv(ctx, res, out: Path, captures=()) -> list:
+def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = None) -> list:
     run = ctx.out / "evaluation"
-    argv = [sys.executable, fwd(HERE / "evalreport.py"), "plan", "--bundle", fwd(bundle_dir(ctx)), "--out", fwd(out),
+    argv = [sys.executable, fwd(HERE / "evalreport.py"), "plan", "--bundle", fwd(bundle or bundle_dir(ctx)), "--out", fwd(out),
             "--verify-copy", "--mode", ctx.entry.get("report", {}).get("mode", "concise")]
     if ctx.entry.get("report", {}).get("maxPages"):
         argv += ["--max-pages", str(ctx.entry["report"]["maxPages"])]
@@ -1031,12 +1031,49 @@ def script_of(argv: list[str]) -> Path | None:
     return None
 
 
+def capture_media_items(rows: list[dict]) -> list[dict]:
+    """The media items of every captured request (capture_acquire capture's media-<arm>.json); a refused request
+    contributes none."""
+    items = []
+    for r in rows:
+        if r.get("status") == "captured" and r.get("result"):
+            for m in sorted(Path(r["result"]).parent.glob("media-*.json")):
+                items += read_json(m).get("items") or []
+    return items
+
+
+def media_bundle_dir(ctx) -> Path:
+    return ctx.out / "report" / "media-bundle" / "evidence"
+
+
 def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
-    caps = [Path(r["result"]) for r in read_json(ctx.out / "capture" / "captures.json") if r.get("result")]
+    """The captured frames go into a second evidence bundle (evalrun bundle --media, every item checked against the
+    arm's own configuration fingerprint), and the report is planned and compiled from it with the capture results."""
+    rows = read_json(ctx.out / "capture" / "captures.json")
+    caps = [Path(r["result"]) for r in rows if r.get("result")]
     out = sdir / "report"
     if out.exists():
         raise Refusal(f"{fwd(out)} exists from an earlier generation; reports keep every attempt, so move it aside first.")
-    steps = [("plan", report_plan_argv(ctx, res, out, caps)),
+    items = capture_media_items(rows)
+    bundle = bundle_dir(ctx)
+    if items:
+        mdir = sdir / "media-bundle"
+        if mdir.exists():
+            shutil.rmtree(mdir)
+        mdir.mkdir(parents=True)
+        write_json(mdir / "media.json", {"schemaVersion": 2, "items": items})
+        bundle = media_bundle_dir(ctx)
+        run = ctx.out / "evaluation"
+        for name, argv in (("media-bundle", evalrun("bundle", "--run", fwd(run), "--out", fwd(bundle), "--media",
+                                                    fwd(mdir / "media.json"), "--reader-cmd", reader_cmd(ctx),
+                                                    *[x for k, v in names_env(ctx).items() for x in ("--reader-env", f"{k}={v}")],
+                                                    *[x for p, n in (ctx.entry.get("modNames") or {}).items()
+                                                      for x in ("--mod-name", f"{p}={n}")])),
+                           ("media-verify", evalrun("verify-bundle", fwd(bundle)))):
+            r = child(ctx, sdir / "commands", name, argv)
+            if r.get("exitCode") != 0:
+                raise Refusal(f"evalrun {name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.txt'))}.")
+    steps = [("plan", report_plan_argv(ctx, res, out, caps, bundle)),
              ("report", [sys.executable, fwd(HERE / "evalreport.py"), "report", "--presentation",
                          fwd(out / "presentation.json"), "--out", fwd(out)]),
              ("verify", [sys.executable, fwd(HERE / "evalreport.py"), "verify", "--out", fwd(out)])]
@@ -1045,18 +1082,19 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         if r.get("exitCode") != 0:
             raise Refusal(f"evalreport {name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.txt'))}.")
     outs = [out / "presentation.json"] + [p for p in (out / "report.md", out / "report.html", out / "report.pdf") if p.is_file()]
-    return {"captures": len(caps)}, outs
+    return {"captures": len(caps), "mediaItems": len(items)}, outs
 
 
 def stage_reel(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     m = ctx.machine
+    reel_bundle = media_bundle_dir(ctx) if media_bundle_dir(ctx).is_dir() else bundle_dir(ctx)
     pres = ctx.out / "report" / "report" / "presentation.json"
     sb = sdir / "storyboard.json"
     reel = sdir / "reel"
     if reel.exists():
         raise Refusal(f"{fwd(reel)} exists from an earlier render; move it aside first.")
     steps = [("storyboard", [sys.executable, fwd(HERE / "evalreel.py"), "storyboard-packet", "--presentation", fwd(pres),
-                             "--bundle", fwd(bundle_dir(ctx)), "--out", fwd(sb)])]
+                             "--bundle", fwd(reel_bundle), "--out", fwd(sb)])]
     board = sb
     if m.get("speech"):
         sp = m["speech"]
@@ -1064,7 +1102,7 @@ def stage_reel(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
                                  "--out", fwd(sdir / "speech")]))
         board = sdir / "speech" / "storyboard-with-audio.json"
     render = [sys.executable, fwd(HERE / "evalreel.py"), "render", "--presentation", fwd(pres), "--out", fwd(reel),
-              "--bundle", fwd(bundle_dir(ctx)), "--storyboard", fwd(board)]
+              "--bundle", fwd(reel_bundle), "--storyboard", fwd(board)]
     if m.get("ffmpeg"):
         render += ["--ffmpeg", m["ffmpeg"]]
     steps.append(("render", render))
@@ -1102,7 +1140,8 @@ def stage_deliver(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
              "reelMap": fwd(ctx.out / "reel" / "reel" / "reel-map.json"),
              "decodedFrames": fwd(ctx.out / "reel" / "decoded"),
              "blindImages": fwd(ctx.out / "image-observations" / "indexed-images"),
-             "bundle": fwd(bundle_dir(ctx)), "precedentCards": fwd(ctx.out / "precedent" / "cards")}
+             "bundle": fwd(bundle_dir(ctx)), "mediaBundle": fwd(media_bundle_dir(ctx)),
+             "precedentCards": fwd(ctx.out / "precedent" / "cards")}
     write_json(sdir / "review-packet.json", paths)
     print(json.dumps(paths, indent=1))
     return {}, [sdir / "review-packet.json"]

@@ -286,6 +286,19 @@ def case_41_unbuilt_scene_stage_is_a_stated_refusal():
     raise AssertionError("an unbuilt stage must refuse visibly, never accept with nothing done")
 
 
+def case_43_captured_frames_reach_the_media_bundle():
+    with tempfile.TemporaryDirectory() as t:
+        seq = Path(t) / "a" / "sequence"
+        seq.mkdir(parents=True)
+        (seq / "capture-result.json").write_text("{}", encoding="utf-8")
+        (seq / "media-baseline.json").write_text(json.dumps({"items": [{"path": "w.png"}]}), encoding="utf-8")
+        (seq / "media-candidate-03.json").write_text(json.dumps({"items": [{"path": "wo.png"}]}), encoding="utf-8")
+        rows = [{"status": "captured", "result": str(seq / "capture-result.json")},
+                {"status": "refused", "result": str(seq / "capture-result.json")}]
+        got = [i["path"] for i in EP.capture_media_items(rows)]
+        assert got == ["w.png", "wo.png"], f"every captured frame goes to the media bundle once, got {got}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
