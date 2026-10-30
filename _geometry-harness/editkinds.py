@@ -14,8 +14,9 @@ disable is one DISABLE, not four field changes. The vocabulary is fixed:
                  is one FIELD:<list> marked bookkeeping
 
 Not edits (dropped before classification): record-header bookkeeping (version, form version, version control,
-timestamps), fields the caller already showed equal to the unpatched winner (identity forwards), and container rows
-whose only differences are child groups.
+timestamps), a cell's or worldspace's child-group bookkeeping and child groups (GROUP_BOOKKEEPING), fields the caller
+already showed equal to the unpatched winner (identity forwards), and container rows whose only differences are child
+groups.
 
 This module classifies field changes a caller has already read; it reads no plugin and decides nothing about whether
 an edit repairs a clash. Lifted from the 4.24 scorecard's Group 1 adapter and common rules without changing a rule.
@@ -36,6 +37,14 @@ FLAG_PERSISTENT = 0x400
 HEADER_BOOKKEEPING = frozenset({
     "Header.version2", "Version2", "FormVersion", "VersionControl", "Timestamp", "TemporaryTimestamp",
     "TemporaryUnknownGroupData", "Header.formVersion", "Header.timestamp", "Header.versionControl"})
+
+#: container bookkeeping: a cell's or worldspace's child-group timestamps and unknowns, and the child groups themselves
+#: (their records are edits of their own); never an edit of the container (record-field-scope.json groupBookkeeping)
+GROUP_BOOKKEEPING = frozenset({
+    "Timestamp", "UnknownGroupData", "PersistentTimestamp", "PersistentUnknownGroupData", "TemporaryTimestamp",
+    "TemporaryUnknownGroupData", "SubCellsTimestamp", "SubCellsUnknown",
+    "Persistent", "Temporary", "SubCells", "TopCell", "NavigationMeshes", "Landscape", "LargeReferences"})
+_CONTAINER_TYPES = frozenset({"CELL", "WRLD", "Cell", "Worldspace"})
 
 LCTN_REGISTRATION = frozenset({
     "ACPR", "LCPR", "RCPR", "ACUN", "LCUN", "RCUN", "ACSR", "LCSR", "RCSR", "ACEP", "LCEP", "RCEP", "ACID", "LCID",
@@ -95,7 +104,8 @@ def classify(record_type: str, row_class: str, changed_fields: list[dict], *, ca
     if row_class == "addition":
         return [{"kind": "ADD", "paths": ["<record>"], "canonPaths": ["<record>"], "bookkeepingKind": False}]
     fields = [f for f in changed_fields
-              if not f.get("bookkeeping") and f["field"] not in HEADER_BOOKKEEPING and f["field"] not in identity]
+              if not f.get("bookkeeping") and f["field"] not in HEADER_BOOKKEEPING and f["field"] not in identity
+              and not (record_type in _CONTAINER_TYPES and f["field"].split(".")[0].split("[")[0] in GROUP_BOOKKEEPING)]
     if not fields:
         return []
     groups: dict[str, list] = {}

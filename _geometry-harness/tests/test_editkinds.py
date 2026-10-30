@@ -100,6 +100,18 @@ def case_9_persistent_flag_alone_is_bookkeeping():
     assert [(e["kind"], e["bookkeepingKind"]) for e in es] == [("RECORD-FLAGS", True)], es
 
 
+def case_11_container_group_bookkeeping_is_not_an_edit():
+    got = kinds("CELL", "substantive", [{"field": "PersistentTimestamp", "before": 1, "after": 2},
+                                        {"field": "SubCells", "before": 1, "after": 2},
+                                        {"field": "Persistent", "before": 1, "after": 2}])
+    assert got == [], f"a container's child-group bookkeeping is not an edit, got {got}"
+    got = kinds("WRLD", "substantive", [{"field": "SubCellsTimestamp", "before": 1, "after": 2},
+                                        {"field": "Water", "before": 1, "after": 2}])
+    assert got == ["FIELD:Water"], f"only the worldspace's own field is an edit, got {got}"
+    got = kinds("REFR", "substantive", [{"field": "PersistentTimestamp", "before": 1, "after": 2}])
+    assert got == ["FIELD:PersistentTimestamp"], f"the rule is for containers only, got {got}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
