@@ -867,6 +867,23 @@ def acquire_split(a, request: dict, source: dict, receipts_dir: Path, shotplan_m
 
 # ---------------------------------------------------------------- the command --
 
+
+def physical_cell(parts: list[dict], bundle: Path) -> str | None:
+    """The cell to picture a pair in when one participant is filed in its worldspace's persistent cell: a persistent
+    exterior reference is drawn in the grid cell its position falls in, never in the persistent container, so the
+    container cannot load both participants. The bundle's names enrichment records each reference's filing cell
+    (`!persistent` marks the container); when the pair has exactly one non-persistent filing cell, that cell is the
+    one to load. Otherwise None, and the request's own location stands (viewprobe then says what it cannot place)."""
+    names = bundle / "enrichment" / "names" / "names.json"
+    if not names.is_file():
+        return None
+    refs = (load_json(names) or {}).get("refs") or {}
+    cells = [c for p in parts for c in ((refs.get(p["formKey"]) or {}).get("cells") or {}).values()]
+    if not any(str(c).endswith("!persistent") for c in cells):
+        return None
+    physical = {str(c) for c in cells if not str(c).endswith("!persistent")}
+    return physical.pop() if len(physical) == 1 else None
+
 def cmd_acquire(a) -> int:
     out = Path(a.out).resolve()
     receipts_dir = Path(a.receipts).resolve() if a.receipts else out.parent / (out.stem + "-receipts")
@@ -933,7 +950,8 @@ def cmd_acquire(a) -> int:
                 CP = _load_points()
                 try:
                     doc = CP.pick_points(request, vp=a.vp, passthrough=a.passthrough,
-                                         work=receipts_dir / "points-work", synthetic=a.synthetic_points,
+                                         work=receipts_dir / "points-work", cell=physical_cell(parts, bundle),
+                                         synthetic=a.synthetic_points,
                                          size=a.points_size, grid=a.points_grid, shotplan=shotplan_mod)
                 except CP.Unpickable as exc:
                     raise Refused("points-unpickable", exc.detail, pickerCode=exc.code, **exc.extra)

@@ -62,7 +62,8 @@ COLOUR_TOL = 2
 
 EYE_LINE = re.compile(r"^\s*eye (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) -> look "
                       r"(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)")
-NOT_PLACED = re.compile(r"'([^']+)' is not a placed ref in this cell's winning state")
+# a FormKey's plugin name may itself carry an apostrophe ("JK's ..."): match up to the quote before the sentence
+NOT_PLACED = re.compile(r"'(.+?)' is not a placed ref in this cell's winning state")
 SURFACE_REFUSED = re.compile(r"^subject-surface-refused: (\S{6}:.+?\.es[pml]):")
 WATER_LINE = re.compile(r"^\s*water z (-?\d+(?:\.\d+)?): ")
 SHOT_HEAD = re.compile(r"^=== worklist cell \d+/\d+ shot (\d+)/(\d+): (.*) ===\s*$")

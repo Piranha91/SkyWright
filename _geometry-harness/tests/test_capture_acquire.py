@@ -686,6 +686,30 @@ def case_fallback_plan_is_refused(root: Path, packet: Path, rid: str, request: d
           doc is not None and "camera" not in doc and "poseId" not in doc, str(sorted((doc or {}).keys())))
 
 
+
+def case_persistent_container_cell(base: Path):
+    """A pair whose one participant is filed in the worldspace's persistent cell is pictured in the other's grid
+    cell: the container loads no temporary reference (Missives / JK's Raven Rock, 2026-10-30). The plugin name's
+    apostrophe also survives the picker's not-placed message."""
+    import capture_acquire as CA
+    import capture_points as CP
+    names = base / "enrichment" / "names"
+    names.mkdir(parents=True, exist_ok=True)
+    (names / "names.json").write_text(json.dumps({"refs": {
+        "000899:Sub.esp": {"cells": {"Sub.esp": "0142EC:Base.esm!persistent"}},
+        "0000F5:JK's Mod.esp": {"cells": {"JK's Mod.esp": "00EED6:Base.esm"}},
+        "000001:Sub.esp": {"cells": {"Sub.esp": "00AAAA:Base.esm"}}}}), encoding="utf-8")
+    pair = [{"formKey": "000899:Sub.esp"}, {"formKey": "0000F5:JK's Mod.esp"}]
+    check("persistent participant -> the other's physical cell", CA.physical_cell(pair, base) == "00EED6:Base.esm",
+          str(CA.physical_cell(pair, base)))
+    plain = [{"formKey": "000001:Sub.esp"}, {"formKey": "0000F5:JK's Mod.esp"}]
+    check("no persistent participant -> the request's own cell stands", CA.physical_cell(plain, base) is None)
+    check("no names enrichment -> the request's own cell stands", CA.physical_cell(pair, base / "absent") is None)
+    msg = "'0000F5:JK's Mod.esp' is not a placed ref in this cell's winning state."
+    check("not-placed message keeps an apostrophe in the plugin name",
+          CP.NOT_PLACED.findall(msg) == ["0000F5:JK's Mod.esp"], str(CP.NOT_PLACED.findall(msg)))
+
+
 def main(argv):
     if len(argv) >= 2 and argv[0] == "--emit":
         root = Path(argv[1]).resolve()
@@ -722,6 +746,8 @@ def main(argv):
         case_fallback_plan_is_refused(root, packet, rid, request)
         print("\n-- case 9: a population-scoped source (P33)")
         case_population_scoped(root / "p33")
+        print("\n-- case 10: a pair filed partly in the persistent cell is pictured in its physical cell")
+        case_persistent_container_cell(root / "persistent")
 
     print()
     if FAILS:
