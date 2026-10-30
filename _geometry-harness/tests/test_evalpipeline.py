@@ -362,6 +362,14 @@ def case_50_a_transient_refusal_is_captured_again():
         got = {rid: EP.reusable_capture({"id": rid}, root / rid, ident) for rid in ("capture-m", "capture-k", "capture-n")}
         assert all(v is None for v in got.values()), f"a memory, crash or unexplained refusal is captured again: {got}"
 
+def case_51_a_round_captures_at_most_the_cap():
+    asked = [{"id": f"capture-{i}"} for i in range(7)]
+    take, rest = EP.capped_requests(asked, 4)
+    assert [q["id"] for q in take] == ["capture-0", "capture-1", "capture-2", "capture-3"], take
+    assert [q["id"] for q in rest] == ["capture-4", "capture-5", "capture-6"], rest
+    assert EP.MAX_NEW_PER_ROUND == 4 and EP.MAX_CAPTURE_ROUNDS == 3
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

@@ -919,6 +919,13 @@ def capture_request(ctx, q, sb: Path, qdir: Path, cands: dict) -> dict:
 
 
 MAX_CAPTURE_ROUNDS = 3
+MAX_NEW_PER_ROUND = 4      # a refusal costs about 5 minutes of the heavy slot; a re-plan may not ask for more per round
+
+
+def capped_requests(asked: list, cap: int) -> tuple[list, list]:
+    """The requests a round captures: the plan's first `cap` new ones, in its order; the rest are deferred to the next
+    round's plan (which may no longer ask for them)."""
+    return list(asked[:cap]), list(asked[cap:])
 
 
 def capture_identity(ctx) -> dict:
@@ -977,8 +984,10 @@ def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     sb = ctx.out / "report-plan" / "storyboard.json"
     rows, done, rounds = [], set(), []
     for rnd in range(1, MAX_CAPTURE_ROUNDS + 1):
-        reqs = [q for q in (read_json(sb).get("capturePlan") or {}).get("requests") or [] if q["id"] not in done]
-        rounds.append({"round": rnd, "storyboard": fwd(sb), "newRequests": [q["id"] for q in reqs]})
+        asked = [q for q in (read_json(sb).get("capturePlan") or {}).get("requests") or [] if q["id"] not in done]
+        reqs, deferred = capped_requests(asked, MAX_NEW_PER_ROUND)
+        rounds.append({"round": rnd, "storyboard": fwd(sb), "newRequests": [q["id"] for q in reqs],
+                       "deferred": [q["id"] for q in deferred]})
         if not reqs:
             break
         for q in reqs:
@@ -1000,10 +1009,14 @@ def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         if r.get("exitCode") != 0:
             raise Refusal(f"evalreel storyboard-packet after round {rnd} refused (exit {r.get('exitCode')}).")
     else:
+        # the bound is strict: after the last round the stage is accepted with what it has, and what the plan still
+        # asks for is recorded as not captured (never a further round)
         left = [q["id"] for q in (read_json(sb).get("capturePlan") or {}).get("requests") or [] if q["id"] not in done]
         if left:
-            write_json(sdir / "captures.json", rows)
-            raise Refusal(f"after {MAX_CAPTURE_ROUNDS} capture rounds the plan still asks for {', '.join(left)}.")
+            rounds.append({"round": None, "storyboard": fwd(sb), "notCaptured": left,
+                           "why": f"the {MAX_CAPTURE_ROUNDS}-round bound was reached"})
+            print(f"capture: the {MAX_CAPTURE_ROUNDS}-round bound was reached; {len(left)} request(s) not captured: "
+                  + ", ".join(left))
     rows = mark_superseded(rows, [q["id"] for q in (read_json(sb).get("capturePlan") or {}).get("requests") or []])
     write_json(sdir / "captures.json", rows)
     write_json(sdir / "rounds.json", rounds)
