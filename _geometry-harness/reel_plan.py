@@ -53,6 +53,18 @@ def humanize(eid: str | None) -> str | None:
     return " ".join(ws) or None
 
 
+NUMBER_WORDS = {2: "two", 3: "three", 4: "four", 5: "five"}
+
+
+def say_names(names: list[str]) -> list[str]:
+    """One phrase per distinct spoken name, in first-seen order, with how many records share it (Missives final reel
+    review, finding 2: two barrels with one editor name sounded like one barrel moved, re-modelled and removed)."""
+    counts = {}
+    for n in names:
+        counts[n] = counts.get(n, 0) + 1
+    return [n if k == 1 else f"{n} ({NUMBER_WORDS.get(k, str(k))} of them)" for n, k in counts.items()]
+
+
 def joined(xs: list[str]) -> str:
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
 
@@ -572,7 +584,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             pr_ = next((r_ for r_ in x["rows"] if r_.get("field") == "Placement"), None)
             lo_, wo_ = (_position((pr_.get("values") or {}).get(k_)) for k_ in ("lost", "winner")) if pr_ else (None, None)
             return bool(lo_ and wo_ and max(abs(lo_[i] - wo_[i]) for i in range(3)) > 1.0)
-        rest = [spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary")) for x in others.get(fk) or [] if moved_row(x)]
+        rest = say_names([spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary"))
+                          for x in others.get(fk) or [] if moved_row(x)])
         lost_items = collections.OrderedDict()
         for x in group:
             nm_ = spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary"))
@@ -593,11 +606,15 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if lost_items and words.get("alsoLost"):
             lw_ = dict(words.get("lostFieldWords") or {}, turn=words.get("lostTurnWord") or "the turn of {objects}")
             text += " " + words["alsoLost"].format(loser=mod(A), winner=mod(B), items=joined(
-                [lw_[k_].format(objects=joined(list(dict.fromkeys(v_)))) for k_, v_ in lost_items.items()]))
+                [lw_[k_].format(objects=joined(say_names(v_))) for k_, v_ in lost_items.items()]))
+        said_names_ = [spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary")) for x in group]
         for g_ in in_split.get(fk) or []:
+            nm_g_ = spoken_ref(g_["rows"][0]["formKey"], g_["rows"][0].get("summary"))
+            # a name another record of this chapter shares is said as "another" one, so the two are not heard as one
+            if said_names_.count(nm_g_) > 1 and words.get("anotherObject"):
+                nm_g_ = words["anotherObject"].format(object=nm_g_)
             text += " " + words["removedInSplit"].format(
-                winner=mod(g_["rows"][0]["B"]), loser=mod(g_["rows"][0]["A"]), subject=obj,
-                object=spoken_ref(g_["rows"][0]["formKey"], g_["rows"][0].get("summary")))
+                winner=mod(g_["rows"][0]["B"]), loser=mod(g_["rows"][0]["A"]), subject=obj, object=nm_g_)
         return text
 
     def sentence(c):

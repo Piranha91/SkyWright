@@ -2563,6 +2563,24 @@ def build_prediction(ctx: dict) -> dict:
             own_layout_cache[key_] = got_
         return own_layout_cache[key_]
 
+    def partner_alone(rk):
+        """(Missives final report review, finding 1) a clash of a compared mod against the base game, there without the
+        evaluated mod but gone in the measured setup without that compared mod: the compared mod's own problem, not one
+        already present without the evaluated mods. The compared mod, or None."""
+        a_, b_ = rk[2], rk[3]
+        if not (is_base_game(a_, words) ^ is_base_game(b_, words)):
+            return None
+        m_ = b_ if is_base_game(a_, words) else a_
+        if m_.lower() in pt_lower:
+            return None
+        arm_m_ = without_other(m_.lower())
+        if arm_m_ is None or (rk[0], arm_m_) not in measured or there(arm_m_, rk):
+            return None
+        partner_alone_mods.setdefault(m_, None)
+        return m_
+
+    partner_alone_mods = collections.OrderedDict()
+
     def admission(rk, history, other=()):
         a, b = rk[2], rk[3]
         if history:
@@ -2572,6 +2590,8 @@ def build_prediction(ctx: dict) -> dict:
         if list_drop(rk):
             return "winnerListDrop"
         if there(w_arm, rk):
+            if partner_alone(rk):
+                return "partnerAlone"
             return "alreadyPresent"
         if rk[1] == "EDGE-IDX" and (link_origin(rk) or ("",))[0] == "base":
             # (round 2, Sewers B1) the base game's own version of the linking navmesh holds the link and the other mod
@@ -4690,7 +4710,8 @@ def build_prediction(ctx: dict) -> dict:
                                                           if r_ > n_ and words.get("setAsidePairs") else "")
 
     aside = {"baseGame": set_aside["baseGame"], "sameMod": set_aside["sameMod"],
-             "alreadyPresent": set_aside["alreadyPresent"], "history": set_aside["history"],
+             "alreadyPresent": set_aside["alreadyPresent"], "partnerAlone": set_aside["partnerAlone"],
+             "history": set_aside["history"],
              "notInvolving": set_aside["notInvolving"], "singleMod": set_aside["singleMod"],
              "repeat": set_aside["repeat"], "noBody": set_aside["noBody"], "pathCase": set_aside["pathCase"],
              "bodyUnread": set_aside["bodyUnread"], "bothDisabled": set_aside["bothDisabled"],
@@ -4893,7 +4914,8 @@ def build_prediction(ctx: dict) -> dict:
                   "setAsideLine": ((bind(words["setAsideLine"], {"setup": (
                       words.get("setAsideSetupMeasured") or "the measured load order") if p_arm == "baseline" else (
                       words.get("setAsideSetupWithout") or "the setup without the patch"), "parts": ", ".join(
-                      bind(t_, {"n": fmt_n(aside[k_])}) for k_, t_ in words["setAsideParts"].items() if aside.get(k_))})
+                      bind(t_, {"n": fmt_n(aside[k_]), "mods": and_list(list(partner_alone_mods))})
+                      for k_, t_ in words["setAsideParts"].items() if aside.get(k_))})
                       if any(aside.get(k_) for k_ in words["setAsideParts"]) else "")
                                    + (" " + bind(words["setAsideNoBody"], aside)
                                                                          if aside["noBody"] else "")

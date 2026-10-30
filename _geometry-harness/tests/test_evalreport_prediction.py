@@ -479,6 +479,21 @@ def already_present_and_mod_partner_bundle():
     return compile_and_render(arms, results, [MOD_A])
 
 
+def partner_alone_bundle():
+    """(Missives final report review, finding 1) One mod added beside a compared mod OTHER2. OTHER2 against the base game
+    is there without the evaluated mod and gone without OTHER2: OTHER2's own problem, not one already present without
+    the evaluated mods. A clash between two third mods stays already present."""
+    arms = [arm("baseline", [BASE, OTHER, OTHER2, MOD_A], kind="baseline"),
+            arm("without-a", [BASE, OTHER, OTHER2]),
+            arm("without-other2", [BASE, OTHER, MOD_A])]
+    own = [row("CONTACT", BASE, OTHER2, f"000F03:{OTHER2}")]
+    already = [row("CONTACT", BASE, OTHER, f"000F04:{OTHER}")]
+    partner = [row("CONTACT", OTHER2, MOD_A, f"000F05:{MOD_A}")]
+    results = {(CONTACT, "baseline"): own + already + partner, (CONTACT, "without-a"): own + already,
+               (CONTACT, "without-other2"): already}
+    return compile_and_render(arms, results, [MOD_A])
+
+
 def coded_reason_bundle():
     """One mod added; nothing between mods; the probe could not judge some objects for a reason it gives only as a
     code -- one the skill names in words (NoGeometry) and one it does not (ZqxOddCode)."""
@@ -1093,6 +1108,17 @@ def main():
               and not any(OTHER2 in (i.get("mods") or []) for i in items))
         return ok, f"setAside {p.get('setAside')}; prediction names {OTHER2}: {OTHER2 in text}"
 
+    # 6b. a compared mod's own clash with the base game, gone without that mod, is said as that mod's, not as already
+    # present without the evaluated mods (Missives final report review, finding 1)
+    def partner_alone_set_aside():
+        plan, md, html = get("partner-alone", partner_alone_bundle)
+        p = reader(plan).get("prediction") or {}
+        aside = p.get("setAside") or {}
+        line = str(p.get("setAsideLine") or "")
+        ok = (aside.get("partnerAlone") == 1 and aside.get("alreadyPresent") == 1
+              and f"of {OTHER2} against the base game, there with {OTHER2} alone" in line)
+        return ok, f"setAside {aside}; line {line[-200:]!r}"
+
     # 7. a non-target mod (not the base game) on one side is a clash between mods, attributed to the evaluated mod
     def mod_partner_admitted():
         plan, md, html = get("already", already_present_and_mod_partner_bundle)
@@ -1525,6 +1551,7 @@ def main():
             ("base-game-in-prediction/scope-line-does-not-name-the-base-game", scope_line_no_base_game),
             ("base-game-in-prediction/already-present-without-the-mod-is-set-aside", already_present_set_aside),
             ("prediction-missing/non-target-mod-partner-is-admitted-and-attributed", mod_partner_admitted),
+            ("base-game-in-prediction/a-compared-mods-own-base-game-clash-is-its-own", partner_alone_set_aside),
             ("prediction-missing/four-setup-report-opens-with-prediction-coverage-validation", prediction_leads_four_setup),
             ("prediction-missing/needs-both-single-mod-and-not-separable-attribution", four_setup_attribution),
             ("prediction-missing/each-kind-says-what-it-looks-like-in-game", four_setup_in_game_words),

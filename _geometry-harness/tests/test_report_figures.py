@@ -83,6 +83,11 @@ def case_13_a_split_marks_a_framed_removal_only_where_it_stands():
     assert "02C075:Dragonborn.esm=magenta" in left and "02C075:Dragonborn.esm=magenta" not in right, (left, right)
 
 
+def case_15_records_sharing_a_name_are_counted_when_spoken():
+    got = RP.say_names(["Barrel", "Urn", "Barrel", "Scathecraw", "Scathecraw", "Scathecraw"])
+    assert got == ["Barrel (two of them)", "Urn", "Scathecraw (three of them)"], got
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
