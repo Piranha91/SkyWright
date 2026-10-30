@@ -158,7 +158,7 @@ def changed_fields(delta_lines: list[str], plugins: list[str], scope) -> list[di
 
         def hx(v):
             try:
-                return "0x%08X" % int(float(v))
+                return "0x%08X" % (int(float(v)) & 0xFFFFFFFF)  # flags are unsigned 32-bit; a reader may print them signed
             except (TypeError, ValueError):
                 return "0x00000000"
         dec = flags.get("decoded") or ("none", "none")

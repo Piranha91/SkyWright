@@ -11,6 +11,7 @@ import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
 _path = os.environ.get("MODCENSUS_PATH") or str(HERE.parent / "modcensus.py")
 MC, LOAD_ERROR = None, None
 try:
@@ -100,6 +101,13 @@ def case_13_refused_row_is_neither_novel_nor_covered():
     bad = MC.census_row(dict(CAND, id="bad"), scope(complete=False), deltas(), ASSETS)
     out = MC.novelty([bad], [])
     assert out[0]["decision"] == "refused", out
+
+
+def case_15_signed_flag_values_read_as_unsigned():
+    import importlib
+    ER = importlib.import_module("evalrecords")
+    f = MC.changed_fields(["MajorRecordFlagsRaw=-2147483648 (Base.esm 0)"], ["Base.esm", "One.esp"], ER.FieldScope())
+    assert f and f[0]["after"] == "0x80000000", f"a signed flag word reads as its unsigned bits, got {f}"
 
 
 def main():
