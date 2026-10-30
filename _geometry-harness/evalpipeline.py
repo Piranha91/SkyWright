@@ -534,7 +534,8 @@ def write_profile(ctx: Context, files: dict[str, bytes]) -> Path:
 def child(ctx, ledger_dir, op, argv, *, heavy=False, purpose=None, deadline_min=None, env=None):
     """One child through the shared Runner; a heavy child goes through the machine's slot command."""
     if heavy and ctx.machine.get("heavyPrefix"):
-        lock = Path(ctx.machine.get("lockDir") or ctx.out) / ("HEAVY-LOCK-" + op)
+        # one lock file per mod and step: two runs of different mods never name the same lock
+        lock = Path(ctx.machine.get("lockDir") or ctx.out) / f"HEAVY-LOCK-{ctx.id}-{op}"
         prefix = [x.replace("{purpose}", purpose or op).replace("{lock}", fwd(lock)) for x in ctx.machine["heavyPrefix"]]
         argv = prefix + ["--"] + argv
     job = {"id": op, "argv": [str(a) for a in argv], "cwd": str(ROOT)}
