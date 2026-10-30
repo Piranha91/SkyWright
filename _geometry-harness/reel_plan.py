@@ -294,6 +294,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         return None
 
     refused = {str(x.get("formKey")) for x in capture_results if x.get("status") == "refused" and x.get("formKey")}
+    # an object no camera can mark (only alpha-tested, effect or marker shapes) fails every request it is in: a clash
+    # with it is not tried again under another request (WRW capture: one such object refused two requests)
+    unmarkable = {str((x.get("refusal") or {}).get("participant")) for x in capture_results
+                  if x.get("status") == "refused" and (x.get("refusal") or {}).get("pickerCode") == "points-no-opaque-face"
+                  and (x.get("refusal") or {}).get("participant")}
     attempts = int(policy.get("captureAttemptsPerType") or policy.get("perType") or 1)
     chosen_by_type, unpictured, represented, candidates, others = {}, [], {}, {}, {}
 
@@ -335,7 +340,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 if tried >= attempts:
                     break
                 tried += 1
-                if c["rows"][0]["formKey"] in refused:
+                if c["rows"][0]["formKey"] in refused or ({str(c["rows"][0]["formKey"]),
+                                                           *map(str, c["rows"][0].get("other") or [])} & unmarkable):
                     tried_refused.append(c)
                     continue
                 chosen.append(c)

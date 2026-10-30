@@ -419,7 +419,7 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
             raise Unpickable("points-no-opaque-face",
                              f"{bare[0]} draws only alpha-tested, effect or marker shapes, which the renderer cannot "
                              "mark, and no opaque face of it appeared from any station, so no point on it can be "
-                             "measured; choose another request")
+                             "measured; choose another request", participant=bare[0])
         placed = [st for st in ring if not st.get("placement") and "participants" in st]
         if not placed:
             raise Unpickable("points-no-station",

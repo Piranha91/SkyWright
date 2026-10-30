@@ -146,6 +146,18 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def capture_tool_identity(vp=None) -> dict:
+    """The capture's tool identity: this module, the point picker and the renderer build. A result taken with another
+    identity is not reused (evalpipeline.reusable_capture)."""
+    here_ = Path(__file__).resolve().parent
+    vp_ = Path(vp) if vp else VIEWPROBE
+    out_ = {}
+    for name_, p_ in (("capture_acquire.py", here_ / "capture_acquire.py"), ("capture_points.py", here_ / "capture_points.py"),
+                      ("viewprobe", Path(str(vp_)))):
+        out_[name_] = sha256_file(p_) if p_.is_file() else None
+    return out_
+
+
 def sha256_file(p: Path) -> str:
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -1044,7 +1056,7 @@ def _capture(a) -> int:
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     result = {"schemaVersion": 1, "kind": "vignette-capture", "request": a.request, "status": "refused", "reason": None,
-              "states": [], "generatedUtc": utcnow()}
+              "states": [], "generatedUtc": utcnow(), "toolIdentity": capture_tool_identity(a.vp)}
 
     def finish(code):
         write_json(out / "capture-result.json", result)
@@ -1058,9 +1070,12 @@ def _capture(a) -> int:
         result["reason"] = f"the acquisition or the request could not be read: {exc}"
         return finish(EXIT_REFUSED)
     result["formKey"] = (request.get("recordKeys") or [None])[0]
-    if acq.get("status") != "camera-ready" or (acq.get("request") or {}).get("id") != a.request:
-        result["reason"] = (f"the acquisition is {acq.get('status')!r} for request "
-                            f"{(acq.get('request') or {}).get('id')!r}, not camera-ready for {a.request}")
+    if acq.get("status") != "camera-ready" or (acq.get("request") or {}).get("id") not in (None, a.request):
+        # the acquisition's own refusal travels with the result, so the planner and a reader see why (WRW capture)
+        ref_ = acq.get("refusal") or {}
+        result["refusal"] = {k: ref_.get(k) for k in ("code", "pickerCode", "participant", "detail") if ref_.get(k)}
+        result["reason"] = (f"the camera acquisition for {a.request} is {acq.get('status')!r}"
+                            + (f" ({ref_.get('pickerCode') or ref_.get('code')}): {ref_.get('detail')}" if ref_ else ""))
         return finish(EXIT_REFUSED)
     seq = request.get("sequence") or {}
     states = list(seq.get("states") or [])

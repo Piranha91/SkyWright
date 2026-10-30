@@ -330,19 +330,37 @@ def case_48_a_capture_the_final_plan_dropped_is_superseded():
 
 
 def case_49_a_finished_request_is_reused_with_its_outcome_and_an_unfinished_one_is_not():
+    ident = {"capture_acquire.py": "a1", "capture_points.py": "p1", "viewprobe": "v1"}
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
-        for rid, status in (("capture-a", "captured"), ("capture-b", "refused")):
+        docs = {"capture-a": {"status": "captured"},
+                "capture-b": {"status": "refused", "refusal": {"code": "points-unpickable", "pickerCode": "points-no-opaque-face"}},
+                "capture-o": {"status": "captured", "toolIdent": "other"}}
+        for rid, doc in docs.items():
             (root / rid / "sequence").mkdir(parents=True)
-            (root / rid / "sequence" / "capture-result.json").write_text(
-                json.dumps({"request": rid, "status": status}), encoding="utf-8")
-        a = EP.reusable_capture({"id": "capture-a", "armId": "baseline", "vignette": {"withoutArmId": "c1"}}, root / "capture-a")
-        b = EP.reusable_capture({"id": "capture-b"}, root / "capture-b")
-        c = EP.reusable_capture({"id": "capture-c"}, root / "capture-c")
+            body = dict(doc, request=rid, toolIdentity=ident if rid != "capture-o" else dict(ident, viewprobe="v0"))
+            (root / rid / "sequence" / "capture-result.json").write_text(json.dumps(body), encoding="utf-8")
+        a = EP.reusable_capture({"id": "capture-a", "armId": "baseline", "vignette": {"withoutArmId": "c1"}}, root / "capture-a", ident)
+        b = EP.reusable_capture({"id": "capture-b"}, root / "capture-b", ident)
+        c = EP.reusable_capture({"id": "capture-c"}, root / "capture-c", ident)
+        o = EP.reusable_capture({"id": "capture-o"}, root / "capture-o", ident)
         assert a and a["reused"] and a["status"] == "captured" and a["arm"] == "baseline", a
         assert b and b["status"] == "refused" and b["reused"], b
         assert c is None, c
+        assert o is None, f"a result taken with another renderer build is captured again, got {o}"
 
+
+def case_50_a_transient_refusal_is_captured_again():
+    ident = {"capture_acquire.py": "a1", "capture_points.py": "p1", "viewprobe": "v1"}
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        for rid, ref in (("capture-m", {"code": "memory-floor"}), ("capture-k", {"code": "renderer-exit"}),
+                         ("capture-n", {})):
+            (root / rid / "sequence").mkdir(parents=True)
+            (root / rid / "sequence" / "capture-result.json").write_text(json.dumps(
+                {"request": rid, "status": "refused", "refusal": ref, "toolIdentity": ident}), encoding="utf-8")
+        got = {rid: EP.reusable_capture({"id": rid}, root / rid, ident) for rid in ("capture-m", "capture-k", "capture-n")}
+        assert all(v is None for v in got.values()), f"a memory, crash or unexplained refusal is captured again: {got}"
 
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),

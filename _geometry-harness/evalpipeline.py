@@ -921,16 +921,35 @@ def capture_request(ctx, q, sb: Path, qdir: Path, cands: dict) -> dict:
 MAX_CAPTURE_ROUNDS = 3
 
 
-def reusable_capture(q: dict, qdir: Path) -> dict | None:
-    """A request already captured in this run folder (same id: the id hashes the request's identity, its setups and
-    its source) is reused rather than rendered again, its outcome with it: captured or refused, the same request gives
-    the same answer. An unfinished one (no result) is captured again. The row says so."""
+def capture_identity(ctx) -> dict:
+    """The capture tools' identity as capture_acquire records it on a result (its own capture_tool_identity)."""
+    import capture_acquire
+    return capture_acquire.capture_tool_identity(ctx.machine.get("viewprobe"))
+
+
+# a refusal that is a property of the request's geometry: the same request, tools and data give it again
+DETERMINISTIC_REFUSALS = {"points-no-opaque-face", "points-no-visible-face", "points-no-station", "placement-unknown",
+                          "points-empty-pick", "request-participants-unusable"}
+
+
+def reusable_capture(q: dict, qdir: Path, identity: dict | None = None) -> dict | None:
+    """A request already finished in this run folder (same id: the id hashes the request's identity, its setups and its
+    source) is reused rather than rendered again, with its outcome, when the capture tools are the same build
+    (`identity`: capture_acquire, the point picker, viewprobe). A refusal is reused only when its reason is a property
+    of the request's geometry (DETERMINISTIC_REFUSALS); a transient one (memory, a lock or slot timeout, a crash or
+    kill, a renderer exit without a reason) is captured again, as is an unfinished one. The row says so."""
     result = qdir / "sequence" / "capture-result.json"
     if not result.is_file():
         return None
     doc = read_json(result)
     if doc.get("status") not in ("captured", "refused") or doc.get("request") not in (None, q["id"]):
         return None
+    if identity is None or doc.get("toolIdentity") != identity:
+        return None
+    if doc.get("status") == "refused":
+        ref_ = doc.get("refusal") or {}
+        if (ref_.get("pickerCode") or ref_.get("code")) not in DETERMINISTIC_REFUSALS:
+            return None
     return {"id": q["id"], "arm": q.get("armId"), "without": (q.get("vignette") or {}).get("withoutArmId"),
             "result": fwd(result), "status": doc.get("status"), "reason": doc.get("reason"), "reused": True}
 
@@ -963,7 +982,7 @@ def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         if not reqs:
             break
         for q in reqs:
-            kept = reusable_capture(q, sdir / q["id"])
+            kept = reusable_capture(q, sdir / q["id"], capture_identity(ctx))
             rows.append(dict(kept or capture_request(ctx, q, sb, sdir / q["id"], cands), round=rnd))
             done.add(q["id"])
         # plan again with every result so far; its storyboard names what the reel would now picture
