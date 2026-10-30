@@ -321,6 +321,14 @@ def case_47_generations_go_to_new_numbered_folders():
         assert EP.latest_numbered(Path(t), "report") == second
 
 
+def case_48_a_capture_the_final_plan_dropped_is_superseded():
+    rows = [{"id": "a", "status": "captured", "result": "a.json"}, {"id": "b", "status": "captured", "result": "b.json"},
+            {"id": "c", "status": "refused", "result": "c.json"}]
+    got = {r["id"]: r["status"] for r in EP.mark_superseded(rows, ["a", "c"])}
+    assert got == {"a": "captured", "b": "superseded", "c": "refused"}, got
+    assert not [m for m in EP.capture_media_items(EP.mark_superseded(rows, ["a", "c"])) if m], "no media files here"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

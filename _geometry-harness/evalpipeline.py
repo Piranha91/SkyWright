@@ -921,6 +921,20 @@ def capture_request(ctx, q, sb: Path, qdir: Path, cands: dict) -> dict:
 MAX_CAPTURE_ROUNDS = 3
 
 
+def mark_superseded(rows: list[dict], final_ids) -> list[dict]:
+    """A capture the final plan no longer asks for (a later round replaced it, say a split re-captured with a mark) is
+    kept on record as superseded, never handed on: the blind packet, the media bundle and the report read only
+    `captured` rows (Missives retry 2: the unmarked split rode along beside the marked one)."""
+    final_ids = set(final_ids)
+    out = []
+    for r in rows:
+        r = dict(r)
+        if r.get("status") == "captured" and r["id"] not in final_ids:
+            r.update(status="superseded", reason="the final plan no longer asks for this request")
+        out.append(r)
+    return out
+
+
 def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """Capture every request the storyboard asks for, then plan again with the results: a refused capture makes the
     reel planner take the next member of that clash's group, which needs its own capture. Repeat until a plan asks
@@ -956,6 +970,7 @@ def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         if left:
             write_json(sdir / "captures.json", rows)
             raise Refusal(f"after {MAX_CAPTURE_ROUNDS} capture rounds the plan still asks for {', '.join(left)}.")
+    rows = mark_superseded(rows, [q["id"] for q in (read_json(sb).get("capturePlan") or {}).get("requests") or []])
     write_json(sdir / "captures.json", rows)
     write_json(sdir / "rounds.json", rounds)
     return {"requests": len(rows)}, [sdir / "captures.json", sdir / "rounds.json"]
@@ -1096,7 +1111,7 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """The captured frames go into a second evidence bundle (evalrun bundle --media, every item checked against the
     arm's own configuration fingerprint), and the report is planned and compiled from it with the capture results."""
     rows = read_json(ctx.out / "capture" / "captures.json")
-    caps = [Path(r["result"]) for r in rows if r.get("result")]
+    caps = [Path(r["result"]) for r in rows if r.get("result") and r.get("status") != "superseded"]
     # every generation in its own numbered folder: a reviewed report is never written over (review pinning)
     out = next_numbered(sdir, "report")
     items = capture_media_items(rows)
