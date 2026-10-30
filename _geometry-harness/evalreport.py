@@ -453,6 +453,21 @@ def fmt_units(v: float) -> str:
     return f"{v:.2f} u" if v < 1 else f"{v:.1f} u" if v < 10 else f"{fmt_n(round(v))} u"
 
 
+def missing_everywhere(missing, arm_ids) -> set:
+    """(Missives r3 report review, finding 3) the checks with no result of their own on every tested setup (a missing
+    comparison part does not count): said once as such, never as a gap of only the setups a section happens to list."""
+    arm_ids = set(arm_ids)
+    on = collections.defaultdict(set)
+    for m in missing or []:
+        if m.get("part") not in ("diff", "reverse") and m.get("armId"):
+            on[str(m.get("checkId"))].add(m.get("armId"))
+    return {c for c, arms in on.items() if arms_ids_cover(arms, arm_ids)}
+
+
+def arms_ids_cover(arms, arm_ids) -> bool:
+    return bool(arm_ids) and arm_ids <= set(arms)
+
+
 def and_list(xs) -> str:
     """Names as one phrase: "a", "a and b", "a, b and c"."""
     xs = [str(x) for x in xs]
@@ -4974,6 +4989,7 @@ def build_prediction(ctx: dict) -> dict:
         by_status.setdefault(tuple(sts), collections.OrderedDict())[check_id] = arms_of[check_id]
     labels = ctx["armLabels"]
     all_relevant = len(relevant_arms)
+    everywhere_ = missing_everywhere(ctx["missing"], labels.keys())
     for status_set, by_check in by_status.items():
         reason = "; and ".join(ctx["missingReason"](st, "has no accepted result") for st in status_set)
         subjects = []
@@ -4993,8 +5009,10 @@ def build_prediction(ctx: dict) -> dict:
                 return (f"the comparison of {label} with the measured load order" if part in ("diff", "reverse")
                         else label)
             setups = sorted({(a, part) for a, part in arms_ if a}, key=lambda x: (str(x[0]), str(x[1])))
-            where = ("" if len({a for a, _ in setups}) >= all_relevant and all(pt not in ("diff", "reverse")
-                                                                                for _, pt in setups)
+            where = ((words.get("missingEverySetup") or "") if check_id in everywhere_
+                     and check_id not in sib_counted and check_id not in sib_used else
+                     "" if len({a for a, _ in setups}) >= all_relevant and all(pt not in ("diff", "reverse")
+                                                                               for _, pt in setups)
                      and not (check_id in sib_counted and any(a == p_arm for a, _ in setups)) else
                      " (for " + "; ".join(place(a, part) for a, part in setups) + ")")
             subjects.append(title_of(check_id) + where)
@@ -6000,6 +6018,7 @@ def build_prediction(ctx: dict) -> dict:
                              for u_, es_ in sorted(c_.items(), key=lambda kv: (-len(kv[1]), kv[0])))
 
         sentences = [bind(words["validationHits"], {"patch": patch, "count": by_unit(hits)})]
+        patch_moves_said_ = []
         # (Missives report review R1) what the patch itself does to an object of a clash it resolves, read from the
         # patch's own record and the version it overrides (both plugin files the plan pinned): a move, a turn, a
         # removal. Said beside the clash, so the reader is told which edit ends it.
@@ -6032,7 +6051,8 @@ def build_prediction(ctx: dict) -> dict:
                             "patch": p_, "object": object_name(fk_) or str(fk_), "formKey": str(fk_),
                             "mod": prev_[0], "what": what_.strip(), "clash": unit_noun(e["checkId"], e["kind"], 1)}))
                         break
-            sentences += list(dict.fromkeys(said_))
+            patch_moves_said_ = list(dict.fromkeys(said_))
+            sentences += patch_moves_said_
 
         def pair_by(xs):
             return sorted(collections.Counter(f"{e['A']}|{e['B']}" for e in xs).items(), key=lambda kv: (-kv[1], kv[0].lower()))
@@ -6321,6 +6341,77 @@ def build_prediction(ctx: dict) -> dict:
             sentences.append(bind(words["validationValueUnrecorded"], {"patch": patch, "count": len(untold_value)}))
         if not_measured:
             sentences.append(bind(words["validationNotMeasured"], {"patch": patch, "count": by_unit(not_measured)}))
+        # (Missives r3 report review, finding 1) what the patch does in game, as one list read from its own records: the
+        # contested fields where it keeps the losing mod's version, the changes it undoes (an object switched back on
+        # first), and the values it sets of its own (a move in metres, else the field). It leads the section and
+        # replaces the patch-move lines; the counted lines stay below it.
+        does_ = []
+
+        def bare_(name_):
+            return re.sub(r"^(a|an) ", "", str(name_))
+        if words.get("validationDoes"):
+            dw_ = words["validationDoes"]
+            restored_ = [e for e in hits if e["kind"] == "LOST-EDIT"] + list(switched)
+            for (los_, win_), es_ in sorted(collections.OrderedDict(
+                    ((e["A"], e["B"]), [x for x in restored_ if (x["A"], x["B"]) == (e["A"], e["B"])])
+                    for e in restored_).items()):
+                objs_ = list(dict.fromkeys(object_name(e["formKey"]) or str(e["formKey"]) for e in es_))
+                does_.append(bind(dw_["keeps"], {"loser": los_, "winner": win_, "count": fmt_n(len(es_)),
+                                                 "noun": words["fieldNoun"][0 if len(es_) == 1 else 1],
+                                                 "objects": and_list(objs_[:4]) + (f" and {fmt_n(len(objs_) - 4)} more"
+                                                                                   if len(objs_) > 4 else "")}))
+            on_keys_ = {str(rk[4]) for rk in list(switched_on) + list(switched_on_r)}
+            by_obj_ = collections.OrderedDict()
+            for rk, h_ in list(undone) + list(replaced):
+                by_obj_.setdefault((str(rk[4]), rk[2]), []).append((rk, h_, (rk, h_) in replaced))
+            for (fk_, mod_), xs_ in sorted(by_obj_.items(), key=lambda kv: (kv[0][0] not in on_keys_, kv[0][0])):
+                if fk_ in on_keys_:
+                    fs_ = [field_word(h_["row"].get("field")) for _, h_, _ in xs_]
+                    does_.append(bind(dw_["switchOn"], {"object": object_name(fk_) or fk_, "formKey": fk_, "mod": mod_,
+                                                        "fields": and_list(list(dict.fromkeys(fs_)))}))
+            moves_ = collections.OrderedDict()
+            for (fk_, mod_), xs_ in by_obj_.items():
+                if fk_ in on_keys_:
+                    continue
+                put_ = [field_word(h_["row"].get("field")) for _, h_, r_ in xs_ if not r_]
+                if put_:
+                    does_.append(bind(dw_["putBack"], {"object": object_name(fk_) or fk_, "mod": mod_,
+                                                       "fields": and_list(list(dict.fromkeys(put_)))}))
+                own_ = [h_["row"].get("field") for _, h_, r_ in xs_ if r_]
+                moved_ = None
+                if any(str(f_) in set(words.get("placementFields") or ["Placement"]) for f_ in own_):
+                    for p_ in patch_names:
+                        a_ = plugin_record(p_, "placementFull", fk_) or {}
+                        b_ = plugin_record(mod_, "placementFull", fk_) or {}
+                        if a_.get("position") and b_.get("position"):
+                            moved_ = sum((float(x) - float(y)) ** 2 for x, y in zip(a_["position"], b_["position"])) ** 0.5
+                            break
+                if moved_ is not None and moved_ >= 70.0:
+                    moves_.setdefault(mod_, []).append((fk_, moved_ / 70.0))
+                    own_ = [f_ for f_ in own_ if str(f_) not in set(words.get("placementFields") or ["Placement"])]
+                if own_:
+                    does_.append(bind(dw_["sets"], {"object": bare_(object_name(fk_) or fk_), "mod": mod_,
+                                                    "fields": and_list(list(dict.fromkeys(field_word(f_) for f_ in own_)))}))
+            for mod_, ms_ in moves_.items():
+                lo_, hi_ = min(m_ for _, m_ in ms_), max(m_ for _, m_ in ms_)
+                does_.append(bind(dw_["moves"], {
+                    "mod": mod_, "objects": and_list(list(dict.fromkeys(bare_(object_name(f_) or f_) for f_, _ in ms_))),
+                    "m": fmt_n(round(lo_)) if round(lo_) == round(hi_) else f"{fmt_n(round(lo_))}-{fmt_n(round(hi_))}"}))
+            if does_:
+                # the move lines are in the list; the undone and set-to lines stay below it as the counted detail with
+                # their evidence links
+                sentences = [x for x in sentences if x not in set(patch_moves_said_)]
+                sentences.insert(1, bind(dw_["lead"], {"patch": patch}) + " " + "; ".join(does_) + ".")
+        # (Missives r3 report review, finding 3) the setup with the patch's own gaps, said where the patch is judged
+        if words.get("validationPatchGaps") and patched_arm:
+            gaps_ = [m for m in ctx["missing"] if m.get("armId") == patched_arm and m.get("part") not in ("diff", "reverse")]
+            by_check_ = collections.OrderedDict()
+            for m in gaps_:
+                by_check_.setdefault(str(m.get("checkId")), []).append(
+                    ctx["missingReason"](str(m.get("status")), "has no accepted result"))
+            parts_ = [f"{title_of(c_)} ({'; and '.join(dict.fromkeys(rs_))})" for c_, rs_ in by_check_.items()]
+            if parts_:
+                sentences.append(bind(words["validationPatchGaps"], {"patch": patch, "parts": "; ".join(parts_)}))
         # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
         def patch_switches_off(e):
             """(blind round 1, Snazzy S1) the setup with the patch has an object of the row off at load (off for good or
@@ -7938,6 +8029,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                          "loadedInGameNote": da.get("loadedInGameNote") or pa.get("loadedInGameNote"),
                          "readerLimits": setup_limits,
                          "locationPluginOrder": affecting_subset,
+                         # (Missives r3 reel review, finding 6) the setup's whole load order, for the reel's plugin page
+                         "plugins": [n for n in names if n],
                          "locationPluginScope": {"basis": location_basis, "complete": location_complete,
                                                  "missingInput": location_missing,
                                                  "locations": [((f"{x.get('worldspace')} ({x.get('x')}, {x.get('y')})"
@@ -8444,13 +8537,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         verdict = "The available results cannot determine whether the target mod has a problem in the measured setup."
     # a comparison that refused a verdict is said in the summary, where a reader decides, not only further down
     # (round 4); its counts were never part of the sentence above
+    # (Missives r3 report review, finding 2) every refusal names the setup it belongs to, so it is never read as the
+    # patch's when it is another setup's
     refused_said, refused_lines = [], []
     for (check_id_, arm_), state_ in comparison_state.items():
-        if state_.get("refused") and arm_ in alternative_arms and check_id_ not in refused_said:
-            refused_said.append(check_id_)
+        if state_.get("refused") and arm_ in alternative_arms and (check_id_, arm_) not in refused_said:
+            refused_said.append((check_id_, arm_))
             refused_lines.append(bind(cmp_words["refusedSummary"], {
                 "title": (reader_data.get("checkTitles") or {}).get(check_id_) or b.check_title(check_id_),
-                "why": refused_words(state_)}))
+                "setup": lower_first(arm_subject(arm_)), "why": refused_words(state_)}))
     if refused_lines:
         verdict += " " + " ".join(refused_lines)
     limitations = []
@@ -8855,7 +8950,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # `missingShown` is what the page lists.
     if settings.get("mode") != "exhaustive":
         covered = set(lead["coverage"].get("relevantArms") or [])
-        rest = [m for m in reader_missing if m.get("armId") not in covered]
+        # a check with no result on every setup is said once, in the coverage list, as such (Missives r3 finding 3)
+        everywhere_ = missing_everywhere(reader_missing, arm_labels.keys())
+        rest = [m for m in reader_missing if m.get("armId") not in covered and str(m.get("checkId")) not in everywhere_]
         reader["missingShown"] = summarise_missing(rest)
         if len(rest) < len(reader_missing):
             reader["missingCoveredLine"] = (reader_data.get("prediction") or {}).get("missingCoveredLine")

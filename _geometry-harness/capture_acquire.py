@@ -744,6 +744,10 @@ def capture_argv(request: dict, camera: dict, state: str, order: str, passthroug
     if split:
         fk = request["highlights"][0]["formKey"]
         argv += (["--npc", fk, "--npc-puck", "on"] if request.get("actor") else ["--ref", f"{fk}=cyan"])
+        # context marks: a removal the split frames, marked only in the half where it still stands
+        for m in request.get("marks") or []:
+            if m.get("state") in (None, state):
+                argv += ["--ref", f"{m['formKey']}={m.get('color') or 'magenta'}"]
         spot = (request.get("placements") or {}).get(state)
         if spot:
             # what stands under this half's placement: a downward probe 64 u up (parse_support reads it back)

@@ -1463,7 +1463,11 @@ def check_missing_setup_naming(bundle: Path):
               f"{label}/{fmt}: the section points to the coverage section for the setups it covers")
         for title, setup in ((both, base_label), (both, alt_label), (alt_only, alt_label), (base_only, base_label)):
             on_page = esc(f"{title} — {setup}") in body
-            if label_of.get(setup) in covered:
+            if title == both:
+                # (Missives r3 report review, finding 3) missing on every setup: said once, in the coverage section,
+                # "on every tested setup", never again here for the setups that section does not list
+                check(not on_page, f"{label}/{fmt}: '{title} — {setup}' is not repeated (missing on every setup)")
+            elif label_of.get(setup) in covered:
                 check(not on_page, f"{label}/{fmt}: '{title} — {setup}' is not repeated (the coverage section lists it)")
             else:
                 check(on_page, f"{label}/{fmt}: '{title} — {setup}' is named in what still needs checking")

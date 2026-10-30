@@ -56,7 +56,10 @@ def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[
                 continue
             source, doc = got
             fk = c.get("formKey")
-            identity = json.dumps(["placement-split", c.get("armId"), fk, source["sha256"]], separators=(",", ":"))
+            marks = [m for m in c.get("alsoMarked") or [] if isinstance(m, dict) and m.get("formKey")]
+            # a removal the split frames is marked too (Missives r3 reel review, finding 4): a new mark is a new request
+            identity = json.dumps(["placement-split", c.get("armId"), fk, source["sha256"]]
+                                  + ([sorted(m["formKey"] for m in marks)] if marks else []), separators=(",", ":"))
             out.append({"id": "capture-" + hashlib.sha256(identity.encode()).hexdigest()[:12],
                         "requestType": "placement-split", "checkId": c.get("checkId") or "records.contested-fields",
                         "armId": c.get("armId"), "findingIds": [c.get("findingId")], "newProblem": False,
@@ -64,6 +67,7 @@ def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[
                         "state": doc.get("state") or "baseline",
                         "configurationFingerprint": doc["configuration"]["fingerprint"], "source": source,
                         "highlights": [{"formKey": fk, "color": COLOURS[0]}], "actor": bool(c.get("actor")),
+                        "marks": marks,
                         "placements": c.get("placements"), "cells": c.get("cells"), "labels": c.get("labels"),
                         "camera": deepcopy(policy.get("camera") or {}),
                         "sequence": {"states": ["left", "right"],

@@ -27,6 +27,7 @@ report untouched: evalreel refuses to render a refused reel.
 """
 from __future__ import annotations
 
+import collections
 import hashlib
 import json
 import re
@@ -54,6 +55,38 @@ def humanize(eid: str | None) -> str | None:
 
 def joined(xs: list[str]) -> str:
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
+
+
+def camera_of(argv) -> dict | None:
+    """The renderer camera a capture state ran with, from its argv: eye, yaw (degrees clockwise from +Y), pitch (positive
+    looks down), vertical fov and aspect (width:height)."""
+    a = [str(x) for x in argv or []]
+
+    def val(flag):
+        return a[a.index(flag) + 1] if flag in a and a.index(flag) + 1 < len(a) else None
+    eye, yaw = val("--eye"), val("--yaw")
+    if not eye or yaw is None:
+        return None
+    w, _, h = (val("--aspect") or "1:1").partition(":")
+    return {"eye": [float(x) for x in eye.split(",")], "yaw": float(yaw), "pitch": float(val("--pitch") or 0.0),
+            "fov": float(val("--fov") or 65.0), "aspect": float(w) / float(h or 1)}
+
+
+def in_view(cam: dict, pos, margin: float = 0.9) -> bool:
+    """Whether a world point projects inside the camera's frame (a pinhole projection; `margin` keeps it off the
+    edges). Occlusion is not judged: a point inside the frame may still be hidden behind something."""
+    import math
+    y, p = math.radians(cam["yaw"]), math.radians(cam["pitch"])
+    fwd = (math.sin(y) * math.cos(p), math.cos(y) * math.cos(p), -math.sin(p))
+    right = (math.cos(y), -math.sin(y), 0.0)
+    up = (right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2], right[0] * fwd[1] - right[1] * fwd[0])
+    d = [float(pos[i]) - float(cam["eye"][i]) for i in range(3)]
+    z = sum(d[i] * fwd[i] for i in range(3))
+    if z <= 1.0:
+        return False
+    t = math.tan(math.radians(cam["fov"]) / 2.0)
+    x_, y_ = sum(d[i] * right[i] for i in range(3)) / z, sum(d[i] * up[i] for i in range(3)) / z
+    return abs(y_) <= t * margin and abs(x_) <= t * cam["aspect"] * margin
 
 
 def _position(v):
@@ -167,15 +200,26 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         m = re.match(r"^\w+ (\S+?):", summary or "")
         return humanize(m.group(1)) if m else "record"
 
-    def place_of(summary):
+    # (Missives r3 reel review, minors 6) the cell a capture rendered, by its editor id (the renderer names its frame
+    # after it), where the clash row names no cell
+    cap_cell = {}
+    for x in capture_results:
+        for st in x.get("states") or []:
+            m_ = re.search(r"([A-Za-z][A-Za-z0-9_]*)-fp\.png$", str(st.get("png") or "").replace("\\", "/"))
+            if m_ and x.get("formKey"):
+                cap_cell.setdefault(str(x["formKey"]), m_.group(1))
+
+    def place_of(summary, fks=()):
         m = re.search(r" in ([A-Za-z0-9_]+) \((?:int|ext)\)", summary or "") or re.search(r"^Cell ([A-Za-z0-9_]+):", summary or "")
-        cell = m.group(1) if m else None
+        cell = m.group(1) if m else next((cap_cell[str(f)] for f in fks if str(f) in cap_cell), None)
         return (places.get(cell) or {}).get("name") or humanize(cell) or "this place"
 
     with_arm = pred.get("predictionArm")
     without_arm = str(pred.get("withoutArm") or "").split(":", 1)[-1] or None
     order = next((a.get("locationPluginOrder") for a in (pres.get("scope") or {}).get("arms") or []
                   if a.get("armId") == with_arm), None) or []
+    full_order = next((a.get("plugins") for a in (pres.get("scope") or {}).get("arms") or []
+                       if a.get("armId") == with_arm), None) or []
 
     rows = [r for r in pred.get("record") or [] if r.get("admission") == "admitted"]
     no_effect = set(policy.get("noInGameEffectFields") or [])
@@ -299,6 +343,28 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         budget -= len(keep)
     selected = [c for t in policy.get("typeOrder") or [] for c in chosen_by_type.get(t, [])]
 
+    # (Missives r3 reel review, finding 4) a removal is pictured where its object stands in a captured split's frame: the
+    # left half (the other mod's spot, with the mod being added gone) shows the object, the right half shows it gone.
+    # Whether it is in frame is decided by projecting its spot into that split's capture camera (read from the capture's
+    # own argv); a removal no split frames stays in the one statement of clashes the reel cannot picture.
+    split_cams = {}
+    for x in capture_results:
+        if x.get("status") == "captured" and x.get("formKey"):
+            for st in x.get("states") or []:
+                if st.get("state") == "left" and camera_of(st.get("argv")):
+                    split_cams[str(x["formKey"])] = camera_of(st.get("argv"))
+    in_split = {}
+    for c, why in list(unpictured):
+        if why != "removed":
+            continue
+        spot = _position((c["rows"][0].get("values") or {}).get("lost"))
+        for sp in chosen_by_type.get("record") or []:
+            cam = split_cams.get(str(sp["rows"][0]["formKey"]))
+            if spot and cam and in_view(cam, spot):
+                in_split.setdefault(sp["rows"][0]["formKey"], []).append(c)
+                unpictured.remove((c, why))
+                break
+
     # the patch search covers every pair the reel speaks about (skill data: patchSearch.requiredTools)
     searched = {}
     for entry in (patch_search or {}).get("pairs") or []:
@@ -337,6 +403,21 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         used[case] = k + 1
         return pool[k % len(pool)]
 
+    def needs(patch, c):
+        """(Missives r3 reel review, finding 6) the plugins the patch needs beyond the clash's two mods and the base game."""
+        base_ = {x.lower() for x in policy.get("baseGameMasters") or []}
+        pair_ = {x.lower() for x in c["pair"]}
+        extra_ = [m for m in sorted(masters.get(patch.lower(), set())) if m not in base_ and m not in pair_]
+        if not extra_ or not words.get("patchNeeds"):
+            return ""
+        nm_ = []
+        for m in extra_:
+            try:
+                nm_.append(mod(next((k for k in mod_names if k.lower() == m), m)))
+            except Refused:
+                nm_.append(m)
+        return " " + words["patchNeeds"].format(patch=patch_name(patch), mods=joined(nm_))
+
     def patch_sentence(c):
         own = own_patches(c)
         r = c["rows"][0]
@@ -369,10 +450,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 else:
                     key = "fixesOverlap"
                     text_ = pick(key).format(patch=patch_name(own[0]))
-                return (text_, {**evidence, "case": "own-" + key, "patch": own[0],
+                return (text_ + needs(own[0], c), {**evidence, "case": "own-" + key, "patch": own[0],
                                 "masters": sorted(masters.get(own[0].lower(), set())),
                                 "moved": [moved[0], round(moved[1], 1)] if moved else None})
-            return (pick(key).format(patch=patch_name(own[0]), kept=kept),
+            return (pick(key).format(patch=patch_name(own[0]), kept=kept) + needs(own[0], c),
                     {**evidence, "case": "own-" + key, "patch": own[0], "masters": sorted(masters.get(own[0].lower(), set()))})
         lead = pick("leaves").format(patch=patch_name(own[0])) + " " if own else ""
         ev = {**evidence, "patch": own[0] if own else None,
@@ -401,7 +482,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         a_owner, o_owner = owner(r["formKey"], r), owner(o_fk, r)
         first = (r["formKey"], a_owner) if a_owner == target else (o_fk, o_owner)
         second = (o_fk, o_owner) if first[0] == r["formKey"] else (r["formKey"], a_owner)
-        return {"place": place_of(r.get("summary")), "modA": mod(first[1]), "objectA": spoken_ref(first[0]),
+        return {"place": place_of(r.get("summary"), [r["formKey"], *(r.get("other") or [])]), "modA": mod(first[1]), "objectA": spoken_ref(first[0]),
                 "modB": mod(second[1]), "objectB": spoken_ref(second[0])}
 
     def volume(fk):
@@ -483,7 +564,25 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 elif sup.get("down") is None:
                     extra = words["spotExtra"]["noFloor" if sup.get("interior") else "inAir"]
             text += " " + words["rightSpot"].format(mod=mod(target), where=where) + extra + "."
-        rest = [spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary")) for x in others.get(fk) or []]
+        # (Missives r3 reel review, finding 5) the others are named by what they lose: a move is "moved the same way";
+        # a model, a size or a turn alone is said as such, never folded into "placed the same way"
+        group = [c, *(others.get(fk) or []), *(in_split.get(fk) or [])]
+
+        def moved_row(x):
+            pr_ = next((r_ for r_ in x["rows"] if r_.get("field") == "Placement"), None)
+            lo_, wo_ = (_position((pr_.get("values") or {}).get(k_)) for k_ in ("lost", "winner")) if pr_ else (None, None)
+            return bool(lo_ and wo_ and max(abs(lo_[i] - wo_[i]) for i in range(3)) > 1.0)
+        rest = [spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary")) for x in others.get(fk) or [] if moved_row(x)]
+        lost_items = collections.OrderedDict()
+        for x in group:
+            nm_ = spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary"))
+            for r_ in x["rows"]:
+                f_ = r_.get("field")
+                if f_ == "Placement":
+                    if not moved_row(x):
+                        lost_items.setdefault("turn", []).append(nm_)
+                elif f_ in (words.get("lostFieldWords") or {}):
+                    lost_items.setdefault(f_, []).append(nm_)
         if rest:
             # with more to count, the three names are a list the count ends: "A, B, C and 2 more"
             nm = ", ".join(rest[:3]) if len(rest) > 3 else joined(rest)
@@ -491,6 +590,14 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 text += " " + words["groupOthers"]["more"].format(names=nm, count=len(rest) - 3)
             else:
                 text += " " + words["groupOthers"]["one" if len(rest) == 1 else "many"].format(names=nm)
+        if lost_items and words.get("alsoLost"):
+            lw_ = dict(words.get("lostFieldWords") or {}, turn=words.get("lostTurnWord") or "the turn of {objects}")
+            text += " " + words["alsoLost"].format(loser=mod(A), winner=mod(B), items=joined(
+                [lw_[k_].format(objects=joined(list(dict.fromkeys(v_)))) for k_, v_ in lost_items.items()]))
+        for g_ in in_split.get(fk) or []:
+            text += " " + words["removedInSplit"].format(
+                winner=mod(g_["rows"][0]["B"]), loser=mod(g_["rows"][0]["A"]),
+                object=spoken_ref(g_["rows"][0]["formKey"], g_["rows"][0].get("summary")))
         return text
 
     def sentence(c):
@@ -534,7 +641,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                      "markersLine": words["leftOutMarkers"].format(count=left_markers, noun="clash" if left_markers == 1 else "clashes")
                      if left_markers else None}},
         {"layout": "load-order", "title": words["stillTitles"]["loadOrder"], "legend": words["stillTitles"]["affected"],
-         "plugins": order, "targets": [target], "affected": [p for p in order if p in affected] or sorted(affected),
+         "plugins": full_order or order, "targets": [target], "affected": [p for p in order if p in affected] or sorted(affected),
          "runtimeMods": runtime_mods, "runtimeTitle": words["stillTitles"]["runtime"] if runtime_mods else None}]
     chapters = [{"id": "R-01", "kind": "opening",
                  "narration": (words["opening"] if counts else words["openingNone"]).format(mod=mod(target)),
@@ -544,7 +651,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if t not in counts:
             continue
         chosen = chosen_by_type.get(t) or []
-        accounting[t] = {"pictured": [c["rows"][0]["formKey"] for c in chosen],
+        accounting[t] = {"pictured": [c["rows"][0]["formKey"] for c in chosen]
+                         + [g_["rows"][0]["formKey"] for c in chosen for g_ in in_split.get(c["rows"][0]["formKey"]) or []],
                          "unpictured": [c["rows"][0]["formKey"] for c, _ in unpictured if c["type"] == t],
                          "represented": [c["rows"][0]["formKey"] for c in represented.get(t, [])]}
         for i, c in enumerate(chosen):
@@ -576,7 +684,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                              cells={"left": (ref_of(r["formKey"]).get("cells") or {}).get(r["A"]),
                                     "right": (ref_of(r["formKey"]).get("cells") or {}).get(r["B"])},
                              labels={k: v.format(loser=mod(r["A"]), winner=mod(r["B"]), mod=mod(target))
-                                     for k, v in words["splitLabels"].items()})
+                                     for k, v in words["splitLabels"].items()},
+                             # removals this split frames: marked on the left half, where they still stand
+                             alsoMarked=[{"formKey": g_["rows"][0]["formKey"], "state": "left",
+                                          "color": policy.get("removedMarkColour") or "magenta"}
+                                         for g_ in in_split.get(r["formKey"]) or []])
             else:
                 clash["place"] = geometry_slots(c)["place"]
                 if t == "state":

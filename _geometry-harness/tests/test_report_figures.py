@@ -53,6 +53,36 @@ def case_7_capital_mod_prefixes_are_not_spoken():
     assert got == ["Building Roof Side Only Short", "Tree Flora Scathecraw", "Hand Cart Wheel", "Test Thing"], got
 
 
+CAM = ["--eye", "30889.0,35010.0,545.3", "--yaw", "190.0", "--pitch", "3.3", "--fov", "65.0", "--aspect", "638:680"]
+
+
+def case_9_a_spot_is_in_frame_by_projection():
+    cam = RP.camera_of(CAM)
+    assert cam and abs(cam["aspect"] - 638 / 680) < 1e-9, cam
+    # the split's subject, a removed barrel a few metres from it, and spots behind and far to the side
+    got = [RP.in_view(cam, p) for p in ((30793, 34719, 435), (30727.2, 34648.95, 389.65), (30889, 35300, 545),
+                                         (31500, 34800, 500))]
+    assert got == [True, True, False, False], got
+
+
+def case_11_a_check_missing_on_every_setup_is_said_once():
+    missing = [{"checkId": "a", "armId": x} for x in ("baseline", "c1", "c2")] + [
+        {"checkId": "b", "armId": "baseline"}, {"checkId": "c", "armId": "c1", "part": "diff"},
+        {"checkId": "c", "armId": "c2", "part": "diff"}, {"checkId": "c", "armId": "baseline", "part": "diff"}]
+    got = ER.missing_everywhere(missing, ["baseline", "c1", "c2"])
+    assert got == {"a"}, f"only a check with no result of its own on every setup, got {got}"
+
+
+def case_13_a_split_marks_a_framed_removal_only_where_it_stands():
+    import capture_acquire as CA
+    req = {"requestType": "placement-split", "highlights": [{"formKey": "02C074:Dragonborn.esm", "color": "cyan"}],
+           "marks": [{"formKey": "02C075:Dragonborn.esm", "state": "left", "color": "magenta"}], "placements": {}}
+    cam = {"cell": "00EED6:Dragonborn.esm", "viewprobe": "--eye 1,2,3 --yaw 10 --pitch 0 --fov 65"}
+    left = CA.capture_argv(req, cam, "left", "o.txt", [], 640)
+    right = CA.capture_argv(req, cam, "right", "o.txt", [], 640)
+    assert "02C075:Dragonborn.esm=magenta" in left and "02C075:Dragonborn.esm=magenta" not in right, (left, right)
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
