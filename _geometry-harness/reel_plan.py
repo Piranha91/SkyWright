@@ -44,7 +44,12 @@ def humanize(eid: str | None) -> str | None:
         return None
     s = re.sub(r"^[A-Za-z0-9]{1,5}_", "", str(eid)).replace("_", " ")
     s = re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])", " ", s)
-    return " ".join(w for w in s.split() if not w.isdigit()) or None
+    ws = [w for w in s.split() if not w.isdigit()]
+    # a mod prefix written in capitals with no underscore ("XJKRRDLC2RRBuilding03...", "DLC2Tree..."): the leading
+    # all-capital words are dropped while a word in ordinary case follows (Missives reel review V3)
+    while len(ws) > 1 and ws[0].isupper() and len(ws[0]) >= 2 and any(not w.isupper() for w in ws[1:]):
+        ws = ws[1:]
+    return " ".join(ws) or None
 
 
 def joined(xs: list[str]) -> str:
@@ -188,6 +193,21 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         key = (t, r["formKey"]) if t in ("record", "cell") else (t, r["formKey"], tuple(r.get("other") or []))
         clashes.setdefault(key, {"type": t, "rows": [],
                                  "pair": tuple(sorted({r["A"], r["B"]} - {target})) + (target,)})["rows"].append(r)
+    drawable = set(policy.get("drawableFields") or [])
+    disabled_z = float(policy.get("disabledZ") if policy.get("disabledZ") is not None else -30000.0)
+
+    def removed(r):
+        """A placement row whose winning position is the disable idiom's (z at disabledZ): the winner takes the object
+        out of the world rather than moving it (Missives reel review V1)."""
+        if r.get("field") != "Placement":
+            return False
+        won = _position((r.get("values") or {}).get("winner"))
+        return bool(won) and won[2] <= disabled_z + 1.0
+
+    # a record clash is classified by every lost edit on its record: a removal first, then a field a picture can show
+    for c in clashes.values():
+        if c["type"] == "record":
+            c["rows"].sort(key=lambda r: (0 if removed(r) else 1 if r.get("field") in drawable else 2))
     effect_re = re.compile(policy["effectModelPattern"], re.I) if policy.get("effectModelPattern") else None
 
     def effect(fk):
@@ -199,6 +219,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             return c["type"]
         r = c["rows"][0]
         if c["type"] == "record":
+            if removed(r):
+                return "removed"
             if r.get("field") not in (policy.get("drawableFields") or []):
                 return "record"
             b = base_of(r["formKey"])
@@ -326,6 +348,30 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if own and wp in ("resolved", "kept", "switched", "own"):
             kept = mod(r["B"] if wp == "kept" else r["A"])
             key = {"resolved": "fixes", "kept": "keeps", "switched": "keeps", "own": "own"}[wp]
+            if key == "fixes" and c["type"] in ("overlap", "contact") and words["patch"].get("fixesOverlap"):
+                # say what the patch did, from its own placement of an object in the pair (names enrichment), never
+                # that it "fixes" a clash nobody saw (Missives reel review V2)
+                moved = None
+                for fk in [r["formKey"], *(r.get("other") or [])]:
+                    pl = ref_of(fk).get("placements") or {}
+                    mine = next((v for k, v in pl.items() if k.lower() == own[0].lower()), None)
+                    before = next((v for k, v in pl.items() if k.lower() == str(target).lower()), None) or next(
+                        (v for k, v in pl.items() if k.lower() in {m.lower() for m in c["pair"]}), None)
+                    if mine and before:
+                        d = sum((float(a) - float(b)) ** 2 for a, b in zip(mine[:3], before[:3])) ** 0.5
+                        if d * float(policy.get("metresPerUnit") or 0.01428) >= 0.5:
+                            moved = (fk, d * float(policy.get("metresPerUnit") or 0.01428))
+                            break
+                if moved and words["patch"].get("fixesOverlapMoved"):
+                    key = "fixesOverlapMoved"
+                    text_ = pick(key).format(patch=patch_name(own[0]), object=spoken_ref(moved[0]),
+                                             m=max(1, round(moved[1])))
+                else:
+                    key = "fixesOverlap"
+                    text_ = pick(key).format(patch=patch_name(own[0]))
+                return (text_, {**evidence, "case": "own-" + key, "patch": own[0],
+                                "masters": sorted(masters.get(own[0].lower(), set())),
+                                "moved": [moved[0], round(moved[1], 1)] if moved else None})
             return (pick(key).format(patch=patch_name(own[0]), kept=kept),
                     {**evidence, "case": "own-" + key, "patch": own[0], "masters": sorted(masters.get(own[0].lower(), set()))})
         lead = pick("leaves").format(patch=patch_name(own[0])) + " " if own else ""
@@ -541,6 +587,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     if unpictured:
         n_un = len(unpictured)
         sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un)
+        # a removal is said, never only counted: which mod takes which object out of the world
+        gone = [c for c, why in unpictured if why == "removed"]
+        if gone and words.get("placementRemoved"):
+            sentence_un += " " + " ".join(words["placementRemoved"].format(
+                winner=mod(c["rows"][0]["B"]), loser=mod(c["rows"][0]["A"]),
+                object=spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary"))) for c in gone)
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "unpictured", "narration": sentence_un, "count": n_un,
                          "clashes": [{"formKey": c["rows"][0]["formKey"], "type": c["type"], "reason": why,
                                       "field": c["rows"][0].get("field"), "pair": [mod(m) for m in c["pair"]],

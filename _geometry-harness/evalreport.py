@@ -6000,6 +6000,39 @@ def build_prediction(ctx: dict) -> dict:
                              for u_, es_ in sorted(c_.items(), key=lambda kv: (-len(kv[1]), kv[0])))
 
         sentences = [bind(words["validationHits"], {"patch": patch, "count": by_unit(hits)})]
+        # (Missives report review R1) what the patch itself does to an object of a clash it resolves, read from the
+        # patch's own record and the version it overrides (both plugin files the plan pinned): a move, a turn, a
+        # removal. Said beside the clash, so the reader is told which edit ends it.
+        if words.get("validationPatchMoves"):
+            said_ = []
+            for e in hits:
+                if e["kind"] == "LOST-EDIT":
+                    continue
+                for fk_ in [e["formKey"], *(e.get("other") or [])]:
+                    for p_ in patch_names:
+                        mine_ = plugin_record(p_, "placementFull", str(fk_)) or {}
+                        if not mine_.get("position"):
+                            continue
+                        prev_ = next(((m_, plugin_record(m_, "placementFull", str(fk_)) or {}) for m_ in (e["A"], e["B"])
+                                      if (plugin_record(m_, "placementFull", str(fk_)) or {}).get("position")), (None, {}))
+                        if not prev_[0]:
+                            continue
+                        d_ = sum((float(a_) - float(b_)) ** 2 for a_, b_ in zip(mine_["position"], prev_[1]["position"])) ** 0.5
+                        turned_ = any(abs(float(a_) - float(b_)) > 1e-3 for a_, b_ in
+                                      zip(mine_.get("rotation") or [], prev_[1].get("rotation") or []))
+                        gone_ = mine_.get("initiallyDisabled") or mine_.get("deleted")
+                        if d_ < 1.0 and not turned_ and not gone_:
+                            continue
+                        what_ = (words.get("validationPatchMovesRemoved") if gone_ else
+                                 bind(words["validationPatchMovesMoved"], {"m": fmt_n(round(d_ / 70.0))})
+                                 if d_ >= 70.0 else words.get("validationPatchMovesNudged") or "")
+                        if turned_ and not gone_ and words.get("validationPatchMovesTurned"):
+                            what_ = (what_ + " " if what_ else "") + words["validationPatchMovesTurned"]
+                        said_.append(bind(words["validationPatchMoves"], {
+                            "patch": p_, "object": object_name(fk_) or str(fk_), "formKey": str(fk_),
+                            "mod": prev_[0], "what": what_.strip(), "clash": unit_noun(e["checkId"], e["kind"], 1)}))
+                        break
+            sentences += list(dict.fromkeys(said_))
 
         def pair_by(xs):
             return sorted(collections.Counter(f"{e['A']}|{e['B']}" for e in xs).items(), key=lambda kv: (-kv[1], kv[0].lower()))
@@ -8094,6 +8127,73 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                   "strength": (c.get("evidence") or {}).get("strength"), "claim": (c.get("evidence") or {}).get("claim"),
                                   "limits": (c.get("evidence") or {}).get("limits")} for cid, c in sorted(b.checks.items())}}
 
+    # --- figures (Missives review R2/R3): every frame of one capture request belongs to the finding any of its frames
+    # illustrates (a split's left half is measured on the other setup), and each frame gets a caption from data: the
+    # setup it shows, the objects and colours its own renderer command marked, and what to look for
+    import reel_plan
+    caption_words = (pr.get("reader") or {}).get("figureCaptions") or {}
+    by_request: dict = collections.defaultdict(list)
+    for m_ in media:
+        req_ = (m_.get("provenance") or {}).get("captureRequest")
+        if req_:
+            by_request[req_].append(m_["id"])
+    media_by_id0 = {m_["id"]: m_ for m_ in media}
+    for f_ in findings:
+        mids_ = list(f_.get("mediaIds") or [])
+        for mid_ in list(mids_):
+            req_ = ((media_by_id0.get(mid_) or {}).get("provenance") or {}).get("captureRequest")
+            for other_ in by_request.get(req_, []):
+                if other_ not in mids_:
+                    mids_.append(other_)
+        f_["mediaIds"] = mids_
+    n_refs = (names_doc0 or {}).get("refs") or {}
+    n_bases = (names_doc0 or {}).get("bases") or {}
+    n_objects = (names_doc0 or {}).get("objects") or {}
+    n_mods = (names_doc0 or {}).get("mods") or {}
+
+    def fig_object(fk_):
+        eid_ = (n_bases.get((n_refs.get(str(fk_)) or {}).get("base") or "") or {}).get("editorId")
+        return (n_objects.get(eid_) or {}).get("name") or reel_plan.humanize(eid_) or str(fk_)
+
+    def fig_mod(plugin_):
+        return (n_mods.get(str(plugin_)) or {}).get("name") or re.sub(r"\.(esp|esm|esl)$", "", str(plugin_), flags=re.I)
+
+    target_plugin = next((t.get("name") for t in targets if t.get("name")), None)
+    for f_ in findings:
+        row_ = (f_.get("rows") or f_.get("allRows") or [{}])[0] if (f_.get("rows") or f_.get("allRows")) else {}
+        for mid_ in f_.get("mediaIds") or []:
+            m_ = media_by_id0.get(mid_)
+            if m_ is None or m_.get("caption"):
+                continue
+            prov_ = m_.get("provenance") or {}
+            state_ = prov_.get("vignetteState")
+            argv_ = [str(x) for x in prov_.get("argv") or []]
+            marks_ = {}
+            for i_, x_ in enumerate(argv_[:-1]):
+                if x_ == "--ref" and "=" in argv_[i_ + 1]:
+                    fk_, col_ = argv_[i_ + 1].rsplit("=", 1)
+                    marks_[col_] = fk_
+            arm_ = (m_.get("subject") or {}).get("armId")
+            setup_ = (caption_words.get("setupWith") if arm_ == f_.get("armId") else caption_words.get("setupWithout") or "")
+            setup_ = str(setup_ or "").format(mod=fig_mod(target_plugin))
+            fk_ = (m_.get("subject") or {}).get("formKey") or row_.get("formKey")
+            slots_ = {"setup": setup_, "object": fig_object(fk_)}
+            if state_ == "highlight" and marks_:
+                cy_, mg_ = marks_.get("cyan"), marks_.get("magenta")
+                slots_.update(a=fig_object(cy_), modA=fig_mod(str(cy_).split(":", 1)[-1]) if cy_ else "",
+                              b=fig_object(mg_), modB=fig_mod(str(mg_).split(":", 1)[-1]) if mg_ else "")
+            if state_ in ("left", "right"):
+                # the left half is the setup without the evaluated mod: the losing side's spot; the right, the winner's
+                ab_ = f_.get("counts") or {}
+                slots_["mod"] = fig_mod(row_.get("A") or ab_.get("A")) if state_ == "left" else fig_mod(row_.get("B") or ab_.get("B"))
+            tmpl_ = caption_words.get(state_) if state_ in caption_words else caption_words.get("fallback")
+            try:
+                m_["caption"] = str(tmpl_ or "").format(**slots_) or None
+            except (KeyError, IndexError):
+                m_["caption"] = str(caption_words.get("fallback") or "").format(**slots_) or None
+            m_["captureState"] = state_
+            m_["captureRequest"] = prov_.get("captureRequest")
+
     # --- chapters (the reel's plan; D6 renders them)
     reel = pr.get("reel") or {}
     chapters = []
@@ -9251,6 +9351,30 @@ def once_on_page(reader: dict, pr: dict) -> dict:
     return out
 
 
+def figure_units(figs: list[dict]) -> list[list[dict]]:
+    """A finding's figures as units: the frames of one capture request are one unit, and the unit shows the frames
+    that state the claim (Missives review R2): a vignette's marked view, else its with-frame; a split's two halves,
+    left then right. Frames of no capture request are a unit each, in order."""
+    units, by_req = [], collections.OrderedDict()
+    for m in figs:
+        req = m.get("captureRequest") or ((m.get("provenance") or {}).get("captureRequest"))
+        if req:
+            by_req.setdefault(req, []).append(m)
+        else:
+            units.append([m])
+    for frames in by_req.values():
+        st = {(m.get("captureState") or (m.get("provenance") or {}).get("vignetteState")): m for m in frames}
+        if "left" in st or "right" in st:
+            units.append([st[k] for k in ("left", "right") if k in st])
+        elif "highlight" in st:
+            units.append([st["highlight"]])
+        elif "with" in st:
+            units.append([st["with"]])
+        else:
+            units.append(frames[:1])
+    return units
+
+
 def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr: dict, layout: str = "normal") -> dict:
     """The plan as the templates see it at one ladder step: rows shown per finding, figures per finding,
     omissions recomputed for the effective settings (exhaustive mode: everything, no ladder)."""
@@ -9259,6 +9383,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
     media_by_id = {m["id"]: m for m in plan.get("media") or []}
     findings = []
     omissions = []
+    figures_by_finding: dict = {}
     for f in plan["findings"]:
         g = dict(f)
         if mode == "exhaustive":
@@ -9276,12 +9401,14 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         g["rowsShown"] = shown
         g["shownRows"] = (f.get("allRows") or f.get("rows") or [])[:shown]
         figs = [media_by_id[m] for m in (f.get("mediaIds") or []) if m in media_by_id and media_by_id[m].get("assessed")]
-        if mode != "exhaustive" and len(figs) > figures_per_finding:
-            omissions.append({"what": f"{f['id']}: {len(figs) - figures_per_finding} of {len(figs)} figure(s) not shown",
+        units = figure_units(figs)
+        if mode != "exhaustive" and len(units) > figures_per_finding:
+            omissions.append({"what": f"{f['id']}: {len(units) - figures_per_finding} of {len(units)} figure(s) not shown",
                               "why": f"concise mode shows {figures_per_finding} figure(s) per finding", "where": f"evidence-index.md#{f['id']}"})
-            figs = figs[:figures_per_finding]
-        g["figures"] = figs
+            units = units[:figures_per_finding]
+        g["figures"] = [m for u in units for m in u]
         findings.append(g)
+        figures_by_finding[f["id"]] = g["figures"]
     sections = []
     for s in sorted(pr.get("sections") or [], key=lambda s: s.get("order", 99)):
         kinds = set(s.get("kinds") or [])
@@ -9626,6 +9753,7 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
     view["sections"] = sections
     view["omissions"] = omissions
     view["effective"] = {"layout": layout, "rowsPerGroup": rows_per_group, "figuresPerFinding": figures_per_finding}
+    view["figuresByFinding"] = figures_by_finding
     view["layout"] = layout
     view["evidenceTokensCompact"] = (pr.get("concise") or {}).get("evidenceTokensCompact", 3)
     view["mediaAssessed"] = [m for m in plan.get("media") or [] if m.get("assessed")]
