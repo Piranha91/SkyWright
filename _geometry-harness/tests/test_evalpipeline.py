@@ -276,6 +276,16 @@ def case_39_precedent_script_absent_is_a_visible_refusal():
         refuses(lambda: EP.stage_precedent(ctx, {}, Path(t) / "precedent"), "stage script absent")
 
 
+def case_41_unbuilt_scene_stage_is_a_stated_refusal():
+    try:
+        EP.stage_scenes(None, {}, Path("."))
+    except EP.Refusal as r:
+        assert "not built" in str(r), f"the refusal says what was not done, got {r}"
+        assert isinstance(r, EP.NonBlockingRefusal), "it does not block the report"
+        return
+    raise AssertionError("an unbuilt stage must refuse visibly, never accept with nothing done")
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

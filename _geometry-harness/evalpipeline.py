@@ -763,11 +763,12 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
 
 
 def stage_scenes(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
-    """Overlap scene acquisition feeds the incident catalogue and the reviewers' reconciliation, not the report or reel
-    (evalreport plans from the bundle and the capture results). Not built in this version; recorded as such."""
-    write_json(sdir / "scenes.json", {"status": "not-built", "sentence": "Overlap scene acquisition is not part of this "
-                                      "version's pipeline; the report and reel do not read it."})
-    return {"status": "not-built"}, [sdir / "scenes.json"]
+    """Overlap scene acquisition (overlapprobe --geometry-manifest per arm with its role, then overlap_attribution,
+    overlap_triage and evalreport triage) is not built in this version. It feeds the incident catalogue and the
+    reviewers' reconciliation, not the report or reel, so its absence is a stated, non-blocking refusal, never a pass."""
+    raise NonBlockingRefusal("overlap scene acquisition is not built in this version (overlapprobe --geometry-manifest "
+                             "per arm, attribution and triage); no incident catalogue was made. The report and reel "
+                             "do not read it.")
 
 
 def names_env(ctx) -> dict:
