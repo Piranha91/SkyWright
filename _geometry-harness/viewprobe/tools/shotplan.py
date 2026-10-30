@@ -2472,6 +2472,18 @@ def print_verdict(v, fov, target=None, indent="  "):
 # subcommands
 # --------------------------------------------------------------------------------------
 
+def _num(x, fmt: str) -> str:
+    return "none" if x is None else format(x, fmt)
+
+
+def candidate_line(v: dict) -> str:
+    """One ranked candidate, printed. A measure the candidate lacks (no wall within reach: wall margin None) is said as
+    "none", never a crash of the whole plan (WRW capture: two acquisitions died here)."""
+    return (f"  score {_num(v.get('score'), '5.1f')}  bearing {_num(v.get('_bearing'), '5.1f')} deg  "
+            f"standoff {_num(v.get('_standoff'), '4.0f')} u  fill {_num(v.get('fill'), '.2f')}  "
+            f"wall margin {_num(v.get('wall_margin'), '.0f')} u  nav {v.get('nav')}  inside {v.get('inside')}")
+
+
 def cmd_plan(args):
     # FIRST, before a single input is read. A refusal raised while resolving the inputs -- a
     # malformed --surface, a surface-only plan with no --floor-z, more points than --surface-max,
@@ -2608,8 +2620,7 @@ def cmd_plan(args):
 
     print(f"\n--- top {min(args.top, len(ok))} ---")
     for v in ok[:args.top]:
-        print(f"  score {v['score']:5.1f}  bearing {v['_bearing']:5.1f} deg  standoff {v['_standoff']:4.0f} u  "
-              f"fill {v['fill']:.2f}  wall margin {v['wall_margin']:.0f} u  nav {v['nav']}  inside {v['inside']}")
+        print(candidate_line(v))
 
     # The final check, and the candidate walk it drives. The map is interpolated between sampled
     # bearings and is probed FROM the target at eye height; this shoots the ray the DELIVERED

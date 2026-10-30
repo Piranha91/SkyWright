@@ -1349,7 +1349,13 @@ def test_nodepth_subject_in_the_open_is_framed_and_accepted():
     check("nodepth: it is framed as a standing subject", doc["subjects"][0]["kind"] == "nodepth")
 
 
-ALL = [test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
+def test_a_candidate_without_a_wall_margin_prints():
+    line = S.candidate_line({"score": 7.25, "_bearing": 12.0, "_standoff": 250.0, "fill": 0.31, "wall_margin": None,
+                             "nav": True, "inside": False})
+    check("a candidate with no wall in reach prints its line", "wall margin none u" in line, line)
+
+
+ALL = [test_a_candidate_without_a_wall_margin_prints, test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
        test_failed_verification_cannot_export_success,
        test_pose_identity_binds_the_result,
        test_skipped_verification_is_not_a_pass,
