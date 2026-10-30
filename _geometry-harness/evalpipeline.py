@@ -929,7 +929,10 @@ def capped_requests(asked: list, cap: int) -> tuple[list, list]:
 
 
 def capture_identity(ctx) -> dict:
-    """The capture tools' identity as capture_acquire records it on a result (its own capture_tool_identity)."""
+    """The capture tools' identity as capture_acquire records it on a result (its own capture_tool_identity):
+    capture_acquire, the point picker and viewprobe. shotplan is left out on purpose: it chooses the camera, and a
+    finished result records the camera its frames were rendered at, so a shotplan change can alter only which camera a
+    new acquisition picks, never what a recorded one renders."""
     import capture_acquire
     return capture_acquire.capture_tool_identity(ctx.machine.get("viewprobe"))
 
