@@ -316,6 +316,7 @@ def run_census(a) -> int:
                     run.advance()
                     continue
                 c = dict(c)
+                t_row = time.perf_counter()
                 own = {p.lower() for p in c["plugins"]}
                 keys = sorted(p for p, ms in masters.items() if p.lower() not in own and own & {m.lower() for m in ms})
                 c["keyPatches"] = [{"plugin": k, "masters": len(masters[k])} for k in keys]
@@ -337,6 +338,7 @@ def run_census(a) -> int:
                 row["keyEditKinds"] = {k: dict(collections.Counter(e["kind"] for e in v["edits"]))
                                        for k, v in deltas.items() if v.get("role") == "key"}
                 row["readRefusals"] = refusals
+                row["readSeconds"] = round(time.perf_counter() - t_row, 1)   # this candidate's reads, wall clock
                 rows.append(row)
                 with (out / "rows.jsonl").open("a", encoding="utf-8") as f:
                     f.write(json.dumps(row) + "\n")
