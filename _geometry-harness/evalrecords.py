@@ -116,6 +116,10 @@ def complete_rows(export) -> list:
 def parse_delta(line: str, plugins: list[str]):
     """One delta line of the record reader -> (field, own value, other plugin, other value, kind).
     kind: 'value', 'absent' (the other side lacks the field) or 'list' (compared by content, not itemised)."""
+    m = re.match(r"^([A-Za-z0-9_.\[\]]+): ABSENT here \((.+?) has (.*)\)$", line)
+    if m:
+        other = next((p for p in plugins if m.group(2) == p), m.group(2))
+        return m.group(1), None, other, m.group(3), "own-absent"
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): (.*) vs (.+?) (\S+) item\(s\)", line)
     if m:
         other = next((p for p in plugins if m.group(3).startswith(p)), m.group(3))
@@ -193,16 +197,26 @@ class FieldScope:
             return False
 
 
-def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, plugins, scope: FieldScope):
-    """(rows, unjudged reasons) for one evaluated non-winning plugin on one contested record."""
+def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, plugins, scope: FieldScope,
+               defines: bool = False):
+    """(rows, judged, unjudged reasons) for one evaluated non-winning plugin on one contested record. A plugin that
+    DEFINES the record authored every field it holds (there is nothing beneath it): its fields are read from its
+    differences with the winner, with no overridden value."""
     authored, against = {}, {}
     unjudged = {}
+    if defines:
+        authored_lines = []
+        for line in vs_winner_lines:
+            p = parse_delta(line, plugins)
+            if p is not None and p[4] != "own-absent":
+                authored[p[0]] = (p[0], p[1], None, None, "defined")
     for line in authored_lines:
         p = parse_delta(line, plugins)
         if p is None:
             unjudged["a delta line the comparator could not read"] = unjudged.get("a delta line the comparator could not read", 0) + 1
             continue
-        authored[p[0]] = p
+        if p[4] != "own-absent":
+            authored[p[0]] = p
     for line in vs_winner_lines:
         p = parse_delta(line, plugins)
         if p is None:
@@ -419,6 +433,15 @@ def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: F
                 if winner == p and arow is not None and arow.get("complete", True):
                     kept = [x for x in (parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []) if x]
                     judged[key] += sum(1 for x in kept if not scope.excluded(rtype, x[0]))
+                    continue
+                defines = arow is not None and "DEFINES" in str(arow.get("error") or "")
+                if defines and node is not None and node.get("complete", True):
+                    rows, n_judged, n_unj = lost_edits(rtype, fid, p, [], node.get("deltas") or [], winner,
+                                                       arm["plugins"], scope, defines=True)
+                    lost_rows[key] += rows
+                    judged[key] += n_judged
+                    for k, v in n_unj.items():
+                        unj[key][k] = unj[key].get(k, 0) + v
                     continue
                 if node is None or arow is None or not node.get("complete", True) or not arow.get("complete", True):
                     unj[key]["a provider read the reader marked incomplete or did not return"] = \

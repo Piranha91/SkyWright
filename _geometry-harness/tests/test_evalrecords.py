@@ -100,6 +100,18 @@ def case_11_lost_edit_rows_carry_the_record_lane_value_shape():
                  "overridden": "Position=1,2,3; Rotation=0,0,0"}, f"the report reads Values.lost/winner, got {v}"
 
 
+def case_13_a_defining_plugin_authored_every_field_it_holds():
+    plugins = ["Subj.esp", "Key.esp"]
+    node = ["LocationReference: ABSENT here (Key.esp has 0143B9:Base.esm)",
+            "Placement.Position=1,2,3 (Key.esp 9,9,9)", "Placement.Rotation=0,0,1 (Key.esp 0,0,2)"]
+    rows, judged, _ = ER.lost_edits("PlacedObject", "000899:Subj.esp", "Subj.esp", [], node, "Key.esp", plugins,
+                                    ER.FieldScope(), defines=True)
+    assert [r["Field"] for r in rows] == ["Placement"], f"the definer's moved object is a lost edit, got {rows}"
+    v = rows[0]["Necessary"][0]["Values"]
+    assert v["lost"] == "Position=1,2,3; Rotation=0,0,1" and v["winner"] == "Position=9,9,9; Rotation=0,0,2", v
+    assert judged == 2, f"its two held fields are judged; the field it never had is not, got {judged}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
