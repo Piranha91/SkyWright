@@ -8,6 +8,9 @@
     <AssemblyName>viewprobe</AssemblyName>
     <NoWarn>CA1416</NoWarn>
     <UseWPF>true</UseWPF>
+    <!-- SkyRender.Character package version. A build can override it (for example
+         -p:SkyRenderVersion=3.0.2-beta.1 to test a prerelease from a local feed). -->
+    <SkyRenderVersion Condition="'$(SkyRenderVersion)' == ''">3.0.1</SkyRenderVersion>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
@@ -19,7 +22,7 @@
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <!-- SkyRender.Character (which brings core SkyRender; viewprobe uses both) is the published
          NuGet package, restored from nuget.org. -->
-    <PackageReference Include="SkyRender.Character" Version="3.0.1" />
+    <PackageReference Include="SkyRender.Character" Version="$(SkyRenderVersion)" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
   </ItemGroup>
   <ItemGroup>
