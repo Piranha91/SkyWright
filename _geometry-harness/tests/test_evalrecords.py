@@ -112,6 +112,17 @@ def case_13_a_defining_plugin_authored_every_field_it_holds():
     assert judged == 2, f"its two held fields are judged; the field it never had is not, got {judged}"
 
 
+def case_15_an_arm_without_evaluated_plugins_has_no_members():
+    trees = {"a": {"type": "PlacedObject", "touchers": ["Base.esm", "Fix.esp"]},
+             "b": {"type": "Cell", "touchers": ["Base.esm", "Subj.esp"]}}
+    none = ER.population_members({"a", "b"}, trees, {}, [])
+    assert none == {"records.contested-fields": 0, "records.cell-attributes": 0, "records.registration-and-dialogue": 0}, none
+    some = ER.population_members({"a", "b"}, trees, {}, ["Subj.esp"])
+    assert some["records.cell-attributes"] == 1 and some["records.contested-fields"] == 0, some
+    untreed = ER.population_members({"a", "c"}, trees, {"c": {"type": "PlacedObject"}}, ["Subj.esp"])
+    assert untreed["records.contested-fields"] == 1, f"a record the reader returned no tree for stays a member: {untreed}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

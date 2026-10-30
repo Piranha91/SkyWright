@@ -103,6 +103,24 @@ def classify_depth(rows):
     return contested, uncontested, unjudged
 
 
+def population_members(contested, trees, by_id, evaluated) -> dict:
+    """How many members each record check's population has on this arm: the contested records an evaluated plugin
+    touches (the fields it authored are what is judged). An arm that loads no evaluated plugin has none, so its import
+    states Members 0 rather than a judged-nothing extraction (evalrun's known-empty rule decides the rest)."""
+    ev = set(evaluated)
+    out = {"records.contested-fields": 0, "records.cell-attributes": 0, "records.registration-and-dialogue": 0}
+    for fid in contested:
+        t = trees.get(fid)
+        if not ev or (t is not None and not ev & set(t.get("touchers") or [])):
+            continue  # a record without a tree stays a member: it is reported unjudgeable, not dropped
+        t = t or {}
+        rtype = (t or by_id.get(fid) or {}).get("type")
+        key = ("records.cell-attributes" if rtype == "Cell" else
+               "records.registration-and-dialogue" if rtype in REGISTRATION_TYPES else "records.contested-fields")
+        out[key] += 1
+    return out
+
+
 def complete_rows(export) -> list:
     rows = export.get("rows") or []
     want = export.get("requested")
@@ -458,12 +476,7 @@ def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: F
                 unj[key]["a contested record whose tree the reader did not return"] = len(missing_trees)
             if unjudged_ids:
                 unj[key]["a selected record without an override depth"] = len(unjudged_ids)
-        members = {"records.contested-fields": 0, "records.cell-attributes": 0, "records.registration-and-dialogue": 0}
-        for fid in contested:
-            rtype = (trees.get(fid) or by_id.get(fid) or {}).get("type")
-            key = ("records.cell-attributes" if rtype == "Cell" else
-                   "records.registration-and-dialogue" if rtype in REGISTRATION_TYPES else "records.contested-fields")
-            members[key] += 1
+        members = population_members(contested, trees, by_id, evaluated)
 
         # registration and dialogue: the native dialogue and script findings for the evaluated plugins
         native_rows, native_judged, native_unj = [], 0, {}
