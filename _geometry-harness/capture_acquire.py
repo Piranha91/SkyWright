@@ -1070,6 +1070,7 @@ def _capture(a) -> int:
         result["reason"] = f"the acquisition or the request could not be read: {exc}"
         return finish(EXIT_REFUSED)
     result["formKey"] = (request.get("recordKeys") or [None])[0]
+    result["recordKeys"] = list(request.get("recordKeys") or [])     # which clash a refusal is about (reel planner)
     if acq.get("status") != "camera-ready" or (acq.get("request") or {}).get("id") not in (None, a.request):
         # the acquisition's own refusal travels with the result, so the planner and a reader see why (WRW capture)
         ref_ = acq.get("refusal") or {}

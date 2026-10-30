@@ -95,6 +95,14 @@ def case_17_the_capture_identity_is_the_renderer_side_only():
         f"shotplan chooses cameras, which a finished result records; it is not part of what renders them: {sorted(ident)}")
 
 
+def case_19_a_refusal_marks_only_its_own_clash():
+    res = [{"status": "refused", "formKey": "B6", "recordKeys": ["B6", "X1"]},
+           {"status": "captured", "formKey": "B6", "recordKeys": ["B6", "X2"]}]
+    assert RP.clash_refused(["B6", "X1"], res), "the refused pair is refused"
+    assert not RP.clash_refused(["B6", "X2"], res), "another pair on the same object is not"
+    assert RP.clash_refused(["C1"], [{"status": "refused", "formKey": "C1"}]), "an old result without keys still counts"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

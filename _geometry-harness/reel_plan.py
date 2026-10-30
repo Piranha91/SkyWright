@@ -65,6 +65,24 @@ def say_names(names: list[str]) -> list[str]:
     return [n if k == 1 else f"{n} ({NUMBER_WORDS.get(k, str(k))} of them)" for n, k in counts.items()]
 
 
+def clash_refused(fks, capture_results) -> bool:
+    """Whether a capture result refused this clash (its first key and its partners). A refusal names the request's
+    record keys; a clash is refused only when the request was about it: same first key, every partner among the keys.
+    A refusal of one request never marks another request on the same object refused (WRW attempt 5: one object's
+    refused pair dropped its two captured pairs). A result without record keys falls back to its first key."""
+    fks = [str(x) for x in fks]
+    for x in capture_results or []:
+        if x.get("status") != "refused" or not x.get("formKey"):
+            continue
+        keys = [str(k) for k in x.get("recordKeys") or []]
+        if keys:
+            if keys[0] == fks[0] and set(fks) <= set(keys):
+                return True
+        elif str(x["formKey"]) == fks[0]:
+            return True
+    return False
+
+
 def joined(xs: list[str]) -> str:
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
 
@@ -293,7 +311,6 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             return "effect"
         return None
 
-    refused = {str(x.get("formKey")) for x in capture_results if x.get("status") == "refused" and x.get("formKey")}
     # an object no camera can mark (only alpha-tested, effect or marker shapes) fails every request it is in: a clash
     # with it is not tried again under another request (WRW capture: one such object refused two requests)
     unmarkable = {str((x.get("refusal") or {}).get("participant")) for x in capture_results
@@ -340,7 +357,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 if tried >= attempts:
                     break
                 tried += 1
-                if c["rows"][0]["formKey"] in refused or ({str(c["rows"][0]["formKey"]),
+                if clash_refused([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results) or ({str(c["rows"][0]["formKey"]),
                                                            *map(str, c["rows"][0].get("other") or [])} & unmarkable):
                     tried_refused.append(c)
                     continue
