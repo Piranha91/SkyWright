@@ -233,7 +233,8 @@ def read_edits(s, ER, EK, plugin, plugs, scope_rules):
             returned += 1
             fields = changed_fields(row.get("deltas") or [], plugs, scope_rules)
             for e in EK.classify(row.get("type") or "", "substantive", fields):
-                edits.append({"formKey": row["formid"], "kind": e["kind"]})
+                edits.append({"formKey": row["formid"], "kind": e["kind"], "paths": e["paths"],
+                              "canonPaths": e["canonPaths"]})
     kept, _ = EK.absorb_disabled(edits)
     kept += [{"formKey": r["formid"], "kind": "ADD"} for r in adds]
     return {"requested": len(overrides), "returned": returned, "edits": kept}
