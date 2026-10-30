@@ -329,6 +329,21 @@ def case_48_a_capture_the_final_plan_dropped_is_superseded():
     assert not [m for m in EP.capture_media_items(EP.mark_superseded(rows, ["a", "c"])) if m], "no media files here"
 
 
+def case_49_a_finished_request_is_reused_with_its_outcome_and_an_unfinished_one_is_not():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        for rid, status in (("capture-a", "captured"), ("capture-b", "refused")):
+            (root / rid / "sequence").mkdir(parents=True)
+            (root / rid / "sequence" / "capture-result.json").write_text(
+                json.dumps({"request": rid, "status": status}), encoding="utf-8")
+        a = EP.reusable_capture({"id": "capture-a", "armId": "baseline", "vignette": {"withoutArmId": "c1"}}, root / "capture-a")
+        b = EP.reusable_capture({"id": "capture-b"}, root / "capture-b")
+        c = EP.reusable_capture({"id": "capture-c"}, root / "capture-c")
+        assert a and a["reused"] and a["status"] == "captured" and a["arm"] == "baseline", a
+        assert b and b["status"] == "refused" and b["reused"], b
+        assert c is None, c
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

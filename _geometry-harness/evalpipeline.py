@@ -921,6 +921,20 @@ def capture_request(ctx, q, sb: Path, qdir: Path, cands: dict) -> dict:
 MAX_CAPTURE_ROUNDS = 3
 
 
+def reusable_capture(q: dict, qdir: Path) -> dict | None:
+    """A request already captured in this run folder (same id: the id hashes the request's identity, its setups and
+    its source) is reused rather than rendered again, its outcome with it: captured or refused, the same request gives
+    the same answer. An unfinished one (no result) is captured again. The row says so."""
+    result = qdir / "sequence" / "capture-result.json"
+    if not result.is_file():
+        return None
+    doc = read_json(result)
+    if doc.get("status") not in ("captured", "refused") or doc.get("request") not in (None, q["id"]):
+        return None
+    return {"id": q["id"], "arm": q.get("armId"), "without": (q.get("vignette") or {}).get("withoutArmId"),
+            "result": fwd(result), "status": doc.get("status"), "reason": doc.get("reason"), "reused": True}
+
+
 def mark_superseded(rows: list[dict], final_ids) -> list[dict]:
     """A capture the final plan no longer asks for (a later round replaced it, say a split re-captured with a mark) is
     kept on record as superseded, never handed on: the blind packet, the media bundle and the report read only
@@ -949,7 +963,8 @@ def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         if not reqs:
             break
         for q in reqs:
-            rows.append(dict(capture_request(ctx, q, sb, sdir / q["id"], cands), round=rnd))
+            kept = reusable_capture(q, sdir / q["id"])
+            rows.append(dict(kept or capture_request(ctx, q, sb, sdir / q["id"], cands), round=rnd))
             done.add(q["id"])
         # plan again with every result so far; its storyboard names what the reel would now picture
         pdir = sdir / f"replan-{rnd:02d}"
