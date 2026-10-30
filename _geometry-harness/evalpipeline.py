@@ -1031,6 +1031,51 @@ def script_of(argv: list[str]) -> Path | None:
     return None
 
 
+def reel_transition_frames(rmap: dict) -> list[dict]:
+    """Every frame index where the reel changes what it shows, from its own map: each segment's first and last frame,
+    and inside a sequence the last frame of one state and the first of the next."""
+    out = []
+    for seg in rmap.get("segments") or []:
+        iv = seg.get("reelInterval") or {}
+        start, n = iv.get("startFrame"), iv.get("frames")
+        if not isinstance(start, int) or not isinstance(n, int):
+            continue
+        out.append({"frame": start, "segment": seg.get("chapterId"), "at": "segment start"})
+        if seg.get("kind") != "split":   # a split's halves are on screen together; a still's pages and a
+                                           # sequence's states follow one another
+            pos = start
+            for f in seg.get("frames") or []:
+                k = f.get("frames")
+                if not isinstance(k, int):
+                    continue
+                if pos != start:
+                    out.append({"frame": pos, "segment": seg.get("chapterId"),
+                                "at": f"first frame of {f.get('state') or 'page ' + str(f.get('page'))}"})
+                pos += k
+                out.append({"frame": pos - 1, "segment": seg.get("chapterId"),
+                            "at": f"last frame of {f.get('state') or 'page ' + str(f.get('page'))}"})
+        out.append({"frame": start + n - 1, "segment": seg.get("chapterId"), "at": "segment end"})
+    seen, rows = set(), []
+    for r in out:
+        if r["frame"] not in seen:
+            seen.add(r["frame"])
+            rows.append(r)
+    return rows
+
+
+def next_numbered(parent: Path, stem: str) -> Path:
+    """parent/stem-NN for the first NN not yet used (01 upward)."""
+    n = 1
+    while (parent / f"{stem}-{n:02d}").exists():
+        n += 1
+    return parent / f"{stem}-{n:02d}"
+
+
+def latest_numbered(parent: Path, stem: str) -> Path | None:
+    got = sorted(p for p in parent.glob(f"{stem}-[0-9][0-9]") if p.is_dir())
+    return got[-1] if got else None
+
+
 def capture_media_items(rows: list[dict]) -> list[dict]:
     """The media items of every captured request (capture_acquire capture's media-<arm>.json); a refused request
     contributes none."""
@@ -1051,9 +1096,8 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     arm's own configuration fingerprint), and the report is planned and compiled from it with the capture results."""
     rows = read_json(ctx.out / "capture" / "captures.json")
     caps = [Path(r["result"]) for r in rows if r.get("result")]
-    out = sdir / "report"
-    if out.exists():
-        raise Refusal(f"{fwd(out)} exists from an earlier generation; reports keep every attempt, so move it aside first.")
+    # every generation in its own numbered folder: a reviewed report is never written over (review pinning)
+    out = next_numbered(sdir, "report")
     items = capture_media_items(rows)
     bundle = bundle_dir(ctx)
     if items:
@@ -1088,19 +1132,22 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
 def stage_reel(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     m = ctx.machine
     reel_bundle = media_bundle_dir(ctx) if media_bundle_dir(ctx).is_dir() else bundle_dir(ctx)
-    pres = ctx.out / "report" / "report" / "presentation.json"
-    sb = sdir / "storyboard.json"
-    reel = sdir / "reel"
-    if reel.exists():
-        raise Refusal(f"{fwd(reel)} exists from an earlier render; move it aside first.")
+    rep = latest_numbered(ctx.out / "report", "report")
+    if rep is None:
+        raise Refusal("no report generation exists to cut a reel from.")
+    pres = rep / "presentation.json"
+    gen = next_numbered(sdir, "reel")
+    gen.mkdir(parents=True)
+    sb = gen / "storyboard.json"
+    reel = gen / "reel"
     steps = [("storyboard", [sys.executable, fwd(HERE / "evalreel.py"), "storyboard-packet", "--presentation", fwd(pres),
                              "--bundle", fwd(reel_bundle), "--out", fwd(sb)])]
     board = sb
     if m.get("speech"):
         sp = m["speech"]
         steps.append(("speech", [sp["python"], fwd(HERE / "evalspeech.py"), "--storyboard", fwd(sb), *sp.get("args", []),
-                                 "--out", fwd(sdir / "speech")]))
-        board = sdir / "speech" / "storyboard-with-audio.json"
+                                 "--out", fwd(gen / "speech")]))
+        board = gen / "speech" / "storyboard-with-audio.json"
     render = [sys.executable, fwd(HERE / "evalreel.py"), "render", "--presentation", fwd(pres), "--out", fwd(reel),
               "--bundle", fwd(reel_bundle), "--storyboard", fwd(board)]
     if m.get("ffmpeg"):
@@ -1114,31 +1161,29 @@ def stage_reel(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     if status.get("status") != "rendered":
         raise Refusal(f"the reel status is {status.get('status')!r}, not rendered; read {fwd(reel / 'reel-status.json')}.")
     # decode the frames the reel map names, for the reel review
-    dec = sdir / "decoded"
+    dec = gen / "decoded"
     if m.get("ffmpeg") and (reel / "reel-map.json").is_file():
         dec.mkdir(exist_ok=True)
         rmap = read_json(reel / "reel-map.json")
-        times = []
-        for seg in rmap.get("segments") or []:
-            iv = seg.get("reelInterval") or {}
-            a, b = iv.get("startSeconds"), iv.get("endSeconds")
-            if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-                times += [a + 0.5, (a + b) / 2]
-        for i, t in enumerate(times[:60]):
-            child(ctx, sdir / "commands", f"decode-{i:02d}", [m["ffmpeg"], "-hide_banner", "-nostdin", "-loglevel", "error",
-                                                              "-ss", f"{t:.2f}", "-i", fwd(reel / "reel.mp4"),
-                                                              "-frames:v", "1", fwd(dec / f"frame-{i:02d}.png")])
+        frames = reel_transition_frames(rmap)
+        write_json(dec / "frames.json", frames)
+        for i, row in enumerate(frames[:80]):
+            child(ctx, gen / "commands", f"decode-{i:02d}", [
+                m["ffmpeg"], "-hide_banner", "-nostdin", "-loglevel", "error", "-i", fwd(reel / "reel.mp4"),
+                "-vf", "select=eq(n\\,%d)" % row["frame"], "-vsync", "0", "-frames:v", "1",
+                fwd(dec / f"frame-{row['frame']:05d}.png")])
     return {"presentation": sha256_file(pres)}, [reel / "reel.mp4", reel / "reel-status.json"]
 
 
 def stage_deliver(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """The review packet paths for the reviewer's clean-context reviews; the run then waits for their verdicts."""
-    rep = ctx.out / "report" / "report"
+    rep = latest_numbered(ctx.out / "report", "report") or ctx.out / "report"
+    gen = latest_numbered(ctx.out / "reel", "reel") or ctx.out / "reel"
     paths = {"report": [fwd(p) for p in (rep / "report.pdf", rep / "report.html", rep / "report.md") if p.is_file()],
              "evidenceIndex": fwd(rep / "evidence-index.md") if (rep / "evidence-index.md").is_file() else None,
-             "reel": fwd(ctx.out / "reel" / "reel" / "reel.mp4"),
-             "reelMap": fwd(ctx.out / "reel" / "reel" / "reel-map.json"),
-             "decodedFrames": fwd(ctx.out / "reel" / "decoded"),
+             "reel": fwd(gen / "reel" / "reel.mp4"),
+             "reelMap": fwd(gen / "reel" / "reel-map.json"),
+             "decodedFrames": fwd(gen / "decoded"),
              "blindImages": fwd(ctx.out / "image-observations" / "indexed-images"),
              "bundle": fwd(bundle_dir(ctx)), "mediaBundle": fwd(media_bundle_dir(ctx)),
              "precedentCards": fwd(ctx.out / "precedent" / "cards")}

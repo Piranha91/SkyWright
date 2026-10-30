@@ -299,6 +299,28 @@ def case_43_captured_frames_reach_the_media_bundle():
         assert got == ["w.png", "wo.png"], f"every captured frame goes to the media bundle once, got {got}"
 
 
+def case_45_reel_transitions_are_decoded_by_index():
+    rmap = {"segments": [
+        {"chapterId": "R-01", "kind": "still", "reelInterval": {"startFrame": 0, "frames": 10},
+         "frames": [{"page": 0, "frames": 4}, {"page": 1, "frames": 6}]},
+        {"chapterId": "R-02", "kind": "sequence", "reelInterval": {"startFrame": 10, "frames": 9},
+         "frames": [{"state": "without", "frames": 3}, {"state": "with", "frames": 3}, {"state": "highlight", "frames": 3}]},
+        {"chapterId": "R-03", "kind": "split", "reelInterval": {"startFrame": 19, "frames": 5},
+         "frames": [{"state": "left", "frames": 5}, {"state": "right", "frames": 5}]}]}
+    got = [r["frame"] for r in EP.reel_transition_frames(rmap)]
+    assert got == [0, 3, 4, 9, 10, 12, 13, 15, 16, 18, 19, 23], f"every change of picture, both sides of it, got {got}"
+
+
+def case_47_generations_go_to_new_numbered_folders():
+    with tempfile.TemporaryDirectory() as t:
+        first = EP.next_numbered(Path(t), "report")
+        first.mkdir()
+        second = EP.next_numbered(Path(t), "report")
+        assert (first.name, second.name) == ("report-01", "report-02"), (first, second)
+        second.mkdir()
+        assert EP.latest_numbered(Path(t), "report") == second
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
