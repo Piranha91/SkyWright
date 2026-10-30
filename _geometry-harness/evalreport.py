@@ -8284,6 +8284,22 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 m_["caption"] = str(tmpl_ or "").format(**slots_) or None
             except (KeyError, IndexError):
                 m_["caption"] = str(caption_words.get("fallback") or "").format(**slots_) or None
+            # (Missives retry 2 blind pass) a split's magenta mark is a removal the split frames, not a second clash
+            # with the cyan object: said on both halves, from the left half's own renderer command
+            if state_ in ("left", "right") and m_.get("caption"):
+                left_marks_ = {}
+                for o_ in by_request.get(prov_.get("captureRequest"), []):
+                    po_ = (media_by_id0.get(o_) or {}).get("provenance") or {}
+                    if po_.get("vignetteState") == "left":
+                        av_ = [str(x) for x in po_.get("argv") or []]
+                        left_marks_ = {av_[i + 1].rsplit("=", 1)[1]: av_[i + 1].rsplit("=", 1)[0]
+                                       for i, x in enumerate(av_[:-1]) if x == "--ref" and "=" in av_[i + 1]}
+                gone_ = left_marks_.get("magenta")
+                key_ = "removedLeft" if state_ == "left" else "removedRight"
+                if gone_ and caption_words.get(key_):
+                    m_["caption"] += caption_words[key_].format(
+                        removed=fig_object(gone_), object=fig_object(fk_),
+                        winner=fig_mod(row_.get("B") or (f_.get("counts") or {}).get("B") or target_plugin))
             m_["captureState"] = state_
             m_["captureRequest"] = prov_.get("captureRequest")
 

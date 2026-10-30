@@ -596,7 +596,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 [lw_[k_].format(objects=joined(list(dict.fromkeys(v_)))) for k_, v_ in lost_items.items()]))
         for g_ in in_split.get(fk) or []:
             text += " " + words["removedInSplit"].format(
-                winner=mod(g_["rows"][0]["B"]), loser=mod(g_["rows"][0]["A"]),
+                winner=mod(g_["rows"][0]["B"]), loser=mod(g_["rows"][0]["A"]), subject=obj,
                 object=spoken_ref(g_["rows"][0]["formKey"], g_["rows"][0].get("summary")))
         return text
 
