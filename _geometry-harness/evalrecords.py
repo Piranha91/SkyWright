@@ -231,7 +231,19 @@ def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, p
                                     "Necessary": [{"FormKey": formid, "Label": None, "Values": {}, "Paths": []}]})
         n = row["Necessary"][0]
         n["Paths"].append(field)
-        n["Values"][field] = {"lost": own, "winner": w[3], "overridden": prev}
+        n.setdefault("_parts", []).append((field, own, w[3], prev))
+    for row in rows.values():
+        # the record-lane row shape (recordrows, the report compiler): Values {lost, winner, overridden}, a field's
+        # leaves joined "Leaf=value; Leaf=value" (a placement reads "Position=x,y,z; Rotation=x,y,z")
+        n = row["Necessary"][0]
+        parts = n.pop("_parts")
+        top = row["Field"]
+
+        def joined(i):
+            if len(parts) == 1 and parts[0][0] == top:
+                return parts[0][i]
+            return "; ".join(f"{p[0][len(top) + 1:] if p[0].startswith(top + '.') else p[0]}={p[i]}" for p in parts)
+        n["Values"] = {"lost": joined(1), "winner": joined(2), "overridden": joined(3)}
     return list(rows.values()), judged, unjudged
 
 
@@ -386,9 +398,9 @@ def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: F
         judged = {k: 0 for k in lost_rows}
         unj = {k: {} for k in lost_rows}
         for p in evaluated:
-            mine = [fid for fid, t in trees.items()
-                    if p in (t.get("touchers") or []) and not any(n.get("plugin") == p and n.get("is_winner")
-                                                                   for n in t.get("nodes") or [])]
+            # every contested record this plugin touches: where it wins its authored fields are judged and kept,
+            # where it does not they are judged against the winner
+            mine = [fid for fid, t in trees.items() if p in (t.get("touchers") or [])]
             authored = {}
             for batch in batched(mine):
                 dd = s.tool("housecarl_records", {"formids": batch, "source": p, "versus": "previous_provider",
@@ -404,6 +416,10 @@ def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: F
                 node = next((n for n in t.get("nodes") or [] if n.get("plugin") == p), None)
                 winner = next((n.get("plugin") for n in t.get("nodes") or [] if n.get("is_winner")), None)
                 arow = authored.get(fid)
+                if winner == p and arow is not None and arow.get("complete", True):
+                    kept = [x for x in (parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []) if x]
+                    judged[key] += sum(1 for x in kept if not scope.excluded(rtype, x[0]))
+                    continue
                 if node is None or arow is None or not node.get("complete", True) or not arow.get("complete", True):
                     unj[key]["a provider read the reader marked incomplete or did not return"] = \
                         unj[key].get("a provider read the reader marked incomplete or did not return", 0) + 1

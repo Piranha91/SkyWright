@@ -88,6 +88,18 @@ def case_9_short_export_refused():
     raise AssertionError("an export returning fewer rows than it selected must refuse")
 
 
+def case_11_lost_edit_rows_carry_the_record_lane_value_shape():
+    plugins = ["Base.esm", "PA.esp", "Subj.esp"]
+    authored = ["Placement.Position=10,20,30 (Base.esm 1,2,3)", "Placement.Rotation=0,0,1 (Base.esm 0,0,0)"]
+    vs_winner = ["Placement.Position=10,20,30 (Subj.esp 7,8,9)", "Placement.Rotation=0,0,1 (Subj.esp 0,0,2)"]
+    rows, judged, _ = ER.lost_edits("PlacedObject", "000001:Base.esm", "PA.esp", authored, vs_winner, "Subj.esp",
+                                    plugins, ER.FieldScope())
+    assert judged == 2 and len(rows) == 1, (judged, rows)
+    v = rows[0]["Necessary"][0]["Values"]
+    assert v == {"lost": "Position=10,20,30; Rotation=0,0,1", "winner": "Position=7,8,9; Rotation=0,0,2",
+                 "overridden": "Position=1,2,3; Rotation=0,0,0"}, f"the report reads Values.lost/winner, got {v}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
