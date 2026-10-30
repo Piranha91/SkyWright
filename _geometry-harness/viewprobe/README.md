@@ -161,7 +161,7 @@ A successful save or size check alone does not establish clean pixels.
     `u` settings). Beyond ±2 only listed large references are admitted (next item). The console line `+N
     reference(s) anchored two cells out …`, the planes report's `sceneScope` (`edgeRadius`, `edgeRadiusBasis:
     "inferred"`, `edgeAdmitted`, `edgePlanesAdmitted`) and its coverage line all say so.
-  - **Deliberately unchanged at 3×3:** `--nav-cell`, terrain and water. Those answer questions about the cells' own
+  - **Deliberately unchanged at 3×3** (unless `--ring visible|N` widens the whole loaded area): `--nav-cell`, terrain and water. Those answer questions about the cells' own
     ground. The `--stations` and route-station floors take the same ring (and the large references below) through
     `FloorFeed`'s reach: a reference beyond the 3×3 is a floor candidate when its placed box enters it (the rule lives
     in `_shared/RingReach.cs`, shared with this merge).
@@ -184,12 +184,118 @@ A successful save or size check alone does not establish clean pixels.
   - **The report:** `sceneScope` gains `largeRadius` (5), `largeRadiusBasis`, `largeList` (`union`/`none`),
     `largeListBasis`, `largeListed`, `largeAdmitted`, `largePlanesAdmitted` and `largePrimitives: "by record"`; the
     console prints `+N large reference(s) anchored 3-5 cells out …` when any is admitted.
-  - **Scene-scope limit: content beyond the 3×3 is not modelled for any ring.** A listed reference whose box misses
+  - **Scene-scope limit: content beyond the 3×3 is not modelled for any ring** (by default; `--ring visible|N`, next
+    item, widens the loaded area itself). A listed reference whose box misses
     the 3×3 is not drawn even when it stands in the view (distant mountains): the game draws it, this render does not.
     It cannot hide content inside the 3×3 (the convexity argument above), but a plane cannot be credited with hiding
     it either. On the G4/G5 predictive views such references reach the view wedge at about 4,078 of 4,556 views (a
     mean of 83 per view); admitting them would also need terrain and LOD beyond the 3×3.
   - **Tests:** `--winning-refs-selftest` cases L1–L12.
+- **Wider loaded area: `--ring visible|N`** (exteriors only, 2026-10-29; `VisibleCells.cs`). The 3×3 is right for an
+  eye-level shot; from a high camera the game shows ground to the frame's edges and the 3×3 is an island in sky.
+
+  | Option | Effect |
+  |---|---|
+  | `--ring 1` (the default) | The target and its ±1 ring, through exactly the old code path. |
+  | `--ring N` (2..16) | The square of radius N around the target. |
+  | `--ring visible` (alias `auto`) | Every cell whose ground the frame can see, plus the target's 3×3. |
+  | `--ring-reach N` (default 8) | `visible` looks no farther than N cells (Chebyshev) from the eye's own cell. |
+  | `--ring-cap N` (default 160) | `visible` loads at most N cells; the ones nearest the eye are kept. |
+
+  - **How `visible` picks.** Before the winning-state walk, one pass over the order reads the winning LAND of every
+    cell within the reach and keeps its lowest and highest vertex. A 97×55 grid of rays through the frame (the
+    render's own camera: vertical `--fov`, the `--aspect`, world Z up) is marched from the eye in 256 u steps. A cell
+    joins when a ray passes over it no higher than its highest ground + 2,048 u (a tree or roof standing there can
+    meet the ray). The ray stops below the cell's lowest ground, on leaving the reach, or when it rises above every
+    band. A square with no LAND stands in at the lowest ground seen. The console prints
+    `visible cells: N loaded (x .., y ..) - F under the frame's R rays …; cut: …` naming the rays that left the reach
+    and the cells the cap dropped, or `nothing cut`.
+  - **What loads in them.** Terrain (LAND, paint layers), water (one surface per cell) and **full references in every
+    loaded cell**, including cells beyond the game's ±2 grid, where the game draws LOD or nothing instead. The console
+    says how many of the cells lie beyond ±2. The persistent merge takes the persistent refs whose position falls in
+    a loaded cell. The ring edge becomes the one-cell border around the set: a reference anchored there joins when its
+    placed box enters any loaded cell (`RingReach.EntersCells`). Large references stay those anchored within 5 cells
+    of the target, outside that border, listed and entering the set. The navmesh, cell outline and `--nav-cell`
+    annotations stay where they were.
+  - **The camera must be known before the walk**: `--eye X,Y,Z` with `--yaw/--pitch` or `--look X,Y,Z`, or a worklist
+    shot. `--eye-ref`/`--look-ref` are refused, because they are resolved from the walk the cells are chosen for.
+  - **Refused combinations.** `--no-ring-refs` with any `--ring` other than 1. A static worklist under cell reuse
+    (the default) is refused too, because the set follows each shot's camera and a retained walk is shared by every
+    shot of the cell; pass `--no-reuse-cell` and every shot walks the order for its own cells.
+  - **Cost, measured on the Riverwood aerial** (A pose, eye 15000,-47000,10000, yaw 76°, pitch 68.1°, 1920×1080,
+    vanilla DevBench order): 22 cells (x 3..6, y −14..−9), nothing cut. The LAND-band pass took 0.2 s. The scene
+    grew from 1,731 to 2,681 refs and from 2,614 to 4,240 shapes. Wall time went from 18 s to 20 s and the peak working
+    set from 3.8 GB to 4.3–4.7 GB (two runs). Against the in-game A frame, edge maps register to within 4 px at
+    1920 wide in the centre and all four quadrants at `--fov 50.534`. The aerial only looked wider in game because
+    the 3×3 render was an island in sky.
+- **Distant LOD: `--lod`** (exteriors only, opt-in, 2026-10-29; `DistantLodLayer.cs`, SkyRender.World
+  `DistantLodLoader` / `GlWorldFactory.CreateDistantLod`). Draws the worldspace's terrain LOD (`.btr`), object LOD
+  (`.bto`), tree LOD (`.btt` + `.lst` + tree atlas) and LOD water (the `.btr` files' `WATER` quads) beyond the
+  loaded cells, plain or with `--ring visible`.
+  - **Which files.** The target worldspace's EditorID names them (its parent's, when the WRLD uses its parent's LOD
+    data); `lodsettings\<w>.lod` gives the grid. They resolve through the same load order and archives as every other
+    asset. A block the selector picks but no source ships draws nothing, as in the game.
+  - **Which blocks.** SkyRender's quadtree on the `[TerrainManager]` distances (fBlockLevel0/1Distance,
+    fBlockMaximumDistance, fSplitDistanceMult for terrain, fTreeLoadDistance; the defaults equal the lab profile's
+    SkyrimPrefs.ini: 60000, 90000, 250000, 1.5, 75000), out to 409,600 u (about 100 cells), which also becomes the
+    camera's far plane (131,072 without `--lod`).
+  - **Under the loaded cells.** Every cell whose terrain the frame draws, plus the walk's `--ring` set: terrain LOD is
+    lowered there by the engine's 230 model units and covered triangles are dropped; level-4 object LOD and LOD water
+    lose those cells' segments (the cells draw their own water); LOD trees standing in them are dropped. With `--ring visible` the loaded area can exceed the
+    game's ±2 grid, so full detail stands where the game would draw LOD.
+  - **Console.** `lod: <world> - lodsettings ...`, one `lod terrain|water|objects|trees:` line each (blocks picked / on disk,
+    meshes per level, triangles, what was cut), file problems, and `lod timing:` (read + build, textures + upload,
+    final frame). `VP_LOD_KINDS=terrain,objects,trees,water` limits the kinds (diagnostic).
+  - **LOD water** (2026-10-29): each quad at its own height (the generator's per-cell water height), drawn with the
+    worldspace's LOD water type (WRLD NAM3, the parent's under "Use LOD Data"; Tamriel: `DefaultWater`) as the engine's
+    LOD water technique: opaque, sky-gradient reflection, the WATR's sun specular, fog; no depth fog or refraction.
+    Not drawn when the WRLD has "No LOD Water", the WATR is missing, or with `--no-water` (the console's
+    `lod water:` line says why). `VP_WATER_LEGACY=1` reflects the WATR's reflection colour instead of the sky.
+  - **Object LOD vertex colours:** shapes with `SLSF2_Vertex_Colors` multiply their diffuse by them (vanilla's HD
+    mountain LOD; DynDOLOD's object and grass LOD); the `lod objects:` line counts them.
+  - **Grass LOD** has no switch of its own: vanilla has none, and DynDOLOD bakes it into level-4 object LOD
+    (`grasspassthru` shapes), so it draws with `--lod` when that output is in the load order. The lab order has
+    none, so it is untested here.
+  - **Not drawn:** DynDOLOD's dynamic LOD (DynDOLOD.esp references switched by its SKSE plugin). Full grass in the
+    drawn cells is the grass layer below, not LOD. LOD is not shown to the interactive window's picker.
+  - **Cost, measured on the Riverwood aerial** (A pose, `--weather SkyrimClear`, 1920×1080, two runs each): 18.6–18.8 s
+    without `--lod` (unchanged from before the feature: 19.6–20.7 s on the same machine earlier, identical pixels and
+    console), 27.6–28.1 s with it: read + build 4.3–4.4 s, textures + upload 3.9 s, final frame 63 ms. About 308 terrain,
+    370 object and 80 tree meshes (1.5 M triangles). `--ring visible --lod` on the same pose: 29.6 s; on the
+    horizon pose (eye 17000,-47000,8000, yaw 0, pitch 8): 36.0 s, final frame 267 ms.
+- **Grass: on by default, `--no-grass` to leave it out** (exteriors; 2026-10-29; `GrassLayer.cs`, SkyRender.World
+  `GrassPlacer` + `GlWorldFactory.CreateGrass`). The grass the game draws in loaded exterior cells: each drawn cell's
+  base and alpha layers name their LTEX, whose grass list (GNAM) names the GRAS records; SkyRender grows them on the
+  drawn ground by the engine's rules (density times each texture's share of the ground, candidate spacing from the
+  position range capped by `iMinGrassSize`, slope and water rules, size, turn, fit to slope, brightness from the LAND
+  vertex colour) and draws each type and model shape as one instanced mesh, lit by the sun under its shadows plus
+  the ambient, alpha-faded out at `fGrassStartFadeDistance` + `fGrassFadeRange`, casting no shadow. The sun on
+  grass is the weather's plain sunlight colour, without the image space's sunlight scale the engine leaves off
+  grass (SkyRender RENDERING_PIPELINE "Grass"); the clear-noon close-up still reads about 1.3x the game's light.
+  - **Positions are not the game's.** The engine draws them from a shared random generator whose state no source
+    gives; SkyRender seeds its own per cell, texture, grass and patch, so a frame is repeatable and the density and
+    spread follow the GRAS records, but individual tufts do not line up with a game screenshot. Clashes with grass
+    therefore read as "grass grows here", not "this tuft is there".
+  - **Settings:** the profile's `Skyrim.ini` then `SkyrimPrefs.ini` `[Grass]` keys `iMinGrassSize`,
+    `iMaxGrassTypesPerTexure`, `fGrassStartFadeDistance`, `fGrassFadeRange`, `fTexturePctThreshold`; absent keys
+    take the engine defaults (20, 2, 7000, 1000, 0). The lab profile sets only the start fade (7000). The console's
+    `grass:` line names what it read, the instance counts per GRAS, and `grass timing:` the cost.
+    `VP_GRASS_SHAPES=1` prints each grass model's shapes (vertices, vertex colours, alpha test, texture).
+    `VP_SHADER_DIR=<folder>` loads the renderer's shaders from that folder instead of the embedded copies (a copy of
+    the bin `Shaders` folder with one edit), to try a shader change, such as a disabled debug constant, without a
+    rebuild.
+  - **Where:** the drawn terrain cells (the 3x3, or `--ring` cells), with the cell's water height for the water
+    rules; patches beyond the fade from the eye are skipped (they draw nothing), except in `--interactive`. Not drawn
+    with `--no-terrain`, `--depth-measurement`, in interiors, or on a retained walk (`--reuse-*`: the retained sheets
+    keep no landscape-texture identities; the console says so). No wind (a still frame).
+  - **Cost, measured on Riverwood** (lab, 1920 px, the game running in parallel): aerial A pose 18.5-19.0 s without
+    grass, 18.7-19.0 s with it (place 19 ms, models + textures + upload 75-83 ms; 14,900 instances of 7 types on 9
+    cells, all beyond the fade from that eye, so the frame is pixel-identical); close-up C pose 15,906 instances,
+    place 22 ms, upload 132 ms. That is far under "a few seconds", so grass is on by default.
+  - **Against the game** (lab, SkyrimClear noon, grass on, 2026-10-29; sheets in
+    `S:\Dev\skyrender-split\_ingame\grass_20261029-140936\`): grass grows where the game has it, but draws about
+    2.5x too bright (yellow where the game is a dark green). The cause is open (see SkyRender's RENDERING_PIPELINE
+    "Grass"); judge grass by where it grows, not by its colour.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
   navmesh vertex positions one plugin's version has and the other's does not, drawn in every panel
   that contains them, always visible. `--no-nav-diff` drops them.
@@ -201,6 +307,87 @@ A successful save or size check alone does not establish clean pixels.
   with nothing anchoring them); turn both off for an in-game-like interior shot.
 - **Look:** `--sky R,G,B` (0-255 or 0-1; default a pale sky blue `0.70,0.82,0.92`), `--msaa N`
   (default 4, clamped to the context's `GL_MAX_SAMPLES`; 0/1 = off).
+- **Defaults (2026-10-29):** viewprobe exists to find local clashes quickly, so every cheap
+  feature is on and anything that significantly delays loading is opt-in. Measured on the lab
+  instance (1920 px, wall time per render, two runs each): Riverwood aerial 18.2-18.5 s before, 18.6-18.8 s
+  with the defaults below; WhiterunBanneredMare kitchen 16.2-16.6 s before, 16.4 s after.
+
+  | Feature | Default | Opt out / in |
+  |---|---|---|
+  | Exterior weather (sky gradient, sun on the climate's path, ambient, fog) | on: the cell's region's most likely weather, else the worldspace climate's, else SkyrimClear | `--no-weather`; `--weather NAME` picks one |
+  | Weather / cell image space | on | `--no-imagespace` |
+  | Sun shadows | on whenever a weather lights the frame | `--no-shadows` (`--shadows` forces them) |
+  | Interior cell lighting (XCLL, image space, placed lights) | on | `--no-cell-lighting` |
+  | Effect shapes (engine effect shading, billboards turned to the camera) | on | `--no-fx`; `VP_NO_BILLBOARD=1` keeps the authored pose |
+  | Environment maps (slot-4 cube map, slot-5 mask) on lighting shapes | on | `VP_NO_ENVMAP=1` |
+  | Visible-cell ring | off (the 3x3) | `--ring visible` / `--ring N` (load time grows with the cells) |
+  | Distant LOD (terrain, objects, trees beyond the loaded cells) | off | `--lod` (adds about 9 s on the Riverwood aerial) |
+  | Near-field grass (LAND-placed GRAS in the drawn cells) | on | `--no-grass` (costs about 0.1 s on Riverwood) |
+
+  The default exterior weather follows the region, as the game picks it: Riverwood's region
+  WeatherPineForest gives SkyrimCloudy (35 of 100), so match an in-game capture taken with
+  `fw 81A` by passing `--weather SkyrimClear`.
+- **Cell lighting (interiors):** on by default (`--no-cell-lighting` keeps the fixed studio lights);
+  lights an interior from its own records (`CellLighting.cs`): the cell's XCLL ambient, directional colour (times
+  its fade, at its rotation) and fog, each value the cell marks as inherited taken from its
+  lighting template (LTMP); its image space (XCIM) as SkyRender's image-space finish (adapted
+  luminance from `--adapt-lum`, default 0.367); and every drawn LIGH reference as a SkyRender point
+  light: the base's colour times its fade plus the reference's XLIG fade offset, the base's radius
+  plus the reference's XRDS (an offset, read so from the in-game match: the Bannered Mare's
+  hearths carry -189 and -304, its candles +80, -3.4, +8.5; `VP_XRDS=override|abs|ignore` reads it
+  the earlier way or others, for diagnosis), negative lights subtracting, shadow-casting lights (shadow spot /
+  hemisphere / omni flags) with a cube shadow map (up to four), nearest the eye first, up to 32.
+  The console prints the resolved lighting and how many lights were drawn;
+  `VP_CELL_LIGHTS_LIST=1` lists them, `VP_CELL_LIGHTS=unshadowed|none` drops the shadow-casting
+  ones or all of them (diagnostics). Not modelled: the six-direction ambient, light fade
+  distances, flicker, spot cones, the per-object light limit, eye adaptation. Bannered Mare against the game
+  (frame mean, ours vs game): kitchen 50,39,24 vs 46,37,24; candle shot 71,58,38 vs 62,50,34;
+  candle close-up 54,44,27 vs 59,48,31, with the pillar beside the central hearth unlit as in game
+  (with XRDS read as a replacement radius these were 56,43,24, 100,84,52 and 76,60,35).
+- **Weather:** on by default for exteriors (`--no-weather` keeps the fixed studio lights). Without
+  `--weather` the WTHR is the target cell's region's most likely weather (CELL XCLR -> REGN weather
+  data, the highest-priority region with weather, its highest-chance entry), else the worldspace
+  climate's (WRLD CNAM -> CLMT; the Tamriel climate lists SkyrimCloudy alone), else SkyrimClear; the
+  console says which and why (`VP_WEATHER_LIST=1` prints the climate's list). `--weather NAME` (a
+  WTHR EditorID such as `SkyrimClear`, or a FormKey such as `00081A:Skyrim.esm`) picks one, and
+  `--weather-slot day|sunrise|sunset|night` (default `day`) the time of day. The scene is lit from
+  the winning WTHR (`SceneWeather.cs`): the sky is a
+  gradient by elevation (SkyRender `SkyGradient`), what sky-reflecting water reflects per pixel and
+  the background (at 20 degrees). Its keys follow the engine's sky dome: the vanilla
+  `meshes/sky/atmosphere.nif` blend masks (horizon at the rim, sky-lower around 18 degrees,
+  sky-upper at the zenith) over the WTHR's horizon, sky-lower and sky-upper colours, plus the image
+  space's sky scale; the dome is seen through the far fog colour at the fog max, which is an
+  in-game fit (it brings the Riverwood sky to within about 10 RGB of the game's and the aerial river
+  from 35,106,148 to 104,170,206 against the game's 105,162,204), not sourced. `VP_SKY_FLAT=1` keeps
+  the single sky-upper colour, `VP_SKY_NO_FOG=1` the bare dome. The sun colour is its sunlight colour, the
+  ambient its directional ambient's "Z-" colour (the light travelling from the sky to the ground,
+  per the Step weather reference; it lights up-facing ground — "Z+" left the Riverwood aerial
+  underlit and cyan against the game), and SkyRender's distance fog takes its fog near/far
+  colours and the day (or night) fog distances, power and max. The sun's direction follows the
+  target worldspace's climate (CLMT sunrise/sunset) at `--game-hour H` (default 12, the hour the
+  in-game captures use), on Community Shaders' sun path (SkySync, its "vanilla" trajectory: east at
+  sunrise, 5 degrees off the zenith at the top of the arc; for Tamriel at noon, azimuth 106.5,
+  elevation 72.9; the console prints it). `VP_SUN_FIXED=1` keeps the earlier fixed direction
+  (azimuth 135, elevation 55). `--sky` still wins for the background. The slot's image space (IMGS) is applied too: its HDR
+  sunlight scale multiplies the sun, and SkyRender's `ImageSpaceFinish` grades the frame with its
+  white, saturation, brightness, contrast and tint (the engine's tone map; see SkyRender's
+  RENDERING_PIPELINE.md, "Image space"). The adapted luminance (the contrast pivot) is fixed at
+  0.367, the value read from the retail adaptation texture at SkyrimClear noon; `--adapt-lum X`
+  overrides it and `--no-imagespace` leaves the frame ungraded (the earlier output). Not modelled:
+  bloom, eye adaptation over time, clouds; a weather-lit Riverwood render is still a little
+  darker and more saturated than the game. A retained walk cannot see the WTHR and says so.
+  Sun shadows: whenever a weather lights the frame the sun casts (SkyRender's directional shadow
+  map, `--shadows` / `--no-shadows` to force either; interiors have none). One 2048-texel map is fitted per frame to a sphere around the eye and the
+  frame's view rays out to the ground under the eye or `--shadow-distance D` (default 10000, the
+  lab profile's fShadowDistance), widened by 1,500 units for casters beside the frame; the engine
+  uses cascades (iNumFocusShadow 4, 4096 texels), so far shadows here are softer. Only the sun is
+  shadowed; the ambient is not. Against the Riverwood noon close-up the shadowed grass matches the
+  game's tone (38,51,37 vs 33,45,34) but covers less of the frame (37% vs 59%: tree crowns cast
+  thinner shadows here), and the sunlit grass stays about 13% bright. Costs one depth pass per frame.
+  The console also prints the slot's six directional ambient colours. Colour-balance diagnostics
+  (not engine behaviour): `VP_WEATHER_NO_FOG=1` drops the fog, `VP_WEATHER_AMBIENT_SCALE=X` scales
+  the ambient, `VP_WEATHER_AMBIENT_FROM=0..5` takes the ambient from +X, -X, +Y, -Y, +Z or -Z instead
+  of -Z (6 = their mean; 4 = the earlier +Z).
 - **Troubleshooting overlay:** `--conflicts emit.json` (paints implicated navmeshes red, doors
   orange, prints the red centroid and a suggested camera), `--red "FORMKEY[:tri]"` by hand.
 - **Compare:** `--compare "A.esp,B.esp"` renders three panels with one camera and stitches them.
@@ -256,12 +443,12 @@ A successful save or size check alone does not establish clean pixels.
   variable, so asking the question never changes the order, the asset view or the archives the
   capture draws from. A run that predates the flag ignores it and reports no identity.
 - **Terrain:** `--no-terrain` (off entirely), `--no-terrain-layers` (base layer only — no painted
-  alpha layers and no base stand-ins).
+  alpha layers; quadrants with no base layer still draw the default landscape texture).
 - **Water and coverings** (both ON by default — their ABSENCE was the bug, not their look):
   `--no-water` drops the water surfaces, `--no-coverings` drops the MATO projected snow/ash/moss.
   Both change every exterior render, so both announce themselves on the console. See *Water* and
   *Projected coverings* under *Known rough edges* — **the water HEIGHT is a known open defect.**
-- **Scene filters:** `--fx` / `--fx-static` (see *Effect geometry*), `--markers` (translucent
+- **Scene filters:** `--no-fx` / `--fx` (see *Effect geometry*; effect shapes are drawn by default), `--markers` (translucent
   editor markers), `--list-meshes` (per-mesh census with its WHOLE-FILE class, `FX-file` vs
   `geometry`), `--out DIR`, `--size N` (default 2560; the render resolution as well as the PNG's —
   there is no downsample step, so `--size` IS the sharpness knob, with `--msaa` for the edges).
@@ -376,11 +563,12 @@ all knowledge.
 
 | Var | Effect |
 |---|---|
-| `VP_SHAPE_DUMP=<substr>` | for every mesh whose path matches, one line per BUILT shape: effect-vs-lighting shader, triangles, blend mode (Bethesda src→dst; `6->0` is additive), material alpha, colour × multiple, depth-write, slot-0 texture. The SHAPE-level companion to `--list-meshes` — that says which files are in the cell, this says why one of their shapes draws the way it does. Printed at build time, before any skip decision, so it shows skipped shapes too |
+| `VP_SHAPE_DUMP=<substr>` | for every mesh whose path matches, one line per BUILT shape: effect-vs-lighting shader, triangles, local bounding box, blend mode (Bethesda src→dst; `6->0` is additive), material alpha, colour × multiple, depth-write, `DECAL` / `BILLBOARDn`, both shader-flag words, slot-0 texture, and for effect shapes their flags, falloff, soft depth, lighting influence, clamp mode, UV transform and greyscale palette; also one `effect drawn:` line per drawn effect shape. The SHAPE-level companion to `--list-meshes` — that says which files are in the cell, this says why one of their shapes draws the way it does. Printed at build time, before any skip decision, so it shows skipped shapes too |
 | `VP_WATER_DUMP=1` | the raw per-cell water read — HasWater, XCLW at full precision, the WATR link, and whether the height was used or rejected. A plane at the wrong height is INVISIBLE rather than wrong-looking (terrain simply covers it), so this is the line that says whether the height or the drawing is at fault |
 | `VP_WATER_SHALLOW_ALPHA=<0..1>` | alpha at ZERO water depth. Default 1 = opaque everywhere, which is what the engine draws. Lower it for a see-through shore margin on a floor plan; below ~0.8 the sea starts reading as tinted glass |
 | `VP_WATER_Z=<z>` | force every water surface to one height. The other half of the pair above: if the surface appears here and not at the resolved height, the renderer is fine and the height is wrong |
-| `VP_FXSTATIC_EMIT=<float>` | taste multiplier on `--fx-static` brightness (default 1 = the authored `baseColorScale`). Below ~0.25 the fire stops reading; above ~2 it blows out |
+| `VP_FX_DOUBLESIDED=1` | diagnostic: draw every effect shape double-sided, to tell a back-face-culled sprite from one its shading hides |
+| `VP_NIF_DUMP=<substr>` | the block-level companion to `VP_SHAPE_DUMP`: SkyRender's full NIF dump (scene graph with transforms, every block's fields) for each matching mesh, once, before it is built. Where a billboard parent, a controller or a particle system shows up |
 | `VP_ALPHA_DUMP=gx,gy` | every alpha layer of that cell as a 17×17 ASCII opacity grid |
 | `VP_LAYER_ONLY=<substr>` + `VP_LAYER_SOLID=1` | draw only the painted layers whose diffuse matches, at full opacity — isolates one layer so "is that wash really this texture?" has an answer |
 | `VP_OCCL_SLACK="rel,abs"` | override the behind-geometry depth-compare slack (default `1.002,1.5`) |
@@ -448,7 +636,7 @@ gitignored for the same reason: probe transcripts name the plugins of whatever l
 ### The extraction scratch, and why it is not beside the exe
 
 The rendering library cannot read an asset out of a BSA in place: it extracts it to disk first. The
-destination it picks is `AppContext.BaseDirectory\CharacterViewerCache`, captured once when the
+destination it picks is `AppContext.BaseDirectory\SkyRenderCache`, captured once when the
 resolver is constructed — the same folder for **every** process started from one build. Two renders
 started together therefore wrote the same files at the same moment, and because a failed read on
 that path is swallowed (a mesh that will not parse becomes "no geometry", a texture that will not
@@ -482,7 +670,7 @@ leaving you to find it.
 The path the limit applies to is the extracted one, and it is built like this:
 
 ```
-<scratch root>\CharacterViewerCache\<8-char source token>\<the asset's own path>
+<scratch root>\SkyRenderCache\<8-char source token>\<the asset's own path>
     ^-- <data directory>\viewprobe-extract\vp-<pid>-<8 hex>
 ```
 
@@ -557,7 +745,7 @@ The library's own `ClearExtractedFiles()` is deliberately not called. Deleting t
 folder is strictly stronger, and the library documents that method as unsafe to call while a render
 is in progress — which at process exit is not something the host can establish.
 
-**An existing `CharacterViewerCache` beside an older build is no longer read or written.** Nothing
+**An existing `SkyRenderCache` (or `CharacterViewerCache`, the folder's name before the library's rename) beside an older build is no longer read or written.** Nothing
 deletes it for you, because it sits inside your binaries and this tool does not delete things it
 did not create; remove it by hand when you want the space back.
 
@@ -743,8 +931,8 @@ For the life of the cell it keeps:
 The static scene is keyed on the prepared cell identity (the record-walk key above) and on every
 input that decides its geometry or materials without depending on the camera: each reference's
 mesh, placement, scale, highlight, marker, BOS and state labels; the terrain patches and layers; the
-coverings; `--fx` and `--fx-static`; `--cull-above` (the cut is applied before upload);
-`--ref-surface` and its opacity; and the `VP_LAYER_ONLY`, `VP_LAYER_SOLID` and `VP_FXSTATIC_EMIT`
+coverings; `--fx` and `--no-fx`; `--cull-above` (the cut is applied before upload);
+`--ref-surface` and its opacity; and the `VP_LAYER_ONLY`, `VP_LAYER_SOLID` and `VP_FX_DOUBLESIDED`
 variables. A shot whose key differs from the retained one disposes that scene and builds a new one,
 so no shot draws a scene built for other inputs.
 
@@ -812,9 +1000,9 @@ worklist cell at cell end, on every exit path: the cell's index and target, its 
 cache's budget and repoll counter at that moment, and how the shot loop ended — `completed`; `stopped` with the exit code
 of the shot that returned nonzero; or `fault` when an exception left the loop. The record describes how the shot loop
 ended, not how the cell tore down: it is written before the cell's graphics owners are disposed, so a teardown failure
-after it shows only in the process exit code, and a reader must check that the two agree. The rendering library exposes
-no accessor for the repoll counter, so it is read from the library's private field; a library without that field gives
-`"counterField": "absent"` and a null value rather than a guess. With `--no-reuse-cell` each cell still gets a line, with
+after it shows only in the process exit code, and a reader must check that the two agree. The repoll counter is read from
+the library's public `ResidentTextureCache.RendersSinceRepoll` (`"counterField": "RendersSinceRepoll"`; earlier builds read
+a private field and named it `"_rendersSinceRepoll"`). With `--no-reuse-cell` each cell still gets a line, with
 the cache fields null. Unset, nothing is written or printed.
 
 ### An asset that was found and could not be read fails the run
@@ -1065,25 +1253,34 @@ flag someone typed, which is why neither is allowed to be silent.
   refs with a PortalBox or Box primitive, which the marker filter drops and the game never draws —
   as a layer of their own, coloured by provenance, hover-identifiable in the window, counted on the
   console whether drawn or not. Its own section below.
-- **Terrain:** winning LAND heightmaps for the target cell ± 1 ring, painted with each quadrant's
-  winning base landscape texture (LTEX → TXST → diffuse, winner-takes-all), tiled ~256 u/repeat.
-  The heightmaps are kept as a queryable field (`terrainHeightAt`, same 128 u quads and diagonal
-  split the mesh is built from) so the overlay can ask what is buried.
-- **Painted layers (roads) — rendered since 2026-08-27, on by default** (`--no-terrain-layers` turns them off). A Skyrim road is not a placed mesh — it is a landscape texture
-  (`LDirtPath01` and friends) painted onto the terrain as a LAND alpha layer with a 17×17
-  per-quadrant opacity map, so base-layer-only rendering drops every road, path and ground blend.
-  Each alpha layer is its own textured sheet over the base, opacity carried in vertex alpha,
-  triangles nobody painted dropped.
-  - They ride the library's **decal** channel: blended decals draw after the distance-sorted
-    transparent set, in insertion order — the one thing coplanar sheets need, since a distance sort
-    between two layers painted on the same triangle is a coin flip and layer order is the author's
-    stated intent. The navmesh sheet joins the same channel, added after them.
+- **Terrain — drawn by SkyRender natively since 2026-10-29** (`SkyRender.World`; `NativeTerrain.cs`
+  rebuilds per-cell `TerrainCell` data from the walk's terrain sheets, so a retained walk feeds it
+  exactly as a fresh one does). Winning LAND heightmaps for the target cell ± 1 ring; each quadrant's
+  winning base texture (LTEX → TXST, winner-takes-all) with its normal map (TXST `NormalOrGloss`), the
+  LAND vertex normals (VNML) and vertex colours (VCLR). One mesh per cell quadrant, opaque, shadowed
+  like any static. The heightmaps are also kept as a queryable field (`terrainHeightAt`, same 128 u
+  quads and diagonal split the mesh is built from) so the overlay can ask what is buried.
+- **Painted layers (roads), on by default** (`--no-terrain-layers` turns them off). A Skyrim road is not
+  a placed mesh: it is a landscape texture (`LDirtPath01` and friends) painted onto the terrain as a
+  LAND alpha layer with a 17×17 per-quadrant opacity map. SkyRender blends up to eight layers per
+  quadrant **in the shader**, in record order, each "over" the result so far by its opacity, with
+  their normal maps blended the same way. Blend rule and tiling (2048/12 u per repeat) were chosen
+  against in-game DevBench captures of Riverwood (SkyRender's RENDERING_PIPELINE.md, Part 6):
+  the earlier hand-built sheets multiplied each layer by
+  its texture alpha, which is what washed overlapping layers out.
   - **Opacity `Position` is decoded x-fastest** (`ly*17 + lx`). Settled by seam continuity across a
     cell boundary, not by eye — a transposed decode still draws a road-shaped ribbon, so a picture
     cannot settle it; a seam can. `VP_ALPHA_DUMP` re-runs that test.
-  - A quadrant with **no base layer** states no ground at all; the stand-in is its most-painted
-    alpha layer.
-- Where no texture resolves at all, terrain falls back to an **off-white slope tint**.
+  - A quadrant with **no base layer**, and a base or alpha layer whose texture reference is zero,
+    draw the engine's default landscape texture, `textures\landscape\dirt02.dds` (UESP's LAND page;
+    OpenMW's ESM4 loader does the same). `VP_TERRAIN_PROMOTE=1` brings back the older stand-in (the
+    quadrant's most-painted alpha layer) for comparison.
+  - An alpha layer with no opacity data (an ATXT that no VTXT follows; Update.esm has some around
+    Riverwood) paints nothing. Reading one used to throw, which dropped the rest of that LAND's
+    layers and left whole quadrants white. `VP_TERRAIN_LAYER_STACK=1` prints the stack of any layer
+    read that still fails.
+- Where an LTEX's texture set does not resolve, the quadrant draws on the white texture (shaded by
+  its normals).
 - **Navmesh overlay:** filled / wire / both; conflict red is reserved for findings and always wins.
   The wire is drawn by viewprobe itself, in its own flat-shaded pass, so an outline is the exact
   palette colour and the hidden layers can drop the depth test. Every edge is walked in short,
@@ -1984,7 +2181,9 @@ scale-1 human) or the console reports the actor `HIDDEN behind scene geometry` a
 ## Effect geometry: two filters, because it comes in two shapes
 
 "Is this an effect?" cannot be answered from the model path — that describes where a file lives,
-not what is in it. Effect geometry is filtered in two places, and `--fx` switches both off:
+not what is in it. Effect geometry is filtered in two places, and `--fx` switches both off. Since
+2026-10-29 the default draws whole-file effects and effect-shader shapes with engine effect shading
+(see *Effect shading* below), so both filters below apply only under `--no-fx`, except kind 2:
 
 - **whole file, at the ref** (`Program.cs`) — the model path contains `effects\`. Beams, mists,
   glows: files that are nothing but effect. Dropped before the scene is assembled.
@@ -2012,46 +2211,63 @@ Two independent tests, both framed as **"this renderer provably cannot shade it"
    hard convention — no legitimate diffuse carries it — and the count is reported separately so the
    rule's reach stays visible rather than assumed.
 
-### `--fx-static` — a frozen fire
+### Effect shading (default since 2026-10-29) — a frozen fire
 
-The middle setting between dropping the fire and drawing it wrong: per-shape effect geometry is
-DRAWN, frozen at the frame the NIF stores. **Off by default** — an additive flame still paints over
-the navmesh behind it, and the navmesh is what this tool is for. Kind 2 stays skipped under it: a
-normal map in the diffuse slot is unshadeable however it is blended.
+Effect-shader shapes are DRAWN by default through SkyRender's engine effect shading
+(`NifMaterialBinder.ApplyEffectMaterial`, see SkyRender's RENDERING_PIPELINE.md, "Effect shaders"),
+frozen at the frame the NIF stores, and whole-file `effects\` refs (light shafts, mists, dust
+beams) are drawn too. `--no-fx` restores the old default — both kinds dropped — for a frame where
+an additive flame must not paint over the navmesh. `--fx-static` is accepted as an explicit
+spelling of the default. Kind 2 (a normal map in the diffuse slot) stays skipped: no blend mode
+makes it shadeable. `--depth-measurement` keeps effect shapes out, as before.
 
-"First frame" costs nothing to obtain: the block's stored values ARE the base state, and the
-`BSEffectShaderPropertyFloatController`s that would animate UV/alpha are simply never run.
+"First frame" costs nothing: the block's stored values ARE the base state, and the
+`BSEffectShaderProperty*Controller`s that would animate UV, alpha and colour are never run.
 
-Three of the four ingredients were already present, which is why this was cheap:
+What the shading does, per the engine's effect pixel shader (Community Shaders' `Effect.hlsl`):
+source texture × `baseColor` × vertex colour; with the greyscale-to-palette flags the colour is
+`baseColorScale × palette(source.g, baseColor.r)` and the alpha `palette(source.a, alpha).a` from
+`BSEffectShaderProperty.greyscaleTexture` — a fire's orange lives in that palette, and `baseColor.r`
+picks the ROW (vanilla flames sit near 0.2, the dark-red-to-white row of `gradfireexplosion.dds`);
+view-angle falloff; the material's own depth-test / depth-write / double-sided flags; the
+`NiAlphaProperty` blend (`6->0` additive for flames). Billboard sprites (`NiBillboardNode`) are
+turned toward the camera every draw, as the engine does (SkyRender `GlRenderer.Billboards`, per
+billboard mode; viewprobe hands it the billboard node's frame placed with the ref), and then follow
+their own double-sided flag; `VP_NO_BILLBOARD=1` draws them in their authored pose, double-sided. Soft-effect depth fades need the SSAO prepass, which viewprobe leaves off,
+so soft effects draw hard-edged.
 
-- **Geometry** — flame quads are real `BSTriShape`/`BSLODTriShape`.
-- **Texture** — already resolving: nifly's `GetTexturePathByIndex` maps slot 0 to
-  `BSEffectShaderProperty.sourceTexture`.
-- **Blend state** — `NiAlphaProperty` is a separate block, so the builder reads it fine: `6->0` =
-  SRC_ALPHA → ONE, additive, depth-write off. Additive is order-independent, so no sorting work.
-- **Missing:** the material, plus three smaller things:
-  1. `DstBlendIndex` was never copied to `GlMesh` (only `Src`), so it kept its default
-     INV_SRC_ALPHA and every additive shape in the game was composited as ordinary alpha blending.
-     Invisible on solid geometry, fatal for a flame.
-  2. `BSEffectShaderProperty` was never read — now `EffectBaseColor` / `EffectBaseColorScale` /
-     `EffectBaseColorAlpha` on `BuiltMesh`.
-  3. **Effect atlases are commonly greyscale.** A fire atlas is white flame shapes and the orange
-     lives entirely in `baseColor`, so drawn with a white emissive the flames come out as white
-     ghosts however bright you make them.
-  4. `SLSF2_Double_Sided` lives on the shader block the builder never reads, so effect quads arrive
-     single-sided and half a flame rosette is back-face culled. `--fx-static` forces double-sided.
+Checked against in-game captures (vanilla Bannered Mare kitchen hearth,
+`S:\Dev\skyrender-split\_ingame\shaderflags_20261029-021047\compare_*.jpg`): flame colour and placement
+match; flame SHAPE is one frozen atlas frame at the authored angle.
 
-**Intensity.** `baseColorScale` is an HDR number the engine tonemaps and viewprobe cannot, so it
-clips — but it clips *along the baseColor hue*, which is what a fire core looks like anyway. A
-hand-swept ladder (×1 invisible, ×2 faint, ×4 legible, ×8 right) landed on the authored value,
-which is the reason to use the author's number rather than a chosen constant.
+Billboards, against the same captures
+(`S:\Dev\skyrender-split\_ingame\billboard_20261029-085750\cmp_{I,J,K,L}_billboard.jpg`): the
+kitchen hearth's right-hand flame, a sliver in the authored pose from the close-up, is now a full
+flame where the game has one, and both flame masses show from the side.
 
-**Limits.** It is a stand-in, not the effect pipeline: the shader computes
-`albedo * (diffuse + emissive)`, not `source * baseColor * baseColorScale`, so the result is paler
-and less saturated than the game's. There is no billboarding — `NiBillboardNode` quads draw at their
-authored angles rather than facing the camera (viewprobe *could* compute this; it knows the camera
-before it builds the scene). And **particle systems can never be drawn**: a `NiParticleSystem` at
-rest has zero live particles, so there is no first frame — no sparks, no smoke plume, no glow point.
+**Limits.** No animation; and **particle systems can never be drawn**: a
+`NiParticleSystem` at rest has zero live particles, so there is no first frame — no sparks, no smoke
+plume, and vanilla `Campfire01Burning.nif` (the Bannered Mare's central pit) shows only its ember
+glow. Heat-shimmer planes are lighting shapes with a normal map in slot 0 (kind 2) and stay skipped.
+
+### Emissive and glow maps (lighting shapes)
+
+Since 2026-10-29 a lighting-shader shape with `SLSF1_Own_Emit` draws its emissive term
+(`emissiveColor × emissiveMultiple`, absorbed by the albedo), modulated by the slot-2 glow map
+under `SLSF2_Glow_Map` on non-skin shader types: candle wax, chandelier chains, enchanted gear.
+Shapes with `SLSF1_External_Emittance` (interior windows, whose glow the engine takes from the
+cell's window light) stay unlit, as before. The console reports `emissive shapes: N`. The
+highlight and occlusion washes that ride the same term save and restore these settings.
+
+### Environment maps (lighting shapes)
+
+Since 2026-10-29 a lighting-shader shape with `SLSF1_Environment_Mapping` (or
+`SLSF1_Eye_Environment_Mapping`) and a slot-4 texture draws its reflection: the cube map (or a
+2D fallback), the slot-5 mask and the NIF's `envMapScale` / `eyeCubemapScale`, through SkyRender's
+environment-mapping stage (looked up in game axes, scaled by the light reaching the surface).
+Metal fittings, glass, ice, polished stone. Before this, statics never bound slot 4 and
+`NormalizeMeshes` dropped the two scales. The console reports `env-mapped shapes: N`;
+`VP_NO_ENVMAP=1` leaves them off. Never under `--depth-measurement`.
 
 ---
 
@@ -3616,19 +3832,14 @@ cell's structure.
 - Terrain beyond the ±1-cell ring doesn't exist → distant hills show as sky or the off-white
   fallback at frame edges. Ring radius is hardcoded. Small worldspaces show bare sky where the
   worldspace itself ends.
-- The off-white fallback is keyed on "no base texture resolved", not on distance, so a near-field
-  untextured quadrant reads as a bright slab in the foreground.
+- A quadrant whose base texture does not resolve draws white, which reads as a bright slab in the
+  foreground.
 - The behind-geometry test still carries a little slack, so a navmesh a unit or two behind a surface
   is attributed to the wrong dash CATEGORY. With both categories dashed (the default) that has no
   visual effect at all — but it does show up in the counts, and it decides what a single
   `--no-nav-*` toggle suppresses.
-- Painted layers composite as N separately-lit transparent sheets, not as one weighted blend the way
-  the engine does it. Where four or five overlap the result washes out. Baking the layers into one
-  per-cell texture on the CPU would fix that and remove the MSAA non-determinism with it.
-- Layer sheets are coplanar with the base and rely on LEQUAL depth; not z-fight-proof if the base
-  and layer vertices are ever computed differently.
-- Terrain vertex colours (LAND `VertexColors`) are read by the API but not applied. The 256 u/repeat
-  tiling is an eyeballed constant.
+- The terrain tiling (2048/12 u per repeat) and the layer blend rule are empirical matches to
+  in-game captures, not documented engine constants.
 - `--nav both` drops the fill to alpha 0.16, which is present in the data but invisible in the
   picture: measured against `--nav wire` it differs on ~31% of pixels by at most 6/255. Effectively
   a synonym for `wire`.
@@ -3642,8 +3853,8 @@ cell's structure.
 
 ### Water (`--no-water` to drop)
 
-One grid per loaded cell that has water, at that cell's own surface height, depth-tested and never
-depth-writing. A GRID, not a quad: the shallow→deep colour is a function of the real distance down
+One grid per loaded cell that has water, at that cell's own surface height, built and drawn by
+SkyRender (`WorldMeshBuilder.BuildWater`). A GRID, not a quad: the shallow→deep colour is a function of the real distance down
 to the LAND underneath, so a shoreline needs vertices along it to shade against.
 
 Height follows the engine's precedence — `CELL.WaterHeight` when the cell states one, the
@@ -3703,23 +3914,36 @@ that is a refraction effect this renderer cannot do honestly.
 
 Honest divergence, stated rather than buried: in the engine the driving factor is camera distance
 and fog, not depth to the bottom. Depth is used here because this renders floor plans and site
-pictures, where "shallow reads lighter than deep" is the readable, camera-independent behaviour,
-and because a camera-distance ramp would bake into vertex colours and freeze at the entry camera.
+pictures, where "shallow reads lighter than deep" is the readable, camera-independent behaviour.
 
-Opaque water joins the OPAQUE pass and writes depth. Not tidiness — it fixed a layering bug the
-opaque default exposed: terrain paint layers ride the DECAL channel, and decals draw AFTER the
-distance-sorted blend set, so while water was blended the roads and ground blends composited
-straight over the river as quadrant-shaped rectangles of differing tint. (Consequence worth knowing:
-`--pick` over water now reports the water surface, where a blended one used to report the bed.)
+Opaque water joins the OPAQUE pass and writes depth. (Consequence worth knowing: `--pick` over water
+reports the water surface, where a blended one used to report the bed.)
 
-Colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
+**Since 2026-10-29 the engine's own terms are used** (SkyRender RENDERING_PIPELINE.md, "Water"; set
+`VP_WATER_LEGACY=1` for the earlier opaque picture described below). The WATR's above-water fog
+(near / far / amount) gives the body colour (shallow to deep by depth / far) and the opacity (the
+shader's refraction weight, so a ford shows its bed and deep water closes up by about 150 units);
+the reflection is the sky, mixed over the lit body by `lerp(1, fresnel, distanceFactor)`, which is
+Fresnel near the camera and a mirror beyond 8192 units for a river whose noise falloff is ~4000.
+The Riverwood aerial's river reads as the sky in game; it does here too, at the sky colour given.
+
+**Per pixel (default since the same night):** the depth is measured along each pixel's view ray
+against SkyRender's depth prepass of the opaque scene (`WaterMaterial.PerPixelDepth`), not
+vertically at the 85-unit grid vertices, and the composition is the engine's: far away the river is
+all reflection with the bed hidden (the high aerial now draws an opaque river, as the game does),
+near the camera the bed shows by the refraction weight. The WATR's sun specular (power, magnitude,
+depth specular lighting) adds the sun glints. `VP_WATER_VERTEX=1` keeps the per-vertex path.
+Use `--ring visible` for water close-ups: a river cell outside the target's 3x3 has no terrain, and
+water over an empty cell reads as deep (opaque) water.
+
+Earlier: colour is `lerp(ShallowColor, DeepColor)` by real depth, plus a sky term reflected off WATR's own
 `ReflectionColor` and weighted by **Schlick Fresnel with `WaterFresnel` as F0**. That replaced a flat
 `lerp(body, sky, WaterReflectivity)` which mixed 40% pale sky into every vertex regardless of angle:
 the water drew correctly and simply did not READ as water — a failure mode worth naming, because it
-looks exactly like "no water was drawn". Camera-dependent and therefore baked at the ENTRY camera, like the rest of this
-renderer's view-dependent overlay work — exact for a static render, frozen in the fly-through.
+looks exactly like "no water was drawn". The Fresnel term is evaluated in SkyRender's vertex shader
+from the live camera, so it also follows the camera in the fly-through.
 
-Not modelled: no reflection or refraction buffer, no flow, no sun sparkle.
+Not modelled: no reflection or refraction buffer (the reflection is one sky colour), no flow, one noise layer of three.
 
 ### Projected coverings — MATO (`--no-coverings` to drop)
 
@@ -3732,7 +3956,26 @@ construction against the whole modeled record library — Static is the only typ
 `FormLink<IMaterialObjectGetter>` — so coverings land on statics and nothing else, and a bare patch
 on a non-STAT is correct rather than a gap.
 
-Each covered shape gets a second shell sharing its triangles, per SHAPE not per ref, because
+**Single-pass materials (the `…1P` snow on every mountain, rock and roof) draw inside the base
+shape's own shader since 2026-10-29**, through SkyRender's projected material (its
+RENDERING_PIPELINE.md, Stage 2b): coverage per PIXEL against the normal-mapped normal, broken by
+the engine's own coverage noise, with the engine's global `textures\effects\projecteddiffuse.dds`
+as the albedo times `SinglePassColor`. Noise and diffuse are planar in world X/Y at
+`1 / NoiseUvScale` per unit (diffuse further scaled by `fProjectedUVDiffuseNormalTilingScale` from
+the profile's SkyrimPrefs.ini; `bEnableProjecteUVDiffuseNormals=0` selects the flat-colour path),
+and the direction is world up — the single-pass path never reads the MATO's projection vector.
+That replaced the shell below for single-pass materials, which smeared on the Riverwood
+mountains: per-vertex coverage interpolated across faces thousands of units wide, with the
+snowmatshader texture planar-projected and so stretched down every steep face. The scale / bias
+falloff is the engine's (`GlMesh.ProjectedParamsFor`); the STAT's MaxAngle is NOT folded in by
+default, because the reverse-engineered fold under-covered against the in-game close-ups
+(`_ingame/mountain_snow_20261029-012329`, judged by eye); `VP_PROJ_MAXANGLE=stat` restores it. The
+census line reports single-pass shapes and shells separately. Still short of the game: covered
+snow reads darker and greyer than in game (its albedo is right by the engine's numbers; the
+gap is lighting), and Community Shaders' triplanar sampling is not modelled.
+
+Multi-pass materials, and single-pass ones whose global textures cannot be loaded, keep the shell:
+each covered shape gets a second shell sharing its triangles, per SHAPE not per ref, because
 coverage is a function of each face's normal — one mesh can have a snowed roof and bare undersides
 and that difference IS the effect. Coverage is `d = dot(faceNormal, −ProjectionVector)`, hard-gated
 by the STAT's `MaxAngle`, then ramped. **The bias/scale ramp is FITTED, not engine-exact**, and the

@@ -1,5 +1,6 @@
 using System.Numerics;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 

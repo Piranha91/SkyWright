@@ -1,4 +1,5 @@
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 
 namespace ViewProbe;
 
@@ -37,11 +38,8 @@ internal sealed class MeshMaterialState
     int DstBlendIndex;
     bool IsHairTintShader;
     bool IsEye;
-    int BipedSlots;
-    int HidesSlots;
-    int SlotDrawPriority;
-    string? OverrideKey;
-    bool HiddenBySlotOccupancy;
+    bool IsHiddenByHost;
+    object? HostData;
     bool ShowWireframe;
     bool RenderAsWireframeFallback;
     System.Numerics.Vector3? WireframeColorOverride;
@@ -86,6 +84,31 @@ internal sealed class MeshMaterialState
     float SkinTintAlpha;
     bool IsFaceWithEmptyDetailSlot;
     AssetSource? MeshSource;
+    bool HasProjectedMaterial;
+    System.Numerics.Vector3 ProjectedDirection;
+    System.Numerics.Vector4 ProjectedParams;
+    System.Numerics.Vector3 ProjectedColor;
+    float ProjectedDiffuseTiling;
+    int ProjectedNoiseTexture;
+    int ProjectedDiffuseTexture;
+    bool IsEffectShader;
+    System.Numerics.Vector4 EffectBaseColor;
+    float EffectBaseColorScale;
+    float EffectLightingInfluence;
+    bool EffectHasSourceTexture;
+    int EffectGreyscaleTexture;
+    bool EffectGreyscaleToColor;
+    bool EffectGreyscaleToAlpha;
+    bool EffectUseFalloff;
+    System.Numerics.Vector4 EffectFalloff;
+    float EffectSoftFalloffDepth;
+    bool EffectClampS;
+    bool EffectClampT;
+    bool EffectDepthTest;
+    bool EffectLit;
+    int EffectBillboard;
+    int BillboardMode;
+    OpenTK.Mathematics.Matrix4? BillboardFrame;
 
     internal static MeshMaterialState Capture(GlMesh m) => new()
     {
@@ -117,11 +140,8 @@ internal sealed class MeshMaterialState
         DstBlendIndex = m.DstBlendIndex,
         IsHairTintShader = m.IsHairTintShader,
         IsEye = m.IsEye,
-        BipedSlots = m.BipedSlots,
-        HidesSlots = m.HidesSlots,
-        SlotDrawPriority = m.SlotDrawPriority,
-        OverrideKey = m.OverrideKey,
-        HiddenBySlotOccupancy = m.HiddenBySlotOccupancy,
+        IsHiddenByHost = m.IsHiddenByHost,
+        HostData = m.HostData,
         ShowWireframe = m.ShowWireframe,
         RenderAsWireframeFallback = m.RenderAsWireframeFallback,
         WireframeColorOverride = m.WireframeColorOverride,
@@ -166,6 +186,31 @@ internal sealed class MeshMaterialState
         SkinTintAlpha = m.SkinTintAlpha,
         IsFaceWithEmptyDetailSlot = m.IsFaceWithEmptyDetailSlot,
         MeshSource = m.MeshSource,
+        HasProjectedMaterial = m.HasProjectedMaterial,
+        ProjectedDirection = m.ProjectedDirection,
+        ProjectedParams = m.ProjectedParams,
+        ProjectedColor = m.ProjectedColor,
+        ProjectedDiffuseTiling = m.ProjectedDiffuseTiling,
+        ProjectedNoiseTexture = m.ProjectedNoiseTexture,
+        ProjectedDiffuseTexture = m.ProjectedDiffuseTexture,
+        IsEffectShader = m.IsEffectShader,
+        EffectBaseColor = m.EffectBaseColor,
+        EffectBaseColorScale = m.EffectBaseColorScale,
+        EffectLightingInfluence = m.EffectLightingInfluence,
+        EffectHasSourceTexture = m.EffectHasSourceTexture,
+        EffectGreyscaleTexture = m.EffectGreyscaleTexture,
+        EffectGreyscaleToColor = m.EffectGreyscaleToColor,
+        EffectGreyscaleToAlpha = m.EffectGreyscaleToAlpha,
+        EffectUseFalloff = m.EffectUseFalloff,
+        EffectFalloff = m.EffectFalloff,
+        EffectSoftFalloffDepth = m.EffectSoftFalloffDepth,
+        EffectClampS = m.EffectClampS,
+        EffectClampT = m.EffectClampT,
+        EffectDepthTest = m.EffectDepthTest,
+        EffectLit = m.EffectLit,
+        EffectBillboard = m.EffectBillboard,
+        BillboardMode = m.BillboardMode,
+        BillboardFrame = m.BillboardFrame,
     };
 
     internal void ApplyTo(GlMesh m)
@@ -198,11 +243,8 @@ internal sealed class MeshMaterialState
         m.DstBlendIndex = DstBlendIndex;
         m.IsHairTintShader = IsHairTintShader;
         m.IsEye = IsEye;
-        m.BipedSlots = BipedSlots;
-        m.HidesSlots = HidesSlots;
-        m.SlotDrawPriority = SlotDrawPriority;
-        m.OverrideKey = OverrideKey;
-        m.HiddenBySlotOccupancy = HiddenBySlotOccupancy;
+        m.IsHiddenByHost = IsHiddenByHost;
+        m.HostData = HostData;
         m.ShowWireframe = ShowWireframe;
         m.RenderAsWireframeFallback = RenderAsWireframeFallback;
         m.WireframeColorOverride = WireframeColorOverride;
@@ -246,8 +288,33 @@ internal sealed class MeshMaterialState
         m.IsSkinShape = IsSkinShape;
         m.SkinTintAlpha = SkinTintAlpha;
         m.IsFaceWithEmptyDetailSlot = IsFaceWithEmptyDetailSlot;
+        m.HasProjectedMaterial = HasProjectedMaterial;
+        m.ProjectedDirection = ProjectedDirection;
+        m.ProjectedParams = ProjectedParams;
+        m.ProjectedColor = ProjectedColor;
+        m.ProjectedDiffuseTiling = ProjectedDiffuseTiling;
+        m.ProjectedNoiseTexture = ProjectedNoiseTexture;
+        m.ProjectedDiffuseTexture = ProjectedDiffuseTexture;
+        m.IsEffectShader = IsEffectShader;
+        m.EffectBaseColor = EffectBaseColor;
+        m.EffectBaseColorScale = EffectBaseColorScale;
+        m.EffectLightingInfluence = EffectLightingInfluence;
+        m.EffectHasSourceTexture = EffectHasSourceTexture;
+        m.EffectGreyscaleTexture = EffectGreyscaleTexture;
+        m.EffectGreyscaleToColor = EffectGreyscaleToColor;
+        m.EffectGreyscaleToAlpha = EffectGreyscaleToAlpha;
+        m.EffectUseFalloff = EffectUseFalloff;
+        m.EffectFalloff = EffectFalloff;
+        m.EffectSoftFalloffDepth = EffectSoftFalloffDepth;
+        m.EffectClampS = EffectClampS;
+        m.EffectClampT = EffectClampT;
+        m.EffectDepthTest = EffectDepthTest;
+        m.EffectLit = EffectLit;
+        m.EffectBillboard = EffectBillboard;
+        m.BillboardMode = BillboardMode;
+        m.BillboardFrame = BillboardFrame;
         m.MeshSource = MeshSource;
     }
 
-    internal const int PropertyCount = 77;
+    internal const int PropertyCount = 74;
 }

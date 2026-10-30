@@ -9,9 +9,6 @@
     <NoWarn>CA1416</NoWarn>
     <UseWPF>true</UseWPF>
   </PropertyGroup>
-  <PropertyGroup>
-    <CharacterViewerRenderingPath Condition="'$(CharacterViewerRenderingPath)' == ''">..\..\..\SynthEBD\CharacterViewer.Rendering\CharacterViewer.Rendering.csproj</CharacterViewerRenderingPath>
-  </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\_shared\LastSighting.cs" Link="LastSighting.cs" />
     <Compile Include="..\_shared\MovedRefFixture.cs" Link="MovedRefFixture.cs" />
@@ -20,12 +17,9 @@
     <Compile Include="..\_shared\FloorReachFixture.cs" Link="FloorReachFixture.cs" />
     <Using Include="System.IO" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
-    <!-- CharacterViewer.Rendering lives in a SEPARATE repo. This was an absolute drive path, which
-         built on exactly one machine. Default assumes the two repos are siblings; override with
-         -p:CharacterViewerRenderingPath=... or the environment variable of the same name when they
-         are not. It is also published as a NuGet package, so a consumer who does not want the
-         source checkout can swap this ProjectReference for a PackageReference. -->
-    <ProjectReference Include="$(CharacterViewerRenderingPath)" />
+    <!-- SkyRender.Character (which brings core SkyRender; viewprobe uses both) is the published
+         NuGet package, restored from nuget.org. -->
+    <PackageReference Include="SkyRender.Character" Version="3.0.1" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
   </ItemGroup>
   <ItemGroup>

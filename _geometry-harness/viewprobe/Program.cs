@@ -46,7 +46,7 @@ using Image = SixLabors.ImageSharp.Image;
 // uploads, which change captured pixels (mostly normal-mapped surfaces and alpha edges) while
 // geometry, depth and masks stay exact. Retained captures, frozen hashes and receipts were all made
 // on the decoded route, and the configuration fingerprint does not yet record the texture policy,
-// so viewprobe stays decoded until it does. The library reads this once per CharacterPreviewCache
+// so viewprobe stays decoded until it does. The library reads this once per AssetCache
 // construction, so it must be set before the first scene is built. An explicitly set value wins,
 // which is how a run opts in to compressed uploads deliberately.
 if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CVR_DDS_MAX_FINAL_MIP_DIMENSION")))
@@ -175,6 +175,7 @@ Instance = HarnessTarget.Require(Instance, "MO2 instance directory", "instance",
 GamePath = HarnessTarget.Require(GamePath, "game directory", "game", "--game");
 profileName = HarnessTarget.Require(profileName, "MO2 profile name", "profile", "--profile");
 string profileDir = Path.Combine(Instance, "profiles", profileName);
+ViewProbe.GrassLayer.ProfileDir = profileDir;   // grass reads the profile's [Grass] INI settings (GrassLayer.cs)
 string modsDir = Path.Combine(Instance, "mods");
 string overwriteDir = Path.Combine(Instance, "overwrite");
 string dataDir = Path.Combine(GamePath, "Data");
@@ -255,14 +256,14 @@ float fov = 65f;                              // viewprobe's own default (the VE
 // values off BSLightingShaderProperty ONLY — an effect-shader shape arrives fully lit and opaque.
 // --fx switches BOTH filters off.
 bool keepFx = false;
-// --fx-static is the middle setting between "drop the fire" and "draw it wrong": effect-shader
-// shapes inside otherwise-solid meshes are DRAWN, frozen at the frame the NIF stores, additive and
-// never writing depth. It rescues only the effect-shader kind — a normal map in the diffuse slot
-// stays skipped, since no blend mode makes that shadeable. It does NOT bring back whole-file
-// `effects\` refs either; those are ambient dust beams and mists, which is a different question.
-// Off by default: an additive flame still paints over the navmesh behind it, and the navmesh is
-// what this tool is for.
-bool fxStatic = false;
+// fxStatic (the default since 2026-10-29; --no-fx turns it off): effect-shader shapes are DRAWN
+// through SkyRender's engine effect shading, frozen at the frame the NIF stores — flames, smoke,
+// light shafts and mists, including whole-file `effects\` refs. It covers only the effect-shader
+// kind: a normal map in the diffuse slot stays skipped, since no blend mode makes that shadeable.
+// --no-fx restores the old default (both kinds and `effects\` files dropped), for a frame where an
+// additive flame must not paint over the navmesh. --fx-static is kept as an explicit spelling of
+// the default.
+bool fxStatic = true;
 // Navmesh render mode (textured mode): filled = the translucent green sheet; wire = transparent
 // triangles with SOLID outlines so the surface underneath stays readable; both = faint fill +
 // outlines; off = none. --no-nav remains an alias for off.
@@ -398,6 +399,14 @@ bool drawCoverings = true;
 // layer for the cell under examination, same scoping as the cell outline. --no-ring-refs goes
 // back to target-cell-only refs (the old, cheaper behaviour). Interiors have no ring.
 bool ringRefs = true;
+// --ring visible|N (VisibleCells.cs): the loaded exterior cells. Unset (or 1) is the target and its ±1 ring, as above,
+// through exactly the old code. N > 1 loads the square of radius N; visible loads every cell whose ground the frame can
+// see (rays through the frame against each cell's LAND height band), out to --ring-reach cells from the eye's cell and at
+// most --ring-cap cells, the target's 3x3 always included. Terrain, water and full references are loaded in all of them,
+// beyond the game's ±2 grid too (the game draws LOD there); the console says how many cells and why any were cut.
+string ringMode = "1";
+int ringReach = ViewProbe.VisibleCells.DefaultReach, ringCap = ViewProbe.VisibleCells.DefaultCap;
+HashSet<(int X, int Y)>? visibleSet = null;   // per shot: null = the ±1 ring
 // --large-refs-child union|none: which large-reference list a CHILD worldspace (a city) uses (WinningRefs.cs). union,
 // the default, is what lane L read in game: the city's own listed references loaded beyond ring 2.
 bool largeChildUnion = true;
@@ -616,6 +625,7 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--fov" && i + 1 < args.Length) fov = float.Parse(args[++i]);
     else if (args[i] == "--fx") keepFx = true;
     else if (args[i] == "--fx-static") fxStatic = true;
+    else if (args[i] == "--no-fx") fxStatic = false;
     else if (args[i] == "--nav" && i + 1 < args.Length) { navMode = args[++i].ToLowerInvariant(); navModeExplicit = true; }
     else if (args[i] == "--conflicts" && i + 1 < args.Length) conflictsPath = args[++i];
     else if (args[i] == "--red" && i + 1 < args.Length) redSpecs.Add(args[++i]);
@@ -634,8 +644,20 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--no-water") drawWater = false;
     else if (args[i] == "--no-coverings") drawCoverings = false;
     else if (args[i] == "--no-terrain-layers") drawTerrainLayers = false;
+    else if (args[i] == "--weather" && i + 1 < args.Length) ViewProbe.SceneWeather.Requested = args[++i];
+    else if (args[i] == "--weather-slot" && i + 1 < args.Length) ViewProbe.SceneWeather.RequestedSlot = args[++i].ToLowerInvariant();
+    else if (args[i] == "--no-imagespace") ViewProbe.SceneWeather.ImageSpaceOff = true;
+    else if (args[i] == "--no-weather") { ViewProbe.SceneWeather.Auto = false; ViewProbe.SceneWeather.Requested = null; }
+    else if (args[i] == "--cell-lighting") ViewProbe.CellLighting.Requested = true;
+    else if (args[i] == "--no-cell-lighting") ViewProbe.CellLighting.Requested = false;
+    else if (args[i] == "--shadows") ViewProbe.SceneWeather.ShadowsRequested = true;
+    else if (args[i] == "--no-shadows") ViewProbe.SceneWeather.ShadowsRequested = false;
+    else if (args[i] == "--shadow-distance" && i + 1 < args.Length) ViewProbe.SceneWeather.ShadowDistance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+    else if (args[i] == "--adapt-lum" && i + 1 < args.Length) ViewProbe.SceneWeather.AdaptedLuminance = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+    else if (args[i] == "--game-hour" && i + 1 < args.Length) ViewProbe.SceneWeather.GameHour = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
     else if (args[i] == "--sky" && i + 1 < args.Length)
     {
+        ViewProbe.SceneWeather.SkyGiven = true;
         var p = args[++i].Split(',');
         if (p.Length == 3)
         {
@@ -653,6 +675,25 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--find-ltex" && i + 1 < args.Length) findLtex = args[++i];
     else if (args[i] == "--no-cell-outline") cellOutline = false;
     else if (args[i] == "--no-ring-refs") ringRefs = false;
+    else if (args[i] == "--lod") ViewProbe.DistantLodLayer.Requested = true;
+    else if (args[i] == "--no-grass") ViewProbe.GrassLayer.Requested = false;
+    else if (args[i] == "--grass") ViewProbe.GrassLayer.Requested = true;
+    else if (args[i] == "--ring" && i + 1 < args.Length)
+    {
+        ringMode = args[++i].ToLowerInvariant();
+        if (ringMode == "auto") ringMode = "visible";
+        if (ringMode != "visible" && !(int.TryParse(ringMode, out var rn) && rn is >= 1 and <= 16))
+        { Console.Error.WriteLine($"--ring takes visible (or auto) or a radius 1..16, not '{ringMode}'."); return 2; }
+        if (ringMode != "visible") ringMode = int.Parse(ringMode, System.Globalization.CultureInfo.InvariantCulture).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+    else if (args[i] is "--ring-reach" or "--ring-cap")
+    {
+        var opt = args[i];
+        int lim = opt == "--ring-reach" ? 32 : 2000;
+        if (i + 1 >= args.Length || !int.TryParse(args[++i], out var rv) || rv < 1 || rv > lim)
+        { Console.Error.WriteLine($"{opt} takes a whole number in 1..{lim}."); return 2; }
+        if (opt == "--ring-reach") ringReach = rv; else ringCap = rv;
+    }
     else if (args[i] == "--large-refs-child" && i + 1 < args.Length)
     {
         var v = args[++i];
@@ -855,6 +896,19 @@ for (int i = argStart; i < args.Length; i++)
                               + "not `--eye=X,Y,Z` — the second is not a flag this reads.");
         return 2;
     }
+}
+if (ringMode != "1" && !ringRefs)
+{
+    Console.Error.WriteLine($"--ring {ringMode} widens the loaded references and --no-ring-refs takes them away; pass one.");
+    return 2;
+}
+// A retained walk (--reuse-cell, on by default for a static worklist) is shared by every shot of a cell, and the visible
+// set follows each shot's camera, so the two cannot be combined: refused rather than drawing shot 2 with shot 1's cells.
+if (ringMode == "visible" && worklistPaths.Count > 0 && reuseCell && !interactiveMode)
+{
+    Console.Error.WriteLine("--ring visible chooses the loaded cells from each shot's camera, so a worklist cannot share one walk "
+                          + "across its shots: pass --no-reuse-cell with it (every shot then walks the order for its own cells).");
+    return 2;
 }
 if (reuseCellExplicit && noReuseCell)
 {
@@ -1332,6 +1386,7 @@ var insideMesh = new Dictionary<string, (Aabb? Bounds, TriangleSoup? Soup)>(Stri
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
 var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
+var txstNormal = new Dictionary<FormKey, string>();
 
 // ---- projected coverings (MATO) and water, both winner-takes-all over the load-order walk ----
 // Values are COPIED out of the record getters, never referenced: every mod overlay is opened in a
@@ -1339,11 +1394,14 @@ var txstDiffuse = new Dictionary<FormKey, string>();
 // happens to work until it doesn't.
 var baseMato = new Dictionary<FormKey, (FormKey Mato, float MaxAngle)>();
 var matoRec = new Dictionary<FormKey, (string Ed, System.Numerics.Vector3 Projection, float Bias, float Scale,
-                                       float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model)>();
+                                       float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model,
+                                       float NoiseUv)>();
 var watrRec = new Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
                                        System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep,
                                        System.Numerics.Vector3 Reflect, float Reflectivity,
-                                       byte Opacity, float Fresnel)>();
+                                       byte Opacity, float Fresnel,
+                                       float FogNear, float FogFar, float FogAmount, float NoiseFalloff,
+                                       System.Numerics.Vector3 Spec)>();   // (sun specular power, sun specular magnitude, depth specular lighting)
 // Per-cell water, keyed by grid point, plus the worldspace fallbacks the cells defer to.
 var cellWater = new Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)>();
 // --stations only. WHICH cell each grid square is (the pose names the cell the STATION stands in,
@@ -1587,7 +1645,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     navVersionPlugins.Clear(); foreach (var plugin in cliNavVersionPlugins) navVersionPlugins.Add(plugin);
     refCellOf.Clear();
     baseMesh.Clear(); baseIsMarker.Clear(); baseEditorId.Clear(); baseType.Clear(); baseObnd.Clear();
-    ltexToTxst.Clear(); ltexEditorId.Clear(); txstDiffuse.Clear();
+    ltexToTxst.Clear(); ltexEditorId.Clear(); txstDiffuse.Clear(); txstNormal.Clear();
     baseMato.Clear(); matoRec.Clear(); watrRec.Clear(); cellWater.Clear();
     wsWater = null; wsDefaultWaterHeight = float.MaxValue;
     cellWaterTruth.Clear(); wsWaterTruth = null; wsDefaultWaterHeightTruth = float.MaxValue;
@@ -1596,6 +1654,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     enableMemo.Clear();
     targetWorldspace = FormKey.Null; targetGrid = null;
     cellKey = null; cellLabel = cellTarget; interior = false;
+    visibleSet = null;
     sw.Restart();
 
     // The shot's route, or the command line's. A LOCAL, like the shot spec below. navMode and
@@ -1704,6 +1763,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     {
         yield return cellTarget.Trim();
         yield return $"ring={ringRefs};stations={stationsSpec is not null};terrain={drawTerrain};water={drawWater};stateRecords={stateSpec is not null}";
+        if (ringMode != "1") yield return $"ringMode={ringMode};reach={ringReach};cap={ringCap}";
         foreach (var x in shotNpcWatch.Order()) yield return "npc:" + x;
         foreach (var x in doorWatchKeys.Order()) yield return "door:" + x;
         foreach (var x in cliNavVersionPlugins.Order(StringComparer.OrdinalIgnoreCase)) yield return "navsource:" + x;
@@ -1792,8 +1852,50 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
 
     // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
     bosFill = bosIdx is not null && bosIdx.RecordsSeen == 0;
+    // --ring visible|N (VisibleCells.cs): the loaded cells, before the walk whose admission rule reads them.
+    if (ringMode != "1" && !interior && targetGrid is { } vtg)
+    {
+        if (ringMode == "visible")
+        {
+            if (eye is not { } vEye)
+            {
+                Console.Error.WriteLine("--ring visible needs the camera before the walk: give --eye X,Y,Z (with --yaw/--pitch or --look X,Y,Z), "
+                                      + "not --eye-ref/--look-ref, which are resolved from the walk it would choose the cells for.");
+                return 2;
+            }
+            if (look is null && lookRef is not null)
+            { Console.Error.WriteLine("--ring visible cannot use --look-ref (resolved after the walk); give --look X,Y,Z or --yaw/--pitch."); return 2; }
+            System.Numerics.Vector3 vLook;
+            if (look is { } lk0) vLook = lk0;
+            else
+            {
+                // The camera rule of the render (first-person block below): 0 = +Y, clockwise; positive pitch looks down.
+                float yr0 = float.DegreesToRadians(yaw ?? 0f), pr0 = float.DegreesToRadians(pitch);
+                vLook = vEye + new System.Numerics.Vector3(MathF.Sin(yr0) * MathF.Cos(pr0), MathF.Cos(yr0) * MathF.Cos(pr0), -MathF.Sin(pr0)) * 512f;
+            }
+            var eyeCell0 = ((int)MathF.Floor(vEye.X / 4096f), (int)MathF.Floor(vEye.Y / 4096f));
+            var bandSw = System.Diagnostics.Stopwatch.StartNew();
+            var bands = ViewProbe.VisibleCells.Bands(order.OrderedPaths, targetWorldspace, eyeCell0, ringReach);
+            var sel = ViewProbe.VisibleCells.Select(vEye, vLook, fov, canvasAspect, vtg, bands, ringReach, ringCap, bandSw.Elapsed.TotalSeconds);
+            visibleSet = sel.Cells;
+            Console.WriteLine(ViewProbe.VisibleCells.Describe(sel, ringReach, ringCap, vtg));
+        }
+        else
+        {
+            int rr = int.Parse(ringMode, System.Globalization.CultureInfo.InvariantCulture);
+            visibleSet = new HashSet<(int X, int Y)>();
+            for (int dx = -rr; dx <= rr; dx++)
+                for (int dy = -rr; dy <= rr; dy++)
+                    visibleSet.Add((vtg.X + dx, vtg.Y + dy));
+            Console.WriteLine($"   ring {rr}: {visibleSet.Count} cells loaded ({2 * rr + 1}x{2 * rr + 1} around the target); full references, terrain and water in all of them"
+                            + (rr > ViewProbe.WinningRefWalk.EdgeRadius ? $", beyond the game's ±{ViewProbe.WinningRefWalk.EdgeRadius} grid too (the game draws LOD there)" : ""));
+        }
+    }
     // The ring edge is measured from the target found above (WinningRefs.cs TrackEdge); interiors have none.
-    if (!interior && targetGrid is { } edgeGrid) winWalk.TrackEdge(targetWorldspace, edgeGrid, ringRefs);
+    if (!interior && targetGrid is { } edgeGrid) { winWalk.TrackEdge(targetWorldspace, edgeGrid, ringRefs); winWalk.SetVisible(visibleSet); }
+    // --lod (DistantLodLayer.cs): the worldspace and the walk's loaded cells, for the LOD drawn beyond them.
+    ViewProbe.DistantLodLayer.Target = !interior && targetGrid is not null ? targetWorldspace : FormKey.Null;
+    ViewProbe.DistantLodLayer.WalkCells = visibleSet;
     ViewProbe.RenderStages.Open(ViewProbe.RenderStages.RecordWalk,
         "the winning state: every plugin, for the refs and navmeshes that win",
         order.OrderedPaths.Count, "plugins");
@@ -1819,20 +1921,42 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var rec in m.EnumerateMajorRecords())
             {
                 if (bosFill) bosIdx!.Note(rec);
+                ViewProbe.CellLighting.Note(rec);   // --cell-lighting: LIGH, LGTM, IMGS and interior XCLL (CellLighting.cs)
                 stationFloor?.NoteBase(rec);   // the station floor reach's base boxes (FloorFeed)
                 // Landscape texture chain: LTEX -> TXST -> diffuse path, winner-takes-all in load
                 // order, so terrain quadrants can be drawn with their real winning textures.
                 if (rec is ILandscapeTextureGetter lt)
                 {
+                    ViewProbe.GrassLayer.NoteLtex(lt);   // its grasses (LTEX GNAM), for the grass layer
                     if (lt.TextureSet.FormKeyNullable is { } ts) ltexToTxst[lt.FormKey] = ts;
                     if (!string.IsNullOrWhiteSpace(lt.EditorID)) ltexEditorId[lt.FormKey] = lt.EditorID!;
                     continue;
                 }
                 if (rec is ITextureSetGetter txst)
-                { if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath; continue; }
+                {
+                    if (!string.IsNullOrWhiteSpace(txst.Diffuse?.GivenPath)) txstDiffuse[txst.FormKey] = txst.Diffuse!.GivenPath;
+                    if (!string.IsNullOrWhiteSpace(txst.NormalOrGloss?.GivenPath)) txstNormal[txst.FormKey] = txst.NormalOrGloss!.GivenPath;
+                    continue;
+                }
                 // WATR — the water body's own colours and wave-noise layers. Values are COPIED
                 // out, never held: the overlay is disposed at the end of this using block, and a
                 // retained getter would read freed memory.
+                // --weather (SceneWeather.cs): the named WTHR, winner-takes-all in load order.
+                if (rec is IImageSpaceGetter imgs) ViewProbe.SceneWeather.NoteImageSpace(imgs);
+                // The sun's path (--weather): the target worldspace's climate and that climate's timing.
+                if (rec is IClimateGetter clmt) ViewProbe.SceneWeather.NoteClimate(clmt);
+                // The exterior's default weather comes from the cell's region (SceneWeather.Resolve).
+                if (rec is IRegionGetter regn) ViewProbe.SceneWeather.NoteRegion(regn);
+                if (rec is ICellGetter wcell && !wcell.Flags.HasFlag(Cell.Flag.IsInteriorCell)) ViewProbe.SceneWeather.NoteCell(wcell);
+                if (rec is IWorldspaceGetter wrld && wrld.FormKey == targetWorldspace) ViewProbe.SceneWeather.WorldClimate = wrld.Climate.FormKeyNullable;
+                if (rec is IWorldspaceGetter wrldAny) ViewProbe.DistantLodLayer.Note(wrldAny);
+                if (rec is IGrassGetter gras) ViewProbe.GrassLayer.NoteGrass(gras);   // GRAS: the grass layer's types (GrassLayer.cs)   // --lod: which LOD files (DistantLodLayer.cs)
+                // Every WTHR is kept; SceneWeather.Resolve picks one once the target is known.
+                if (rec is IWeatherGetter wthr)
+                {
+                    ViewProbe.SceneWeather.NoteWeather(wthr);
+                    continue;
+                }
                 if (rec is IWaterGetter wtr)
                 {
                     watrRec[wtr.FormKey] = (wtr.EditorID ?? wtr.FormKey.ToString(),
@@ -1840,7 +1964,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                             wtr.NoiseLayerOneUvScale,
                                             Rgb(wtr.ShallowColor), Rgb(wtr.DeepColor),
                                             Rgb(wtr.ReflectionColor), wtr.WaterReflectivity,
-                                            wtr.Opacity, wtr.WaterFresnel);
+                                            wtr.Opacity, wtr.WaterFresnel,
+                                            wtr.FogAboveWaterDistanceNearPlane, wtr.FogAboveWaterDistanceFarPlane,
+                                            wtr.FogAboveWaterAmount, wtr.NoiseFalloff,
+                                            new System.Numerics.Vector3(wtr.SpecularSunPower, wtr.SpecularSunSpecularMagnitude,
+                                                                        wtr.DepthSpecularLighting));
                     continue;
                 }
                 // MATO — the projected covering itself (snow, ash, moss). Reached only through
@@ -1853,7 +1981,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                              mato.FalloffBias, mato.FalloffScale, mato.MaterialUvScale,
                                              Rgb(mato.SinglePassColor),
                                              mato.Flags.HasFlag(MaterialObject.Flag.SinglePass),
-                                             mato.Model?.File.GivenPath);
+                                             mato.Model?.File.GivenPath, mato.NoiseUvScale);
                     // NOT continue: MATO is modeled, and the block below wants its model path too.
                 }
                 bool collectedModel = false;
@@ -1922,7 +2050,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 }
                 // Which refs the winning state admits, and where: WinningRefs.cs (persistent refs are
                 // filed for the by-position merge; target and ring cells admit theirs).
-                var (isTarget, inRing) = ViewProbe.WinningRefWalk.Classify(cp, cellKey, interior, ringRefs, targetWorldspace, targetGrid);
+                var (isTarget, inRing) = ViewProbe.WinningRefWalk.Classify(cp, cellKey, interior, ringRefs, targetWorldspace, targetGrid, visibleSet);
                 winWalk.Observe(cp, isTarget, inRing);
                 // The "where is it" tables: deletions, watched NPCs by reference and by base, watched doors (WalkSideTables.cs).
                 ViewProbe.RefWhere.Observe(cp, plgName, whereTables, shotNpcWatch, doorWatchKeys, m.ModKey);
@@ -1985,6 +2113,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         foreach (var x in f.LtexToTxst) ltexToTxst[x.Key] = x.Value;
         foreach (var x in f.LtexEditorIds) ltexEditorId[x.Key] = x.Value;
         foreach (var x in f.TxstDiffuse) txstDiffuse[x.Key] = x.Value;
+        foreach (var x in f.TxstNormal) txstNormal[x.Key] = x.Value;
         foreach (var x in f.BaseMato) baseMato[x.Key] = x.Value;
         foreach (var x in f.Mato) matoRec[x.Key] = x.Value;
         foreach (var x in f.WaterRecords) watrRec[x.Key] = x.Value;
@@ -2029,7 +2158,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             Navigation = navGraph,
             BaseMeshes = new(baseMesh), MarkerBases = baseIsMarker.ToHashSet(),
             BaseEditorIds = new(baseEditorId), BaseTypes = new(baseType), BaseBounds = new(baseObnd),
-            LtexToTxst = new(ltexToTxst), LtexEditorIds = new(ltexEditorId), TxstDiffuse = new(txstDiffuse),
+            LtexToTxst = new(ltexToTxst), LtexEditorIds = new(ltexEditorId), TxstDiffuse = new(txstDiffuse), TxstNormal = new(txstNormal),
             BaseMato = new(baseMato), Mato = new(matoRec), WaterRecords = new(watrRec),
             CellWater = new(), WorldWater = null, WorldDefaultWaterHeight = float.MaxValue,
             CellWaterTruth = new(), WorldWaterTruth = null, WorldDefaultWaterHeightTruth = float.MaxValue,
@@ -2165,12 +2294,12 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         int ringR = ringRefs ? 1 : 0;
         int addedPersist = winWalk.MergePersistent(targetWorldspace, tgp, ringRefs);
         if (addedPersist > 0)
-            Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
+            Console.WriteLine($"   +{addedPersist} persistent worldspace ref(s) inside the rendered {(visibleSet is not null ? $"{visibleSet.Count} cells'" : ringR > 0 ? "3x3 cells'" : "cell's")} bounds (doors live here)");
         if (edgeAdmittedCount > 0)
-            Console.WriteLine($"   +{edgeAdmittedCount} reference(s) anchored two cells out whose bounds enter the loaded 3x3 ({edgePlanesAdmittedCount} occlusion plane(s); "
+            Console.WriteLine($"   +{edgeAdmittedCount} reference(s) anchored {(visibleSet is not null ? "one cell outside the loaded cells whose bounds enter them" : "two cells out whose bounds enter the loaded 3x3")} ({edgePlanesAdmittedCount} occlusion plane(s); "
                             + $"game grid ±{ViewProbe.WinningRefWalk.EdgeRadius}, inferred: uGridsToLoad is unset in the INIs)");
         if (largeAdmittedCount > 0)
-            Console.WriteLine($"   +{largeAdmittedCount} large reference(s) anchored 3-{ViewProbe.WinningRefWalk.LargeRadius} cells out whose bounds enter the loaded 3x3 "
+            Console.WriteLine($"   +{largeAdmittedCount} large reference(s) anchored {(visibleSet is not null ? $"up to {ViewProbe.WinningRefWalk.LargeRadius} cells out, beyond the loaded cells' border, whose bounds enter them" : $"3-{ViewProbe.WinningRefWalk.LargeRadius} cells out whose bounds enter the loaded 3x3")} "
                             + $"({largePlanesAdmittedCount} occlusion primitive(s), by record; list: {(largeIsChild ? (largeChildUnion ? "child worldspace, its own lists' union" : "child worldspace, none") : "union of every plugin's list")}, "
                             + $"{largeListedCount:N0} listed)");
     }
@@ -2382,6 +2511,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         }
 
         var scene = new List<ViewProbe.SceneRef>();
+        ViewProbe.CellLighting.Placed.Clear();
+        ViewProbe.CellLighting.TargetCell = interior ? cellKey : null;
+        ViewProbe.SceneWeather.Resolve(interior, cellKey);
         int fxSkipped = 0, markerSkipped = 0;
         int deletedSkipped = 0, disabledFlagSkipped = 0, disabledParentSkipped = 0, enabledByParentDrawn = 0, noModel = 0;
         int bosSwapped = 0, bosRandomCount = 0, bosTransformed = 0, bosReflagged = 0;
@@ -2454,6 +2586,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     bosLabel = BosLabelOf(res, bk0);
                 }
             }
+            // --cell-lighting: every drawn LIGH reference is a point light (CellLighting.cs), model or not.
+            if (ViewProbe.CellLighting.Requested && ViewProbe.CellLighting.Bases.ContainsKey(bk)) ViewProbe.CellLighting.Placed.Add((rPos, bk, r.FormKey));
             if (!baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
             // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
             // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
@@ -2469,7 +2603,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 var cls = isMarker ? "MARKER" : isFx ? "FX-file" : "geometry";
                 meshCensus[rel] = (meshCensus.TryGetValue(rel, out var c) ? c.Count + 1 : 1, cls);
             }
-            if (!keepFx && isFx) { fxSkipped++; continue; }
+            if (!keepFx && !fxStatic && isFx) { fxSkipped++; continue; }
             // Editor markers are not world geometry; the game never draws them. --markers keeps them
             // as a translucent extra layer instead of dropping them.
             if (isMarker && !showMarkers) { markerSkipped++; continue; }
@@ -2495,7 +2629,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                            : r.Base is not { } bk0 ? "NOT DRAWN: no base"
                            : !baseMesh.TryGetValue(bk0, out _) ? "NOT DRAWN: base carries no model"
                            : baseIsMarker.Contains(bk0) && !showMarkers ? "not drawn: editor marker (--markers)"
-                           : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx ? "not drawn: FX (--fx)"
+                           : baseMesh[bk0].Replace('/', (char)92).Contains("effects" + (char)92, StringComparison.OrdinalIgnoreCase) && !keepFx && !fxStatic ? "not drawn: FX (--no-fx)"
                            : r.InitiallyDisabled ? "drawn (enable parent resolves ENABLED)"
                            : "drawn";
                 // base TYPE first, then FormKey, then EditorID or '-': a parser can take the row
@@ -2624,7 +2758,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var kv in bosByIni.OrderByDescending(k => k.Value).Take(10)) Console.WriteLine($"      {kv.Value,6:N0}  swaps from {kv.Key}");
         }
         else Console.WriteLine("   BOS off: record bases (--bos on|diff for the bases the game loads)");
-        if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped; --fx to include them)");
+        if (fxSkipped > 0) Console.WriteLine($"   ({fxSkipped} effect-mesh refs skipped by --no-fx; --fx or the default draws them)");
         if (markerSkipped > 0) Console.WriteLine($"   ({markerSkipped} editor-marker refs skipped; --markers to include them translucently)");
         if (meshCensus is not null)
         {
@@ -2737,7 +2871,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                         if (layer.Header?.Texture.FormKeyNullable is { } lk && wanted.ContainsKey(lk))
                                         {
                                             if (layer is IAlphaLayerGetter al)
-                                                painted += al.AlphaLayerData.Count(pt => pt.Opacity > 0.004f);
+                                                painted += ViewProbe.TerrainLand.AlphaPoints(al).Count(pt => pt.Opacity > 0.004f);
                                             else { isBase = true; painted += 289; }
                                         }
                                         layersRead++;
@@ -2776,6 +2910,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // whether a triangle is BELOW the ground that gets drawn, which is what separates "buried"
         // from "behind a rock" and earns the two different dashed layers.
         var landHeights = new Dictionary<(int X, int Y), float[,]>();
+        // What the native terrain reads beyond the sheets: LAND normals / colours per square and
+        // each landscape diffuse's TXST normal map.
+        var terrainExtras = new ViewProbe.NativeTerrainExtras();
         // --interactive: hovering bare ground answers with the quadrant's painted layers. Assigned
         // inside the terrain block (it captures the walked LAND census); null on interiors.
         Func<float, float, string?>? terrainDescribeAt = null;
@@ -2783,12 +2920,18 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // LAND layer census callback and therefore cannot enter this retained branch.
         if (retainedWalkHit && (drawTerrain || drawWater) && !interior && targetGrid is not null)
         {
+            // The retained walk keeps the terrain sheets, not each layer's LTEX: no grass lists to grow from.
+            ViewProbe.GrassLayer.NoCellsWhy = "a retained walk keeps no landscape-texture identities (run without the reuse options)";
             foreach (var p in retainedWalk!.TerrainPatches)
                 terrainPatches[p.Diffuse] = p.Triangles.ToList();
             foreach (var l in retainedWalk.TerrainLayers)
                 terrainLayers.Add((l.Diffuse, l.Triangles.ToList()));
             foreach (var h in retainedWalk.LandHeights)
+            {
                 landHeights[(h.X, h.Y)] = (float[,])h.Heights.Clone();
+                if (h.Normals is { } hn) terrainExtras.Normals[(h.X, h.Y)] = hn.ToArray();
+                if (h.Colors is { } hc) terrainExtras.Colors[(h.X, h.Y)] = hc.ToArray();
+            }
             int terrTotal = terrainPatches.Values.Sum(v => v.Count);
             if (terrTotal > 0)
                 Console.WriteLine($"   terrain: {landHeights.Count} cell(s) of LAND, {terrTotal:N0} triangles, "
@@ -2859,8 +3002,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         foreach (var c in Cells())
                         {
                             if (c.Grid?.Point is not { } gp) continue;
-                            if (Math.Abs(gp.X - tg.X) > stationCellRadius
-                                || Math.Abs(gp.Y - tg.Y) > stationCellRadius) continue;
+                            bool inVisible = visibleSet is not null && visibleSet.Contains((gp.X, gp.Y));
+                            if (!inVisible && (Math.Abs(gp.X - tg.X) > stationCellRadius
+                                || Math.Abs(gp.Y - tg.Y) > stationCellRadius)) continue;
                             // WHICH cell this grid square is, for --stations: a pose names the cell
                             // the STATION stands in, and one ladder reaches across a cell border.
                             // In load order, so the last plugin to state the square wins it.
@@ -2876,11 +3020,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             // renderer's, and --stations gets its heightmaps from FloorFeed's own
                             // filing instead. Widening it would decode a 7x7 block of LAND for a
                             // mode that draws nothing.
-                            if (Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
+                            if (visibleSet is not null ? !inVisible : Math.Abs(gp.X - tg.X) > 1 || Math.Abs(gp.Y - tg.Y) > 1) continue;
                             // One rule (TerrainLand.cs, the core's LandHeight.Classify): no LAND leaves the earlier
                             // terrain; a LAND that declares no heights removes it, so nothing is drawn there (the engine
                             // draws no ground); an unreadable one is refused (skipping it drew the earlier plugin's heights).
-                            if (ViewProbe.TerrainLand.Step(c.Landscape, m2Name, (gp.X, gp.Y), landWin, landLayers, landPromoted) is not { } lcT) continue;
+                            if (ViewProbe.TerrainLand.Step(c.Landscape, m2Name, (gp.X, gp.Y), landWin, landLayers, landPromoted,
+                                    terrainExtras.Normals, terrainExtras.Colors) is not { } lcT) continue;
+                            terrainExtras.TakeLand(c.Landscape!, (gp.X, gp.Y));
                             var grad = lcT.Gradients!;
                             // Base layer per quadrant (a non-alpha layer names the quadrant's ground
                             // texture; alpha layers blend on top and are out of scope for this pass).
@@ -2898,7 +3044,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                         // 17x17 opacity points per quadrant, addressed by Position.
                                         var op = new float[289];
                                         int painted = 0; float maxOp = 0f;
-                                        foreach (var pt in al.AlphaLayerData)
+                                        // An ATXT with no VTXT after it reads as null data: it paints nothing.
+                                        foreach (var pt in ViewProbe.TerrainLand.AlphaPoints(al))
                                         {
                                             if (pt.Position < op.Length) op[pt.Position] = pt.Opacity;
                                             if (pt.Opacity > 0.004f) { painted++; if (pt.Opacity > maxOp) maxOp = pt.Opacity; }
@@ -2909,12 +3056,15 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                     census.Add((qi, layer.Header?.LayerNumber ?? -1, false, tex, 289, 1f, null));
                                     if (qi is >= 0 and < 4 && quad[qi] is null && tex is { } lf) quad[qi] = lf;
                                 }
-                                // No base layer for a quadrant: stand in the alpha layer that paints the
-                                // most of it, and remember which, so it is not also drawn on top of itself.
-                                // Gated on the same switch as the overlays — --no-terrain-layers means
-                                // "ignore the alpha layers entirely", base stand-ins included, which is
-                                // what makes it a clean revert to the base-only picture.
-                                for (int q = 0; drawTerrainLayers && q < 4; q++)
+                                // No base layer for a quadrant: the engine draws its default landscape
+                                // texture there (QuadDiffuse below; OpenMW's ESM4 loader starts every
+                                // quadrant's base at form 0 for the same reason). VP_TERRAIN_PROMOTE=1 keeps
+                                // the older stand-in for comparison: the alpha layer that paints the most of
+                                // the quadrant, remembered so it is not also drawn on top of itself. Gated on
+                                // the same switch as the overlays — --no-terrain-layers means "ignore the
+                                // alpha layers entirely", base stand-ins included.
+                                bool promoteStandIn = Environment.GetEnvironmentVariable("VP_TERRAIN_PROMOTE") == "1";
+                                for (int q = 0; promoteStandIn && drawTerrainLayers && q < 4; q++)
                                 {
                                     if (quad[q] is not null) continue;
                                     var best = census.Where(l => l.Alpha && l.Quadrant == q && l.Tex is not null)
@@ -2936,9 +3086,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 { throw ViewProbe.PluginRead.Failed(path, terrIndex, order.OrderedPaths.Count, "the terrain walk", ex); }
             }
 
+            // The engine's default landscape texture (its sDefaultLandDiffuseTexture setting): what it draws for a
+            // quadrant with no BTXT and for a BTXT or ATXT whose texture reference is zero (UESP, LAND: "If the
+            // reference is zero the engine falls back to dirt02.dds"; OpenMW's ESM4 loader, the same for Skyrim).
+            // Its normal map is found like any other diffuse's, through the TXST that names it (NormalForDiffuse).
+            const string DefaultLandDiffuse = @"textures\landscape\dirt02.dds";
             string? QuadDiffuse(FormKey? ltex)
             {
-                if (ltex is not { } lk) return null;
+                if (ltex is not { } lk || lk.IsNull) return DefaultLandDiffuse;
                 if (!ltexToTxst.TryGetValue(lk, out var ts)) return null;
                 if (!txstDiffuse.TryGetValue(ts, out var d)) return null;
                 var p = d.Replace('/', '\\');
@@ -2949,7 +3104,21 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             foreach (var pr in landPromoted.Values) promotedQuads += pr.Count(v => v >= 0);
             if (promotedQuads > 0)
                 Console.WriteLine($"   terrain: {promotedQuads} quadrant(s) carry no base layer — "
-                                + $"stood in with their most-painted alpha layer");
+                                + $"stood in with their most-painted alpha layer (VP_TERRAIN_PROMOTE)");
+            {
+                int noBase = 0, zeroRef = 0;
+                foreach (var (grid, census) in landLayers)
+                    for (int q = 0; q < 4; q++)
+                    {
+                        var bl = census.Where(l => !l.Alpha && l.Quadrant == q).ToList();
+                        if (bl.Count == 0) { if (!landPromoted.TryGetValue(grid, out var pr) || pr[q] < 0) noBase++; }
+                        else if (bl[0].Tex is not { } bk || bk.IsNull) zeroRef++;
+                    }
+                int zeroAlpha = landLayers.Values.Sum(c => c.Count(l => l.Alpha && (l.Tex is not { } ak || ak.IsNull)));
+                if (noBase + zeroRef + zeroAlpha > 0)
+                    Console.WriteLine($"   terrain: default landscape texture ({DefaultLandDiffuse}) drawn for {noBase} quadrant(s) "
+                                    + $"with no base layer, {zeroRef} base layer(s) and {zeroAlpha} alpha layer(s) whose texture is zero");
+            }
 
             foreach (var ((gx, gy), (off, grad, quadLtex)) in landWin)
             {
@@ -3001,6 +3170,47 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     if (tris.Count > 0) terrainLayers.Add((lyrTex, tris));
                 }
             }
+            // ---- GRASS (GrassLayer.cs): one TerrainCell per drawn cell, each quadrant's base and alpha layers
+            // named by their LTEX so each carries that texture's grass list (LTEX GNAM), in the terrain's blend
+            // order; the water height each cell's grass water rule tests (the cell's own, else the worldspace
+            // default; none for a cell without water).
+            ViewProbe.GrassLayer.Cells.Clear();
+            ViewProbe.GrassLayer.WaterHeights.Clear();
+            if (ViewProbe.GrassLayer.Requested && drawTerrain)
+                foreach (var ((gx, gy), _) in landWin.OrderBy(k => k.Key.Y).ThenBy(k => k.Key.X))
+                {
+                    var hgt = landHeights[(gx, gy)];
+                    var flat = new float[SkyRender.World.TerrainCell.Side * SkyRender.World.TerrainCell.Side];
+                    for (int y = 0; y < SkyRender.World.TerrainCell.Side; y++)
+                        for (int x = 0; x < SkyRender.World.TerrainCell.Side; x++)
+                            flat[y * SkyRender.World.TerrainCell.Side + x] = hgt[x, y];
+                    var gcell = new SkyRender.World.TerrainCell(gx, gy, flat)
+                    {
+                        Normals = terrainExtras.Normals.TryGetValue((gx, gy), out var gn) ? gn : null,
+                        Colors = terrainExtras.Colors.TryGetValue((gx, gy), out var gc) ? gc : null,
+                    };
+                    var census = landLayers.TryGetValue((gx, gy), out var cl) ? cl : new();
+                    for (int q = 0; q < 4; q++)
+                    {
+                        var baseLayer = census.Where(l => !l.Alpha && l.Quadrant == q).Select(l => l.Tex).FirstOrDefault();
+                        var alpha = census.Where(l => l.Alpha && l.Quadrant == q && l.Opacity is not null).OrderBy(l => l.Layer)
+                            .Select(l => new SkyRender.World.TerrainLayer(
+                                new SkyRender.World.TerrainTexture(QuadDiffuse(l.Tex) ?? "") { Grasses = ViewProbe.GrassLayer.GrassesFor(l.Tex) },
+                                l.Opacity!))
+                            .ToList();
+                        gcell.Quadrants[q] = new SkyRender.World.TerrainQuadrant
+                        {
+                            Base = new SkyRender.World.TerrainTexture(QuadDiffuse(baseLayer) ?? "") { Grasses = ViewProbe.GrassLayer.GrassesFor(baseLayer) },
+                            Layers = alpha,
+                        };
+                    }
+                    ViewProbe.GrassLayer.Cells.Add(gcell);
+                    if (cellWater.TryGetValue((gx, gy), out var cw) && cw.Has)
+                    {
+                        float wh = cw.Height != float.MaxValue ? cw.Height : wsDefaultWaterHeight;
+                        if (wh != float.MaxValue) ViewProbe.GrassLayer.WaterHeights[(gx, gy)] = wh;
+                    }
+                }
             // VP_ALPHA_DUMP=gx,gy prints every alpha layer of that cell as a 17x17 opacity grid, in
             // the SAME orientation the geometry builder reads it (lx fastest, ly down). It exists to
             // settle one question that no amount of looking at a render can: whether Position is
@@ -3105,6 +3315,17 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         // actually drawn, not below some second opinion about where the ground is. Null outside the
         // ring of cells that has LAND, which leaves those segments to the depth test instead.
         Func<float, float, float?>? terrainHeightAt = null;
+        // Each landscape diffuse's normal map (TXST NormalOrGloss), keyed by the diffuse path in the
+        // same normalised form QuadDiffuse gives the sheets. Fresh and retained walks both have
+        // txstDiffuse / txstNormal by now.
+        static string TexPath(string p)
+        {
+            p = p.Replace('/', '\\');
+            return p.StartsWith("textures\\", StringComparison.OrdinalIgnoreCase) ? p : "textures\\" + p;
+        }
+        foreach (var (tsKey, tsDiffuse) in txstDiffuse)
+            if (txstNormal.TryGetValue(tsKey, out var tsNormal))
+                terrainExtras.NormalForDiffuse.TryAdd(TexPath(tsDiffuse), TexPath(tsNormal));
         if (landHeights.Count > 0)
             terrainHeightAt = (wx, wy) =>
             {
@@ -4018,7 +4239,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (rn is null) continue;
                 string label = string.IsNullOrEmpty(labelHint) ? rn.Name : labelHint;
                 ViewProbe.NpcOutfitResult? outfit = null;
-                List<CharacterViewer.Rendering.MeshOverride>? overrides = null;
+                List<SkyRender.Character.MeshOverride>? overrides = null;
                 if (!npcNoOutfit)
                 {
                     outfit = outfitStack.Resolve(rn.Winner, rn.Facts);
@@ -4297,6 +4518,21 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 : $"   seams: {edges} mismatched edge(s) in the ring at eps {seamEps:0.#} u, {runs} run(s) drawn, worst {worst:0} u (yellow < 32, orange < 128, red beyond)");
         }
 
+        // --lod: the worldspace's LOD water type (WRLD NAM3) for the terrain LOD blocks' WATER quads
+        // (DistantLodLayer.cs). The quads carry their own heights; only the material comes from here.
+        if (ViewProbe.DistantLodLayer.Requested && !interior)
+        {
+            ViewProbe.DistantLodLayer.LodWater = null;
+            if (!drawWater) ViewProbe.DistantLodLayer.LodWaterWhy = "--no-water";
+            else if (ViewProbe.DistantLodLayer.LodWaterKey(out var lwWhy) is not { } lwk) ViewProbe.DistantLodLayer.LodWaterWhy = lwWhy;
+            else if (!watrRec.TryGetValue(lwk, out var lw)) ViewProbe.DistantLodLayer.LodWaterWhy = $"WATR {lwk} not found in the load order";
+            else
+                ViewProbe.DistantLodLayer.LodWater = new ViewProbe.WaterPlane(
+                    0f, 0f, 0f, 0f, 0f,
+                    lw.Noise is { Length: > 0 } lwn ? NormalizeTexPath(lwn) : null, lw.NoiseUv, lw.Shallow, lw.Deep, lw.Reflect,
+                    lw.Reflectivity, Math.Clamp(lw.Opacity / 100f, 0f, 1f), lw.Fresnel, lw.Ed,
+                    lw.FogNear, lw.FogFar, lw.FogAmount, lw.NoiseFalloff, lw.Spec);
+        }
         // ---- WATER: one surface per loaded cell that has any -----------------------------------
         // Exteriors only. An interior's water is a placed basin with no grid footprint to span, so
         // there is nothing honest to draw a plane across; say so rather than inventing a rectangle.
@@ -4307,10 +4543,20 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             var armWater = waterArm == "truth" ? cellWaterTruth : cellWater;
             var wref = waterArm == "truth" ? wsWaterTruth : wsWater;
             float wsDefault = waterArm == "truth" ? wsDefaultWaterHeightTruth : wsDefaultWaterHeight;
-            for (int dx = -1; dx <= 1; dx++)
-                for (int dy = -1; dy <= 1; dy++)
+            // The loaded cells in the order the ±1 loops have always walked them (dx outer, or dy outer); --ring's set
+            // (which always holds the 3x3) adds its other cells after them, sorted the same way.
+            IEnumerable<(int X, int Y)> LoadedCells(bool dxOuter)
+            {
+                for (int a = -1; a <= 1; a++)
+                    for (int b = -1; b <= 1; b++)
+                        yield return dxOuter ? (wg.X + a, wg.Y + b) : (wg.X + b, wg.Y + a);
+                if (visibleSet is null) yield break;
+                var rest = visibleSet.Where(c => Math.Abs(c.X - wg.X) > 1 || Math.Abs(c.Y - wg.Y) > 1);
+                foreach (var c in dxOuter ? rest.OrderBy(c => c.X).ThenBy(c => c.Y) : rest.OrderBy(c => c.Y).ThenBy(c => c.X))
+                    yield return c;
+            }
+            foreach (var key in LoadedCells(true))
                 {
-                    var key = (wg.X + dx, wg.Y + dy);
                     if (!armWater.TryGetValue(key, out var cw) || !cw.Has) continue;
                     // The engine's own precedence: the cell's height when it states one, the
                     // worldspace default when it holds the sentinel.
@@ -4332,23 +4578,23 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                           : ("(no WATR record)", (string?)null, 1024f,
                              new System.Numerics.Vector3(0.14f, 0.25f, 0.25f),
                              new System.Numerics.Vector3(0.03f, 0.13f, 0.13f),
-                             new System.Numerics.Vector3(0.30f, 0.30f, 0.30f), 0.4f, (byte)50, 0.07f);
+                             new System.Numerics.Vector3(0.30f, 0.30f, 0.30f), 0.4f, (byte)50, 0.07f,
+                             0f, 0f, 0f, 0f, System.Numerics.Vector3.Zero);
                     string? noise = w.Item2 is { Length: > 0 } np ? NormalizeTexPath(np) : null;
                     waterPlanes.Add(new ViewProbe.WaterPlane(
                         z, key.Item1 * 4096f, key.Item2 * 4096f, key.Item1 * 4096f + 4096f, key.Item2 * 4096f + 4096f,
                         noise, w.Item3, w.Item4, w.Item5, w.Item6, w.Item7,
                         // WATR.Opacity is a 0..100 percentage in the CK, not a 0..255 byte.
-                        Math.Clamp(w.Item8 / 100f, 0f, 1f), w.Item9, w.Item1));
+                        Math.Clamp(w.Item8 / 100f, 0f, 1f), w.Item9, w.Item1,
+                        w.Item10, w.Item11, w.Item12, w.Item13, w.Item14));
                 }
             // The two arms side by side, per ring cell, with the share of the cell's LAND vertices under each surface —
             // waterprobe's visible-share number, so a surface that is drawn but under the ground is called out here.
             {
                 bool differ = false;
                 var lines = new List<string>();
-                for (int dy = -1; dy <= 1; dy++)
-                    for (int dx = -1; dx <= 1; dx++)
+                foreach (var k in LoadedCells(false))
                     {
-                        var k = (wg.X + dx, wg.Y + dy);
                         cellWater.TryGetValue(k, out var win); cellWaterTruth.TryGetValue(k, out var tru);
                         string Arm((bool Has, float Height, FormKey? Water) t, FormKey? wsw2, float wsd)
                         {
@@ -4387,10 +4633,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // A water plane at the wrong height is invisible, not wrong-looking, so when the sea
             // is missing this is the line that says whether the height or the drawing is at fault.
             if (Environment.GetEnvironmentVariable("VP_WATER_DUMP") == "1")
-                for (int dx = -1; dx <= 1; dx++)
-                    for (int dy = -1; dy <= 1; dy++)
+                foreach (var k in LoadedCells(true))
                     {
-                        var k = (wg.X + dx, wg.Y + dy);
                         if (!cellWater.TryGetValue(k, out var cwd))
                         { Console.WriteLine($"      cell ({k.Item1},{k.Item2}): no CELL record found in the walk"); continue; }
                         Console.WriteLine($"      cell ({k.Item1},{k.Item2}): HasWater={cwd.Has}  "
@@ -4404,6 +4648,27 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         if (drawCoverings)
         {
             int coveringNoMato = 0;
+            // The single-pass path's two display settings, as the engine reads them
+            // (fProjectedUVDiffuseNormalTilingScale:Display, bEnableProjecteUVDiffuseNormals:Display,
+            // spelled as the engine spells it). Absent keys take the engine defaults (0.5, on).
+            static string? PrefsValue(string dir, string key)
+            {
+                var ini = Directory.Exists(dir)
+                    ? Directory.EnumerateFiles(dir, "*.ini").FirstOrDefault(f =>
+                        string.Equals(Path.GetFileName(f), "SkyrimPrefs.ini", StringComparison.OrdinalIgnoreCase))
+                    : null;
+                if (ini is null) return null;
+                foreach (var line in File.ReadLines(ini))
+                {
+                    int eq = line.IndexOf('=');
+                    if (eq > 0 && string.Equals(line[..eq].Trim(), key, StringComparison.OrdinalIgnoreCase))
+                        return line[(eq + 1)..].Trim();
+                }
+                return null;
+            }
+            float projTiling = float.TryParse(PrefsValue(profileDir, "fProjectedUVDiffuseNormalTilingScale"),
+                System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pt) ? pt : 0.5f;
+            bool projDiffuse = PrefsValue(profileDir, "bEnableProjecteUVDiffuseNormals") is not { } pdv || pdv != "0";
             foreach (var bk in scene.Select(s => s.BaseKey).Distinct())
             {
                 if (!baseMato.TryGetValue(bk, out var link)) continue;
@@ -4417,7 +4682,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     mt.Projection, link.MaxAngle, mt.Bias, mt.Scale, mt.UvScale,
                     tinted ? new System.Numerics.Vector4(mt.Color.X, mt.Color.Y, mt.Color.Z, 1f)
                            : System.Numerics.Vector4.One,
-                    mt.Model, mt.Ed);
+                    mt.Model, mt.Ed, mt.SinglePass, mt.NoiseUv, projTiling, projDiffuse);
             }
             if (coveringNoMato > 0)
                 Console.WriteLine($"   coverings: {coveringNoMato} base(s) name a MaterialObject no active plugin defines");
@@ -4458,7 +4723,9 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             builtWalkCore.TerrainLayers = terrainLayers.Select(x =>
                 new ViewProbe.TerrainLayerFact(x.Diffuse, x.Tris.ToArray())).ToArray();
             builtWalkCore.LandHeights = landHeights.Select(x =>
-                new ViewProbe.LandHeightFact(x.Key.X, x.Key.Y, (float[,])x.Value.Clone())).ToArray();
+                new ViewProbe.LandHeightFact(x.Key.X, x.Key.Y, (float[,])x.Value.Clone(),
+                    terrainExtras.Normals.TryGetValue(x.Key, out var fn) ? fn.ToArray() : null,
+                    terrainExtras.Colors.TryGetValue(x.Key, out var fc) ? fc.ToArray() : null)).ToArray();
             cellScene!.StoreFacts(preparedKey!, builtWalkCore, factsProbe);
         }
         ViewProbe.CellFactsRed.ThrowAfterPublishIfRequested();
@@ -4678,7 +4945,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     appearance = shotDepthMeasurement?.Appearance() ?? (object)new { status = "unassessed", reasonCode = "appearance_inputs_not_fingerprinted",
                         reason = "Texture/material inputs and renderer fallbacks are not qualified; geometry visibility is not a claim of matching game appearance." },
                     plugins, assemblies = new[] { typeof(ViewProbe.ShapeOcclusion).Assembly.Location, typeof(SphereBound).Assembly.Location,
-                        typeof(CharacterViewer.Rendering.GlMesh).Assembly.Location }
+                        typeof(SkyRender.GlMesh).Assembly.Location }
                         .Select(p => new { file = Path.GetFileName(p), sha256 = HashFile(p) }).ToArray(),
                     cell = cellLabel, cellFormKey = cellKey.ToString(), worldspace = targetWorldspace.ToString(),
                     state = stateSpec ?? "load-time", stateView, bosMode,
@@ -4746,7 +5013,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                    refSurfaceOpacity: refSurfaceOpacity,
                    depthDumpPath: depthDump, sizeHeight: canvasH, cellScene: cellScene,
                    graphicsReuseRed: graphicsReuseRed, graphicsCell: graphicsCell,
-                   preparedIdentity: preparedKey, depthMeasurement: shotDepthMeasurement);
+                   preparedIdentity: preparedKey, depthMeasurement: shotDepthMeasurement, terrainExtras: terrainExtras);
             if (collectArtifacts) completedArtifacts.AddClosed(outFile, "frame");
             return rendered;
         }
@@ -4934,7 +5201,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,
                 reportMode, camMeta, iopt, planeReportSink, bosMode, stateView, stateArm?.Name ?? "", navColourGroups: navColourGroups,
                 refSurface: refSurface, refSurfaceOpacity: refSurfaceOpacity, graphicsReuseRed: graphicsReuseRed,
-                graphicsCell: graphicsCell, preparedIdentity: preparedKey);
+                graphicsCell: graphicsCell, preparedIdentity: preparedKey, terrainExtras: terrainExtras);
             Console.WriteLine($"   interactive run over ({iShapes:N0} shapes were resident)");
         pendingSwitch = iopt.CellSwitch;
             return 0;

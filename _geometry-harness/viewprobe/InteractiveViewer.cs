@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Numerics;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HarnessShared;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;
@@ -189,7 +190,9 @@ sealed class InteractiveOptions
 static class InteractiveViewer
 {
     // The textured path's frustum, exactly (near 15 u = the game's fNearDistance; see TexturedScene).
-    const float NearPlane = 15f, FarPlane = 131072f;
+    const float NearPlane = 15f;
+    // --lod draws to about 100 cells (DistantLodLayer.FarPlane); without it the far plane is unchanged.
+    static float FarPlane => DistantLodLayer.Requested ? DistantLodLayer.FarPlane : 131072f;
 
     internal static void Run(
         InteractiveOptions opt,

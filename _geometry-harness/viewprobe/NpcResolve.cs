@@ -1,4 +1,5 @@
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Plugins.Cache;
@@ -425,8 +426,8 @@ sealed class NpcRecordResolver
         if (!appearanceKey.Equals(npcFormKey))
             Console.WriteLine($"   [npc] {npcFormKey} inherits its traits from template {appearanceKey} — rendering the template's appearance");
 
-        var sex = IsFemale(npc) ? Sex.Female : Sex.Male;
-        string sexLabel = sex == Sex.Female ? "Female" : "Male";
+        var sex = IsFemale(npc) ? NpcGender.Female : NpcGender.Male;
+        string sexLabel = sex == NpcGender.Female ? "Female" : "Male";
         string npcName = targetWinner.Name?.String ?? targetWinner.EditorID ?? npcFormKey.ToString();
 
         FormKey? npcRaceKey = npc.Race != null && !npc.Race.IsNull ? npc.Race.FormKey : null;
@@ -481,7 +482,7 @@ sealed class NpcRecordResolver
         chains["Head"] = $"{npcName} → FaceGen → {Path.GetFileName(headPath)}";
 
         string? skeletonPath = null;
-        var skelModel = sex == Sex.Female ? race?.SkeletalModel?.Female : race?.SkeletalModel?.Male;
+        var skelModel = sex == NpcGender.Female ? race?.SkeletalModel?.Female : race?.SkeletalModel?.Male;
         if (skelModel?.File != null && !string.IsNullOrWhiteSpace(skelModel.File.GivenPath))
         {
             skeletonPath = skelModel.File.GivenPath;
@@ -500,7 +501,7 @@ sealed class NpcRecordResolver
         float raceHeight = 1f;
         if (race != null)
         {
-            float rh = sex == Sex.Female ? race.Height.Female : race.Height.Male;
+            float rh = sex == NpcGender.Female ? race.Height.Female : race.Height.Male;
             if (float.IsFinite(rh) && rh > 0f) raceHeight = rh;
         }
 
@@ -522,7 +523,7 @@ sealed class NpcRecordResolver
             HeadMeshPath = headPath,
             HairMeshPath = hairPath,
             TailMeshPath = tailPath,
-            Sex = sex,
+            Gender = sex,
             SkeletonPath = skeletonPath,
             ResolutionChains = chains,
             TxstTextures = txstTextures,
@@ -592,10 +593,10 @@ sealed class NpcRecordResolver
         return false;
     }
 
-    static string? WorldModelPath(IArmorAddonGetter arma, Sex sex)
+    static string? WorldModelPath(IArmorAddonGetter arma, NpcGender sex)
     {
         if (arma.WorldModel == null) return null;
-        var model = sex == Sex.Female ? arma.WorldModel.Female : arma.WorldModel.Male;
+        var model = sex == NpcGender.Female ? arma.WorldModel.Female : arma.WorldModel.Male;
         if (model?.File == null) return null;
         string path = model.File.GivenPath;
         if (string.IsNullOrWhiteSpace(path)) return null;
@@ -605,13 +606,13 @@ sealed class NpcRecordResolver
         return path;
     }
 
-    Dictionary<int, string> ResolveTxstTextures(IArmorAddonGetter arma, Sex sex, FormKey armaFormKey)
+    Dictionary<int, string> ResolveTxstTextures(IArmorAddonGetter arma, NpcGender sex, FormKey armaFormKey)
     {
         var result = new Dictionary<int, string>();
         try
         {
             if (arma.SkinTexture == null) return result;
-            var link = sex == Sex.Female ? arma.SkinTexture.Female : arma.SkinTexture.Male;
+            var link = sex == NpcGender.Female ? arma.SkinTexture.Female : arma.SkinTexture.Male;
             if (link == null || link.IsNull) return result;
             if (!_linkCache.TryResolve<ITextureSetGetter>(link.FormKey, out var txst)) return result;
             PopulateTxstSlots(txst, result);
@@ -660,7 +661,7 @@ sealed class NpcRecordResolver
     {
         var result = new List<MeshOverride>();
         var seenKeys = new HashSet<string>();
-        var sex = IsFemale(npc) ? Sex.Female : Sex.Male;
+        var sex = IsFemale(npc) ? NpcGender.Female : NpcGender.Male;
         FormKey? npcRaceKey = npc.Race != null && !npc.Race.IsNull ? npc.Race.FormKey : null;
         IRaceGetter? race = null;
         if (npcRaceKey != null) _linkCache.TryResolve<IRaceGetter>(npcRaceKey.Value, out race);
@@ -736,7 +737,7 @@ sealed class NpcRecordResolver
         }
     }
 
-    void AppendArmorMeshOverrides(IArmorGetter armor, string source, Sex sex,
+    void AppendArmorMeshOverrides(IArmorGetter armor, string source, NpcGender sex,
         FormKey? npcRaceKey, FormKey? armorRaceKey,
         bool includeBody, bool includeHeadgear, bool hairCountsAsHeadgear,
         List<MeshOverride> result, HashSet<string> seenKeys)
@@ -771,7 +772,7 @@ sealed class NpcRecordResolver
             Dictionary<int, string>? textures = txst.Count > 0 ? txst : null;
 
             IReadOnlyList<AlternateTextureSpec>? alternateTextures = null;
-            var model = sex == Sex.Female ? arma.WorldModel?.Female : arma.WorldModel?.Male;
+            var model = sex == NpcGender.Female ? arma.WorldModel?.Female : arma.WorldModel?.Male;
             var alts = model?.AlternateTextures;
             if (alts is { Count: > 0 })
             {
@@ -819,7 +820,7 @@ sealed class NpcRecordResolver
                 // the broadcast archive fallback only widens where a piece's
                 // textures live in a third mod's BSA.
                 AllowLoadOrderFallback = true,
-                HasWeightVariants = sex == Sex.Female ? arma.WeightSliderEnabled.Female : arma.WeightSliderEnabled.Male,
+                HasWeightVariants = sex == NpcGender.Female ? arma.WeightSliderEnabled.Female : arma.WeightSliderEnabled.Male,
             });
         }
     }

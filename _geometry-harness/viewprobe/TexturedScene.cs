@@ -1,5 +1,7 @@
 ﻿using System.Numerics;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
+using SkyRender.World;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;
@@ -113,7 +115,7 @@ sealed class HcBsaProvider(AssetResolver assets) : IBsaArchiveProvider
     }
 }
 
-sealed class ConsoleCvLogger : ICharacterViewerLogger
+sealed class ConsoleCvLogger : IRenderLogger
 {
     public void LogMessage(string message) { if (Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1") Console.Error.WriteLine($"   [cv] {message}"); }
     public void LogError(string message) => Console.Error.WriteLine($"   [cv] {message}");
@@ -125,8 +127,8 @@ sealed class CvSettings : ICharacterViewerSettings
     public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged { add { } remove { } }
     public string CharacterViewerLightingLayout { get; set; } = "";
     public string CharacterViewerLightingColorScheme { get; set; } = "";
-    public IList<CharacterViewerLightingLayout> UserLightingLayouts { get; } = new List<CharacterViewerLightingLayout>();
-    public IList<CharacterViewerLightingColorScheme> UserLightingColorSchemes { get; } = new List<CharacterViewerLightingColorScheme>();
+    public IList<LightingLayout> UserLightingLayouts { get; } = new List<LightingLayout>();
+    public IList<LightingColorScheme> UserLightingColorSchemes { get; } = new List<LightingColorScheme>();
     public bool CharacterViewerVerboseLog { get; set; } = false;
 }
 
@@ -167,14 +169,20 @@ readonly record struct SceneRef(string MeshRelPath, Vec3 Position, Vec3 Rotation
 /// data's own spread rather than guessed: vanilla snow is bias 0.40, and the deliberately-thinner
 /// variants climb monotonically (Windhelm's "Light" 0.92, "EvenLess" 0.94, "Minimal" 0.98), so a
 /// HIGHER bias means LESS coverage and bias is a threshold on d with scale as the ramp width.
-/// Say so in the docs rather than implying the curve is the engine's.</summary>
+/// Say so in the docs rather than implying the curve is the engine's. That fitted ramp now serves
+/// only the multi-pass shell: a SINGLE-PASS material is drawn per pixel inside the base shape's own
+/// shader with the engine's formula (SkyRender's projected material; see the per-shape block).</summary>
 readonly record struct Covering(Vector3 ProjectionVector,     // Skyrim space, direction of travel
                                 float MaxAngleDeg,            // STAT.MaxAngle — the hard gate
                                 float FalloffBias, float FalloffScale,
                                 float UvScale,                // MATO.MaterialUvScale, world u per tile
                                 Vector4 Color,                // SinglePassColor, or white when a texture carries it
                                 string? ModelPath,            // the MATO's own model NIF; its slot-0 diffuse IS the covering texture
-                                string Label);                // MATO EditorID, for the census
+                                string Label,                 // MATO EditorID, for the census
+                                bool SinglePass,              // MATO flag: drawn by the base's own shader, not a second shell
+                                float NoiseUvScale,           // MATO.NoiseUvScale, world u per noise tile (single pass)
+                                float DiffuseTiling,          // fProjectedUVDiffuseNormalTilingScale (SkyrimPrefs.ini)
+                                bool ProjectedDiffuse);       // bEnableProjecteUVDiffuseNormals (SkyrimPrefs.ini)
 
 /// <summary>WATER over one loaded cell. Drawn because its ABSENCE was the bug: with nothing at the
 /// water height, sea reads as sky, and this project's standing rule is that empty background is a
@@ -202,7 +210,10 @@ readonly record struct WaterPlane(float Z,                                      
                                   Vector3 ReflectionColor,                        // 0..1, WATR's own
                                   float Reflectivity, float Opacity,              // 0..1
                                   float Fresnel,                                  // WATR.WaterFresnel, used as Schlick F0
-                                  string Label);
+                                  string Label,
+                                  float FogNear, float FogFar, float FogAmount,   // WATR above-water fog (depth fog)
+                                  float NoiseFalloff,                             // WATR.NoiseFalloff (reflection distance blend)
+                                  Vector3 Spec);                                  // WATR sun specular power, sun specular magnitude, depth specular lighting
 
 static class TexturedScene
 {
@@ -313,7 +324,15 @@ static class TexturedScene
             SrcBlendIndex = b.SrcBlendIndex, DstBlendIndex = b.DstBlendIndex,
             HasEffectShader = b.HasEffectShader, EffectBaseColor = b.EffectBaseColor,
             EffectBaseColorAlpha = b.EffectBaseColorAlpha, EffectBaseColorScale = b.EffectBaseColorScale,
+            EffectShaderFlags1 = b.EffectShaderFlags1, EffectShaderFlags2 = b.EffectShaderFlags2,
+            EffectGreyscaleTexture = b.EffectGreyscaleTexture, EffectFalloff = b.EffectFalloff,
+            EffectSoftFalloffDepth = b.EffectSoftFalloffDepth, EffectLightingInfluence = b.EffectLightingInfluence,
+            EffectUvScale = b.EffectUvScale, EffectUvOffset = b.EffectUvOffset,
+            EffectTextureClampMode = b.EffectTextureClampMode, HasVertexColors = b.HasVertexColors, BillboardMode = b.BillboardMode,
+            BillboardFrame = b.BillboardFrame,
             EmissiveColor = b.EmissiveColor, EmissiveMultiple = b.EmissiveMultiple,
+            EnvironmentMapScale = b.EnvironmentMapScale, EyeCubemapScale = b.EyeCubemapScale,
+            ShaderFlags1 = b.ShaderFlags1, ShaderFlags2 = b.ShaderFlags2, ShaderType = b.ShaderType,
         }).ToList();
     }
 
@@ -431,7 +450,7 @@ static class TexturedScene
         static string H(Vec3 value) => $"{F(value.X)},{F(value.Y)},{F(value.Z)}";
         Add(preparedIdentity); Add($"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}");
         Add(Environment.GetEnvironmentVariable("VP_LAYER_ONLY")); Add(Environment.GetEnvironmentVariable("VP_LAYER_SOLID"));
-        Add(Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT"));
+        Add(Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED"));
         foreach (var r in refs)
             Add(string.Join("|", r.MeshRelPath, r.RefKey, r.BaseKey, r.BaseEditorId, H(r.Position), H(r.Rotation),
                 F(r.Scale), r.Highlight, r.Marker, r.BosRecordBase, r.BosLabel, r.BosRandom, r.StateChange,
@@ -452,7 +471,7 @@ static class TexturedScene
             var c = pair.Value;
             Add(string.Join("|", pair.Key, V(c.ProjectionVector), F(c.MaxAngleDeg), F(c.FalloffBias),
                 F(c.FalloffScale), F(c.UvScale), F(c.Color.X), F(c.Color.Y), F(c.Color.Z), F(c.Color.W),
-                c.ModelPath, c.Label));
+                c.ModelPath, c.Label, c.SinglePass, F(c.NoiseUvScale), F(c.DiffuseTiling), c.ProjectedDiffuse));
         }
         return Convert.ToHexString(hash.GetHashAndReset());
     }
@@ -516,7 +535,8 @@ static class TexturedScene
         GraphicsReuseRed? graphicsReuseRed = null,      // private graphics-lifetime RED; null is the production path
         GraphicsCell? graphicsCell = null,              // opt-in retained GL owner; null preserves the per-shot path
         string? preparedIdentity = null,                // retained CPU-walk identity; required with graphicsCell
-        DepthMeasurement? depthMeasurement = null)      // --depth-measurement: only alpha-tested diffuses load (DepthMeasurement.cs)
+        DepthMeasurement? depthMeasurement = null,      // --depth-measurement: only alpha-tested diffuses load (DepthMeasurement.cs)
+        NativeTerrainExtras? terrainExtras = null)      // LAND normals / colours and TXST normal maps for the native terrain
     {
         // THE CANVAS IS TWO NUMBERS, NOT ONE. It used to be `size` on both axes, and the camera's
         // fov went to the projection at aspect 1 -- so a pose planned for a 16:9 deliverable was
@@ -547,12 +567,12 @@ static class TexturedScene
             PlanePopulation: planes.Count,
             SubjectMaskPopulation: refs.Count(x => x.Highlight)));
         var logger = new ConsoleCvLogger();
-        var gate = new CharacterViewerLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
+        var gate = new RenderLogGate { Verbose = Environment.GetEnvironmentVariable("VP_CV_VERBOSE") == "1" };
 
         var folders = ResolverFolders(modFoldersHighestFirst, overwriteDir);
 
         // The bracket. GameAssetResolver captures Path.Combine(AppContext.BaseDirectory,
-        // "CharacterViewerCache") in its constructor and never re-reads it, so this is the one line
+        // "SkyRenderCache") in its constructor and never re-reads it, so this is the one line
         // in the run where the redirect has to be in force — see ExtractionScratch.cs.
         GameAssetResolver MakeResolver()
         {
@@ -573,7 +593,7 @@ static class TexturedScene
         {
             var made = MakeResolver();
             return new CellAssets(made,
-                new CharacterPreviewCache(new NullNpcSource(), made, logger, gate, new CvSettings()));
+                new AssetCache(made, logger, gate, new CvSettings()));
         }
         var (resolver, cache) = cellScene is null ? MakeAssets() : cellScene.Assets(MakeAssets);
 
@@ -610,11 +630,15 @@ static class TexturedScene
         graphicsShot?.RendererMembership("shot-start", renderer);   // G3 RED, measurement only
         if (localRenderer is not null)
         {
-            renderer.Initialize(null);                  // embedded shaders
+            // Embedded shaders; VP_SHADER_DIR=<folder> loads basic.vert/.frag etc. from disk instead
+            // (a diagnostic: try a shader edit without rebuilding).
+            renderer.Initialize(Environment.GetEnvironmentVariable("VP_SHADER_DIR"));
             graphicsShot?.RendererReady(renderer, initializedNow: true);
         }
         renderer.EnableBloom = false;                    // deterministic output; no post FX
         renderer.EnableShadows = false;
+        renderer.ShadowBounds = null;
+        renderer.PointLights.Clear();
         renderer.EnableAmbientOcclusion = false;
         // The sky. GlRenderer.Render() clears the frame AGAIN with its own ClearColor, so this
         // is the setting that decides the background — the GL.ClearColor in Draw() below only
@@ -623,6 +647,68 @@ static class TexturedScene
         renderer.SetAmbientIntensity(0.55f);
         renderer.SetKeyLight(azimuthDeg: 135f, elevationDeg: 55f, intensity01: 0.85f, new GlVec3(1f, 0.98f, 0.92f));
         renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0.35f, new GlVec3(0.85f, 0.9f, 1f));
+        // --weather (SceneWeather.cs): the WTHR's sky, sun, ambient and fog replace the fixed studio
+        // lights. The sun is placed from the worldspace's climate (below); there is no fill light in the engine.
+        renderer.Fog = null;
+        renderer.ImageSpace = null;
+        renderer.SkyColor = null;
+        renderer.SkyGradient = null;
+        renderer.Lights[0].Color = new GlVec3(1f, 1f, 1f);   // a reused renderer may carry a weather's ambient
+        if (SceneWeather.Requested is not null && SceneWeather.Current is null)
+            Console.WriteLine($"   weather: no WTHR '{SceneWeather.Requested}' in the load order (or this walk was retained) - studio lights kept");
+        if (SceneWeather.Current is { } sw)
+        {
+            if (!SceneWeather.SkyGiven) renderer.ClearColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
+            renderer.SkyColor = new GlVec3(sw.SkyUpper.X, sw.SkyUpper.Y, sw.SkyUpper.Z);
+            renderer.Lights[0].Color = new GlVec3(sw.AmbientUp.X, sw.AmbientUp.Y, sw.AmbientUp.Z);
+            renderer.SetAmbientIntensity(1f);
+            // The image space: the engine scales the sun's colour by its HDR sunlight scale and
+            // finishes the frame with its tone map and cinematic grade (SkyRender ImageSpaceFinish).
+            var isd = SceneWeather.ImageSpaceOff ? null : SceneWeather.ImageSpaceData;
+            // The sun's direction from the worldspace's climate at --game-hour (SceneWeather.SunPath);
+            // the fixed studio direction when there is no climate. VP_SUN_FIXED=1 keeps the fixed one.
+            var sunPath = Environment.GetEnvironmentVariable("VP_SUN_FIXED") == "1" ? null : SceneWeather.SunPath();
+            renderer.SetKeyLight(azimuthDeg: sunPath?.Azimuth ?? 135f, elevationDeg: sunPath?.Elevation ?? 55f,
+                                 intensity01: isd?.SunlightScale ?? 1f,
+                                 new GlVec3(sw.Sunlight.X, sw.Sunlight.Y, sw.Sunlight.Z));
+            Console.WriteLine(sunPath is { } spx ? $"   weather sun: {spx.Text}"
+                                                 : "   weather sun: fixed studio direction (azimuth 135, elevation 55) - no climate read");
+            if (isd is not null)
+                renderer.ImageSpace = new ImageSpaceFinish(isd.White, isd.Saturation, isd.Brightness, isd.Contrast,
+                    new GlVec3(isd.TintColor.X, isd.TintColor.Y, isd.TintColor.Z), isd.TintAmount, SceneWeather.AdaptedLuminance);
+            renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
+            // The sky by elevation (SceneWeather.SkyKeys): what sky-reflecting water reflects, per pixel,
+            // and the frame's background (the dome at 20 degrees; the fogged sky is nearly flat).
+            // VP_SKY_FLAT=1 keeps the single sky-upper colour; VP_SKY_NO_FOG=1 drops the fog over the sky.
+            if (Environment.GetEnvironmentVariable("VP_SKY_FLAT") != "1")
+            {
+                var skyKeys = sw.SkyKeys(isd?.SkyScale ?? 0f, fog: Environment.GetEnvironmentVariable("VP_SKY_NO_FOG") != "1");
+                renderer.SkyGradient = new SkyGradient(skyKeys.Select(k => new SkyGradientKey(k.El, new GlVec3(k.Color.X, k.Color.Y, k.Color.Z))).ToArray());
+                if (!SceneWeather.SkyGiven) renderer.ClearColor = renderer.SkyGradient.At(20f);
+                Console.WriteLine($"   weather sky: gradient of {skyKeys.Length} keys, horizon {skyKeys[0].Color:0.000}, 20 deg {renderer.SkyGradient.At(20f):0.000}, zenith {skyKeys[^1].Color:0.000}");
+            }
+            // Diagnostics for the colour balance (README, VP_WEATHER_*): drop the fog, or scale the ambient.
+            if (float.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_SCALE"),
+                               System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ambScale))
+                renderer.SetAmbientIntensity(ambScale);
+            // VP_WEATHER_AMBIENT_FROM=0..5: take the ambient from another of the six directional
+            // ambient colours (+X, -X, +Y, -Y, +Z, -Z) instead of -Z, or 6 = their mean.
+            if (int.TryParse(Environment.GetEnvironmentVariable("VP_WEATHER_AMBIENT_FROM"), out var ambFrom)
+                && sw.Ambient6.Length == 6 && ambFrom >= 0 && ambFrom <= 6)
+            {
+                var ac = ambFrom == 6 ? (sw.Ambient6[0] + sw.Ambient6[1] + sw.Ambient6[2] + sw.Ambient6[3] + sw.Ambient6[4] + sw.Ambient6[5]) / 6f
+                                      : sw.Ambient6[ambFrom];
+                renderer.Lights[0].Color = new GlVec3(ac.X, ac.Y, ac.Z);
+            }
+            renderer.Fog = Environment.GetEnvironmentVariable("VP_WEATHER_NO_FOG") == "1" ? null : sw.FogFar > sw.FogNear
+                ? new DistanceFog(new GlVec3(sw.FogNearColor.X, sw.FogNearColor.Y, sw.FogNearColor.Z),
+                                  new GlVec3(sw.FogFarColor.X, sw.FogFarColor.Y, sw.FogFarColor.Z),
+                                  sw.FogNear, sw.FogFar, sw.FogPower, sw.FogMax)
+                : null;
+            Console.WriteLine($"   weather: {sw}" + (SceneWeather.CurrentWhy is { } why ? $"  [{why}; --no-weather for the studio lights]" : ""));
+            if (SceneWeather.ImageSpaceText is { } ist)
+                Console.WriteLine($"   weather image space ({(isd is null ? "not applied" : $"applied, adapted luminance {SceneWeather.AdaptedLuminance:0.###}; bloom and eye adaptation not modelled; sky scale on the sky gradient only")}): {ist}");
+        }
         var meshes = new List<GlMesh>();
         var borrowedNpcMeshes = new List<GlMesh>();
         using var shotResources = new ShotResourceScope(renderer, meshes, borrowedNpcMeshes, graphicsShot,
@@ -734,28 +820,51 @@ static class TexturedScene
             matoTexCache[modelPath] = handle;
             return handle;
         }
+        // A SINGLE-PASS material has no texture of its own: the engine binds the same global
+        // textures from textures\effects for every projected draw, whatever was projected, and
+        // its lighting path reads two of them (the coverage noise and the projected diffuse).
+        // Loaded once, on first use. A missing noise leaves the material to the shell fallback.
+        int projectedNoise = -1, projectedDiffuse = -1;
+        (int Noise, int Diffuse) ProjectedTextures()
+        {
+            if (depthMeasurement is not null) return (0, 0);   // colour only; depth never reads it
+            if (projectedNoise < 0)
+            {
+                int nz = LoadObservedTexture("static-covering-noise", @"textures\effects\projectednoise.dds");
+                int df = LoadObservedTexture("static-covering-diffuse", @"textures\effects\projecteddiffuse.dds");
+                projectedNoise = nz == staticWhite ? 0 : nz;
+                projectedDiffuse = df == staticWhite ? 0 : df;
+            }
+            return (projectedNoise, projectedDiffuse);
+        }
         int shapes = 0, missingMesh = 0, texturedShapes = 0;
         // Effect-shader shapes dropped this render: the total shape-draws, and how many such
         // shapes each distinct mesh carries (a per-file property, so it is SET, not accumulated,
         // however many refs place that mesh).
         int fxShapesSkipped = 0, nmShapesSkipped = 0, fxRefCount = 0;
         int fxStaticShapes = 0, fxStaticRefCount = 0;
+        int editorMarkerShapes = 0, emissiveShapes = 0, envMappedShapes = 0;
         int cullTrisDropped = 0, cullShapesDropped = 0;
-        int coveringShapes = 0, coveringRefs = 0;
+        int coveringShapes = 0, coveringRefs = 0, projectedShapes = 0;
         var coveringByMato = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         int waterMeshes = 0; long waterTris = 0;
         long waterSubmerged = 0, waterSamples = 0;
-        // env VP_FXSTATIC_EMIT — brightness of the --fx-static stand-in. The real number is
-        // BSEffectShaderProperty.baseColorScale, which the builder does not read; until it does,
-        // this is the knob that stands in for it.
-        float fxStaticEmit = float.TryParse(Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT"),
-                                            out var fse) ? fse : 1f;
         var fxByMesh = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         // env VP_SHAPE_DUMP=<substr> — the SHAPE-level companion to --list-meshes: for every mesh
         // whose path matches, print what the builder actually read off each shape. --list-meshes
         // says which files are in the cell; this says why one of their shapes draws as it does.
         // Printed once per distinct mesh, at build time, before any skip decision.
         string? shapeDump = Environment.GetEnvironmentVariable("VP_SHAPE_DUMP");
+        // env VP_NIF_DUMP=<substr> — the block-level companion to VP_SHAPE_DUMP: SkyRender's full NIF
+        // dump (scene graph, every block's fields) for each matching mesh, once, before it is built.
+        string? nifDump = Environment.GetEnvironmentVariable("VP_NIF_DUMP");
+        var nifDumped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void NifDumpIfAsked(string rel, string abs)
+        {
+            if (nifDump is not { Length: > 0 } || !rel.Contains(nifDump, StringComparison.OrdinalIgnoreCase) || !nifDumped.Add(rel)) return;
+            try { Console.WriteLine($"   ---- NIF dump of {rel} ----"); Console.WriteLine(NifDumpApi.DumpFileToString(abs)); }
+            catch (Exception ex) { Console.WriteLine($"   ---- NIF dump of {rel} failed: {ex.Message}"); }
+        }
         var shapeDumped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Highlighted refs keep their own texture; their halo (an inflated inverted hull) is
         // emitted here and drawn by the OVERLAY pass, whose zero-normal vertices render as the
@@ -830,6 +939,7 @@ static class TexturedScene
                     {
                         try
                         {
+                            NifDumpIfAsked(rel, abs);
                             built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
                             StripNifRootTransform(abs, built);
                             if (needOcclusion && source.Hash.Length > 0)
@@ -865,6 +975,7 @@ static class TexturedScene
                             Exception? identityFailure = null;
                             try
                             {
+                                NifDumpIfAsked(rel, abs);
                                 built = meshReadHooks is null ? builder.BuildFromFile(abs) : meshReadHooks.Build(abs);
                                 StripNifRootTransform(abs, built);
                                 built = NormalizeMeshes(built);
@@ -923,13 +1034,27 @@ static class TexturedScene
                     Console.WriteLine(
                         $"      {(b.HasEffectShader ? "EFFECT " : "lighting")}  {b.ShapeName,-22}"
                       + $"  {b.Indices.Length / 3,6:N0} tri"
+                      + (b.Positions.Length > 0
+                          ? $"  box=({b.Positions.Min(v => v.X):0},{b.Positions.Min(v => v.Y):0},{b.Positions.Min(v => v.Z):0})"
+                            + $"..({b.Positions.Max(v => v.X):0},{b.Positions.Max(v => v.Y):0},{b.Positions.Max(v => v.Z):0})"
+                          : "")
                       + $"  blend={(b.HasAlphaBlend ? $"{b.SrcBlendIndex}->{b.DstBlendIndex}" : "off")}"
                       + $"  matAlpha={b.MaterialAlpha:0.00}"
                       + (b.HasEffectShader
                           ? $"  base=({b.EffectBaseColor.X:0.00},{b.EffectBaseColor.Y:0.00},{b.EffectBaseColor.Z:0.00},a{b.EffectBaseColorAlpha:0.00})x{b.EffectBaseColorScale:0.00}"
                           : $"  emis=({b.EmissiveColor.X:0.00},{b.EmissiveColor.Y:0.00},{b.EmissiveColor.Z:0.00})x{b.EmissiveMultiple:0.00}")
                       + $"  zwrite={b.ZBufferWrite}"
-                      + $"  tex0={(b.TexturePaths.TryGetValue(0, out var t0) && t0.Length > 0 ? t0 : "(none)")}");
+                      + (b.IsDecal ? "  DECAL" : "")
+                      + (b.BillboardMode >= 0 ? $"  BILLBOARD{b.BillboardMode}" : "")
+                      + $"  sf1=0x{b.ShaderFlags1:X8} sf2=0x{b.ShaderFlags2:X8}"
+                      + $"  tex0={(b.TexturePaths.TryGetValue(0, out var t0) && t0.Length > 0 ? t0 : "(none)")}"
+                      + (b.HasEffectShader
+                          ? $"  fx1=0x{b.EffectShaderFlags1:X8} fx2=0x{b.EffectShaderFlags2:X8}"
+                            + $" falloff=({b.EffectFalloff.X:0.00},{b.EffectFalloff.Y:0.00},{b.EffectFalloff.Z:0.00},{b.EffectFalloff.W:0.00})"
+                            + $" soft={b.EffectSoftFalloffDepth:0.#} light={b.EffectLightingInfluence:0.00} clamp={b.EffectTextureClampMode}"
+                            + $" uv=({b.EffectUvScale.X:0.##},{b.EffectUvScale.Y:0.##})+({b.EffectUvOffset.X:0.##},{b.EffectUvOffset.Y:0.##})"
+                            + $" grey={b.EffectGreyscaleTexture ?? "(none)"}"
+                          : ""));
             }
 
             // Skyrim-space placement — see SpatialOverlap.RefrRotation, which derives the whole
@@ -962,6 +1087,12 @@ static class TexturedScene
                     part.Issue ??= "transparent, alpha-tested, effect or non-depth-writing material unsupported";
                 int n = b.Positions.Length;
                 if (n == 0 || b.Indices.Length == 0) { part.Issue ??= "empty rendered geometry"; continue; }
+                // A shape named "EditorMarker" is the editor's stand-in (the Creation Kit draws it, the
+                // game hides it). Unseen while effect shapes were dropped wholesale; with them drawn, the
+                // fishing-spot markers (an untextured orange effect cone) painted orange wisps over
+                // Riverwood's river bank (2026-10-29).
+                if (b.ShapeName.StartsWith("EditorMarker", StringComparison.OrdinalIgnoreCase) && !r.Marker)
+                { part.Issue ??= "editor-marker shape is not gameplay render geometry"; editorMarkerShapes++; continue; }
 
                 // UNSHADEABLE SHAPES — two kinds, both meaning "this renderer provably cannot
                 // draw this shape's material, so drawing it is worse than omitting it". Per
@@ -989,7 +1120,11 @@ static class TexturedScene
                 // --fx-static rescues kind 1 ONLY. Kind 2 stays skipped under it: a normal map in
                 // the diffuse slot is unshadeable however it is blended, and the warp plane is
                 // exactly the slab this whole thread was about.
-                bool drawStatic = fxStatic && b.HasEffectShader && !normalAsDiffuse;
+                // Effect-shader shapes draw through SkyRender's effect shading whenever they are drawn
+                // at all (default, --fx-static, --fx); --no-fx clears fxStatic and drops them again.
+                // Depth measurement keeps its old exclusion: effects are not surfaces.
+                bool drawStatic = (fxStatic || keepFx) && b.HasEffectShader && !normalAsDiffuse
+                                  && depthMeasurement is null;
                 if (!keepFx && !drawStatic && (b.HasEffectShader || normalAsDiffuse))
                 {
                     part.Issue ??= "unrenderable material omitted";
@@ -1058,6 +1193,9 @@ static class TexturedScene
                 }
                 mesh.ShapeName = b.ShapeName;
                 mesh.HasVertexColors = b.VertexColors is { Length: > 0 };
+                // SLSF2_Tree_Anim: vertex alpha is the wind-sway weight, not opacity. Reading it as
+                // opacity cut most leaf cards away under the alpha test (trees drew as bare trunks).
+                mesh.VertexAlphaIsWindWeight = (b.ShaderFlags2 & (1u << 29)) != 0;
                 mesh.UseAlphaTest = b.HasAlphaTest;
                 mesh.AlphaThreshold = b.AlphaThreshold;
                 mesh.HasAlphaBlend = b.HasAlphaBlend;
@@ -1172,46 +1310,146 @@ static class TexturedScene
                     }
                 }
 
+                // ---- EMISSIVE AND GLOW MAP (lighting shapes) ----------------------------------
+                // SLSF1_Own_Emit adds emissiveColor x emissiveMultiple (x the slot-2 glow map under
+                // SLSF2_Glow_Map on non-skin shader types), absorbed by the albedo, as SkyRender's
+                // NifMaterialBinder does. Candle wax, chandelier chains, enchanted gear. Skipped when
+                // SLSF1_External_Emittance is set: the engine then takes the colour from outside the
+                // NIF (interior windows: the cell's window light), which this tool does not model, so
+                // those keep drawing unlit as before. Set on every bind: a retained mesh keeps whatever
+                // the last bind wrote. Never under --depth-measurement (lighting only).
+                mesh.HasEmissive = false;
+                mesh.HasGlowMap = false;
+                mesh.GlowTexture = 0;
+                bool ownEmit = (b.ShaderFlags1 & (1u << 22)) != 0 && (b.ShaderFlags1 & (1u << 29)) == 0;
+                if (ownEmit && !b.HasEffectShader && depthMeasurement is null && !r.Marker)
+                {
+                    mesh.HasEmissive = true;
+                    mesh.EmissiveColor = b.EmissiveColor;
+                    mesh.EmissiveMultiple = b.EmissiveMultiple;
+                    bool skin = b.ShaderType == 4 || b.ShaderType == 5;
+                    if ((b.ShaderFlags2 & (1u << 6)) != 0 && !skin && b.TexturePaths.TryGetValue(2, out var glowPath)
+                        && glowPath.Length > 0)
+                    {
+                        int g = LoadObservedTexture("static-ref-glow", glowPath);
+                        if (g != staticWhite) { mesh.GlowTexture = g; mesh.HasGlowMap = true; }
+                    }
+                    emissiveShapes++;
+                }
+
+                // ---- ENVIRONMENT MAP (lighting shapes) -----------------------------------------
+                // SLSF1_Environment_Mapping (bit 7) or SLSF1_Eye_Environment_Mapping (bit 17) with a
+                // slot-4 texture: the cube map (or the 2D fallback) and the slot-5 mask, with the
+                // NIF's scales, as SkyRender's NifMaterialBinder does for characters. Metal fittings,
+                // glass, ice, polished stone. Set on every bind (a retained mesh keeps whatever the
+                // last bind wrote). The handles live in the texture manager's own cache, not in a
+                // scene lease. Never under --depth-measurement. VP_NO_ENVMAP=1 leaves them off.
+                mesh.HasEnvironmentMap = false;
+                mesh.HasEnvMask = false;
+                mesh.IsEnvMap2D = false;
+                mesh.EnvMapTexture = 0;
+                mesh.EnvMaskTexture = 0;
+                bool envFlag = (b.ShaderFlags1 & ((1u << 7) | (1u << 17))) != 0;
+                if (envFlag && !b.HasEffectShader && depthMeasurement is null && !r.Marker
+                    && b.TexturePaths.TryGetValue(4, out var envPath) && envPath.Length > 0
+                    && Environment.GetEnvironmentVariable("VP_NO_ENVMAP") != "1")
+                {
+                    var envManager = graphicsCell is not null ? graphicsCell.InstallTextures : textures;
+                    var (envTex, envIsCube) = envManager.LoadEnvMap(envPath);
+                    if (envTex != 0)
+                    {
+                        mesh.EnvMapTexture = envTex;
+                        mesh.HasEnvironmentMap = true;
+                        mesh.IsEnvMap2D = !envIsCube;
+                        mesh.EnvMapScale = b.EnvironmentMapScale;
+                        mesh.EyeCubemapScale = b.EyeCubemapScale;
+                        mesh.UseEyeCubemapScale = b.ShaderType == 16;   // BSLSP_EYE
+                        if (b.TexturePaths.TryGetValue(5, out var maskPath) && maskPath.Length > 0)
+                        {
+                            int m = LoadObservedTexture("static-ref-envmask", maskPath);
+                            if (m != staticWhite) { mesh.EnvMaskTexture = m; mesh.HasEnvMask = true; }
+                        }
+                        envMappedShapes++;
+                    }
+                }
+
                 if (drawStatic)
                 {
-                    // THE STATIC-FRAME STAND-IN. Everything an effect shape needs is already in
-                    // hand except its material: the source texture resolves (nifly maps slot 0 to
-                    // BSEffectShaderProperty.sourceTexture), and the NiAlphaProperty — a separate
-                    // block, so the builder reads it fine — already says additive with no depth
-                    // write. What is missing is that BSEffectShaderProperty is never read, so the
-                    // shape arrives emissive-zero and draws LIT: a dark quad, and a dark quad added
-                    // to the frame adds nothing, which is why --fx showed no flames at all.
-                    //
-                    // So: force it unlit-ish by driving the existing emissive term (the shader
-                    // computes albedo * (diffuse + emissive), so a white emissive x1 yields roughly
-                    // albedo — the fire atlas's own colour — with the lighting no longer able to
-                    // darken it toward nothing). This is a STAND-IN, not the real thing: the real
-                    // thing reads baseColor / baseColorScale off the block and needs an unlit
-                    // branch in basic.frag. It is deliberately cheap and reversible.
-                    //
-                    // "First frame" is free: the block's stored values ARE the base state, and the
-                    // BSEffectShaderPropertyFloatControllers that would animate UV/alpha are simply
-                    // never run. Nothing here has to fake a clock.
-                    mesh.HasEmissive = true;
-                    mesh.EmissiveColor = b.EffectBaseColor;
-                    // The author's own baseColorScale (8-10 on this fire) is used as the intensity.
-                    // It is an HDR number the engine tonemaps and viewprobe cannot, so it DOES
-                    // clip — but it clips along the baseColor hue, which is what a fire core looks
-                    // like anyway. The earlier attempt blew out to flat white only because the
-                    // emissive was left WHITE, so every channel clipped equally; tinted, the same
-                    // magnitude reads as flame. Measured against a hand-swept ladder (x1 too faint
-                    // to see, x2 faint, x4 legible, x8 right) — and the authored value landing in
-                    // that window is the reason to use it rather than a constant of my choosing.
-                    // VP_FXSTATIC_EMIT scales it for taste.
-                    mesh.EmissiveMultiple = b.EffectBaseColorScale * fxStaticEmit;
-                    mesh.MaterialAlpha = b.EffectBaseColorAlpha;
-                    mesh.DepthWrite = false;          // never let a frozen flame occlude the room
-                    // Effect quads are authored double-sided (SLSF2_Double_Sided), but that flag
-                    // lives on the shader block the builder never reads, so they arrive
-                    // single-sided and roughly half of a flame rosette is back-face culled.
-                    mesh.IsDoubleSided = true;
+                    // ENGINE EFFECT SHADING (SkyRender's effect path, frozen at the authored frame:
+                    // the BSEffectShaderPropertyFloatControllers that animate UV/alpha are never
+                    // run, so the block's stored values ARE the frame). Source texture x baseColor,
+                    // the greyscale palette and baseColorScale, view-angle falloff, the material's
+                    // own double-sided / depth flags, and the NiAlphaProperty blend (6->0 additive
+                    // for flames). Replaces the 2026-08-28 emissive stand-in, which drew
+                    // albedo x (lighting + emissive) and needed VP_FXSTATIC_EMIT to look like fire.
+                    string? grey = b.EffectGreyscaleTexture;
+                    int greyTex = grey is { Length: > 0 } ? LoadObservedTexture("static-ref-effect-greyscale", grey) : 0;
+                    if (greyTex == staticWhite) greyTex = 0;
+                    NifMaterialBinder.ApplyEffectMaterial(mesh, b, mesh.DiffuseTexture,
+                        mesh.DiffuseTexture != staticWhite, greyTex);
+                    // Billboards: the builder's frame is in NIF root space, but this mesh's vertices
+                    // are already placed in the world, so the frame takes the same placement (each
+                    // axis row rotated and scaled, the origin placed). SkyRender then turns the shape
+                    // about that origin toward the camera each draw. VP_NO_BILLBOARD=1 keeps the
+                    // authored pose.
+                    if (mesh.BillboardFrame is { } bfr && Environment.GetEnvironmentVariable("VP_NO_BILLBOARD") != "1")
+                    {
+                        GlVec3 Axis(GlVec3 a)
+                        {
+                            var w = YUp(Vector3.TransformNormal(new Vector3(a.X, -a.Z, a.Y) * r.Scale, rot));
+                            return new GlVec3(w.X, w.Y, w.Z);
+                        }
+                        var bo = bfr.Row3.Xyz;
+                        var wo = YUp(Vector3.Transform(new Vector3(bo.X, -bo.Z, bo.Y) * r.Scale, rot) + pos);
+                        mesh.BillboardFrame = new OpenTK.Mathematics.Matrix4(
+                            new GlVec4(Axis(bfr.Row0.Xyz), 0f), new GlVec4(Axis(bfr.Row1.Xyz), 0f),
+                            new GlVec4(Axis(bfr.Row2.Xyz), 0f), new GlVec4(wo.X, wo.Y, wo.Z, 1f));
+                    }
+                    else mesh.BillboardFrame = null;
+                    // env VP_FX_DOUBLESIDED=1 — diagnostic: draw every effect shape double-sided, to
+                    // tell a back-face-culled quad from one the shading itself hides.
+                    if (Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED") == "1") mesh.IsDoubleSided = true;
+                    if (shapeDump is { Length: > 0 } && rel.Contains(shapeDump, StringComparison.OrdinalIgnoreCase))
+                        Console.WriteLine($"      effect drawn: {b.ShapeName} ref {r.RefKey} render={mesh.ShouldRender} blend={mesh.HasAlphaBlend} "
+                                        + $"test={mesh.UseAlphaTest}@{mesh.AlphaThreshold:0.00} tris={tri.Length / 3}"
+                                        + (mesh.BillboardFrame is { } dbf ? $" billboard {mesh.BillboardMode} frame X{dbf.Row0.Xyz:0.00} Y{dbf.Row1.Xyz:0.00} Z{dbf.Row2.Xyz:0.00} o{dbf.Row3.Xyz:0.0}" : ""));
                     fxStaticShapes++;
                     refHadFxStatic = true;
+                }
+                else mesh.IsEffectShader = false;   // a retained mesh keeps whatever the last bind wrote
+
+                // ---- SINGLE-PASS COVERING (MATO) -------------------------------------------
+                // The engine draws a single-pass material inside the base shape's OWN lighting
+                // shader (Projected_UV), per pixel against the normal-mapped normal, so the snow
+                // settles into the rock's relief with a noise-broken edge. SkyRender's projected
+                // material is that path. The direction is world up: the single-pass path reads
+                // only scale, bias, noise scale, colour and the STAT's max angle, never the
+                // MATO's projection vector. Set on every bind and cleared when absent, because a
+                // retained mesh keeps whatever the last bind wrote.
+                mesh.HasProjectedMaterial = false;
+                bool projectedDrawn = false;
+                if (cover is { SinglePass: true } spc && ProjectedTextures() is { Noise: > 0 } ptx)
+                {
+                    mesh.HasProjectedMaterial = true;
+                    mesh.ProjectedDirection = Vector3.UnitY;
+                    // MAX ANGLE. The reverse-engineered account SkyRender cites folds the STAT's
+                    // max angle into the threshold (cos + (1 - cos) * ...). Against the game it
+                    // under-covers: the 2026-10-29 close-up of MountainCliff03_LightSN (max angle
+                    // 70) shows snow on faces that fold admits nowhere near, while dropping the
+                    // fold (equivalently, angle 90) matches by eye. So 90 by default, judged
+                    // in game rather than settled by a source; VP_PROJ_MAXANGLE=stat restores the
+                    // fold for the next comparison.
+                    float projAngle = Environment.GetEnvironmentVariable("VP_PROJ_MAXANGLE") == "stat" ? spc.MaxAngleDeg : 90f;
+                    mesh.ProjectedParams = GlMesh.ProjectedParamsFor(spc.FalloffScale, spc.FalloffBias,
+                                                                     spc.NoiseUvScale, projAngle);
+                    mesh.ProjectedColor = new Vector3(spc.Color.X, spc.Color.Y, spc.Color.Z);
+                    mesh.ProjectedDiffuseTiling = spc.DiffuseTiling;
+                    mesh.ProjectedNoiseTexture = ptx.Noise;
+                    mesh.ProjectedDiffuseTexture = spc.ProjectedDiffuse ? ptx.Diffuse : 0;
+                    projectedDrawn = true;
+                    projectedShapes++;
+                    refHadCovering = true;
+                    coveringByMato[spc.Label] = coveringByMato.TryGetValue(spc.Label, out var pcn) ? pcn + 1 : 1;
                 }
 
                 if (meshCreatedNow)
@@ -1243,13 +1481,16 @@ static class TexturedScene
                     basePick = ps;                       // the covering below hangs itself off this
                 }
 
-                // ---- PROJECTED COVERING (MATO) ------------------------------------------------
+                // ---- PROJECTED COVERING SHELL (multi-pass MATO) ---------------------------------
+                // A MULTI-PASS material builds a second piece of geometry in the engine; a
+                // single-pass one is drawn above, inside the base shader, and lands here only
+                // when the global projected textures could not be loaded.
                 // A second shell over the shape just drawn, sharing its triangles: same verts,
                 // per-vertex coverage in the ALPHA channel, UVs planar-projected along the
                 // material's own projection vector. Emitted per SHAPE rather than per ref because
                 // coverage is a function of each face's normal — one mesh can have a snowed roof
                 // and bare undersides, and that difference IS the effect.
-                if (cover is { } cv)
+                if (cover is { } cv && !projectedDrawn)
                 {
                     var cu = new Vector2[n];
                     var cc = new Vector4[n];
@@ -1342,154 +1583,86 @@ static class TexturedScene
             if (refHadCovering) coveringRefs++;
         }
 
-        // TERRAIN — winning LAND heightmap, drawn with each quadrant's winning base landscape
-        // texture (LTEX -> TXST diffuse). Patches whose texture cannot be resolved fall back to
-        // the off-white snow slope tint. Opaque, depth-written.
-        int terrainTexturedPatches = 0, terrainFallbackPatches = 0;
-        foreach (var (texPath, patchTris) in terrainPatches)
-        {
-            if (patchTris.Count == 0) continue;
-            // Terrain has no alpha test, so its texture never reaches depth.
-            int texHandle = texPath.Length > 0 && depthMeasurement is null ? LoadObservedTexture("static-terrain-diffuse", texPath) : staticWhite;
-            bool textured = texPath.Length > 0 && texHandle != staticWhite;
-            if (textured) terrainTexturedPatches++; else terrainFallbackPatches++;
-
-            var tv = new List<Vector3>(); var ti = new List<int>();
-            var tn = new List<Vector3>(); var tc = new List<Vector4>();
-            var tuv = new List<Vector2>();
-            foreach (var (a, b, c) in patchTris)
-            {
-                var nrm = Vector3.Cross(b - a, c - a);
-                nrm = nrm.LengthSquared() > 1e-10f ? Vector3.Normalize(nrm) : Vector3.UnitZ;
-                float flatness = MathF.Max(0f, nrm.Z);                    // Z-up before the swap
-                // Textured ground: near-white vertex colour, slightly darker on steeps so relief
-                // still reads. Where no base texture resolves — which in practice is the far
-                // cells at the edge of the ring — the fallback is an OFF-WHITE slope tint that
-                // reads as distant snow rather than as a green slab pretending to be foreground.
-                var col = textured
-                    ? Vector4.Lerp(new Vector4(0.75f, 0.74f, 0.72f, 1f), new Vector4(1f, 1f, 1f, 1f), flatness * flatness)
-                    : Vector4.Lerp(new Vector4(0.46f, 0.48f, 0.52f, 1f), new Vector4(0.62f, 0.64f, 0.68f, 1f), flatness * flatness);
-                int at = tv.Count;
-                tv.Add(YUp(a)); tv.Add(YUp(b)); tv.Add(YUp(c));
-                // Landscape textures tile; ~2 grid squares (256 units) per repeat reads close to
-                // the game's default land tiling.
-                tuv.Add(new Vector2(a.X / 256f, a.Y / 256f));
-                tuv.Add(new Vector2(b.X / 256f, b.Y / 256f));
-                tuv.Add(new Vector2(c.X / 256f, c.Y / 256f));
-                var ny = YUp(nrm);
-                tn.Add(ny); tn.Add(ny); tn.Add(ny);
-                tc.Add(col); tc.Add(col); tc.Add(col);
-                ti.Add(at); ti.Add(at + 1); ti.Add(at + 2);
-            }
-            var terrainIndices = ti.ToArray();
-            var terrainVertices = Interleave(tv.ToArray(), tn.ToArray(), tuv.ToArray(), tn.ToArray(), tn.ToArray(), tc.ToArray());
-            var retainedTerrain = builtScene?.AcquireMesh("static-terrain", terrainVertices, terrainIndices);
-            var terra = retainedTerrain?.Mesh ?? new GlMesh();
-            bool terrainCreatedNow = retainedTerrain?.CreatedNow ?? true;
-            string? terrainUploadHash = retainedTerrain?.InputSha256;
-            if (graphicsShot is not null && terrainUploadHash is null)
-                terrainUploadHash = BuiltScene.HashArrays(terrainVertices, terrainIndices);
-            if (terrainCreatedNow)
-            {
-                terra.Upload(terrainVertices, terrainIndices);
-                graphicsShot?.MeshUploaded("static-terrain", terra, terrainVertices, terrainIndices);
-            }
-            terra.ShapeName = texPath.Length > 0 ? $"terrain:{texPath}" : "terrain";
-            terra.DiffuseTexture = texHandle;
-            terra.HasVertexColors = true;
-            terra.IsDoubleSided = true;
-            if (terrainCreatedNow)
-            {
-                renderer.AddMesh(terra);
-                builtScene?.AddedToRenderer(terra);
-                graphicsShot?.MeshAdded("static-terrain", terra);
-            }
-            if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain", terra, terrainUploadHash!);
-            if (builtScene is null) meshes.Add(terra);
-            if (interactive is not null)
-            {
-                var ps = new PickShape { Kind = PickKind.Terrain, Verts = tv.ToArray(), Tris = ti.ToArray(), TerrainTex = texPath };
-                ps.ComputeBounds();
-                interactive.PickShapes.Add(ps);
-            }
-        }
-        // PAINTED LAYERS over the base. Roads, paths and every ground blend in Skyrim live here
-        // and nowhere else, so a render without them is a render with no roads in it.
-        //
-        // They ride the library's DECAL channel: blended decals are drawn after the distance-
-        // sorted transparent set, in the order they were added, which is the one thing coplanar
-        // sheets actually need — a distance sort between two layers painted on the same triangle
-        // is a coin flip, and layer order is the author's stated intent. Depth test on (a rock in
-        // front still hides the road), depth write off (they are surface, not occluders).
+        // TERRAIN — drawn by SkyRender natively (SkyRender.World): one mesh per cell quadrant, its
+        // painted layers (roads, paths, every ground blend) blended in the shader over the quadrant's
+        // winning base texture (LTEX -> TXST). Opaque, depth-written, shadowed like any static.
         // Two env toggles for answering "is that wash really this texture, or is something wrong":
         // VP_LAYER_ONLY=<substr> keeps only layers whose diffuse path matches, and
         // VP_LAYER_SOLID=1 ignores the opacity map so the texture is drawn at full strength.
         // Together they isolate one painted layer and show it as itself.
+        int terrainTexturedPatches = 0, terrainFallbackPatches = 0;
         string? layerOnly = Environment.GetEnvironmentVariable("VP_LAYER_ONLY");
         bool layerSolid = Environment.GetEnvironmentVariable("VP_LAYER_SOLID") == "1";
         int layerMeshes = 0;
-        // Paint layers are blended decals that never write depth: the depth-measurement mode does not build them.
+        // The depth-measurement mode reads depth only: painted layers do not change it.
         if (depthMeasurement is not null && terrainLayers.Count > 0)
-            Console.WriteLine($"   terrain paint: {terrainLayers.Count} layer(s) not drawn (--depth-measurement; they write no depth)");
-        foreach (var (texPath, layerTris) in terrainLayers)
+            Console.WriteLine($"   terrain paint: {terrainLayers.Count} layer(s) not drawn (--depth-measurement)");
+        if (terrainPatches.Count > 0)
         {
-            if (depthMeasurement is not null) break;
-            if (layerTris.Count == 0) continue;
-            if (layerOnly is { Length: > 0 } && !texPath.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
-            int texHandle = LoadObservedTexture("static-terrain-layer", texPath);
-            if (texHandle == staticWhite) continue;   // unresolvable: a white sheet is worse than none
-            var lv = new List<Vector3>(); var li = new List<int>();
-            var ln = new List<Vector3>(); var lc = new List<Vector4>();
-            var luv = new List<Vector2>();
-            foreach (var (a, b, c, oa, ob, oc) in layerTris)
-            {
-                var nrm = Vector3.Cross(b - a, c - a);
-                nrm = nrm.LengthSquared() > 1e-10f ? Vector3.Normalize(nrm) : Vector3.UnitZ;
-                float flatness = MathF.Max(0f, nrm.Z);
-                float shade = 0.75f + 0.25f * flatness * flatness;   // same relief cue as the base
-                int at = lv.Count;
-                lv.Add(YUp(a)); lv.Add(YUp(b)); lv.Add(YUp(c));
-                luv.Add(new Vector2(a.X / 256f, a.Y / 256f));
-                luv.Add(new Vector2(b.X / 256f, b.Y / 256f));
-                luv.Add(new Vector2(c.X / 256f, c.Y / 256f));
-                var ny = YUp(nrm);
-                ln.Add(ny); ln.Add(ny); ln.Add(ny);
-                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : oa));
-                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : ob));
-                lc.Add(new Vector4(shade, shade, shade, layerSolid ? 1f : oc));
-                li.Add(at); li.Add(at + 1); li.Add(at + 2);
-            }
-            var layerIndices = li.ToArray();
-            var layerVertices = Interleave(lv.ToArray(), ln.ToArray(), luv.ToArray(), ln.ToArray(), ln.ToArray(), lc.ToArray());
-            var retainedLayer = builtScene?.AcquireMesh("static-terrain-layer", layerVertices, layerIndices);
-            var sheet = retainedLayer?.Mesh ?? new GlMesh();
-            bool layerCreatedNow = retainedLayer?.CreatedNow ?? true;
-            string? layerUploadHash = retainedLayer?.InputSha256;
-            if (graphicsShot is not null && layerUploadHash is null)
-                layerUploadHash = BuiltScene.HashArrays(layerVertices, layerIndices);
-            if (layerCreatedNow)
-            {
-                sheet.Upload(layerVertices, layerIndices);
-                graphicsShot?.MeshUploaded("static-terrain-layer", sheet, layerVertices, layerIndices);
-            }
-            sheet.ShapeName = $"terrain-layer:{texPath}";
-            sheet.DiffuseTexture = texHandle;
-            sheet.HasVertexColors = true;      // the opacity map rides in vertex alpha
-            sheet.HasAlphaBlend = true;
-            sheet.IsDecal = true;              // draw after the sorted set, in insertion order
-            sheet.DepthWrite = false;
-            sheet.IsDoubleSided = true;
-            if (layerCreatedNow)
-            {
-                renderer.AddMesh(sheet);
-                builtScene?.AddedToRenderer(sheet);
-                graphicsShot?.MeshAdded("static-terrain-layer", sheet);
-            }
-            if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain-layer", sheet, layerUploadHash!);
-            if (builtScene is null) meshes.Add(sheet);
-            layerMeshes++;
+            // The cells are rebuilt from the walk's terrain sheets (NativeTerrain), so the fresh and
+            // the retained walk feed it alike; textures load through the observed categories. Blend
+            // and tiling are SkyRender's defaults, matched against in-game captures.
+            var buildOptions = new TerrainBuildOptions();
+            var blendMode = buildOptions.Blend;
+            int? LoadNormal(string? path) => path is { Length: > 0 } && depthMeasurement is null
+                && LoadObservedTexture("static-terrain-normal", path) is var nh && nh != staticWhite ? nh : null;
+            foreach (var cell in NativeTerrain.FromSheets(terrainPatches, terrainLayers, terrainExtras))
+                for (int q = 0; q < 4; q++)
+                {
+                    var quad = cell.Quadrants[q]!;
+                    string basePath = quad.Base?.DiffusePath ?? "";
+                    int baseHandle = basePath.Length > 0 && depthMeasurement is null
+                        ? LoadObservedTexture("static-terrain-diffuse", basePath) : staticWhite;
+                    int? baseNormal = LoadNormal(quad.Base?.NormalPath);
+                    if (basePath.Length > 0 && baseHandle != staticWhite) terrainTexturedPatches++; else terrainFallbackPatches++;
+
+                    var kept = new List<TerrainLayer>();
+                    var keptHandles = new List<int>();
+                    var keptNormals = new List<int?>();
+                    if (depthMeasurement is null)
+                        foreach (var layer in quad.Layers)
+                        {
+                            if (kept.Count == TerrainQuadrant.MaxLayers) break;
+                            string lp = layer.Texture.DiffusePath;
+                            if (layerOnly is { Length: > 0 } && !lp.Contains(layerOnly, StringComparison.OrdinalIgnoreCase)) continue;
+                            int lh = LoadObservedTexture("static-terrain-layer", lp);
+                            if (lh == staticWhite) continue;   // unresolvable: a white layer is worse than none
+                            kept.Add(layerSolid ? layer with { Opacity = layer.Opacity.Select(o => o > 0f ? 1f : 0f).ToArray() } : layer);
+                            keptHandles.Add(lh);
+                            keptNormals.Add(LoadNormal(layer.Texture.NormalPath));
+                        }
+                    layerMeshes += kept.Count;
+
+                    var data = WorldMeshBuilder.BuildTerrainQuadrant(cell, (TerrainQuadrantIndex)q, kept, buildOptions);
+                    var retained = builtScene?.AcquireMesh("static-terrain", data.Vertices, data.Indices);
+                    var mesh = retained?.Mesh ?? new GlMesh();
+                    bool createdNow = retained?.CreatedNow ?? true;
+                    string? uploadHash = retained?.InputSha256;
+                    if (graphicsShot is not null && uploadHash is null)
+                        uploadHash = BuiltScene.HashArrays(data.Vertices, data.Indices);
+                    if (createdNow)
+                    {
+                        GlWorldFactory.UploadTerrain(mesh, data);
+                        graphicsShot?.MeshUploaded("static-terrain", mesh, data.Vertices, data.Indices);
+                    }
+                    GlWorldFactory.ApplyTerrainMaterial(mesh, baseHandle, keptHandles, blendMode, baseNormal, keptNormals);
+                    if (createdNow)
+                    {
+                        renderer.AddMesh(mesh);
+                        builtScene?.AddedToRenderer(mesh);
+                        graphicsShot?.MeshAdded("static-terrain", mesh);
+                    }
+                    if (graphicsShot is not null) graphicsShot.StaticBound("static-terrain", mesh, uploadHash!);
+                    if (builtScene is null) meshes.Add(mesh);
+                    if (interactive is not null)
+                    {
+                        var ps = new PickShape { Kind = PickKind.Terrain, Verts = data.Positions, Tris = data.Indices, TerrainTex = basePath };
+                        ps.ComputeBounds();
+                        interactive.PickShapes.Add(ps);
+                    }
+                }
+            if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer(s) blended natively over their quadrants");
         }
-        if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer sheet(s) drawn over the base");
 
         if (terrainTexturedPatches + terrainFallbackPatches > 0)
             Console.WriteLine($"   terrain paint: {terrainTexturedPatches} textured patch(es), {terrainFallbackPatches} untextured (snow fallback)");
@@ -1505,8 +1678,9 @@ static class TexturedScene
         // to shade against. A single quad would paint the whole sea one flat colour and lose the
         // one cue that makes water read as water from above.
         //
-        // Depth-tested, never depth-writing: terrain and statics standing above the surface hide
-        // it for free, exactly as they should, so there is no need to clip the grid to the coast.
+        // Built and drawn by SkyRender (WorldMeshBuilder.BuildWater): opaque by default, as the engine
+        // draws water, so terrain and statics above the surface hide it without clipping the grid to
+        // the coast. The Fresnel sky mix follows the live camera.
         foreach (var wpl in waterPlanes)
         {
             const int WaterGrid = 48;                 // 4096/48 ~ 85 u per quad — fine enough for a shoreline
@@ -1515,6 +1689,7 @@ static class TexturedScene
             // real body of water permanently in the "shallow" half of both ramps and is why the
             // sea read as tinted glass.
             const float ShallowBand = 192f;
+            bool waterLegacy = Environment.GetEnvironmentVariable("VP_WATER_LEGACY") == "1";
             // The alpha at zero depth. 1 = opaque everywhere, matching the engine's opaque draw.
             float shoreAlpha = float.TryParse(Environment.GetEnvironmentVariable("VP_WATER_SHALLOW_ALPHA"),
                                               out var sa) ? Math.Clamp(sa, 0f, 1f) : 1f;
@@ -1522,134 +1697,50 @@ static class TexturedScene
                 ? LoadObservedTexture("dynamic-water-normal", wtx) : 0;   // a normal map; never depth
             bool hasNoise = texHandle != 0 && texHandle != textures.WhiteTexture;
 
-            int side = WaterGrid + 1;
-            int submerged = 0;                        // grid points whose LAND sits BELOW the surface
-            var pv = new Vector3[side * side]; var nv = new Vector3[side * side];
-            var uvv = new Vector2[side * side]; var cvv2 = new Vector4[side * side];
-            var tgt = new Vector3[side * side]; var btg = new Vector3[side * side];
-            var idxs = new List<int>(WaterGrid * WaterGrid * 6);
-            float uvScale = wpl.NoiseUvScale > 1e-3f ? wpl.NoiseUvScale : 1024f;
-            for (int gy = 0; gy < side; gy++)
-                for (int gx = 0; gx < side; gx++)
-                {
-                    int i = gy * side + gx;
-                    float x = wpl.X0 + (wpl.X1 - wpl.X0) * gx / WaterGrid;
-                    float y = wpl.Y0 + (wpl.Y1 - wpl.Y0) * gy / WaterGrid;
-                    // Depth to the ground below. No LAND here (off the heightmap) reads as deep
-                    // ocean rather than as shallow — the conservative direction for a coastline.
-                    float? groundZ = terrainHeightAt?.Invoke(x, y);
-                    float depth = groundZ is { } gz ? wpl.Z - gz : ShallowBand;
-                    if (depth > 0f) submerged++;
-                    float t = Math.Clamp(depth / ShallowBand, 0f, 1f);
-                    var body = Vector3.Lerp(wpl.ShallowColor, wpl.DeepColor, t);
-
-                    // SKY REFLECTION, Fresnel-weighted by the record's own WaterFresnel as F0
-                    // (Schlick). This replaced a flat `lerp(body, sky, WaterReflectivity)` that
-                    // mixed 40% pale sky into every vertex regardless of angle and turned the
-                    // Riverwood ford into a grey-green film over sand — the water was drawing
-                    // correctly and simply did not READ as water. Top-down, Schlick with an F0 of
-                    // 0.07 returns almost nothing, so the surface shows its own dark teal, which
-                    // is what water looks like from above; at grazing angles it goes bright.
-                    // Camera-dependent and therefore baked at the ENTRY camera, like the rest of
-                    // this renderer's view-dependent overlay work — exact for a static render,
-                    // frozen in the fly-through.
-                    var toEye = Unit(new Vector3(cam.Eye.X - x, cam.Eye.Y - y, cam.Eye.Z - wpl.Z));
-                    float cosI = MathF.Max(toEye.Z, 0f);              // surface normal is +Z
-                    float f0 = Math.Clamp(wpl.Fresnel, 0f, 1f);
-                    float fres = f0 + (1f - f0) * MathF.Pow(1f - cosI, 5f);
-                    var reflected = skyColor * wpl.ReflectionColor;   // sky, tinted by WATR's own reflection colour
-                    var rgb = Vector3.Lerp(body, reflected, Math.Clamp(fres * wpl.Reflectivity * 4f, 0f, 1f));
-
-                    pv[i] = YUp(new Vector3(x, y, wpl.Z));
-                    nv[i] = YUp(Vector3.UnitZ);
-                    tgt[i] = YUp(Vector3.UnitX);
-                    btg[i] = YUp(Vector3.UnitY);
-                    uvv[i] = new Vector2(x / uvScale, y / uvScale);
-                    // ALPHA. Grounded in the game's own water shader (Community Shaders'
-                    // `package/Shaders/Water.hlsl`), which settles a question guesswork got wrong
-                    // twice here: **Skyrim does not alpha-blend its water at all.** The pixel
-                    // shader writes `psout.Lighting = float4(finalColor, isSpecular)` — the alpha
-                    // channel carries a specular FLAG, not opacity — so the surface is an OPAQUE
-                    // draw, and everything that looks like transparency is done inside the shader
-                    // as `lerp(refractionColor, finalColorPreFog, refractionMul)` against a
-                    // refraction sample. Framebuffer blending is the wrong instrument; it is only
-                    // used here because this renderer has no refraction buffer to lerp against,
-                    // and a blend IS that same lerp with the framebuffer standing in for it.
-                    //
-                    // The shape of the ramp is the shader's too. `VarAmounts` is documented in its
-                    // own cbuffer as "alpha in z", and that value is a FLOOR rather than a level:
-                    //     distanceMul = saturate(lerp(VarAmounts.z, 1, -(distanceFactor - 1)))
-                    // i.e. it starts at the record's alpha and rises to 1 — fully opaque, no
-                    // refraction — as the driving factor closes. So WATR.Opacity is the MOST
-                    // transparent the water ever gets, not how transparent it is. Using it as a
-                    // flat 50% everywhere (the previous version) made an ocean out of tinted air.
-                    //
-                    // Honest divergence, stated rather than buried: in the engine that driving
-                    // factor is camera distance and fog, not depth to the bottom. Depth is used
-                    // here instead because this is a renderer for floor plans and site pictures,
-                    // where "you can see the riverbed through a ford but not through a fjord" is
-                    // the readable, camera-independent behaviour, and because a camera-distance
-                    // ramp would bake into vertex colours and freeze at the entry camera.
-                    // So: OPAQUE by default, which is what the engine draws. The shallow/deep
-                    // information is not lost by that — it rides the COLOUR ramp above, which is
-                    // the shader's own `lerp(ShallowColor, DeepColor, distanceMul)`. What is lost
-                    // is seeing the bed through a ford, and that is a refraction effect this
-                    // renderer cannot do honestly. VP_WATER_SHALLOW_ALPHA=<0..1> puts a
-                    // see-through shore margin back for anyone who wants it for a floor plan.
-                    cvv2[i] = new Vector4(rgb.X, rgb.Y, rgb.Z, shoreAlpha + (1f - shoreAlpha) * t);
-                }
-            for (int gy = 0; gy < WaterGrid; gy++)
-                for (int gx = 0; gx < WaterGrid; gx++)
-                {
-                    // Wind so the geometric normal comes out +Y (up) in viewer space, agreeing
-                    // with the vertex normals. Viewer Z is -y, so advancing gy walks -Z and the
-                    // "obvious" order faces the surface at the sea floor instead of the sky.
-                    int a = gy * side + gx, b2 = a + 1, c2 = a + side, d2 = c2 + 1;
-                    idxs.Add(a); idxs.Add(b2); idxs.Add(c2);
-                    idxs.Add(b2); idxs.Add(d2); idxs.Add(c2);
-            }
-            var water = new GlMesh();
-            var waterIndices = idxs.ToArray();
-            var waterVertices = Interleave(pv, nv, uvv, tgt, btg, cvv2);
-            water.Upload(waterVertices, waterIndices);
-            graphicsShot?.MeshUploaded("dynamic-water", water, waterVertices, waterIndices);
-            water.ShapeName = $"water:{wpl.Label}";
-            water.DiffuseTexture = textures.WhiteTexture;   // WATR has NO diffuse field; colour is the record's
-            if (hasNoise)
+            var wmat = new WaterMaterial(wpl.ShallowColor, wpl.DeepColor, wpl.ReflectionColor, wpl.Reflectivity, wpl.Fresnel)
             {
-                // The noise layer is a WAVE NORMAL MAP, bound as one. Binding it as a diffuse
-                // would paint the sea normal-map lilac — the exact defect class this renderer
-                // already carries a filter for.
-                water.NormalTexture = texHandle;
-                water.HasNormalMap = true;
-            }
-            water.HasVertexColors = true;
-            // OPAQUE water joins the opaque pass and writes depth; only a see-through shore margin
-            // needs blending. This is not just tidiness — it fixes a layering bug that the opaque
-            // default exposed. Terrain paint layers ride the DECAL channel, and decals are drawn
-            // AFTER the distance-sorted blend set, so while water was blended the roads and
-            // ground blends composited straight over the top of it: quadrant-shaped rectangles of
-            // differing tint sitting on the river. As opaque geometry the water is simply in the
-            // depth buffer before they draw, and they are correctly hidden beneath it.
-            bool opaqueWater = shoreAlpha >= 0.999f;
-            water.HasAlphaBlend = !opaqueWater;
-            water.SrcBlendIndex = 6; water.DstBlendIndex = 7;
-            water.DepthWrite = opaqueWater;
-            water.IsDoubleSided = true;                     // readable from under the surface too
-            water.MaterialGlossiness = 80f;
-            water.MaterialSpecularStrength = 0.5f;
-            renderer.AddMesh(water);
-            graphicsShot?.MeshAdded("dynamic-water", water);
-            meshes.Add(water);
-            waterMeshes++; waterTris += idxs.Count / 3;
-            waterSubmerged += submerged; waterSamples += side * side;
+                NoiseTexturePath = wpl.NoiseTexture, NoiseUvScale = wpl.NoiseUvScale,
+                ShallowBand = ShallowBand, ShoreAlpha = shoreAlpha, GridResolution = WaterGrid,
+                // The engine's water terms (SkyRender RENDERING_PIPELINE.md, "Water"): the reflection is
+                // the sky (water reflections are on in the game's default settings), blended by Fresnel
+                // near the camera and as a mirror beyond the WATR's noise falloff; the WATR's
+                // above-water fog sets the body colour and how far the ground shows through.
+                // VP_WATER_LEGACY=1 draws the earlier opaque ShallowBand water for comparison.
+                ReflectsSky = !waterLegacy,
+                NoiseFalloff = waterLegacy ? 0f : wpl.NoiseFalloff,
+                DepthFog = waterLegacy || wpl.FogFar <= 0f ? null : new WaterDepthFog(wpl.FogNear, wpl.FogFar, wpl.FogAmount),
+                // Per pixel (the default): the water depth along each pixel's view ray against the
+                // opaque scene, the engine's refraction weight and far-distance mirror, and the WATR's
+                // sun specular. VP_WATER_VERTEX=1 keeps the earlier per-vertex vertical-depth path.
+                PerPixelDepth = !waterLegacy && Environment.GetEnvironmentVariable("VP_WATER_VERTEX") != "1",
+                SunSpecularPower = wpl.Spec.X, SunSpecularMagnitude = wpl.Spec.Y, DepthSpecularLighting = wpl.Spec.Z,
+            };
+            var wdata = WorldMeshBuilder.BuildWater(
+                new WaterSurface(wpl.Z, wpl.X0, wpl.Y0, wpl.X1, wpl.Y1, wmat) { Label = wpl.Label }, terrainHeightAt);
+            var nwater = new GlMesh();
+            GlWorldFactory.UploadWater(nwater, wdata);
+            graphicsShot?.MeshUploaded("dynamic-water", nwater, wdata.Vertices, wdata.Indices);
+            GlWorldFactory.ApplyWaterMaterial(nwater, wmat, textures.WhiteTexture, hasNoise ? texHandle : null);
+            renderer.AddMesh(nwater);
+            graphicsShot?.MeshAdded("dynamic-water", nwater);
+            meshes.Add(nwater);
+            waterMeshes++; waterTris += wdata.Indices.Length / 3;
+            waterSubmerged += wdata.SubmergedVertexCount; waterSamples += wdata.Positions.Length;
         }
         if (waterMeshes > 0)
             Console.WriteLine($"   water: {waterMeshes} cell surface(s), {waterTris:N0} triangles — "
                             + $"{waterPlanes[0].Label} at z {waterPlanes[0].Z:0}"
                             + (waterPlanes.Any(w => w.NoiseTexture is { Length: > 0 })
                                 ? ", noise layer bound as a wave normal map" : ", no noise texture resolved")
-                            + " (no reflection/refraction/flow — see README)");
+                            + (Environment.GetEnvironmentVariable("VP_WATER_VERTEX") == "1"
+                                ? " (sky reflection, Fresnel and WATR depth fog per vertex; no reflection/refraction buffers or flow — see README)"
+                                : " (sky reflection, Fresnel, sun specular, WATR depth fog per pixel along the view ray; no reflection/refraction buffers or flow — see README)"));
+        foreach (var wk in waterPlanes.GroupBy(w => w.Label).Select(g => g.First()))
+            Console.WriteLine($"      {wk.Label}: shallow {wk.ShallowColor:0.000} deep {wk.DeepColor:0.000} "
+                            + $"reflection {wk.ReflectionColor:0.000} reflectivity {wk.Reflectivity:0.###} "
+                            + $"fresnel {wk.Fresnel:0.###} opacity {wk.Opacity:0.###} "
+                            + $"fog near {wk.FogNear:0.#} far {wk.FogFar:0.#} amount {wk.FogAmount:0.###} noise falloff {wk.NoiseFalloff:0.#} "
+                            + $"sun specular power {wk.Spec.X:0.##} magnitude {wk.Spec.Y:0.###} depth specular {wk.Spec.Z:0.###}");
         // HOW MUCH of the water footprint is actually below the surface. The number that tells a
         // wrong HEIGHT from an honest absence: a sea whose floor is mostly above the surface is a
         // height bug, while a low percentage over a mountain cell is just a mountain. Without it,
@@ -1657,6 +1748,148 @@ static class TexturedScene
         if (waterSamples > 0)
             Console.WriteLine($"      {100.0 * waterSubmerged / waterSamples:0.0}% of the water footprint has LAND "
                             + $"BELOW the surface (the rest is dry ground, and correctly hides it)");
+
+        // ---- GRASS (default on, --no-grass; GrassLayer.cs) -------------------------------------
+        // The GRAS the drawn cells' landscape textures list, placed by SkyRender.World's GrassPlacer on the
+        // same ground the terrain draws and drawn instanced: one mesh per grass type and model shape. The
+        // models load through the same NIF builder and resolver as every static, in their own space (the
+        // instances place them). Cells beyond the grass fade from the eye are skipped (they would draw
+        // nothing), except in the fly-through, which can move the eye.
+        if (GrassLayer.Requested && depthMeasurement is null)
+        {
+            var grassSw = System.Diagnostics.Stopwatch.StartNew();
+            if (GrassLayer.Cells.Count == 0)
+            {
+                if (GrassLayer.NoCellsWhy is { } gw) Console.WriteLine($"   grass: not drawn - {gw}");
+            }
+            else
+            {
+                var gset = GrassLayer.Settings(out var gsrc);
+                var placement = GrassPlacer.Place(GrassLayer.Cells, gset,
+                    c => GrassLayer.WaterHeights.TryGetValue((c.GridX, c.GridY), out var wh) ? wh : null,
+                    interactive is null ? cam.Eye : null);
+                double placeMs = grassSw.Elapsed.TotalMilliseconds;
+                int grassShapes = 0, grassNoTexture = 0;
+                var glGrass = GlWorldFactory.CreateGrass(placement, type =>
+                {
+                    string? abs = resolver.ResolveAssetPath(type.ModelPath);
+                    if (abs is null) return null;
+                    List<NifMeshBuilder.BuiltMesh> built;
+                    try { built = builder.BuildFromFile(abs).ToList(); }
+                    catch (Exception ex) { logger.LogError($"grass model '{type.ModelPath}'", ex); return null; }
+                    var shapes = new List<GlMesh>();
+                    foreach (var b in built)
+                    {
+                        if (b.Positions.Length == 0 || b.Indices.Length == 0 || b.HasEffectShader) continue;
+                        var gm = new GlMesh();
+                        gm.Upload(Interleave(b.Positions, b.Normals, b.TextureCoordinates, b.Tangents, b.Bitangents, b.VertexColors), b.Indices);
+                        gm.ShapeName = $"grass:{Path.GetFileNameWithoutExtension(type.ModelPath)}:{b.ShapeName}";
+                        gm.HasVertexColors = b.VertexColors is { Length: > 0 };
+                        gm.IsDoubleSided = b.IsDoubleSided;
+                        int dh = b.TexturePaths.TryGetValue(0, out var gt0) && gt0 is { Length: > 0 }
+                            ? LoadObservedTexture("dynamic-grass", gt0) : textures.WhiteTexture;
+                        if (dh == textures.WhiteTexture) grassNoTexture++;
+                        gm.DiffuseTexture = dh;
+                        // The NIF's own alpha-test threshold; 128 (the usual cutout reference) when it has none.
+                        gm.AlphaThreshold = b.HasAlphaTest ? b.AlphaThreshold : 128f / 255f;
+                        if (Environment.GetEnvironmentVariable("VP_GRASS_SHAPES") == "1")
+                        {
+                            var vc = b.VertexColors;
+                            string vcs = vc is { Length: > 0 }
+                                ? $"vc mean ({vc.Average(c => c.X):0.00},{vc.Average(c => c.Y):0.00},{vc.Average(c => c.Z):0.00},a{vc.Average(c => c.W):0.00})"
+                                : "no vc";
+                            Console.WriteLine($"     grass shape {gm.ShapeName}: {b.Positions.Length} verts, {b.Indices.Length / 3} tris, {vcs}, "
+                                            + $"alpha test {b.HasAlphaTest} {b.AlphaThreshold * 255f:0}, blend {b.HasAlphaBlend}, two-sided {b.IsDoubleSided}, "
+                                            + $"sf1=0x{b.ShaderFlags1:X8} sf2=0x{b.ShaderFlags2:X8} type {b.ShaderType}, tex0 {gt0}, "
+                                            + $"y {b.Positions.Min(v => v.Y):0}..{b.Positions.Max(v => v.Y):0}");
+                        }
+                        shapes.Add(gm);
+                        grassShapes++;
+                    }
+                    return shapes;
+                });
+                foreach (var m in glGrass.Meshes)
+                {
+                    renderer.AddMesh(m);
+                    meshes.Add(m);
+                }
+                Console.WriteLine($"   grass: {placement.InstanceCount:N0} instance(s) of {placement.Types.Count(t => t.Instances.Count > 0)} type(s) "
+                                + $"({glGrass.Meshes.Count} instanced mesh(es)) on {placement.CellsPlaced} cell(s), {placement.PatchesPlaced:N0} patch(es); "
+                                + $"{placement.CellsOutOfReach} cell(s) beyond the fade ({gset.Reach:0} u); settings: {gsrc}"
+                                + $"; {GrassLayer.TypesSeen} GRAS in the load order");
+                foreach (var t in placement.Types.Where(t => t.Instances.Count > 0).OrderByDescending(t => t.Instances.Count))
+                    Console.WriteLine($"     grass {t.Type.ModelPath}: {t.Instances.Count:N0} of {t.Candidates:N0} candidate(s); density {t.Type.Density}%, "
+                                    + $"position range {t.Type.PositionRange:0.#}, height range {t.Type.HeightRange:0.##}, colour range {t.Type.ColorRange:0.##}, "
+                                    + $"slope {t.Type.MinSlope}-{t.Type.MaxSlope}, flags {t.Type.Flags}, brightness mean {t.Instances.Average(i => i.Shade):0.00}"
+                                    + (glGrass.MissingModels.Contains(t.Type) ? " - MODEL NOT FOUND, not drawn" : ""));
+                if (grassNoTexture > 0) Console.WriteLine($"   grass: {grassNoTexture} shape(s) without a diffuse (drawn white)");
+                Console.WriteLine($"   grass timing: place {placeMs:0} ms, models + textures + upload {grassSw.Elapsed.TotalMilliseconds - placeMs:0} ms");
+            }
+        }
+
+        // ---- DISTANT LOD (--lod, opt-in; DistantLodLayer.cs) --------------------------------
+        // Terrain, object and tree LOD beyond the loaded cells, picked for this camera the way the
+        // engine picks blocks, and cut away under every cell whose terrain this frame draws (and the
+        // walk's loaded set), so the full cells and the LOD never overlap. SkyRender builds and
+        // shades it; textures load through the same observed loader as everything else.
+        if (DistantLodLayer.Requested)
+        {
+            var lodSw = System.Diagnostics.Stopwatch.StartNew();
+            string? lodWorld = DistantLodLayer.LodWorldspace(out var lodWhy);
+            if (lodWorld is null) Console.WriteLine($"   lod: not drawn - {lodWhy}");
+            else
+            {
+                var loadedCells = new HashSet<(int X, int Y)>(DistantLodLayer.WalkCells ?? Array.Empty<(int, int)>());
+                foreach (var tris in terrainPatches.Values)
+                    foreach (var (a, b, c) in tris)
+                        loadedCells.Add(((int)MathF.Floor((a.X + b.X + c.X) / 3f / TerrainCell.CellSize),
+                                         (int)MathF.Floor((a.Y + b.Y + c.Y) / 3f / TerrainCell.CellSize)));
+                var lodData = DistantLodLoader.Load(new DistantLodRequest
+                {
+                    Worldspace = lodWorld,
+                    Eye = cam.Eye,
+                    LoadedCells = new LoadedCells(loadedCells),
+                    Kinds = DistantLodLayer.Kinds(),
+                    MaxDistance = DistantLodLayer.FarPlane,
+                }, p => cache.ResolveAssetPath(p));
+                double lodBuildMs = lodSw.Elapsed.TotalMilliseconds;
+                if (lodData.Problem is { } lp) Console.WriteLine($"   lod: not drawn - {lp}");
+                else
+                {
+                    int lodTexBefore = textures.MissingTexturePaths.Count;
+                    // LOD water: the worldspace's LOD water type through SkyRender's LOD water technique
+                    // (opaque, sky reflection, sun specular, fog; no depth or refraction).
+                    WaterMaterial? lodWaterMat = DistantLodLayer.LodWater is { } lw
+                        ? new WaterMaterial(lw.ShallowColor, lw.DeepColor, lw.ReflectionColor, lw.Reflectivity, lw.Fresnel)
+                        {
+                            NoiseTexturePath = depthMeasurement is null ? lw.NoiseTexture : null, NoiseUvScale = lw.NoiseUvScale,
+                            ReflectsSky = Environment.GetEnvironmentVariable("VP_WATER_LEGACY") != "1",
+                            NoiseFalloff = lw.NoiseFalloff,
+                            SunSpecularPower = lw.Spec.X, SunSpecularMagnitude = lw.Spec.Y,
+                        }
+                        : null;
+                    var glLod = GlWorldFactory.CreateDistantLod(lodData, path =>
+                    {
+                        int h = LoadObservedTexture(path == lodWaterMat?.NoiseTexturePath ? "dynamic-water-normal" : "dynamic-lod", path);
+                        return h == textures.WhiteTexture ? null : h;
+                    }, textures.WhiteTexture, lodWaterMat);
+                    foreach (var m in glLod.Meshes)
+                    {
+                        renderer.AddMesh(m);
+                        meshes.Add(m);
+                    }
+                    var ls = lodData.Settings!;
+                    Console.WriteLine($"   lod: {lodWorld}{lodWhy} - lodsettings SW cell ({ls.SouthWestCellX}, {ls.SouthWestCellY}), stride {ls.Stride}, levels {ls.MinLevel}..{ls.MaxLevel}; "
+                                    + $"cut under {loadedCells.Count} loaded cell(s); reach {DistantLodLayer.FarPlane:0} (also the far plane)");
+                    foreach (var line in DistantLodLayer.Describe(lodData)) Console.WriteLine(line);
+                    foreach (var e in lodData.Errors.Take(5)) Console.WriteLine($"   lod: {e}");
+                    if (lodData.Errors.Count > 5) Console.WriteLine($"   lod: ... {lodData.Errors.Count - 5} more file problem(s)");
+                    int lodMissing = textures.MissingTexturePaths.Count - lodTexBefore;
+                    Console.WriteLine($"   lod timing: read + build {lodBuildMs:0} ms, textures + upload {lodSw.Elapsed.TotalMilliseconds - lodBuildMs:0} ms"
+                                    + (lodMissing > 0 ? $"; {lodMissing} LOD texture(s) not found (drawn white)" : ""));
+                }
+            }
+        }
 
         // ── THE NAVMESH OVERLAY — the probe's whole point ──────────────────────────────
         // Looks: filled = the translucent sheet; wire = every triangle outlined; both.
@@ -1731,7 +1964,9 @@ static class TexturedScene
         // compiled-in default, no profile ini sets it; first person uses `fNear1stPersonDistance` 5). It was 4 u
         // before, which drew geometry the game clips in a close-up. That the free camera uses the third-person
         // value is assumed, not measured.
-        const float NearPlane = 15f, FarPlane = 131072f;
+        const float NearPlane = 15f;
+        // --lod draws to about 100 cells (DistantLodLayer.FarPlane); without it the far plane is unchanged.
+        float FarPlane = DistantLodLayer.Requested ? DistantLodLayer.FarPlane : 131072f;
         var eyeY = YUp(cam.Eye); var lookY = YUp(cam.Look);
         var camOff = eyeY - lookY;
         float camDist = MathF.Max(camOff.Length(), 1f);
@@ -1751,6 +1986,65 @@ static class TexturedScene
             FarPlane = FarPlane,
             MaxDistance = 1_000_000f,
         };
+
+        // --cell-lighting (CellLighting.cs): an interior lit by its own XCLL (with the lighting
+        // template's inherited values), its image space and its placed LIGH references.
+        if (CellLighting.Requested && CellLighting.TargetCell is { } litCell)
+        {
+            if (CellLighting.Resolve(litCell) is not { } cl)
+                Console.WriteLine("   cell lighting: the cell has no XCLL (or this walk was retained) - studio lights kept");
+            else
+            {
+                var v = cl.Lighting;
+                renderer.Lights[0].Color = new GlVec3(v.Ambient.X, v.Ambient.Y, v.Ambient.Z);
+                renderer.SetAmbientIntensity(1f);
+                renderer.SetKeyLight(azimuthDeg: v.RotXY, elevationDeg: v.RotZ, intensity01: v.DirectionalFade,
+                                     new GlVec3(v.Directional.X, v.Directional.Y, v.Directional.Z));
+                renderer.SetFillLight(azimuthDeg: 315f, elevationDeg: 20f, intensity01: 0f, new GlVec3(1f, 1f, 1f));
+                renderer.Fog = v.FogFar > v.FogNear
+                    ? new DistanceFog(new GlVec3(v.FogNearColor.X, v.FogNearColor.Y, v.FogNearColor.Z),
+                                      new GlVec3(v.FogFarColor.X, v.FogFarColor.Y, v.FogFarColor.Z),
+                                      v.FogNear, v.FogFar, v.FogPower > 0f ? v.FogPower : 1f, v.FogMax > 0f ? v.FogMax : 1f)
+                    : null;
+                if (cl.ImageSpace is { } cis && !SceneWeather.ImageSpaceOff)
+                    renderer.ImageSpace = new ImageSpaceFinish(cis.White, cis.Saturation, cis.Brightness, cis.Contrast,
+                        new GlVec3(cis.TintColor.X, cis.TintColor.Y, cis.TintColor.Z), cis.TintAmount, SceneWeather.AdaptedLuminance);
+                // Point lights, nearest the eye first, up to the renderer's limit.
+                var lit = CellLighting.Placed
+                    .Select(p => (P: new Vector3(p.Position.X, p.Position.Y, p.Position.Z), B: CellLighting.Effective(p.Base, p.Ref)))
+                    .Where(p => p.B.Radius > 0f)
+                    // Diagnostic: VP_CELL_LIGHTS=unshadowed drops the shadow-casting lights (drawn unshadowed here).
+                    .Where(p => Environment.GetEnvironmentVariable("VP_CELL_LIGHTS") != "unshadowed" || !p.B.Shadowed)
+                    .Where(p => Environment.GetEnvironmentVariable("VP_CELL_LIGHTS") != "none")
+                    .OrderBy(p => Vector3.Distance(p.P, cam.Eye))
+                    .Take(GlRenderer.MaxPointLights).ToList();
+                foreach (var (p, b) in lit)
+                {
+                    var py = YUp(p);
+                    var col = b.Negative ? -b.Color : b.Color;
+                    renderer.PointLights.Add(new PointLight(new GlVec3(py.X, py.Y, py.Z), new GlVec3(col.X, col.Y, col.Z), b.Radius) { CastsShadow = b.Shadowed });
+                }
+                Console.WriteLine($"   cell lighting: {cl.Text}");
+                if (Environment.GetEnvironmentVariable("VP_CELL_LIGHTS_LIST") == "1")
+                    foreach (var (p, b) in lit)
+                        Console.WriteLine($"     light {b.Name} at ({p.X:0}, {p.Y:0}, {p.Z:0}) colour x fade {b.Color:0.###} radius {b.Radius:0}{(b.Negative ? " NEGATIVE" : "")}{(b.Shadowed ? " shadow-casting" : "")}, {Vector3.Distance(p, cam.Eye):0} u from the eye");
+                Console.WriteLine($"   cell lighting: {lit.Count} of {CellLighting.Placed.Count} placed light(s) drawn as point lights (nearest first)"
+                                  + (lit.Count > 0 ? $"; nearest {lit[0].B.Name} radius {lit[0].B.Radius:0}" : ""));
+            }
+        }
+
+        // The sun's shadow (--shadows; on by default with --weather): SkyRender's directional shadow
+        // map, fitted to the part of the frame within --shadow-distance. Only the sun casts; the
+        // ambient is unshadowed, as in the engine.
+        if (SceneWeather.ShadowsOn && SceneWeather.Current is not null)
+        {
+            float groundZ = terrainHeightAt?.Invoke(cam.Eye.X, cam.Eye.Y) ?? MathF.Min(cam.Look.Z, cam.Eye.Z - 100f);
+            var (sc, sr) = SceneWeather.ShadowSphere(cam.Eye, cam.Look, cam.FovDeg, sizeW / (float)sizeH, groundZ, SceneWeather.ShadowDistance);
+            var scY = YUp(sc);
+            renderer.EnableShadows = true;
+            renderer.ShadowBounds = (new GlVec3(scY.X, scY.Y, scY.Z), sr);
+            Console.WriteLine($"   sun shadow: map over a {sr:0}-unit sphere at ({sc.X:0}, {sc.Y:0}, {sc.Z:0}), ground {groundZ:0}, reach {SceneWeather.ShadowDistance:0}");
+        }
 
         // Offscreen target + readback (same pattern as the flat path). With MSAA the scene is
         // drawn into a multisampled PAIR and resolved into this one: --size buys detail, but the
@@ -2385,7 +2679,7 @@ static class TexturedScene
 
         // Window depth -> distance along the view axis, so the compare happens in world units
         // instead of in the wildly non-linear depth encoding a 4..131072 frustum produces.
-        static float ViewDist(float winZ)
+        float ViewDist(float winZ)
         {
             float zn = winZ * 2f - 1f;
             return 2f * NearPlane * FarPlane / (FarPlane + NearPlane - zn * (FarPlane - NearPlane));
@@ -3034,15 +3328,22 @@ static class TexturedScene
                 Console.WriteLine($"   cull-above z {cz2:0}: {cullTrisDropped:N0} static triangle(s) removed, "
                                 + $"{cullShapesDropped:N0} shape(s) wholly above the cut (terrain/nav/actors/overlay untouched)");
             }
+            if (emissiveShapes > 0)
+                Console.WriteLine($"   emissive shapes: {emissiveShapes:N0} (SLSF1_Own_Emit, glow map where flagged; External_Emittance shapes stay unlit)");
+            if (envMappedShapes > 0)
+                Console.WriteLine($"   env-mapped shapes: {envMappedShapes:N0} (slot-4 cube map, slot-5 mask, NIF envMapScale)");
+            if (editorMarkerShapes > 0)
+                Console.WriteLine($"   editor-marker shapes: {editorMarkerShapes:N0} not drawn (shape named EditorMarker; the game hides it)");
             if (fxStaticShapes > 0)
                 Console.WriteLine($"   static effect shapes: {fxStaticShapes:N0} DRAWN on {fxStaticRefCount:N0} ref(s) "
-                                + "— --fx-static, frozen at the authored frame, additive, no depth write");
-            if (coveringShapes > 0)
+                                + "— engine effect shading, frozen at the authored frame (--no-fx drops them)");
+            if (coveringShapes + projectedShapes > 0)
             {
-                Console.WriteLine($"   projected coverings (MATO): {coveringShapes:N0} shell(s) on {coveringRefs:N0} ref(s) "
+                Console.WriteLine($"   projected coverings (MATO): {projectedShapes:N0} single-pass shape(s) covered per pixel, "
+                                + $"{coveringShapes:N0} shell(s), on {coveringRefs:N0} ref(s) "
                                 + $"of {coveringByMato.Count} material(s) — STAT.Material + MaxAngle, --no-coverings to drop");
                 foreach (var kv in coveringByMato.OrderByDescending(k => k.Value))
-                    Console.WriteLine($"      {kv.Value,5} shell(s)  {kv.Key}");
+                    Console.WriteLine($"      {kv.Value,5} shape(s)  {kv.Key}");
             }
             if (fxShapesSkipped + nmShapesSkipped > 0)
             {
@@ -3097,7 +3398,10 @@ static class TexturedScene
         }
 
         float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 || depthDumpPath is not null ? new float[sizeW * sizeH] : null;
+        var frameSw = System.Diagnostics.Stopwatch.StartNew();
         var pixels = Draw(pickDepth);
+        // --lod: the final frame's draw time (GL.Finish inside Draw), since LOD is what adds draws.
+        if (DistantLodLayer.Requested) Console.WriteLine($"   lod timing: final frame drawn in {frameSw.Elapsed.TotalMilliseconds:0} ms");
         // --depth-dump: the finished frame's depth buffer, exactly as --pick reads it below — size*size
         // float32 window depth in [0,1], GL row order (row 0 = the BOTTOM image row), 1.0 = background.
         // A distance along the view axis is the standard perspective inverse with the near/far printed

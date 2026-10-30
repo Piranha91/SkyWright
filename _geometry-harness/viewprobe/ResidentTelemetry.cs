@@ -1,4 +1,5 @@
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 
 namespace ViewProbe;
 
@@ -13,15 +14,12 @@ internal static class ResidentTelemetry
 {
     internal const string Variable = "VP_RESIDENT_TELEMETRY_OUT";
     static readonly string? OutputPath = Resolve(Environment.GetEnvironmentVariable(Variable));
-    // Rendering exposes BudgetBytes but not its repoll counter; the private field is read only when telemetry is on.
-    static readonly System.Reflection.FieldInfo? CounterField = typeof(ResidentTextureCache).GetField("_rendersSinceRepoll",
-        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
 
     internal static bool Failed { get; private set; }
 
     static string? Resolve(string? value) => string.IsNullOrWhiteSpace(value) ? null : Path.GetFullPath(value.Trim());
 
-    internal static int? ReadCounter(ResidentTextureCache resident) => CounterField?.GetValue(resident) as int?;
+    internal static int? ReadCounter(ResidentTextureCache resident) => resident.RendersSinceRepoll;
 
     internal static void WriteCell(int cellIndex, string cell, bool reuseCell, string outcome, int boundaryExit, int shots,
         GraphicsCell? graphics)
@@ -44,7 +42,7 @@ internal static class ResidentTelemetry
                 residentCache = resident is not null,
                 budgetBytes = resident?.BudgetBytes,
                 rendersSinceRepoll = resident is null ? null : ReadCounter(resident),
-                counterField = resident is null ? null : CounterField is null ? "absent" : "_rendersSinceRepoll",
+                counterField = resident is null ? null : "RendersSinceRepoll",
                 // Process memory at cell end (lane V, 2026-10-10): the managed heap as the last GC left it, the GC's
                 // peak-free total, the GC's commit, and the OS's private bytes and peak working set.
                 managedHeapBytes = GC.GetGCMemoryInfo().HeapSizeBytes,

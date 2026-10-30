@@ -12,7 +12,8 @@ internal sealed record TerrainPatchFact(string Diffuse,
 internal sealed record TerrainLayerFact(string Diffuse,
     (System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C,
      float Oa, float Ob, float Oc)[] Triangles);
-internal sealed record LandHeightFact(int X, int Y, float[,] Heights);
+internal sealed record LandHeightFact(int X, int Y, float[,] Heights,
+    System.Numerics.Vector3[]? Normals = null, System.Numerics.Vector3[]? Colors = null);
 
 /// <summary>
 /// Complete owned output of the expensive record walks for one worklist cell. Every collection
@@ -56,12 +57,17 @@ internal sealed class CellWalkFacts
     internal required Dictionary<FormKey, FormKey> LtexToTxst { get; init; }
     internal required Dictionary<FormKey, string> LtexEditorIds { get; init; }
     internal required Dictionary<FormKey, string> TxstDiffuse { get; init; }
+    /// <summary>TXST NormalOrGloss paths, for the native terrain's layer normal maps.</summary>
+    internal Dictionary<FormKey, string> TxstNormal { get; init; } = new();
     internal required Dictionary<FormKey, (FormKey Mato, float MaxAngle)> BaseMato { get; init; }
     internal required Dictionary<FormKey, (string Ed, System.Numerics.Vector3 Projection, float Bias,
-        float Scale, float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model)> Mato { get; init; }
+        float Scale, float UvScale, System.Numerics.Vector3 Color, bool SinglePass, string? Model,
+        float NoiseUv)> Mato { get; init; }
     internal required Dictionary<FormKey, (string Ed, string? Noise, float NoiseUv,
         System.Numerics.Vector3 Shallow, System.Numerics.Vector3 Deep, System.Numerics.Vector3 Reflect,
-        float Reflectivity, byte Opacity, float Fresnel)> WaterRecords { get; init; }
+        float Reflectivity, byte Opacity, float Fresnel,
+        float FogNear, float FogFar, float FogAmount, float NoiseFalloff,
+        System.Numerics.Vector3 Spec)> WaterRecords { get; init; }
 
     internal required Dictionary<(int X, int Y), (bool Has, float Height, FormKey? Water)> CellWater { get; set; }
     internal required FormKey? WorldWater { get; set; }
@@ -107,7 +113,7 @@ internal sealed class CellWalkFacts
             Navigation = nav,
             BaseMeshes = new(BaseMeshes), MarkerBases = MarkerBases.ToHashSet(),
             BaseEditorIds = new(BaseEditorIds), BaseTypes = new(BaseTypes), BaseBounds = new(BaseBounds),
-            LtexToTxst = new(LtexToTxst), LtexEditorIds = new(LtexEditorIds), TxstDiffuse = new(TxstDiffuse),
+            LtexToTxst = new(LtexToTxst), LtexEditorIds = new(LtexEditorIds), TxstDiffuse = new(TxstDiffuse), TxstNormal = new(TxstNormal),
             BaseMato = new(BaseMato), Mato = new(Mato), WaterRecords = new(WaterRecords),
             CellWater = new(CellWater), WorldWater = WorldWater,
             WorldDefaultWaterHeight = WorldDefaultWaterHeight,
@@ -122,7 +128,8 @@ internal sealed class CellWalkFacts
             StationReach = StationReach,   // shared: its filing is not changed after the walk
             TerrainPatches = TerrainPatches.Select(x => new TerrainPatchFact(x.Diffuse, x.Triangles.ToArray())).ToArray(),
             TerrainLayers = TerrainLayers.Select(x => new TerrainLayerFact(x.Diffuse, x.Triangles.ToArray())).ToArray(),
-            LandHeights = LandHeights.Select(x => new LandHeightFact(x.X, x.Y, (float[,])x.Heights.Clone())).ToArray(),
+            LandHeights = LandHeights.Select(x => new LandHeightFact(x.X, x.Y, (float[,])x.Heights.Clone(),
+                x.Normals?.ToArray(), x.Colors?.ToArray())).ToArray(),
         };
     }
 

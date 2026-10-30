@@ -2,7 +2,8 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using OpenTK.Graphics.OpenGL4;
 
 namespace ViewProbe;
@@ -142,20 +143,18 @@ internal sealed class GraphicsReuseRed : IDisposable
         session.Emit("cell-resources-after-owner-dispose", cell, null,
             new { contextId, contextCurrent = current, glVersion = version, checks });
         // G3 (Gate B6 review, Q4): every borrowed NPC mesh this cell saw, at cell end with the context current:
-        // disposed by its owner (GlMesh's private _disposed, by reflection) and its recorded handles' liveness.
-        var disposedField = typeof(GlMesh).GetField("_disposed",
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        // disposed by its owner (GlMesh.IsDisposed) and its recorded handles' liveness.
         var borrowedRows = cell.BorrowedMeshes.GroupBy(b => b.Id).Select(g => g.First()).Select(b => new
         {
             meshId = b.Id, b.Vao, b.Vbo, b.Ebo,
-            disposed = disposedField is null ? (bool?)null : (bool)disposedField.GetValue(b.Mesh)!,
+            disposed = (bool?)b.Mesh.IsDisposed,
             vaoLive = current && b.Vao > 0 && GL.IsVertexArray(b.Vao),
             vboLive = current && b.Vbo > 0 && GL.IsBuffer(b.Vbo),
             eboLive = current && b.Ebo > 0 && GL.IsBuffer(b.Ebo)
         }).ToArray();
         session.Emit("borrowed-at-cell-end", cell, null, new
         {
-            contextCurrent = current, reflectionFound = disposedField is not null, count = borrowedRows.Length,
+            contextCurrent = current, reflectionFound = true, // GlMesh.IsDisposed is public now; key kept for the evidence schema count = borrowedRows.Length,
             disposedCount = borrowedRows.Count(r => r.disposed == true), rows = borrowedRows
         });
     }
@@ -225,10 +224,10 @@ internal sealed class GraphicsReuseRed : IDisposable
     internal ClearProbe InstallCacheClearing(GlTextureManager manager)
     {
         ThrowIfDisposed();
-        var map = (Dictionary<string, int>)ManagerPathCache!.GetValue(manager)!;
-        var all = (List<int>)ManagerAllTextures!.GetValue(manager)!;
+        var map = manager.CachedTexturePaths;
+        var all = manager.OwnedTextureHandles;
         int white = manager.WhiteTexture;
-        return new(white, white > 0 && GL.IsTexture(white), map.Count, map.Keys.ToArray(),
+        return new(white, white > 0 && GL.IsTexture(white), map.Count, map.ToArray(),
             manager.MissingTexturePaths.Count, all.Count(h => h != white), session.OrderMark());
     }
 
@@ -239,8 +238,8 @@ internal sealed class GraphicsReuseRed : IDisposable
     {
         ThrowIfDisposed();
         if (before is null) return;
-        var map = (Dictionary<string, int>)ManagerPathCache!.GetValue(manager)!;
-        var all = (List<int>)ManagerAllTextures!.GetValue(manager)!;
+        var map = manager.CachedTexturePaths;
+        var all = manager.OwnedTextureHandles;
         int white = manager.WhiteTexture;
         bool whiteLive = white > 0 && GL.IsTexture(white);
         int peekHits = before.MappedPaths.Count(p => PeekPrivate(manager, p) != -1);
@@ -734,7 +733,7 @@ internal sealed class GraphicsReuseRed : IDisposable
                 key, D([preparedIdentity]),
                 $"fx={keepFx};fxStatic={fxStatic};cull={cullAbove?.ToString("R", System.Globalization.CultureInfo.InvariantCulture)};surface={refSurface};opacity={F(refSurfaceOpacity)}",
                 D([Environment.GetEnvironmentVariable("VP_LAYER_ONLY") ?? "<null>", Environment.GetEnvironmentVariable("VP_LAYER_SOLID") ?? "<null>",
-                   Environment.GetEnvironmentVariable("VP_FXSTATIC_EMIT") ?? "<null>"]),
+                   Environment.GetEnvironmentVariable("VP_FX_DOUBLESIDED") ?? "<null>"]),
                 refs.Count, D(refs.Select(r => r.ToString())),
                 D(refs.Select(r => $"{r.MeshRelPath}|{r.RefKey}|{r.BaseKey}|{r.Position}|{r.Rotation}|{F(r.Scale)}")),
                 refs.Count(r => r.Highlight),
@@ -1195,17 +1194,16 @@ internal sealed class GraphicsReuseRed : IDisposable
         int RetiredOnlyPaths, int RetiredFound, string[] RetiredEvicted, int Surplus, string[] ShotLocalPathsInCache,
         bool Holds);
 
-    // ---- G2 (Gate B4) non-promoting reads of the Rendering caches, by reflection (measurement only) ----
+    // ---- G2 (Gate B4) non-promoting reads of the Rendering caches (public telemetry), plus the reflection the
+    // fault-injection writes still need (entry identity, handle replace, evict) -- measurement only ----
     const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
     static readonly System.Reflection.FieldInfo? ResidentMap = typeof(ResidentTextureCache).GetField("_map", Private);
     static readonly Type? ResidentEntry = typeof(ResidentTextureCache).GetNestedType("Entry", System.Reflection.BindingFlags.NonPublic);
-    static readonly System.Reflection.FieldInfo? ManagerPathCache = typeof(GlTextureManager).GetField("_textureCache", Private);
-    static readonly System.Reflection.FieldInfo? ManagerAllTextures = typeof(GlTextureManager).GetField("_allTextures", Private);
 
     static void ValidateReflection()
     {
         string[] entryFields = ["Handle", "Bytes", "InProtected", "Node"];
-        if (ResidentMap is null || ResidentEntry is null || ManagerPathCache is null || ManagerAllTextures is null
+        if (ResidentMap is null || ResidentEntry is null
             || entryFields.Any(f => ResidentEntry.GetField(f) is null)
             || typeof(ResidentTextureCache).GetField("_currentBytes", Private) is null
             || typeof(ResidentTextureCache).GetField("_protectedBytes", Private) is null)
@@ -1213,12 +1211,7 @@ internal sealed class GraphicsReuseRed : IDisposable
     }
 
     static int PeekResident(ResidentTextureCache cache, string? diskPath)
-    {
-        if (string.IsNullOrEmpty(diskPath)) return -1;
-        var map = (System.Collections.IDictionary)ResidentMap!.GetValue(cache)!;
-        object? entry = map.Contains(diskPath) ? map[diskPath] : null;
-        return entry is null ? -1 : (int)ResidentEntry!.GetField("Handle")!.GetValue(entry)!;
-    }
+        => cache.TryPeek(diskPath, out int handle) ? handle : -1;
 
     string? ResidentEntryId(ResidentTextureCache cache, string? diskPath)
     {
@@ -1229,10 +1222,7 @@ internal sealed class GraphicsReuseRed : IDisposable
     }
 
     static int PeekPrivate(GlTextureManager manager, string gamePath)
-    {
-        var map = (Dictionary<string, int>)ManagerPathCache!.GetValue(manager)!;
-        return map.TryGetValue(gamePath, out int handle) ? handle : -1;
-    }
+        => manager.TryPeekCachedTexture(gamePath, out int handle) ? handle : -1;
 
     static void SetResidentHandle(ResidentTextureCache cache, string diskPath, int handle)
     {
@@ -1320,8 +1310,6 @@ internal sealed class GraphicsReuseRed : IDisposable
         long BudgetBefore, object? CeilingBefore, int WhiteBefore, long Order);
     static System.Globalization.CultureInfo Inv => System.Globalization.CultureInfo.InvariantCulture;
 
-    static object? ResidentField(ResidentTextureCache cache, string name) =>
-        typeof(ResidentTextureCache).GetField(name, Private)?.GetValue(cache);
 
     static int FreeVramKb() => GL.GetInteger((GetPName)0x9049);   // GL_GPU_MEMORY_INFO_CURRENT_AVAILABLE_VIDMEM_NVX, as the dependency reads it
 
@@ -1347,10 +1335,10 @@ internal sealed class GraphicsReuseRed : IDisposable
         return new
         {
             budgetBytes = resident.BudgetBytes, currentBytes = resident.CurrentBytes, count = resident.Count,
-            epoch = ResidentField(resident, "_epoch"), rendersSinceRepoll = ResidentField(resident, "_rendersSinceRepoll"),
-            overrideBudgetBytes = ResidentField(resident, "_overrideBudgetBytes"),
-            vramQueryAvailable = ResidentField(resident, "_vramQueryAvailable"),
-            totalVramBytes = ResidentField(resident, "_totalVramBytes"), oomCeilingBytes = ResidentField(resident, "_oomCeilingBytes"),
+            epoch = (object?)resident.Epoch, rendersSinceRepoll = (object?)resident.RendersSinceRepoll,
+            overrideBudgetBytes = (object?)resident.OverrideBudgetBytes,
+            vramQueryAvailable = (object?)resident.VramQueryAvailable,
+            totalVramBytes = (object?)resident.TotalVramBytes, oomCeilingBytes = (object?)resident.OomCeilingBytes,
             retainedEntries = manifest.Length, retainedMember = member, retainedLive = live,
             freeVramKb = FreeVramKb(), privateBytes = PrivateBytes()
         };
@@ -1430,7 +1418,7 @@ internal sealed class GraphicsReuseRed : IDisposable
         if (session.G4Mode != "repoll") return;
         var shot = cell.Shots.LastOrDefault();
         int ordinal = cell.Shots.Count;
-        object? since = ResidentField(resident, "_rendersSinceRepoll");
+        object? since = (object?)resident.RendersSinceRepoll;
         bool arm = !g4RepollFired && scene is not null && since is int n && n == 15;
         var view = ResidentView(resident, scene);
         if (!arm)
@@ -1439,7 +1427,7 @@ internal sealed class GraphicsReuseRed : IDisposable
             return;
         }
         g4RepollFired = true;
-        long total = ResidentField(resident, "_totalVramBytes") is long t ? t : 0;
+        long total = resident.TotalVramBytes;
         long headroom = total > 0 ? Math.Max(1L << 30, (long)(total * 0.15)) : 1L << 30;   // ResidentTextureCache.ComputeDynamicBudget
         long deficit = session.G4RepollDeficitBytes;
         long targetFreeKb = (headroom - deficit) / 1024;
@@ -1479,7 +1467,7 @@ internal sealed class GraphicsReuseRed : IDisposable
         GL.ClearColor(clear[0], clear[1], clear[2], clear[3]);
         int freeNow = FreeVramKb();
         long current = resident.CurrentBytes;
-        long ceiling = ResidentField(resident, "_oomCeilingBytes") is long c ? c : 8L << 30;
+        long ceiling = resident.OomCeilingBytes;
         long predicted = Math.Clamp(current + (long)freeNow * 1024 - headroom, 256L << 20, Math.Min(8L << 30, ceiling));
         session.Emit("g4-repoll-ballast", cell, shot, new
         {
@@ -1543,7 +1531,7 @@ internal sealed class GraphicsReuseRed : IDisposable
             drained.Add(e.ToString());
         }
         long budgetBefore = resident.BudgetBytes;
-        object? ceilingBefore = ResidentField(resident, "_oomCeilingBytes");
+        object? ceilingBefore = (object?)resident.OomCeilingBytes;
         int prior = GL.GetInteger(GetPName.ArrayBufferBinding);
         int buf = GL.GenBuffer();
         GL.BindBuffer(BufferTarget.ArrayBuffer, buf);
@@ -1571,7 +1559,7 @@ internal sealed class GraphicsReuseRed : IDisposable
             missingSetCount = manager.MissingTexturePaths.Count,
             missingSetHasPath = manager.MissingTexturePaths.Any(x => StringComparer.OrdinalIgnoreCase.Equals(x, probe.GamePath)),
             budgetBefore = probe.BudgetBefore, budgetAfter = resident.BudgetBytes, ceilingBefore = probe.CeilingBefore,
-            ceilingAfter = ResidentField(resident, "_oomCeilingBytes"), residentPeek = PeekResident(resident, probe.DiskPath),
+            ceilingAfter = (object?)resident.OomCeilingBytes, residentPeek = PeekResident(resident, probe.DiskPath),
             privateCachePeek = privatePeek, privateCachedWhite = privatePeek == manager.WhiteTexture,
             pendingErrorAfter = pending.ToString()
         });
@@ -2009,10 +1997,10 @@ internal sealed class GraphicsReuseRed : IDisposable
     static object ResidentFields(ResidentTextureCache resident) => new
     {
         budgetBytes = resident.BudgetBytes, currentBytes = resident.CurrentBytes, count = resident.Count,
-        rendersSinceRepoll = ResidentField(resident, "_rendersSinceRepoll"), epoch = ResidentField(resident, "_epoch"),
-        oomCeilingBytes = ResidentField(resident, "_oomCeilingBytes"),
-        overrideBudgetBytes = ResidentField(resident, "_overrideBudgetBytes"),
-        vramQueryAvailable = ResidentField(resident, "_vramQueryAvailable"),
+        rendersSinceRepoll = (object?)resident.RendersSinceRepoll, epoch = (object?)resident.Epoch,
+        oomCeilingBytes = (object?)resident.OomCeilingBytes,
+        overrideBudgetBytes = (object?)resident.OverrideBudgetBytes,
+        vramQueryAvailable = (object?)resident.VramQueryAvailable,
     };
 
     bool b10bCeilingFired;
@@ -2027,7 +2015,7 @@ internal sealed class GraphicsReuseRed : IDisposable
         int ordinal = cell.Shots.Count;
         session.Emit("b10b-pass", cell, shot, new { ordinal, phase, fields = ResidentFields(resident) });
         if (phase != "before" || session.G4Mode != "ceiling" || b10bCeilingFired) return;
-        if (ResidentField(resident, "_rendersSinceRepoll") is not int since || since != 15) return;
+        if (resident.RendersSinceRepoll != 15) return;
         var field = typeof(ResidentTextureCache).GetField("_oomCeilingBytes", Private)
             ?? throw new InvalidOperationException("B10b ceiling arm: ResidentTextureCache._oomCeilingBytes is absent");
         object? before = field.GetValue(resident);

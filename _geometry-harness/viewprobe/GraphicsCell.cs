@@ -1,4 +1,5 @@
-using CharacterViewer.Rendering;
+﻿using SkyRender;
+using SkyRender.Character;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
@@ -61,8 +62,8 @@ internal sealed class GraphicsCell : IDisposable
             throw new InvalidOperationException("graphics cell failed to make its context current");
     }
 
-    internal BuiltScene BeginShot(string staticKey, CharacterPreviewCache cache,
-        ICharacterViewerLogger logger, GraphicsReuseRed.ShotScope? evidence)
+    internal BuiltScene BeginShot(string staticKey, AssetCache cache,
+        IRenderLogger logger, GraphicsReuseRed.ShotScope? evidence)
     {
         MakeCurrent();
         bool created = resident is null;
@@ -72,7 +73,7 @@ internal sealed class GraphicsCell : IDisposable
             installTextures = new GlTextureManager(cache, logger, resident);
             installTextures.Initialize();
             renderer = new GlRenderer();
-            renderer.Initialize(null);
+            renderer.Initialize(Environment.GetEnvironmentVariable("VP_SHADER_DIR"));   // null: embedded shaders
             rendererBaseline = RendererSettings.Capture(renderer);
         }
         evidence?.ResidentOwnerReady(resident!, created);

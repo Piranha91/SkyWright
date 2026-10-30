@@ -1062,7 +1062,7 @@
       "verified": "read"
     },
     {
-      "name": "extraction cache (CharacterViewerCache)",
+      "name": "extraction cache (SkyRenderCache)",
       "surface": "input-file",
       "invalidates": "shot",
       "changesGeometry": false,

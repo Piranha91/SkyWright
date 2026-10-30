@@ -1,7 +1,8 @@
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
-using CharacterViewer.Rendering;
+using SkyRender;
+using SkyRender.Character;
 using HousecarlCore;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
