@@ -241,6 +241,41 @@ def case_31_precedent_refusal_does_not_block_but_keeps_run_incomplete():
     assert st2["blocksLater"] is True, "a failed measurement stage blocks the stages after it"
 
 
+# ---- judgement and run-local stages ----
+
+KEY = [{"image": "image-001.png", "sha256": "a" * 64}, {"image": "image-002.png", "sha256": "b" * 64}]
+
+
+def case_33_observations_wait_until_banked():
+    st, why = EP.observations_state(KEY, None)
+    assert st == "awaiting", f"frames without banked observations must stop the run, got {st}: {why}"
+
+
+def case_35_observations_must_match_this_capture():
+    other = {"frames": [{"image": "image-001.png", "sha256": "c" * 64, "observation": "a doorway"},
+                        {"image": "image-002.png", "sha256": "b" * 64, "observation": "a cart"}]}
+    st, why = EP.observations_state(KEY, other)
+    assert st == "refused" and "image-001.png" in why, f"observations of other bytes are refused, got {st}: {why}"
+    empty = {"frames": [{"image": k["image"], "sha256": k["sha256"], "observation": ""} for k in KEY]}
+    st, _ = EP.observations_state(KEY, empty)
+    assert st == "refused", "a frame without an observation is refused"
+    good = {"frames": [{"image": k["image"], "sha256": k["sha256"], "observation": "x"} for k in KEY]}
+    assert EP.observations_state(KEY, good)[0] == "accepted"
+
+
+def case_37_no_frames_is_a_stated_refusal_not_a_pass():
+    st, why = EP.observations_state([], None)
+    assert st == "nothing" and "nothing to observe" in why, f"no frames is said, never accepted, got {st}: {why}"
+
+
+def case_39_precedent_script_absent_is_a_visible_refusal():
+    import types
+    with tempfile.TemporaryDirectory() as t:
+        ctx = types.SimpleNamespace(machine={"precedentCmd": ["python", f"{t}/absent/precedent_stage.py", "--bundle",
+                                                              "{bundle}", "--out", "{out}"]}, out=Path(t), id="x")
+        refuses(lambda: EP.stage_precedent(ctx, {}, Path(t) / "precedent"), "stage script absent")
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

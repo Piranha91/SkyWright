@@ -55,6 +55,8 @@ REGISTRY = ROOT / ".claude/skills/world-edit-compatibility/references/check-regi
 STAGES = ("census", "prepare", "scope", "plan", "evaluate", "records", "scenes", "bundle", "precedent",
           "report-plan", "capture", "image-observations", "report", "reel", "deliver")
 NON_BLOCKING = frozenset({"precedent"})
+#: entry fields that change only what is presented (names, patch search, report shape); measuring stages ignore them
+PRESENTATION_KEYS = frozenset({"modNames", "patchSearch", "report", "captureSize"})
 EXIT_OK, EXIT_REFUSED, EXIT_JUDGEMENT = 0, 2, 3
 MAX_PATH = 240  # leave room under Windows' 260-character limit for the probes' own file names
 
@@ -693,7 +695,8 @@ def stage_evaluate(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     if last["exitCode"] != 0:
         raise Refusal(f"evalrun {last['verb']} ended with exit {last['exitCode']} (stopped: {last['stopped']}); "
                       f"read {fwd(sdir / 'commands')} and `evalrun status`.")
-    return {"plan": sha256_file(run / "plan.json")}, [sdir / "evaluate.json", run / "ledger.json"]
+    # the ledger is not an output binding: imports and finalize change it in later stages
+    return {"plan": sha256_file(run / "plan.json")}, [sdir / "evaluate.json"]
 
 
 def comparison_cells(res: dict, scopes: dict) -> list[str]:
@@ -721,8 +724,15 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     cells = comparison_cells(res, scopes)
     write_json(sdir / "cells.json", cells)
     run = ctx.out / "evaluation"
-    cap = sdir / "capture"
+    led = read_json(run / "ledger.json").get("entries") or {}
+    open_arms = sorted({k.split("__")[1] for k, v in led.items() if str(v.get("status")) == "mcp-only" and "__" in k})
+    if not open_arms:
+        write_json(sdir / "records.json", {"note": "no mcp-only row is open; nothing to capture"})
+        return {"openArms": 0}, [sdir / "records.json"]
+    n = len(list(sdir.glob("capture-*")))
+    cap = sdir / f"capture-{n + 1:02d}"
     argv = [sys.executable, fwd(HERE / "evalrecords.py"), "capture", "--run", fwd(run),
+            *[x for a in open_arms for x in ("--arm", a)],
             "--baseline-from", fwd(ctx.out / "prepare" / "preparation.json"), "--reader-cmd", reader_cmd(ctx),
             "--data", fwd(ctx.game / "Data"), "--mods", fwd(ctx.instance / "mods"),
             "--profile-dir", fwd(ctx.instance / "profiles" / ctx.profile), "--cells", fwd(sdir / "cells.json"),
@@ -735,9 +745,10 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
             refusals[arm] = v["refused"]
         imports += v.get("imports", [])
     results = []
+    imports = [d for d in imports if str((led.get(Path(d).parent.name) or {}).get("status")) == "mcp-only"]
     for i, doc in enumerate(sorted(imports)):
-        rr = child(ctx, sdir / "commands", f"import-{i:02d}", evalrun("import-results", "--run", fwd(run), "--file", doc))
-        log = sdir / "commands" / f"import-{i:02d}.log"
+        rr = child(ctx, sdir / "commands", f"import-{cap.name}-{i:02d}", evalrun("import-results", "--run", fwd(run), "--file", doc))
+        log = sdir / "commands" / f"import-{cap.name}-{i:02d}.txt"
         results.append({"file": doc, "exitCode": rr.get("exitCode"),
                         "log": fwd(log) if log.is_file() else None})
     write_json(sdir / "records.json", {"capture": summary, "captureExit": r.get("exitCode"), "imports": results,
@@ -759,14 +770,21 @@ def stage_scenes(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"status": "not-built"}, [sdir / "scenes.json"]
 
 
+def names_env(ctx) -> dict:
+    """A private, empty instance for the names read (bundleenrich's own rule: every record is read by absolute path,
+    never from an active copy of the same plugin)."""
+    import bundleenrich
+    return {k: fwd(v) for k, v in bundleenrich.private_instance(ctx.out / "names-instance").items()}
+
+
 def stage_bundle(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     run = ctx.out / "evaluation"
-    bundle = ctx.out / "bundle"
+    bundle = bundle_dir(ctx)
     if bundle.exists():
         raise Refusal(f"{fwd(bundle)} exists from an earlier bundle; move it aside rather than overwrite it.")
     steps = [("finalize", evalrun("finalize", "--run", fwd(run)), (0, 3)),
              ("bundle", evalrun("bundle", "--run", fwd(run), "--out", fwd(bundle), "--reader-cmd", reader_cmd(ctx),
-                                "--reader-env", "HOUSECARL_DATA_DIR=" + fwd(ctx.out / "reader-data"),
+                                *[x for k, v in names_env(ctx).items() for x in ("--reader-env", f"{k}={v}")],
                                 *[x for p, n in (ctx.entry.get("modNames") or {}).items()
                                   for x in ("--mod-name", f"{p}={n}")]), (0,)),
              ("verify-bundle", evalrun("verify-bundle", fwd(bundle)), (0,))]
@@ -776,7 +794,11 @@ def stage_bundle(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         done.append({"step": name, "exitCode": r.get("exitCode")})
         if r.get("exitCode") not in ok:
             write_json(sdir / "bundle.json", {"steps": done})
-            raise Refusal(f"evalrun {name} ended with exit {r.get('exitCode')}; read {fwd(sdir / 'commands' / (name + '.log'))}.")
+            raise Refusal(f"evalrun {name} ended with exit {r.get('exitCode')}; read {fwd(sdir / 'commands' / (name + '.txt'))}.")
+    log = (sdir / "commands" / "bundle.txt").read_text(encoding="utf-8", errors="replace")         if (sdir / "commands" / "bundle.txt").is_file() else ""
+    names = [l for l in log.splitlines() if l.startswith("names:")]
+    if names and "refused" in names[-1]:
+        raise Refusal("the bundle was written but its names enrichment " + names[-1][len("names:"):].strip()[:300])
     disp = read_json(run / "disposition.json")
     write_json(sdir / "bundle.json", {"steps": done, "bundle": fwd(bundle), "evaluation": disp.get("evaluation", {}).get("claim"),
                                       "complete": disp.get("evaluation", {}).get("complete"),
@@ -785,7 +807,7 @@ def stage_bundle(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
 
 
 def bundle_dir(ctx) -> Path:
-    return ctx.out / "bundle"
+    return ctx.out / "bundle" / "evidence"
 
 
 def stage_precedent(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
@@ -795,8 +817,11 @@ def stage_precedent(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         raise Refusal("no precedent stage is named in the machine file (precedentCmd); the cards were not written.")
     out = sdir / "cards"
     argv = [x.replace("{bundle}", fwd(bundle_dir(ctx))).replace("{out}", fwd(out)) for x in tmpl]
+    script = script_of(argv)
+    if script is not None and not script.is_file():
+        raise Refusal(f"stage script absent: {fwd(script)}; no precedent cards were written.")
     r = child(ctx, sdir / "commands", "precedent", argv)
-    log = sdir / "commands" / "precedent.log"
+    log = sdir / "commands" / "precedent.txt"
     if r.get("exitCode") != 0:
         tail = log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-1:] if log.is_file() else []
         raise Refusal(f"the precedent stage refused (exit {r.get('exitCode')}): {' '.join(tail)[:300]}")
@@ -834,7 +859,7 @@ def stage_report_plan(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         shutil.rmtree(out)
     r = child(ctx, sdir / "commands", "report-plan", report_plan_argv(ctx, res, out))
     if r.get("exitCode") != 0 or not (out / "presentation.json").is_file():
-        raise Refusal(f"evalreport plan refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / 'report-plan.log')}.")
+        raise Refusal(f"evalreport plan refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / 'report-plan.txt')}.")
     sb = sdir / "storyboard.json"
     r = child(ctx, sdir / "commands", "storyboard", [sys.executable, fwd(HERE / "evalreel.py"), "storyboard-packet",
                                                      "--presentation", fwd(out / "presentation.json"),
@@ -849,72 +874,160 @@ def stage_report_plan(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"bundle": sha256_file(bundle_dir(ctx) / "manifest.json")}, [out / "presentation.json", sb, sdir / "requests.json"]
 
 
+def capture_request(ctx, q, sb: Path, qdir: Path, cands: dict) -> dict:
+    """One capture request: a verified camera (capture_acquire acquire --points auto), then its frames (capture), in
+    the with- and without-setups the request names. capture runs even on a refused acquisition: it writes the refusal
+    as a capture result the report and reel state."""
+    lab = ["--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game)]
+    # capture_acquire's own default is the production viewprobe build; a machine file may name another one
+    vp_args = ["--vp", ctx.machine["viewprobe"]] if ctx.machine.get("viewprobe") else []
+    row = {"id": q["id"], "arm": q.get("armId"), "without": (q.get("vignette") or {}).get("withoutArmId")}
+    if ((q.get("camera") or {}).get("support") or {}).get("supported") is False:
+        row["refused"] = "the request says its camera is not supported by capture_acquire"
+        return row
+    if row["arm"] not in cands or row["without"] not in cands:
+        row["refused"] = "the request names no planned with- or without-arm"
+        return row
+    acq = qdir / "acquisition.json"
+    a = child(ctx, qdir / "commands", "acquire", [
+        sys.executable, fwd(HERE / "capture_acquire.py"), "acquire", "--packet", fwd(sb), "--request", q["id"],
+        "--points", "auto", "--bundle", fwd(bundle_dir(ctx)), "--out", fwd(acq), "--receipts",
+        fwd(qdir / "camera-receipts"), *vp_args, "--", *lab, "--order", cands[row["arm"]]],
+        heavy=True, purpose=f"evalpipeline {ctx.id} capture", deadline_min=60)
+    row["acquireExit"] = a.get("exitCode")
+    if not acq.is_file():
+        row["refused"] = f"the camera acquisition wrote no result (exit {a.get('exitCode')}); see {fwd(qdir / 'commands')}"
+        return row
+    c = child(ctx, qdir / "commands", "capture", [
+        sys.executable, fwd(HERE / "capture_acquire.py"), "capture", "--packet", fwd(sb), "--request", q["id"],
+        "--acquisition", fwd(acq), "--with-order", cands[row["arm"]], "--without-order", cands[row["without"]],
+        "--out", fwd(qdir / "sequence"), "--size", str(ctx.entry.get("captureSize", 1280)), *vp_args, "--", *lab],
+        heavy=True, purpose=f"evalpipeline {ctx.id} capture", deadline_min=60)
+    row["captureExit"] = c.get("exitCode")
+    result = qdir / "sequence" / "capture-result.json"
+    if not result.is_file():
+        row["refused"] = f"capture wrote no result (exit {c.get('exitCode')}); see {fwd(qdir / 'commands')}"
+    else:
+        doc = read_json(result)
+        row.update(result=fwd(result), status=doc.get("status"), reason=doc.get("reason"))
+    acqd = read_json(acq)
+    if acqd.get("refusal"):
+        row["acquisitionRefusal"] = acqd["refusal"]
+    return row
+
+
+MAX_CAPTURE_ROUNDS = 3
+
+
 def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
-    """Each supported capture request: a verified camera (capture_acquire acquire --points auto) and its frames
-    (capture_acquire capture) in the with- and without-setups the request names. A refused request is kept, not hidden."""
-    sb = ctx.out / "report-plan" / "storyboard.json"
+    """Capture every request the storyboard asks for, then plan again with the results: a refused capture makes the
+    reel planner take the next member of that clash's group, which needs its own capture. Repeat until a plan asks
+    for nothing new (at most MAX_CAPTURE_ROUNDS rounds; a plan still asking after that is a refusal)."""
     plan = read_json(ctx.out / "evaluation" / "plan.json")
     cands = {a["armId"]: fwd(ctx.out / "prepare" / "candidates" / a["candidateFile"]) for a in plan["arms"]}
-    lab = ["--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game)]
-    vp = ctx.machine.get("viewprobe") or fwd(HERE / "viewprobe" / "bin" / "Release" / "net9.0" / "viewprobe.exe")
-    rows = []
-    for q in (read_json(sb).get("capturePlan") or {}).get("requests") or []:
-        qdir = sdir / q["id"]
-        row = {"id": q["id"], "arm": q.get("armId"), "without": (q.get("vignette") or {}).get("withoutArmId")}
-        if not ((q.get("camera") or {}).get("support") or {}).get("supported"):
-            row["refused"] = "the request says its camera is not supported by capture_acquire"
-            rows.append(row)
-            continue
-        if row["arm"] not in cands or row["without"] not in cands:
-            row["refused"] = "the request names no planned with- or without-arm"
-            rows.append(row)
-            continue
-        acq = qdir / "acquisition.json"
-        a = child(ctx, qdir / "commands", "acquire", [
-            sys.executable, fwd(HERE / "capture_acquire.py"), "acquire", "--packet", fwd(sb), "--request", q["id"],
-            "--points", "auto", "--bundle", fwd(bundle_dir(ctx)), "--out", fwd(acq), "--receipts",
-            fwd(qdir / "camera-receipts"), "--vp", vp, "--", *lab, "--order", cands[row["arm"]]],
-            heavy=True, purpose=f"evalpipeline {ctx.id} capture", deadline_min=60)
-        row["acquireExit"] = a.get("exitCode")
-        if a.get("exitCode") != 0 or not acq.is_file():
-            row["refused"] = f"the camera was not acquired (exit {a.get('exitCode')}); see {fwd(qdir / 'commands')}"
-            rows.append(row)
-            continue
-        c = child(ctx, qdir / "commands", "capture", [
-            sys.executable, fwd(HERE / "capture_acquire.py"), "capture", "--packet", fwd(sb), "--request", q["id"],
-            "--acquisition", fwd(acq), "--with-order", cands[row["arm"]], "--without-order", cands[row["without"]],
-            "--out", fwd(qdir / "sequence"), "--size", str(ctx.entry.get("captureSize", 1280)), "--vp", vp, "--", *lab],
-            heavy=True, purpose=f"evalpipeline {ctx.id} capture", deadline_min=60)
-        row["captureExit"] = c.get("exitCode")
-        result = qdir / "sequence" / "capture-result.json"
-        if c.get("exitCode") != 0 or not result.is_file():
-            row["refused"] = f"the frames were not rendered (exit {c.get('exitCode')}); see {fwd(qdir / 'commands')}"
-        else:
-            row["result"] = fwd(result)
-        rows.append(row)
+    sb = ctx.out / "report-plan" / "storyboard.json"
+    rows, done, rounds = [], set(), []
+    for rnd in range(1, MAX_CAPTURE_ROUNDS + 1):
+        reqs = [q for q in (read_json(sb).get("capturePlan") or {}).get("requests") or [] if q["id"] not in done]
+        rounds.append({"round": rnd, "storyboard": fwd(sb), "newRequests": [q["id"] for q in reqs]})
+        if not reqs:
+            break
+        for q in reqs:
+            rows.append(dict(capture_request(ctx, q, sb, sdir / q["id"], cands), round=rnd))
+            done.add(q["id"])
+        # plan again with every result so far; its storyboard names what the reel would now picture
+        pdir = sdir / f"replan-{rnd:02d}"
+        if pdir.exists():
+            shutil.rmtree(pdir)
+        results = [Path(r["result"]) for r in rows if r.get("result")]
+        r = child(ctx, sdir / "commands", f"replan-{rnd:02d}", report_plan_argv(ctx, res, pdir, results))
+        if r.get("exitCode") != 0:
+            raise Refusal(f"evalreport plan with the round-{rnd} capture results refused (exit {r.get('exitCode')}).")
+        sb = sdir / f"storyboard-{rnd:02d}.json"
+        r = child(ctx, sdir / "commands", f"storyboard-{rnd:02d}", [
+            sys.executable, fwd(HERE / "evalreel.py"), "storyboard-packet", "--presentation",
+            fwd(pdir / "presentation.json"), "--bundle", fwd(bundle_dir(ctx)), "--out", fwd(sb)])
+        if r.get("exitCode") != 0:
+            raise Refusal(f"evalreel storyboard-packet after round {rnd} refused (exit {r.get('exitCode')}).")
+    else:
+        left = [q["id"] for q in (read_json(sb).get("capturePlan") or {}).get("requests") or [] if q["id"] not in done]
+        if left:
+            write_json(sdir / "captures.json", rows)
+            raise Refusal(f"after {MAX_CAPTURE_ROUNDS} capture rounds the plan still asks for {', '.join(left)}.")
     write_json(sdir / "captures.json", rows)
-    return {"storyboard": sha256_file(sb)}, [sdir / "captures.json"]
+    write_json(sdir / "rounds.json", rounds)
+    return {"requests": len(rows)}, [sdir / "captures.json", sdir / "rounds.json"]
+
+
+class Awaiting(Exception):
+    """The run waits for a judgement a person or a model makes; one sentence says which file it waits for."""
+
+
+class NonBlockingRefusal(Refusal):
+    """A refusal recorded with its sentence that does not stop the stages after it."""
+
+
+def observations_state(key: list[dict], obs: dict | None) -> tuple[str, str]:
+    """('awaiting' | 'refused' | 'accepted' | 'nothing', sentence) for the blind image observations of one capture.
+    Accepted only when the banked file lists exactly the packet's frames with the same hashes and an observation each."""
+    if not key:
+        return "nothing", "no frame was captured (every capture request was refused), so there is nothing to observe."
+    if obs is None:
+        return "awaiting", "the blind image observations are not banked yet."
+    want = {k["image"]: k["sha256"] for k in key}
+    got = {f.get("image"): f.get("sha256") for f in obs.get("frames") or []}
+    if got != want:
+        missing = sorted(set(want) - set(got))
+        wrong = sorted(i for i in set(want) & set(got) if want[i] != got[i])
+        extra = sorted(set(got) - set(want))
+        return "refused", (f"the banked observations do not match this capture's frames (missing {missing[:5]}, "
+                           f"other bytes {wrong[:5]}, not in this packet {extra[:5]}); observe this packet again.")
+    empty = [f.get("image") for f in obs.get("frames") or [] if not str(f.get("observation") or "").strip()]
+    if empty:
+        return "refused", f"frames {empty[:5]} have no observation; every frame needs one."
+    return "accepted", f"{len(want)} frames observed blind."
 
 
 def stage_image_observations(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
-    """A neutral, indexed copy of every captured frame for the blind image review (no names, arms or expectations)."""
+    """A neutral, indexed copy of every captured frame for the blind image review (no names, arms or expectations),
+    then a stop until the reviewer's agent banks RUN/image-observations/observations.json for exactly these frames."""
     caps = read_json(ctx.out / "capture" / "captures.json")
     packet = sdir / "indexed-images"
-    if packet.exists():
-        shutil.rmtree(packet)
-    packet.mkdir(parents=True)
-    key, n = [], 0
-    for row in caps:
-        if not row.get("result"):
-            continue
-        for png in sorted(Path(row["result"]).parent.rglob("*.png")):
-            n += 1
-            shutil.copy2(png, packet / f"image-{n:03d}.png")
-            key.append({"image": f"image-{n:03d}.png", "source": fwd(png), "sha256": sha256_file(png), "request": row["id"]})
-    write_json(sdir / "image-key.json", key)  # the key stays out of the packet a blind reviewer is given
-    (packet / "README.txt").write_text("Indexed frames for a blind review. Describe what each image shows; no names or "
-                                       "expectations are supplied.\n", encoding="utf-8")
-    return {"images": n}, [packet, sdir / "image-key.json"]
+    key = []
+    if not (sdir / "image-key.json").is_file():
+        if packet.exists():
+            shutil.rmtree(packet)
+        packet.mkdir(parents=True)
+        n = 0
+        for row in caps:
+            if row.get("status") != "captured":
+                continue
+            for png in sorted(Path(row["result"]).parent.rglob("*.png")):
+                n += 1
+                shutil.copy2(png, packet / f"image-{n:03d}.png")
+                key.append({"image": f"image-{n:03d}.png", "source": fwd(png), "sha256": sha256_file(png),
+                            "request": row["id"]})
+        write_json(sdir / "image-key.json", key)  # the key stays out of the packet a blind reviewer is given
+        (packet / "README.txt").write_text("Indexed frames for a blind review. Describe what each image shows; no "
+                                           "names or expectations are supplied.\n", encoding="utf-8")
+    key = read_json(sdir / "image-key.json")
+    obs_path = sdir / "observations.json"
+    state, sentence = observations_state(key, read_json(obs_path) if obs_path.is_file() else None)
+    if state == "awaiting":
+        raise Awaiting(f"{sentence} Bank them at {fwd(obs_path)} as {{frames: [{{image, sha256, observation}}]}} for "
+                       f"the {len(key)} frames in {fwd(packet)}, then run again.")
+    if state == "nothing":
+        raise NonBlockingRefusal(sentence)
+    if state == "refused":
+        raise Refusal(sentence)
+    return {"images": len(key), "observations": sha256_file(obs_path)}, [sdir / "image-key.json", obs_path]
+
+
+def script_of(argv: list[str]) -> Path | None:
+    for a in argv:
+        if a.lower().endswith(".py"):
+            return Path(a)
+    return None
 
 
 def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
@@ -929,7 +1042,7 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     for name, argv in steps:
         r = child(ctx, sdir / "commands", name, argv)
         if r.get("exitCode") != 0:
-            raise Refusal(f"evalreport {name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.log'))}.")
+            raise Refusal(f"evalreport {name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.txt'))}.")
     outs = [out / "presentation.json"] + [p for p in (out / "report.md", out / "report.html", out / "report.pdf") if p.is_file()]
     return {"captures": len(caps)}, outs
 
@@ -957,7 +1070,7 @@ def stage_reel(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     for name, argv in steps:
         r = child(ctx, sdir / "commands", name, argv, deadline_min=90)
         if r.get("exitCode") != 0:
-            raise Refusal(f"reel step {name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.log'))}.")
+            raise Refusal(f"reel step {name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.txt'))}.")
     status = read_json(reel / "reel-status.json") if (reel / "reel-status.json").is_file() else {}
     if status.get("status") != "rendered":
         raise Refusal(f"the reel status is {status.get('status')!r}, not rendered; read {fwd(reel / 'reel-status.json')}.")
@@ -967,11 +1080,11 @@ def stage_reel(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         dec.mkdir(exist_ok=True)
         rmap = read_json(reel / "reel-map.json")
         times = []
-        for seg in rmap.get("segments") or rmap.get("scenes") or []:
-            for k in ("start", "startSeconds"):
-                if isinstance(seg.get(k), (int, float)):
-                    times.append(float(seg[k]) + 0.5)
-                    break
+        for seg in rmap.get("segments") or []:
+            iv = seg.get("reelInterval") or {}
+            a, b = iv.get("startSeconds"), iv.get("endSeconds")
+            if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                times += [a + 0.5, (a + b) / 2]
         for i, t in enumerate(times[:60]):
             child(ctx, sdir / "commands", f"decode-{i:02d}", [m["ffmpeg"], "-hide_banner", "-nostdin", "-loglevel", "error",
                                                               "-ss", f"{t:.2f}", "-i", fwd(reel / "reel.mp4"),
@@ -1038,7 +1151,9 @@ def cmd_run(a) -> int:
             sdir.mkdir(exist_ok=True)
             # the entry and every earlier stage's binding decide reuse; the driver's own code is recorded, not bound,
             # because the measurements' tool identities are bound inside evalrun's plan
-            inputs = {"entry": sha256_file(ctx.entry_path),
+            measured = {k: v for k, v in ctx.entry.items() if k not in PRESENTATION_KEYS}
+            entry_hash = sha256_json(ctx.entry if STAGES.index(name) >= STAGES.index("bundle") else measured)
+            inputs = {"entry": entry_hash,
                       "upstream": {s: (ledger.doc["stages"].get(s) or {}).get("inputsSha256")
                                    for s in STAGES[:STAGES.index(name)]}}
             if ledger.decide(name, inputs) == "reuse":
@@ -1048,9 +1163,21 @@ def cmd_run(a) -> int:
             t0 = time.perf_counter()
             try:
                 extra, outputs = body(ctx, res, sdir)
+            except Awaiting as w:
+                ledger.record(name, inputs, [], exit_code=3, extra=None)
+                ledger.doc["history"][-1]["reason"] = "awaiting: " + str(w)
+                ledger._save()
+                write_json(out / "status.json", {"status": "awaiting-judgement", "stoppedAt": name, "sentence": str(w),
+                                                 "at": utcnow()})
+                print(f"{name}: AWAITING: {w}")
+                return EXIT_JUDGEMENT
             except Refusal as r:
                 ledger.record(name, inputs, [], exit_code=2, extra=None)
+                ledger.doc["history"][-1]["reason"] = "refused: " + str(r)
+                ledger._save()
                 outcome = stage_outcome(name, 2, False, str(r))
+                if isinstance(r, NonBlockingRefusal):
+                    outcome["blocksLater"] = False
                 write_json(out / "status.json", {"status": "incomplete", "stoppedAt": name, "sentence": str(r),
                                                  "at": utcnow()})
                 if outcome["blocksLater"]:
@@ -1072,7 +1199,13 @@ def cmd_status(a) -> int:
     led = StageLedger(a.out)
     for s in STAGES:
         rec = led.doc["stages"].get(s)
-        print(f"{s:20s} {'accepted ' + rec['at'] + ' (' + str(rec.get('seconds')) + ' s)' if rec else '-'}")
+        last = next((h for h in reversed(led.doc["history"]) if h.get("stage") == s), None)
+        if rec:
+            print(f"{s:20s} accepted {rec['at']} ({rec.get('seconds')} s)")
+        elif last:
+            print(f"{s:20s} not accepted ({last['at']}): {last.get('reason') or 'exit ' + str(last.get('exitCode'))}")
+        else:
+            print(f"{s:20s} not run")
     st = Path(a.out) / "status.json"
     if st.is_file():
         print(json.dumps(read_json(st)))
