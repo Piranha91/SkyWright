@@ -572,10 +572,9 @@ def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: F
                         paths.add(asset_path(v.strip(), f.get("path", "")))
         arows, absent, unread = [], 0, {}
         if paths:
-            ad = s.tool("housecarl_asset_status", {"asset_paths": sorted(paths), "format": "json", "limit": 0})
-            rows = ad.get("results") or []
-            if len(rows) != len(paths) or ad.get("read_incomplete") or ad.get("bsa_failures") or ad.get("truncated"):
-                raise Refusal(f"the asset read returned {len(rows)} of {len(paths)} paths, or read archives incompletely.")
+            ad = s.tool("housecarl_asset_status", {"asset_paths": sorted(paths), "format": "json", "limit": 0,
+                                                   "max_chars": MAX_CHARS})
+            rows = asset_rows(ad, paths)
             for r in rows:
                 if r.get("error"):
                     unread[str(r["error"])[:80]] = unread.get(str(r["error"])[:80], 0) + 1
@@ -594,6 +593,27 @@ def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: F
         s.close()
         s.write(out)
     return result
+
+
+def asset_rows(ad: dict, paths) -> list:
+    """Every row of one asset-status answer. A long answer is cut inline and spilled whole to the reader's results file
+    (Ice Blade: 208 of 7,473 rows inline); the spill is read when it says it is complete and holds exactly the asked
+    paths. Anything short of that, or an archive read the reader calls incomplete, is refused."""
+    want = set(paths)
+    if ad.get("read_incomplete") or ad.get("bsa_failures"):
+        raise Refusal(f"the asset read of {len(want)} paths read archives incompletely.")
+    rows = ad.get("results") or []
+    if ad.get("truncated") or len(rows) != len(want):
+        sp = ad.get("spilled") or {}
+        f = Path(str(sp.get("path") or ""))
+        if not (sp.get("complete") is True and sp.get("path") and f.is_file()):
+            raise Refusal(f"the asset read returned {len(rows)} of {len(want)} paths and no complete spilled answer.")
+        lines = [l for l in f.read_text(encoding="utf-8").splitlines() if l.strip()]
+        head = json.loads(lines[0]) if lines else {}
+        rows = [json.loads(l) for l in lines[1:]] if head.get("housecarl_artifact") else [json.loads(l) for l in lines]
+    if len(rows) != len(want) or {str(r.get("path")) for r in rows} != want:
+        raise Refusal(f"the asset read returned {len(rows)} rows for {len(want)} asked paths, or other paths.")
+    return rows
 
 
 def asset_path(value: str, field_path: str) -> str:

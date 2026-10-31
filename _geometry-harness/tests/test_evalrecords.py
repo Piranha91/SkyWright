@@ -10,6 +10,7 @@ contested records of types T in H. A record is contested when its override depth
 is unjudged, never uncontested. The import itself is checked at Gate C against round 2's accepted Missives imports.
 """
 import importlib.util
+import json
 import os
 import sys
 import traceback
@@ -180,6 +181,47 @@ def case_21_a_hung_reader_is_stopped_at_the_arm_deadline():
         assert time.perf_counter() - t0 < 20, "the hung reader was stopped near its deadline"
         return
     raise AssertionError("a reader that never answers was not stopped at the arm's deadline")
+
+
+def asset_answer(t: Path, paths, inline, spill_rows=None, complete=True):
+    """An asset-status answer in the reader's shape: `inline` rows in the document, the rest spilled to a results file
+    (a header line, then one row per line), as the reader writes a long answer."""
+    rows = [{"path": p, "exists": True, "error": None} for p in paths]
+    doc = {"read_incomplete": False, "bsa_failures": [], "results": rows[:inline],
+           "truncated": inline < len(rows)}
+    if spill_rows is not None:
+        f = t / "asset_status_spill.jsonl"
+        head = {"housecarl_artifact": 1, "tool": "housecarl_asset_status", "row_count": len(spill_rows)}
+        f.write_text("\n".join(json.dumps(x) for x in [head] + spill_rows) + "\n", encoding="utf-8")
+        doc["spilled"] = {"path": str(f), "complete": complete, "row_count": len(spill_rows)}
+    return doc, rows
+
+
+def case_23_a_cut_asset_answer_is_read_whole_from_its_spill():
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        paths = [f"meshes/a/{i:04d}.nif" for i in range(300)]
+        doc, rows = asset_answer(Path(t), paths, inline=208, spill_rows=None)
+        doc2, _ = asset_answer(Path(t), paths, inline=208,
+                               spill_rows=[{"path": p, "exists": True, "error": None} for p in paths])
+        got = ER.asset_rows(doc2, paths)
+        assert [r["path"] for r in got] == paths, f"the spilled answer is read whole, got {len(got)} of {len(paths)} rows"
+
+
+def case_25_a_cut_asset_answer_without_a_complete_spill_is_refused():
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        paths = [f"meshes/a/{i:04d}.nif" for i in range(300)]
+        for what, (doc, _) in {"no spill": asset_answer(Path(t), paths, inline=208),
+                               "an incomplete spill": asset_answer(Path(t), paths, inline=208,
+                                                                   spill_rows=[{"path": p} for p in paths], complete=False),
+                               "a spill of other paths": asset_answer(Path(t), paths, inline=208,
+                                                                      spill_rows=[{"path": p + "x"} for p in paths])}.items():
+            try:
+                ER.asset_rows(doc, paths)
+            except ER.Refusal:
+                continue
+            raise AssertionError(f"a cut asset answer with {what} was accepted")
 
 
 def main():
