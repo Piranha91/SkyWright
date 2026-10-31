@@ -2507,6 +2507,16 @@ def cmd_plan(args):
         print(f"  subject {s.label:<18} {s.x:.1f}, {s.y:.1f}, {s.z:.1f}")
     print(f"  aim point          {aim[0]:.1f}, {aim[1]:.1f}, {aim[2]:.1f}")
 
+    # --top-down-only: the caller already knows no eye-level camera can be had (the capture fallbacks: every eye-level
+    # station refused, and the cutaway too) and asks for the labelled sliced top-down directly, with its reason as the
+    # stage. The same shot, refusal record and exit 1 as a fallback reached at the end of a search.
+    if getattr(args, "top_down_only", None):
+        msg = f"\nTop-down requested by the caller: {args.top_down_only}"
+        print(msg)
+        wl, adds, pid, scene = top_down_fallback(run, args, subjects, floor_z, args.top_down_only, msg,
+                                                 {"requested": True}, [])
+        return write_fallback(wl, adds, args, refused_json(args, floor_z, aim, pid, scene, subjects, run))
+
     # Pass 1 -- the clearance maps. One render per subject per sector; every pick in a render is
     # free once its load walk has run, which is the whole reason this beats testing candidate
     # cameras one at a time.
@@ -3358,6 +3368,10 @@ def main(argv=None):
                    help="the fallback's --cull-above height (default: the highest subject's z + "
                         "--subject-height + 64). A caller that knows the object's world-box top "
                         "passes it here; the shot records which basis was used")
+    p.add_argument("--top-down-only", default=None, metavar="WHY",
+                   help="skip the eye-level search and write the labelled sliced top-down fallback at once, with WHY "
+                        "as the stage it records (the capture fallbacks call this after the eye-level and cutaway "
+                        "attempts refused); exit 1, as any fallback")
     p.add_argument("--fallback-extent", type=float, default=2048.0,
                    help="minimum width of the fallback frame at the subjects' floor (default 2048; "
                         "it grows to the subjects' spread + 1024)")
