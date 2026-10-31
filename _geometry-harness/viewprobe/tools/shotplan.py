@@ -2779,8 +2779,10 @@ def cmd_plan(args):
                 "yaw": round(best["yaw"], 1), "pitch": round(best["pitch"], 1), "fov": args.fov,
                 "note": (f"planned by shotplan: bearing {best['_bearing']:.0f} deg, standoff "
                          f"{best['_standoff']:.0f} u, subjects fill {best['fill']:.2f} of the "
-                         f"half-frame, nearest obstruction behind the camera "
-                         f"{best['wall_margin']:.0f} u further out")}
+                         f"half-frame, "
+                         + ("no obstruction behind the camera within the probe's reach"
+                            if best.get("wall_margin") is None else
+                            f"nearest obstruction behind the camera {best['wall_margin']:.0f} u further out"))}
         # The canvas SHAPE travels with the shot, or `viewprobe --worklist` -- the render this very
         # function advertises two lines below -- renders the square and silently undoes the plan.
         # Written only when the plan is non-square. A shot with no `aspect` INHERITS THE RUN'S
