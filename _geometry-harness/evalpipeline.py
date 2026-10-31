@@ -790,6 +790,10 @@ def reader_cmd(ctx) -> str:
     return cmd
 
 
+# one arm's record read: about twice the slowest arm measured (Ice Blade's Legacy-carrying baseline arm, 73.5 min)
+RECORDS_ARM_MINUTES = 150
+
+
 def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     scopes = read_json(ctx.out / "scope" / "scopes.json")
     cells = comparison_cells(res, scopes)
@@ -808,7 +812,12 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
             "--data", fwd(ctx.game / "Data"), "--mods", fwd(ctx.instance / "mods"),
             "--profile-dir", fwd(ctx.instance / "profiles" / ctx.profile), "--cells", fwd(sdir / "cells.json"),
             "--reader-data", fwd(ctx.out / "reader-data"), "--out", fwd(cap)]
-    r = child(ctx, sdir / "commands", "records-capture", argv, deadline_min=240)
+    # an arm's read is stopped at RECORDS_ARM_MINUTES (a hung reader); the stage's backstop scales with the open arms.
+    # Finished arms are kept in the checkpoints folder, so a stop or a rerun reads only the arms not yet finished.
+    (sdir / "checkpoints").mkdir(exist_ok=True)
+    argv += ["--checkpoints", fwd(sdir / "checkpoints"), "--arm-deadline-min", str(RECORDS_ARM_MINUTES)]
+    r = child(ctx, sdir / "commands", "records-capture", argv,
+              deadline_min=RECORDS_ARM_MINUTES * len(open_arms) + 10)
     summary = read_json(cap / "capture-summary.json") if (cap / "capture-summary.json").is_file() else {}
     imports, refusals = [], {}
     for arm, v in summary.items():
@@ -827,10 +836,14 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     bad = [x for x in results if x["exitCode"] != 0]
     if r.get("exitCode") not in (0, 2) or not summary:
         raise Refusal(f"the record capture did not finish (exit {r.get('exitCode')}); read {fwd(sdir / 'commands')}.")
+    stopped = sorted(a_ for a_, why in refusals.items() if "deadline" in str(why))
+    if stopped:
+        raise Refusal(f"the record read of arm(s) {', '.join(stopped)} reached its {RECORDS_ARM_MINUTES}-minute deadline; "
+                      f"run again: finished arms are kept in {fwd(sdir / 'checkpoints')} and only these are read again.")
     if bad or refusals:
         # recorded, not hidden: the evaluation stays incomplete for those rows, and the bundle says so
         print(f"records: {len(bad)} import(s) refused and {len(refusals)} arm(s) refused; see {fwd(sdir / 'records.json')}")
-    return {"imports": len(results), "refused": len(bad) + len(refusals)}, [sdir / "records.json", cap]
+    return {"imports": len(results), "refused": len(bad) + len(refusals)}, [sdir / "records.json", cap, sdir / "checkpoints"]
 
 
 def stage_scenes(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:

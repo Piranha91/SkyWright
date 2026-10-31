@@ -284,11 +284,25 @@ def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, p
 class Session:
     """One houseCARL server over stdio for one arm, every message kept for the import's transcripts."""
 
-    def __init__(self, cmd: str, env: dict, token: str):
+    def __init__(self, cmd: str, env: dict, token: str, deadline_s: float | None = None):
         argv = [t[1:-1] if len(t) > 1 and t[0] == t[-1] == '"' else t for t in shlex.split(cmd, posix=os.name != "nt")]
         self.p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                   text=True, encoding="utf-8", env={**os.environ, **env})
         self.req, self.resp, self.n = [], [], 0
+        # a hung or runaway reader is stopped at the arm's deadline; the arm is then refused, never accepted as read
+        self.deadline_s, self.timed_out, self.timer = deadline_s, False, None
+        if deadline_s:
+            import threading
+
+            def stop():
+                self.timed_out = True
+                try:
+                    self.p.kill()
+                except OSError:
+                    pass
+            self.timer = threading.Timer(deadline_s, stop)
+            self.timer.daemon = True
+            self.timer.start()
         m = self.call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                      "clientInfo": {"name": token, "version": "evalrecords 1"}})
         if "error" in m:
@@ -306,6 +320,9 @@ class Session:
         while True:
             line = self.p.stdout.readline()
             if not line:
+                if self.timed_out:
+                    raise Refusal(f"the arm's record read reached its {self.deadline_s / 60:.0f}-minute deadline at "
+                                  f"request {self.n} ({method}); run the capture again: finished arms are kept.")
                 raise Refusal(f"the record reader exited before answering request {self.n} ({method}).")
             m = json.loads(line)
             self.resp.append(m)
@@ -328,6 +345,8 @@ class Session:
             raise Refusal(f"{name} did not answer in JSON: {text[:200]}")
 
     def close(self):
+        if self.timer is not None:
+            self.timer.cancel()
         try:
             self.p.stdin.close()
             self.p.wait(timeout=60)
@@ -376,10 +395,10 @@ def batched(ids, n=400):
         yield ids[i:i + n]
 
 
-def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: FieldScope, log):
+def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
-    s = Session(reader_cmd, env, token)
+    s = Session(reader_cmd, env, token, deadline_s)
     result = {}
     try:
         # dangling references over the whole order
@@ -629,6 +648,49 @@ def write_imports(plan, arm, result, session_dir: Path, out: Path, captured: str
     return docs
 
 
+def reader_identity(reader_cmd: str) -> dict:
+    """The record reader as the checkpoint key names it: its command line and, where the command's program is a file,
+    that file's sha256 (a rebuilt server is another reader)."""
+    argv = [t[1:-1] if len(t) > 1 and t[0] == t[-1] == '"' else t
+            for t in shlex.split(reader_cmd, posix=os.name != "nt")]
+    exe = Path(argv[0]) if argv else None
+    return {"cmd": reader_cmd, "sha256": sha256_file(exe) if exe is not None and exe.is_file() else None}
+
+
+def arm_key(plan: dict, arm: dict, baseline, cells, ini_hashes: dict, code_sha256: str, reader: dict) -> str:
+    """What a finished arm's checkpoint is valid for: the arm's own content (plugins in order, asset providers,
+    candidate bytes), the plan, the baseline, the comparison cells and the view's INIs, evalrecords' own code and the
+    reader's identity. Any change reads the arm again."""
+    doc = {"planId": plan.get("planId"), "armId": arm["armId"], "plugins": list(arm["plugins"]),
+           "mods": list(arm.get("mods") or []), "candidateSha256": arm.get("candidateSha256"),
+           "baseline": list(baseline), "cells": sorted(cells), "inis": ini_hashes, "code": code_sha256,
+           "reader": reader}
+    return hashlib.sha256(json.dumps(doc, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def reusable_checkpoint(folder: Path, key: str) -> dict | None:
+    """A finished arm's saved summary when its key matches and every import it names still exists; else None."""
+    f = folder / "checkpoint.json"
+    if not f.is_file():
+        return None
+    doc = json.loads(f.read_text(encoding="utf-8"))
+    if doc.get("key") != key:
+        return None
+    summary = doc.get("summary") or {}
+    if not summary.get("imports") or not all(Path(p).is_file() for p in summary["imports"]):
+        return None
+    return summary
+
+
+def save_checkpoint(folder: Path, key: str, summary: dict):
+    folder.mkdir(parents=True, exist_ok=True)
+    tmp = folder / "checkpoint.json.tmp"
+    tmp.write_text(json.dumps({"key": key, "summary": summary,
+                               "savedUtc": datetime.now(timezone.utc).isoformat(timespec="seconds")}, indent=1),
+                   encoding="utf-8")
+    os.replace(tmp, folder / "checkpoint.json")
+
+
 def cmd_capture(a) -> int:
     import evalrun
     run = Path(a.run)
@@ -639,29 +701,46 @@ def cmd_capture(a) -> int:
     out.mkdir(parents=True, exist_ok=True)
     scope = FieldScope()
     summary = {}
+    ckpts = Path(a.checkpoints) if getattr(a, "checkpoints", None) else None
+    code = sha256_file(Path(__file__).resolve())
+    reader = reader_identity(a.reader_cmd)
+    inis = {f.name: sha256_file(f) for f in sorted(Path(a.profile_dir).glob("*.ini"))} if a.profile_dir else {}
+    deadline_s = 60 * float(a.arm_deadline_min) if getattr(a, "arm_deadline_min", None) else None
     with Run("evalrecords", mode="capture", stage_source="counted") as r:
         arms = [x for x in plan["arms"] if not a.arm or x["armId"] in a.arm]
         r.stage("arms", "arm captures", len(arms), "arms")
         for arm in arms:
+            key = arm_key(plan, arm, baseline, cells, inis, code, reader)
+            if ckpts is not None:
+                kept = reusable_checkpoint(ckpts / arm["armId"], key)
+                if kept is not None:
+                    summary[arm["armId"]] = dict(kept, reused=True)
+                    print(f"{arm['armId']}: reused its finished checkpoint", flush=True)
+                    r.advance()
+                    continue
+            # with checkpoints, an arm's session and imports live in its checkpoint folder so a later capture keeps them
+            home = (ckpts / arm["armId"] / key[:12]) if ckpts is not None else out
             view = out / "views" / arm["armId"]
             write_view(view, arm, Path(a.profile_dir) if a.profile_dir else None)
             env = {"HouseCarl__DataDir": a.data, "HouseCarl__ModsDir": a.mods, "HouseCarl__ProfileDir": str(view)}
             if a.reader_data:
                 env["HOUSECARL_DATA_DIR"] = a.reader_data
             captured = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
-            session_dir = out / "sessions" / arm["armId"]
+            session_dir = home / "sessions" / arm["armId"]
             try:
                 result = capture_arm(plan, arm, baseline, cells, a.reader_cmd, env, session_dir, scope,
-                                     lambda m: print(m, flush=True))
+                                     lambda m: print(m, flush=True), deadline_s=deadline_s)
             except Refusal as ex:
                 summary[arm["armId"]] = {"refused": str(ex)}
                 print(f"{arm['armId']}: REFUSED: {ex}", flush=True)
                 r.advance()
                 continue
-            docs = write_imports(plan, arm, result, session_dir, out / "imports", captured, evalrun)
+            docs = write_imports(plan, arm, result, session_dir, home / "imports", captured, evalrun)
             summary[arm["armId"]] = {"imports": [str(d) for d in docs],
                                      "findings": {k: len(v[0]) for k, v in result.items()},
                                      "judged": {k: sum(c["Judged"] for c in v[1]) for k, v in result.items()}}
+            if ckpts is not None:
+                save_checkpoint(ckpts / arm["armId"], key, summary[arm["armId"]])
             r.advance()
     (out / "capture-summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
     refused = [k for k, v in summary.items() if "refused" in v]
@@ -683,6 +762,9 @@ def main(argv=None) -> int:
     p.add_argument("--reader-data", help="a private HOUSECARL_DATA_DIR for the reader")
     p.add_argument("--arm", action="append")
     p.add_argument("--out", required=True)
+    p.add_argument("--checkpoints", help="a folder that keeps each finished arm across captures; an arm is reused only "
+                                         "when its key (arm content, plan, cells, evalrecords' code, reader) matches")
+    p.add_argument("--arm-deadline-min", type=float, help="stop one arm's record read after this many minutes")
     p.set_defaults(fn=cmd_capture)
     a = ap.parse_args(argv)
     try:

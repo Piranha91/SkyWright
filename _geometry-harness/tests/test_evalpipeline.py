@@ -495,6 +495,16 @@ def case_57_the_report_stage_plans_with_the_capture_closed():
     assert "final=True" in inspect.getsource(EP.stage_report), "the report stage plans with the capture closed"
 
 
+def case_58_the_records_stage_keeps_finished_arms_and_scales_its_deadline():
+    import inspect
+    per_arm = getattr(EP, "RECORDS_ARM_MINUTES", None)
+    assert isinstance(per_arm, (int, float)) and 60 <= per_arm <= 600, f"a per-arm record deadline is set, got {per_arm}"
+    src = inspect.getsource(EP.stage_records)
+    assert "--checkpoints" in src and "--arm-deadline-min" in src, "the records stage keeps finished arms and stops a hung arm"
+    assert "RECORDS_ARM_MINUTES * len(open_arms)" in src, "the stage's backstop scales with the open arms"
+    assert "deadline_min=240" not in src, "no fixed stage deadline"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

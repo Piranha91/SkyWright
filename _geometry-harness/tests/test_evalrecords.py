@@ -123,6 +123,65 @@ def case_15_an_arm_without_evaluated_plugins_has_no_members():
     assert untreed["records.contested-fields"] == 1, f"a record the reader returned no tree for stays a member: {untreed}"
 
 
+PLAN = {"planId": "p1"}
+ARM = {"armId": "baseline", "plugins": ["Base.esm", "Subj.esp", "Legacy.esm"], "mods": ["M1", "M2"],
+       "candidateSha256": "c" * 64}
+READER = {"cmd": "reader.exe", "sha256": "r" * 64}
+
+
+def key_of(arm=ARM, code="e" * 64, reader=READER, cells=("000A:Base.esm",)):
+    return ER.arm_key(PLAN, arm, ["Base.esm"], list(cells), {"skyrim.ini": "i" * 64}, code, reader)
+
+
+def saved(t: Path, key):
+    imp = t / "imports" / "records.contested-fields__baseline" / "import.json"
+    imp.parent.mkdir(parents=True)
+    imp.write_text("{}", encoding="utf-8")
+    summary = {"imports": [str(imp)], "findings": {"records.contested-fields": 3}, "judged": {}}
+    ER.save_checkpoint(t / "baseline", key, summary)
+    return summary
+
+
+def case_17_a_finished_arm_with_the_same_key_is_reused():
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        s = saved(Path(t), key_of())
+        got = ER.reusable_checkpoint(Path(t) / "baseline", key_of())
+        assert got == s, f"a finished arm with the same key is reused as saved, got {got}"
+
+
+def case_19_a_changed_arm_code_reader_or_cells_is_read_again():
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        saved(Path(t), key_of())
+        changed = {"arm order": key_of(arm=dict(ARM, plugins=["Base.esm", "Legacy.esm", "Subj.esp"])),
+                   "arm mods": key_of(arm=dict(ARM, mods=["M2", "M1"])),
+                   "candidate bytes": key_of(arm=dict(ARM, candidateSha256="d" * 64)),
+                   "evalrecords code": key_of(code="f" * 64),
+                   "reader": key_of(reader=dict(READER, sha256="s" * 64)),
+                   "cells": key_of(cells=("000A:Base.esm", "000B:Base.esm"))}
+        for what, k in changed.items():
+            assert k != key_of(), f"a changed {what} must change the arm's key"
+            assert ER.reusable_checkpoint(Path(t) / "baseline", k) is None, f"a changed {what} reused the old arm"
+        # an import the checkpoint names that is gone is not reused either
+        for p in (Path(t) / "imports").rglob("import.json"):
+            p.unlink()
+        assert ER.reusable_checkpoint(Path(t) / "baseline", key_of()) is None, "a checkpoint whose import is gone was reused"
+
+
+def case_21_a_hung_reader_is_stopped_at_the_arm_deadline():
+    import time
+    cmd = '"' + sys.executable + '" -c "import time; time.sleep(60)"'
+    t0 = time.perf_counter()
+    try:
+        ER.Session(cmd, {}, "evalrun:p1:baseline", deadline_s=1.0)
+    except ER.Refusal as r:
+        assert "deadline" in str(r), f"the refusal names the deadline: {r}"
+        assert time.perf_counter() - t0 < 20, "the hung reader was stopped near its deadline"
+        return
+    raise AssertionError("a reader that never answers was not stopped at the arm's deadline")
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
