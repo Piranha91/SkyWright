@@ -937,9 +937,30 @@ def capture_identity(ctx) -> dict:
     return capture_acquire.capture_tool_identity(ctx.machine.get("viewprobe"))
 
 
-# a refusal that is a property of the request's geometry: the same request, tools and data give it again
-DETERMINISTIC_REFUSALS = {"points-no-opaque-face", "points-no-visible-face", "points-no-station", "placement-unknown",
-                          "points-empty-pick", "request-participants-unusable"}
+# a refusal that is a property of the request's geometry: the same request, tools and data give it again. The three bare
+# picker codes a capture fallback now answers (no visible face -> cutaway, then top-down; no station -> top-down; no
+# opaque face -> a measured coverage mark) are not here: such a refusal is reused only as the FINAL code of a finished
+# chain (FINAL_REFUSALS), never on its own.
+DETERMINISTIC_REFUSALS = {"placement-unknown", "points-empty-pick", "request-participants-unusable"}
+# the final codes of a finished fallback chain (capture_acquire marks the refusal `final`): every fallback was tried and
+# each step's own verdict was the geometry's
+FINAL_REFUSALS = {"top-down-participant-unseen", "see-through-unmarked", "points-not-drawn", "points-not-placed"}
+# a chain step that failed for a reason that is not the geometry's (a crash, memory, a lock or slot timeout, a renderer
+# exit) makes the whole refusal transient, whatever the other steps said
+TRANSIENT_STEP = {"failed"}
+
+
+def deterministic_refusal(ref_: dict) -> bool:
+    """Whether a capture refusal is a property of the request's geometry, so the same tools give it again: one of the
+    plain deterministic codes, or a FINISHED fallback chain whose final code is one of FINAL_REFUSALS and none of whose
+    steps failed for a reason of its own (A3: a crashed top-down step is captured again)."""
+    code = ref_.get("pickerCode") or ref_.get("code")
+    chain = ref_.get("chain") or []
+    if any(str(st.get("status")) in TRANSIENT_STEP for st in chain):
+        return False
+    if ref_.get("final") is True:
+        return (ref_.get("code") in FINAL_REFUSALS or code in FINAL_REFUSALS)
+    return code in DETERMINISTIC_REFUSALS
 
 
 def reusable_capture(q: dict, qdir: Path, identity: dict | None = None) -> dict | None:
@@ -958,7 +979,7 @@ def reusable_capture(q: dict, qdir: Path, identity: dict | None = None) -> dict 
         return None
     if doc.get("status") == "refused":
         ref_ = doc.get("refusal") or {}
-        if (ref_.get("pickerCode") or ref_.get("code")) not in DETERMINISTIC_REFUSALS:
+        if not deterministic_refusal(ref_):
             return None
     return {"id": q["id"], "arm": q.get("armId"), "without": (q.get("vignette") or {}).get("withoutArmId"),
             "result": fwd(result), "status": doc.get("status"), "reason": doc.get("reason"), "reused": True}

@@ -334,7 +334,11 @@ def case_49_a_finished_request_is_reused_with_its_outcome_and_an_unfinished_one_
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         docs = {"capture-a": {"status": "captured"},
-                "capture-b": {"status": "refused", "refusal": {"code": "points-unpickable", "pickerCode": "points-no-opaque-face"}},
+                # (corrected 2026-10-31, capture fallbacks: a bare points-no-opaque-face is now answered by a coverage mark
+                # and is captured again; a FINISHED chain's geometric refusal is what is reused)
+                "capture-b": {"status": "refused", "refusal": {"code": "see-through-unmarked", "final": True,
+                                                               "chain": [{"kind": "eye-level", "status": "refused"},
+                                                                         {"kind": "top-down", "status": "refused"}]}},
                 "capture-o": {"status": "captured", "toolIdent": "other"}}
         for rid, doc in docs.items():
             (root / rid / "sequence").mkdir(parents=True)
