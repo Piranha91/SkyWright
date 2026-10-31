@@ -136,6 +136,55 @@ def is_master(name: str, headers: dict) -> bool:
     return bool(h.get("esm")) or name.lower().endswith((".esm", ".esl"))
 
 
+# ---------------------------------------------------------------- plugin identity
+
+class PluginNames:
+    """One spelling per plugin. The game matches plugin names without regard to case, and headers often name a master
+    in another case than the file ("ccbgssse001-fish.esm"); the first spelling seen is the plugin's name everywhere
+    after: the entry's first, then the source profile's, then the headers'. Every name the runner compares passes
+    through here once, when it is read."""
+
+    def __init__(self):
+        self._by = {}
+
+    def __call__(self, p):
+        return p if p is None else self._by.setdefault(str(p).lower(), str(p))
+
+    def many(self, ps):
+        return [self(p) for p in ps or []]
+
+
+def normalise_entry(e: dict, name: PluginNames) -> dict:
+    """The entry with every plugin name it holds in its one spelling (roles, baseline, companions, extra arms, order
+    variants, places, mod names)."""
+    e = json.loads(json.dumps(e))
+
+    def role(r):
+        if r.get("plugin") is not None:
+            r["plugin"] = name(r["plugin"])
+        if r.get("plugins") is not None:
+            r["plugins"] = name.many(r["plugins"])
+    for r in [e.get("subject") or {}] + list(e.get("partners") or []) + list(e.get("keys") or []) \
+            + list(e.get("dependencies") or []) + list(e.get("companionsOf") or []):
+        role(r)
+    if "baseline" in e:
+        e["baseline"] = name.many(e["baseline"])
+    if e.get("baselineScopeTarget"):
+        e["baselineScopeTarget"] = name(e["baselineScopeTarget"])
+    if e.get("companions"):
+        e["companions"] = {name(k): name.many(v) for k, v in e["companions"].items()}
+    for x in e.get("extraArms") or []:
+        x["plugins"] = name.many(x.get("plugins"))
+    for v in e.get("orderVariants") or []:
+        if "last" in v:
+            v["last"] = name.many(v["last"])
+    if e.get("places"):
+        e["places"] = {name(k): dict(v, after=name(v.get("after"))) for k, v in e["places"].items()}
+    if e.get("modNames"):
+        e["modNames"] = {name(k): v for k, v in e["modNames"].items()}
+    return e
+
+
 # ---------------------------------------------------------------- the arm rule
 
 def _units(entry) -> list[list[str]]:
@@ -367,7 +416,9 @@ class Context:
 
     def __init__(self, entry_path, machine_path, out):
         self.entry_path = Path(entry_path)
-        self.entry = read_json(entry_path)
+        # one spelling per plugin from here on (PluginNames); an entry that spells each plugin one way is unchanged
+        self.names = PluginNames()
+        self.entry = normalise_entry(read_json(entry_path), self.names)
         self.machine = read_json(machine_path) if machine_path else {}
         self.out = Path(out)
         lab = {**self.machine.get("lab", {}), **self.entry.get("lab", {})}
@@ -410,7 +461,8 @@ class Context:
         lo = self.source_instance / "profiles" / self.source_profile / "loadorder.txt"
         if not lo.is_file():
             raise Refusal(f"the source profile has no loadorder.txt at {fwd(lo)}.")
-        return [l.strip() for l in lo.read_text(encoding="utf-8-sig").splitlines() if l.strip() and not l.startswith("#")]
+        return self.names.many(l.strip() for l in lo.read_text(encoding="utf-8-sig").splitlines()
+                               if l.strip() and not l.startswith("#"))
 
     def resolve(self) -> dict:
         """Headers, baseline and every arm's ordered plugins, providers and mods."""
@@ -419,15 +471,17 @@ class Context:
         keys = [k["plugin"] for k in e.get("keys", [])]
         partner_plugins = [p for u in _units(e) for p in u]
         companions = {k.lower(): v for k, v in (e.get("companions") or {}).items()}
+        source = self.source_order()   # read before the headers: its spellings outrank theirs
         headers, providers, todo = {}, {}, list(subj + partner_plugins + keys + list(e.get("baseline", [])))
         for c in companions.values():
             todo += c
         while todo:
-            p = todo.pop(0)
+            p = self.names(todo.pop(0))
             if p in headers:
                 continue
             mod, f = self.provider_of(p)
             headers[p] = plugin_header(f)
+            headers[p]["masters"] = self.names.many(headers[p]["masters"])
             providers[p] = mod
             todo += headers[p]["masters"]
         evaluated = set(subj + partner_plugins + keys)
@@ -460,7 +514,6 @@ class Context:
         for q in subj:
             subj_full += [c for c in companions.get(q.lower(), []) if c not in subj_full]
         resolved = dict(e, partners=entry_units, subject=dict(e["subject"], plugins=subj_full))
-        source = self.source_order()
         arms = derive_arms(resolved, headers)
         key_mods = {k["plugin"]: k.get("mod") for k in e.get("keys", [])}
         for a in arms:

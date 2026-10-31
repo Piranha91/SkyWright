@@ -374,6 +374,66 @@ def case_51_a_round_captures_at_most_the_cap():
     assert EP.MAX_NEW_PER_ROUND == 4 and EP.MAX_CAPTURE_ROUNDS == 3
 
 
+# ---- plugin identity and placed plugins (Context.resolve over a small synthetic lab) ----
+
+def write_plugin(path: Path, masters, esm=False):
+    """A minimal TES4 header: the flags word and one MAST subrecord per master (all plugin_header reads)."""
+    body = b""
+    for m in masters:
+        z = m.encode("cp1252") + b"\0"
+        body += b"MAST" + len(z).to_bytes(2, "little") + z + b"DATA" + (8).to_bytes(2, "little") + bytes(8)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"TES4" + len(body).to_bytes(4, "little") + (1 if esm else 0).to_bytes(4, "little")
+                     + bytes(12) + body)
+
+
+def lab_context(t: Path, files: dict, source: list, ent: dict):
+    """files: {(mod or None, plugin): (masters, esm)}; None is the game's Data."""
+    for (mod, plugin), (masters, esm) in files.items():
+        write_plugin((t / "game" / "Data" / plugin) if mod is None else (t / "lab" / "mods" / mod / plugin),
+                     masters, esm)
+    (t / "lab" / "mods").mkdir(parents=True, exist_ok=True)
+    lo = t / "src" / "profiles" / "P" / "loadorder.txt"
+    lo.parent.mkdir(parents=True, exist_ok=True)
+    lo.write_text("".join(p + "\n" for p in source), encoding="utf-8")
+    e = {"schema": 1, "id": "t", "source": {"instance": str(t / "src"), "profile": "P"},
+         "lab": {"instance": str(t / "lab"), "game": str(t / "game")}, "extraArms": [], "orderVariants": [], **ent}
+    (t / "entry.json").write_text(json.dumps(e), encoding="utf-8")
+    return EP.Context(t / "entry.json", None, t / "out")
+
+
+MIXED_FILES = {(None, "Base.esm"): ([], True), (None, "Dlc.esm"): (["Base.esm"], True),
+               ("MFix", "Fix.esp"): (["Base.esm", "Dlc.esm"], False),
+               # two partner headers name the same baseline plugins in other spellings
+               ("MA", "PA.esp"): (["base.esm", "DLC.ESM", "fix.esp"], False),
+               ("MB", "PB.esp"): (["BASE.ESM", "FIX.ESP"], False),
+               ("MS", "Subj.esp"): (["Base.esm", "Fix.esp"], False),
+               ("MK", "KA.esp"): (["Base.esm", "Subj.esp", "pa.esp"], False)}
+MIXED_SOURCE = ["Base.esm", "Dlc.esm", "Fix.esp", "PA.esp", "PB.esp", "Subj.esp"]
+MIXED_ENTRY = {"subject": {"plugin": "Subj.esp", "mod": "MS"},
+               "partners": [{"plugin": "PA.esp", "mod": "MA"}, {"plugin": "PB.esp", "mod": "MB"}],
+               "keys": [{"plugin": "KA.esp", "mod": "MK"}],
+               "dependencies": [{"plugin": "Fix.esp", "mod": "MFix"}], "baseline": ["Base.esm", "Dlc.esm", "Fix.esp"]}
+
+
+def case_52_a_master_named_in_another_case_is_one_plugin():
+    with tempfile.TemporaryDirectory() as t:
+        res = lab_context(Path(t), MIXED_FILES, MIXED_SOURCE, MIXED_ENTRY).resolve()
+        assert len({p.lower() for p in res["baseline"]}) == len(res["baseline"]) == 3, (
+            f"the baseline names each plugin once, got {res['baseline']}")
+        assert sorted(res["headers"]) == sorted({p for (_, p) in MIXED_FILES}), (
+            f"each plugin's header is read once, under one spelling, got {sorted(res['headers'])}")
+        for arm in res["arms"]:
+            low = [p.lower() for p in arm["plugins"]]
+            assert len(low) == len(set(low)), f"arm {arm['id']} loads a plugin twice: {arm['plugins']}"
+            assert all(p in res["headers"] for p in arm["plugins"]), (
+                f"arm {arm['id']} names a plugin in another spelling: {arm['plugins']}")
+        units = {a["id"]: a["evaluated"] for a in res["arms"]}
+        assert units["unit:0"] == ["PA.esp"] and units["unit:1"] == ["PB.esp"], (
+            f"a partner unit carries no baseline plugin under another spelling, got {units}")
+        assert "pair:0+key:KA.esp" in units, f"the key's lower-case master still names partner PA, got {list(units)}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
