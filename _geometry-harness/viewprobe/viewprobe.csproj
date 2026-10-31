@@ -18,6 +18,8 @@
     <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
     <Compile Include="..\_shared\MovedRefFloorCheck.cs" Link="MovedRefFloorCheck.cs" />
     <Compile Include="..\_shared\FloorReachFixture.cs" Link="FloorReachFixture.cs" />
+    <Compile Include="..\_shared\BlockFixture.cs" Link="BlockFixture.cs" />
+    <Compile Include="..\_shared\NifBoxFixture.cs" Link="NifBoxFixture.cs" />
     <Using Include="System.IO" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <!-- SkyRender.Character (which brings core SkyRender; viewprobe uses both) is the published

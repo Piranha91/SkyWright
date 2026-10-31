@@ -141,6 +141,9 @@ if (args.Length >= 1 && args[0] == "--plugin-read-selftest")
     return ViewProbe.PluginReadSelfTest.Run();
 // Known answers for the side tables the walk fills (the --stations floor, the "where is it" tables) and the route mode's
 // worldspace pass, against moved and deleted references (_shared/MovedRefFixture.cs). No MO2 instance, game or GL context.
+// The capture-fallback fixture (CaptureFixture.cs): one plugin of interior cells naming vanilla meshes, for the capture tests.
+if (args.Length == 2 && args[0] == "--write-capture-fixture")
+    return ViewProbe.CaptureFixture.Write(args[1]);
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest")
     return ViewProbe.MovedRefSelfTestVp.Run();
 if (args.Length == 2 && args[0] == "--mesh-reuse-red")
@@ -792,6 +795,13 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
     else if (args[i] == "--report-mode") { reportMode = true; textured = true; }
     else if (args[i] == "--ref-surface") { refSurface = true; textured = true; }
+    // the capture fallbacks (CaptureViews.cs): hide, protect, contacts, occluders, coverage
+    else if (args[i] == "--coverage-of" && i + 1 < args.Length) { ViewProbe.CaptureViews.CoverageOf.Add(args[++i]); textured = true; }
+    else if (args[i] == "--coverage-dump") ViewProbe.CaptureViews.CoverageDump = true;
+    else if (args[i] == "--hide" && i + 1 < args.Length) { ViewProbe.CaptureViews.Hide.Add(args[++i]); textured = true; }
+    else if (args[i] == "--protect" && i + 1 < args.Length) { ViewProbe.CaptureViews.Protect.Add(args[++i]); textured = true; }
+    else if (args[i] == "--contacts-of" && i + 1 < args.Length) { ViewProbe.CaptureViews.ContactsOf.Add(args[++i]); textured = true; }
+    else if (args[i] == "--occluders-of" && i + 1 < args.Length) { ViewProbe.CaptureViews.OccludersOf.Add(args[++i]); textured = true; }
     else if (args[i] == "--ref-surface-opacity" && i + 1 < args.Length)
     {
         // (0,1]. 0 is refused rather than clamped: a mark that draws nothing is a silent
@@ -949,6 +959,15 @@ if (worklistReadinessSha256 is not null && (worklistReadinessSha256.Length != 64
 {
     Console.Error.WriteLine("--worklist-readiness-sha256 requires exactly 64 hexadecimal characters.");
     return 2;
+}
+if (ViewProbe.CaptureViews.Protect.Count > 0 && ViewProbe.CaptureViews.Hide.Count == 0)
+{ Console.Error.WriteLine("--protect only means anything with --hide: it refuses a hidden object that touches or holds up the protected one; add --hide or drop it."); return 2; }
+if (ViewProbe.CaptureViews.CoverageDump && ViewProbe.CaptureViews.CoverageOf.Count == 0)
+{ Console.Error.WriteLine("--coverage-dump only means anything with --coverage-of; add --coverage-of or drop it."); return 2; }
+foreach (var cspec in ViewProbe.CaptureViews.CoverageOf)
+{
+    try { ViewProbe.CaptureViews.CoverageSpec(cspec); }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
 }
 if (refSurfaceOpacitySet && !refSurface)
 {
@@ -5242,6 +5261,7 @@ if (worklist is not null)
             int rc;
             try { rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, null, out _); }
             catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+            catch (ViewProbe.CaptureRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }        // CaptureViews.cs
             catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
             if (pendingSwitch is not { } next) return rc < 0 ? 0 : rc;
             (wlc, wls) = next;
@@ -5297,6 +5317,11 @@ if (worklist is not null)
                     {
                         var plan = batchProgress?.PlanFor(wlc, wls);
                         rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, plan, out completed);
+                    }
+                    catch (ViewProbe.CaptureRefusal ex)   // CaptureViews.cs: --protect, or a label that cannot be drawn
+                    {
+                        Console.Error.WriteLine(ex.Message);
+                        rc = 2; completed = new ViewProbe.BatchProgress.ShotArtifacts();
                     }
                     catch (ViewProbe.GlAllocationRefusal ex)   // F-G4-1: refused before draw, in every mode
                     {
@@ -5435,6 +5460,7 @@ if (winRefsDump is not null)
 int singleRc;
 try { singleRc = RunCellTextured(target, 0, 0, null, out _); }
 catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
+catch (ViewProbe.CaptureRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }        // CaptureViews.cs
 catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
 // FinalExitCode, not a bare return: a shot must never return 3 itself, because the worklist loop
 // above stops at the first shot with a non-zero code and a degraded shot must not stop the ones

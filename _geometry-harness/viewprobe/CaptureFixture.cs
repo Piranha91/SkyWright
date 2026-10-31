@@ -1,0 +1,188 @@
+using System.Drawing;
+using HarnessShared;
+using Mutagen.Bethesda;
+using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Skyrim;
+using Noggog;
+using SkCell = Mutagen.Bethesda.Skyrim.Cell;
+
+namespace ViewProbe;
+
+// THE CAPTURE-FALLBACK FIXTURE (`viewprobe --write-capture-fixture DIR`, read by tests/test_capture_fallbacks.py, which runs
+// the REAL viewprobe, capture_points, capture_acquire and shotplan on it). Test-only, written with Mutagen. One plugin,
+// CfFixture.esp, no masters: its own STAT bases name VANILLA meshes, which the test resolves from a Skyrim SE game's own
+// archives (the game folder comes from the environment or the harness config; absent, the test reports "not run").
+//
+// Every cell is interior, floored with a 7 x 7 tiling of ImpExtFloorChunk01 350 u apart (overlapping, top at z 0) and,
+// except CfNoNav, navmeshed with a flat 64 u grid at z 0 from -1280 to 1280. The pair is A (crate) and B. A "wall" is the
+// same crate at scale 1.9 (local box x -47.5..47.5, y -197.6..72.2, z -38..38): 95 u thick, so an eye inside one is
+// within 96 u of both faces, and stacked in four tiers (centres z -4, 72, 148, 224; boundaries at 34, 110, 186), so an
+// eye 120 u up inside a wall is 10 u above a tier's underside: the placement test calls it enclosed. (A single 150 u
+// thick tier let an eye inside it pass with only two near faces, and the base planner accepted that camera: the first
+// base runs, 2026-10-31.) Each side is two pieces per tier: wall index side*8 + tier*2 + piece, sides W, E, S, N.
+// Expectations are stated by each test, worked out from this table.
+//
+//   cell        A                      B                                    else
+//   CfCutaway   crate (0,30,20)        crate (30,10,20) crossing A          walls, inner faces 25 u clear of the pair 
+//   CfTouch     crate (0,30,20)        crate (30,10,20)                     walls, inner faces on the pair's outer faces 
+//   CfBuried    crate (0,0,20)         floor chunk at z -38 (z -38..-19): sunk under the floor, its top on the
+//                                      floor's underside (z -19), so it touches the tiles over it
+//   CfGlow      crate (0,0,20)         glow sphere (effect, additive) at (0,0,60)
+//   CfFocus     crate (0,0,20)         glow sphere x6 at (900,0,1400): big, see-through, far above and aside
+//   CfNoNav     crate (0,30,20)        crate (30,10,20)                     no navmesh: no station can stand
+//   CfDisabled  crate (0,0,20)         glow sphere at (0,0,60), initially disabled
+//   (CfGlow also stands in a room of walls about 800 u out, so the planner's clearance rays are bounded)
+//   CfCutMod    crate (0,30,20)        crate (30,10,20) from CfFixtureMod.esp  the CfCutaway walls (B1/B2: the capture
+//                                      states; without the mod plugin, B is not there)
+public static class CaptureFixture
+{
+    public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
+    public static readonly ModKey Key = new("CfFixture", ModType.Plugin);
+    static FormKey K(uint id) => new(Key, id);
+
+    public static readonly FormKey FloorBase = K(0x801), CrateBase = K(0x802), GlowBase = K(0x803);
+    public const string FloorMesh = "Dungeons\\Imperial\\Exterior\\ImpExtFloorChunk01.nif";
+    public const string CrateMesh = "Clutter\\Common\\CrateSmallLong02.nif";
+    public const string GlowMesh = "Effects\\Ambient\\FXGlowFillRndLitBrt.nif";
+
+    // per cell: the cell, its navmesh, A, B, 32 wall pieces and 49 floor tiles; FormIDs are stable so the tests can name them
+    public sealed record CellIds(string EditorId, FormKey Cell, FormKey Nav, FormKey A, FormKey B, FormKey[] Walls, FormKey[] Floor);
+    public static readonly CellIds Cutaway = Ids("CfCutaway", 0x810), Touch = Ids("CfTouch", 0x820), Buried = Ids("CfBuried", 0x830),
+        Glow = Ids("CfGlow", 0x840), Focus = Ids("CfFocus", 0x850), NoNav = Ids("CfNoNav", 0x860), Disabled = Ids("CfDisabled", 0x870),
+        CutMod = Ids("CfCutMod", 0x880);
+    /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
+    public static readonly ModKey ModKeyB = new("CfFixtureMod", ModType.Plugin);
+    public static readonly FormKey CutModB = new(ModKeyB, 0x801);
+    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod };
+
+    static CellIds Ids(string edid, uint b)
+        => new(edid, K(b), K(b + 1), K(b + 2), K(b + 3), Enumerable.Range(0, 32).Select(n => K(0x2000 + (b - 0x810) / 0x10 * 0x40 + (uint)n)).ToArray(),
+               Enumerable.Range(0, 49).Select(i => K(0x1000 + (b - 0x810) / 0x10 * 0x40 + (uint)i)).ToArray());
+
+    static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y, float z, float rx = 0, float ry = 0, float rz = 0, float scale = 1f)
+    {
+        var r = new PlacedObject(key, Rel)
+        {
+            Placement = new Placement { Position = new(x, y, z), Rotation = new(rx, ry, rz) },
+            Scale = scale == 1f ? null : scale,
+        };
+        r.Base.SetTo(baseKey);
+        return r;
+    }
+
+    const float HalfPi = MathF.PI / 2f;
+    // a wall: the crate at scale 3 standing on the floor; the long axis along Y, or along X when turned a quarter
+    static PlacedObject WallY(FormKey k, float x, float y, float z) => Ref(k, CrateBase, x, y, z, scale: 1.9f);
+    static PlacedObject WallX(FormKey k, float x, float y, float z) => Ref(k, CrateBase, x, y, z, 0, 0, HalfPi, 1.9f);
+    static readonly float[] TierZ = { -4f, 72f, 148f, 224f };
+    // four walls around the pair (union x -25..55, y -94..68): w and e are the W and E walls' centre x, s and n the S and N
+    // walls' centre y. W/E pieces centred at y -16 and 116 cover y -213.6..188.2; S/N pieces centred at x -80 and 110 cover
+    // x -145..175 whichever way the quarter turn swings the crate's long axis.
+    static void Walls(SkCell cell, FormKey[] p, float w, float e, float s, float n)
+    {
+        for (int t = 0; t < 4; t++)
+            for (int k = 0; k < 2; k++)
+            {
+                float z = TierZ[t];
+                cell.Temporary.Add(WallY(p[0 * 8 + t * 2 + k], w, k == 0 ? -16f : 116f, z));
+                cell.Temporary.Add(WallY(p[1 * 8 + t * 2 + k], e, k == 0 ? -16f : 116f, z));
+                cell.Temporary.Add(WallX(p[2 * 8 + t * 2 + k], k == 0 ? -80f : 110f, s, z));
+                cell.Temporary.Add(WallX(p[3 * 8 + t * 2 + k], k == 0 ? -80f : 110f, n, z));
+            }
+    }
+
+    // a room around an open cell: four walls of the crate at scale 4 (200 u thick, 160 u tall, two tiers to z 320) about
+    // 700 u out, so the camera planner's horizontal clearance rays meet geometry on every bearing (it refuses a bearing
+    // whose rays leave the cell). Pieces 0x3000 + cell index * 0x40 + n.
+    static void Room(SkCell cell, uint b)
+    {
+        uint ci = (b - 0x810) / 0x10, n = 0;
+        foreach (var z in new[] { 80f, 240f })
+            foreach (var c in new[] { -560f, 0f, 560f })
+            {
+                cell.Temporary.Add(Ref(K(0x3000 + ci * 0x40 + n++), CrateBase, -800f, c, z, scale: 4f));
+                cell.Temporary.Add(Ref(K(0x3000 + ci * 0x40 + n++), CrateBase, 800f, c, z, scale: 4f));
+                cell.Temporary.Add(Ref(K(0x3000 + ci * 0x40 + n++), CrateBase, c, -800f, z, 0, 0, HalfPi, 4f));
+                cell.Temporary.Add(Ref(K(0x3000 + ci * 0x40 + n++), CrateBase, c, 800f, z, 0, 0, HalfPi, 4f));
+            }
+    }
+
+    static SkCell NewCell(CellIds c, bool nav)
+    {
+        var cell = new SkCell(c.Cell, Rel)
+        {
+            EditorID = c.EditorId, Flags = SkCell.Flag.IsInteriorCell,
+            Lighting = new Mutagen.Bethesda.Skyrim.CellLighting
+            {
+                AmbientColor = Color.FromArgb(255, 180, 180, 180), DirectionalColor = Color.FromArgb(255, 200, 200, 190),
+                FogNearColor = Color.FromArgb(255, 0, 0, 0), FogFarColor = Color.FromArgb(255, 0, 0, 0),
+                DirectionalRotationXY = 45, DirectionalRotationZ = 60, DirectionalFade = 1f, FogPower = 1f, FogMax = 0f,
+                FogNear = 100000f, FogFar = 200000f, FogClipDistance = 300000f, LightFadeBegin = 100000f, LightFadeEnd = 200000f,
+            },
+        };
+        // the floor: 7 x 7 chunks, 350 u apart (each about 530 u across, so they overlap), top at z 0 (the chunk stands
+        // from z 0 to 19 in its own space)
+        int f = 0;
+        for (int j = -3; j <= 3; j++)
+            for (int i = -3; i <= 3; i++)
+                cell.Temporary.Add(Ref(c.Floor[f++], FloorBase, i * 350f, j * 350f, -19f));
+        if (nav) cell.NavigationMeshes.Add(BlockFixture.Grid(c.Nav, c.Cell, 40, 40, 64f, -1280f, -1280f));
+        return cell;
+    }
+
+    public static int Write(string dir)
+    {
+        Directory.CreateDirectory(dir);
+        var m = new SkyrimMod(Key, Rel);
+        m.Statics.Add(new Static(FloorBase, Rel) { EditorID = "CfFloorChunk", Model = new Model { File = FloorMesh },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-280, -246, 0), Second = new P3Int16(256, 286, 19) } });
+        m.Statics.Add(new Static(CrateBase, Rel) { EditorID = "CfCrate", Model = new Model { File = CrateMesh },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-25, -104, -20), Second = new P3Int16(25, 38, 20) } });
+        m.Statics.Add(new Static(GlowBase, Rel) { EditorID = "CfGlow", Model = new Model { File = GlowMesh },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-258, -258, -258), Second = new P3Int16(258, 258, 258) } });
+
+        void Pair(SkCell cell, CellIds c)
+        {
+            cell.Temporary.Add(Ref(c.A, CrateBase, 0, 30, 20));
+            cell.Temporary.Add(Ref(c.B, CrateBase, 30, 10, 20));
+        }
+        // pair union: x -25..55, y -94..68
+        var cut = NewCell(Cutaway, true); Pair(cut, Cutaway);
+        Walls(cut, Cutaway.Walls, -97.5f, 127.5f, -166.5f, 140.5f);      // inner faces 25 u clear of the pair
+        var touch = NewCell(Touch, true); Pair(touch, Touch);
+        Walls(touch, Touch.Walls, -72.5f, 102.5f, -141.5f, 115.5f);      // inner faces on the pair's outer faces
+        var buried = NewCell(Buried, true);
+        buried.Temporary.Add(Ref(Buried.A, CrateBase, 0, 0, 20)); buried.Temporary.Add(Ref(Buried.B, FloorBase, 0, 0, -38));
+        var glow = NewCell(Glow, true);
+        glow.Temporary.Add(Ref(Glow.A, CrateBase, 0, 0, 20)); glow.Temporary.Add(Ref(Glow.B, GlowBase, 0, 0, 60));
+        Room(glow, 0x840);
+        var focus = NewCell(Focus, true);
+        focus.Temporary.Add(Ref(Focus.A, CrateBase, 0, 0, 20)); focus.Temporary.Add(Ref(Focus.B, GlowBase, 900, 0, 1400, scale: 6f));
+        var nonav = NewCell(NoNav, false); Pair(nonav, NoNav);
+        var dis = NewCell(Disabled, true);
+        dis.Temporary.Add(Ref(Disabled.A, CrateBase, 0, 0, 20));
+        var off = Ref(Disabled.B, GlowBase, 0, 0, 60);
+        off.MajorRecordFlagsRaw |= 0x800;   // initially disabled
+        dis.Temporary.Add(off);
+        var cutMod = NewCell(CutMod, true);
+        cutMod.Temporary.Add(Ref(CutMod.A, CrateBase, 0, 30, 20));
+        Walls(cutMod, CutMod.Walls, -97.5f, 127.5f, -166.5f, 140.5f);
+        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod }) MovedRefFixture.FileInterior(m, c);
+
+        var path = Path.Combine(dir, Key.FileName.String);
+        m.BeginWrite.ToPath(path).WithNoLoadOrder().Write();
+        // the second plugin: CfCutMod's B, placed by an override of that cell
+        using (var mOv = SkyrimMod.CreateFromBinaryOverlay(path, Rel))
+        {
+            var mb = new SkyrimMod(ModKeyB, Rel);
+            var ov = new SkCell(CutMod.Cell, Rel) { EditorID = CutMod.EditorId, Flags = SkCell.Flag.IsInteriorCell };
+            ov.Temporary.Add(Ref(CutModB, CrateBase, 30, 10, 20));
+            MovedRefFixture.FileInterior(mb, ov);
+            mb.BeginWrite.ToPath(Path.Combine(dir, ModKeyB.FileName.String)).WithLoadOrder(mOv).Write();
+        }
+        Console.WriteLine($"capture fixture: {path} ({All.Length} cells)");
+        foreach (var c in All)
+            Console.WriteLine($"  {c.EditorId}: A {c.A}  B {c.B}  walls {c.Walls[0]}..{c.Walls[^1]}");
+        return 0;
+    }
+}

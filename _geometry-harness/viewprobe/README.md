@@ -83,7 +83,9 @@ Pass `--report-mode` with any textured still, compare, worklist, or interactive 
 projection, canvas, crop, scene geometry and diagnostic overlays while removing every text surface from the
 pixels. Static PNGs omit caption bars, coloured NPC/route captions and grid numbers. Interactive windows and
 F12 captures omit the control bar, hover/status HUD and help card. Console output, PNG `viewprobe` metadata,
-camera pose and sidecars remain complete. Without the flag, output is unchanged.
+camera pose and sidecars remain complete. Without the flag, output is unchanged. **One exception:** a frame that is
+not what the player sees (objects hidden with `--hide`, or a `--cull-above` slice) keeps its view label in report
+mode too; see *Capture fallbacks* below.
 
 In textured mode, `--ref` is repeatable: bare `--ref FORMKEY` keeps the orange halo; `--ref FORMKEY=cyan` and
 `--ref FORMKEY=magenta` distinguish objects in one frame. Accepted colours are orange, cyan, magenta, yellow,
@@ -1348,6 +1350,58 @@ flag someone typed, which is why neither is allowed to be silent.
   a hidden door pops as a strong silhouette while a visible one keeps its readable texture.
 
 ---
+
+## Capture fallbacks (`--hide`, `--protect`, `--contacts-of`, `--occluders-of`, `--coverage-of`)
+
+The primitives the capture fallbacks compose (`../capture_points.py`, `../capture_acquire.py`): a cutaway when no
+eye-level camera sees a clashing pair, a measured mark for a see-through object. Code: `CaptureViews.cs`, hooked into
+`TexturedScene.cs`. Each is a value on the render; none is a job.
+
+- `--hide FORMKEY` (repeatable): the ref is drawn in no pass of this frame (colour, depth and so `--pick`, the
+  `--ref` marks, shadows). Its meshes stay built, and the CPU placement queries (`--nav-at`, `--clear-at`,
+  `--inside-at`) still see it: where a camera may stand is judged on the whole scene. Each key prints
+  `hidden: KEY (EDID, N shape(s)) is not drawn in this frame`, or `hidden: KEY not drawn in this setup ...` when the
+  ref is not there. The frame carries the view label (below).
+- `--protect FORMKEY` (repeatable, needs `--hide`): before drawing, refuse (exit 2, one sentence starting
+  `protect refused:`) when a hidden ref touches the protected one, holds it up, or cannot be assessed; a protected
+  ref absent from this setup prints `protect: KEY is not drawn in this setup; nothing of it to protect`. The check
+  runs in every render's own setup, so a capture's without-the-mod state is checked against what is there.
+- `--contacts-of FORMKEY` (repeatable): `contacts-of KEY: touches [..]; rests on [..]; unassessed [..]` and its drawn
+  box. **Touches**: the gap between the two refs' render triangles is at most 8 u (housecarl-core
+  `SpatialOverlap.Contact`, the function contactprobe reads; crossing counts). **Rests on**: the first geometry hit by
+  downward rays (up to 64) from the ref's drawn vertices within 16 u of its lowest point, within 512 u. Read on the
+  full transformed render triangles of every drawn ref, before any `--cull-above`. A placed ref that drew nothing
+  (its mesh missing or unreadable) within 256 u is listed as unassessed; it is never treated as safe to hide.
+- `--occluders-of FORMKEY` (repeatable, report only): the named ref drawn alone gives its own depth; every other
+  drawn ref whose box reaches its screen rectangle is drawn alone and counted where it is nearer:
+  `occluders-of KEY: covers N px, visible V px`, then `occluder KEY2 N px` (`translucent` when it writes no depth),
+  then `other geometry (terrain, water, distant LOD, actors) N px`.
+- `--coverage-of FORMKEY[@X,Y,Z]` (repeatable) and `--coverage-dump`: the ref's non-opaque shapes (effect shader,
+  alpha blend or test, no depth write, material alpha under 1) drawn alone, with their own shading, over a black and
+  a white clear (image space and sky gradient off): `a = 1 - (white - black)`. For an alpha-blended shape that is its
+  opacity; for an additive one (destination ONE) the colour it adds. `coverage-of KEY: blend additive|alpha|mixed`
+  says which. The mark is every pixel with `a >= 0.25` (frozen, `CaptureViews.CoverageAlphaMin`) whose own nearest
+  surface (a forced-depth draw of the same shapes) is in front of the opaque scene; never drawn from bounds. One state
+  line says what happened: `marked`, `below-threshold`, `transparent`, `outside-frustum`, `back-facing` (single-sided,
+  seen from behind: rasterises only with back faces drawn, which the engine culls), `not-rendered`, `not-drawn` (not
+  in this setup), or `opaque` (no non-opaque shape: `--ref-surface` marks it). Writes
+  `<frame>-coverage-<key>-mask.png` and `-alpha.png` (and `-black.png` with `--coverage-dump`); each `--pick` pixel
+  inside the mark prints `coverage pick KEY x,y: X,Y,Z alpha a d u from the eye`, the participant's own surface there;
+  with `@X,Y,Z`, `coverage-at` says whether that world point projects into the mark and how deep.
+- `--ref-surface`'s refusal line now counts: `subject-surface-refused: KEY: k of n shape(s) alpha, effect, ...`. A
+  ref with some opaque shapes is not "see-through"; only `k == n` is.
+
+**The view label.** A frame with any ref hidden, or sliced with `--cull-above`, burns a label bottom-left, in report
+mode too (the one raster text report mode keeps): `CUTAWAY: N objects hidden; not the player's view`, `SLICED
+TOP-DOWN above z Z, grid G u; not the player's view`, or both. The console prints `view-label: TEXT | rect x,y,w,h`
+(image pixels, top-left origin) so a measurement can leave those pixels out, and the PNG carries a `viewprobe-view`
+text chunk with the label, its rectangle and the hidden list. No system font to draw it: the frame is refused rather
+than saved unlabelled.
+
+**Their known answers** are `../tests/test_capture_fallbacks.py`, on the fixture `viewprobe --write-capture-fixture DIR`
+writes (`CaptureFixture.cs`: interior cells of vanilla meshes with written navmeshes, and a second plugin for a
+without-the-mod setup), laid out by `../tests/capture_fixture_lab.py` over a Skyrim SE game folder's own archives
+(`HOUSECARL_FIXTURE_GAME`, or `fixtureGame` in the harness config; without it the render cases report NOT RUN).
 
 ## Interactive fly-through (`--interactive`)
 

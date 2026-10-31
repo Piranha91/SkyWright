@@ -873,6 +873,13 @@ static class TexturedScene
         var subjectSurface = new List<float>();
         var subjectSurfaceDoubleSided = new List<float>();
         var subjectSurfaceRefusals = new HashSet<string>();
+        // --coverage-of (CaptureViews.cs): each named ref's non-opaque meshes, drawn alone after the frame.
+        var coverageMeshes = new Dictionary<string, List<GlMesh>>(StringComparer.Ordinal);
+        var coverageKeys = CaptureViews.CoverageOf.Select(c => CaptureViews.CoverageSpec(c).Key).ToHashSet(StringComparer.Ordinal);
+        // --protect / --contacts-of (CaptureViews.cs): every drawn ref's world triangles, before any --cull-above.
+        var captureGeom = CaptureViews.WantsGeometry ? new CaptureViews.Geometry() : null;
+        // --ref-surface: per highlighted ref, its drawn shapes and how many of them are non-opaque (refused)
+        var surfaceShapes = new Dictionary<string, (int Total, int Refused)>(StringComparer.Ordinal);
         // Near faces (outward winding), for the deep-occlusion boost: they pass a GREATER
         // depth test only when the occluder sits in front of the WHOLE hull — a wall, never
         // the object itself or its own door-jamb — so the through-wall ghost gets a second
@@ -1015,6 +1022,8 @@ static class TexturedScene
             if (built is null || built.Count == 0)
             {
                 missingMesh++; ro.Issue ??= "renderer produced no geometry"; noGeometry.Add(rel);
+                captureGeom?.MarkUnassessed(r.RefKey.ToString(), r.BaseEditorId ?? "", "its mesh drew no geometry",
+                    new Vector3(r.Position.X, r.Position.Y, r.Position.Z));
                 if (!noGeometryAt.TryGetValue(rel, out var atList)) noGeometryAt[rel] = atList = new();
                 atList.Add(new UnreadableAssets.Placement(r.RefKey.ToString(), r.Position, r.Scale));
                 if (source.Model is { } unrendered)
@@ -1164,6 +1173,7 @@ static class TexturedScene
                 // Statics only: terrain, navmesh, NPC actors and the overlay are never
                 // sliced — the subject of the picture must not be cullable by the knife
                 // that exists to reveal it.
+                captureGeom?.Add(r.RefKey.ToString(), r.BaseEditorId ?? "", wp, b.Indices);
                 var tri = b.Indices;
                 if (cullAbove is { } cutZ)
                 {
@@ -1294,14 +1304,25 @@ static class TexturedScene
                     }
                 }
 
+                if (coverageKeys.Contains(r.RefKey.ToString()) &&
+                    (b.HasAlphaBlend || b.HasAlphaTest || b.MaterialAlpha < 1f || !b.ZBufferWrite || b.HasEffectShader))
+                {
+                    if (!coverageMeshes.TryGetValue(r.RefKey.ToString(), out var cml)) coverageMeshes[r.RefKey.ToString()] = cml = new();
+                    cml.Add(mesh);
+                }
+
                 if (r.Highlight && refSurface)
                 {
                     // An identity pass must preserve the scene depth and the normal material path.
                     // A solid overlay cannot reproduce alpha-card coverage, so these participants
                     // remain explicitly unqualified instead of becoming opaque diagnostic sheets.
-                    if (b.HasAlphaBlend || b.HasAlphaTest || b.MaterialAlpha < 1f ||
-                        !b.ZBufferWrite || b.HasEffectShader || r.Marker)
-                        subjectSurfaceRefusals.Add(r.RefKey.ToString());
+                    bool refusedShape = b.HasAlphaBlend || b.HasAlphaTest || b.MaterialAlpha < 1f ||
+                        !b.ZBufferWrite || b.HasEffectShader || r.Marker;
+                    var sk = r.RefKey.ToString();
+                    surfaceShapes[sk] = surfaceShapes.TryGetValue(sk, out var ss) ? (ss.Total + 1, ss.Refused + (refusedShape ? 1 : 0))
+                                                                                   : (1, refusedShape ? 1 : 0);
+                    if (refusedShape)
+                        subjectSurfaceRefusals.Add(sk);
                     else
                     {
                         var surface = b.IsDoubleSided ? subjectSurfaceDoubleSided : subjectSurface;
@@ -1581,6 +1602,63 @@ static class TexturedScene
             if (refHadFx) fxRefCount++;
             if (refHadFxStatic) fxStaticRefCount++;
             if (refHadCovering) coveringRefs++;
+        }
+
+        // --hide / --contacts-of / --protect (CaptureViews.cs). Hidden refs keep their meshes (the retained scene and the
+        // CPU placement queries are untouched) and are switched off for every draw of this shot; ApplyHide runs again
+        // before the frame, after anything that may have switched meshes back on.
+        var hiddenPresent = new List<string>();
+        void ApplyHide()
+        {
+            foreach (var key in CaptureViews.Hide)
+                foreach (var o in occl.Refs)
+                    if (o.Ref.RefKey.ToString() == key)
+                        foreach (var m in o.Meshes) m.IsRendering = false;
+        }
+        foreach (var key in CaptureViews.Hide)
+        {
+            var hro = occl.Refs.Where(o => o.Ref.RefKey.ToString() == key && o.Meshes.Count > 0).ToList();
+            if (hro.Count == 0)
+            {
+                Console.WriteLine($"hidden: {key} not drawn in this setup (not placed, disabled, or no geometry); nothing to hide");
+                continue;
+            }
+            hiddenPresent.Add(key);
+            Console.WriteLine($"hidden: {key} ({hro[0].Ref.BaseEditorId ?? "?"}, {hro.Sum(o => o.Meshes.Count)} shape(s)) is not drawn in this frame");
+        }
+        ApplyHide();
+        if (captureGeom is not null)
+        {
+            foreach (var key in CaptureViews.ContactsOf)
+            {
+                var ans = CaptureViews.Contacts(captureGeom, key);
+                if (ans.Refusal == "absent") { Console.WriteLine($"contacts-of {key}: not drawn in this setup"); continue; }
+                if (ans.Refusal is not null) { Console.WriteLine($"contacts-of {key}: undecided: {ans.Refusal}"); continue; }
+                Console.WriteLine(CaptureViews.Line(ans));
+                Console.WriteLine(CaptureViews.BoxLine(ans));
+            }
+            foreach (var key in CaptureViews.Protect)
+            {
+                var ans = CaptureViews.Contacts(captureGeom, key);
+                if (ans.Refusal == "absent")
+                {
+                    Console.WriteLine($"protect: {key} is not drawn in this setup; nothing of it to protect");
+                    continue;
+                }
+                if (ans.Refusal is not null && hiddenPresent.Count > 0)
+                    throw new CaptureRefusal($"protect refused: {ans.Refusal}; nothing may be hidden around it");
+                foreach (var h in hiddenPresent)
+                {
+                    if (ans.Touches.Contains(h))
+                        throw new CaptureRefusal($"protect refused: {h} touches {key} (its render surfaces within {CaptureViews.TouchTolerance:0} u), so hiding it would erase the clash; hide something else or take the top-down view");
+                    if (ans.RestsOn.Contains(h))
+                        throw new CaptureRefusal($"protect refused: {key} rests on {h}, so hiding it would erase the clash; hide something else or take the top-down view");
+                    if (ans.Unassessed.Contains(h))
+                        throw new CaptureRefusal($"protect refused: whether {h} touches {key} cannot be decided (its geometry is incomplete), so it may not be hidden");
+                }
+                Console.WriteLine($"protect: {key} kept: none of the {hiddenPresent.Count} hidden object(s) touches it or holds it up; "
+                                + CaptureViews.Line(ans)[("contacts-of " + key + ": ").Length..]);
+            }
         }
 
         // TERRAIN — drawn by SkyRender natively (SkyRender.World): one mesh per cell quadrant, its
@@ -2834,7 +2912,9 @@ static class TexturedScene
                 : $"subject-surface-mode: exact placed triangles at opacity {refSurfaceOpacity:0.###} over the subject's own material; "
                   + "depth-tested; no inflated hull or occluded ghost; NOT opaque identity evidence");
             foreach (var key in subjectSurfaceRefusals.OrderBy(x => x, StringComparer.Ordinal))
-                Console.WriteLine($"subject-surface-refused: {key}: alpha, effect, marker or non-depth-writing shape; participant coverage incomplete");
+                Console.WriteLine($"subject-surface-refused: {key}: "
+                    + (surfaceShapes.TryGetValue(key, out var sc) ? $"{sc.Refused} of {sc.Total} shape(s) " : "")
+                    + "alpha, effect, marker or non-depth-writing; participant coverage incomplete");
             if (subjectSurface.Count > 0) AddLayer("subject-surface", (subjectSurface.ToArray(), true, true, 0, refSurfaceOpacity));
             if (subjectSurfaceDoubleSided.Count > 0) AddLayer("subject-surface-double-sided", (subjectSurfaceDoubleSided.ToArray(), true, false, 0, refSurfaceOpacity));
         }
@@ -3399,6 +3479,7 @@ static class TexturedScene
 
         float[]? pickDepth = picks.Count > 0 || npcActors.Count > 0 || depthDumpPath is not null ? new float[sizeW * sizeH] : null;
         var frameSw = System.Diagnostics.Stopwatch.StartNew();
+        ApplyHide();
         var pixels = Draw(pickDepth);
         // --lod: the final frame's draw time (GL.Finish inside Draw), since LOD is what adds draws.
         if (DistantLodLayer.Requested) Console.WriteLine($"   lod timing: final frame drawn in {frameSw.Elapsed.TotalMilliseconds:0} ms");
@@ -3414,6 +3495,229 @@ static class TexturedScene
             File.WriteAllBytes(depthDumpPath, System.Runtime.InteropServices.MemoryMarshal.AsBytes(pickDepth.AsSpan()).ToArray());
             Console.WriteLine($"   depth-dump: {Path.GetFullPath(depthDumpPath)}  ({sizeW}x{sizeH} float32 window depth, rows bottom-up, "
                             + $"1.0 = background; near {NearPlane:0} far {FarPlane:0}; fov {cam.FovDeg:0.##} square)");
+        }
+
+        // --occluders-of / --coverage-of (CaptureViews.cs): isolated draws after the frame, on the single-sample buffer. The
+        // overlay, the sky gradient and the image space finish are off for them, and every saved state is restored after.
+        if ((CaptureViews.CoverageOf.Count > 0 || CaptureViews.OccludersOf.Count > 0) && interactive is null)
+        {
+            var allMeshesC = renderer.Meshes.Concat(npcActors.SelectMany(a => a.Meshes)).Distinct().ToArray();
+            var savedVisC = allMeshesC.ToDictionary(m => m, m => m.IsRendering);
+            var savedClearC = renderer.ClearColor; var savedSkyC = skyColor; var savedGradC = renderer.SkyGradient;
+            var savedIsC = renderer.ImageSpace; var savedWireC = wireOverlay;
+            var invVpC = viewProj.Inverted();
+            float[] IsolatedDepth(IReadOnlyCollection<GlMesh> iso, bool bothFaces = false)
+            {
+                var set = iso.ToHashSet();
+                var saved = iso.ToDictionary(m => m, m => (m.DepthWrite, m.IsDoubleSided));
+                var depth = new float[sizeW * sizeH];
+                try
+                {
+                    foreach (var m in allMeshesC) m.IsRendering = savedVisC[m] && set.Contains(m);
+                    foreach (var m in iso) { m.DepthWrite = true; if (bothFaces) m.IsDoubleSided = true; }
+                    Draw(depth, singleSample: true, readColour: false);
+                }
+                finally { foreach (var (m, st) in saved) { m.DepthWrite = st.DepthWrite; m.IsDoubleSided = st.IsDoubleSided; } }
+                return depth;
+            }
+            Vector3 Unproject(int i, float d)
+            {
+                int bx = i % sizeW, gy = i / sizeW;
+                float nx = (bx + 0.5f) / sizeW * 2f - 1f, ny = (gy + 0.5f) / sizeH * 2f - 1f;
+                var w4 = GlVec4.TransformRow(new GlVec4(nx, ny, d * 2f - 1f, 1f), invVpC);
+                var wy = new Vector3(w4.X / w4.W, w4.Y / w4.W, w4.Z / w4.W);
+                return new Vector3(wy.X, -wy.Z, wy.Y);
+            }
+            string Stem(string key) => Path.GetFileNameWithoutExtension(outPath) + "-coverage-" + key.Replace(':', '_').Replace(' ', '_').Replace("'", "");
+            void SaveGrey(string name, Func<int, byte> value)
+            {
+                var img = new byte[sizeW * sizeH];
+                for (int y = 0; y < sizeH; y++)
+                    for (int x = 0; x < sizeW; x++) img[(sizeH - 1 - y) * sizeW + x] = value(y * sizeW + x);
+                using var gi = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.L8>(img, sizeW, sizeH);
+                gi.SaveAsPng(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outPath))!, name));
+            }
+            try
+            {
+                wireOverlay = null;
+                renderer.SkyGradient = null; renderer.ImageSpace = null;
+                var sceneDepthC = new float[sizeW * sizeH];
+                Draw(sceneDepthC, singleSample: true, readColour: false);    // the frame's own depth: hidden refs stay out
+
+                // ---- --occluders-of: every drawn ref nearer than the named one over its own pixels ----
+                foreach (var key in CaptureViews.OccludersOf)
+                {
+                    var own = occl.Refs.Where(o => o.Ref.RefKey.ToString() == key).SelectMany(o => o.Meshes)
+                                       .Where(m => savedVisC.TryGetValue(m, out var v) && v).ToList();
+                    if (own.Count == 0) { Console.WriteLine($"occluders-of {key}: not drawn in this frame"); continue; }
+                    var ownD = IsolatedDepth(own);
+                    int covered = 0, visible = 0, x0 = sizeW, x1 = -1, y0 = sizeH, y1 = -1;
+                    float farD = 0f;
+                    for (int i = 0; i < ownD.Length; i++)
+                    {
+                        if (ownD[i] >= 0.999999f) continue;
+                        covered++;
+                        if (ownD[i] <= sceneDepthC[i] + 1e-6f) visible++;
+                        int x = i % sizeW, y = i / sizeW;
+                        x0 = Math.Min(x0, x); x1 = Math.Max(x1, x); y0 = Math.Min(y0, y); y1 = Math.Max(y1, y);
+                        farD = MathF.Max(farD, ownD[i]);
+                    }
+                    Console.WriteLine($"occluders-of {key}: covers {covered} px, visible {visible} px");
+                    if (covered == 0) continue;
+                    var ownSet = own.ToHashSet();
+                    var refMeshes = new HashSet<GlMesh>();
+                    var rows = new List<(string Key, int Px, bool Translucent)>();
+                    foreach (var o in occl.Refs)
+                    {
+                        var ms = o.Meshes.Where(m => savedVisC.TryGetValue(m, out var v) && v && !ownSet.Contains(m)).ToList();
+                        foreach (var m in ms) refMeshes.Add(m);
+                        if (ms.Count == 0 || o.Ref.RefKey.ToString() == key) continue;
+                        // the candidate's box must reach the participant's screen rectangle (any corner behind the eye: test it)
+                        bool behind = false; int bx0 = sizeW, bx1 = -1, by0 = sizeH, by1 = -1;
+                        for (int c = 0; c < 8; c++)
+                        {
+                            var p = new Vector3((c & 1) == 0 ? o.Min.X : o.Max.X, (c & 2) == 0 ? o.Min.Y : o.Max.Y, (c & 4) == 0 ? o.Min.Z : o.Max.Z);
+                            var clip = GlVec4.TransformRow(new GlVec4(p.X, p.Z, -p.Y, 1f), viewProj);
+                            if (clip.W <= 0.01f) { behind = true; break; }
+                            int sx = (int)((clip.X / clip.W * 0.5f + 0.5f) * sizeW), sy = (int)((clip.Y / clip.W * 0.5f + 0.5f) * sizeH);
+                            bx0 = Math.Min(bx0, sx); bx1 = Math.Max(bx1, sx); by0 = Math.Min(by0, sy); by1 = Math.Max(by1, sy);
+                        }
+                        if (!behind && (bx1 < x0 || bx0 > x1 || by1 < y0 || by0 > y1)) continue;
+                        var d = IsolatedDepth(ms);
+                        int n = 0;
+                        for (int i = 0; i < d.Length; i++)
+                            if (ownD[i] < 0.999999f && d[i] < ownD[i] - 1e-6f) n++;
+                        if (n > 0) rows.Add((o.Ref.RefKey.ToString(), n, ms.All(m => !m.DepthWrite)));
+                    }
+                    foreach (var (k, n, tr) in rows.OrderByDescending(r => r.Px))
+                        Console.WriteLine($"occluders-of {key}: occluder {k} {n} px{(tr ? " translucent (writes no depth)" : "")}");
+                    var other = allMeshesC.Where(m => savedVisC[m] && !refMeshes.Contains(m) && !ownSet.Contains(m)).ToList();
+                    if (other.Count > 0)
+                    {
+                        var od = IsolatedDepth(other);
+                        int n = 0;
+                        for (int i = 0; i < od.Length; i++) if (ownD[i] < 0.999999f && od[i] < ownD[i] - 1e-6f) n++;
+                        Console.WriteLine($"occluders-of {key}: other geometry (terrain, water, distant LOD, actors) {n} px");
+                    }
+                }
+
+                // ---- --coverage-of: a see-through ref's drawn coverage ----
+                renderer.SkyGradient = null; renderer.ImageSpace = null;
+                foreach (var spec in CaptureViews.CoverageOf)
+                {
+                    var (key, point) = CaptureViews.CoverageSpec(spec);
+                    if (!coverageMeshes.TryGetValue(key, out var own) || own.Count == 0)
+                    {
+                        // which of three different things: not drawn at all in this setup, drawn but every shape opaque, or
+                        // placed with no shape built
+                        var placed = occl.Refs.Where(o => o.Ref.RefKey.ToString() == key).ToList();
+                        string why = placed.Count == 0 ? "not-drawn: it is not a drawn reference in this setup (not placed in the winning state, disabled, or no model)"
+                                   : placed.All(o => o.Meshes.Count == 0) ? "not-drawn: it is placed but the renderer built no shape of it"
+                                   : CaptureViews.Hide.Contains(key) ? "not-drawn: it is hidden in this frame"
+                                   : "opaque: every drawn shape of it is opaque, so --ref-surface marks it";
+                        Console.WriteLine($"coverage-of {key}: {why}");
+                        continue;
+                    }
+                    int switchedOff = own.Count(m => !savedVisC.TryGetValue(m, out var vis0) || !vis0);
+                    var iso = own.ToHashSet();
+                    foreach (var m in allMeshesC) m.IsRendering = savedVisC[m] && iso.Contains(m);
+                    skyColor = new Vector3(0f, 0f, 0f); renderer.ClearColor = new GlVec3(0f, 0f, 0f);
+                    var blk = Draw(null, singleSample: true);
+                    skyColor = new Vector3(1f, 1f, 1f); renderer.ClearColor = new GlVec3(1f, 1f, 1f);
+                    var wht = Draw(null, singleSample: true);
+                    var ownDepth = IsolatedDepth(own);
+                    var alpha = CaptureViews.Alpha(blk, wht, sizeW, sizeH);
+                    int drawn = 0, front = 0, pass = 0, passFront = 0, depthless = 0, raster = 0;
+                    var mask = new byte[sizeW * sizeH];
+                    var hist = new int[10];
+                    for (int i = 0; i < alpha.Length; i++)
+                    {
+                        if (ownDepth[i] < 0.999999f) raster++;
+                        float av = alpha[i];
+                        if (av <= 1f / 255f) continue;
+                        drawn++;
+                        hist[Math.Min(9, (int)(av * 10f))]++;
+                        bool hasOwn = ownDepth[i] < 0.999999f;
+                        if (!hasOwn) depthless++;
+                        bool inFront = hasOwn && ownDepth[i] <= sceneDepthC[i];
+                        if (inFront) front++;
+                        if (av >= CaptureViews.CoverageAlphaMin) { pass++; if (inFront) { passFront++; mask[i] = 255; } }
+                    }
+                    // nothing rasterised: outside the frustum, or single-sided and seen from behind (back faces culled, as the
+                    // engine culls them). One more forced-depth draw with both faces tells the two apart.
+                    int rasterBoth = raster;
+                    if (raster == 0)
+                    {
+                        var both = IsolatedDepth(own, bothFaces: true);
+                        rasterBoth = both.Count(v => v < 0.999999f);
+                    }
+                    string state = switchedOff == own.Count ? $"not-rendered: the renderer holds all {own.Count} of its shapes switched off in this view"
+                                 : raster == 0 && rasterBoth > 0 ? $"back-facing: single-sided and seen from behind; {rasterBoth} px rasterise only with back faces drawn, which the engine culls"
+                                 : raster == 0 ? "outside-frustum: none of its triangles rasterised in this view, front or back"
+                                 : drawn == 0 ? $"transparent: {raster} px rasterised, every one at alpha <= 1/255"
+                                 : passFront == 0 ? $"below-threshold: drawn, but no pixel is both in front of the scene and at alpha {CaptureViews.CoverageAlphaMin:0.##}"
+                                 : "marked";
+                    Console.WriteLine($"coverage-of {key}: {state}");
+                    // the blend the measured value means: over SRC_ALPHA / INV_SRC_ALPHA it is the opacity a; over an additive
+                    // (dst ONE) shape it is the colour the shape adds, c * a. A frame composites back as black + behind * (1 - a)
+                    // in the first case and black + behind in the second (tests/test_capture_fallbacks.py CF5).
+                    string blend = own.All(m => m.DstBlendIndex == 0) ? "additive" : own.All(m => m.DstBlendIndex == 7) ? "alpha" : "mixed";
+                    Console.WriteLine($"coverage-of {key}: blend {blend}");
+                    Console.WriteLine($"coverage-of {key}: {own.Count} non-opaque shape(s); rasterised {raster} px; drawn {drawn} px (alpha > 1/255), "
+                                    + $"{front} of them in front of the opaque scene, {pass} at alpha >= {CaptureViews.CoverageAlphaMin:0.##}, "
+                                    + $"{passFront} both (the mark); {depthless} drawn px gave no own depth");
+                    Console.WriteLine($"coverage-of {key}: alpha histogram by tenths " + string.Join(" ", hist));
+                    var stem = Stem(key);
+                    SaveGrey(stem + "-mask.png", i => mask[i]);
+                    SaveGrey(stem + "-alpha.png", i => (byte)Math.Clamp(alpha[i] * 255f + 0.5f, 0f, 255f));
+                    if (CaptureViews.CoverageDump)
+                    {
+                        var flip = new byte[sizeW * sizeH * 4];
+                        for (int y = 0; y < sizeH; y++)
+                            Array.Copy(blk, y * sizeW * 4, flip, (sizeH - 1 - y) * sizeW * 4, sizeW * 4);
+                        for (int i = 3; i < flip.Length; i += 4) flip[i] = 255;
+                        using var bi = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Rgba32>(flip, sizeW, sizeH);
+                        bi.SaveAsPng(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outPath))!, stem + "-black.png"));
+                    }
+                    Console.WriteLine($"coverage-of {key}: mask {stem}-mask.png, alpha {stem}-alpha.png (image rows top-down)");
+                    // the mark's world points at the --pick pixels: the participant's own nearest surface there
+                    foreach (var (ix, iy) in picks)
+                    {
+                        if (ix < 0 || ix >= sizeW || iy < 0 || iy >= sizeH) continue;
+                        int gi = (sizeH - 1 - iy) * sizeW + ix;
+                        if (mask[gi] == 0) continue;
+                        var ws = Unproject(gi, ownDepth[gi]);
+                        Console.WriteLine($"coverage pick {key} {ix},{iy}: {ws.X:0},{ws.Y:0},{ws.Z:0}  alpha {alpha[gi]:0.000}  "
+                                        + $"{Vector3.Distance(ws, cam.Eye):0} u from the eye");
+                    }
+                    if (point is { } pt)
+                    {
+                        var sp = ScreenOf(new Vector3(pt.X, pt.Z, -pt.Y));
+                        if (sp is null) Console.WriteLine($"coverage-at {key} {pt.X:0},{pt.Y:0},{pt.Z:0}: off the frame");
+                        else
+                        {
+                            int gi = sp.Value.Y * sizeW + sp.Value.X;
+                            int depthIn = 0;
+                            while (depthIn < 64)
+                            {
+                                int r = depthIn + 1, px = sp.Value.X, py = sp.Value.Y;
+                                if (px - r < 0 || px + r >= sizeW || py - r < 0 || py + r >= sizeH) break;
+                                if (mask[py * sizeW + px - r] == 0 || mask[py * sizeW + px + r] == 0
+                                    || mask[(py - r) * sizeW + px] == 0 || mask[(py + r) * sizeW + px] == 0) break;
+                                depthIn++;
+                            }
+                            Console.WriteLine($"coverage-at {key} {pt.X:0},{pt.Y:0},{pt.Z:0}: pixel {sp.Value.X},{sizeH - 1 - sp.Value.Y} "
+                                            + $"{(mask[gi] != 0 ? $"in the mark, {depthIn} px inside" : "outside the mark")}");
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                foreach (var (m, v) in savedVisC) m.IsRendering = v;
+                renderer.ClearColor = savedClearC; skyColor = savedSkyC; renderer.SkyGradient = savedGradC;
+                renderer.ImageSpace = savedIsC; wireOverlay = savedWireC;
+            }
         }
         if (wireProg != 0)
         {
@@ -3510,7 +3814,9 @@ static class TexturedScene
         ClassifyUnreadable();
         SaveFrame(pixels, sizeW, sizeH, capLines, colourCaptionLines, pngTextMeta, outPath,
                   gridSpacing > 0f ? gridLabels : null, gridColour3, reportMode,
-                  UnreadableAssets.FrameIncompleteText());
+                  UnreadableAssets.FrameIncompleteText(),
+                  CaptureViews.ViewLabel(hiddenPresent.Count, cullAbove, gridSpacing),
+                  hiddenPresent.Count > 0 ? "hidden: " + string.Join(" ", hiddenPresent) : null);
 
         shotResources.Dispose();
         graphicsCell?.EndShot();
@@ -3530,7 +3836,7 @@ static class TexturedScene
         IReadOnlyList<string> captionLines, IReadOnlyList<(string Text, Vector3 Color)> colourCaptionLines,
         string? pngTextMeta, string outPath,
         IReadOnlyList<(string Text, int X, int Y)>? pinnedLabels = null, Vector3 pinnedColor = default,
-        bool reportMode = false, string? incompleteMeta = null)
+        bool reportMode = false, string? incompleteMeta = null, string? viewLabel = null, string? viewMeta = null)
     {
         ViewProbe.RenderStages.Open(ViewProbe.RenderStages.Encode,
             "encoding the frame and writing it", 1, "frames");
@@ -3622,6 +3928,28 @@ static class TexturedScene
                 }
             });
         }
+
+        // ---- the view label (CaptureViews.cs): a frame that is not what the player sees says so, in report mode too --------
+        // The one raster text report mode keeps. Bottom-left, on a dark strip; its rectangle is printed so a measurement can
+        // leave those pixels out, and the label and the hidden list ride in the PNG's own metadata.
+        if (viewLabel is { Length: > 0 } && font is not null)
+        {
+            var vf = font;
+            var size = TextMeasurer.MeasureSize(viewLabel, new TextOptions(vf));
+            int pad = Math.Max(2, (int)(6f * capScale));
+            int rw = Math.Min(width, (int)MathF.Ceiling(size.Width) + 2 * pad), rh = Math.Min(height, (int)MathF.Ceiling(size.Height) + 2 * pad);
+            int rx = 0, ry = height - rh;
+            img.Mutate(x =>
+            {
+                x.Fill(SixLabors.ImageSharp.Color.FromRgba(8, 10, 14, 230), new SixLabors.ImageSharp.RectangleF(rx, ry, rw, rh));
+                x.DrawText(viewLabel, vf, SixLabors.ImageSharp.Color.FromRgb(255, 214, 64), new SixLabors.ImageSharp.PointF(rx + pad, ry + pad));
+            });
+            Console.WriteLine($"view-label: {viewLabel} | rect {rx},{ry},{rw},{rh}");
+            img.Metadata.GetPngMetadata().TextData.Add(new SixLabors.ImageSharp.Formats.Png.Chunks.PngTextData(
+                "viewprobe-view", viewLabel + $" | rect {rx},{ry},{rw},{rh}" + (viewMeta is null ? "" : " | " + viewMeta), string.Empty, string.Empty));
+        }
+        else if (viewLabel is { Length: > 0 })
+            throw new CaptureRefusal($"the frame needs the view label '{viewLabel}' and no system font was found to draw it; refusing an unlabelled picture");
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         // Replication chunk: the camera pose (and the arguments that compose it) rides
