@@ -188,6 +188,22 @@ class Refused(Exception):
 # ---------------------------------------------------------------- the request side --
 
 SUPPORTED_REQUEST_TYPES = ("overlap-pair", "state-pair", "placement-split")
+
+# Frozen at Gate B (2026-10-31): a top-down picture is accepted only when each participant shows at least this many of its
+# own marked pixels (--ref-surface colour or --coverage-of mask, the view label left out) in the probe frame, 320 px wide
+# at the request's aspect. Fewer, and the top-down refuses for that participant rather than publish a picture of the
+# floor around it.
+TOP_DOWN_MIN_PIXELS = 25
+TOP_DOWN_PROBE_SIZE = 320
+
+
+def top_down_accepts(counts: dict) -> tuple[bool, str | None]:
+    """(accepted, why not): every participant at TOP_DOWN_MIN_PIXELS or more."""
+    short = {k: v for k, v in counts.items() if v < TOP_DOWN_MIN_PIXELS}
+    if not short:
+        return True, None
+    k, v = sorted(short.items())[0]
+    return False, (f"{k} shows {v} marked pixel(s) from above, under the {TOP_DOWN_MIN_PIXELS} the top-down needs")
 SPLIT_SIZE, SPLIT_ASPECT = 638, "638:680"      # a split half (skill data scene-policy vignettes.split.half)
 
 
@@ -338,7 +354,10 @@ proved by a ray that STOPS there. An overlap envelope's centre is not such a poi
 CAMERA_KEYS = {"fov": float, "aspect": str, "eyeHeight": float, "size": int,
                "surfaceExtent": float, "standoffMin": float, "standoffMax": float,
                "verifyCandidates": int, "bearingStep": float, "sightMargin": float,
-               "surfaceTol": float, "aim": list, "bearingWindow": list}
+               "surfaceTol": float, "aim": list, "bearingWindow": list,
+               # a see-through mark is planned as a --subject-nodepth, which the planner frames as a figure of this size
+               # standing on its point; the picker sets it small, since the mark is a point on the object's surface
+               "subjectHeight": float, "subjectWidth": float}
 
 
 def read_points(path: Path, request: dict, parts: list[dict], source: dict) -> dict:
@@ -461,12 +480,17 @@ def plan_argv(points: dict, parts: list[dict], receipts: Path, vp: str | None,
         x, y, z = (float(v) for v in row["point"])
         label = surface_label(row, p)
         # `=` form: a leading negative coordinate is read as an option otherwise.
-        argv += [f"--surface={x:g},{y:g},{z:g}={label}"]
+        if row.get("markKind") == "coverage":
+            # a see-through mark writes no depth, so no ray can stop on it: framed with the depth test omitted, and
+            # checked again at the final pose by its own coverage (coverage_at_pose)
+            argv += [f"--subject-nodepth={x:g},{y:g},{z:g}={label}"]
+        else:
+            argv += [f"--surface={x:g},{y:g},{z:g}={label}"]
     flags = {"fov": "--fov", "aspect": "--aspect", "eyeHeight": "--eye-height", "size": "--size",
              "surfaceExtent": "--surface-extent", "standoffMin": "--standoff-min",
              "standoffMax": "--standoff-max", "verifyCandidates": "--verify-candidates",
              "bearingStep": "--bearing-step", "sightMargin": "--sight-margin",
-             "surfaceTol": "--surface-tol"}
+             "surfaceTol": "--surface-tol", "subjectHeight": "--subject-height", "subjectWidth": "--subject-width"}
     for k, flag in flags.items():
         if k in cam:
             argv += [flag, str(cam[k])]
@@ -559,7 +583,8 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
     # exit code say a run succeeded; they do not say WHICH targets it succeeded on.
     want, got = declared_surfaces(points, parts), plan_subjects(plan)
     kinds = {s.get("kind") for s in (plan.get("subjects") or [])}
-    if got != want or kinds != {"surface"}:
+    want_kinds = {"nodepth" if points["byKey"][p["formKey"]].get("markKind") == "coverage" else "surface" for p in parts}
+    if got != want or kinds != want_kinds:
         raise Refused("plan-subject-mismatch",
                       "the planner's result describes different targets than this invocation "
                       "submitted, so it is not this request's camera",
@@ -608,7 +633,10 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
               "viewprobe": (f"--eye {chosen['eye'][0]:.1f},{chosen['eye'][1]:.1f},"
                             f"{chosen['eye'][2]:.1f} --yaw {chosen['yaw']:.1f} "
                             f"--pitch {chosen['pitch']:.1f} --fov {pose.get('fov')}"
-                            + shotplan_mod.aspect_flag(pose.get("aspect")))}
+                            + shotplan_mod.aspect_flag(pose.get("aspect"))),
+              # a cutaway's hide and protect flags travel WITH the camera: every state is rendered with them
+              "viewKind": points["doc"].get("viewKind") or "eye-level",
+              "viewFlags": list(points["doc"].get("viewFlags") or [])}
     sequence = request.get("sequence") or {}
     setups = sequence.get("setups") or {}
     states = [{"state": s, "poseId": plan["poseId"], "camera": camera, "setup": setups.get(s),
@@ -631,8 +659,13 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
                     "status": request.get("status")},
         "participants": [{**p, "point": points["byKey"][p["formKey"]]["point"],
                           "label": points["byKey"][p["formKey"]].get("label"),
+                          "markKind": points["byKey"][p["formKey"]].get("markKind") or "surface",
+                          "coverage": points["byKey"][p["formKey"]].get("coverage"),
                           "surfaceOf": points["byKey"][p["formKey"]].get("surfaceOf")}
                          for p in parts],
+        "viewKind": points["doc"].get("viewKind") or "eye-level",
+        "cutaway": points["doc"].get("cutaway"),
+        "fallbackChain": points["doc"].get("fallbackChain") or [],
         "source": source,
         "suppliedPoints": {"path": points["path"], "sha256": points["sha256"],
                            "provenance": points["doc"].get("provenance"),
@@ -670,6 +703,156 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
             "outstanding": (request.get("review") or {}).get("separateJudgments")},
         "receipts": receipts,
     }
+
+
+def _vp_run(a, shotplan_mod, cell: str, flags: list[str], out: Path) -> tuple[int, str]:
+    """One viewprobe render for the acquisition's own checks; its console is kept beside the frame."""
+    out.mkdir(parents=True, exist_ok=True)
+    cmd = shotplan_mod.vp_command(a.vp) + [cell, *[str(f) for f in flags], "--out", str(out), *a.passthrough]
+    p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    text = (p.stdout or "") + "\n--stderr--\n" + (p.stderr or "")
+    (out / "console.txt").write_text(" ".join(cmd) + "\n" + text, encoding="utf-8")
+    return p.returncode, text
+
+
+COVERAGE_AT = re.compile(r"^coverage-at (\S{6}:.+?\.es[pml]) \S+: (?:pixel (\d+),(\d+) (in the mark, (\d+) px inside|outside the mark)|off the frame)")
+
+
+def coverage_at_pose(a, result: dict, receipts_dir: Path, shotplan_mod) -> None:
+    """For a participant marked by coverage, render the final pose and require its point to land in its own mark (at least
+    2 px inside, the picker's rule). Fills participant.coverage.atPose, or refuses."""
+    cov = [p for p in result.get("participants") or [] if p.get("markKind") == "coverage"]
+    if not cov:
+        return
+    cam = result["camera"]
+    flags = shlex.split(cam["viewprobe"]) + ["--size", "320", "--msaa", "0", "--nav", "off", "--report-mode",
+                                              *(cam.get("viewFlags") or [])]
+    for p in cov:
+        x, y, z = p["point"]
+        flags += ["--coverage-of", f"{p['formKey']}@{x:g},{y:g},{z:g}"]
+    rc, text = _vp_run(a, shotplan_mod, cam["cell"], flags, receipts_dir / "coverage-at-pose")
+    if rc != 0:
+        raise Refused("points-renderer-failed", f"the coverage check at the final pose did not render (viewprobe exit {rc})")
+    for p in cov:
+        m = next((mm for mm in (COVERAGE_AT.match(ln) for ln in text.splitlines()) if mm and mm[1] == p["formKey"]), None)
+        inside = int(m[5]) if m and m[5] else -1
+        if m is None or inside < 2:
+            raise Refused("see-through-not-covered-at-pose",
+                          f"{p['formKey']}'s measured point does not land in its own coverage mark at the final camera "
+                          f"({'no reading' if m is None else m.group(0).split(': ', 1)[1]}); no camera is published",
+                          final=False)
+        p["coverage"] = {**(p.get("coverage") or {}), "atPose": True, "insideAtPose": inside,
+                         "atPoseReceipt": str(receipts_dir / "coverage-at-pose" / "console.txt")}
+
+
+def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts_dir: Path, shotplan_mod, exc) -> dict:
+    """The labelled sliced top-down, when the eye-level picture and the cutaway both refused (or no station stood): the
+    planner's own fallback shot (shotplan plan --top-down-only), accepted only when each participant shows at least
+    TOP_DOWN_MIN_PIXELS of its own mark from above. Returns the camera-ready result, or raises a refusal that says every
+    fallback was tried (final) -- unless a step failed for a reason that is not the geometry's (final False)."""
+    import numpy as np
+    from PIL import Image
+    CP = _load_points()
+    td = exc.extra["topDown"]
+    chain = list(exc.extra.get("chain") or [])
+    expected = request.get("configurationFingerprint")
+    d = receipts_dir / "top-down"
+    d.mkdir(parents=True, exist_ok=True)
+    pj, wl = d / "shotplan-plan.json", d / "shotplan-worklist.json"
+    shotplan_mod.claim_outputs([str(pj), str(wl)], request["id"])
+    why = (f"{chain[0]['code'] if chain else exc.code}" + (f", then {chain[-1]['code']}" if len(chain) > 1 else ""))
+    argv = [sys.executable, str(SHOTPLAN), "plan", td["cell"], "--floor-z", repr(float(td["floorZ"])),
+            "--top-down-only", f"eye-level refused ({why})", "--json", str(pj), "--worklist", str(wl),
+            "--label", f"capture request {request['id']} top-down", "--fov", "65", "--aspect", "16:9"]
+    for s_ in td["subjects"]:
+        x, y, z = s_["point"]
+        argv.append(f"--subject={x:g},{y:g},{z:g}={s_['formKey'].replace(':', '-')[:18]}")
+    if td.get("cut") is not None:
+        argv += ["--fallback-cut", f"{float(td['cut']):g}"]
+    if a.vp:
+        argv += ["--vp", a.vp]
+    if a.passthrough:
+        argv += ["--"] + list(a.passthrough)
+    call = call_planner(argv, d)
+    doc = load_json(wl) if wl.is_file() else {}
+    shot = next((x for c_ in doc.get("cells") or [] for x in c_.get("shots") or []
+                 if isinstance(x, dict) and x.get("status") == "fallback"), None)
+    if shot is None:
+        chain.append({"kind": "top-down", "status": "failed", "code": "planner-not-verified",
+                      "detail": f"the planner wrote no top-down shot (exit {call['exitCode']})"})
+        raise Refused("planner-not-verified", f"the planner wrote no top-down shot (exit {call['exitCode']}); see "
+                      f"{call['log']}", final=False, chain=chain)
+    observed = (doc.get("scene") or {}).get("renderer")
+    if observed != expected:
+        scoped = scene_identity(source, expected, state=request.get("state") if request.get("requestType") == "state-pair" else None)
+        if scoped is None or scoped["sceneFingerprint"] != observed:
+            raise Refused("configuration-mismatch",
+                          f"the top-down was planned in configuration {str(observed)[:16]}… but this finding was measured "
+                          f"in {str(expected)[:16]}…", expectedFingerprint=expected, observedFingerprint=observed)
+    cut = shot.get("cullAbove")
+    rflags = [str(x) for x in doc.get("renderFlags") or []]
+    aspect = shot.get("aspect") or 1.777778
+    vpcam = (f"--eye {shot['eye'][0]:.1f},{shot['eye'][1]:.1f},{shot['eye'][2]:.1f} --yaw {float(shot.get('yaw', 0)):.1f} "
+             f"--pitch {float(shot['pitch']):.1f} --fov {shot.get('fov', 65)}" + shotplan_mod.aspect_flag(aspect)
+             + (f" --cull-above {float(cut):.1f}" if cut is not None else ""))
+    nav = "wire" if "--nav-z" in rflags else "off"
+    # the acceptance probe: each participant's own mark, seen from that camera
+    see = set(td.get("seeThrough") or [])
+    flags = shlex.split(vpcam) + ["--size", str(TOP_DOWN_PROBE_SIZE), "--msaa", "0", "--nav", "off", "--report-mode",
+                                  *[x for p in parts for x in ("--ref", f"{p['formKey']}={p['color']}")], "--ref-surface",
+                                  *[x for k in sorted(see) for x in ("--coverage-of", k)]]
+    rc, text = _vp_run(a, shotplan_mod, td["cell"], flags, d / "probe")
+    png = next(iter(sorted((d / "probe").glob("*-fp.png"))), None)
+    if rc != 0 or png is None:
+        chain.append({"kind": "top-down", "status": "failed", "code": "points-renderer-failed",
+                      "detail": f"the top-down probe did not render (viewprobe exit {rc})"})
+        raise Refused("points-renderer-failed", f"the top-down probe did not render (viewprobe exit {rc})", final=False,
+                      chain=chain)
+    img = np.asarray(Image.open(png).convert("RGB"))
+    counts = {}
+    for p in parts:
+        mask, _cov = CP.participant_mask(img, png, p, p["formKey"] in see, text)
+        counts[p["formKey"]] = int(mask.sum())
+    ok, why_not = top_down_accepts(counts)
+    if not ok:
+        short = min(counts, key=lambda k: counts[k])
+        states = sorted((exc.extra.get("coverageStates") or {}).get(short) or [])
+        code = ("see-through-unmarked" if short in set(td.get("allNonOpaque") or []) and "marked" not in states
+                else "top-down-participant-unseen")
+        detail = (f"{why_not} (the view sliced above z {float(cut):.0f})" if cut is not None else why_not)
+        if code == "see-through-unmarked":
+            detail += (f"; it draws only alpha, effect or non-depth-writing shapes and its coverage never reached alpha "
+                       f"0.25 in front of the scene from any station (states seen: {', '.join(states) or 'none'})")
+        chain.append({"kind": "top-down", "status": "refused", "code": code, "detail": detail})
+        raise Refused(code, detail + "; every fallback was tried: " + "; ".join(
+            f"{c['kind']}: {c.get('code') or c['status']}" for c in chain), final=True, chain=chain,
+            topDownPixels=counts, participant=short)
+    chain.append({"kind": "top-down", "status": "ok", "code": None,
+                  "detail": f"sliced above z {float(cut):.0f}" if cut is not None else "top-down"})
+    camera = {"cell": td["cell"], "eye": list(shot["eye"]), "yaw": float(shot.get("yaw", 0)), "pitch": float(shot["pitch"]),
+              "fov": shot.get("fov", 65), "aspect": aspect, "cullAbove": cut, "floorZ": td["floorZ"],
+              "viewKind": "top-down", "nav": nav, "renderFlags": rflags, "viewFlags": [], "viewprobe": vpcam}
+    seq = request.get("sequence") or {}
+    return {"schemaVersion": 1, "kind": "capture-acquisition", "status": "camera-ready", "generatedUtc": utcnow(),
+            "synthetic": False, "viewKind": "top-down",
+            "request": {"id": request["id"], "requestType": request.get("requestType"), "checkId": request.get("checkId"),
+                        "armId": request.get("armId"), "findingIds": request.get("findingIds"),
+                        "location": request.get("location"), "recordKeys": request.get("recordKeys"),
+                        "state": request.get("state"), "status": request.get("status")},
+            "participants": [{**p, "markKind": "top-down", "pixelsFromAbove": counts[p["formKey"]]} for p in parts],
+            "source": source, "poseId": shot.get("poseId"), "camera": camera, "cutaway": None,
+            "fallbackChain": chain,
+            "topDown": {"acceptance": {"minPixels": TOP_DOWN_MIN_PIXELS, "probeSize": TOP_DOWN_PROBE_SIZE, "counts": counts},
+                        "subjects": td["subjects"], "cut": cut, "note": shot.get("note"), "label": shot.get("label")},
+            "configuration": {"expected": expected, "observed": observed, "match": True},
+            "states": [{"state": s_, "poseId": shot.get("poseId"), "camera": camera, "setup": (seq.get("setups") or {}).get(s_),
+                        "highlight": s_ == "highlight"} for s_ in (seq.get("states") or [])],
+            "sequence": seq,
+            "visualQualification": {"status": "pending",
+                                    "note": "a sliced top-down is a picture of the geometry, not a player viewpoint; it is "
+                                            "labelled in the frame and reviewed like any other"},
+            "receipts": {"receiptsDir": str(receipts_dir), "planJson": str(pj), "worklist": str(wl),
+                         "plannerLog": call["log"], "probe": str(d / "probe" / "console.txt")}}
 
 
 def refusal_doc(request_id: str, exc: Refused, extra: dict) -> dict:
@@ -749,8 +932,11 @@ def capture_argv(request: dict, camera: dict, state: str, order: str, passthroug
     if split:
         cam = _strip_flag(cam, "--aspect") + ["--aspect", SPLIT_ASPECT]
         size = SPLIT_SIZE
-    argv = [camera["cell"], *passthrough, "--order", str(order), *cam, "--nav", "off", "--size", str(size), "--msaa", "4",
-            "--report-mode", "--no-cell-outline"]
+    argv = [camera["cell"], *passthrough, "--order", str(order), *cam, "--nav", camera.get("nav") or "off",
+            "--size", str(size), "--msaa", "4", "--report-mode", "--no-cell-outline",
+            # a top-down's navmesh band and grid; a cutaway's hide and protect flags (the protect check runs again in
+            # this state's own setup)
+            *[str(x) for x in camera.get("renderFlags") or []], *[str(x) for x in camera.get("viewFlags") or []]]
     if request.get("state") and request.get("requestType") == "state-pair":
         argv += ["--state", str(request["state"])]
     if split:
@@ -970,14 +1156,26 @@ def cmd_acquire(a) -> int:
                                          synthetic=a.synthetic_points,
                                          size=a.points_size, grid=a.points_grid, shotplan=shotplan_mod)
                 except CP.Unpickable as exc:
-                    raise Refused("points-unpickable", exc.detail, pickerCode=exc.code, **exc.extra)
+                    if exc.extra.get("topDown") is None:
+                        raise Refused("points-unpickable", exc.detail, pickerCode=exc.code, **exc.extra)
+                    # every eye-level picture refused, the cutaway too (or no station stood): the labelled top-down
+                    result = acquire_top_down(a, request, parts, source, receipts_dir, shotplan_mod, exc)
+                    write_json(out, result)
+                    run.advance(1)
+                    run.artifact(str(out))
+                    run.tally(ok=1)
+                    print(f"camera-ready {a.request}: TOP-DOWN, sliced above z {result['camera']['cullAbove']} -- not a "
+                          f"player viewpoint; {result['camera']['viewprobe']}")
+                    return EXIT_OK
                 points_path = receipts_dir / "points.json"
                 write_json(points_path, doc)
             else:
                 points_path = Path(a.points).resolve()
             points = read_points(points_path, request, parts, source)
 
-            argv, _pj, _wl = plan_argv(points, parts, receipts_dir, a.vp, a.passthrough)
+            # a cutaway's hide and protect flags ride on every render the planner makes, so it verifies the pose it publishes
+            argv, _pj, _wl = plan_argv(points, parts, receipts_dir, a.vp,
+                                       list(a.passthrough) + list(points["doc"].get("viewFlags") or []))
             call = call_planner(argv, receipts_dir)
             try:
                 plan = load_json(plan_json)
@@ -991,6 +1189,7 @@ def cmd_acquire(a) -> int:
                         "plannerExitCode": call["exitCode"]}
             result = build_result(request, parts, points, source, plan, call, receipts,
                                   shotplan_mod)
+            coverage_at_pose(a, result, receipts_dir, shotplan_mod)
         except Refused as exc:
             write_json(out, refusal_doc(a.request, exc,
                                         {"receipts": {"receiptsDir": str(receipts_dir)}}))
@@ -1027,6 +1226,7 @@ def cmd_acquire(a) -> int:
 
 
 VIEWPROBE = HERE / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
+VIEW_LABEL = re.compile(r"^view-label: (.*?) \| rect (\d+),(\d+),(\d+),(\d+)\s*$")
 
 
 def cmd_capture(a) -> int:
@@ -1074,7 +1274,10 @@ def _capture(a) -> int:
     if acq.get("status") != "camera-ready" or (acq.get("request") or {}).get("id") not in (None, a.request):
         # the acquisition's own refusal travels with the result, so the planner and a reader see why (WRW capture)
         ref_ = acq.get("refusal") or {}
-        result["refusal"] = {k: ref_.get(k) for k in ("code", "pickerCode", "participant", "detail") if ref_.get(k)}
+        result["refusal"] = {k: ref_.get(k) for k in ("code", "pickerCode", "participant", "detail", "chain")
+                             if ref_.get(k)}
+        if "final" in ref_:
+            result["refusal"]["final"] = ref_["final"]
         result["reason"] = (f"the camera acquisition for {a.request} is {acq.get('status')!r}"
                             + (f" ({ref_.get('pickerCode') or ref_.get('code')}): {ref_.get('detail')}" if ref_ else ""))
         return finish(EXIT_REFUSED)
@@ -1115,10 +1318,20 @@ def _capture(a) -> int:
         fp = next((ln.split("capture input configuration:")[1].strip().split()[0] for ln in text.splitlines()
                    if "capture input configuration:" in ln), None)
         refusals = [ln.strip() for ln in text.splitlines() if "refused" in ln.lower()]
+        label = next((m_ for m_ in (VIEW_LABEL.match(ln) for ln in text.splitlines()) if m_), None)
         row = {"state": state, "armId": arms[state], "exit": r.returncode, "png": str(pngs[-1]) if pngs else None,
                "sha256": sha256_file(pngs[-1]) if pngs else None, "configurationFingerprint": fp, "refusals": refusals,
-               "hidden": [ln.strip() for ln in text.splitlines() if "HIDDEN" in ln], "argv": argv}
+               "hidden": [ln.strip() for ln in text.splitlines() if "HIDDEN" in ln], "argv": argv,
+               # the capture fallbacks: what this state hid (each key with whether it was drawn in this setup), its label,
+               # and the protect check's own words in this setup
+               "hiddenObjects": [ln.split(":", 1)[1].strip() for ln in text.splitlines() if ln.startswith("hidden: ")],
+               "viewLabel": label[1] if label else None,
+               "protect": [ln.strip() for ln in text.splitlines() if ln.startswith("protect")]}
         result["states"].append(row)
+        view_kind = (cams[state] or {}).get("viewKind") or "eye-level"
+        if r.returncode == 0 and pngs and fp and view_kind != "eye-level" and not row["viewLabel"]:
+            result["reason"] = f"the {state} state of a {view_kind} picture carries no view label; an unlabelled picture is refused"
+            return finish(EXIT_REFUSED)
         if r.returncode != 0 or not pngs or not fp:
             result["reason"] = (f"viewprobe could not render the {state} state (exit {r.returncode}"
                                 + (f"; {refusals[0]}" if refusals else "") + ("" if fp else "; no configuration line") + ")")
@@ -1149,6 +1362,9 @@ def _capture(a) -> int:
                            "relativePose": bool(relative), "splitMode": (acq.get("split") or {}).get("mode") if split else None,
                            "support": support,
                            "vignetteState": state, "camera": cams[state], "configurationSidecar": str(side) if side else None,
+                           "viewKind": (cams[state] or {}).get("viewKind") or "eye-level",
+                           "hidden": [{"formKey": h.split()[0]} for h in row["hiddenObjects"] if "not drawn in this setup" not in h],
+                           "viewLabel": row["viewLabel"], "cullAbove": (cams[state] or {}).get("cullAbove"),
                            "runtimeOverlayMods": sorted({str(o.get("Mod") or o.get("Provider") or o.get("Name"))
                                                          for o in overlays or [] if isinstance(o, dict)})}})
     shared = not split or (acq.get("split") or {}).get("mode") == "shared"
@@ -1160,6 +1376,8 @@ def _capture(a) -> int:
         return finish(EXIT_REFUSED)
     for arm, items in media.items():
         write_json(out / f"media-{arm}.json", {"schemaVersion": 2, "items": items})
+    result.update(viewKind=acq.get("viewKind") or (acq.get("camera") or {}).get("viewKind") or "eye-level",
+                  hiddenByState={r_["state"]: r_.get("hiddenObjects") or [] for r_ in result["states"]})
     result.update(status="captured", reason=None, poseId=acq.get("poseId"),
                   splitMode=(acq.get("split") or {}).get("mode") if split else None,
                   media={arm: str(out / f"media-{arm}.json") for arm in media})

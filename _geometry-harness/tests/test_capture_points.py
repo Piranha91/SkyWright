@@ -232,8 +232,14 @@ def c704(fx):
     sc["boxes"][-1]["alpha"] = True
     proc, doc = pick(fx, sc, "c704")
     ref = (doc or {}).get("refusal") or {}
-    check("C704 alpha participant: refused, no opaque face, naming it",
-          proc.returncode == 2 and ref.get("code") == "points-no-opaque-face" and fx.mg in ref.get("detail", ""),
+    # Corrected 2026-10-31 (capture fallbacks): a participant with no opaque shape is no longer refused as "no opaque
+    # face" by the picker. It is marked by its measured coverage (viewprobe --coverage-of, which this stand-in does not
+    # draw), so here it shows no mark from any station: the picker refuses the eye-level step, names it in the coverage
+    # record, and hands the chain on (topDown inputs) instead of ending it. The real renderer's answer is
+    # tests/test_capture_fallbacks.py CF4.
+    check("C704 alpha participant: no coverage mark from the stand-in, so the eye-level step refuses and the chain goes on",
+          proc.returncode == 2 and ref.get("code") == "points-no-visible-face" and fx.mg in (ref.get("coverageStates") or {})
+          and isinstance(ref.get("topDown"), dict) and bool(ref.get("chain")),
           ref.get("detail", tail(proc)))
 
 
@@ -374,10 +380,14 @@ def c714(fx):
 def c715(fx):
     proc, acq, _ = acquire_with(fx, enclosed(fx.cy, fx.mg), "c715", "auto")
     ref = (acq or {}).get("refusal") or {}
-    check("C715 a picker refusal reaches the acquisition as one sentence, exit 2",
-          proc.returncode == 2 and acq and acq.get("status") == "refused" and ref.get("code") == "points-unpickable"
-          and ref.get("pickerCode") == "points-no-visible-face" and "\n" not in ref.get("detail", "x\n")
-          and ref.get("detail", "").endswith("view."), ref.get("detail", tail(proc)))
+    # Corrected 2026-10-31 (capture fallbacks): a no-visible-face picker refusal no longer ends the acquisition; the
+    # cutaway and the top-down are tried, and the acquisition's refusal is the chain's final one, still one sentence.
+    chain = [c.get("kind") for c in ref.get("chain") or []]
+    check("C715 a picker refusal reaches the acquisition as one sentence, exit 2, after every fallback",
+          proc.returncode == 2 and acq and acq.get("status") == "refused" and ref.get("final") is True
+          and ref.get("code") == "top-down-participant-unseen" and chain == ["eye-level", "cutaway", "top-down"]
+          and "\n" not in ref.get("detail", "x\n") and ref.get("detail", "").endswith(ref["chain"][-1]["code"]),
+          ref.get("detail", tail(proc)))
 
 
 def c717(fx):
@@ -404,8 +414,9 @@ def run_cases(root: Path, picker=PICKER, only=None):
 
 # ---------------------------------------------------------------- C716 sabotage --
 
-SABOTAGE_FROM = 'mask = colour_mask(img, p["color"])'
-SABOTAGE_TO = 'mask = np.ones(img.shape[:2], dtype=bool)   # SABOTAGE: any hit counts as the participant'
+# (2026-10-31: the owner test moved into participant_mask, which the capture fallbacks share)
+SABOTAGE_FROM = 'col = colour_mask(img, part["color"]) & ~lab'
+SABOTAGE_TO = 'col = np.ones(img.shape[:2], dtype=bool) & ~lab   # SABOTAGE: any hit counts as the participant'
 
 
 def sabotage(root: Path) -> int:

@@ -24,6 +24,13 @@ HOW, in three viewprobe runs, each one cell load:
                   eye height, looking at the pair), every shot with `--ref A=cyan --ref B=magenta --ref-surface`, a
                   grid of `--pick` pixels and the planner's own placement queries at the station eye.
 
+THE FALLBACKS (2026-10-31). A participant with non-opaque shapes is marked by its measured coverage too (viewprobe
+--coverage-of); "no opaque face" is no longer a refusal of its own. When no placed station sees both, the CUTAWAY tries up
+to three placed stations with what stands in front hidden (--occluders-of), never a participant, nothing either touches or
+rests on (--contacts-of, measured in the placements run), and with --protect so the renderer refuses on its own too. When
+that refuses, or no station stands, the refusal carries `topDown` (the inputs capture_acquire's sliced top-down needs) and
+`chain` (each step's verdict); capture_acquire finishes the chain.
+
 "VISIBLE" means, for participant P at station S: the pixel carries P's flat `--ref-surface` colour (which the renderer
 draws from P's own placed opaque triangles, depth-tested, so it shows only where nothing stands in front), lies at least
 `--min-depth` pixels inside P's colour region (a pose rounded by the planner still lands on P), and the pick there hit
@@ -237,12 +244,114 @@ def choose_floor(levels: list[float], minz: float, maxz: float, below: float, ab
     return round(sum(best) / len(best), 1)
 
 
+# ---------------------------------------------------------------- the capture fallbacks' report lines --
+
+SURFACE_COUNTS = re.compile(r"^subject-surface-refused: (\S{6}:.+?\.es[pml]): (?:(\d+) of (\d+) shape)?")
+CONTACTS_LINE = re.compile(r"^contacts-of (\S{6}:.+?\.es[pml]): touches \[(.*?)\]; rests on \[(.*?)\]; unassessed \[(.*?)\]")
+BOX_LINE = re.compile(r"^contacts-of (\S{6}:.+?\.es[pml]): box (-?\d+),(-?\d+),(-?\d+) (-?\d+),(-?\d+),(-?\d+)")
+OCCLUDER_LINE = re.compile(r"^occluders-of (\S{6}:.+?\.es[pml]): occluder (\S{6}:.+?\.es[pml]) (\d+) px( translucent)?")
+OCCLUDER_OTHER = re.compile(r"^occluders-of (\S{6}:.+?\.es[pml]): other geometry .*? (\d+) px")
+OCCLUDER_COVERS = re.compile(r"^occluders-of (\S{6}:.+?\.es[pml]): covers (\d+) px, visible (\d+) px")
+COVERAGE_STATE = re.compile(r"^coverage-of (\S{6}:.+?\.es[pml]): (marked|below-threshold|transparent|outside-frustum|back-facing|"
+                            r"not-rendered|not-drawn|opaque)\b")
+COVERAGE_PICK = re.compile(r"^coverage pick (\S{6}:.+?\.es[pml]) (\d+),(\d+): (-?\d+),(-?\d+),(-?\d+)\s+alpha ([0-9.]+)\s+(\d+) u")
+VIEW_LABEL = re.compile(r"^view-label: (.*?) \| rect (\d+),(\d+),(\d+),(\d+)\s*$")
+PROTECT_REFUSED = re.compile(r"^protect refused: (.*)$")
+FOCUS_RATIO = 4.0         # a see-through participant this many times the partner's largest dimension rings the partner
+CUTAWAY_STATIONS = 3      # frozen at Gate B: at most three cutaway witness runs per request
+
+
+def keyset(text: str) -> set[str]:
+    return {x.strip() for x in text.split(",") if x.strip()}
+
+
+def coverage_stem(png: Path, key: str) -> str:
+    """viewprobe's coverage picture prefix for a frame (CaptureViews / TexturedScene Stem)."""
+    return png.stem + "-coverage-" + key.replace(":", "_").replace(" ", "_").replace("'", "")
+
+
+def label_mask(text: str, shape) -> np.ndarray:
+    """True on the pixels of the frame's view label (left out of every measurement)."""
+    m = np.zeros(shape[:2], dtype=bool)
+    for ln in text.splitlines():
+        lm = VIEW_LABEL.match(ln)
+        if lm:
+            x, y, w, h = (int(lm[i]) for i in range(2, 6))
+            m[y:y + h, x:x + w] = True
+    return m
+
+
+def participant_mask(img: np.ndarray, png: Path, part: dict, see_through: bool, text: str) -> tuple[np.ndarray, np.ndarray]:
+    """(the participant's marked pixels, the subset measured by coverage): its --ref-surface colour on its opaque shapes,
+    and, for a participant with non-opaque shapes, its --coverage-of mask; the view label's pixels are never in either."""
+    lab = label_mask(text, img.shape)
+    col = colour_mask(img, part["color"]) & ~lab
+    cov = np.zeros_like(col)
+    if see_through:
+        f = png.parent / (coverage_stem(png, part["formKey"]) + "-mask.png")
+        if f.is_file():
+            cov = (np.asarray(Image.open(f).convert("L")) > 0) & ~lab & ~col
+    return col | cov, cov
+
+
+def coverage_picks(text: str) -> dict:
+    """{(key, x, y): (X, Y, Z, dist, alpha)} from the coverage pick lines."""
+    out = {}
+    for ln in text.splitlines():
+        cm = COVERAGE_PICK.match(ln)
+        if cm:
+            out[(cm[1], int(cm[2]), int(cm[3]))] = (float(cm[4]), float(cm[5]), float(cm[6]), float(cm[8]), float(cm[7]))
+    return out
+
+
+def measure_station(img, png, text, pr, parts, see_through, gridset, min_depth, size):
+    """Per participant at one frame: pixels, depth, and the best measured point (a depth pick on its colour, or a coverage
+    pick on its coverage mask), as the eye-level rule picks it."""
+    picks = pr.picks()
+    cpicks = coverage_picks(text)
+    out = {}
+    for p in parts:
+        k = p["formKey"]
+        mask, cov = participant_mask(img, png, p, k in see_through, text)
+        dm = depth_map(mask)
+        best = None
+        for (x, y) in gridset:
+            dpx = int(dm[y, x]) if y < dm.shape[0] and x < dm.shape[1] else 0
+            if dpx < min_depth:
+                continue
+            if cov[y, x]:
+                hit = cpicks.get((k, x, y))
+                kind = "coverage"
+                if hit is None:
+                    continue
+                pt, dist, alpha = hit[:3], hit[3], hit[4]
+            else:
+                hit = picks.get((x, y))
+                kind, alpha = "surface", None
+                if hit is None:
+                    continue
+                pt, dist = hit[:3], hit[3]
+            centre = abs(x - size / 2) + abs(y - size / 2)
+            cand = (dpx, -centre, -y, -x)
+            if best is None or cand > best[0]:
+                best = (cand, {"pixel": [x, y], "regionDepth": dpx, "point": [pt[0], pt[1], pt[2]], "pickDistance": dist,
+                               "markKind": kind, "alpha": alpha})
+        out[k] = {"pixels": int(mask.sum()), "coveragePixels": int(cov.sum()), "maxDepth": int(dm.max()),
+                  "best": best[1] if best else None}
+    return out
+
+
 # ---------------------------------------------------------------- the picker --
 
 def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: Path, cell: str | None = None,
                 bearings: int = 12, standoffs=(150.0, 250.0, 400.0), size: int = 320, grid: int = 10, fov: float = 65.0,
                 min_depth: int = 2, synthetic: bool = False, aspect: str = "16:9", shotplan=None) -> dict:
-    """The points document `capture_acquire.py` reads, or Unpickable with one plain sentence."""
+    """The points document `capture_acquire.py` reads, or Unpickable with one plain sentence.
+
+    The chain (README, capture fallbacks): eye-level, with a see-through participant marked by its measured coverage;
+    then, when no placed station sees both, the CUTAWAY at up to three placed stations, hiding what stands in front and
+    never what the pair touches or rests on; when that refuses too, or no station stands at all, an Unpickable carrying
+    `topDown` (the inputs capture_acquire's top-down needs) and `chain` (each step's verdict)."""
     S = shotplan or _load_shotplan()
     ap = argparse.ArgumentParser()
     S.add_common(ap, need_subjects=False)
@@ -256,14 +365,15 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
     for p in parts:
         marks += ["--ref", f"{p['formKey']}={p['color']}"]
 
-    # 1. placements
+    # 1. placements, and each participant's drawn shapes (opaque or not), box and contacts
     rc, text = R.call("p0-placements", [cell], ["--eye-ref", A, "--eye-height", "0", "--look-ref", B,
-                                                 "--size", "64", "--msaa", "0", "--nav", "off"])
+                                                 "--size", "64", "--msaa", "0", "--nav", "off", *marks, "--ref-surface",
+                                                 "--contacts-of", A, "--contacts-of", B])
     missing = NOT_PLACED.findall(text)
     if missing:
         raise Unpickable("points-not-placed",
                          f"{missing[0]} is not a placed reference in {cell}'s winning state, so it has no face to "
-                         "measure; check the request's cell and load order")
+                         "measure; check the request's cell and load order", final=True)
     ensure_ok(rc, text, "placement")
     m = None
     for ln in text.splitlines():
@@ -272,9 +382,33 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
         raise Unpickable("points-renderer-failed", "viewprobe did not print the resolved camera, so the "
                                                    "participants' placements are unknown")
     pos = {A: (float(m[1]), float(m[2]), float(m[3])), B: (float(m[4]), float(m[5]), float(m[6]) - LOOK_LIFT)}
+    counts = {}
+    for ln in text.splitlines():
+        sm = SURFACE_COUNTS.match(ln)
+        if sm:
+            counts[sm[1]] = (int(sm[2]), int(sm[3])) if sm[2] else None
+    # a participant with any non-opaque shape is marked by coverage too; one with ONLY non-opaque shapes is see-through
+    see_through = set(counts)
+    all_non_opaque = {k for k, c in counts.items() if c is None or c[0] == c[1]}
+    contacts, boxes = {}, {}
+    for ln in text.splitlines():
+        cm = CONTACTS_LINE.match(ln)
+        if cm:
+            contacts[cm[1]] = {"touches": sorted(keyset(cm[2])), "restsOn": sorted(keyset(cm[3])),
+                               "unassessed": sorted(keyset(cm[4]))}
+        bm = BOX_LINE.match(ln)
+        if bm:
+            boxes[bm[1]] = [float(bm[i]) for i in range(2, 8)]
     mid = tuple((pos[A][k] + pos[B][k]) / 2.0 for k in range(3))
     minz, maxz = min(pos[A][2], pos[B][2]), max(pos[A][2], pos[B][2])
     focus = request.get("focus")
+    if focus not in pos and len(boxes) == 2:
+        # a see-through participant much larger than its partner (a cloud against a tower): its origin and its size say
+        # nothing about where the clash is, so the ring and the floor come from the partner
+        dim = {k: max(b[3] - b[0], b[4] - b[1], b[5] - b[2]) for k, b in boxes.items()}
+        for big, small in ((A, B), (B, A)):
+            if big in all_non_opaque and dim.get(big, 0) >= FOCUS_RATIO * max(1.0, dim.get(small, 0)):
+                focus = small
     if focus in pos:
         # a landscape-scale partner (the reel's volume rule marks only the smaller participant): its origin says nothing
         # about where the clash is, so the stations ring the smaller participant, at its level
@@ -292,16 +426,14 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
         flags += ["--nav-at", f"{st['xy'][0]},{st['xy'][1]}", "--clear-at", f"{st['xy'][0]},{st['xy'][1]},{zq}"]
     rc, text = R.call("p1-floor", [cell], flags)
     ensure_ok(rc, text, "floor")
-    # A participant with any alpha, effect or marker shape is reported by the renderer; its opaque shapes, if it has
-    # any, are still marked. Only a participant with no marked face anywhere is refused for it (below).
-    refused = sorted({mm[1] for ln in text.splitlines() if (mm := SURFACE_REFUSED.match(ln))} & {A, B})
     p1 = R.parsed(text)
     near = p1.refs_near()
     for k in (A, B):
         rows = [r for rows_ in near.values() for r in rows_ if r["formkey"] == k]
         if rows and not rows[0]["why"].startswith("drawn"):
             raise Unpickable("points-not-drawn",
-                             f"{k} is not drawn by the renderer ({rows[0]['why']}), so no face of it can be measured")
+                             f"{k} is not drawn by the renderer ({rows[0]['why']}), so no face of it can be measured",
+                             final=True)
     nav = p1.nav()
     levels = [z for e in nav.values() for z in e["levels"]]
     floor = choose_floor(levels, minz, maxz, 300.0, args.storey_tol)
@@ -336,6 +468,26 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
                          f"the pair stands in water: the measured floor z {floor:.0f} lies under the water surface at "
                          f"z {max(wet):.0f}, and no camera storey above the water was measured; choose another request")
 
+    # what a top-down needs, should every eye-level picture refuse: the subjects (the focus alone, else both), placed at
+    # the centre of the overlap of their drawn boxes (their origins when the boxes do not meet), and the cut above it
+    def top_down_inputs():
+        keys = [focus] if focus in pos else [A, B]
+        bx = [boxes.get(k) for k in keys]
+        cut, subj = None, []
+        if all(bx) and len(bx) == 2:
+            lo = [max(bx[0][i], bx[1][i]) for i in range(3)]
+            hi = [min(bx[0][i + 3], bx[1][i + 3]) for i in range(3)]
+            if all(lo[i] <= hi[i] for i in range(3)):
+                c = [(lo[i] + hi[i]) / 2 for i in range(3)]
+                subj = [{"formKey": k, "point": [round(c[0], 1), round(c[1], 1), round(c[2], 1)]} for k in keys]
+                cut = round(hi[2] + 64.0, 1)
+        if not subj:
+            subj = [{"formKey": k, "point": [round(v, 1) for v in pos[k]]} for k in keys]
+            tops = [boxes[k][5] for k in keys if k in boxes]
+            cut = round(max(tops) + 64.0, 1) if tops else None
+        return {"cell": cell, "floorZ": floor, "subjects": subj, "cut": cut, "focus": focus if focus in pos else None,
+                "seeThrough": sorted(see_through), "allNonOpaque": sorted(all_non_opaque), "contacts": contacts}
+
     # 3. witnesses
     ez = int(round(floor + args.eye_height))
     lookz = min(max(mid[2], floor + 40.0), floor + 300.0)
@@ -345,8 +497,9 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
           "cells": [{"cell": cell, "shots": shots}]}
     (work / "witness-worklist.json").write_text(json.dumps(wl, indent=1), encoding="utf-8")
     grid_px = [(x, y) for y in range(grid // 2, size, grid) for x in range(grid // 2, size, grid)]
+    cov_flags = [x for k in sorted(see_through) for x in ("--coverage-of", k)]
     flags = [*marks, "--ref-surface", "--report-mode", "--size", str(size), "--msaa", "0", "--nav", "off",
-             "--clear-reach", f"{args.clear_reach:g}"]
+             "--clear-reach", f"{args.clear_reach:g}", *cov_flags]
     for x, y in grid_px:
         flags += ["--pick", f"{x},{y}"]
     for st in ring:
@@ -365,6 +518,7 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
             chunks[cur].append(ln)
     gridset = set(grid_px)
     seen = {p["formKey"]: 0 for p in parts}
+    cov_states = {k: set() for k in see_through}
     for st in ring:
         st["eye"] = [st["xy"][0], st["xy"][1], ez]
         chunk = chunks.get(st["id"])
@@ -373,7 +527,12 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
         if chunk is None or not pngs:
             st.update(valid=False, why="the witness run gave no frame or console block for this station")
             continue
-        pr = R.parsed("\n".join(chunk))
+        ctext = "\n".join(chunk)
+        for ln in chunk:
+            cs = COVERAGE_STATE.match(ln)
+            if cs and cs[1] in cov_states:
+                cov_states[cs[1]].add(cs[2])
+        pr = R.parsed(ctext)
         key3, key2 = (st["xy"][0], st["xy"][1], ez), st["xy"]
         kind, nmsg = S.nav_verdict(pr.nav().get(key2), floor, args)
         eye = (float(st["xy"][0]), float(st["xy"][1]), float(ez))
@@ -386,25 +545,9 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
             place.append(f"placement: {nmsg}; and the geometry does not bear that out -- {smsg}")
         place += ifails
         img = np.asarray(Image.open(pngs[0]).convert("RGB"))
-        picks = pr.picks()
-        st["participants"] = {}
-        for p in parts:
-            mask = colour_mask(img, p["color"])
-            dm = depth_map(mask)
-            seen[p["formKey"]] = max(seen[p["formKey"]], int(mask.sum()))
-            best = None
-            for (x, y) in gridset:
-                dpx = int(dm[y, x]) if y < dm.shape[0] and x < dm.shape[1] else 0
-                hit = picks.get((x, y))
-                if dpx < min_depth or hit is None:
-                    continue
-                centre = abs(x - size / 2) + abs(y - size / 2)
-                cand = (dpx, -centre, -y, -x)
-                if best is None or cand > best[0]:
-                    best = (cand, {"pixel": [x, y], "regionDepth": dpx, "point": [hit[0], hit[1], hit[2]],
-                                   "pickDistance": hit[3]})
-            st["participants"][p["formKey"]] = {"pixels": int(mask.sum()), "maxDepth": int(dm.max()),
-                                                "best": best[1] if best else None}
+        st["participants"] = measure_station(img, pngs[0], ctext, pr, parts, see_through, gridset, min_depth, size)
+        for k, v in st["participants"].items():
+            seen[k] = max(seen[k], v["pixels"])
         st["placement"] = place
         st["valid"] = not place and all(v["best"] for v in st["participants"].values())
         if place:
@@ -413,59 +556,88 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
             st["why"] = "not every participant shows a measurable face from here"
 
     valid = [st for st in ring if st["valid"]]
+    view_kind, cutaway, view_flags = "eye-level", None, []
+    chain = []
+    placed = [st for st in ring if not st.get("placement") and "participants" in st]
     if not valid:
-        bare = [k for k in refused if seen.get(k, 0) == 0]
-        if bare:
-            raise Unpickable("points-no-opaque-face",
-                             f"{bare[0]} draws only alpha-tested, effect or marker shapes, which the renderer cannot "
-                             "mark, and no opaque face of it appeared from any station, so no point on it can be "
-                             "measured; choose another request", participant=bare[0])
-        placed = [st for st in ring if not st.get("placement") and "participants" in st]
         if not placed:
-            raise Unpickable("points-no-station",
-                             f"none of the {len(ring)} eye-level stations around the pair passed the planner's placement "
-                             f"test on the floor at z {floor:.0f}; see the witness consoles")
-        counts = {p["formKey"]: sum(1 for st in placed if st["participants"][p["formKey"]]["best"]) for p in parts}
-        raise Unpickable("points-no-visible-face",
-                         f"no eye-level camera {int(min(standoffs))}-{int(max(standoffs))} u around the pair sees both: "
-                         f"{A} shows a measurable face from {counts[A]} of {len(placed)} stations and {B} from "
-                         f"{counts[B]}; choose another request or a top-down view",
-                         visibleFrom=counts, pixelsSeen=seen)
+            code = "points-no-station"
+            detail = (f"none of the {len(ring)} eye-level stations around the pair passed the planner's placement test on "
+                      f"the floor at z {floor:.0f}; see the witness consoles")
+            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail})
+            chain.append({"kind": "cutaway", "status": "skipped", "code": "cutaway-no-station",
+                          "detail": "no station stands, so no cutaway can stand either"})
+        else:
+            counts_ = {p["formKey"]: sum(1 for st in placed if st["participants"][p["formKey"]]["best"]) for p in parts}
+            code = "points-no-visible-face"
+            detail = (f"no eye-level camera {int(min(standoffs))}-{int(max(standoffs))} u around the pair sees both: "
+                      f"{A} shows a measurable face from {counts_[A]} of {len(placed)} stations and {B} from "
+                      f"{counts_[B]}")
+            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail})
+            got = cutaway_attempt(R, S, args, cell, parts, marks, placed, contacts, see_through, cov_flags, floor,
+                                  mid, lookz, fov, size, grid_px, gridset, min_depth, work)
+            if got["status"] == "ok":
+                valid = [got["station"]]
+                view_kind, cutaway, view_flags = "cutaway", got["record"], got["flags"]
+                chain.append({"kind": "cutaway", "status": "ok", "code": None, "detail": got["detail"]})
+            else:
+                chain.append({"kind": "cutaway", "status": got["status"], "code": got["code"], "detail": got["detail"]})
+        if not valid:
+            raise Unpickable(code, detail + "; " + chain[-1]["detail"], topDown=top_down_inputs(), chain=chain,
+                             coverageStates={k: sorted(v) for k, v in cov_states.items()},
+                             visibleFrom={p["formKey"]: sum(1 for st in placed if st["participants"][p["formKey"]]["best"])
+                                          for p in parts} if placed else None, pixelsSeen=seen)
 
     def neighbours(st):
         return sum(1 for o in valid if o["ring"] == st["ring"] and (o["slot"] - st["slot"]) % bearings in (1, bearings - 1))
 
     def score(st):
         return (min(v["best"]["regionDepth"] for v in st["participants"].values()), neighbours(st), -st["standoff"],
-                -ring.index(st))
+                -ring.index(st) if st in ring else 0)
     chosen = max(valid, key=score)
     rows = []
     for p in parts:
         b = chosen["participants"][p["formKey"]]["best"]
+        what = "--ref-surface pixel" if b["markKind"] == "surface" else "--coverage-of mask pixel"
         rows.append({"formKey": p["formKey"], "point": [float(v) for v in b["point"]], "label": f"{p['color']}-face",
-                     "surfaceOf": (f"{p['formKey']}: its {p['color']} --ref-surface pixel {b['pixel'][0]},{b['pixel'][1]} "
-                                   f"({b['regionDepth']} px inside its colour region) seen from witness station "
-                                   f"{chosen['id']} ({chosen['bearing']:.0f} deg, {chosen['standoff']:.0f} u); "
-                                   f"--pick {b['pickDistance']:.0f} u from that eye")})
+                     "markKind": b["markKind"],
+                     "coverage": ({"alphaMin": 0.25, "alpha": b["alpha"],
+                                   "pixels": chosen["participants"][p["formKey"]]["coveragePixels"],
+                                   "measures": ("pixels where the participant's own drawn contribution, recovered from "
+                                                "isolated draws over black and white, is at least 0.25 and its own nearest "
+                                                "surface is in front of the opaque scene; the point is that surface")}
+                                  if b["markKind"] == "coverage" else None),
+                     "surfaceOf": (f"{p['formKey']}: its {p['color']} {what} {b['pixel'][0]},{b['pixel'][1]} "
+                                   f"({b['regionDepth']} px inside its region) seen from witness station "
+                                   f"{chosen['id']} ({chosen['bearing']:.0f} deg, {chosen['standoff']:.0f} u)"
+                                   + (" with the cutaway's objects hidden" if view_kind == "cutaway" else "")
+                                   + f"; pick {b['pickDistance']:.0f} u from that eye")})
     cx = sum(r["point"][0] for r in rows) / len(rows)
     cy = sum(r["point"][1] for r in rows) / len(rows)
     wb = bearing_deg(chosen["eye"][0] - cx, chosen["eye"][1] - cy)
     ws = math.hypot(chosen["eye"][0] - cx, chosen["eye"][1] - cy)
-    half = 20.0 if neighbours(chosen) == 2 else 10.0
+    half = 10.0 if view_kind == "cutaway" else (20.0 if neighbours(chosen) == 2 else 10.0)
+    chain.append({"kind": view_kind, "status": "ok", "code": None,
+                  "detail": f"station {chosen['id']} ({chosen['bearing']:.0f} deg, {chosen['standoff']:.0f} u)"})
     doc = {"schemaVersion": 1, "requestId": request.get("id"),
            "sourceSha256": (request.get("source") or {}).get("sha256"), "synthetic": bool(synthetic),
            "provenance": ("Measured by capture_points.py: each point is viewprobe's --pick at a pixel carrying the "
-                          "participant's own --ref-surface colour in an eye-level witness frame, so the depth ray from "
-                          "that station stops on the participant; the floor is "
+                          "participant's own --ref-surface colour (or, for a see-through shape, a pixel of its measured "
+                          "--coverage-of mark) in an eye-level witness frame, so the ray from that station stops on, or "
+                          "for a see-through mark reaches, the participant; the floor is "
                           f"{floor_src} at z {floor:.0f}." + (" SYNTHETIC renderer stand-in." if synthetic else "")),
            "cell": cell, "floorZ": floor,
+           "viewKind": view_kind, "viewFlags": view_flags, "cutaway": cutaway, "fallbackChain": chain,
            "points": rows,
            "camera": {"fov": float(fov), "aspect": aspect, "bearingWindow": [round(wb, 1), half], "standoffMin": float(max(50, int(ws // 50) * 50)),
-                      "standoffMax": float(max(50, int(ws // 50) * 50) + 200)},
+                      "standoffMax": float(max(50, int(ws // 50) * 50) + 200),
+                      # a coverage mark is a point on a see-through surface: framed as a 16 u box on it, not a standing figure
+                      **({"subjectHeight": 16.0, "subjectWidth": 16.0} if any(r["markKind"] == "coverage" for r in rows) else {})},
            "witness": {"station": {k: chosen[k] for k in ("id", "bearing", "standoff", "eye", "frame")},
                        "placements": {k: list(v) for k, v in pos.items()},
                        "floor": {"z": floor, "source": floor_src, "water": water},
-                       "partlyUnmarked": refused,
+                       "partlyUnmarked": sorted(see_through), "focus": focus if focus in pos else None,
+                       "contacts": contacts,
                        "stations": [{"id": st["id"], "bearing": st["bearing"], "standoff": st["standoff"],
                                      "eye": st.get("eye"), "valid": st["valid"], "why": st.get("why"),
                                      "participants": {k: {"pixels": v["pixels"], "maxDepth": v["maxDepth"]}
@@ -473,8 +645,118 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
                                     for st in ring],
                        "runs": R.calls,
                        "rule": (f"grid {grid} px on a {size} px, {fov:g} deg frame; a point needs {min_depth} px of its "
-                                f"own colour around it and a pick hit; stations must pass the planner's placement verdicts")}}
+                                f"own colour or coverage around it and a pick hit; stations must pass the planner's "
+                                f"placement verdicts")}}
     return doc
+
+
+def cutaway_attempt(R, S, args, cell, parts, marks, placed, contacts, see_through, cov_flags, floor, mid, lookz, fov,
+                    size, grid_px, gridset, min_depth, work) -> dict:
+    """The cutaway: at stations that passed placement, hide what stands in front of a participant the station cannot see,
+    never a participant, nothing either touches or rests on, nothing whose contact is undecided. At most
+    CUTAWAY_STATIONS witness runs, each with --protect on both participants so the renderer refuses on its own too."""
+    keys = [p["formKey"] for p in parts]
+    protected = set(keys)
+    for k in keys:
+        c = contacts.get(k)
+        if c is None:
+            return {"status": "refused", "code": "cutaway-contacts-unknown",
+                    "detail": f"the cutaway was refused: what {k} touches was not measured, so nothing may be hidden"}
+        protected |= set(c["touches"]) | set(c["restsOn"]) | set(c["unassessed"])
+    # which objects stand in front, at every placed station (one worklist run, report only)
+    shots = [{"label": st["id"], "eye": st["eye"], "floorZ": floor, "look": [round(mid[0], 1), round(mid[1], 1), round(lookz, 1)],
+              "fov": fov} for st in placed]
+    wl = {"label": "cutaway occluders", "cells": [{"cell": cell, "shots": shots}]}
+    (work / "occluders-worklist.json").write_text(json.dumps(wl, indent=1), encoding="utf-8")
+    rc, text = R.call("p3-occluders", ["--worklist", str(work / "occluders-worklist.json")],
+                      ["--report-mode", "--size", str(size), "--msaa", "0", "--nav", "off",
+                       *[x for k in keys for x in ("--occluders-of", k)]])
+    if rc != 0:
+        tail = " ".join(text.strip().splitlines()[-2:])[-200:]
+        return {"status": "failed", "code": "points-renderer-failed",
+                "detail": f"the cutaway was not tried: viewprobe exited {rc} listing what stands in front ({tail})"}
+    chunks, cur = {}, None
+    for ln in text.splitlines():
+        hm = SHOT_HEAD.match(ln)
+        if hm:
+            cur = hm[3].strip(); chunks[cur] = []
+            continue
+        if cur is not None:
+            chunks[cur].append(ln)
+    cands = []
+    blocked_by = {}
+    for st in placed:
+        occ, other, cover = {k: {} for k in keys}, {k: 0 for k in keys}, {k: 0 for k in keys}
+        for ln in chunks.get(st["id"], []):
+            om = OCCLUDER_LINE.match(ln)
+            if om and not om[4]:
+                occ[om[1]][om[2]] = int(om[3])
+            oo = OCCLUDER_OTHER.match(ln)
+            if oo:
+                other[oo[1]] = int(oo[2])
+            oc = OCCLUDER_COVERS.match(ln)
+            if oc:
+                cover[oc[1]] = int(oc[2])
+        need = [k for k in keys if not st["participants"][k]["best"]]
+        hide, kept_px, hide_px = set(), 0, 0
+        for k in need:
+            for o, n in occ[k].items():
+                if o in protected:
+                    kept_px += n
+                    blocked_by.setdefault(o, 0)
+                    blocked_by[o] += n
+                else:
+                    hide.add(o); hide_px += n
+            kept_px += other[k]
+        if hide and all(cover[k] > 0 for k in need):
+            cands.append((kept_px, len(hide), -hide_px, st["id"], st, sorted(hide), {k: occ[k] for k in keys}))
+    if not cands:
+        names = ", ".join(f"{k} ({n} px)" for k, n in sorted(blocked_by.items(), key=lambda kv: -kv[1])[:4])
+        return {"status": "refused", "code": "cutaway-refused",
+                "detail": ("the cutaway was refused: at no placed station is what stands in front hideable"
+                           + (f"; it is the ground or what the pair touches or rests on: {names}" if names else
+                              "; nothing hideable was found in front of the pair"))}
+    cands.sort(key=lambda c: c[:4])
+    tried = []
+    for kept_px, n, _hp, sid, st, hide, occ in cands[:CUTAWAY_STATIONS]:
+        flags = [x for k in hide for x in ("--hide", k)] + [x for k in keys for x in ("--protect", k)]
+        cam = ["--eye", f"{st['eye'][0]},{st['eye'][1]},{st['eye'][2]}",
+               "--look", f"{mid[0]:.1f},{mid[1]:.1f},{lookz:.1f}", "--fov", f"{fov:g}"]
+        tag = f"p3-cutaway-{sid}"
+        rc, text = R.call(tag, [cell], [*cam, *marks, "--ref-surface", "--report-mode", "--size", str(size), "--msaa", "0",
+                                        "--nav", "off", *cov_flags, *flags, *[x for xy in grid_px for x in ("--pick", f"{xy[0]},{xy[1]}")]])
+        pr_ = next((m for m in (PROTECT_REFUSED.match(ln) for ln in text.splitlines()) if m), None)
+        if rc != 0:
+            tried.append(f"{sid}: " + (pr_[1] if pr_ else f"viewprobe exited {rc}"))
+            continue
+        png = next(iter(sorted((work / tag).glob("*-fp.png"))), None)
+        if png is None:
+            tried.append(f"{sid}: no frame")
+            continue
+        img = np.asarray(Image.open(png).convert("RGB"))
+        meas = measure_station(img, png, text, R.parsed(text), parts, see_through, gridset, min_depth, size)
+        if not all(v["best"] for v in meas.values()):
+            tried.append(f"{sid}: with {len(hide)} object(s) hidden, " + " and ".join(
+                k for k, v in meas.items() if not v["best"]) + " still shows no measurable face")
+            continue
+        if not VIEW_LABEL.search("\n".join(ln for ln in text.splitlines() if ln.startswith("view-label:"))):
+            tried.append(f"{sid}: the cutaway frame carries no view label")
+            continue
+        station = dict(st, participants=meas, valid=True, frame=f"{tag}/{png.name}")
+        record = {"station": sid, "hidden": [{"formKey": h, "occludedPixels": {k: occ[k].get(h, 0) for k in keys}}
+                                               for h in hide],
+                  "protected": {k: contacts[k] for k in keys},
+                  "rule": ("hidden: the opaque objects in front of a participant this station could not see; never a "
+                           "participant, nothing either touches (render surfaces within 8 u) or rests on (the first "
+                           "geometry under its lowest vertices), nothing whose contact is undecided"),
+                  "tried": tried}
+        return {"status": "ok", "station": station, "record": record, "flags": flags,
+                "detail": f"station {sid} with {len(hide)} object(s) hidden"}
+    names = ", ".join(f"{k} ({n} px)" for k, n in sorted(blocked_by.items(), key=lambda kv: -kv[1])[:4])
+    return {"status": "refused", "code": "cutaway-refused",
+            "detail": "the cutaway was refused: " + "; ".join(tried)
+                      + (f"; what still stands in front may not be hidden, because the pair touches or rests on it: {names}"
+                         if names else "")}
 
 
 # ---------------------------------------------------------------- the command --
