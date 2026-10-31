@@ -75,6 +75,19 @@ TRIAGE_POLICY = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" 
 
 # ------------------------------------------------------------------------------------------ helpers --
 
+
+def view_kind_caption(provenance: dict, words: dict) -> str:
+    """The figure caption's addition for a picture that is not what the player sees ("" for one that is), from the
+    skill's figureCaptions words: a cutaway names how many objects it hides, a sliced top-down its cut."""
+    kind = (provenance or {}).get("viewKind") or "eye-level"
+    if kind == "cutaway":
+        n = len((provenance or {}).get("hidden") or [])
+        return str(words.get("cutaway") or "").format(count=n, plural="" if n == 1 else "s", them="it" if n == 1 else "them")
+    if kind == "top-down":
+        cut = (provenance or {}).get("cullAbove")
+        return str(words.get("topDown") or "").format(cut="?" if cut is None else f"{float(cut):.0f}")
+    return ""
+
 def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -8322,6 +8335,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                     m_["caption"] += caption_words[key_].format(
                         removed=fig_object(gone_), object=fig_object(fk_),
                         winner=fig_mod(row_.get("B") or (f_.get("counts") or {}).get("B") or target_plugin))
+            # a cutaway or a sliced top-down says so in its caption, not only in the frame's own label (a crop can cut that)
+            if m_.get("caption"):
+                m_["caption"] += view_kind_caption(prov_, caption_words)
             m_["captureState"] = state_
             m_["captureRequest"] = prov_.get("captureRequest")
 

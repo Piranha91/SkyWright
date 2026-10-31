@@ -39,6 +39,32 @@ class Refused(ValueError):
     pass
 
 
+
+def unmarkable_objects(capture_results) -> set:
+    """Objects no capture can mark, from FINISHED see-through refusals only: every fallback (eye-level with a measured
+    coverage mark, cutaway, top-down) was tried and the object's own drawn coverage never reached the mark's threshold.
+    A bare points-no-opaque-face is not enough: that code also named objects with opaque shapes that simply stood out
+    of sight (two such objects in one evaluation), which the fallbacks now picture."""
+    out = set()
+    for x in capture_results or []:
+        ref = x.get("refusal") or {}
+        if x.get("status") == "refused" and ref.get("final") is True and ref.get("code") == "see-through-unmarked"                 and ref.get("participant"):
+            out.add(str(ref["participant"]))
+    return out
+
+
+def view_kind_line(provenance: dict) -> str:
+    """The words a reel still adds for a picture that is not what the player sees ("" for one that is)."""
+    kind = (provenance or {}).get("viewKind") or "eye-level"
+    if kind == "cutaway":
+        n = len((provenance or {}).get("hidden") or [])
+        return f"Cutaway: {n} object{'' if n == 1 else 's'} hidden so the pair shows; the player's view has them."
+    if kind == "top-down":
+        cut = (provenance or {}).get("cullAbove")
+        return ("Sliced top-down view from above" + (f", everything above z {float(cut):.0f} removed" if cut is not None else "")
+                + "; not the player's view.")
+    return ""
+
 def humanize(eid: str | None) -> str | None:
     """An editor id in words: a leading mod prefix (`MAG_`) and standalone digits dropped, camel case split."""
     if not eid:
@@ -311,11 +337,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             return "effect"
         return None
 
-    # an object no camera can mark (only alpha-tested, effect or marker shapes) fails every request it is in: a clash
-    # with it is not tried again under another request (WRW capture: one such object refused two requests)
-    unmarkable = {str((x.get("refusal") or {}).get("participant")) for x in capture_results
-                  if x.get("status") == "refused" and (x.get("refusal") or {}).get("pickerCode") == "points-no-opaque-face"
-                  and (x.get("refusal") or {}).get("participant")}
+    # an object no camera can mark fails every request it is in: a clash with it is not tried again under another request
+    # (WRW capture: one such object refused two requests)
+    unmarkable = unmarkable_objects(capture_results)
     attempts = int(policy.get("captureAttemptsPerType") or policy.get("perType") or 1)
     chosen_by_type, unpictured, represented, candidates, others = {}, [], {}, {}, {}
 
@@ -712,7 +736,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             frames = []
             for state in states:
                 m = frame_media(c, state)
-                frames.append({"state": state, "armId": arm_of[state], "mediaId": (m or {}).get("id")})
+                # a cutaway or a sliced top-down says so on the reel too, not only in the frame's own label
+                frames.append({"state": state, "armId": arm_of[state], "mediaId": (m or {}).get("id"),
+                               "viewNote": view_kind_line((m or {}).get("provenance") or {}) or None})
+            notes_ = list(dict.fromkeys(f_["viewNote"] for f_ in frames if f_.get("viewNote")))
+            if notes_:
+                text = (text + " " + " ".join(notes_)).strip()
             clash = {"type": t, "checkId": r["checkId"], "formKey": r["formKey"], "other": list(r.get("other") or []),
                      "pair": list(c["pair"]), "armId": with_arm, "withoutArmId": without_arm,
                      "findingId": r.get("findingId"), "highlight": highlight(c)}
