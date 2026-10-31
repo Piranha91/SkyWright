@@ -437,8 +437,10 @@ def cf14_focus_floor_from_box(rig: Rig):
     wl = rig.root / "acq" / "CfFocusLow" / "receipts" / "points-work" / "witness-worklist.json"
     if check("CF14", wl.is_file(), "no witness ring was written for the low-origin focus pair", refusal_text(doc)):
         sh_ = json.loads(wl.read_text(encoding="utf-8"))["cells"][0]["shots"][0]
-        check("CF14", abs(sh_["floorZ"]) <= 8 and abs(sh_["look"][0]) <= 1 and abs(sh_["look"][1]) <= 1,
-              "the ring is not on the focus's floor (z 0) around it (0,0)", f"floor {sh_['floorZ']}, look {sh_['look']}")
+        # this storey is the navmesh (z 0) or the floor tiles' top (about z -9: CfNoNav, which has no navmesh, measures
+        # it); the wrong storeys are the wall's origin (z -380) and its top (about z 193)
+        check("CF14", -16 <= sh_["floorZ"] <= 8 and abs(sh_["look"][0]) <= 1 and abs(sh_["look"][1]) <= 1,
+              "the ring is not on the focus's floor around it (0,0)", f"floor {sh_['floorZ']}, look {sh_['look']}")
 
 
 def cf15_no_floor_top_down(rig: Rig):
