@@ -152,6 +152,13 @@ def refusal_text(doc: dict) -> str:
     return f"{doc.get('status')} {ref.get('pickerCode') or ref.get('code')}: {str(ref.get('detail'))[:300]}"
 
 
+def step_codes(doc: dict) -> list[str]:
+    """The refusal's own code and every step's, so a wrong refusal is seen even when the chain carried it on."""
+    ref = doc.get("refusal") or {}
+    steps = ref.get("chain") or doc.get("fallbackChain") or []
+    return [c for c in [ref.get("pickerCode"), ref.get("code"), *[st.get("code") for st in steps]] if c]
+
+
 def hidden_keys(doc: dict) -> list[str]:
     return [h.get("formKey") for h in ((doc.get("cutaway") or {}).get("hidden") or [])]
 
@@ -206,8 +213,9 @@ def cf3_buried(rig: Rig):
     doc = rig.acquire("CfBuried")
     ref = doc.get("refusal") or {}
     code = ref.get("pickerCode") or ref.get("code")
-    check("CF3", code != "points-no-opaque-face", "a participant with opaque shapes was refused as having no opaque face",
-          refusal_text(doc))
+    # every step, not the last: the chain carries an eye-level refusal on to the top-down, which refuses the same way
+    check("CF3", "points-no-opaque-face" not in step_codes(doc),
+          "a participant with opaque shapes was refused as having no opaque face", str(step_codes(doc)))
     check("CF3", doc.get("status") == "refused" and code == "top-down-participant-unseen" and i["B"] in str(ref.get("detail")),
           "the buried participant was not refused as unseen from above, by name", refusal_text(doc))
     check("CF3", ref.get("final") is True, "the refusal does not say every fallback was tried", str(ref.get("final")))
@@ -432,8 +440,8 @@ def cf14_focus_floor_from_box(rig: Rig):
     ground it stands through, so a floor searched around its origin finds nothing. The floor comes from the focus's
     drawn box. Wrong answers: points-no-floor, or a ring at another storey."""
     doc = rig.acquire("CfFocusLow")
-    code = (doc.get("refusal") or {}).get("pickerCode") or (doc.get("refusal") or {}).get("code")
-    check("CF14", code != "points-no-floor", "the focus's floor was searched around its origin and not found", refusal_text(doc))
+    check("CF14", "points-no-floor" not in step_codes(doc), "the focus's floor was searched around its origin and not found",
+          str(step_codes(doc)))
     wl = rig.root / "acq" / "CfFocusLow" / "receipts" / "points-work" / "witness-worklist.json"
     if check("CF14", wl.is_file(), "no witness ring was written for the low-origin focus pair", refusal_text(doc)):
         sh_ = json.loads(wl.read_text(encoding="utf-8"))["cells"][0]["shots"][0]
