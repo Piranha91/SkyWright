@@ -475,6 +475,26 @@ def case_56_a_place_for_a_plugin_the_source_loads_is_refused():
                                     ).resolve(), "PA.esp is in the source profile's load order already")
 
 
+def case_57_the_report_stage_plans_with_the_capture_closed():
+    import inspect
+    import types
+    with tempfile.TemporaryDirectory() as t:
+        out = Path(t)
+        (out / "prepare").mkdir()
+        (out / "evaluation").mkdir()
+        (out / "prepare" / "preparation.json").write_text('{"arms": []}', encoding="utf-8")
+        (out / "evaluation" / "plan.json").write_text('{"arms": []}', encoding="utf-8")
+        ctx = types.SimpleNamespace(out=out, entry={})
+        try:
+            closed = EP.report_plan_argv(ctx, {"keys": []}, out / "p", final=True)
+        except TypeError:
+            raise AssertionError("the report stage cannot tell evalreport plan that the capture stage is closed")
+        assert "--captures-final" in closed, f"the report stage's plan says the capture is closed, got {closed}"
+        assert "--captures-final" not in EP.report_plan_argv(ctx, {"keys": []}, out / "p"), \
+            "a plan inside the capture rounds still asks for captures"
+    assert "final=True" in inspect.getsource(EP.stage_report), "the report stage plans with the capture closed"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

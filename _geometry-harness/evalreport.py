@@ -9330,7 +9330,7 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
                 switches[sw["key"]] = {"edid": sw.get("edid"), "baselineEnabled": sw.get("baselineEnabled"),
                                        "trigger": sw.get("trigger")}
     reel = reel_plan.plan_reel(view, names, masters, policy, words, search, mod_names, captures, markers=markers,
-                               switches=switches)
+                               switches=switches, captures_final=bool(getattr(a, "captures_final", False)))
     reel["switchCensus"] = ({"path": str(census_path), "sha256": sha256_file(census_path), "switches": len(switches)}
                             if census_path is not None and census_path.is_file() else None)
     reel["media"] = extra_media
@@ -10726,6 +10726,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "vignettes.patchSearch); without it the reel plan is refused and the report still compiles")
     p.add_argument("--mod-name", action="append", default=[], metavar="PLUGIN=NAME",
                    help="the name the review reel speaks for a plugin's mod, over the MO2 mod folder the evaluation recorded")
+    p.add_argument("--captures-final", action="store_true",
+                   help="the capture stage is closed: the review reel pictures only clashes with captured frames and "
+                        "says in one sentence when a kind has none (the report's own plan after the last capture round)")
     p.add_argument("--capture-results", action="append", default=[], metavar="FILE",
                    help="capture_acquire.py capture results: a refused vignette becomes a still, its reason on the closing")
     p.add_argument("--declare-patch", action="append", default=[], metavar="PLUGIN",

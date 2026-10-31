@@ -190,14 +190,17 @@ def _sha(obj) -> str:
 
 def plan_reel(pres: dict, names: dict | None, masters: dict | None, policy: dict, words: dict,
               patch_search: dict | None, mod_names: dict | None = None, capture_results: list | None = None,
-              markers: set | None = None, switches: dict | None = None) -> dict:
-    """`markers`: the references evalreport's marker rule calls editor-only (skill data markerModels / markerFlags,
+              markers: set | None = None, switches: dict | None = None, captures_final: bool = False) -> dict:
+    """`captures_final`: the capture stage is closed (the report's own plan, after the last capture round): a clash is
+    pictured only from a captured request about it; one never captured is unavailable and the planner moves on, and a
+    kind with nothing captured is said in one sentence. Without it (a plan inside the capture rounds) an uncaptured
+    clash is what the next capture request asks for. `markers`: the references evalreport's marker rule calls editor-only (skill data markerModels / markerFlags,
     read from the records); a clash on one is no clash a player meets, so it is left out with a count. `switches`: the
     prediction setup's switch census rows by switch FormKey (edid, baselineEnabled, trigger), for a world-state clash's
     condition."""
     try:
         return _plan(pres, names or {}, masters or {}, policy, words, patch_search, mod_names or {}, capture_results or [],
-                     set(markers or ()), switches or {})
+                     set(markers or ()), switches or {}, captures_final)
     except Refused as e:
         return {"schemaVersion": SCHEMA, "status": "refused", "reason": str(e), "chapters": []}
 
@@ -223,7 +226,8 @@ def condition(row: dict, names: dict, switches: dict, place: str, words: dict) -
     return words["conditionFallback"].format(place=place)
 
 
-def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_results, markers, switches):
+def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_results, markers, switches,
+          captures_final=False):
     reader = pres.get("reader") or {}
     pred = reader.get("prediction") or {}
     target = pred.get("subject")
@@ -349,6 +353,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     unmarkable = unmarkable_objects(capture_results)
     attempts = int(policy.get("captureAttemptsPerType") or policy.get("perType") or 1)
     chosen_by_type, unpictured, represented, candidates, others = {}, [], {}, {}, {}
+    none_captured = []      # (type, count) of kinds with clashes to picture and no captured frame, capture closed
 
     def group_key(c):
         """Instances of one problem (skill data vignettes.groupKey): the type, the mod pair, the cell, and a record
@@ -387,7 +392,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             for c in g:                                     # a group's next member is its capture fallback
                 if tried >= attempts:
                     break
-                tried += 1
+                fks_ = [c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])]
+                if (captures_final and captured_request(fks_, capture_results) is None
+                        and not clash_refused(fks_, capture_results)):
+                    continue                                # never captured: unavailable, not a try
+                # once capture is closed nothing is tried again: a captured clash is shown, a refused one said
+                tried += 0 if captures_final else 1
                 if clash_refused([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results) or ({str(c["rows"][0]["formKey"]),
                                                            *map(str, c["rows"][0].get("other") or [])} & unmarkable):
                     tried_refused.append(c)
@@ -396,6 +406,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 others[c["rows"][0]["formKey"]] = [x for x in g if x is not c]
                 break
         unpictured += [(c, "captureRefused") for c in tried_refused]
+        if captures_final and not chosen and t in (policy.get("pictureTypes") or []) and len(draw) > len(tried_refused):
+            none_captured.append((t, len(draw) - len(tried_refused)))
         chosen_by_type[t] = chosen
         if t in (policy.get("pictureTypes") or []):
             candidates[t] = [c["rows"][0]["formKey"] for g in ordering for c in g][:attempts]
@@ -785,9 +797,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     clash.update(kind=r.get("kind"), state=m_.group(1) if m_ else None)
             chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "split" if split else "vignette", "narration": text,
                              "clash": clash, "frames": frames, "patch": evidence})
-    if unpictured:
+    if unpictured or none_captured:
         n_un = len(unpictured)
-        sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un)
+        sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un) if unpictured else ""
+        for t_, n_ in none_captured:
+            sentence_un = (sentence_un + " " + words["noneCaptured"].format(
+                count=n_, label=words["caseLabels"][t_])).strip()
         # a removal is said, never only counted: which mod takes which object out of the world
         gone = [c for c, why in unpictured if why == "removed"]
         if gone and words.get("placementRemoved"):
@@ -808,5 +823,6 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             "patchSearchSha256": _sha(patch_search) if patch_search is not None else None,
             "modNames": {k: v for k, v in mod_names.items()}, "markers": sorted(markers),
             "sequence": list(policy["sequence"]), "holdSeconds": dict(policy.get("holdSeconds") or {}),
-            "captureCandidates": candidates, "accounting": accounting,
+            "captureCandidates": candidates, "accounting": accounting, "capturesFinal": bool(captures_final),
+            "noneCaptured": [{"type": t_, "count": n_} for t_, n_ in none_captured],
             "chapters": chapters}

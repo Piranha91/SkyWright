@@ -1979,8 +1979,14 @@ def plan_final(pres, names, masters, search, mods, captures, final):
     import inspect
     import reel_plan
     kw = {"captures_final": final} if "captures_final" in inspect.signature(reel_plan.plan_reel).parameters else {}
-    return reel_plan.plan_reel(copy.deepcopy(pres), names, masters, POLICY, WORDS, search, mods, captures,
+    return reel_plan.plan_reel(copy.deepcopy(pres), names, masters, POLICY, binding_words(), search, mods, captures,
                                markers=MARKERS, switches=SWITCHES, **kw)
+
+
+def binding_words():
+    """The test's words plus any the shipped skill data adds (the closed-capture sentence is skill data)."""
+    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    return {**WORDS, **{k: v for k, v in shipped.items() if k not in WORDS}}
 
 
 def case_capture_binding():
@@ -1991,6 +1997,41 @@ def case_capture_binding():
     check("B1-one-request", bool(vig) and all(str(i).startswith("M-req-own-") for i in ids),
           f"a vignette's frames all come from the capture request about its clash, never from another request on the "
           f"same object (frames {ids})")
+    # the capture stage is closed: a clash the plan would picture but that was never captured is unavailable
+    dropped = [dict(c) for c in captures if c["request"] != "req-own"]
+    pres2 = copy.deepcopy(pres)
+    pres2["media"] = [m for m in pres["media"] if m["provenance"]["captureRequest"] != "req-own"]
+    reel2 = plan_final(pres2, names, masters, search, mods, dropped, final=True)
+    vigs = [ch for ch in reel2.get("chapters") or [] if ch.get("kind") in ("vignette", "split")]
+    missing = [(ch.get("id"), f.get("state")) for ch in vigs for f in ch.get("frames") or [] if not f.get("mediaId")]
+    check("B2-only-captured", reel2.get("status") == "planned" and bool(vigs) and not missing,
+          f"with capture closed the reel pictures only clashes with captured frames and moves on past one never "
+          f"captured (status {reel2.get('status')}, frames without media {missing})")
+    picked = [(ch.get("clash") or {}).get("formKey") for ch in vigs if (ch.get("clash") or {}).get("type") == "overlap"]
+    check("B3-moves-on", "000104:Target.esp" in picked and "000101:Target.esp" not in picked,
+          f"the overlap vignette is the captured clash in the next group (picked {picked})")
+    # WRW's shape: refusals ahead of a captured clash used up the capture attempts, so nothing was shown; with capture
+    # closed nothing is tried again, so the captured clash is shown and the refusal is said
+    refused = dropped + [{"request": "req-refused", "status": "refused", "formKey": "000101:Target.esp",
+                          "recordKeys": ["000101:Target.esp", "000201:Alpha.esp"], "reason": "no camera"}]
+    import reel_plan
+    one_try = dict(POLICY, captureAttemptsPerType=1)
+    kw = {"captures_final": True} if "captures_final" in __import__("inspect").signature(reel_plan.plan_reel).parameters else {}
+    reel5 = reel_plan.plan_reel(copy.deepcopy(pres2), names, masters, one_try, binding_words(), search, mods, refused,
+                                markers=MARKERS, switches=SWITCHES, **kw)
+    picked5 = [(ch.get("clash") or {}).get("formKey") for ch in reel5.get("chapters") or [] if ch.get("kind") == "vignette"]
+    un5 = [c.get("formKey") for ch in reel5.get("chapters") or [] if ch.get("kind") == "unpictured" for c in ch.get("clashes") or []]
+    check("B5-refusals-do-not-hide-a-capture", "000104:Target.esp" in picked5 and "000101:Target.esp" in un5,
+          f"a refusal ahead of a captured clash does not use up the attempts once capture is closed (picked {picked5}, "
+          f"said unpictured {un5})")
+    # nothing captured at all: one sentence says so, and no vignette asks for a frame
+    reel3 = plan_final(pres2 | {"media": []}, names, masters, search, mods, [], final=True)
+    vigs3 = [ch for ch in reel3.get("chapters") or [] if ch.get("kind") in ("vignette", "split")]
+    said = " ".join(str(ch.get("narration") or "") for ch in reel3.get("chapters") or [])
+    check("B4-none-captured", reel3.get("status") == "planned" and not vigs3
+          and binding_words().get("noneCaptured", "(no closed-capture sentence in the skill data)")[:20] in said,
+          f"with nothing captured the reel plans no vignette and says so in one sentence (status {reel3.get('status')}, "
+          f"vignettes {len(vigs3)})")
 
 
 def main(argv=None) -> int:

@@ -900,7 +900,9 @@ def stage_precedent(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"bundle": sha256_file(bundle_dir(ctx) / "manifest.json")}, [out]
 
 
-def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = None) -> list:
+def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = None, final: bool = False) -> list:
+    """evalreport plan's argv; `final` once the capture stage is closed (the report stage), so the reel plans only from
+    captured clashes instead of asking for captures no later round will take."""
     run = ctx.out / "evaluation"
     argv = [sys.executable, fwd(HERE / "evalreport.py"), "plan", "--bundle", fwd(bundle or bundle_dir(ctx)), "--out", fwd(out),
             "--verify-copy", "--mode", ctx.entry.get("report", {}).get("mode", "concise")]
@@ -922,6 +924,8 @@ def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = Non
         argv += ["--patch-search", ctx.entry["patchSearch"]]
     for c in captures:
         argv += ["--capture-results", fwd(c)]
+    if final:
+        argv += ["--captures-final"]
     return argv
 
 
@@ -1274,7 +1278,7 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
             r = child(ctx, sdir / "commands", name, argv)
             if r.get("exitCode") != 0:
                 raise Refusal(f"evalrun {name} refused (exit {r.get('exitCode')}); read {fwd(sdir / 'commands' / (name + '.txt'))}.")
-    steps = [("plan", report_plan_argv(ctx, res, out, caps, bundle)),
+    steps = [("plan", report_plan_argv(ctx, res, out, caps, bundle, final=True)),
              ("report", [sys.executable, fwd(HERE / "evalreport.py"), "report", "--presentation",
                          fwd(out / "presentation.json"), "--out", fwd(out)]),
              ("verify", [sys.executable, fwd(HERE / "evalreport.py"), "verify", "--out", fwd(out)])]
