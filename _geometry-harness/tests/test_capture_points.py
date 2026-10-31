@@ -189,6 +189,7 @@ def c700(fx, picker=PICKER):
     old["points"][0]["point"] = [30.0, 0.0, 8.0]    # the block's +x face where the slab crosses it
     old["points"][1]["point"] = [0.0, 40.0, 8.0]    # the slab's +y face where the block crosses it
     old.pop("camera", None)
+    old.pop("topDown", None)        # measured for the picked points, not these: a refusal here has no fallback to take
     op = fx.root / "points-c700-old.json"
     op.write_text(json.dumps(old), encoding="utf-8")
     proc, acq, _ = acquire_with(fx, sc, "c700-old", op)
