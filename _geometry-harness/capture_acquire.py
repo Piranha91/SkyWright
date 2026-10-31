@@ -745,6 +745,50 @@ def coverage_at_pose(a, result: dict, receipts_dir: Path, shotplan_mod) -> None:
                          "atPoseReceipt": str(receipts_dir / "coverage-at-pose" / "console.txt")}
 
 
+# A refusal raised after the picker returned a pose is one of two things, decided here and nowhere else: the pose was
+# judged and refused (it enters the chain: the top-down is next), or no fallback can apply, and the refusal says why.
+# A code missing from both is still refused, and says it was not classified.
+POSE_REFUSED = {
+    "planner-not-verified": lambda e: e.extra.get("plannerStatus") == "refused",
+    "see-through-not-covered-at-pose": lambda e: True,
+}
+NO_FALLBACK = {
+    "planner-not-verified": "the planner did not finish judging the pose; the request is captured again",
+    "points-renderer-failed": "the renderer failed; the request is captured again",
+    "planner-result-stale": "the planner's result belongs to another run; a fallback would read the same files",
+    "plan-subject-mismatch": "the planner judged other targets; a fallback would be bound to the same wrong targets",
+    "planner-inconsistent": "the planner contradicts itself; a fallback goes through the same planner",
+    "configuration-identity-absent": "the renderer named no configuration; a fallback is checked against the same identity",
+    "request-configuration-unidentified": "the request has no configuration to match; no fallback can be bound to it",
+    "configuration-mismatch": "the renderer read another configuration; a fallback renders the same scene",
+}
+
+
+def after_pick_refusal(exc: Refused, points_doc: dict) -> dict | None:
+    """The chain to hand the top-down when the picked pose was refused, else None, with the refusal's noFallback set."""
+    test = POSE_REFUSED.get(exc.code)
+    td = points_doc.get("topDown")
+    if test and test(exc) and td:
+        chain = list(points_doc.get("fallbackChain") or [])
+        kind = points_doc.get("viewKind") or "eye-level"
+        detail = f"the picked {kind} pose was refused: {exc.detail}"
+        if chain and chain[-1].get("kind") == kind and chain[-1].get("status") == "ok":
+            chain[-1] = {**chain[-1], "status": "refused", "code": exc.code, "detail": detail}
+        else:
+            chain.append({"kind": kind, "status": "refused", "code": exc.code, "detail": detail})
+        if kind == "eye-level" and not any(c.get("kind") == "cutaway" for c in chain):
+            # the picker tries a cutaway only when no station saw both; one did, so nothing stood in front to hide
+            chain.append({"kind": "cutaway", "status": "skipped", "code": "cutaway-not-applicable",
+                          "detail": "a station saw both participants, so nothing stood in front to hide"})
+        return {"topDown": td, "chain": chain, "coverageStates": points_doc.get("coverageStates") or {}}
+    if test and test(exc):
+        why = "the picker gave no top-down inputs, so there is nothing to take a top-down of"
+    else:
+        why = NO_FALLBACK.get(exc.code) or f"{exc.code} is not classified for the fallback chain; no fallback was tried"
+    exc.extra.setdefault("noFallback", why)
+    return None
+
+
 def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts_dir: Path, shotplan_mod, exc) -> dict:
     """The labelled sliced top-down, when the eye-level picture and the cutaway both refused (or no station stood): the
     planner's own fallback shot (shotplan plan --top-down-only), accepted only when each participant shows at least
@@ -1187,9 +1231,24 @@ def cmd_acquire(a) -> int:
             receipts = {"planJson": str(plan_json), "worklist": str(worklist),
                         "plannerLog": call["log"], "receiptsDir": str(receipts_dir),
                         "plannerExitCode": call["exitCode"]}
-            result = build_result(request, parts, points, source, plan, call, receipts,
-                                  shotplan_mod)
-            coverage_at_pose(a, result, receipts_dir, shotplan_mod)
+            try:
+                result = build_result(request, parts, points, source, plan, call, receipts,
+                                      shotplan_mod)
+                coverage_at_pose(a, result, receipts_dir, shotplan_mod)
+            except Refused as pexc:
+                handed = after_pick_refusal(pexc, points["doc"])
+                if handed is None:
+                    raise
+                handoff = type("PoseRefusal", (), {})()
+                handoff.code, handoff.extra = pexc.code, handed
+                result = acquire_top_down(a, request, parts, source, receipts_dir, shotplan_mod, handoff)
+                write_json(out, result)
+                run.advance(1)
+                run.artifact(str(out))
+                run.tally(ok=1)
+                print(f"camera-ready {a.request}: TOP-DOWN after the picked pose was refused ({pexc.code}); "
+                      f"{result['camera']['viewprobe']}")
+                return EXIT_OK
         except Refused as exc:
             write_json(out, refusal_doc(a.request, exc,
                                         {"receipts": {"receiptsDir": str(receipts_dir)}}))

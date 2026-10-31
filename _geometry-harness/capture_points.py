@@ -78,13 +78,22 @@ LOOK_LIFT = 96.0   # viewprobe's --look-ref lift (Program.cs RefPos(lookRef, 96f
 
 
 class Unpickable(Exception):
-    """No measured visible point can be given. `detail` is one plain sentence: what went wrong and what to try."""
+    """No measured visible point can be given. `detail` is one plain sentence: what went wrong and what to try.
+
+    Every refusal is one of three kinds, decided where it is raised: `final=True` (a property of the request no fallback
+    can change: a participant not placed or not drawn, an unusable request), `transient=True` (the renderer failed:
+    captured again), or neither, and then pick_points attaches the top-down's inputs and the chain so far, and
+    capture_acquire carries the chain on."""
 
     def __init__(self, code: str, detail: str, **extra):
         detail = detail.strip()
         detail = detail if detail.endswith(".") else detail + "."
         super().__init__(f"{code}: {detail}")
         self.code, self.detail, self.extra = code, detail, extra
+        if extra.get("final"):
+            extra.setdefault("noFallback", "this is a property of the request itself, which no other view changes")
+        elif extra.get("transient"):
+            extra.setdefault("noFallback", "the renderer failed; the request is captured again")
 
 
 def _load_shotplan():
@@ -135,8 +144,8 @@ def request_cell(request: dict) -> str:
     loc = str(request.get("location") or "").strip()
     loc = re.sub(r"\s*\((?:ext|int)\)\s*$", "", loc).strip()
     if not loc or " " in loc:
-        raise Unpickable("points-cell-unknown",
-                         f"the request's location {request.get('location')!r} does not name one cell; pass --cell")
+        raise Unpickable("points-cell-unknown", final=True,
+                         detail=f"the request's location {request.get('location')!r} does not name one cell; pass --cell")
     return loc
 
 
@@ -145,11 +154,12 @@ def request_participants(request: dict) -> list[dict]:
     rows = [h for h in (request.get("pointParticipants") or request.get("highlights") or []) if isinstance(h, dict) and h.get("formKey")]
     if len(rows) != 2 or rows[0]["formKey"] == rows[1]["formKey"]:
         raise Unpickable("points-participants-unusable",
-                         "the picker measures a pair: the request must highlight exactly two distinct records")
+                         "the picker measures a pair: the request must highlight exactly two distinct records", final=True)
     for h in rows:
         if h.get("color") not in SURFACE_RGB:
             raise Unpickable("points-participants-unusable",
-                             f"{h['formKey']} is highlighted {h.get('color')!r}; the picker reads only cyan and magenta marks")
+                             f"{h['formKey']} is highlighted {h.get('color')!r}; the picker reads only cyan and magenta marks",
+                             final=True)
     return [{"formKey": h["formKey"], "color": h["color"]} for h in rows]
 
 
@@ -181,7 +191,7 @@ class Renderer:
 def ensure_ok(rc: int, text: str, what: str):
     if rc != 0:
         tail = " ".join(text.strip().splitlines()[-3:])[-300:]
-        raise Unpickable("points-renderer-failed", f"viewprobe exited {rc} during the {what} run ({tail})")
+        raise Unpickable("points-renderer-failed", f"viewprobe exited {rc} during the {what} run ({tail})", transient=True)
 
 
 # ---------------------------------------------------------------- the geometry of the ring --
@@ -343,9 +353,28 @@ def measure_station(img, png, text, pr, parts, see_through, gridset, min_depth, 
 
 # ---------------------------------------------------------------- the picker --
 
-def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: Path, cell: str | None = None,
-                bearings: int = 12, standoffs=(150.0, 250.0, 400.0), size: int = 320, grid: int = 10, fov: float = 65.0,
-                min_depth: int = 2, synthetic: bool = False, aspect: str = "16:9", shotplan=None) -> dict:
+def pick_points(request: dict, **kw) -> dict:
+    """The points document, or Unpickable. A refusal that is neither final nor transient leaves here carrying the
+    top-down's inputs and the chain so far, wherever in the picker it was raised (Unpickable's three kinds)."""
+    ctx: dict = {}
+    try:
+        return _pick_points(request, _ctx=ctx, **kw)
+    except Unpickable as exc:
+        if exc.extra.get("final") or exc.extra.get("transient") or exc.extra.get("topDown") is not None:
+            raise
+        if ctx.get("topDown") is None:
+            exc.extra.setdefault("noFallback", "the participants' placements were never read, so there is nothing to "
+                                               "take a top-down of")
+            raise
+        exc.extra["topDown"] = ctx["topDown"](ctx.get("floor"))
+        exc.extra.setdefault("chain", [{"kind": "eye-level", "status": "refused", "code": exc.code, "detail": exc.detail}])
+        exc.extra.setdefault("coverageStates", ctx.get("coverageStates") or {})
+        raise
+
+
+def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: Path, cell: str | None = None,
+                 bearings: int = 12, standoffs=(150.0, 250.0, 400.0), size: int = 320, grid: int = 10, fov: float = 65.0,
+                 min_depth: int = 2, synthetic: bool = False, aspect: str = "16:9", shotplan=None, _ctx=None) -> dict:
     """The points document `capture_acquire.py` reads, or Unpickable with one plain sentence.
 
     The chain (README, capture fallbacks): eye-level, with a see-through participant marked by its measured coverage;
@@ -380,7 +409,7 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
         m = EYE_LINE.match(ln) or m
     if m is None:
         raise Unpickable("points-renderer-failed", "viewprobe did not print the resolved camera, so the "
-                                                   "participants' placements are unknown")
+                                                   "participants' placements are unknown", transient=True)
     pos = {A: (float(m[1]), float(m[2]), float(m[3])), B: (float(m[4]), float(m[5]), float(m[6]) - LOOK_LIFT)}
     counts = {}
     for ln in text.splitlines():
@@ -411,8 +440,47 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
                 focus = small
     if focus in pos:
         # a landscape-scale partner (the reel's volume rule marks only the smaller participant): its origin says nothing
-        # about where the clash is, so the stations ring the smaller participant, at its level
+        # about where the clash is, so the stations ring the smaller participant, at its level. Its level is its DRAWN
+        # box when there is one: an origin can sit far below the ground the object stands through (a cliff: WRW rerun,
+        # fb173b065383), and a floor searched around it finds nothing
         mid, minz, maxz = pos[focus], pos[focus][2], pos[focus][2]
+        if focus in boxes:
+            bz = boxes[focus]
+            minz, maxz = bz[2], bz[5]
+            mid = (pos[focus][0], pos[focus][1], (minz + maxz) / 2.0)
+
+    # what a top-down needs, should every eye-level picture refuse: the subjects (the focus alone, else both), placed at
+    # the centre of the overlap of their drawn boxes (a lone focus at its box's centre; origins when nothing is drawn),
+    # the cut above it, and the floor: the measured storey, else the lowest drawn point of the subjects (a top-down needs
+    # no camera storey; its frame is sized from what is drawn)
+    def top_down_inputs(floor_z=None):
+        keys = [focus] if focus in pos else [A, B]
+        bx = [boxes.get(k) for k in keys]
+        cut, subj = None, []
+        if all(bx) and len(bx) == 2:
+            lo = [max(bx[0][i], bx[1][i]) for i in range(3)]
+            hi = [min(bx[0][i + 3], bx[1][i + 3]) for i in range(3)]
+            if all(lo[i] <= hi[i] for i in range(3)):
+                c = [(lo[i] + hi[i]) / 2 for i in range(3)]
+                subj = [{"formKey": k, "point": [round(c[0], 1), round(c[1], 1), round(c[2], 1)]} for k in keys]
+                cut = round(hi[2] + 64.0, 1)
+        if not subj and len(bx) == 1 and bx[0]:
+            c = [(bx[0][i] + bx[0][i + 3]) / 2 for i in range(3)]
+            subj = [{"formKey": keys[0], "point": [round(v, 1) for v in c]}]
+            cut = round(bx[0][5] + 64.0, 1)
+        if not subj:
+            subj = [{"formKey": k, "point": [round(v, 1) for v in pos[k]]} for k in keys]
+            tops = [boxes[k][5] for k in keys if k in boxes]
+            cut = round(max(tops) + 64.0, 1) if tops else None
+        src = "measured storey"
+        if floor_z is None:
+            lows = [boxes[k][2] for k in keys if k in boxes] or [pos[k][2] for k in keys]
+            floor_z, src = round(min(lows), 1), "no storey measured: the lowest drawn point of the subjects"
+        return {"cell": cell, "floorZ": floor_z, "floorSource": src, "subjects": subj, "cut": cut,
+                "focus": focus if focus in pos else None,
+                "seeThrough": sorted(see_through), "allNonOpaque": sorted(all_non_opaque), "contacts": contacts}
+    if _ctx is not None:
+        _ctx["topDown"] = top_down_inputs
     ring = stations(mid, bearings, standoffs)
 
     # 2. floor, drawn, opaque
@@ -468,25 +536,8 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
                          f"the pair stands in water: the measured floor z {floor:.0f} lies under the water surface at "
                          f"z {max(wet):.0f}, and no camera storey above the water was measured; choose another request")
 
-    # what a top-down needs, should every eye-level picture refuse: the subjects (the focus alone, else both), placed at
-    # the centre of the overlap of their drawn boxes (their origins when the boxes do not meet), and the cut above it
-    def top_down_inputs():
-        keys = [focus] if focus in pos else [A, B]
-        bx = [boxes.get(k) for k in keys]
-        cut, subj = None, []
-        if all(bx) and len(bx) == 2:
-            lo = [max(bx[0][i], bx[1][i]) for i in range(3)]
-            hi = [min(bx[0][i + 3], bx[1][i + 3]) for i in range(3)]
-            if all(lo[i] <= hi[i] for i in range(3)):
-                c = [(lo[i] + hi[i]) / 2 for i in range(3)]
-                subj = [{"formKey": k, "point": [round(c[0], 1), round(c[1], 1), round(c[2], 1)]} for k in keys]
-                cut = round(hi[2] + 64.0, 1)
-        if not subj:
-            subj = [{"formKey": k, "point": [round(v, 1) for v in pos[k]]} for k in keys]
-            tops = [boxes[k][5] for k in keys if k in boxes]
-            cut = round(max(tops) + 64.0, 1) if tops else None
-        return {"cell": cell, "floorZ": floor, "subjects": subj, "cut": cut, "focus": focus if focus in pos else None,
-                "seeThrough": sorted(see_through), "allNonOpaque": sorted(all_non_opaque), "contacts": contacts}
+    if _ctx is not None:
+        _ctx["floor"] = floor
 
     # 3. witnesses
     ez = int(round(floor + args.eye_height))
@@ -583,7 +634,7 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
             else:
                 chain.append({"kind": "cutaway", "status": got["status"], "code": got["code"], "detail": got["detail"]})
         if not valid:
-            raise Unpickable(code, detail + "; " + chain[-1]["detail"], topDown=top_down_inputs(), chain=chain,
+            raise Unpickable(code, detail + "; " + chain[-1]["detail"], topDown=top_down_inputs(floor), chain=chain,
                              coverageStates={k: sorted(v) for k, v in cov_states.items()},
                              visibleFrom={p["formKey"]: sum(1 for st in placed if st["participants"][p["formKey"]]["best"])
                                           for p in parts} if placed else None, pixelsSeen=seen)
@@ -628,6 +679,8 @@ def pick_points(request: dict, *, vp: str | None, passthrough: list[str], work: 
                           f"{floor_src} at z {floor:.0f}." + (" SYNTHETIC renderer stand-in." if synthetic else "")),
            "cell": cell, "floorZ": floor,
            "viewKind": view_kind, "viewFlags": view_flags, "cutaway": cutaway, "fallbackChain": chain,
+           # should the planner refuse every camera at this pose, the chain goes on to the top-down with these
+           "topDown": top_down_inputs(floor), "coverageStates": {k: sorted(v) for k, v in cov_states.items()},
            "points": rows,
            "camera": {"fov": float(fov), "aspect": aspect, "bearingWindow": [round(wb, 1), half], "standoffMin": float(max(50, int(ws // 50) * 50)),
                       "standoffMax": float(max(50, int(ws // 50) * 50) + 200),

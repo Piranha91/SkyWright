@@ -32,6 +32,12 @@ namespace ViewProbe;
 //   CfNoNav     crate (0,30,20)        crate (30,10,20)                     no navmesh: no station can stand
 //   CfDisabled  crate (0,0,20)         glow sphere at (0,0,60), initially disabled
 //   (CfGlow also stands in a room of walls about 800 u out, so the planner's clearance rays are bounded)
+//   CfOpen      crate (0,30,20)        crate (30,10,20)                     nothing else: no obstruction stands behind any
+//               camera, so the planner's nearest-obstruction margin is none
+//   CfFocusLow  ImpExtWall03 with its origin at z -380 (drawn z about -394..193: its origin far below the floor it
+//               stands through), and the glow x6 at (900,0,1400): the focus's floor must come from its drawn box,
+//               not its origin (C1, the WRW rerun's fb173b065383)
+//   CfVoid      crate (0,30,20)        crate (30,10,20)                     no floor and no navmesh: no storey at all
 //   CfCutMod    crate (0,30,20)        crate (30,10,20) from CfFixtureMod.esp  the CfCutaway walls (B1/B2: the capture
 //                                      states; without the mod plugin, B is not there)
 public static class CaptureFixture
@@ -40,7 +46,8 @@ public static class CaptureFixture
     public static readonly ModKey Key = new("CfFixture", ModType.Plugin);
     static FormKey K(uint id) => new(Key, id);
 
-    public static readonly FormKey FloorBase = K(0x801), CrateBase = K(0x802), GlowBase = K(0x803);
+    public static readonly FormKey FloorBase = K(0x801), CrateBase = K(0x802), GlowBase = K(0x803), WallBase = K(0x804);
+    public const string WallMesh = "Dungeons\\Imperial\\Exterior\\ImpExtWall03.nif";
     public const string FloorMesh = "Dungeons\\Imperial\\Exterior\\ImpExtFloorChunk01.nif";
     public const string CrateMesh = "Clutter\\Common\\CrateSmallLong02.nif";
     public const string GlowMesh = "Effects\\Ambient\\FXGlowFillRndLitBrt.nif";
@@ -49,11 +56,12 @@ public static class CaptureFixture
     public sealed record CellIds(string EditorId, FormKey Cell, FormKey Nav, FormKey A, FormKey B, FormKey[] Walls, FormKey[] Floor);
     public static readonly CellIds Cutaway = Ids("CfCutaway", 0x810), Touch = Ids("CfTouch", 0x820), Buried = Ids("CfBuried", 0x830),
         Glow = Ids("CfGlow", 0x840), Focus = Ids("CfFocus", 0x850), NoNav = Ids("CfNoNav", 0x860), Disabled = Ids("CfDisabled", 0x870),
-        CutMod = Ids("CfCutMod", 0x880);
+        CutMod = Ids("CfCutMod", 0x880), Open = Ids("CfOpen", 0x890), FocusLow = Ids("CfFocusLow", 0x8A0),
+        Void = Ids("CfVoid", 0x8B0);
     /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
     public static readonly ModKey ModKeyB = new("CfFixtureMod", ModType.Plugin);
     public static readonly FormKey CutModB = new(ModKeyB, 0x801);
-    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod };
+    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void };
 
     static CellIds Ids(string edid, uint b)
         => new(edid, K(b), K(b + 1), K(b + 2), K(b + 3), Enumerable.Range(0, 32).Select(n => K(0x2000 + (b - 0x810) / 0x10 * 0x40 + (uint)n)).ToArray(),
@@ -107,7 +115,7 @@ public static class CaptureFixture
             }
     }
 
-    static SkCell NewCell(CellIds c, bool nav)
+    static SkCell NewCell(CellIds c, bool nav, bool floor = true)
     {
         var cell = new SkCell(c.Cell, Rel)
         {
@@ -123,7 +131,7 @@ public static class CaptureFixture
         // the floor: 7 x 7 chunks, 350 u apart (each about 530 u across, so they overlap), top at z 0 (the chunk stands
         // from z 0 to 19 in its own space)
         int f = 0;
-        for (int j = -3; j <= 3; j++)
+        for (int j = -3; j <= 3 && floor; j++)
             for (int i = -3; i <= 3; i++)
                 cell.Temporary.Add(Ref(c.Floor[f++], FloorBase, i * 350f, j * 350f, -19f));
         if (nav) cell.NavigationMeshes.Add(BlockFixture.Grid(c.Nav, c.Cell, 40, 40, 64f, -1280f, -1280f));
@@ -138,6 +146,8 @@ public static class CaptureFixture
             ObjectBounds = new ObjectBounds { First = new P3Int16(-280, -246, 0), Second = new P3Int16(256, 286, 19) } });
         m.Statics.Add(new Static(CrateBase, Rel) { EditorID = "CfCrate", Model = new Model { File = CrateMesh },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-25, -104, -20), Second = new P3Int16(25, 38, 20) } });
+        m.Statics.Add(new Static(WallBase, Rel) { EditorID = "CfWall", Model = new Model { File = WallMesh },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-201, -272, -14), Second = new P3Int16(191, 289, 573) } });
         m.Statics.Add(new Static(GlowBase, Rel) { EditorID = "CfGlow", Model = new Model { File = GlowMesh },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-258, -258, -258), Second = new P3Int16(258, 258, 258) } });
 
@@ -167,7 +177,11 @@ public static class CaptureFixture
         var cutMod = NewCell(CutMod, true);
         cutMod.Temporary.Add(Ref(CutMod.A, CrateBase, 0, 30, 20));
         Walls(cutMod, CutMod.Walls, -97.5f, 127.5f, -166.5f, 140.5f);
-        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod }) MovedRefFixture.FileInterior(m, c);
+        var open = NewCell(Open, true); Pair(open, Open);
+        var focusLow = NewCell(FocusLow, true);
+        focusLow.Temporary.Add(Ref(FocusLow.A, WallBase, 0, 0, -380)); focusLow.Temporary.Add(Ref(FocusLow.B, GlowBase, 900, 0, 1400, scale: 6f));
+        var voidCell = NewCell(Void, false, floor: false); Pair(voidCell, Void);
+        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell }) MovedRefFixture.FileInterior(m, c);
 
         var path = Path.Combine(dir, Key.FileName.String);
         m.BeginWrite.ToPath(path).WithNoLoadOrder().Write();

@@ -1,15 +1,15 @@
-"""Known answers for the capture fallbacks: cutaway, top-down and see-through marks (CF1-CF23).
+"""Known answers for the capture fallbacks: cutaway, top-down and see-through marks (CF1-CF24).
 
     python tests/test_capture_fallbacks.py [--vp VIEWPROBE.exe] [--only CF1,CF2] [--keep DIR]
 
 Two kinds of case.
 
-RENDER CASES (CF1-CF12) run the REAL viewprobe (--vp; default the in-tree production build), the REAL capture_points,
+RENDER CASES (CF1-CF12, CF14-CF16) run the REAL viewprobe (--vp; default the in-tree production build), the REAL capture_points,
 capture_acquire and shotplan on CfFixture.esp (viewprobe/CaptureFixture.cs), laid out as an MO2 instance over a Skyrim SE
 game's own archives (tests/capture_fixture_lab.py). The game folder is HOUSECARL_FIXTURE_GAME or `fixtureGame` in the
 harness config. Without it these cases are NOT RUN, the run says so and exits 3: never a pass.
 
-CODE CASES (CF20-CF23) call the real evalpipeline, reel_plan, capture_acquire and evalreport functions on hand-built
+CODE CASES (CF13, CF20-CF24) call the real evalpipeline, reel_plan, capture_acquire and evalreport functions on hand-built
 inputs: the reuse rule, the reel's unmarkable skip, the top-down acceptance count and the view-kind caption words.
 
 Each case names the wrong answer it exists to reject. Exit 0: every case that ran passed and none was skipped; 1: a
@@ -418,9 +418,41 @@ def cf12_capture_states(rig: Rig):
           f"exit {wo.get('exit')}, protect {wo.get('protect')}, hidden {sorted(hid_wo)}, B's {sorted(holds_b)}")
 
 
+def cf16_open_cell(rig: Rig):
+    """An open cell: nothing stands behind any camera, so the planner's nearest-obstruction margin is none. The verified
+    eye-level camera is published. Wrong answer: the planner crashing on the absent margin after it verified the pose
+    (status incomplete), which no fallback should paper over."""
+    doc = rig.acquire("CfOpen")
+    check("CF16", doc.get("status") == "camera-ready" and doc.get("viewKind") == "eye-level",
+          "an open cell's verified camera was not published", refusal_text(doc))
+
+
+def cf14_focus_floor_from_box(rig: Rig):
+    """C1 (the WRW rerun, fb173b065383: a cliff paired with a cloud): the focus participant's origin lies far below the
+    ground it stands through, so a floor searched around its origin finds nothing. The floor comes from the focus's
+    drawn box. Wrong answers: points-no-floor, or a ring at another storey."""
+    doc = rig.acquire("CfFocusLow")
+    code = (doc.get("refusal") or {}).get("pickerCode") or (doc.get("refusal") or {}).get("code")
+    check("CF14", code != "points-no-floor", "the focus's floor was searched around its origin and not found", refusal_text(doc))
+    wl = rig.root / "acq" / "CfFocusLow" / "receipts" / "points-work" / "witness-worklist.json"
+    if check("CF14", wl.is_file(), "no witness ring was written for the low-origin focus pair", refusal_text(doc)):
+        sh_ = json.loads(wl.read_text(encoding="utf-8"))["cells"][0]["shots"][0]
+        check("CF14", abs(sh_["floorZ"]) <= 8 and abs(sh_["look"][0]) <= 1 and abs(sh_["look"][1]) <= 1,
+              "the ring is not on the focus's floor (z 0) around it (0,0)", f"floor {sh_['floorZ']}, look {sh_['look']}")
+
+
+def cf15_no_floor_top_down(rig: Rig):
+    """C1: a pair with no storey at all (no floor, no navmesh). The eye-level step refuses, and the refusal enters the
+    chain: the top-down needs no camera storey and takes its frame from the participants' drawn boxes. Wrong answer: a
+    points-no-floor refusal that skips every fallback."""
+    doc = rig.acquire("CfVoid")
+    check("CF15", doc.get("status") == "camera-ready" and doc.get("viewKind") == "top-down",
+          "a pair with no storey got no top-down", refusal_text(doc))
+
+
 RENDER_CASES = [cf1_cutaway, cf2_touching_blockers, cf3_buried, cf4_see_through, cf5_alpha_recovery, cf6_focus,
                 cf7_no_station, cf8_not_drawn, cf9_hide_protect_banner, cf10_contacts, cf11_occluders,
-                cf12_capture_states]
+                cf12_capture_states, cf14_focus_floor_from_box, cf15_no_floor_top_down, cf16_open_cell]
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -517,7 +549,71 @@ def cf23_caption_words(tmp: Path):
         check("CF23", e == "", f"the {name} labels an eye-level view", e)
 
 
-CODE_CASES = [cf20_reuse, cf21_reel_unmarkable, cf22_top_down_count, cf23_caption_words]
+def cf13_planner_refusal(tmp: Path):
+    """C1 (the WRW rerun, 708f2bea9d46 and 9d8658891055): the picker found an eye-level station that sees both, then the
+    camera planner probed that pose and refused it. That refusal enters the same chain as any other: no cutaway applies (a
+    station saw both), so the top-down is next, handed the picker's top-down inputs. Called on the real capture_acquire
+    rule with the planner's real refusal (code planner-not-verified, plannerStatus refused). No fixture cell makes the
+    real planner refuse a pose the picker accepted; the WRW rerun is the end-to-end case. Wrong answer: None (the refusal
+    skips every fallback)."""
+    CA = load("cf_capture_acquire_c1", HARNESS / "capture_acquire.py")
+    fn = getattr(CA, "after_pick_refusal", None)
+    if not check("CF13", fn is not None, "capture_acquire has no rule for a refusal of the picked pose"):
+        return
+    td = {"subjects": [{"formKey": "A"}], "floorZ": 0.0}
+    doc = {"viewKind": "eye-level", "topDown": td, "coverageStates": {"B": ["marked"]},
+           "fallbackChain": [{"kind": "eye-level", "status": "ok", "code": None, "detail": "station s36"}]}
+    e = CA.Refused("planner-not-verified", "the planner probed this pose and refused it (exit 1)",
+                   plannerStatus="refused", plannerExitCode=1)
+    handed = fn(e, doc)
+    if not check("CF13", handed is not None, "a planner refusal of the picked pose skipped the fallbacks", str(e.extra)):
+        return
+    ch = handed["chain"]
+    check("CF13", handed["topDown"] is td and handed["coverageStates"] == {"B": ["marked"]}
+          and [(c["kind"], c["status"], c["code"]) for c in ch]
+          == [("eye-level", "refused", "planner-not-verified"), ("cutaway", "skipped", "cutaway-not-applicable")],
+          "the chain handed to the top-down does not record the refused pose and the inapplicable cutaway", str(handed))
+
+
+def cf24_after_pick_rule(tmp: Path):
+    """C1: every refusal raised after the picker returned a pose either enters the chain or says why no fallback can
+    apply, by one table. Wrong answers: a code raised there that the table does not classify; a refused pose (here a
+    see-through point outside its mark at the final camera) that does not go on to the top-down; a refusal that leaves
+    without saying why no fallback was tried."""
+    import ast
+    CA = load("cf_capture_acquire_rule", HARNESS / "capture_acquire.py")
+    fn = getattr(CA, "after_pick_refusal", None)
+    if not check("CF24", fn is not None, "capture_acquire has no rule for refusals after the pick"):
+        return
+    tree = ast.parse((HARNESS / "capture_acquire.py").read_text(encoding="utf-8"))
+    codes = set()
+    for f in tree.body:
+        if isinstance(f, ast.FunctionDef) and f.name in ("build_result", "coverage_at_pose"):
+            for n in ast.walk(f):
+                if (isinstance(n, ast.Call) and getattr(n.func, "id", None) == "Refused" and n.args
+                        and isinstance(n.args[0], ast.Constant)):
+                    codes.add(n.args[0].value)
+    known = set(CA.POSE_REFUSED) | set(CA.NO_FALLBACK)
+    check("CF24", codes and codes <= known, "a refusal raised after the pick is not classified", str(sorted(codes - known)))
+    doc = {"viewKind": "eye-level", "topDown": {"subjects": []},
+           "fallbackChain": [{"kind": "eye-level", "status": "ok"}]}
+    handed = fn(CA.Refused("see-through-not-covered-at-pose", "outside its mark", final=False), doc)
+    check("CF24", handed is not None and [c["kind"] for c in handed["chain"]] == ["eye-level", "cutaway"]
+          and handed["chain"][0]["status"] == "refused" and handed["chain"][1]["status"] == "skipped",
+          "a see-through point outside its mark at the final camera does not go on to the top-down", str(handed))
+    for code, extra in (("configuration-mismatch", {}), ("planner-not-verified", {"plannerStatus": "incomplete"}),
+                        ("no-such-code", {})):
+        e = CA.Refused(code, "x", **extra)
+        check("CF24", fn(e, doc) is None and e.extra.get("noFallback"),
+              f"{code} {extra} entered the chain, or left without saying why no fallback applies", str(e.extra))
+    CP = load("cf_capture_points_rule", HARNESS / "capture_points.py")
+    for kind in ("final", "transient"):
+        u = CP.Unpickable("points-x", "x", **{kind: True})
+        check("CF24", bool(u.extra.get("noFallback")), f"a {kind} picker refusal does not say why no fallback applies")
+
+
+CODE_CASES = [cf13_planner_refusal, cf20_reuse, cf21_reel_unmarkable, cf22_top_down_count, cf23_caption_words,
+              cf24_after_pick_rule]
 
 
 def main(argv=None) -> int:
@@ -564,7 +660,7 @@ def main(argv=None) -> int:
     for case, verdict, text in RESULTS:
         print(f"{case:5} {verdict:5} {text}")
     if not_run:
-        print(f"NOT RUN: render cases CF1-CF12 -- {not_run}")
+        print(f"NOT RUN: render cases CF1-CF12, CF14-CF16 -- {not_run}")
     print(f"work folder: {tmp}")
     if FAILS:
         return 1

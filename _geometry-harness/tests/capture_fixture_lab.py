@@ -20,7 +20,8 @@ PLUGIN = "CfFixture.esp"
 # the fixture's FormIDs (CaptureFixture.cs Ids(): cell base b, nav b+1, A b+2, B b+3; walls 0x2000 + cell index * 0x40 + n,
 # n = side * 8 + tier * 2 + piece, sides W E S N, tiers bottom up; floor tiles 0x1000 + cell index * 0x40 + 0..48)
 CELLS = {"CfCutaway": 0x810, "CfTouch": 0x820, "CfBuried": 0x830, "CfGlow": 0x840, "CfFocus": 0x850, "CfNoNav": 0x860,
-         "CfDisabled": 0x870, "CfCutMod": 0x880}
+         "CfDisabled": 0x870, "CfCutMod": 0x880, "CfOpen": 0x890, "CfFocusLow": 0x8A0,
+         "CfVoid": 0x8B0}
 PLUGIN_MOD = "CfFixtureMod.esp"      # CfCutMod's B (master CfFixture.esp); the "without" setup leaves it out
 CUTMOD_B = f"000801:{PLUGIN_MOD}"
 
