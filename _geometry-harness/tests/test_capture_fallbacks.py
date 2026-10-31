@@ -261,6 +261,17 @@ def cf5_alpha_recovery(rig: Rig):
     ok = float((err <= 3).mean()) if err.size else 0.0
     check("CF5", err.size > 500 and ok >= 0.95, "the recovered alpha does not composite back to the rendered frame",
           f"{err.size} mask px, {ok:.3f} within 3 levels")
+    # The composite above does not read `a` for an additive shape, so it cannot see the alpha itself go wrong (the
+    # A-alpha-sign arm at Gate C came back green). For an additive shape the recovered value is the colour it adds:
+    # over black it draws c * a, over white the clear saturates, so a = 1 - (255 - black) / 255 = black / 255. Every
+    # pixel the shape draws (its black-clear frame not black) must say so.
+    if m.group(1) == "additive":
+        drawn = black.max(axis=2) > 2
+        diff = np.abs(alpha * 255.0 - black.mean(axis=2))[drawn]
+        good = float((diff <= 3).mean()) if diff.size else 0.0
+        check("CF5", diff.size > 500 and good >= 0.95,
+              "the recovered alpha is not the colour the additive shape adds over black",
+              f"{diff.size} drawn px, {good:.3f} within 3 levels")
 
 
 def cf6_focus(rig: Rig):
