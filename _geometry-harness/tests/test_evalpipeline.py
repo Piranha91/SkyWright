@@ -434,6 +434,47 @@ def case_52_a_master_named_in_another_case_is_one_plugin():
         assert "pair:0+key:KA.esp" in units, f"the key's lower-case master still names partner PA, got {list(units)}"
 
 
+PLACED_FILES = {(None, "Base.esm"): ([], True), ("MS", "Subj.esp"): (["Base.esm"], False),
+                ("MA", "PA.esp"): (["Base.esm"], False), ("MB", "PB.esp"): (["Base.esm"], False),
+                ("ML", "Lab.esp"): (["Base.esm", "PB.esp"], False)}
+PLACED_SOURCE = ["Base.esm", "PA.esp", "PB.esp", "Subj.esp"]
+
+
+def placed_entry(places):
+    return {"subject": {"plugin": "Subj.esp", "mod": "MS"},
+            "partners": [{"plugin": "PA.esp", "mod": "MA"}, {"plugin": "Lab.esp", "mod": "ML"}],
+            "keys": [], "dependencies": [{"plugin": "PB.esp", "mod": "MB"}], "baseline": ["Base.esm", "PB.esp"],
+            "places": places}
+
+
+def case_53_a_plugin_the_source_does_not_load_takes_its_named_place():
+    with tempfile.TemporaryDirectory() as t:
+        res = lab_context(Path(t), PLACED_FILES, PLACED_SOURCE, placed_entry({"lab.esp": {"after": "PB.esp"}})).resolve()
+        comb = next(a for a in res["arms"] if a["id"] == "combined")
+        assert comb["plugins"] == ["Base.esm", "PA.esp", "PB.esp", "Lab.esp", "Subj.esp"], comb["plugins"]
+    with tempfile.TemporaryDirectory() as t:
+        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE, placed_entry({})).resolve(), "Lab.esp")
+
+
+def case_54_a_place_before_the_plugins_own_master_is_refused():
+    with tempfile.TemporaryDirectory() as t:
+        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE,
+                                    placed_entry({"Lab.esp": {"after": "PA.esp"}})).resolve(), "its master PB.esp")
+
+
+def case_55_a_place_after_a_plugin_the_source_does_not_load_is_refused():
+    with tempfile.TemporaryDirectory() as t:
+        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE,
+                                    placed_entry({"Lab.esp": {"after": "Gone.esp"}})).resolve(), "Gone.esp")
+
+
+def case_56_a_place_for_a_plugin_the_source_loads_is_refused():
+    with tempfile.TemporaryDirectory() as t:
+        refuses(lambda: lab_context(Path(t), PLACED_FILES, PLACED_SOURCE,
+                                    placed_entry({"Lab.esp": {"after": "PB.esp"}, "PA.esp": {"after": "PB.esp"}})
+                                    ).resolve(), "PA.esp is in the source profile's load order already")
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

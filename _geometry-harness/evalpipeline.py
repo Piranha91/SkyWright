@@ -13,9 +13,10 @@ variants) and the machine; everything else is derived or refused:
             combined; subject with each unit (more than one unit); per key, combined + key and, when the key masters
             exactly one partner unit, subject + that unit + key; combined + every key (more than one key); then the
             entry's extra arms and order variants. Arms with the same plugins and order rule collapse to the first.
-  order     `order_arm`: the source profile's load order, ESM-flagged plugins first (the game's rule), keys absent from
-            the source after everything; a late or missing master refuses by name. Asset providers follow the plugin
-            order (a later plugin's folder wins), keys' folders strongest.
+  order     `order_arm`: the source profile's load order (plus the entry's `places` for plugins it does not load),
+            ESM-flagged plugins first (the game's rule), keys absent from the source after everything; a late or
+            missing master refuses by name. Asset providers follow the plugin order (a later plugin's folder wins),
+            keys' folders strongest.
   stages    census, prepare, scope, plan, evaluate, records, scenes, bundle, precedent, report-plan, capture,
             image-observations, report, reel, deliver. Each stage is a receipt in RUN/stages.json bound to the hashes
             of its inputs and outputs; `run` reuses an accepted stage whose bindings are unchanged and reruns one that
@@ -263,7 +264,7 @@ def order_arm(arm: dict, baseline: list[str], source_order: list[str], headers: 
     index = {p.lower(): i for i, p in enumerate(source_order)}
     for p in plugins:
         if p.lower() not in index and p not in keys:
-            raise Refusal(f"{p} is not in the source profile's load order; add it there or name its place in the entry.")
+            raise Refusal(f"{p} is not in the source profile's load order; add it there or name its place in the entry's places ({{plugin: {{after: plugin}}}}).")
     late = len(source_order)
 
     def pos(p):
@@ -472,6 +473,15 @@ class Context:
         partner_plugins = [p for u in _units(e) for p in u]
         companions = {k.lower(): v for k, v in (e.get("companions") or {}).items()}
         source = self.source_order()   # read before the headers: its spellings outrank theirs
+        places = e.get("places") or {}
+        for p, where in places.items():
+            if p in source:
+                raise Refusal(f"{p} is in the source profile's load order already; drop it from the entry's places.")
+            after = (where or {}).get("after")
+            if after not in source:
+                raise Refusal(f"places: {p} is to load after {after}, which the source profile does not load; "
+                              f"name a plugin it loads.")
+            source.insert(source.index(after) + 1, p)
         headers, providers, todo = {}, {}, list(subj + partner_plugins + keys + list(e.get("baseline", [])))
         for c in companions.values():
             todo += c
@@ -484,6 +494,13 @@ class Context:
             headers[p]["masters"] = self.names.many(headers[p]["masters"])
             providers[p] = mod
             todo += headers[p]["masters"]
+        for p in places:
+            # a place is checked against the plugin's own masters: one that loads later would be a broken order
+            late = sorted((m for m in (headers.get(p) or {}).get("masters", [])
+                           if m in source and source.index(m) > source.index(p)), key=source.index)
+            if late:
+                raise Refusal(f"places: {p} after {places[p].get('after')} loads before its master {late[0]}; "
+                              f"place it after {late[-1]}.")
         evaluated = set(subj + partner_plugins + keys)
         # baseline: the entry's pins plus every master closure of the subject and keys outside the evaluated set
         base = list(e.get("baseline", []))
