@@ -91,22 +91,29 @@ def say_names(names: list[str]) -> list[str]:
     return [n if k == 1 else f"{n} ({NUMBER_WORDS.get(k, str(k))} of them)" for n, k in counts.items()]
 
 
+def result_about(x: dict, fks) -> bool:
+    """Whether a capture result is about this clash (its first key and its partners): the result's record keys start
+    with the clash's first key and hold every partner. A result without record keys falls back to its first key."""
+    fks = [str(k) for k in fks]
+    if not x.get("formKey"):
+        return False
+    keys = [str(k) for k in x.get("recordKeys") or []]
+    if keys:
+        return keys[0] == fks[0] and set(fks) <= set(keys)
+    return str(x["formKey"]) == fks[0]
+
+
 def clash_refused(fks, capture_results) -> bool:
-    """Whether a capture result refused this clash (its first key and its partners). A refusal names the request's
-    record keys; a clash is refused only when the request was about it: same first key, every partner among the keys.
-    A refusal of one request never marks another request on the same object refused (WRW attempt 5: one object's
-    refused pair dropped its two captured pairs). A result without record keys falls back to its first key."""
-    fks = [str(x) for x in fks]
-    for x in capture_results or []:
-        if x.get("status") != "refused" or not x.get("formKey"):
-            continue
-        keys = [str(k) for k in x.get("recordKeys") or []]
-        if keys:
-            if keys[0] == fks[0] and set(fks) <= set(keys):
-                return True
-        elif str(x["formKey"]) == fks[0]:
-            return True
-    return False
+    """Whether a capture result refused this clash. A clash is refused only when the request was about it
+    (`result_about`): a refusal of one request never marks another request on the same object refused (WRW attempt 5:
+    one object's refused pair dropped its two captured pairs)."""
+    return any(x.get("status") == "refused" and result_about(x, fks) for x in capture_results or [])
+
+
+def captured_request(fks, capture_results) -> str | None:
+    """The id of the captured request about this clash (`result_about`), or None."""
+    return next((x.get("request") for x in capture_results or []
+                 if x.get("status") == "captured" and result_about(x, fks)), None)
 
 
 def joined(xs: list[str]) -> str:
@@ -679,13 +686,26 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     arm_of = {"without": without_arm, "with": with_arm, "highlight": with_arm, "left": without_arm, "right": with_arm}
 
     def frame_media(c, state):
+        """A clash's frame in one state, from ONE capture request: the captured request about the clash, else the
+        request of its first matching frame. Two requests can picture one object (WRW: the tower in two pairs), and
+        frames from both would mix two poses in one vignette."""
         fks = {c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])}
-        for m in pres.get("media") or []:
+
+        def matches(m, st):
             prov = m.get("provenance") or {}
-            if (m.get("assessed") and prov.get("vignetteState") == state and (m.get("subject") or {}).get("formKey") in fks
-                    and (m.get("subject") or {}).get("armId") == arm_of[state]):
+            return (m.get("assessed") and prov.get("vignetteState") == st and (m.get("subject") or {}).get("formKey") in fks
+                    and (m.get("subject") or {}).get("armId") == arm_of[st])
+        req = captured_request([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results)
+        if req is None:
+            first = next((m for st in states_of(c) for m in pres.get("media") or [] if matches(m, st)), None)
+            req = ((first or {}).get("provenance") or {}).get("captureRequest")
+        for m in pres.get("media") or []:
+            if matches(m, state) and (req is None or (m.get("provenance") or {}).get("captureRequest") == req):
                 return m
         return None
+
+    def states_of(c):
+        return ["left", "right"] if c["type"] == "record" else list(policy["sequence"])
 
     type_labels = words["typeLabels"]
     counts = {}

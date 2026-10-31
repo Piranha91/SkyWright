@@ -1951,13 +1951,55 @@ def code_sabotage(name: str) -> int:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def capture_binding_fixture():
+    """The synthetic evaluation with WRW's capture shape: two captured requests picture one object (000101, the first
+    overlap clash's), and the first clash a plan picks in another group (000103) was never captured."""
+    pres, names, masters, search, mods = synthetic()
+
+    def media(req, fk, states=("without", "with", "highlight")):
+        arm = {"without": "without-target", "with": "with-target", "highlight": "with-target"}
+        return [{"id": f"M-{req}-{s}", "assessed": True, "mediaKind": "offline-render",
+                 "subject": {"checkId": "geometry.object-overlap", "armId": arm[s], "formKey": fk},
+                 "provenance": {"captureRequest": req, "vignetteState": s, "poseId": "pose-" + req}} for s in states]
+    # req-other pictures 000101 with an object no clash here names; its frames come first in the media list
+    pres["media"] = media("req-other", "000101:Target.esp") + media("req-own", "000101:Target.esp") \
+        + media("req-cell-two", "000104:Target.esp")
+    captures = [{"request": "req-other", "status": "captured", "formKey": "000101:Target.esp",
+                 "recordKeys": ["000101:Target.esp", "000999:Alpha.esp"]},
+                {"request": "req-own", "status": "captured", "formKey": "000101:Target.esp",
+                 "recordKeys": ["000101:Target.esp", "000201:Alpha.esp"]},
+                {"request": "req-cell-two", "status": "captured", "formKey": "000104:Target.esp",
+                 "recordKeys": ["000104:Target.esp", "000204:Alpha.esp"]}]
+    return pres, names, masters, search, mods, captures
+
+
+def plan_final(pres, names, masters, search, mods, captures, final):
+    """plan_reel with the capture stage closed when the planner takes `captures_final` (a planner without it is
+    called as it can be, so its output fails the assertions rather than crashing)."""
+    import inspect
+    import reel_plan
+    kw = {"captures_final": final} if "captures_final" in inspect.signature(reel_plan.plan_reel).parameters else {}
+    return reel_plan.plan_reel(copy.deepcopy(pres), names, masters, POLICY, WORDS, search, mods, captures,
+                               markers=MARKERS, switches=SWITCHES, **kw)
+
+
+def case_capture_binding():
+    pres, names, masters, search, mods, captures = capture_binding_fixture()
+    reel = plan_final(pres, names, masters, search, mods, captures, final=False)
+    vig = [ch for ch in reel.get("chapters") or [] if (ch.get("clash") or {}).get("formKey") == "000101:Target.esp"]
+    ids = [f.get("mediaId") for ch in vig for f in ch.get("frames") or []]
+    check("B1-one-request", bool(vig) and all(str(i).startswith("M-req-own-") for i in ids),
+          f"a vignette's frames all come from the capture request about its clash, never from another request on the "
+          f"same object (frames {ids})")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--presentation")
     ap.add_argument("--reference", action="store_true")
     ap.add_argument("--sabotage")
     ap.add_argument("--code-sabotage", help="a CODE_SABOTAGE arm name, or all")
-    ap.add_argument("--case", choices=("planner", "capture", "data", "render"))
+    ap.add_argument("--case", choices=("planner", "capture", "binding", "data", "render"))
     a = ap.parse_args(argv)
     if a.code_sabotage:
         arms = list(CODE_SABOTAGE) if a.code_sabotage == "all" else [a.code_sabotage]
@@ -1974,7 +2016,7 @@ def main(argv=None) -> int:
         arms = SABOTAGE if a.sabotage == "all" else [a.sabotage]
         return max(case_sabotage(n, got) for n in arms)
     else:
-        cases = {"planner": case_planner, "capture": case_capture_plan, "data": case_skill_data, "render": case_render}
+        cases = {"planner": case_planner, "capture": case_capture_plan, "binding": case_capture_binding, "data": case_skill_data, "render": case_render}
         for case in ([cases[a.case]] if a.case else cases.values()):
             try:
                 case()
