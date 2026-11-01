@@ -569,6 +569,37 @@ def case_60_a_heavy_child_holds_the_slot_for_its_own_hold_minutes():
     assert a1[a1.index("--") + 1:] == ["x"], "the job's own argv follows the prefix"
 
 
+def case_61_evaluate_stops_itself_at_its_budget_with_the_slot_held_that_long():
+    import types
+    def run(budget):
+        calls = []
+        saved = EP.child, EP.evalrun
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t)
+            (out / "evaluation").mkdir()
+            (out / "evaluate").mkdir()
+            (out / "evaluation" / "ledger.json").write_text('{"runIds": [], "entries": {}}', encoding="utf-8")
+            (out / "evaluation" / "plan.json").write_text("{}", encoding="utf-8")
+            ctx = types.SimpleNamespace(out=out, id="m", machine={}, entry={"evaluation": {"budgetMinutes": budget}})
+            try:
+                def fake(*a, **k):
+                    calls.append(k)
+                    return {"exitCode": 0, "stopped": None}
+                EP.child = fake
+                EP.evalrun = lambda *a: list(a)
+                EP.stage_evaluate(ctx, {}, out / "evaluate")
+            finally:
+                EP.child, EP.evalrun = saved
+        return calls
+    k = run(325)[0]
+    assert k.get("deadline_min", 0) > 325, f"evalrun's own 325-minute budget stops it first, got an outer deadline of {k.get('deadline_min')}"
+    assert k.get("hold_min") == k.get("deadline_min"), f"the slot is held as long as the stage's deadline, got {k.get('hold_min')}"
+    assert k.get("heavy") is True, "evaluate takes the machine slot"
+    k = run(105)[0]
+    assert k.get("deadline_min", 0) > 105, f"a short budget also stops by itself, got {k.get('deadline_min')}"
+    assert len(run(325)) == 1, "one invocation when evalrun ends by itself"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

@@ -755,10 +755,13 @@ def stage_evaluate(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     run = ctx.out / "evaluation"
     history = []
     verb = "resume" if (run / "ledger.json").is_file() and read_json(run / "ledger.json").get("runIds") else "run"
+    # evalrun stops itself at the plan's budget and releases the slot; a stop from outside leaves a stale lock that
+    # keeps the machine busy for the next attempt, so the deadline and the slot's hold sit past the budget.
+    backstop = int(ctx.entry.get("evaluation", {}).get("budgetMinutes", 90)) + 10
     for attempt in range(1, 6):
         before = ledger_counts(run)
         r = child(ctx, sdir / "commands", f"evaluate-{attempt:02d}", evalrun(verb, "--run", fwd(run)), heavy=True,
-                  purpose=f"evalpipeline {ctx.id} evaluate", deadline_min=110)
+                  purpose=f"evalpipeline {ctx.id} evaluate", deadline_min=backstop, hold_min=backstop)
         after = ledger_counts(run)
         history.append({"attempt": attempt, "verb": verb, "exitCode": r.get("exitCode"), "stopped": r.get("stopped"),
                         "before": before, "after": after})
