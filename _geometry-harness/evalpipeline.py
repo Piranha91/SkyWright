@@ -601,12 +601,18 @@ def write_profile(ctx: Context, files: dict[str, bytes]) -> Path:
 
 # ---------------------------------------------------------------- stage bodies
 
-def child(ctx, ledger_dir, op, argv, *, heavy=False, purpose=None, deadline_min=None, env=None):
-    """One child through the shared Runner; a heavy child goes through the machine's slot command."""
+def child(ctx, ledger_dir, op, argv, *, heavy=False, purpose=None, deadline_min=None, env=None, hold_min=None):
+    """One child through the shared Runner; a heavy child goes through the machine's slot command, held for
+    `hold_min` minutes when given (the slot command's --max-min), else for the machine's own hold."""
     if heavy and ctx.machine.get("heavyPrefix"):
         # one lock file per mod and step: two runs of different mods never name the same lock
         lock = Path(ctx.machine.get("lockDir") or ctx.out) / f"HEAVY-LOCK-{ctx.id}-{op}"
         prefix = [x.replace("{purpose}", purpose or op).replace("{lock}", fwd(lock)) for x in ctx.machine["heavyPrefix"]]
+        if hold_min is not None:
+            if "--max-min" in prefix:
+                prefix[prefix.index("--max-min") + 1] = str(hold_min)
+            else:
+                prefix += ["--max-min", str(hold_min)]
         argv = prefix + ["--"] + argv
     job = {"id": op, "argv": [str(a) for a in argv], "cwd": str(ROOT)}
     if env:
@@ -816,8 +822,10 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     # Finished arms are kept in the checkpoints folder, so a stop or a rerun reads only the arms not yet finished.
     (sdir / "checkpoints").mkdir(exist_ok=True)
     argv += ["--checkpoints", fwd(sdir / "checkpoints"), "--arm-deadline-min", str(RECORDS_ARM_MINUTES)]
-    r = child(ctx, sdir / "commands", "records-capture", argv,
-              deadline_min=RECORDS_ARM_MINUTES * len(open_arms) + 10)
+    # the read takes the machine slot, held as long as the stage's own backstop so the slot never stops it first
+    backstop = RECORDS_ARM_MINUTES * len(open_arms) + 10
+    r = child(ctx, sdir / "commands", "records-capture", argv, heavy=True, purpose=f"evalpipeline {ctx.id} records",
+              deadline_min=backstop, hold_min=backstop)
     summary = read_json(cap / "capture-summary.json") if (cap / "capture-summary.json").is_file() else {}
     imports, refusals = [], {}
     for arm, v in summary.items():

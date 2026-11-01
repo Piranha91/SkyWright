@@ -505,6 +505,70 @@ def case_58_the_records_stage_keeps_finished_arms_and_scales_its_deadline():
     assert "deadline_min=240" not in src, "no fixed stage deadline"
 
 
+def case_59_the_records_stage_takes_the_machine_slot_for_its_backstop():
+    import types
+    calls = []
+    saved = EP.child, EP.comparison_cells, EP.reader_cmd
+    with tempfile.TemporaryDirectory() as t:
+        out = Path(t)
+        for d in ("scope", "evaluation", "prepare", "records"):
+            (out / d).mkdir()
+        (out / "scope" / "scopes.json").write_text("{}", encoding="utf-8")
+        (out / "prepare" / "preparation.json").write_text('{"arms": []}', encoding="utf-8")
+        led = {f"row{i}__{a}": {"status": "mcp-only"} for i, a in enumerate(("baseline", "candidate-01", "candidate-02"))}
+        (out / "evaluation" / "ledger.json").write_text(json.dumps({"entries": led}), encoding="utf-8")
+        ctx = types.SimpleNamespace(out=out, game=out, instance=out, profile="p", id="m", machine={})
+        try:
+            EP.child = lambda *a, **k: calls.append((a, k)) or {"exitCode": 0}
+            EP.comparison_cells = lambda res, scopes: {}
+            EP.reader_cmd = lambda c: "reader"
+            try:
+                EP.stage_records(ctx, {}, out / "records")
+            except EP.Refusal:
+                pass
+        finally:
+            EP.child, EP.comparison_cells, EP.reader_cmd = saved
+    cap = [k for a, k in calls if len(a) > 2 and a[2] == "records-capture"]
+    assert cap, "the records stage reads its arms through one child"
+    k = cap[0]
+    assert k.get("heavy") is True, f"the records stage takes the machine slot, got heavy={k.get('heavy')}"
+    want = EP.RECORDS_ARM_MINUTES * 3 + 10
+    assert k.get("hold_min") == want, f"the slot is held for the stage's backstop ({want} min), got {k.get('hold_min')}"
+    assert k.get("deadline_min") == want, f"the stage's backstop is {want} min, got {k.get('deadline_min')}"
+
+
+def case_60_a_heavy_child_holds_the_slot_for_its_own_hold_minutes():
+    import types
+    seen = []
+
+    class FakeRunner:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self, jobs, echo=False):
+            seen.extend(jobs)
+            return [{"exitCode": 0}]
+    prefix = ["python", "idle_lock.py", "hold", "--lock", "{lock}", "--purpose", "{purpose}", "--max-min", "180",
+              "--min-free-gb", "16"]
+    saved = EP.Runner
+    with tempfile.TemporaryDirectory() as t:
+        ctx = types.SimpleNamespace(out=Path(t), id="m", machine={"heavyPrefix": prefix, "lockDir": t})
+        try:
+            EP.Runner = FakeRunner
+            try:
+                EP.child(ctx, Path(t), "records-capture", ["x"], heavy=True, hold_min=460)
+            except TypeError:
+                raise AssertionError("a heavy child cannot be given its own slot hold")
+            EP.child(ctx, Path(t), "evaluate-01", ["x"], heavy=True)
+        finally:
+            EP.Runner = saved
+    a1, a2 = seen[0]["argv"], seen[1]["argv"]
+    i = a1.index("--max-min")
+    assert a1[i + 1] == "460" and a1.count("--max-min") == 1, f"the hold is 460 min, once, got {a1[:12]}"
+    assert a2[a2.index("--max-min") + 1] == "180", "a child with no hold of its own keeps the machine's hold"
+    assert a1[a1.index("--") + 1:] == ["x"], "the job's own argv follows the prefix"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
