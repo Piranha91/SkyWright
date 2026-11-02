@@ -711,6 +711,20 @@ def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"preparation": sha256_file(ctx.out / "prepare" / "preparation.json")}, outs + [sdir / "scopes.json"]
 
 
+def planned_budget(out: Path):
+    """The budget an existing plan froze, or None when there is no plan yet."""
+    f = Path(out) / "evaluation" / "plan.json"
+    return ((read_json(f).get("budgets") or {}).get("minutes")) if f.is_file() else None
+
+
+def budget_differs(ctx_entry: dict, out: Path):
+    """The entry's budget when it differs from the existing plan's, else None: a budget is a limit on an invocation, so
+    changing only it keeps the plan, and evaluate continues under the new limit."""
+    planned = planned_budget(out)
+    want = (ctx_entry.get("evaluation") or {}).get("budgetMinutes")
+    return want if planned is not None and want is not None and float(want) != float(planned) else None
+
+
 def evalrun(*args) -> list[str]:
     return [sys.executable, fwd(HERE / "evalrun.py"), *[str(a) for a in args]]
 
@@ -760,7 +774,9 @@ def stage_evaluate(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     backstop = int(ctx.entry.get("evaluation", {}).get("budgetMinutes", 90)) + 10
     for attempt in range(1, 6):
         before = ledger_counts(run)
-        r = child(ctx, sdir / "commands", f"evaluate-{attempt:02d}", evalrun(verb, "--run", fwd(run)), heavy=True,
+        limit = budget_differs(ctx.entry, ctx.out)
+        argv = evalrun(verb, "--run", fwd(run), *(["--budget-minutes", limit] if limit is not None else []))
+        r = child(ctx, sdir / "commands", f"evaluate-{attempt:02d}", argv, heavy=True,
                   purpose=f"evalpipeline {ctx.id} evaluate", deadline_min=backstop, hold_min=backstop)
         after = ledger_counts(run)
         history.append({"attempt": attempt, "verb": verb, "exitCode": r.get("exitCode"), "stopped": r.get("stopped"),
@@ -1407,10 +1423,18 @@ def cmd_run(a) -> int:
             # the entry and every earlier stage's binding decide reuse; the driver's own code is recorded, not bound,
             # because the measurements' tool identities are bound inside evalrun's plan
             measured = {k: v for k, v in ctx.entry.items() if k not in PRESENTATION_KEYS}
+            # a budget-only change touches evaluate and what follows it: earlier stages hash the budget their plan froze,
+            # so a run with an unchanged budget hashes byte for byte as it always did
+            limit = budget_differs(ctx.entry, out)
+            if limit is not None:
+                frozen = float(planned_budget(out))
+                measured["evaluation"] = dict(measured["evaluation"], budgetMinutes=int(frozen) if frozen == int(frozen) else frozen)
             entry_hash = sha256_json(ctx.entry if STAGES.index(name) >= STAGES.index("bundle") else measured)
             inputs = {"entry": entry_hash,
                       "upstream": {s: (ledger.doc["stages"].get(s) or {}).get("inputsSha256")
                                    for s in STAGES[:STAGES.index(name)]}}
+            if limit is not None and name == "evaluate":
+                inputs["budgetInForce"] = limit
             if ledger.decide(name, inputs) == "reuse":
                 print(f"{name}: reused (inputs and outputs unchanged)")
                 run.advance()

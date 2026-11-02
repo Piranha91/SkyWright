@@ -655,20 +655,60 @@ def write_imports(plan, arm, result, session_dir: Path, out: Path, captured: str
 
 def reader_identity(reader_cmd: str) -> dict:
     """The record reader as the checkpoint key names it: its command line and, where the command's program is a file,
-    that file's sha256 (a rebuilt server is another reader)."""
+    that file's sha256 and its folder's package digest (a rebuild can change the dll and corpus beside an unchanged exe)."""
+    import toolidentity
     argv = [t[1:-1] if len(t) > 1 and t[0] == t[-1] == '"' else t
             for t in shlex.split(reader_cmd, posix=os.name != "nt")]
     exe = Path(argv[0]) if argv else None
-    return {"cmd": reader_cmd, "sha256": sha256_file(exe) if exe is not None and exe.is_file() else None}
+    if exe is None or not exe.is_file():
+        return {"cmd": reader_cmd, "sha256": None}
+    try:
+        package = toolidentity.package(exe.parent).get("digest")
+    except toolidentity.Unreadable as ex:
+        raise Refusal(f"the record reader's folder could not be read for its identity: {ex}; check {exe.parent}.")
+    return {"cmd": reader_cmd, "sha256": sha256_file(exe), "package": package}
 
 
-def arm_key(plan: dict, arm: dict, baseline, ini_hashes: dict, code_sha256: str, reader: dict) -> str:
+def folder_listing(folder: Path) -> str:
+    """Every file under one folder by relative path, size and last write (the project's freshness rule: a same-size
+    copy that keeps its timestamp is not seen); an absent folder has its own value."""
+    if not folder.is_dir():
+        return "absent"
+    rows = []
+    for dp, _, names in os.walk(folder):
+        for n in names:
+            f = Path(dp) / n
+            st = f.stat()
+            rows.append([f.relative_to(folder).as_posix().lower(), st.st_size, st.st_mtime_ns])
+    return hashlib.sha256(json.dumps(sorted(rows)).encode("utf-8")).hexdigest()
+
+
+def arm_inputs(arm: dict, data, mods, memo: dict) -> dict:
+    """What the arm reads from disk now: each plugin's bytes, and the listing of Data, overwrite and the arm's mods."""
+    def once(key, fn):
+        if key not in memo:
+            memo[key] = fn()
+        return memo[key]
+
+    plugins = {}
+    for p in (arm.get("requested") or {}).get("plugins") or []:
+        path = Path(str(p.get("path") or ""))
+        plugins[p.get("name")] = once(("file", str(path)), lambda: sha256_file(path) if path.is_file() else None)
+    view = {"data": once(("dir", str(data)), lambda: folder_listing(Path(data)))} if data else {}
+    if mods:
+        view["overwrite"] = once(("dir", "overwrite"), lambda: folder_listing(Path(mods).parent / "overwrite"))
+        for m in arm.get("mods") or []:
+            view["mod:" + m] = once(("dir", m), lambda m=m: folder_listing(Path(mods) / m))
+    return {"plugins": plugins, "assetView": view}
+
+
+def arm_key(plan: dict, arm: dict, baseline, ini_hashes: dict, code_sha256: str, reader: dict, inputs: dict) -> str:
     """What a finished arm's checkpoint is valid for: the arm's own content (plugins in order, asset providers,
-    candidate bytes), the plan, the baseline and the view's INIs, evalrecords' own code and the reader's identity. Any
-    change reads the arm again."""
+    candidate bytes), the plan, the baseline and the view's INIs, what the arm reads from disk now (plugin bytes, asset
+    listing), evalrecords' own code and the reader's identity. Any change reads the arm again."""
     doc = {"planId": plan.get("planId"), "armId": arm["armId"], "plugins": list(arm["plugins"]),
            "mods": list(arm.get("mods") or []), "candidateSha256": arm.get("candidateSha256"),
-           "baseline": list(baseline), "inis": ini_hashes, "code": code_sha256, "reader": reader}
+           "baseline": list(baseline), "inis": ini_hashes, "code": code_sha256, "reader": reader, "inputs": inputs}
     return hashlib.sha256(json.dumps(doc, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -709,11 +749,12 @@ def cmd_capture(a) -> int:
     reader = reader_identity(a.reader_cmd)
     inis = {f.name: sha256_file(f) for f in sorted(Path(a.profile_dir).glob("*.ini"))} if a.profile_dir else {}
     deadline_s = 60 * float(a.arm_deadline_min) if getattr(a, "arm_deadline_min", None) else None
+    memo = {}
     with Run("evalrecords", mode="capture", stage_source="counted") as r:
         arms = [x for x in plan["arms"] if not a.arm or x["armId"] in a.arm]
         r.stage("arms", "arm captures", len(arms), "arms")
         for arm in arms:
-            key = arm_key(plan, arm, baseline, inis, code, reader)
+            key = arm_key(plan, arm, baseline, inis, code, reader, arm_inputs(arm, a.data, a.mods, memo))
             if ckpts is not None:
                 kept = reusable_checkpoint(ckpts / arm["armId"], key)
                 if kept is not None:
@@ -765,7 +806,7 @@ def main(argv=None) -> int:
     p.add_argument("--arm", action="append")
     p.add_argument("--out", required=True)
     p.add_argument("--checkpoints", help="a folder that keeps each finished arm across captures; an arm is reused only "
-                                         "when its key (arm content, plan, evalrecords' code, reader) matches")
+                                         "when its key (arm content, plan, plugin bytes, asset listing, evalrecords' code, reader) matches")
     p.add_argument("--arm-deadline-min", type=float, help="stop one arm's record read after this many minutes")
     p.set_defaults(fn=cmd_capture)
     a = ap.parse_args(argv)

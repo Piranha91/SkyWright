@@ -1903,10 +1903,11 @@ class Ledger:
             out["importOrigin"] = r["imported"].get("origin")
         return out
 
-    def open_invocation(self, command: str, run_id: str | None, parent: str | None) -> None:
+    def open_invocation(self, command: str, run_id: str | None, parent: str | None, budget_minutes=None) -> None:
         self.run_id = run_id
         self.doc.setdefault("runIds", []).append(
-            {"runId": run_id, "parentRunId": parent, "command": command, "startedUtc": utcnow()})
+            {"runId": run_id, "parentRunId": parent, "command": command, "startedUtc": utcnow(),
+             **({"budgetMinutes": budget_minutes} if budget_minutes is not None else {})})
         self.save()
 
     def entry(self, check_id: str, arm_id: str, part: str | None) -> dict | None:
@@ -2554,7 +2555,7 @@ def same_account(prev, new: dict) -> bool:
 # --------------------------------------------------------------------------- the executor --
 
 class Executor:
-    def __init__(self, run: Path, plan: dict, ledger: Ledger, *, resume: bool):
+    def __init__(self, run: Path, plan: dict, ledger: Ledger, *, resume: bool, budget_minutes=None):
         self.run = Path(run)
         self.plan = plan
         self.ledger = ledger
@@ -2569,7 +2570,8 @@ class Executor:
         # than one tick launch a child). `run` and `resume` each start their own deadline from the
         # plan's frozen minutes. The Runner enforces it on the process tree it launched.
         self.t0 = time.perf_counter()
-        self.budget_s = (plan["budgets"].get("minutes") or 0) * 60 or None
+        self.budget_minutes = budget_minutes if budget_minutes is not None else plan["budgets"].get("minutes")
+        self.budget_s = (self.budget_minutes or 0) * 60 or None
         self.deadline = (self.t0 + self.budget_s) if self.budget_s else None
         self.runner = Runner("evalrun-check", out_dir=self.logs, retries=0, deadline=self.deadline)
         self.deadline_stops = 0
@@ -2633,12 +2635,12 @@ class Executor:
         return self.deadline is None or time.perf_counter() < self.deadline
 
     def budget_sentence(self) -> str:
-        return (f"the plan's budget of {self.plan['budgets']['minutes']} minute(s) was reached "
+        return (f"this run's budget of {self.budget_minutes} minute(s) was reached "
                 f"{(time.perf_counter() - self.t0) / 60:.1f} minutes into this run, before this check "
                 f"launched: it was planned and not evaluated")
 
     def stop_sentence(self, res: dict, what: str) -> str:
-        return (f"the plan's budget of {self.plan['budgets']['minutes']} minute(s) was reached while {what} "
+        return (f"this run's budget of {self.budget_minutes} minute(s) was reached while {what} "
                 f"was running: its process tree was stopped at the deadline after {res.get('seconds', 0):.1f}s "
                 f"({'confirmed gone' if res.get('treeStopped') else 'NOT confirmed gone'}); nothing it "
                 f"wrote is accepted, and the check was planned and not evaluated")
@@ -2912,8 +2914,9 @@ def cmd_run(a, *, resuming: bool = False) -> int:
         return refuse(bad)
 
     with Run("evalrun-checks", stage_source="counted") as parent:
-        ledger.open_invocation("resume" if resuming else "run", parent.run_id, None)
-        ex = Executor(run, plan, ledger, resume=resuming)
+        limit = getattr(a, "budget_minutes", None)
+        ledger.open_invocation("resume" if resuming else "run", parent.run_id, None, budget_minutes=limit)
+        ex = Executor(run, plan, ledger, resume=resuming, budget_minutes=limit)
         ex.parent_run_id = parent.run_id
         ex.preflight = measured
         healed = ledger.heal_interrupted()
@@ -2944,8 +2947,8 @@ def cmd_run(a, *, resuming: bool = False) -> int:
             return EXIT_REFUSED_INPUT
         if ex.deadline_stops:
             parent.note(f"deadline: {ex.deadline_stops} running child(ren) stopped at the budget's deadline")
-            print(f"   deadline: {ex.deadline_stops} running child(ren) stopped when the plan's budget of "
-                  f"{plan['budgets']['minutes']} minute(s) ran out; their checks are stopped(deadline) and "
+            print(f"   deadline: {ex.deadline_stops} running child(ren) stopped when this run's budget of "
+                  f"{ex.budget_minutes} minute(s) ran out; their checks are stopped(deadline) and "
                   f"`resume` re-runs them under a fresh deadline")
 
     print_status(run, plan, ledger)
@@ -5573,6 +5576,12 @@ def load_decisions(run: Path, plan: dict) -> list[dict]:
     return out
 
 
+def budgets_in_force(ledger: Ledger) -> list[dict]:
+    """Each invocation that ran under a limit other than the plan's, so a reader of the plan's frozen value is told."""
+    return [{"runId": r.get("runId"), "command": r.get("command"), "budgetMinutes": r["budgetMinutes"]}
+            for r in ledger.doc.get("runIds") or [] if r.get("budgetMinutes") is not None]
+
+
 def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
                       integrity: dict | None = None, bad_keys: dict | None = None) -> dict:
     integrity = integrity or {"ok": True, "defects": []}
@@ -5766,6 +5775,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
         "manualDecisions": decisions,
         "unassessed": unassessed,
         "explicitDecisions": plan["explicitDecisions"],
+        **({"budgetsInForce": budgets_in_force(ledger)} if budgets_in_force(ledger) else {}),
         "discovery": discovery,
         "catalogues": catalogues,
         "importedEvidence": imported_evidence(ledger, receipts, bad_keys),
@@ -5947,6 +5957,9 @@ def status_md(plan: dict, disp: dict) -> str:
         L.append("- none declared by the registry for the checks in this plan")
     L += ["", "## Explicit decisions", ""]
     ed = plan["explicitDecisions"]
+    if disp.get("budgetsInForce"):
+        L.append(f"- time limit: the plan froze {plan['budgets'].get('minutes')} minute(s); limits in force: "
+                 + ", ".join(f"{b['command']} {b['budgetMinutes']}" for b in disp["budgetsInForce"]))
     L.append(f"- --select: {ed['select'] if ed['select'] is not None else 'not used'}")
     L.append(f"- --exclude: {ed['exclude'] or 'not used'}")
     if disp["manualDecisions"]:
@@ -6778,10 +6791,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("run", help="execute the plan's supported checks")
     p.add_argument("--run", required=True)
+    p.add_argument("--budget-minutes", type=float, help="this invocation's time limit, in place of the plan's")
     p.set_defaults(fn=cmd_run)
 
     p = sub.add_parser("resume", help="re-validate, reuse what is unchanged, redo what is not")
     p.add_argument("--run", required=True)
+    p.add_argument("--budget-minutes", type=float, help="this invocation's time limit, in place of the plan's")
     p.add_argument("--rebuild-ledger", action="store_true",
                    help="rebuild ledger.json from journal.jsonl and the receipts on disk")
     p.set_defaults(fn=cmd_resume)

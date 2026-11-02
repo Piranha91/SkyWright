@@ -121,8 +121,11 @@ ARM = {"armId": "baseline", "plugins": ["Base.esm", "Subj.esp", "Legacy.esm"], "
 READER = {"cmd": "reader.exe", "sha256": "r" * 64}
 
 
-def key_of(arm=ARM, code="e" * 64, reader=READER):
-    return ER.arm_key(PLAN, arm, ["Base.esm"], {"skyrim.ini": "i" * 64}, code, reader)
+INPUTS = {"plugins": {"Base.esm": "b" * 64}, "assetView": {"data": "d" * 64}}
+
+
+def key_of(arm=ARM, code="e" * 64, reader=READER, inputs=INPUTS):
+    return ER.arm_key(PLAN, arm, ["Base.esm"], {"skyrim.ini": "i" * 64}, code, reader, inputs)
 
 
 def saved(t: Path, key):
@@ -150,7 +153,9 @@ def case_19_a_changed_arm_code_or_reader_is_read_again():
                    "arm mods": key_of(arm=dict(ARM, mods=["M2", "M1"])),
                    "candidate bytes": key_of(arm=dict(ARM, candidateSha256="d" * 64)),
                    "evalrecords code": key_of(code="f" * 64),
-                   "reader": key_of(reader=dict(READER, sha256="s" * 64))}
+                   "reader": key_of(reader=dict(READER, sha256="s" * 64)),
+                   "plugin bytes": key_of(inputs=dict(INPUTS, plugins={"Base.esm": "c" * 64})),
+                   "asset view": key_of(inputs=dict(INPUTS, assetView={"data": "e" * 64}))}
         for what, k in changed.items():
             assert k != key_of(), f"a changed {what} must change the arm's key"
             assert ER.reusable_checkpoint(Path(t) / "baseline", k) is None, f"a changed {what} reused the old arm"

@@ -2945,6 +2945,7 @@ def case_25(tmp):
 
     class Stub:
         plan = {"budgets": {"minutes": 0.3}}
+        budget_minutes = 0.3
 
         def __init__(self):
             self.calls = []
