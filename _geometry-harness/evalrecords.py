@@ -1,7 +1,7 @@
 """evalrecords - the record capture for an evaluation's mcp-only checks, one reader session per arm.
 
     python _geometry-harness/evalrecords.py capture --run RUN --views DIR --reader-cmd CMD --out DIR
-           --profile-dir PROFILE --data DIR --mods DIR [--cells FILE] [--arm ARM ...] [--reader-data DIR]
+           --profile-dir PROFILE --data DIR --mods DIR [--arm ARM ...] [--reader-data DIR]
 
 What this is for. Five registry checks are `mcp-only`: their capability is the houseCARL record and check tools,
 which evalrun cannot call. This module calls them for each planned arm through the built houseCARL server, in its
@@ -9,15 +9,13 @@ explicit-paths mode (the arm's own plugins.txt, loadorder.txt and modlist.txt, a
 base archives are read), and writes one schema-1 import document per (check, arm) for `evalrun import-results`.
 Every session's `initialize` names `evalrun:<planId>:<armId>`, so each import is `fresh` for its arm.
 
-The selection, per arm (the recipe accepted in round 2's record method assessment):
-  A  every record the arm's evaluated plugins (its plugins minus the dependency baseline) touch;
-  C  the order's contested placed records, navmeshes and landscape inside the comparison cells H;
-  U  = A union C. A record of U is contested when its override depth is above one; a row without a depth is
-     unjudged, never uncontested.
+The selection, per arm: A, every record the arm's evaluated plugins (its plugins minus the dependency baseline) touch.
+A record of A is contested when its override depth is above one; a row without a depth is unjudged, never uncontested.
+A record no evaluated plugin touches cannot produce a row, so it is not read.
 
 The checks:
   loadability.dangling-references   housecarl_check errors family over the arm's whole order: every dangling link.
-  records.contested-fields          lost edits on contested records of U that are not cells or registration records:
+  records.contested-fields          lost edits on contested records of A that are not cells or registration records:
   records.cell-attributes           the same on CELL records;
   records.registration-and-dialogue the same on registration and dialogue records, plus the dialogue and script
                                     findings housecarl_check reports for the evaluated plugins' quests and topics.
@@ -52,7 +50,6 @@ sys.path.insert(0, str(HERE))
 from runlog import Run  # noqa: E402
 
 SCOPE_FILE = ROOT / ".claude/skills/world-edit-compatibility/references/record-field-scope.json"
-LOCAL_TYPES = ["REFR", "ACHR", "NAVM", "LAND"]
 REGISTRATION_TYPES = {"Quest", "DialogTopic", "DialogResponses", "Scene", "FormList", "Location",
                       "StoryManagerQuestNode", "StoryManagerBranchNode", "StoryManagerEventNode", "Package",
                       "DialogBranch", "DialogView"}
@@ -72,14 +69,6 @@ class Refusal(Exception):
 
 
 # ---------------------------------------------------------------- selection rules (pure)
-
-def local_union(partner_rows, contested_rows, cells, types) -> set:
-    """(P intersect T intersect H) union C: the partners' local records in the comparison cells, plus the order's
-    contested local records there."""
-    tset = set(types)
-    keep = {r["formid"] for r in partner_rows if r.get("type") in tset and r.get("parentCell") in cells}
-    return keep | {r["formid"] for r in contested_rows}
-
 
 def touched(arm_plugins, owners, rows) -> set:
     """The records the arm's owners touch; refuses an empty answer while one of them loads."""
@@ -395,7 +384,7 @@ def batched(ids, n=400):
         yield ids[i:i + n]
 
 
-def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None):
+def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
     s = Session(reader_cmd, env, token, deadline_s)
@@ -425,16 +414,12 @@ def capture_arm(plan, arm, baseline, cells, reader_cmd, env, out: Path, scope: F
         result["loadability.dangling-references"] = (drows, [cov])
         log(f"{arm['armId']}: dangling {len(drows)}")
 
-        # the selection U
+        # the selection: what the evaluated plugins touch
         a_rows = summaries(s, {"plugins": {"names": evaluated}}) if evaluated else []
         touched(arm["plugins"], evaluated, a_rows)
-        c_rows = []
-        if cells:
-            where = ["*parent.FormKey in [" + ", ".join(sorted(cells)) + "]"]
-            c_rows = summaries(s, {"types": LOCAL_TYPES, "conflicts_only": True, "where": where})
-        by_id = {r["formid"]: r for r in a_rows + c_rows}
+        by_id = {r["formid"]: r for r in a_rows}
         contested, uncontested, unjudged_ids = classify_depth(list(by_id.values()))
-        log(f"{arm['armId']}: U {len(by_id)} (A {len(a_rows)}, C {len(c_rows)}); contested {len(contested)}")
+        log(f"{arm['armId']}: A {len(a_rows)}; contested {len(contested)}")
 
         # trees of the contested records: who touches, who wins, what each provider differs from the winner by
         trees = {}
@@ -677,14 +662,13 @@ def reader_identity(reader_cmd: str) -> dict:
     return {"cmd": reader_cmd, "sha256": sha256_file(exe) if exe is not None and exe.is_file() else None}
 
 
-def arm_key(plan: dict, arm: dict, baseline, cells, ini_hashes: dict, code_sha256: str, reader: dict) -> str:
+def arm_key(plan: dict, arm: dict, baseline, ini_hashes: dict, code_sha256: str, reader: dict) -> str:
     """What a finished arm's checkpoint is valid for: the arm's own content (plugins in order, asset providers,
-    candidate bytes), the plan, the baseline, the comparison cells and the view's INIs, evalrecords' own code and the
-    reader's identity. Any change reads the arm again."""
+    candidate bytes), the plan, the baseline and the view's INIs, evalrecords' own code and the reader's identity. Any
+    change reads the arm again."""
     doc = {"planId": plan.get("planId"), "armId": arm["armId"], "plugins": list(arm["plugins"]),
            "mods": list(arm.get("mods") or []), "candidateSha256": arm.get("candidateSha256"),
-           "baseline": list(baseline), "cells": sorted(cells), "inis": ini_hashes, "code": code_sha256,
-           "reader": reader}
+           "baseline": list(baseline), "inis": ini_hashes, "code": code_sha256, "reader": reader}
     return hashlib.sha256(json.dumps(doc, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -716,7 +700,6 @@ def cmd_capture(a) -> int:
     run = Path(a.run)
     plan = json.loads((run / "plan.json").read_text(encoding="utf-8"))
     baseline = json.loads(Path(a.baseline_from).read_text(encoding="utf-8"))["baseline"]
-    cells = json.loads(Path(a.cells).read_text(encoding="utf-8")) if a.cells else []
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     scope = FieldScope()
@@ -730,7 +713,7 @@ def cmd_capture(a) -> int:
         arms = [x for x in plan["arms"] if not a.arm or x["armId"] in a.arm]
         r.stage("arms", "arm captures", len(arms), "arms")
         for arm in arms:
-            key = arm_key(plan, arm, baseline, cells, inis, code, reader)
+            key = arm_key(plan, arm, baseline, inis, code, reader)
             if ckpts is not None:
                 kept = reusable_checkpoint(ckpts / arm["armId"], key)
                 if kept is not None:
@@ -748,7 +731,7 @@ def cmd_capture(a) -> int:
             captured = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
             session_dir = home / "sessions" / arm["armId"]
             try:
-                result = capture_arm(plan, arm, baseline, cells, a.reader_cmd, env, session_dir, scope,
+                result = capture_arm(plan, arm, baseline, a.reader_cmd, env, session_dir, scope,
                                      lambda m: print(m, flush=True), deadline_s=deadline_s)
             except Refusal as ex:
                 summary[arm["armId"]] = {"refused": str(ex)}
@@ -778,12 +761,11 @@ def main(argv=None) -> int:
     p.add_argument("--data", required=True, help="the game's Data folder")
     p.add_argument("--mods", required=True, help="the lab instance's mods folder")
     p.add_argument("--profile-dir", help="the base profile, whose INIs every view copies")
-    p.add_argument("--cells", help="a JSON list of comparison cell FormKeys")
     p.add_argument("--reader-data", help="a private HOUSECARL_DATA_DIR for the reader")
     p.add_argument("--arm", action="append")
     p.add_argument("--out", required=True)
     p.add_argument("--checkpoints", help="a folder that keeps each finished arm across captures; an arm is reused only "
-                                         "when its key (arm content, plan, cells, evalrecords' code, reader) matches")
+                                         "when its key (arm content, plan, evalrecords' code, reader) matches")
     p.add_argument("--arm-deadline-min", type=float, help="stop one arm's record read after this many minutes")
     p.set_defaults(fn=cmd_capture)
     a = ap.parse_args(argv)

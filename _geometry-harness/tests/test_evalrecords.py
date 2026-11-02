@@ -4,10 +4,8 @@ Dependency-free: `python _geometry-harness/tests/test_evalrecords.py`. EVALRECOR
 from that file instead (the sabotage arms use it). Rows are synthetic, in the summary-row shape the record reader's
 summary exports carry (formid, type, parent cell, override_depth).
 
-Selection per arm: A = every record the loaded subject and keys touch; P = the loaded partners' records; within the
-comparison cells H and the local types T, the local set is (P intersect T intersect H) union C, where C is the order's
-contested records of types T in H. A record is contested when its override depth is above one; a row without a depth
-is unjudged, never uncontested. The import itself is checked at Gate C against round 2's accepted Missives imports.
+Selection per arm: A = every record the arm's evaluated plugins touch. A record is contested when its override depth is
+above one; a row without a depth is unjudged, never uncontested. test_records_keep_work.py drives the whole capture.
 """
 import importlib.util
 import json
@@ -48,13 +46,6 @@ def row(fid, rtype, cell, depth=1):
 
 CELLS = {"C1", "C2"}
 TYPES = {"REFR", "ACHR", "NAVM", "LAND"}
-
-
-def case_1_local_union():
-    partner = [row("p1", "REFR", "C1"), row("p2", "REFR", "C9"), row("p3", "QUST", None), row("p4", "NAVM", "C2")]
-    contested = [row("c1", "REFR", "C1", 2), row("p1", "REFR", "C1", 2)]
-    got = ER.local_union(partner, contested, CELLS, TYPES)
-    assert got == {"p1", "p4", "c1"}, f"(P ∩ T ∩ H) ∪ C, got {sorted(got)}"
 
 
 def case_3_empty_touched_with_subject_loaded_refused():
@@ -130,8 +121,8 @@ ARM = {"armId": "baseline", "plugins": ["Base.esm", "Subj.esp", "Legacy.esm"], "
 READER = {"cmd": "reader.exe", "sha256": "r" * 64}
 
 
-def key_of(arm=ARM, code="e" * 64, reader=READER, cells=("000A:Base.esm",)):
-    return ER.arm_key(PLAN, arm, ["Base.esm"], list(cells), {"skyrim.ini": "i" * 64}, code, reader)
+def key_of(arm=ARM, code="e" * 64, reader=READER):
+    return ER.arm_key(PLAN, arm, ["Base.esm"], {"skyrim.ini": "i" * 64}, code, reader)
 
 
 def saved(t: Path, key):
@@ -151,7 +142,7 @@ def case_17_a_finished_arm_with_the_same_key_is_reused():
         assert got == s, f"a finished arm with the same key is reused as saved, got {got}"
 
 
-def case_19_a_changed_arm_code_reader_or_cells_is_read_again():
+def case_19_a_changed_arm_code_or_reader_is_read_again():
     import tempfile
     with tempfile.TemporaryDirectory() as t:
         saved(Path(t), key_of())
@@ -159,8 +150,7 @@ def case_19_a_changed_arm_code_reader_or_cells_is_read_again():
                    "arm mods": key_of(arm=dict(ARM, mods=["M2", "M1"])),
                    "candidate bytes": key_of(arm=dict(ARM, candidateSha256="d" * 64)),
                    "evalrecords code": key_of(code="f" * 64),
-                   "reader": key_of(reader=dict(READER, sha256="s" * 64)),
-                   "cells": key_of(cells=("000A:Base.esm", "000B:Base.esm"))}
+                   "reader": key_of(reader=dict(READER, sha256="s" * 64))}
         for what, k in changed.items():
             assert k != key_of(), f"a changed {what} must change the arm's key"
             assert ER.reusable_checkpoint(Path(t) / "baseline", k) is None, f"a changed {what} reused the old arm"

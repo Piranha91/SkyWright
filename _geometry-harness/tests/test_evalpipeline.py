@@ -508,7 +508,7 @@ def case_58_the_records_stage_keeps_finished_arms_and_scales_its_deadline():
 def case_59_the_records_stage_takes_the_machine_slot_for_its_backstop():
     import types
     calls = []
-    saved = EP.child, EP.comparison_cells, EP.reader_cmd
+    saved = EP.child, EP.reader_cmd
     with tempfile.TemporaryDirectory() as t:
         out = Path(t)
         for d in ("scope", "evaluation", "prepare", "records"):
@@ -520,14 +520,13 @@ def case_59_the_records_stage_takes_the_machine_slot_for_its_backstop():
         ctx = types.SimpleNamespace(out=out, game=out, instance=out, profile="p", id="m", machine={})
         try:
             EP.child = lambda *a, **k: calls.append((a, k)) or {"exitCode": 0}
-            EP.comparison_cells = lambda res, scopes: {}
             EP.reader_cmd = lambda c: "reader"
             try:
                 EP.stage_records(ctx, {}, out / "records")
             except EP.Refusal:
                 pass
         finally:
-            EP.child, EP.comparison_cells, EP.reader_cmd = saved
+            EP.child, EP.reader_cmd = saved
     cap = [k for a, k in calls if len(a) > 2 and a[2] == "records-capture"]
     assert cap, "the records stage reads its arms through one child"
     k = cap[0]

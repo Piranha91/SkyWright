@@ -779,18 +779,6 @@ def stage_evaluate(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     return {"plan": sha256_file(run / "plan.json")}, [sdir / "evaluate.json"]
 
 
-def comparison_cells(res: dict, scopes: dict) -> list[str]:
-    """The record capture's comparison cells H: every non-persistent cell a scope target places in, over all arms,
-    except the baseline's own target."""
-    evaluated = set(res["subject"]) | {p for u in res["partners"] for p in u} | set(res["keys"])
-    cells = set()
-    for arm in scopes.values():
-        for t, x in arm["targets"].items():
-            if t in evaluated:
-                cells |= set(x["measuredCells"])
-    return sorted(cells)
-
-
 def reader_cmd(ctx) -> str:
     cmd = ctx.machine.get("readerCmd") or os.environ.get("HOUSECARL_RECORD_READER_CMD")
     if not cmd:
@@ -804,9 +792,6 @@ RECORDS_ARM_MINUTES = 150
 
 
 def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
-    scopes = read_json(ctx.out / "scope" / "scopes.json")
-    cells = comparison_cells(res, scopes)
-    write_json(sdir / "cells.json", cells)
     run = ctx.out / "evaluation"
     led = read_json(run / "ledger.json").get("entries") or {}
     open_arms = sorted({k.split("__")[1] for k, v in led.items() if str(v.get("status")) == "mcp-only" and "__" in k})
@@ -819,7 +804,7 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
             *[x for a in open_arms for x in ("--arm", a)],
             "--baseline-from", fwd(ctx.out / "prepare" / "preparation.json"), "--reader-cmd", reader_cmd(ctx),
             "--data", fwd(ctx.game / "Data"), "--mods", fwd(ctx.instance / "mods"),
-            "--profile-dir", fwd(ctx.instance / "profiles" / ctx.profile), "--cells", fwd(sdir / "cells.json"),
+            "--profile-dir", fwd(ctx.instance / "profiles" / ctx.profile),
             "--reader-data", fwd(ctx.out / "reader-data"), "--out", fwd(cap)]
     # an arm's read is stopped at RECORDS_ARM_MINUTES (a hung reader); the stage's backstop scales with the open arms.
     # Finished arms are kept in the checkpoints folder, so a stop or a rerun reads only the arms not yet finished.
@@ -843,7 +828,7 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         results.append({"file": doc, "exitCode": rr.get("exitCode"),
                         "log": fwd(log) if log.is_file() else None})
     write_json(sdir / "records.json", {"capture": summary, "captureExit": r.get("exitCode"), "imports": results,
-                                       "refusedArms": refusals, "cells": len(cells)})
+                                       "refusedArms": refusals})
     bad = [x for x in results if x["exitCode"] != 0]
     if r.get("exitCode") not in (0, 2) or not summary:
         raise Refusal(f"the record capture did not finish (exit {r.get('exitCode')}); read {fwd(sdir / 'commands')}.")
