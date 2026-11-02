@@ -3972,22 +3972,37 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
                 rows[-1].pop("sweepFolders")
             ex.ledger.save()
     if res.get("stopped"):
-        # Defect iv: the sweep was stopped at the deadline (or never launched). Nothing in its folder is read
-        # for credit: the summary is absent, an emit may be written by a probe that never finished. Every planned
-        # part not already terminal-ok is accounted with the named cause. Probe jobs whose process tree emptied
-        # before the stop are carried only by that folder's identity-verified cache, which the next launch reads
-        # (`--reuse-cache`): under a deadline ordersweep records a probe only after its whole tree is empty, so a
-        # probe that exited 0 with a descendant still running is never cached and is re-measured.
+        # Defect iv: the sweep was stopped at the deadline (or never launched). A (check, arm) is credited only when
+        # every job its normal path reads finished in this launch: the baseline's, its forward, its reverse and its diff
+        # with the diff's row. Those go through the ordinary split and its validation. Every other planned part not
+        # already terminal-ok is accounted with the named cause; its finished probes are carried by the folder's
+        # identity-verified cache, which the next launch reads (`--reuse-cache`): under a deadline ordersweep records a
+        # probe only after its whole tree is empty, so one that exited 0 with a descendant still running is re-measured.
+        whole = {}
         if res["stopped"] == "deadline":
             ex.children += 1
             ex.deadline_stops += 1
+            ex.check_accept(sweep_pids, "the ordersweep child")
+            jobs = read_sweep_jobs(inv)
+            summary = load_json(inv / "summary.json") or {}
+            whole = {"jobs": jobs, "summary": summary, "ended": utcnow()}
         for check in sweep_checks:
-            for arm_row in check["arms"]:
+            for arm_row in sorted(check["arms"], key=lambda r: ex.arms[r["armId"]]["kind"] != "baseline"):
                 aid = arm_row["armId"]
                 if aid in stale_arms or (runnable is not None and aid not in runnable):
                     parent.advance()  # already accounted blocked(...) above
                     continue
                 arm = ex.arms[aid]
+                if whole and arm_row.get("status") == "planned" \
+                        and sweep_arm_finished(ex, check, arm, whole["jobs"], whole["summary"]):
+                    ex.checked = ["launch", "acceptance"]
+                    try:
+                        split_sweep_receipts(ex, check, arm, check["adapter"]["exe"], inv, whole["jobs"], whole["summary"],
+                                             res, started_iso, whole["ended"], started_mono, log)
+                    finally:
+                        ex.checked = ["preflight"]
+                    parent.advance()
+                    continue
                 for part in (("arm",) if arm["kind"] == "baseline" else SWEEP_PARTS):
                     e = ex.ledger.entry(check["checkId"], aid, part)
                     if e and e.get("status") in TERMINAL_OK:
@@ -4020,6 +4035,27 @@ def run_ordersweep(ex: Executor, sweep_checks: list[dict], parent, allowed: dict
     finally:
         ex.checked = ["preflight"]
     ex.stop_if_changed()
+
+
+def sweep_arm_finished(ex: Executor, check: dict, arm: dict, jobs: dict, summary: dict) -> bool:
+    """After a stop: did every job this (check, arm)'s receipts read finish in this launch? The baseline's emit for all;
+    for a candidate its forward, its reverse unless none was asked for, its diff and the diff's row in the summary."""
+    probe = check["adapter"]["exe"]
+
+    def produced(job: str) -> bool:
+        rec = jobs.get(job) or {}
+        return rec.get("exitCode") == 0 and (rec.get("outcome") == "reused"
+                                             or (rec.get("outcome") == "ran" and bool(rec.get("emitWritten"))))
+    if not produced(f"{probe}-baseline"):
+        return False
+    if arm["kind"] == "baseline":
+        return True
+    stem = Path(arm["candidateFile"]).stem
+    needed = [f"{probe}-{stem}", f"diff-{probe}-{stem}"]
+    if not ex.opts.get("noReverse"):
+        needed.append(f"{probe}-{stem}-reverse")
+    rows = ((summary.get("candidates") or {}).get(stem) or {}).get("rows") or []
+    return all(produced(j) for j in needed) and any(r.get("probe") == probe for r in rows)
 
 
 def _split_sweep(ex, sweep_checks, parent, stale_arms, runnable, inv, jobs, summary, res, started_iso, ended_iso,

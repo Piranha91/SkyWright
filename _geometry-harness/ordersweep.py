@@ -573,6 +573,27 @@ def main() -> int:
 
     results: dict[str, list[dict]] = {}
     base_emits: dict[str, Path] = {}
+
+    def candidate_entry(cand: Path, rows: list[dict], classification) -> dict:
+        cf = load_json(cand) or {}
+        return {"classification": classification,
+                "changes": "; ".join(cf.get("Changes") or cf.get("changes") or []) or "(none listed)", "rows": rows,
+                "rules": rules_of.get(cand.stem, {"violates": [], "satisfies": []})}
+
+    def summary_head() -> dict:
+        return {"baseline": str(baseline), "probes": probes, "candidates": {}, "manifest": manifest,
+                **({"population": {"file": str(pop_file), "sha256": pop_sha, "probes": sorted(pop_probes)}} if pop_probes else {})}
+
+    def save_progress() -> None:
+        """The rows finished so far, so a stop keeps them. A candidate is classified only once all its probes have rows."""
+        doc = summary_head()
+        for c, rows in results.items():
+            path = next(x for x in cands if x.stem == c)
+            doc["candidates"][c] = candidate_entry(path, rows, classify(rows) if len(rows) == len(probes) else None)
+        tmp = out / "summary.json.tmp"
+        tmp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+        os.replace(tmp, out / "summary.json")
+
     with Run("ordersweep-plan", stage_source="counted") as plan:
         plan.feature("candidates", len(cands), "candidates"); plan.feature("probes", len(probes), "probes")
         plan.stage("baseline", total=len(probes), unit="probes")
@@ -589,14 +610,14 @@ def main() -> int:
         arms = 3 if not a.no_reverse else 2
         plan.stage("candidates", total=len(cands) * len(probes) * arms, unit="probe-arms")
         for cand in cands:
-            rows = []
+            rows = results[cand.stem] = []
             for p in probes:
                 row = {"probe": p, "candidate": cand.stem, "probeExit": None, "probeRefused": False, "illegal": False,
                        "diff": {"verdict": "(not run)", "counts": {}, "refusals": [], "delta": []},
                        "created": {"created": 0, "newDefect": 0, "attributed": 0, "unmeasured": 0}}
                 base_emit = base_emits.get(p)
                 if base_emit is None:
-                    row["probeExit"] = -1; rows.append(row); plan.advance(arms); continue
+                    row["probeExit"] = -1; rows.append(row); save_progress(); plan.advance(arms); continue
                 emit = out / p / f"{cand.stem}.json"
                 code, refused, illegal, got, measured = run_probe(f"{p}-{cand.stem}", p, cand, base_emit, emit)
                 row.update(probeExit=code, probeRefused=refused, illegal=illegal, emit=str(got))
@@ -634,11 +655,10 @@ def main() -> int:
                 else:
                     plan.advance(arms - 1)
                 rows.append(row)
-            results[cand.stem] = rows
+                save_progress()
 
     # ------------------------------------------------------------------------------------ the report
-    summary = {"baseline": str(baseline), "probes": probes, "candidates": {}, "manifest": manifest,
-               **({"population": {"file": str(pop_file), "sha256": pop_sha, "probes": sorted(pop_probes)}} if pop_probes else {})}
+    summary = summary_head()
     lines = ["# ordersweep report", "",
              f"baseline: `{baseline.name}`; probes: {', '.join(probes)}; candidates evaluated: {len(cands)}; "
              f"reverse measurement: {'off' if a.no_reverse else 'on'}"
@@ -660,7 +680,7 @@ def main() -> int:
         ru = rules_of.get(cand.stem, {"violates": [], "satisfies": []})
         rules_cell = ("violates " + "; ".join(v.split(" — ")[0].split(" — ")[0] for v in ru["violates"])) if ru["violates"] else ("satisfies " + str(len(ru["satisfies"])) if ru["satisfies"] else "—")
         lines.append(f"| {cand.stem} | {changes} | " + " | ".join(cells) + f" | {rules_cell} | **{cls}** |")
-        summary["candidates"][cand.stem] = {"classification": cls, "changes": changes, "rows": rows, "rules": ru}
+        summary["candidates"][cand.stem] = candidate_entry(cand, rows, cls)
         new_defects = sum(r["created"]["newDefect"] for r in rows)
         repaired = sum(r["diff"]["counts"].get("repaired", 0) for r in rows)
         displaced = len(cf.get("Changes") or cf.get("changes") or [])

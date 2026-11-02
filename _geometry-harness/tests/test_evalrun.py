@@ -2054,7 +2054,7 @@ def _pids(pidfile: Path) -> dict:
 def case_21(tmp):
     """Defect iv. `--budget-minutes` is a deadline on the process tree evalrun launched, not only a gate
     before launch: a sweep still running at the deadline is stopped (its probe AND the probe's descendant),
-    nothing from the stopped sweep is accepted (a complete emit with no completion, a stale summary.json and
+    nothing unfinished in the stopped sweep is accepted (a complete emit with no completion, a stale summary.json and
     a stale per-arm log from an 'earlier invocation' are all present), every affected entry is accounted
     with a named cause, finalize/bundle/verify-bundle report a valid incomplete evaluation, and resume
     recovers reusing only intact evidence. Expiry before launch still starts nothing."""
@@ -2173,7 +2173,10 @@ def case_21(tmp):
 
     led = ledger_entries(load(run / "ledger.json") or {})
     parts = [(base_id, "arm"), (cand_id, "arm"), (cand_id, "reverse"), (cand_id, "diff")]
-    for aid, part in parts:
+    # the baseline finished before the stop (its RECORDED line is asserted below), so it keeps its result; this used to
+    # read stopped(deadline), which was the defect of a stop losing every finished job
+    expect(execution_of(led.get(f"{nav}__{base_id}__arm")), "completed", f"{case}: the baseline that finished keeps its result")
+    for aid, part in parts[1:]:
         e = led.get(f"{nav}__{aid}__{part}") or {}
         expect(execution_of(e), "stopped(deadline)", f"{case}: {nav} [{aid}/{part}] after the stop", "defect iv")
         expect(e.get("cause"), "budget-exhausted", f"{case}: {nav} [{aid}/{part}] named cause", "defect iv")
@@ -2295,7 +2298,7 @@ raise SystemExit(main(probe, argv))
 def case_22(tmp):
     """The deadline covers descendants that outlive the process they came from. A probe writes a valid emit
     and exits 0 at once but leaves a sleeping descendant; the sweep itself then finishes. The job is the unit
-    of work, so the check must NOT be accepted: at the deadline the descendant is stopped, every planned part
+    of work, so the check must NOT be accepted: at the deadline the descendant is stopped, every part of that candidate
     is `stopped(deadline)` / budget-exhausted, no entry is left running, and finalize reports it missing."""
     import threading
     case = "case-22-deadline-descendant-outlives-probe"
@@ -2385,7 +2388,9 @@ def case_22(tmp):
     expect(proc.returncode, 0, f"{case}: the run exits 0 (an incomplete evaluation is not a crash)")
 
     led = ledger_entries(load(run / "ledger.json") or {})
-    for aid, part in [(base_id, "arm"), (cand_id, "arm"), (cand_id, "reverse"), (cand_id, "diff")]:
+    # the baseline's job finished, tree empty, before the stop, so it keeps its result (it used to read stopped)
+    expect(execution_of(led.get(f"{nav}__{base_id}__arm")), "completed", f"{case}: the baseline that finished keeps its result")
+    for aid, part in [(cand_id, "arm"), (cand_id, "reverse"), (cand_id, "diff")]:
         e = led.get(f"{nav}__{aid}__{part}") or {}
         expect(execution_of(e), "stopped(deadline)", f"{case}: {nav} [{aid}/{part}] is not accepted as completed",
                "deadline covers the job")
