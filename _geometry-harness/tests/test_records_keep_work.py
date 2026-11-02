@@ -152,6 +152,23 @@ def case_r4_key_what_rereads(tmp):
     T.expect(lab.capture(), 1, "r4: a changed order rereads the arm")
 
 
+def case_r6_what_a_game_launch_leaves_behind_does_not_reread(tmp):
+    """Round 2's overwrite took 327 screenshots and a few settings files from lab launches; none is an asset a row reads."""
+    lab = Lab(tmp / "r6")
+    T.expect(lab.capture(), 1, "r6: the first capture reads")
+    over = tmp / "r6" / "inst" / "overwrite"
+    (over / "Root").mkdir()
+    (over / "Root" / "ScreenShot1.png").write_bytes(b"png")
+    (over / "SKSE.log").write_text("log", encoding="utf-8")
+    (over / "settings.ini").write_text("[x]", encoding="utf-8")
+    T.expect(lab.capture(), 0, "r6: a screenshot, a log and a settings file in overwrite do not reread the arm")
+    (over / "textures").mkdir()
+    (over / "textures" / "new.dds").write_bytes(b"dds")
+    T.expect(lab.capture(), 1, "r6: a new asset in overwrite does reread the arm")
+    (over / "x.bsa").write_bytes(b"bsa")
+    T.expect(lab.capture(), 1, "r6: a new archive in overwrite does reread the arm")
+
+
 def case_r5_a_reader_rebuilt_beside_its_exe_is_another_reader(tmp):
     er = load_module("er_under_test", HARNESS / "evalrecords.py")
     d = tmp / "r5"

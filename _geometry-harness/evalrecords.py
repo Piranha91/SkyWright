@@ -60,6 +60,7 @@ ASSET_RE = re.compile(r"[A-Za-z0-9_ .\-\\/'()&!,+]+\.(?:nif|dds|hkx|wav|xwm|fuz|
 ASSET_ROOTS = {"nif": "meshes", "tri": "meshes", "egm": "meshes", "bto": "meshes", "btr": "meshes", "btt": "meshes",
                "hkx": "meshes", "dds": "textures", "wav": "sound", "xwm": "sound", "fuz": "sound", "lip": "sound",
                "swf": "interface", "pex": "scripts", "seq": "seq"}
+VIEW_EXTENSIONS = set(ASSET_ROOTS) | {"bsa", "esp", "esm", "esl"}
 BIG = 1_000_000
 MAX_CHARS = 200_000_000
 
@@ -670,13 +671,17 @@ def reader_identity(reader_cmd: str) -> dict:
 
 
 def folder_listing(folder: Path) -> str:
-    """Every file under one folder by relative path, size and last write (the project's freshness rule: a same-size
-    copy that keeps its timestamp is not seen); an absent folder has its own value."""
+    """Every file the capture's answers can rest on under one folder, by relative path, size and last write (the
+    project's freshness rule: a same-size copy that keeps its timestamp is not seen); an absent folder has its own value.
+    Assets, archives and plugins only: a game launch leaves screenshots and logs in overwrite, and those must not reread
+    every arm."""
     if not folder.is_dir():
         return "absent"
     rows = []
     for dp, _, names in os.walk(folder):
         for n in names:
+            if n.rsplit(".", 1)[-1].lower() not in VIEW_EXTENSIONS:
+                continue
             f = Path(dp) / n
             st = f.stat()
             rows.append([f.relative_to(folder).as_posix().lower(), st.st_size, st.st_mtime_ns])
