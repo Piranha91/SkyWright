@@ -68,10 +68,10 @@ if (args.Length >= 2 && args[0] == "--only" && args[1] == "solidscan")
     return fail == 0 ? 0 : 1;
 }
 
-// --only accel: the acceleration known answers (AX-*) alone; accel-waiting: those that need a branch not yet merged.
-if (args.Length >= 2 && args[0] == "--only" && args[1] is "accel" or "accel-waiting")
+// --only accel: the acceleration known answers (AX-*) alone.
+if (args.Length >= 2 && args[0] == "--only" && args[1] == "accel")
 {
-    if (args[1] == "accel") AccelerationProof.Run(Check); else AccelerationProof.RunWaitingOnBranches(Check);
+    AccelerationProof.Run(Check);
     Console.WriteLine();
     Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
     if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));

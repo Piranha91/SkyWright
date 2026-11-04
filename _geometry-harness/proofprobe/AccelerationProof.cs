@@ -58,11 +58,6 @@ static class AccelerationProof
         RelationCases(check);
         SolidCases(check);
         ContactIndexOrder(check, manyThreads: false);
-    }
-
-    // Cases whose fix is on a branch not yet here: --only accel-waiting runs them; move each call to Run when its branch merges.
-    public static void RunWaitingOnBranches(Action<string, bool, string> check)
-    {
         ContactIndexOrder(check, manyThreads: true);
         ManyThreadPreparedMesh(check);
     }
