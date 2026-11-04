@@ -535,6 +535,8 @@ public sealed class SurfacePairSweep
     public long PairsChecked, SameChecked, SameIntersects, SameUnknown,
                 CrossDeclaredChecked, CrossDeclaredIntersects, CrossUndeclaredChecked,
                 CrossUndeclaredIntersects, CrossUnknown;
+    /// <summary>Pairs a worker thread timed out on that were measured again on the calling thread.</summary>
+    public long Remeasured;
     public readonly Dictionary<string, (long Intersects, long Unknown, long Checked)> SameByDomain = new();
     /// <summary>Same-responsible queries already measured by the sweep, retained only when requested by a caller.</summary>
     public readonly List<SurfaceOverlapHit> SameResults = new();
@@ -937,7 +939,9 @@ public sealed class OverlapIndex
     }
 
     /// <summary>Symmetric actual-surface discovery. Bounds only decide a provably separated broad-phase rejection;
-    /// every surviving pair reaches the generic mesh predicate with a per-pair work and time budget.</summary>
+    /// every surviving pair reaches the generic mesh predicate with a per-pair work and time budget. On many threads the rows are
+    /// one thread's, with one known limit: a pair that would time out alone may complete when another pair filled its validation memo
+    /// first, because a memo hit reads no clock. A worker's time-out is measured again in order (<see cref="SurfacePairSweep.Remeasured"/>).</summary>
     public static SurfacePairSweep SurfacePairs(IReadOnlyList<SurfaceOverlapCandidate> candidates,
         IReadOnlyList<HashSet<int>> closure, double tolerance = 1e-5, long maxTrianglePairs = 2_000_000,
         TimeSpan? pairTimeout = null, Func<int, int, bool>? includeResponsiblePair = null,
@@ -1016,10 +1020,10 @@ public sealed class OverlapIndex
             onProgress?.Invoke(sweep.PairsChecked);
         }
 
-        SurfaceQueryOutcome Timed(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b, PairTimer? timer, PairResultCache? cache, out PairPath path, out double seconds)
+        SurfaceQueryOutcome Timed(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b, PairTimer? timer, PairResultCache? cache, CancellationToken token, out PairPath path, out double seconds)
         {
             long started = System.Diagnostics.Stopwatch.GetTimestamp();
-            var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken, timer, prepared, cache, out path);
+            var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, token, timer, prepared, cache, out path);
             seconds = MeshQueryTimer.Seconds(System.Diagnostics.Stopwatch.GetTimestamp() - started);
             return query;
         }
@@ -1028,7 +1032,7 @@ public sealed class OverlapIndex
         {
             foreach (var (a, b) in Reached())
             {
-                var query = Timed(a, b, a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer, results, out var path, out var seconds);
+                var query = Timed(a, b, a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer, results, cancellationToken, out var path, out var seconds);
                 Accumulate(a, b, query, path, seconds);
             }
             return sweep;
@@ -1049,36 +1053,42 @@ public sealed class OverlapIndex
             for (int i = 0; i < keys.Length; i++) inOrder[i] = results.Contains(keys[i]) || !first.Add(keys[i]);
         }
 
-        int next = -1;
-        bool stop = false;
-        var signal = new object();
+        int next = -1, consumed = 0, runAhead = PairRunAhead;
+        bool noMoreLeases = false, stop = false;
+        object filled = new(), window = new();
+        var workerToken = TestWorkerToken ?? cancellationToken;
         var workers = new Thread[threads];
-        var sameTimers = new PairTimer?[threads];
-        var crossTimers = new PairTimer?[threads];
         for (int w = 0; w < threads; w++)
         {
-            var mySame = sameTimers[w] = sameTimer is null ? null : new PairTimer();
-            var myCross = crossTimers[w] = crossTimer is null ? null : new PairTimer();
             workers[w] = new Thread(() =>
             {
-                while (!Volatile.Read(ref stop))
+                while (!Volatile.Read(ref noMoreLeases) && !Volatile.Read(ref stop))
                 {
                     int i = Interlocked.Increment(ref next);
                     if (i >= pairs.Count) return;
                     if (inOrder is not null && inOrder[i]) continue;
+                    // The pair the in-order pass waits for is never past the window, so its holder never waits here.
+                    if (i - Volatile.Read(ref consumed) > runAhead)
+                        lock (window)
+                            while (i - consumed > runAhead && !stop) Monitor.Wait(window);
+                    if (Volatile.Read(ref stop)) return;
                     PairSlot slot;
                     try
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         var (a, b) = pairs[i];
-                        var query = Timed(a, b, a.Win.Plugin == b.Win.Plugin ? mySame : myCross, null, out var path, out var seconds);
-                        slot = new(query, path, seconds, null);
+                        // A timer per pair: only the pairs the in-order pass keeps reach the sweep's totals.
+                        var mine = (a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer) is null ? null : new PairTimer();
+                        var query = StopOnOutOfMemory(Timed(a, b, mine, null, workerToken, out var path, out var seconds));
+                        slot = new(query, path, seconds, mine, null);
                     }
                     catch (Exception ex)
                     {
-                        slot = new(null, default, 0, System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex));
+                        // Leases stop, but pairs already leased finish, so the in-order pass reaches this one.
+                        Volatile.Write(ref noMoreLeases, true);
+                        slot = new(null, default, 0, null, System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex));
                     }
-                    lock (signal) { slots[i] = slot; Monitor.PulseAll(signal); }
+                    lock (filled) { slots[i] = slot; Monitor.PulseAll(filled); }
                 }
             }, WorkerStackBytes) { IsBackground = true, Name = $"overlap pair {w}" };
             workers[w].Start();
@@ -1089,43 +1099,63 @@ public sealed class OverlapIndex
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var (a, b) = pairs[i];
+                var timer = a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer;
                 if (inOrder is not null && inOrder[i])
                 {
-                    var served = Timed(a, b, a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer, results, out var servedPath, out var servedSeconds);
+                    var served = StopOnOutOfMemory(Timed(a, b, timer, results, cancellationToken, out var servedPath, out var servedSeconds));
                     Accumulate(a, b, served, servedPath, servedSeconds);
-                    continue;
                 }
-                PairSlot? slot;
-                lock (signal)
+                else
                 {
-                    while ((slot = slots[i]) is null) Monitor.Wait(signal);
-                    slots[i] = null;
+                    PairSlot? slot;
+                    lock (filled)
+                    {
+                        while ((slot = slots[i]) is null) Monitor.Wait(filled);
+                        slots[i] = null;
+                    }
+                    slot.Failure?.Throw();
+                    var (query, path, seconds) = (slot.Query!, slot.Path, slot.Seconds);
+                    // A worker's clock counts waits and contention: a time-out is measured again here, alone on a fresh clock.
+                    if (TimedOut(query))
+                    {
+                        sweep.Remeasured++;
+                        query = StopOnOutOfMemory(Timed(a, b, timer, null, cancellationToken, out path, out seconds));
+                    }
+                    else if (slot.Timer is { } mine) timer!.Add(mine);
+                    // Measured without the cache: the cache sees it here, in sweep order, so its counts and its file's order are one thread's.
+                    if (results is not null)
+                    {
+                        results.TryGet(keys![i], out _, out _);
+                        results.Put(keys[i], query, path);
+                    }
+                    Accumulate(a, b, query, path, seconds);
                 }
-                slot.Failure?.Throw();
-                // Measured without the cache: the cache sees it here, in sweep order, so its counts and its file's order are one thread's.
-                if (results is not null)
-                {
-                    results.TryGet(keys![i], out _, out _);
-                    results.Put(keys[i], slot.Query!, slot.Path);
-                }
-                Accumulate(a, b, slot.Query!, slot.Path, slot.Seconds);
+                lock (window) { consumed = i + 1; Monitor.PulseAll(window); }
             }
         }
         finally
         {
-            Volatile.Write(ref stop, true);
+            lock (window) { stop = true; Monitor.PulseAll(window); }
             foreach (var worker in workers) worker.Join();
-            for (int w = 0; w < threads; w++)
-            {
-                if (sameTimers[w] is { } s) sameTimer!.Add(s);
-                if (crossTimers[w] is { } c) crossTimer!.Add(c);
-            }
         }
         return sweep;
     }
 
+    static bool TimedOut(SurfaceQueryOutcome q) => q.Reason is "cancelled" or "pair time budget exhausted";
+
+    // The shared query turns any exception into a row; on many threads running out of memory stops the run instead.
+    static SurfaceQueryOutcome StopOnOutOfMemory(SurfaceQueryOutcome q)
+        => q.Reason?.StartsWith("mesh query failed: OutOfMemoryException", StringComparison.Ordinal) == true ? throw new OutOfMemoryException(q.Reason) : q;
+
+    /// <summary>How many pairs past the in-order pass a worker may start, which bounds the finished results held.</summary>
+    public static int PairRunAhead = 4096;
+
+    /// <summary>Test hook only (overlapprobe --self-test): the token worker threads measure under, so a test can make a worker's
+    /// measurement time out. Null in every real run.</summary>
+    public static CancellationToken? TestWorkerToken;
+
     /// <summary>One pair's answer from a worker thread: the outcome, or the exception to raise at this pair's place in sweep order.</summary>
-    sealed record PairSlot(SurfaceQueryOutcome? Query, PairPath Path, double Seconds, System.Runtime.ExceptionServices.ExceptionDispatchInfo? Failure);
+    sealed record PairSlot(SurfaceQueryOutcome? Query, PairPath Path, double Seconds, PairTimer? Timer, System.Runtime.ExceptionServices.ExceptionDispatchInfo? Failure);
 
     // Worker threads run the same recursive BVH build as the main thread, so they get a generous stack (reserved, not committed).
     const int WorkerStackBytes = 16 * 1024 * 1024;

@@ -1589,7 +1589,7 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
     }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation,
     sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache, results: pairResults, threads: pairThreads);
 double sweepSeconds = sw.Elapsed.TotalSeconds - sweepStarted;
-Console.WriteLine($"   pair sweep threads: {pairThreads}");
+Console.WriteLine($"   pair sweep threads: {pairThreads}; worker time-outs measured again in order: {sweep.Remeasured:N0}");
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
 ReportTimer("same", sameTimer, null);
 ReportTimer("cross", crossTimer, null);
@@ -1617,6 +1617,7 @@ if (preparedCache is not null)
 }
 preparedCache = null;   // released before provenance: nothing after the sweep reads it
 __run.Feature("actual-shape-queries.threads", pairThreads, "threads", FeatureAt.Final)
+     .Feature("actual-shape-queries.remeasured", sweep.Remeasured, "pairs", FeatureAt.Final)
      .Feature("actual-shape-queries.stage.seconds", sweepSeconds, "seconds", FeatureAt.Final)
      .Feature("actual-shape-queries.bvh-nodes", MeshIntersection.BvhNodesBuilt - bvhNodesBefore, "nodes", FeatureAt.Final);
 if (ledger is not null)
