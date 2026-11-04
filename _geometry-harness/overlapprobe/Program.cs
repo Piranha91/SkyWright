@@ -47,7 +47,7 @@ using HousecarlCore.Progress;
 //
 // usage: overlapprobe [--list N] [--surface-tolerance U] [--max-triangle-pairs N] [--pair-seconds S]
 //                     [--emit path] [--base emit.json] [--reverse-of baseline.json] [--dump path] [--json path] [--pair-ledger path]
-//                     [--prepared-cache-mib N] [--pair-cache-read FILE]* [--pair-cache-write FILE]
+//                     [--prepared-cache-mib N] [--threads N] [--pair-cache-read FILE]* [--pair-cache-write FILE]
 //                     [--bos on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //                     [--responsible-pair A.esp B.esp]* [--historical-pairs crosswalk.json] [--geometry-manifest output.json]
 //                     [--motion swept [--motion-delta U]]
@@ -200,6 +200,8 @@ string? pairLedgerPath = null;
 // --prepared-cache-mib N: the pair sweep prepares each candidate's world soup once and keeps it, least recently used first out,
 // within about N MiB (default 2,048; 0 prepares every pair's soups afresh, as before). Results do not depend on it.
 long preparedCacheMib = 2048;
+// --threads N: the pair sweep's measuring threads. Rows do not depend on it; 1 is the sequential sweep.
+int pairThreads = 8;
 // --pair-cache-read FILE (repeatable) / --pair-cache-write FILE (P3): placed-pair results from earlier runs of this same build,
 // keyed by every argument of the query (PairResultCache in _shared/OverlapIndex.cs); this run's own results are written to the
 // write file. A file of another build or pair time limit is not read, and says so. Results do not depend on it.
@@ -276,6 +278,7 @@ try
         else if (flag == "--json") { jsonPath = NeedValue(i, flag); i++; }
         else if (flag == "--pair-ledger") { pairLedgerPath = NeedValue(i, flag); i++; }
         else if (flag == "--prepared-cache-mib") { if (!long.TryParse(NeedValue(i, flag), out preparedCacheMib) || preparedCacheMib < 0) throw new ArgumentException("--prepared-cache-mib requires a whole number of MiB, 0 or more"); i++; }
+        else if (flag == "--threads") { if (!int.TryParse(NeedValue(i, flag), out pairThreads) || pairThreads < 1) throw new ArgumentException("--threads requires a whole number, 1 or more"); i++; }
         else if (flag == "--reverse-of") { reverseOfPath = NeedValue(i, flag); i++; }
         else if (flag == "--pair-cache-read") { pairCacheReads.Add(NeedValue(i, flag)); i++; }
         else if (flag == "--pair-cache-write") { pairCacheWrite = NeedValue(i, flag); i++; }
@@ -1571,6 +1574,8 @@ void LedgerLine(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b, SurfaceQue
     }));
 }
 long bvhNodesBefore = MeshIntersection.BvhNodesBuilt;
+long memoHitsBefore = MeshIntersection.ValidateMemoHits, memoMissesBefore = MeshIntersection.ValidateMemoMisses;
+long memoRepeatsBefore = MeshIntersection.ValidateRepeats, memoRepeatTicksBefore = MeshIntersection.ValidateRepeatTicks;
 var preparedCache = preparedCacheMib > 0 ? new PreparedMeshCache(preparedCacheMib * 1024 * 1024) : null;
 double sweepStarted = sw.Elapsed.TotalSeconds;
 var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, maxTrianglePairs,
@@ -1582,8 +1587,9 @@ var sweep = OverlapIndex.SurfacePairs(candidates, closure, surfaceTolerance, max
         lastPairProgress = checkedPairs;
         Console.WriteLine($"   ... {checkedPairs:N0} actual-shape pairs tested ({sw.Elapsed.TotalSeconds:0}s)");
     }, retainSameResults: sceneCapture, includePair: population is null ? null : PairInPopulation,
-    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache, results: pairResults);
+    sameTimer: sameTimer, crossTimer: crossTimer, onPair: LedgerLine, prepared: preparedCache, results: pairResults, threads: pairThreads);
 double sweepSeconds = sw.Elapsed.TotalSeconds - sweepStarted;
+Console.WriteLine($"   pair sweep threads: {pairThreads}");
 __run.ReviseTotal(sweep.PairsChecked, "the bounds sweep established the exact number of mesh queries");
 ReportTimer("same", sameTimer, null);
 ReportTimer("cross", crossTimer, null);
@@ -1594,13 +1600,24 @@ if (preparedCache is not null)
 {
     Console.WriteLine($"   prepared meshes: {preparedCache.Misses:N0} prepared, {preparedCache.Hits:N0} reused, {preparedCache.Evictions:N0} evicted; "
         + $"peak {preparedCache.PeakBytes / 1048576.0:N0} MiB of {preparedCacheMib:N0}");
+    long memoHits = MeshIntersection.ValidateMemoHits - memoHitsBefore, memoMisses = MeshIntersection.ValidateMemoMisses - memoMissesBefore;
+    long memoRepeats = MeshIntersection.ValidateRepeats - memoRepeatsBefore;
+    double memoRepeatSeconds = MeshQueryTimer.Seconds(MeshIntersection.ValidateRepeatTicks - memoRepeatTicksBefore);
+    Console.WriteLine($"   validation memo: {memoHits:N0} hits, {memoMisses:N0} misses; {memoRepeats:N0} of the misses repeat a validation after eviction "
+        + $"({memoRepeatSeconds:0.0}s, {preparedCache.Reprepared:N0} meshes prepared again)");
+    __run.Feature("actual-shape-queries.prepared.memo-hits", memoHits, "validations", FeatureAt.Final)
+         .Feature("actual-shape-queries.prepared.memo-misses", memoMisses, "validations", FeatureAt.Final)
+         .Feature("actual-shape-queries.prepared.memo-repeats", memoRepeats, "validations", FeatureAt.Final)
+         .Feature("actual-shape-queries.prepared.memo-repeat.seconds", memoRepeatSeconds, "seconds", FeatureAt.Final)
+         .Feature("actual-shape-queries.prepared.reprepared", preparedCache.Reprepared, "meshes", FeatureAt.Final);
     __run.Feature("actual-shape-queries.prepared.misses", preparedCache.Misses, "meshes", FeatureAt.Final)
          .Feature("actual-shape-queries.prepared.hits", preparedCache.Hits, "meshes", FeatureAt.Final)
          .Feature("actual-shape-queries.prepared.evictions", preparedCache.Evictions, "meshes", FeatureAt.Final)
          .Feature("actual-shape-queries.prepared.peak-mib", preparedCache.PeakBytes / 1048576.0, "MiB", FeatureAt.Final);
 }
 preparedCache = null;   // released before provenance: nothing after the sweep reads it
-__run.Feature("actual-shape-queries.stage.seconds", sweepSeconds, "seconds", FeatureAt.Final)
+__run.Feature("actual-shape-queries.threads", pairThreads, "threads", FeatureAt.Final)
+     .Feature("actual-shape-queries.stage.seconds", sweepSeconds, "seconds", FeatureAt.Final)
      .Feature("actual-shape-queries.bvh-nodes", MeshIntersection.BvhNodesBuilt - bvhNodesBefore, "nodes", FeatureAt.Final);
 if (ledger is not null)
 {

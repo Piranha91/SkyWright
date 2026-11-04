@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Numerics;
 using HarnessShared;
 using HousecarlCore;
+using Mutagen.Bethesda.Plugins;
 
 // overlapprobe --self-test, overlap acceleration (Track P): the pair-loop timers observe and never decide (P0).
 static class AccelSelfTest
@@ -184,6 +185,108 @@ static class AccelSelfTest
                 $"{compared4} compared, {mismatched4} mismatched, misses {cache4.Misses}, holds thrower {cache4.Holds(thrower)}; {string.Join("; ", bad4)}");
 
         P3(t);
+        P4(t);
+    }
+
+    // P4: the sweep on many threads gives one thread's rows, counters, callbacks and cache file, in one thread's order.
+    static void P4(ProbeSelfTest t)
+    {
+        var space = FormKey.Factory("000D74:Skyrim.esm");
+        var models = new[] { Box(Vector3.Zero, new(10, 10, 10)), GridBox(Vector3.Zero, new(14, 14, 14), 5), GridBox(Vector3.Zero, new(6, 6, 6), 3),
+                             new TriangleSoup(new[] { Vector3.Zero, new Vector3(9, 0, 0), new Vector3(0, 9, 0) }, new[] { 0, 1, 2 }) };
+        var candidates = new List<SurfaceOverlapCandidate>();
+        for (int i = 0; i < 90; i++)
+        {
+            // Every tenth reference repeats an earlier one's model and pose exactly, so repeated cache keys are reached.
+            int place = i % 10 == 9 ? i - 9 : i;
+            var model = models[place % models.Length];
+            var pos = new Vec3(place * 2.5f, (place % 7) * 3f, (place % 3) * 4f);
+            var snap = new Snap(i % 3, pos, FormKey.Null, false, false, space);
+            var world = SpatialOverlap.TransformSoup(model, pos, default, 1f);
+            candidates.Add(new(new FormKey(ModKey.FromNameAndExtension("P4.esp"), (uint)(0x800 + i)), snap, FormKey.Null, SpatialOverlap.SoupBounds(world), world, 'm', model));
+        }
+        var closure = new[] { new HashSet<int> { 0 }, new HashSet<int> { 0, 1 }, new HashSet<int> { 2 } };
+
+        (List<string> Rows, string Tallies, PairResultCache Cache, PairTimer Same, PairTimer Cross, SurfacePairSweep Sweep) Sweep(int threads, long preparedBytes, PairResultCache? cache)
+        {
+            var rows = new List<string>(); var same = new PairTimer(); var cross = new PairTimer();
+            var prepared = preparedBytes > 0 ? new PreparedMeshCache(preparedBytes) : null;
+            var results = cache ?? new PairResultCache("p4-probe", "p4-core", 60);
+            long progress = 0;
+            var s = OverlapIndex.SurfacePairs(candidates, closure, 1e-5, 2_000_000, TimeSpan.FromSeconds(60),
+                onProgress: n => { if (n != ++progress) rows.Add($"progress out of order at {n}"); },
+                retainSameResults: true, sameTimer: same, crossTimer: cross,
+                onPair: (a, b, q, path, _) => rows.Add($"{a.Key} {b.Key} {q} {path}"), prepared: prepared, results: results, threads: threads);
+            string H(IEnumerable<SurfaceOverlapHit> hits) => string.Join(";", hits.Select(h => $"{h.A.Key}/{h.B.Key}/{h.Query}/{h.Declared}"));
+            string tallies = string.Join(",", s.PairsChecked, s.SameChecked, s.SameIntersects, s.SameUnknown, s.CrossDeclaredChecked, s.CrossDeclaredIntersects,
+                s.CrossUndeclaredChecked, s.CrossUndeclaredIntersects, s.CrossUnknown, string.Join("+", s.SameByDomain.Select(d => $"{d.Key}={d.Value}")),
+                H(s.SameResults), H(s.CrossResults), H(s.CrossHits), same.Pairs, cross.Pairs, same.Core.Queries, cross.Core.Queries,
+                string.Join("/", same.Paths), string.Join("/", cross.Paths), same.CacheHits, cross.CacheHits, same.Timeouts, cross.Timeouts,
+                same.Slowest.Count, cross.Slowest.Count, results.Hits, results.Misses, results.NotStored, results.Stored);
+            return (rows, tallies, results, same, cross, s);
+        }
+
+        string FileLines(PairResultCache c)
+        {
+            var file = Path.Combine(Path.GetTempPath(), $"pd-p4-{Environment.ProcessId}-{Guid.NewGuid():N}.gz");
+            c.Write(file);
+            try
+            {
+                using var gz = new System.IO.Compression.GZipStream(File.OpenRead(file), System.IO.Compression.CompressionMode.Decompress);
+                using var r = new StreamReader(gz);
+                return r.ReadToEnd();
+            }
+            finally { File.Delete(file); }
+        }
+
+        var one = Sweep(1, 1L << 30, null);
+        foreach (var (threads, bytes) in new[] { (8, 1L << 30), (8, 1L), (2, 0L), (3, 1L << 30) })
+        {
+            var many = Sweep(threads, bytes, null);
+            t.Check($"P4-1 {threads} threads with a {bytes}-byte prepared cache give one thread's rows, tallies and cache file, in order",
+                    one.Sweep.PairsChecked > 100 && one.Sweep.CrossHits.Count > 0 && one.Cache.Hits > 0
+                    && one.Rows.SequenceEqual(many.Rows) && one.Tallies == many.Tallies && FileLines(one.Cache) == FileLines(many.Cache),
+                    $"{one.Rows.Count} vs {many.Rows.Count} rows; {one.Sweep.PairsChecked} pairs, {one.Cache.Hits} cache hits; tallies equal {one.Tallies == many.Tallies}");
+        }
+
+        // A second run served by the first run's file: every pair from the cache, the same rows.
+        var warmFile = Path.Combine(Path.GetTempPath(), $"pd-p4-{Environment.ProcessId}-warm.gz");
+        one.Cache.Write(warmFile);
+        var warm = new PairResultCache("p4-probe", "p4-core", 60);
+        string? warmWhy = warm.Read(warmFile);
+        File.Delete(warmFile);
+        var served = Sweep(8, 1L << 30, warm);
+        t.Check("P4-2 a sweep served by an earlier run's cache file gives the same rows on many threads",
+                warmWhy is null && served.Rows.SequenceEqual(one.Rows) && warm.Misses == 0, $"read {warmWhy ?? "ok"}, misses {warm.Misses}");
+
+        // Cancellation surfaces at the same pair as one thread's sweep, with the same rows before it.
+        int Cancelled(int threads)
+        {
+            using var cts = new CancellationTokenSource();
+            int seen = 0;
+            try
+            {
+                OverlapIndex.SurfacePairs(candidates, closure, 1e-5, 2_000_000, TimeSpan.FromSeconds(60), cancellationToken: cts.Token,
+                    onPair: (_, _, _, _, _) => { if (++seen == 25) cts.Cancel(); }, threads: threads);
+                return -1;
+            }
+            catch (OperationCanceledException) { return seen; }
+        }
+        t.Check("P4-3 a cancelled sweep stops at the same pair on one thread and on many", Cancelled(1) == 25 && Cancelled(8) == 25, $"{Cancelled(1)} / {Cancelled(8)}");
+
+        // One prepared mesh, one validation: many threads on one soup share the preparation and the memo.
+        var shared = new PreparedMeshCache(1L << 30);
+        var soup = GridBox(Vector3.Zero, new(10, 10, 10), 8); var other = Box(new(40, 40, 40), new(41, 41, 41));
+        var got = new MeshIntersection.PreparedMesh[16];
+        long misses = MeshIntersection.ValidateMemoMisses;
+        Parallel.For(0, got.Length, i =>
+        {
+            got[i] = shared.Get(soup, null);
+            MeshIntersection.Query(got[i], got[i].Refused ? got[i] : shared.Get(other, null));
+        });
+        t.Check("P4-4 threads on one soup prepare it once and share the mesh",
+                shared.Misses == 2 && got.All(g => ReferenceEquals(g, got[0])) && got[0].MemoisedValidations == 1 && MeshIntersection.ValidateMemoMisses - misses == 2,
+                $"misses {shared.Misses}, memo {got[0].MemoisedValidations}, validations run {MeshIntersection.ValidateMemoMisses - misses}");
     }
 
     // P3: the pair-result cache (PairResultCache in _shared/OverlapIndex.cs).
