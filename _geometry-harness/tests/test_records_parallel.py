@@ -453,6 +453,35 @@ def case_13d_commit_counts_as_well_as_physical(tmp):
     T.expect(lab.record().get("workers"), 1, "13d: too little commit means one worker, however much physical is free")
 
 
+def case_26_the_warning_names_the_limit_that_applied(tmp):
+    lab = Lab(tmp / "commit")
+    lab.set_memory(availMB=60000, commitMB=14000, totalMB=64000)
+    lab.capture(workers="auto")
+    r = lab.record()
+    T.expect(r.get("limit"), "commit", "26: commit was the limit, and the record says so")
+    w = str(r.get("warning"))
+    T.check("14000 MB of commit" in w, f"26: the warning names commit, got {w}")
+    T.check("60000" not in w, f"26: and doesn't call the plentiful physical memory the reason, got {w}")
+    lab = Lab(tmp / "physical")
+    lab.set_memory(availMB=13000, commitMB=80000, totalMB=64000)
+    lab.capture(workers="auto")
+    r = lab.record()
+    T.expect(r.get("limit"), "physical", "26: physical was the limit, and the record says so")
+    w = str(r.get("warning"))
+    T.check("13000 MB of physical memory" in w and "80000" not in w, f"26: the warning names physical, got {w}")
+
+
+def case_27_the_warning_leaves_out_what_nobody_can_close(tmp):
+    import evalrecords_workers as W
+    listing = '"Memory Compression","3","Services","0","5,000,000 K"\n"System","4","Services","0","4,000,000 K"\n"svchost.exe","9","Services","0","3,000,000 K"\n' \
+              '"MyEditor.exe","10","Console","1","2,048,000 K"\n"MyEditor.exe","11","Console","1","1,024,000 K"\n"Browser.exe","12","Console","1","1,024 K"\n'
+    T.expect(W.programs_in(listing), [("MyEditor.exe", 3000), ("Browser.exe", 1)], "27: only programs a user could close, largest first, summed by name")
+    lab = Lab(tmp / "a")
+    lab.set_memory(availMB=13000, commitMB=80000, totalMB=64000)
+    lab.capture(workers="auto")
+    T.check("Memory Compression" not in str(lab.record().get("warning")), f"27: a real warning doesn't name it, got {lab.record().get('warning')}")
+
+
 def case_14_with_nothing_running_an_arm_always_starts(tmp):
     lab = Lab(tmp / "a", arms=ARMS[:2])
     lab.set_memory(availMB=100, commitMB=100, totalMB=64000)

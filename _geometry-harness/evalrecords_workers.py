@@ -40,6 +40,8 @@ LOW_COMMIT_MB = 2000
 STOP_GRACE_S = 5                # a stopped arm's memory takes a moment to come back
 MOST_BY_DEFAULT = 5             # the most readers measured; a number on the command line may ask for more
 MEMORY_FILE_ENV = "EVALRECORDS_MEMORY_FILE"     # tests name a JSON file of readings here
+NOT_CLOSABLE = {"memory compression", "system", "registry", "secure system", "system idle process", "smss.exe", "csrss.exe", "wininit.exe",
+                "winlogon.exe", "services.exe", "lsass.exe", "dwm.exe", "svchost.exe", "vmmem", "vmmemwsl"}
 
 
 # ---------------------------------------------------------------- memory
@@ -75,21 +77,25 @@ def read_memory() -> Memory | None:
     return Memory(m.ap >> 20, m.apf >> 20, m.tp >> 20)
 
 
-def largest_programs(n=3) -> list:
-    """The largest running programs by working set, for the warning: [(name, MB)]; empty when the list can't be read."""
-    if os.name != "nt":
-        return []
-    try:
-        out = subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True, errors="replace", timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
+def programs_in(tasklist_csv: str, n=3) -> list:
+    """The largest programs in `tasklist /fo csv /nh` text by working set, [(name, MB)], without the system's own, which nobody can close."""
     by = {}
-    for row in csv.reader(out.splitlines()):
-        if len(row) >= 5:
+    for row in csv.reader(tasklist_csv.splitlines()):
+        if len(row) >= 5 and row[0].lower() not in NOT_CLOSABLE:
             digits = "".join(c for c in row[4] if c.isdigit())
             if digits:
                 by[row[0]] = by.get(row[0], 0) + int(digits) // 1024
     return sorted(by.items(), key=lambda kv: -kv[1])[:n]
+
+
+def largest_programs(n=3) -> list:
+    """The largest running programs a user could close, for the warning; empty when the list can't be read."""
+    if os.name != "nt":
+        return []
+    try:
+        return programs_in(subprocess.run(["tasklist", "/fo", "csv", "/nh"], capture_output=True, text=True, errors="replace", timeout=30).stdout, n)
+    except (OSError, subprocess.SubprocessError):
+        return []
 
 
 def process_counters(proc=None) -> dict:
@@ -186,8 +192,14 @@ def choose(requested, needs: list, mem: Memory | None, cpus: int | None = None) 
         doc["case"] = "absent"
     elif by_avail < by_total:
         doc["case"] = "held-by-others"
+        by_physical = how_many_fit(needs, mem.avail - keep, float("inf"), want)
+        by_commit = how_many_fit(needs, float("inf"), mem.commit - keep, want)
+        physical = f"{mem.avail} MB of physical memory is free"
+        commit = f"{mem.commit} MB of commit (physical memory plus page file) is free"
+        doc["limit"] = "both" if by_physical == by_commit else "physical" if by_physical < by_commit else "commit"
+        limit = {"both": f"{physical} and {commit}", "physical": physical, "commit": commit}[doc["limit"]]
         names = ", ".join(f"{n} ({mb} MB)" for n, mb in largest_programs()) or "other programs"
-        doc["warning"] = (f"Other programs hold memory, so the capture reads {by_avail} arm(s) at a time rather than {by_total}: {mem.avail} MB is free. "
+        doc["warning"] = (f"Other programs hold memory, so the capture reads {by_avail} arm(s) at a time rather than {by_total}: only {limit}. "
                           f"Largest now: {names}. Close some to read faster next time, or set recordWorkers to 1 to read one at a time.")
     else:
         doc["case"] = "free"
