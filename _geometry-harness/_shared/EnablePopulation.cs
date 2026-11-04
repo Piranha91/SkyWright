@@ -202,12 +202,15 @@ public sealed class EnablePopulation
             return new EnableResolution(f is null || !f.Value.InitiallyDisabled, false, f is not null);
         }
         if (_facts is null) throw new InvalidOperationException("a load-time population needs facts");
-        if (!_queried.Add(k)) return EnableState.Resolve(k, _facts, _memo);
-        var fresh = EnableState.Resolve(k, _facts, _memo);
-        if (!fresh.Enabled) _disabled++;
-        if (fresh.ViaParent) _viaParent++;
-        if (!fresh.Resolved) _unresolved++;
-        return fresh;
+        lock (_memo)
+        {
+            if (!_queried.Add(k)) return EnableState.Resolve(k, _facts, _memo);
+            var fresh = EnableState.Resolve(k, _facts, _memo);
+            if (!fresh.Enabled) _disabled++;
+            if (fresh.ViaParent) _viaParent++;
+            if (!fresh.Resolved) _unresolved++;
+            return fresh;
+        }
     }
 
     /// <summary>The predicate consumers take (<c>FloorFeed.Build</c>, <c>ActorBand.ForCell</c>,

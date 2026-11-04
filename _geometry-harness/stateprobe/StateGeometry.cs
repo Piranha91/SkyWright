@@ -9,7 +9,9 @@ using Mutagen.Bethesda.Plugins;
 sealed class StateGeometry
 {
     readonly Func<string, byte[]?> _read;
-    readonly Dictionary<string, RefGeometry?> _byMesh = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>One holder at a time reads an asset and parses a NIF: the asset view and the NIF reader keep unsynchronised caches.</summary>
+    public static readonly object MeshGate = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, RefGeometry?> _byMesh = new(StringComparer.OrdinalIgnoreCase);
     public long MeshesMeasured, ObndFallback, NoGeometry;
     /// <summary>The contact index this geometry serves; set once it is built (it reads the base records' meshes and bounds).</summary>
     public ContactIndex? Contact { get; set; }
@@ -23,12 +25,14 @@ sealed class StateGeometry
         {
             var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
             if (!_byMesh.TryGetValue(full, out g))
+            lock (MeshGate)
+            if (!_byMesh.TryGetValue(full, out g))
             {
                 g = null;
                 var bytes = _read(full);
                 if (bytes is not null && NifGeometry.Measure(bytes, includeTriangles: true) is { Model: { } m })
                 {
-                    MeshesMeasured++;
+                    Interlocked.Increment(ref MeshesMeasured);
                     var hc = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
                     var dc = m.CollisionSoupFor(b => b.Solid && b.Layer != "SKYL_NONCOLLIDABLE");
                     TriangleSoup host, dep; char hs, ds;
@@ -49,8 +53,8 @@ sealed class StateGeometry
         if (g is null)
         {
             var ob = Contact.Index.ObndBox(baseKey);
-            if (!ob.IsEmpty) { ObndFallback++; g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false); }
-            else NoGeometry++;
+            if (!ob.IsEmpty) { Interlocked.Increment(ref ObndFallback); g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false); }
+            else Interlocked.Increment(ref NoGeometry);
         }
         return g;
     }

@@ -93,6 +93,7 @@ public sealed class SwitchIndex
     public int DisabledSingletons;
     public int ChainCycles;
     readonly Dictionary<FormKey, EnableResolution> _baseline = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<FormKey, EnableResolution> _baselineRead = new();
 
     SwitchIndex(OverlapIndex idx) => Index = idx;
 
@@ -113,7 +114,11 @@ public sealed class SwitchIndex
     }
 
     /// <summary>The baseline: EnableState over the winner, memoised.</summary>
-    public EnableResolution Baseline(FormKey k) => EnableState.Resolve(k, WinnerFacts, _baseline);
+    public EnableResolution Baseline(FormKey k)
+    {
+        if (_baselineRead.TryGetValue(k, out var hit)) return hit;
+        lock (_baseline) return _baselineRead[k] = EnableState.Resolve(k, WinnerFacts, _baseline);
+    }
 
     /// <summary>The plugin that defined a reference (its first snap), -1 when unplaced.</summary>
     public int PlacerOf(FormKey k) => Index.History.Of(k) is { Count: > 0 } h ? h[0].Plugin : -1;
