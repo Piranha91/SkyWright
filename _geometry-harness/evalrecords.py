@@ -323,10 +323,19 @@ class Session:
             raise Refusal(f"the record reader refused to start: {m['error']}")
         self._send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
+    def _gone(self, method) -> Refusal:
+        if self.timed_out:
+            return Refusal(f"the arm's record read reached its {self.deadline_s / 60:.0f}-minute deadline at "
+                           f"request {self.n} ({method}); run the capture again: finished arms are kept.")
+        return Refusal(f"the record reader exited before answering request {self.n} ({method}).")
+
     def _send(self, m):
         self.req.append(m)
-        self.p.stdin.write(json.dumps(m) + "\n")
-        self.p.stdin.flush()
+        try:
+            self.p.stdin.write(json.dumps(m) + "\n")
+            self.p.stdin.flush()
+        except OSError:
+            raise self._gone(m.get("method"))
 
     def call(self, method, params):
         self.n += 1
@@ -334,11 +343,13 @@ class Session:
         while True:
             line = self.p.stdout.readline()
             if not line:
+                raise self._gone(method)
+            try:
+                m = json.loads(line)
+            except ValueError:
                 if self.timed_out:
-                    raise Refusal(f"the arm's record read reached its {self.deadline_s / 60:.0f}-minute deadline at "
-                                  f"request {self.n} ({method}); run the capture again: finished arms are kept.")
-                raise Refusal(f"the record reader exited before answering request {self.n} ({method}).")
-            m = json.loads(line)
+                    raise self._gone(method)
+                raise Refusal(f"the record reader's answer to request {self.n} ({method}) was not JSON: {line[:200]}")
             self.resp.append(m)
             if m.get("id") == self.n:
                 return m
