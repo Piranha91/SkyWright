@@ -104,8 +104,12 @@ using HousecarlCore.Progress;
 //   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share, and in the default pass the decoded meshes
 //                   too (least-recently-used; an evicted mesh is decoded again from the same bytes; e.g. 2G, 512M;
 //                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
-//                   hard limit), 40 % of (memory free before the host loop - live data) and 1 GiB (an explicit size may exceed it).
+//                   hard limit), 40 % of (memory free before the host loop - live data) and 1 GiB, or 2 GiB per thread with
+//                   --threads above 1 (an explicit size may exceed it).
 //                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
+//   --threads N     the host loop's worker threads (default 8; 1 = one thread, as before). Rows, their order and every count are the
+//                   same at any N. Above 1 the automatic --cache-budget ceiling is 2 GiB per thread, still under its 20 % and 40 % terms.
+//                   --geom-report, HC_MEMSTAGES and HC_STALEBASE record first-seen order, so they run on one thread
 //   --phase-timers FILE  the contact code's own time split (ContactIndex BestContact / PairContact / Judge, their caches and the core
 //                   contact steps; _shared/ContactIndex.cs ContactTimer) printed after the run, recorded as run features and written to
 //                   FILE as JSON; for measuring where the time goes. Changes no output
@@ -178,6 +182,7 @@ bool allRows = false, absolute = false, vanillaAssets = false, interiorOnly = fa
 HashSet<string>? only = null;
 bool bosOn = true;
 long? cacheBudget = null;   // --cache-budget: null = CacheBudget.Auto()
+int threads = 8;            // --threads: the host loop's workers
 bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (default on; off = the core reading as before)
 bool terrain = false; float? floatThreshold = null, burialThreshold = null, burialShare = null; int terrainSample = 1;   // --terrain (TerrainReview.cs)
 var enablePlugins = new List<string>();
@@ -267,6 +272,13 @@ try
             cacheBudget = v.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase) ? null
                         : CacheBudget.Parse(v) ?? throw new ArgumentException("--cache-budget takes a size (e.g. 2G, 512M, bytes) or auto");
             if (cacheBudget < CacheBudget.MinimumBytes) throw new ArgumentException($"--cache-budget {v} is below the minimum {CacheBudget.MinimumBytes >> 20} MiB");
+            i++;
+        }
+        else if (flag == "--threads")
+        {
+            var v = NeedValue(i, flag);
+            if (!int.TryParse(v, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out threads) || threads < 1)
+                throw new ArgumentException($"--threads takes a whole number of at least 1, not {v}");
             i++;
         }
         else if (flag == "--radius") { radiusOn = NeedValue(i, flag) switch { "on" => true, "off" => false, _ => throw new ArgumentException("--radius takes on|off") }; i++; }
@@ -550,9 +562,12 @@ RefGeometry? GeomOf(FormKey baseKey)
     if (g is null)
     {
         var ob = cidx.Index.ObndBox(baseKey);
-        bool firstAsk = basesCounted.Add(baseKey);
-        if (!ob.IsEmpty) { if (firstAsk) obndFallback++; g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false); }
-        else if (firstAsk) noGeometry++;
+        lock (basesCounted)
+        {
+            bool firstAsk = basesCounted.Add(baseKey);
+            if (firstAsk) { if (!ob.IsEmpty) obndFallback++; else noGeometry++; }
+        }
+        if (!ob.IsEmpty) g = new RefGeometry(ob, ContactIndex.BoxSoup(ob), ContactIndex.BoxSoup(ob), 'o', 'o', HostUsable: false, Array.Empty<(string, string)>(), false);
     }
     return g;
 }
@@ -575,7 +590,12 @@ IReadOnlyCollection<string>? RenderClasses(FormKey baseKey)
     }
     return renderClassMemo[full] = classes;
 }
-try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
+if (threads > 1 && (geomReport is not null || MemStages.On || Environment.GetEnvironmentVariable("HC_STALEBASE") is not null))
+{
+    Console.WriteLine($"   --threads {threads} set to 1: --geom-report, HC_MEMSTAGES and HC_STALEBASE record first-seen order");
+    threads = 1;
+}
+try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry, automaticThreads: threads) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 meshReader.Store(boundedGeometry, cidx.Budget);
 if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();
@@ -1052,16 +1072,16 @@ if (reverseOfPath is not null)
 var rows = new List<ContactRow>();
 int done = 0, hostsOutsidePopulation = 0, rowsOutsidePopulation = 0;
 long hostLoop0 = Stopwatch.GetTimestamp();
-foreach (var h in hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.Previous.Cell.ToString()))
+var orderedHosts = hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.Previous.Cell.ToString()).ToList();
+// A host is judged only when one of the dependents Judge would consider (the same search) is in the population.
+bool HostOutsidePopulation(MovedHost h)
 {
-    if (population is not null && !RefInPopulation(h.Key))
-    {
-        // A host is judged only when one of the dependents Judge would consider (the same search) is in the population.
-        var hb = cidx.WorldBox(h.PrevBase, h.Previous);
-        bool any = !hb.IsEmpty && depHash.Near(h.Previous.Space, hb, cidx.Reach).Any(d => RefInPopulation(d.Item.Key));
-        if (!any) { hostsOutsidePopulation++; done++; continue; }
-    }
-    var judged = cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: allRows);
+    if (population is null || RefInPopulation(h.Key)) return false;
+    var hb = cidx.WorldBox(h.PrevBase, h.Previous);
+    return !(!hb.IsEmpty && depHash.Near(h.Previous.Space, hb, cidx.Reach).Any(d => RefInPopulation(d.Item.Key)));
+}
+void TakeHostRows(List<ContactRow> judged)
+{
     if (population is not null)
     {
         int before = judged.Count;
@@ -1071,6 +1091,56 @@ foreach (var h in hosts.OrderBy(h => h.Previous.Space.ToString()).ThenBy(h => h.
     rows.AddRange(judged);
     if (++done % 2000 == 0) Console.WriteLine($"   ... {done:N0}/{hosts.Count:N0} hosts, {rows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
     if (done % 500 == 0) MemStages.Print("host loop", cidx, rows.Count, done);
+}
+if (threads <= 1)
+{
+    foreach (var h in orderedHosts)
+    {
+        if (HostOutsidePopulation(h)) { hostsOutsidePopulation++; done++; continue; }
+        TakeHostRows(cidx.Judge(h, depHash, winHash, closure, skips, keepNoRelation: allRows));
+    }
+}
+else
+{
+    // Workers judge hosts in any order; each host's rows, counters and trace events are taken strictly in host order.
+    Console.WriteLine($"   host loop on {threads} threads");
+    var outside = orderedHosts.Select(HostOutsidePopulation).ToArray();
+    var judgedAt = Enumerable.Range(0, orderedHosts.Count).Where(i => !outside[i]).ToList();
+    var reachFloors = cidx.HostReachFloors(judgedAt.Select(i => orderedHosts[i]).ToList(), depHash, closure);
+    var finished = new (List<ContactRow> Rows, ContactSkips Skips, List<TraceEvent>? Trace)?[orderedHosts.Count];
+    int nextToTake = 0;
+    var takeGate = new object();
+    void TakeFinished()
+    {
+        for (; nextToTake < finished.Length; nextToTake++)
+        {
+            if (outside[nextToTake]) { hostsOutsidePopulation++; done++; continue; }
+            if (finished[nextToTake] is not { } f) return;
+            finished[nextToTake] = null;
+            skips.Add(f.Skips);
+            if (f.Trace is not null) foreach (var ev in f.Trace) traceSink!.Emit(ev);
+            TakeHostRows(f.Rows);
+        }
+    }
+    try
+    {
+        System.Threading.Tasks.Parallel.ForEach(
+            System.Collections.Concurrent.Partitioner.Create(Enumerable.Range(0, judgedAt.Count), System.Collections.Concurrent.EnumerablePartitionerOptions.NoBuffering),
+            new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = threads },
+            j =>
+            {
+                var hostSkips = new ContactSkips();
+                var traceBuffer = traceSink is null ? null : new List<TraceEvent>();
+                var judged = cidx.Judge(orderedHosts[judgedAt[j]], depHash, winHash, closure, hostSkips, allRows, reachFloors[j], traceBuffer);
+                lock (takeGate) { finished[judgedAt[j]] = (judged, hostSkips, traceBuffer); TakeFinished(); }
+            });
+    }
+    catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
+    {
+        System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex.InnerExceptions[0]).Throw();
+    }
+    TakeFinished();
+    cidx.MergeThreadTimers();
 }
 double hostLoopSeconds = Stopwatch.GetElapsedTime(hostLoop0).TotalSeconds;
 Console.WriteLine($"   pairs within the box band: {rows.Count + skips.BoxesApart:N0} tested; set aside: {skips.BoxesApart:N0} boxes further apart than {cidx.BoxBand:0}u, "
@@ -1195,8 +1265,9 @@ string? FitCheck()
     if (cacheBudget is null)
     {
         cidx.RefreshAutomaticBudget(() => CacheBudget.SelectAutomatic(
-            GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, f, live, "managed bytes after compacting full collection"));
+            GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, f, live, "managed bytes after compacting full collection", threads));
         line += " -> " + cidx.AutomaticBudgetReport();
+        if (threads > 1 && cidx.AutomaticBudgetSelection?.MemoryHeldWarning() is { } held) line += " (" + held + ")";
     }
     else if ((long)(f * 0.9) - live < cidx.Budget.Limit)
         line += $" (warning: the --cache-budget exceeds the {((long)(f * 0.9) - live) / 1e9:0.00} GB that fits; kept as asked)";
