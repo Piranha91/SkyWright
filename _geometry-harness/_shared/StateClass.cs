@@ -115,7 +115,7 @@ public sealed class StateEvaluator
     readonly BoxHash<FormKey> _boxes = new();
     readonly Dictionary<FormKey, (Aabb Box, Role Role, FormKey Base)> _facts = new();
     readonly HashSet<FormKey> _stateOverlapScope = new();
-    readonly Dictionary<(string Arm, FormKey Key), (RouteCutVerdict? V, string Why)> _routeMemo = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<(string Arm, FormKey Key), (RouteCutVerdict? V, string Why)> _routeMemo = new();
     readonly bool _allowLegacyBoundsOverlapForProof;
     public int Boxed => _facts.Count;
     public int BoxedNoGeometry, BoxedMarkers, BoxedFxVolumes;
@@ -192,7 +192,7 @@ public sealed class StateEvaluator
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var tm = Timer;
         long t0 = tm is null ? 0 : System.Diagnostics.Stopwatch.GetTimestamp();
-        long Lap(ref long bucket) { long now = System.Diagnostics.Stopwatch.GetTimestamp(); bucket += now - t0; t0 = now; return now; }
+        long Lap(ref long bucket) { long now = System.Diagnostics.Stopwatch.GetTimestamp(); Interlocked.Add(ref bucket, now - t0); t0 = now; return now; }
         var rows = new List<StateRow>();
         var sx = Switches;
         var facts = arm.Wrap(sx.WinnerFacts, sx.Baseline);
@@ -270,8 +270,8 @@ public sealed class StateEvaluator
                 bool navcut = (f.Role & Role.Navcut) != 0;
                 // Memoised per (state, reference): the same reference measured in two different states can differ, because
                 // each state has its own floor and band (Q27). Before then the memo was keyed on the reference alone.
-                if (!_routeMemo.TryGetValue((arm.Name, key), out var rm)) { var v0 = Route(arm, key, navcut, out var w0); _routeMemo[(arm.Name, key)] = rm = (v0, w0); if (tm is not null) tm.RouteCalls++; }
-                else if (tm is not null) tm.RouteMemoHits++;
+                if (!_routeMemo.TryGetValue((arm.Name, key), out var rm)) { var v0 = Route(arm, key, navcut, out var w0); _routeMemo[(arm.Name, key)] = rm = (v0, w0); if (tm is not null) Interlocked.Increment(ref tm.RouteCalls); }
+                else if (tm is not null) Interlocked.Increment(ref tm.RouteMemoHits);
                 tally.RouteAsked++;
                 if (rm.V is null || rm.V == RouteCutVerdict.Unjudgeable) tally.RouteUnjudged++;
                 else if (rm.V == RouteCutVerdict.NoLine) tally.RouteNoLine++;
