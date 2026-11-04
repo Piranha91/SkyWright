@@ -31,7 +31,7 @@ the judgement file exists.
 
 The machine file (machine-local, never tracked) names the lab instance, the game, a command prefix for heavy stages
 (the machine's slot and idle queue), how many arms the records stage reads at once (recordWorkers: a number or auto, from
-available memory; 1 by default) and the commands of run-local stages such as the precedent cards.
+available memory; auto by default, 1 for one at a time) and the commands of run-local stages such as the precedent cards.
 Exit codes: 0 the requested stages accepted or reused; 2 a refusal (one sentence on stderr); 3 the run stopped for a
 judgement (status names it).
 """
@@ -834,7 +834,7 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         return {"openArms": 0}, [sdir / "records.json"]
     import evalrecords_workers
     try:
-        record_workers = evalrecords_workers.parse_workers(ctx.machine.get("recordWorkers", 1), "the machine file's recordWorkers")
+        record_workers = evalrecords_workers.parse_workers(ctx.machine.get("recordWorkers", "auto"), "the machine file's recordWorkers")
     except ValueError as ex:
         raise Refusal(str(ex))
     n = len(list(sdir.glob("capture-*")))

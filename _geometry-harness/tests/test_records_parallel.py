@@ -231,7 +231,8 @@ def case_18_the_stage_asks_for_one_worker_unless_the_machine_file_says(tmp):
         seen.clear()
         T.check(k.get("heavy") is True, "18: the capture takes the machine slot, once, whatever the workers")
         return argv[argv.index("--workers") + 1] if "--workers" in argv else None
-    T.expect(ask({}), "1", "18: with no recordWorkers in the machine file the stage asks for one worker")
+    T.expect(ask({}), "auto", "18: with no recordWorkers in the machine file the stage chooses from memory")
+    T.expect(ask({"recordWorkers": 1}), "1", "18: recordWorkers 1 is how a user refuses")
     T.expect(ask({"recordWorkers": "auto"}), "auto", "18: the machine file's recordWorkers reaches the capture")
 
 
