@@ -20,7 +20,9 @@ using HousecarlCore.Progress;
 // the route oracle (blockprobe's obstacle step), the tallies, the listings, --json and --emit.
 //
 // usage: stateprobe [--state SPEC]* [--states-file F] [--all] [--cell CELL]* [--switch-map FILE] [--list N] [--json FILE] [--emit FILE]
-//                   [--route on|off] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//                   [--route on|off] [--threads N] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
+//   --threads N      arms evaluated side by side (default 8); each arm's rows merge in arm order, so the rows are a sequential
+//                    run's. 1 is the plain sequential loop. --phase-timers' state-loop split then sums every worker's time.
 //   --state SPEC     a state to evaluate: <switch>[,<switch>…] by editor id or FormKey, or stage:<quest>:<n> (needs --switch-map)
 //   --states-file F  one --state SPEC per line (the Deep evaluation's list); every line is parsed as --state is
 //   --all            every switch alone, plus every joint flip in --switch-map when given
@@ -83,6 +85,7 @@ int listN = 25;
 string? jsonPath = null, emitPath = null, mapPath = null, emptySpaceOut = null;
 string? phaseTimersPath = null;   // --phase-timers FILE: per-phase seconds and one line per state (lane O P0); changes no decision
 bool all = false, routeOn = true;
+int threads = 8;
 var stateSpecs = new List<string>(); var cellFilters = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
 string? orderFile = null;
@@ -106,6 +109,10 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--cell" && i + 1 < args.Length) cellFilters.Add(args[++i]);
     else if (args[i] == "--all") all = true;
     else if (args[i] == "--route" && i + 1 < args.Length) routeOn = args[++i].ToLowerInvariant() switch { "on" => true, "off" => false, _ => throw new ArgumentException("--route takes on|off") };
+    else if (args[i] == "--threads" && i + 1 < args.Length)
+    {
+        if (!int.TryParse(args[++i], out threads) || threads < 1) { Console.Error.WriteLine($"--threads {args[i]}: give a whole number of at least 1"); return 2; }
+    }
     else if (args[i] == "--order" && i + 1 < args.Length) orderFile = args[++i];
     else if (args[i] == "--enable" && i + 1 < args.Length) enablePlugins.Add(args[++i]);
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
@@ -234,6 +241,10 @@ RouteAsk? oracle = null;
 Func<string>? routeFloorLine = null;
 Dictionary<FormKey, (FormKey Wrld, int X, int Y)>? routeCellGrid = null;
 long routeMeasured = 0, routeNoNav = 0, routeNoGeo = 0, routeSetAside = 0, routeNoCross = 0;
+// The (cell, state) fields in the order a sequential run first asks for them: each arm's asks, merged in arm order.
+var fieldOrder = new List<(FormKey Cell, string State)>();
+var fieldSeen = new HashSet<(FormKey Cell, string State)>();
+var fieldAsks = new ThreadLocal<List<(FormKey Cell, string State)>?>();
 if (routeOn)
 {
     sw.Restart();
@@ -275,40 +286,42 @@ if (routeOn)
     var (fallbackTop, fallbackSrc) = ActorBand.TallestPlayable(raceFacts);
     Console.WriteLine($"route oracle: winning navmesh read for {winNav.Count:N0} of {wantedCells.Count:N0} cells; actor band fallback {fallbackSrc}; the band stands on the physical floor (Q24: {floorRefsByWorld.Values.Sum(w => w.Values.Sum(d => d.Count)):N0} exterior floor refs filed for {cellGridOf.Count:N0} exterior cells' neighbourhoods)  ({sw.Elapsed.TotalSeconds:0.0}s)");
     // The navmesh and its walkable graph do not depend on the state; the floor and the band do (see FieldFor).
-    var navIndex = new Dictionary<FormKey, (NavmeshIndex Index, Dictionary<NavGraph.TriRef, NavGraph.Node>? Graph)>();
+    var navIndex = new System.Collections.Concurrent.ConcurrentDictionary<FormKey, Lazy<NavCell>>();
     // One field per (cell, state) — see FieldFor below. Null when the cell's band is unjudgeable in that state.
-    var fieldByCellState = new Dictionary<(FormKey Cell, string State), (float Top, FloorField Floor)?>();
+    var fieldByCellState = new System.Collections.Concurrent.ConcurrentDictionary<(FormKey Cell, string State), Lazy<((float Top, FloorField Floor)? Field, string Why)>>();
     routeFloorLine = () =>
     {
-        var t = new FloorFeed.Tally(); foreach (var f in fieldByCellState.Values) if (f is { } ff) t.Add(ff.Floor);
+        var fields = fieldOrder.Select(k => (Key: k, Value: fieldByCellState[k].Value.Field)).ToList();
+        var t = new FloorFeed.Tally(); foreach (var f in fields) if (f.Value is { } ff) t.Add(ff.Floor);
         var sb = new System.Text.StringBuilder(t.Line());
-        sb.Append($"\n   {fieldByCellState.Count:N0} (cell, state) fields built; the floor each stood on (δ = navmesh − floor over the raster reads; a strongly negative median is a floor laid ABOVE the winning navmesh):");
-        foreach (var kv in fieldByCellState.Where(kv => kv.Value is { } v && v.Floor.Reads > 0).OrderBy(kv => kv.Value!.Value.Floor.OffsetQuantile(0.5f)).Take(40))
+        sb.Append($"\n   {fields.Count:N0} (cell, state) fields built; the floor each stood on (δ = navmesh − floor over the raster reads; a strongly negative median is a floor laid ABOVE the winning navmesh):");
+        foreach (var kv in fields.Where(kv => kv.Value is { } v && v.Floor.Reads > 0).OrderBy(kv => kv.Value!.Value.Floor.OffsetQuantile(0.5f)).Take(40))
             sb.Append("\n      " + FloorFeed.Tally.CellLine($"{kv.Key.Cell} @ {kv.Key.State}", kv.Value!.Value.Floor));
         return sb.ToString();
     };
-    var soupCache = new Dictionary<string, (Aabb Box, TriangleSoup? Soup, string Source)>(StringComparer.OrdinalIgnoreCase);
+    var soupCache = new System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<(Aabb Box, TriangleSoup? Soup, string Source)>>(StringComparer.OrdinalIgnoreCase);
     (Aabb Box, TriangleSoup? Soup, string Source) Obstacle(string rel)
+        => soupCache.GetOrAdd(rel, r => new Lazy<(Aabb Box, TriangleSoup? Soup, string Source)>(() => { lock (StateGeometry.MeshGate) return ReadObstacle(r); })).Value;
+    (Aabb Box, TriangleSoup? Soup, string Source) ReadObstacle(string rel)
     {
-        if (soupCache.TryGetValue(rel, out var hit)) return hit;
         var full = rel.StartsWith("meshes", StringComparison.OrdinalIgnoreCase) ? rel : Path.Combine("meshes", rel);
         var res = assets.ResolveForPlacement(full);
-        if (res.Sources.Count == 0) return soupCache[rel] = (Aabb.Empty, null, "unresolved");
+        if (res.Sources.Count == 0) return (Aabb.Empty, null, "unresolved");
         var (bytes, _) = AssetResolver.ReadPlacementSource(res.Sources[0]);
-        if (bytes is null) return soupCache[rel] = (Aabb.Empty, null, "unresolved");
+        if (bytes is null) return (Aabb.Empty, null, "unresolved");
         var o = NifGeometry.Measure(bytes, includeTriangles: true);
-        if (o.Model is null) return soupCache[rel] = (Aabb.Empty, null, "unreadable");
+        if (o.Model is null) return (Aabb.Empty, null, "unreadable");
         var m = o.Model;
         bool anySolid = m.CollisionBodies is not null && m.CollisionBodies.Any(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
-        if (!m.HasCollision || !anySolid) return soupCache[rel] = (Aabb.Empty, null, "none");
+        if (!m.HasCollision || !anySolid) return (Aabb.Empty, null, "none");
         var solid = m.CollisionSoupFor(b => b.Solid && CollisionLayers.IsActorSolid(b.Layer));
         if (m.CollisionComplete && solid is { TriangleCount: > 0 })
         {
             var bx = Aabb.Empty;
             foreach (var v in solid.Vertices) bx = bx.Add(v);
-            return soupCache[rel] = (bx, solid, "collision");
+            return (bx, solid, "collision");
         }
-        return soupCache[rel] = (m.Bounds, m.Soup is { TriangleCount: > 0 and <= 200_000 } ? m.Soup : null, "fallback");
+        return (m.Bounds, m.Soup is { TriangleCount: > 0 and <= 200_000 } ? m.Soup : null, "fallback");
     }
     var Ladder = new[] { 0f, 32f, 64f, 96f, 128f };
     // The floor the band stands on and the band's top belong to the STATE being judged (Q27): a flip can bring in a floor
@@ -325,7 +338,7 @@ if (routeOn)
         return g.Soup is not null && !g.Box.IsEmpty ? (g.Box, g.Soup) : null;
     }
     var baselinePop = EnablePopulation.Of(cidx!.Arms.WinnerRawFacts, EnablePopulation.BaselineStateName);
-    var armPops = new Dictionary<string, EnablePopulation>();
+    var armPops = new System.Collections.Concurrent.ConcurrentDictionary<string, EnablePopulation>();
     EnablePopulation PopOfArm(StateArm arm)
     {
         if (arm.IsBaseline) return baselinePop;
@@ -342,55 +355,58 @@ if (routeOn)
         (List<PlacedRef> Refs, List<((int X, int Y) Grid, float[,] Heights)> Land)? nb = null;
         if (cellGridOf.TryGetValue(cell, out var cg) && floorRefsByWorld.ContainsKey(cg.Wrld))
         {
-            if (!nbByCell.TryGetValue(cell, out var got0))
-                nbByCell[cell] = got0 = rwalk.Floor.NeighbourhoodOf(cg.Wrld, (cg.X, cg.Y));   // the 3x3 by position plus the reach (FloorFeed)
-            nb = got0;
+            // The floor index fills its worldspace maps as it is asked, so one asker at a time.
+            lock (nbByCell)
+            {
+                if (!nbByCell.TryGetValue(cell, out var got0))
+                    nbByCell[cell] = got0 = rwalk.Floor.NeighbourhoodOf(cg.Wrld, (cg.X, cg.Y));   // the 3x3 by position plus the reach (FloorFeed)
+                nb = got0;
+            }
         }
         // Does this state differ from the baseline anywhere the field is built from? If not, its field IS the
         // baseline's, and the key collapses.
         string key = StateFieldKey.For(arm, crefs, nb?.Refs, pop, baselinePop);
         var usePop = key == EnablePopulation.BaselineStateName ? baselinePop : pop;
-        if (fieldByCellState.TryGetValue((cell, key), out var got)) return got;
-        var band = ActorBand.ForCell(crefs, npcFacts, raceFacts, fallbackTop, fallbackSrc, usePop.Predicate);
-        if (!float.IsFinite(band.Top)) { why = $"UNJUDGEABLE actor band: {band.Source}"; fieldByCellState[(cell, key)] = null; return null; }
-        FloorField floor;
-        if (cellGridOf.TryGetValue(cell, out var cgL) && rwalk.Floor.UnreadableNear(cgL.Wrld, (cgL.X, cgL.Y)) is { Count: > 0 } badLand)
+        fieldAsks.Value?.Add((cell, key));
+        var nbHere = nb;
+        var made = fieldByCellState.GetOrAdd((cell, key), _ => new Lazy<((float Top, FloorField Floor)? Field, string Why)>(() =>
         {
-            why = $"UNJUDGEABLE floor: a LAND in the neighbourhood gives no heights ({string.Join("; ", badLand)})";
-            fieldByCellState[(cell, key)] = null;
-            return null;
-        }
-        if (nb is { } n) floor = FloorFeed.Build(n.Refs, FloorGeometry, n.Land, enabled: usePop.Predicate);
-        else floor = FloorFeed.Build(crefs, FloorGeometry, null, enabled: usePop.Predicate);
-        var made = (ActorBand.PhysicalControllerTop(band.Top), floor);
-        fieldByCellState[(cell, key)] = made;
-        return made;
+            var band = ActorBand.ForCell(crefs, npcFacts, raceFacts, fallbackTop, fallbackSrc, usePop.Predicate);
+            if (!float.IsFinite(band.Top)) return (null, $"UNJUDGEABLE actor band: {band.Source}");
+            if (cellGridOf.TryGetValue(cell, out var cgL) && rwalk.Floor.UnreadableNear(cgL.Wrld, (cgL.X, cgL.Y)) is { Count: > 0 } badLand)
+                return (null, $"UNJUDGEABLE floor: a LAND in the neighbourhood gives no heights ({string.Join("; ", badLand)})");
+            FloorField floor;
+            if (nbHere is { } n) floor = FloorFeed.Build(n.Refs, FloorGeometry, n.Land, enabled: usePop.Predicate);
+            else floor = FloorFeed.Build(crefs, FloorGeometry, null, enabled: usePop.Predicate);
+            return ((ActorBand.PhysicalControllerTop(band.Top), floor), "");
+        })).Value;
+        why = made.Why;
+        return made.Field;
     }
     oracle = (StateArm arm, FormKey key, bool navcut, out string why) =>
     {
         why = "";
         var win = idx.History.Winning(key);
         if (win is not { } w) { why = "no winning placement"; return null; }
-        if (!winNav.TryGetValue(w.Cell, out var navs) || navs.Count == 0) { why = "the cell has no navmesh"; routeNoNav++; return null; }
-        if (!navIndex.TryGetValue(w.Cell, out var ni))
-            navIndex[w.Cell] = ni = (NavmeshIndex.Build(navs.Values.ToList(), out _), null);
+        if (!winNav.TryGetValue(w.Cell, out var navs) || navs.Count == 0) { why = "the cell has no navmesh"; Interlocked.Increment(ref routeNoNav); return null; }
+        var ni = navIndex.GetOrAdd(w.Cell, _ => new Lazy<NavCell>(() => new NavCell(NavmeshIndex.Build(navs.Values.ToList(), out var _)))).Value;
         if (FieldFor(w.Cell, arm, out var fieldWhy) is not { } field) { why = fieldWhy; return null; }
-        if (ni.Index.TriangleCount == 0) { why = "the cell's navmesh is empty"; routeNoNav++; return null; }
+        if (ni.Index.TriangleCount == 0) { why = "the cell's navmesh is empty"; Interlocked.Increment(ref routeNoNav); return null; }
         TriangleSoup soup; Aabb model;
         if (navcut)
         {
-            if (!idx.RefPrimitive.TryGetValue(key, out var prim)) { why = "navcut without a primitive"; routeNoGeo++; return null; }
+            if (!idx.RefPrimitive.TryGetValue(key, out var prim)) { why = "navcut without a primitive"; Interlocked.Increment(ref routeNoGeo); return null; }
             model = NavcutGeometry.ModelBox(prim); soup = NavcutGeometry.Soup(prim);
-            if (model.IsEmpty) { why = "navcut with an empty box"; routeNoGeo++; return null; }
+            if (model.IsEmpty) { why = "navcut with an empty box"; Interlocked.Increment(ref routeNoGeo); return null; }
         }
         else
         {
             var b = cidx!.WinnerBase(key);
-            if (b.IsNull || !idx.BaseMesh.TryGetValue(b, out var rel)) { why = "no mesh"; routeNoGeo++; return null; }
+            if (b.IsNull || !idx.BaseMesh.TryGetValue(b, out var rel)) { why = "no mesh"; Interlocked.Increment(ref routeNoGeo); return null; }
             string type = idx.BaseInfo.TryGetValue(b, out var bi) ? bi.Type : "?";
-            if (RouteObstacle.SetAside(type, out var asideWhy)) { why = asideWhy; routeSetAside++; return null; }   // stateprobe/RouteObstacle.cs
+            if (RouteObstacle.SetAside(type, out var asideWhy)) { why = asideWhy; Interlocked.Increment(ref routeSetAside); return null; }   // stateprobe/RouteObstacle.cs
             var g = Obstacle(rel);
-            if (g.Soup is null || g.Box.IsEmpty) { why = $"no actor-solid geometry ({g.Source})"; routeNoGeo++; return null; }
+            if (g.Soup is null || g.Box.IsEmpty) { why = $"no actor-solid geometry ({g.Source})"; Interlocked.Increment(ref routeNoGeo); return null; }
             model = g.Box; soup = g.Soup;
         }
         var world = SpatialOverlap.ToWorld(model, w.Pos, w.Rot, w.Scale);
@@ -399,12 +415,14 @@ if (routeOn)
         // The cheap test first, as blockprobe does: does the solid enter an actor column over any walkable triangle?
         var q = SpatialOverlap.GrowDown(world, field.Top);
         bool crosses = RouteObstacle.EntersActorColumn(ni.Index, columns, q, field.Top);
-        if (!crosses) { why = "never enters an actor column over walkable ground"; routeNoCross++; return RouteCutVerdict.None; }
-        if (ni.Graph is null) { ni.Graph = NavGraph.Build(ni.Index).Nodes; navIndex[w.Cell] = ni; }
-        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, field.Top, Ladder, graph: ni.Graph, floorAt: field.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
+        if (!crosses) { why = "never enters an actor column over walkable ground"; Interlocked.Increment(ref routeNoCross); return RouteCutVerdict.None; }
+        var graph = ni.Graph.Value;
+        // A floor field keeps read scratch and tallies, and builds its columns as read: one reader per field. A cell's fields are its own.
+        RouteFacts facts;
+        lock (field.Floor) facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, field.Top, Ladder, graph: graph, floorAt: field.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
         var line = facts.Line;
         var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
-        routeMeasured++;
+        Interlocked.Increment(ref routeMeasured);
         why = vc.Why;
         return vc.Verdict;
     };
@@ -419,10 +437,12 @@ phase.Mark("route-oracle");
 var ev = new StateEvaluator(cidx, sx) { Route = oracle };
 var stateTimer = phaseTimersPath is not null ? new StatePhaseTimer() : null;
 ev.Timer = stateTimer;
-if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();   // --phase-timers: the contact code's own split (changes no output)
+// The contact code's own split (changes no output) is single-thread: --threads 1 only.
+if (phaseTimersPath is not null && threads == 1) cidx.Timer = new ContactTimer();
+else if (phaseTimersPath is not null) Console.WriteLine("   --phase-timers: the contact split is measured with --threads 1 only");
 var stateLines = new List<string>();
 // The population rule (window 2, task 1), decided once per changed reference and the same in every state.
-var keyRule = new Dictionary<FormKey, string?>();
+var keyRule = new System.Collections.Concurrent.ConcurrentDictionary<FormKey, string?>();
 bool RefInPopulation(FormKey key) => population!.Seeds.Contains(key) || (idx.History.Of(key) is { } hs && hs.Any(population.PlaceInScope));
 float contactNeighbourhood = cidx.Reach + cidx.BoxBand + cidx.MaxDependentDim;
 string? RuleOf(FormKey k)
@@ -461,16 +481,38 @@ var rows = new List<StateRow>();
 var perState = new List<(StateArm Arm, int Changes, int Rows, int Conditional, double Ms)>();
 int done = 0;
 phase.Mark("evaluator-boxing");
-foreach (var arm in arms)
+// What keeps an arm's answers from being its own: a shared memo a later arm reads first decides a cycle's answer, or an arm named as
+// the baseline shares the baseline's field key. Either keeps the loop sequential, said once.
+int stateThreads = threads;
+if (threads > 1 && routeOn && ParallelArms.ChainCycleOrderMatters(idx.EnableChanges.Keys, cidx.Arms.WinnerRawFacts) is { } orderCycle)
+{
+    stateThreads = 1;
+    Console.WriteLine($"   state loop stays sequential: the answers of the enable-chain cycle through {orderCycle} depend on which reference is asked first");
+}
+else if (threads > 1 && routeOn && arms.Any(a => !a.IsBaseline && a.Name == EnablePopulation.BaselineStateName))
+{
+    stateThreads = 1;
+    Console.WriteLine($"   state loop stays sequential: a flipped state is named '{EnablePopulation.BaselineStateName}', which its fields share with the load-time state");
+}
+ParallelArms.Run(arms, stateThreads, arm =>
 {
     var t = new StateTally();
+    var asks = new List<(FormKey Cell, string State)>();
+    fieldAsks.Value = asks;
     var r = ev.Evaluate(arm, IsVanilla, IsUssep, t);
-    if (phaseTimersPath is not null) stateLines.Add(PhaseClock.StateLine("state", arm.Name, t.ElapsedMs, t.Changes, r.Count, PhaseClock.Digest(r.Select(x => x.ToString())), PhaseClock.TallyDigest(t)));
+    fieldAsks.Value = null;
+    string? line = phaseTimersPath is null ? null : PhaseClock.StateLine("state", arm.Name, t.ElapsedMs, t.Changes, r.Count, PhaseClock.Digest(r.Select(x => x.ToString())), PhaseClock.TallyDigest(t));
+    return (Tally: t, Rows: r, Asks: asks, Line: line);
+}, (i, res) =>
+{
+    var (t, r, asks, line) = res;
+    if (line is not null) stateLines.Add(line);
+    foreach (var ask in asks) if (fieldSeen.Add(ask)) fieldOrder.Add(ask);
     rows.AddRange(r);
-    perState.Add((arm, t.Changes, r.Count, r.Count(x => x.Verdict == StateVerdict.StateConditional && !x.SameSet), t.ElapsedMs));
+    perState.Add((arms[i], t.Changes, r.Count, r.Count(x => x.Verdict == StateVerdict.StateConditional && !x.SameSet), t.ElapsedMs));
     Merge(tally, t);
     if (++done % 250 == 0) Console.WriteLine($"   ... {done:N0}/{arms.Count:N0} states, {rows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
-}
+});
 static void Merge(StateTally a, StateTally b)
 {
     a.States += b.States; a.Changes += b.Changes; a.Arrivals += b.Arrivals; a.Departures += b.Departures; a.SwitchesThemselves += b.SwitchesThemselves;
@@ -507,21 +549,31 @@ if (emptySpaceOut is not null)
 {
     sw.Restart();
     var closure = DetectorModel.MasterClosure(masterIdx);
-    es = new EmptySpaceSearch(cidx, closure, PluginName, EmptySpaceOutput.NodeCheck(idx, assets), f => PluginKinds.IsBethesda(f), p => IsVanilla(p) || IsUssep(p));
+    var nodeCheck = EmptySpaceOutput.NodeCheck(idx, assets);
+    Func<FormKey, string, bool?> nodeCheckOneAtATime = (b, n) => { lock (StateGeometry.MeshGate) return nodeCheck(b, n); };
+    es = new EmptySpaceSearch(cidx, closure, PluginName, nodeCheckOneAtATime, f => PluginKinds.IsBethesda(f), p => IsVanilla(p) || IsUssep(p));
     if (population is not null)
     {
         esScope = new EmptySpaceScope(idx, population.InteriorClosure(idx, es.RackPartners));
         Console.WriteLine($"   empty space population scope: {esScope.Cells.Count:N0} interior cells");
     }
     int esDone = 0;
-    foreach (var arm in arms)
+    var esSearch = es; var esArea = esScope;
+    if (threads > 1) esSearch.PrepareStateViews();
+    ParallelArms.Run(arms, threads, arm =>
     {
-        if (++esDone % 250 == 0) Console.WriteLine($"   ... empty space: {esDone:N0}/{arms.Count:N0} states, {esRows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
         long esT0 = Stopwatch.GetTimestamp();
-        var judgedHere = es.JudgeArrivals(arm, sx, esScope, out var o1, out var o2);
-        if (phaseTimersPath is not null)
-            stateLines.Add(PhaseClock.StateLine("empty-space", arm.Name, Stopwatch.GetElapsedTime(esT0).TotalMilliseconds, 0, judgedHere.Count,
-                PhaseClock.Digest(judgedHere.Select(x => x.Item1.ToString() + "|" + x.Item2)), ""));
+        // Each state's memos start empty either way, so a state's own view reads what the shared pass reads.
+        int o1, o2;
+        var judgedHere = threads > 1 ? esSearch.JudgeArrivalsAlone(arm, sx, esArea, out o1, out o2) : esSearch.JudgeArrivals(arm, sx, esArea, out o1, out o2);
+        string? line = phaseTimersPath is null ? null : PhaseClock.StateLine("empty-space", arm.Name, Stopwatch.GetElapsedTime(esT0).TotalMilliseconds, 0, judgedHere.Count,
+            PhaseClock.Digest(judgedHere.Select(x => x.Item1.ToString() + "|" + x.Item2)), "");
+        return (Judged: judgedHere, O1: o1, O2: o2, Line: line);
+    }, (_, res) =>
+    {
+        var (judgedHere, o1, o2, line) = res;
+        if (++esDone % 250 == 0) Console.WriteLine($"   ... empty space: {esDone:N0}/{arms.Count:N0} states, {esRows.Count:N0} rows, {sw.Elapsed.TotalSeconds:0}s");
+        if (line is not null) stateLines.Add(line);
         esOutside += o1; esJudgedDropped += o2;
         foreach (var (r, sk) in judgedHere)
         {
@@ -531,7 +583,7 @@ if (emptySpaceOut is not null)
             if (r.Verdict == EmptySpaceVerdict.Falls) { esFalls++; continue; }
             esRows.Add(r); esTrigger[r] = map?.TriggerOf(sk).Status ?? "(no map)";
         }
-    }
+    });
     phase.Mark("empty-space");
     var esCls = esRows.Where(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace).ToList();
     Console.WriteLine($"\n==== EMPTY SPACE per state - {esPairs:N0} arriving-fixture x mover pairs (absent {esAbsent:N0}, no relation {esNoRelation:N0}, falls {esFalls:N0}; counted, not listed) in {sw.Elapsed.TotalSeconds:0.0}s; touch tests {es.TouchTests:N0} ====");
