@@ -807,6 +807,22 @@ def reader_cmd(ctx) -> str:
 RECORDS_ARM_MINUTES = 150
 
 
+def slot_wait_sentence(log: Path, ctx) -> str | None:
+    """The one sentence for a capture that never started because the machine slot's wait for idle ran out; None for any other end."""
+    if not log.is_file():
+        return None
+    line = next((x for x in log.read_text(encoding="utf-8", errors="replace").splitlines() if "gave up waiting for idle" in x), None)
+    if line is None:
+        return None
+    why = line.split(": ", 1)[-1].strip()
+    prefix = ctx.machine.get("heavyPrefix") or []
+    floor = prefix[prefix.index("--min-free-gb") + 1] if "--min-free-gb" in prefix else None
+    if "memory" in why:
+        return (f"the record capture never started: the machine slot's wait for memory ran out ({why}); it needs {floor} GB free, so close other programs "
+                f"or lower --min-free-gb in the machine file's heavyPrefix, then run again.")
+    return f"the record capture never started: the machine slot's wait for an idle machine ran out ({why}); end what it names, then run again."
+
+
 def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     run = ctx.out / "evaluation"
     led = read_json(run / "ledger.json").get("entries") or {}
@@ -847,7 +863,8 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
                                        "refusedArms": refusals})
     bad = [x for x in results if x["exitCode"] != 0]
     if r.get("exitCode") not in (0, 2) or not summary:
-        raise Refusal(f"the record capture did not finish (exit {r.get('exitCode')}); read {fwd(sdir / 'commands')}.")
+        raise Refusal(slot_wait_sentence(sdir / "commands" / "records-capture.txt", ctx)
+                      or f"the record capture did not finish (exit {r.get('exitCode')}); read {fwd(sdir / 'commands')}.")
     stopped = sorted(a_ for a_, why in refusals.items() if "deadline" in str(why))
     if stopped:
         raise Refusal(f"the record read of arm(s) {', '.join(stopped)} reached its {RECORDS_ARM_MINUTES}-minute deadline; "
