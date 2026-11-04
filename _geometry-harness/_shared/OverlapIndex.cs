@@ -325,6 +325,7 @@ public sealed class PairResultCache
         ["timer"] = "observation only (P0)",
         ["prepared"] = "the prepared-mesh cache gives the soup query's own result (P2, every pair identical on B1 and B2)",
         ["results"] = "this cache",
+        ["path"] = "an output: the call's path, stored with the result",
     };
     public const string Format = "overlapprobe-pair-results-1";
 
