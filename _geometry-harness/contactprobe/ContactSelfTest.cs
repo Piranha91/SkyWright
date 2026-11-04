@@ -139,6 +139,18 @@ static class ContactSelfTest
             Check("CP-4 per-thread counters and timers add up when merged",
                   skipA.BoxesApart == 7 && skipA.HostVolume == 7 && skipA.DepBodilessDoor == 3 && timerA.Best.Calls == 3 && timerA.CoreShell.Calls == 4,
                   $"apart {skipA.BoxesApart}, volume {skipA.HostVolume}, best {timerA.Best.Calls}, shell {timerA.CoreShell.Calls}");
+
+            var early = (baseA, 0, baseA); var late = (baseB, 0, baseB);
+            Mutagen.Bethesda.Plugins.FormKey LargestOf(bool stable, params (Mutagen.Bethesda.Plugins.FormKey, int, Mutagen.Bethesda.Plugins.FormKey)[] keys)
+            {
+                var pool = new CacheBudget(1L << 20) { StableLargestTie = stable };
+                var tied = new PlacementCache<HousecarlCore.TriangleSoup>(pool, "tied", PlacementCache<HousecarlCore.TriangleSoup>.SoupBytes);
+                foreach (var k in keys) tied[k] = HousecarlCore.TriangleSoup.Empty;
+                return tied.Largest!.Value.Key.Key;
+            }
+            Check("CP-5 a tie for the largest entry: by key whichever arrives first when stable, first arrival when not",
+                  LargestOf(true, early, late) == baseA && LargestOf(true, late, early) == baseA && LargestOf(false, late, early) == baseB,
+                  $"{LargestOf(true, late, early)} / {LargestOf(false, late, early)}");
         }
         finally { Directory.Delete(dir, recursive: true); }
 

@@ -597,6 +597,7 @@ if (threads > 1 && (geomReport is not null || MemStages.On || Environment.GetEnv
 }
 try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry, automaticThreads: threads) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
+cidx.Budget.StableLargestTie = threads > 1;
 meshReader.Store(boundedGeometry, cidx.Budget);
 if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();
 var idx = cidx.Index;
