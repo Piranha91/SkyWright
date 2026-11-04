@@ -68,6 +68,16 @@ if (args.Length >= 2 && args[0] == "--only" && args[1] == "solidscan")
     return fail == 0 ? 0 : 1;
 }
 
+// --only accel: the acceleration known answers (AX-*) alone; accel-waiting: those that need a branch not yet merged.
+if (args.Length >= 2 && args[0] == "--only" && args[1] is "accel" or "accel-waiting")
+{
+    if (args[1] == "accel") AccelerationProof.Run(Check); else AccelerationProof.RunWaitingOnBranches(Check);
+    Console.WriteLine();
+    Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
+    if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
+    return fail == 0 ? 0 : 1;
+}
+
 // --only sweptnear (2026-10-21): the instanced swept near test (MV4-MV6) and the volume identity cases beside it, alone.
 if (args.Length >= 2 && args[0] == "--only" && args[1] == "sweptnear")
 {
@@ -3502,6 +3512,7 @@ MeshIntersectionProof.Run(Check);
 SolidScanConsumerProof.Run(Check);
 OverlapVolumeProof.Run(Check);
 CacheBudgetProof.Run(Check);
+AccelerationProof.Run(Check);
 GeometryRetentionProof.Run(Check);
 OverlapSurfaceProof.Run(Check);
 MotionProof.Run(Check);
