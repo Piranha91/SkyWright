@@ -249,6 +249,51 @@ static class AccelSelfTest
                     $"{one.Rows.Count} vs {many.Rows.Count} rows; {one.Sweep.PairsChecked} pairs, {one.Cache.Hits} cache hits; tallies equal {one.Tallies == many.Tallies}");
         }
 
+        // A worker's time-out is measured again in order: every worker measurement cut short, one thread's rows and tallies all the same.
+        using (var gone = new CancellationTokenSource())
+        {
+            gone.Cancel();
+            OverlapIndex.TestWorkerToken = gone.Token;
+            try
+            {
+                var redone = Sweep(8, 1L << 30, null);
+                t.Check("P4-5 worker time-outs measured again on a fresh clock give one thread's rows, tallies and cache file",
+                        redone.Sweep.Remeasured > 0 && one.Sweep.Remeasured == 0 && one.Rows.SequenceEqual(redone.Rows) && one.Tallies == redone.Tallies && FileLines(one.Cache) == FileLines(redone.Cache),
+                        $"measured again {redone.Sweep.Remeasured}, tallies equal {one.Tallies == redone.Tallies}");
+            }
+            finally { OverlapIndex.TestWorkerToken = null; }
+        }
+
+        // The run-ahead window at its smallest still finishes, with one thread's rows.
+        int window = OverlapIndex.PairRunAhead;
+        OverlapIndex.PairRunAhead = 1;
+        try
+        {
+            var bounded = Sweep(8, 1L << 30, null);
+            t.Check("P4-6 a run-ahead window of one pair finishes with one thread's rows and tallies",
+                    one.Rows.SequenceEqual(bounded.Rows) && one.Tallies == bounded.Tallies, $"{bounded.Rows.Count} rows");
+        }
+        finally { OverlapIndex.PairRunAhead = window; }
+
+        // Out of memory stops a many-thread sweep; one thread keeps the shared query's row.
+        var starving = candidates[10].WorldSoup;
+        MeshIntersection.TestPrepareHook = s => { if (ReferenceEquals(s, starving)) throw new OutOfMemoryException("test: out of memory"); };
+        try
+        {
+            string Starved(int threads)
+            {
+                try
+                {
+                    var r = OverlapIndex.SurfacePairs(candidates, closure, 1e-5, 2_000_000, TimeSpan.FromSeconds(60), threads: threads);
+                    return r.CrossResults.Concat(r.SameResults).Any(h => h.Query.Reason?.Contains("OutOfMemoryException") == true) ? "row" : $"finished, {r.PairsChecked} pairs";
+                }
+                catch (OutOfMemoryException) { return "stopped"; }
+            }
+            string alone = Starved(1), many = Starved(8);
+            t.Check("P4-7 out of memory stops a many-thread sweep instead of becoming a row; one thread is unchanged", many == "stopped" && alone == "row", $"one thread: {alone}; eight: {many}");
+        }
+        finally { MeshIntersection.TestPrepareHook = null; }
+
         // A second run served by the first run's file: every pair from the cache, the same rows.
         var warmFile = Path.Combine(Path.GetTempPath(), $"pd-p4-{Environment.ProcessId}-warm.gz");
         one.Cache.Write(warmFile);
