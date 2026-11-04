@@ -22,7 +22,7 @@ using HousecarlCore.Progress;
 // usage: stateprobe [--state SPEC]* [--states-file F] [--all] [--cell CELL]* [--switch-map FILE] [--list N] [--json FILE] [--emit FILE]
 //                   [--route on|off] [--threads N] [--enable X.esp]* [--disable X.esp]* [--instance DIR] [--game DIR] [--profile NAME]
 //   --threads N      arms evaluated side by side (default 8); each arm's rows merge in arm order, so the rows are a sequential
-//                    run's. 1 is the plain sequential loop. --phase-timers' state-loop split then sums every worker's time.
+//                    run's. 1 is the plain sequential loop. --phase-timers' state-loop and contact splits then sum every worker's time.
 //   --state SPEC     a state to evaluate: <switch>[,<switch>…] by editor id or FormKey, or stage:<quest>:<n> (needs --switch-map)
 //   --states-file F  one --state SPEC per line (the Deep evaluation's list); every line is parsed as --state is
 //   --all            every switch alone, plus every joint flip in --switch-map when given
@@ -155,7 +155,7 @@ HarnessOrderCli.Print(cfg);
 // ---------------------------------------------------------------------------------------
 ContactIndex? cidx = null;
 var geo = new StateGeometry(full => assets.ResolveForPlacement(full) is { Sources.Count: > 0 } res ? AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes : null);   // stateprobe/StateGeometry.cs
-try { cidx = new ContactIndex(geo.Of); geo.Contact = cidx; }
+try { cidx = new ContactIndex(geo.Of, automaticThreads: threads); geo.Contact = cidx; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 var idx = cidx.Index;
 
@@ -417,9 +417,7 @@ if (routeOn)
         bool crosses = RouteObstacle.EntersActorColumn(ni.Index, columns, q, field.Top);
         if (!crosses) { why = "never enters an actor column over walkable ground"; Interlocked.Increment(ref routeNoCross); return RouteCutVerdict.None; }
         var graph = ni.Graph.Value;
-        // A floor field keeps read scratch and tallies, and builds its columns as read: one reader per field. A cell's fields are its own.
-        RouteFacts facts;
-        lock (field.Floor) facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, field.Top, Ladder, graph: graph, floorAt: field.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
+        var facts = RouteConnectivity.Measure(ni.Index, columns, world, 256f, 16f, ActorBand.PhysicalStep, field.Top, Ladder, graph: graph, floorAt: field.Floor.FloorAt, isStairsMaterial: DetectorModel.IsStairsMaterial);
         var line = facts.Line;
         var vc = DetectorModel.RouteCut(facts.Judged, facts.Touched, line?.Found ?? false, line?.Why ?? "", line?.Cut ?? false, line?.Passage ?? float.NaN, cutRise: line?.CutRise ?? float.NaN, cutFloat: line?.CutFloat ?? float.NaN, cutOnStairs: line?.CutOnStairs ?? false);
         Interlocked.Increment(ref routeMeasured);
@@ -437,9 +435,7 @@ phase.Mark("route-oracle");
 var ev = new StateEvaluator(cidx, sx) { Route = oracle };
 var stateTimer = phaseTimersPath is not null ? new StatePhaseTimer() : null;
 ev.Timer = stateTimer;
-// The contact code's own split (changes no output) is single-thread: --threads 1 only.
-if (phaseTimersPath is not null && threads == 1) cidx.Timer = new ContactTimer();
-else if (phaseTimersPath is not null) Console.WriteLine("   --phase-timers: the contact split is measured with --threads 1 only");
+if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();   // --phase-timers: the contact code's own split (changes no output)
 var stateLines = new List<string>();
 // The population rule (window 2, task 1), decided once per changed reference and the same in every state.
 var keyRule = new System.Collections.Concurrent.ConcurrentDictionary<FormKey, string?>();
@@ -522,6 +518,7 @@ static void Merge(StateTally a, StateTally b)
     a.OutsidePopulation += b.OutsidePopulation; a.MergedContactRows += b.MergedContactRows;
 }
 double totalS = sw.Elapsed.TotalSeconds;
+cidx.MergeThreadTimers();
 phase.Mark("state-loop");
 var cellStates = perState.Sum(p => arms.First(a => a == p.Arm).Changes(sx).Select(c => idx.History.Winning(c.Key)?.Cell ?? FormKey.Null).Distinct().Count());
 Console.WriteLine($"\n==== COST ====");
@@ -584,6 +581,7 @@ if (emptySpaceOut is not null)
             esRows.Add(r); esTrigger[r] = map?.TriggerOf(sk).Status ?? "(no map)";
         }
     });
+    cidx.MergeThreadTimers();
     phase.Mark("empty-space");
     var esCls = esRows.Where(r => r.Verdict == EmptySpaceVerdict.LeftInEmptySpace).ToList();
     Console.WriteLine($"\n==== EMPTY SPACE per state - {esPairs:N0} arriving-fixture x mover pairs (absent {esAbsent:N0}, no relation {esNoRelation:N0}, falls {esFalls:N0}; counted, not listed) in {sw.Elapsed.TotalSeconds:0.0}s; touch tests {es.TouchTests:N0} ====");

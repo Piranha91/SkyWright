@@ -9,7 +9,7 @@ using Mutagen.Bethesda.Plugins;
 sealed class StateGeometry
 {
     readonly Func<string, byte[]?> _read;
-    /// <summary>One holder at a time reads an asset and parses a NIF: the asset view and the NIF reader keep unsynchronised caches.</summary>
+    /// <summary>One holder at a time reads an asset and parses a NIF: neither the asset view nor the NIF library is known to be safe concurrently.</summary>
     public static readonly object MeshGate = new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<string, RefGeometry?> _byMesh = new(StringComparer.OrdinalIgnoreCase);
     public long MeshesMeasured, ObndFallback, NoGeometry;
