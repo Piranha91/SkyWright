@@ -101,6 +101,12 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
                                                   long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken = default,
                                                   PairTimer? timer = null, PreparedMeshCache? prepared = null,
                                                   PairResultCache? results = null)
+        => QueryPlaced(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer, prepared, results, out _);
+
+    /// <summary>The same query, returning the pair's path to this call, whichever thread makes it.</summary>
+    public static SurfaceQueryOutcome QueryPlaced(TriangleSoup worldA, Placed? a, TriangleSoup worldB, Placed? b, double tolerance,
+                                                  long maxTrianglePairs, TimeSpan pairTimeout, CancellationToken cancellationToken,
+                                                  PairTimer? timer, PreparedMeshCache? prepared, PairResultCache? results, out PairPath path)
     {
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         string? key = null;
@@ -113,10 +119,11 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
                 if (results.TryGet(key, out var hit, out var hitPath))
                 {
                     if (timer is not null) { timer.LastPath = hitPath; timer.Paths[(int)hitPath]++; timer.CacheHits++; }
+                    path = hitPath;
                     return hit;
                 }
             }
-            var outcome = QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer, prepared, out var path);
+            var outcome = QueryPlacedCore(worldA, a, worldB, b, tolerance, maxTrianglePairs, pairTimeout, cancellationToken, timer, prepared, out path);
             if (results is not null) results.Put(key!, outcome, path);
             return outcome;
         }
@@ -235,39 +242,64 @@ public sealed record SurfaceQueryOutcome(string Status, string? Reason, string S
 /// <summary>Candidates' world soups prepared once each for the pair sweep (overlap acceleration P2), least recently used first
 /// out, bounded by estimated bytes; and each soup's zero-area answer, which PairFrame asks of every pair. Keyed by the soup
 /// object: a candidate's world soup is made once and kept for the run. Nothing a time limit cut short is kept: preparation
-/// reads no clock, and a prepared mesh keeps only completed validations. Not thread-safe.</summary>
+/// reads no clock, and a prepared mesh keeps only completed validations. Thread-safe; one thread at a time prepares a given soup,
+/// and the others wait and share it, so no thread repeats its preparation or its validation.</summary>
 public sealed class PreparedMeshCache(long maxBytes)
 {
+    readonly object _sync = new();
     readonly Dictionary<TriangleSoup, LinkedListNode<MeshIntersection.PreparedMesh>> _map = new(ReferenceEqualityComparer.Instance);
     readonly LinkedList<MeshIntersection.PreparedMesh> _lru = new();
-    readonly Dictionary<TriangleSoup, bool> _zero = new(ReferenceEqualityComparer.Instance);
-    public long Bytes, PeakBytes, Hits, Misses, Evictions;
+    readonly System.Collections.Concurrent.ConcurrentDictionary<TriangleSoup, bool> _zero = new(ReferenceEqualityComparer.Instance);
+    readonly HashSet<TriangleSoup> _evicted = new(ReferenceEqualityComparer.Instance);
+    public long Bytes, PeakBytes, Hits, Misses, Evictions, Reprepared;
     public long MaxBytes => maxBytes;
 
     public MeshIntersection.PreparedMesh Get(TriangleSoup soup, MeshQueryTimer? timer)
     {
-        if (_map.TryGetValue(soup, out var node))
+        if (TryHit(soup, out var held)) return held;
+        // The soup's own lock, never held with _sync across the preparation: other soups' pairs carry on meanwhile.
+        lock (soup)
         {
-            Hits++;
-            _lru.Remove(node); _lru.AddFirst(node);
-            return node.Value;
+            if (TryHit(soup, out held)) return held;
+            bool repeat;
+            lock (_sync) { Misses++; repeat = _evicted.Contains(soup); if (repeat) Reprepared++; }
+            var prepared = MeshIntersection.PreparedMesh.Create(soup, timer);
+            if (repeat) prepared.MarkRepeat();
+            lock (_sync)
+            {
+                _map[soup] = _lru.AddFirst(prepared);
+                Bytes += prepared.EstimatedBytes;
+                PeakBytes = Math.Max(PeakBytes, Bytes);
+                while (Bytes > maxBytes && _lru.Count > 1)
+                {
+                    var last = _lru.Last!;
+                    _lru.RemoveLast(); _map.Remove(last.Value.Source);
+                    _evicted.Add(last.Value.Source);
+                    Bytes -= last.Value.EstimatedBytes; Evictions++;
+                }
+            }
+            return prepared;
         }
-        Misses++;
-        var prepared = MeshIntersection.PreparedMesh.Create(soup, timer);
-        _map[soup] = _lru.AddFirst(prepared);
-        Bytes += prepared.EstimatedBytes;
-        PeakBytes = Math.Max(PeakBytes, Bytes);
-        while (Bytes > maxBytes && _lru.Count > 1)
+    }
+
+    bool TryHit(TriangleSoup soup, out MeshIntersection.PreparedMesh held)
+    {
+        lock (_sync)
         {
-            var last = _lru.Last!;
-            _lru.RemoveLast(); _map.Remove(last.Value.Source);
-            Bytes -= last.Value.EstimatedBytes; Evictions++;
+            if (_map.TryGetValue(soup, out var node))
+            {
+                Hits++;
+                _lru.Remove(node); _lru.AddFirst(node);
+                held = node.Value;
+                return true;
+            }
         }
-        return prepared;
+        held = null!;
+        return false;
     }
 
     /// <summary>Whether a prepared mesh for this soup object is held.</summary>
-    public bool Holds(TriangleSoup soup) => _map.ContainsKey(soup);
+    public bool Holds(TriangleSoup soup) { lock (_sync) return _map.ContainsKey(soup); }
 
     public bool AnyZeroArea(TriangleSoup soup) => _zero.TryGetValue(soup, out var z) ? z : _zero[soup] = PairFrame.AnyZeroArea(soup);
 }
@@ -278,7 +310,8 @@ public sealed class PreparedMeshCache(long maxBytes)
 /// housecarl-core's dll hashes and the mesh policy). The parameters left out are <see cref="HeaderParameters"/> (constant per
 /// run, recorded in each file's header and required equal to read it) and <see cref="Unkeyed"/> (cannot change a stored
 /// result: a result a time limit or cancellation cut short, or that threw, is never stored). Each run reads earlier runs'
-/// files and writes its own (gzip JSON lines, written to a temporary name and renamed when complete). Not thread-safe.</summary>
+/// files and writes its own (gzip JSON lines, written to a temporary name and renamed when complete). Key, TryGet, Contains and
+/// Put are thread-safe; Read and Write run with no query in flight.</summary>
 public sealed class PairResultCache
 {
     /// <summary>QueryPlaced's parameters the key covers.</summary>
@@ -295,6 +328,7 @@ public sealed class PairResultCache
     };
     public const string Format = "overlapprobe-pair-results-1";
 
+    readonly object _sync = new();
     readonly string _probeSha, _coreSha, _header;
     readonly double _pairSeconds;
     readonly Dictionary<string, (SurfaceQueryOutcome Outcome, PairPath Path)> _read = new(StringComparer.Ordinal);
@@ -362,19 +396,28 @@ public sealed class PairResultCache
 
     public bool TryGet(string key, out SurfaceQueryOutcome outcome, out PairPath path)
     {
-        if (_mine.TryGetValue(key, out var v) || _read.TryGetValue(key, out v)) { Hits++; (outcome, path) = v; return true; }
-        Misses++; outcome = null!; path = default; return false;
+        lock (_sync)
+        {
+            if (_mine.TryGetValue(key, out var v) || _read.TryGetValue(key, out v)) { Hits++; (outcome, path) = v; return true; }
+            Misses++; outcome = null!; path = default; return false;
+        }
     }
+
+    /// <summary>Whether <see cref="TryGet"/> would serve this key, counting nothing.</summary>
+    public bool Contains(string key) { lock (_sync) return _mine.ContainsKey(key) || _read.ContainsKey(key); }
 
     /// <summary>Keep a result unless a time limit or cancellation cut it short, or it threw.</summary>
     public void Put(string key, SurfaceQueryOutcome outcome, PairPath path)
     {
-        if (outcome.Reason is "cancelled" or "pair time budget exhausted" || (outcome.Reason?.StartsWith("mesh query failed", StringComparison.Ordinal) ?? false))
-        { NotStored++; return; }
-        _mine[key] = (outcome, path);
+        lock (_sync)
+        {
+            if (outcome.Reason is "cancelled" or "pair time budget exhausted" || (outcome.Reason?.StartsWith("mesh query failed", StringComparison.Ordinal) ?? false))
+            { NotStored++; return; }
+            _mine[key] = (outcome, path);
+        }
     }
 
-    public int Stored => _mine.Count;
+    public int Stored { get { lock (_sync) return _mine.Count; } }
 
     /// <summary>Read an earlier run's file. Returns null when read, else why it was not (the header names another build or
     /// pair time limit, or the file is unreadable); a file is read whole or not at all.</summary>
@@ -440,7 +483,7 @@ public sealed class PairResultCache
 public enum PairPath { World, WorldSkip, Shifted, Refused }
 
 /// <summary>Cumulative time and counts of placed-pair queries for one class of pairs (overlap acceleration P0). Observation only;
-/// not thread-safe.</summary>
+/// not thread-safe: one timer per thread, merged with <see cref="Add"/> when the threads have finished.</summary>
 public sealed class PairTimer
 {
     public readonly MeshQueryTimer Core = new();
@@ -453,12 +496,24 @@ public sealed class PairTimer
     public readonly List<(double Seconds, string A, string B, SurfaceQueryOutcome Query, PairPath Path)> Slowest = new();
     public const int Keep = 20;
 
-    public void Note(double seconds, string a, string b, SurfaceQueryOutcome q)
+    public void Note(double seconds, string a, string b, SurfaceQueryOutcome q) => Note(seconds, a, b, q, LastPath);
+
+    public void Note(double seconds, string a, string b, SurfaceQueryOutcome q, PairPath path)
     {
         if (Slowest.Count == Keep && seconds <= Slowest[^1].Seconds) return;
-        Slowest.Add((seconds, a, b, q, LastPath));
+        Slowest.Add((seconds, a, b, q, path));
         Slowest.Sort((x, y) => y.Seconds.CompareTo(x.Seconds));
         if (Slowest.Count > Keep) Slowest.RemoveAt(Keep);
+    }
+
+    /// <summary>Adds a finished thread's totals and slowest pairs to this timer.</summary>
+    public void Add(PairTimer o)
+    {
+        Core.Add(o.Core);
+        PairFrameTicks += o.PairFrameTicks; WallTicks += o.WallTicks;
+        Pairs += o.Pairs; Timeouts += o.Timeouts; CacheHits += o.CacheHits;
+        for (int i = 0; i < Paths.Length; i++) Paths[i] += o.Paths[i];
+        foreach (var s in o.Slowest) Note(s.Seconds, s.A, s.B, s.Query, s.Path);
     }
 }
 
@@ -889,71 +944,190 @@ public sealed class OverlapIndex
         bool retainSameResults = false, Func<SurfaceOverlapCandidate, SurfaceOverlapCandidate, bool>? includePair = null,
         PairTimer? sameTimer = null, PairTimer? crossTimer = null,
         Action<SurfaceOverlapCandidate, SurfaceOverlapCandidate, SurfaceQueryOutcome, PairPath?, double>? onPair = null,
-        PreparedMeshCache? prepared = null, PairResultCache? results = null)
+        PreparedMeshCache? prepared = null, PairResultCache? results = null, int threads = 1)
     {
         var timeout = pairTimeout ?? TimeSpan.FromSeconds(120);
         var sweep = new SurfacePairSweep();
+
         // A sweep per coordinate space has no allocation proportional to an object's dimensions. This matters now that
         // large real surfaces are eligible. Bounds reject only axis separation greater than the predicate tolerance.
-        foreach (var space in candidates.GroupBy(c => c.Win.Space))
+        IEnumerable<(SurfaceOverlapCandidate A, SurfaceOverlapCandidate B)> Reached()
         {
-            var ordered = space.OrderBy(c => (double)c.WorldBounds.Min.X).ThenBy(c => c.Key.ToString(), StringComparer.Ordinal).ToList();
-            for (int ai = 0; ai < ordered.Count; ai++)
-                for (int bi = ai + 1; bi < ordered.Count; bi++)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    var a = ordered[ai]; var b = ordered[bi];
-                    if ((double)b.WorldBounds.Min.X - a.WorldBounds.Max.X > tolerance) break;
-                    if ((double)b.WorldBounds.Min.Y - a.WorldBounds.Max.Y > tolerance
-                        || (double)a.WorldBounds.Min.Y - b.WorldBounds.Max.Y > tolerance
-                        || (double)b.WorldBounds.Min.Z - a.WorldBounds.Max.Z > tolerance
-                        || (double)a.WorldBounds.Min.Z - b.WorldBounds.Max.Z > tolerance) continue;
-                    if (includeResponsiblePair is not null && !includeResponsiblePair(a.Win.Plugin, b.Win.Plugin)) continue;
-                    // --population (P25): a pair neither of whose references is in the plan's population is not measured.
-                    if (includePair is not null && !includePair(a, b)) continue;
-                    sweep.PairsChecked++;
-                    var timer = a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer;
-                    long started = System.Diagnostics.Stopwatch.GetTimestamp();
-                    var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken, timer, prepared, results);
-                    double seconds = MeshQueryTimer.Seconds(System.Diagnostics.Stopwatch.GetTimestamp() - started);
-                    timer?.Note(seconds, a.Key.ToString(), b.Key.ToString(), query);
-                    onPair?.Invoke(a, b, query, timer?.LastPath, seconds);
-                    bool intersects = query.Intersects == true;
-                    bool unknown = query.Unknown;
+            foreach (var space in candidates.GroupBy(c => c.Win.Space))
+            {
+                var ordered = space.OrderBy(c => (double)c.WorldBounds.Min.X).ThenBy(c => c.Key.ToString(), StringComparer.Ordinal).ToList();
+                for (int ai = 0; ai < ordered.Count; ai++)
+                    for (int bi = ai + 1; bi < ordered.Count; bi++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var a = ordered[ai]; var b = ordered[bi];
+                        if ((double)b.WorldBounds.Min.X - a.WorldBounds.Max.X > tolerance) break;
+                        if ((double)b.WorldBounds.Min.Y - a.WorldBounds.Max.Y > tolerance
+                            || (double)a.WorldBounds.Min.Y - b.WorldBounds.Max.Y > tolerance
+                            || (double)b.WorldBounds.Min.Z - a.WorldBounds.Max.Z > tolerance
+                            || (double)a.WorldBounds.Min.Z - b.WorldBounds.Max.Z > tolerance) continue;
+                        if (includeResponsiblePair is not null && !includeResponsiblePair(a.Win.Plugin, b.Win.Plugin)) continue;
+                        // --population (P25): a pair neither of whose references is in the plan's population is not measured.
+                        if (includePair is not null && !includePair(a, b)) continue;
+                        yield return (a, b);
+                    }
+            }
+        }
 
-                    if (a.Win.Plugin == b.Win.Plugin)
-                    {
-                        if (retainSameResults) sweep.SameResults.Add(new(a, b, query, true));
-                        sweep.SameChecked++;
-                        if (intersects) sweep.SameIntersects++;
-                        if (unknown) sweep.SameUnknown++;
-                        string domain = a.Win.Interior ? "interior" : "exterior";
-                        var old = sweep.SameByDomain.GetValueOrDefault(domain);
-                        sweep.SameByDomain[domain] = (old.Intersects + (intersects ? 1 : 0), old.Unknown + (unknown ? 1 : 0), old.Checked + 1);
-                    }
-                    else
-                    {
-                        bool declared = closure[a.Win.Plugin].Contains(b.Win.Plugin) || closure[b.Win.Plugin].Contains(a.Win.Plugin);
-                        var hit = new SurfaceOverlapHit(a, b, query, declared);
-                        sweep.CrossResults.Add(hit);
-                        if (intersects) sweep.CrossHits.Add(hit);
-                        if (unknown) sweep.CrossUnknown++;
-                        if (declared)
-                        {
-                            sweep.CrossDeclaredChecked++;
-                            if (intersects) sweep.CrossDeclaredIntersects++;
-                        }
-                        else
-                        {
-                            sweep.CrossUndeclaredChecked++;
-                            if (intersects) sweep.CrossUndeclaredIntersects++;
-                        }
-                    }
-                    onProgress?.Invoke(sweep.PairsChecked);
+        // Runs in sweep order on the calling thread, whatever measured the pair.
+        void Accumulate(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b, SurfaceQueryOutcome query, PairPath path, double seconds)
+        {
+            sweep.PairsChecked++;
+            var timer = a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer;
+            timer?.Note(seconds, a.Key.ToString(), b.Key.ToString(), query, path);
+            onPair?.Invoke(a, b, query, timer is null ? null : path, seconds);
+            bool intersects = query.Intersects == true;
+            bool unknown = query.Unknown;
+
+            if (a.Win.Plugin == b.Win.Plugin)
+            {
+                if (retainSameResults) sweep.SameResults.Add(new(a, b, query, true));
+                sweep.SameChecked++;
+                if (intersects) sweep.SameIntersects++;
+                if (unknown) sweep.SameUnknown++;
+                string domain = a.Win.Interior ? "interior" : "exterior";
+                var old = sweep.SameByDomain.GetValueOrDefault(domain);
+                sweep.SameByDomain[domain] = (old.Intersects + (intersects ? 1 : 0), old.Unknown + (unknown ? 1 : 0), old.Checked + 1);
+            }
+            else
+            {
+                bool declared = closure[a.Win.Plugin].Contains(b.Win.Plugin) || closure[b.Win.Plugin].Contains(a.Win.Plugin);
+                var hit = new SurfaceOverlapHit(a, b, query, declared);
+                sweep.CrossResults.Add(hit);
+                if (intersects) sweep.CrossHits.Add(hit);
+                if (unknown) sweep.CrossUnknown++;
+                if (declared)
+                {
+                    sweep.CrossDeclaredChecked++;
+                    if (intersects) sweep.CrossDeclaredIntersects++;
                 }
+                else
+                {
+                    sweep.CrossUndeclaredChecked++;
+                    if (intersects) sweep.CrossUndeclaredIntersects++;
+                }
+            }
+            onProgress?.Invoke(sweep.PairsChecked);
+        }
+
+        SurfaceQueryOutcome Timed(SurfaceOverlapCandidate a, SurfaceOverlapCandidate b, PairTimer? timer, PairResultCache? cache, out PairPath path, out double seconds)
+        {
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            var query = SurfaceQueryOutcome.QueryPlaced(a.WorldSoup, a.Placed, b.WorldSoup, b.Placed, tolerance, maxTrianglePairs, timeout, cancellationToken, timer, prepared, cache, out path);
+            seconds = MeshQueryTimer.Seconds(System.Diagnostics.Stopwatch.GetTimestamp() - started);
+            return query;
+        }
+
+        if (threads <= 1)
+        {
+            foreach (var (a, b) in Reached())
+            {
+                var query = Timed(a, b, a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer, results, out var path, out var seconds);
+                Accumulate(a, b, query, path, seconds);
+            }
+            return sweep;
+        }
+
+        var pairs = Reached().ToList();
+        var slots = new PairSlot?[pairs.Count];
+        // A pair the result cache serves, or that repeats an earlier pair's key, is left to the in-order pass, which treats it as one thread would.
+        string[]? keys = null;
+        bool[]? inOrder = null;
+        if (results is not null)
+        {
+            keys = new string[pairs.Count];
+            inOrder = new bool[pairs.Count];
+            Parallel.For(0, pairs.Count, new ParallelOptions { MaxDegreeOfParallelism = threads },
+                i => keys[i] = results.Key(pairs[i].A.WorldSoup, pairs[i].A.Placed, pairs[i].B.WorldSoup, pairs[i].B.Placed, tolerance, maxTrianglePairs));
+            var first = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < keys.Length; i++) inOrder[i] = results.Contains(keys[i]) || !first.Add(keys[i]);
+        }
+
+        int next = -1;
+        bool stop = false;
+        var signal = new object();
+        var workers = new Thread[threads];
+        var sameTimers = new PairTimer?[threads];
+        var crossTimers = new PairTimer?[threads];
+        for (int w = 0; w < threads; w++)
+        {
+            var mySame = sameTimers[w] = sameTimer is null ? null : new PairTimer();
+            var myCross = crossTimers[w] = crossTimer is null ? null : new PairTimer();
+            workers[w] = new Thread(() =>
+            {
+                while (!Volatile.Read(ref stop))
+                {
+                    int i = Interlocked.Increment(ref next);
+                    if (i >= pairs.Count) return;
+                    if (inOrder is not null && inOrder[i]) continue;
+                    PairSlot slot;
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var (a, b) = pairs[i];
+                        var query = Timed(a, b, a.Win.Plugin == b.Win.Plugin ? mySame : myCross, null, out var path, out var seconds);
+                        slot = new(query, path, seconds, null);
+                    }
+                    catch (Exception ex)
+                    {
+                        slot = new(null, default, 0, System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex));
+                    }
+                    lock (signal) { slots[i] = slot; Monitor.PulseAll(signal); }
+                }
+            }, WorkerStackBytes) { IsBackground = true, Name = $"overlap pair {w}" };
+            workers[w].Start();
+        }
+        try
+        {
+            for (int i = 0; i < pairs.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var (a, b) = pairs[i];
+                if (inOrder is not null && inOrder[i])
+                {
+                    var served = Timed(a, b, a.Win.Plugin == b.Win.Plugin ? sameTimer : crossTimer, results, out var servedPath, out var servedSeconds);
+                    Accumulate(a, b, served, servedPath, servedSeconds);
+                    continue;
+                }
+                PairSlot? slot;
+                lock (signal)
+                {
+                    while ((slot = slots[i]) is null) Monitor.Wait(signal);
+                    slots[i] = null;
+                }
+                slot.Failure?.Throw();
+                // Measured without the cache: the cache sees it here, in sweep order, so its counts and its file's order are one thread's.
+                if (results is not null)
+                {
+                    results.TryGet(keys![i], out _, out _);
+                    results.Put(keys[i], slot.Query!, slot.Path);
+                }
+                Accumulate(a, b, slot.Query!, slot.Path, slot.Seconds);
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref stop, true);
+            foreach (var worker in workers) worker.Join();
+            for (int w = 0; w < threads; w++)
+            {
+                if (sameTimers[w] is { } s) sameTimer!.Add(s);
+                if (crossTimers[w] is { } c) crossTimer!.Add(c);
+            }
         }
         return sweep;
     }
+
+    /// <summary>One pair's answer from a worker thread: the outcome, or the exception to raise at this pair's place in sweep order.</summary>
+    sealed record PairSlot(SurfaceQueryOutcome? Query, PairPath Path, double Seconds, System.Runtime.ExceptionServices.ExceptionDispatchInfo? Failure);
+
+    // Worker threads run the same recursive BVH build as the main thread, so they get a generous stack (reserved, not committed).
+    const int WorkerStackBytes = 16 * 1024 * 1024;
 
     /// <summary>Apply the unchanged provenance rule to an actual-shape hit, rebuilding the arm without the later
     /// responsible plugin from strict model triangles. An unknown counterfactual is retained and withheld from credit.</summary>
