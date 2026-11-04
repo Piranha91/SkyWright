@@ -271,14 +271,38 @@ def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, p
 
 # ---------------------------------------------------------------- the reader session
 
-class Session:
-    """One houseCARL server over stdio for one arm, every message kept for the import's transcripts."""
+class TranscriptFile:
+    """One side of a session's transcript, written line by line under a working name; `finish` gives it its real name."""
 
-    def __init__(self, cmd: str, env: dict, token: str, deadline_s: float | None = None):
+    def __init__(self, path: Path):
+        self.path = path
+        self.partial = path.with_name(path.name + ".partial")
+        self.f = open(self.partial, "w", encoding="utf-8")
+
+    def append(self, m):
+        try:
+            self.f.write(json.dumps(m) + "\n")
+            self.f.flush()
+        except OSError as ex:
+            raise Refusal(f"the arm's transcript could not be written to {self.partial}: {ex}; free some disk and run again.")
+
+    def finish(self):
+        self.f.close()
+        os.replace(self.partial, self.path)
+
+
+class Session:
+    """One houseCARL server over stdio for one arm, every message kept for the import's transcripts: in memory, or as
+    they arrive when `stream_to` names the session's folder."""
+
+    def __init__(self, cmd: str, env: dict, token: str, deadline_s: float | None = None, stream_to: Path | None = None):
         argv = [t[1:-1] if len(t) > 1 and t[0] == t[-1] == '"' else t for t in shlex.split(cmd, posix=os.name != "nt")]
         self.p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                   text=True, encoding="utf-8", env={**os.environ, **env})
         self.req, self.resp, self.n = [], [], 0
+        if stream_to is not None:
+            stream_to.mkdir(parents=True, exist_ok=True)
+            self.req, self.resp = TranscriptFile(stream_to / "request.jsonl"), TranscriptFile(stream_to / "response.jsonl")
         # a hung or runaway reader is stopped at the arm's deadline; the arm is then refused, never accepted as read
         self.deadline_s, self.timed_out, self.timer = deadline_s, False, None
         if deadline_s:
@@ -344,6 +368,10 @@ class Session:
             self.p.kill()
 
     def write(self, folder: Path):
+        if isinstance(self.req, TranscriptFile):
+            self.req.finish()
+            self.resp.finish()
+            return
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "request.jsonl").write_text("".join(json.dumps(m) + "\n" for m in self.req), encoding="utf-8")
         (folder / "response.jsonl").write_text("".join(json.dumps(m) + "\n" for m in self.resp), encoding="utf-8")
@@ -388,7 +416,7 @@ def batched(ids, n=400):
 def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
-    s = Session(reader_cmd, env, token, deadline_s)
+    s = Session(reader_cmd, env, token, deadline_s, stream_to=out)
     result = {}
     try:
         # dangling references over the whole order
