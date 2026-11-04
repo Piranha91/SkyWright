@@ -61,7 +61,9 @@ public sealed class EmptySpaceSearch
 
     Dictionary<FormKey, (FormKey Act, FormKey Trig)>? _rackItem;
     Dictionary<FormKey, List<FormKey>>? _trigItems;
-    readonly Dictionary<(FormKey, int, FormKey), (TriangleSoup Soup, TriangleGrid Grid, char Src)?> _surf = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<(FormKey, int, FormKey), Lazy<(TriangleSoup Soup, TriangleGrid Grid, char Src)?>> _surf = new();
+    /// <summary>One state's own enable arms on a per-state view (<see cref="JudgeArrivalsAlone"/>); null: the index's arms.</summary>
+    readonly EnableArms? _stateArms;
     const int SurfCacheMax = 20000;
 
     /// <param name="triggerHasNode">whether a weapon-rack trigger base's model has a named node (true / false; null when its model
@@ -72,6 +74,15 @@ public sealed class EmptySpaceSearch
                             Func<string, bool> isBethesdaFile, Func<int, bool> isFloorPlugin)
     {
         C = c; _closure = closure; _pluginName = pluginName; _triggerHasNode = triggerHasNode; _isBethesdaFile = isBethesdaFile; _isFloorPlugin = isFloorPlugin;
+    }
+
+    /// <summary>One state's view of <paramref name="root"/>: its own enable arms and walk memos, sharing the surfaces and the space hashes.</summary>
+    EmptySpaceSearch(EmptySpaceSearch root, StateArm arm)
+    {
+        C = root.C; _closure = root._closure; _pluginName = root._pluginName; _triggerHasNode = root._triggerHasNode; _isBethesdaFile = root._isBethesdaFile; _isFloorPlugin = root._isFloorPlugin;
+        MaxMembers = root.MaxMembers; MinAnchorDim = root.MinAnchorDim; AnchorReport = root.AnchorReport; MaxAnchorWalk = root.MaxAnchorWalk;
+        _surf = root._surf; _spaceHash = root._spaceHash; _bySpace = root._bySpace; _rackItem = root._rackItem; _trigItems = root._trigItems;
+        _stateArms = new EnableArms(C.Index) { State = arm };
     }
 
     float Eps => C.Epsilon;
@@ -90,7 +101,7 @@ public sealed class EmptySpaceSearch
         {
             var w = snaps[^1];
             if (w.Deleted || C.Index.IsDeletedNow(key)) return null;
-            var en = C.WinnerEnable(key);
+            var en = _stateArms?.Winner(key) ?? C.WinnerEnable(key);
             if (!en.Resolved || !en.Enabled) return null;
             var wb = C.WinnerBase(key);
             return wb.IsNull ? null : new Placed(w, snaps.Count - 1, wb);
@@ -101,7 +112,7 @@ public sealed class EmptySpaceSearch
         if (s.Deleted) return null;
         int del = C.Index.Deletions.WinningDeleter(key);
         if (del >= 0 && del > s.Plugin && del != mover && !_closure[del].Contains(mover)) return null;
-        var aen = C.ArmEnable(key, mover, _closure);
+        var aen = _stateArms?.Without(key, mover, _closure) ?? C.ArmEnable(key, mover, _closure);
         if (!aen.Resolved || !aen.Enabled) return null;
         var b = C.ArmBase(key, mover, _closure);
         if (b.IsNull) b = C.BaseAt(key, s.Plugin);
@@ -113,8 +124,13 @@ public sealed class EmptySpaceSearch
     (TriangleSoup Soup, TriangleGrid Grid, char Src)? Surface(FormKey key, Placed p)
     {
         var k = (key, p.Index, p.Base);
-        if (_surf.TryGetValue(k, out var hit)) return hit;
+        if (_surf.TryGetValue(k, out var hit)) return hit.Value;
         if (_surf.Count >= SurfCacheMax) _surf.Clear();
+        return _surf.GetOrAdd(k, _ => new Lazy<(TriangleSoup Soup, TriangleGrid Grid, char Src)?>(() => BuildSurface(p))).Value;
+    }
+
+    (TriangleSoup Soup, TriangleGrid Grid, char Src)? BuildSurface(Placed p)
+    {
         (TriangleSoup, TriangleGrid, char)? r = null;
         if (C.GeomOf(p.Base) is { HasGeometry: true } g)
         {
@@ -126,7 +142,7 @@ public sealed class EmptySpaceSearch
                 SurfacesBuilt++;
             }
         }
-        return _surf[k] = r;
+        return r;
     }
 
     /// <summary>Whether a and b touch within ε, and whether a rests on b (b's face under a points up within the support band).</summary>
@@ -145,19 +161,26 @@ public sealed class EmptySpaceSearch
     /// worldspace) only when the search first looks there, so a run reads the geometry of the spaces it judges and no other.</summary>
     BoxHash<(FormKey Key, int Snap)> In(FormKey space)
     {
-        if (_bySpace is null)
-        {
-            _bySpace = new();
-            foreach (var (key, snaps) in C.Index.History.Refs)
-                for (int i = 0; i < snaps.Count; i++)
-                {
-                    if (snaps[i].Deleted) continue;
-                    if (!_bySpace.TryGetValue(snaps[i].Space, out var l)) _bySpace[snaps[i].Space] = l = new();
-                    l.Add((key, i));
-                }
-        }
-        if (_spaceHash.TryGetValue(space, out var h)) return h;
-        h = new BoxHash<(FormKey, int)>();
+        BuildBySpace();
+        return _spaceHash.GetOrAdd(space, s => new Lazy<BoxHash<(FormKey, int)>>(() => BuildSpaceHash(s))).Value;
+    }
+
+    void BuildBySpace()
+    {
+        if (_bySpace is not null) return;
+        _bySpace = new();
+        foreach (var (key, snaps) in C.Index.History.Refs)
+            for (int i = 0; i < snaps.Count; i++)
+            {
+                if (snaps[i].Deleted) continue;
+                if (!_bySpace.TryGetValue(snaps[i].Space, out var l)) _bySpace[snaps[i].Space] = l = new();
+                l.Add((key, i));
+            }
+    }
+
+    BoxHash<(FormKey, int)> BuildSpaceHash(FormKey space)
+    {
+        var h = new BoxHash<(FormKey, int)>();
         if (_bySpace.TryGetValue(space, out var refs))
             foreach (var (key, i) in refs)
             {
@@ -171,10 +194,10 @@ public sealed class EmptySpaceSearch
                     h.Add(s.Space, box, (key, i));
                 }
             }
-        return _spaceHash[space] = h;
+        return h;
     }
     Dictionary<FormKey, List<(FormKey, int)>>? _bySpace;
-    readonly Dictionary<FormKey, BoxHash<(FormKey, int)>> _spaceHash = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<FormKey, Lazy<BoxHash<(FormKey, int)>>> _spaceHash = new();
 
     IEnumerable<(FormKey Key, Placed P)> Near(FormKey self, Placed p, int mover, float reach)
     {
@@ -598,21 +621,46 @@ public sealed class EmptySpaceSearch
         if (arrivals.Count == 0) return res;
         var was = C.State;
         C.State = arm; ClearMemo();
-        try
+        try { JudgeEach(arrivals, arm, scope, res, ref outside, ref judgedDropped); }
+        finally { C.State = was; ClearMemo(); }
+        return res;
+    }
+
+    void JudgeEach(List<(FormKey Key, FormKey Switch)> arrivals, StateArm arm, EmptySpaceScope? scope, List<(EmptySpaceRow, FormKey)> res, ref int outside, ref int judgedDropped)
+    {
+        foreach (var (f, sw) in arrivals)
         {
-            foreach (var (f, sw) in arrivals)
+            if (Place(f, -1) is not { } pf || !IsCandidate(f, pf) || !pf.Snap.Interior) continue;
+            if (scope is not null && !scope.MustJudge(f)) { outside++; continue; }
+            bool keep = scope is null || scope.InScope(f);
+            foreach (var m in MoversNear(f))
             {
-                if (Place(f, -1) is not { } pf || !IsCandidate(f, pf) || !pf.Snap.Interior) continue;
-                if (scope is not null && !scope.MustJudge(f)) { outside++; continue; }
-                bool keep = scope is null || scope.InScope(f);
-                foreach (var m in MoversNear(f))
-                {
-                    var r = Judge(f, m, arm.Name);
-                    if (keep) res.Add((r, sw)); else judgedDropped++;
-                }
+                var r = Judge(f, m, arm.Name);
+                if (keep) res.Add((r, sw)); else judgedDropped++;
             }
         }
-        finally { C.State = was; ClearMemo(); }
+    }
+
+    /// <summary>Build what the per-state views share, before any of them runs. A forced reference or a state set on the index's arms has
+    /// no equal on a view's own arms, so either refuses.</summary>
+    public void PrepareStateViews()
+    {
+        if (C.State is not null || C.Arms.Forced.Count > 0) throw new InvalidOperationException("the empty-space pass cannot run per-state views over an index with a state set or references forced; use --threads 1");
+        BuildRacks(); BuildBySpace();
+    }
+
+    /// <summary><see cref="JudgeArrivals(StateArm, SwitchIndex, EmptySpaceScope?, out int, out int)"/> on a view of its own, leaving the index's
+    /// arms alone, so states can run side by side. Same rows: the shared pass clears its memos at each state anyway.</summary>
+    public List<(EmptySpaceRow Row, FormKey Switch)> JudgeArrivalsAlone(StateArm arm, SwitchIndex sx, EmptySpaceScope? scope, out int outside, out int judgedDropped)
+    {
+        outside = 0; judgedDropped = 0;
+        var res = new List<(EmptySpaceRow, FormKey)>();
+        var arrivals = arm.Changes(sx).Where(c => c.After).GroupBy(c => c.Key).Select(g => (g.Key, g.First().Root.Key)).ToList();
+        if (arrivals.Count == 0) return res;
+        var view = new EmptySpaceSearch(this, arm);
+        view.JudgeEach(arrivals, arm, scope, res, ref outside, ref judgedDropped);
+        Interlocked.Add(ref TouchTests, view.TouchTests); Interlocked.Add(ref SurfacesBuilt, view.SurfacesBuilt);
+        Interlocked.Add(ref WalksRun, view.WalksRun); Interlocked.Add(ref WalksReused, view.WalksReused);
         return res;
     }
 
