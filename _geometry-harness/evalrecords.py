@@ -26,6 +26,10 @@ The checks:
   loadability.missing-assets        every Data-relative asset path the evaluated plugins' winning records name,
                                     resolved through the arm's file view; an absent one is a finding.
 
+One worker, the default, reads arm after arm in this process. `--workers N` or `auto` reads several at once, each arm in
+its own process with its own reader and data folder, inside whatever machine slot the caller holds; capture-workers.json
+records the choice and every attempt (evalrecords_workers.py).
+
 What it refuses. An empty enumeration where an evaluated plugin loads, an export shorter than its selection, a
 reader error, or an unparsable answer stops the arm with one sentence; nothing is imported for it. A count is only
 ever what a completed read returned. Reads the server marks incomplete are unjudged with their reason.
@@ -40,6 +44,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -424,10 +429,11 @@ def batched(ids, n=400):
         yield ids[i:i + n]
 
 
-def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None):
+def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None, counters=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
     s = Session(reader_cmd, env, token, deadline_s, stream_to=out)
+    log(f"{arm['armId']}: reader pid {s.p.pid}")
     result = {}
     try:
         # dangling references over the whole order
@@ -617,6 +623,13 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
     finally:
         s.close()
         s.write(out)
+        if counters is not None:
+            # a measurement: nothing here may cost the arm its transcript or its answer
+            try:
+                import evalrecords_workers
+                counters.update(pid=s.p.pid, **evalrecords_workers.process_counters(s.p))
+            except Exception as ex:
+                counters["unread"] = f"{type(ex).__name__}: {ex}"
     return result
 
 
@@ -794,18 +807,65 @@ def cmd_capture(a) -> int:
     inis = {f.name: sha256_file(f) for f in sorted(Path(a.profile_dir).glob("*.ini"))} if a.profile_dir else {}
     deadline_s = 60 * float(a.arm_deadline_min) if getattr(a, "arm_deadline_min", None) else None
     memo = {}
+    t0 = time.perf_counter()
+    import evalrecords_workers as W
+    try:
+        requested = W.parse_workers(getattr(a, "workers", "1"))
+    except ValueError as ex:
+        raise Refusal(str(ex))
+    record = {"requested": requested, "workers": 1, "case": "one-asked-or-needed", "warning": None, "arms": {}, "curedAlone": {}}
     with Run("evalrecords", mode="capture", stage_source="counted") as r:
         arms = [x for x in plan["arms"] if not a.arm or x["armId"] in a.arm]
         r.stage("arms", "arm captures", len(arms), "arms")
-        for arm in arms:
-            key = arm_key(plan, arm, baseline, inis, code, reader, arm_inputs(arm, a.data, a.mods, memo))
-            if ckpts is not None:
-                kept = reusable_checkpoint(ckpts / arm["armId"], key)
-                if kept is not None:
-                    summary[arm["armId"]] = dict(kept, reused=True)
-                    print(f"{arm['armId']}: reused its finished checkpoint", flush=True)
-                    r.advance()
-                    continue
+
+        def key_of(arm):
+            return arm_key(plan, arm, baseline, inis, code, reader, arm_inputs(arm, a.data, a.mods, memo))
+
+        def kept_of(arm, key):
+            return reusable_checkpoint(ckpts / arm["armId"], key) if ckpts is not None else None
+
+        in_process = arms
+        if requested != 1:
+            to_read = [arm for arm in arms if kept_of(arm, key_of(arm)) is None]
+            needs = {arm["armId"]: W.arm_need(arm, baseline) for arm in to_read}
+            choice = W.choose(requested, list(needs.values()), W.read_memory())
+            record.update(choice)
+            record["estimates"] = needs
+            if choice.get("warning"):
+                print("WARNING: " + choice["warning"], flush=True)
+            print(f"workers: {choice['workers']} ({choice['case']})", flush=True)
+            if choice["workers"] > 1:
+                in_process = [arm for arm in arms if arm not in to_read]
+
+                def build_argv(arm, doc_path):
+                    argv = [sys.executable, str(Path(__file__).resolve()), "capture", "--run", a.run, "--arm", arm["armId"], "--baseline-from", a.baseline_from,
+                            "--reader-cmd", a.reader_cmd, "--data", a.data, "--mods", a.mods, "--out", a.out, "--workers", "1", "--summary-to", str(doc_path)]
+                    argv += ["--profile-dir", a.profile_dir] if a.profile_dir else []
+                    argv += ["--reader-data", str(Path(a.reader_data) / arm["armId"])] if a.reader_data else []
+                    argv += ["--checkpoints", a.checkpoints] if ckpts is not None else []
+                    argv += ["--arm-deadline-min", str(a.arm_deadline_min)] if getattr(a, "arm_deadline_min", None) else []
+                    return argv
+
+                def kept(arm_id, value):
+                    if ckpts is None:
+                        return True
+                    doc = W.read_doc(ckpts / arm_id / "checkpoint.json") or {}
+                    return (doc.get("summary") or {}).get("imports") == value.get("imports")
+
+                state = W.run_side_by_side(to_read, needs, choice, build_argv, out, lambda _arm: r.advance(), kept)
+                for arm_id, s in state.items():
+                    summary[arm_id] = s["final"]
+                    record["arms"][arm_id] = {"estimate": needs[arm_id], "attempts": s["attempts"]}
+                    if s["curedAlone"]:
+                        record["curedAlone"][arm_id] = s["curedAlone"]
+        for arm in in_process:
+            key = key_of(arm)
+            kept = kept_of(arm, key)
+            if kept is not None:
+                summary[arm["armId"]] = dict(kept, reused=True)
+                print(f"{arm['armId']}: reused its finished checkpoint", flush=True)
+                r.advance()
+                continue
             # with checkpoints, an arm's session and imports live in its checkpoint folder so a later capture keeps them
             home = (ckpts / arm["armId"] / key[:12]) if ckpts is not None else out
             view = out / "views" / arm["armId"]
@@ -815,9 +875,11 @@ def cmd_capture(a) -> int:
                 env["HOUSECARL_DATA_DIR"] = a.reader_data
             captured = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
             session_dir = home / "sessions" / arm["armId"]
+            counters = {}
+            record["arms"][arm["armId"]] = {"attempts": [{"attempt": 1, "besideOthers": False, "reader": counters}]}
             try:
                 result = capture_arm(plan, arm, baseline, a.reader_cmd, env, session_dir, scope,
-                                     lambda m: print(m, flush=True), deadline_s=deadline_s)
+                                     lambda m: print(m, flush=True), deadline_s=deadline_s, counters=counters)
             except Refusal as ex:
                 summary[arm["armId"]] = {"refused": str(ex)}
                 print(f"{arm['armId']}: REFUSED: {ex}", flush=True)
@@ -830,7 +892,19 @@ def cmd_capture(a) -> int:
             if ckpts is not None:
                 save_checkpoint(ckpts / arm["armId"], key, summary[arm["armId"]])
             r.advance()
+    summary = {x["armId"]: summary[x["armId"]] for x in arms}
+    if getattr(a, "summary_to", None):
+        # one arm for a capture running several: its parent merges these, and only the parent writes the summary
+        only = next(iter(record["arms"].values()), {"attempts": [{}]})
+        tmp = Path(a.summary_to + ".tmp")
+        tmp.write_text(json.dumps({"summary": summary, "reader": only["attempts"][0].get("reader"), "python": W.process_counters()}, indent=1), encoding="utf-8")
+        os.replace(tmp, a.summary_to)
+        return 2 if any("refused" in v for v in summary.values()) else 0
+    for arm_id, why in record["curedAlone"].items():
+        print(f"NOTE: {arm_id} was refused beside other arms and read fine alone, which says something about reading side by side: {why}", flush=True)
     (out / "capture-summary.json").write_text(json.dumps(summary, indent=1), encoding="utf-8")
+    record["wallSeconds"] = round(time.perf_counter() - t0, 1)
+    (out / "capture-workers.json").write_text(json.dumps(record, indent=1), encoding="utf-8")
     refused = [k for k, v in summary.items() if "refused" in v]
     print(json.dumps({"arms": len(summary), "refused": refused}))
     return 2 if refused else 0
@@ -852,6 +926,9 @@ def main(argv=None) -> int:
     p.add_argument("--checkpoints", help="a folder that keeps each finished arm across captures; an arm is reused only "
                                          "when its key (arm content, plan, plugin bytes, asset listing, evalrecords' code, reader) matches")
     p.add_argument("--arm-deadline-min", type=float, help="stop one arm's record read after this many minutes")
+    p.add_argument("--workers", default="1", help="how many arms read at once: 1 (the default) in this process, a number as a ceiling, or auto from available memory; "
+                                                  "the choice and every attempt are in capture-workers.json")
+    p.add_argument("--summary-to", help="for one arm of a capture running several: write its result here and leave the capture's own files to the parent")
     p.set_defaults(fn=cmd_capture)
     a = ap.parse_args(argv)
     try:

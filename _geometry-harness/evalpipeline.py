@@ -30,7 +30,8 @@ a person or a model (blind image observations, the final reviews) the run stops 
 the judgement file exists.
 
 The machine file (machine-local, never tracked) names the lab instance, the game, a command prefix for heavy stages
-(the machine's slot and idle queue) and the commands of run-local stages such as the precedent cards.
+(the machine's slot and idle queue), how many arms the records stage reads at once (recordWorkers: a number or auto, from
+available memory; 1 by default) and the commands of run-local stages such as the precedent cards.
 Exit codes: 0 the requested stages accepted or reused; 2 a refusal (one sentence on stderr); 3 the run stopped for a
 judgement (status names it).
 """
@@ -50,6 +51,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(HERE))
 from runlog import Run, Runner  # noqa: E402
 
 REGISTRY = ROOT / ".claude/skills/world-edit-compatibility/references/check-registry.json"
@@ -830,6 +832,11 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     if not open_arms:
         write_json(sdir / "records.json", {"note": "no mcp-only row is open; nothing to capture"})
         return {"openArms": 0}, [sdir / "records.json"]
+    import evalrecords_workers
+    try:
+        record_workers = evalrecords_workers.parse_workers(ctx.machine.get("recordWorkers", 1), "the machine file's recordWorkers")
+    except ValueError as ex:
+        raise Refusal(str(ex))
     n = len(list(sdir.glob("capture-*")))
     cap = sdir / f"capture-{n + 1:02d}"
     argv = [sys.executable, fwd(HERE / "evalrecords.py"), "capture", "--run", fwd(run),
@@ -842,11 +849,18 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     # Finished arms are kept in the checkpoints folder, so a stop or a rerun reads only the arms not yet finished.
     (sdir / "checkpoints").mkdir(exist_ok=True)
     argv += ["--checkpoints", fwd(sdir / "checkpoints"), "--arm-deadline-min", str(RECORDS_ARM_MINUTES)]
+    # how many arms read at once: the machine file's recordWorkers, a number or auto; workers run inside the one slot below
+    argv += ["--workers", str(record_workers)]
     # the read takes the machine slot, held as long as the stage's own backstop so the slot never stops it first
     backstop = RECORDS_ARM_MINUTES * len(open_arms) + 10
     r = child(ctx, sdir / "commands", "records-capture", argv, heavy=True, purpose=f"evalpipeline {ctx.id} records",
               deadline_min=backstop, hold_min=backstop)
     summary = read_json(cap / "capture-summary.json") if (cap / "capture-summary.json").is_file() else {}
+    workers = read_json(cap / "capture-workers.json") if (cap / "capture-workers.json").is_file() else {}
+    if workers.get("warning"):
+        print(f"records: {workers['warning']}")
+    for arm, why in (workers.get("curedAlone") or {}).items():
+        print(f"records: {arm} was refused beside other arms and read fine alone: {why}")
     imports, refusals = [], {}
     for arm, v in summary.items():
         if "refused" in v:
@@ -860,7 +874,8 @@ def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         results.append({"file": doc, "exitCode": rr.get("exitCode"),
                         "log": fwd(log) if log.is_file() else None})
     write_json(sdir / "records.json", {"capture": summary, "captureExit": r.get("exitCode"), "imports": results,
-                                       "refusedArms": refusals})
+                                       "refusedArms": refusals,
+                                       "workers": {k: workers.get(k) for k in ("requested", "workers", "case", "warning", "memory", "curedAlone")}})
     bad = [x for x in results if x["exitCode"] != 0]
     if r.get("exitCode") not in (0, 2) or not summary:
         raise Refusal(slot_wait_sentence(sdir / "commands" / "records-capture.txt", ctx)
