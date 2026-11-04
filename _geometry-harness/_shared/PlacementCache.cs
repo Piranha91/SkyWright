@@ -163,6 +163,8 @@ public sealed class CacheBudget
     /// <summary>Guards the recency list, the counters and every cache map in this pool. Held briefly; never across a build.</summary>
     internal readonly object Gate = new();
     public long Limit { get; private set; }
+    /// <summary>Settle a tie for a cache's <c>Largest</c> by key, not by first arrival, which threads make a race. Off keeps first arrival.</summary>
+    public bool StableLargestTie { get; set; }
     /// <summary>Lower the limit (never below <see cref="MinimumBytes"/>); the next insert evicts down to it.</summary>
     public void LowerTo(long limit) { lock (Gate) { if (limit < Limit) Limit = Math.Max(limit, MinimumBytes); } }
     public long Bytes { get; private set; }
@@ -296,11 +298,19 @@ public sealed class PlacementCache<TValue> where TValue : class
             {
                 if (_map.Remove(key, out var old)) _budget.Remove(old);
                 _map[key] = e;
-                if (Largest is not { } lg || e.Bytes > lg.Bytes)
+                if (Largest is not { } lg || e.Bytes > lg.Bytes || (_budget.StableLargestTie && e.Bytes == lg.Bytes && KeyBefore(key, lg.Key)))
                     Largest = (key, e.Bytes, value switch { TriangleGrid g => g.TriangleCount, TriangleSoup so => so.TriangleCount, _ => 0 });
                 _budget.Insert(e);
             }
         }
+    }
+
+    static bool KeyBefore((FormKey Key, int Snap, FormKey Base) a, (FormKey Key, int Snap, FormKey Base) b)
+    {
+        int c = string.CompareOrdinal(a.Key.ToString(), b.Key.ToString());
+        if (c == 0) c = a.Snap.CompareTo(b.Snap);
+        if (c == 0) c = string.CompareOrdinal(a.Base.ToString(), b.Base.ToString());
+        return c < 0;
     }
 
     public static long SoupBytes(TriangleSoup s)

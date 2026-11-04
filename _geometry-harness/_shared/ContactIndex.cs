@@ -546,6 +546,7 @@ public sealed class ContactIndex
         internal int JudgeDepth;                                               // > 0 while Judge runs: a timer files nested calls apart
         internal float? HostReachFloor;                                        // the largest host radius one thread would have seen at this host
         internal List<TraceEvent>? TraceBuffer;                                // this host's events, merged in host order by the driver
+        internal Dictionary<(string Role, string Outcome, string Rule), long>? TraceCounts;   // this host's counts, when the sink keeps no events
         internal ContactTimer? Fork;                                           // this thread's own timer, unless it attached Timer
     }
     readonly ThreadLocal<ThreadState> _thread = new(() => new ThreadState(), trackAllValues: true);
@@ -576,8 +577,10 @@ public sealed class ContactIndex
     void Te(FormKey key, string role, string outcome, string rule, FormKey other = default,
             IReadOnlyDictionary<string, double>? values = null, string? detail = null)
     {
+        var st = _thread.Value!;
+        if (st.TraceCounts is { } counts) { var k = (role, outcome, rule); counts[k] = counts.GetValueOrDefault(k) + 1; return; }
         var ev = new TraceEvent(key, role, outcome, rule, other, values, detail);
-        if (_thread.Value!.TraceBuffer is { } buffer) { buffer.Add(ev); return; }
+        if (st.TraceBuffer is { } buffer) { buffer.Add(ev); return; }
         lock (_traceGate) Trace!.Emit(ev);
     }
     readonly object _traceGate = new();
@@ -1589,18 +1592,20 @@ public sealed class ContactIndex
     /// near it under the winner.</summary>
     /// <param name="hostReachFloor">this host's value from <see cref="HostReachFloors"/>, for a threaded driver; null reads the running value.</param>
     /// <param name="traceBuffer">collects this host's trace events instead of emitting them, for a driver merging in host order.</param>
+    /// <param name="traceCounts">counts this host's trace events by (role, outcome, rule) and keeps none, for a sink in counting mode; wins over <paramref name="traceBuffer"/>.</param>
     public List<ContactRow> Judge(MovedHost host, BoxHash<(FormKey Key, int Snap)> depSnaps, BoxHash<FormKey> winners,
                                   IReadOnlyList<HashSet<int>> closure, ContactSkips skips, bool keepNoRelation = false,
-                                  float? hostReachFloor = null, List<TraceEvent>? traceBuffer = null)
+                                  float? hostReachFloor = null, List<TraceEvent>? traceBuffer = null,
+                                  Dictionary<(string Role, string Outcome, string Rule), long>? traceCounts = null)
     {
         var tmJ = ActiveTimer;
         long j0 = tmJ is null ? 0 : ContactTimer.Now(), a0 = tmJ?.AccountingTicks ?? 0;
         var st = _thread.Value!;
-        st.JudgeDepth++; st.HostReachFloor = hostReachFloor; st.TraceBuffer = traceBuffer;
+        st.JudgeDepth++; st.HostReachFloor = hostReachFloor; st.TraceBuffer = traceBuffer; st.TraceCounts = traceCounts;
         try { return JudgeBody(host, depSnaps, winners, closure, skips, keepNoRelation); }
         finally
         {
-            st.JudgeDepth--; st.HostReachFloor = null; st.TraceBuffer = null;
+            st.JudgeDepth--; st.HostReachFloor = null; st.TraceBuffer = null; st.TraceCounts = null;
             if (tmJ is not null) { tmJ.JudgeCalls++; tmJ.JudgeTicks += ContactTimer.Now() - j0 - (tmJ.AccountingTicks - a0); }
         }
     }

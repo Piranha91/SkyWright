@@ -597,6 +597,7 @@ if (threads > 1 && (geomReport is not null || MemStages.On || Environment.GetEnv
 }
 try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry, automaticThreads: threads) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
+cidx.Budget.StableLargestTie = threads > 1;
 meshReader.Store(boundedGeometry, cidx.Budget);
 if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();
 var idx = cidx.Index;
@@ -1107,7 +1108,7 @@ else
     var outside = orderedHosts.Select(HostOutsidePopulation).ToArray();
     var judgedAt = Enumerable.Range(0, orderedHosts.Count).Where(i => !outside[i]).ToList();
     var reachFloors = cidx.HostReachFloors(judgedAt.Select(i => orderedHosts[i]).ToList(), depHash, closure);
-    var finished = new (List<ContactRow> Rows, ContactSkips Skips, List<TraceEvent>? Trace)?[orderedHosts.Count];
+    var finished = new (List<ContactRow> Rows, ContactSkips Skips, List<TraceEvent>? Trace, Dictionary<(string Role, string Outcome, string Rule), long>? TraceCounts)?[orderedHosts.Count];
     int nextToTake = 0;
     var takeGate = new object();
     void TakeFinished()
@@ -1119,6 +1120,7 @@ else
             finished[nextToTake] = null;
             skips.Add(f.Skips);
             if (f.Trace is not null) foreach (var ev in f.Trace) traceSink!.Emit(ev);
+            if (f.TraceCounts is not null) foreach (var (k, n) in f.TraceCounts) traceSink!.Counts[k] = traceSink.Counts.GetValueOrDefault(k) + n;
             TakeHostRows(f.Rows);
         }
     }
@@ -1130,9 +1132,11 @@ else
             j =>
             {
                 var hostSkips = new ContactSkips();
-                var traceBuffer = traceSink is null ? null : new List<TraceEvent>();
-                var judged = cidx.Judge(orderedHosts[judgedAt[j]], depHash, winHash, closure, hostSkips, allRows, reachFloors[j], traceBuffer);
-                lock (takeGate) { finished[judgedAt[j]] = (judged, hostSkips, traceBuffer); TakeFinished(); }
+                // Counting mode stores no events, so a host waiting its turn holds only its counts.
+                var traceBuffer = traceSink is { CountOnly: false } ? new List<TraceEvent>() : null;
+                var traceCounts = traceSink is { CountOnly: true } ? new Dictionary<(string Role, string Outcome, string Rule), long>() : null;
+                var judged = cidx.Judge(orderedHosts[judgedAt[j]], depHash, winHash, closure, hostSkips, allRows, reachFloors[j], traceBuffer, traceCounts);
+                lock (takeGate) { finished[judgedAt[j]] = (judged, hostSkips, traceBuffer, traceCounts); TakeFinished(); }
             });
     }
     catch (AggregateException ex) when (ex.InnerExceptions.Count > 0)
