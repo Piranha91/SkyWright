@@ -57,12 +57,13 @@ static class AccelerationProof
         ManyThreadGrid(check);
         RelationCases(check);
         SolidCases(check);
+        ContactIndexOrder(check, manyThreads: false);
     }
 
     // Cases whose fix is on a branch not yet here: --only accel-waiting runs them; move each call to Run when its branch merges.
     public static void RunWaitingOnBranches(Action<string, bool, string> check)
     {
-        ManyThreadContactIndex(check);
+        ContactIndexOrder(check, manyThreads: true);
         ManyThreadPreparedMesh(check);
     }
 
@@ -419,8 +420,8 @@ static class AccelerationProof
     static TriangleSoup FoldedPyramid() =>
         Soup([P(0, 0, 0), P(4, 0, 0), P(2, 2, 0), P(2, 4, 0), P(2, 1, -5)], 0, 1, 2, 1, 0, 3, 2, 1, 4, 0, 2, 4, 3, 0, 4, 1, 3, 4);
 
-    // ---- Waiting on other branches: public API today, but not safe from many threads until those branches merge.
-    static void ManyThreadContactIndex(Action<string, bool, string> check)
+    // ---- One contact index asked in any order: an answer must not depend on the cache's state. The fixture for AX-59..61 and AX-63.
+    static void ContactIndexOrder(Action<string, bool, string> check, bool manyThreads)
     {
         var mod = new ModKey("AxProof", ModType.Plugin);
         FormKey K(uint id) => new(mod, id);
@@ -433,23 +434,29 @@ static class AccelerationProof
         var pairs = new List<(FormKey Dep, uint DepBase, Snap DepAt, FormKey Host, uint HostBase, Snap HostAt)>();
         for (uint d = 0; d < 24; d++)
             for (uint h = 0; h < 24; h += 3)
-                pairs.Add((K(0x900 + d), 0x800 + d, At(d, 2 * h, 40 + 2 * h), K(0xA00 + h), 0x800 + h, At(0, 0, 0)));
+                pairs.Add((K(0x1000 + d * 24 + h), 0x800 + d, At(d, 2 * h, 40 + 2 * h), K(0xA00 + h), 0x800 + h, At(0, 0, 0)));
         var queries = pairs.ToArray();
         string Ask(ContactIndex c, (FormKey Dep, uint DepBase, Snap DepAt, FormKey Host, uint HostBase, Snap HostAt) p)
         {
             var r = c.PairContact(p.Dep, 0, K(p.DepBase), p.DepAt, p.Host, 0, K(p.HostBase), p.HostAt);
             return r is null ? "none" : $"{Hex(r.Contact.FacingDistance)} {r.Contact}";
         }
-        void Same(string name, long budget) => Case(check, name, () =>
+        void Same(string name, long budget, int threads) => Case(check, name, () =>
         {
             var alone = new ContactIndex(G, long.MaxValue);
             var expected = queries.Select(p => Ask(alone, p)).ToArray();
             var shared = new ContactIndex(G, budget);
-            var (wrong, first) = ManyThreads(8, 6, queries, expected, p => Ask(shared, p));
-            return (wrong == 0, $"{wrong} of {6 * queries.Length * 8} answers differ{first}");
+            var (wrong, first) = ManyThreads(threads, 6, queries, expected, p => Ask(shared, p));
+            return (wrong == 0, $"{wrong} of {6 * queries.Length * threads} answers differ{first}");
         });
-        Same("AX-60 one contact index, 8 threads, a roomy cache: every pair answers as it does alone (waits on claude/accel-contact-parallel)", long.MaxValue);
-        Same("AX-61 one contact index, 8 threads, the smallest cache: eviction under load changes no answer (waits on claude/accel-contact-parallel)", CacheBudget.MinimumBytes);
+        if (!manyThreads)
+        {
+            Same("AX-59 control: one contact index, one thread, pairs asked in rotated orders: the answers do not depend on the order", long.MaxValue, 1);
+            Same("AX-63 control: the same with the smallest cache: eviction changes no answer", CacheBudget.MinimumBytes, 1);
+            return;
+        }
+        Same("AX-60 one contact index, 8 threads, a roomy cache: every pair answers as it does alone (waits on claude/accel-contact-parallel)", long.MaxValue, 8);
+        Same("AX-61 one contact index, 8 threads, the smallest cache: eviction under load changes no answer (waits on claude/accel-contact-parallel)", CacheBudget.MinimumBytes, 8);
     }
 
     static void ManyThreadPreparedMesh(Action<string, bool, string> check)
