@@ -108,6 +108,37 @@ static class ContactSelfTest
             Check("472 control: the default pass's store stays bounded: an evicted mesh is decoded again (a, b, a: 3 decodes, 1 again) with the same geometry",
                   bnd.Decodes == 3 && bnd.Redecodes == 1 && n1 is not null && n2 is not null && n1.Box.Equals(n2.Box),
                   $"decodes {bnd.Decodes} (again {bnd.Redecodes})");
+
+            // CP-1..CP-4: the host loop's shared stores under eight threads, on a 1-byte budget so every insert evicts.
+            var parLog = new List<(string Path, bool First)>();
+            var par = new MeshGeometryReader(path => File.ReadAllBytes(path), (path, bytes, first) => { parLog.Add((path, first)); return Decode(path, bytes, first); });
+            var parBudget = new CacheBudget(1);
+            par.Store(bounded: true, parBudget);
+            var parBoxes = new System.Collections.Concurrent.ConcurrentBag<bool>();
+            var refBoxes = new Dictionary<string, RefGeometry?> { [a] = bnd.Get(a), [b] = bnd.Get(b) };
+            Parallel.For(0, 4000, new ParallelOptions { MaxDegreeOfParallelism = 8 }, i =>
+            {
+                var path = i % 2 == 0 ? a : b;
+                parBoxes.Add(par.Get(path)?.Box.Equals(refBoxes[path]!.Box) == true);
+            });
+            Check("CP-1 eight threads on one mesh store: every answer equals the sequential one", parBoxes.Count == 4000 && parBoxes.All(x => x), $"{parBoxes.Count(x => x)} of {parBoxes.Count}");
+            Check("CP-2 eight threads on one mesh store: each mesh's first decode happens once",
+                  parLog.Count(x => x.First && x.Path == a) == 1 && parLog.Count(x => x.First && x.Path == b) == 1 && par.Decodes == parLog.Count,
+                  $"decodes {par.Decodes}, again {par.Redecodes}");
+
+            int asked = 0;
+            var once = new ContactIndex(k => { Interlocked.Increment(ref asked); return idxReader.Get(meshOf[k]); }, cacheBudgetBytes: 1, memoiseGeometry: true);
+            Parallel.For(0, 2000, new ParallelOptions { MaxDegreeOfParallelism = 8 }, _ => { once.Summary(baseA); once.GeomOf(baseA); });
+            Check("CP-3 eight threads on one base: its geometry is asked for once", asked == 1, $"asked {asked}x");
+
+            var skipA = new ContactSkips { BoxesApart = 2, DepBodilessDoor = 3 };
+            skipA.Add(new ContactSkips { BoxesApart = 5, HostVolume = 7 });
+            var timerA = new ContactTimer(); var timerB = new ContactTimer();
+            timerA.Best.Calls = 1; timerB.Best.Calls = 2; timerB.CoreShell.Calls = 4;
+            timerA.Merge(timerB);
+            Check("CP-4 per-thread counters and timers add up when merged",
+                  skipA.BoxesApart == 7 && skipA.HostVolume == 7 && skipA.DepBodilessDoor == 3 && timerA.Best.Calls == 3 && timerA.CoreShell.Calls == 4,
+                  $"apart {skipA.BoxesApart}, volume {skipA.HostVolume}, best {timerA.Best.Calls}, shell {timerA.CoreShell.Calls}");
         }
         finally { Directory.Delete(dir, recursive: true); }
 

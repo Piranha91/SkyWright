@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Numerics;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
@@ -239,6 +240,13 @@ public sealed class ContactSkips
     /// base's type: no coverage key (as for lights), counted for the console so they leave NoGeometry visibly.</summary>
     public long HostBodilessLight, HostBodilessActivator, HostBodilessDoor, DepBodilessLight, DepBodilessActivator, DepBodilessDoor;
 
+    static readonly System.Reflection.FieldInfo[] Counters = typeof(ContactSkips).GetFields().Where(f => f.FieldType == typeof(long)).ToArray();
+    /// <summary>Add one thread's counters into these: each worker counts its own, merged in the sequential step.</summary>
+    public void Add(ContactSkips other)
+    {
+        foreach (var f in Counters) f.SetValue(this, (long)f.GetValue(this)! + (long)f.GetValue(other)!);
+    }
+
     /// <summary>Count one bodiless base of type <paramref name="type"/> left out as a host or as a dependent.</summary>
     public void Bodiless(string type, bool host)
     {
@@ -295,8 +303,9 @@ public sealed class BoxHash<T>
 /// <see cref="ContactIndex.Judge"/> (stateprobe and contactprobe <c>--phase-timers</c>): <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/>
 /// ticks and counts per sub-phase. Null on the index (the default): no clock is read and nothing here is touched. Never read by a
 /// decision. Each entry's buckets partition its calls' wall exactly (a running stamp, every segment assigned to one bucket); the
-/// repeat accounting's own work is kept out of every bucket and counted in <see cref="AccountingTicks"/>. Not thread-safe: the
-/// index is used from one thread in every probe.</summary>
+/// repeat accounting's own work is kept out of every bucket and counted in <see cref="AccountingTicks"/>. One timer belongs to one
+/// thread: <see cref="ContactIndex"/> gives each other thread its own and <see cref="ContactIndex.MergeThreadTimers"/> folds them in,
+/// so after a threaded run ticks sum across threads and exceed the wall clock.</summary>
 public sealed class ContactTimer
 {
     public static long Now() => System.Diagnostics.Stopwatch.GetTimestamp();
@@ -312,6 +321,8 @@ public sealed class ContactTimer
         public long Neighbours, SelfSkips, PlacementNulls, RadiusRejects, GridNulls, SoupNulls, Measured, MemoHits, ExtentCalls, PreexistingCalls,
                     CoverPlausibleCalls, CoverMeasureCalls, CoverAuthoredCalls, CoverCompareCalls;
         internal void Lap(ref long bucket) { long now = Now(); bucket += now - Stamp; Stamp = now; }
+        static readonly System.Reflection.FieldInfo[] Longs = typeof(Entry).GetFields().Where(f => f.FieldType == typeof(long)).ToArray();
+        internal void Add(Entry o) { foreach (var f in Longs) f.SetValue(this, (long)f.GetValue(this)! + (long)f.GetValue(o)!); }
         public IEnumerable<(string Name, long Ticks)> Buckets() => new[]
         {
             ("dep-soup", DepSoupTicks), ("broad", BroadTicks), ("placementOf", PlacementOfTicks), ("baseOf", BaseOfTicks), ("host-grid", HostGridTicks),
@@ -346,6 +357,12 @@ public sealed class ContactTimer
             if (value is null) NullValues++;
             if (value is TriangleGrid g) { if (g.Sizing is { GroupingPower: > 0 }) Coarsened++; if (g.OverflowTriangleCount > 0) Overflowed++; }
             if (!_built.Add(key)) { Rebuilds++; RebuildTicks += now - m0; }
+        }
+        internal void Add(CacheTiming o)
+        {
+            Hits += o.Hits; Misses += o.Misses; MissTicks += o.MissTicks; GeomTicks += o.GeomTicks; TransformTicks += o.TransformTicks; BuildTicks += o.BuildTicks;
+            Rebuilds += o.Rebuilds; RebuildTicks += o.RebuildTicks; NullValues += o.NullValues; Coarsened += o.Coarsened; Overflowed += o.Overflowed;
+            foreach (var k in o._built) if (!_built.Add(k)) Rebuilds++;
         }
     }
 
@@ -385,6 +402,21 @@ public sealed class ContactTimer
             if (_slowest.Count > 20) _slowest.RemoveAt(20);
         }
         long now = Now(); AccountingTicks += now - e.Stamp; e.Stamp = now;
+    }
+
+    /// <summary>Add another thread's timer into this one: sums, the distinct sets united, the slowest list kept to twenty.</summary>
+    public void Merge(ContactTimer o)
+    {
+        Best.Add(o.Best); BestInJudge.Add(o.BestInJudge); Pair.Add(o.Pair); PairInJudge.Add(o.PairInJudge);
+        DepSoups.Add(o.DepSoups); HostGrids.Add(o.HostGrids); ShellDeps.Add(o.ShellDeps); ShellGrids.Add(o.ShellGrids); ArmGrids.Add(o.ArmGrids);
+        CoreMeasure.Add(o.CoreMeasure); CoreShell.Add(o.CoreShell); CorePreexisting.Add(o.CorePreexisting);
+        JudgeCalls += o.JudgeCalls; JudgeTicks += o.JudgeTicks; AccountingTicks += o.AccountingTicks;
+        BucketTargets.UnionWith(o.BucketTargets);
+        MeasureDistinct += o.MeasureDistinct; MeasureRepeats += o.MeasureRepeats; MeasureRepeatTicks += o.MeasureRepeatTicks;
+        foreach (var k in o._measureKeys) if (!_measureKeys.Add(k)) { MeasureDistinct--; MeasureRepeats++; }
+        _slowest.AddRange(o._slowest);
+        _slowest.Sort((a, b) => b.Ticks.CompareTo(a.Ticks));
+        if (_slowest.Count > 20) _slowest.RemoveRange(20, _slowest.Count - 20);
     }
 
     /// <summary>The printed block (one line per bucket with seconds and its share of the entry's calls).</summary>
@@ -485,6 +517,11 @@ public sealed class ContactTimer
     }
 }
 
+/// <summary>Build the index and the hashes on one thread; after that every query (<see cref="Judge"/>, <see cref="BestContact"/>,
+/// <see cref="PairContact"/>, the enable and geometry reads) is safe from many threads, given a thread-safe <c>geomOf</c> and concurrent-safe
+/// <see cref="TriangleGrid"/> queries. Each key of a memo is computed once; an evicted entry rebuilt later is the same value. A driver wanting
+/// the same rows as one thread gives each host its own <see cref="ContactSkips"/>, passes <see cref="HostReachFloors"/> to <see cref="Judge"/>
+/// and merges in host order. Setting <see cref="State"/>, <see cref="Trace"/> or <see cref="Timer"/>, and the budget refresh, stay single-threaded.</summary>
 public sealed class ContactIndex
 {
     public OverlapIndex Index { get; } = new();
@@ -495,18 +532,66 @@ public sealed class ContactIndex
     /// <summary>Diagnostic (contactprobe HC_MEMSTAGES): called every 10,000 references inside the two hashes. Null: nothing is called.</summary>
     public Action<string, int>? StageProbe { get; set; }
     /// <summary>Opt-in timers (<see cref="ContactTimer"/>). Null by default: no clock is read. Never read by a decision.</summary>
-    public ContactTimer? Timer { get; set; }
-    int _judgeDepth;                                                           // > 0 while Judge runs: a timer files nested calls apart
+    public ContactTimer? Timer
+    {
+        get => _timer;
+        set { _timer = value; _timerOwner = Environment.CurrentManagedThreadId; }
+    }
+    ContactTimer? _timer;
+    int _timerOwner;
+
+    /// <summary>What one thread is doing inside this index.</summary>
+    sealed class ThreadState
+    {
+        internal int JudgeDepth;                                               // > 0 while Judge runs: a timer files nested calls apart
+        internal float? HostReachFloor;                                        // the largest host radius one thread would have seen at this host
+        internal List<TraceEvent>? TraceBuffer;                                // this host's events, merged in host order by the driver
+        internal ContactTimer? Fork;                                           // this thread's own timer, unless it attached Timer
+    }
+    readonly ThreadLocal<ThreadState> _thread = new(() => new ThreadState(), trackAllValues: true);
+
+    /// <summary>The timer this thread writes: the attached one on its owner thread, this thread's own on any other. Null: no clock is read.</summary>
+    ContactTimer? ActiveTimer
+    {
+        get
+        {
+            var t = _timer;
+            if (t is null) return null;
+            if (Environment.CurrentManagedThreadId == _timerOwner) return t;
+            var st = _thread.Value!;
+            return st.Fork ??= new ContactTimer();
+        }
+    }
+
+    /// <summary>Fold every other thread's timer into <see cref="Timer"/>. Call from one thread once the workers have finished.</summary>
+    public void MergeThreadTimers()
+    {
+        if (_timer is not { } t) return;
+        foreach (var st in _thread.Values)
+            if (st.Fork is { } f) { t.Merge(f); st.Fork = null; }
+    }
 
     /// <summary>Whether the attached sink wants events for this key (false with no sink — the untraced path does no work).</summary>
     bool Tw(FormKey key) => Trace is { } t && t.Wants(key);
     void Te(FormKey key, string role, string outcome, string rule, FormKey other = default,
             IReadOnlyDictionary<string, double>? values = null, string? detail = null)
-        => Trace!.Emit(new TraceEvent(key, role, outcome, rule, other, values, detail));
+    {
+        var ev = new TraceEvent(key, role, outcome, rule, other, values, detail);
+        if (_thread.Value!.TraceBuffer is { } buffer) { buffer.Add(ev); return; }
+        lock (_traceGate) Trace!.Emit(ev);
+    }
+    readonly object _traceGate = new();
     static Dictionary<string, double> Tv(string n1, double v1, string n2, double v2) => new() { [n1] = v1, [n2] = v2 };
     readonly Func<FormKey, RefGeometry?> _geomOf;
-    readonly Dictionary<FormKey, RefGeometry?> _geomCache = new();
-    readonly Dictionary<FormKey, GeomSummary?> _summaries = new();
+    readonly ConcurrentDictionary<FormKey, RefGeometry?> _geomCache = new();
+    readonly ConcurrentDictionary<FormKey, GeomSummary?> _summaries = new();
+    // Per-key build locks: one key is computed once, and a lock is held only for its own stripe. Taken in this order, never back:
+    // measure stripe, then build stripe, then base stripe; the caller's geomOf and the budget gate are leaves.
+    const int StripeCount = 1024;
+    static object[] NewStripes() { var s = new object[StripeCount]; for (int i = 0; i < s.Length; i++) s[i] = new object(); return s; }
+    readonly object[] _measureStripes = NewStripes(), _buildStripes = NewStripes(), _baseStripes = NewStripes();
+    static object StripeOf(object[] stripes, int hash) => stripes[(hash & int.MaxValue) % StripeCount];
+    readonly object _armsGate = new();                                         // EnableArms' memos; held for a lookup or a short chain walk
     /// <summary>Memoise each base's full geometry for the run (the default). False: keep only a <see cref="GeomSummary"/> per base and
     /// ask the geometry delegate again whenever a soup is needed: the caller bounds its store and decodes again (contactprobe).</summary>
     readonly bool _memoiseGeometry;
@@ -554,12 +639,57 @@ public sealed class ContactIndex
     /// over a lower ε, by the in-game placement-contact acceptance set; ε is unchanged.</summary>
     public bool ReadRadius { get; init; }
     float _maxHostRadiusW;                                                     // the largest host radius x scale hashed so far
+    float HostPadOf(FormKey baseKey, Snap s) => Summary(baseKey) is { } g ? g.HostRadiusMax * s.Scale : 0f;
     float HostPadW(FormKey baseKey, Snap s)
     {
         if (!ReadRadius) return 0f;
-        float r = Summary(baseKey) is { } g ? g.HostRadiusMax * s.Scale : 0f;
-        if (r > _maxHostRadiusW) _maxHostRadiusW = r;
+        float r = HostPadOf(baseKey, s);
+        for (float seen = Volatile.Read(ref _maxHostRadiusW); r > seen;)
+        {
+            float was = Interlocked.CompareExchange(ref _maxHostRadiusW, r, seen);
+            if (was == seen) break;
+            seen = was;
+        }
         return r;
+    }
+    float HostReachNow => _thread.Value!.HostReachFloor ?? Volatile.Read(ref _maxHostRadiusW);
+
+    /// <summary>The broad-phase host radius one thread would read while judging each of <paramref name="hosts"/>, given in judging order: it
+    /// grows as hosts are judged, its window sets the order neighbours are visited in, and a tie is decided by that order. Pass each host's value
+    /// to <see cref="Judge"/> so a threaded run visits neighbours exactly as a sequential one. Call after the hashes are built.</summary>
+    public float[] HostReachFloors(IReadOnlyList<MovedHost> hosts, BoxHash<(FormKey Key, int Snap)> depSnaps, IReadOnlyList<HashSet<int>> closure)
+    {
+        var floors = new float[hosts.Count];
+        if (!ReadRadius) return floors;
+        float m = Volatile.Read(ref _maxHostRadiusW);
+        for (int i = 0; i < hosts.Count; i++)
+        {
+            var h = hosts[i];
+            float r = HostPadOf(h.PrevBase, h.Previous);
+            if (r > m && ReadsHostPad(h, depSnaps, closure)) m = r;
+            floors[i] = m;
+        }
+        return floors;
+    }
+
+    /// <summary>Whether <see cref="JudgeBody"/> reaches this host's box-gap test for any dependent: the same steps in the same order, nothing counted.</summary>
+    bool ReadsHostPad(MovedHost host, BoxHash<(FormKey Key, int Snap)> depSnaps, IReadOnlyList<HashSet<int>> closure)
+    {
+        var hostBox = WorldBox(host.PrevBase, host.Previous);
+        if (hostBox.IsEmpty) return false;
+        foreach (var ((depKey, si), _, _) in depSnaps.Near(host.Previous.Space, hostBox, Reach))
+        {
+            var snaps = Index.History.Of(depKey)!;
+            if (depKey == host.Key) continue;
+            int ai = AuthoringSnapIndex(snaps, host.Mover, closure);
+            if (ai != si || ai < 0) continue;
+            if (snaps[ai].Space != host.Previous.Space) continue;
+            var en = ArmEnable(depKey, host.Mover, closure);
+            if (!en.Resolved || !en.Enabled) continue;
+            if (ArmBase(depKey, host.Mover, closure).IsNull) continue;
+            return true;
+        }
+        return false;
     }
     float DepPadW(FormKey baseKey, Snap s) => ReadRadius && Summary(baseKey) is { } g ? g.DepRadiusMax * s.Scale : 0f;
     readonly PlacementCache<TriangleGrid> _shellGrids;
@@ -583,12 +713,12 @@ public sealed class ContactIndex
     /// <summary>Measure's answers on this index. A pair's answer is a function of its key and of this index's init-only settings
     /// (<see cref="Reach"/>, <see cref="NearBand"/>, <see cref="ReadRadius"/>), so it is computed once per index; a grid rebuilt after
     /// eviction, at whatever bucket target, answers the same (storage only: proof CT-7). Unbounded: one small entry per distinct pair.
-    /// Not locked: every probe uses an index from one thread.</summary>
-    readonly Dictionary<MeasureKey, (SoupContact Contact, float CoreGap)> _measureMemo = new();
+    /// One key is measured once under its stripe; a lookup takes no lock.</summary>
+    readonly ConcurrentDictionary<MeasureKey, (SoupContact Contact, float CoreGap)> _measureMemo = new();
     /// <summary>Distinct pairs memoised, and their approximate bytes (entry structs plus the dictionary's own arrays).</summary>
     public int MeasureMemoCount => _measureMemo.Count;
     public long MeasureMemoApproxBytes => (long)_measureMemo.Count * (System.Runtime.CompilerServices.Unsafe.SizeOf<MeasureKey>()
-        + System.Runtime.CompilerServices.Unsafe.SizeOf<(SoupContact, float)>() + 12) + (long)_measureMemo.EnsureCapacity(0) * 4;
+        + System.Runtime.CompilerServices.Unsafe.SizeOf<(SoupContact, float)>() + 12) + (long)_measureMemo.Count * 4;
 
     /// <summary>One pair measured: the core contact (normal, penetration, enclosed depth — the rule's reading), and with
     /// <see cref="ReadRadius"/> its facing gap replaced by the gap between the grown soups. The core gap rides beside it. Memoised
@@ -596,22 +726,24 @@ public sealed class ContactIndex
     (SoupContact Contact, float CoreGap) Measure(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
                                                  FormKey hostKey, int hostSnap, FormKey hostBase, Snap hostS, bool anySurface, ContactTimer.Entry? e = null)
     {
-        var tm = e is null ? null : Timer;
+        var tm = e is null ? null : ActiveTimer;
         long m0 = 0;
         if (e is not null) { e.Lap(ref e.OtherTicks); m0 = e.Stamp; }
         var key = new MeasureKey(depKey, depSnap, depBase, SnapBits.Of(depS), hostKey, hostSnap, hostBase, SnapBits.Of(hostS), anySurface);
-        if (_measureMemo.TryGetValue(key, out var known))
+        void AccountHit()
         {
-            if (e is not null)
-            {
-                e.Lap(ref e.MeasureCoreTicks); e.Measured++; e.MemoHits++;
-                tm!.Account(e, e.Stamp - m0, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, soup.TriangleCount, grid.TriangleCount);
-            }
-            return known;
+            if (e is null) return;
+            e.Lap(ref e.MeasureCoreTicks); e.Measured++; e.MemoHits++;
+            tm!.Account(e, e.Stamp - m0, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, soup.TriangleCount, grid.TriangleCount);
         }
-        var result = MeasureOnce(soup, grid, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, e, tm, m0);
-        _measureMemo[key] = result;
-        return result;
+        if (_measureMemo.TryGetValue(key, out var known)) { AccountHit(); return known; }
+        lock (StripeOf(_measureStripes, key.GetHashCode()))
+        {
+            if (_measureMemo.TryGetValue(key, out known)) { AccountHit(); return known; }
+            var result = MeasureOnce(soup, grid, depKey, depSnap, depBase, depS, hostKey, hostSnap, hostBase, hostS, e, tm, m0);
+            _measureMemo[key] = result;
+            return result;
+        }
     }
 
     (SoupContact Contact, float CoreGap) MeasureOnce(TriangleSoup soup, TriangleGrid grid, FormKey depKey, int depSnap, FormKey depBase, Snap depS,
@@ -644,38 +776,46 @@ public sealed class ContactIndex
 
     TriangleGrid? ShellGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        var ct = Timer?.ShellGrids;
+        var tm = ActiveTimer; var ct = tm?.ShellGrids;
         if (_shellGrids.TryGetValue((key, snapIndex, baseKey), out var g)) { if (ct is not null) ct.Hits++; return g; }
-        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
-        TriangleGrid? grid = null;
-        if (Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom)
+        lock (StripeOf(_buildStripes, (key, snapIndex, baseKey).GetHashCode()))
         {
-            if (ct is not null) m1 = ContactTimer.Now();
-            var w = SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale);
-            if (ct is not null) m2 = ContactTimer.Now();
-            grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
-            if (ct is not null) { m3 = ContactTimer.Now(); Timer!.BucketTargets.Add(GridBucketTarget); }
+            if (_shellGrids.TryPeek((key, snapIndex, baseKey), out g)) return g;
+            long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
+            TriangleGrid? grid = null;
+            if (Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom)
+            {
+                if (ct is not null) m1 = ContactTimer.Now();
+                var w = SpatialOverlap.TransformSoup(geom.HostShell ?? geom.HostSoup, s.Pos, s.Rot, s.Scale);
+                if (ct is not null) m2 = ContactTimer.Now();
+                grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
+                if (ct is not null) { m3 = ContactTimer.Now(); tm!.BucketTargets.Add(GridBucketTarget); }
+            }
+            _shellGrids[(key, snapIndex, baseKey)] = grid;
+            ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
+            return grid;
         }
-        _shellGrids[(key, snapIndex, baseKey)] = grid;
-        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
-        return grid;
     }
 
     TriangleSoup? ShellDep(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        var ct = Timer?.ShellDeps;
+        var ct = ActiveTimer?.ShellDeps;
         if (_shellDeps.TryGetValue((key, snapIndex, baseKey), out var so)) { if (ct is not null) ct.Hits++; return so; }
-        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0;
-        TriangleSoup? soup = null;
-        if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
+        lock (StripeOf(_buildStripes, (key, snapIndex, baseKey).GetHashCode()))
         {
-            if (ct is not null) m1 = ContactTimer.Now();
-            soup = SpatialOverlap.TransformSoup(geom.DepShell ?? geom.DepSoup, s.Pos, s.Rot, s.Scale);
-            if (ct is not null) m2 = ContactTimer.Now();
+            if (_shellDeps.TryPeek((key, snapIndex, baseKey), out so)) return so;
+            long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0;
+            TriangleSoup? soup = null;
+            if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
+            {
+                if (ct is not null) m1 = ContactTimer.Now();
+                soup = SpatialOverlap.TransformSoup(geom.DepShell ?? geom.DepSoup, s.Pos, s.Rot, s.Scale);
+                if (ct is not null) m2 = ContactTimer.Now();
+            }
+            _shellDeps[(key, snapIndex, baseKey)] = soup;
+            ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m0, soup);
+            return soup;
         }
-        _shellDeps[(key, snapIndex, baseKey)] = soup;
-        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m0, soup);
-        return soup;
     }
 
     readonly bool _automaticBudget;
@@ -692,12 +832,13 @@ public sealed class ContactIndex
     /// <param name="automaticSelection">optional reading seam for deterministic known answers; never called for an explicit budget.</param>
     /// <param name="memoiseGeometry">false: keep only a summary per base; <paramref name="geomOf"/> is asked again for every soup
     /// and must return the same geometry each time (the caller's own bounded store).</param>
+    /// <param name="automaticThreads">the threads the pass will query on, which sets the automatic budget's ceiling (<see cref="CacheBudget.CeilingFor"/>).</param>
     public ContactIndex(Func<FormKey, RefGeometry?> geomOf, long? cacheBudgetBytes = null,
-        Func<CacheBudget.AutomaticSelection>? automaticSelection = null, bool memoiseGeometry = true)
+        Func<CacheBudget.AutomaticSelection>? automaticSelection = null, bool memoiseGeometry = true, int automaticThreads = 1)
     {
         _geomOf = geomOf; _memoiseGeometry = memoiseGeometry; Arms = new EnableArms(Index);
         _automaticBudget = cacheBudgetBytes is null;
-        _readAutomaticBudget = automaticSelection ?? CacheBudget.ReadAutomatic;
+        _readAutomaticBudget = automaticSelection ?? (() => CacheBudget.ReadAutomatic(automaticThreads));
         long limit;
         if (cacheBudgetBytes is { } explicitBytes) limit = explicitBytes;
         else
@@ -769,14 +910,22 @@ public sealed class ContactIndex
     {
         if (!_memoiseGeometry) return _geomOf(baseKey);
         if (_geomCache.TryGetValue(baseKey, out var g)) return g;
-        return _geomCache[baseKey] = _geomOf(baseKey);
+        lock (StripeOf(_baseStripes, baseKey.GetHashCode()))
+        {
+            if (_geomCache.TryGetValue(baseKey, out g)) return g;
+            return _geomCache[baseKey] = _geomOf(baseKey);
+        }
     }
 
     /// <summary>A base's geometry without its soups: what everything but the soup builders reads. Kept per base.</summary>
     public GeomSummary? Summary(FormKey baseKey)
     {
         if (_summaries.TryGetValue(baseKey, out var s)) return s;
-        return _summaries[baseKey] = GeomOf(baseKey) is { } g ? GeomSummary.Of(g) : null;
+        lock (StripeOf(_baseStripes, baseKey.GetHashCode()))
+        {
+            if (_summaries.TryGetValue(baseKey, out s)) return s;
+            return _summaries[baseKey] = GeomOf(baseKey) is { } g ? GeomSummary.Of(g) : null;
+        }
     }
 
     // ---- roles ---------------------------------------------------------------------------------
@@ -867,13 +1016,13 @@ public sealed class ContactIndex
     /// <summary>A reference's runtime enable state under the winner: its winning flag and winning XESP, the chain
     /// followed through everything else's winning state. A reference the order does not place, or has deleted, is
     /// unknown to the chain (reported unresolved). <see cref="EnableArms.Winner"/>.</summary>
-    public EnableResolution WinnerEnable(FormKey key) => Arms.Winner(key);
+    public EnableResolution WinnerEnable(FormKey key) { lock (_armsGate) return Arms.Winner(key); }
 
     /// <summary>A reference's runtime enable state in the arm WITHOUT <paramref name="mover"/>'s side: each chain
     /// reference's flag at its authoring snap and its XESP as last set outside the mover's side. Memoised per mover.
     /// <see cref="EnableArms.Without"/>.</summary>
     public EnableResolution ArmEnable(FormKey key, int mover, IReadOnlyList<HashSet<int>> closure)
-        => Arms.Without(key, mover, closure);
+    { lock (_armsGate) return Arms.Without(key, mover, closure); }
 
     /// <summary>The plugin whose step on a reference's enable chain last changed its runtime state under the winner —
     /// the mover of a host that left the world through its parent: the latest plugin among every chain element's XESP
@@ -945,22 +1094,26 @@ public sealed class ContactIndex
     /// asks whether two SURFACES meet (the overlap ranker), not whether one HOLDS the other.</param>
     TriangleGrid? HostGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s, bool anySurface = false)
     {
-        var ct = Timer?.HostGrids;
+        var tm = ActiveTimer; var ct = tm?.HostGrids;
         if (_hostGrids.TryGetValue((key, snapIndex, baseKey), out var g) && (g is not null || !anySurface)) { if (ct is not null) ct.Hits++; return g; }
-        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
-        var sum = Summary(baseKey);
-        TriangleGrid? grid = null;
-        if ((sum is { CanHost: true } || (anySurface && sum is { HasGeometry: true } && sum.HostTriangles > 0)) && GeomOf(baseKey) is { } geom)
+        lock (StripeOf(_buildStripes, (key, snapIndex, baseKey).GetHashCode()))
         {
-            if (ct is not null) m1 = ContactTimer.Now();
-            var w = SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale);
-            if (ct is not null) m2 = ContactTimer.Now();
-            grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
-            if (ct is not null) { m3 = ContactTimer.Now(); Timer!.BucketTargets.Add(GridBucketTarget); }
+            if (_hostGrids.TryPeek((key, snapIndex, baseKey), out g) && (g is not null || !anySurface)) return g;
+            long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
+            var sum = Summary(baseKey);
+            TriangleGrid? grid = null;
+            if ((sum is { CanHost: true } || (anySurface && sum is { HasGeometry: true } && sum.HostTriangles > 0)) && GeomOf(baseKey) is { } geom)
+            {
+                if (ct is not null) m1 = ContactTimer.Now();
+                var w = SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale);
+                if (ct is not null) m2 = ContactTimer.Now();
+                grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
+                if (ct is not null) { m3 = ContactTimer.Now(); tm!.BucketTargets.Add(GridBucketTarget); }
+            }
+            _hostGrids[(key, snapIndex, baseKey)] = grid;
+            ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
+            return grid;
         }
-        _hostGrids[(key, snapIndex, baseKey)] = grid;
-        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
-        return grid;
     }
 
     /// <summary>A neighbour's host grid at its AUTHORING placement, for the differential Sunk rule. Keyed by base as well as snap: the
@@ -968,39 +1121,47 @@ public sealed class ContactIndex
     /// budget (<see cref="Budget"/>), counted and evicted with the other four.</summary>
     TriangleGrid? ArmGrid(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        var ct = Timer?.ArmGrids;
+        var tm = ActiveTimer; var ct = tm?.ArmGrids;
         if (_armGrids.TryGetValue((key, snapIndex, baseKey), out var g)) { if (ct is not null) ct.Hits++; return g; }
-        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
-        TriangleGrid? grid = null;
-        if (Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom)
+        lock (StripeOf(_buildStripes, (key, snapIndex, baseKey).GetHashCode()))
         {
-            if (ct is not null) m1 = ContactTimer.Now();
-            var w = SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale);
-            if (ct is not null) m2 = ContactTimer.Now();
-            grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
-            if (ct is not null) { m3 = ContactTimer.Now(); Timer!.BucketTargets.Add(GridBucketTarget); }
+            if (_armGrids.TryPeek((key, snapIndex, baseKey), out g)) return g;
+            long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0, m3 = m0;
+            TriangleGrid? grid = null;
+            if (Summary(baseKey) is { CanHost: true } && GeomOf(baseKey) is { } geom)
+            {
+                if (ct is not null) m1 = ContactTimer.Now();
+                var w = SpatialOverlap.TransformSoup(geom.HostSoup, s.Pos, s.Rot, s.Scale);
+                if (ct is not null) m2 = ContactTimer.Now();
+                grid = TriangleGrid.BuildAdaptive(w, targetBucketApproxBytes: GridBucketTarget);
+                if (ct is not null) { m3 = ContactTimer.Now(); tm!.BucketTargets.Add(GridBucketTarget); }
+            }
+            _armGrids[(key, snapIndex, baseKey)] = grid;
+            ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
+            return grid;
         }
-        _armGrids[(key, snapIndex, baseKey)] = grid;
-        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m3, grid);
-        return grid;
     }
     readonly PlacementCache<TriangleGrid> _armGrids;
 
     TriangleSoup? DepSoup(FormKey key, int snapIndex, FormKey baseKey, Snap s)
     {
-        var ct = Timer?.DepSoups;
+        var ct = ActiveTimer?.DepSoups;
         if (_depSoups.TryGetValue((key, snapIndex, baseKey), out var so)) { if (ct is not null) ct.Hits++; return so; }
-        long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0;
-        TriangleSoup? soup = null;
-        if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
+        lock (StripeOf(_buildStripes, (key, snapIndex, baseKey).GetHashCode()))
         {
-            if (ct is not null) m1 = ContactTimer.Now();
-            soup = SpatialOverlap.TransformSoup(geom.DepSoup, s.Pos, s.Rot, s.Scale);
-            if (ct is not null) m2 = ContactTimer.Now();
+            if (_depSoups.TryPeek((key, snapIndex, baseKey), out so)) return so;
+            long m0 = ct is null ? 0 : ContactTimer.Now(), m1 = m0, m2 = m0;
+            TriangleSoup? soup = null;
+            if (Summary(baseKey) is { CanDepend: true } && GeomOf(baseKey) is { } geom)
+            {
+                if (ct is not null) m1 = ContactTimer.Now();
+                soup = SpatialOverlap.TransformSoup(geom.DepSoup, s.Pos, s.Rot, s.Scale);
+                if (ct is not null) m2 = ContactTimer.Now();
+            }
+            _depSoups[(key, snapIndex, baseKey)] = soup;
+            ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m0, soup);
+            return soup;
         }
-        _depSoups[(key, snapIndex, baseKey)] = soup;
-        ct?.Miss((key, snapIndex, baseKey), m0, m1, m2, m0, soup);
-        return soup;
     }
 
     // ---- the moved hosts -------------------------------------------------------------------------
@@ -1233,8 +1394,8 @@ public sealed class ContactIndex
                                    Func<FormKey, DirectionalCoverageResult, CoverageInputs, AuthoredCoverageReading>? authoredCoverage = null,
                                    bool coverageMaySelect = true)
     {
-        var tm = Timer;
-        var e = tm is null ? null : _judgeDepth > 0 ? tm.BestInJudge : tm.Best;
+        var tm = ActiveTimer;
+        var e = tm is null ? null : _thread.Value!.JudgeDepth > 0 ? tm.BestInJudge : tm.Best;
         long wall0 = 0;
         if (e is not null) { e.Calls++; e.Stamp = wall0 = ContactTimer.Now(); }
         neighboursTested = 0;
@@ -1251,7 +1412,7 @@ public sealed class ContactIndex
         float bestRaw = float.PositiveInfinity; FormKey rawAgainst = default;
         float depPad = DepPadW(depBase, depSnap);
         if (e is not null) e.Lap(ref e.OtherTicks);
-        foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand + depPad + (ReadRadius ? _maxHostRadiusW : 0f)))
+        foreach (var (nKey, nBox, _) in hash.Near(depSnap.Space, depBox, BoxBand + depPad + (ReadRadius ? HostReachNow : 0f)))
         {
             if (e is not null) { e.Lap(ref e.BroadTicks); e.Neighbours++; }
             if (nKey == depKey) { if (e is not null) e.SelfSkips++; continue; }
@@ -1393,8 +1554,8 @@ public sealed class ContactIndex
     public ArmContact? PairContact(FormKey depKey, int depSnapIndex, FormKey depBase, Snap depSnap,
                                    FormKey hostKey, int hostSnapIndex, FormKey hostBase, Snap hostSnap, bool anySurface = false)
     {
-        var tm = Timer;
-        var e = tm is null ? null : _judgeDepth > 0 ? tm.PairInJudge : tm.Pair;
+        var tm = ActiveTimer;
+        var e = tm is null ? null : _thread.Value!.JudgeDepth > 0 ? tm.PairInJudge : tm.Pair;
         long wall0 = 0;
         if (e is not null) { e.Calls++; e.Stamp = wall0 = ContactTimer.Now(); }
         var soup = DepSoup(depKey, depSnapIndex, depBase, depSnap);
@@ -1426,16 +1587,20 @@ public sealed class ContactIndex
     /// is the order without the host's mover: the host at its previous snap, each dependent at its last snap not on the
     /// mover's side — and existing at runtime there (R1). The winner arm tests the dependent against everything physical
     /// near it under the winner.</summary>
+    /// <param name="hostReachFloor">this host's value from <see cref="HostReachFloors"/>, for a threaded driver; null reads the running value.</param>
+    /// <param name="traceBuffer">collects this host's trace events instead of emitting them, for a driver merging in host order.</param>
     public List<ContactRow> Judge(MovedHost host, BoxHash<(FormKey Key, int Snap)> depSnaps, BoxHash<FormKey> winners,
-                                  IReadOnlyList<HashSet<int>> closure, ContactSkips skips, bool keepNoRelation = false)
+                                  IReadOnlyList<HashSet<int>> closure, ContactSkips skips, bool keepNoRelation = false,
+                                  float? hostReachFloor = null, List<TraceEvent>? traceBuffer = null)
     {
-        var tmJ = Timer;
+        var tmJ = ActiveTimer;
         long j0 = tmJ is null ? 0 : ContactTimer.Now(), a0 = tmJ?.AccountingTicks ?? 0;
-        _judgeDepth++;
+        var st = _thread.Value!;
+        st.JudgeDepth++; st.HostReachFloor = hostReachFloor; st.TraceBuffer = traceBuffer;
         try { return JudgeBody(host, depSnaps, winners, closure, skips, keepNoRelation); }
         finally
         {
-            _judgeDepth--;
+            st.JudgeDepth--; st.HostReachFloor = null; st.TraceBuffer = null;
             if (tmJ is not null) { tmJ.JudgeCalls++; tmJ.JudgeTicks += ContactTimer.Now() - j0 - (tmJ.AccountingTicks - a0); }
         }
     }
@@ -1541,7 +1706,7 @@ public sealed class ContactIndex
                 if (nBase.IsNull) return 0f;
                 var grid = ArmGrid(nKey, ni, nBase, nAuth);
                 if (grid is null) return 0f;
-                return SpatialOverlap.Contact(depAuthSoup, grid, Reach, NearBand, default, Timer?.CorePreexisting).EffectivePenetration;   // the core depth, as Measure reads it
+                return SpatialOverlap.Contact(depAuthSoup, grid, Reach, NearBand, default, ActiveTimer?.CorePreexisting).EffectivePenetration;   // the core depth, as Measure reads it
             }
             AuthoredCoverageReading AuthoredCover(FormKey nKey, DirectionalCoverageResult winner, CoverageInputs winnerInput)
             {
