@@ -1,6 +1,10 @@
 """Known answers for the discovery probes' machine-readable hit list (`--json`): patchprobe, poolprobe, fomodprobe.
 
-    python _geometry-harness/tests/test_discovery_probes.py
+    python _geometry-harness/tests/test_discovery_probes.py [--installed [HARNESS_DIR]]
+
+--installed runs the same cases against the copies evalrun runs (HARNESS_DIR/<probe>/bin/Release/net9.0, default this
+checkout's harness) instead of a fresh build: the deploy smoke, and the check that would have caught a stale deployed
+fomodprobe that ignored --json and exited 0 with no hit list. fomodprobe must also refuse an argument it does not know.
 
 Builds the three probes from this checkout into a temporary folder (never an older binary), writes a tiny scratch
 machine - two MO2 instances, a download pool of two 7-Zip archives, hand-written plugin headers - and runs each REAL
@@ -224,6 +228,19 @@ def inside(path, root: Path) -> bool:
         return False
 
 
+def installed(harness: Path) -> dict[str, Path]:
+    """The copies evalrun runs (`<harness>/<probe>/bin/Release/net9.0/<probe>.exe`), not a fresh build: a deploy check."""
+    exes = {}
+    for p in PROBES:
+        exe = harness / p / "bin" / "Release" / "net9.0" / (f"{p}.exe" if os.name == "nt" else p)
+        if not exe.exists():
+            raise SystemExit(f"  FAIL  no installed {p} at {exe}")
+        dll = exe.with_suffix(".dll")
+        print(f"  {p}: installed {exe}  sha256 {sha(dll.read_bytes()) if dll.exists() else '?'}")
+        exes[p] = exe
+    return exes
+
+
 def main() -> int:
     sz = seven_zip()
     if not sz or not Path(sz).exists():
@@ -231,7 +248,11 @@ def main() -> int:
         return 1
     tmp = Path(tempfile.mkdtemp(prefix="hc-discovery-test-"))
     try:
-        exes = build(tmp)
+        if "--installed" in sys.argv:
+            i = sys.argv.index("--installed")
+            exes = installed(Path(sys.argv[i + 1]) if len(sys.argv) > i + 1 else HARNESS)
+        else:
+            exes = build(tmp)
         m = machine(tmp / "machine", sz)
         p = m["planted"]
         out = tmp / "out"
@@ -306,6 +327,11 @@ def main() -> int:
             print(f"    fomodprobe added extraction: {cost['plugins']} plugin(s), {cost['seconds']:.3f}s, "
                   f"{cost['seconds'] / cost['plugins']:.3f}s per hit plugin (whole run {secs:.2f}s)")
         check((doc.get("counts") or {}).get("judged") == 1, f"fomodprobe judged the one parsed FOMOD ({doc.get('counts')})")
+
+        # an argument the probe does not know is refused, never dropped (a stale build once ignored --json and exited 0)
+        r, _ = run(exes["fomodprobe"], ["--no-such-flag", "x"], m, "fomodprobe with an unknown argument")
+        check(r.returncode == 2 and "--no-such-flag" in (r.stdout + r.stderr),
+              f"fomodprobe refuses an unknown argument with exit 2 and names it (exit {r.returncode})")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

@@ -67,6 +67,12 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--jobs" && i + 1 < args.Length) jobs = int.Parse(args[++i]);
     else if (args[i] == "--json" && i + 1 < args.Length && !args[i + 1].StartsWith("--")) jsonPath = args[++i];
     else if (args[i] == "--json") jsonMalformed = true;
+    else
+    {
+        // never drop an argument: a build that ignored --json once exited 0 with no hit list written
+        Console.Error.WriteLine($"unknown argument {args[i]}: fomodprobe takes --list N, --mod NAME, --jobs N and --json PATH.");
+        return 2;
+    }
 }
 if (jsonMalformed) { Console.Error.WriteLine("--json needs a file path: pass --json PATH."); return 2; }
 var hitList = jsonPath is null ? null : new DiscoveryHits("fomodprobe", "fomod");
