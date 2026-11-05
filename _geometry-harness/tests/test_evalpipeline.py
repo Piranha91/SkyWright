@@ -751,6 +751,34 @@ def case_64_the_review_packet_names_no_media_bundle_the_report_did_not_use():
     assert doc.get("mediaBundle") and not missing, "a report that used its media bundle names it"
 
 
+def case_65_a_run_with_no_frame_stops_for_a_person_with_the_true_reason():
+    import types
+    def stage(rows, obs=None):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t)
+            (out / "capture").mkdir()
+            (out / "capture" / "captures.json").write_text(json.dumps(rows), encoding="utf-8")
+            sdir = out / "image-observations"
+            sdir.mkdir()
+            if obs is not None:
+                (sdir / "observations.json").write_text(json.dumps(obs), encoding="utf-8")
+            try:
+                return EP.stage_image_observations(types.SimpleNamespace(out=out), {}, sdir)
+            except (EP.Awaiting, EP.Refusal) as ex:
+                return ex
+    got = stage([])
+    assert "every capture request was refused" not in str(got), f"nothing was asked, yet the sentence says refused: {got}"
+    assert isinstance(got, EP.Awaiting), f"a run with no frame stops for a person, got {type(got).__name__}: {got}"
+    assert "asked for no" in str(got) and "nothing to observe" in str(got), f"the sentence says no picture was asked: {got}"
+    refused = [{"id": "capture-a", "status": "refused", "reason": "points-empty-pick"},
+               {"id": "capture-b", "refused": "capture wrote no result (exit None)"}]
+    got = stage(refused)
+    assert isinstance(got, EP.Awaiting) and "2 capture requests" in str(got) and "refused" in str(got), \
+        f"when every request was refused the sentence counts them, got {type(got).__name__}: {got}"
+    got = stage([], {"frames": [], "acknowledged": "no picture is right: the plan asked for none"})
+    assert isinstance(got, tuple) and got[0].get("images") == 0, f"an acknowledged empty packet is accepted, got {got}"
+
+
 def case_66_capture_holds_the_machine_slot_once_across_its_rounds():
     """The real stage_capture, its child() and its dispatch, with only the Runner faked: with a slot command the stage
     makes ONE heavy launch (its rounds inside the slot command's job, whose request children inherit the slot), held

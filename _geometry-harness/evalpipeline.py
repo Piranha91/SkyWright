@@ -1288,6 +1288,18 @@ def observations_state(key: list[dict], obs: dict | None) -> tuple[str, str]:
     return "accepted", f"{len(want)} frames observed blind."
 
 
+def no_frame_sentence(rows: list[dict]) -> str:
+    """Why a capture stage left no frame, from its rows: nothing asked for, every request refused, or none produced one."""
+    if not rows:
+        return "capture asked for no picture (the reel plan requested none), so there is nothing to observe."
+    refused = [r for r in rows if r.get("status") == "refused" or r.get("refused")]
+    if len(refused) == len(rows):
+        why = sorted({str(r.get("reason") or r.get("refused") or "no reason given") for r in refused})
+        return (f"all {len(rows)} capture requests were refused ({'; '.join(why[:3])}{'; ...' if len(why) > 3 else ''}), "
+                f"so there is nothing to observe.")
+    return f"none of the {len(rows)} capture requests produced a frame, so there is nothing to observe."
+
+
 def stage_image_observations(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """A neutral, indexed copy of every captured frame for the blind image review (no names, arms or expectations),
     then a stop until the reviewer's agent banks RUN/image-observations/observations.json for exactly these frames."""
@@ -1317,7 +1329,13 @@ def stage_image_observations(ctx: Context, res: dict, sdir: Path) -> tuple[dict,
         raise Awaiting(f"{sentence} Bank them at {fwd(obs_path)} as {{frames: [{{image, sha256, observation}}]}} for "
                        f"the {len(key)} frames in {fwd(packet)}, then run again.")
     if state == "nothing":
-        raise NonBlockingRefusal(sentence)
+        # no frame to observe blind: the run stops for a person to confirm that no picture is right, with the reason
+        # read from the capture rows (none asked for, every request refused, or none produced a frame)
+        obs = read_json(obs_path) if obs_path.is_file() else {}
+        if obs.get("frames") == [] and str(obs.get("acknowledged") or "").strip():
+            return {"images": 0, "observations": sha256_file(obs_path)}, [sdir / "image-key.json", obs_path]
+        raise Awaiting(f"{no_frame_sentence(caps)} Confirm that no picture is right by banking {fwd(obs_path)} as "
+                       f'{{"frames": [], "acknowledged": "<why>"}}, then run again.')
     if state == "refused":
         raise Refusal(sentence)
     return {"images": len(key), "observations": sha256_file(obs_path)}, [sdir / "image-key.json", obs_path]
