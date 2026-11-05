@@ -32,6 +32,8 @@ using HousecarlCore.Progress;
 if (args.Length > 0 && args[0] == "--reach-memory-child") return MotionProof.ReachMemoryChild(args);
 // 2026-10-14 (task 2026-10-11-swept-build-retains-samples): the discovery-proxy memory child process, run by P2/P4 under a heap cap
 if (args.Length > 0 && args[0] == "--proxy-memory-child") return MotionProof.ProxyMemoryChild(args);
+// the solid-rule fixture: written for tests/test_solid_rule_named.py, which runs the real motionprobe and lightprobe on it; test-only
+if (args.Length >= 2 && args[0] == "--write-motion-fixture") return MotionProof.WriteSolidRuleFixture(args[1]);
 
 using var __run = RunLog.BeginProcess("proofprobe", args);
 
