@@ -7,7 +7,9 @@ machine - two MO2 instances, a download pool of two 7-Zip archives, hand-written
 probe against it with HOUSECARL_SEARCH_ROOTS / HOUSECARL_MO2_INSTANCE / HOUSECARL_MO2_PROFILE /
 HOUSECARL_DOWNLOAD_POOL / HOUSECARL_SEVENZIP set for that run only, so no real instance or pool is read. Each run
 prints that environment and the instances the probe says it found. Asserts every planted hit is listed with the
-sha256 of the planted bytes, that a hit with no hash says why, and that the counts are real totals.
+sha256 of the planted bytes, that a hit with no hash says why, and that the counts are real totals. A second pool
+of seven archives checks that poolprobe writes its hits and unjudgeable items in the same documented order at any
+--jobs.
 
 Needs dotnet and 7-Zip (HOUSECARL_SEVENZIP, or `sevenZip` in the file HOUSECARL_HARNESS_CONFIG names). A missing tool
 is a FAILURE, never a skip. Exits 1 on failure.
@@ -224,6 +226,63 @@ def inside(path, root: Path) -> bool:
         return False
 
 
+def pool_order(exe: Path, m: dict, out: Path, sz: str) -> None:
+    """poolprobe writes its hits sorted by (archive, entry) ordinal and its unjudgeable items in ordinal order, at any
+    --jobs. The pool is built so that no other order passes: the one-master-short hit's archive sorts FIRST (a list
+    that puts applicable hits before near misses fails), and inside m-multi.7z the subfolder entry sorts before the
+    root entry (an extraction-enumeration order, root files first, fails). Neither depends on thread timing. The
+    unjudgeable names and reasons are chosen so that ordinal order is the reverse of NTFS name order and of
+    one-worker processing order."""
+    pool = m["root"] / "pool-order"
+    pool.mkdir()
+    p = m["planted"]
+
+    def archive(name, entries):
+        stage = m["root"] / "stage-order" / name
+        for rel, data in entries.items():
+            (stage / rel).parent.mkdir(parents=True, exist_ok=True)
+            (stage / rel).write_bytes(data)
+        r = subprocess.run([sz, "a", "-bso0", "-bsp0", str(pool / name)] + sorted({rel.split("/")[0] for rel in entries}),
+                           cwd=stage, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit(f"  FAIL  7-Zip could not write {name}: {r.stderr.strip()[:300]}")
+
+    archive("a-nearmiss.7z", {"NearMiss.esp": plugin(["A.esp", "C.esp"], "one master short")})
+    archive("m-multi.7z", {"zeta.esp": plugin(["A.esp", "B.esp"], "root entry"),
+                           "sub/alpha.esp": plugin(["A.esp", "B.esp"], "subfolder entry")})
+    archive("pool-patch.7z", {"PoolPatch.esp": p["PoolPatch.esp"]})
+    archive("c-empty.7z", {"Empty.esp": b""})
+    archive("d-corrupt.7z", {"Corrupt.esp": b"not a plugin header"})
+    (pool / "Broken.7z").write_bytes(b"not an archive")
+    (pool / "a-broken.7z").write_bytes(b"not an archive either")
+
+    want_hits = [("a-nearmiss.7z", "NearMiss.esp"), ("m-multi.7z", "sub\\alpha.esp"), ("m-multi.7z", "zeta.esp"),
+                 ("pool-patch.7z", "PoolPatch.esp")]
+    want_unj = [("Broken.7z", "7-Zip could not list the archive"), ("a-broken.7z", "7-Zip could not list the archive"),
+                ("1 plugin(s)", "MalformedDataException"), ("1 plugin(s)", "zero-byte file")]
+    mo = dict(m, env=dict(m["env"], HOUSECARL_DOWNLOAD_POOL=str(pool)))
+    first = None
+    for i, jobs in enumerate((1, 2, 8, 8, 8)):
+        label = f"poolprobe order, --jobs {jobs} (run {i + 1})"
+        j = out / f"pool-order-{i}.json"
+        r, _ = run(exe, ["--jobs", jobs, "--json", j], mo, label)
+        doc = load(j)
+        check(r.returncode == 0 and isinstance(doc, dict),
+              f"{label}: exits 0 and writes a JSON object (exit {r.returncode})")
+        doc = doc or {}
+        got = [(str((h.get("where") or {}).get("archive")), str((h.get("where") or {}).get("entry")).replace("/", "\\"))
+               for h in doc.get("hits") or []]
+        check(got == want_hits and len(set(got)) == len(got),
+              f"{label}: hits in (archive, entry) ordinal order, keys unique\n        got  {got}\n        want {want_hits}")
+        unj = [(u.get("what"), u.get("why")) for u in doc.get("unjudgeableItems") or []]
+        check(unj == want_unj, f"{label}: unjudgeable items in ordinal order\n        got  {unj}\n        want {want_unj}")
+        same = json.dumps([doc.get("hits"), doc.get("unjudgeableItems")], sort_keys=True)
+        if first is None:
+            first = same
+        else:
+            check(same == first, f"{label}: hits and unjudgeable items identical to run 1")
+
+
 def main() -> int:
     sz = seven_zip()
     if not sz or not Path(sz).exists():
@@ -287,6 +346,9 @@ def main() -> int:
         check((doc.get("counts") or {}).get("judged") == 1 and (doc.get("counts") or {}).get("unjudgeable") == 0,
               f"poolprobe judged the one never-installed archive ({doc.get('counts')})")
         check(not hits_named(doc, "BPatch.esp"), "an archive some instance installed is not a pool hit")
+
+        # ---- poolprobe hit order: a second pool, so the checks above keep their one-archive pool
+        pool_order(exes["poolprobe"], m, out, sz)
 
         # ---- fomodprobe
         r, secs = run(exes["fomodprobe"], ["--json", out / "fomod.json"], m, "fomodprobe")
