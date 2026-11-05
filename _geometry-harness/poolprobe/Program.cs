@@ -27,7 +27,9 @@ using HousecarlCore.Progress;
 //
 // --json PATH writes the hit list (schema 1, ../_shared/DiscoveryHits.cs): every patch-shaped plugin that would
 // install now or is one master short, one hit per archive version, each with the sha256 of the bytes extracted
-// from that archive (hashed before the scratch copy is deleted).
+// from that archive (hashed before the scratch copy is deleted). Hits are written sorted by where.archive, then
+// where.entry, both ordinal (unique per hit), and unjudgeable items in ordinal order, so two runs on the same inputs
+// write the same order whatever the thread timing.
 
 // Nothing is compiled in — see ../_shared/HarnessTarget.cs. Search roots are a drive layout,
 // the most machine-specific thing a probe can carry.
@@ -177,6 +179,7 @@ var pool = Directory.EnumerateFiles(Pool)
     .Where(f => { var e = Path.GetExtension(f); return e.Equals(".7z", StringComparison.OrdinalIgnoreCase)
                                                     || e.Equals(".zip", StringComparison.OrdinalIgnoreCase)
                                                     || e.Equals(".rar", StringComparison.OrdinalIgnoreCase); })
+    .OrderBy(f => f, StringComparer.Ordinal)
     .ToList();
 var never = pool.Where(f => !everInstalled.Contains(Path.GetFileName(f))).Take(max).ToList();
 Console.WriteLine($"   pool holds {pool.Count:N0} archives; {never.Count:N0} of them were never installed anywhere");
@@ -265,8 +268,7 @@ Parallel.ForEach(never, new ParallelOptions { MaxDegreeOfParallelism = jobs }, a
                 // like most failures had no reason at all.
                 var why = exOk ? "7z reported success but extracted nothing (entry-name matching)" : "7z extract failed";
                 whyUnreadable[why] = whyUnreadable.GetValueOrDefault(why) + want.Count;
-                if (noExtractExamples.Count < 8)
-                    noExtractExamples.Add($"{Path.GetFileName(arc)}   wanted e.g. \"{want[0]}\"");
+                noExtractExamples.Add($"{Path.GetFileName(arc)}   wanted e.g. \"{want[0]}\"");
             }
 
         foreach (var onDisk in extracted)
@@ -285,8 +287,7 @@ Parallel.ForEach(never, new ParallelOptions { MaxDegreeOfParallelism = jobs }, a
                 {
                     pluginsUnreadable++;
                     Bump(whyUnreadable, size == 0 ? "zero-byte file" : $"{ex.GetType().Name}");
-                    if (unreadableExamples.Count < 12)
-                        unreadableExamples.Add($"{Path.GetFileName(onDisk)}  ({size:N0} bytes)  {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
+                    unreadableExamples.Add($"{Path.GetFileName(onDisk)}  ({size:N0} bytes)  {ex.GetType().Name}: {ex.Message.Split('\n')[0]}");
                 }
                 continue;
             }
@@ -313,6 +314,13 @@ Parallel.ForEach(never, new ParallelOptions { MaxDegreeOfParallelism = jobs }, a
 
 try { Directory.Delete(scratch, true); } catch { }
 
+// The parallel loop appends in completion order; everything below reads these in a fixed, ordinal order instead.
+found.Sort((a, b) => { int c = string.CompareOrdinal(a.Archive, b.Archive); return c != 0 ? c : string.CompareOrdinal(a.Entry, b.Entry); });
+unlistableArchives.Sort(StringComparer.Ordinal);
+unreadableExamples.Sort(StringComparer.Ordinal);
+noExtractExamples.Sort(StringComparer.Ordinal);
+var reasons = whyUnreadable.OrderBy(w => w.Key, StringComparer.Ordinal).ToList();
+
 // ---------------------------------------------------------------------------------------
 // 5. Answer
 // ---------------------------------------------------------------------------------------
@@ -324,10 +332,10 @@ Console.WriteLine($"   plugins read                    : {found.Count:N0}");
 Console.WriteLine($"   ---- not judged, and why ----");
 Console.WriteLine($"   archives 7-Zip could not list   : {unreadable:N0}   (verified by hand: truncated downloads — \"Cannot open the file as [7z] archive\")");
 Console.WriteLine($"   plugins that would not extract or parse : {pluginsUnreadable:N0}");
-foreach (var w in whyUnreadable.OrderByDescending(w => w.Value))
+foreach (var w in reasons.OrderByDescending(w => w.Value))
     Console.WriteLine($"      {w.Value,5}  {w.Key}");
-foreach (var e in unreadableExamples) Console.WriteLine($"      e.g. {e}");
-foreach (var e in noExtractExamples) Console.WriteLine($"      no-extract: {e}");
+foreach (var e in unreadableExamples.Take(12)) Console.WriteLine($"      e.g. {e}");
+foreach (var e in noExtractExamples.Take(8)) Console.WriteLine($"      no-extract: {e}");
 foreach (var a in unlistableArchives) Console.WriteLine($"      unlistable archive: {a}");
 
 // Same two tests the cross-list filter uses, for the same reasons: every master must be active for
@@ -351,11 +359,11 @@ Console.WriteLine($"   nothing about whether the patch is correct or wanted — 
 // the extra versions are counted rather than repeated as rows.
 var distinct = patches.GroupBy(h => h.Plugin, StringComparer.OrdinalIgnoreCase)
                       .OrderByDescending(g => g.First().RealMasters.Length)
-                      .ThenBy(g => g.Key).ToList();
+                      .ThenBy(g => g.Key, StringComparer.Ordinal).ToList();
 Console.WriteLine($"   ...which are {distinct.Count:N0} DISTINCT plugins (the rest are other versions of the same download)");
 
 if (hitList is not null)
-    foreach (var h in patches.Concat(nearMiss))
+    foreach (var h in found.Where(h => h.RealMasters.Length > 0 && h.Absent.Length <= 1))
         hitList.Hit(h.Plugin, "pool-archive", new() { ["archive"] = h.Archive, ["entry"] = h.Entry, ["path"] = Path.Combine(Pool, h.Archive) },
                     h.Hash, "archive-entry", h.Masters,
                     new() { ["absentMasters"] = h.Absent, ["realMasters"] = h.RealMasters, ["applicable"] = h.Absent.Length == 0 },
@@ -371,13 +379,13 @@ foreach (var g in distinct.Take(listN))
 
 Console.WriteLine($"\n   ---- ONE MASTER SHORT ----");
 foreach (var g in nearMiss.GroupBy(h => h.Absent[0], StringComparer.OrdinalIgnoreCase)
-                          .OrderByDescending(g => g.Count()).Take(listN))
+                          .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).Take(listN))
     Console.WriteLine($"   {g.Count(),4} downloaded patches wait on   {g.Key}    e.g. {g.First().Plugin}");
 
 if (hitList is not null)
 {
     foreach (var a in unlistableArchives) hitList.Unjudgeable(a, "7-Zip could not list the archive");
-    foreach (var w in whyUnreadable) hitList.Unjudgeable($"{w.Value} plugin(s)", w.Key);
+    foreach (var w in reasons) hitList.Unjudgeable($"{w.Value} plugin(s)", w.Key);
     hitList.Write(jsonPath!, never.Count, unreadable + pluginsUnreadable);
 }
 Console.WriteLine($"\nelapsed {sw.Elapsed.TotalSeconds:0.0}s");

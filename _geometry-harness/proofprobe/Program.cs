@@ -78,6 +78,16 @@ if (args.Length >= 2 && args[0] == "--only" && args[1] == "accel")
     return fail == 0 ? 0 : 1;
 }
 
+// --only samplingloop (2026-11-05): the shared sampling loop's known answers (SL-1..SL-4) alone, for red runs and sabotage arms.
+if (args.Length >= 2 && args[0] == "--only" && args[1] == "samplingloop")
+{
+    MotionProof.RunSamplingLoop(Check);
+    Console.WriteLine();
+    Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
+    if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
+    return fail == 0 ? 0 : 1;
+}
+
 // --only sweptnear (2026-10-21): the instanced swept near test (MV4-MV6) and the volume identity cases beside it, alone.
 if (args.Length >= 2 && args[0] == "--only" && args[1] == "sweptnear")
 {
@@ -3587,6 +3597,8 @@ MotionProof.RunMemberMotion(Check);
 MotionProof.RunReachMemory(Check);
 // 2026-10-14: discovery-proxy memory (P2/P4 red until the proxy stops retaining samples), P6 guards the proxy bit for bit.
 MotionProof.RunProxyMemory(Check);
+// 2026-11-05 (task 2026-11-05-shared-sampling-loop-unguarded): the shared sampling loop's samples and member deltas, SL-1..SL-4.
+MotionProof.RunSamplingLoop(Check);
 // Lane D (2026-10-04): texture alpha sampling along alpha-only crossings (red until implemented).
 AlphaSamplingProof.Run(Check);
 // Lane 2 (2026-10-07): the contactprobe wiring of the visible crossing (placed measure, lazy source, alternates).
