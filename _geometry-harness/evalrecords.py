@@ -133,6 +133,14 @@ def parse_delta(line: str, plugins: list[str]):
     if m:
         other = next((p for p in plugins if m.group(2) == p), m.group(2))
         return m.group(1), None, other, m.group(3), "own-absent"
+    # FieldsDiff: "<path> only in <reference>: <value>": the reference holds this leaf and this side holds no such path
+    m = re.match(r"^([A-Za-z0-9_.\[\]]+) only in (.+?): (.*)$", line)
+    if m and m.group(2) in plugins:
+        return m.group(1), None, m.group(2), m.group(3), "own-absent"
+    # FieldsDiff: "<root>: same <n> item(s), ORDER DIFFERS from <reference>": equal contents in another order
+    m = re.match(r"^([A-Za-z0-9_.\[\]]+): same \d+ item\(s\), ORDER DIFFERS from (.+)$", line)
+    if m and m.group(2) in plugins:
+        return m.group(1), None, m.group(2), None, "order"
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): (.*) vs (.+?) (\S+) item\(s\)", line)
     if m:
         other = next((p for p in plugins if m.group(3).startswith(p)), m.group(3))
@@ -210,32 +218,91 @@ class FieldScope:
             return False
 
 
+# Lists whose order the game reads or may read, each unassessed when reordered. By list name, on any record: a condition chain's
+# OR grouping, an actor's package stack, a response's spoken lines, a navmesh's tables that triangles and search name by position, a
+# record's script list. By list and record type: a form list's items, which scripts read by index; a leveled list's entries, which
+# the engine walks by level; a story-manager node's quests; a response's topic links. Decided from the reordered roots in the transcripts of
+# real large orders; a reorder of any other list is the same contents, not a value clash.
+ORDER_MATTERS = {"Conditions", "Packages", "Responses", "EdgeLinks", "Vertices", "DoorTriangles", "NavmeshTree", "Scripts"}
+ORDER_MATTERS_BY_TYPE = {"FormList": {"Items"}, "LeveledItem": {"Entries"}, "LeveledNpc": {"Entries"}, "LeveledSpell": {"Entries"},
+                         "StoryManagerQuestNode": {"Quests"}, "DialogResponses": {"LinkTo"}}
+
+
+def order_is_read(rtype: str, root: str) -> bool:
+    name = root.split(".")[-1].split("[")[0]
+    return name in ORDER_MATTERS or name in ORDER_MATTERS_BY_TYPE.get(rtype, ())
+
+
+def _master_holds(field, masters, providers, plugins):
+    """True or False when the tree says whether one of `masters` holds this leaf, the winner holding it; None when it can't say."""
+    if providers is None:
+        return None
+    unsure = False
+    for name, (lines, complete) in providers.items():
+        if name not in masters:
+            continue
+        if not complete:
+            unsure = True
+            continue
+        here = [ln for ln in lines if ln.startswith(field) and ln[len(field):len(field) + 1] in ("=", ":", " ")]
+        if not here:
+            return True      # no difference from the winner on this leaf, and the winner holds it
+        parsed = [parse_delta(ln, plugins) for ln in here]
+        if any(x is None for x in parsed):
+            unsure = True
+        elif any(x[4] != "own-absent" for x in parsed):
+            return True
+    return None if unsure else False
+
+
 def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, plugins, scope: FieldScope,
-               defines: bool = False):
+               defines: bool = False, masters: set | None = None, providers: dict | None = None):
     """(rows, judged, unjudged reasons) for one evaluated non-winning plugin on one contested record. A plugin that
     DEFINES the record authored every field it holds (there is nothing beneath it): its fields are read from its
-    differences with the winner, with no overridden value."""
+    differences with the winner, with no overridden value.
+
+    A leaf this plugin lacks is its edit only if it saw the leaf: if one of `masters`, what it was built on, holds it. `providers`, the same
+    tree's {plugin: (lines against the winner, complete)}, says that: a master with no line on the leaf holds the winner's value. Whatever
+    those can't settle is counted by name. Without `masters` the plugin never had the leaf, and its provider's edit is judged from that side."""
     authored, against = {}, {}
     unjudged = {}
+    lacking = []
     if defines:
         authored_lines = []
         for line in vs_winner_lines:
             p = parse_delta(line, plugins)
-            if p is not None and p[4] != "own-absent":
+            if p is not None and p[4] not in ("own-absent", "order"):
                 authored[p[0]] = (p[0], p[1], None, None, "defined")
     for line in authored_lines:
         p = parse_delta(line, plugins)
         if p is None:
             unjudged["a delta line the comparator could not read"] = unjudged.get("a delta line the comparator could not read", 0) + 1
             continue
-        if p[4] != "own-absent":
-            authored[p[0]] = p
+        if p[4] == "order":
+            if order_is_read(rtype, p[0]) and not scope.excluded(rtype, p[0]):
+                unjudged["a list whose order the game reads, reordered"] = unjudged.get("a list whose order the game reads, reordered", 0) + 1
+            continue
+        if p[4] == "own-absent":
+            lacking.append(p)
+            continue
+        authored[p[0]] = p
     for line in vs_winner_lines:
         p = parse_delta(line, plugins)
         if p is None:
             unjudged["a delta line the comparator could not read"] = unjudged.get("a delta line the comparator could not read", 0) + 1
             continue
+        if p[4] == "order":
+            continue
         against[p[0]] = p
+    for p in lacking:
+        # no line against the winner: the winner lacks it too, so whatever this was, it stands
+        if masters is None or p[0] not in against or scope.excluded(rtype, p[0]):
+            continue
+        held = _master_holds(p[0], masters, providers, plugins) if p[2].lower() not in masters else True
+        if held is None:
+            unjudged["a removal whose master's copy could not be settled"] = unjudged.get("a removal whose master's copy could not be settled", 0) + 1
+        elif held:
+            authored[p[0]] = (p[0], "(absent)", p[2], p[3], "removed")
     rows, judged = {}, 0
     for field, a in authored.items():
         why = scope.excluded(rtype, field)
@@ -429,7 +496,8 @@ def batched(ids, n=400):
         yield ids[i:i + n]
 
 
-def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None, counters=None):
+def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None, counters=None,
+                masters_of=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
     s = Session(reader_cmd, env, token, deadline_s, stream_to=out)
@@ -516,7 +584,9 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                         unj[key].get("a provider read the reader marked incomplete or did not return", 0) + 1
                     continue
                 rows, n_judged, n_unj = lost_edits(rtype, fid, p, arow.get("deltas") or [], node.get("deltas") or [],
-                                                   winner, arm["plugins"], scope)
+                                                   winner, arm["plugins"], scope,
+                                                   masters=masters_of(p) if masters_of else None,
+                                                   providers={n["plugin"].lower(): (n.get("deltas") or [], n.get("complete", True)) for n in t.get("nodes") or []})
                 lost_rows[key] += rows
                 judged[key] += n_judged
                 for k, v in n_unj.items():

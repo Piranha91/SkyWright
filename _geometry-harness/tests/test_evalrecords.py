@@ -104,6 +104,116 @@ def case_13_a_defining_plugin_authored_every_field_it_holds():
     assert judged == 2, f"its two held fields are judged; the field it never had is not, got {judged}"
 
 
+def case_41_only_in_reads_as_this_side_lacking_the_leaf():
+    # lines from a real capture: FieldsDiff's wording, the reference holds the leaf
+    plugins = ["City Walls Patch.esp", "Restored.esp", "PA.esp"]
+    p = ER.parse_delta("EnableParent.Reference only in City Walls Patch.esp: 000014:Skyrim.esm", plugins)
+    assert p == ("EnableParent.Reference", None, plugins[0], "000014:Skyrim.esm", "own-absent"), p
+    q = ER.parse_delta("Landscape.Flags only in Restored.esp: 31", plugins)
+    assert q == ("Landscape.Flags", None, plugins[1], "31", "own-absent"), q
+    assert ER.parse_delta("Odd line only in Nowhere.esp: 1", plugins) is None, "an unknown plugin stays unread"
+
+
+def case_42_an_enable_parent_a_later_mod_drops_is_lost_from_the_adders_side():
+    plugins = ["Base.esm", "Adder.esp", "Dropper.esp"]
+    authored = ["EnableParent.Reference=000014:Skyrim.esm (Base.esm has no EnableParent.Reference)"]
+    vs_winner = ["EnableParent.Reference=000014:Skyrim.esm (Dropper.esp has no EnableParent.Reference)"]
+    rows, judged, unj = ER.lost_edits("PlacedObject", "000001:Base.esm", "Adder.esp", authored, vs_winner, "Dropper.esp", plugins, ER.FieldScope())
+    assert [r["Field"] for r in rows] == ["EnableParent"] and judged == 1 and not unj, (rows, judged, unj)
+
+
+def case_43_a_plugin_that_never_saw_a_leaf_did_not_remove_it():
+    plugins = ["Base.esm", "Other.esp", "Late.esp", "Win.esp"]
+    authored = ["EnableParent.Reference only in Other.esp: 000014:Skyrim.esm"]
+    vs_winner = ["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"]
+    prov = {"base.esm": (["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"], True), "other.esp": (["EnableParent.Reference=000014:Skyrim.esm (Win.esp 000015:Skyrim.esm)"], True)}
+    rows, judged, unj = ER.lost_edits("PlacedObject", "000001:Base.esm", "Late.esp", authored, vs_winner, "Win.esp", plugins, ER.FieldScope(), masters={"base.esm"}, providers=prov)
+    assert rows == [] and judged == 0 and not unj, (rows, judged, unj)
+
+
+def case_44_a_removal_of_a_masters_leaf_is_an_edit_and_can_be_lost():
+    plugins = ["Base.esm", "Remover.esp", "Win.esp"]
+    authored = ["EnableParent.Reference only in Base.esm: 000014:Skyrim.esm"]
+    vs_winner = ["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"]
+    prov = {"base.esm": ([], True)}
+    rows, judged, _ = ER.lost_edits("PlacedObject", "000001:Base.esm", "Remover.esp", authored, vs_winner, "Win.esp", plugins, ER.FieldScope(), masters={"base.esm"}, providers=prov)
+    assert [r["Field"] for r in rows] == ["EnableParent"] and judged == 1, (rows, judged)
+    assert rows[0]["Necessary"][0]["Values"]["lost"] == "Reference=(absent)", rows[0]["Necessary"][0]["Values"]
+    rows, _, _ = ER.lost_edits("PlacedObject", "000001:Base.esm", "Remover.esp", authored, [], "Win.esp", plugins, ER.FieldScope(), masters={"base.esm"})
+    assert rows == [], "the winner also lacks it, so the removal stands"
+
+
+def case_45_a_cells_landscape_is_a_child_record_not_a_lost_edit():
+    plugins = ["Restored.esp", "Win.esp", "Base.esm"]
+    authored = ["Landscape.Flags=31 (Base.esm has no Landscape.Flags)"]
+    vs_winner = ["Landscape.Flags=31 (Win.esp has no Landscape.Flags)", "Landscape.VertexHeightMap only in Win.esp: [LandscapeVertexHeightMap]"]
+    rows, judged, unj = ER.lost_edits("Cell", "000D44:Dawnguard.esm", "Restored.esp", authored, vs_winner, "Win.esp", plugins, ER.FieldScope(), masters={"base.esm"})
+    assert rows == [] and judged == 0 and not unj, (rows, judged, unj)
+
+
+def case_46_a_reorder_is_read_and_is_a_clash_only_where_the_game_reads_order():
+    plugins = ["Light Two.esp", "Mine.esp", "Base.esm"]
+    regions = ["Regions: same 3 item(s), ORDER DIFFERS from Light Two.esp"]
+    p = ER.parse_delta(regions[0], plugins)
+    assert p == ("Regions", None, "Light Two.esp", None, "order"), p
+    rows, judged, unj = ER.lost_edits("Cell", "000001:Base.esm", "Mine.esp", regions, regions, "Light Two.esp", plugins, ER.FieldScope())
+    assert rows == [] and judged == 0 and not unj, (rows, judged, unj)
+    edge = ["Data.EdgeLinks: same 4 item(s), ORDER DIFFERS from Light Two.esp"]
+    rows, judged, unj = ER.lost_edits("NavigationMesh", "000001:Base.esm", "Mine.esp", edge, edge, "Light Two.esp", plugins, ER.FieldScope())
+    assert rows == [] and unj == {"a list whose order the game reads, reordered": 1}, (rows, unj)
+
+
+def case_48_a_masters_leaf_removed_with_a_non_master_between_is_an_edit():
+    plugins = ["Skyrim.esm", "Light.esp", "Late.esp", "Win.esp"]
+    authored = ["EnableParent.Reference only in Light.esp: 000014:Skyrim.esm"]
+    vs_winner = ["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"]
+    prov = {"skyrim.esm": ([], True), "light.esp": ([], True), "late.esp": (vs_winner, True), "win.esp": ([], True)}
+    rows, judged, unj = ER.lost_edits("PlacedObject", "000001:Skyrim.esm", "Late.esp", authored, vs_winner, "Win.esp", plugins, ER.FieldScope(), masters={"skyrim.esm"}, providers=prov)
+    assert [r["Field"] for r in rows] == ["EnableParent"] and judged == 1 and not unj, (rows, judged, unj)
+
+
+def case_49_a_master_that_lacks_the_leaf_means_no_removal():
+    plugins = ["Skyrim.esm", "Light.esp", "Late.esp", "Win.esp"]
+    authored = ["EnableParent.Reference only in Light.esp: 000014:Skyrim.esm"]
+    vs_winner = ["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"]
+    prov = {"skyrim.esm": (["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"], True), "light.esp": ([], True)}
+    rows, judged, unj = ER.lost_edits("PlacedObject", "000001:Skyrim.esm", "Late.esp", authored, vs_winner, "Win.esp", plugins, ER.FieldScope(), masters={"skyrim.esm"}, providers=prov)
+    assert rows == [] and judged == 0 and not unj, (rows, judged, unj)
+
+
+def case_50_a_master_that_cannot_be_read_is_counted_by_name():
+    plugins = ["Skyrim.esm", "Light.esp", "Late.esp", "Win.esp"]
+    authored = ["EnableParent.Reference only in Light.esp: 000014:Skyrim.esm"]
+    vs_winner = ["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"]
+    prov = {"skyrim.esm": ([], False), "light.esp": ([], True)}
+    rows, judged, unj = ER.lost_edits("PlacedObject", "000001:Skyrim.esm", "Late.esp", authored, vs_winner, "Win.esp", plugins, ER.FieldScope(), masters={"skyrim.esm"}, providers=prov)
+    assert rows == [] and unj == {"a removal whose master's copy could not be settled": 1}, (rows, unj)
+
+
+def case_51_a_winner_that_also_lacks_the_leaf_leaves_nothing_to_settle():
+    plugins = ["Skyrim.esm", "Light.esp", "Late.esp", "Win.esp"]
+    authored = ["EnableParent.Reference only in Light.esp: 000014:Skyrim.esm"]
+    rows, judged, unj = ER.lost_edits("PlacedObject", "000001:Skyrim.esm", "Late.esp", authored, [], "Win.esp", plugins, ER.FieldScope(), masters={"skyrim.esm"}, providers={"skyrim.esm": ([], False)})
+    assert rows == [] and judged == 0 and not unj, (rows, judged, unj)
+
+
+def case_52_the_same_list_name_is_decided_by_record_type():
+    plugins = ["A.esp", "Win.esp"]
+    line = ["Items: same 3 item(s), ORDER DIFFERS from Win.esp"]
+    key = "a list whose order the game reads, reordered"
+    _, _, unj = ER.lost_edits("FormList", "000001:Base.esm", "A.esp", line, line, "Win.esp", plugins, ER.FieldScope())
+    assert unj == {key: 1}, f"a form list is read by index, got {unj}"
+    _, _, unj = ER.lost_edits("Container", "000001:Base.esm", "A.esp", line, line, "Win.esp", plugins, ER.FieldScope())
+    assert not unj, f"a container's contents have no order the game reads, got {unj}"
+
+
+def case_47_a_line_of_no_known_form_stays_unread():
+    plugins = ["A.esp", "Win.esp"]
+    bad = ["SubCells: NOT COMPARED on both sides (here (not compared: element [0] passed))"]
+    _, _, unj = ER.lost_edits("Worldspace", "000001:Base.esm", "A.esp", bad, [], "Win.esp", plugins, ER.FieldScope())
+    assert unj == {"a delta line the comparator could not read": 1}, unj
+
+
 def case_15_an_arm_without_evaluated_plugins_has_no_members():
     trees = {"a": {"type": "PlacedObject", "touchers": ["Base.esm", "Fix.esp"]},
              "b": {"type": "Cell", "touchers": ["Base.esm", "Subj.esp"]}}
