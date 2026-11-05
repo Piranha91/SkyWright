@@ -102,11 +102,11 @@ def population_members(contested, trees, by_id, evaluated) -> dict:
     """How many members each record check's population has on this arm: the contested records an evaluated plugin
     touches (the fields it authored are what is judged). An arm that loads no evaluated plugin has none, so its import
     states Members 0 rather than a judged-nothing extraction (evalrun's known-empty rule decides the rest)."""
-    ev = set(evaluated)
+    ev = {p.casefold() for p in evaluated}
     out = {"records.contested-fields": 0, "records.cell-attributes": 0, "records.registration-and-dialogue": 0}
     for fid in contested:
         t = trees.get(fid)
-        if not ev or (t is not None and not ev & set(t.get("touchers") or [])):
+        if not ev or (t is not None and not ev & {str(x).casefold() for x in t.get("touchers") or []}):
             continue  # a record without a tree stays a member: it is reported unjudgeable, not dropped
         t = t or {}
         rtype = (t or by_id.get(fid) or {}).get("type")
@@ -280,6 +280,8 @@ def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, p
     authored, against = {}, {}
     unjudged = {}
     lacking = []
+    if masters is not None:
+        masters = {str(m).lower() for m in masters}
     if defines:
         authored_lines = []
         for line in vs_winner_lines:
@@ -513,6 +515,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                 masters_of=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
+    evaluated_keys = {p.casefold() for p in evaluated}
     s = Session(reader_cmd, env, token, deadline_s, stream_to=out)
     log(f"{arm['armId']}: reader pid {s.p.pid}")
     result = {}
@@ -563,7 +566,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
         for p in evaluated:
             # every contested record this plugin touches: where it wins its authored fields are judged and kept,
             # where it does not they are judged against the winner
-            mine = [fid for fid, t in trees.items() if p in (t.get("touchers") or [])]
+            mine = [fid for fid, t in trees.items() if p.casefold() in {str(x).casefold() for x in t.get("touchers") or []}]
             authored = {}
             for batch in batched(mine):
                 dd = s.tool("housecarl_records", {"formids": batch, "source": p, "versus": "previous_provider",
@@ -576,8 +579,9 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                 rtype = t.get("type")
                 key = ("records.cell-attributes" if rtype == "Cell" else
                        "records.registration-and-dialogue" if rtype in REGISTRATION_TYPES else "records.contested-fields")
-                node = next((n for n in t.get("nodes") or [] if n.get("plugin") == p), None)
+                node = next((n for n in t.get("nodes") or [] if str(n.get("plugin")).casefold() == p.casefold()), None)
                 winner = next((n.get("plugin") for n in t.get("nodes") or [] if n.get("is_winner")), None)
+                winner = arm_name(winner, arm["plugins"]) or winner
                 arow = authored.get(fid)
                 if winner == p and arow is not None and arow.get("complete", True):
                     read = [parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []]
@@ -620,7 +624,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
         native_rows, native_judged, native_unj = [], 0, {}
         if evaluated:
             seeds = [r["formid"] for r in a_rows if r.get("type") in ("Quest", "DialogTopic")
-                     and r.get("winner") in evaluated]
+                     and str(r.get("winner")).casefold() in evaluated_keys]
             args = {"findings": ["scripts"] + (["dialogue"] if seeds else []), "plugins": evaluated, "format": "json",
                     "limit": BIG, "max_chars": MAX_CHARS}
             if seeds:
@@ -678,7 +682,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
 
         # missing assets: every asset path the evaluated plugins' winning records name
         paths = set()
-        winners = [r["formid"] for r in a_rows if r.get("winner") in evaluated]
+        winners = [r["formid"] for r in a_rows if str(r.get("winner")).casefold() in evaluated_keys]
         for batch in batched(winners, 200):
             d = s.tool("housecarl_records", {"formids": batch, "project": {"form": "everything", "depth": 6},
                                              "format": "json", "limit": BIG, "max_chars": MAX_CHARS})

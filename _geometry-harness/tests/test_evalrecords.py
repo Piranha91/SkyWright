@@ -353,6 +353,32 @@ def case_55_a_line_the_winner_branch_cannot_read_is_counted_not_dropped():
     assert refused is None and "failed extraction" in why_not, (refused, why_not)
 
 
+def case_56_an_evaluated_plugin_the_reader_spells_by_its_disk_name_is_still_read():
+    # the tree's touchers, its nodes and its winner all carry the reader's spelling of the evaluated plugin
+    cov = cell_capture(CELL_LINES, tree_subject="cotn - morthal.esp")
+    assert cov["Members"] == 2, f"both CELLs the evaluated plugin touches are members, got {cov['Members']}"
+    # 3, not 2: it wins, so its reordered Regions is its kept edit, not a lost-edit comparison against itself
+    assert cov["Judged"] == 3 and cov["Unjudgeable"] == {}, (cov["Judged"], cov["Unjudgeable"])
+    trees = {"a": {"type": "Cell", "touchers": ["Skyrim.esm", "cotn - morthal.esp"]}}
+    got = ER.population_members({"a"}, trees, {}, ["COTN - Morthal.esp"])
+    assert got["records.cell-attributes"] == 1, got
+
+
+def case_57_masters_named_in_the_arms_spelling_still_settle_a_removal():
+    plugins = ["Base.esm", "Remover.esp", "Win.esp"]
+    authored = ["EnableParent.Reference only in Base.esm: 000014:Skyrim.esm"]
+    vs_winner = ["EnableParent.Reference only in Win.esp: 000014:Skyrim.esm"]
+    rows, judged, unj = ER.lost_edits("PlacedObject", "000001:Base.esm", "Remover.esp", authored, vs_winner, "Win.esp",
+                                      plugins, ER.FieldScope(), masters={"Base.esm"}, providers={"base.esm": ([], True)})
+    assert [r["Field"] for r in rows] == ["EnableParent"] and judged == 1 and not unj, (rows, judged, unj)
+
+
+def case_58_a_winner_the_summary_spells_by_its_disk_name_has_its_body_read():
+    cell_capture(CELL_LINES, summary_winner="cotn - morthal.esp")
+    assert sorted(FakeSession.bodies) == sorted(CELL_LINES), \
+        f"the evaluated plugin's winning records are read for their asset paths, got {FakeSession.bodies}"
+
+
 def case_15_an_arm_without_evaluated_plugins_has_no_members():
     trees = {"a": {"type": "PlacedObject", "touchers": ["Base.esm", "Fix.esp"]},
              "b": {"type": "Cell", "touchers": ["Base.esm", "Subj.esp"]}}
