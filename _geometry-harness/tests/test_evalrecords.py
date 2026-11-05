@@ -214,6 +214,145 @@ def case_47_a_line_of_no_known_form_stays_unread():
     assert unj == {"a delta line the comparator could not read": 1}, unj
 
 
+USSEP = "Unofficial Skyrim Special Edition Patch.esp"   # the arm's spelling
+DISK = "unofficial skyrim special edition patch.esp"     # the reader's: the file on disk
+
+
+def case_53_a_partner_named_by_its_disk_spelling_is_read_in_the_arms_spelling():
+    # line shapes from the round-2 Helgi candidate-03 session; the reader writes USSEP as its file on disk
+    plugins = ["Skyrim.esm", USSEP, "COTN - Morthal.esp"]
+    want = {
+        "Grid.Flags=Quad1 (unofficial skyrim special edition patch.esp -1783484416)":
+            ("Grid.Flags", "Quad1", USSEP, "-1783484416", "value"),
+        "Landscape.Flags=31 (unofficial skyrim special edition patch.esp has no Landscape.Flags)":
+            ("Landscape.Flags", "31", USSEP, None, "absent"),
+        "Landscape=[Landscape 00A39D:Skyrim.esm] (unofficial skyrim special edition patch.esp has Landscape ABSENT)":
+            ("Landscape", "[Landscape 00A39D:Skyrim.esm]", USSEP, None, "absent"),
+        "LocationReference: ABSENT here (unofficial skyrim special edition patch.esp has 018A53:Skyrim.esm)":
+            ("LocationReference", None, USSEP, "018A53:Skyrim.esm", "own-absent"),
+        "Landscape.Flags only in unofficial skyrim special edition patch.esp: 31":
+            ("Landscape.Flags", None, USSEP, "31", "own-absent"),
+        "Regions: same 5 item(s), ORDER DIFFERS from unofficial skyrim special edition patch.esp":
+            ("Regions", None, USSEP, None, "order"),
+        "Persistent: 62 vs unofficial skyrim special edition patch.esp 705 item(s) — compared by content hash, "
+        "not itemised (over the 2000-line read limit)":
+            ("Persistent", "62", USSEP, "705", "list"),
+    }
+    bad = {line: ER.parse_delta(line, plugins) for line in want}
+    bad = {line: got for line, got in bad.items() if got != want[line]}
+    assert not bad, f"lines naming the partner by its disk spelling were misread: {bad}"
+    assert ER.parse_delta("Odd line only in Nowhere.esp: 1", plugins) is None, "an unknown plugin stays unread"
+    assert ER.parse_delta("Grid.Flags=1 (nowhere.esp 2)", plugins) is None, "an unknown plugin stays unread"
+
+
+class FakeSession:
+    """The record reader as capture_arm calls it, answering from a fixed set of summary rows, trees and delta rows."""
+    summary, trees, deltas, bodies = [], {}, {}, []
+
+    def __init__(self, *a, **k):
+        self.p = type("P", (), {"pid": 0})()
+
+    def tool(self, name, args, *, want_json=True):
+        form = (args.get("project") or {}).get("form")
+        if name == "housecarl_check":
+            if "dangling" in args.get("findings", []):
+                return {"families": {"errors": {"plugins": [], "dangling": 0, "scanned_plugins": 3}}}
+            return {"families": {"scripts": {}}}
+        if form == "summary":
+            return {"matches": list(self.summary), "total": len(self.summary)}
+        if form == "tree":
+            return {"rows": [self.trees[f] for f in args["formids"] if f in self.trees]}
+        if form == "delta":
+            return {"rows": [self.deltas[f] for f in args["formids"] if f in self.deltas]}
+        if form == "everything":
+            FakeSession.bodies += list(args["formids"])
+            return {"records": [{"formid": f, "fields": []} for f in args["formids"]]}
+        raise AssertionError(f"the fake reader was asked something it does not answer: {name} {args}")
+
+    def close(self):
+        pass
+
+    def write(self, folder):
+        pass
+
+
+# two real CELLs of the round-2 Helgi candidate-03 session: COTN wins both, USSEP (disk spelling) is the provider beneath
+CELL_LINES = {
+    "000D74:Skyrim.esm": [
+        "FormVersion=43 (unofficial skyrim special edition patch.esp 44)",
+        "Grid.Flags=Quad1 (unofficial skyrim special edition patch.esp -1783484416)",
+        "PersistentTimestamp=12101 (unofficial skyrim special edition patch.esp 13390)",
+        "PersistentUnknownGroupData=5 (unofficial skyrim special edition patch.esp 0)",
+        "Timestamp=12101 (unofficial skyrim special edition patch.esp 13390)",
+        "Version2=0 (unofficial skyrim special edition patch.esp 9)",
+        "Persistent: 62 vs unofficial skyrim special edition patch.esp 705 item(s) — compared by content hash, "
+        "not itemised (over the 2000-line read limit)",
+        "Regions: same 5 item(s), ORDER DIFFERS from unofficial skyrim special edition patch.esp"],
+    "0138CB:Skyrim.esm": [
+        "PersistentTimestamp=12101 (unofficial skyrim special edition patch.esp 0)",
+        "TemporaryTimestamp=12101 (unofficial skyrim special edition patch.esp 13390)",
+        "Timestamp=12101 (unofficial skyrim special edition patch.esp 13390)",
+        "WaterHeight=0 (unofficial skyrim special edition patch.esp -2.1474836E+09)",
+        "Temporary: 455 vs unofficial skyrim special edition patch.esp 5 item(s) — compared by content hash, "
+        "not itemised (over the 2000-line read limit)"],
+}
+
+
+def cell_capture(lines_of, subject="COTN - Morthal.esp", tree_subject=None, summary_winner=None, masters_of=None):
+    """capture_arm over contested CELLs the subject wins, the fake reader in place of the server. Returns the
+    cell-attributes coverage line."""
+    import tempfile
+    tree_subject = tree_subject or subject
+    FakeSession.summary = [{"formid": f, "type": "Cell", "winner": summary_winner or subject, "override_depth": 3}
+                           for f in lines_of]
+    FakeSession.trees = {f: {"formid": f, "type": "Cell", "touchers": ["Skyrim.esm", DISK, tree_subject],
+                             "nodes": [{"plugin": "Skyrim.esm", "is_winner": False, "complete": True, "deltas": []},
+                                       {"plugin": DISK, "is_winner": False, "complete": True, "deltas": []},
+                                       {"plugin": tree_subject, "is_winner": True, "is_reference": True}]}
+                         for f in lines_of}
+    FakeSession.deltas = {f: {"formid": f, "type": "Cell", "complete": True, "deltas": lines}
+                          for f, lines in lines_of.items()}
+    FakeSession.bodies = []
+    arm = {"armId": "candidate-03", "plugins": ["Skyrim.esm", USSEP, subject]}
+    real = ER.Session
+    ER.Session = FakeSession
+    try:
+        with tempfile.TemporaryDirectory() as t:
+            res = ER.capture_arm({"planId": "p1"}, arm, ["Skyrim.esm", USSEP], "reader.exe", {}, Path(t),
+                                 ER.FieldScope(), lambda m: None, masters_of=masters_of)
+    finally:
+        ER.Session = real
+    return res["records.cell-attributes"][1][0]
+
+
+def case_54_a_winning_cells_fields_are_judged_against_a_partner_in_its_disk_spelling():
+    cov = cell_capture(CELL_LINES)
+    # Grid.Flags and Regions on the first, WaterHeight on the second: the authored fields in scope
+    assert cov["Judged"] == 3, f"the winner's authored fields are judged, got Judged {cov['Judged']}"
+    assert cov["Unjudgeable"] == {}, f"every line was read, got {cov['Unjudgeable']}"
+    assert cov["Members"] == 2, cov
+
+
+def case_55_a_line_the_winner_branch_cannot_read_is_counted_not_dropped():
+    why = "a delta line the comparator could not read"
+    odd = "SubCells: NOT COMPARED on both sides (here (not compared: element [0] passed))"
+    lines = {f: v + [odd] for f, v in CELL_LINES.items()}
+    cov = cell_capture(lines)
+    assert cov["Judged"] == 3 and cov["Unjudgeable"] == {why: 2}, (cov["Judged"], cov["Unjudgeable"])
+    # a real failed read: nothing readable at all is still judged 0 with its lines counted, so it stays refused
+    cov = cell_capture({f: [odd] for f in CELL_LINES})
+    assert cov["Judged"] == 0 and cov["Unjudgeable"] == {why: 2}, (cov["Judged"], cov["Unjudgeable"])
+    try:
+        sys.path.insert(0, str(HERE.parent))
+        import evalrun
+    except Exception:  # noqa: BLE001
+        return
+    refused, why_not = evalrun.empty_population({"targets": [{"name": "COTN - Morthal.esp"}]},
+                                                {"plugins": ["COTN - Morthal.esp"]}, [cov["Members"]],
+                                                sum(cov["Unjudgeable"].values()))
+    assert refused is None and "failed extraction" in why_not, (refused, why_not)
+
+
 def case_15_an_arm_without_evaluated_plugins_has_no_members():
     trees = {"a": {"type": "PlacedObject", "touchers": ["Base.esm", "Fix.esp"]},
              "b": {"type": "Cell", "touchers": ["Base.esm", "Subj.esp"]}}

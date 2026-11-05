@@ -126,36 +126,49 @@ def complete_rows(export) -> list:
 
 # ---------------------------------------------------------------- delta lines
 
+def arm_name(name, plugins):
+    """The arm's spelling of a plugin name, matched without case as the game and Windows match it; None if not loaded."""
+    if name is None:
+        return None
+    key = str(name).casefold()
+    return next((p for p in plugins if p.casefold() == key), None)
+
+
 def parse_delta(line: str, plugins: list[str]):
     """One delta line of the record reader -> (field, own value, other plugin, other value, kind).
-    kind: 'value', 'absent' (the other side lacks the field) or 'list' (compared by content, not itemised)."""
+    kind: 'value', 'absent' (the other side lacks the field) or 'list' (compared by content, not itemised).
+    The reader names a plugin by its file on disk; it is matched without case and returned in the arm's spelling."""
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): ABSENT here \((.+?) has (.*)\)$", line)
     if m:
-        other = next((p for p in plugins if m.group(2) == p), m.group(2))
+        other = arm_name(m.group(2), plugins) or m.group(2)
         return m.group(1), None, other, m.group(3), "own-absent"
     # FieldsDiff: "<path> only in <reference>: <value>": the reference holds this leaf and this side holds no such path
     m = re.match(r"^([A-Za-z0-9_.\[\]]+) only in (.+?): (.*)$", line)
-    if m and m.group(2) in plugins:
-        return m.group(1), None, m.group(2), m.group(3), "own-absent"
+    if m and arm_name(m.group(2), plugins):
+        return m.group(1), None, arm_name(m.group(2), plugins), m.group(3), "own-absent"
     # FieldsDiff: "<root>: same <n> item(s), ORDER DIFFERS from <reference>": equal contents in another order
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): same \d+ item\(s\), ORDER DIFFERS from (.+)$", line)
-    if m and m.group(2) in plugins:
-        return m.group(1), None, m.group(2), None, "order"
+    if m and arm_name(m.group(2), plugins):
+        return m.group(1), None, arm_name(m.group(2), plugins), None, "order"
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): (.*) vs (.+?) (\S+) item\(s\)", line)
     if m:
-        other = next((p for p in plugins if m.group(3).startswith(p)), m.group(3))
+        other = next((p for p in plugins if m.group(3).casefold().startswith(p.casefold())), m.group(3))
         return m.group(1), m.group(2), other, m.group(4), "list"
     eq = line.find("=")
     if eq < 0:
         return None
     field = line[:eq]
     rest = line[eq + 1:]
+    if not rest.endswith(")"):
+        return None
     for p in sorted(plugins, key=len, reverse=True):
         for marker, kind in ((f" ({p} has no ", "absent"), (f" ({p} has {field} ABSENT", "absent"), (f" ({p} ", "value")):
-            i = rest.rfind(marker)
-            if i >= 0 and rest.endswith(")"):
+            # the last occurrence, without case, at its place in the original text
+            found = list(re.finditer(re.escape(marker), rest, re.IGNORECASE))
+            if found:
+                i, j = found[-1].start(), found[-1].end()
                 own = rest[:i]
-                other = None if kind == "absent" else rest[i + len(marker):-1]
+                other = None if kind == "absent" else rest[j:-1]
                 return field, own, p, other, kind
     return None
 
@@ -567,8 +580,13 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                 winner = next((n.get("plugin") for n in t.get("nodes") or [] if n.get("is_winner")), None)
                 arow = authored.get(fid)
                 if winner == p and arow is not None and arow.get("complete", True):
-                    kept = [x for x in (parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []) if x]
-                    judged[key] += sum(1 for x in kept if not scope.excluded(rtype, x[0]))
+                    read = [parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []]
+                    judged[key] += sum(1 for x in read if x and not scope.excluded(rtype, x[0]))
+                    unread = sum(1 for x in read if x is None)
+                    if unread:
+                        # a line the comparator cannot read is counted, never dropped
+                        why = "a delta line the comparator could not read"
+                        unj[key][why] = unj[key].get(why, 0) + unread
                     continue
                 defines = arow is not None and "DEFINES" in str(arow.get("error") or "")
                 if defines and node is not None and node.get("complete", True):
