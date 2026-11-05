@@ -714,6 +714,43 @@ def case_63_the_outer_deadline_sits_past_the_slot_commands_own_bounds():
     assert 89 < m3 <= 90.1, f"a light child keeps its own deadline, got {m3:.1f} min"
 
 
+def case_64_the_review_packet_names_no_media_bundle_the_report_did_not_use():
+    import types
+    def packet(media_items, media_dir):
+        with tempfile.TemporaryDirectory() as t:
+            out = Path(t)
+            for d in ("report/report-01", "reel/reel-01/reel", "reel/reel-01/decoded", "image-observations/indexed-images",
+                      "bundle/evidence", "precedent/cards"):
+                (out / d).mkdir(parents=True)
+            for f in ("report/report-01/report.md", "report/report-01/evidence-index.md", "reel/reel-01/reel/reel.mp4",
+                      "reel/reel-01/reel/reel-map.json"):
+                (out / f).write_text("x", encoding="utf-8")
+            if media_dir:
+                (out / "report" / "media-bundle" / "evidence").mkdir(parents=True)
+            led = EP.StageLedger(out)
+            led.record("report", {"a": 1}, [out / "report/report-01/report.md"], exit_code=0,
+                       extra={"bound": {"captures": media_items, "mediaItems": media_items}})
+            ctx = types.SimpleNamespace(out=out)
+            EP.stage_deliver(ctx, {}, out / "deliver")
+            doc = json.loads((out / "deliver" / "review-packet.json").read_text(encoding="utf-8"))
+            missing = []
+            for k, v in doc.items():
+                if k.endswith("Absent"):        # a sentence saying why a path is not named, not a path
+                    continue
+                for p in (v if isinstance(v, list) else [v]):
+                    if isinstance(p, str) and ("/" in p or "\\" in p) and not Path(p).exists():
+                        missing.append(k)
+            return doc, missing
+    doc, missing = packet(0, False)
+    assert not missing, f"the packet names paths that do not exist: {missing} ({doc.get('mediaBundle')})"
+    assert doc.get("mediaBundle") is None and "no frame" in str(doc.get("mediaBundleAbsent")), \
+        f"with no media the packet says so instead of naming a path, got {doc.get('mediaBundle')!r}, {doc.get('mediaBundleAbsent')!r}"
+    doc, _ = packet(0, True)
+    assert doc.get("mediaBundle") is None, "a media bundle left from an earlier generation is not named for this report"
+    doc, missing = packet(3, True)
+    assert doc.get("mediaBundle") and not missing, "a report that used its media bundle names it"
+
+
 def case_66_capture_holds_the_machine_slot_once_across_its_rounds():
     """The real stage_capture, its child() and its dispatch, with only the Runner faked: with a slot command the stage
     makes ONE heavy launch (its rounds inside the slot command's job, whose request children inherit the slot), held

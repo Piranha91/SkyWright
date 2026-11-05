@@ -1484,8 +1484,15 @@ def stage_deliver(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
              "reelMap": fwd(gen / "reel" / "reel-map.json"),
              "decodedFrames": fwd(gen / "decoded"),
              "blindImages": fwd(ctx.out / "image-observations" / "indexed-images"),
-             "bundle": fwd(bundle_dir(ctx)), "mediaBundle": fwd(media_bundle_dir(ctx)),
+             "bundle": fwd(bundle_dir(ctx)), "mediaBundle": None,
              "precedentCards": fwd(ctx.out / "precedent" / "cards")}
+    # the media bundle only when the accepted report was built from one; a folder left by an earlier generation is not it
+    report = StageLedger(ctx.out).doc["stages"].get("report") or {}
+    if ((report.get("bound") or {}).get("mediaItems") or 0) > 0 and media_bundle_dir(ctx).is_dir():
+        paths["mediaBundle"] = fwd(media_bundle_dir(ctx))
+    else:
+        paths["mediaBundleAbsent"] = (f"no frame was captured, so the report has no media bundle; it reads the evidence "
+                                      f"bundle at {fwd(bundle_dir(ctx))}")
     write_json(sdir / "review-packet.json", paths)
     print(json.dumps(paths, indent=1))
     return {}, [sdir / "review-packet.json"]
