@@ -599,6 +599,121 @@ def case_61_evaluate_stops_itself_at_its_budget_with_the_slot_held_that_long():
     assert len(run(325)) == 1, "one invocation when evalrun ends by itself"
 
 
+# ---- runner defects after round 2 (cases 62-67) ----
+
+def _lock_log(camp: Path) -> list:
+    p = camp / "idle_lock.log"
+    return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()] if p.is_file() else []
+
+
+def case_62_a_heavy_child_stopped_from_outside_leaves_no_lock():
+    """A real process tree (the slot command and its job) ending at the stage's limit leaves no lock and a release line
+    after the take. With the stand-in holder, which ignores its own maximum (a slot command hung past its bounds), the
+    real Runner's outer stop ends it, and the lock is removed with a release line naming the outer stop. With
+    IDLE_LOCK_PATH (the real hold) the hold's own maximum ends it first. When the Runner cannot confirm the tree gone,
+    the lock stays and the stage says so."""
+    import types
+    real = os.environ.get("IDLE_LOCK_PATH")
+    holder = real or str(HERE / "fixtures" / "standin_hold.py")
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t) / "runs"
+        camp = root / "campaign"
+        camp.mkdir(parents=True)
+        prefix = [sys.executable, holder, "hold", "--lock", "{lock}", "--purpose", "{purpose}", "--max-min", "180",
+                  "--slot-wait-min", "0", "--wait-timeout-min", "0"]
+        if real:
+            prefix += ["--runs-root", str(root), "--min-free-gb", "1", "--no-wait"]
+        else:
+            prefix.remove("hold")
+        ctx = types.SimpleNamespace(out=camp, id="m", machine={"heavyPrefix": prefix, "lockDir": str(camp)})
+        margin = getattr(EP, "HOLD_MARGIN_MIN", None)
+        try:
+            if margin is not None:
+                EP.HOLD_MARGIN_MIN = 0.05      # the outer stop a few seconds past the hold, so the case runs quickly
+            r = EP.child(ctx, Path(t) / "ledger", "evaluate-01", [sys.executable, "-c", "import time; time.sleep(120)"],
+                         heavy=True, deadline_min=0.25)
+        finally:
+            if margin is not None:
+                EP.HOLD_MARGIN_MIN = margin
+        lock = camp / "HEAVY-LOCK-m-evaluate-01"
+        steps = [(x.get("step"), x.get("reason")) for x in _lock_log(camp) if str(x.get("lock", "")).endswith(lock.name)]
+        if real:
+            assert r.get("stopped") or r.get("exitCode") == 124, f"the hold or the Runner ended the job: {r}"
+        else:
+            assert r.get("stopped") == "deadline" and r.get("treeStopped") is True, f"the Runner stopped the tree: {r}"
+        problems = []
+        if lock.exists():
+            problems.append(f"a lock is left after a confirmed tree stop: {lock.name} (log steps {steps})")
+        names = [s for s, _ in steps]
+        if not ("taken" in names and "released" in names[names.index("taken") + 1:]):
+            problems.append(f"idle_lock.log has no release line after the take: {steps}")
+        elif not real and not any(s == "released" and ("outer" in str(w) or "deadline" in str(w)) for s, w in steps):
+            problems.append(f"the release line does not name the outer stop: {steps}")
+
+    class Unconfirmed:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self, jobs, echo=False):
+            argv = jobs[0]["argv"]
+            Path(argv[argv.index("--lock") + 1]).write_text('{"pid": 999999}', encoding="utf-8")
+            return [{"exitCode": None, "stopped": "deadline", "treeStopped": False}]
+    saved = EP.Runner
+    with tempfile.TemporaryDirectory() as t:
+        camp = Path(t)
+        ctx = types.SimpleNamespace(out=camp, id="m", machine={"heavyPrefix": ["slot", "--lock", "{lock}", "--purpose",
+                                                                               "{purpose}", "--max-min", "180"],
+                                                               "lockDir": str(camp)})
+        try:
+            EP.Runner = Unconfirmed
+            try:
+                refuses(lambda: EP.child(ctx, camp / "ledger", "evaluate-01", ["x"], heavy=True, deadline_min=1),
+                        "not confirmed")
+            except AssertionError as ex:
+                problems.append(f"an unconfirmed tree stop must leave the lock and say so: {ex}")
+        finally:
+            EP.Runner = saved
+        if not (camp / "HEAVY-LOCK-m-evaluate-01").exists():
+            problems.append("an unconfirmed stop removed the lock")
+    assert not problems, "; ".join(problems)
+
+
+def case_63_the_outer_deadline_sits_past_the_slot_commands_own_bounds():
+    """The Runner's deadline counts from launch, so it must cover the slot command's turn wait, idle wait and hold;
+    the hold's own maximum is the stage's minutes, so the slot command stops its job and releases first."""
+    import types
+    seen = []
+
+    class FakeRunner:
+        def __init__(self, *a, **k):
+            seen.append(k.get("deadline"))
+
+        def run(self, jobs, echo=False):
+            seen.append(jobs[0]["argv"])
+            return [{"exitCode": 0}]
+    prefix = ["python", "idle_lock.py", "hold", "--lock", "{lock}", "--purpose", "{purpose}", "--max-min", "180",
+              "--wait-timeout-min", "240", "--min-free-gb", "16"]
+    saved = EP.Runner
+    with tempfile.TemporaryDirectory() as t:
+        ctx = types.SimpleNamespace(out=Path(t), id="m", machine={"heavyPrefix": prefix, "lockDir": t})
+        try:
+            EP.Runner = FakeRunner
+            import time as _t
+            now = _t.perf_counter()
+            EP.child(ctx, Path(t), "records-capture", ["x"], heavy=True, deadline_min=460, hold_min=460)
+            EP.child(ctx, Path(t), "acquire", ["x"], heavy=True, deadline_min=60)
+            EP.child(ctx, Path(t), "plan", ["x"], deadline_min=90)
+        finally:
+            EP.Runner = saved
+    d1, a1, d2, a2, d3, _ = seen
+    m1, m2, m3 = ((d - now) / 60 for d in (d1, d2, d3))
+    assert a1[a1.index("--max-min") + 1] == "460", f"the hold is the stage's 460 min, got {a1[:12]}"
+    assert m1 > 240 + 240 + 460, f"the outer deadline ({m1:.0f} min) must sit past slot wait 240 + idle wait 240 + hold 460"
+    assert a2[a2.index("--max-min") + 1] == "60", f"a child with only a deadline holds the slot that long, got {a2[:12]}"
+    assert m2 > 240 + 240 + 60, f"capture's outer deadline ({m2:.0f} min) must sit past its waits and its 60-min hold"
+    assert 89 < m3 <= 90.1, f"a light child keeps its own deadline, got {m3:.1f} min"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

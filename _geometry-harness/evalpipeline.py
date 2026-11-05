@@ -603,25 +603,67 @@ def write_profile(ctx: Context, files: dict[str, bytes]) -> Path:
 
 # ---------------------------------------------------------------- stage bodies
 
+#: how far past the slot command's own waits and hold a heavy child's outer deadline sits
+HOLD_MARGIN_MIN = 5
+
+
+def _prefix_minutes(prefix: list, flag: str, default: float) -> float:
+    try:
+        return float(prefix[prefix.index(flag) + 1]) if flag in prefix else default
+    except (IndexError, ValueError):
+        return default
+
+
 def child(ctx, ledger_dir, op, argv, *, heavy=False, purpose=None, deadline_min=None, env=None, hold_min=None):
     """One child through the shared Runner; a heavy child goes through the machine's slot command, held for
-    `hold_min` minutes when given (the slot command's --max-min), else for the machine's own hold."""
+    `hold_min` minutes when given (the slot command's --max-min), else for the stage's `deadline_min`, else for the
+    machine's own hold. The slot command stops its own job at that hold and releases; the Runner's deadline sits past
+    the slot command's own waits and hold, so it never stops the slot command first."""
+    lock = None
     if heavy and ctx.machine.get("heavyPrefix"):
         # one lock file per mod and step: two runs of different mods never name the same lock
         lock = Path(ctx.machine.get("lockDir") or ctx.out) / f"HEAVY-LOCK-{ctx.id}-{op}"
         prefix = [x.replace("{purpose}", purpose or op).replace("{lock}", fwd(lock)) for x in ctx.machine["heavyPrefix"]]
-        if hold_min is not None:
+        hold = hold_min if hold_min is not None else deadline_min
+        if hold is not None:
             if "--max-min" in prefix:
-                prefix[prefix.index("--max-min") + 1] = str(hold_min)
+                prefix[prefix.index("--max-min") + 1] = str(hold)
             else:
-                prefix += ["--max-min", str(hold_min)]
+                prefix += ["--max-min", str(hold)]
+        if deadline_min:
+            # the deadline counts from launch, the hold from when the lock is taken: cover the turn and idle waits too
+            deadline_min = (_prefix_minutes(prefix, "--slot-wait-min", 240) + _prefix_minutes(prefix, "--wait-timeout-min", 0)
+                            + _prefix_minutes(prefix, "--max-min", deadline_min) + HOLD_MARGIN_MIN)
         argv = prefix + ["--"] + argv
     job = {"id": op, "argv": [str(a) for a in argv], "cwd": str(ROOT)}
     if env:
         job["env"] = {**os.environ, **env}
+    lock_before = lock is not None and lock.exists()
     deadline = time.perf_counter() + 60 * deadline_min if deadline_min else None
     res = Runner("evalpipeline-" + op, out_dir=Path(ledger_dir), deadline=deadline).run([job], echo=False)
+    if lock is not None and not lock_before and res[0].get("stopped") and lock.exists():
+        release_stopped_lock(lock, res[0])
     return res[0]
+
+
+def release_stopped_lock(lock: Path, res: dict):
+    """The lock a slot command took before a stop from outside killed it, so its own release never ran. Removed, with
+    a release line in its log, only when the Runner confirmed the whole tree gone; otherwise left, and the stage refuses."""
+    try:
+        held = (json.loads(lock.read_text(encoding="utf-8")) or {}).get("pid")
+    except (OSError, ValueError):
+        held = None
+    if res.get("treeStopped") is not True:
+        raise Refusal(f"the stage's slot command was stopped from outside ({res.get('stopped')}) and its process tree was "
+                      f"not confirmed gone, so its lock {fwd(lock)} is left in place; check nothing it started still runs, "
+                      f"then delete it.")
+    lock.unlink()
+    rec = {"step": "released", "reason": f"outer-stop: the stage's {res.get('stopped')} stopped the slot command; its process "
+                                         f"tree was confirmed gone", "by": "evalpipeline", "heldPid": held,
+           "t": time.strftime("%Y-%m-%d %H:%M:%S %Z"), "lock": str(lock)}
+    with open(lock.parent / "idle_lock.log", "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
+    print(f"released the stopped slot command's lock {fwd(lock)} (its tree was confirmed gone)")
 
 
 def scopeprobe_exe() -> Path:
