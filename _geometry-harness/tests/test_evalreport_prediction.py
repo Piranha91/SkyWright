@@ -8998,8 +8998,7 @@ def main():
         sc_ = [x for x in val_ if "supplied patch edit" in x]
         return any(f"still there with {L_}" in x and "a supplied patch edits" in x for x in sc_), " | ".join(sc_)[:500] or str(val_)[:500]
 
-    # The measured-load-order line of record fields a declared patch's value wins (Clockwork 135 / 139, Winterhold 154 /
-    # 159). R1: ModA's and ModB's own changes lost to the patch (1 field, 2 plugin-pair rows), listed by both record
+    # The measured-load-order line of record fields a declared patch's value wins. R1: ModA's and ModB's own changes lost to the patch (1 field, 2 plugin-pair rows), listed by both record
     # checks. R2: OtherMod only carries the base game's value there, lost to the patch.
     def patch_wins_line_bundle():
         R0, R1, R2 = f"00C090:{BASE}", f"00C190:{BASE}", f"00C290:{BASE}"
@@ -9022,7 +9021,7 @@ def main():
     def patch_wins_lines(md):
         return [x for x in md.splitlines() if "where a declared patch's value wins" in x]
 
-    # C1190 (eighth review, Clockwork 135 / 139): a losing value the losing plugin only carries is no change of its own:
+    # C1190: a losing value the losing plugin only carries is no change of its own:
     # not counted as lost, said apart; a field two record checks list is counted once, the second line saying so.
     def c1190_patch_wins_line_carried_and_once():
         plan, md, _ = get("patch-wins-line", patch_wins_line_bundle)
