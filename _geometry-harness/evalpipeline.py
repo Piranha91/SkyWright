@@ -835,6 +835,17 @@ def stage_evaluate(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     if last["exitCode"] != 0:
         raise Refusal(f"evalrun {last['verb']} ended with exit {last['exitCode']} (stopped: {last['stopped']}); "
                       f"read {fwd(sdir / 'commands')} and `evalrun status`.")
+    # evalrun ends 0 when it stops itself at its budget: rows it stopped or never started keep the stage open, so the
+    # next run resumes them instead of reusing a partial evaluation; the stages after it still run on what finished
+    counts = ledger_counts(run)
+    stopped, skipped = counts.get("stopped", 0), counts.get("skipped-budget", 0)
+    if stopped or skipped:
+        minutes = budget_differs(ctx.entry, ctx.out)
+        minutes = minutes if minutes is not None else planned_budget(ctx.out)
+        minutes = int(minutes) if isinstance(minutes, float) and minutes.is_integer() else minutes
+        raise NonBlockingRefusal(f"evaluation stopped at its budget of {minutes} min with {stopped + skipped} rows open "
+                                 f"({stopped} stopped, {skipped} not started); run again to resume them (each run gets a "
+                                 f"fresh budget), or raise the entry's budgetMinutes.")
     # the ledger is not an output binding: imports and finalize change it in later stages
     return {"plan": sha256_file(run / "plan.json")}, [sdir / "evaluate.json"]
 
@@ -1482,6 +1493,7 @@ def cmd_run(a) -> int:
     ctx = Context(a.entry, a.machine, out)
     ledger = StageLedger(out)
     through = a.through or STAGES[-1]
+    refusals = []      # non-blocking refusals: the run goes on, and its final status still names each one
     with Run("evalpipeline", mode=ctx.id, stage_source="counted") as run:
         res = ctx.resolve()
         write_json(out / "arms.json", [{k: v for k, v in arm.items()} for arm in res["arms"]])
@@ -1537,6 +1549,7 @@ def cmd_run(a) -> int:
                     print(f"{name}: REFUSED: {r}", file=sys.stderr)
                     return EXIT_REFUSED
                 print(f"{name}: refused, not blocking: {r}")
+                refusals.append({"stage": name, "sentence": str(r)})
                 run.advance()
                 continue
             secs = round(time.perf_counter() - t0, 1)
@@ -1544,7 +1557,11 @@ def cmd_run(a) -> int:
                           extra={"bound": extra, "seconds": secs, "driverSha256": sha256_file(Path(__file__))})
             print(f"{name}: accepted in {secs} s")
             run.advance()
-        write_json(out / "status.json", {"status": "through " + through, "at": utcnow()})
+        if refusals:
+            write_json(out / "status.json", {"status": "incomplete", "through": through, "sentence": refusals[0]["sentence"],
+                                             "refusals": refusals, "at": utcnow()})
+        else:
+            write_json(out / "status.json", {"status": "through " + through, "at": utcnow()})
     return EXIT_OK
 
 

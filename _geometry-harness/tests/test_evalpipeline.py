@@ -714,6 +714,67 @@ def case_63_the_outer_deadline_sits_past_the_slot_commands_own_bounds():
     assert 89 < m3 <= 90.1, f"a light child keeps its own deadline, got {m3:.1f} min"
 
 
+def case_67_an_evaluation_stopped_at_its_budget_is_resumed_by_the_next_run_not_reused():
+    import types
+    saved = EP.Context, dict(EP.STAGE_BODIES), EP.child
+    calls, problems = [], []
+    with tempfile.TemporaryDirectory() as t:
+        out = Path(t) / "run"
+        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+
+        class FakeCtx:
+            def __init__(self, entry, machine, o):
+                self.entry, self.machine, self.out, self.id = {"evaluation": {"budgetMinutes": 105}}, {}, Path(o), "m"
+
+            def resolve(self):
+                return {"arms": [], "subject": ["S.esp"], "keys": []}
+
+        def light(name):
+            def body(ctx, res, sdir):
+                f = sdir / f"{name}.json"
+                f.write_text("{}", encoding="utf-8")
+                if name == "plan":
+                    (ctx.out / "evaluation").mkdir(exist_ok=True)
+                    (ctx.out / "evaluation" / "plan.json").write_text('{"budgets": {"minutes": 105}}', encoding="utf-8")
+                    (ctx.out / "evaluation" / "ledger.json").write_text('{"runIds": [], "entries": {}}', encoding="utf-8")
+                return {}, [f]
+            return body
+
+        def fake_child(ctx, ledger_dir, op, argv, **k):
+            calls.append(list(argv))
+            led = {"runIds": ["r%d" % len(calls)], "entries": {
+                "a__baseline": {"status": "completed"}, "b__baseline": {"status": "stopped(deadline)"},
+                "c__baseline": {"status": "stopped(deadline)"}, "d__candidate-01": {"status": "skipped-budget"}}}
+            (ctx.out / "evaluation" / "ledger.json").write_text(json.dumps(led), encoding="utf-8")
+            return {"exitCode": 0, "stopped": None}
+        try:
+            EP.Context, EP.child = FakeCtx, fake_child
+            for n in ("census", "prepare", "scope", "plan"):
+                EP.STAGE_BODIES[n] = light(n)
+            a = types.SimpleNamespace(entry="e.json", machine=None, out=str(out), through="evaluate")
+            rc1 = EP.cmd_run(a)
+            status = json.loads((out / "status.json").read_text(encoding="utf-8"))
+            accepted = "evaluate" in EP.StageLedger(out).doc["stages"]
+            rc2 = EP.cmd_run(a)
+        finally:
+            EP.Context, EP.child = saved[0], saved[2]
+            EP.STAGE_BODIES.clear()
+            EP.STAGE_BODIES.update(saved[1])
+            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+    sentence = str(status.get("sentence") or status)
+    if accepted:
+        problems.append("the stage was accepted with rows stopped or skipped at the budget")
+    if not ("stopped at its budget" in sentence and "3 rows open" in sentence and "run again" in sentence):
+        problems.append(f"the run's status does not say the evaluation stopped at its budget with 3 rows open and that "
+                        f"running again resumes it: {sentence!r}")
+    if rc1 != EP.EXIT_OK:
+        problems.append(f"the refusal is non-blocking (exit {rc1})")
+    if len(calls) != 2 or "resume" not in calls[-1]:
+        problems.append(f"the rerun at the same budget must resume evalrun, got {len(calls)} call(s): "
+                        f"{[c[2:4] for c in calls]}")
+    assert not problems, "; ".join(problems)
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
