@@ -419,6 +419,7 @@ class Context:
 
     def __init__(self, entry_path, machine_path, out):
         self.entry_path = Path(entry_path)
+        self.machine_path = Path(machine_path) if machine_path else None
         # one spelling per plugin from here on (PluginNames); an entry that spells each plugin one way is unchanged
         self.names = PluginNames()
         self.entry = normalise_entry(read_json(entry_path), self.names)
@@ -1183,7 +1184,34 @@ def mark_superseded(rows: list[dict], final_ids) -> list[dict]:
     return out
 
 
+#: the capture stage's one hold on the machine slot: every round's requests (acquire and capture, 60 min each at most)
+#: and its re-plan
+CAPTURE_HOLD_MIN = MAX_CAPTURE_ROUNDS * (MAX_NEW_PER_ROUND * 2 * 60 + 15)
+
+
 def stage_capture(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
+    """The capture rounds hold the machine slot once, from the first request to the last re-plan: with a slot command
+    they run as one heavy child (`capture-rounds`), whose request children inherit the slot instead of queueing for it
+    between requests, where another subject's heavy stage could take it."""
+    if not ctx.machine.get("heavyPrefix"):
+        return capture_rounds(ctx, res, sdir)
+    done = sdir / "capture-rounds.json"
+    if done.exists():
+        done.unlink()
+    argv = [sys.executable, fwd(HERE / "evalpipeline.py"), "capture-rounds", "--entry", fwd(ctx.entry_path),
+            *(["--machine", fwd(ctx.machine_path)] if getattr(ctx, "machine_path", None) else []), "--out", fwd(ctx.out)]
+    r = child(ctx, sdir / "commands", "capture-rounds", argv, heavy=True, purpose=f"evalpipeline {ctx.id} capture",
+              deadline_min=CAPTURE_HOLD_MIN, hold_min=CAPTURE_HOLD_MIN)
+    got = read_json(done) if done.is_file() else {}
+    if got.get("refused"):
+        raise Refusal(got["refused"])
+    if r.get("exitCode") != 0 or not got.get("accepted"):
+        raise Refusal(f"the capture rounds did not finish (exit {r.get('exitCode')}, stopped: {r.get('stopped')}); "
+                      f"read {fwd(sdir / 'commands' / 'capture-rounds.txt')}.")
+    return got["bound"], [sdir / "captures.json", sdir / "rounds.json"]
+
+
+def capture_rounds(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """Capture every request the storyboard asks for, then plan again with the results: a refused capture makes the
     reel planner take the next member of that clash's group, which needs its own capture. Repeat until a plan asks
     for nothing new (at most MAX_CAPTURE_ROUNDS rounds; a plan still asking after that is a refusal)."""
@@ -1565,6 +1593,25 @@ def cmd_run(a) -> int:
     return EXIT_OK
 
 
+def cmd_capture_rounds(a) -> int:
+    """The capture stage's rounds, run inside the one machine-slot hold the stage took; its outcome is written to
+    RUN/capture/capture-rounds.json for the stage to read."""
+    out = Path(a.out)
+    os.environ.setdefault("HOUSECARL_RUNLOG_DIR", fwd(out / "runlog"))
+    ctx = Context(a.entry, a.machine, out)
+    sdir = out / "capture"
+    sdir.mkdir(exist_ok=True)
+    with Run("evalpipeline", mode=ctx.id + ":capture-rounds", stage_source="counted"):
+        try:
+            bound, _ = capture_rounds(ctx, ctx.resolve(), sdir)
+        except Refusal as r:
+            write_json(sdir / "capture-rounds.json", {"refused": str(r), "at": utcnow()})
+            print(f"capture-rounds: REFUSED: {r}", file=sys.stderr)
+            return EXIT_REFUSED
+        write_json(sdir / "capture-rounds.json", {"accepted": True, "bound": bound, "at": utcnow()})
+    return EXIT_OK
+
+
 def cmd_status(a) -> int:
     led = StageLedger(a.out)
     for s in STAGES:
@@ -1596,6 +1643,12 @@ def build_parser():
     p.add_argument("--machine")
     p.add_argument("--out")
     p.set_defaults(fn=cmd_arms)
+    p = sub.add_parser("capture-rounds", help="the capture stage's rounds, inside the machine-slot hold the stage took "
+                                              "(the stage runs it; not for direct use)")
+    p.add_argument("--entry", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--machine")
+    p.set_defaults(fn=cmd_capture_rounds)
     p = sub.add_parser("status", help="print the accepted stages")
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_status)

@@ -714,6 +714,62 @@ def case_63_the_outer_deadline_sits_past_the_slot_commands_own_bounds():
     assert 89 < m3 <= 90.1, f"a light child keeps its own deadline, got {m3:.1f} min"
 
 
+def case_66_capture_holds_the_machine_slot_once_across_its_rounds():
+    """The real stage_capture, its child() and its dispatch, with only the Runner faked: with a slot command the stage
+    makes ONE heavy launch (its rounds inside the slot command's job, whose request children inherit the slot), held
+    for every round; never a launch, and a slot turn, per request child."""
+    import types
+    jobs = []
+
+    class FakeRunner:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self, js, echo=False):
+            job = js[0]
+            jobs.append(job)
+            argv = job["argv"]
+            if "capture-rounds" in argv:      # what the subcommand writes when its rounds finish
+                o = Path(argv[argv.index("--out") + 1]) / "capture"
+                (o / "captures.json").write_text("[]", encoding="utf-8")
+                (o / "rounds.json").write_text("[]", encoding="utf-8")
+                (o / "capture-rounds.json").write_text('{"accepted": true, "bound": {"requests": 0}}', encoding="utf-8")
+            if job["id"].startswith("storyboard-"):
+                Path(argv[argv.index("--out") + 1]).write_text('{"capturePlan": {"requests": []}}', encoding="utf-8")
+            return [{"exitCode": 0}]
+    saved = EP.Runner, EP.report_plan_argv, EP.capture_identity
+    with tempfile.TemporaryDirectory() as t:
+        out = Path(t)
+        (out / "evaluation").mkdir()
+        (out / "report-plan").mkdir()
+        (out / "evaluation" / "plan.json").write_text(json.dumps({"arms": [
+            {"armId": "baseline", "candidateFile": "c0.json"}, {"armId": "candidate-01", "candidateFile": "c1.json"}]}),
+            encoding="utf-8")
+        req = [{"id": f"capture-{i}", "armId": "baseline", "vignette": {"withoutArmId": "candidate-01"},
+                "camera": {"support": {"supported": True}}} for i in range(2)]
+        (out / "report-plan" / "storyboard.json").write_text(json.dumps({"capturePlan": {"requests": req}}), encoding="utf-8")
+        (out / "capture").mkdir()
+        prefix = ["python", "idle_lock.py", "hold", "--lock", "{lock}", "--purpose", "{purpose}", "--max-min", "180"]
+        ctx = types.SimpleNamespace(out=out, id="m", machine={"heavyPrefix": prefix, "lockDir": t}, entry={},
+                                    instance=out, profile="p", game=out, entry_path=out / "entry.json",
+                                    machine_path=out / "machine.json")
+        try:
+            EP.Runner = FakeRunner
+            EP.report_plan_argv, EP.capture_identity = (lambda *a, **k: ["x"]), (lambda c: {})
+            try:
+                EP.stage_capture(ctx, {}, out / "capture")
+            except EP.Refusal:
+                pass
+        finally:
+            EP.Runner, EP.report_plan_argv, EP.capture_identity = saved
+    heavy = [j for j in jobs if "idle_lock.py" in j["argv"]]
+    bound = EP.MAX_CAPTURE_ROUNDS * EP.MAX_NEW_PER_ROUND * 2 * 60
+    assert len(heavy) == 1, f"the stage takes the machine slot once, not per child: {[j['id'] for j in heavy]}"
+    argv = heavy[0]["argv"]
+    assert "capture-rounds" in argv, f"the one heavy launch runs the capture rounds, got {argv[argv.index('--') + 1:][:4]}"
+    assert float(argv[argv.index("--max-min") + 1]) >= bound, f"its hold covers every round ({bound} min), got {argv[:12]}"
+
+
 def case_67_an_evaluation_stopped_at_its_budget_is_resumed_by_the_next_run_not_reused():
     import types
     saved = EP.Context, dict(EP.STAGE_BODIES), EP.child
