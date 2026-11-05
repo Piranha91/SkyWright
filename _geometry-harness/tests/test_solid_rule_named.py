@@ -174,6 +174,7 @@ def main() -> int:
         def c1960():
             d = doc(L.sweep["mover"], "sweep-mover")
             assert d.get("Status") == "built", f"the fixture did not build: {d.get('Status')} {d.get('Reason')}"
+            assert d.get("Solid") is True, f"the closed box's region is not a solid (Solid={d.get('Solid')}), so this case would not cover the solid path"
             named(d, "solidPolicy", RULE, "sweep of a built closed region")
             assert d.get("policy") == SWEPT, f"policy changed: {d.get('policy')!r}"
 
