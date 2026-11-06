@@ -259,6 +259,16 @@ if (compareLog is not null)
     Console.WriteLine($"   blocks: {exact} inis reproduced exactly, {differ} with differences; lines: {matchedLines:N0} of the game's {gLines:N0} matched ({(gLines == 0 ? 0 : 100.0 * matchedLines / gLines):0.00} %), reader wrote {mLines:N0}");
     foreach (var kv in diffKinds.OrderByDescending(k => k.Value)) Console.WriteLine($"      {kv.Value,6}  {kv.Key}");
     foreach (var e in examples) Console.WriteLine(e);
+    // The CONFLICTS block: who BOS itself says wins each id with several lines, compared per id (BosConflictLog).
+    var gameConf = BosConflictLog.Parse(BosConflictLog.FromGameLog(File.ReadLines(compareLog)));
+    var mineConf = BosConflictLog.Parse(layer.ConflictLogLines());
+    var gIniSet = new HashSet<string>(gOrder.Select(k => k.StartsWith("Data\\") ? k[5..] : k), StringComparer.OrdinalIgnoreCase);
+    var mIniSet = new HashSet<string>(inis.Select(i => i.Name), StringComparer.OrdinalIgnoreCase);
+    var cmp = BosConflictLog.Compare(gameConf, mineConf, gIniSet, mIniSet);
+    Console.WriteLine($"\n==== CONFLICTS block: game {gameConf.Count} id(s), reader {mineConf.Count} ====");
+    Console.WriteLine($"   same {cmp.Same}, different {cmp.Differ}, only in the game {cmp.OnlyGame}, only in the reader {cmp.OnlyReader}; "
+                    + $"{cmp.OrderDiffers} id(s) name an ini only one side has (the two orders differ there, not compared)");
+    foreach (var e in cmp.Examples) Console.WriteLine("      " + e.Replace("\t", " "));
 }
 
 if (noApply) return 0;
