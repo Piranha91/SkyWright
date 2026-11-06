@@ -1322,7 +1322,7 @@ Console.WriteLine($"   the class (mod mover, Fixed, Stranded + Orphaned): {class
     var d = MemoryRoute.Decide(readings, shape, memoryRoute, others, explicitShape: threadsExplicit || cacheBudget is not null);
     routeDecision = d;
     if (d.Route is { } decidedRoute)
-        oomSentence = $"contactprobe: memory: the {decidedRoute.ToString().ToLowerInvariant()} route ran out of memory in the host loop and wrote no emit or rows; "
+        oomSentence = $"contactprobe: memory: the {decidedRoute.ToString().ToLowerInvariant()} route ran out of memory after it was chosen and wrote no emit or rows; "
                     + (decidedRoute == RouteName.Lean ? "run it on a machine with more memory, or raise the limit." : "rerun with --memory-route lean, or close other programs and rerun.");
     Console.WriteLine($"   memory before the host loop: live {live / 1e9:0.00} GB, this process {ownPrivate / 1e9:0.00} GB, "
                     + $"free now {(readings.AvailablePhysical is { } f0 ? $"{f0 / 1e9:0.00} GB" : "unknown")} of {readings.TotalPhysical / 1e9:0.00} GB; readings from {from}");
