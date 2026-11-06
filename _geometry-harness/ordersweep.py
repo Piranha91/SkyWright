@@ -86,6 +86,11 @@ REFUSED_RE = re.compile(r"MISSING MASTER|CANNOT ENABLE|PROFILE MISMATCH|(?<![\d,
 NOT_PROOF = "No passing order found within the budget is not proof that none exists."
 
 
+def memory_route(emit: Path | None) -> dict:
+    """STUB (red stage): today ordersweep records no memory route."""
+    return {"route": None}
+
+
 def sha256_file(p: Path) -> str:
     h = hashlib.sha256()
     with open(p, "rb") as f:

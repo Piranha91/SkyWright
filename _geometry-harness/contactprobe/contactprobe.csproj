@@ -34,6 +34,7 @@
     <Compile Include="..\_shared\ContactIndex.cs" Link="ContactIndex.cs" />
     <Compile Include="..\_shared\ContactAssembly.cs" Link="ContactAssembly.cs" />
     <Compile Include="..\_shared\PlacementCache.cs" Link="PlacementCache.cs" />
+    <Compile Include="..\_shared\MemoryRoute.cs" Link="MemoryRoute.cs" />
     <Compile Include="..\_shared\CollisionLayers.cs" Link="CollisionLayers.cs" />
     <Compile Include="..\_shared\ActorBand.cs" Link="ActorBand.cs" />
     <Compile Include="..\_shared\WorldState.cs" Link="WorldState.cs" />
