@@ -21,6 +21,9 @@
 //                                                                    the processor count; the answer does not depend on it.
 //                                                                    stderr: "octree: cells N, near tests N, triangle tests N,
 //                                                                    threads T")
+//                                                                    every sweep output (built, refused, missing, error) carries
+//                                                                    solidPolicy: MeshIntersection.PolicyVersion when the region
+//                                                                    built (its Solid and volume come from that rule), else "none"
 //   ASSETS = --loose-root DIR | --instance DIR --profile P --game DIR --order CANDIDATE.json
 //   common: [--out FILE] [--placement BASETYPE[,open]]
 //           [--rules graph,book,physics,switch,blend,member]   read as the reach rules do (inspect, pose, node, sweep, graph):
@@ -165,6 +168,8 @@ static object Bounds(TriangleSoup? s)
     return new { min = V(lo), max = V(hi), vertices = s.Vertices.Length, triangles = s.TriangleCount };
 }
 
+// the solid rule a sweep's result depends on: named once Build returns built (Build validates the first sample), else "none"
+string sweepSolid = "none";
 try
 {
     if (verb == "graph")
@@ -175,7 +180,9 @@ try
         return Emit(new { verb, rel, graph = g }, g.Status == "read");
     }
     var bytes = read(rel);
-    if (bytes is null) return Emit(new { verb, rel, status = "refused", reason = "missing_asset: " + rel }, false);
+    if (bytes is null)
+        return Emit(verb == "sweep" ? new { verb, rel, status = "refused", reason = "missing_asset: " + rel, solidPolicy = sweepSolid }
+                                    : new { verb, rel, status = "refused", reason = "missing_asset: " + rel }, false);
     switch (verb)
     {
         case "physics":
@@ -306,6 +313,7 @@ try
             var m = NifMotion.Read(bytes, read, placement, readOptions);
             var opts = new MotionOptions(DeltaTarget: delta ?? 0.5, SampleBudget: budget ?? 4096);
             var r = SweptGeometry.Build(bytes, m, anims.Count > 0 ? anims : null, geometry, opts, read);
+            if (r.Status == "built") sweepSolid = MeshIntersection.PolicyVersion;
             var octree = new SweptVolumeRun { Threads = octreeThreads };
             var v = r.Status == "built" ? SweptGeometry.Volume(r, null, run: octree) : null;
             if (v is not null)
@@ -314,7 +322,7 @@ try
                 __run.Feature("octree_cells", octree.Cells, "cells", FeatureAt.Final).Feature("octree_near_tests", octree.NearTests, "tests", FeatureAt.Final)
                      .Feature("octree_triangle_tests", octree.TriangleTests, "tests", FeatureAt.Final).Feature("octree_threads", octree.ThreadsUsed, "threads", FeatureAt.Final);
             }
-            return Emit(new { verb, rel, policy = SweptGeometry.PolicyVersion, r.Status, r.Reason, r.Geometry, r.MaxDelta, r.Converged, r.Solid,
+            return Emit(new { verb, rel, policy = SweptGeometry.PolicyVersion, solidPolicy = sweepSolid, r.Status, r.Reason, r.Geometry, r.MaxDelta, r.Converged, r.Solid,
                               animations = r.Animations, samples = r.Samples.Count,
                               outerBounds = SampleBounds(r.Samples),
                               volume = v }, r.Status == "built");
@@ -325,6 +333,8 @@ try
 }
 catch (Exception ex) when (ex is not ArgumentException)
 {
-    return Emit(new { verb, rel, status = "error", reason = ex.GetType().Name + ": " + ex.Message }, false);
+    var why = ex.GetType().Name + ": " + ex.Message;
+    return Emit(verb == "sweep" ? new { verb, rel, status = "error", reason = why, solidPolicy = sweepSolid }
+                                : new { verb, rel, status = "error", reason = why }, false);
 }
 finally { assets?.Dispose(); }

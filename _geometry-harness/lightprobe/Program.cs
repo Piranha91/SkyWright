@@ -17,6 +17,9 @@
 // incomplete. No decision is made here: attribution and verdicts are the caller's (the fold).
 // Emitting parts (lane A 2026-10-13, with --geometry): every enabled, drawn reference with a model carries `emitters` (its placed
 // emissive / self-lit effect / particle emitter boxes, LightReach.ReadEmitters) or `emitterStatus` when its mesh could not be read for them.
+// identity.solidPolicy / anchorPolicy: MeshIntersection.PolicyVersion and MeshAnchor.PolicyVersion when the run wrote at least one
+// pointInSolid row (identity.pointInSolidRows counts the rows written, refused ones included), else "none" (no --geometry,
+// --list-interiors, or no light inside any placed box).
 // Base Object Swapper: not applied (stated in the output).
 // --list-interiors: every interior cell of the order with its placed-light count (the calibration sample frame).
 
@@ -168,7 +171,12 @@ var llf = LlfDetect();
 
 var jsonOpts = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
                                            NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals };
-object Identity() => new { schema = "housecarl.light/1", policy = LightReach.PolicyVersion, bos = "off", pose = "stored pose (an animated shape is read where the file stores it)", population = "load-time", state = "baseline",
+// the solid rule and anchor reading the pointInSolid rows depend on: named when the run wrote at least one row (refused ones
+// included), else "none"; Identity() is evaluated when the JSON is written, after every cell
+int pointInSolidRows = 0;
+object Identity() => new { schema = "housecarl.light/1", policy = LightReach.PolicyVersion,
+                          solidPolicy = pointInSolidRows > 0 ? MeshIntersection.PolicyVersion : "none",
+                          anchorPolicy = pointInSolidRows > 0 ? MeshAnchor.PolicyVersion : "none", pointInSolidRows, bos = "off", pose = "stored pose (an animated shape is read where the file stores it)", population = "load-time", state = "baseline",
                           configuration = cfg.Identity("load-time", "baseline").Short, plugins = pluginName, llf };
 
 if (listInteriors)
@@ -335,6 +343,7 @@ foreach (var (cedid, ck) in scopeCells)
                 catch (Exception ex) { pis.Add(new { @ref = on[bx.Owner].Key.ToString(), point = "refused", reason = ex.Message }); }
             }
             row["pointInSolid"] = pis;
+            pointInSolidRows += pis.Count;
             var inc = refused.Where(u => Vector3.Distance(u.At, at) <= r + u.Reach).Select(u => u.Key.ToString()).ToList();
             if (inc.Count > 0) row["incomplete"] = inc;
         }
