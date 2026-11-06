@@ -225,6 +225,34 @@ static class ContactSelfTest
               fits.All(f => f.est >= f.x.Peak && f.est <= f.x.Peak * 1.30),
               string.Join("; ", fits.Select(f => $"T{f.x.T} {f.est:0.00}/{f.x.Peak:0.00}")));
 
+        // CR-21: the warning names the fewest programs, largest first, whose memory covers the shortfall (reviewer, 2026-11-06).
+        var three = new List<ProcessUse> { new("c", 3, 1 * G), new("a", 1, 4 * G), new("b", 2, 3 * G) };
+        long shortfall = nf - 5 * G;   // Held(): 2 GB free + 3 GB own
+        var w3 = MemoryRoute.Decide(Held(), s, RouteRequest.Auto, three).Warning ?? "";
+        Check("CR-21 the warning names the fewest programs, largest first, that cover the shortfall: python alone; then a and b, not c",
+              c1.Warning is { } w21 && w21.Contains("python") && !w21.Contains("firefox")
+              && shortfall > 4 * G && shortfall <= 7 * G && w3.Contains("a (pid 1") && w3.Contains("b (pid 2") && !w3.Contains("c (pid 3"),
+              $"shortfall {shortfall / 1e9:0.00} GB; {c1.Warning} // {w3}");
+
+        // CR-23: the lean need against every floor run on the contact-baseline order (Gate B D-2, hold C): live, lean budget, GC heap
+        // limit, completed. A limit the lean route did not survive must be refused up front, one that it survived must run lean.
+        var floor = new (string Run, double L, double B, double Limit, bool Completed)[]
+        {
+            ("cand GC 4 GiB", 2.52, 0.859, 4.295, false), ("cand job 5.5 GiB", 2.52, 0.886, 4.429, true),
+            ("cand job 6 GiB", 2.60, 0.966, 4.832, true), ("prod GC 4.5 GiB, 1G", 2.66, 1.074, 4.832, true), ("prod GC 5 GiB, 1G", 2.66, 1.074, 5.369, true),
+        };
+        var floorOut = floor.Select(f => (f, d: MemoryRoute.Decide(new MemoryReadings(64 * G, 30 * G, 4 * G, (long)(f.Limit * G), "GC heap hard limit"),
+            new RouteShape((long)(f.L * G), 8, 2L << 30, 8, (long)(f.B * G)), RouteRequest.Auto, none))).ToList();
+        Check("CR-23 the lean need agrees with every floor run: refused where the lean route ran out, lean where it completed",
+              floorOut.All(x => x.f.Completed ? x.d.Route == RouteName.Lean : x.d.Case == MemoryCase.NothingFits),
+              string.Join("; ", floorOut.Select(x => $"{x.f.Run}: need {x.d.NeedLean / 1e9:0.000} vs {x.f.Limit:0.000} -> {x.d.Case}/{x.d.Route?.ToString() ?? "-"}")));
+
+        // CR-24: an explicit shape that does not fit says so, and that dropping the flags lets the route run lean.
+        var e3 = MemoryRoute.Decide(new MemoryReadings(64 * G, 30 * G, 3 * G, 3 * G, "GC heap hard limit"), s with { LeanBudget = 2L << 30 }, RouteRequest.Auto, others, explicitShape: true);
+        Check("CR-24 an explicit --threads/--cache-budget that does not fit: the sentence blames the flags and says dropping them runs lean",
+              e3.ExitCode == 2 && e3.Refusal is { } r24 && r24.Contains("--threads/--cache-budget") && r24.Contains("without them")
+              && !r24.Contains("even on the lean route"), D(e3));
+
         var e1 = MemoryRoute.Decide(Held(), s, RouteRequest.Auto, others, explicitShape: true);
         var e2 = MemoryRoute.Decide(Free(nf - 1, "GC heap hard limit"), s, RouteRequest.Auto, others, explicitShape: true);
         Check("CR-12 an explicit --threads/--cache-budget is kept as asked: contended warns and keeps it; absent names the limit and keeps it",
