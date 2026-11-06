@@ -104,12 +104,23 @@ using HousecarlCore.Progress;
 //   --cache-budget SIZE|auto  the byte budget the per-placement contact caches share, and in the default pass the decoded meshes
 //                   too (least-recently-used; an evicted mesh is decoded again from the same bytes; e.g. 2G, 512M;
 //                   minimum 64M). auto (default) = the smaller of 20 % of the memory the runtime may use (physical, or the heap
-//                   hard limit), 40 % of (memory free before the host loop - live data) and 1 GiB, or 2 GiB per thread with
-//                   --threads above 1 (an explicit size may exceed it).
+//                   hard limit) and 1 GiB, on either memory route (until 2026-11-05: 2 GiB per thread above one thread, which bought
+//                   no measured speed). An explicit size is kept as asked (it may exceed that) and the route only warns.
 //                   Output does not depend on it; a smaller budget rebuilds evicted grids (slower, less memory)
 //   --threads N     the host loop's worker threads (default 8; 1 = one thread, as before). Rows, their order and every count are the
-//                   same at any N. Above 1 the automatic --cache-budget ceiling is 2 GiB per thread, still under its 20 % and 40 % terms.
+//                   same at any N. An explicit N is kept as asked by the memory route, which then only warns.
 //                   --geom-report, HC_MEMSTAGES and HC_STALEBASE record first-seen order, so they run on one thread
+//   --memory-route auto|fast|lean|ask  (default pass; _shared/MemoryRoute.cs, Piranha's rule 2026-11-05) decided before the host
+//                   loop from live data, physical memory, free memory and any limit (GC heap hard limit, job object):
+//                   auto (default): fast when the memory is there; lean when a limit or the machine is too small; when other
+//                   programs hold the memory, a warning naming them, then lean as the unattended default. fast: the user's answer
+//                   after closing them (or to run fast anyway). lean: the user's refusal. ask: at that warning stop before the host
+//                   loop with exit 5 and one sentence - for a session running contactprobe for a user, who is asked and the run
+//                   repeated with fast or lean; ordersweep and the evaluation controller never pass it (they run auto). Nothing fits
+//                   even lean: exit 2 with one sentence. Running out of memory later: exit 2, one sentence, no emit or rows left.
+//                   The route, its case, readings, estimate and warning go to the console and to <emit>.memory.json (beside --json
+//                   without --emit); emit and rows are the same on every route. An earlier run's emit, rows and record at this run's
+//                   paths are removed before the route is decided.
 //   --phase-timers FILE  the contact code's own time split (ContactIndex BestContact / PairContact / Judge, their caches and the core
 //                   contact steps; _shared/ContactIndex.cs ContactTimer) printed after the run, recorded as run features and written to
 //                   FILE as JSON; for measuring where the time goes. Changes no output
@@ -153,6 +164,12 @@ contactprobe: placement contact and explicit render-surface pair review
 Candidate Mods lists select asset priority. Surface/contact evidence is not a defect verdict.
 Other modes: --absolute, --labelled-mover PLUGIN, or --empty-space OUTPUT (fixtures a mover left in empty space: their
   assembly reaches no floor or wall; --emit writes that class as EMPTY-SPACE rows); default is the moved-host pass.
+Default pass memory: --memory-route auto|fast|lean|ask (default auto). Fast when the memory exists; lean when a limit or the
+  machine is too small; when other programs hold the memory, a warning naming them, then lean as the unattended default.
+  fast = the user's answer after closing them; lean = the user's refusal; ask = stop at that warning with exit 5 and one
+  sentence. Pass ask only from a session running contactprobe for a user who can be asked (then rerun with fast or lean);
+  ordersweep and the evaluation controller never pass it. Nothing fits: exit 2, one sentence. The route is recorded in the
+  console and in <emit>.memory.json; emit and rows do not depend on it. --threads N / --cache-budget SIZE are kept as asked.
 Default pass only: --trace OUTPUT [--trace-keys KEYS.txt] writes the per-object trace (why each requested FormKey
 was or was not flagged; without a key list, counting mode checks the coverage counters). Output is otherwise unchanged.
 See contactprobe/Program.cs usage documentation for those modes. Help performs no load-order scan.
@@ -183,6 +200,13 @@ HashSet<string>? only = null;
 bool bosOn = true;
 long? cacheBudget = null;   // --cache-budget: null = CacheBudget.Auto()
 int threads = 8;            // --threads: the host loop's workers
+bool threadsExplicit = false;   // --threads given: the route keeps the asked shape
+var memoryRoute = RouteRequest.Auto;   // --memory-route auto|fast|lean|ask (_shared/MemoryRoute.cs)
+// The route's record (written beside the emit as <emit>.memory.json) and the outputs it guards.
+RouteDecision? routeDecision = null; MemoryReadings? routeReadings = null; IReadOnlyList<ProcessUse> routeOthers = Array.Empty<ProcessUse>();
+string routeReadingsFrom = "", routeOutcome = "not decided"; long? routeGcLimitAfter = null; string? routeHeapNote = null;
+// The out-of-memory sentence, built before it is needed, and a reserve freed first thing in the handler (real exhaustion: D-2).
+string oomSentence = ""; byte[]? oomReserve = null; const int OomReserveBytes = 64 << 20;
 bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (default on; off = the core reading as before)
 bool terrain = false; float? floatThreshold = null, burialThreshold = null, burialShare = null; int terrainSample = 1;   // --terrain (TerrainReview.cs)
 var enablePlugins = new List<string>();
@@ -268,7 +292,7 @@ try
         else if (flag == "--cache-budget")
         {
             var v = NeedValue(i, flag);
-            // "auto" is the default (null), so the fit check's free-memory term applies to it as well
+            // "auto" is the default (null): the memory route sizes it at the fit check
             cacheBudget = v.Trim().Equals("auto", StringComparison.OrdinalIgnoreCase) ? null
                         : CacheBudget.Parse(v) ?? throw new ArgumentException("--cache-budget takes a size (e.g. 2G, 512M, bytes) or auto");
             if (cacheBudget < CacheBudget.MinimumBytes) throw new ArgumentException($"--cache-budget {v} is below the minimum {CacheBudget.MinimumBytes >> 20} MiB");
@@ -279,6 +303,17 @@ try
             var v = NeedValue(i, flag);
             if (!int.TryParse(v, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out threads) || threads < 1)
                 throw new ArgumentException($"--threads takes a whole number of at least 1, not {v}");
+            threadsExplicit = true;
+            i++;
+        }
+        else if (flag == "--memory-route")
+        {
+            var v = NeedValue(i, flag);
+            memoryRoute = v switch
+            {
+                "auto" => RouteRequest.Auto, "fast" => RouteRequest.Fast, "lean" => RouteRequest.Lean, "ask" => RouteRequest.Ask,
+                _ => throw new ArgumentException($"--memory-route takes auto, fast, lean or ask, not {v}")
+            };
             i++;
         }
         else if (flag == "--radius") { radiusOn = NeedValue(i, flag) switch { "on" => true, "off" => false, _ => throw new ArgumentException("--radius takes on|off") }; i++; }
@@ -354,6 +389,19 @@ if (reverseOfPath is not null)
             ? "--reverse-of writes no judged rows, trace, population audit or contact timers (it judges no host); drop --json, --trace, --population-audit and --phase-timers"
         : null;
     if (clash is not null) { Console.Error.WriteLine(clash); return 2; }
+}
+// The default pass (2026-11-05): an earlier run's emit, rows and memory-route record at this run's paths are removed now, and an
+// unhandled failure from here on - running out of memory before the route is decided included - removes this run's unfinished
+// emit and rows; running out of memory ends in one sentence.
+if (selectedModes == 0)
+{
+    RemoveEarlierOutputs();
+    // Built now, while memory is there: a real exhaustion may leave the handler nothing to allocate with.
+    oomSentence = $"contactprobe: memory: ran out of memory before the memory route was decided (this process may use "
+                + $"{GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1e9:0.0} GB) and wrote no emit or rows; run it on a machine with more memory, or raise the limit.";
+    oomReserve = GC.AllocateUninitializedArray<byte>(OomReserveBytes, pinned: false);
+    for (int k = 0; k < oomReserve.Length; k += 4096) oomReserve[k] = 1;   // committed, so freeing it returns real room
+    AppDomain.CurrentDomain.UnhandledException += (_, e) => OnUnhandled(e.ExceptionObject as Exception);
 }
 List<FormKey>? traceKeys = null;
 if (traceKeysPath is not null && File.Exists(traceKeysPath))
@@ -594,8 +642,11 @@ if (threads > 1 && (geomReport is not null || MemStages.On || Environment.GetEnv
 {
     Console.WriteLine($"   --threads {threads} set to 1: --geom-report, HC_MEMSTAGES and HC_STALEBASE record first-seen order");
     threads = 1;
+    threadsExplicit = true;   // the memory route keeps the one thread
 }
-try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry, automaticThreads: threads) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
+// Built with the one-thread (lean) budget whatever the route: the hashes before the route is decided then hold the same memory
+// on either route; the fit check raises it for the fast route.
+try { cidx = new ContactIndex(GeomOf, cacheBudget, memoiseGeometry: !boundedGeometry, automaticThreads: 1) { Epsilon = eps, Reach = reach, NearBand = 2f * eps, BoxBand = 2f * eps + 2f, ReadRadius = radiusOn }; }
 catch (CacheBudget.AutomaticBudgetUnavailableException ex) { Console.Error.WriteLine(ex.Message + "; " + ex.Selection.Describe()); return 2; }
 cidx.Budget.StableLargestTie = threads > 1;
 meshReader.Store(boundedGeometry, cidx.Budget);
@@ -1002,9 +1053,11 @@ if (emptySpaceOut is not null)
                                 EmptySpaceOutput.NodeCheck(idx, assets), emptySpaceOut, emitPath, basePath, Instance, paths.Count - unreadable.Count, unreadable.Count,
                                 cfg.Identity(population?.Identity("load-time") ?? "load-time", cidx.State?.Name ?? EnablePopulation.BaselineStateName), listN, sw,
                                 radiusOn, bosOn, forceEnable, population, populationAuditEmit, populationAuditOut);
+// HC_CONTACT_FAULT=oom-before-route (known-answer tests only): out of memory in the hashes, before the route is decided.
+if (Environment.GetEnvironmentVariable("HC_CONTACT_FAULT") == "oom-before-route") throw new OutOfMemoryException("HC_CONTACT_FAULT=oom-before-route");
 var depHash = cidx.DependentSnaps(skips);
 MemStages.Print("dependents hashed", cidx, 0, 0);
-if (FitCheck() is { } fitRefusal) { Console.Error.WriteLine("contactprobe: " + fitRefusal); return 2; }
+if (reverseOfPath is null && FitCheck() is { } fitStop) { Console.Error.WriteLine("contactprobe: " + fitStop.Message); return fitStop.Exit; }
 Func<Snap, bool>? winScope = null;
 var winHash = cidx.PhysicalWinners(winScope, skips);
 MemStages.Print("winner arm hashed", cidx, 0, 0);
@@ -1081,8 +1134,11 @@ bool HostOutsidePopulation(MovedHost h)
     var hb = cidx.WorldBox(h.PrevBase, h.Previous);
     return !(!hb.IsEmpty && depHash.Near(h.Previous.Space, hb, cidx.Reach).Any(d => RefInPopulation(d.Item.Key)));
 }
+// HC_CONTACT_FAULT=oom-host-loop (known-answer tests only): the host loop runs out of memory at its first host.
+bool faultOom = Environment.GetEnvironmentVariable("HC_CONTACT_FAULT") == "oom-host-loop";
 void TakeHostRows(List<ContactRow> judged)
 {
+    if (faultOom) throw new OutOfMemoryException("HC_CONTACT_FAULT=oom-host-loop");
     if (population is not null)
     {
         int before = judged.Count;
@@ -1245,38 +1301,109 @@ Console.WriteLine($"   the class (mod mover, Fixed, Stranded + Orphaned): {class
                 + $"author after the mover {classRows.Count(r => r.AuthorAfterMover):N0}; mover's side overrode the dependent without moving it {classRows.Count(r => r.DepTouchedByMoverSide):N0}");
 
 // The fit check before the host loop fills the contact caches: one compacting full collection, the live heap, and the memory
-// free now. Refuses (exit 2) when the live data plus the minimum cache cannot fit; lowers an automatic budget to what fits.
-string? FitCheck()
+// free now. (Before 2026-11-05 it refused on free memory alone and lowered an automatic budget to what fits.)
+// (Since 2026-11-05) it also decides the memory route (Piranha's rule, _shared/MemoryRoute.cs): fast when the memory exists; a
+// warning naming the programs that hold it; lean when refused, unattended or absent; one sentence when nothing fits. An earlier
+// run's emit, rows and record were removed when the default pass began, so no stop, refusal or crash leaves a file there that
+// reads as this run's.
+(string Message, int Exit)? FitCheck()
 {
     var t0 = sw.Elapsed.TotalSeconds;
     System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
     GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
     long live = GC.GetTotalMemory(false);
-    long? free = CacheBudget.AvailablePhysicalBytes();
-    string line = $"   memory before the host loop: live {live / 1e9:0.00} GB, free now {(free is { } f0 ? $"{f0 / 1e9:0.00} GB" : "unknown")}, contact cache budget {cidx.Budget.Limit / 1e9:0.00} GB";
-    if (free is not { } f)
+    long ownPrivate; using (var me = Process.GetCurrentProcess()) ownPrivate = me.PrivateMemorySize64;
+    var (readings, others, from) = MemoryReadingsReader.Read(ownPrivate);
+    routeReadings = readings; routeOthers = others; routeReadingsFrom = from;
+    long runtimeAvailable = Math.Min(GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, readings.ProcessLimit ?? long.MaxValue);
+    long fastBudget = cacheBudget ?? Math.Max(CacheBudget.MinimumBytes, Math.Min(MemoryRoute.FastBudgetCeiling, (long)(runtimeAvailable * CacheBudget.AutoFraction)));
+    long leanBudget = cacheBudget ?? CacheBudget.Auto(runtimeAvailable);
+    var shape = new RouteShape(live, threads, fastBudget, threadsExplicit ? threads : MemoryRoute.LeanThreads, leanBudget);
+    var d = MemoryRoute.Decide(readings, shape, memoryRoute, others, explicitShape: threadsExplicit || cacheBudget is not null);
+    routeDecision = d;
+    if (d.Route is { } decidedRoute)
+        oomSentence = $"contactprobe: memory: the {decidedRoute.ToString().ToLowerInvariant()} route ran out of memory after it was chosen and wrote no emit or rows; "
+                    + (decidedRoute == RouteName.Lean ? "run it on a machine with more memory, or raise the limit." : "rerun with --memory-route lean, or close other programs and rerun.");
+    Console.WriteLine($"   memory before the host loop: live {live / 1e9:0.00} GB, this process {ownPrivate / 1e9:0.00} GB, "
+                    + $"free now {(readings.AvailablePhysical is { } f0 ? $"{f0 / 1e9:0.00} GB" : "unknown")} of {readings.TotalPhysical / 1e9:0.00} GB; readings from {from}");
+    if (d.Warning is { } w) { Console.WriteLine("   " + w); Console.Error.WriteLine("contactprobe: " + w); }
+    if (d.Route is not { } route)
     {
-        if (cacheBudget is null)
-        {
-            cidx.RefreshAutomaticBudget(() => CacheBudget.SelectAutomatic(
-                GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, null, live, "managed bytes after compacting full collection"));
-            line += " -> " + cidx.AutomaticBudgetReport();
-        }
-        Console.WriteLine(line + $" (fit check skipped: free memory unreadable on this platform)  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
-        return null;
+        Console.WriteLine("   " + d.Line + $"  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
+        routeOutcome = d.ExitCode == MemoryRoute.AskExit ? "stopped: asked the user (--memory-route ask)" : "refused: nothing fits";
+        WriteRouteSidecar();
+        return (d.Refusal!, d.ExitCode);
     }
-    if (CacheBudget.FitRefusal(live, f, "--radius off lowers the need; a larger machine or freeing memory raises what fits") is { } refusal) return refusal;
-    if (cacheBudget is null)
+    threads = d.Threads;
+    cidx.Budget.StableLargestTie = threads > 1;
+    if (cacheBudget is null) cidx.Budget.SetLimit(d.Budget);
+    if (d.HeapLimit is { } heap)
     {
-        cidx.RefreshAutomaticBudget(() => CacheBudget.SelectAutomatic(
-            GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, f, live, "managed bytes after compacting full collection", threads));
-        line += " -> " + cidx.AutomaticBudgetReport();
-        if (threads > 1 && cidx.AutomaticBudgetSelection?.MemoryHeldWarning() is { } held) line += " (" + held + ")";
+        // The lean route's collector works inside what is there (GC.RefreshMemoryLimit, .NET 8+); refused when below committed.
+        AppContext.SetData("GCHeapHardLimit", (ulong)heap);
+        try { GC.RefreshMemoryLimit(); routeHeapNote = $"GC heap limit {heap / 1e9:0.00} GB applied"; }
+        catch (InvalidOperationException ex) { routeHeapNote = $"the runtime refused the {heap / 1e9:0.00} GB heap limit ({ex.Message}); running without it"; }
+        routeGcLimitAfter = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
     }
-    else if ((long)(f * 0.9) - live < cidx.Budget.Limit)
-        line += $" (warning: the --cache-budget exceeds the {((long)(f * 0.9) - live) / 1e9:0.00} GB that fits; kept as asked)";
-    Console.WriteLine(line + $"  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
+    Console.WriteLine("   " + d.Line + (routeHeapNote is { } hn ? $"; {hn}" : "") + $"; contact cache {cidx.Budget.Limit / 1e9:0.00} GB  ({sw.Elapsed.TotalSeconds - t0:0.0}s)");
+    routeOutcome = "running";
+    WriteRouteSidecar();
     return null;
+}
+
+// The route record beside the emit (or the rows file): route, case, readings, estimate, warning and how the run ended.
+string? RouteSidecarPath() => emitPath is not null ? emitPath + ".memory.json" : jsonPath is not null ? jsonPath + ".memory.json" : null;
+void WriteRouteSidecar()
+{
+    if (RouteSidecarPath() is not { } p || routeDecision is not { } d) return;
+    var doc = new Dictionary<string, object?>
+    {
+        ["probe"] = "contactprobe", ["route"] = d.Route?.ToString().ToLowerInvariant(), ["case"] = d.Case switch
+        {
+            MemoryCase.Free => "free", MemoryCase.Contended => "contended", MemoryCase.Absent => "absent", _ => "nothing-fits"
+        },
+        ["request"] = memoryRoute.ToString().ToLowerInvariant(), ["unattendedDefault"] = d.UnattendedDefault, ["line"] = d.Line,
+        ["warning"] = d.Warning, ["refusal"] = d.Refusal, ["exitCode"] = d.ExitCode, ["threads"] = d.Threads, ["cacheBudget"] = d.Budget,
+        ["heapLimit"] = d.HeapLimit, ["gcLimitAfter"] = routeGcLimitAfter, ["heapNote"] = routeHeapNote,
+        ["needFastBytes"] = d.NeedFast, ["needLeanBytes"] = d.NeedLean, ["readingsFrom"] = routeReadingsFrom,
+        ["readings"] = routeReadings, ["others"] = routeOthers, ["outcome"] = routeOutcome,
+    };
+    try
+    {
+        var dir = Path.GetDirectoryName(Path.GetFullPath(p));
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        File.WriteAllText(p, JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true }));
+    }
+    catch (IOException ex) { Console.Error.WriteLine($"contactprobe: could not write the memory-route record {p}: {ex.Message}"); }
+}
+
+// An earlier run's emit, rows and route record at this run's paths: removed at the start of the default pass.
+void RemoveEarlierOutputs()
+{
+    foreach (var p in new[] { emitPath, jsonPath, RouteSidecarPath() })
+        if (p is not null && File.Exists(p))
+        {
+            File.Delete(p);
+            Console.WriteLine($"   removed an earlier run's {Path.GetFileName(p)} at this run's path, so nothing there reads as this run's until it finishes");
+        }
+}
+
+// After the route is decided: an unhandled failure removes this run's unfinished emit and rows; running out of memory ends in one sentence.
+void OnUnhandled(Exception? ex)
+{
+    if (routeOutcome == "completed") return;
+    // Room first: drop the reserve and collect, so what follows can allocate after a real exhaustion; the sentence is prebuilt.
+    oomReserve = null;
+    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+    bool oom = ex is OutOfMemoryException || ex is AggregateException ag && ag.InnerExceptions.Count > 0 && ag.InnerExceptions[0] is OutOfMemoryException;
+    foreach (var p in new[] { emitPath, jsonPath })
+        if (p is not null && File.Exists(p)) { try { File.Delete(p); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
+    try { routeOutcome = oom ? "failed: out of memory" : $"failed: {ex?.GetType().Name}"; WriteRouteSidecar(); }
+    catch (OutOfMemoryException) { }
+    if (!oom) return;
+    try { Console.Out.Flush(); } catch (OutOfMemoryException) { }
+    Console.Error.WriteLine(oomSentence);
+    Environment.Exit(2);
 }
 
 void StaleBaseReport()
@@ -1503,5 +1630,7 @@ if (cidx.Timer is { } contactTimer)
     File.WriteAllText(phaseTimersPath!, contactTimer.ToJson(new Dictionary<string, object> { ["hostLoopSeconds"] = hostLoopSeconds }));
     Console.WriteLine($"   wrote the contact timer table -> {phaseTimersPath}");
 }
+routeOutcome = "completed";
+WriteRouteSidecar();
 Console.WriteLine($"elapsed {sw.Elapsed.TotalSeconds:0.0}s");
 return 0;

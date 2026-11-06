@@ -154,7 +154,120 @@ static class ContactSelfTest
         }
         finally { Directory.Delete(dir, recursive: true); }
 
+        MemoryRouteCases(Check);
+
         Console.WriteLine($"contactprobe --self-test: {pass} passed, {fail} failed");
         return fail == 0 ? 0 : 1;
+    }
+
+    /// <summary>CR-1..CR-10, CR-12: the memory route (_shared/MemoryRoute.cs) on constructed readings (Piranha's rule, 2026-11-05).</summary>
+    static void MemoryRouteCases(Action<string, bool, string> Check)
+    {
+        const long G = 1_000_000_000;
+        var s = new RouteShape(Live: 2_660_000_000, FastThreads: 8, FastBudget: 1L << 30, LeanThreads: 1, LeanBudget: 1L << 30);
+        long nf = (long)Math.Ceiling(MemoryRoute.FastNeed(s) * (1 + MemoryRoute.Margin));
+        var others = new List<ProcessUse> { new("python", 4242, 26 * G), new("firefox", 77, 3_100_000_000) };
+        var none = new List<ProcessUse>();
+        MemoryReadings Free(long? limit = null, string src = "none") => new(64 * G, 30 * G, 3 * G, limit, src);
+        MemoryReadings Held() => new(64 * G, 2 * G, 3 * G, null, "none");
+        static string D(RouteDecision d) => $"{d.Case} {d.Route?.ToString() ?? "-"} exit {d.ExitCode} threads {d.Threads}; {d.Line} | {d.Warning} | {d.Refusal}";
+
+        var free = MemoryRoute.Decide(Free(), s, RouteRequest.Auto, others);
+        Check("CR-8 memory free: fast, on the fast threads, exit 0", free.Case == MemoryCase.Free && free.Route == RouteName.Fast && free.ExitCode == 0
+              && free.Threads == s.FastThreads && free.Warning is null, D(free));
+
+        var c1 = MemoryRoute.Decide(Held(), s, RouteRequest.Auto, others);
+        Check("CR-1 contended, auto: the warning names the largest other program (name, pid, GB); lean as the unattended default",
+              c1.Case == MemoryCase.Contended && c1.Route == RouteName.Lean && c1.UnattendedDefault && c1.ExitCode == 0
+              && c1.Warning is { } w1 && w1.Contains("python") && w1.Contains("4242") && w1.Contains("26.0 GB")
+              && c1.Line.Contains("unattended default") && c1.Threads == s.LeanThreads && c1.Budget == s.LeanBudget
+              && c1.HeapLimit is { } h1 && h1 >= MemoryRoute.LeanNeed(s) && h1 <= 5 * G, D(c1));
+
+        var c2 = MemoryRoute.Decide(Held(), s, RouteRequest.Ask, others);
+        Check("CR-2 contended, ask: stop before the host loop, exit 5, one sentence naming the program and both answers",
+              c2.Case == MemoryCase.Contended && c2.Route is null && c2.ExitCode == 5 && c2.Refusal is { } r2 && !r2.Contains('\n')
+              && r2.Contains("python") && r2.Contains("--memory-route fast") && r2.Contains("--memory-route lean"), D(c2));
+
+        var c3 = MemoryRoute.Decide(Held(), s, RouteRequest.Fast, others);
+        Check("CR-3 contended, fast (the user accepts): fast, saying free memory is short", c3.Route == RouteName.Fast && c3.ExitCode == 0
+              && c3.Threads == s.FastThreads && c3.Line.Contains("short") && !c3.UnattendedDefault, D(c3));
+
+        var c4 = MemoryRoute.Decide(Free(nf - 1, "GC heap hard limit"), s, RouteRequest.Auto, others);
+        Check("CR-4 absent by a GC heap limit: lean, the limit named, and no advice to close programs (closing frees nothing)",
+              c4.Case == MemoryCase.Absent && c4.Route == RouteName.Lean && c4.Warning is null && c4.Line.Contains("GC heap hard limit")
+              && !c4.Line.Contains("clos", StringComparison.OrdinalIgnoreCase) && !c4.UnattendedDefault, D(c4));
+
+        var c5 = MemoryRoute.Decide(Free(nf - 1, "job object"), s, RouteRequest.Auto, none);
+        Check("CR-5 absent by a job object's limit: lean, the job object named", c5.Case == MemoryCase.Absent && c5.Route == RouteName.Lean
+              && c5.Line.Contains("job object"), D(c5));
+
+        var c6 = MemoryRoute.Decide(new MemoryReadings(nf - 1, nf - 1, 0, null, "none"), s, RouteRequest.Auto, others);
+        Check("CR-6 absent: the machine's physical memory is below the fast need: lean", c6.Case == MemoryCase.Absent && c6.Route == RouteName.Lean
+              && c6.Warning is null, D(c6));
+
+        var c7 = MemoryRoute.Decide(Free(2 * G, "job object"), s, RouteRequest.Auto, others);
+        Check("CR-7 nothing fits (the limit is below even the lean need): refuse, exit 2, one sentence saying what to try",
+              c7.Case == MemoryCase.NothingFits && c7.Route is null && c7.ExitCode == 2 && c7.Refusal is { } r7 && !r7.Contains('\n')
+              && r7.Contains("lean") && r7.Contains("limit"), D(c7));
+
+        var atEdge = MemoryRoute.Decide(new MemoryReadings(64 * G, nf - 3 * G, 3 * G, null, "none"), s, RouteRequest.Auto, others);
+        var past = MemoryRoute.Decide(new MemoryReadings(64 * G, nf - 3 * G - 1, 3 * G, null, "none"), s, RouteRequest.Auto, others);
+        Check("CR-9 boundary: free + own == need with margin is fast; one byte less is contended; own private counts as available",
+              atEdge.Case == MemoryCase.Free && past.Case == MemoryCase.Contended, $"{D(atEdge)} // {D(past)}");
+
+        // The recorded readings on the contact-baseline order (GATE-A 3.3 and Gate B D-1): threads, live, budget, peak private (GB).
+        var recorded = new (int T, double L, double B, double Peak)[]
+            { (1, 2.66, 1.07, 8.15), (8, 2.66, 1.07, 8.92), (3, 3.32, 6.44, 15.43), (8, 3.32, 11.68, 21.47), (8, 3.32, 11.29, 21.27), (16, 3.32, 11.51, 21.67),
+              (8, 2.66, 1.074, 9.32), (8, 2.66, 1.074, 9.14), (8, 3.32, 2.147, 11.39), (8, 3.32, 2.147, 11.28), (8, 3.32, 4.295, 15.03),
+              (8, 3.32, 4.295, 16.11), (8, 3.32, 11.96, 21.41), (8, 3.32, 11.76, 21.03) };
+        var fits = recorded.Select(x => (x, est: MemoryRoute.FastNeed(new RouteShape((long)(x.L * G), x.T, (long)(x.B * G), 1, 1L << 30)) * (1 + MemoryRoute.Margin) / G)).ToList();
+        Check("CR-10 the fast need with its margin covers each recorded peak and over-states none by more than 30 %",
+              fits.All(f => f.est >= f.x.Peak && f.est <= f.x.Peak * 1.30),
+              string.Join("; ", fits.Select(f => $"T{f.x.T} {f.est:0.00}/{f.x.Peak:0.00}")));
+
+        // CR-21: the warning names the fewest programs, largest first, whose memory covers the shortfall (reviewer, 2026-11-06).
+        var three = new List<ProcessUse> { new("c", 3, 1 * G), new("a", 1, 4 * G), new("b", 2, 3 * G) };
+        long shortfall = nf - 5 * G;   // Held(): 2 GB free + 3 GB own
+        var w3 = MemoryRoute.Decide(Held(), s, RouteRequest.Auto, three).Warning ?? "";
+        Check("CR-21 the warning names the fewest programs, largest first, that cover the shortfall: python alone; then a and b, not c",
+              c1.Warning is { } w21 && w21.Contains("python") && !w21.Contains("firefox")
+              && shortfall > 4 * G && shortfall <= 7 * G && w3.Contains("a (pid 1") && w3.Contains("b (pid 2") && !w3.Contains("c (pid 3"),
+              $"shortfall {shortfall / 1e9:0.00} GB; {c1.Warning} // {w3}");
+
+        // CR-23: the lean need against every floor run on the contact-baseline order (Gate B D-2, hold C): live, lean budget, GC heap
+        // limit, completed. A limit the lean route did not survive must be refused up front, one that it survived must run lean.
+        var floor = new (string Run, double L, double B, double Limit, bool Completed)[]
+        {
+            ("cand GC 4 GiB", 2.52, 0.859, 4.295, false), ("cand job 5.5 GiB", 2.52, 0.886, 4.429, true),
+            ("cand job 6 GiB", 2.60, 0.966, 4.832, true), ("prod GC 4.5 GiB, 1G", 2.66, 1.074, 4.832, true), ("prod GC 5 GiB, 1G", 2.66, 1.074, 5.369, true),
+        };
+        var floorOut = floor.Select(f => (f, d: MemoryRoute.Decide(new MemoryReadings(64 * G, 30 * G, 4 * G, (long)(f.Limit * G), "GC heap hard limit"),
+            new RouteShape((long)(f.L * G), 8, 2L << 30, 8, (long)(f.B * G)), RouteRequest.Auto, none))).ToList();
+        Check("CR-23 the lean need agrees with every floor run: refused where the lean route ran out, lean where it completed",
+              floorOut.All(x => x.f.Completed ? x.d.Route == RouteName.Lean : x.d.Case == MemoryCase.NothingFits),
+              string.Join("; ", floorOut.Select(x => $"{x.f.Run}: need {x.d.NeedLean / 1e9:0.000} vs {x.f.Limit:0.000} -> {x.d.Case}/{x.d.Route?.ToString() ?? "-"}")));
+
+        // CR-24: an explicit shape that does not fit says so, and that dropping the flags lets the route run lean.
+        var e3 = MemoryRoute.Decide(new MemoryReadings(64 * G, 30 * G, 3 * G, 3 * G, "GC heap hard limit"), s with { LeanBudget = 2L << 30 }, RouteRequest.Auto, others, explicitShape: true);
+        Check("CR-24 an explicit --threads/--cache-budget that does not fit: the sentence blames the flags and says dropping them runs lean",
+              e3.ExitCode == 2 && e3.Refusal is { } r24 && r24.Contains("--threads/--cache-budget") && r24.Contains("without them")
+              && !r24.Contains("even on the lean route"), D(e3));
+
+        // CR-22: the programs offered to close leave out this process and the processes that started it.
+        var procs = new (string, int, long)[] { ("contactprobe", 10, 9 * G), ("bash", 9, 2 * G), ("claude", 8, 3 * G), ("python", 4242, 26 * G), ("System", 4, 5 * G) };
+        var parents = new Dictionary<int, int> { [10] = 9, [9] = 8, [8] = 1, [4242] = 1 };
+        var sel = MemoryReadingsReader.Select(procs, 10, parents);
+        Check("CR-22 other programs leave out this process, its parent chain and the system's own",
+              sel.Count == 1 && sel[0].Pid == 4242, string.Join(", ", sel.Select(x => $"{x.Name}:{x.Pid}")));
+
+        // CR-25: a job limit is named as the GC heap's share of the job's limit, not as the job's limit.
+        var js = MemoryReadingsReader.JobSource(7_516_192_768, 5_637_144_576);
+        Check("CR-25 a job object's limit is named as the GC heap's share of the job's 7.5 GB limit", js.Contains("share") && js.Contains("7.5 GB"), js);
+
+        var e1 = MemoryRoute.Decide(Held(), s, RouteRequest.Auto, others, explicitShape: true);
+        var e2 = MemoryRoute.Decide(Free(nf - 1, "GC heap hard limit"), s, RouteRequest.Auto, others, explicitShape: true);
+        Check("CR-12 an explicit --threads/--cache-budget is kept as asked: contended warns and keeps it; absent names the limit and keeps it",
+              e1.Route == RouteName.Fast && e1.Threads == s.FastThreads && e1.Warning is not null && e1.Line.Contains("kept as asked")
+              && e2.Route == RouteName.Fast && e2.Line.Contains("kept as asked") && e2.Line.Contains("GC heap hard limit"), $"{D(e1)} // {D(e2)}");
     }
 }
