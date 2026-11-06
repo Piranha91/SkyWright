@@ -181,6 +181,88 @@ def case_r5_a_reader_rebuilt_beside_its_exe_is_another_reader(tmp):
     T.check(one != two, "r5: a changed dll beside an unchanged exe changes the reader's identity")
 
 
+# ---------------------------------------------------------------- authored removals, judged against the plugin's own masters
+
+def write_plugin(path: Path, masters, esm=False):
+    """A minimal TES4 header: the flags word and one MAST subrecord per master (all evalpipeline.plugin_header reads)."""
+    body = b""
+    for m in masters:
+        z = m.encode("cp1252") + b"\0"
+        body += b"MAST" + len(z).to_bytes(2, "little") + z + b"DATA" + (8).to_bytes(2, "little") + bytes(8)
+    path.write_bytes(b"TES4" + len(body).to_bytes(4, "little") + (1 if esm else 0).to_bytes(4, "little") + bytes(12) + body)
+
+
+REMOVAL_MASTERS = {"Base.esm": [], "Mid.esm": ["Base.esm"], "Solo.esm": [], "Lux.esp": ["Base.esm"],
+                   "Late.esp": ["Mid.esm"], "Other.esp": ["Solo.esm"], "Win.esp": ["Base.esm"]}
+REMOVED_BY_NAME = "a removal by a plugin whose masters' headers could not all be read"
+
+
+class RemovalLab(Lab):
+    """The stand-in reader's removal scenario over plugin files with real TES4 headers. Late.esp and Other.esp are evaluated."""
+
+    def __init__(self, tmp: Path):
+        super().__init__(tmp, evaluated=())
+        self.plugins = list(REMOVAL_MASTERS)
+        for p, ms in REMOVAL_MASTERS.items():
+            write_plugin(self.data / p, ms, esm=p.endswith(".esm"))
+        (tmp / "prep.json").write_text(json.dumps({"baseline": ["Base.esm", "Mid.esm", "Solo.esm", "Lux.esp", "Win.esp"]}), encoding="utf-8")
+        self.write_plan()
+
+    def capture(self):
+        os.environ["FAKE_CAPTURE_SCENARIO"] = "removal"
+        try:
+            return super().capture()
+        finally:
+            os.environ.pop("FAKE_CAPTURE_SCENARIO", None)
+
+
+def contested(summary: dict, arm="baseline") -> dict:
+    """The contested-fields rows document the capture wrote for one arm."""
+    f = next(Path(p).parent / "rows.json" for p in summary[arm]["imports"] if "records.contested-fields" in p)
+    return json.loads(f.read_text(encoding="utf-8"))
+
+
+def removal_rows(doc: dict) -> list:
+    return sorted((r["Necessary"][0]["FormKey"], r["A"], r["B"], r["Field"], r["Necessary"][0]["Values"]["lost"]) for r in doc["Conflicts"])
+
+
+def check_removals(doc, tag):
+    rows = removal_rows(doc)
+    T.check(("0000B1:Base.esm", "Late.esp", "Win.esp", "EnableParent", "Reference=(absent)") in rows,
+            f"{tag}: Late.esp's removal of the leaf its master's master holds ('only in' wording) is a lost edit, got {rows}")
+    T.check(("0000B2:Base.esm", "Late.esp", "Win.esp", "EnableParent", "Reference=(absent)") in rows,
+            f"{tag}: the same removal in the 'ABSENT here' wording is a lost edit, got {rows}")
+    T.check(not [r for r in rows if r[0] == "0000B3:Base.esm"],
+            f"{tag}: a leaf the plugin's only master also lacks was never seen, so it is no removal, got {rows}")
+    T.check(not [r for r in rows if r[0] == "0000B4:Base.esm"],
+            f"{tag}: a plugin not built on the leaf's holders did not remove it, got {rows}")
+    T.expect(doc["Coverage"][0]["Judged"], 2, f"{tag}: the two removals are judged, nothing else")
+    T.expect(doc["Coverage"][0]["Unjudgeable"], {}, f"{tag}: nothing is unjudgeable")
+
+
+def case_r7_a_masters_removal_lost_to_the_winner_is_found_by_the_capture(tmp):
+    lab = RemovalLab(tmp / "r7")
+    lab.capture()
+    check_removals(contested(json.loads((tmp / "r7" / "out-1" / "capture-summary.json").read_text(encoding="utf-8"))), "r7")
+
+
+def case_r8_a_finished_arm_reused_keeps_its_removal_rows(tmp):
+    lab = RemovalLab(tmp / "r8")
+    T.expect(lab.capture(), 1, "r8: the first capture reads")
+    T.expect(lab.capture(), 0, "r8: the unchanged arm is reused")
+    check_removals(contested(json.loads((tmp / "r8" / "out-2" / "capture-summary.json").read_text(encoding="utf-8"))), "r8")
+
+
+def case_r9_a_master_missing_from_disk_is_counted_by_name(tmp):
+    lab = RemovalLab(tmp / "r9")
+    (lab.data / "Mid.esm").unlink()
+    lab.capture()
+    doc = contested(json.loads((tmp / "r9" / "out-1" / "capture-summary.json").read_text(encoding="utf-8")))
+    T.expect(removal_rows(doc), [], "r9: with Late.esp's master unreadable, none of its removals is judged a lost edit")
+    T.expect(doc["Coverage"][0]["Unjudgeable"], {REMOVED_BY_NAME: 3},
+             "r9: each of its three removals is counted under its own reason, not dropped as 'no masters'")
+
+
 # ---------------------------------------------------------------- the pipeline's stage bindings
 
 ENTRY = {"id": "t", "source": {"instance": "i", "profile": "p"}, "lab": {"instance": "i", "game": "g"},

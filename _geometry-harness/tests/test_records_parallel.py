@@ -742,6 +742,40 @@ def case_25_a_failed_measurement_costs_no_transcript(tmp):
     T.check((session / "request.jsonl").is_file() and (session / "response.jsonl").is_file(), f"25: its transcript has its real names, got {sorted(p.name for p in session.iterdir())}")
 
 
+class RemovalLab(Lab):
+    """K.RemovalLab's plugins and headers on two arms, read side by side."""
+
+    def __init__(self, tmp: Path):
+        super().__init__(tmp, arms=ARMS[:2])
+        self.plugins = list(K.REMOVAL_MASTERS)
+        for p, ms in K.REMOVAL_MASTERS.items():
+            K.write_plugin(self.data / p, ms, esm=p.endswith(".esm"))
+        (tmp / "prep.json").write_text(json.dumps({"baseline": ["Base.esm", "Mid.esm", "Solo.esm", "Lux.esp", "Win.esp"]}), encoding="utf-8")
+        self.write_plan()
+
+
+def case_28_a_masters_removal_is_found_by_a_child_capture(tmp):
+    lab = RemovalLab(tmp / "a")
+    p = lab.capture(workers=2, FAKE_CAPTURE_SCENARIO="removal")
+    T.check(p.returncode == 0, f"28: finished, exit {p.returncode}: {p.stderr[-200:]}")
+    T.expect(lab.record().get("workers"), 2, "28: the arms were read side by side, each in its own child capture")
+    for arm in ARMS[:2]:
+        T.expect(lab.attempts(arm), ["finished"], f"28: {arm} was read by a child capture")
+        K.check_removals(K.contested(lab.summary(), arm), f"28 {arm}")
+
+
+def case_29_a_master_missing_from_disk_is_counted_by_name_in_a_child_capture(tmp):
+    lab = RemovalLab(tmp / "a")
+    (lab.data / "Mid.esm").unlink()
+    p = lab.capture(workers=2, FAKE_CAPTURE_SCENARIO="removal")
+    T.check(p.returncode == 0, f"29: finished, exit {p.returncode}: {p.stderr[-200:]}")
+    T.expect(lab.record().get("workers"), 2, "29: the arms were read side by side")
+    for arm in ARMS[:2]:
+        doc = K.contested(lab.summary(), arm)
+        T.expect(K.removal_rows(doc), [], f"29 {arm}: none of Late.esp's removals is judged with its master unreadable")
+        T.expect(doc["Coverage"][0]["Unjudgeable"], {K.REMOVED_BY_NAME: 3}, f"29 {arm}: each is counted under its own reason")
+
+
 CASES = {k: v for k, v in sorted(globals().items()) if k.startswith("case_")}
 
 

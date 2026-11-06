@@ -84,7 +84,51 @@ def tree(fid):
                       {"plugin": "Win.esp", "is_winner": True, "deltas": [], "complete": True}]}
 
 
+# FAKE_CAPTURE_SCENARIO=removal: placed records an evaluated plugin lacks a leaf of, in the reader's two removal wordings.
+# Base.esm holds EnableParent on B1, B2 and B4 and lacks it on B3; Lux.esp (no one's master) and Win.esp (the winner) hold it
+# on all four. Late.esp (built on Mid.esm, built on Base.esm) drops it on B1-B3; Other.esp (built on Solo.esm) drops it on B4.
+SCENARIO = os.environ.get("FAKE_CAPTURE_SCENARIO")
+EP = "EnableParent.Reference"
+
+
+def _removal(fid, dropper, base_lacks=False, absent_wording=False):
+    def lacks(holder):
+        return f"{EP}: ABSENT here ({holder} has 000014:Base.esm)" if absent_wording else f"{EP} only in {holder}: 000014:Base.esm"
+    return ({"formid": fid, "type": "PlacedObject", "touchers": ["Base.esm", "Lux.esp", dropper, "Win.esp"],
+             "nodes": [{"plugin": "Base.esm", "deltas": [lacks("Win.esp")] if base_lacks else [], "complete": True},
+                       {"plugin": "Lux.esp", "deltas": [], "complete": True},
+                       {"plugin": dropper, "deltas": [lacks("Win.esp")], "complete": True},
+                       {"plugin": "Win.esp", "is_winner": True, "deltas": [], "complete": True}]},
+            {"formid": fid, "deltas": [lacks("Lux.esp")], "complete": True})
+
+
+REMOVAL = {"0000B1:Base.esm": _removal("0000B1:Base.esm", "Late.esp"),
+           "0000B2:Base.esm": _removal("0000B2:Base.esm", "Late.esp", absent_wording=True),
+           "0000B3:Base.esm": _removal("0000B3:Base.esm", "Late.esp", base_lacks=True),
+           "0000B4:Base.esm": _removal("0000B4:Base.esm", "Other.esp")}
+
+
+def answer_removal(a, name):
+    if name == "housecarl_check":
+        if "plugins" not in a:
+            return {"families": {"errors": {"accounting": {}, "plugins": [], "dangling": 0, "scanned_plugins": 7}}}
+        return {"families": {"scripts": {"records_with_scripts": 0, "records": []}}}
+    form = (a.get("project") or {}).get("form")
+    if form == "summary":
+        rows = [{"formid": f, "type": "PlacedObject", "override_depth": 4, "winner": "Win.esp"} for f in REMOVAL]
+        return {"matches": rows, "total": str(len(rows))}
+    if form == "tree":
+        return {"rows": [REMOVAL[f][0] for f in a["formids"] if f in REMOVAL]}
+    if form == "delta":
+        return {"rows": [REMOVAL[f][1] for f in a["formids"] if f in REMOVAL and a.get("source") in REMOVAL[f][0]["touchers"]]}
+    if form == "everything":
+        return {"records": [{"formid": f, "fields": []} for f in a["formids"]]}
+    raise ValueError(f"not supported: {a}")
+
+
 def answer(a, name):
+    if SCENARIO == "removal":
+        return answer_removal(a, name)
     if name == "housecarl_check":
         if "plugins" not in a:
             return {"families": {"errors": {"accounting": {}, "plugins": [], "dangling": 0, "scanned_plugins": 2}}}
