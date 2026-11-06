@@ -205,6 +205,8 @@ var memoryRoute = RouteRequest.Auto;   // --memory-route auto|fast|lean|ask (_sh
 // The route's record (written beside the emit as <emit>.memory.json) and the outputs it guards.
 RouteDecision? routeDecision = null; MemoryReadings? routeReadings = null; IReadOnlyList<ProcessUse> routeOthers = Array.Empty<ProcessUse>();
 string routeReadingsFrom = "", routeOutcome = "not decided"; long? routeGcLimitAfter = null; string? routeHeapNote = null;
+// The out-of-memory sentence, built before it is needed, and a reserve freed first thing in the handler (real exhaustion: D-2).
+string oomSentence = ""; byte[]? oomReserve = null; const int OomReserveBytes = 64 << 20;
 bool radiusOn = true;   // --radius: read the Havok radius for the contact gap (default on; off = the core reading as before)
 bool terrain = false; float? floatThreshold = null, burialThreshold = null, burialShare = null; int terrainSample = 1;   // --terrain (TerrainReview.cs)
 var enablePlugins = new List<string>();
@@ -394,6 +396,11 @@ if (reverseOfPath is not null)
 if (selectedModes == 0)
 {
     RemoveEarlierOutputs();
+    // Built now, while memory is there: a real exhaustion may leave the handler nothing to allocate with.
+    oomSentence = $"contactprobe: memory: ran out of memory before the memory route was decided (this process may use "
+                + $"{GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1e9:0.0} GB) and wrote no emit or rows; run it on a machine with more memory, or raise the limit.";
+    oomReserve = GC.AllocateUninitializedArray<byte>(OomReserveBytes, pinned: false);
+    for (int k = 0; k < oomReserve.Length; k += 4096) oomReserve[k] = 1;   // committed, so freeing it returns real room
     AppDomain.CurrentDomain.UnhandledException += (_, e) => OnUnhandled(e.ExceptionObject as Exception);
 }
 List<FormKey>? traceKeys = null;
@@ -1314,6 +1321,9 @@ Console.WriteLine($"   the class (mod mover, Fixed, Stranded + Orphaned): {class
     var shape = new RouteShape(live, threads, fastBudget, threadsExplicit ? threads : MemoryRoute.LeanThreads, leanBudget);
     var d = MemoryRoute.Decide(readings, shape, memoryRoute, others, explicitShape: threadsExplicit || cacheBudget is not null);
     routeDecision = d;
+    if (d.Route is { } decidedRoute)
+        oomSentence = $"contactprobe: memory: the {decidedRoute.ToString().ToLowerInvariant()} route ran out of memory in the host loop and wrote no emit or rows; "
+                    + (decidedRoute == RouteName.Lean ? "run it on a machine with more memory, or raise the limit." : "rerun with --memory-route lean, or close other programs and rerun.");
     Console.WriteLine($"   memory before the host loop: live {live / 1e9:0.00} GB, this process {ownPrivate / 1e9:0.00} GB, "
                     + $"free now {(readings.AvailablePhysical is { } f0 ? $"{f0 / 1e9:0.00} GB" : "unknown")} of {readings.TotalPhysical / 1e9:0.00} GB; readings from {from}");
     if (d.Warning is { } w) { Console.WriteLine("   " + w); Console.Error.WriteLine("contactprobe: " + w); }
@@ -1382,19 +1392,17 @@ void RemoveEarlierOutputs()
 void OnUnhandled(Exception? ex)
 {
     if (routeOutcome == "completed") return;
-    var inner = ex is AggregateException ag ? ag.Flatten().InnerExceptions.FirstOrDefault() ?? ex : ex;
+    // Room first: drop the reserve and collect, so what follows can allocate after a real exhaustion; the sentence is prebuilt.
+    oomReserve = null;
+    GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+    bool oom = ex is OutOfMemoryException || ex is AggregateException ag && ag.InnerExceptions.Count > 0 && ag.InnerExceptions[0] is OutOfMemoryException;
     foreach (var p in new[] { emitPath, jsonPath })
         if (p is not null && File.Exists(p)) { try { File.Delete(p); } catch (IOException) { } catch (UnauthorizedAccessException) { } }
-    if (inner is not OutOfMemoryException) { routeOutcome = $"failed: {inner?.GetType().Name}"; WriteRouteSidecar(); return; }
-    routeOutcome = "failed: out of memory";
-    WriteRouteSidecar();
-    Console.Out.Flush();
-    if (routeDecision?.Route is not { } decided)
-        Console.Error.WriteLine($"contactprobe: memory: ran out of memory before the memory route was decided (this process may use "
-                              + $"{GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 1e9:0.0} GB) and wrote no emit or rows; run it on a machine with more memory, or raise the limit.");
-    else
-        Console.Error.WriteLine($"contactprobe: memory: the {decided.ToString().ToLowerInvariant()} route ran out of memory in the host loop and wrote no emit or rows; "
-                              + (decided == RouteName.Lean ? "run it on a machine with more memory, or raise the limit." : "rerun with --memory-route lean, or close other programs and rerun."));
+    try { routeOutcome = oom ? "failed: out of memory" : $"failed: {ex?.GetType().Name}"; WriteRouteSidecar(); }
+    catch (OutOfMemoryException) { }
+    if (!oom) return;
+    try { Console.Out.Flush(); } catch (OutOfMemoryException) { }
+    Console.Error.WriteLine(oomSentence);
     Environment.Exit(2);
 }
 
