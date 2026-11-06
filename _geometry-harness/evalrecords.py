@@ -42,6 +42,7 @@ import json
 import os
 import re
 import shlex
+import struct
 import subprocess
 import sys
 import time
@@ -269,14 +270,17 @@ def _master_holds(field, masters, providers, plugins):
 
 
 def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, plugins, scope: FieldScope,
-               defines: bool = False, masters: set | None = None, providers: dict | None = None):
+               defines: bool = False, masters: set | None = None, providers: dict | None = None,
+               masters_unread: bool = False):
     """(rows, judged, unjudged reasons) for one evaluated non-winning plugin on one contested record. A plugin that
     DEFINES the record authored every field it holds (there is nothing beneath it): its fields are read from its
     differences with the winner, with no overridden value.
 
     A leaf this plugin lacks is its edit only if it saw the leaf: if one of `masters`, what it was built on, holds it. `providers`, the same
     tree's {plugin: (lines against the winner, complete)}, says that: a master with no line on the leaf holds the winner's value. Whatever
-    those can't settle is counted by name. Without `masters` the plugin never had the leaf, and its provider's edit is judged from that side."""
+    those can't settle is counted by name. Without `masters` the plugin never had the leaf, and its provider's edit is judged from that side.
+    `masters_unread`: some of the plugin's masters' headers could not be read, so a removal the known masters do not settle is
+    counted by name, never decided."""
     authored, against = {}, {}
     unjudged = {}
     lacking = []
@@ -314,7 +318,10 @@ def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, p
         if masters is None or p[0] not in against or scope.excluded(rtype, p[0]):
             continue
         held = _master_holds(p[0], masters, providers, plugins) if p[2].lower() not in masters else True
-        if held is None:
+        if held is not True and masters_unread:
+            why = "a removal by a plugin whose masters' headers could not all be read"
+            unjudged[why] = unjudged.get(why, 0) + 1
+        elif held is None:
             unjudged["a removal whose master's copy could not be settled"] = unjudged.get("a removal whose master's copy could not be settled", 0) + 1
         elif held:
             authored[p[0]] = (p[0], "(absent)", p[2], p[3], "removed")
@@ -511,8 +518,37 @@ def batched(ids, n=400):
         yield ids[i:i + n]
 
 
+def arm_masters(arm: dict):
+    """(masters_of, masters_unread) for one arm: each plugin's masters, transitively, from the TES4 header of the file the arm
+    loads (the master list the engine resolves the plugin's records against), named without case; and whether a plugin's
+    closure meets a header that could not be read (no file for it in the arm, a file that is gone or not a plugin)."""
+    import evalpipeline
+    files = {str(p.get("name")).casefold(): p.get("path") for p in (arm.get("requested") or {}).get("plugins") or []}
+    direct = {}
+    for name in arm["plugins"]:
+        path = files.get(name.casefold())
+        try:
+            direct[name.casefold()] = [str(m).casefold() for m in evalpipeline.plugin_header(path)["masters"]] if path else None
+        except (OSError, ValueError, struct.error, evalpipeline.Refusal):
+            direct[name.casefold()] = None
+    closure = {}
+    for name in direct:
+        seen, blind, stack = set(), direct[name] is None, list(direct[name] or [])
+        while stack:
+            m = stack.pop()
+            if m in seen:
+                continue
+            seen.add(m)
+            if direct.get(m) is None:
+                blind = True
+            else:
+                stack.extend(direct[m])
+        closure[name] = (seen, blind)
+    return (lambda p: closure.get(p.casefold(), (set(), True))[0]), (lambda p: closure.get(p.casefold(), (set(), True))[1])
+
+
 def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldScope, log, deadline_s=None, counters=None,
-                masters_of=None):
+                masters_of=None, masters_unread=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
     evaluated_keys = {p.casefold() for p in evaluated}
@@ -608,6 +644,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                 rows, n_judged, n_unj = lost_edits(rtype, fid, p, arow.get("deltas") or [], node.get("deltas") or [],
                                                    winner, arm["plugins"], scope,
                                                    masters=masters_of(p) if masters_of else None,
+                                                   masters_unread=bool(masters_unread and masters_unread(p)),
                                                    providers={n["plugin"].lower(): (n.get("deltas") or [], n.get("complete", True)) for n in t.get("nodes") or []})
                 lost_rows[key] += rows
                 judged[key] += n_judged
@@ -970,8 +1007,10 @@ def cmd_capture(a) -> int:
             counters = {}
             record["arms"][arm["armId"]] = {"attempts": [{"attempt": 1, "besideOthers": False, "reader": counters}]}
             try:
+                masters_of, masters_unread = arm_masters(arm)
                 result = capture_arm(plan, arm, baseline, a.reader_cmd, env, session_dir, scope,
-                                     lambda m: print(m, flush=True), deadline_s=deadline_s, counters=counters)
+                                     lambda m: print(m, flush=True), deadline_s=deadline_s, counters=counters,
+                                     masters_of=masters_of, masters_unread=masters_unread)
             except Refusal as ex:
                 summary[arm["armId"]] = {"refused": str(ex)}
                 print(f"{arm['armId']}: REFUSED: {ex}", flush=True)
