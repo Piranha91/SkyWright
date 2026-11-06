@@ -167,6 +167,8 @@ public sealed class CacheBudget
     public bool StableLargestTie { get; set; }
     /// <summary>Lower the limit (never below <see cref="MinimumBytes"/>); the next insert evicts down to it.</summary>
     public void LowerTo(long limit) { lock (Gate) { if (limit < Limit) Limit = Math.Max(limit, MinimumBytes); } }
+    /// <summary>Set the limit up or down (never below <see cref="MinimumBytes"/>); a lower limit evicts on the next insert.</summary>
+    public void SetLimit(long limit) { lock (Gate) Limit = Math.Max(limit, MinimumBytes); }
     public long Bytes { get; private set; }
     public long PeakBytes { get; private set; }
     public long OversizeInserts { get; private set; }

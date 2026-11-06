@@ -87,8 +87,18 @@ NOT_PROOF = "No passing order found within the budget is not proof that none exi
 
 
 def memory_route(emit: Path | None) -> dict:
-    """STUB (red stage): today ordersweep records no memory route."""
-    return {"route": None}
+    """What a probe's memory-route sidecar (<emit>.memory.json, contactprobe since 2026-11-05) says about the route the run took,
+    the memory case it read, whether the route was the unattended default, and the warning it gave. A run with no sidecar is
+    "not reported" - never assumed fast."""
+    side = Path(str(emit) + ".memory.json") if emit else None
+    if side is None or not side.is_file():
+        return {"route": "not reported"}
+    try:
+        d = json.loads(side.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        return {"route": "not reported", "sidecarUnreadable": f"{side}: {e}"}
+    return {"route": d.get("route") or "not reported", "case": d.get("case"), "unattendedDefault": d.get("unattendedDefault"),
+            "warning": d.get("warning"), "outcome": d.get("outcome"), "sidecar": str(side)}
 
 
 def sha256_file(p: Path) -> str:
@@ -476,6 +486,7 @@ def main() -> int:
                "stop": ({k: runner.get(k) for k in ("seconds", "treeStopped", "refused", "launchedExitCode")}
                         if stopped and runner else None),
                "emit": str(emit.resolve()) if emit else None, "emitWritten": bool(written),
+               "memoryRoute": memory_route(emit) if kind == "probe" else None,
                "emitSha256": sha256_file(emit) if emit and emit.is_file() else None,
                "reusedFrom": str(reused_from.resolve()) if reused_from else None,
                "log": str(log.resolve()) if log and log.exists() else None,
@@ -578,6 +589,7 @@ def main() -> int:
 
     results: dict[str, list[dict]] = {}
     base_emits: dict[str, Path] = {}
+    baseline_routes: dict[str, dict] = {}
 
     def candidate_entry(cand: Path, rows: list[dict], classification) -> dict:
         cf = load_json(cand) or {}
@@ -587,6 +599,7 @@ def main() -> int:
 
     def summary_head() -> dict:
         return {"baseline": str(baseline), "probes": probes, "candidates": {}, "manifest": manifest,
+                "baselineMemoryRoute": baseline_routes,
                 **({"population": {"file": str(pop_file), "sha256": pop_sha, "probes": sorted(pop_probes)}} if pop_probes else {})}
 
     def save_progress() -> None:
@@ -605,6 +618,7 @@ def main() -> int:
         for p in probes:
             emit = out / p / "baseline.json"; emit.parent.mkdir(parents=True, exist_ok=True)
             code, _, _, got, measured = run_probe(f"{p}-baseline", p, baseline, None, emit)
+            baseline_routes[p] = memory_route(got)
             if measured:
                 base_emits[p] = got
             else:
@@ -625,7 +639,7 @@ def main() -> int:
                     row["probeExit"] = -1; rows.append(row); save_progress(); plan.advance(arms); continue
                 emit = out / p / f"{cand.stem}.json"
                 code, refused, illegal, got, measured = run_probe(f"{p}-{cand.stem}", p, cand, base_emit, emit)
-                row.update(probeExit=code, probeRefused=refused, illegal=illegal, emit=str(got))
+                row.update(probeExit=code, probeRefused=refused, illegal=illegal, emit=str(got), memoryRoute=memory_route(got))
                 if code == 0 and not measured:
                     row["emitNotWritten"] = True
                 plan.advance()
@@ -638,6 +652,7 @@ def main() -> int:
                         reverse = rgot if rmeasured else None
                         row["reverseExit"] = rcode
                         row["reverseEmit"] = str(rgot)
+                        row["reverseMemoryRoute"] = memory_route(rgot)
                         if rcode == 0 and not rmeasured:
                             row["reverseEmitNotWritten"] = True
                         plan.advance()
