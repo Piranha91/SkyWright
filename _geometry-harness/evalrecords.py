@@ -102,11 +102,11 @@ def population_members(contested, trees, by_id, evaluated) -> dict:
     """How many members each record check's population has on this arm: the contested records an evaluated plugin
     touches (the fields it authored are what is judged). An arm that loads no evaluated plugin has none, so its import
     states Members 0 rather than a judged-nothing extraction (evalrun's known-empty rule decides the rest)."""
-    ev = set(evaluated)
+    ev = {p.casefold() for p in evaluated}
     out = {"records.contested-fields": 0, "records.cell-attributes": 0, "records.registration-and-dialogue": 0}
     for fid in contested:
         t = trees.get(fid)
-        if not ev or (t is not None and not ev & set(t.get("touchers") or [])):
+        if not ev or (t is not None and not ev & {str(x).casefold() for x in t.get("touchers") or []}):
             continue  # a record without a tree stays a member: it is reported unjudgeable, not dropped
         t = t or {}
         rtype = (t or by_id.get(fid) or {}).get("type")
@@ -126,36 +126,49 @@ def complete_rows(export) -> list:
 
 # ---------------------------------------------------------------- delta lines
 
+def arm_name(name, plugins):
+    """The arm's spelling of a plugin name, matched without case as the game and Windows match it; None if not loaded."""
+    if name is None:
+        return None
+    key = str(name).casefold()
+    return next((p for p in plugins if p.casefold() == key), None)
+
+
 def parse_delta(line: str, plugins: list[str]):
     """One delta line of the record reader -> (field, own value, other plugin, other value, kind).
-    kind: 'value', 'absent' (the other side lacks the field) or 'list' (compared by content, not itemised)."""
+    kind: 'value', 'absent' (the other side lacks the field) or 'list' (compared by content, not itemised).
+    The reader names a plugin by its file on disk; it is matched without case and returned in the arm's spelling."""
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): ABSENT here \((.+?) has (.*)\)$", line)
     if m:
-        other = next((p for p in plugins if m.group(2) == p), m.group(2))
+        other = arm_name(m.group(2), plugins) or m.group(2)
         return m.group(1), None, other, m.group(3), "own-absent"
     # FieldsDiff: "<path> only in <reference>: <value>": the reference holds this leaf and this side holds no such path
     m = re.match(r"^([A-Za-z0-9_.\[\]]+) only in (.+?): (.*)$", line)
-    if m and m.group(2) in plugins:
-        return m.group(1), None, m.group(2), m.group(3), "own-absent"
+    if m and arm_name(m.group(2), plugins):
+        return m.group(1), None, arm_name(m.group(2), plugins), m.group(3), "own-absent"
     # FieldsDiff: "<root>: same <n> item(s), ORDER DIFFERS from <reference>": equal contents in another order
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): same \d+ item\(s\), ORDER DIFFERS from (.+)$", line)
-    if m and m.group(2) in plugins:
-        return m.group(1), None, m.group(2), None, "order"
+    if m and arm_name(m.group(2), plugins):
+        return m.group(1), None, arm_name(m.group(2), plugins), None, "order"
     m = re.match(r"^([A-Za-z0-9_.\[\]]+): (.*) vs (.+?) (\S+) item\(s\)", line)
     if m:
-        other = next((p for p in plugins if m.group(3).startswith(p)), m.group(3))
+        other = next((p for p in plugins if m.group(3).casefold().startswith(p.casefold())), m.group(3))
         return m.group(1), m.group(2), other, m.group(4), "list"
     eq = line.find("=")
     if eq < 0:
         return None
     field = line[:eq]
     rest = line[eq + 1:]
+    if not rest.endswith(")"):
+        return None
     for p in sorted(plugins, key=len, reverse=True):
         for marker, kind in ((f" ({p} has no ", "absent"), (f" ({p} has {field} ABSENT", "absent"), (f" ({p} ", "value")):
-            i = rest.rfind(marker)
-            if i >= 0 and rest.endswith(")"):
+            # the last occurrence, without case, at its place in the original text
+            found = list(re.finditer(re.escape(marker), rest, re.IGNORECASE))
+            if found:
+                i, j = found[-1].start(), found[-1].end()
                 own = rest[:i]
-                other = None if kind == "absent" else rest[i + len(marker):-1]
+                other = None if kind == "absent" else rest[j:-1]
                 return field, own, p, other, kind
     return None
 
@@ -267,6 +280,8 @@ def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, p
     authored, against = {}, {}
     unjudged = {}
     lacking = []
+    if masters is not None:
+        masters = {str(m).lower() for m in masters}
     if defines:
         authored_lines = []
         for line in vs_winner_lines:
@@ -500,6 +515,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                 masters_of=None):
     token = f"evalrun:{plan['planId']}:{arm['armId']}"
     evaluated = [p for p in arm["plugins"] if p not in set(baseline)]
+    evaluated_keys = {p.casefold() for p in evaluated}
     s = Session(reader_cmd, env, token, deadline_s, stream_to=out)
     log(f"{arm['armId']}: reader pid {s.p.pid}")
     result = {}
@@ -550,7 +566,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
         for p in evaluated:
             # every contested record this plugin touches: where it wins its authored fields are judged and kept,
             # where it does not they are judged against the winner
-            mine = [fid for fid, t in trees.items() if p in (t.get("touchers") or [])]
+            mine = [fid for fid, t in trees.items() if p.casefold() in {str(x).casefold() for x in t.get("touchers") or []}]
             authored = {}
             for batch in batched(mine):
                 dd = s.tool("housecarl_records", {"formids": batch, "source": p, "versus": "previous_provider",
@@ -563,12 +579,18 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                 rtype = t.get("type")
                 key = ("records.cell-attributes" if rtype == "Cell" else
                        "records.registration-and-dialogue" if rtype in REGISTRATION_TYPES else "records.contested-fields")
-                node = next((n for n in t.get("nodes") or [] if n.get("plugin") == p), None)
+                node = next((n for n in t.get("nodes") or [] if str(n.get("plugin")).casefold() == p.casefold()), None)
                 winner = next((n.get("plugin") for n in t.get("nodes") or [] if n.get("is_winner")), None)
+                winner = arm_name(winner, arm["plugins"]) or winner
                 arow = authored.get(fid)
                 if winner == p and arow is not None and arow.get("complete", True):
-                    kept = [x for x in (parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []) if x]
-                    judged[key] += sum(1 for x in kept if not scope.excluded(rtype, x[0]))
+                    read = [parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []]
+                    judged[key] += sum(1 for x in read if x and not scope.excluded(rtype, x[0]))
+                    unread = sum(1 for x in read if x is None)
+                    if unread:
+                        # a line the comparator cannot read is counted, never dropped
+                        why = "a delta line the comparator could not read"
+                        unj[key][why] = unj[key].get(why, 0) + unread
                     continue
                 defines = arow is not None and "DEFINES" in str(arow.get("error") or "")
                 if defines and node is not None and node.get("complete", True):
@@ -602,7 +624,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
         native_rows, native_judged, native_unj = [], 0, {}
         if evaluated:
             seeds = [r["formid"] for r in a_rows if r.get("type") in ("Quest", "DialogTopic")
-                     and r.get("winner") in evaluated]
+                     and str(r.get("winner")).casefold() in evaluated_keys]
             args = {"findings": ["scripts"] + (["dialogue"] if seeds else []), "plugins": evaluated, "format": "json",
                     "limit": BIG, "max_chars": MAX_CHARS}
             if seeds:
@@ -660,7 +682,7 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
 
         # missing assets: every asset path the evaluated plugins' winning records name
         paths = set()
-        winners = [r["formid"] for r in a_rows if r.get("winner") in evaluated]
+        winners = [r["formid"] for r in a_rows if str(r.get("winner")).casefold() in evaluated_keys]
         for batch in batched(winners, 200):
             d = s.tool("housecarl_records", {"formids": batch, "project": {"form": "everything", "depth": 6},
                                              "format": "json", "limit": BIG, "max_chars": MAX_CHARS})
