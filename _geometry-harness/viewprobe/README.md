@@ -294,8 +294,8 @@ A successful save or size check alone does not establish clean pixels.
     grass, 18.7-19.0 s with it (place 19 ms, models + textures + upload 75-83 ms; 14,900 instances of 7 types on 9
     cells, all beyond the fade from that eye, so the frame is pixel-identical); close-up C pose 15,906 instances,
     place 22 ms, upload 132 ms. That is far under "a few seconds", so grass is on by default.
-  - **Against the game** (lab, SkyrimClear noon, grass on, 2026-10-29; sheets in
-    `S:\Dev\skyrender-split\_ingame\grass_20261029-140936\`): grass grows where the game has it, but draws about
+  - **Against the game** (lab, SkyrimClear noon, grass on, 2026-10-29; contact sheets
+    kept with the rendering-lineage evidence, outside this repository): grass grows where the game has it, but draws about
     2.5x too bright (yellow where the game is a dark green). The cause is open (see SkyRender's RENDERING_PIPELINE
     "Grass"); judge grass by where it grows, not by its colour.
 - **Navmesh diff spheres** (`--compare` only, on by default): small shaded VIOLET spheres at the
@@ -2291,11 +2291,11 @@ their own double-sided flag; `VP_NO_BILLBOARD=1` draws them in their authored po
 so soft effects draw hard-edged.
 
 Checked against in-game captures (vanilla Bannered Mare kitchen hearth,
-`S:\Dev\skyrender-split\_ingame\shaderflags_20261029-021047\compare_*.jpg`): flame colour and placement
+kept with the rendering-lineage evidence, outside this repository): flame colour and placement
 match; flame SHAPE is one frozen atlas frame at the authored angle.
 
 Billboards, against the same captures
-(`S:\Dev\skyrender-split\_ingame\billboard_20261029-085750\cmp_{I,J,K,L}_billboard.jpg`): the
+(kept with the rendering-lineage evidence, outside this repository): the
 kitchen hearth's right-hand flame, a sliver in the authored pose from the close-up, is now a full
 flame where the game has one, and both flame masses show from the side.
 
