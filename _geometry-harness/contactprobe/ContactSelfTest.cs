@@ -253,6 +253,17 @@ static class ContactSelfTest
               e3.ExitCode == 2 && e3.Refusal is { } r24 && r24.Contains("--threads/--cache-budget") && r24.Contains("without them")
               && !r24.Contains("even on the lean route"), D(e3));
 
+        // CR-22: the programs offered to close leave out this process and the processes that started it.
+        var procs = new (string, int, long)[] { ("contactprobe", 10, 9 * G), ("bash", 9, 2 * G), ("claude", 8, 3 * G), ("python", 4242, 26 * G), ("System", 4, 5 * G) };
+        var parents = new Dictionary<int, int> { [10] = 9, [9] = 8, [8] = 1, [4242] = 1 };
+        var sel = MemoryReadingsReader.Select(procs, 10, parents);
+        Check("CR-22 other programs leave out this process, its parent chain and the system's own",
+              sel.Count == 1 && sel[0].Pid == 4242, string.Join(", ", sel.Select(x => $"{x.Name}:{x.Pid}")));
+
+        // CR-25: a job limit is named as the GC heap's share of the job's limit, not as the job's limit.
+        var js = MemoryReadingsReader.JobSource(7_516_192_768, 5_637_144_576);
+        Check("CR-25 a job object's limit is named as the GC heap's share of the job's 7.5 GB limit", js.Contains("share") && js.Contains("7.5 GB"), js);
+
         var e1 = MemoryRoute.Decide(Held(), s, RouteRequest.Auto, others, explicitShape: true);
         var e2 = MemoryRoute.Decide(Free(nf - 1, "GC heap hard limit"), s, RouteRequest.Auto, others, explicitShape: true);
         Check("CR-12 an explicit --threads/--cache-budget is kept as asked: contended warns and keeps it; absent names the limit and keeps it",

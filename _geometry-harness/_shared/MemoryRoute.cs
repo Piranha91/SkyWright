@@ -55,15 +55,30 @@ public static class MemoryRoute
     /// against eight more (Gate B D-1) under the 25 % margin (CR-10): 4.2 GB + 0.12 GB per thread + 0.10 of the budget.</summary>
     public static long FastExtra(int threads, long budget) => 4_200_000_000L + 120_000_000L * threads + budget / 10;
     public static long FastNeed(RouteShape s) => s.Live + s.FastBudget + FastExtra(s.FastThreads, s.FastBudget);
-    /// <summary>The lean route's need: under its heap limit the collector keeps little headroom; a quarter of live data and budget
-    /// (at least 64 MiB) covers grids in flight, garbage between collections and native memory.</summary>
-    public static long LeanNeed(RouteShape s) => s.Live + s.LeanBudget + Math.Max(64L << 20, (s.Live + s.LeanBudget) / 4);
+    /// <summary>What the lean route needs beyond live data and budget, as a share of them: grids in flight, garbage between
+    /// collections. Calibrated 2026-11-06 on the contact-baseline order's floor runs (Gate B, CR-23): with live + budget 3.38 GB a
+    /// 4.295 GB GC heap limit ran out of memory, with 3.41 GB a 4.429 GB limit completed, and with 3.73 GB a 4.832 GB limit completed,
+    /// so the share lies between 0.271 and 0.294; 0.285 is taken. The band is about 0.1 GB wide on one order: a limit inside it can go
+    /// either way, and the out-of-memory sentence covers that.</summary>
+    public const double LeanExtraShare = 0.285;
+    /// <summary>The lean route's need under a GC heap limit (the smallest limit it completes under), at least 64 MiB over live + budget.</summary>
+    public static long LeanNeed(RouteShape s) => s.Live + s.LeanBudget + Math.Max(64L << 20, (long)((s.Live + s.LeanBudget) * LeanExtraShare));
 
     static string Gb(long b) => $"{b / 1e9:0.0} GB";
 
-    /// <summary>The programs to close, largest first, as "name (pid N, X GB)".</summary>
-    public static string Programs(IReadOnlyList<ProcessUse> others, int n = 5)
-        => string.Join(", ", others.OrderByDescending(o => o.Bytes).Take(n).Select(o => $"{o.Name} (pid {o.Pid}, {Gb(o.Bytes)})"));
+    /// <summary>The programs to close: the fewest, largest first, whose memory covers <paramref name="shortfall"/> (all of them, at
+    /// most <paramref name="n"/>, when none suffices), as "name (pid N, X GB)".</summary>
+    public static string Programs(IReadOnlyList<ProcessUse> others, long shortfall, int n = 5)
+    {
+        var pick = new List<ProcessUse>();
+        long covered = 0;
+        foreach (var o in others.OrderByDescending(o => o.Bytes))
+        {
+            if (pick.Count == n || covered >= shortfall) break;
+            pick.Add(o); covered += o.Bytes;
+        }
+        return string.Join(", ", pick.Select(o => $"{o.Name} (pid {o.Pid}, {Gb(o.Bytes)})"));
+    }
 
     public static RouteDecision Decide(MemoryReadings r, RouteShape s, RouteRequest request, IReadOnlyList<ProcessUse> others, bool explicitShape = false)
     {
@@ -87,15 +102,18 @@ public static class MemoryRoute
 
         if (needL > ceiling)
         {
-            string refusal = $"memory: this order needs about {Gb(needL)} even on the lean route and this process may use {limitText}; "
-                           + "run it on a machine with more memory, or raise the limit.";
+            string refusal = explicitShape
+                ? $"memory: the asked --threads/--cache-budget need about {Gb(needL)} and this process may use {limitText}; "
+                  + "run without them and the memory route takes the lean route, or raise the limit."
+                : $"memory: this order needs about {Gb(needL)} even on the lean route and this process may use {limitText}; "
+                  + "run it on a machine with more memory, or raise the limit.";
             return new(MemoryCase.NothingFits, null, 2, false, needF, needL, s.LeanThreads, s.LeanBudget, null,
                        $"memory route: none (nothing fits) - {est}", null, refusal);
         }
         if (needF > ceiling)
         {
             string why = r.ProcessLimit is { } pl && pl < r.TotalPhysical && pl < needF
-                ? $"the fast route needs {Gb(needF)} and the {r.LimitSource} allows {Gb(pl)}"
+                ? $"the fast route needs {Gb(needF)} and this process may use {limitText}"
                 : $"the fast route needs {Gb(needF)} and this machine has {Gb(r.TotalPhysical)}";
             if (explicitShape) return Fast(MemoryCase.Absent, why + $" (limit {limitText})", kept: true);
             return request == RouteRequest.Fast
@@ -104,7 +122,7 @@ public static class MemoryRoute
         }
         if (needF > room)
         {
-            string progs = Programs(others);
+            string progs = Programs(others, needF - room);
             string warning = $"memory: the fast route needs {Gb(needF)} and {Gb(room)} is free for it; other programs hold the rest"
                            + (progs.Length > 0 ? $" - closing {progs} frees it" : "")
                            + "; rerun with --memory-route fast after closing them, or --memory-route lean to accept the slower run";
@@ -154,10 +172,14 @@ public static class MemoryReadingsReader
         long totalPhys = total ?? gcAvailable;
         long? job = JobMemoryLimit();
         long? limit = null; string source = "none";
-        if (job is { } j) { limit = Math.Min(j, gcAvailable); source = "job object"; }
+        if (job is { } j) { limit = Math.Min(j, gcAvailable); source = JobSource(j, gcAvailable); }
         else if (gcAvailable < totalPhys) { limit = gcAvailable; source = "GC heap hard limit"; }
         return (new MemoryReadings(totalPhys, avail, ownPrivate, limit, source), Others(), "this machine");
     }
+
+    /// <summary>How a job object's limit is named: the GC heap's share when the runtime took one (75 % of the job by default).</summary>
+    public static string JobSource(long jobLimit, long gcAvailable)
+        => gcAvailable < jobLimit ? $"the GC heap's share of the job object's {jobLimit / 1e9:0.0} GB limit" : $"job object, {jobLimit / 1e9:0.0} GB";
 
     static (MemoryReadings, IReadOnlyList<ProcessUse>, string) ParseTest(string spec, long ownPrivate)
     {
@@ -212,25 +234,57 @@ public static class MemoryReadingsReader
         return limit;
     }
 
-    /// <summary>Other programs by working set, largest first, leaving out this process and the system's own.</summary>
+    /// <summary>Other programs by working set, largest first, leaving out this process, the processes that started it (closing
+    /// them would stop this run) and the system's own.</summary>
     public static IReadOnlyList<ProcessUse> Others()
     {
-        int self = Environment.ProcessId;
-        var list = new List<ProcessUse>();
+        var list = new List<(string Name, int Pid, long Bytes)>();
         foreach (var p in System.Diagnostics.Process.GetProcesses())
         {
-            try
-            {
-                if (p.Id == self || p.Id == 0 || SystemNames.Contains(p.ProcessName)) continue;
-                long ws = p.WorkingSet64;
-                if (ws >= 100_000_000) list.Add(new(p.ProcessName, p.Id, ws));
-            }
+            try { list.Add((p.ProcessName, p.Id, p.WorkingSet64)); }
             catch (InvalidOperationException) { }
             catch (System.ComponentModel.Win32Exception) { }
             finally { p.Dispose(); }
         }
-        return list.OrderByDescending(x => x.Bytes).Take(8).ToList();
+        return Select(list, Environment.ProcessId, ParentMap());
     }
+
+    /// <summary>Pure part of <see cref="Others"/>: drop this process, its ancestors (by <paramref name="parentOf"/>), the system's own
+    /// and anything under 100 MB; keep the largest eight.</summary>
+    public static IReadOnlyList<ProcessUse> Select(IEnumerable<(string Name, int Pid, long Bytes)> all, int self, IReadOnlyDictionary<int, int> parentOf)
+    {
+        var skip = new HashSet<int> { 0, self };
+        for (int p = self, guard = 0; parentOf.TryGetValue(p, out var parent) && parent != 0 && guard < 64; p = parent, guard++)
+            if (!skip.Add(parent)) break;
+        return all.Where(x => !skip.Contains(x.Pid) && !SystemNames.Contains(x.Name) && x.Bytes >= 100_000_000)
+                  .OrderByDescending(x => x.Bytes).Take(8).Select(x => new ProcessUse(x.Name, x.Pid, x.Bytes)).ToList();
+    }
+
+    /// <summary>Each process's parent, from a Toolhelp snapshot (Windows); empty elsewhere or when the snapshot fails.</summary>
+    static Dictionary<int, int> ParentMap()
+    {
+        var map = new Dictionary<int, int>();
+        if (!OperatingSystem.IsWindows()) return map;
+        IntPtr snap = CreateToolhelp32Snapshot(0x2, 0);
+        if (snap == new IntPtr(-1)) return map;
+        try
+        {
+            var e = new ProcessEntry { Size = (uint)Marshal.SizeOf<ProcessEntry>() };
+            for (bool ok = Process32FirstW(snap, ref e); ok; ok = Process32NextW(snap, ref e)) map[(int)e.Pid] = (int)e.ParentPid;
+        }
+        finally { CloseHandle(snap); }
+        return map;
+    }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct ProcessEntry
+    {
+        public uint Size, Usage, Pid; public IntPtr DefaultHeapId; public uint ModuleId, Threads, ParentPid; public int PriClassBase; public uint Flags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string ExeFile;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool Process32FirstW(IntPtr snap, ref ProcessEntry e);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool Process32NextW(IntPtr snap, ref ProcessEntry e);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
 
     [StructLayout(LayoutKind.Sequential)]
     struct MemStatus { public uint Length, MemoryLoad; public ulong TotalPhys, AvailPhys, TotalPageFile, AvailPageFile, TotalVirtual, AvailVirtual, AvailExtendedVirtual; }
