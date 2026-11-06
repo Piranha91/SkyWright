@@ -49,6 +49,7 @@ public sealed class Footprint
     public HashSet<FormKey>? Links;                                                     // null: not read
     public Dictionary<FormKey, (string Type, string? Edid)>? Info;                      // newcomer only: display
     public Dictionary<string, string>? CellNames;                                       // newcomer only: display
+    public Dictionary<string, (string? Edid, string? Worldspace, int? X, int? Y)>? Cells;  // cells: true only: every cell, by FormKey
     public int NewRecords, Overrides, ScriptCarriers;
     public IReadOnlyList<string> Masters = Array.Empty<string>();
 
@@ -58,10 +59,11 @@ public sealed class Footprint
     /// <summary>Read one plugin's footprint through the core's overlay open. Values are copied out; the overlay is
     /// disposed before returning. A plugin that will not open or walk comes back with <see cref="Error"/> set and its
     /// partial sets cleared, so a half-read plugin never reads as "nothing in common".</summary>
-    public static Footprint Read(string path, string? dataDir, bool links, bool info)
+    public static Footprint Read(string path, string? dataDir, bool links, bool info, bool cells = false)
     {
         var fp = new Footprint { Name = System.IO.Path.GetFileName(path), Path = path };
         if (info) { fp.Info = new(); fp.CellNames = new(StringComparer.Ordinal); }
+        if (cells) fp.Cells = new(StringComparer.Ordinal);
         if (links) fp.Links = new();                                                    // empty, not null, for a plugin with no records
         ISkyrimModGetter mod;
         try { mod = LoadOrderResolver.OpenOverlay(path, dataDir); }
@@ -90,6 +92,7 @@ public sealed class Footprint
                 if (ws.TopCell is { } tc)
                 {
                     fp.Containers.Add(tc.FormKey);                                  // the persistent cell's own CELL record
+                    if (cells) fp.Cells![tc.FormKey.ToString()] = (string.IsNullOrEmpty(tc.EditorID) ? null : tc.EditorID, ws.EditorID, null, null);
                     foreach (var r in tc.Persistent.Concat(tc.Temporary))
                         if (r is IPlacedGetter pg && pg.Placement is { } pl)
                             fp.Exterior.Add((ws.FormKey, Grid(pl.Position.X), Grid(pl.Position.Y)));
@@ -98,6 +101,7 @@ public sealed class Footprint
                     foreach (var sub in blk.Items)
                         foreach (var c in sub.Items)
                         {
+                            if (cells) fp.Cells![c.FormKey.ToString()] = (string.IsNullOrEmpty(c.EditorID) ? null : c.EditorID, ws.EditorID, c.Grid?.Point.X, c.Grid?.Point.Y);
                             if (c.Grid?.Point is { } gp)
                             {
                                 fp.Exterior.Add((ws.FormKey, gp.X, gp.Y));
@@ -111,13 +115,14 @@ public sealed class Footprint
                     foreach (var c in sub.Cells)
                     {
                         fp.Interior.Add(c.FormKey.ToString());
+                        if (cells) fp.Cells![c.FormKey.ToString()] = (string.IsNullOrEmpty(c.EditorID) ? null : c.EditorID, null, null, null);
                         if (info && !string.IsNullOrEmpty(c.EditorID)) fp.CellNames![c.FormKey.ToString()] = c.EditorID!;
                     }
         }
         catch (Exception ex)
         {
             fp.Error = $"would not walk — {Concise(ex)}";
-            fp.Keys.Clear(); fp.Containers.Clear(); fp.Interior.Clear(); fp.Exterior.Clear(); fp.PlacedBases.Clear(); fp.Links?.Clear();
+            fp.Keys.Clear(); fp.Containers.Clear(); fp.Interior.Clear(); fp.Exterior.Clear(); fp.PlacedBases.Clear(); fp.Links?.Clear(); fp.Cells?.Clear();
         }
         finally { (mod as IDisposable)?.Dispose(); }
         return fp;
