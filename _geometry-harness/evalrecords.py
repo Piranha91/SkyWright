@@ -545,14 +545,19 @@ def batched(ids, n=400):
         yield ids[i:i + n]
 
 
-def arm_masters(arm: dict):
+def arm_masters(arm: dict, recorded: dict | None = None):
     """(masters_of, masters_unread) for one arm: each plugin's masters, transitively, from the TES4 header of the file the arm
     loads (the master list the engine resolves the plugin's records against), named without case; and whether a plugin's
-    closure meets a header that could not be read (no file for it in the arm, a file that is gone or not a plugin)."""
+    closure meets a header that could not be read (no file for it in the arm, a file that is gone or not a plugin).
+    `recorded` ({plugin casefold: [masters]}): master lists a measurement recorded for these very bytes, used before the
+    file's header, so a file changed after the measurement does not blind its dependents."""
     import evalpipeline
     files = {str(p.get("name")).casefold(): p.get("path") for p in (arm.get("requested") or {}).get("plugins") or []}
     direct = {}
     for name in arm["plugins"]:
+        if recorded and name.casefold() in recorded:
+            direct[name.casefold()] = [str(m).casefold() for m in recorded[name.casefold()]]
+            continue
         path = files.get(name.casefold())
         try:
             direct[name.casefold()] = [str(m).casefold() for m in evalpipeline.plugin_header(path)["masters"]] if path else None

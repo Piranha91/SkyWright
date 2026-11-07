@@ -88,20 +88,57 @@ def _commit(d: Path, manifest: dict, kind: str, outputs: list[dict], tool_files:
 
 # ------------------------------------------------------------------------------------------ record rows
 
-def configuration_masters(cfg: dict) -> tuple[dict, set]:
-    """Each plugin's masters, closed transitively, read from the TES4 header of the file the configuration names (the
-    record capture's own rule, evalrecords.arm_masters), and the plugins whose closure meets a header that cannot be
-    read: a file gone, not a plugin, or not hashing to the sha256 the configuration recorded. ({plugin lower: masters},
+def recorded_plugin_headers(d: Path, manifest: dict) -> dict:
+    """The plugin header facts the bundle's own probe emits recorded at measurement time (`Configuration.Plugins[]`:
+    name, sha256, masters, master and light flags), {(plugin lower, sha256 lower): {...}}. Per setup the smallest emit
+    that records master lists is read (the lists are a fact of the file, the same in every emit of a setup); a reverse
+    part's emit records another setup's configuration and is not read."""
+    emits = [e for e in manifest.get("evidence") or [] if e.get("kind") == "emit"
+             and str(e.get("path", "")).endswith(".json") and ".reverse." not in str(e.get("path"))]
+
+    def size(e):
+        try:
+            return (d / e["path"]).stat().st_size
+        except OSError:
+            return float("inf")
+    out, seen = {}, set()
+    for e in sorted(emits, key=size):
+        if e.get("armId") in seen:
+            continue
+        em = _load(d / e["path"])
+        cfg = em.get("Configuration") if isinstance(em, dict) else None
+        rows = [x for x in (cfg or {}).get("Plugins") or [] if isinstance(x, dict) and isinstance(x.get("Masters"), list)
+                and x.get("Name") and x.get("Sha256")]
+        if not rows:
+            continue
+        seen.add(e.get("armId"))
+        for x in rows:
+            out.setdefault((str(x["Name"]).lower(), str(x["Sha256"]).lower()), {
+                "name": x["Name"], "sha256": str(x["Sha256"]).lower(), "masters": [str(m) for m in x["Masters"]],
+                "master": x.get("MasterFlag"), "light": x.get("LightFlag"), "source": e["path"]})
+    return out
+
+
+def configuration_masters(cfg: dict, recorded: dict | None = None) -> tuple[dict, set]:
+    """Each plugin's masters, closed transitively (the record capture's own rule, evalrecords.arm_masters), and the
+    plugins whose closure meets a master list that cannot be had. A plugin's list is the one the bundle's emits recorded
+    for the same bytes (`recorded`, from recorded_plugin_headers), else the TES4 header of the file the configuration
+    names, read only when the file hashes to the sha256 the configuration recorded. ({plugin lower: masters},
     {plugin lower})."""
     import evalrecords
     plugins = [p for p in cfg.get("plugins") or [] if isinstance(p, dict) and p.get("name")]
-    checked = []
+    checked, lists = [], {}
     for p in plugins:
         path, want = p.get("path"), str(p.get("sha256") or "").lower()
+        rec = (recorded or {}).get((str(p["name"]).lower(), want)) if want else None
+        if rec is not None:
+            lists[str(p["name"]).casefold()] = rec["masters"]
+            checked.append({"name": p["name"], "path": None})
+            continue
         ok = bool(path) and Path(path).is_file() and (not want or sha(Path(path)) == want)
         checked.append({"name": p["name"], "path": path if ok else None})
     masters_of, unread_of = evalrecords.arm_masters({"plugins": [p["name"] for p in checked],
-                                                     "requested": {"plugins": checked}})
+                                                     "requested": {"plugins": checked}}, recorded=lists)
     names = [p["name"] for p in checked]
     return ({n.lower(): set(masters_of(n)) for n in names}, {n.lower() for n in names if unread_of(n)})
 
@@ -141,12 +178,17 @@ def enrich_record_rows(d: Path) -> dict:
     containers = set()
     for _, _, _, resp, _ in todo:
         containers |= RR.persistent_cells(resp)
+    recorded = recorded_plugin_headers(d, manifest)
     for rc, by_role, req, resp, cfg in todo:
-        masters, unread = configuration_masters(cfg)
+        masters, unread = configuration_masters(cfg, recorded)
         emit = RR.derive(req, resp, cfg, scope, rel={req: f"evidence/{by_role['request']}",
                                                      resp: f"evidence/{by_role['response']}"}, containers=containers,
                          masters=masters, masters_unread=unread)
         emit["mastersUnread"] = sorted(unread)
+        # whose master list came from the bundle's own emits (else from the file's header at the recorded bytes)
+        emit["mastersRecorded"] = sorted({str(p.get("name")).lower() for p in cfg.get("plugins") or []
+                                          if isinstance(p, dict) and (str(p.get("name")).lower(),
+                                                                      str(p.get("sha256") or "").lower()) in recorded})
         rel = f"enrichment/record-rows/{rc['checkId']}__{rc['armId']}.json"
         _write(d / rel, emit)
         outputs.append(_row(rel, d, "record-rows", checkId=rc["checkId"], armId=rc["armId"],

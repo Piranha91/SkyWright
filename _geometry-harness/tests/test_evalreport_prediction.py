@@ -137,7 +137,7 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
                 diff_logs=None, states_not_explored=None, transcripts=None, masters=None, coverage_pops=None,
-                single_run=(), route_rows=None, programs=None):
+                single_run=(), route_rows=None, programs=None, enrichment_coverage=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -154,6 +154,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     names: a names enrichment document, written as `enrichment/names/names.json`.
     enrichment_unjudged: {(checkId, armId): [{FormKey, Field, Reason, Plugins}]} -- the fields that enrichment left
     unjudged, written as its `Unjudged` list and counted in its coverage line.
+    enrichment_coverage: {(checkId, armId): {reason: count}} -- further unjudgeable counts on that enrichment's coverage
+    line whose fields it does not list (item 18 A2).
     predicates: {(checkId, armId): [{Kind, A, B, FormKey, Other, Physical}]} -- the rows of the setup that arm was
     measured against, measured again in that arm's setup (an emit's `Predicates`).
     diff_logs: {(checkId, armId): text} -- the log of that arm's comparison with the baseline (a `diff` receipt).
@@ -257,6 +259,9 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
         uj_counts = {}
         for u in uj:
             uj_counts[u["Reason"]] = uj_counts.get(u["Reason"], 0) + 1
+        # (item 18 A2) reasons a rows file counts on its coverage line without listing the fields
+        for r_, n_ in ((enrichment_coverage or {}).get((check_id, arm_id)) or {}).items():
+            uj_counts[r_] = uj_counts.get(r_, 0) + n_
         (root / rel).write_text(json.dumps({"Population": "contested records", "State": "baseline", "Conflicts": rows,
                                             "Coverage": [{"Population": check_id, "Judged": 40,
                                                           "Unjudgeable": uj_counts}],

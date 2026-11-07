@@ -607,7 +607,7 @@ def tes4(path: Path, masters) -> Path:
     return path
 
 
-def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False):
+def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False, recorded=None):
     """One record import without a rows file, its configuration on real plugin files: the record's chain is the base
     game, M, Q, P and the winner W; P holds M's value, which differs from Q's. P's own masters decide whether P made a
     change (with M among them, it made none)."""
@@ -653,7 +653,17 @@ def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False):
                     {"path": "imports/rc/02-response.jsonl"}],
         "consumed": {"configuration": {"plugins": plugins}}}), encoding="utf-8")
     (root / "disposition.json").write_text("{}", encoding="utf-8")
-    (root / "manifest.json").write_text(json.dumps({"evidence": [], "registry": "registry/check-registry.json"}),
+    evidence = []
+    if recorded is not None:
+        # a probe emit of the same setup recording each plugin's header as measured ({name: masters}), for the
+        # bytes the configuration recorded
+        sw = root / "evidence" / "sweep" / "probe"
+        sw.mkdir(parents=True)
+        (sw / "baseline.json").write_text(json.dumps({"Configuration": {"Plugins": [
+            {"Name": x["name"], "Sha256": x["sha256"], "Masters": list(recorded.get(x["name"], heads[x["name"]])),
+             "MasterFlag": False, "LightFlag": False} for x in plugins]}}), encoding="utf-8")
+        evidence.append({"kind": "emit", "path": "evidence/sweep/probe/baseline.json", "armId": "baseline"})
+    (root / "manifest.json").write_text(json.dumps({"evidence": evidence, "registry": "registry/check-registry.json"}),
                                         encoding="utf-8")
     bundleenrich.enrich_record_rows(root)
     return json.loads((root / "enrichment" / "record-rows" / f"{RECORDS}__baseline.json").read_text(encoding="utf-8"))
@@ -700,6 +710,90 @@ def case_record_rows_treat_a_changed_file_as_unread():
         emit = rows_bundle(Path(td), [BASE, "M.esp"], p_changed=True)
     ok = emit.get("mastersUnread") == ["p.esp"] and "P.esp" not in losers(emit)
     return ok, f"masters unread {emit.get('mastersUnread')}; losing plugins {losers(emit)}"
+
+
+def case_item18_record_rows_take_masters_the_bundle_recorded():
+    """Item 18 A1: P's file changed after the measurement (its live bytes are not the recorded ones), but the bundle's
+    probe emit recorded P's masters for the recorded bytes: P is judged against those, not blinded. P is not built on
+    M, so its value is its own change, lost to the winner."""
+    with tempfile.TemporaryDirectory() as td:
+        emit = rows_bundle(Path(td), [BASE], p_changed=True, recorded={})
+    ok = emit.get("mastersUnread") == [] and losers(emit) == ["M.esp", "P.esp", "Q.esp"] \
+        and "p.esp" in (emit.get("mastersRecorded") or [])
+    return ok, (f"masters unread {emit.get('mastersUnread')}; recorded {emit.get('mastersRecorded')}; "
+                f"losing plugins {losers(emit)}")
+
+
+def case_item18_record_rows_recorded_masters_decide_over_the_header():
+    """Item 18 A1: the recorded list is the measurement's fact; here it says P is built on M, while P's file header (at
+    the recorded bytes) says it is not. The recorded list decides: P holds its master's value, so it lost no change."""
+    with tempfile.TemporaryDirectory() as td:
+        emit = rows_bundle(Path(td), [BASE], recorded={"P.esp": [BASE, "M.esp"]})
+    ok = emit.get("mastersUnread") == [] and losers(emit) == ["M.esp", "Q.esp"]
+    return ok, f"masters unread {emit.get('mastersUnread')}; losing plugins {losers(emit)}"
+
+
+def item18_coverage_bundle(listed=True, extra=None):
+    """The prediction suite's unjudged-fields setups; the baseline's rows file lists 5 fields (or none) and its coverage
+    line counts, besides, the reasons in `extra` without listing their fields."""
+    nb = [P.lost_row(A, B, f"00070{i}:{BASE}", "LocationReference", f"a{i}", f"b{i}", "v") for i in (1, 2)]
+    enr = {(RECORDS, "baseline"): nb, (RECORDS, "dependency-only"): [], (RECORDS, "plus-a"): [], (RECORDS, "plus-b"): []}
+    both = [{"FormKey": f"018A5A:{BASE}", "Type": "Location", "Field": f, "Reason": P.TRUNC, "Plugins": [BASE, A, B]}
+            for f in ("Music", "Name", "ParentLocation")]
+    one = [{"FormKey": f"000711:{BASE}", "Type": "Cell", "Field": f, "Reason": P.NOT_READ, "Plugins": [BASE, OTHER, A]}
+           for f in ("Regions", "Water")]
+    results = {(CONTACT, a): [] for a in ("baseline", "dependency-only", "plus-a", "plus-b")}
+    return P.compile_and_render(P.four_arms(), results, [A, B], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                enrichment=enr, enrichment_unjudged={(RECORDS, "baseline"): (both + one) if listed else []},
+                                enrichment_coverage={(RECORDS, "baseline"): dict(extra or {})})
+
+
+def item18_fields_line(plan):
+    reason = ((PR["reader"].get("prediction") or {}).get("coverageReasons") or {}).get("fieldsUnjudged")
+    return [ln for ln in (plan.get("reader") or {}).get("coverage", {}).get("lines") or [] if ln.get("reason") == reason]
+
+
+def case_item18_every_coverage_reason_reaches_the_report():
+    """Item 18 A2: a reason the rows file counts on its coverage line without listing the fields (here one no wording
+    names, and the masters one) is counted on the report's unjudged-fields line with its count, beside the listed ones."""
+    import recordrows
+    mu = recordrows.MASTERS_UNREAD
+    plan, md, html = item18_coverage_bundle(extra={"a reason no listing names": 4, mu: 7})
+    lines = item18_fields_line(plan)
+    subj = str(lines[0].get("subject") or "") if len(lines) == 1 else ""
+    fw = ((PR["reader"].get("prediction") or {}).get("fieldUnjudgedWords") or {}).get(mu)
+    ok = (len(lines) == 1 and lines[0].get("count") == 5 + 4 + 7 and "a reason no listing names 4" in subj
+          and bool(fw) and f"{fw} 7" in subj and subj in md)
+    return ok, f"lines {lines}; field words {fw!r}; on report.md {bool(subj) and subj in md}"
+
+
+def case_item18_coverage_reason_reaches_the_report_with_nothing_listed():
+    """Item 18 A2: a rows file that lists no unjudged field but counts some on its coverage line still gets the line."""
+    plan, md, html = item18_coverage_bundle(listed=False, extra={"a reason no listing names": 3})
+    lines = item18_fields_line(plan)
+    ok = len(lines) == 1 and lines[0].get("count") == 3 and "a reason no listing names 3" in str(lines[0].get("subject"))
+    return ok, f"lines {lines}"
+
+
+def case_item18_listed_and_counted_reasons_are_not_counted_twice():
+    """Item 18 A2, the must-not-fire case: coverage counts equal to the listed fields add nothing (5 listed, 5 counted)."""
+    plan, md, html = item18_coverage_bundle()
+    lines = item18_fields_line(plan)
+    ok = len(lines) == 1 and lines[0].get("count") == 5
+    return ok, f"lines {lines}"
+
+
+def case_item18_masters_unread_fields_are_listed():
+    """Item 18 A2: the rows comparator lists every field it counts unjudged for an unreadable master list, with the
+    plugins compared, so its coverage count and its list agree by construction."""
+    import recordrows
+    with tempfile.TemporaryDirectory() as td:
+        emit = rows_bundle(Path(td), [BASE, "M.esp"], p_file=False)
+    counted = sum(n for c in emit.get("Coverage") or [] for r, n in (c.get("Unjudgeable") or {}).items()
+                  if r == recordrows.MASTERS_UNREAD)
+    listed = [u for u in emit.get("Unjudged") or [] if u.get("Reason") == recordrows.MASTERS_UNREAD]
+    ok = counted == 1 and len(listed) == 1 and listed[0].get("Field") == "LocationReference" and listed[0].get("Plugins")
+    return ok, f"counted {counted}; listed {listed}"
 
 
 def case_record_rows_unread_reason_is_the_captures():

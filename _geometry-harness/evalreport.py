@@ -5225,10 +5225,32 @@ def build_prediction(ctx: dict) -> dict:
         emit = bundle.emit(path) if path else None
         ul = emit.get("Unjudged") if isinstance(emit, dict) else None
         return ul if isinstance(ul, list) else None
+
+    def emit_coverage_counts(check_id):
+        """(item 18 A2) every unjudgeable count the check's rows file states on its own coverage lines, by reason
+        (judged-elsewhere reasons excluded: they have their own line)."""
+        arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
+        if str(arm_id).startswith("sibling:"):
+            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
+        if bundle is None:
+            return collections.Counter()
+        path = bundle.output_emit_path(check_id, arm_id, "arm") or bundle.output_emit_path(check_id, arm_id, None)
+        out = collections.Counter()
+        # a record check's rows file only (an import's rows output or a record-rows enrichment); a probe's emit has
+        # its populations line
+        if not path or not (str(path).endswith("-rows.json") or str(path).startswith("enrichment/record-rows/")):
+            return out
+        emit = bundle.emit(path)
+        for c in (emit.get("Coverage") if isinstance(emit, dict) else None) or []:
+            for k, v in ((c.get("Unjudgeable") or {}).items() if isinstance(c, dict) else []):
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 and not elsewhere_re.match(str(k)):
+                    out[str(k)] += int(v)
+        return out
     for check_id in unjudged_checks:
         # a check whose rows file lists its unjudged fields gets the fields line below, which says more; its
         # populations line would count the same fields twice (judged-elsewhere reasons are still read here)
-        fields_line = any(isinstance(u, dict) and u.get("Field") for u in emit_unjudged(check_id) or [])
+        fields_line = (any(isinstance(u, dict) and u.get("Field") for u in emit_unjudged(check_id) or [])
+                       or bool(emit_coverage_counts(check_id)))
         pops = []
         for population, uj in own_coverage(check_id):
             per = collections.Counter()
@@ -5277,9 +5299,17 @@ def build_prediction(ctx: dict) -> dict:
     for check_id in checks_on_p:
         ul = [u for u in emit_unjudged(check_id) or [] if isinstance(u, dict)]
         fields = [u for u in ul if u.get("Field") and not elsewhere_re.match(str(u.get("Reason") or ""))]
-        if not fields and not [u for u in ul if not u.get("Field")]:
+        # (item 18 A2) a count the rows file states on its coverage line beyond the fields it lists is counted too,
+        # under its reason, so no unjudged field leaves the report silently
+        listed = collections.Counter(str(u.get("Reason") or "") for u in ul)
+        beyond = {r_: n_ - listed.get(r_, 0) for r_, n_ in emit_coverage_counts(check_id).items()
+                  if n_ > listed.get(r_, 0)}
+        if not fields and not [u for u in ul if not u.get("Field")] and not beyond:
             continue
-        per = collections.Counter(reason_words(u.get("Reason")) for u in fields)
+        fw_ = words.get("fieldUnjudgedWords") or {}
+        per = collections.Counter(fw_.get(str(u.get("Reason"))) or reason_words(u.get("Reason")) for u in fields)
+        for r_, n_ in beyond.items():
+            per[fw_.get(r_) or reason_words(r_)] += n_
         parts = [f"{r} {fmt_n(n)}" for r, n in per.most_common()]
         unreadable_records = [u for u in ul if not u.get("Field")]
         if unreadable_records:
@@ -5287,8 +5317,12 @@ def build_prediction(ctx: dict) -> dict:
         if multi:
             both = sum(1 for u in fields if pt_lower <= {str(x).lower() for x in u.get("Plugins") or []})
             parts.append(bind(words["fieldsUnjudgedBoth"], {"count": fmt_n(both)}))
-        lines.append({"reason": reasons["fieldsUnjudged"], "count": len(fields),
-                      "unit": "field" if len(fields) == 1 else "fields",
+            if beyond and words.get("fieldsUnjudgedUnlisted"):
+                # (item 18 A2) fields counted without their records: whether they lie on such records is not known
+                parts.append(bind(words["fieldsUnjudgedUnlisted"], {"count": fmt_n(sum(beyond.values()))}))
+        n_fields = len(fields) + sum(beyond.values())
+        lines.append({"reason": reasons["fieldsUnjudged"], "count": n_fields,
+                      "unit": "field" if n_fields == 1 else "fields",
                       "subject": f"{title_of(check_id)}: " + "; ".join(parts)})
     not_sep = sum(g["count"] for g in items if g["attribution"] == "not-separable")
     if not_sep:

@@ -611,6 +611,9 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                     # the plugin loaded before it
                     if vals[win_i] != vals[i]:
                         line(rtype)["Unjudgeable"][MASTERS_UNREAD] += 1
+                        # listed as well as counted, so a report can say how many lie on records both mods change
+                        unjudged.append({"FormKey": fk, "Type": rtype, "Field": top, "Reason": MASTERS_UNREAD,
+                                         "Plugins": names})
                     continue
                 changed, j = own_change(names, vals, i, (masters or {}).get(names[i].lower()) if masters else None)
                 its = (rec.get("items") or {}).get(top)
