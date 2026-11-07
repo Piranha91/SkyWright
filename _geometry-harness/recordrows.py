@@ -580,8 +580,12 @@ def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, contain
     return out
 
 
+#: the reason a plugin's change is left unjudged when its masters cannot all be read (the record capture's own words)
+MASTERS_UNREAD = "a removal by a plugin whose masters' headers could not all be read"
+
+
 def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, containers: set | None = None,
-                   masters: dict | None = None) -> dict:
+                   masters: dict | None = None, masters_unread: set | None = None) -> dict:
     """The conflict-file emit for one setup: `plugins` in load order, each {name, path}. `containers`: persistent cells
     known from other captures of the same evaluation (a capture that read no worldspace cannot name them). `masters`:
     {plugin (lower case): its masters}; a value is a plugin's change only if it differs from the one it inherits from
@@ -602,6 +606,12 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
         for top, vals in rec["values"].items():
             picked = rec["reads"][top]
             for i in range(1, win_i):
+                if masters_unread and names[i].lower() in masters_unread:
+                    # whose value it inherits cannot be told without its masters: counted by name, never guessed from
+                    # the plugin loaded before it
+                    if vals[win_i] != vals[i]:
+                        line(rtype)["Unjudgeable"][MASTERS_UNREAD] += 1
+                    continue
                 changed, j = own_change(names, vals, i, (masters or {}).get(names[i].lower()) if masters else None)
                 its = (rec.get("items") or {}).get(top)
                 if its and j is not None and list_change_kept(its[j], its[i], its[win_i]):
@@ -783,11 +793,12 @@ def read_chains(request: Path, response: Path, plugins: list[dict], scope: Scope
 
 
 def derive(request: Path, response: Path, configuration: dict, scope: Scope, rel: dict | None = None,
-           containers: set | None = None, masters: dict | None = None) -> dict:
+           containers: set | None = None, masters: dict | None = None, masters_unread: set | None = None) -> dict:
     """rows_for_setup over one import's transcripts, citing the bytes it read: `rel` maps each file to the path a
     reader of the output finds it at (inside the bundle)."""
     parsed = parse_transcript(Path(request), Path(response))
-    emit = rows_for_setup(parsed["reads"], list(configuration.get("plugins") or []), scope, containers, masters)
+    emit = rows_for_setup(parsed["reads"], list(configuration.get("plugins") or []), scope, containers, masters,
+                          masters_unread)
     rel = rel or {}
     emit["derivedFrom"] = [{"path": str(rel.get(p, p)).replace("\\", "/"), "sha256": sha256(p), "role": role}
                            for role, p in (("request", Path(request)), ("response", Path(response)))]

@@ -88,6 +88,24 @@ def _commit(d: Path, manifest: dict, kind: str, outputs: list[dict], tool_files:
 
 # ------------------------------------------------------------------------------------------ record rows
 
+def configuration_masters(cfg: dict) -> tuple[dict, set]:
+    """Each plugin's masters, closed transitively, read from the TES4 header of the file the configuration names (the
+    record capture's own rule, evalrecords.arm_masters), and the plugins whose closure meets a header that cannot be
+    read: a file gone, not a plugin, or not hashing to the sha256 the configuration recorded. ({plugin lower: masters},
+    {plugin lower})."""
+    import evalrecords
+    plugins = [p for p in cfg.get("plugins") or [] if isinstance(p, dict) and p.get("name")]
+    checked = []
+    for p in plugins:
+        path, want = p.get("path"), str(p.get("sha256") or "").lower()
+        ok = bool(path) and Path(path).is_file() and (not want or sha(Path(path)) == want)
+        checked.append({"name": p["name"], "path": path if ok else None})
+    masters_of, unread_of = evalrecords.arm_masters({"plugins": [p["name"] for p in checked],
+                                                     "requested": {"plugins": checked}})
+    names = [p["name"] for p in checked]
+    return ({n.lower(): set(masters_of(n)) for n in names}, {n.lower() for n in names if unread_of(n)})
+
+
 def enrich_record_rows(d: Path) -> dict:
     import recordrows as RR
     manifest = _guard(d, "record-rows")
@@ -124,8 +142,11 @@ def enrich_record_rows(d: Path) -> dict:
     for _, _, _, resp, _ in todo:
         containers |= RR.persistent_cells(resp)
     for rc, by_role, req, resp, cfg in todo:
+        masters, unread = configuration_masters(cfg)
         emit = RR.derive(req, resp, cfg, scope, rel={req: f"evidence/{by_role['request']}",
-                                                     resp: f"evidence/{by_role['response']}"}, containers=containers)
+                                                     resp: f"evidence/{by_role['response']}"}, containers=containers,
+                         masters=masters, masters_unread=unread)
+        emit["mastersUnread"] = sorted(unread)
         rel = f"enrichment/record-rows/{rc['checkId']}__{rc['armId']}.json"
         _write(d / rel, emit)
         outputs.append(_row(rel, d, "record-rows", checkId=rc["checkId"], armId=rc["armId"],
