@@ -1326,6 +1326,7 @@ def case_the_unpictured_page_accounts_for_every_clash():
     card = {r["label"]: r["count"] for r in types["rows"]}
     un = str((chapter(reel, "unpictured") or {}).get("narration"))
     parts = re.findall(r"([^.:]+): of (\d+) [^,]*, (\d+) pictured, (\d+) represented by the pictured example and (\d+) not pictured", un)
+    parts += [(lab, n, "0", "0", n) for lab, n in re.findall(r"([^.:]+): (\d+) [^,.]*, none pictured", un)]
     ok_parts = parts and all(int(n) == int(a) + int(b) + int(c) and card.get(lab.strip()) == int(n) for lab, n, a, b, c in parts)
     why = sum(int(x) for x in re.findall(r"\((\d+) not pictured\)", un))
     ok = bool(ok_parts) and why == sum(int(c) for *_, c in parts) and "Why some are not pictured:" in un
@@ -1367,7 +1368,7 @@ def case_subtitles_never_overlap_and_never_flash():
     spans = [(secs(c[1].split(" --> ")[0]), secs(c[1].split(" --> ")[1])) for c in cues]
     overlap = sum(1 for (a, e), (b, _) in zip(spans, spans[1:]) if e > b + 1e-6)
     short = [round(e - a, 2) for a, e in spans if e - a < 1.0]
-    ok = not overlap and not short and all(a < e for a, e in spans)
+    ok = not overlap and not short and all(a < e for a, e in spans) and len(spans) >= 4
     return ok, f"cues {len(spans)}; overlaps {overlap}; short {short}"
 
 
@@ -1380,7 +1381,9 @@ def case_each_clash_says_its_own_in_game_meaning():
     plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "no-a"): []}, [A],
                                           count_only={(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()},
                                           enrichment=enr)
-    fm = PR["reader"]["prediction"]["fieldMeanings"]
+    fm = PR["reader"]["prediction"].get("fieldMeanings")
+    if not fm:
+        return False, "no field meanings"
     items = {tuple(sorted(i.get("mods") or [])): str(i.get("inGameText") or "") for i in pred_of(plan).get("items") or []
              if i.get("kind") == "LOST-EDIT"}
     ab, ao = items.get(tuple(sorted([A, B]))) or "", items.get(tuple(sorted([A, OTHER]))) or ""
@@ -1403,7 +1406,7 @@ def vignette_pres(**reader_extra):
     pres = reel_pres()
     pres["reader"]["prediction"]["record"].append(
         {"admission": "admitted", "checkId": "geometry.object-overlap", "formKey": fk, "A": OTHER, "B": A,
-         "kind": "OVERLAP", "other": [other], "summary": f"crossing in 009366:{BASE} (ext) [mm] {fk} / {other}"})
+         "kind": "OVERLAP", "other": [other], "summary": f"crossing in 00A366:{BASE} (ext) [mm] {fk} / {other}"})
     pres["media"] = [{"id": f"M-{st}", "assessed": True, "path": f"media/{st}.png",
                       "provenance": {"vignetteState": st, "captureRequest": "q1", "poseId": "p1"},
                       "subject": {"formKey": fk, "armId": "no-a" if st == "without" else "baseline"}}

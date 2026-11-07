@@ -1046,6 +1046,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     continue
                 any_rep_ = any_rep_ or bool(rep_)
                 other_ = tot_ - pic_ - rep_ - unp_
+                if not pic_ and not rep_ and not other_ and words.get("unpicturedNone"):
+                    parts_.append(words["unpicturedNone"].format(label=type_labels[t_], total=tot_,
+                                                                 unit=card_unit(t_, tot_) or "") + ".")
+                    continue
                 parts_.append(words["unpicturedAccount"].format(
                     label=type_labels[t_], total=tot_, unit=card_unit(t_, tot_) or "", pictured=pic_, represented=rep_,
                     unpictured=unp_) + (words.get("unpicturedOther", "").format(count=other_) if other_ else "") + ".")
@@ -1085,13 +1089,25 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 count=n_, label=case_labels[t_])).strip()
         # a removal is said, never only counted: which mod takes which object out of the world
         gone = [c for c, why in unpictured if why == "removed"]
-        if gone and words.get("placementRemoved"):
-            sentence_un += " " + " ".join(words["placementRemoved"].format(
-                winner=mod(c["rows"][0]["B"]), loser=mod(c["rows"][0]["A"]),
-                object=spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary")),
-                places=(words.get("placesVerb") or {}).get(
-                    "own" if str(c["rows"][0]["formKey"]).split(":", 1)[-1].lower() == str(c["rows"][0]["A"]).lower()
-                    else "changes", "places")) for c in gone)
+        def verb_(c):
+            return (words.get("placesVerb") or {}).get(
+                "own" if str(c["rows"][0]["formKey"]).split(":", 1)[-1].lower() == str(c["rows"][0]["A"]).lower()
+                else "changes", "places")
+        groups_ = {}
+        for c in gone:
+            groups_.setdefault((mod(c["rows"][0]["B"]), mod(c["rows"][0]["A"]), verb_(c)), []).append(c)
+        for (win_, lose_, vb_), cs_ in groups_.items():
+            if len(cs_) == 1 or not words.get("placementRemovedMany"):
+                if words.get("placementRemoved"):
+                    sentence_un += " " + " ".join(words["placementRemoved"].format(
+                        winner=win_, loser=lose_, places=vb_,
+                        object=spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary"))) for c in cs_)
+                continue
+            # several objects one mod takes out of the world: said once, with a few named and the rest counted
+            names_ = list(dict.fromkeys(spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary")) for c in cs_))
+            sentence_un += " " + words["placementRemovedMany"].format(
+                winner=win_, loser=lose_, places=vb_, count=len(cs_),
+                objects=joined(names_[:4] + ([f"{len(names_) - 4} more"] if len(names_) > 4 else [])))
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "unpictured", "narration": sentence_un, "count": n_un,
                          "clashes": [{"formKey": c["rows"][0]["formKey"], "type": c["type"], "reason": why,
                                       "field": c["rows"][0].get("field"), "pair": [mod(m) for m in c["pair"]],
