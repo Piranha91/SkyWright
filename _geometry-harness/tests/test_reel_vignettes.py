@@ -1683,8 +1683,10 @@ def case_skill_data():
                                                        "actorTypes", "noInGameEffectFields", "sequence", "drawableFields",
                                                        "captureAttemptsPerType", "volumeFactor")),
           f"scene-policy.json vignettes carries the selection numbers, the no-effect fields and the sequence (has {sorted(vign)})")
-    check("data-length", (pr.get("reel") or {}).get("maxSeconds") == 600 and bool((pr.get("reel") or {}).get("stillFont")),
-          f"reel.maxSeconds is 600 and the still font file is named ({(pr.get('reel') or {}).get('maxSeconds')}, "
+    # retry 2 of the generator-rules review: the per-page narration and the folded sentences need more than 600 s on
+    # the largest subject; reel length is not an objective (coordinator, regeneration-2 review), so the guard is 900 s
+    check("data-length", (pr.get("reel") or {}).get("maxSeconds") == 900 and bool((pr.get("reel") or {}).get("stillFont")),
+          f"reel.maxSeconds is 900 and the still font file is named ({(pr.get('reel') or {}).get('maxSeconds')}, "
           f"{(pr.get('reel') or {}).get('stillFont')!r})")
     docs = (SKILL / "SKILL.md").read_text(encoding="utf-8") + (SKILL / "references/reel-layout.md").read_text(encoding="utf-8")
     old = [x for x in ("highlighted -> unhighlighted -> highlighted", "highlighted → unhighlighted → highlighted",

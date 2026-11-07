@@ -1338,7 +1338,8 @@ def case_closing_names_each_setup_by_its_own_arm():
     concern."""
     pres = reel_pres()
     pres["scope"]["arms"].append({"armId": "no-other", "plugins": [BASE, A], "locationPluginOrder": [BASE, A],
-                                  "displayLabel": "Tested alternative setup (removes OtherMod.esp)"})
+                                  "displayLabel": "Tested alternative setup", "pluginsRemoved": [OTHER], "pluginsAdded": [],
+                                  "readerLabel": "Tested alternative setup (removes OtherMod.esp)"})
     pres["reader"]["suppliedPatches"] = [PATCH]
     pres["reader"]["missingSummary"] = [
         {"reason": "ran, but could not decide", "subjects": ["Objects occupying the same space — Tested alternative setup (removes OtherMod.esp)"]},

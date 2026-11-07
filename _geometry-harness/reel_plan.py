@@ -169,7 +169,12 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
             check_, _, setup = str(subj).partition(" — ")
             reasons_of.setdefault(check_, {}).setdefault(m.get("reason"), []).append(setup)
     patches = list(reader.get("suppliedPatches") or [])
-    arms = {a.get("displayLabel"): a for a in (pres.get("scope") or {}).get("arms") or []}
+    # a missing row names its setup by the arm's reader label (the display label in older plans): both are keys
+    arms = {}
+    for a in (pres.get("scope") or {}).get("arms") or []:
+        for key_ in (a.get("displayLabel"), a.get("readerLabel")):
+            if key_:
+                arms.setdefault(key_, a)
     pred_arm_ = ((reader.get("prediction") or {}).get("predictionArm")) or "baseline"
     base_arm_ = next((a for a in (pres.get("scope") or {}).get("arms") or [] if a.get("armId") == pred_arm_), {})
     rows = []
@@ -183,8 +188,10 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
                 # each gap named by its own setup: what that setup leaves out or adds against the measured one
                 have_ = [str(x) for x in arm_.get("plugins") or arm_.get("locationPluginOrder") or []]
                 base_ = [str(x) for x in base_arm_.get("plugins") or base_arm_.get("locationPluginOrder") or []]
-                gone_ = [mod(x) for x in base_ if x.lower() not in {y.lower() for y in have_}]
-                new_ = [mod(x) for x in have_ if x.lower() not in {y.lower() for y in base_}]
+                gone_ = [mod(x) for x in (arm_.get("pluginsRemoved") if "pluginsRemoved" in arm_ else
+                                          [x for x in base_ if x.lower() not in {y.lower() for y in have_}]) or []]
+                new_ = [mod(x) for x in (arm_.get("pluginsAdded") if "pluginsAdded" in arm_ else
+                                         [x for x in have_ if x.lower() not in {y.lower() for y in base_}]) or []]
                 if gone_ or new_:
                     line = words["closingLines"]["setupWithout" if gone_ and not new_ else
                                                  "setupWith" if new_ and not gone_ else "setupBoth"].format(
@@ -903,7 +910,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     titles_ = reader.get("checkTitles") or {}
     type_labels, case_labels = dict(words["typeLabels"]), dict(words["caseLabels"])
     for t_ in {c["type"] for c in clashes.values()}:
-        ck_ = {r_["checkId"] for c in clashes.values() if c["type"] == t_ for r_ in c["rows"]}
+        ck_ = {c["rows"][0]["checkId"] for c in clashes.values() if c["type"] == t_}     # the check that counts each
         if len(ck_) == 1 and titles_.get(next(iter(ck_))):
             ttl_ = str(titles_[next(iter(ck_))])
             type_labels[t_] = ttl_
