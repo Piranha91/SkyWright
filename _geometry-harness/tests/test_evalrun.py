@@ -71,12 +71,12 @@ def probe_cmds() -> list[str]:
     return out
 
 
-def evalrun(args, scenario: Path | None = None, expect_exit=None, timeout=300):
+def evalrun(args, scenario: Path | None = None, expect_exit=None, timeout=300, cwd: Path | None = None):
     env = dict(os.environ)
     if scenario:
         env["EVALRUN_FAKE_SCENARIO"] = str(scenario)
     r = subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args],
-                       capture_output=True, text=True, env=env, timeout=timeout)
+                       capture_output=True, text=True, env=env, timeout=timeout, cwd=cwd)
     if expect_exit is not None and r.returncode != expect_exit:
         print(r.stdout[-3000:])
         print(r.stderr[-2000:])
@@ -8125,6 +8125,143 @@ CASES["case-563"] = case_563
 CASES["case-564"] = case_564
 CASES["case-565"] = case_565
 CASES["case-566"] = case_566
+
+# ---- rebundling a finished run after its registry changed (cases 590-593)
+# Each case plans from its OWN copy of the fixture registry, so changing that copy disturbs no other case, and keeps a
+# frozen copy aside: the file an earlier bundle's registry/check-registry.json would hold.
+
+REBUNDLE_CASE = "case-11-bundle-relocate"  # a finished run with receipts, a disposition and a scope
+
+
+def rebundle_setup(tmp: Path, case: str):
+    reg = GEN / "registry" / f"{case}-registry.json"
+    shutil.copy2(GEN / "registry" / "fixture-check-registry.json", reg)
+    run = tmp / case
+    _, _, _, scen = case_paths(REBUNDLE_CASE)
+    do_plan(run, REBUNDLE_CASE, registry=reg.name)
+    evalrun(["run", "--run", run], scen, expect_exit=0)
+    evalrun(["finalize", "--run", run], scen, expect_exit=0)
+    frozen = tmp / f"{case}-frozen" / "check-registry.json"
+    frozen.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(reg, frozen)
+    return run, reg, frozen
+
+
+def change_registry(reg: Path) -> None:
+    """The registry changes under the finished run, the way sibling work adds a check to the shipped one."""
+    doc = load(reg)
+    doc["rebundleTestEdit"] = "the registry changed after this plan froze"
+    reg.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+
+
+def sha(p: Path) -> str:
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
+def bundle_defects(out: Path) -> list[str]:
+    v = load(out / "verify.json") or {}
+    return [d.get("kind") for d in (v.get("bundle") or {}).get("defects") or []]
+
+
+def case_590(tmp):
+    """A rebundle after the registry changed, with nothing named: refused by name before anything is written, never a
+    bundle that only fails at verify."""
+    case = "case-590"
+    run, reg, _ = rebundle_setup(tmp, case)
+    change_registry(reg)
+    out = tmp / f"{case}-bundle"
+    b = evalrun(["bundle", "--run", run, "--out", out])
+    later = ""
+    if (out / "manifest.json").exists():
+        v = evalrun(["verify-bundle", out])
+        later = f"; the bundle was written and verify-bundle exits {v.returncode} with {bundle_defects(out)}"
+    expect(b.returncode, 3, f"{case}: bundle refuses a run whose registry changed{later}", "rebundle")
+    check("registry-changed" in b.stderr and "--registry" in b.stderr,
+          f"{case}: the refusal is registry-changed and names --registry ({b.stderr.strip()[-300:]!r})")
+    check(not (out / "manifest.json").exists(), f"{case}: no bundle is written{later}")
+
+
+def case_591(tmp):
+    """Naming the frozen registry rebundles the run from an unrelated folder, and the bundle verifies."""
+    case = "case-591"
+    run, reg, frozen = rebundle_setup(tmp, case)
+    change_registry(reg)
+    elsewhere = tmp / f"{case}-elsewhere"
+    elsewhere.mkdir()
+    out = tmp / f"{case}-bundle"
+    b = evalrun(["bundle", "--run", run, "--registry", frozen, "--out", out], cwd=elsewhere)
+    expect(b.returncode, 0, f"{case}: bundle --registry FROZEN exit ({b.stderr.strip()[-300:]!r})", "rebundle")
+    v = evalrun(["verify-bundle", out], cwd=elsewhere)
+    expect(v.returncode, 0, f"{case}: verify-bundle exit", "rebundle")
+    expect([k for k in bundle_defects(out) if k.startswith("registry")], [], f"{case}: no registry defect")
+    plan = load(run / "plan.json") or {}
+    copy = out / "registry" / "check-registry.json"
+    expect(sha(copy) if copy.exists() else None, plan["registry"]["sha256"],
+           f"{case}: the bundled registry is the one the plan froze")
+
+
+def case_592(tmp):
+    """A named file that is not what the plan froze is a refused input (exit 2), and nothing is written."""
+    case = "case-592"
+    run, reg, frozen = rebundle_setup(tmp, case)
+    change_registry(reg)
+    want = (load(run / "plan.json") or {})["registry"]["sha256"][:12]
+    for label, args, cause, tokens in (
+            ("changed file", ["--registry", reg], "registry-mismatch", [sha(reg)[:12], want]),
+            ("missing file", ["--registry", tmp / f"{case}-nowhere.json"], "registry-missing", [want]),
+            ("wrong scope", ["--registry", frozen, "--scope", frozen], "scope-mismatch", [])):
+        out = tmp / f"{case}-{label.replace(' ', '-')}"
+        b = evalrun(["bundle", "--run", run, "--out", out] + args)
+        expect(b.returncode, 2, f"{case}/{label}: refused as an input", "rebundle")
+        check(cause in b.stderr and all(t in b.stderr for t in tokens),
+              f"{case}/{label}: the refusal is {cause} naming {tokens} ({b.stderr.strip()[-300:]!r})")
+        check(not (out / "manifest.json").exists(), f"{case}/{label}: no bundle is written")
+
+
+def case_593(tmp):
+    """An older plan that stored its registry and scope relative to the folder it was planned from. From that folder
+    it bundles as before; from any other it is refused by name, and naming both files bundles one that verifies."""
+    case = "case-593"
+    run, reg, _ = rebundle_setup(tmp, case)
+    plan_path = run / "plan.json"
+    plan = load(plan_path)
+    scope = Path(plan["scope"]["path"])
+    # the shape of a plan written before plans stored absolute paths, with its immutability hash rewritten to match
+    plan["registry"]["path"] = os.path.relpath(reg, GEN)
+    plan["scope"]["path"] = os.path.relpath(scope, GEN)
+    plan_path.write_text(json.dumps(plan, indent=1), encoding="utf-8")
+    (run / "plan.sha256").write_text(sha(plan_path) + "\n", encoding="utf-8")
+
+    home = tmp / f"{case}-home-bundle"
+    b = evalrun(["bundle", "--run", run, "--out", home], cwd=GEN)
+    expect(b.returncode, 0, f"{case}/planned-from folder: bundle exit ({b.stderr.strip()[-300:]!r})", "rebundle")
+    expect(evalrun(["verify-bundle", home]).returncode, 0, f"{case}/planned-from folder: verify-bundle exit")
+
+    elsewhere = tmp / f"{case}-elsewhere"
+    elsewhere.mkdir()
+    out = tmp / f"{case}-bundle"
+    b = evalrun(["bundle", "--run", run, "--out", out], cwd=elsewhere)
+    later = ""
+    if (out / "manifest.json").exists():
+        v = evalrun(["verify-bundle", out])
+        later = f"; the bundle was written and verify-bundle exits {v.returncode} with {bundle_defects(out)}"
+    expect(b.returncode, 3, f"{case}/other folder: bundle refuses the unresolvable registry path{later}", "rebundle")
+    check("plan-path-relative" in b.stderr and "--registry" in b.stderr,
+          f"{case}/other folder: refused plan-path-relative naming --registry ({b.stderr.strip()[-300:]!r})")
+    check(not (out / "manifest.json").exists(), f"{case}/other folder: no bundle is written{later}")
+
+    named = tmp / f"{case}-named-bundle"
+    b = evalrun(["bundle", "--run", run, "--registry", reg, "--scope", scope, "--out", named], cwd=elsewhere)
+    expect(b.returncode, 0, f"{case}/named: bundle exit ({b.stderr.strip()[-300:]!r})", "rebundle")
+    v = evalrun(["verify-bundle", named], cwd=elsewhere)
+    expect(v.returncode, 0, f"{case}/named: verify-bundle exit ({bundle_defects(named)})", "rebundle")
+
+
+CASES["case-590"] = case_590
+CASES["case-591"] = case_591
+CASES["case-592"] = case_592
+CASES["case-593"] = case_593
+
 
 
 def main() -> int:

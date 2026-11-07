@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "about": "Rules for orderleads.py: how a whole-order pass's rows are tiered, grouped, ordered and admitted as leads. Leads are places to open, not verdicts.",
+  "readingLimit": {
+    "wholeOrderGroups": 50,
+    "oneModGroups": 20,
+    "why": "a filtered view (an added mod, a place, a pair) is read to 20, the whole-order list to 50; each lead takes a reader most of a minute to open"
+  },
+  "tiers": {
+    "1": "breaks something in the base order of play: a blocked path, a broken navmesh link, a missing master, a quest or topic edit lost",
+    "2": "visibly wrong at load: floating or sunk fixed objects, objects left in empty space, lost cell attributes, water seams, lost registration edits",
+    "3": "needs a look: overlap, lost field edits, likely-blocked paths, state-only rows, seams, left-behind links, asset-only mesh or script clashes",
+    "4": "signal only: map edges with no row, other asset clashes, deliberate overrides, one-mod or base-game rows"
+  },
+  "kinds": {
+    "route:Blocked": 1,
+    "route:LikelyBlocked": 3,
+    "navmesh": 1,
+    "quest-alias": 1,
+    "MISSING-MASTER": 1,
+    "lost:Quest": 1,
+    "lost:DialogTopic": 1,
+    "lost:DialogResponses": 1,
+    "lost:Scene": 1,
+    "lost:registration": 2,
+    "lost:Cell": 2,
+    "lost:other": 3,
+    "contact": 2,
+    "empty": 2,
+    "water": 2,
+    "overlap": 3,
+    "seam": 3,
+    "left-behind": 3,
+    "state:Blocked": 3,
+    "state:other": 3,
+    "asset:mesh-or-script": 3,
+    "asset:other": 4,
+    "edge": 4
+  },
+  "demotions": {
+    "aMastersB": "a pair where one plugin masters the other, directly or through other plugins, goes down one tier, because its author had the other in front of them",
+    "lostToOwnDependent": "a lost edit whose winner masters the loser is a deliberate override and goes to tier 4",
+    "ussep": "a pair naming the unofficial patch goes down one tier, because mods are generally built on it",
+    "fieldsNoEffect": "a lost EditorID, Unknown or Unused field goes to tier 4: the game doesn't act on it",
+    "fieldsLesser": "a lost Flags field in tier 1 goes to tier 2: it can change a line's behaviour, but less than its conditions or text"
+  },
+  "fieldsNoEffect": [
+    "EditorID",
+    "Unknown",
+    "Unused",
+    "Unused2"
+  ],
+  "fieldsLesser": [
+    "Flags"
+  ],
+  "oneModBlockedTier": 4,
+  "admission": true,
+  "admissionRule": "a lead names two different non-base plugins (or two mod folders whose bytes differ on a shared path) in every row; a row naming one plugin, a row against the base game only, and a map edge with no row stay in the record with a counted reason",
+  "maskedFlags": {
+    "fields": [
+      "MajorFlags",
+      "SkyrimMajorRecordFlags"
+    ],
+    "flag": "Compressed",
+    "why": "the compressed-storage flag changes how a record is stored, not what the game does with it; a row whose values differ only in it is set aside",
+    "bits": {
+      "ESM": 1,
+      "NotPlayable": 4,
+      "Deleted": 32,
+      "InitiallyDisabled": 2048,
+      "Ignored": 4096,
+      "VisibleWhenDistant": 32768,
+      "Dangerous_OffLimits_InteriorCell": 131072,
+      "Compressed": 262144,
+      "CantWait": 524288
+    },
+    "bitsSource": "Mutagen.Bethesda.Skyrim 0.54.4, SkyrimMajorRecord.SkyrimMajorRecordFlag"
+  },
+  "orderOver": "leads",
+  "tierShares": {
+    "1": 4,
+    "2": 3,
+    "3": 2,
+    "4": 1
+  },
+  "group": "the non-base plugins a row names (one or two, sorted), the family of check and the tier; cells are summarised inside the group, largest first, the top ten shown",
+  "order": "tiers take turns, 4 from tier 1, 3 from tier 2, 2 from tier 3, 1 from tier 4; inside a tier families take turns; inside a family most objects first; over leads only",
+  "lists": {
+    "confirmed": "a group whose rows are all record facts (lost edits, missing masters, dangling links): the row itself is read from the records. Which mod causes it is still 'named by the row'",
+    "screenedOnly": "every other group: calibrated geometry or map signal, until detail compares setups",
+    "unassessed": "see coverage.registry and the runtime layers"
+  },
+  "pairWording": "plugins named together are named by the rows; whether both are needed takes a run without each, so a pair is where to look, not a joint cause",
+  "excludedFromRanking": {
+    "route": [
+      "None",
+      "Clipped",
+      "NoLine",
+      "Unjudgeable"
+    ],
+    "routeNote": "None and Clipped are not findings; NoLine and Unjudgeable count on the unassessed list",
+    "stateEmpty": [
+      "Grounded",
+      "FloatsAsShipped"
+    ],
+    "kinds": [
+      "DANGLING-REFERENCE and UNBOUND-SCRIPT-PROPERTY stay rows under one mod or base game unless two plugins are named"
+    ]
+  },
+  "assets": {
+    "rule": "folders sharing a path are compared by bytes, loose and in their plugins' archives. Identical bytes are no clash. Different bytes make an asset edge with its winner by the game's rule: loose over archive, then MO2 priority among loose, then load order among archives",
+    "assetOnly": "different bytes and no plugin edge of any kind between the two folders' plugins, and neither folder's plugin masters the other's",
+    "intent": "an overwrite where one folder's plugin masters the other's is taken as deliberate and goes to tier 4"
+  },
+  "dummies": "bug fix, not ranking: a plugin with no records whose file is 79 bytes gets its own line, isn't counted as a real plugin, and isn't on the no-signal list",
+  "coverage": {
+    "registry": {
+      "loadability.masters-and-order": "screen: missing masters from the records stage, master graph in the map. Sort quality is not judged",
+      "loadability.dangling-references": "screen: records stage",
+      "loadability.missing-assets": "screen: records stage",
+      "records.contested-fields": "screen: records stage",
+      "records.cell-attributes": "screen: records stage",
+      "records.registration-and-dialogue": "screen: records stage",
+      "geometry.navmesh-ownership": "screen: navownprobe",
+      "geometry.object-overlap": "screen: overlapprobe",
+      "geometry.placement-contact": "screen: contactprobe",
+      "geometry.fixture-empty-space": "screen: contactprobe --empty-space",
+      "geometry.declared-dependencies": "screen: depprobe",
+      "geometry.route-cut": "screen: blockprobe, every plugin with cells as a target",
+      "functional.quest-alias-split": "screen: driftprobe",
+      "state.switch-census": "screen: switchprobe",
+      "state.conditional-geometry": "screen: stateprobe, baseline state and generated flips. State overlap is withheld by the probe",
+      "environment.water-boundaries": "screen: waterprobe",
+      "environment.land-seams": "screen: seamprobe",
+      "geometry.terrain-support": "unassessed: the registry marks it unsupported",
+      "geometry.bos-overlay": "unassessed as its own check: probes apply the swap layer, but no list of swaps is on the screen",
+      "functional.linked-dependencies": "unassessed: the registry marks it unsupported",
+      "functional.collective-route-connectivity": "unassessed: the registry marks it unsupported",
+      "environment.occlusion": "unassessed: the registry marks it unsupported, and it is a game-observation check",
+      "environment.generated-output-regeneration": "unassessed: manual; a person regenerates LOD, occlusion and Synthesis-style output after changes",
+      "patch.discovery-installed": "unassessed as a search; a patch already installed shows as a master relation in the map",
+      "patch.discovery-fomod": "unassessed: applies to one mod at detail, needs its installer",
+      "patch.discovery-pool": "unassessed: applies to one mod at detail, needs the download pool",
+      "patch.author-advice": "unassessed: applies to one mod at detail, needs its Nexus page",
+      "patch.order-evaluation": "unassessed: the registry has no adapter",
+      "patch.candidate-qualification": "unassessed: the registry has no adapter",
+      "runtime.supplied-observations": "unassessed: needs the game",
+      "runtime.state-switch-flip": "unassessed: needs the game",
+      "runtime.crash-performance-appearance": "unassessed: needs the game"
+    },
+    "runtimeLayers": "SPID, KID, SkyPatcher, BOS, SKSE plugins, Papyrus scripts, OAR and DAR animations, behaviour patches and other animation files: named in the output by folder and unassessed. The map sees none of what they do. An unbound script property is the one script row on the screen, from the records stage. A mod whose work is done here can read 'no signal' while doing a great deal"
+  }
+}
