@@ -91,7 +91,7 @@ def case_verdict_on_a_patch_for_another_pair():
     plan, md, html = contact_patch_bundle(patch=PATCH_L, masters={PATCH_L: [BASE, A, LEG], A: [BASE], B: [BASE]},
                                           base_extra=(LEG,), left=3)
     todo = " ".join(pred_of(plan).get("whatToDo") or [])
-    want = f"{PATCH_L} is a patch for {LEG} and {A}. None of the predicted clashes is between them"
+    want = f"{PATCH_L} is a patch for {A} and {LEG}. None of the predicted clashes is between them"
     ok = want in todo and "resolves none" not in todo and want in md
     return ok, f"what to do {todo[:300]!r}"
 
@@ -118,11 +118,15 @@ def case_verdict_over_unfinished_world_checks_is_not_clean():
     reel = reel_of(plan, [BASE, A, B, PATCH])
     verdict = chapter(reel, "verdict") or {}
     patch_line = next((x for x in todo if PATCH in x and "predicted" in x), "")
+    spoken = patch_line
+    for p_ in sorted([BASE, A, B, PATCH], key=len, reverse=True):
+        spoken = spoken.replace(p_, re.sub(r"\.(esp|esm|esl)$", "", p_))
     ok = (bool(patch_line) and "No check of objects in the world finished on the setup with it" in patch_line
           and "adds no new clash" not in md and "adds no new clash" not in unesc(html)
           and "no check of objects in the world finished with the patch" in summ
           and "no new clash the checks can see" not in md
-          and patch_line in str(verdict.get("narration")) and "adds no new clash" not in str(verdict.get("narration")))
+          and spoken in str(verdict.get("narration")) and ".esp" not in str(verdict.get("narration"))
+          and "adds no new clash" not in str(verdict.get("narration")))
     return ok, f"patch line {patch_line!r}; summary {summ[-200:]!r}; reel verdict {str(verdict.get('narration'))[:160]!r}"
 
 
@@ -283,7 +287,7 @@ def case_reel_counts_in_the_reports_units():
     ok = (rows.get(WORDS["typeLabels"]["navmesh"]) == (3, "broken navmesh links")
           and WORDS["typeLabels"]["contact"] in rows and len(flat) == len(set(flat))
           and "pictured in this reel" in un and "can't be visualized" not in un
-          and f"under \"What adding {A} will do\"" in un)
+          and 'under "What adding ModA will do"' in un and ".esp" not in un)
     return ok, f"card {rows}; unpictured {un[:220]!r}"
 
 
@@ -369,6 +373,16 @@ def case_every_produced_picture_is_shown_or_named():
     named = {m["id"] for m in plan["media"] if m["id"] not in shown and m["id"] in said}
     ok = len(shown) + len(named) == 9 and len(shown) == 9
     return ok, f"shown {len(shown)}, named as left out {len(named)} of 9"
+
+
+def case_the_reels_vignettes_are_in_the_report():
+    """Four vignettes and room for three: the one the reel shows is among those the report shows."""
+    plan = figure_plan(vignettes=4)
+    plan["reel"] = {"chapters": [{"kind": "vignette", "frames": [{"mediaId": f"M-4{st}"} for st in ("without", "with", "highlight")]}]}
+    view = R.effective_view(plan, 3, 3, PR, "normal")
+    shown = {m["id"] for f in view["findings"] for m in f.get("figures") or []}
+    ok = {"M-4without", "M-4with", "M-4highlight"} <= shown and len(shown) == 9
+    return ok, f"shown {sorted(shown)}"
 
 
 def case_a_vignette_is_shown_whole():

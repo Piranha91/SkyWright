@@ -223,6 +223,18 @@ def lead_qualifiers(hit: dict, words: dict, loaded: set, evaluated: bool) -> str
     return "".join(" " + x for x in out)
 
 
+def usable_first(hits: list, loaded: set) -> list:
+    """Patch files in the order a reader can use them: a file naming no mod this setup lacks before one that does, a live
+    file before a retired or archived one; otherwise the search's own order."""
+    def rank(h):
+        other = h.get("otherMentions")
+        other = [other] if isinstance(other, str) else list(other or [])
+        lacks = any(str(m).lower() not in loaded for m in other)
+        stale = str(h.get("status") or "").lower() not in ("", "live") or str(h.get("category") or "") in ("ARCHIVED", "OLD_VERSION")
+        return (lacks, stale)
+    return sorted(hits, key=rank)
+
+
 def page_words(page: dict) -> int:
     """The words a still page puts on screen (its title, rows and lines)."""
     bits = [page.get("title"), page.get("text"), page.get("incomplete")]
@@ -604,9 +616,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         ev = {**evidence, "patch": own[0] if own else None,
               "masters": sorted(masters.get(own[0].lower(), set())) if own else None}
         if hits:
-            q_ = lead_qualifiers(hits[0], words, {str(x).lower() for x in full_order or order}, bool(own))
-            return (lead + pick("listed").format(file=hits[0].get("file")) + q_,
-                    {**ev, "case": "listed", "hit": hits[0], "qualifiers": q_.strip() or None})
+            loaded_ = {str(x).lower() for x in full_order or order}
+            hit_ = usable_first(hits, loaded_)[0]
+            q_ = lead_qualifiers(hit_, words, loaded_, bool(own))
+            return (lead + pick("listed").format(file=hit_.get("file")) + q_,
+                    {**ev, "case": "listed", "hit": hit_, "qualifiers": q_.strip() or None})
         # "No patch exists" only on a search that found its own known answer and read every source of this pair
         unread = entry.get("unreadSources") or []
         if known_found and not unread:
@@ -632,6 +646,18 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         return {"place": place_of(r.get("summary"), [r["formKey"], *(r.get("other") or [])]), "modA": mod(first[1]), "objectA": spoken_ref(first[0]),
                 "modB": mod(second[1]), "objectB": spoken_ref(second[0]),
                 "thingA": thing(first[0], first[1]), "thingB": thing(second[0], second[1])}
+
+    def spoken(text):
+        """A report sentence as the reel says it: each plugin by its mod's name, a place pointer to the report."""
+        for p_ in sorted({str(k) for k in mod_names} | {str(target)}, key=len, reverse=True):
+            if p_ and p_ in text:
+                try:
+                    text = text.replace(p_, mod(p_))
+                except Refused:
+                    pass
+        for a_, b_ in (words.get("reportToReel") or {}).items():
+            text = text.replace(a_, b_)
+        return text
 
     def clash_id(c):
         r_ = c["rows"][0]
@@ -937,8 +963,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             parts = [f"{n_} {card_unit(t_, n_) or words['caseLabels'].get(t_, t_)}" for t_, n_ in by_t.items()]
             sentence_un = words["unpicturedTyped"].format(
                 parts=joined(parts), verb="isn't" if sum(by_t.values()) == 1 else "aren't",
-                heading=((reader.get("sectionHeadings") or {}).get("prediction") or ""))
-            why_n = collections.Counter(why for _, why in unpictured)
+                heading=spoken((reader.get("sectionHeadings") or {}).get("prediction") or ""))
+            why_n = collections.Counter()
+            for c_, why_ in unpictured:
+                why_n[why_] += len(c_["rows"]) if c_["type"] in (policy.get("countRows") or []) else 1
             short = policy.get("stillReasonsShort") or {}
             if short and words.get("unpicturedWhy"):
                 sentence_un += " " + words["unpicturedWhy"].format(reasons=joined(
@@ -964,7 +992,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                                               **({"seconds": page_seconds({"layout": "statement", "text": sentence_un},
                                                                           rate, policy)} if rate else {})}]}})
     # what to do: the report's own verdicts and next steps, the same sentences, before the closing list
-    todo = [str(x) for x in pred.get("whatToDo") or []]
+    todo = [spoken(str(x)) for x in pred.get("whatToDo") or []]
     if todo:
         tpage = {"layout": "list", "title": pred.get("whatToDoHeading") or words["stillTitles"].get("whatToDo") or "",
                  "rows": todo, **({"maxWords": policy["pageMaxWords"]} if policy.get("pageMaxWords") else {})}

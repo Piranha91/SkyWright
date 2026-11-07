@@ -7221,7 +7221,8 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
                                "them": "it" if n == 1 else "them", "mods": and_list([name(m) for m in it.get("mods") or []]),
                                "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
                                "candNoun": (ns.get("candNoun") or ["", ""])[0 if n == 1 else 1],
-                               "still": ns.get("still", "") if compared else ns.get("stillNone", "")}))
+                               "still": ns.get("still", "") if compared else ns.get("stillNone", ""),
+                               "state": bind(ns.get("state" if compared else "stateNone") or "", {"verb": "is" if n == 1 else "are"})}))
     return out
 
 
@@ -8406,7 +8407,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         for i_, x_ in enumerate(mine_):
             for y_ in mine_[i_ + 1:]:
                 if pos_.get(x_.lower(), 0) > pos_.get(y_.lower(), 0):
-                    return bind(reader_data.get("orderSwapped") or "loads {first} before {second}", {"first": x_, "second": y_})
+                    return bind((reader_data.get("prediction") or {}).get("orderSwapped") or "loads {first} before {second}",
+                                {"first": x_, "second": y_})
         return ""
 
     def change_words(arm) -> str:
@@ -8722,10 +8724,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # the tested setups leave out or add mods to attribute each clash; said as that, never as one setup differing by a
     # list of plugins as if they were a patch
     n_alt_ = sum(1 for k in comparison_kinds.values() if k not in ("baseline", "patch-comparison", "supplied-combination"))
-    unstated_text = ((" " + bind(reader_data["unstatedSetups"], {
+    unstated_text = ((" " + bind((reader_data.get("prediction") or {})["unstatedSetups"], {
                           "count": fmt_n(n_alt_), "noun": "setup" if n_alt_ == 1 else "setups",
                           "plugins": and_list(unstated_difference_plugins)}))
-                     if unstated_difference_plugins and reader_data.get("unstatedSetups") else
+                     if unstated_difference_plugins and (reader_data.get("prediction") or {}).get("unstatedSetups") else
                      (f" One tested setup differs by {', '.join(unstated_difference_plugins)}, "
                       f"which is not declared as a patch; it is reported as a plugin that "
                       f"differs, not as an evaluated patch.")
@@ -9691,10 +9693,10 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
                 continue
             hits_ = entry_.get("hits") or []
             evaluated_ = any({x.lower() for x in pair_} <= set(masters.get(p_.lower(), set())) for p_ in supplied_)
-            if hits_:
-                leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1], file=hits_[0].get("file"))
-                              + reel_plan.lead_qualifiers(hits_[0], words, loaded_, evaluated_))
-            else:
+            for h_ in reel_plan.usable_first(hits_, loaded_)[:3]:
+                leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1], file=h_.get("file"))
+                              + reel_plan.lead_qualifiers(h_, words, loaded_, evaluated_))
+            if not hits_:
                 leads_.append(words["reportLead"]["notFound"].format(a=pair_[0], b=pair_[1]))
         if leads_:
             pred_.setdefault("whatToDo", [])
@@ -9918,6 +9920,8 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
     mode = plan["settings"]["mode"]
     reverse_rule = (pr.get("concise") or {}).get("reversePartRows", "index-only")
     media_by_id = {m["id"]: m for m in plan.get("media") or []}
+    reel_media = {str(fr.get("mediaId")) for c in (plan.get("reel") or {}).get("chapters") or []
+                  for fr in c.get("frames") or [] if fr.get("mediaId")}
     findings = []
     omissions = []
     figures_by_finding: dict = {}
@@ -9939,6 +9943,8 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         g["shownRows"] = (f.get("allRows") or f.get("rows") or [])[:shown]
         figs = [media_by_id[m] for m in (f.get("mediaIds") or []) if m in media_by_id and media_by_id[m].get("assessed")]
         units = figure_units(figs)
+        # the vignettes the reel shows come first, so a figure limit never leaves out a picture the reel shows
+        units.sort(key=lambda u_: not any(str(m_.get("id")) in reel_media for m_ in u_))
         if mode != "exhaustive" and len(units) > figures_per_finding:
             left_ = [str(m_.get("id")) for u_ in units[figures_per_finding:] for m_ in u_]
             omissions.append({"what": f"{f['id']}: {len(units) - figures_per_finding} of {len(units)} figure(s) not shown "
