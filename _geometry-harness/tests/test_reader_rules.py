@@ -607,7 +607,8 @@ def tes4(path: Path, masters) -> Path:
     return path
 
 
-def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False, recorded=None):
+def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False, recorded=None, flags=None,
+                override=None):
     """One record import without a rows file, its configuration on real plugin files: the record's chain is the base
     game, M, Q, P and the winner W; P holds M's value, which differs from Q's. P's own masters decide whether P made a
     change (with M among them, it made none)."""
@@ -621,7 +622,7 @@ def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False, rec
     files = td / "plugins"
     files.mkdir()
     fk = f"000901:{BASE}"
-    heads = {BASE: [], "M.esp": [BASE], "Q.esp": [BASE], "P.esp": list(p_masters), "W.esp": [BASE], **dict(extra)}
+    heads = {BASE: [], "M.esp": [BASE], "Q.esp": [BASE], "P.esp": list(p_masters), "W.esp": [BASE], **dict(extra), **dict(override or {})}
     order = [BASE, "M.esp", *[k for k in dict(extra)], "Q.esp", "P.esp", "W.esp"]
     plugins = []
     for n in order:
@@ -661,7 +662,8 @@ def rows_bundle(td: Path, p_masters, extra=(), p_file=True, p_changed=False, rec
         sw.mkdir(parents=True)
         (sw / "baseline.json").write_text(json.dumps({"Configuration": {"Plugins": [
             {"Name": x["name"], "Sha256": x["sha256"], "Masters": list(recorded.get(x["name"], heads[x["name"]])),
-             "MasterFlag": False, "LightFlag": False} for x in plugins]}}), encoding="utf-8")
+             "MasterFlag": False, "LightFlag": False, **((flags or {}).get(x["name"]) or {})}
+            for x in plugins]}}), encoding="utf-8")
         evidence.append({"kind": "emit", "path": "evidence/sweep/probe/baseline.json", "armId": "baseline"})
     (root / "manifest.json").write_text(json.dumps({"evidence": evidence, "registry": "registry/check-registry.json"}),
                                         encoding="utf-8")
@@ -794,6 +796,81 @@ def case_item18_masters_unread_fields_are_listed():
     listed = [u for u in emit.get("Unjudged") or [] if u.get("Reason") == recordrows.MASTERS_UNREAD]
     ok = counted == 1 and len(listed) == 1 and listed[0].get("Field") == "LocationReference" and listed[0].get("Plugins")
     return ok, f"counted {counted}; listed {listed}"
+
+
+def item18_derive(transcript, order):
+    """recordrows.derive, the function the record-rows and order-variant enrichments call, on a 2.0 capture's
+    transcripts with the configuration in `order`."""
+    import recordrows
+    req, resp = transcript
+    with tempfile.TemporaryDirectory() as td:
+        rq, rs = Path(td) / "request.jsonl", Path(td) / "response.jsonl"
+        rq.write_text("".join(json.dumps(x) + NL for x in req), encoding="utf-8")
+        rs.write_text("".join(json.dumps(x) + NL for x in resp), encoding="utf-8")
+        return recordrows.derive(rq, rs, {"plugins": [{"name": n} for n in order]}, recordrows.load_scope())
+
+
+def item18_chain():
+    fk = f"000801:{BASE}"
+    return [(fk, "PlacedObject", [(BASE, {"Base": "000101:Skyrim.esm", "Scale": "1"}),
+                                  (A, {"Base": "000102:ModA.esp", "Scale": "1"}),
+                                  (B, {"Base": "000103:ModB.esp", "Scale": "2"})])]
+
+
+def case_item18_b1_derive_reads_a_2_0_tree_capture():
+    """Item 18 B1: a 2.0 capture holds tree answers, not pre-2.0 text reads. derive must read them: in the measured order
+    A's Base is lost to B; with the pair reversed, B's Base and Scale are lost to A (A's Scale is its master's)."""
+    emit = item18_derive(P.tree_transcript(item18_chain()), [BASE, A, B])
+    rev = item18_derive(P.tree_transcript(item18_chain()), [BASE, B, A])
+    got = sorted((c["A"], c["B"], c["Field"]) for c in emit.get("Conflicts") or [])
+    got_r = sorted((c["A"], c["B"], c["Field"]) for c in rev.get("Conflicts") or [])
+    # the row says the lost value as the tree gives it (the provider's difference from the winner), whole
+    lost = [n["Values"]["lost"] for c in emit.get("Conflicts") or [] for n in c.get("Necessary") or []]
+    ok = (got == [(A, B, "Base")] and got_r == [(B, A, "Base"), (B, A, "Scale")]
+          and len(lost) == 1 and "000102:ModA.esp" in lost[0])
+    return ok, f"measured {got}; reversed {got_r}; lost value {lost}"
+
+
+def case_item18_b1_derive_reads_2_0_by_name_reads():
+    """Item 18 B1: the same through the 2.0 by-name reads (housecarl_records source= form fields)."""
+    emit = item18_derive(P.records_transcript(item18_chain()), [BASE, A, B])
+    got = sorted((c["A"], c["B"], c["Field"]) for c in emit.get("Conflicts") or [])
+    ok = got == [(A, B, "Base")]
+    return ok, f"measured {got}"
+
+
+def json19_transcript(chain, fk=f"000801:{BASE}", rtype="PlacedObject"):
+    """houseCARL 1.9.0's record reads: `housecarl_read_plugin_file` answered in JSON (`record.fields[] {path, value |
+    note}`), as Groups 2 and 3's retained bundles hold them."""
+    req, resp = [{"batchMarker": "b1"}], [{"batchMarker": "b1"}]
+    for n, (plugin, fields) in enumerate(chain, start=1):
+        req.append({"jsonrpc": "2.0", "id": n, "method": "tools/call", "params": {
+            "name": "housecarl_read_plugin_file", "arguments": {"plugin": f"X:/m/{plugin}", "formid": fk, "depth": 3}}})
+        body = {"out_of_load_order": True, "file": f"X:/m/{plugin}", "where": "direct path", "masters": [], "mode": "read",
+                "record": {"formid": fk, "type": rtype, "editorid": None,
+                           "fields": [{"path": k, "value": v} if v is not None else {"path": k, "note": "(absent)"}
+                                      for k, v in fields.items()]}}
+        resp.append({"jsonrpc": "2.0", "id": n, "result": {"content": [{"type": "text", "text": json.dumps(body, indent=2)}]}})
+    return req, resp
+
+
+def case_item18_g2_record_rows_read_the_1_9_json_form():
+    """Item 18 ruling 2: a 1.9.0 JSON record read is read like a text read: A's Base is lost to B; a field absent in
+    every version is no change."""
+    import recordrows
+    chain = [(BASE, {"Base": "000101:Skyrim.esm", "Scale": None}), (A, {"Base": "000102:ModA.esp", "Scale": None}),
+             (B, {"Base": "000103:ModB.esp", "Scale": None})]
+    req, resp = json19_transcript(chain)
+    with tempfile.TemporaryDirectory() as td:
+        rq, rs = Path(td) / "request.jsonl", Path(td) / "response.jsonl"
+        rq.write_text("".join(json.dumps(x) + NL for x in req), encoding="utf-8")
+        rs.write_text("".join(json.dumps(x) + NL for x in resp), encoding="utf-8")
+        emit = recordrows.derive(rq, rs, {"plugins": [{"name": n, "path": f"X:/m/{n}"} for n in (BASE, A, B)]},
+                                 recordrows.load_scope())
+    got = sorted((c["A"], c["B"], c["Field"]) for c in emit.get("Conflicts") or [])
+    failed = sum(n for c in emit.get("Coverage") or [] for r, n in (c.get("Unjudgeable") or {}).items())
+    ok = got == [(A, B, "Base")] and failed == 0
+    return ok, f"rows {got}; unjudgeable {failed}"
 
 
 def case_record_rows_unread_reason_is_the_captures():

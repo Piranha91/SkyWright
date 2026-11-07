@@ -216,10 +216,31 @@ def _messages(path: Path):
                 yield batch, x
 
 
+def parse_json19(text: str) -> dict:
+    """houseCARL 1.9.0's JSON answer to a record read (`record` {type, formid, editorid, fields [{path, value | note}]}):
+    the same shape parse_text gives; a field the answer notes instead of valuing ("(absent)", "(null link)") carries
+    the note as its value, so two versions noting it alike are equal."""
+    try:
+        d = json.loads(text)
+    except ValueError:
+        return {"status": "error", "error": text.strip()[:300], "fields": {}}
+    r = d.get("record") if isinstance(d, dict) else None
+    if not isinstance(r, dict) or not r.get("type"):
+        return {"status": "error", "error": text.strip()[:300], "fields": {}}
+    fields = {}
+    for f in r.get("fields") or []:
+        if isinstance(f, dict) and f.get("path"):
+            fields[str(f["path"])] = str(f["value"]) if "value" in f else str(f.get("note", ""))
+    return {"status": "ok", "fields": fields, "type": r.get("type"), "formKey": r.get("formid"),
+            "editorId": str(r.get("editorid") or "").strip()}
+
+
 def parse_text(text: str) -> dict:
     rec = {"status": "ok", "fields": {}}
     if not text.strip() or text.lstrip().startswith("error"):
         return {"status": "error", "error": text.strip()[:300], "fields": {}}
+    if text.lstrip().startswith("{"):
+        return parse_json19(text)
     infields = False
     for ln in text.splitlines():
         if not infields:
@@ -389,7 +410,12 @@ def _show(vals) -> str:
 
 
 def _show_field(val) -> str:
-    """A field's value for the record: its own value, or `leaf=value` for each leaf of a struct or list."""
+    """A field's value for the record: its own value, or `leaf=value` for each leaf of a struct or list. A 2.0 tree
+    answer's value is the provider's differences from the winner (strings); none is the winner's value."""
+    if any(isinstance(x, str) for x in val):
+        return "; ".join(val)
+    if not val:
+        return "(the winning value)"
     if len(val) == 1 and "." not in val[0][0]:
         return _show(val[0][1])
     return "; ".join(f"{k.split('.', 1)[1] if '.' in k else k}={_show(v)}" for k, v in val)
@@ -585,11 +611,12 @@ MASTERS_UNREAD = "a removal by a plugin whose masters' headers could not all be 
 
 
 def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, containers: set | None = None,
-                   masters: dict | None = None, masters_unread: set | None = None) -> dict:
+                   masters: dict | None = None, masters_unread: set | None = None, chains: dict | None = None) -> dict:
     """The conflict-file emit for one setup: `plugins` in load order, each {name, path}. `containers`: persistent cells
     known from other captures of the same evaluation (a capture that read no worldspace cannot name them). `masters`:
     {plugin (lower case): its masters}; a value is a plugin's change only if it differs from the one it inherits from
-    them (`own_change`); without them, from the plugin before it."""
+    them (`own_change`); without them, from the plugin before it. `chains`: provider chains already read
+    (`chains_for_setup`, a 2.0 capture) in place of `reads`."""
     conflicts, unjudged = [], []
     cov = collections.OrderedDict()
     # A worldspace's persistent cell (the one its TopCell names) holds the worldspace's persistent references; its
@@ -600,11 +627,16 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
     def line(rtype):
         return cov.setdefault(rtype, {"Population": f"contested {rtype} records", "Judged": 0,
                                       "Unjudgeable": collections.Counter(), "SetAside": collections.Counter()})
-    for fk, rec in _record_chains(reads, plugins, scope, containers, line, unjudged).items():
+    if chains is not None:
+        chains = {fk: rec for fk, rec in chains.items() if fk not in containers}
+        for rec in chains.values():
+            line(rec["type"])["Judged"] += 1
+    for fk, rec in (chains if chains is not None else _record_chains(reads, plugins, scope, containers, line,
+                                                                     unjudged)).items():
         names, rtype = rec["providers"], rec["type"]
         win_i = len(names) - 1
         for top, vals in rec["values"].items():
-            picked = rec["reads"][top]
+            picked = (rec.get("reads") or {}).get(top)
             for i in range(1, win_i):
                 if masters_unread and names[i].lower() in masters_unread:
                     # whose value it inherits cannot be told without its masters: counted by name, never guessed from
@@ -620,8 +652,8 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                 if its and j is not None and list_change_kept(its[j], its[i], its[win_i]):
                     continue           # every item it added or removed the winning list keeps so: nothing of it is lost
                 if changed and vals[win_i] != vals[i]:
-                    reads_ = [{"batch": picked[k]["batch"], "id": picked[k]["id"], "plugin": names[k]}
-                              for k in (i - 1, i, win_i)]
+                    reads_ = ([{"batch": picked[k]["batch"], "id": picked[k]["id"], "plugin": names[k]}
+                               for k in (i - 1, i, win_i)] if picked else None)
                     a, b = names[i], names[win_i]
                     eid = rec["editorId"]
                     conflicts.append({
@@ -632,7 +664,7 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                         "Necessary": [{"FormKey": fk, "Label": (eid if rtype == "Cell" and eid else None),
                                        "Values": {"lost": _show_field(vals[i]), "winner": _show_field(vals[win_i]),
                                                   "overridden": _show_field(vals[i - 1])},
-                                       "Reads": reads_}]})
+                                       **({"Reads": reads_} if reads_ else {})}]})
     coverage = [{"Population": v["Population"], "Judged": v["Judged"],
                  "Unjudgeable": dict(v["Unjudgeable"]), "SetAside": dict(v["SetAside"])} for v in cov.values()]
     return {"Population": "contested records", "State": "baseline", "Conflicts": conflicts, "Coverage": coverage,
@@ -795,13 +827,42 @@ def read_chains(request: Path, response: Path, plugins: list[dict], scope: Scope
     return out
 
 
+def chains_for_setup(request: Path, response: Path, plugins: list[dict], scope: Scope) -> dict:
+    """A 2.0 capture's provider chains (read_chains: tree answers and by-name reads), each put in this configuration's
+    load order. A tree lists a record's providers in the order the reader loaded them; a configuration with the same
+    plugins in another order (a reversed pair) permutes them, and each value goes with its provider. A record holding a
+    provider the configuration does not load is left out (it was read in another setup)."""
+    rows = _plugin_rows(plugins)
+    idx = {}
+    for i, p in enumerate(rows):
+        idx.setdefault(str(p["name"]).lower(), i)
+        if p.get("path"):
+            idx.setdefault(_norm_path(p["path"]), i)
+    out = {}
+    for fk, rec in read_chains(Path(request), Path(response), rows, scope).items():
+        provs = list(rec.get("providers") or [])
+        pos = [idx.get(str(n).lower(), idx.get(_norm_path(str(n)))) for n in provs]
+        if not provs or any(x is None for x in pos):
+            continue
+        order = sorted(range(len(provs)), key=lambda k: pos[k])
+        new = dict(rec, providers=[rows[pos[k]]["name"] for k in order],
+                   values={t: [v[k] for k in order] for t, v in (rec.get("values") or {}).items()},
+                   reads={t: [v[k] for k in order] for t, v in (rec.get("reads") or {}).items()})
+        if rec.get("items"):
+            new["items"] = {t: [v[k] for k in order] for t, v in rec["items"].items()}
+        out[fk] = new
+    return out
+
+
 def derive(request: Path, response: Path, configuration: dict, scope: Scope, rel: dict | None = None,
            containers: set | None = None, masters: dict | None = None, masters_unread: set | None = None) -> dict:
     """rows_for_setup over one import's transcripts, citing the bytes it read: `rel` maps each file to the path a
-    reader of the output finds it at (inside the bundle)."""
+    reader of the output finds it at (inside the bundle). A capture with no pre-2.0 record reads is read through its
+    2.0 forms (chains_for_setup), in the configuration's order."""
     parsed = parse_transcript(Path(request), Path(response))
-    emit = rows_for_setup(parsed["reads"], list(configuration.get("plugins") or []), scope, containers, masters,
-                          masters_unread)
+    plugins = list(configuration.get("plugins") or [])
+    chains = None if parsed["reads"] else chains_for_setup(Path(request), Path(response), plugins, scope)
+    emit = rows_for_setup(parsed["reads"], plugins, scope, containers, masters, masters_unread, chains=chains)
     rel = rel or {}
     emit["derivedFrom"] = [{"path": str(rel.get(p, p)).replace("\\", "/"), "sha256": sha256(p), "role": role}
                            for role, p in (("request", Path(request)), ("response", Path(response)))]

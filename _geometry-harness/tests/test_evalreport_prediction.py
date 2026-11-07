@@ -137,7 +137,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                 scope_unmeasured=(), count_only=None, cells=(), plan_id="pred00000000", tool_builds=None,
                 enrichment=None, receipt_configs=None, names=None, enrichment_unjudged=None, predicates=None,
                 diff_logs=None, states_not_explored=None, transcripts=None, masters=None, coverage_pops=None,
-                single_run=(), route_rows=None, programs=None, enrichment_coverage=None):
+                single_run=(), route_rows=None, programs=None, enrichment_coverage=None,
+                plugin_flags=None, order_variant=None, manifest_extra=None):
     """results: {(checkId, armId): [conflict rows]} -- an empty list is a completed check with no finding.
     missing: [(checkId, armId, status)]. unjudgeable: disposition unassessed.unjudgeablePopulations rows.
     order: {armId: {probe: perProbe counts}} -- the controller's order evaluation of that arm against the baseline.
@@ -156,6 +157,11 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     unjudged, written as its `Unjudged` list and counted in its coverage line.
     enrichment_coverage: {(checkId, armId): {reason: count}} -- further unjudgeable counts on that enrichment's coverage
     line whose fields it does not list (item 18 A2).
+    plugin_flags: {plugin: {"MasterFlag": bool, "LightFlag": bool}} -- header flags each emit's configuration records
+    beside the master lists (item 18 phase 3).
+    order_variant: {(checkId, armId): (plugins in the reversed order, [conflict rows])} -- an `order-variant`
+    enrichment: that arm's record rows derived with the evaluated pair's order reversed (item 18 phase 3).
+    manifest_extra: further top-level manifest keys (item 18: the bundle's `order` status).
     predicates: {(checkId, armId): [{Kind, A, B, FormKey, Other, Physical}]} -- the rows of the setup that arm was
     measured against, measured again in that arm's setup (an emit's `Predicates`).
     diff_logs: {(checkId, armId): text} -- the log of that arm's comparison with the baseline (a `diff` receipt).
@@ -208,7 +214,8 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
                 "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}],
                 **({"Predicates": predicates[(check_id, arm_id)]} if (check_id, arm_id) in (predicates or {}) else {}),
                 **({} if masters is False else {"Configuration": {"Plugins": [
-                    {"Name": x["name"], "Sha256": x["sha256"], "Masters": list((masters or {}).get(x["name"]) or [])}
+                    {"Name": x["name"], "Sha256": x["sha256"], "Masters": list((masters or {}).get(x["name"]) or []),
+                     **((plugin_flags or {}).get(x["name"]) or {})}
                     for x in config_of(check_id, arm_id)]}})}
         (root / "receipts" / f"{rid}.json").write_text(json.dumps(receipt), encoding="utf-8")
         (root / "evidence" / f"{rid}.json").write_text(json.dumps(emit), encoding="utf-8")
@@ -326,9 +333,20 @@ def make_bundle(root: Path, arms, results, targets, patches=(), missing=(), unju
     (root / "ledger.json").write_text(json.dumps({"entries": []}), encoding="utf-8")
     (root / "registry").mkdir(exist_ok=True)
     (root / "registry" / "check-registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    for n, ((check_id, arm_id), (o_plugins, rows)) in enumerate(sorted((order_variant or {}).items())):
+        rel = f"enrichment/order-variant/{check_id}__{arm_id}.json"
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        src = f"evidence/{check_id}__{arm_id}__arm.json"
+        (root / rel).write_text(json.dumps({"Population": "contested records", "State": "baseline", "Conflicts": rows,
+                                            "Coverage": [{"Population": check_id, "Judged": 40, "Unjudgeable": {}}],
+                                            "configuration": {"plugins": [{"name": x} for x in o_plugins]},
+                                            "derivedFrom": [{"path": src, "sha256": "1" * 64}]}), encoding="utf-8")
+        evidence.append({"id": f"v{n:015x}", "kind": "enrichment", "enrichment": "order-variant", "path": rel,
+                         "sha256": "2" * 64, "checkId": check_id, "armId": arm_id,
+                         "recordedBy": "enrichment:order-variant", "derivedFrom": [{"path": src, "sha256": "1" * 64}]})
     (root / "manifest.json").write_text(json.dumps({
         "bundleSchema": 2, "plan": "plan.json", "disposition": "disposition.json", "ledger": "ledger.json",
-        "registry": "registry/check-registry.json", "evidence": evidence}), encoding="utf-8")
+        "registry": "registry/check-registry.json", "evidence": evidence, **(manifest_extra or {})}), encoding="utf-8")
     return root
 
 
