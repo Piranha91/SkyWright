@@ -1035,7 +1035,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         for subj in row.get("subjects") or []:
             it = head_titles.get(str(subj).split(", with")[0].split(", without")[0])
             if it and words.get("closingReconcile") and row.get("comparison"):
-                reconcile.append(words["closingReconcile"].format(title=it.get("title"), count=it.get("count")))
+                reconcile.append(words["closingReconcile"].format(title=it.get("title"), count=it.get("count"),
+                                                                  cases="case" if it.get("count") == 1 else "cases",
+                                                                  verb="is" if it.get("count") == 1 else "are"))
     checks += other_
     if reconcile:
         checks.append({"reason": " ".join(dict.fromkeys(reconcile)), "subjects": [], "comparison": True})
@@ -1057,8 +1059,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 if not judged_:
                     item_ = item_.split(partial_["judgedCut"])[0] if partial_.get("judgedCut") else item_
             else:
-                item_ = partial_["uncounted"].format(check=check_.strip(), parts="; ".join(
-                    re.sub(r"\s*\([^()]*(\([^()]*\)[^()]*)*\)", "", x_).strip() for x_ in rest_.split(";") if x_.strip()))
+                # the populations are in the report; the reel names the check and says only part was judged
+                item_ = partial_["uncounted"].format(check=check_.strip())
             row_ = next((r_ for r_ in checks if r_["reason"] == partial_["heading"]), None)
             if row_ is None:
                 row_ = {"reason": partial_["heading"], "subjects": [], "comparison": False}

@@ -976,7 +976,7 @@ def case_reel_closing_counts_the_openings_checks_and_parts():
           and len(measured) == 3 and "Connected doors, cells, quests and scripts" in measured
           and "On another tested setup only" in flat
           and "Quest aliases split between mods: 9,490 items it could not judge, beside 6,810 it did" in flat
-          and "Objects occupying the same space: 1,144 object types whose mesh was read; 18,510 placed objects" in flat
+          and "Objects occupying the same space: some of its items" in flat and "18,510" not in flat
           and '"Could not be judged"' not in flat and " 1 check." not in say and " checks." not in say
           and hasattr(reel_stills, "page_say") and say == reel_stills.page_say(page))
     return ok, f"rows {flat[:500]}; say {say[:300]!r}"
