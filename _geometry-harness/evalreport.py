@@ -10006,6 +10006,10 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
             if not hits_:
                 leads_.append(words["reportLead"]["notFound"].format(a=pair_[0], b=pair_[1]))
         if leads_:
+            # the search file names plugins by the file on disk; said in the load order's spelling, as every line is
+            leads_ = proper_plugin_case(leads_, [str(q.get("name") if isinstance(q, dict) else q)
+                                                 for a_ in b.plan.get("arms") or []
+                                                 for q in (a_.get("requested") or {}).get("plugins") or []])
             pred_.setdefault("whatToDo", [])
             pred_["whatToDo"] = list(pred_["whatToDo"]) + [x for x in leads_ if x not in pred_["whatToDo"]]
             pred_["whatToDoHeading"] = pred_.get("whatToDoHeading") or ((pr.get("reader") or {}).get("prediction") or {}).get("whatToDo", {}).get("heading")
