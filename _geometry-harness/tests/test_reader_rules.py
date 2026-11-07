@@ -1449,6 +1449,21 @@ def case_the_reel_keeps_the_reports_attribution_caveat():
     return ok, f"vignette {said[:400]!r}"
 
 
+def case_a_check_on_many_setups_is_said_once():
+    """A check with no result on several other setups is said once, with how many, not once per setup."""
+    pres = reel_pres()
+    for i_, gone in enumerate(([OTHER], [B], [OTHER, B])):
+        pres["scope"]["arms"].append({"armId": f"alt-{i_}", "plugins": [BASE, A], "displayLabel": "Tested alternative setup",
+                                      "readerLabel": f"Tested alternative setup {i_}", "pluginsRemoved": gone,
+                                      "pluginsAdded": []})
+    pres["reader"]["missingSummary"] = [{"reason": "ran, but could not decide", "subjects": [
+        f"Which tested load order has fewer measured problems — Tested alternative setup {i_}" for i_ in range(3)]}]
+    rows = ((chapter(reel_of(pres, MODS + [B]), "closing") or {}).get("still") or {"pages": [{}]})["pages"][0].get("rows") or []
+    subs = [s for r in rows for s in r.get("subjects") or [] if "fewer measured problems" in s]
+    ok = subs == ["Which tested load order has fewer measured problems, on 3 other tested setups (the report names each)"]
+    return ok, f"subjects {subs}"
+
+
 CASES = [(k, v) for k, v in list(globals().items()) if k.startswith("case_") and callable(v)]
 
 

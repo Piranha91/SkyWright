@@ -202,6 +202,13 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
                     check=check_, patch=patch_name((has or patches)[0]))
             if line not in subs:
                 subs.append(line)
+        # a check named on several other setups is said once, with how many (the report lists each setup)
+        if words["closingLines"].get("setupMany"):
+            by_check_ = collections.OrderedDict()
+            for s_ in subs:
+                by_check_.setdefault(check_title_of(s_), []).append(s_)
+            subs = [ls_[0] if len(ls_) == 1 else words["closingLines"]["setupMany"].format(check=c_, count=len(ls_))
+                    for c_, ls_ in by_check_.items()]
         reason, comparison = plain_reason(m.get("reason"), words)
         same = next((r_ for r_ in rows if r_["reason"] == reason), None)
         if same is not None:
@@ -245,7 +252,7 @@ def largest_population(text: str):
 
 def check_title_of(line: str) -> str:
     """A closing line's check title, without the setup it names."""
-    return re.split(r", (?:with|without|on the setup) ", str(line), maxsplit=1)[0]
+    return re.split(r", (?:with|without|on the setup|on \d+ other) ", str(line), maxsplit=1)[0]
 
 
 def plain_reason(reason, words: dict) -> tuple[str, bool]:
