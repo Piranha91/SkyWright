@@ -648,6 +648,8 @@ def capture_arm(plan, arm, baseline, reader_cmd, env, out: Path, scope: FieldSco
                 arow = authored.get(fid)
                 if winner == p and arow is not None and arow.get("complete", True):
                     read = [parse_delta(l, arm["plugins"]) for l in arow.get("deltas") or []]
+                    if any(x and x[0] == scope.flags_field for x in read):
+                        read = [x for x in read if not (x and x[0] in scope.flags_views)]  # one header, judged once
                     judged[key] += sum(1 for x in read if x and not scope.excluded(rtype, x[0]))
                     unread = sum(1 for x in read if x is None)
                     if unread:

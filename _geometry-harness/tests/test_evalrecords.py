@@ -353,6 +353,16 @@ def case_55_a_line_the_winner_branch_cannot_read_is_counted_not_dropped():
     assert refused is None and "failed extraction" in why_not, (refused, why_not)
 
 
+def case_64_a_winning_records_flags_in_both_views_are_judged_once():
+    p = "unofficial skyrim special edition patch.esp"
+    lines = {"000D74:Skyrim.esm": [f"MajorFlags=262144 ({p} 0)", f"SkyrimMajorRecordFlags=Compressed ({p} 0)",
+                                   f"WaterHeight=0 ({p} 5)"],
+             "0138CB:Skyrim.esm": [f"MajorFlags=Persistent ({p} 0)"]}
+    cov = cell_capture(lines)
+    # the first cell: its flags once and its water height; the second carries only the per-type view, judged on its own
+    assert cov["Judged"] == 3, f"want Judged 3 (flags once + water height + the lone view), got {cov['Judged']}"
+
+
 def case_56_an_evaluated_plugin_the_reader_spells_by_its_disk_name_is_still_read():
     # the tree's touchers, its nodes and its winner all carry the reader's spelling of the evaluated plugin
     cov = cell_capture(CELL_LINES, tree_subject="cotn - morthal.esp")
