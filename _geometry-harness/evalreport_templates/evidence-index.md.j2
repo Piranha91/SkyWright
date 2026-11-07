@@ -35,7 +35,12 @@ Complete in every mode: every finding with all of its rows, every evidence file 
 |---|---|---|---|---|---|---|
 {% for r in g.rows %}| `{{ r.FormKey|md }}` {{ r.objectWords|md }} | {{ r.Cell|md }} | `{{ (r.Mesh or "-")|md }}` | {{ r.Verdict }} | {{ r.Passage if r.Passage is not none else "-" }} ({{ r.PassageLeft if r.PassageLeft is not none else "-" }} / {{ r.PassageRight if r.PassageRight is not none else "-" }}) | {{ (r.PassageShare or "-")|md }} | {{ (r.Why or "")|md }} |
 {% endfor %}
-{% endfor %}{% endif %}<a id="prediction-record"></a>
+{% endfor %}{% endif %}{% set lo = p.reader.prediction.get("loadOrder") %}{% if lo %}<a id="load-order-pair"></a>
+## Load order of the evaluated pair
+
+{{ lo.sentence }} Rule: {{ lo.rule or "not established" }}; orders evaluated: {{ (lo.ordersEvaluated or [])|join("; ") }}.{% if lo.changeHands %} Fields that change hands: {{ lo.changeHands.fields }} on {{ lo.changeHands.records }} records; the reversed setup's rows: `{{ lo.changeHands.rowsPath|md }}`.{% endif %}{% if lo.withPatch %} With the patch: {{ lo.withPatch.changeHands }} fields change hands.{% endif %}{% for m in lo.missing or [] %} {{ m }}.{% endfor %}
+
+{% endif %}<a id="prediction-record"></a>
 ## Prediction record ({{ p.reader.prediction.record|length }})
 
 Every record on the setup the prediction reads ({{ p.reader.prediction.predictionArm }}), with whether it counts as a clash between mods (`admitted`) or why it is set aside, and how an admitted one is attributed.

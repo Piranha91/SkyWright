@@ -6468,6 +6468,11 @@ def cmd_bundle(a) -> int:
                 r.refuse(msg, EXIT_REFUSED_RESULT)
                 return EXIT_REFUSED_RESULT
         r.advance()
+        # The order step (item 18, roadmap 4.24 phase 3): whether the evaluated pair's order is a choice, and for a free
+        # pair the record lane's rows with the two swapped; the manifest's `order` says which, in one sentence.
+        r.stage("order", total=1, unit="statements")
+        ost = order_step(out)
+        r.advance()
     print(f"bundle: {len(evidence)} evidence file(s) under {out}"
           + (f"; {len(unassessed_media)} media item(s) unassessed" if unassessed_media else ""))
     print(f"names: {st['status']}: {st['sentence']}",
@@ -6707,7 +6712,8 @@ def cmd_enrich(a) -> int:
             out = st["result"]
         else:
             try:
-                out = bundleenrich.enrich_record_rows(d)
+                out = (bundleenrich.enrich_order_variant(d) if a.kind == "order-variant"
+                       else bundleenrich.enrich_record_rows(d))
             except bundleenrich.Refused as ex:
                 msg = f"enrich refused: {ex}"
                 print(f"REFUSED: {msg}", file=sys.stderr)
@@ -6785,6 +6791,43 @@ def names_step(d: Path, cmd: str | None, source: str, mods: dict, env: dict) -> 
                                f"the report counts their clashes as cannot-tell.", out, c)
     return done("enriched", f"The names enrichment read all {c.get('objectsNamed')} objects the rows name and their "
                             f"{c.get('bases')} base records.", out, c)
+
+
+def order_step(d: Path) -> dict:
+    """Say in the bundle's manifest (`order`) whether the evaluated pair's order is a choice: forced (the rule and which
+    loads first), unknown (a header fact missing), derived (free, and the order-variant enrichment wrote the reversed
+    setup's record rows) or refused (free, but the enrichment could not run, with its reason). Never raises."""
+    import bundleenrich
+    m = load_json(d / "manifest.json") or {}
+    plan = load_json(d / (m.get("plan") or "plan.json")) or {}
+    pair = [str(t.get("name")) for t in plan.get("targets") or [] if isinstance(t, dict) and t.get("name")]
+    if len(pair) != 2:
+        st = {"status": "unknown", "pair": pair, "rule": None,
+              "sentence": f"The plan names {len(pair)} evaluated plugin(s), not a pair, so no order is stated."}
+    else:
+        ch = bundleenrich.order_choice(pair, bundleenrich.pair_headers(d, m, plan, pair))
+        if ch["forced"] is None:
+            st = {"status": "unknown", "pair": pair, "rule": None, "sentence": "Whether the order is a choice is not said: "
+                  + ch["missing"][0] + "."}
+        elif ch["forced"]:
+            st = {"status": "forced", "pair": pair, "rule": ch["rule"], "loadsFirst": ch["loadsFirst"],
+                  "sentence": f"The order of {pair[0]} and {pair[1]} is not a choice ({ch['rule']}): "
+                              f"{ch['loadsFirst']} loads first."}
+        else:
+            try:
+                res = bundleenrich.enrich_order_variant(d)
+                st = {"status": "derived", "pair": pair, "rule": ch["rule"],
+                      "sentence": f"The order of {pair[0]} and {pair[1]} is free ({ch['rule']}); the record lane's rows "
+                                  f"with the two swapped were derived from the setups' own reads ({res['files']} "
+                                  f"file(s))."}
+            except (bundleenrich.Refused, OSError, ValueError, KeyError) as ex:
+                st = {"status": "refused", "pair": pair, "rule": ch["rule"],
+                      "sentence": f"The order of {pair[0]} and {pair[1]} is free, but the reversed setup was not "
+                                  f"derived: {str(ex).rstrip('.')}."}
+    m = load_json(d / "manifest.json") or {}
+    m["order"] = st
+    write_json(d / "manifest.json", m)
+    return st
 
 
 def write_names_status(d: Path, st: dict) -> dict:
@@ -6923,7 +6966,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("enrich", help="add evidence derived after measurement to a bundle (record rows, names)")
     p.add_argument("--bundle", required=True)
-    p.add_argument("--kind", required=True, choices=("record-rows", "names"))
+    p.add_argument("--kind", required=True, choices=("record-rows", "names", "order-variant"))
     p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with (default: "
                                         f"{READER_ENV}, else this checkout's built server)")
     p.add_argument("--reader-env", action="append", metavar="KEY=VALUE",

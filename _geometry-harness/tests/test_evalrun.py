@@ -8263,6 +8263,40 @@ CASES["case-592"] = case_592
 CASES["case-593"] = case_593
 
 
+def case_800(tmp):
+    """Item 18 phase 3: `enrich --kind order-variant` is a kind evalrun takes. On case-01's evaluation it either derives
+    the reversed order's rows (exit 0, a manifest row of that kind, and the copy still verifies) or refuses in one
+    sentence that says why the order cannot be reversed (exit 2); never a usage error."""
+    case = "case-800-enrich-order-variant"
+    bundle, plan, cid, arm, names = recorded_bundle(tmp, case)
+    b1 = tmp / f"{case}-b1"
+    shutil.copytree(bundle, b1)
+    r = evalrun(["enrich", "--bundle", b1, "--kind", "order-variant"])
+    check("invalid choice" not in r.stderr, f"{case}: the kind is accepted ({r.stderr.strip()[-200:]!r})")
+    if r.returncode == 0:
+        rows = manifest_rows(b1, "order-variant")
+        check(bool(rows), f"{case}: an order-variant row is in the manifest")
+        expect(evalrun(["verify-bundle", b1]).returncode, 0, f"{case}: the enriched copy verifies", "phase 3")
+    else:
+        expect(r.returncode, 2, f"{case}: a refusal, not a crash ({r.stderr.strip()[-200:]!r})", "phase 3")
+        check("invalid choice" not in r.stderr and "order" in r.stderr.lower() and r.stderr.strip().count(". ") <= 1,
+              f"{case}: one sentence saying why the order cannot be reversed ({r.stderr.strip()[-200:]!r})")
+
+
+def case_801(tmp):
+    """Item 18 phase 3: every bundle says whether its evaluated pair's order is a choice: the manifest's `order` status
+    is derived, forced, unknown or refused, with a sentence, whatever the reader settings."""
+    case = "case-801-bundle-order-status"
+    bundle, plan, cid, arm, names = recorded_bundle(tmp, case)
+    st = (load(bundle / "manifest.json") or {}).get("order") or {}
+    check(st.get("status") in ("derived", "forced", "unknown", "refused") and bool(st.get("sentence")),
+          f"{case}: the manifest's order status ({st})")
+
+
+CASES["case-800"] = case_800
+CASES["case-801"] = case_801
+
+
 
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""

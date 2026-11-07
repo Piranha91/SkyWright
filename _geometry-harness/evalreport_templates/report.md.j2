@@ -42,7 +42,9 @@
 {% endfor %}{% for o in pred.get("orderRiskLines") or [] %}{% if loop.first %}{{ "
 " }}{% endif %}- {{ o.text }} [Evidence]({{ o.path }}).
 
-{% endfor %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}{{ "
+{% endfor %}{% if pred.get("loadOrder") and pred.loadOrder.get("sentence") %}{{ pred.loadOrder.sentence }}
+
+{% endif %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}{{ "
 " }}**{{ pred.singleModHeading }}**
 
 {% for a in pred.get("aloneLines") or [] %}- **{{ a.title }}** ({{ a.unit }}): {% for g in a.groups %}{{ g.from }} {% for e in g.entries %}{{ e.text }}{% for fid in e.findingIds[:1] %} ([evidence](evidence-index.md#{{ fid }})){% endfor %}{% if not loop.last %}, {% endif %}{% endfor %}{% if not loop.last %}; {% endif %}{% endfor %}. {{ a.inGameText }}

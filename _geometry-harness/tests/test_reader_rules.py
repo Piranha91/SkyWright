@@ -798,6 +798,244 @@ def case_item18_masters_unread_fields_are_listed():
     return ok, f"counted {counted}; listed {listed}"
 
 
+# ------------------------------------------------------------------ item 18, phase 3: the order of the two mods
+
+def p3_bundle(flags=None, masters=None, variant=None, patch=False, patch_variant=None):
+    """The four setups (A before B on the setup with both); A's change to one record lost to B. `flags`/`masters`:
+    the header facts the emits record (masters=False: none recorded). `variant`: the reversed order's rows on the
+    baseline. `patch`: the bundle is the setup with a declared patch after both, measured against this one as its
+    sibling, with `patch_variant` the reversed rows on the patched setup."""
+    m = {OTHER: [BASE], A: [BASE], B: [BASE]}
+    m.update(masters or {})
+    # A's Name on one record and Scale on a third are lost to B in the measured order
+    rows = [P.lost_row(A, B, f"000801:{BASE}", "Name", "a1", "b1", "v1"),
+            P.lost_row(A, B, f"000803:{BASE}", "Scale", "a3", "b3", "v3")]
+    enr = {(RECORDS, "baseline"): rows, (RECORDS, "dependency-only"): [], (RECORDS, "plus-a"): [], (RECORDS, "plus-b"): []}
+    results = {(CONTACT, a_): [] for a_ in ("baseline", "dependency-only", "plus-a", "plus-b")}
+    kw = dict(count_only={k: max(1, len(v)) for k, v in enr.items()}, enrichment=enr,
+              masters=(False if masters is False else m), plugin_flags=flags or {},
+              order_variant=({(RECORDS, "baseline"): ([BASE, OTHER, B, A], variant)} if variant is not None else None))
+    if not patch:
+        return P.compile_and_render(P.four_arms(), results, [A, B], **kw)
+    arms = [P.arm("baseline", [BASE, OTHER, A, B, PATCH], kind="baseline"), P.arm("without-patch", [BASE, OTHER, A, B])]
+    p_enr = {(RECORDS, "baseline"): [], (RECORDS, "without-patch"): rows}
+    p_kw = dict(count_only={k: 1 for k in p_enr}, enrichment=p_enr, masters={**m, PATCH: [BASE, A, B]},
+                plugin_flags=flags or {}, patches=[PATCH],
+                order_variant=({(RECORDS, "baseline"): ([BASE, OTHER, B, A, PATCH], patch_variant)}
+                               if patch_variant is not None else None))
+    return P.compile_and_render(arms, {(CONTACT, a_): [] for a_ in ("baseline", "without-patch")}, [A, B],
+                                sibling=(P.four_arms(), results, [A, B], kw), settings_extra={"declaredPatches": [PATCH]},
+                                **p_kw)
+
+
+def lo_of(plan):
+    return pred_of(plan).get("loadOrder") or {}
+
+
+def case_item18_p3_forced_by_the_esm_flag():
+    """A is flagged as a master file and B is not: the order is not a choice, A loads first, the report says why."""
+    plan, md, html = p3_bundle(flags={A: {"MasterFlag": True, "LightFlag": False}, B: {"MasterFlag": False}})
+    lo = lo_of(plan)
+    ok = (lo.get("forced") is True and lo.get("rule") == "ESM flag" and lo.get("loadsFirst") == A
+          and bool(lo.get("sentence")) and lo["sentence"] in md)
+    return ok, f"loadOrder {lo}"
+
+
+def case_item18_p3_forced_by_a_master():
+    """B lists A as a master: the order is not a choice (rule: master), whatever the flags."""
+    plan, md, html = p3_bundle(masters={B: [BASE, A]}, flags={A: {"MasterFlag": False}, B: {"MasterFlag": False}})
+    lo = lo_of(plan)
+    ok = lo.get("forced") is True and lo.get("rule") == "master" and lo.get("loadsFirst") == A
+    return ok, f"loadOrder {lo}"
+
+
+def case_item18_p3_free_both_plain_one_order_measured():
+    """Neither is a master (A carries only the light flag, an .esp): the order is free; only the measured order was
+    evaluated, and the report says the other order was not checked; no change-hands count is invented."""
+    plan, md, html = p3_bundle(flags={A: {"MasterFlag": False, "LightFlag": True}, B: {"MasterFlag": False}})
+    lo = lo_of(plan)
+    ok = (lo.get("forced") is False and lo.get("rule") == "free (both non-master)" and lo.get("loadsFirst") is None
+          and lo.get("bothWeighed") is False and lo.get("ordersEvaluated") == [f"{A} before {B}"]
+          and lo.get("changeHands") is None and bool(lo.get("sentence")) and lo["sentence"] in md)
+    return ok, f"loadOrder {lo}"
+
+
+def case_item18_p3_free_both_esm_flagged():
+    plan, md, html = p3_bundle(flags={A: {"MasterFlag": True}, B: {"MasterFlag": True}})
+    lo = lo_of(plan)
+    ok = lo.get("forced") is False and lo.get("rule") == "free (both ESM-flagged)"
+    return ok, f"loadOrder {lo}"
+
+
+def case_item18_p3_no_header_facts_no_claim():
+    """No emit records master lists or flags and the files are not at hand: the order is not said either way; the plan
+    names the missing fact."""
+    plan, md, html = p3_bundle(masters=False)
+    lo = lo_of(plan)
+    ok = lo.get("forced") is None and lo.get("rule") is None and bool(lo.get("missing"))
+    return ok, f"loadOrder {lo}"
+
+
+def case_item18_p3_reverse_counts_fields_that_change_hands():
+    """Free pair with the reversed order derived: B's change to the same record's Name and to a second record's Model
+    are lost to A there. Fields that change hands are the union over both orders (the measured order also loses A's Scale on a third record): 3 fields on 3 records; both orders
+    weighed; each order's losses stated; no order ranked."""
+    rev = [P.lost_row(B, A, f"000801:{BASE}", "Name", "b1", "a1", "v1"),
+           P.lost_row(B, A, f"000802:{BASE}", "Model", "b2", "a2", "v2")]
+    plan, md, html = p3_bundle(flags={A: {"MasterFlag": False}, B: {"MasterFlag": False}}, variant=rev)
+    lo = lo_of(plan)
+    ch = lo.get("changeHands") or {}
+    s = str(lo.get("sentence") or "")
+    ok = (lo.get("bothWeighed") is True and sorted(lo.get("ordersEvaluated") or []) == sorted([f"{A} before {B}", f"{B} before {A}"])
+          and ch.get("fields") == 3 and ch.get("records") == 3 and s in md
+          and not re.search(r"\b(better|recommend|prefer|fewer|safer)\b", s, re.I))
+    return ok, f"loadOrder {lo}"
+
+
+def case_item18_p3_with_the_patch_order_does_not_matter():
+    """With the patch installed, the reversed patched setup loses nothing between the pair: the report says the order
+    no longer matters once the patch is installed, from that measurement."""
+    rev = [P.lost_row(B, A, f"000801:{BASE}", "Name", "b1", "a1", "v1")]
+    plan, md, html = p3_bundle(flags={A: {"MasterFlag": False}, B: {"MasterFlag": False}}, variant=rev, patch=True,
+                               patch_variant=[])
+    lo = lo_of(plan)
+    wp = lo.get("withPatch") or {}
+    ok = wp.get("changeHands") == 0 and wp.get("orderMatters") is False and str(lo.get("sentence") or "") in md
+    return ok, f"loadOrder {lo}"
+
+
+def case_item18_p3_order_variant_enrichment_derives_reversed_rows():
+    """The order-variant enrichment derives the setup's rows with the evaluated pair swapped, from the same
+    transcripts: P and W swapped, P wins, so Q's and W's changes are lost to P and M's (equal to P's) is not."""
+    import bundleenrich
+    fn = getattr(bundleenrich, "enrich_order_variant", None)
+    if fn is None:
+        return False, "bundleenrich has no enrich_order_variant"
+    with tempfile.TemporaryDirectory() as td:
+        rows_bundle(Path(td), [BASE], recorded={})
+        root = Path(td) / "bundle"
+        (root / "plan.json").write_text(json.dumps({"targets": [{"name": "P.esp"}, {"name": "W.esp"}]}), encoding="utf-8")
+        fn(root)
+        doc = json.loads((root / "enrichment" / "order-variant" / f"{RECORDS}__baseline.json").read_text(encoding="utf-8"))
+    order = [x.get("name") for x in (doc.get("configuration") or {}).get("plugins") or []]
+    ok = losers(doc) == ["Q.esp", "W.esp"] and order[-2:] == ["W.esp", "P.esp"]
+    return ok, f"reversed order {order}; losing plugins {losers(doc)}"
+
+
+def case_item18_p3_order_variant_keeps_masters_before():
+    """Group 2's shape: the pair is not adjacent and the later one (W) masters a plugin between them (P). Swapping the
+    two slots would load W before its master; the reversed setup moves the earlier one (Q) to just after W instead,
+    so every plugin still loads after its masters: [.., P, W, Q], and Q wins."""
+    import bundleenrich
+    with tempfile.TemporaryDirectory() as td:
+        rows_bundle(Path(td), [BASE], recorded={}, override={"W.esp": [BASE, "P.esp"]})
+        root = Path(td) / "bundle"
+        (root / "plan.json").write_text(json.dumps({"targets": [{"name": "Q.esp"}, {"name": "W.esp"}]}), encoding="utf-8")
+        try:
+            bundleenrich.enrich_order_variant(root)
+        except bundleenrich.Refused as ex:
+            return False, f"refused: {ex}"
+        doc = json.loads((root / "enrichment" / "order-variant" / f"{RECORDS}__baseline.json").read_text(encoding="utf-8"))
+    order = [x.get("name") for x in (doc.get("configuration") or {}).get("plugins") or []]
+    ok = order == [BASE, "M.esp", "P.esp", "W.esp", "Q.esp"] and losers(doc) == ["M.esp", "P.esp", "W.esp"]
+    return ok, f"reversed order {order}; losing plugins {losers(doc)}"
+
+
+def case_item18_p3_order_variant_refuses_a_forced_pair():
+    """P is flagged as a master file and W is not: the reversed order is not one the game would load, so the
+    enrichment refuses in one sentence naming the flag, and writes nothing."""
+    import bundleenrich
+    fn = getattr(bundleenrich, "enrich_order_variant", None)
+    if fn is None:
+        return False, "bundleenrich has no enrich_order_variant"
+    with tempfile.TemporaryDirectory() as td:
+        rows_bundle(Path(td), [BASE], recorded={}, flags={"P.esp": {"MasterFlag": True}})
+        root = Path(td) / "bundle"
+        (root / "plan.json").write_text(json.dumps({"targets": [{"name": "P.esp"}, {"name": "W.esp"}]}), encoding="utf-8")
+        try:
+            fn(root)
+            return False, "not refused"
+        except bundleenrich.Refused as ex:
+            msg = str(ex)
+        wrote = (root / "enrichment" / "order-variant").exists()
+    ok = "master" in msg.lower() and "P.esp" in msg and not wrote
+    return ok, f"refusal {msg!r}; wrote {wrote}"
+
+
+def case_item18_p3_reader_page_says_the_plans_order_fact():
+    """The reader's page takes the order fact from the plan (no --order side file): with the reversed order weighed,
+    its order paragraph is not the 'other order was not checked' sentence and names the fields that change hands."""
+    import readerdoc
+    rev = [P.lost_row(B, A, f"000801:{BASE}", "Name", "b1", "a1", "v1"),
+           P.lost_row(B, A, f"000802:{BASE}", "Model", "b2", "a2", "v2")]
+    plan, md, html = p3_bundle(flags={A: {"MasterFlag": False}, B: {"MasterFlag": False}}, variant=rev, patch=True,
+                               patch_variant=[])
+    rd = PR["readerDoc"]
+    try:
+        page, _, _ = readerdoc.build(plan, rd, {A: "Mod A", B: "Mod B"}, None, None, "show", "evidence-index.html")
+    except Exception as ex:                 # the page refuses a plan it cannot render: report it, not a crash
+        return False, f"readerdoc refused: {ex}"
+    sec = page.split(f"## {rd['headings']['order']}", 1)[-1].split("## ", 1)[0] if rd.get("headings") else page
+    not_checked = R.bind(rd["order"]["free"], {"first": "Mod B"}) if "{first}" in rd["order"]["free"] else rd["order"]["free"]
+    ok = (bool(lo_of(plan)) and rd["order"]["unknown"] not in sec and "not checked" not in sec
+          and re.search(r"\b3 record fields on 3 records\b", sec) is not None)
+    return ok, f"order paragraph {sec.strip()[:300]!r}"
+
+
+def item18_free_both_plan(want_index=False):
+    rev = [P.lost_row(B, A, f"000801:{BASE}", "Name", "b1", "a1", "v1"),
+           P.lost_row(B, A, f"000802:{BASE}", "Model", "b2", "a2", "v2")]
+    m = {OTHER: [BASE], A: [BASE], B: [BASE]}
+    rows = [P.lost_row(A, B, f"000801:{BASE}", "Name", "a1", "b1", "v1")]
+    enr = {(RECORDS, "baseline"): rows, (RECORDS, "dependency-only"): [], (RECORDS, "plus-a"): [], (RECORDS, "plus-b"): []}
+    results = {(CONTACT, a_): [] for a_ in ("baseline", "dependency-only", "plus-a", "plus-b")}
+    return P.compile_and_render(P.four_arms(), results, [A, B], want_index=want_index,
+                                count_only={k: max(1, len(v)) for k, v in enr.items()}, enrichment=enr, masters=m,
+                                plugin_flags={A: {"MasterFlag": False}, B: {"MasterFlag": False}},
+                                order_variant={(RECORDS, "baseline"): ([BASE, OTHER, B, A], rev)})
+
+
+def case_item18_p3_consumer_report_html_says_the_order():
+    """report.html carries the plan's order sentence, as report.md does."""
+    plan, md, html = item18_free_both_plan()
+    s = str(lo_of(plan).get("sentence") or "")
+    ok = bool(s) and s in unesc(html) and s in md
+    return ok, f"sentence {s[:120]!r}; in html {bool(s) and s in unesc(html)}"
+
+
+def case_item18_p3_consumer_evidence_index_lists_the_reversed_rows():
+    """The evidence index has the pair's load-order section, naming the reversed setup's rows file."""
+    plan, md, html, index = item18_free_both_plan(want_index=True)
+    path = ((lo_of(plan).get("changeHands") or {}).get("rowsPath")) or ""
+    ok = '<a id="load-order-pair"></a>' in index and bool(path) and path in index
+    return ok, f"rows path {path!r}; section {'load-order-pair' in index}"
+
+
+def case_item18_p3_consumer_narrate_packet_carries_the_order():
+    """The narrator's packet carries the order sentence with the numbers it binds, so a narration may use them."""
+    import types
+    plan, md, html = item18_free_both_plan()
+    with tempfile.TemporaryDirectory() as td:
+        pres, out = Path(td) / "presentation.json", Path(td) / "packet.json"
+        pres.write_text(json.dumps(plan), encoding="utf-8")
+        code = R.cmd_narrate_packet(types.SimpleNamespace(presentation=str(pres), out=str(out)))
+        pk = json.loads(out.read_text(encoding="utf-8")) if out.is_file() else {}
+    lo = pk.get("loadOrder") or {}
+    ok = code == 0 and lo.get("sentence") == lo_of(plan).get("sentence") and "2" in (lo.get("boundNumbers") or [])
+    return ok, f"exit {code}; packet loadOrder {lo}"
+
+
+def case_item18_p3_reel_load_order_page_unchanged():
+    """The reel is pinned: a plan carrying loadOrder gives the same load-order page as one without it."""
+    pres = reel_pres()
+    a_ = chapter(reel_of(pres, MODS + [B]), "opening")
+    pres2 = json.loads(json.dumps(pres))
+    pres2["reader"]["prediction"]["loadOrder"] = {"forced": False, "sentence": "Neither mod has to load first."}
+    b_ = chapter(reel_of(pres2, MODS + [B]), "opening")
+    ok = a_ == b_ and a_ is not None
+    return ok, f"opening chapter equal {a_ == b_}"
+
+
 def item18_derive(transcript, order):
     """recordrows.derive, the function the record-rows and order-variant enrichments call, on a 2.0 capture's
     transcripts with the configuration in `order`."""

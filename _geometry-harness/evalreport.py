@@ -1352,6 +1352,132 @@ class InputRefused(Exception):
     """An input the compiler will not use, with the one-sentence reason; `plan` exits 2 with it."""
 
 
+def _pair_lost_keys(b: "Bundle", arm_id: str, pair: list, variant: bool = False) -> tuple[set, dict]:
+    """The pair's record lost edits on one setup: {(FormKey, field)} and {losing plugin: fields}. variant: the
+    order-variant enrichment's rows for that setup (its reversed order) instead of the setup's own rows."""
+    low = {str(x).lower() for x in pair}
+    keys, by_loser, paths = set(), collections.Counter(), []
+    if variant:
+        paths = [e["path"] for e in b.evidence if e.get("kind") == "enrichment" and e.get("enrichment") == "order-variant"
+                 and e.get("armId") == arm_id]
+    else:
+        for cid in sorted({str(e.get("checkId")) for e in b.evidence if e.get("armId") == arm_id
+                           and str(e.get("checkId") or "").startswith("records.")}):
+            pth = b.output_emit_path(cid, arm_id, "arm") or b.output_emit_path(cid, arm_id, None)
+            if pth:
+                paths.append(pth)
+    for pth in paths:
+        doc = b.emit(pth)
+        for r in (doc.get("Conflicts") if isinstance(doc, dict) else None) or []:
+            if r.get("Kind") != "LOST-EDIT" or {str(r.get("A")).lower(), str(r.get("B")).lower()} != low:
+                continue
+            for n in r.get("Necessary") or []:
+                k = (str(n.get("FormKey")), str(r.get("Field")))
+                if k not in keys:
+                    keys.add(k)
+                    by_loser[str(r.get("A"))] += 1
+    return keys, dict(by_loser)
+
+
+def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict) -> dict | None:
+    """Item 18 (roadmap 4.24 phase 3): whether the evaluated pair's order is a choice, which orders were weighed, the
+    record fields that change hands between them (the union of the pair's lost edits over the measured order and the
+    bundle's order-variant rows), and, with a declared patch, whether the order still matters on the patched setup
+    (its own reversed rows). Header facts are the bundle's recorded ones (bundleenrich.pair_headers). The advice never
+    ranks the two orders."""
+    import bundleenrich
+    if len(pair) != 2:
+        return None
+    main_b, sib = ctx.get("mainBundle"), (ctx.get("sibling") or {}).get("bundle")
+    if main_b is None:
+        return None
+    w = words.get("loadOrderWords") or {}
+    heads = bundleenrich.pair_headers(main_b.dir, main_b.manifest, main_b.plan, pair)
+    if len(heads) < 2 and sib is not None:
+        heads = {**bundleenrich.pair_headers(sib.dir, sib.manifest, sib.plan, pair), **heads}
+    ch = bundleenrich.order_choice(pair, heads)
+    arm = next((a for a in main_b.plan.get("arms") or [] if a.get("armId") == p_arm), {}) or {}
+    names = [str(x.get("name")) for x in (arm.get("requested") or {}).get("plugins") or []]
+    low = [n.lower() for n in names]
+    if all(x.lower() in low for x in pair):
+        first, second = sorted(pair, key=lambda x: low.index(x.lower()))
+    else:
+        first, second = pair
+    fact = {**ch, "measuredOrder": [first, second], "ordersEvaluated": [f"{first} before {second}"],
+            "bothWeighed": False, "changeHands": None, "withPatch": None, "patchCarries": None}
+    # the reversed setup: this bundle's variant of the setup without the patch, else the sibling's of the same setup
+    src = None
+    if any(e.get("enrichment") == "order-variant" and e.get("armId") == p_arm for e in main_b.evidence):
+        src = (main_b, p_arm)
+    elif sib is not None:
+        for a in sib.plan.get("arms") or []:
+            if [str(x.get("name")) for x in (a.get("requested") or {}).get("plugins") or []] == names and any(
+                    e.get("enrichment") == "order-variant" and e.get("armId") == a.get("armId") for e in sib.evidence):
+                src = (sib, a.get("armId"))
+                break
+    if ch["forced"] is False and src is not None:
+        mk, m_lost = _pair_lost_keys(src[0], src[1], pair)
+        rk, r_lost = _pair_lost_keys(src[0], src[1], pair, variant=True)
+        u = mk | rk
+        fact.update({"bothWeighed": True, "ordersEvaluated": [f"{first} before {second}", f"{second} before {first}"],
+                     "changeHands": {"fields": len(u), "records": len({k[0] for k in u}),
+                                     "lostByMeasuredOrder": m_lost, "lostByReversed": r_lost,
+                                     "rowsPath": next((e["path"] for e in src[0].evidence
+                                                       if e.get("enrichment") == "order-variant"
+                                                       and e.get("armId") == src[1]), None)}})
+    # session 1's record-level split, for the load-order table: of the fields that change hands, those on records the
+    # declared patch has a version of (read from the patched setup's own record transcripts)
+    patches_ = {str(x).lower() for x in ctx.get("declared") or []}
+    if fact["changeHands"] is not None and patches_ and patched_arm:
+        import recordrows as RR_
+        scope_ = RR_.load_scope()
+        carried = set()
+        for rc_, _, req_, resp_, cfg_ in bundleenrich._record_imports(main_b.dir, main_b.manifest):
+            if rc_.get("armId") != patched_arm:
+                continue
+            for fk_, c_ in RR_.read_chains(req_, resp_, cfg_.get("plugins") or [], scope_).items():
+                if any(str(p_).lower() in patches_ for p_ in c_.get("providers") or []):
+                    carried.add(str(fk_).lower())
+        keys_ = (_pair_lost_keys(src[0], src[1], pair)[0] | _pair_lost_keys(src[0], src[1], pair, variant=True)[0])
+        n_ = sum(1 for k in keys_ if k[0].lower() in carried)
+        fact["patchCarries"] = {"fields": n_, "notCarried": len(keys_) - n_}
+    if ch["forced"] is False and patched_arm and any(e.get("enrichment") == "order-variant"
+                                                     and e.get("armId") == patched_arm for e in main_b.evidence):
+        mk, _ = _pair_lost_keys(main_b, patched_arm, pair)
+        rk, _ = _pair_lost_keys(main_b, patched_arm, pair, variant=True)
+        fact["withPatch"] = {"changeHands": len(mk | rk), "orderMatters": bool(mk | rk)}
+    other = second if fact.get("loadsFirst") == first else first
+
+    def lost_words(d_):
+        return "; ".join(bind(w.get("lostPart") or "{count} of {plugin}'s are lost", {"count": fmt_n(n), "plugin": x})
+                         for x, n in d_.items()) or (w.get("lostNone") or "nothing between them is lost")
+    if ch["forced"] is None:
+        parts = [bind(w.get("unknown") or "Whether the order of these two mods is a choice was not established: "
+                      "{missing}.", {"missing": "; ".join(ch.get("missing") or [])})]
+    elif ch["forced"]:
+        key = "forcedEsm" if ch["rule"] == "ESM flag" else "forcedMaster"
+        parts = [bind(w.get(key) or "{first} loads first: the order of these two mods is not a choice.",
+                      {"first": fact["loadsFirst"], "other": other})]
+    elif fact["changeHands"] is None:
+        parts = [bind(w.get("freeOne") or "Neither mod has to load first. Only the tested order ({first} before "
+                      "{second}) was measured; the other order was not checked.", {"first": first, "second": second})]
+    else:
+        c = fact["changeHands"]
+        parts = [bind(w.get("freeBoth") or "Neither mod has to load first, and both orders were weighed: {fields} "
+                      "record fields on {records} records change hands between them. With {first} before {second}, "
+                      "{measured}; with {second} before {first}, {reversed}. Neither order is ranked here.",
+                      {"first": first, "second": second, "fields": fmt_n(c["fields"]), "records": fmt_n(c["records"]),
+                       "measured": lost_words(c["lostByMeasuredOrder"]), "reversed": lost_words(c["lostByReversed"])})]
+    if fact["withPatch"] is not None:
+        wp = fact["withPatch"]
+        parts.append(bind(w.get("withPatchMatters") or "With the patch installed, {count} record fields still change "
+                          "hands between the two orders.", {"count": fmt_n(wp["changeHands"])}) if wp["orderMatters"]
+                     else (w.get("withPatchNot") or "With the patch installed, the order no longer matters for these "
+                           "fields: the same values win in either order."))
+    fact["sentence"] = " ".join(parts)
+    return fact
+
+
 def build_prediction(ctx: dict) -> dict:
     """The prediction, coverage and validation blocks a report leads with.
 
@@ -5066,7 +5192,9 @@ def build_prediction(ctx: dict) -> dict:
                   "sibling": ({**sibling_record, "rows": sibling_rows()} if sibling_record else sibling_record),
                   "withoutPartnerArms": dict(partner_arms),
                   "siblingSource": sibling_source(),
-                  "orderRiskLines": order_lines, "orderRisks": order_record}
+                  "orderRiskLines": order_lines, "orderRisks": order_record,
+                  # item 18 (4.24 phase 3): whether the order is a choice, and both orders weighed when it is
+                  "loadOrder": load_order_fact(ctx, p_arm, patched_arm, list(subject_mods), words)}
 
     sib_counted = {e["checkId"] for e in record if e.get("source") == "sibling" and e["admission"] == "admitted"}
     # (sixth review, Sewers S3) a check whose rows this report takes from the separate evaluation, counted or not
@@ -11443,7 +11571,12 @@ def cmd_narrate_packet(a) -> int:
                                   "never use the words pass, compatible, clean or verified-in-game; never claim completion. "
                                   "Answer as {\"answers\": [{\"id\": \"F-001\", \"text\": \"...\"}]}. A refused answer keeps the template.",
                   "checks": sorted(plan["scope"].get("checks") or {}), "arms": [x["armId"] for x in plan["scope"]["arms"]],
-                  "findings": items}
+                  "findings": items,
+                  # item 18 (4.24 phase 3): the order sentence, read-only for a narrator, with the numbers it binds
+                  "loadOrder": ({"sentence": lo_["sentence"], "boundNumbers": sorted(set(re.findall(r"\b\d[\d,]*\b",
+                                                                                                    lo_["sentence"])))}
+                                if isinstance((lo_ := ((plan.get("reader") or {}).get("prediction") or {}).get("loadOrder")), dict)
+                                and lo_.get("sentence") else None)}
         write_json(Path(a.out), packet)
         r.artifact(str(a.out))
         r.feature("findings", len(items), "findings")

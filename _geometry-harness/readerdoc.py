@@ -277,7 +277,14 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         md += [" ".join(sents), ""]
     # order
     od = rd["order"]
-    if order and order.get("forced") is True:
+    lo_ = pred.get("loadOrder") if isinstance(pred.get("loadOrder"), dict) else None
+    if order is None and lo_ and lo_.get("sentence"):
+        # item 18 (4.24 phase 3): the plan's own order fact, with each plugin said by its ordinary name; an --order side
+        # file, when given, still decides (it is recorded in the manifest)
+        o = str(lo_["sentence"])
+        for plug_ in sorted(disp, key=len, reverse=True):
+            o = o.replace(plug_, str(disp[plug_]))
+    elif order and order.get("forced") is True:
         rule = str(order.get("rule") or "").lower()
         o = bind(od["forced"] if "esm" in rule else od["forcedMaster"],
                  first=disp.get(order.get("first"), str(order.get("first"))))
