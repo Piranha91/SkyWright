@@ -353,6 +353,16 @@ def case_55_a_line_the_winner_branch_cannot_read_is_counted_not_dropped():
     assert refused is None and "failed extraction" in why_not, (refused, why_not)
 
 
+def case_64_a_winning_records_flags_in_both_views_are_judged_once():
+    p = "unofficial skyrim special edition patch.esp"
+    lines = {"000D74:Skyrim.esm": [f"MajorFlags=262144 ({p} 0)", f"SkyrimMajorRecordFlags=Compressed ({p} 0)",
+                                   f"WaterHeight=0 ({p} 5)"],
+             "0138CB:Skyrim.esm": [f"MajorFlags=Persistent ({p} 0)"]}
+    cov = cell_capture(lines)
+    # the first cell: its flags once and its water height; the second carries only the per-type view, judged on its own
+    assert cov["Judged"] == 3, f"want Judged 3 (flags once + water height + the lone view), got {cov['Judged']}"
+
+
 def case_56_an_evaluated_plugin_the_reader_spells_by_its_disk_name_is_still_read():
     # the tree's touchers, its nodes and its winner all carry the reader's spelling of the evaluated plugin
     cov = cell_capture(CELL_LINES, tree_subject="cotn - morthal.esp")
@@ -492,6 +502,65 @@ def case_25_a_cut_asset_answer_without_a_complete_spill_is_refused():
             except ER.Refusal:
                 continue
             raise AssertionError(f"a cut asset answer with {what} was accepted")
+
+
+FLAG_PLUGINS = ["Base.esm", "Mine.esp", "Win.esp"]
+
+
+def flag_edits(rtype, authored, vs_winner, defines=False):
+    return ER.lost_edits(rtype, "000001:Base.esm", "Mine.esp", authored, vs_winner, "Win.esp", FLAG_PLUGINS,
+                         ER.FieldScope(), defines=defines)
+
+
+def case_59_record_flags_that_differ_only_in_the_compressed_bit_give_no_row_on_any_type():
+    # a name against a number: InitiallyDisabled (0x800) lost to 0x40800
+    rows, _, _ = flag_edits("PlacedObject", ["SkyrimMajorRecordFlags=InitiallyDisabled (Base.esm 0)"],
+                            ["SkyrimMajorRecordFlags=InitiallyDisabled (Win.esp 264192)"])
+    assert rows == [], f"a placed object's flags differing only in Compressed gave {rows}"
+    # the Cut Content cell: both views, number and name
+    rows, _, _ = flag_edits("Cell", ["MajorFlags=0 (Base.esm 262144)", "SkyrimMajorRecordFlags=0 (Base.esm Compressed)"],
+                            ["MajorFlags=0 (Win.esp 262144)", "SkyrimMajorRecordFlags=0 (Win.esp Compressed)"])
+    assert rows == [], f"a cell's flags differing only in Compressed gave {rows}"
+    # the plugin's only change to the flags is the storage bit, so it authored nothing there
+    rows, _, _ = flag_edits("Static", ["SkyrimMajorRecordFlags=Compressed (Base.esm 0)"],
+                            ["SkyrimMajorRecordFlags=Compressed (Win.esp 4)"])
+    assert rows == [], f"a static whose only flag edit is Compressed gave {rows}"
+
+
+def case_60_compressed_with_another_bit_is_one_row_on_the_base_field():
+    rows, _, _ = flag_edits("Cell", ["MajorFlags=0 (Base.esm 264192)", "SkyrimMajorRecordFlags=0 (Base.esm InitiallyDisabled, Compressed)"],
+                            ["MajorFlags=0 (Win.esp 264192)", "SkyrimMajorRecordFlags=0 (Win.esp InitiallyDisabled, Compressed)"])
+    assert [r["Field"] for r in rows] == ["SkyrimMajorRecordFlags"], f"want one SkyrimMajorRecordFlags row, got {[r['Field'] for r in rows]}"
+    v = rows[0]["Necessary"][0]["Values"]
+    assert v == {"lost": "0", "winner": "InitiallyDisabled, Compressed", "overridden": "InitiallyDisabled, Compressed"}, v
+
+
+def case_61_a_flag_change_seen_in_both_views_is_judged_once():
+    authored = ["MajorFlags=2048 (Base.esm 0)", "SkyrimMajorRecordFlags=InitiallyDisabled (Base.esm 0)", "WaterHeight=5 (Base.esm 0)"]
+    vs_winner = ["MajorFlags=2048 (Win.esp 0)", "SkyrimMajorRecordFlags=InitiallyDisabled (Win.esp 0)", "WaterHeight=5 (Win.esp 0)"]
+    rows, judged, _ = flag_edits("Cell", authored, vs_winner)
+    assert sorted(r["Field"] for r in rows) == ["SkyrimMajorRecordFlags", "WaterHeight"], [r["Field"] for r in rows]
+    assert judged == 2, f"the flags and the water height are two judged fields, got {judged}"
+    # a plugin that defines the record authored both views: still one
+    rows, judged, _ = flag_edits("Cell", [], vs_winner, defines=True)
+    assert sorted(r["Field"] for r in rows) == ["SkyrimMajorRecordFlags", "WaterHeight"] and judged == 2, \
+        f"the definer's flags are judged once, got {[r['Field'] for r in rows]}, judged {judged}"
+
+
+def case_62_a_flag_name_the_table_does_not_know_keeps_the_row():
+    rows, _, _ = flag_edits("PlacedObject", ["SkyrimMajorRecordFlags=0 (Base.esm Compressed, NewFlag)"],
+                            ["SkyrimMajorRecordFlags=0 (Win.esp Compressed, NewFlag)"])
+    assert [r["Field"] for r in rows] == ["SkyrimMajorRecordFlags"], f"an unknown name was guessed away: {rows}"
+    rows, _, _ = flag_edits("Cell", ["MajorFlags=0 (Base.esm 262144)", "SkyrimMajorRecordFlags=0 (Base.esm Compressed, NewFlag)"],
+                            ["MajorFlags=0 (Win.esp 262144)", "SkyrimMajorRecordFlags=0 (Win.esp Compressed, NewFlag)"])
+    assert [r["Field"] for r in rows] == ["SkyrimMajorRecordFlags"], f"want the one base-field row kept, got {[r['Field'] for r in rows]}"
+
+
+def case_63_the_per_type_view_alone_is_read_only_as_numbers():
+    rows, _, _ = flag_edits("PlacedNpc", ["MajorFlags=0 (Base.esm 262144)"], ["MajorFlags=0 (Win.esp 262144)"])
+    assert rows == [], f"MajorFlags differing only in Compressed, as numbers, gave {rows}"
+    rows, _, _ = flag_edits("PlacedNpc", ["MajorFlags=Persistent (Base.esm 263168)"], ["MajorFlags=Persistent (Win.esp 263168)"])
+    assert [r["Field"] for r in rows] == ["MajorFlags"], f"a per-type name is not read, so the row stays, got {rows}"
 
 
 def main():
