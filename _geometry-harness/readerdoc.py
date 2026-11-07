@@ -278,12 +278,27 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
     # order
     od = rd["order"]
     lo_ = pred.get("loadOrder") if isinstance(pred.get("loadOrder"), dict) else None
-    if order is None and lo_ and lo_.get("sentence"):
-        # item 18 (4.24 phase 3): the plan's own order fact, with each plugin said by its ordinary name; an --order side
-        # file, when given, still decides (it is recorded in the manifest)
-        o = str(lo_["sentence"])
-        for plug_ in sorted(disp, key=len, reverse=True):
-            o = o.replace(plug_, str(disp[plug_]))
+    if order is None and lo_ and lo_.get("forced") is not None:
+        # item 18 (4.24 phase 3): the plan's own order fact, in the page's words and each mod's ordinary name; an
+        # --order side file, when given, still decides (it is recorded in the manifest)
+        def nm_(x):
+            return disp.get(x, str(x))
+        mo_ = lo_.get("measuredOrder") or [None, None]
+        ch_ = lo_.get("changeHands")
+        if lo_["forced"]:
+            o = bind(od["forced"] if lo_.get("rule") == "ESM flag" else od["forcedMaster"], first=nm_(lo_.get("loadsFirst")))
+        elif not ch_:
+            o = bind(od["free"], first=nm_(mo_[0]))
+        else:
+            def lost_(d_):
+                return "; ".join(bind(od["lostPart"], count=ER.fmt_n(n_), plugin=nm_(x_)) for x_, n_ in d_.items()) \
+                    or od["lostNone"]
+            o = bind(od["freeBoth"], count=ER.fmt_n(ch_["fields"]), first=nm_(mo_[0]), second=nm_(mo_[1]),
+                     measured=lost_(ch_.get("lostByMeasuredOrder") or {}), reversed=lost_(ch_.get("lostByReversed") or {}))
+            wp_ = lo_.get("withPatch")
+            if wp_ is not None:
+                o += " " + (bind(od["withPatchMatters"], count=ER.fmt_n(wp_["changeHands"])) if wp_.get("orderMatters")
+                            else od["withPatchNot"])
     elif order and order.get("forced") is True:
         rule = str(order.get("rule") or "").lower()
         o = bind(od["forced"] if "esm" in rule else od["forcedMaster"],

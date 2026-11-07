@@ -978,7 +978,9 @@ def case_item18_p3_reader_page_says_the_plans_order_fact():
     sec = page.split(f"## {rd['headings']['order']}", 1)[-1].split("## ", 1)[0] if rd.get("headings") else page
     not_checked = R.bind(rd["order"]["free"], {"first": "Mod B"}) if "{first}" in rd["order"]["free"] else rd["order"]["free"]
     ok = (bool(lo_of(plan)) and rd["order"]["unknown"] not in sec and "not checked" not in sec
-          and re.search(r"\b3 record fields on 3 records\b", sec) is not None)
+          and re.search(r"\b3 changes in the game\b", sec) is not None
+          # the page's jargon lint (L3): no record words in the reader's words
+          and re.search(r"\brecords?\b", sec, re.I) is None)
     return ok, f"order paragraph {sec.strip()[:300]!r}"
 
 
