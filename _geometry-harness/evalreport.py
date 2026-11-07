@@ -6029,6 +6029,8 @@ def build_prediction(ctx: dict) -> dict:
         # (Gate A review, finding 4) the owning patch is named, as every other line names plugins
         replaced_whose = collections.Counter(
             ("own" if str(what_[id(h_)][1]).lower() in patch_lower else "of", what_[id(h_)][1]) for rk, h_ in replaced)
+        # each replaced row's owner, read here while the classification is at hand
+        replaced_owner_ = {id(h_): str(what_[id(h_)][1]) for rk, h_ in replaced}
         undone_off = [rk for rk, _ in undone if patch_sets_off(rk)]
         undone_by = collections.Counter(rk[2] for rk, _ in undone)
         switched_on = [rk for rk, h_ in undone if off_at_load((h_["row"].get("values") or {}).get("lost"))
@@ -6374,7 +6376,7 @@ def build_prediction(ctx: dict) -> dict:
         replaced_sentence = None
         # with several patches, each replaced change is said under the patch whose own record sets the value, and joined
         # to an undone line only when that line is the same patch's
-        own_of_ = lambda h_: (str(what_[id(h_)][1]) if str(what_[id(h_)][1]).lower() in patch_lower else None)  # noqa: E731
+        own_of_ = lambda h_: (replaced_owner_[id(h_)] if replaced_owner_[id(h_)].lower() in patch_lower else None)  # noqa: E731
         replaced_groups_ = ([(patch, list(replaced))] if len(patch_names) <= 1 else
                             [(p_, [x_ for x_ in replaced if str(own_of_(x_[1]) or "").lower() == str(p_).lower()])
                              for p_ in patch_names] + [(patch, [x_ for x_ in replaced if own_of_(x_[1]) is None])])
@@ -6382,7 +6384,7 @@ def build_prediction(ctx: dict) -> dict:
             if not (rep_ and words.get("validationReplaced")):
                 continue
             whose_ = collections.Counter(
-                ("own" if str(what_[id(h_)][1]).lower() in patch_lower else "of", what_[id(h_)][1]) for rk, h_ in rep_)
+                ("own" if replaced_owner_[id(h_)].lower() in patch_lower else "of", replaced_owner_[id(h_)]) for rk, h_ in rep_)
             sw_on_ = [rk for rk, h_ in rep_ if off_at_load((h_["row"].get("values") or {}).get("lost"))
                       and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
             host_ = (undone_said_.get(who_r_) if len(patch_names) > 1 else undone_sentence)
