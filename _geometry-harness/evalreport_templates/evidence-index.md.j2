@@ -75,6 +75,14 @@ Each door whose navmesh door link a navmesh record of {{ dl.winner }} drops, rea
 
 {% for r in dl.rows %}- `{{ r.door|txt }}`: navmesh `{{ r.navmesh|txt }}`; linked by {{ r.held }}'s version; {{ r.wins }}'s version wins{% if dl.patchRead %}; {{ "still none with the patches" if r.still else "linked again with the patches" }}{% endif %}
 {% endfor %}{% endfor %}
+{% set pcards_ = (p.reader.get("validation") or {}).get("precedentCards") or [] %}{% if pcards_ %}
+<a id="precedent-cards"></a>
+## Precedent cards ({{ pcards_|length }})
+
+Each group of a patch's own edits, as its precedent card reads it: what the patch did, where, and a model-written reason (a reading, not a measurement).
+
+{% for c in pcards_ %}- {{ c.patch }}: {{ c.what|md }}{% if c.place %} In {{ c.place|md }}.{% endif %} Reason: {{ c.reason|md }}{% if c.constraint %} ({{ c.constraint }}){% endif %}
+{% endfor %}{% endif %}
 
 {% if p.reader.get("enrichment") %}
 <a id="derived-after-measurement"></a>

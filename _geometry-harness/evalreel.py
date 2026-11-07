@@ -512,16 +512,57 @@ def srt_time(seconds: float) -> str:
     return f"{ms // 3600000:02d}:{(ms // 60000) % 60:02d}:{(ms // 1000) % 60:02d},{ms % 1000:03d}"
 
 
+#: a subtitle cue holds at most this many words and lasts at most this many seconds
+CUE_MAX_WORDS, CUE_MAX_SECONDS = 14, 7.0
+
+
+def cue_texts(text: str) -> list[str]:
+    """The narration as subtitle cues: one per sentence, a long sentence split at its clause marks, then by words."""
+    out = []
+    for sent in re.split(r"(?<=[.!?])\s+", " ".join(str(text or "").split())):
+        pieces = [sent]
+        if len(sent.split()) > CUE_MAX_WORDS:
+            pieces = [x for x in re.split(r"(?<=[;:,])\s+", sent) if x]
+        for pc in pieces:
+            w = pc.split()
+            out += [" ".join(w[i:i + CUE_MAX_WORDS]) for i in range(0, len(w), CUE_MAX_WORDS)]
+    return [x for x in out if x]
+
+
 def write_srt(path: Path, segments: list[dict]) -> int:
+    """Cues timed across each segment's own speech, by the share of its characters; none longer than the cap."""
     cues = []
     for s in segments:
         iv = s.get("reelInterval")
         if not iv:
             continue
-        text = s.get("narration") or s.get("caption") or ""
-        cues.append(f"{len(cues) + 1}\n{srt_time(iv['startSeconds'])} --> {srt_time(iv['endSeconds'])}\n{text}\n")
+        texts = cue_texts(s.get("narration") or s.get("caption") or "")
+        start, stop = float(iv["startSeconds"]), float(iv["endSeconds"])
+        span = min(float(s.get("speechSeconds") or (stop - start)), stop - start)
+        total = sum(len(x) for x in texts) or 1
+        at = start
+        for x in texts:
+            dur = span * len(x) / total
+            end = min(at + max(dur, 0.8), at + CUE_MAX_SECONDS, stop)
+            cues.append(f"{len(cues) + 1}\n{srt_time(at)} --> {srt_time(end)}\n{x}\n")
+            at += dur
     path.write_text("\n".join(cues) + ("\n" if cues else ""), encoding="utf-8")
     return len(cues)
+
+
+def silences(exe: str, path: Path, noise_db: float, min_seconds: float) -> list[dict]:
+    """The decoded audio's silent stretches of at least `min_seconds` (ffmpeg silencedetect)."""
+    r = run_ffmpeg(exe, ["-hide_banner", "-nostdin", "-i", str(path), "-af",
+                         f"silencedetect=noise={noise_db}dB:d={min_seconds}", "-f", "null", "-"])
+    out, start = [], None
+    for line in (r.stderr or "").splitlines():
+        m = re.search(r"silence_start: ([\d.]+)", line)
+        if m:
+            start = float(m.group(1))
+        m = re.search(r"silence_end: ([\d.]+) \| silence_duration: ([\d.]+)", line)
+        if m:
+            out.append({"start": start, "end": float(m.group(1)), "seconds": float(m.group(2))})
+    return out
 
 
 def contact_sheet(out: Path, reel: Path, segments: list[dict], ffmpeg: dict) -> dict:
@@ -580,8 +621,21 @@ def cmd_storyboard_packet(a) -> int:
         return refuse(f"reel-refused: {reel.get('reason')}")
     scenes = []
     if isinstance(reel, dict) and reel.get("status") == "planned":
-        # the vignette reel: one narrated scene per reel chapter, its words the planner's
+        # the vignette reel: one narrated scene per reel chapter, its words the planner's; a still chapter one scene per
+        # page as drawn, each with its own page's words, so each page is spoken and held for itself
+        import reel_stills
+        try:
+            font_, bold_ = reel_stills.font_files(getattr(a, "font", None), ((pres.get("settings") or {}).get("reel") or {}))
+        except reel_stills.FontMissing as e:
+            return refuse(f"font-missing: {e}")
         for ch in reel.get("chapters") or []:
+            if ch.get("kind") in STILL_KINDS and (ch.get("still") or {}).get("pages"):
+                for n, part in enumerate(reel_stills.still_parts(ch["still"]["pages"], font_, bold_)):
+                    scenes.append({"chapterId": ch.get("id"), "captionIndex": n, "occurrenceIndex": 0, "mediaId": None,
+                                   "kind": ch.get("kind"), "page": n, "narration": part["say"],
+                                   "narrationAudio": (ch.get("pageAudio") or {}).get(str(n)), "omitFromReel": False,
+                                   "omissionReason": None})
+                continue
             scenes.append({"chapterId": ch.get("id"), "captionIndex": 0, "occurrenceIndex": 0, "mediaId": None,
                            "kind": ch.get("kind"), "narration": ch.get("narration"),
                            "narrationAudio": ch.get("narrationAudio"), "omitFromReel": False, "omissionReason": None})
@@ -621,6 +675,11 @@ def apply_storyboard_answers(pres: dict, path: Path) -> str | None:
             ch = reel_chapters.get(row.get("chapterId")) if isinstance(row, dict) else None
             if ch is None:
                 return f"storyboard-answers-invalid: unknown reel scene {row.get('chapterId') if isinstance(row, dict) else row!r}"
+            if ch.get("kind") in STILL_KINDS:
+                # a still page's audio, by its page; its words stay the page's own
+                if row.get("narrationAudio"):
+                    ch.setdefault("pageAudio", {})[str(int(row.get("captionIndex") or 0))] = row["narrationAudio"]
+                continue
             if row.get("narrationAudio"):
                 ch["narrationAudio"] = row["narrationAudio"]
             text = " ".join(str(row.get("narration") or "").split())
@@ -1036,19 +1095,15 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
             if not pages:
                 errors.append(f"{cid}: still scene has no pages")
                 continue
-            seg["kind"] = "still"
-            seg["dataSha256"] = sha256_text(json.dumps(pages, sort_keys=True, ensure_ascii=False))
-            # a page too full to read at a readable size is drawn as several pages, its hold shared by their words
-            split_ = []
-            for page in pages:
-                parts_ = reel_stills.paginate(page, font, bold)
-                if len(parts_) > 1 and page.get("seconds"):
-                    wsum_ = sum(max(1, reel_stills_words(x)) for x in parts_)
-                    parts_ = [{**x, "seconds": round(float(page["seconds"]) * max(1, reel_stills_words(x)) / wsum_, 2)}
-                              for x in parts_]
-                split_ += parts_
-            pages = split_
-            for n, page in enumerate(pages):
+            # one segment per page as drawn: each page says its own words and is held for them (the storyboard cut the
+            # same parts, so a prepared page audio is that page's)
+            parts = reel_stills.still_parts(pages, font, bold)
+            page_audio = ch.get("pageAudio") or {}
+            if len(parts) > 1 and ch.get("narrationAudio") and not page_audio:
+                errors.append(f"{cid}: the still scene has {len(parts)} pages but one narration; prepare one narration per "
+                              "page (the storyboard packet lists each page as its own scene)")
+                continue
+            for n, page in enumerate(parts):
                 ph = reel_stills.page_hash(page)
                 png = stills_dir / f"{cid}-p{n}-{ph[:10]}-{font_doc['sha256'][:8]}.png"
                 if not png.is_file():
@@ -1057,8 +1112,14 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                     except ValueError as e:
                         errors.append(f"{cid}: {e}")
                         break
-                seg["items"].append({"page": n, "layout": page.get("layout"), "path": str(png), "sha256": sha256_file(png),
-                                     "dataSha256": ph, **({"seconds": float(page["seconds"])} if page.get("seconds") else {})})
+                say = page["say"] or narration
+                segments.append({"chapterId": cid, "chapterKind": kind, "page": n, "kind": "still", "narration": say,
+                                 "narrationOverlaid": False, "clash": ch.get("clash"), "patch": ch.get("patch"),
+                                 "narrationAudio": page_audio.get(str(n)) or (ch.get("narrationAudio") if len(parts) == 1 else None),
+                                 "dataSha256": sha256_text(json.dumps(page, sort_keys=True, ensure_ascii=False)),
+                                 "items": [{"page": n, "layout": page.get("layout"), "path": str(png), "sha256": sha256_file(png),
+                                            "dataSha256": ph, **({"seconds": float(page["seconds"])} if page.get("seconds") else {})}]})
+            continue
         elif kind == "vignette":
             seg["kind"] = "sequence"
             frames = ch.get("frames") or []
@@ -1181,16 +1242,19 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
             return refuse(f"narration-refused: {s['chapterId']}: audio file {apath} is not decodable audio", out)
         s["audioPath"], s["audioSha256"], s["audioMethod"] = str(apath), sha256_file(apath), method
         speech = float(ah["durationSeconds"])
+        s["speechSeconds"] = round(speech, 3)
         if s["kind"] == "split":
             secs = [speech + float(hold.get("stillPause", 1.5))] * 2          # both halves for the whole scene
-        elif s["kind"] == "still" and all(it.get("seconds") for it in s["items"]):
-            # each page holds for its reading time; the narration spans the pages, so no page is longer silent than read
-            need_ = [float(it["seconds"]) for it in s["items"]]
-            scale_ = max(1.0, (speech + float(hold.get("stillPause", 1.5))) / sum(need_))
-            secs = [x * scale_ for x in need_]
         elif s["kind"] == "still":
-            first = speech + float(hold.get("stillPause", 1.5))
-            secs = [first] + [float(hold.get("loadOrderPage", 6.0))] * (len(s["items"]) - 1)
+            # a page holds for its own narration and a short pause, or for its reading time if longer; a page whose
+            # reading time outruns its narration by more than the allowed silence is refused, never played silent
+            pause_ = float(hold.get("stillPause", 1.5))
+            read_ = float(s["items"][0].get("seconds") or 0)
+            max_sil_ = float(hold.get("maxSilence", 3.0))
+            if read_ - speech > max_sil_:
+                return refuse(f"narration-refused: {s['chapterId']} page {s.get('page', 0)}: its reading time ({read_:.1f} s) "
+                              f"outruns its narration ({speech:.1f} s) by more than {max_sil_:.1f} s of silence", out)
+            secs = [max(speech + pause_, read_)]
         else:
             w, wi = float(hold.get("without", 2.5)), float(hold.get("with", 2.5))
             secs = [w, wi, max(float(hold.get("highlightMin", 4.0)), speech + 0.25 - w - wi)]
@@ -1267,10 +1331,28 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                 checks.append(f"{probe.get('width')}x{probe.get('height')} at {probe.get('fps')} fps")
             if not probe.get("hasAudio") or not probe.get("audioDecoded"):
                 checks.append("no independently decoded audio stream")
+            # the decoded audio itself: no stretch of silence longer than the allowed pause
+            max_sil_ = float(hold.get("maxSilence", 3.0))
+            # (a vignette may hold its frames past its words; a still page never shows silent text)
+            quiet_ = silences(ffmpeg["path"], reel_path, float(hold.get("silenceNoiseDb", -40)), max_sil_)
+            on_pages_ = []
+            for q in quiet_:
+                for s in segments:
+                    iv = s.get("reelInterval") or {}
+                    if s["kind"] != "still" or not iv:
+                        continue
+                    ov = min(q["end"], iv["endSeconds"]) - max(q["start"] or 0.0, iv["startSeconds"])
+                    if ov > max_sil_:
+                        on_pages_.append({**q, "chapterId": s["chapterId"], "page": s.get("page"), "overlap": round(ov, 2)})
+            status_doc["silences"], status_doc["silencesOnPages"] = quiet_, on_pages_
+            if on_pages_:
+                checks.append(f"silence longer than {max_sil_:.1f} s on a still page in the decoded audio: " + "; ".join(
+                    f"{q['overlap']:.1f} s on {q['chapterId']} page {q['page']} from {q['start']:.1f} s" for q in on_pages_[:5]))
             if checks:
                 failed = True
                 status_doc["errors"].append("reel.mp4 does not match the plan: " + "; ".join(checks))
     seg_out = [{"index": s["index"], "chapterId": s["chapterId"], "chapterKind": s["chapterKind"], "kind": s["kind"],
+                "page": s.get("page"), "speechSeconds": s.get("speechSeconds"),
                 "narration": s["narration"], "narrationOverlaid": s["narrationOverlaid"], "clash": s.get("clash"),
                 "patch": s.get("patch"), "dataSha256": s.get("dataSha256"), "reelInterval": s.get("reelInterval"),
                 "frames": [{k: v for k, v in it.items() if k != "path"} for it in s["items"]],

@@ -121,6 +121,44 @@ def fits(page: dict, font: Path, bold: Path, size=(1280, 720), floor: int = MIN_
         return False
 
 
+def _sentence(x) -> str:
+    x = " ".join(str(x or "").split())
+    return x if not x or x[-1] in ".:;!?" else x + "."
+
+
+def page_say(page: dict) -> str:
+    """The narration a still page carries, from its own text: a fixed `say` (the load order, spoken as a summary), else
+    its lead sentence and then what the page shows, row by row, in the page's order."""
+    if page.get("say"):
+        return " ".join(str(page["say"]).split())
+    lay = page.get("layout")
+    bits = [page.get("sayLead")] if page.get("sayLead") else []
+    if lay == "statement":
+        bits.append(page.get("text"))
+    elif lay == "list":
+        bits += [str(r) for r in page.get("rows") or []]
+    elif lay == "checks":
+        for r in page.get("rows") or []:
+            reason = str(r.get("reason") or "")
+            reason = reason[:1].upper() + reason[1:]
+            subs = [str(s) for s in r.get("subjects") or []]
+            bits.append(f"{reason.rstrip('.:')}: {'; '.join(subs)}" if subs else reason)
+    elif lay == "load-order":
+        plugins = list(page.get("plugins") or [])
+        marked = [p for p in plugins if p in set(page.get("affected") or page.get("targets") or [])]
+        bits.append(f"{page.get('title') or 'Load order'}: {len(plugins)} plugins")
+        if marked:
+            bits.append(f"{page.get('legend') or 'Highlighted'}: " + ", ".join(
+                re.sub(r"\.(esp|esm|esl)$", "", str(m), flags=re.IGNORECASE) for m in marked))
+    elif lay == "types":
+        for r in page.get("rows") or []:
+            bits.append(f"{r.get('label')}: {r.get('count')}" + (f" {r['unit']}" if r.get("unit") else ""))
+        for key in ("line", "markersLine"):
+            if (page.get("leftOut") or {}).get(key):
+                bits.append(page["leftOut"][key])
+    return " ".join(_sentence(b) for b in bits if b)
+
+
 def paginate(page: dict, font: Path, bold: Path, size=(1280, 720)) -> list[dict]:
     """A still page split into pages that each fit at a readable size: a statement by its sentences, a list or checks
     page by its rows (a checks row too long alone by its subjects). One page when it fits; a page that cannot be split
@@ -138,18 +176,36 @@ def paginate(page: dict, font: Path, bold: Path, size=(1280, 720)) -> list[dict]
             return [page]
         k = len(parts) // 2
         return (paginate({**page, "text": " ".join(parts[:k])}, font, bold, size)
-                + paginate({**page, "text": " ".join(parts[k:])}, font, bold, size))
+                + paginate({**page, "text": " ".join(parts[k:]), "sayLead": None}, font, bold, size))
     rows = list(page.get("rows") or [])
+    # each part says only what it shows: the lead sentence goes with the first part, never repeated
     if lay in ("list", "checks") and len(rows) > 1:
         k = len(rows) // 2
         return (paginate({**page, "rows": rows[:k]}, font, bold, size)
-                + paginate({**page, "rows": rows[k:]}, font, bold, size))
+                + paginate({**page, "rows": rows[k:], "sayLead": None}, font, bold, size))
     if lay == "checks" and rows and len(rows[0].get("subjects") or []) > 1:
         subs = rows[0]["subjects"]
         k = len(subs) // 2
         return (paginate({**page, "rows": [{**rows[0], "subjects": subs[:k]}]}, font, bold, size)
-                + paginate({**page, "rows": [{**rows[0], "subjects": subs[k:]}]}, font, bold, size))
+                + paginate({**page, "rows": [{**rows[0], "subjects": subs[k:]}], "sayLead": None}, font, bold, size))
     return [page]
+
+
+def still_parts(pages: list[dict], font: Path, bold: Path) -> list[dict]:
+    """A still scene's pages as drawn, each with its own narration (`say`): the storyboard and the render cut the same
+    parts, so every page is spoken in page order and held for its own words."""
+    out = []
+    for page in pages:
+        parts = paginate(page, font, bold)
+        if len(parts) > 1 and page.get("seconds"):
+            wsum = sum(max(1, page_words_drawn(x)) for x in parts)
+            parts = [{**x, "seconds": round(float(page["seconds"]) * max(1, page_words_drawn(x)) / wsum, 2)} for x in parts]
+        out += [{**x, "say": page_say(x)} for x in parts]
+    return out
+
+
+def page_words_drawn(page: dict) -> int:
+    return len(" ".join(str(b[1]) for b in _blocks(page)).split())
 
 
 def label_frame(src: Path, label: str, font: Path, bold: Path, size=(1280, 720), strip_h: int = 40) -> Image.Image:

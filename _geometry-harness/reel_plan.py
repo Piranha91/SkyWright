@@ -32,6 +32,8 @@ import hashlib
 import json
 import re
 
+import reel_stills
+
 SCHEMA = 1
 
 
@@ -886,15 +888,19 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     opening_say = (words["opening"] if counts else words["openingNone"]).format(mod=mod(target))
     if incomplete:
         opening_say += " " + incomplete
+    # each page says its own words: the types page its lead and its rows, the load-order page what it highlights
+    opening_pages[0]["sayLead"] = opening_say
     if words.get("loadOrderSay"):
-        n_aff = len(opening_pages[1]["affected"])
-        opening_say += " " + words["loadOrderSay"].format(count=len(opening_pages[1]["plugins"]), marked=n_aff)
+        aff_ = [mod(p) for p in opening_pages[1]["affected"]]
+        opening_pages[1]["say"] = words["loadOrderSay"].format(
+            count=len(opening_pages[1]["plugins"]), marked=len(aff_), names=joined(aff_))
     rate = float(policy.get("readingWordsPerSecond") or 0) or None
     for pg in opening_pages:
         if rate:
             pg["seconds"] = (float((policy.get("holdSeconds") or {}).get("loadOrderPage") or 6.0)
                              if pg["layout"] == "load-order" else page_seconds(pg, rate, policy))
-    chapters = [{"id": "R-01", "kind": "opening", "narration": opening_say, "still": {"pages": opening_pages}}]
+    chapters = [{"id": "R-01", "kind": "opening", "narration": " ".join(x_ for x_ in (reel_stills.page_say(p_) for p_ in opening_pages) if x_),
+                 "still": {"pages": opening_pages}}]
     accounting = {}
     for t in policy.get("typeOrder") or []:
         if t not in counts:
@@ -1000,48 +1006,82 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             tpage["seconds"] = page_seconds(tpage, rate, policy)
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "verdict", "narration": " ".join(todo),
                          "still": {"pages": [tpage]}})
-    checks = closing_checks(reader, pres, mod, patch_name, words)
-    # what the checks that ran could not judge, and the play-time line, from the report's own coverage: the closing is the
-    # whole list of what was not judged, not only the checks that did not run
-    skip_ = tuple(words.get("closingCoverageSkip") or ())
-    for line_ in (reader.get("coverage") or {}).get("lines") or []:
-        rsn_ = str(line_.get("reason") or "")
-        if not rsn_ or (skip_ and rsn_.startswith(skip_)):
-            continue
-        subj_ = str(line_.get("subject") or "").split(":", 1)[0].strip()
-        cnt_ = line_.get("count")
-        item_ = f"{subj_} ({cnt_:,}{' ' + line_['unit'] if line_.get('unit') else ''})" if isinstance(cnt_, int) else subj_
-        row_ = next((r_ for r_ in checks if r_["reason"] == rsn_), None)
+    # the closing, in the order a viewer reads it, each page saying its own words:
+    # 1. the opening's own count and the checks behind it, each under its own reason (the same list, by construction)
+    ic_ = pred.get("incompleteChecks") or {}
+    checks, measured_titles = [], set()
+    if ic_.get("checks") and words.get("closingLead"):
+        checks.append({"reason": words["closingLead"].format(missing=len(ic_["checks"]), total=ic_.get("total")),
+                       "subjects": [], "comparison": False, "lead": True})
+    for c_ in ic_.get("checks") or []:
+        reason_, comparison_ = plain_reason(c_.get("reason"), words)
+        row_ = next((r_ for r_ in checks if r_["reason"] == reason_), None)
         if row_ is None:
-            row_ = {"reason": rsn_, "subjects": [], "comparison": False}
+            row_ = {"reason": reason_, "subjects": [], "comparison": comparison_}
             checks.append(row_)
-        if item_ and item_ not in row_["subjects"]:
-            row_["subjects"].append(item_)
-    play_ = words.get("closingPlayTime")
-    if play_ and any(play_ in str(n_) for n_ in (reader.get("coverage") or {}).get("notes") or []):
-        checks.append({"reason": next(str(n_) for n_ in reader["coverage"]["notes"] if play_ in str(n_)),
-                       "subjects": [], "comparison": False})
-    closing_say = words["closing"]
-    # a closing check that is also a headline kind: its arm result stands; what has no result is a comparison
+        if c_["title"] not in row_["subjects"]:
+            row_["subjects"].append(c_["title"])
+        measured_titles.add(c_["title"])
+    # 2. what has no result only on the other tested setups (a comparison), said as that
+    other_ = []
+    for r_ in closing_checks(reader, pres, mod, patch_name, words):
+        subs_ = [s_ for s_ in r_["subjects"] if s_.split(", with")[0].split(", without")[0] not in measured_titles]
+        if subs_:
+            other_.append({**r_, "reason": (words.get("closingOtherSetups") or "{reason}").format(reason=r_["reason"]),
+                           "subjects": subs_})
     head_titles = {str(i.get("title")): i for i in pred.get("items") or [] if i.get("shownAs") != "alone"}
     reconcile = []
-    for row in checks:
+    for row in other_:
         for subj in row.get("subjects") or []:
             it = head_titles.get(str(subj).split(", with")[0].split(", without")[0])
             if it and words.get("closingReconcile") and row.get("comparison"):
                 reconcile.append(words["closingReconcile"].format(title=it.get("title"), count=it.get("count")))
+    checks += other_
     if reconcile:
-        checks = [{"reason": " ".join(dict.fromkeys(reconcile)), "subjects": []}] + checks
-    if words.get("closingCount"):
-        closing_say += " " + " ".join(words["closingCount"].format(
-            reason=str(r_["reason"])[:1].upper() + str(r_["reason"])[1:], count=len(r_["subjects"]),
-            noun="check" if len(r_["subjects"]) == 1 else "checks") for r_ in checks if r_.get("subjects"))
-        closing_say += (" " + " ".join(dict.fromkeys(reconcile))) if reconcile else ""
+        checks.append({"reason": " ".join(dict.fromkeys(reconcile)), "subjects": [], "comparison": True})
+    # 3. checks that ran and could not judge some of their items: parts of checks that ran, with what they did judge
+    skip_ = tuple(words.get("closingCoverageSkip") or ())
+    partial_ = words.get("closingPartial") or {}
+    for line_ in (reader.get("coverage") or {}).get("lines") or []:
+        rsn_ = str(line_.get("reason") or "")
+        if not rsn_ or (skip_ and rsn_.startswith(skip_)):
+            continue
+        subj_full_ = str(line_.get("subject") or "")
+        if partial_ and rsn_ == partial_.get("reason"):
+            check_, _, rest_ = subj_full_.partition(":")
+            judged_ = re.search(r"beside ([\d,]+) the check did judge", rest_)
+            cnt_ = line_.get("count")
+            if isinstance(cnt_, int):
+                item_ = partial_["counted"].format(check=check_.strip(), count=f"{cnt_:,}", unit=line_.get("unit") or "items",
+                                                   judged=judged_.group(1) if judged_ else "")
+                if not judged_:
+                    item_ = item_.split(partial_["judgedCut"])[0] if partial_.get("judgedCut") else item_
+            else:
+                item_ = partial_["uncounted"].format(check=check_.strip(), parts="; ".join(
+                    re.sub(r"\s*\([^()]*(\([^()]*\)[^()]*)*\)", "", x_).strip() for x_ in rest_.split(";") if x_.strip()))
+            row_ = next((r_ for r_ in checks if r_["reason"] == partial_["heading"]), None)
+            if row_ is None:
+                row_ = {"reason": partial_["heading"], "subjects": [], "comparison": False}
+                checks.append(row_)
+            row_["subjects"].append(item_)
+            continue
+        # 4. areas and states the evaluation did not measure, each its own item
+        row_ = next((r_ for r_ in checks if r_["reason"] == rsn_), None)
+        if row_ is None:
+            row_ = {"reason": rsn_, "subjects": [], "comparison": False}
+            checks.append(row_)
+        for x_ in subj_full_.split("; "):
+            if x_.strip() and x_.strip() not in row_["subjects"]:
+                row_["subjects"].append(x_.strip())
+    play_ = words.get("closingPlayTime")
+    if play_ and any(play_ in str(n_) for n_ in (reader.get("coverage") or {}).get("notes") or []):
+        checks.append({"reason": next(str(n_) for n_ in reader["coverage"]["notes"] if play_ in str(n_)),
+                       "subjects": [], "comparison": False})
     cpage = {"layout": "checks", "title": words["stillTitles"]["checks"], "rows": checks,
              **({"maxWords": policy["pageMaxWords"]} if policy.get("pageMaxWords") else {})}
     if rate:
         cpage["seconds"] = page_seconds(cpage, rate, policy)
-    chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": closing_say,
+    chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": reel_stills.page_say(cpage),
                      "still": {"pages": [cpage]}})
     return {"schemaVersion": SCHEMA, "status": "planned", "reason": None,
             "policySha256": _sha(policy), "wordsSha256": _sha(words),

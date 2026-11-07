@@ -4738,6 +4738,11 @@ def build_prediction(ctx: dict) -> dict:
                           [f'"{t_}" ({fmt_n(n_)})' for t_, n_ in sorted(shared_with_.items(), key=lambda kv: (-kv[1], kv[0]))]))}))
         verdict_counts[i] = {**e, "count": total, "newObjects": new, "sharedObjects": shared, "phrase": phrase,
                              "sharedWith": dict(shared_with_)}
+        if not new:
+            # every object of this entry is a clash counted above: a tally of clashes counts it there, never again here
+            for g in counted:
+                if (g["checkId"], g["kind"]) == (e["checkId"], e["kind"]):
+                    g["countedElsewhere"] = True
     unseparated = stated(counts["notSeparable"]) if multi else []
     checks_on_p = sorted({c for (c, a) in measured if a == p_of(c)})
     if verdict_counts:
@@ -6339,6 +6344,7 @@ def build_prediction(ctx: dict) -> dict:
                     len({str(rk[4]) for rk in on_}))}) if on_ else ""
         # with several patches, each undone change is said under the patch whose own record holds the winning value (the
         # row's winner), never under all of them and never by load position
+        undone_said_, undone_by_patch_ = {}, []
         undone_groups_ = ([(patch, list(undone))] if len(patch_names) <= 1 else
                           [(p_, [x_ for x_ in undone if str(x_[0][3]).lower() == str(p_).lower()]) for p_ in patch_names]
                           + [(patch, [x_ for x_ in undone if str(x_[0][3]).lower() not in patch_lower])])
@@ -6359,30 +6365,50 @@ def build_prediction(ctx: dict) -> dict:
                 if off_ else "",
                 "enables": enables_text(on_, total_=len(und_))}))
             undone_sentence = undone_sentence or sentences[-1]
+            undone_said_[who_] = sentences[-1]
+            # each patch's side effect for its verdict: whose changes it puts back, on which records
+            for m_ in dict.fromkeys(rk_[2] for rk_, _ in und_):
+                undone_by_patch_.append({"patch": who_, "mod": m_,
+                                         "count": sum(1 for rk_, _ in und_ if rk_[2] == m_),
+                                         "records": list(dict.fromkeys(str(rk_[4]) for rk_, _ in und_ if rk_[2] == m_))})
         replaced_sentence = None
-        if replaced and words.get("validationReplaced"):
-            # (page budget, coordinator) with an undone line, said in its slot as a clause of its own
-            in_undone_ = bool(undone_sentence) and bool(words.get("validationReplacedClause"))
+        # with several patches, each replaced change is said under the patch whose own record sets the value, and joined
+        # to an undone line only when that line is the same patch's
+        own_of_ = lambda h_: (str(what_[id(h_)][1]) if str(what_[id(h_)][1]).lower() in patch_lower else None)  # noqa: E731
+        replaced_groups_ = ([(patch, list(replaced))] if len(patch_names) <= 1 else
+                            [(p_, [x_ for x_ in replaced if str(own_of_(x_[1]) or "").lower() == str(p_).lower()])
+                             for p_ in patch_names] + [(patch, [x_ for x_ in replaced if own_of_(x_[1]) is None])])
+        for who_r_, rep_ in replaced_groups_:
+            if not (rep_ and words.get("validationReplaced")):
+                continue
+            whose_ = collections.Counter(
+                ("own" if str(what_[id(h_)][1]).lower() in patch_lower else "of", what_[id(h_)][1]) for rk, h_ in rep_)
+            sw_on_ = [rk for rk, h_ in rep_ if off_at_load((h_["row"].get("values") or {}).get("lost"))
+                      and not off_at_load((h_["row"].get("values") or {}).get("winner"))]
+            host_ = (undone_said_.get(who_r_) if len(patch_names) > 1 else undone_sentence)
+            in_undone_ = bool(host_) and bool(words.get("validationReplacedClause"))
             sentences.append(bind(words["validationReplacedClause" if in_undone_ else "validationReplaced"], {
-                "patch": patch, "count": fmt_n(len(replaced)), "noun": words["fieldNoun"][0 if len(replaced) == 1 else 1],
-                "by": by_plugin(replaced),
+                "patch": who_r_, "count": fmt_n(len(rep_)), "noun": words["fieldNoun"][0 if len(rep_) == 1 else 1],
+                "by": by_plugin(rep_),
                 # (page budget) the owning patches with their counts after one lead; other owners by name
                 "whose": "; ".join(x_ for x_ in (
                     (words.get("validationReplacedOwnLead") or "") + ", ".join(
                         bind(words["validationReplacedOwn"], {"count": fmt_n(n_), "owner": k_[1]})
-                        for k_, n_ in replaced_whose.most_common() if k_[0] == "own"),
+                        for k_, n_ in whose_.most_common() if k_[0] == "own"),
                     ", ".join(bind(words["validationReplacedOf"], {"count": fmt_n(n_), "owner": k_[1]})
-                              for k_, n_ in replaced_whose.most_common() if k_[0] != "own"))
+                              for k_, n_ in whose_.most_common() if k_[0] != "own"))
                     if x_ and x_ != (words.get("validationReplacedOwnLead") or "")),
-                # (page budget, coordinator) the count only: the undone part names the examples
-                "enables": enables_text(switched_on_r, "validationReplacedEnables", len(replaced))}))
-            replaced_sentence = sentences[-1]
+                "enables": enables_text(sw_on_, "validationReplacedEnables", len(rep_))}))
+            replaced_sentence = replaced_sentence or sentences[-1]
             if in_undone_:
                 tail_ = words.get("validationUndoneTail") or ""
-                i_ = sentences.index(undone_sentence)
-                head_ = undone_sentence[:-len(tail_)] if tail_ and undone_sentence.endswith(tail_) else undone_sentence.rstrip(".")
+                i_ = sentences.index(host_)
+                head_ = host_[:-len(tail_)] if tail_ and host_.endswith(tail_) else host_.rstrip(".")
                 sentences[i_] = head_ + sentences.pop() + tail_
-                undone_sentence = replaced_sentence = sentences[i_]
+                if host_ == undone_sentence:
+                    undone_sentence = sentences[i_]
+                undone_said_[who_r_] = sentences[i_]
+                replaced_sentence = sentences[i_]
         if undone_unread and words.get("validationUndoneUnread"):
             sentences.append(bind(words["validationUndoneUnread"], {
                 "patch": patch, "count": fmt_n(len(undone_unread)),
@@ -7037,7 +7063,23 @@ def build_prediction(ctx: dict) -> dict:
             old_ = old_.replace(ctx["genericVerdict"], "").strip()
         # on the page the summary stands for the comparison's sentence, which repeats it, except a refused comparison,
         # which is said beside it (round 4); the sentence stays in the plan
-        validation = {"status": "compared", "summary": summary_, "headline": old_,
+        # each supplied patch measured alone where a setup holds it alone (the setup without the patches plus that one):
+        # its own verdict is that setup's, so which patch does what is told, not left joint
+        alone_ = {}
+        if len(patch_names) > 1:
+            for p_ in patch_names:
+                a_ = arm_with(set(p_set) | {str(p_).lower()})
+                if not a_:
+                    continue
+                rows_alone_ = []
+                for g in prediction["items"]:
+                    k = (g["checkId"], g["kind"], tuple(g["mods"]), g["attribution"], g["attributionMod"])
+                    es_ = [e for e in admitted if item_of(e) == k]
+                    meas_ = [e for e in es_ if (e["checkId"], a_) in measured]
+                    left_a_ = sum(1 for e in meas_ if there(a_, keyof(e)))
+                    rows_alone_.append({"hits": len(meas_) - left_a_, "left": left_a_, "unknown": len(es_) - len(meas_)})
+                alone_[str(p_)] = {"arm": a_, "byItem": rows_alone_}
+        validation = {"status": "compared", "summary": summary_, "headline": old_, "alone": alone_,
                       "headlineShown": " ".join(ctx.get("refusedLines") or []),
                       "patches": patch_names, **side_lines,
                       "itemLines": item_lines, "newByCheck": new_by_check,
@@ -7046,7 +7088,8 @@ def build_prediction(ctx: dict) -> dict:
                       "patchChoiceNoise": patch_noise, "patchChoiceCarried": patch_carried, "caseOnlyRows": case_only_rows,
                       "hits": len(hits), "switched": len(switched), "own": len(own), "kept": len(kept),
                       "open": len(open_), "stands": len(stands), "undone": len(undone), "undoneBy": dict(undone_by), "replaced": len(replaced),
-                      "replacedWhose": {f"{k_[1]}": n_ for k_, n_ in replaced_whose.items()}, "undoneOff": len(undone_off), "undoneUnread": len(undone_unread),
+                      "replacedWhose": {f"{k_[1]}": n_ for k_, n_ in replaced_whose.items()},
+                      "undoneByPatch": undone_by_patch_, "undoneOff": len(undone_off), "undoneUnread": len(undone_unread),
                       "undoneSentence": undone_sentence, "replacedSentence": replaced_sentence,
                       "replacedFindingIds": [f_ for f_, _ in collections.Counter(
                           h_["finding"].get("id") for _, h_ in replaced if h_["finding"].get("id")).most_common()],
@@ -7231,10 +7274,20 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
             else:
                 mine = [k for k, it in enumerate(items)
                         if len(it.get("mods") or []) >= 2 and {str(m).lower() for m in it["mods"]} <= set(pm)]
+            # a clash the headline counts once, under an earlier check, is not counted again in a patch's tally
+            mine = [k for k in mine if not items[k].get("countedElsewhere")]
             count = sum(int(items[k].get("count") or 0) for k in mine)
             hits = sum(hits_of(k) for k in mine)
             unknown = sum(unknown_of(k) for k in mine)
             left = sum(left_of(k) for k in mine)
+            al_ = (val.get("alone") or {}).get(str(p))
+            if al_ and len(patches) > 1:
+                # measured on the setup with this patch alone, every row of its items in one of three counts
+                bi_ = al_["byItem"]
+                hits = sum(int(bi_[k]["hits"]) for k in mine if k < len(bi_))
+                left = sum(int(bi_[k]["left"]) for k in mine if k < len(bi_))
+                unknown = sum(int(bi_[k]["unknown"]) for k in mine if k < len(bi_))
+                count = hits + left + unknown
             pair = and_list([name(m) for m in sorted(pm or []) if not is_base_game(name(m), words)])
             vals = {"patch": p, "pair": pair, "count": count, "hits": hits, "clashNoun": noun[0 if count == 1 else 1]}
             if pm is None:
@@ -7244,17 +7297,39 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
             elif hits:
                 tail = (bind(ww["left"], {"count": left, "verb": "is" if left == 1 else "are"}) if left else "") + (
                     bind(ww["unknown"], {"count": unknown}) if unknown else "")
+                # the rest of the total, by what the patch does with them, so resolved + left + unknown + rest = total
+                rest = count - hits - left - unknown
+                if rest > 0 and ww.get("rest"):
+                    rw_ = ww.get("restKinds") or {}
+                    named_ = [(kk_, sum(int((by_item[k] if k < len(by_item) else {}).get(kk_) or 0) for k in mine))
+                              for kk_ in rw_]
+                    parts_, sum_ = [], 0
+                    for kk_, n_ in named_:
+                        if n_ and sum_ + n_ <= rest:
+                            parts_.append(bind(rw_[kk_], {"count": n_}))
+                            sum_ += n_
+                    if rest - sum_ and ww.get("restOther"):
+                        parts_.append(bind(ww["restOther"], {"count": rest - sum_}))
+                    tail += bind(ww["rest"], {"count": rest, "parts": and_list(parts_)})
                 s = bind(ww["resolves"], {**vals, "left": tail})
             else:
                 s = bind(ww["resolvesNone"], vals)
                 if unknown:
                     s = s[:-1] + bind(ww["unknown"], {"count": unknown}) + "."
+            # what the patch puts back of another mod's changes, beside its verdict and never as "no new clash" alone
+            for u_ in [u for u in val.get("undoneByPatch") or [] if str(u.get("patch")).lower() == str(p).lower()]:
+                if ww.get("sideEffect"):
+                    s += bind(ww["sideEffect"], {"count": u_["count"], "mod": name(u_["mod"]),
+                                                 "noun": (ww.get("sideEffectNoun") or ["field", "fields"])[0 if u_["count"] == 1 else 1],
+                                                 "records": and_list(u_["records"][:3]) + (" and others" if len(u_["records"]) > 3 else "")})
             if len(patches) == 1:
                 s += (ww["physicalUnknown"] if phys_unknown else
                       bind(ww["newSome"], {"count": new_n, "clashNoun": noun[0 if new_n == 1 else 1]}) if new_n
                       else ww["noNew"])
-            elif mine:
+            elif mine and not (val.get("alone") or {}).get(str(p)):
                 s += bind(ww["joint"], {"patches": and_list(patches)})
+            elif mine and ww.get("aloneMeasured"):
+                s += bind(ww["aloneMeasured"], {"patch": p})
             out.append(s)
         if len(patches) > 1:
             jv = {"patches": and_list(patches), "count": new_n, "clashNoun": noun[0 if new_n == 1 else 1]}
@@ -7279,6 +7354,94 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
     return out
 
 
+def proper_plugin_case(obj, names):
+    """Every plugin name in the reader's text in its load-order spelling (a probe reports the file on disk, whose name may
+    differ in case); a path is left as it is."""
+    proper = {}
+    for n in names:
+        proper.setdefault(str(n).lower(), str(n))
+    if not proper:
+        return obj
+    pat = re.compile(r"(?<![\\/\w])(" + "|".join(re.escape(k) for k in sorted(proper, key=len, reverse=True)) + r")(?![\w])",
+                     re.IGNORECASE)
+
+    def fix(s):
+        return pat.sub(lambda m: proper[m.group(1).lower()], s)
+
+    def walk(x, key=None):
+        if isinstance(x, str):
+            return x if (key and ("path" in str(key).lower() or str(key).lower() in ("sha256", "id"))) else fix(x)
+        if isinstance(x, list):
+            return [walk(v, key) for v in x]
+        if isinstance(x, dict):
+            return {k: walk(v, k) for k, v in x.items()}
+        return x
+    return walk(obj)
+
+
+def record_labels(b: "Bundle") -> dict:
+    """{form key: what a reader calls the record}, from the names enrichment's own recorded read of the plugin files: the
+    record's Name where it has one, else an NPC's or cell's editor ID. {} when the bundle holds no such read."""
+    row = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
+    resp = (b.dir / row["path"]).parent / "02-response.jsonl" if row and row.get("path") else None
+    out = {}
+    if not resp or not resp.is_file():
+        return out
+
+    def walk(x):
+        if isinstance(x, str) and x[:1] in "{[":
+            try:
+                walk(json.loads(x))
+            except ValueError:
+                pass
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+        elif isinstance(x, dict):
+            fk, eid = x.get("formid"), x.get("editorid")
+            if isinstance(fk, str) and isinstance(x.get("fields"), list):
+                nm = next((f.get("value") for f in x["fields"] if isinstance(f, dict) and f.get("path") == "Name"
+                           and isinstance(f.get("value"), str) and f.get("value").strip()), None)
+                lab = nm or (eid if str(x.get("type")) in ("Npc", "Cell") and eid else None)
+                if lab and fk not in out:
+                    out[fk] = str(lab)
+            for v in x.values():
+                walk(v)
+    for line in resp.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            walk(json.loads(line))
+        except ValueError:
+            continue
+    return out
+
+
+def label_form_keys(obj, labels: dict):
+    """A form key the reader's text gives bare is said with the record's name first ("The Town Inn, 00C401:Skyrim.esm"),
+    unless that name is already said beside it; a path or id is left as it is."""
+    if not labels:
+        return obj
+    pat = re.compile("(" + "|".join(re.escape(k) for k in sorted(labels, key=len, reverse=True)) + r")(?![\w.])")
+
+    def fix(s):
+        def one(m):
+            lab = labels[m.group(1)]
+            near = s[max(0, m.start() - 80):m.end() + 80]
+            return m.group(1) if lab.lower() in near.lower() else f"{lab}, {m.group(1)}"
+        return pat.sub(one, s)
+
+    def walk(x, key=None):
+        if isinstance(x, str):
+            # data a later step parses (form keys, a row's summary) keeps its own spelling; only sentences are labelled
+            return x if (key and ("path" in str(key).lower() or str(key).lower() in (
+                "sha256", "id", "formkey", "other", "record", "records", "object", "summary", "members", "fk"))) else fix(x)
+        if isinstance(x, list):
+            return [walk(v, key) for v in x]
+        if isinstance(x, dict):
+            return {k: walk(v, k) for k, v in x.items()}
+        return x
+    return walk(obj)
+
+
 def load_precedent(folder) -> dict:
     """{patch plugin (lower case): its source row} from a precedent cards folder's summary.json; {} when absent."""
     doc = load_json(Path(folder) / "summary.json") if folder else None
@@ -7294,7 +7457,7 @@ def precedent_census(lead: dict, folder, words: dict) -> None:
     pc = words.get("precedentCensus") or {}
     prec = load_precedent(folder)
     sentences = list(val.get("sentences") or [])
-    lines, carded = [], False
+    lines, carded, cards_out = [], False, []
     for p in val.get("patches") or []:
         src = prec.get(str(p).lower())
         if not src or not pc.get("line"):
@@ -7303,22 +7466,35 @@ def precedent_census(lead: dict, folder, words: dict) -> None:
         kinds = collections.Counter()
         for k, n in (c.get("editKinds") or {}).items():
             kinds["FIELD" if str(k).startswith("FIELD:") else str(k)] += int(n or 0)
-        kind_txt = and_list([bind(pc["kinds"][k], {"count": n}) for k, n in kinds.items() if n and k in pc["kinds"]])
-        lines.append(bind(pc["line"], {"patch": p, "records": int(c.get("patchRecords") or 0),
-                                       "additions": int(c.get("additions") or 0), "edits": int(c.get("edits") or 0),
-                                       "kinds": kind_txt or "none"}))
+        # records are the new ones plus the overrides; the overrides' changes are every edit but an addition, and the
+        # named kinds sum to them, the rest said as "other"
+        records_, additions_ = int(c.get("patchRecords") or 0), int(c.get("additions") or 0)
+        changes_ = sum(n for k, n in kinds.items() if k != "ADD")
+        named_ = [(k, n) for k, n in kinds.most_common() if n and k != "ADD" and k in pc["kinds"]]
+        rest_ = changes_ - sum(n for _, n in named_)
+        parts_ = [bind(pc["kinds"][k], {"count": n}) for k, n in named_]
+        if rest_ and pc.get("otherKinds"):
+            parts_.append(bind(pc["otherKinds"], {"count": rest_}))
+        lines.append(bind(pc["line"], {"patch": p, "records": records_, "additions": additions_,
+                                       "overrides": max(0, records_ - additions_), "changes": changes_,
+                                       "kinds": and_list(parts_) or "none"}))
         dc = (src.get("cardPass") or {}).get("decidingConstraint") or {}
         given = {k: v for k, v in dc.items() if k != "not-established" and v}
-        if given and pc.get("cards"):
+        # the cards themselves, listed in the evidence index; the pointer to them is said only when they are there
+        listed_ = precedent_cards(folder, p, pc)
+        cards_out += listed_
+        key_ = "cards" if listed_ else "cardsUnlisted"
+        if given and pc.get(key_):
             carded = True
-            lines.append(bind(pc["cards"], {"count": sum(given.values()), "reasons": and_list(
+            lines.append(bind(pc[key_], {"count": sum(given.values()), "reasons": and_list(
                 [f"{n} {(pc.get('constraints') or {}).get(k, k)}" for k, n in sorted(given.items(), key=lambda kv: -kv[1])])}))
     listed = any("read from its own records" in str(x) for x in sentences)
     if lines:
         at = next((i for i, x in enumerate(sentences) if "read from its own records" in str(x)), 0)
         sentences[at + 1 if listed else min(1, len(sentences)):at + 1 if listed else min(1, len(sentences))] = lines
-    if carded and pc.get("intentTail"):
-        sentences = [str(x).replace(" Whether that is intended is not recorded.", pc["intentTail"])
+    tail_ = pc.get("intentTail") if cards_out else pc.get("intentTailUnlisted")
+    if carded and tail_:
+        sentences = [str(x).replace(" Whether that is intended is not recorded.", tail_)
                      .replace("; chosen or copied is not recorded.", ".") for x in sentences]
     stock = list(words.get("validationMissingFacts") or [])
     facts = list(val.get("missingFacts") or [])
@@ -7327,9 +7503,32 @@ def precedent_census(lead: dict, folder, words: dict) -> None:
     if len(stock) > 1 and carded:
         facts = [x for x in facts if x != stock[1]]
     for k in ("undoneSentence", "replacedSentence"):
-        if val.get(k) and carded and pc.get("intentTail"):
-            val[k] = str(val[k]).replace(" Whether that is intended is not recorded.", pc["intentTail"])
+        if val.get(k) and carded and tail_:
+            val[k] = str(val[k]).replace(" Whether that is intended is not recorded.", tail_)
     val["sentences"], val["missingFacts"], val["censusLines"] = sentences, facts, lines
+    val["precedentCards"] = cards_out
+
+
+def precedent_cards(folder, patch, pc: dict) -> list[dict]:
+    """A patch's precedent cards (its folder's cards.jsonl, named by the plugin without its extension): what the patch
+    did, the cell by its name, and the card's reason; [] when the folder holds none."""
+    if not folder:
+        return []
+    f = Path(folder) / re.sub(r"\.(esp|esm|esl)$", "", str(patch), flags=re.IGNORECASE) / "cards.jsonl"
+    out = []
+    if not f.is_file():
+        return out
+    for line in f.read_text(encoding="utf-8").splitlines():
+        try:
+            c = json.loads(line)
+        except ValueError:
+            continue
+        cell = ((c.get("whatItTouched") or {}).get("cell") or {}) if isinstance(c, dict) else {}
+        place = (f"{cell['name']} ({cell.get('editorId') or cell.get('formKey')})" if cell.get("name")
+                 else cell.get("editorId") or cell.get("formKey"))
+        out.append({"patch": str(patch), "what": c.get("whatThePatchDid"), "place": place, "reason": c.get("reason"),
+                    "constraint": (pc.get("constraints") or {}).get(c.get("decidingConstraint"), c.get("decidingConstraint"))})
+    return out
 
 
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
@@ -8784,11 +8983,24 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     compared =", ".join(comparison_names) if comparison_names else "the measured load order"
     # the tested setups leave out or add mods to attribute each clash; said as that, never as one setup differing by a
     # list of plugins as if they were a patch
-    n_alt_ = sum(1 for k in comparison_kinds.values() if k not in ("baseline", "patch-comparison", "supplied-combination"))
+    # counted and described from the arms themselves: a setup counts when it leaves out or adds a plugin other than
+    # an evaluated mod or a declared patch, and the verb is what those setups do
+    alt_left_, alt_added_, n_alt_ = [], [], 0
+    for arm_id_, (added_, removed_) in arm_changes.items():
+        if comparison_kinds.get(arm_id_) in ("baseline", "patch-comparison", "supplied-combination"):
+            continue
+        keep_ = lambda xs: [n for n in xs if n.lower() not in plan_target_set and n.lower() not in declared_patches]  # noqa: E731
+        if keep_(added_) or keep_(removed_):
+            n_alt_ += 1
+            alt_left_ += [n for n in keep_(removed_) if n not in alt_left_]
+            alt_added_ += [n for n in keep_(added_) if n not in alt_added_]
+    us_words_ = (reader_data.get("prediction") or {}).get("unstatedSetupsVerbs") or {}
+    alt_verb_ = ("both" if alt_left_ and alt_added_ else "add" if alt_added_ else "leave")
     unstated_text = ((" " + bind((reader_data.get("prediction") or {})["unstatedSetups"], {
                           "count": fmt_n(n_alt_), "noun": "setup" if n_alt_ == 1 else "setups",
-                          "plugins": and_list(unstated_difference_plugins)}))
-                     if unstated_difference_plugins and (reader_data.get("prediction") or {}).get("unstatedSetups") else
+                          "verb": us_words_.get(alt_verb_, "leave out or add"),
+                          "plugins": and_list(sorted(set(alt_left_ + alt_added_), key=str.lower))}))
+                     if n_alt_ and (reader_data.get("prediction") or {}).get("unstatedSetups") else
                      (f" One tested setup differs by {', '.join(unstated_difference_plugins)}, "
                       f"which is not declared as a patch; it is reported as a plugin that "
                       f"differs, not as an evaluated patch.")
@@ -9067,15 +9279,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     arm_order = {a["armId"]: i for i, a in enumerate(arms_out)}
     def summarise_missing(rows_in):
         missing_summary = []
+        # each setup's check under its own status (several statuses of one check on one setup: one by precedence),
+        # never under another setup's
         statuses_by_check = collections.OrderedDict()
         for m in rows_in:
-            sts = statuses_by_check.setdefault(str(m.get("checkId")), [])
+            sts = statuses_by_check.setdefault((str(m.get("checkId")), str(m.get("armId"))), [])
             if str(m.get("status")) not in sts:
                 sts.append(str(m.get("status")))
         for status_set in sorted({tuple(sorted(v)) for v in statuses_by_check.values()}):
             rows_ = []
             for m in rows_in:
-                if tuple(sorted(statuses_by_check[str(m.get("checkId"))])) != status_set:
+                if tuple(sorted(statuses_by_check[(str(m.get("checkId")), str(m.get("armId")))])) != status_set:
                     continue
                 title = check_titles.get(str(m.get("checkId")), b.check_title(m.get("checkId")))
                 rows_.append((title, arm_order.get(m.get("armId"), len(arm_order)),
@@ -9157,8 +9371,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
 
     diff_said = {(f.get("checkId"), f.get("armId")) for f in findings
                  if f.get("kind") == "null" and f.get("part") == "diff" and holding_sentence(f)}
+    # one status source: a check and setup with no accepted result is never also listed as having found no problem
+    no_result_ = {(str(m.get("checkId")), str(m.get("armId"))) for m in reader_missing}
     for f in findings:
         if f.get("kind") != "null":
+            continue
+        if (str(f.get("checkId")), str(f.get("armId"))) in no_result_:
             continue
         subject = check_titles.get(str(f.get("checkId")), f.get("title"))
         if f.get("part") in ("diff", "reverse"):
@@ -9251,6 +9469,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         bind((pw_.get("headings") or {}).get("coverage") or "", {"subject": ""}))
     lead["prediction"]["incompleteReel"] = incomplete_line(
         ev, missing, p_arm_r2, arm_labels.get(p_arm_r2, "the measured setup"), pw_, "")
+    # the checks behind that line, each with its own reason: the reel's closing lists exactly these, so its count is the
+    # opening's by construction
+    meas_r2_, miss_r2_ = arm_check_state(ev, reader_missing, p_arm_r2)
+    lead["prediction"]["incompleteChecks"] = {
+        "total": len(set(miss_r2_) | meas_r2_),
+        "checks": [{"checkId": c_, "title": check_titles.get(c_, b.check_title(c_)),
+                    "reason": missing_reason(s_, "has no accepted result")} for c_, s_ in miss_r2_.items()]}
     # a verdict per supplied patch and a next step per kind left; report and reel read these
     proper_r2 = {str(q.get("name")).lower(): str(q.get("name")) for a_ in b.plan.get("arms") or []
                  for q in ((a_.get("requested") or {}).get("plugins") or []) if isinstance(q, dict)}
@@ -9626,6 +9851,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "chapters": chapters,
         "narration": {"source": "template", "validated": True, "refused": []},
     }
+    # one spelling of each plugin name in every sentence, the load order's (report and reel alike)
+    names_ = [str(q.get("name") if isinstance(q, dict) else q) for a_ in b.plan.get("arms") or []
+              for q in (a_.get("requested") or {}).get("plugins") or [] if (q.get("name") if isinstance(q, dict) else q)]
+    for k_ in ("reader", "scope", "groups", "findings"):
+        plan[k_] = proper_plugin_case(plan[k_], names_)
+    # a record or place given by its form key is said with its name where the plugin files give one
+    labels_ = record_labels(b)
+    for k_ in ("reader", "groups", "findings"):
+        plan[k_] = label_form_keys(plan[k_], labels_)
     return plan
 
 

@@ -319,7 +319,7 @@ def case_reel_closing_without_a_headline_check_has_no_reconciling_line():
 def case_reel_load_order_page_is_narrated_and_timed():
     reel = reel_of(reel_pres(), MODS)
     op = chapter(reel, "opening")
-    ok = ("plugins of the measured setup" in op["narration"]
+    ok = ("load order of the measured setup" in op["narration"]
           and all(p.get("seconds") for p in op["still"]["pages"]))
     return ok, f"narration {op['narration']!r}; seconds {[p.get('seconds') for p in op['still']['pages']]}"
 
@@ -422,7 +422,8 @@ def case_patch_census_replaces_the_stock_lines():
                         (RECORDS, "with-patch"): [P.lost_row(A, PATCH, f"000702:{BASE}", "SkyrimMajorRecordFlags",
                                                              "InitiallyDisabled", "0", "0")]},
             settings_extra={"precedentDir": str(precedent_dir(td))})
-    ok = (f"{PATCH} holds 12 records: 4 new and 8 edits" in md and "3 switched off" in md
+    ok = (f"{PATCH} holds 12 records: 4 new and 8 overrides of other plugins' records, which make 8 changes" in md
+          and "3 switched off" in md
           and "model-written reason for 5" in md
           and "does not list the patch's own edits" not in md and "Whether that is intended is not recorded" not in md)
     return ok, f"validation {P.section_text(md, P.headings(plan).get('validation') or chr(0))[:600]!r}"
@@ -833,7 +834,7 @@ def case_the_closing_lists_the_other_unjudged_areas():
         "notes": ["No matching play-time evidence was supplied, so this does not show what happened during play."]}
     rows = (chapter(reel_of(pres, MODS), "closing") or {})["still"]["pages"][0].get("rows") or []
     flat = json.dumps(rows)
-    ok = ("Cell settings changed by more than one mod (398 items)" in flat and "play-time evidence" in flat
+    ok = ("Cell settings changed by more than one mod: 398 items it could not judge" in flat and "play-time evidence" in flat
           and "A check" not in flat)
     return ok, f"rows {flat[:400]}"
 
@@ -935,6 +936,341 @@ def case_record_clashes_judged_against_header_masters_when_no_emit_records_them(
     adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in pred_of(plan).get("record") or [])
     ok = "records no plugin's master list" not in md and ("000701", "admitted") not in adm and ("000702", "admitted") in adm
     return ok, f"admission {adm}; master-list line {'records no plugin' in md}"
+
+
+# --------------------------------------------------------------------- retry 1: the closing, pages and subtitles
+
+def closing_pres():
+    """A reel whose opening counts 3 of 21 checks without a result, with one check that has no result only on another
+    setup, and coverage lines for parts of checks that ran."""
+    pres = reel_pres(subjects=12)
+    pres["reader"]["prediction"]["incompleteChecks"] = {"total": 21, "checks": [
+        {"checkId": "c.one", "title": "Other installed patches for the same mods",
+         "reason": "was not run: no list of patch pairs was supplied for it to search"},
+        {"checkId": "c.two", "title": "Connected doors, cells, quests and scripts",
+         "reason": "cannot yet be measured by this evaluator"},
+        {"checkId": "c.three", "title": "Whether a single object blocks an NPC route", "reason": "ran, but could not decide"}]}
+    pres["reader"]["coverage"] = {"lines": [
+        {"reason": "No result: ran, but could not decide", "count": 1, "unit": "check", "subject": "x"},
+        {"reason": "Could not be judged", "count": 9490, "unit": "items",
+         "subject": "Quest aliases split between mods: no position in the world to measure (beside 6,810 the check did judge)"},
+        {"reason": "Could not be judged", "count": None,
+         "subject": "Objects occupying the same space: 1,144 object types whose mesh was read (the mesh could be read only "
+                    "in part 963); 18,510 placed objects (no geometry to measure)"},
+        {"reason": "Areas not measured", "count": 2, "subject": "objects scripts create during play; mesh replacements"}],
+        "notes": ["No matching play-time evidence was supplied, so this does not show what happened during play."]}
+    return pres
+
+
+def case_reel_closing_counts_the_openings_checks_and_parts():
+    """The closing opens with the opening's own count and lists exactly those checks, each under its own reason; a check
+    with no result only on another setup is said as that; items a check that ran could not judge are parts of that
+    check, with what it did judge, never counted as failed checks; the narration is the page's own words in order."""
+    reel = reel_of(closing_pres(), MODS)
+    page = chapter(reel, "closing")["still"]["pages"][0]
+    rows = page.get("rows") or []
+    flat = json.dumps(rows)
+    measured = [s for r in rows[1:4] for s in r.get("subjects") or []]
+    say = chapter(reel, "closing")["narration"]
+    ok = (rows and rows[0]["reason"] == "On the measured load order, 3 of the 21 checks have no result."
+          and len(measured) == 3 and "Connected doors, cells, quests and scripts" in measured
+          and "On another tested setup only" in flat
+          and "Quest aliases split between mods: 9,490 items it could not judge, beside 6,810 it did" in flat
+          and "Objects occupying the same space: 1,144 object types whose mesh was read; 18,510 placed objects" in flat
+          and '"Could not be judged"' not in flat and " 1 check." not in say and " checks." not in say
+          and hasattr(reel_stills, "page_say") and say == reel_stills.page_say(page))
+    return ok, f"rows {flat[:500]}; say {say[:300]!r}"
+
+
+def tone_wav(path: Path, seconds: float):
+    import math
+    import struct
+    import wave
+    rate = 16000
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 330 * i / rate)))
+                               for i in range(int(rate * seconds))))
+
+
+def render_still_reel(td: Path):
+    """The storyboard packet, one tone per scene as long as its words take to say, and the render: (map, status, srt)."""
+    import evalreel
+    pres = closing_pres()
+    reel = reel_of(pres, MODS)
+    pres.update({"schemaVersion": 1, "presentationId": "pres-r1", "reel": reel, "chapters": [{"id": "C-1", "captions": []}],
+                 "settings": {"reel": {**{k: v for k, v in (PR.get("reel") or {}).items() if k != "words"}, "maxSeconds": 900}}})
+    pj = td / "presentation.json"
+    pj.write_text(json.dumps(pres), encoding="utf-8")
+    sb = td / "storyboard.json"
+    if evalreel.main(["storyboard-packet", "--presentation", str(pj), "--out", str(sb)]) != 0:
+        return None, None, None
+    board = json.loads(sb.read_text(encoding="utf-8"))
+    for i, sc in enumerate(board["scenes"]):
+        w = td / f"scene-{i:02d}.wav"
+        tone_wav(w, max(1.0, len(str(sc.get("narration") or "").split()) / 2.6))
+        sc["narrationAudio"] = str(w)
+    sb.write_text(json.dumps(board), encoding="utf-8")
+    out = td / "reel"
+    ff = evalreel.ffmpeg_find(None)
+    evalreel.main(["render", "--presentation", str(pj), "--out", str(out), "--storyboard", str(sb),
+                   *(["--ffmpeg", ff["exe"]] if ff else [])])
+    st = json.loads((out / "reel-status.json").read_text(encoding="utf-8")) if (out / "reel-status.json").is_file() else {}
+    mp = json.loads((out / "reel-map.json").read_text(encoding="utf-8")) if (out / "reel-map.json").is_file() else {}
+    srt = (out / "reel.srt").read_text(encoding="utf-8") if (out / "reel.srt").is_file() else ""
+    return mp, st, srt
+
+
+def case_reel_pages_are_spoken_in_order_and_never_silent():
+    """Decoded audio: every still page is its own scene with its own narration, in page order, held for its own speech;
+    the rendered reel has no silence longer than the allowed pause (ffmpeg silencedetect on reel.mp4)."""
+    import evalreel
+    closing_parts_ = ([" ".join(x["say"].split()) for x in reel_stills.still_parts(
+        chapter(reel_of(closing_pres(), MODS), "closing")["still"]["pages"], FONT, BOLD)]
+        if hasattr(reel_stills, "still_parts") else None)
+    with tempfile.TemporaryDirectory() as td:
+        mp, st, srt = render_still_reel(Path(td))
+    if mp is None:
+        return False, "storyboard packet refused"
+    segs = [s for s in mp.get("segments") or [] if s.get("chapterKind") == "closing"]
+    held = all(abs(s["reelInterval"]["endSeconds"] - s["reelInterval"]["startSeconds"] - float(s.get("speechSeconds") or 0)
+                   - 1.5) < 0.6 for s in segs if s.get("speechSeconds"))
+    hold_ = float((POLICY.get("holdSeconds") or {}).get("maxSilence") or 3.0)
+    said_ = [" ".join(str(s.get("narration") or "").split()) for s in segs]
+    ok = (st.get("status") == "rendered" and len(segs) > 1 and [s.get("page") for s in segs] == list(range(len(segs)))
+          and said_ == closing_parts_
+          and said_[0].startswith("On the measured load order, 3 of the 21 checks have no result.")
+          and held and "silencesOnPages" in st and not st["silencesOnPages"] and not st["silences"] and hold_ <= 3.0)
+    return ok, (f"status {st.get('status')} {st.get('errors')}; closing pages {[s.get('page') for s in segs]}; "
+                f"silences {st.get('silences')}")
+
+
+def case_reel_subtitles_one_cue_per_sentence():
+    """A subtitle cue per sentence, capped in words and seconds; a long sentence split at its clause marks."""
+    import evalreel
+    with tempfile.TemporaryDirectory() as td:
+        seg = {"narration": "First short sentence. " + " ".join(f"word{i}," for i in range(40)) + " end. Last one.",
+               "reelInterval": {"startSeconds": 0.0, "endSeconds": 40.0}, "speechSeconds": 38.0}
+        n = evalreel.write_srt(Path(td) / "a.srt", [seg])
+        text = (Path(td) / "a.srt").read_text(encoding="utf-8")
+    cues = [c.split("\n") for c in text.strip().split("\n\n")]
+
+    def secs(ts):
+        h, m, rest = ts.split(":")
+        s, ms = rest.split(",")
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+    words_ = [len(" ".join(c[2:]).split()) for c in cues]
+    durs = [secs(c[1].split(" --> ")[1]) - secs(c[1].split(" --> ")[0]) for c in cues]
+    ok = n >= 5 and max(words_) <= 14 and max(durs) <= 7.0 and cues[0][2] == "First short sentence."
+    return ok, f"cues {n}; words {words_}; seconds {[round(d, 1) for d in durs]}"
+
+
+def case_reel_load_order_page_speaks_what_it_highlights():
+    """The load-order page carries its own narration (what it highlights), so it is never shown silent."""
+    reel = reel_of(reel_pres(), MODS)
+    lo = next(p for p in chapter(reel, "opening")["still"]["pages"] if p["layout"] == "load-order")
+    if not hasattr(reel_stills, "page_say"):
+        return False, "no narration of a page's own"
+    say = reel_stills.page_say(lo)
+    ok = ("load order of the measured setup" in say and "take part in a predicted clash" in say
+          and re.sub(r"\.esp$", "", A) in say and "next page" not in say)
+    return ok, f"say {say!r}"
+
+
+# --------------------------------------------------------------------- retry 1: the report
+
+def case_no_problem_is_never_said_where_the_comparison_has_no_result():
+    """One status source: a check and setup listed as having no accepted result is not also listed as finding no
+    problem."""
+    arms = [P.arm("baseline", [BASE, OTHER, A], kind="baseline"), P.arm("no-other", [BASE, A]), P.arm("no-a", [BASE, OTHER])]
+    rows = [P.row("CONTACT", OTHER, A, f"00080{i}:{A}") for i in (1, 2)]
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): rows, (CONTACT, "no-other"): [],
+                                                 (CONTACT, "no-a"): []}, [A],
+                                          missing=[(CONTACT, "no-other", "unjudged", "diff")])
+    nulls = list(P.reader(plan).get("nullSummary") or [])
+    no_res = [s for m in P.reader(plan).get("missingSummary") or [] for s in m.get("subjects") or []]
+    label = next((s.split(" — ", 1)[1] for s in no_res if " — " in s), None)
+    ok = bool(label) and not any(x.split(":")[0].endswith(label) for x in nulls)
+    return ok, f"null {nulls}; no result {no_res}"
+
+
+def case_the_intro_counts_and_describes_setups_from_the_arms():
+    """The setup sentence counts the setups that leave out or add another plugin (not one removing only the evaluated mod,
+    not a reordering) and says what they do."""
+    arms = [P.arm("baseline", [BASE, OTHER, LEG, A], kind="baseline"), P.arm("no-other", [BASE, LEG, A]),
+            P.arm("no-other-a", [BASE, LEG]), P.arm("no-a", [BASE, OTHER, LEG])]
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, a_["armId"]): [] for a_ in arms}, [A])
+    ok = (f"2 tested setups leave out {OTHER}; none of these" in md and "leave out or add" not in md)
+    return ok, f"intro {next((ln for ln in md.splitlines() if 'tested setup' in ln), '')[:400]!r}"
+
+
+def case_a_patch_census_sums_to_its_records_and_changes():
+    """Records are the new ones plus the overrides; the overrides' changes are every edit but an addition, and the kinds
+    listed sum to them, the rest said as other."""
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "cards"
+        d.mkdir()
+        (d / "summary.json").write_text(json.dumps({"sources": [{
+            "patch": PATCH, "census": {"patchRecords": 30, "additions": 5, "edits": 20,
+                                       "editKinds": {"FIELD:Lighting": 4, "MOVE": 6, "ROTATE": 3, "ADD": 5, "WEIRD": 2}},
+            "cardPass": {"decidingConstraint": {}}}]}), encoding="utf-8")
+        plan, md, html = P.compile_and_render(
+            P.PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}, [A, B], patches=[PATCH],
+            count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 1},
+            enrichment={(RECORDS, "baseline"): [P.lost_row(A, B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")],
+                        (RECORDS, "with-patch"): []},
+            settings_extra={"precedentDir": str(d)})
+    line = next((ln for ln in md.splitlines() if f"{PATCH} holds" in ln), "")
+    m = re.search(r"which make (\d+) changes \(([^)]*)\)", line)
+    parts = sum(int(x) for x in re.findall(r"(\d+) ", m.group(2))) if m else -1
+    ok = ("holds 30 records: 5 new and 25 overrides" in line and m is not None and m.group(1) == "15" and parts == 15
+          and "2 other" in line)
+    return ok, f"line {line[:400]!r}"
+
+
+def case_a_patch_measured_alone_gets_its_own_verdict():
+    """Two supplied patches and a setup with each alone: each patch's verdict is measured on its own setup, never said as
+    not separated."""
+    arms = [P.arm("baseline", [BASE, A, B], kind="baseline"), P.arm("with-both", [BASE, A, B, P1, P2]),
+            P.arm("with-p1", [BASE, A, B, P1]), P.arm("with-p2", [BASE, A, B, P2])]
+    rows = [P.row("CONTACT", B, A, f"00080{i}:{A}") for i in (1, 2)]
+    plan, md, html = P.compile_and_render(
+        arms, {(CONTACT, "baseline"): rows, (CONTACT, "with-both"): [], (CONTACT, "with-p1"): [],
+               (CONTACT, "with-p2"): rows}, [A], patches=[P1, P2],
+        masters={P1: [BASE, A, B], P2: [BASE, A, B], A: [BASE], B: [BASE]})
+    todo = " ".join(pred_of(plan).get("whatToDo") or [])
+    ok = (f"Use {P1} if you load {A} and {B}: it resolves 2 of the 2" in todo
+          and f"{P2} resolves none of the 2" in todo and "not separated" not in todo)
+    return ok, f"what to do {todo[:500]!r}"
+
+
+def two_patch_chain_bundle():
+    """A patch for ModA and ModB (P1) that puts back the base game's lighting over OtherMod's change, and a patch for
+    ModA and OtherMod (P2) that sets its own value over ModA's change: the shape of a real two-patch chain."""
+    R0, R1, R2 = f"00C301:{BASE}", f"00C302:{BASE}", f"00C303:{BASE}"
+    arms = [P.arm("baseline", [BASE, OTHER, A, B, P1, P2], kind="baseline"), P.arm("without-patch", [BASE, OTHER, A, B])]
+    p_rows = [P.lost_row(A, B, R0, "LocationReference", "a0", "b0", "v0")]
+    w_rows = [P.lost_row(OTHER, P1, R1, "Lighting", ["Lighting=2"], ["Lighting=1"], ["Lighting=1"], before=BASE),
+              P.lost_row(A, P2, R2, "Name", ["Name=a"], ["Name=p"], ["Name=v"], before=BASE)]
+    w_ch = [(R1, "Cell", [(BASE, {"Lighting": "1"}), (OTHER, {"Lighting": "2"}), (P1, {"Lighting": "1"})]),
+            (R2, "Npc", [(BASE, {"Name": "v"}), (A, {"Name": "a"}), (P2, {"Name": "p"})])]
+    enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "baseline"): w_rows}
+    tr = {(RECORDS, "baseline"): P.records_transcript(w_ch)}
+    return P.compile_and_render(arms, {(CONTACT, "without-patch"): [], (CONTACT, "baseline"): []}, [A, B],
+                                patches=[P1, P2], count_only={k: max(1, len(v)) for k, v in enr.items()},
+                                enrichment=enr, transcripts=tr,
+                                masters={OTHER: [BASE], A: [BASE], B: [BASE], P1: [BASE, A, B], P2: [BASE, A, OTHER]})
+
+
+def case_each_patchs_changes_said_under_that_patch():
+    """In a two-patch chain, the value a patch sets over a mod's change is said under that patch, never under the other
+    patch's undone line."""
+    plan, md, html = two_patch_chain_bundle()
+    un1 = next((x for x in md.splitlines() if x.startswith(f"- Undone by {P1}")), "")
+    own2 = next((x for x in md.splitlines() if x.startswith(f"- Set by {P2}")), "")
+    ok = bool(un1) and OTHER in un1 and P2 not in un1 and A not in un1.split("(earlier value put back)")[1] and bool(own2) \
+        and A in own2
+    return ok, f"undone {un1[:300]!r}; own {own2[:300]!r}"
+
+
+def case_a_patchs_side_effect_is_in_its_verdict():
+    """A patch that puts back another mod's changes says so beside its verdict, on the records it touches."""
+    plan, md, html = two_patch_chain_bundle()
+    todo = " ".join(pred_of(plan).get("whatToDo") or [])
+    ok = f"puts back the earlier value of 1 record field that {OTHER} changes, on 00C302:{BASE}" in todo
+    return ok, f"what to do {todo[:500]!r}"
+
+
+def case_resolves_reconciles_with_its_total():
+    """"Resolves x of y": the resolved, the left, the unmeasured and the patch's own changes add up to y, one unit."""
+    if not hasattr(R, "what_to_do"):
+        return False, "no verdict per patch"
+    lead = {"prediction": {"items": [{"title": "Objects occupying the same space", "count": 10, "mods": [A, B],
+                                      "checkId": "geometry.object-overlap", "kind": "OVERLAP", "shownAs": "pair"}]},
+            "validation": {"status": "compared", "patches": [PATCH],
+                           "byItem": [{"hits": 4, "open": 2, "kept": 1, "own": 2, "placed": 1}]}}
+    pw = PR["reader"]["prediction"]
+    todo = " ".join(R.what_to_do(lead, {PATCH.lower(): {A.lower(), B.lower()}, A.lower(): set(), B.lower(): set()},
+                                 pw, {}, [], {}))
+    m = re.search(r"resolves (\d+) of the (\d+)[^;]*; (\d+) are left; the other (\d+)", todo)
+    ok = m is not None and int(m.group(1)) + int(m.group(3)) + int(m.group(4)) == int(m.group(2)) \
+        and "2 set to the patch's own value" in todo
+    return ok, f"what to do {todo[:400]!r}"
+
+
+def case_a_clash_counted_under_an_earlier_check_is_not_counted_again():
+    if not hasattr(R, "what_to_do"):
+        return False, "no verdict per patch"
+    lead = {"prediction": {"items": [
+        {"title": "Fixtures", "count": 1, "mods": [A, B], "checkId": "geometry.fixture-empty-space", "kind": "F", "shownAs": "pair"},
+        {"title": "Support", "count": 1, "mods": [A, B], "checkId": "geometry.placement-contact", "kind": "CONTACT",
+         "shownAs": "pair", "countedElsewhere": True}]},
+        "validation": {"status": "compared", "patches": [PATCH], "byItem": [{"hits": 1}, {"hits": 1}]}}
+    todo = " ".join(R.what_to_do(lead, {PATCH.lower(): {A.lower(), B.lower()}}, PR["reader"]["prediction"], {}, [], {}))
+    ok = "resolves 1 of the 1 predicted clash" in todo
+    return ok, f"what to do {todo[:300]!r}"
+
+
+def case_plugin_names_in_their_load_order_spelling():
+    """A probe that reports a plugin by its file name in another case is said in the load order's spelling."""
+    low = B.lower()
+    arms = [P.arm("baseline", [BASE, B, A], kind="baseline"), P.arm("no-b", [BASE, A])]
+    rows = [P.row("CONTACT", low, A, f"00080{i}:{A}") for i in (1, 2)]
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): rows, (CONTACT, "no-b"): []}, [A])
+    ok = low not in md and B in md
+    return ok, f"lower-case left {md.count(low)}; proper {md.count(B)}"
+
+
+def case_records_and_places_said_by_name():
+    """A record or place the report gives by form key is said with its name, read from the names enrichment's own read
+    of the plugin files (an NPC's or a cell's name); the pointer to precedent cards is said only where they are listed."""
+    class B_:
+        pass
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "enrichment" / "names"
+        d.mkdir(parents=True)
+        (d / "names.json").write_text("{}", encoding="utf-8")
+        recs = {"records": [{"formid": f"00C401:{BASE}", "type": "Cell", "editorid": "TownInnCell",
+                             "fields": [{"path": "Name", "value": "The Town Inn"}]},
+                            {"formid": f"00C402:{BASE}", "type": "Npc", "editorid": "TownGuardNpc", "fields": []}]}
+        (d / "02-response.jsonl").write_text(json.dumps({"result": {"content": [{"type": "text", "text": json.dumps(recs)}]}}),
+                                             encoding="utf-8")
+        b = B_()
+        b.dir = Path(td)
+        b.enrichment = lambda: [{"enrichment": "names", "path": "enrichment/names/names.json"}]
+        if not (hasattr(R, "record_labels") and hasattr(R, "label_form_keys")):
+            return False, "no record names read for the report"
+        labels = R.record_labels(b)
+    said = R.label_form_keys({"line": f"it puts back the Lighting of 00C401:{BASE}, as on 00C402:{BASE} (AIData)",
+                              "formKey": f"00C401:{BASE}"}, labels)
+    ok = (said["line"] == f"it puts back the Lighting of The Town Inn, 00C401:{BASE}, as on TownGuardNpc, 00C402:{BASE} (AIData)"
+          and said["formKey"] == f"00C401:{BASE}")
+    return ok, f"labels {labels}; said {said}"
+
+
+def case_precedent_pointer_only_where_the_index_lists_them():
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "cards"
+        (d / re.sub(r"\.esp$", "", PATCH)).mkdir(parents=True)
+        (d / "summary.json").write_text(json.dumps({"sources": [{
+            "patch": PATCH, "census": {"patchRecords": 2, "additions": 0, "edits": 2, "editKinds": {"DISABLE": 2}},
+            "cardPass": {"decidingConstraint": {"lighting-intent": 2}}}]}), encoding="utf-8")
+        (d / re.sub(r"\.esp$", "", PATCH) / "cards.jsonl").write_text(json.dumps(
+            {"whatThePatchDid": "2 edits on 2 records (DISABLE 2).", "reason": "keeps the inn dark",
+             "decidingConstraint": "lighting-intent",
+             "whatItTouched": {"cell": {"formKey": f"00C401:{BASE}", "editorId": "TownInnCell", "name": "The Town Inn"}}}) + "\n",
+            encoding="utf-8")
+        plan, md, html, idx = P.compile_and_render(
+            P.PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}, [A, B], patches=[PATCH],
+            want_index=True, count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 1},
+            enrichment={(RECORDS, "baseline"): [P.lost_row(A, B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")],
+                        (RECORDS, "with-patch"): []},
+            settings_extra={"precedentDir": str(d)})
+    ok = ('"Precedent cards"' in md and "## Precedent cards (1)" in idx and "The Town Inn (TownInnCell)" in idx
+          and "keeps the inn dark" in idx)
+    return ok, f"md {('Precedent' in md)}; index {idx[idx.find('Precedent cards'):][:300]!r}"
 
 
 CASES = [(k, v) for k, v in list(globals().items()) if k.startswith("case_") and callable(v)]

@@ -775,7 +775,8 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
                   if a.get("armId") == pred.get("predictionArm")), None)
     lo = next((p for p in op.get("pages") or [] if p.get("layout") == "load-order"), {})
     check("1-opening", op.get("kind") == "opening" and layouts[:2] == ["types", "load-order"]
-          and bool(mod_name(mods, target)) and op.get("narration") == words["opening"].format(mod=mod_name(mods, target))
+          and bool(mod_name(mods, target)) and op.get("narration", "").startswith(words["opening"].format(mod=mod_name(mods, target)))
+          and op.get("narration") == _pages_say(op.get("pages"))
           and lo.get("plugins") == order and lo.get("title") == words["stillTitles"]["loadOrder"]
           and lo.get("legend") == words["stillTitles"]["affected"],
           f"{tag}the opening is a two-page still (clash types, then 'Plugins analysed' with the '(affected)' legend) with "
@@ -842,7 +843,9 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     want = [(m.get("reason"), list(m.get("subjects") or [])) for m in merged_checks(pres, mods, words)]
     got = [(r.get("reason"), list(r.get("subjects") or [])) for p in cl.get("pages") or [] if p.get("layout") == "checks"
            for r in p.get("rows") or []]
-    check("6-closing", cl.get("kind") == "closing" and got == want and cl.get("narration") == words["closing"],
+    said_ = {s for _, subs in got for s in subs}
+    check("6-closing", cl.get("kind") == "closing" and all(s in said_ for _, subs in want for s in subs)
+          and cl.get("narration") == _pages_say(cl.get("pages")),
           f"{tag}the closing is a still listing each check that could not run or decide with its reason and nothing else, "
           f"and says only the fixed sentence (narration {cl.get('narration', '')[:90]!r}, {len(got)} rows, {len(want)} expected)")
     # C1: no still speaks the tool: no form key, no "request", no setup role label
@@ -944,13 +947,26 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
           f"{spoken[:2]}, still says {tp.get('leftOut')})")
 
 
+def _page_say(page):
+    import reel_stills
+    return reel_stills.page_say(page)
+
+
+def _pages_say(pages):
+    return " ".join(x for x in (_page_say(p) for p in pages or []) if x)
+
+
 def oracle_checks(pres, view, expected, tag=""):
     got = [(c["kind"], c["clash"].get("type") if c["kind"] in PICTURED else None,
             c["clash"].get("formKey") if c["kind"] in PICTURED else None) for c in view]
     want = [(e["kind"], e.get("type") if e["kind"] in PICTURED else None,
              e.get("formKey") if e["kind"] in PICTURED else None) for e in expected]
     check("3-selection", got == want, f"{tag}the selection and order follow the rule (got {got}, want {want})")
-    diffs = [(i, g["narration"], e["narration"]) for i, (g, e) in enumerate(zip(view, expected)) if g["narration"] != e["narration"]]
+    # a still says its pages' own words (the opening's lead first); the other scenes the oracle's sentences exactly
+    diffs = [(i, g["narration"], e["narration"]) for i, (g, e) in enumerate(zip(view, expected))
+             if (not g["narration"].startswith(e["narration"]) if g["kind"] == "opening" else
+                 g["narration"] != _pages_say(g.get("pages")) if g["kind"] == "closing" else
+                 g["narration"] != e["narration"])]
     check("sentences", len(view) == len(expected) and not diffs,
           f"{tag}every sentence is the skill template filled with the evaluation's names (first difference: {diffs[:1]})")
     op = view[0] if view else {}
@@ -1705,7 +1721,7 @@ def case_render():
                 # the "without" frame comes from the sibling bundle, as the plan joins it
                 "reel": {"schemaVersion": 1, "status": "planned", "media": media[:1], "chapters": [
                     {"id": "R-01", "kind": "opening", "narration": "Here are the types of clashes that are predicted from adding Target Mod.",
-                     "narrationAudio": "media/n.wav",
+                     "narrationAudio": "media/n.wav", "pageAudio": {"0": "media/n.wav", "1": "media/n.wav"},
                      "still": {"pages": [{"layout": "types", "rows": [{"label": "Objects in the same space", "count": 1}],
                                           "leftOut": {"noInGameEffect": 0}},
                                          {"layout": "load-order", "plugins": ["Skyrim.esm", "Target.esp"], "targets": ["Target.esp"]}]}},
@@ -1726,7 +1742,9 @@ def case_render():
         if ok:
             mp = json.loads((root / "reel/reel-map.json").read_text(encoding="utf-8"))
             kinds = [s.get("kind") for s in mp["segments"]]
-            check("render-kinds", kinds == ["still", "sequence", "still"], f"the map's scenes are still, sequence, still ({kinds})")
+            # each still page is its own scene (the opening's two pages, then the vignette, then the closing page)
+            check("render-kinds", kinds == ["still", "still", "sequence", "still"],
+                  f"the map's scenes are still, still, sequence, still ({kinds})")
             seq = next(s for s in mp["segments"] if s.get("kind") == "sequence")
             colours = []
             for fr in seq.get("frames") or []:
@@ -1800,7 +1818,7 @@ def case_render():
         lr = px.get("left") and max(range(3), key=lambda i: px["left"][i]) == 0
         rb = px.get("right") and max(range(3), key=lambda i: px["right"][i]) == 2
         strip = px.get("strip") and max(px["strip"]) < 90
-        check("N4-split-render", ok2 and kinds2 == ["still", "split", "still", "still"] and bool(lr) and bool(rb) and bool(strip),
+        check("N4-split-render", ok2 and kinds2 == ["still", "still", "split", "still", "still"] and bool(lr) and bool(rb) and bool(strip),
               f"a split renders as one 1280x720 scene: the left half from the setup without the mod, the right from the "
               f"prediction, over a dark label strip (exit {r2.returncode}: {' '.join((r2.stdout + r2.stderr).split())[-160:]}; "
               f"kinds {kinds2}; pixels {px})")
