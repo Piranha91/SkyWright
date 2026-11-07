@@ -911,6 +911,32 @@ def case_a_patch_pair_from_headers_when_no_probe_recorded_masters():
     return ok, f"what to do {todo[:300]!r}"
 
 
+def case_record_clashes_judged_against_header_masters_when_no_emit_records_them():
+    """No measured check recorded master lists, but each plugin file is the recorded bytes: the report reads the masters
+    from the headers, so a mod changing its own master's value is set aside, and it never says it cannot tell."""
+    import hashlib
+    with tempfile.TemporaryDirectory() as td:
+        files = {}
+        for n, ms in ((BASE, []), (OTHER, [BASE]), (A, [BASE, OTHER]), (B, [BASE])):
+            f = tes4(Path(td) / n, ms)
+            files[n] = {"name": n, "path": str(f), "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
+
+        def arm_(i, names, kind="candidate"):
+            a_ = P.arm(i, names, kind=kind)
+            a_["requested"]["plugins"] = [files[n] for n in names]
+            return a_
+        arms = [arm_("baseline", [BASE, OTHER, B, A], "baseline"), arm_("without-a", [BASE, OTHER, B])]
+        rec = [P.lost_row(OTHER, A, f"000701:{BASE}", "Name", "o1", "a1", "v1"),
+               P.lost_row(A, B, f"000702:{BASE}", "Name", "a2", "b2", "v2")]
+        enr = {(RECORDS, "baseline"): rec, (RECORDS, "without-a"): []}
+        plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "without-a"): []}, [A],
+                                              count_only={(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()},
+                                              enrichment=enr, masters=False)
+    adm = sorted(((e.get("formKey") or "")[:6], e.get("admission")) for e in pred_of(plan).get("record") or [])
+    ok = "records no plugin's master list" not in md and ("000701", "admitted") not in adm and ("000702", "admitted") in adm
+    return ok, f"admission {adm}; master-list line {'records no plugin' in md}"
+
+
 CASES = [(k, v) for k, v in list(globals().items()) if k.startswith("case_") and callable(v)]
 
 

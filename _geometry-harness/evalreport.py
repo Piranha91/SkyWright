@@ -1204,6 +1204,20 @@ def plugin_masters(b: "Bundle") -> dict | None:
         seen_arms.add(e.get("armId"))
         for x in plugs:
             out.setdefault(str(x.get("Name")).lower(), {str(m).lower() for m in x["Masters"]})
+    # a plugin no emit records: its TES4 header, read only when the file is the bytes the plan recorded
+    import evalpipeline
+    import struct
+    for a_ in b.plan.get("arms") or []:
+        for q_ in (a_.get("requested") or {}).get("plugins") or []:
+            nm_ = str((q_ or {}).get("name") or "").lower() if isinstance(q_, dict) else ""
+            if not nm_ or nm_ in out or not q_.get("path") or not q_.get("sha256") or not Path(str(q_["path"])).is_file():
+                continue
+            try:
+                if sha256_file(Path(str(q_["path"]))) != str(q_["sha256"]).lower():
+                    continue
+                out[nm_] = {str(m_).lower() for m_ in evalpipeline.plugin_header(q_["path"])["masters"]}
+            except (OSError, ValueError, struct.error, evalpipeline.Refusal):
+                continue
     return out or None
 
 
@@ -9240,23 +9254,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # a verdict per supplied patch and a next step per kind left; report and reel read these
     proper_r2 = {str(q.get("name")).lower(): str(q.get("name")) for a_ in b.plan.get("arms") or []
                  for q in ((a_.get("requested") or {}).get("plugins") or []) if isinstance(q, dict)}
-    # each plugin's own master list, from the probes' emits, else from the TES4 header of the file the plan names (read
-    # only when it is the recorded bytes): a patch whose setup measured no probe still has its pair
-    masters_r2 = {k: set(v) for k, v in (plugin_masters_doc or {}).items()}
-    for a_ in b.plan.get("arms") or []:
-        for q_ in (a_.get("requested") or {}).get("plugins") or []:
-            nm_ = str(q_.get("name") or "").lower()
-            if not nm_ or nm_ in masters_r2 or not q_.get("path") or not Path(str(q_["path"])).is_file():
-                continue
-            import evalpipeline
-            import struct
-            try:
-                if q_.get("sha256") and sha256_file(Path(str(q_["path"]))) != str(q_["sha256"]).lower():
-                    continue
-                masters_r2[nm_] = {str(m_).lower() for m_ in evalpipeline.plugin_header(q_["path"])["masters"]}
-            except (OSError, ValueError, struct.error, evalpipeline.Refusal):
-                continue
-    lead["prediction"]["whatToDo"] = what_to_do(lead, masters_r2 or None, pw_, ev, missing, proper_r2)
+    # each plugin's own master list (emits, else the recorded file's header): a patch no probe measured still has its pair
+    lead["prediction"]["whatToDo"] = what_to_do(lead, plugin_masters_doc, pw_, ev, missing, proper_r2)
     lead["prediction"]["whatToDoHeading"] = (pw_.get("whatToDo") or {}).get("heading")
     precedent_census(lead, settings.get("precedentDir"), reader_data.get("prediction") or {})
     # what a lost record change means in play, from the fields it is on (skill data fieldMeanings), where nothing does
