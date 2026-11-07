@@ -843,8 +843,9 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     want = [(m.get("reason"), list(m.get("subjects") or [])) for m in merged_checks(pres, mods, words)]
     got = [(r.get("reason"), list(r.get("subjects") or [])) for p in cl.get("pages") or [] if p.get("layout") == "checks"
            for r in p.get("rows") or []]
-    said_ = {s for _, subs in got for s in subs}
-    check("6-closing", cl.get("kind") == "closing" and all(s in said_ for _, subs in want for s in subs)
+    import reel_plan as _rp
+    said_ = {_rp.check_title_of(s) for _, subs in got for s in subs}       # each setup is named from its own arm
+    check("6-closing", cl.get("kind") == "closing" and all(_rp.check_title_of(s) in said_ for _, subs in want for s in subs)
           and cl.get("narration") == _pages_say(cl.get("pages")),
           f"{tag}the closing is a still listing each check that could not run or decide with its reason and nothing else, "
           f"and says only the fixed sentence (narration {cl.get('narration', '')[:90]!r}, {len(got)} rows, {len(want)} expected)")

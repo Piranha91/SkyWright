@@ -513,7 +513,7 @@ def srt_time(seconds: float) -> str:
 
 
 #: a subtitle cue holds at most this many words and lasts at most this many seconds
-CUE_MAX_WORDS, CUE_MAX_SECONDS = 14, 7.0
+CUE_MAX_WORDS, CUE_MAX_SECONDS, CUE_MIN_SECONDS = 14, 7.0, 1.2
 
 
 def cue_texts(text: str) -> list[str]:
@@ -530,7 +530,8 @@ def cue_texts(text: str) -> list[str]:
 
 
 def write_srt(path: Path, segments: list[dict]) -> int:
-    """Cues timed across each segment's own speech, by the share of its characters; none longer than the cap."""
+    """Cues timed across each segment's own speech, by the share of its characters: in order, never overlapping, none
+    shorter than CUE_MIN_SECONDS (a short cue is merged into its neighbour) and none longer than CUE_MAX_SECONDS."""
     cues = []
     for s in segments:
         iv = s.get("reelInterval")
@@ -540,14 +541,30 @@ def write_srt(path: Path, segments: list[dict]) -> int:
         start, stop = float(iv["startSeconds"]), float(iv["endSeconds"])
         span = min(float(s.get("speechSeconds") or (stop - start)), stop - start)
         total = sum(len(x) for x in texts) or 1
+        parts = [[x, span * len(x) / total] for x in texts]
+        # merge a cue too short to read into the next one (the last into the one before)
+        k = 0
+        while k < len(parts) and len(parts) > 1:
+            if parts[k][1] < CUE_MIN_SECONDS:
+                o = k + 1 if k + 1 < len(parts) else k - 1
+                a, b = (k, o) if o > k else (o, k)
+                parts[a] = [parts[a][0] + " " + parts[b][0], parts[a][1] + parts[b][1]]
+                del parts[b]
+                k = max(0, a - 1)
+                continue
+            k += 1
         at = start
-        for x in texts:
-            dur = span * len(x) / total
-            end = min(at + max(dur, 0.8), at + CUE_MAX_SECONDS, stop)
-            cues.append(f"{len(cues) + 1}\n{srt_time(at)} --> {srt_time(end)}\n{x}\n")
+        for x, dur in parts:
+            end = min(at + dur, at + CUE_MAX_SECONDS, stop)
+            cues.append((at, end, x))
             at += dur
-    path.write_text("\n".join(cues) + ("\n" if cues else ""), encoding="utf-8")
-    return len(cues)
+    out = []
+    for n, (a, e, x) in enumerate(cues):
+        if n + 1 < len(cues):
+            e = min(e, cues[n + 1][0])                       # never past the next cue's start
+        out.append(f"{n + 1}\n{srt_time(a)} --> {srt_time(e)}\n{x}\n")
+    path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+    return len(out)
 
 
 def silences(exe: str, path: Path, noise_db: float, min_seconds: float) -> list[dict]:

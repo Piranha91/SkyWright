@@ -7257,6 +7257,11 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
         # still a clash with the patch: left as it was, or the losing mod's change kept lost (never a value the patch sets)
         bi = by_item[k] if k < len(by_item) else {}
         return int(bi.get("open") or 0) + int(bi.get("kept") or 0)
+
+    def kept_of(k):
+        # a record field the supplied patch carries with one side's value: the patch author's choice, not a clash left open
+        bi = by_item[k] if k < len(by_item) else {}
+        return int(bi.get("kept") or 0) if ww.get("kept") else 0
     out = []
     if compared:
         patches = list(val["patches"])
@@ -7297,10 +7302,13 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
             elif not mine:
                 s = bind(ww["notItsPair"], vals)
             elif hits:
-                tail = (bind(ww["left"], {"count": left, "verb": "is" if left == 1 else "are"}) if left else "") + (
+                kept = 0 if (al_ and len(patches) > 1) else sum(kept_of(k) for k in mine)
+                open_ = left - kept
+                tail = (bind(ww["left"], {"count": open_, "verb": "is" if open_ == 1 else "are"}) if open_ else "") + (
+                    bind(ww["kept"], {"count": kept}) if kept else "") + (
                     bind(ww["unknown"], {"count": unknown}) if unknown else "")
-                # the rest of the total, by what the patch does with them, so resolved + left + unknown + rest = total
-                rest = count - hits - left - unknown
+                # the rest of the total, by what the patch does with them, so resolved + left + kept + unknown + rest = total
+                rest = count - hits - open_ - kept - unknown
                 if rest > 0 and ww.get("rest"):
                     rw_ = ww.get("restKinds") or {}
                     named_ = [(kk_, sum(int((by_item[k] if k < len(by_item) else {}).get(kk_) or 0) for k in mine))
@@ -7343,6 +7351,16 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
             continue
         n = left_of(k) if compared else int(it.get("count") or 0)
         if n <= 0:
+            continue
+        kept_n = kept_of(k) if compared else 0
+        if kept_n and kept_n == n and ns.get("keptByPatch"):
+            # every one left is a field the supplied patch carries with one mod's value: its choice, said as that
+            kb_ = (by_item[k] if k < len(by_item) else {}).get("keptBy") or {}
+            winners_ = list(dict.fromkeys(str(x).split("|")[1] for x in kb_ if "|" in str(x)))
+            out.append(bind(ns["keptByPatch"], {"title": it.get("title"), "count": n,
+                                                 "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
+                                                 "mods": and_list([name(m) for m in it.get("mods") or []]),
+                                                 "winner": and_list([name(w) for w in winners_]) or "one mod"}))
             continue
         tmpl = ns.get(str(it.get("checkId"))) or ns.get(str(it.get("kind"))) or ns.get("default")
         if not tmpl:
@@ -7509,6 +7527,60 @@ def precedent_census(lead: dict, folder, words: dict) -> None:
             val[k] = str(val[k]).replace(" Whether that is intended is not recorded.", tail_)
     val["sentences"], val["missingFacts"], val["censusLines"] = sentences, facts, lines
     val["precedentCards"] = cards_out
+    # a patch that switches off another mod's placed object, or removes a record's scripts, says so in its verdict,
+    # read from the patch's own records (the precedent stage's edit list, not its model-written cards)
+    acts_w = words.get("patchActs") or {}
+    todo = list((lead.get("prediction") or {}).get("whatToDo") or [])
+    for p in val.get("patches") or []:
+        off_, strip_ = patch_acts(folder, p)
+        add_ = ""
+        for mod_, objs_ in off_.items():
+            if acts_w.get("switchesOff"):
+                add_ += bind(acts_w["switchesOff"], {"mod": mod_, "objects": and_list(objs_[:3]) + (
+                    f" and {len(objs_) - 3} more" if len(objs_) > 3 else ""), "count": len(objs_)})
+        for mod_, recs_ in strip_.items():
+            if acts_w.get("stripsScripts"):
+                add_ += bind(acts_w["stripsScripts"], {"mod": mod_, "records": and_list(recs_[:3]) + (
+                    f" and {len(recs_) - 3} more" if len(recs_) > 3 else ""), "count": len(recs_)})
+        if not add_:
+            continue
+        at_ = next((i for i, x in enumerate(todo) if str(x).startswith((str(p), f"Use {p} "))), None)
+        if at_ is not None:
+            todo[at_] = str(todo[at_]) + add_
+    if todo:
+        lead["prediction"]["whatToDo"] = todo
+
+
+def patch_acts(folder, patch) -> tuple[dict, dict]:
+    """({mod: objects the patch switches off that the mod places}, {mod: records whose scripts the patch removes}), from
+    the precedent stage's edit list of the patch's own records (edits.jsonl); empty when the folder holds none."""
+    off, strip = {}, {}
+    if not folder:
+        return off, strip
+    f = Path(folder) / re.sub(r"\.(esp|esm|esl)$", "", str(patch), flags=re.IGNORECASE) / "edits.jsonl"
+    if not f.is_file():
+        return off, strip
+    for line in f.read_text(encoding="utf-8").splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        fk = str(e.get("formKey") or "")
+        owner = fk.split(":", 1)[1] if ":" in fk else ""
+        if not owner or owner.lower() == str(patch).lower():
+            continue
+        eid = e.get("editorId") or fk
+        if e.get("kind") == "DISABLE":
+            base = ((e.get("touched") or {}).get("base") or {})
+            cell = (((e.get("touched") or {}).get("cell") or {}).get("name"))
+            what = eid + (f" (a placed {base.get('editorId')}" + (f", in {cell}" if cell else "") + ")" if base.get("editorId")
+                          else f" (in {cell})" if cell else "")
+            off.setdefault(owner, []).append(what)
+        elif str(e.get("kind")) == "FIELD:VirtualMachineAdapter":
+            pv = ((e.get("values") or {}).get("patch") or {}).get("values") or {}
+            if pv and all(v is None for v in pv.values()):
+                strip.setdefault(owner, []).append(eid)
+    return off, strip
 
 
 def precedent_cards(folder, patch, pc: dict) -> list[dict]:
@@ -9490,10 +9562,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for it_ in lead["prediction"].get("items") or []:
         if it_.get("kind") != "LOST-EDIT" or it_.get("inGameText") != pw_.get("inGameMissing") or not pw_.get("inGameFields"):
             continue
-        vc_ = next((v_ for v_ in lead["prediction"].get("verdictCounts") or [] if v_.get("checkId") == it_.get("checkId")
-                    and v_.get("kind") == "LOST-EDIT"), {})
-        means_ = list(dict.fromkeys(fm_[f_.split(".")[0]] for f_ in (vc_.get("fieldNames") or {})
-                                    if f_.split(".")[0] in fm_))
+        # this clash's own fields: the admitted rows of its check between its own two mods, never the check's pool
+        mods_ = {str(m_).lower() for m_ in it_.get("mods") or []}
+        own_fields_ = [str(r_.get("field") or "") for r_ in lead["prediction"].get("record") or []
+                       if r_.get("checkId") == it_.get("checkId") and r_.get("admission") == "admitted"
+                       and (mods_ <= {str(r_.get("A")).lower(), str(r_.get("B")).lower()} if len(mods_) < 2 else
+                            {str(r_.get("A")).lower(), str(r_.get("B")).lower()} == mods_)]
+        means_ = list(dict.fromkeys(fm_[f_.split(".")[0]] for f_ in own_fields_ if f_.split(".")[0] in fm_))
         if means_:
             it_["inGameText"] = bind(pw_["inGameFields"], {"meanings": and_list(means_)})
     # a report with clashes and no picture says so, rather than leaving the reader to wonder
@@ -10004,7 +10079,14 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
                 leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1], file=h_.get("file"))
                               + reel_plan.lead_qualifiers(h_, words, loaded_, evaluated_))
             if not hits_:
-                leads_.append(words["reportLead"]["notFound"].format(a=pair_[0], b=pair_[1]))
+                # a supplied patch for this pair that the search did not find: said as the search's miss, never as no patch
+                def top_(p_):
+                    pm_ = set(masters.get(p_.lower(), set()))
+                    return {m_ for m_ in pm_ if not any(m_ in (masters.get(o_) or ()) for o_ in pm_ if o_ != m_)}
+                own_ = next((p_ for p_ in supplied_ if {x.lower() for x in pair_} <= top_(p_)), None)
+                leads_.append(words["reportLead"]["notFoundSupplied"].format(a=pair_[0], b=pair_[1], patch=own_)
+                              if own_ and words["reportLead"].get("notFoundSupplied") else
+                              words["reportLead"]["notFound"].format(a=pair_[0], b=pair_[1]))
         if leads_:
             # the search file names plugins by the file on disk; said in the load order's spelling, as every line is
             leads_ = proper_plugin_case(leads_, [str(q.get("name") if isinstance(q, dict) else q)

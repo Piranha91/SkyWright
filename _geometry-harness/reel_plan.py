@@ -170,13 +170,26 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
             reasons_of.setdefault(check_, {}).setdefault(m.get("reason"), []).append(setup)
     patches = list(reader.get("suppliedPatches") or [])
     arms = {a.get("displayLabel"): a for a in (pres.get("scope") or {}).get("arms") or []}
+    pred_arm_ = ((reader.get("prediction") or {}).get("predictionArm")) or "baseline"
+    base_arm_ = next((a for a in (pres.get("scope") or {}).get("arms") or [] if a.get("armId") == pred_arm_), {})
     rows = []
     for m in reader.get("missingSummary") or []:
         subs = []
         for subj in m.get("subjects") or []:
             check_, _, setup = str(subj).partition(" — ")
             line = check_
-            if len(reasons_of[check_]) > 1 and patches:
+            arm_ = arms.get(setup) or {}
+            if arm_ and arm_ is not base_arm_ and words["closingLines"].get("setupWithout"):
+                # each gap named by its own setup: what that setup leaves out or adds against the measured one
+                have_ = [str(x) for x in arm_.get("plugins") or arm_.get("locationPluginOrder") or []]
+                base_ = [str(x) for x in base_arm_.get("plugins") or base_arm_.get("locationPluginOrder") or []]
+                gone_ = [mod(x) for x in base_ if x.lower() not in {y.lower() for y in have_}]
+                new_ = [mod(x) for x in have_ if x.lower() not in {y.lower() for y in base_}]
+                if gone_ or new_:
+                    line = words["closingLines"]["setupWithout" if gone_ and not new_ else
+                                                 "setupWith" if new_ and not gone_ else "setupBoth"].format(
+                        check=check_, without=joined(gone_) if gone_ else "", with_=joined(new_) if new_ else "")
+            elif not arm_ and len(reasons_of[check_]) > 1 and patches:
                 has = [p for p in patches if p in ((arms.get(setup) or {}).get("locationPluginOrder") or [])]
                 line = words["closingLines"]["withSetup" if has else "withoutSetup"].format(
                     check=check_, patch=patch_name((has or patches)[0]))
@@ -190,6 +203,42 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
         else:
             rows.append({"reason": reason, "subjects": subs, "comparison": comparison})
     return rows
+
+
+def top_level_parts(text: str, sep: str = ";") -> list[str]:
+    """`text` split at `sep` outside parentheses."""
+    out, depth, cur = [], 0, ""
+    for ch in str(text):
+        depth += (ch == "(") - (ch == ")")
+        if ch == sep and depth == 0:
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    return [x.strip() for x in out + [cur] if x.strip()]
+
+
+def largest_population(text: str):
+    """(count, what, more) for the largest counted population a coverage subject lists ("26,532 placed objects (no
+    geometry to measure)"): the count, its noun with a short reason kept, and whether others are listed; None when none."""
+    best = None
+    parts = top_level_parts(text)
+    for part in parts:
+        m = re.match(r"([\d,]+) (.*)$", part)
+        if not m:
+            continue
+        n = int(m.group(1).replace(",", ""))
+        noun, _, reason = m.group(2).partition(" (")
+        reason = reason[:-1] if reason.endswith(")") else ""
+        what = noun.strip() + (f" ({reason})" if reason and "(" not in reason and ";" not in reason and len(reason) <= 40 else "")
+        if best is None or n > best[0]:
+            best = (n, what)
+    return (f"{best[0]:,}", best[1], len(parts) > 1) if best else None
+
+
+def check_title_of(line: str) -> str:
+    """A closing line's check title, without the setup it names."""
+    return re.split(r", (?:with|without|on the setup) ", str(line), maxsplit=1)[0]
 
 
 def plain_reason(reason, words: dict) -> tuple[str, bool]:
@@ -627,7 +676,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         unread = entry.get("unreadSources") or []
         if known_found and not unread:
             return lead + pick("noneOther" if own else "none"), {**ev, "case": "none-searched"}
-        return (lead + pick("notFoundOther" if own else "notFound"),
+        return (lead + pick("notFoundOther" if own else "notFound").format(patch=patch_name(own[0]) if own else ""),
                 {**ev, "case": "not-found", "knownAnswerFound": known_found, "unreadSources": unread})
 
     def owner(fk, r):
@@ -849,7 +898,16 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     def states_of(c):
         return ["left", "right"] if c["type"] == "record" else list(policy["sequence"])
 
-    type_labels = words["typeLabels"]
+    # one name for each kind of clash, wherever it is said: a kind whose clashes all come from one check is called by
+    # that check's title (the report's, and the closing's), never by a second name
+    titles_ = reader.get("checkTitles") or {}
+    type_labels, case_labels = dict(words["typeLabels"]), dict(words["caseLabels"])
+    for t_ in {c["type"] for c in clashes.values()}:
+        ck_ = {r_["checkId"] for c in clashes.values() if c["type"] == t_ for r_ in c["rows"]}
+        if len(ck_) == 1 and titles_.get(next(iter(ck_))):
+            ttl_ = str(titles_[next(iter(ck_))])
+            type_labels[t_] = ttl_
+            case_labels[t_] = ttl_[:1].lower() + ttl_[1:]
     counts = {}
     for c in clashes.values():
         counts.setdefault(c["type"], {"count": 0, "pairs": set()})
@@ -914,9 +972,15 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         for i, c in enumerate(chosen):
             patch, evidence = patch_sentence(c)
             text = sentence(c) + " " + patch
+            # what the report says of which mod the clash needs, from the same field, so the reel pins it no harder
+            item_ = next((i_ for i_ in pred.get("items") or [] if i_.get("attributionText")
+                          and i_.get("checkId") == c["rows"][0]["checkId"]
+                          and {str(m_).lower() for m_ in i_.get("mods") or []} == {str(m_).lower() for m_ in c["pair"]}), None)
+            if item_:
+                text += " " + spoken(str(item_["attributionText"]))
             if i == 0:
                 n, shown = card_count(t), len(chosen)
-                intro = words["cases"]["one" if n == 1 else "many"].format(count=n, label=words["caseLabels"][t])
+                intro = words["cases"]["one" if n == 1 else "many"].format(count=n, label=case_labels[t])
                 lead = ("" if n == 1 else words["lead"]["all"] if shown == n else
                         words["lead"]["one"] if shown == 1 else words["lead"]["some"].format(count=shown))
                 text = " ".join(x for x in (intro, lead, text) if x)
@@ -958,10 +1022,49 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     clash.update(kind=r.get("kind"), state=m_.group(1) if m_ else None)
             chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "split" if split else "vignette", "narration": text,
                              "clash": clash, "frames": frames, "patch": evidence})
-    if unpictured or none_captured:
+    if unpictured or none_captured or any(represented.get(t_) for t_ in counts):
         n_un = len(unpictured)
         sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un) if unpictured else ""
-        if unpictured and words.get("unpicturedTyped"):
+        if words.get("unpicturedAccount"):
+            # per kind, in the opening card's unit: pictured + represented by the example + not pictured = the card's
+            # count, so every clash on the card is accounted for; then what "represented" means and why, as sentences
+            def units_(t_, cs_):
+                return sum(len(c_["rows"]) if t_ in (policy.get("countRows") or []) else 1 for c_ in cs_)
+            parts_, any_rep_, moved_ = [], False, 0
+            for t_ in policy.get("typeOrder") or []:
+                if t_ not in counts:
+                    continue
+                shown_ = list(chosen_by_type.get(t_) or []) + [g_ for c_ in chosen_by_type.get(t_) or []
+                                                               for g_ in in_split.get(c_["rows"][0]["formKey"]) or []]
+                pic_, rep_ = units_(t_, shown_), units_(t_, represented.get(t_) or [])
+                unp_ = units_(t_, [c_ for c_, _ in unpictured if c_["type"] == t_])
+                tot_ = card_count(t_)
+                if not pic_:
+                    moved_ += rep_
+                    unp_, rep_ = unp_ + rep_, 0                 # no example shown: nothing stands for them
+                if not (rep_ or unp_):
+                    continue
+                any_rep_ = any_rep_ or bool(rep_)
+                other_ = tot_ - pic_ - rep_ - unp_
+                parts_.append(words["unpicturedAccount"].format(
+                    label=type_labels[t_], total=tot_, unit=card_unit(t_, tot_) or "", pictured=pic_, represented=rep_,
+                    unpictured=unp_) + (words.get("unpicturedOther", "").format(count=other_) if other_ else "") + ".")
+            sentence_un = " ".join(parts_)
+            if any_rep_ and words.get("representedMeans"):
+                sentence_un += " " + words["representedMeans"]
+            why_n = collections.Counter()
+            for c_, why_ in unpictured:
+                why_n[why_] += units_(c_["type"], [c_])
+            if moved_:
+                why_n["notCaptured"] += moved_
+            reasons_ = policy.get("stillReasons") or {}
+            if why_n and words.get("unpicturedReasons"):
+                sentence_un += " " + words["unpicturedReasons"].format(reasons=" ".join(
+                    str(reasons_.get(w_, w_)).rstrip(".") + f" ({n_} not pictured)." for w_, n_ in why_n.most_common()))
+            sentence_un += " " + words.get("unpicturedWhere", "").format(
+                heading=spoken((reader.get("sectionHeadings") or {}).get("prediction") or ""))
+            sentence_un = sentence_un.strip()
+        elif unpictured and words.get("unpicturedTyped"):
             # in the opening card's units, by type, and where in the report to find them; then why, by reason
             by_t = collections.Counter()
             for c, _ in unpictured:
@@ -979,7 +1082,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     [f"{n_} {short.get(w_, w_)}" for w_, n_ in why_n.most_common()]))
         for t_, n_ in none_captured:
             sentence_un = (sentence_un + " " + words["noneCaptured"].format(
-                count=n_, label=words["caseLabels"][t_])).strip()
+                count=n_, label=case_labels[t_])).strip()
         # a removal is said, never only counted: which mod takes which object out of the world
         gone = [c for c, why in unpictured if why == "removed"]
         if gone and words.get("placementRemoved"):
@@ -1025,7 +1128,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     # 2. what has no result only on the other tested setups (a comparison), said as that
     other_ = []
     for r_ in closing_checks(reader, pres, mod, patch_name, words):
-        subs_ = [s_ for s_ in r_["subjects"] if s_.split(", with")[0].split(", without")[0] not in measured_titles]
+        subs_ = [s_ for s_ in r_["subjects"] if check_title_of(s_) not in measured_titles]
         if subs_:
             other_.append({**r_, "reason": (words.get("closingOtherSetups") or "{reason}").format(reason=r_["reason"]),
                            "subjects": subs_})
@@ -1033,7 +1136,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     reconcile = []
     for row in other_:
         for subj in row.get("subjects") or []:
-            it = head_titles.get(str(subj).split(", with")[0].split(", without")[0])
+            it = head_titles.get(check_title_of(str(subj)))
             if it and words.get("closingReconcile") and row.get("comparison"):
                 reconcile.append(words["closingReconcile"].format(title=it.get("title"), count=it.get("count"),
                                                                   cases="case" if it.get("count") == 1 else "cases",
@@ -1059,8 +1162,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 if not judged_:
                     item_ = item_.split(partial_["judgedCut"])[0] if partial_.get("judgedCut") else item_
             else:
-                # the populations are in the report; the reel names the check and says only part was judged
-                item_ = partial_["uncounted"].format(check=check_.strip())
+                # the largest population it could not judge, as a count, in one short phrase; the rest are in the report
+                big_ = largest_population(rest_)
+                item_ = (partial_["uncountedOne"].format(check=check_.strip(), count=big_[0], what=big_[1],
+                                                         more=partial_.get("uncountedMore", "") if big_[2] else "")
+                         if big_ and partial_.get("uncountedOne") else partial_["uncounted"].format(check=check_.strip()))
             row_ = next((r_ for r_ in checks if r_["reason"] == partial_["heading"]), None)
             if row_ is None:
                 row_ = {"reason": partial_["heading"], "subjects": [], "comparison": False}

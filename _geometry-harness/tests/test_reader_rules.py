@@ -286,7 +286,7 @@ def case_reel_counts_in_the_reports_units():
     un = str((chapter(reel, "unpictured") or {}).get("narration"))
     ok = (rows.get(WORDS["typeLabels"]["navmesh"]) == (3, "broken navmesh links")
           and WORDS["typeLabels"]["contact"] in rows and len(flat) == len(set(flat))
-          and "pictured in this reel" in un and "can't be visualized" not in un
+          and "not pictured" in un and "can't be visualized" not in un
           and 'under "What adding ModA will do"' in un and ".esp" not in un)
     return ok, f"card {rows}; unpictured {un[:220]!r}"
 
@@ -976,7 +976,7 @@ def case_reel_closing_counts_the_openings_checks_and_parts():
           and len(measured) == 3 and "Connected doors, cells, quests and scripts" in measured
           and "On another tested setup only" in flat
           and "Quest aliases split between mods: 9,490 items it could not judge, beside 6,810 it did" in flat
-          and "Objects occupying the same space: some of its items" in flat and "18,510" not in flat
+          and "Objects occupying the same space: 18,510 placed objects (no geometry to measure) it could not judge, among others" in flat
           and '"Could not be judged"' not in flat and " 1 check." not in say and " checks." not in say
           and hasattr(reel_stills, "page_say") and say == reel_stills.page_say(page))
     return ok, f"rows {flat[:500]}; say {say[:300]!r}"
@@ -1194,8 +1194,9 @@ def case_resolves_reconciles_with_its_total():
     pw = PR["reader"]["prediction"]
     todo = " ".join(R.what_to_do(lead, {PATCH.lower(): {A.lower(), B.lower()}, A.lower(): set(), B.lower(): set()},
                                  pw, {}, [], {}))
-    m = re.search(r"resolves (\d+) of the (\d+)[^;]*; (\d+) are left; the other (\d+)", todo)
-    ok = m is not None and int(m.group(1)) + int(m.group(3)) + int(m.group(4)) == int(m.group(2)) \
+    m = re.search(r"resolves (\d+) of the (\d+)[^;]*; (\d+) (?:is|are) left(?:; on (\d+) it keeps one mod's value[^;]*)?"
+                  r"; the other (\d+)", todo)
+    ok = m is not None and int(m.group(1)) + int(m.group(3)) + int(m.group(4) or 0) + int(m.group(5)) == int(m.group(2)) \
         and "2 set to the patch's own value" in todo
     return ok, f"what to do {todo[:400]!r}"
 
@@ -1271,6 +1272,177 @@ def case_precedent_pointer_only_where_the_index_lists_them():
     ok = ('"Precedent cards"' in md and "## Precedent cards (1)" in idx and "The Town Inn (TownInnCell)" in idx
           and "keeps the inn dark" in idx)
     return ok, f"md {('Precedent' in md)}; index {idx[idx.find('Precedent cards'):][:300]!r}"
+
+
+# --------------------------------------------------------------------- retry 2
+
+def case_a_value_the_patch_keeps_is_its_choice():
+    """A supplied patch that carries the contested fields with one side's value: its author's choice, said as the patch
+    keeping that mod's value, never as a clash that needs another patch."""
+    if not hasattr(R, "what_to_do"):
+        return False, "no verdict per patch"
+    lead = {"prediction": {"items": [{"title": "Record fields changed by more than one mod", "count": 3, "mods": [A, B],
+                                      "checkId": "records.contested-fields", "kind": "LOST-EDIT", "shownAs": "pair"}]},
+            "validation": {"status": "compared", "patches": [PATCH],
+                           "byItem": [{"hits": 0, "open": 0, "kept": 3, "keptBy": {f"{A}|{B}": 3}}]}}
+    todo = " ".join(R.what_to_do(lead, {PATCH.lower(): {A.lower(), B.lower()}}, PR["reader"]["prediction"], {}, [], {}))
+    ok = f"the supplied patch keeps {B}'s value" in todo and "needs a patch that carries both" not in todo
+    return ok, f"what to do {todo[:400]!r}"
+
+
+def case_a_patch_that_switches_off_another_mods_object_says_so():
+    """A patch that switches off an object another mod places, or removes a record's scripts, says so in its verdict,
+    read from the patch's own records (the precedent stage's edit list)."""
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "cards"
+        (d / re.sub(r"\.esp$", "", PATCH)).mkdir(parents=True)
+        (d / "summary.json").write_text(json.dumps({"sources": [{
+            "patch": PATCH, "census": {"patchRecords": 2, "additions": 0, "edits": 2, "editKinds": {"DISABLE": 1, "FIELD:VirtualMachineAdapter": 1}},
+            "cardPass": {"decidingConstraint": {}}}]}), encoding="utf-8")
+        edits = [{"formKey": f"000901:{B}", "kind": "DISABLE", "editorId": "ModBGuardRef",
+                  "values": {"patch": {"values": {"MajorRecordFlagsRaw": "3072"}}},
+                  "touched": {"base": {"editorId": "ModBGuard", "type": "Npc"}, "cell": {"name": "The Town Inn"}}},
+                 {"formKey": f"000902:{B}", "kind": "FIELD:VirtualMachineAdapter", "editorId": "ModBQuestEffect",
+                  "values": {"patch": {"values": {"VirtualMachineAdapter.Version": None}}}, "touched": {}}]
+        (d / re.sub(r"\.esp$", "", PATCH) / "edits.jsonl").write_text("\n".join(json.dumps(e) for e in edits) + "\n",
+                                                                       encoding="utf-8")
+        plan, md, html = P.compile_and_render(
+            P.PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}, [A, B], patches=[PATCH],
+            count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 1},
+            enrichment={(RECORDS, "baseline"): [P.lost_row(A, B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")],
+                        (RECORDS, "with-patch"): []},
+            settings_extra={"precedentDir": str(d)})
+    todo = " ".join(pred_of(plan).get("whatToDo") or [])
+    ok = ("It switches off ModBGuardRef (a placed ModBGuard, in The Town Inn), which " + B in todo
+          and "removes the scripts from ModBQuestEffect" in todo)
+    return ok, f"what to do {todo[:500]!r}"
+
+
+def case_the_unpictured_page_accounts_for_every_clash():
+    """Per kind, in the card's unit: pictured + represented + not pictured = the card's count; the reasons are sentences,
+    counted in the same unit."""
+    reel = reel_of(reel_pres(), MODS)
+    types = next(p for p in chapter(reel, "opening")["still"]["pages"] if p["layout"] == "types")
+    card = {r["label"]: r["count"] for r in types["rows"]}
+    un = str((chapter(reel, "unpictured") or {}).get("narration"))
+    parts = re.findall(r"([^.:]+): of (\d+) [^,]*, (\d+) pictured, (\d+) represented by the pictured example and (\d+) not pictured", un)
+    ok_parts = parts and all(int(n) == int(a) + int(b) + int(c) and card.get(lab.strip()) == int(n) for lab, n, a, b, c in parts)
+    why = sum(int(x) for x in re.findall(r"\((\d+) not pictured\)", un))
+    ok = bool(ok_parts) and why == sum(int(c) for *_, c in parts) and "Why some are not pictured:" in un
+    return ok, f"parts {parts}; reasons {why}; {un[:300]!r}"
+
+
+def case_closing_names_each_setup_by_its_own_arm():
+    """A gap on another tested setup is named by what that setup leaves out or adds, never by a supplied patch it does not
+    concern."""
+    pres = reel_pres()
+    pres["scope"]["arms"].append({"armId": "no-other", "plugins": [BASE, A], "locationPluginOrder": [BASE, A],
+                                  "displayLabel": "Tested alternative setup (removes OtherMod.esp)"})
+    pres["reader"]["suppliedPatches"] = [PATCH]
+    pres["reader"]["missingSummary"] = [
+        {"reason": "ran, but could not decide", "subjects": ["Objects occupying the same space — Tested alternative setup (removes OtherMod.esp)"]},
+        {"reason": "was not run", "subjects": ["Objects occupying the same space — Measured load order"]}]
+    flat = json.dumps(((chapter(reel_of(pres, MODS + [PATCH]), "closing") or {}).get("still") or {"pages": [{}]})["pages"][0].get("rows") or [])
+    other = re.sub(r"\.esp$", "", OTHER)
+    ok = f"on the setup without {other}" in flat and re.sub(r"\.esp$", "", PATCH) not in flat
+    return ok, f"rows {flat[:400]}"
+
+
+def case_subtitles_never_overlap_and_never_flash():
+    """The written .srt: cues in order, none overlapping the next, none shorter than the minimum (short ones merged)."""
+    import evalreel
+    segs = [{"narration": "Yes. No. Maybe so. A longer sentence follows here to fill the time. Ok.",
+             "reelInterval": {"startSeconds": 0.0, "endSeconds": 8.0}, "speechSeconds": 7.5},
+            {"narration": "One. Two words. " + " ".join(f"w{i}" for i in range(30)) + ".",
+             "reelInterval": {"startSeconds": 8.0, "endSeconds": 20.0}, "speechSeconds": 11.0}]
+    with tempfile.TemporaryDirectory() as td:
+        evalreel.write_srt(Path(td) / "a.srt", segs)
+        text = (Path(td) / "a.srt").read_text(encoding="utf-8")
+
+    def secs(ts):
+        h, m, rest = ts.split(":")
+        s, ms = rest.split(",")
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+    cues = [c.split("\n") for c in text.strip().split("\n\n")]
+    spans = [(secs(c[1].split(" --> ")[0]), secs(c[1].split(" --> ")[1])) for c in cues]
+    overlap = sum(1 for (a, e), (b, _) in zip(spans, spans[1:]) if e > b + 1e-6)
+    short = [round(e - a, 2) for a, e in spans if e - a < 1.0]
+    ok = not overlap and not short and all(a < e for a, e in spans)
+    return ok, f"cues {len(spans)}; overlaps {overlap}; short {short}"
+
+
+def case_each_clash_says_its_own_in_game_meaning():
+    """Two record clashes of different kinds: each one's in-game sentence comes from its own fields."""
+    arms = [P.arm("baseline", [BASE, OTHER, B, A], kind="baseline"), P.arm("no-a", [BASE, OTHER, B])]
+    rec = [P.lost_row(B, A, f"000801:{BASE}", "AIData", "b1", "a1", "v1"),
+           P.lost_row(OTHER, A, f"000802:{BASE}", "EnableParent", "o2", "a2", "v2")]
+    enr = {(RECORDS, "baseline"): rec, (RECORDS, "no-a"): []}
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "no-a"): []}, [A],
+                                          count_only={(RECORDS, a): max(1, len(r)) for (_, a), r in enr.items()},
+                                          enrichment=enr)
+    fm = PR["reader"]["prediction"]["fieldMeanings"]
+    items = {tuple(sorted(i.get("mods") or [])): str(i.get("inGameText") or "") for i in pred_of(plan).get("items") or []
+             if i.get("kind") == "LOST-EDIT"}
+    ab, ao = items.get(tuple(sorted([A, B]))) or "", items.get(tuple(sorted([A, OTHER]))) or ""
+    ok = (fm["AIData"] in ab and fm["EnableParent"] not in ab and fm["EnableParent"] in ao and fm["AIData"] not in ao)
+    return ok, f"A/B {ab[:200]!r}; A/Other {ao[:200]!r}"
+
+
+def case_one_name_for_each_kind_of_clash():
+    """A kind of clash that comes from one check is called by that check's title on the opening card too."""
+    pres = reel_pres()
+    pres["reader"]["checkTitles"] = {"geometry.placement-contact": "Objects left without their supporting surface"}
+    types = next(p for p in chapter(reel_of(pres, MODS), "opening")["still"]["pages"] if p["layout"] == "types")
+    labels = [r["label"] for r in types["rows"]]
+    ok = "Objects left without their supporting surface" in labels and WORDS["typeLabels"]["contact"] not in labels
+    return ok, f"labels {labels}"
+
+
+def vignette_pres(**reader_extra):
+    fk, other = f"000D01:{A}", f"009301:{BASE}"
+    pres = reel_pres()
+    pres["reader"]["prediction"]["record"].append(
+        {"admission": "admitted", "checkId": "geometry.object-overlap", "formKey": fk, "A": OTHER, "B": A,
+         "kind": "OVERLAP", "other": [other], "summary": f"crossing in 009366:{BASE} (ext) [mm] {fk} / {other}"})
+    pres["media"] = [{"id": f"M-{st}", "assessed": True, "path": f"media/{st}.png",
+                      "provenance": {"vignetteState": st, "captureRequest": "q1", "poseId": "p1"},
+                      "subject": {"formKey": fk, "armId": "no-a" if st == "without" else "baseline"}}
+                     for st in ("without", "with", "highlight")]
+    for k, v in reader_extra.items():
+        pres["reader"]["prediction"][k] = v
+    return pres, fk
+
+
+def vignette_said(pres, fk, masters=None):
+    names = {p: {"name": re.sub(r"\.(esp|esm|esl)$", "", p)} for p in MODS + [PATCH]}
+    search = {"pairs": [{"pair": [OTHER, A], "hits": [], "queries": [{"tool": t} for t in
+                                                                    POLICY["patchSearch"]["requiredTools"]]}]}
+    reel = reel_plan.plan_reel(pres, {}, masters or {}, POLICY, WORDS, search, names,
+                               capture_results=[{"status": "captured", "formKey": fk, "request": "q1"}],
+                               captures_final=True)
+    return " ".join(str(c.get("narration")) for c in reel.get("chapters") or [] if c.get("kind") == "vignette")
+
+
+def case_a_supplied_patch_the_search_missed_is_said_as_a_miss():
+    """Where a supplied patch is for the pair and the name search found nothing, the reel says the search missed that
+    patch, never that no other patch exists."""
+    pres, fk = vignette_pres()
+    pres["reader"]["suppliedPatches"] = [PATCH]
+    said = vignette_said(pres, fk, masters={PATCH.lower(): {OTHER.lower(), A.lower()}})
+    pname = re.sub(r"\.esp$", "", PATCH)
+    ok = f"did not find {pname}" in said and "No other patch" not in said and "No patch for these" not in said
+    return ok, f"vignette {said[:400]!r}"
+
+
+def case_the_reel_keeps_the_reports_attribution_caveat():
+    """The report's "whether it also needs X was not measured" is said with the reel's vignette of that clash."""
+    cav = f"It appears when {A} is added; whether it also needs {OTHER} was not measured, because no setup without {OTHER} was measured for this check."
+    pres, fk = vignette_pres(items=[{"title": "Objects occupying the same space", "count": 1, "shownAs": "pair",
+                                     "checkId": "geometry.object-overlap", "mods": [OTHER, A], "attributionText": cav}])
+    said = vignette_said(pres, fk)
+    other = re.sub(r"\.esp$", "", OTHER)
+    ok = f"whether it also needs {other} was not measured" in said
+    return ok, f"vignette {said[:400]!r}"
 
 
 CASES = [(k, v) for k, v in list(globals().items()) if k.startswith("case_") and callable(v)]
