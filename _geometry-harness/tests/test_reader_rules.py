@@ -872,6 +872,45 @@ def case_reel_says_the_reports_place():
     return ok, f"vignette {said[:300]!r}; status {reel.get('status')} {reel.get('reason')}"
 
 
+def case_a_patch_pair_leaves_out_shared_dependencies():
+    """A patch built on the two mods and on a master they share: its pair is the two mods, so a clash of one of them with
+    that shared master is not the patch's to resolve."""
+    DEP = "Shared.esm"
+    arms = [P.arm("baseline", [BASE, DEP, A, B], kind="baseline"), P.arm("with-patch", [BASE, DEP, A, B, PATCH])]
+    rows_ab = [P.row("CONTACT", B, A, f"00080{i}:{A}") for i in (1, 2)]
+    rows_dep = [P.row("CONTACT", DEP, A, f"00090{i}:{A}") for i in (1, 2, 3)]
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): rows_ab + rows_dep,
+                                                 (CONTACT, "with-patch"): rows_dep}, [A], patches=[PATCH],
+                                          masters={PATCH: [BASE, DEP, A, B], A: [BASE, DEP], B: [BASE, DEP], DEP: [BASE]})
+    todo = " ".join(pred_of(plan).get("whatToDo") or [])
+    ok = (f"if you load {A} and {B}: it resolves 2 of the 2 predicted clashes between them" in todo
+          and DEP not in todo.split(":")[0])
+    return ok, f"what to do {todo[:300]!r}"
+
+
+def case_a_patch_pair_from_headers_when_no_probe_recorded_masters():
+    """No measured check recorded master lists: the patch's masters are read from its own file's header (when the file
+    is the recorded bytes), so it still gets its pair."""
+    import hashlib
+    with tempfile.TemporaryDirectory() as td:
+        files = {}
+        for n, ms in ((BASE, []), (A, [BASE]), (B, [BASE]), (PATCH, [BASE, A, B])):
+            f = tes4(Path(td) / n, ms)
+            files[n] = {"name": n, "path": str(f), "sha256": hashlib.sha256(f.read_bytes()).hexdigest()}
+
+        def arm_(i, names, kind="candidate"):
+            a_ = P.arm(i, names, kind=kind)
+            a_["requested"]["plugins"] = [files[n] for n in names]
+            return a_
+        arms = [arm_("baseline", [BASE, A, B], "baseline"), arm_("with-patch", [BASE, A, B, PATCH])]
+        rows = [P.row("CONTACT", B, A, f"00080{i}:{A}") for i in (1, 2)]
+        plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): rows, (CONTACT, "with-patch"): rows[1:]},
+                                              [A], patches=[PATCH], masters=False)
+    todo = " ".join(pred_of(plan).get("whatToDo") or [])
+    ok = f"Use {PATCH} if you load {A} and {B}: it resolves 1 of the 2" in todo
+    return ok, f"what to do {todo[:300]!r}"
+
+
 CASES = [(k, v) for k, v in list(globals().items()) if k.startswith("case_") and callable(v)]
 
 

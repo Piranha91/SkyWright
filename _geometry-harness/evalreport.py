@@ -7205,6 +7205,13 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
         new_n = int(val.get("patchProblems") or 0)
         for p in patches:
             pm = None if masters is None else masters.get(str(p).lower())
+            if pm is not None:
+                # the pair a patch is built for: its masters that are not themselves masters of its other masters (a
+                # shared dependency is not one side of the pair), narrowed to the plugins the predicted clashes name
+                # where at least two of them are
+                pm = {m for m in pm if not any(m in (masters.get(o) or ()) for o in pm if o != m)}
+                parties = {str(x).lower() for it in items for x in it.get("mods") or []}
+                pm = pm & parties if len(pm & parties) >= 2 else pm
             if pm is None:
                 mine = list(range(len(items)))
             else:
@@ -9233,7 +9240,23 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # a verdict per supplied patch and a next step per kind left; report and reel read these
     proper_r2 = {str(q.get("name")).lower(): str(q.get("name")) for a_ in b.plan.get("arms") or []
                  for q in ((a_.get("requested") or {}).get("plugins") or []) if isinstance(q, dict)}
-    lead["prediction"]["whatToDo"] = what_to_do(lead, plugin_masters_doc, pw_, ev, missing, proper_r2)
+    # each plugin's own master list, from the probes' emits, else from the TES4 header of the file the plan names (read
+    # only when it is the recorded bytes): a patch whose setup measured no probe still has its pair
+    masters_r2 = {k: set(v) for k, v in (plugin_masters_doc or {}).items()}
+    for a_ in b.plan.get("arms") or []:
+        for q_ in (a_.get("requested") or {}).get("plugins") or []:
+            nm_ = str(q_.get("name") or "").lower()
+            if not nm_ or nm_ in masters_r2 or not q_.get("path") or not Path(str(q_["path"])).is_file():
+                continue
+            import evalpipeline
+            import struct
+            try:
+                if q_.get("sha256") and sha256_file(Path(str(q_["path"]))) != str(q_["sha256"]).lower():
+                    continue
+                masters_r2[nm_] = {str(m_).lower() for m_ in evalpipeline.plugin_header(q_["path"])["masters"]}
+            except (OSError, ValueError, struct.error, evalpipeline.Refusal):
+                continue
+    lead["prediction"]["whatToDo"] = what_to_do(lead, masters_r2 or None, pw_, ev, missing, proper_r2)
     lead["prediction"]["whatToDoHeading"] = (pw_.get("whatToDo") or {}).get("heading")
     precedent_census(lead, settings.get("precedentDir"), reader_data.get("prediction") or {})
     # what a lost record change means in play, from the fields it is on (skill data fieldMeanings), where nothing does
