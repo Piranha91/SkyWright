@@ -23,5 +23,13 @@
   "integerMasksAbout": "Integer fields the game reads only in part, by record type and field path, with the mask of the bytes it reads; a change outside the mask is no change in game. A cell's XCLC grid holds one byte of land flags (hide quads 1-4) and three unused bytes; Mutagen reads the four bytes as one CellGrid.Flag value (Quad1-Quad4 = 0-3, not bit flags), so its Grid.Flags carries the unused bytes too. Mutagen lags xEdit here (xEdit names the three bytes Unused).",
   "integerMasks": {"Cell": {"Grid.Flags": 255}},
   "integerEnumNamesAbout": "Values of a masked integer field that Mutagen prints by its enum name instead of the number (a Grid.Flags of 0 prints as Quad1), by record type and field path: the name is read as its value before the mask applies, so one value printed two ways is one value.",
-  "integerEnumNames": {"Cell": {"Grid.Flags": {"Quad1": 0, "Quad2": 1, "Quad3": 2, "Quad4": 3}}}
+  "integerEnumNames": {"Cell": {"Grid.Flags": {"Quad1": 0, "Quad2": 1, "Quad3": 2, "Quad4": 3}}},
+  "recordFlagsAbout": "The record header's flags, on any record type. Mutagen shows the same 32 bits twice: field (SkyrimMajorRecordFlags, base names) and sameBitsAs (MajorFlags, names that differ per record type); a record that authors both is judged once, on field. A value prints as comma-separated names from bits when every set bit has a name, else as the whole decimal number; a name not in bits is never guessed, so the row stays. Values that differ only in the storageOnly bits are no change in game: Compressed (0x40000) says how the record is stored. sameBitsAs values are read only as numbers, since their names are per type. bits are SkyrimMajorRecord.SkyrimMajorRecordFlag of Mutagen.Bethesda.Skyrim 0.54.4, read by reflection 2026-11-07.",
+  "recordFlags": {
+    "field": "SkyrimMajorRecordFlags",
+    "sameBitsAs": ["MajorFlags"],
+    "storageOnly": ["Compressed"],
+    "bits": {"ESM": 1, "NotPlayable": 4, "Deleted": 32, "InitiallyDisabled": 2048, "Ignored": 4096, "VisibleWhenDistant": 32768,
+             "Dangerous_OffLimits_InteriorCell": 131072, "Compressed": 262144, "CantWait": 524288}
+  }
 }

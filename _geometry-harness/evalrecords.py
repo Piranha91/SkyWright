@@ -22,7 +22,8 @@ The checks:
                                     A lost edit is a field an evaluated plugin authored (its value differs from the
                                     provider beneath it) whose winning value differs from its own (recordrows' rule),
                                     at the top-level field, file, group and runtime-merged bookkeeping excluded by the
-                                    world-edit-compatibility skill's record-field-scope.json.
+                                    world-edit-compatibility skill's record-field-scope.json. Record flags are one
+                                    field (recordFlags there): a difference only in the Compressed storage bit is none.
   loadability.missing-assets        every Data-relative asset path the evaluated plugins' winning records name,
                                     resolved through the arm's file view; an absent one is a finding.
 
@@ -199,6 +200,26 @@ class FieldScope:
         self.merged_records = set(d["runtimeMergedRecords"])
         self.masks = d.get("integerMasks", {})
         self.enum_names = d.get("integerEnumNames", {})
+        rf = d.get("recordFlags") or {}
+        self.flags_field = rf.get("field")
+        self.flags_views = set(rf.get("sameBitsAs") or [])
+        self.flag_bits = {k: int(v) for k, v in (rf.get("bits") or {}).items()}
+        self.storage_bits = sum(self.flag_bits[n] for n in rf.get("storageOnly") or [])
+
+    def record_flags(self, field, v):
+        """A record-flags value as an int: a number, or (on the base field) comma-separated known names; else None."""
+        s = str(v).strip() if v is not None else ""
+        if re.fullmatch(r"-?\d+", s):
+            return int(s) & 0xFFFFFFFF
+        if field != self.flags_field or not s:
+            return None  # the per-type view's names are not in the table
+        total = 0
+        for part in s.split(","):
+            part = part.strip()
+            if part not in self.flag_bits:
+                return None
+            total |= self.flag_bits[part]
+        return total
 
     def excluded(self, rtype: str, field: str) -> str | None:
         top = field.split(".")[0].split("[")[0]
@@ -218,6 +239,9 @@ class FieldScope:
         return None
 
     def masked_equal(self, rtype, field, a, b) -> bool:
+        if self.flags_field and (field == self.flags_field or field in self.flags_views):
+            x, y = self.record_flags(field, a), self.record_flags(field, b)
+            return x is not None and y is not None and (x & ~self.storage_bits) == (y & ~self.storage_bits)
         mask = (self.masks.get(rtype) or {}).get(field)
         if mask is None:
             return False
@@ -325,6 +349,9 @@ def lost_edits(rtype, formid, plugin, authored_lines, vs_winner_lines, winner, p
             unjudged["a removal whose master's copy could not be settled"] = unjudged.get("a removal whose master's copy could not be settled", 0) + 1
         elif held:
             authored[p[0]] = (p[0], "(absent)", p[2], p[3], "removed")
+    if scope.flags_field in authored:
+        for view in scope.flags_views:
+            authored.pop(view, None)  # the same header bits under a per-type name: judged once, on the base field
     rows, judged = {}, 0
     for field, a in authored.items():
         why = scope.excluded(rtype, field)
