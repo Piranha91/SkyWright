@@ -914,7 +914,7 @@ def check_patch_direction(bundle: Path):
         check(verdict.startswith(f"{subject} reduces the number of overlap candidates reported by the checks that ran."),
               f"{label}/{variant}/overlap-reduction: the overlap-only Result names the change (got {verdict!r})")
         got = plain_of(plan, "candidate-02-patchb", ("repaired", "reclassified"), "geometry.object-overlap")
-        check(f"no longer present after {subject[:1].lower() + subject[1:]}." in got,
+        check(f"no longer present after {subject[:1].lower() + subject[1:]}" in got,
               f"{label}/{variant}/overlap-reduction: the overlap reduction names the change (got {got!r})")
         check("supplied setup" not in md.lower() and "supplied setup" not in html.lower(),
               f"{label}/{variant}/overlap-reduction: no supplied-setup wording in report.md or report.html")

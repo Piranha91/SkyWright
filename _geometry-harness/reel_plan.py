@@ -1001,6 +1001,26 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "verdict", "narration": " ".join(todo),
                          "still": {"pages": [tpage]}})
     checks = closing_checks(reader, pres, mod, patch_name, words)
+    # what the checks that ran could not judge, and the play-time line, from the report's own coverage: the closing is the
+    # whole list of what was not judged, not only the checks that did not run
+    skip_ = tuple(words.get("closingCoverageSkip") or ())
+    for line_ in (reader.get("coverage") or {}).get("lines") or []:
+        rsn_ = str(line_.get("reason") or "")
+        if not rsn_ or (skip_ and rsn_.startswith(skip_)):
+            continue
+        subj_ = str(line_.get("subject") or "").split(":", 1)[0].strip()
+        cnt_ = line_.get("count")
+        item_ = f"{subj_} ({cnt_:,}{' ' + line_['unit'] if line_.get('unit') else ''})" if isinstance(cnt_, int) else subj_
+        row_ = next((r_ for r_ in checks if r_["reason"] == rsn_), None)
+        if row_ is None:
+            row_ = {"reason": rsn_, "subjects": [], "comparison": False}
+            checks.append(row_)
+        if item_ and item_ not in row_["subjects"]:
+            row_["subjects"].append(item_)
+    play_ = words.get("closingPlayTime")
+    if play_ and any(play_ in str(n_) for n_ in (reader.get("coverage") or {}).get("notes") or []):
+        checks.append({"reason": next(str(n_) for n_ in reader["coverage"]["notes"] if play_ in str(n_)),
+                       "subjects": [], "comparison": False})
     closing_say = words["closing"]
     # a closing check that is also a headline kind: its arm result stands; what has no result is a comparison
     head_titles = {str(i.get("title")): i for i in pred.get("items") or [] if i.get("shownAs") != "alone"}

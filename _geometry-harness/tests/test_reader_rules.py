@@ -143,7 +143,7 @@ def case_no_patch_no_verdict_line_but_next_step():
     rows = [P.row("CONTACT", B, A, f"00080{i}:{A}") for i in (1, 2)]
     plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): rows}, [A])
     todo = pred_of(plan).get("whatToDo") or []
-    ok = (len(todo) == 1 and "check them in game at the places listed above" in todo[0]
+    ok = (len(todo) == 1 and "check them in game at the places its item below names" in todo[0]
           and "Use " not in todo[0] and todo[0] in md)
     return ok, f"what to do {todo}"
 
@@ -708,6 +708,168 @@ def case_record_rows_unread_reason_is_the_captures():
     want = getattr(recordrows, "MASTERS_UNREAD", None)
     ok = bool(want) and f'"{want}"' in src
     return ok, f"reason {want!r} in the capture: {bool(want) and want in src}"
+
+
+# ------------------------------------------------------------------------ the parts finished before the re-render
+
+def case_every_place_is_named():
+    """Clashes in three places: the two with most first, then every other place by name, never "N more places"."""
+    arms = [P.arm("baseline", [BASE, A, B], kind="baseline")]
+    rows = [P.row("CONTACT", B, A, f"00080{i}:{A}", label=cell) for i, cell in
+            enumerate(["CellA (ext)"] * 3 + ["CellB (ext)"] * 2 + ["CellC (int)"])]
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): rows}, [A])
+    ok = "1 more place: CellC (int) (1)" in md and "more places." not in md
+    return ok, f"places line {next((ln for ln in md.splitlines() if 'CellA' in ln), '')[:300]!r}"
+
+
+def case_unjudged_count_beside_what_was_judged():
+    plan, md, html = P.none_found_bundle()
+    line = next((ln for ln in md.splitlines() if "no collision geometry" in ln), "")
+    ok = "beside 40 the check did judge" in line
+    return ok, f"line {line!r}"
+
+
+def overlap_reduction_bundle():
+    arms = [P.arm("baseline", [BASE, OTHER, A, B], kind="baseline"), P.arm("no-b", [BASE, OTHER, A])]
+    rows = [P.row("OVERLAP", B, A, f"00081{i}:{A}", other=f"00091{i}:{B}") for i in (1, 2)]
+    counts = dict(verdict="DIFFERENTIAL-VERIFIED", repaired=1, reclassified=0, created=0, newDefect=0, attributed=0,
+                  unmeasured=0)
+    log = "   GONE     OVERLAP   " + OTHER + "  x  " + B + "  -1 record(s): repaired 1" + NL
+    return P.compile_and_render(arms, {(OVERLAP, "baseline"): rows, (OVERLAP, "no-b"): rows[:1]}, [A],
+                                order={"no-b": {"overlapprobe": counts}}, diff_logs={(OVERLAP, "no-b"): log})
+
+
+def case_a_repaired_line_names_its_pair():
+    plan, md, html = overlap_reduction_bundle()
+    line = next((ln for ln in md.splitlines() if "no longer present" in ln), "")
+    ok = f"(between {OTHER} and {B}: 1)" in line
+    return ok, f"line {line[:300]!r}"
+
+
+def case_one_reason_label_per_check():
+    """A check missing for two reasons on two setups is said under one label, never two glued with "; and"."""
+    arms = [P.arm("baseline", [BASE, OTHER, A], kind="baseline"), P.arm("dependency-only", [BASE, OTHER])]
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "dependency-only"): []}, [A],
+                                          missing=[(OVERLAP, "baseline", "unknown-applicability"),
+                                                   (OVERLAP, "dependency-only", "unsupported")])
+    glued = [ln for ln in md.splitlines() if "; and " in ln and ln.startswith("- **")]
+    ok = not glued and "cannot yet be measured by this evaluator" in md
+    return ok, f"glued labels {glued[:2]}"
+
+
+def case_what_to_do_points_the_right_way():
+    """The "What to do" list sits above the items: it never sends the reader to places "listed above"."""
+    plan, md, html = contact_patch_bundle()
+    todo = " ".join(pred_of(plan).get("whatToDo") or [])
+    ok = "listed above" not in todo and "its item below" in todo
+    return ok, f"what to do {todo[-200:]!r}"
+
+
+def case_a_state_example_is_an_object_and_its_lost_support():
+    arms = [P.arm("baseline", [BASE, A, B], kind="baseline")]
+    fk, host = f"0008A3:{A}", f"0DFDA9:{BASE}"
+    names = {"refs": {fk: {"base": f"0B0001:{BASE}"}, host: {"base": f"0B0002:{BASE}"}},
+             "bases": {f"0B0001:{BASE}": {"editorId": "CommonWardrobe01", "type": "Container", "model": "a.nif"},
+                       f"0B0002:{BASE}": {"editorId": "FarmIntBasement", "type": "Static", "model": "b.nif"}}}
+    rows = [P.row(f"STATE-EMPTY@0008A8:{A}@Triggered", B, A, fk, other=host)]
+    plan, md, html = P.compile_and_render(arms, {("state.conditional-geometry", "baseline"): rows}, [A], names=names)
+    line = next((ln for ln in md.splitlines() if "CommonWardrobe01" in ln), "")
+    ok = "left in empty space because" in line and " against " not in line
+    return ok, f"line {line[:300]!r}"
+
+
+def kept_remainder_bundle():
+    """Two lost changes the patch keeps lost: one on an object the losing mod switches off (a state the line names),
+    one on an ordinary field (no state): the breakdown names the first and says the other."""
+    WP = [P.arm("baseline", [BASE, OTHER, A, B, PATCH], kind="baseline"), P.arm("without-patch", [BASE, OTHER, A, B])]
+
+    def offs(z, flags="0"):
+        return {"Placement.Position": f"100,100,{z}", "Placement.Rotation": "0,0,0", "SkyrimMajorRecordFlags": flags,
+                "EnableParent.Reference": "has no EnableParent.Reference", "EnableParent.Flags": "has no EnableParent.Flags"}
+
+    def txt(v):
+        return f"Position={v['Placement.Position']}; Rotation=0,0,0"
+    D1, D5 = f"00CA77:{BASE}", f"00CA78:{BASE}"
+    a_off, b_ = offs(-30000, "InitiallyDisabled"), offs(0)
+    p_rows = [P.lost_row(A, B, D1, "Placement", txt(a_off), txt(b_), txt(offs(0)), before=BASE),
+              P.lost_row(A, B, D5, "LocationReference", "a5", "b5", "v5", before=BASE)]
+    w_rows = [P.lost_row(A, PATCH, D1, "Placement", txt(a_off), txt(b_), txt(offs(0)), before=BASE),
+              P.lost_row(A, PATCH, D5, "LocationReference", "a5", "b5", "v5", before=BASE)]
+    p_ch = [(D1, "PlacedObject", [(BASE, offs(0)), (A, a_off), (B, b_)]),
+            (D5, "PlacedObject", [(BASE, {"LocationReference": "v5"}), (A, {"LocationReference": "a5"}),
+                                  (B, {"LocationReference": "b5"})])]
+    w_ch = [(D1, "PlacedObject", [(BASE, offs(0)), (A, a_off), (B, b_), (PATCH, b_)]),
+            (D5, "PlacedObject", [(BASE, {"LocationReference": "v5"}), (A, {"LocationReference": "a5"}),
+                                  (B, {"LocationReference": "b5"}), (PATCH, {"LocationReference": "b5"})])]
+    enr = {(RECORDS, "without-patch"): p_rows, (RECORDS, "baseline"): w_rows}
+    tr = {(RECORDS, "without-patch"): P.records_transcript(p_ch), (RECORDS, "baseline"): P.records_transcript(w_ch)}
+    return P.compile_and_render(WP, {(CONTACT, "baseline"): [], (CONTACT, "without-patch"): []}, [A], patches=[PATCH],
+                                count_only={k: len(v) for k, v in enr.items()}, enrichment=enr, transcripts=tr,
+                                masters={OTHER: [BASE], A: [BASE], B: [BASE], PATCH: [BASE]})
+
+
+def case_a_breakdown_says_its_remainder():
+    plan, md, html = kept_remainder_bundle()
+    kl = next((x for x in pred_of(plan).get("withPatchLines") or [] if x.startswith("Record fields")), "")
+    ok = "on 2 (" in kl and "and 1 other" in kl
+    return ok, f"line {kl[:400]!r}"
+
+
+def case_a_breakdown_that_adds_up_has_no_remainder():
+    plan, md, html = P.compile_and_render(
+        P.PATCH_ADDED_ARMS, {(CONTACT, "baseline"): [], (CONTACT, "with-patch"): []}, [A], patches=[PATCH],
+        count_only={(RECORDS, "baseline"): 1, (RECORDS, "with-patch"): 1},
+        enrichment={(RECORDS, "baseline"): [P.lost_row(A, B, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")],
+                    (RECORDS, "with-patch"): [P.lost_row(A, PATCH, f"000701:{BASE}", "LocationReference", "a1", "b1", "v")]})
+    ok = "and 1 other" not in md
+    return ok, "no remainder clause where nothing is left over"
+
+
+def case_the_closing_lists_the_other_unjudged_areas():
+    pres = reel_pres()
+    pres["reader"]["coverage"] = {"lines": [
+        {"reason": "No result: cannot yet be measured by this evaluator", "count": 1, "subject": "A check"},
+        {"reason": "Could not be judged", "count": 398, "unit": "items", "subject": "Cell settings changed by more than one mod: x"}],
+        "notes": ["No matching play-time evidence was supplied, so this does not show what happened during play."]}
+    rows = (chapter(reel_of(pres, MODS), "closing") or {})["still"]["pages"][0].get("rows") or []
+    flat = json.dumps(rows)
+    ok = ("Cell settings changed by more than one mod (398 items)" in flat and "play-time evidence" in flat
+          and "A check" not in flat)
+    return ok, f"rows {flat[:400]}"
+
+
+def case_unjudged_reasons_in_plain_words():
+    arms = [P.arm("baseline", [BASE, OTHER, A], kind="baseline"), P.arm("dependency-only", [BASE, OTHER])]
+    pops = {(CONTACT, "baseline"): [{"Population": "placed references", "Judged": 10,
+                                     "Unjudgeable": {"a delta line the comparator could not read": 2}}]}
+    plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): [], (CONTACT, "dependency-only"): []}, [A],
+                                          coverage_pops=pops)
+    ok = "a change in the record that houseCARL could not read" in md and "comparator could not read" not in md
+    return ok, f"line {next((ln for ln in md.splitlines() if 'could not read' in ln), '')[:300]!r}"
+
+
+def case_reel_says_the_reports_place():
+    """A clash in a cell with no name of its own is said where the report says it (its worldspace and grid), never as
+    the plugin file the cell's form key names."""
+    fk, other = f"000D01:{A}", f"009301:{BASE}"
+    pres = reel_pres()
+    pres["reader"]["prediction"]["record"].append(
+        {"admission": "admitted", "checkId": "geometry.object-overlap", "formKey": fk, "A": OTHER, "B": A,
+         "kind": "OVERLAP", "other": [other], "summary": f"crossing in 00ABCD:{BASE} (ext) [mm] {fk} / {other}"})
+    pres["reader"]["prediction"]["placeLabels"] = {fk: f"00ABCD:{BASE} (ext) in Tamriel, grid cell -21, 18"}
+    pres["media"] = [{"id": f"M-{st}", "assessed": True, "path": f"media/{st}.png",
+                      "provenance": {"vignetteState": st, "captureRequest": "q1", "poseId": "p1"},
+                      "subject": {"formKey": fk, "armId": "no-a" if st == "without" else "baseline"}}
+                     for st in ("without", "with", "highlight")]
+    names = {p: {"name": re.sub(r"\.(esp|esm|esl)$", "", p)} for p in MODS}
+    search = {"pairs": [{"pair": [OTHER, A], "hits": [], "queries": [{"tool": t} for t in
+                                                                    POLICY["patchSearch"]["requiredTools"]]}]}
+    reel = reel_plan.plan_reel(pres, {}, {}, POLICY, WORDS, search, names,
+                               capture_results=[{"status": "captured", "formKey": fk, "request": "q1"}],
+                               captures_final=True)
+    said = " ".join(str(c.get("narration")) for c in reel.get("chapters") or [] if c.get("kind") == "vignette")
+    ok = "Tamriel, grid cell -21, 18" in said and "esm" not in said.lower().replace("skyrim.esm", "")
+    return ok, f"vignette {said[:300]!r}; status {reel.get('status')} {reel.get('reason')}"
 
 
 CASES = [(k, v) for k, v in list(globals().items()) if k.startswith("case_") and callable(v)]

@@ -1681,7 +1681,8 @@ def main():
         plan, cov, md = limits()
         title = (priorities()["reader"]["checkTitles"]).get(WATER, WATER)
         lines = [x for x in cov.splitlines() if title in x and x.startswith("- **No result")]
-        ok = len(lines) == 1 and "could not decide" in lines[0] and "cannot yet be measured" in lines[0]
+        # one label by the skill's precedence (missingReasonPrecedence), never two glued with "; and"
+        ok = len(lines) == 1 and "cannot yet be measured" in lines[0] and "; and" not in lines[0]
         return ok, f"lines naming the check: {lines}"
 
     # C473. Statuses in words: a check that failed to run, a check with no pair list

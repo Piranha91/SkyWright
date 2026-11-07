@@ -2917,7 +2917,9 @@ def build_prediction(ctx: dict) -> dict:
             g.setdefault("_partnerSet", set()).add(o0_)
             pairs_ = g.setdefault("_objPairs", [])
             if not pairs_ and (object_name(rk[4]) or object_name(o0_)):
-                pairs_.append(bind(words["itemObjectPair"], {"a": named(rk[4]), "b": named(o0_)}))
+                # a world-state row left in empty space is an object and the support it lost, never two objects in a clash
+                empty_ = str(rk[1]).startswith("STATE-EMPTY") and words.get("itemObjectEmpty")
+                pairs_.append(bind(words["itemObjectEmpty" if empty_ else "itemObjectPair"], {"a": named(rk[4]), "b": named(o0_)}))
         eff_row_ = rk[1] != "LOST-EDIT" and bool(hit["row"].get("other")) and effect_pair(rk[4], hit["row"]["other"])
         if eff_row_:
             # (fourth review, Pilgrim S2) a pair with an object whose model is a visual effect (skill data): said apart
@@ -3446,7 +3448,12 @@ def build_prediction(ctx: dict) -> dict:
             else:
                 detail.append(bind(words["itemPlaces" if top[0][1] * 2 > sum(places.values()) else "itemPlacesSpread"],
                                    {"places": "; ".join(f"{pl} ({fmt_n(n)})" for pl, n in top),
-                                                        "more": (bind(words["itemPlacesMore"], {"count": len(places) - len(top)})
+                                                        "more": (bind(words["itemPlacesMore"], {
+                                                            "count": len(places) - len(top),
+                                                            "noun": "place" if len(places) - len(top) == 1 else "places",
+                                                            # the rest named too, so the reader can find every one
+                                                            "rest": "; ".join(f"{pl} ({fmt_n(n)})" for pl, n in
+                                                                              places.most_common()[len(top):])})
                                                                  if len(places) > len(top) else "")}))
         g.pop("_records", None)
         partners_ = g.pop("_partnerSet", set())
@@ -3592,7 +3599,8 @@ def build_prediction(ctx: dict) -> dict:
         if n_touch_ and words.get("itemTouchingPairs"):
             detail.append(bind(words["itemTouchingPairs"], {"count": fmt_n(n_touch_), "verb": "touch" if n_touch_ != 1 else "touch"}))
         if n_eff_ and words.get("itemEffectPairs"):
-            detail.append(bind(words["itemEffectPairs"], {"count": fmt_n(n_eff_), "all": "All" if n_eff_ == g["count"] else ""}))
+            detail.append(bind(words["itemEffectPairs"], {"count": fmt_n(n_eff_), "all": "All" if n_eff_ == g["count"] else "",
+                                                          "verb": "involves" if n_eff_ == 1 else "involve"}))
         for (wi_, lo_), dzs_ in (g.pop("_heightDiff", None) or {}).items():
             if words.get("itemHeightDiff") and all(x_ is not None and abs(x_) >= SEAT_SPOT_UNITS for x_ in dzs_) and (
                     all(x_ < 0 for x_ in dzs_) or all(x_ > 0 for x_ in dzs_)):
@@ -5062,7 +5070,7 @@ def build_prediction(ctx: dict) -> dict:
     all_relevant = len(relevant_arms)
     everywhere_ = missing_everywhere(ctx["missing"], labels.keys())
     for status_set, by_check in by_status.items():
-        reason = "; and ".join(ctx["missingReason"](st, "has no accepted result") for st in status_set)
+        reason = ctx["missingReason"](first_status(status_set, words.get("missingReasonPrecedence")), "has no accepted result")
         subjects = []
         for check_id, arms_ in sorted(by_check.items(), key=lambda kv: title_of(kv[0])):
             # a missing comparison part is the comparison with the measured order, not the setup's own result
@@ -5168,6 +5176,9 @@ def build_prediction(ctx: dict) -> dict:
         cov = ((rc or {}).get("result") or {}).get("coverage") if rc else None
         own = [(c.get("Population", c.get("population")), c.get("Unjudgeable", c.get("unjudgeable")))
                for c in cov if isinstance(c, dict)] if isinstance(cov, list) else []
+        for c in cov if isinstance(cov, list) else []:
+            if isinstance(c, dict) and isinstance(c.get("Judged", c.get("judged")), (int, float)):
+                judged_seen[(check_id, c.get("Population", c.get("population")))] = c.get("Judged", c.get("judged"))
         if any((sum(v for v in uj.values() if isinstance(v, (int, float))) if isinstance(uj, dict) else uj or 0) > 0
                for _, uj in own):
             return own
@@ -5176,7 +5187,10 @@ def build_prediction(ctx: dict) -> dict:
             if u.get("armId") == p_arm and u.get("checkId") == check_id and u.get("population") not in seen:
                 seen.add(u.get("population"))
                 out.append((u.get("population"), u.get("unjudgeable")))
+                if isinstance(u.get("judged"), (int, float)):
+                    judged_seen[(check_id, u.get("population"))] = u.get("judged")
         return out
+    judged_seen = {}
     unjudged_checks = list(dict.fromkeys(
         [str(u.get("checkId")) for u in ctx["unassessed"].get("unjudgeablePopulations") or [] if u.get("armId") == p_arm]
         + list(checks_on_p)))
@@ -5221,9 +5235,13 @@ def build_prediction(ctx: dict) -> dict:
             return text
         if len(pops) == 1:
             total_n = sum(pops[0][1].values())
+            # the count beside what the check did judge, so the reader can weigh it
+            judged_ = judged_seen.get((check_id, pops[0][0]))
+            share_ = (bind(reasons["unjudgeableShare"], {"judged": fmt_n(int(judged_))})
+                      if judged_ is not None and reasons.get("unjudgeableShare") else "")
             lines.append({"reason": reasons["unjudgeable"], "count": total_n,
                           "unit": "item" if total_n == 1 else "items",
-                          "subject": f"{title_of(check_id)}: {detail_of(pops[0][1])}"})
+                          "subject": f"{title_of(check_id)}: {detail_of(pops[0][1])}{share_}"})
         else:
             lines.append({"reason": reasons["unjudgeable"], "count": None,
                           "subject": f"{title_of(check_id)}: " + "; ".join(
@@ -5664,7 +5682,7 @@ def build_prediction(ctx: dict) -> dict:
         def off_counts(es_):
             return collections.Counter(off_state(e) for e in es_ if off_state(e))
 
-        def off_text(c_, wrap=True, objs=None):
+        def off_text(c_, wrap=True, objs=None, total=None):
             """The off-for-good note: a Counter by the losing version's state (an int is an unknown state). objs: the
             objects per state, said with the record fields where they differ (seventh review, Winterhold S2)."""
             if isinstance(c_, int):
@@ -5683,6 +5701,10 @@ def build_prediction(ctx: dict) -> dict:
                       if (c_ or {}).get(s_)]
             if not parts_:
                 return ""
+            # a breakdown whose parts fall short of the count it breaks down says the rest, so the parts add up
+            rest_ = (int(total) - sum(int(c_.get(s_) or 0) for s_ in OFF_STATES)) if total is not None else 0
+            if rest_ > 0 and notes_.get("rest"):
+                parts_.append(bind(notes_["rest"], {"count": fmt_n(rest_)}))
             return (" ({})" if wrap else "{}").format("; ".join(parts_))
 
         def off_note(es_):
@@ -6732,7 +6754,7 @@ def build_prediction(ctx: dict) -> dict:
                 return ", ".join(bind(ow["kept"], {"loser": m_.split("|")[0], "winner": m_.split("|")[1],
                                                    "count": fmt_n(n_)})
                                  + off_text(collections.Counter({s_: (bi.get("offKeptBy") or {}).get(f"{m_}|{s_}", 0)
-                                                                 for s_ in OFF_STATES}),
+                                                                 for s_ in OFF_STATES}), total=n_,
                                             objs=collections.Counter(s_.rsplit("|", 1)[-1] for s_, _ in
                                                                      {tuple(x_) for x_ in bi.get("offKeptObjs") or []}
                                                                      if s_.rsplit("|", 1)[0] == m_)
@@ -7097,6 +7119,16 @@ def build_prediction(ctx: dict) -> dict:
             f_["readerPlain"] = bind(sp_["line"], vals_)
     prediction["placeLabels"] = place_labels
     return {"prediction": prediction, "coverage": coverage, "validation": validation, "headings": headings}
+
+
+def first_status(statuses, precedence) -> str:
+    """One status for a check with several: the first by the skill's precedence (a status starting with a listed prefix
+    ranks by that prefix; an unlisted one after them), so two reason labels are never glued together."""
+    prec = list(precedence or [])
+
+    def rank(st):
+        return next((i for i, p in enumerate(prec) if str(st).startswith(p)), len(prec))
+    return sorted(statuses, key=lambda st: (rank(st), str(st)))[0]
 
 
 def is_physical_check(check_id, words: dict) -> bool:
@@ -7843,6 +7875,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                          "title": b.check_title(check_id), "strength": strength, "verdict": p.get("verdict"),
                          "plain": bind(templates.get(kind, ""), {**counts, "armId": arm_id}),
                          "counts": {**counts, "diffLines": [d["line"] for d in shrank],
+                                    # the mods each repaired line is between, so a reader never takes it for another pair
+                                    "readerRepairedByPair": [[d.get("A"), d.get("B"), int(d.get("repaired") or 0)]
+                                                             for d in reader_shrank if d.get("repaired")],
                                     "readerRepaired": reader_repaired, "readerReclassified": reader_reclassified,
                                     "readerRepairedNoBody": rep_obj_[1] if rep_obj_ else 0,
                                     "readerRepairedPairs": rep_obj_[2] if rep_obj_ else None,
@@ -8157,6 +8192,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                     clauses.append(bind(reader_comparison_templates["overlapReduction"],
                                         {"repairedCount": repaired_count, **subject_values([f.get("armId")]),
                                          "candidateNoun": overlap_candidate_noun(repaired_count)}))
+                    by_pair_ = c.get("readerRepairedByPair") or []
+                    if by_pair_ and reader_comparison_templates.get("reductionPairs"):
+                        clauses[-1] = clauses[-1].rstrip(".") + bind(reader_comparison_templates["reductionPairs"], {
+                            "pairs": "; ".join(bind(reader_comparison_templates.get("reductionPair") or "{a} and {b}: {count}",
+                                                    {"a": a_, "b": b_, "count": fmt_n(n_)}) for a_, b_, n_ in by_pair_)}) + "."
                 if reclassified_count:
                     clauses.append(bind(reader_comparison_templates["overlapReclassification"],
                                         {"reclassifiedCount": reclassified_count,
@@ -8913,7 +8953,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         verdict += " " + " ".join(refused_lines)
     limitations = []
     if missing:
-        limitations.append("Testing is incomplete; outstanding areas are listed below.")
+        limitations.append(bind((reader_data.get("prediction") or {}).get("limitationIncomplete")
+                                or "Testing is incomplete; the outstanding areas are listed under \"{heading}\".",
+                                {"heading": ((reader_data.get("prediction") or {}).get("headings") or {}).get("coverage")
+                                 or "What the checks could not judge"}))
     if not any(m.get("assessed") and m.get("mediaKind") == "game-video" for m in media):
         limitations.append("No matching play-time evidence was supplied, so this does not show what happened during play.")
     if any(a.get("espOnly") for a in arms_out):
@@ -9017,7 +9060,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 rows_.append((title, arm_order.get(m.get("armId"), len(arm_order)),
                               arm_labels.get(m.get("armId"), "Measured setup")))
             subjects = [f"{title} — {setup}" for title, _, setup in sorted(dict.fromkeys(rows_))]
-            missing_summary.append({"reason": "; and ".join(missing_reason(st, "has no accepted result") for st in status_set),
+            reason_ = missing_reason(first_status(status_set, (reader_data.get("prediction") or {}).get(
+                "missingReasonPrecedence")), "has no accepted result")
+            same_ = next((x_ for x_ in missing_summary if x_["reason"] == reason_), None)
+            if same_ is not None:
+                same_["subjects"] = list(dict.fromkeys(same_["subjects"] + subjects))
+                continue
+            missing_summary.append({"reason": reason_,
                                     "subjects": subjects,
                                     "explanation": " ".join(x for x in (reason_explanations.get(st) for st in status_set) if x)
                                     or None})
