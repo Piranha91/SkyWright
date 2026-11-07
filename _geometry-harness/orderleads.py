@@ -35,6 +35,8 @@ FIELD = re.compile(r"^\S+ \S+: (\S+) - ")
 REGISTRATION = {"Quest", "DialogTopic", "DialogResponses", "Scene", "FormList", "Location", "StoryManagerQuestNode", "StoryManagerBranchNode",
                 "StoryManagerEventNode", "Package", "DialogBranch", "DialogView"}
 STAGES = ("map", "overlap", "contact", "empty", "census", "state", "navown", "seam", "water", "dep", "drift", "route", "records")
+STAGE_FILES = {"map": "map", "overlap": "overlap", "contact": "contact", "empty": "empty", "census": "census", "state": "state", "navown": "navown",
+               "seam": "seam", "water": "water", "dep": "dep", "drift": "drift", "route": "route", "records": "records"}
 
 REASON_ONE = "names one plugin: not a clash between mods"
 REASON_BASE = "differs from the base game only: not a clash between mods"
@@ -274,19 +276,47 @@ def default_added(pass_dir, added):
     return list(pj.get("added") or [])
 
 
-def unassessed(d, m, rules, rec_doc):
+def _pass_file(d, pj, key):
+    """A file the pass folder names in pass.json (relative to the folder), or None."""
+    v = (pj.get(key) or {}).get("file") if isinstance(pj.get(key), dict) else pj.get(key)
+    if not v:
+        return None
+    p = Path(v)
+    return p if p.is_absolute() else Path(d) / p
+
+
+def stage_record(d, pj):
+    """Each stage: ran, failed, refused, skipped, not run (only when the record says it is complete) or unknown."""
     d = Path(d)
-    stages = load(d / "stages.json")
-    st = []
-    if stages is not None:
-        for s in STAGES:
-            v = stages.get(s)
-            if v is None:
-                st.append({"stage": s, "why": "not run"})
-            elif v.get("skipped"):
-                st.append({"stage": s, "why": "skipped"})
-            elif v.get("exit") not in (0, None) or v.get("stopped") or v.get("refused"):
-                st.append({"stage": s, "why": v.get("refused") or (f"stopped: {v.get('stopped')}" if v.get("stopped") else f"exit {v.get('exit')}")})
+    rec = pj.get("stages") if isinstance(pj.get("stages"), dict) else load(d / "stages.json")
+    complete = bool(pj.get("stagesComplete"))
+    out = {}
+    for s in STAGES:
+        v = (rec or {}).get(s)
+        present = (d / f"{STAGE_FILES[s]}.json").exists() or (d / f"{STAGE_FILES[s]}.json.gz").exists()
+        if v is None:
+            out[s] = {"status": "not run" if complete else "unknown", "outputPresent": present,
+                      "why": "the pass's stage record says it did not run" if complete else "the pass's stage record does not cover it"}
+        elif v.get("status") == "unknown":
+            out[s] = {"status": "unknown", "outputPresent": present, "why": v.get("why") or "the pass's stage record does not cover it"}
+        elif v.get("skipped"):
+            out[s] = {"status": "skipped", "outputPresent": present, "why": "skipped"}
+        elif v.get("refused"):
+            out[s] = {"status": "refused", "outputPresent": present, "why": v["refused"]}
+        elif v.get("exit") not in (0, None) or v.get("stopped"):
+            out[s] = {"status": "failed", "outputPresent": present, "why": f"stopped: {v.get('stopped')}" if v.get("stopped") else f"exit {v.get('exit')}"}
+        else:
+            out[s] = {"status": "ran", "outputPresent": present, "why": ""}
+    return out
+
+
+def unassessed(d, m, rules, rec_doc, pj=None):
+    d = Path(d)
+    rec = stage_record(d, pj or {})
+    # unassessed: a stage that did not run, failed, was refused or skipped, or whose record is unknown and left no output
+    st = [{"stage": s, "status": v["status"], "why": v["why"]} for s, v in rec.items()
+          if v["status"] in ("not run", "failed", "refused", "skipped") or (v["status"] == "unknown" and not v["outputPresent"])]
+    unknown_read = [s for s, v in rec.items() if v["status"] == "unknown" and v["outputPresent"]]
     layers = collections.defaultdict(list)
     for folder, v in (m.get("runtimeLayers") or {}).items():
         for k in v:
@@ -297,7 +327,7 @@ def unassessed(d, m, rules, rec_doc):
         bad = [x for x in v.get("coverage") or [] if any((x.get("Unjudgeable") or {}).values())]
         if bad:
             cov[k] = bad
-    return {"stages": st, "runtimeLayers": {k: sorted(v) for k, v in sorted(layers.items())},
+    return {"stages": st, "stagesUnknownButRead": unknown_read, "stageRecord": rec, "runtimeLayers": {k: sorted(v) for k, v in sorted(layers.items())},
             "registry": {k: v for k, v in (rules.get("coverage", {}).get("registry") or {}).items() if str(v).startswith("unassessed")},
             "runtimeLayersNote": rules.get("coverage", {}).get("runtimeLayers"),
             "unreadable": [p["name"] for p in m["plugins"] if p.get("error")] + list(m.get("archivesUnreadable") or []),
@@ -399,8 +429,8 @@ def _cells(m, cell_names):
 
 
 class Result:
-    def __init__(self, leads, message=None, asked=None):
-        self.leads, self.message, self.asked = leads, message, asked or {}
+    def __init__(self, leads, message=None, asked=None, notes=None):
+        self.leads, self.message, self.asked, self.notes = leads, message, asked or {}, notes or []
 
 
 def _public(g, rank=None):
@@ -422,6 +452,12 @@ class Index:
             raise ValueError(f"{self.pass_dir} has no map.json; run ordermap (or orderpass) for this order first.")
         self.map = m
         ctx = self.ctx = Ctx(m)
+        pj = self.pass_info = load(self.pass_dir / "pass.json") or {}
+        # what the pass folder says about itself, unless the caller names another file
+        dummies = dummies or _pass_file(self.pass_dir, pj, "dummies")
+        cell_names = cell_names or _pass_file(self.pass_dir, pj, "cellNames")
+        self.inputs = {"dummies": str(dummies) if dummies else None, "cellNames": str(cell_names) if cell_names else None,
+                       "passJson": bool(pj)}
         self.cells = _cells(m, cell_names)
         # dummies: the map's sizes, else a measured list, else none can be told
         if any("bytes" in p for p in m["plugins"]):
@@ -528,7 +564,7 @@ class Index:
         named = {x for g in groups.values() for x in g["mods"]}
         self.real_plugins = len(real)
         self.no_signal = sorted(set(real) - named - {x for pr in plugin_pairs for x in pr})
-        self.unassessed = unassessed(self.pass_dir, m, R, rec_doc)
+        self.unassessed = unassessed(self.pass_dir, m, R, rec_doc, pj)
         self.added = default_added(self.pass_dir, added)
 
     # ---- queries ----------------------------------------------------------------------------------------------------
@@ -581,7 +617,31 @@ class Index:
         for i, g in enumerate(out, 1):
             g["position"] = i
         msg = None if out else self._why_none(added, place or place_prefix, pair, family)
-        return Result(out, msg, asked)
+        notes = self._place_notes(kept, q) if q else []
+        return Result(out, msg, asked, notes)
+
+    def _place_notes(self, kept, q):
+        """What a place query could not match because the pass lacks a name or a FormKey, said whatever the hit count."""
+        by_key = re.fullmatch(r"[0-9A-Fa-f]{6}:\S.*", q.strip()) is not None
+        n, leads = 0, set()
+        for g in kept:
+            for r in g["members"]:
+                if not (r.get("isPlace") and r["place"]):
+                    continue
+                s = _strip(r["place"])
+                key_shaped = re.fullmatch(r"[0-9A-Fa-f]{6}:.+", s) is not None
+                if not by_key and key_shaped and not (self.cells["byKey"].get(s) or {}).get("edid") and not (self.cells["byKey"].get(s) or {}).get("grid"):
+                    n += 1
+                    leads.add(id(g))
+                elif by_key and not key_shaped and s.lower() not in self.cells["byName"]:
+                    n += 1
+                    leads.add(id(g))
+        if not n:
+            return []
+        if by_key:
+            return [f"{n} rows in {len(leads)} leads this query could have kept are labelled by a cell name this pass has no FormKey for, so a FormKey can't match them; ask by name too."]
+        return [f"{n} rows in {len(leads)} leads this query could have kept sit in cells this pass has no name for (record rows name a cell by FormKey), so a name can't match them; "
+                "ask by FormKey too, or give the pass a cell-name table."]
 
     def _why_none(self, added, place, pair, family):
         for n in list(added or []) + list(pair or []):
@@ -629,6 +689,8 @@ class Index:
         L.append(f"Not offered as leads (kept in the record, index.json): rows: {sa or 'none'}. {sg}.\n")
         if result.message:
             L.append(f"**{result.message}**\n")
+        for n in result.notes:
+            L.append(f"**Not matched by this query:** {n}\n")
         for g in result.leads[:lim]:
             pos = g.get("position", g.get("rank"))
             places = ", ".join(self._place_label(p) for p, _ in g["places"][:10])
@@ -650,7 +712,9 @@ class Index:
         for k, v in u["runtimeLayers"].items():
             L.append(f"- **{k}:** {len(v)} folders: {', '.join(v[:12])}{' ...' if len(v) > 12 else ''}")
         for s in u["stages"]:
-            L.append(f"- **Stage {s['stage']}:** {s['why']}; its check is unassessed in this pass.")
+            L.append(f"- **Stage {s['stage']}:** {s['status']} ({s['why']}); its check is unassessed in this pass.")
+        if u.get("stagesUnknownButRead"):
+            L.append(f"- **Stage record incomplete:** {', '.join(u['stagesUnknownButRead'])}: the pass's record doesn't say how they ended; their outputs are present and were read.")
         for k, v in u["registry"].items():
             L.append(f"- **{k}:** {v}")
         if u["unreadable"]:
@@ -673,7 +737,7 @@ class Index:
     def to_json(self):
         return {"tool": "orderleads", "schema": 1, "pass": str(self.pass_dir), "rulesSha256": self.rules_sha256, "rawRows": self.raw_rows,
                 "leads": len(self._leads), "setAside": self.set_aside, "added": self.added, "dummies": self.dummies, "dummySource": self.dummy_source,
-                "realPlugins": self.real_plugins, "noSignal": self.no_signal, "unassessed": self.unassessed, "flagCensus": self.flag_census,
+                "realPlugins": self.real_plugins, "noSignal": self.no_signal, "unassessed": self.unassessed, "flagCensus": self.flag_census, "inputs": self.inputs,
                 "record": self.record}
 
 
@@ -693,6 +757,10 @@ def build(pass_dir, added=None, rules=None, dummies=None, cell_names=None):
 # ---- command line ----------------------------------------------------------------------------------------------------
 
 def main(argv=None):
+    # rows carry non-ASCII text (a Δ, an em dash); a Windows console's code page must not turn a read into a crash
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure") and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(prog="orderleads.py")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("build", "read"):
@@ -742,7 +810,7 @@ def main(argv=None):
             res = None
         if a.format == "json":
             r_ = res or (idx.query(added=idx.added) if idx.added else idx.query())
-            print(json.dumps({"asked": r_.asked, "message": r_.message, "leads": r_.leads[: a.limit or len(r_.leads)]}, ensure_ascii=False))
+            print(json.dumps({"asked": r_.asked, "message": r_.message, "notes": r_.notes, "matched": len(r_.leads), "leads": r_.leads[: a.limit or len(r_.leads)]}, ensure_ascii=False))
         else:
             sys.stdout.write(idx.render(res, whole=a.whole, limit=a.limit))
     return 0

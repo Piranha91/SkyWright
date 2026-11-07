@@ -136,7 +136,8 @@ def main(argv=None, resolve=None):
         stop.set()
     order_id = {"instance": a.instance, "profile": a.profile, "order": a.order, "plugins": len(m["plugins"]),
                 "pluginNames": [p["name"] for p in m["plugins"]]}
-    (out / "pass.json").write_text(json.dumps({"tool": "orderpass", "schema": 1, "order": order_id, "added": a.added, "stages": stages,
+    (out / "pass.json").write_text(json.dumps({"tool": "orderpass", "schema": 1, "order": order_id, "added": a.added, "stages": stages, "stagesComplete": True,
+                                               "dummies": {"source": "map", "why": "ordermap records each plugin's size"}, "cellNames": None,
                                                "seconds": round(time.time() - t_pass, 1)}, indent=1), encoding="utf-8")
     import orderleads
     return orderleads.main(["build", "--pass", str(out)])

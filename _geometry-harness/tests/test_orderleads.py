@@ -225,8 +225,55 @@ def case_L11_no_hit(M, tmp):
     assert not r.leads and r.message and "placeholder" in r.message.lower(), f"a dummy asked for: {r.message!r}"
 
 
+def bare_map(d):
+    """The pass as a retained pass may hold it: a map with no plugin sizes and no cell names."""
+    m = json.loads((d / "map.json").read_text(encoding="utf-8"))
+    for p in m["plugins"]:
+        p.pop("bytes", None)
+    m.pop("cells", None)
+    (d / "map.json").write_text(json.dumps(m), encoding="utf-8")
+
+
+def case_L12_unmatched_said(M, tmp):
+    """A place asked by name, on a pass with no cell names: the record rows on unnamed cells are said, with a hit."""
+    d = write_pass(tmp / "p")
+    bare_map(d)
+    r = M.build(d).query(place="CellOne")
+    assert r.leads, "--place CellOne found nothing on a pass without cell names (the overlap row is labelled by name)"
+    notes = getattr(r, "notes", None) or []
+    assert any("no name" in n for n in notes), f"rows on cells the pass can't name are not said: {notes}"
+
+
+def case_L13_self_described(M, tmp):
+    """A pass folder names its own dummy list and cell-name table in pass.json; a read with no flags uses them."""
+    d = write_pass(tmp / "p", added=["ModA.esp"])
+    bare_map(d)
+    (d / "dummies.json").write_text(json.dumps({"dummies": ["Dummy.esp"]}), encoding="utf-8")
+    cells = {CELL1: {"edid": "CellOne"}, EXT: {"edid": None, "worldspace": "World", "grid": [3, -2]}}
+    (d / "cells.json").write_text(json.dumps({"cells": cells}), encoding="utf-8")
+    pj = json.loads((d / "pass.json").read_text(encoding="utf-8"))
+    pj.update({"dummies": {"source": "list", "file": "dummies.json"}, "cellNames": "cells.json"})
+    (d / "pass.json").write_text(json.dumps(pj), encoding="utf-8")
+    idx = M.build(d)
+    assert idx.dummies == ["Dummy.esp"] and idx.dummy_source == "list", f"pass.json's dummy list not read: {idx.dummies}, {idx.dummy_source!r}"
+    assert "Dummy.esp" not in idx.no_signal, "the dummy is on the no-signal list"
+    got = {(tuple(sorted(g["mods"])), g["family"]) for g in idx.query(place="CellOne").leads}
+    assert (("ModA.esp", "ModB.esp"), "records") in got, f"pass.json's cell names not read: --place CellOne kept {got}"
+
+
+def case_L14_stage_unknown(M, tmp):
+    """A stage the pass's record doesn't cover is unknown, not 'not run'; with a complete record it is 'not run'."""
+    d = write_pass(tmp / "p")
+    text = M.build(d).render(whole=True)
+    assert "not run" not in text, "a stage missing from an incomplete record reads 'not run'"
+    assert "unknown" in text, "a stage the record doesn't cover isn't said to be unknown"
+    (d / "pass.json").write_text(json.dumps({"stagesComplete": True}), encoding="utf-8")
+    assert "not run" in M.build(d).render(whole=True), "with a complete stage record, a missing stage isn't 'not run'"
+
+
 CASES = [case_L1_mod, case_L2_place, case_L3_pair, case_L4_one_plugin, case_L5_compressed, case_L6_dummy, case_L7_edge,
-         case_L8_unassessed, case_L9_default, case_L10_wording, case_L11_no_hit]
+         case_L8_unassessed, case_L9_default, case_L10_wording, case_L11_no_hit, case_L12_unmatched_said, case_L13_self_described,
+         case_L14_stage_unknown]
 
 
 def main():
