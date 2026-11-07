@@ -4,7 +4,7 @@
     python evalrun.py run    --run RUN
     python evalrun.py resume --run RUN [--rebuild-ledger]
     python evalrun.py finalize --run RUN
-    python evalrun.py bundle --run RUN [--out DIR] [--media media.json]
+    python evalrun.py bundle --run RUN [--out DIR] [--media media.json] [--registry FILE] [--scope FILE]
     python evalrun.py verify-bundle DIR
     python evalrun.py status --run RUN
 
@@ -1774,18 +1774,45 @@ def refusal_cause(why: str) -> str:
     return head if re.fullmatch(r"[a-z][a-z-]*", head or "") else "plan-changed"
 
 
-def relative_path_refusal(plan: dict) -> str | None:
+def relative_path_refusal(plan: dict, only: tuple | None = None, remedy: str | None = None) -> str | None:
     """A plan written before `plan` stored absolute paths keeps its inputs as typed. Where such a path does not resolve
     from the folder this command runs in, the plan cannot say where it was made, so it is refused by name rather than
-    reported as a missing input."""
+    reported as a missing input. `only` limits the check to those stored paths; `remedy` replaces the closing advice."""
     stored = [("registry", (plan.get("registry") or {}).get("path")), ("scope", (plan.get("scope") or {}).get("path")),
               ("candidates folder", plan.get("candidatesDir"))]
     stored += [(f"candidate (arm {a.get('armId')})", a.get("candidatePath")) for a in plan.get("arms") or []]
     for what, p in stored:
+        if only is not None and what not in only:
+            continue
         if p and not Path(p).is_absolute() and not Path(p).exists():
             return (f"plan-path-relative: this plan stores the {what} path '{p}' relative to the folder it was planned "
                     f"from, which the plan does not record, and it does not resolve from {Path.cwd()}; run from the "
-                    "folder the plan was made in, or plan again (plans now store absolute paths).")
+                    "folder the plan was made in, or " + (remedy or "plan again (plans now store absolute paths)."))
+    return None
+
+
+#: What a missing or changed premise costs, in the refusal's words.
+PREMISE_WORDS = {"registry": ("the checklist this run was derived from cannot be re-read",
+                              "A checklist cannot change under a frozen plan."),
+                 "scope": ("the applicability this plan froze cannot be re-derived",
+                           "A scope change changes the checklist.")}
+
+
+def premise_file_refusal(plan: dict, label: str, nxt: str, named: str | None = None) -> str | None:
+    """The one hash check of a frozen premise (`registry` or `scope`): the plan's stored file, or a file named on the
+    command line in its place (`--registry` / `--scope`), must exist and hash to what the plan froze."""
+    want = str((plan.get(label) or {}).get("sha256"))
+    p = Path(named if named is not None else plan[label]["path"])
+    lost, changed = PREMISE_WORDS[label]
+    if not p.is_file():
+        if named is not None:
+            return f"{label}-missing: --{label} {p} does not exist. {nxt}"
+        return f"{label}-missing: the plan's {label} {p} does not exist, so {lost}. {nxt}"
+    got = sha256_file(p)
+    if got != want:
+        if named is not None:
+            return f"{label}-mismatch: --{label} {p} hashes {str(got)[:12]}, the plan froze {want[:12]}. {nxt}"
+        return f"{label}-changed: {p} now hashes {str(got)[:12]}, the plan recorded {want[:12]}. {changed} {nxt}"
     return None
 
 
@@ -1796,26 +1823,45 @@ def premise_refusal(plan: dict) -> str | None:
     rel = relative_path_refusal(plan)
     if rel:
         return rel
-    reg = Path(plan["registry"]["path"])
     nxt = "Next action: re-run scopeprobe and plan again."
-    if not reg.exists():
-        return (f"registry-missing: the plan's registry {reg} does not exist, so the checklist this run "
-                f"was derived from cannot be re-read. {nxt}")
-    if sha256_file(reg) != plan["registry"]["sha256"]:
-        return (f"registry-changed: {reg} now hashes {str(sha256_file(reg))[:12]}, the plan recorded "
-                f"{plan['registry']['sha256'][:12]}. A checklist cannot change under a frozen plan. {nxt}")
-    spath = (plan.get("scope") or {}).get("path")
-    if not spath:
+    bad = premise_file_refusal(plan, "registry", nxt)
+    if bad:
+        return bad
+    if not (plan.get("scope") or {}).get("path"):
         return None  # a plan made without --scope has no scope premise
-    sp = Path(spath)
-    if not sp.exists():
-        return (f"scope-missing: the plan's scope {sp} does not exist, so the applicability this plan "
-                f"froze cannot be re-derived. {nxt}")
-    got = sha256_file(sp)
-    if got != plan["scope"]["sha256"]:
-        return (f"scope-changed: {sp} now hashes {str(got)[:12]}, the plan recorded "
-                f"{str(plan['scope']['sha256'])[:12]}. A scope change changes the checklist. {nxt}")
-    return None
+    return premise_file_refusal(plan, "scope", nxt)
+
+
+#: Where bundle copies each premise.
+PREMISE_COPIES = {"registry": "registry/check-registry.json", "scope": "scope/scope.json"}
+
+
+def bundle_premise_sources(plan: dict, named: dict) -> tuple[dict, str | None, int]:
+    """The file bundle copies for each frozen premise, checked by `premise_file_refusal` before anything is written:
+    a file named with --registry / --scope, else the plan's stored path. A bundle whose copy cannot hash to the plan
+    could never verify, so it is refused by name instead (exit 2 for a named file, exit 3 for the stored one)."""
+    sources: dict[str, Path] = {}
+    for label, dest in PREMISE_COPIES.items():
+        frozen = plan.get(label) or {}
+        given = named.get(label)
+        if not frozen.get("path"):
+            if given:
+                return {}, f"--{label} {given}: this plan froze no {label}, so there is nothing to name", EXIT_REFUSED_INPUT
+            continue  # a plan made without --scope has no scope premise
+        want = str(frozen.get("sha256"))[:12]
+        nxt = f"Next action: pass --{label} naming a copy that hashes {want}, such as an earlier bundle's {dest}."
+        if given:
+            why = premise_file_refusal(plan, label, nxt, named=given)
+            if why:
+                return {}, why, EXIT_REFUSED_INPUT
+            sources[label] = Path(given)
+            continue
+        why = (relative_path_refusal(plan, only=(label,), remedy=f"pass --{label} naming a copy that hashes {want}.")
+               or premise_file_refusal(plan, label, nxt))
+        if why:
+            return {}, why, EXIT_REFUSED_RESULT
+        sources[label] = Path(frozen["path"])
+    return sources, None, EXIT_OK
 
 
 # ------------------------------------------------------------------- ledger and journal (D5) --
@@ -6214,6 +6260,10 @@ def cmd_bundle(a) -> int:
     if bad:
         print(f"REFUSED: {bad}", file=sys.stderr)
         return EXIT_REFUSED_RESULT
+    premises, bad, code = bundle_premise_sources(plan, {"registry": a.registry, "scope": a.scope})
+    if bad:
+        print(f"REFUSED: {bad}", file=sys.stderr)
+        return code
 
     with Run("evalrun-bundle", stage_source="counted") as r:
         r.stage("bundle", total=1, unit="bundles")
@@ -6288,10 +6338,9 @@ def cmd_bundle(a) -> int:
         for p in sorted((run / "sweep").glob("**/*")):
             if p.is_file() and p.suffix.lower() in (".json", ".jsonl", ".md", ".txt"):
                 copy_in(p, f"sweep/{p.relative_to(run / 'sweep').as_posix()}", kind="sweep")
-        if plan["scope"].get("path") and Path(plan["scope"]["path"]).exists():
-            copy_in(Path(plan["scope"]["path"]), "scope/scope.json", kind="scope")
-        if Path(plan["registry"]["path"]).exists():
-            copy_in(Path(plan["registry"]["path"]), "registry/check-registry.json", kind="registry")
+        for label in ("scope", "registry"):  # checked against the plan's frozen hashes above; manifest order kept
+            if label in premises:
+                copy_in(premises[label], PREMISE_COPIES[label], kind=label)
         search = Path(plan["candidatesDir"]) / "candidates.json"
         if search.exists():
             copy_in(search, "search/candidates.json", kind="search")
@@ -6854,6 +6903,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--run", required=True)
     p.add_argument("--out")
     p.add_argument("--media")
+    p.add_argument("--registry", help="the registry file the plan froze, copied in place of the plan's stored path "
+                                      "(rebundling an older run after the registry changed); it must hash to the plan")
+    p.add_argument("--scope", help="the scope file the plan froze, copied in place of the plan's stored path; it must "
+                                   "hash to the plan")
     p.add_argument("--no-names", action="store_true",
                    help="skip the names step (each row's objects, their bases and models, read with the record reader); "
                         "the manifest says it was skipped, and `enrich --kind names` can add it later")
