@@ -7780,10 +7780,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for v in (settings.get("declaredPatches") or []):
         decls_.append(patch_declaration(v, "--declare-patch"))
     copies_of = collections.defaultdict(list)
+    arms_with_rows = set()
     for arm_id_ in arm_ids:
         for p in ((plan_arms.get(arm_id_) or {}).get("requested") or {}).get("plugins") or []:
             if p.get("name"):
                 copies_of[str(p["name"]).lower()].append((arm_id_, p))
+                arms_with_rows.add(arm_id_)
 
     def name_ambiguous(cs) -> bool:
         """Different files under one name, or a baseline copy that cannot be compared with another setup's copy."""
@@ -7841,8 +7843,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         return "baseline" if f.get("part") == "reverse" else f.get("armId")
 
     def finding_declared(f, name) -> bool:
+        """A setup the plan requests no plugins for (a disposition-only arm, a sibling's) has no copies to ask of, so
+        its rows are judged by the name, as before item 20."""
         setup_ = setup_of_rows(f)
-        return declared_copy(setup_, name) if setup_ else str(name or "").lower() in declared_patches
+        if setup_ in arms_with_rows:
+            return declared_copy(setup_, name)
+        return str(name or "").lower() in declared_patches
 
     def arm_comparison_kind(arm_id) -> str:
         if arm_id == "baseline":

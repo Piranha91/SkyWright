@@ -1,5 +1,5 @@
 """A same-named plugin from another folder is planned and reported as itself (cases 451-459), and can be declared
-as the patch by its sha256 or its folder without marking the other file of its name (cases 460-479; 475 unused).
+as the patch by its sha256 or its folder without marking the other file of its name (cases 460-479).
 
     python _geometry-harness/tests/test_same_name_variant.py
 
@@ -492,6 +492,22 @@ def prediction_cases():
         doc_md = f"readerdoc raised {type(ex).__name__}: {ex}"
     files = next((ln for ln in doc_md.splitlines() if ln.startswith("Files:")), doc_md[:160])
     check(LABEL in files and f"{SEW}, {SEW}" not in files, f"474: files line {files!r}")
+
+    # 475 (Gate C review R1): a setup the plan requests no plugins for has no copies to ask of, so its rows are judged
+    # by the declared name, as before item 20: a lost edit an ordinary declared patch wins there is the patch's choice.
+    PT = P.PATCH
+    bare = P.arm("no-rows", [B, P.MOD_A, P.MOD_B, PT])
+    bare["requested"]["plugins"] = []
+    arms_r = [P.arm("baseline", [B, P.MOD_A, P.MOD_B, PT], kind="baseline"), bare]
+    rows_r = [P.lost_row(P.MOD_B, PT, fk[0], "LocationReference", "b1", "a1", "a1")]
+    plan_r, _, _ = P.compile_and_render(arms_r, {(P.CONTACT, "baseline"): [], (P.CONTACT, "no-rows"): []},
+                                        [P.MOD_A, P.MOD_B], patches=[PT],
+                                        count_only={(P.RECORDS, "baseline"): 1, (P.RECORDS, "no-rows"): 1},
+                                        enrichment={(P.RECORDS, "baseline"): rows_r, (P.RECORDS, "no-rows"): rows_r})
+    check([bool(f.get("readerPatchChoice")) for f in rec(plan_r, "no-rows")] == [True]
+          and [bool(f.get("readerPatchChoice")) for f in rec(plan_r, "baseline")] == [True],
+          f"475: a setup with no requested rows judges by name (no-rows {[f.get('readerPatchChoice') for f in rec(plan_r, 'no-rows')]}, "
+          f"baseline {[f.get('readerPatchChoice') for f in rec(plan_r, 'baseline')]})")
 
     # 479 (C1b): both setups carry the name and the variant's bytes are unstated: by name alone neither copy is marked.
     plan_u, _, _ = P.compile_and_render(p_arms(alt_source="unstated"), res, [SEW], patches=[SEW], count_only=co,
