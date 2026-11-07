@@ -152,7 +152,11 @@ def page_say(page: dict) -> str:
                 re.sub(r"\.(esp|esm|esl)$", "", str(m), flags=re.IGNORECASE) for m in marked))
     elif lay == "types":
         for r in page.get("rows") or []:
-            bits.append(f"{r.get('label')}: {r.get('count')}" + (f" {r['unit']}" if r.get("unit") else ""))
+            bits.append(f"{r.get('label')}: {r.get('count')}" + (f" {r['unit']}" if r.get("unit") else "")
+                        + (f", between {'; '.join(r['pairs'])}" if r.get("pairs") else "")
+                        + (f"; {r['moreLine']}" if r.get("moreLine") else ""))
+        if page.get("incomplete") and page.get("incomplete") not in str(page.get("sayLead") or ""):
+            bits.append(page["incomplete"])
         for key in ("line", "markersLine"):
             if (page.get("leftOut") or {}).get(key):
                 bits.append(page["leftOut"][key])
