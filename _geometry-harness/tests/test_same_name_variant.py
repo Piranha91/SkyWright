@@ -1,5 +1,6 @@
-"""A same-named plugin from another folder is planned and reported as itself (cases 451-459), and can be declared
-as the patch by its sha256 or its folder without marking the other file of its name (cases 460-479).
+"""A same-named plugin from another folder is planned and reported as itself (cases 451-459).
+Such a file can also be declared as the patch by its sha256 or its folder without marking the other file of its name
+(cases 460-479).
 
     python _geometry-harness/tests/test_same_name_variant.py
 
