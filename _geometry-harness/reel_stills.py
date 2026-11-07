@@ -12,6 +12,7 @@ different pages. These pages are the only frames of a reel that carry text; evid
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 import os
 from pathlib import Path
@@ -65,7 +66,7 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
     lay = page.get("layout")
     if lay == "types":
         for r in page.get("rows") or []:
-            out.append(("head", f"{r.get('label')}: {r.get('count')}", 1.15))
+            out.append(("head", f"{r.get('label')}: {r.get('count')}" + (f" {r['unit']}" if r.get("unit") else ""), 1.15))
             if r.get("pairs"):
                 out.append(("dim", "between " + "; ".join(r["pairs"]), 0.8))
             if r.get("moreLine"):
@@ -73,6 +74,8 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
         for key in ("line", "markersLine"):
             if (page.get("leftOut") or {}).get(key):
                 out.append(("dim", page["leftOut"][key], 0.8))
+        if page.get("incomplete"):
+            out.append(("mark", page["incomplete"], 0.85))
     elif lay == "load-order":
         # the mod being added and every plugin of a counted clash in the highlight colour, under the same-colour legend
         marked = set(page.get("affected") or page.get("targets") or [])
@@ -85,6 +88,8 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
             out += [("body", m, 0.75) for m in page["runtimeMods"]]
     elif lay == "statement":
         out = [("head", page.get("text") or "", 1.3)]           # one sentence, no title: what the narration says
+    elif lay == "list":
+        out += [("body", str(r), 0.9) for r in page.get("rows") or []]
     elif lay == "checks":
         for r in page.get("rows") or []:
             out.append(("head", str(r.get("reason") or "")[:1].upper() + str(r.get("reason") or "")[1:], 0.95))
@@ -104,23 +109,94 @@ def draw_strip(labels: dict, font: Path, bold: Path, size=(1280, 40), split_at: 
     return img
 
 
-def draw_page(page: dict, font: Path, bold: Path, size=(1280, 720)) -> Image.Image:
+#: the smallest body size (px at 720p) a still page is drawn at; a page that would need smaller is split into pages
+MIN_READABLE = 22
+
+
+def fits(page: dict, font: Path, bold: Path, size=(1280, 720), floor: int = MIN_READABLE) -> bool:
+    try:
+        draw_page(page, font, bold, size, floor=floor)
+        return True
+    except ValueError:
+        return False
+
+
+def paginate(page: dict, font: Path, bold: Path, size=(1280, 720)) -> list[dict]:
+    """A still page split into pages that each fit at a readable size: a statement by its sentences, a list or checks
+    page by its rows (a checks row too long alone by its subjects). One page when it fits; a page that cannot be split
+    further is returned as it is and draws at its smallest size."""
+    limit = page.get("maxWords")
+    n_words = len(" ".join(str(x) for x in [page.get("title"), page.get("text"), *[
+        (" ".join([str(r.get("reason") or ""), *map(str, r.get("subjects") or [])]) if isinstance(r, dict) else str(r))
+        for r in page.get("rows") or []]] if x).split())
+    if fits(page, font, bold, size) and not (limit and n_words > int(limit)):
+        return [page]
+    lay = page.get("layout")
+    if lay == "statement":
+        parts = re.split(r"(?<=[.;])\s+", str(page.get("text") or ""))
+        if len(parts) < 2:
+            return [page]
+        k = len(parts) // 2
+        return (paginate({**page, "text": " ".join(parts[:k])}, font, bold, size)
+                + paginate({**page, "text": " ".join(parts[k:])}, font, bold, size))
+    rows = list(page.get("rows") or [])
+    if lay in ("list", "checks") and len(rows) > 1:
+        k = len(rows) // 2
+        return (paginate({**page, "rows": rows[:k]}, font, bold, size)
+                + paginate({**page, "rows": rows[k:]}, font, bold, size))
+    if lay == "checks" and rows and len(rows[0].get("subjects") or []) > 1:
+        subs = rows[0]["subjects"]
+        k = len(subs) // 2
+        return (paginate({**page, "rows": [{**rows[0], "subjects": subs[:k]}]}, font, bold, size)
+                + paginate({**page, "rows": [{**rows[0], "subjects": subs[k:]}]}, font, bold, size))
+    return [page]
+
+
+def label_frame(src: Path, label: str, font: Path, bold: Path, size=(1280, 720), strip_h: int = 40) -> Image.Image:
+    """A vignette frame fitted above a label strip: which setup it shows, or which marked shape is which colour. The
+    evidence frame itself carries no text; the strip is the reel's."""
+    w, h = size
+    img = Image.new("RGB", size, BG)
+    with Image.open(src) as fr:
+        fr = fr.convert("RGB")
+        scale = min(w / fr.width, (h - strip_h) / fr.height)
+        fr = fr.resize((max(1, round(fr.width * scale)), max(1, round(fr.height * scale))))
+        img.paste(fr, ((w - fr.width) // 2, (h - strip_h - fr.height) // 2))
+    d = ImageDraw.Draw(img)
+    sz = 22
+    f = ImageFont.truetype(str(bold), sz)
+    while d.textlength(label, font=f) > w - 32 and sz > 12:
+        sz -= 1
+        f = ImageFont.truetype(str(bold), sz)
+    d.text(((w - d.textlength(label, font=f)) / 2, h - strip_h + (strip_h - sz) / 2 - 2), label, font=f, fill=FG)
+    return img
+
+
+def draw_page(page: dict, font: Path, bold: Path, size=(1280, 720), floor: int = 10) -> Image.Image:
     w, h = size
     margin = 64
     blocks = _blocks(page)
     if page.get("layout") == "statement":
         img = Image.new("RGB", size, BG)
         d = ImageDraw.Draw(img)
-        f = ImageFont.truetype(str(bold), 40)
-        lines = _wrap(d, page.get("text") or "", f, w - 2 * margin)
-        y = (h - len(lines) * 52) / 2
+        sz = 40
+        while True:
+            f = ImageFont.truetype(str(bold), sz)
+            lines = _wrap(d, page.get("text") or "", f, w - 2 * margin)
+            if len(lines) * round(sz * 1.3) <= h - 2 * margin:
+                break
+            if sz <= max(floor, 10):
+                raise ValueError("the statement page does not fit 1280x720 even at the smallest text size")
+            sz -= 2
+        lh = round(sz * 1.3)
+        y = (h - len(lines) * lh) / 2
         for line in lines:
             d.text(((w - d.textlength(line, font=f)) / 2, y), line, font=f, fill=FG)
-            y += 52
+            y += lh
         return img
     columns = 2 if page.get("layout") == "load-order" and len(page.get("plugins") or []) > 18 else 1
     base = 34
-    while base >= 10:
+    while base >= max(floor, 10):
         img = Image.new("RGB", size, BG)
         d = ImageDraw.Draw(img)
         col_w = (w - 2 * margin - (columns - 1) * 32) / columns

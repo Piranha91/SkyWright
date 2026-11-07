@@ -50,11 +50,11 @@ def check(name: str, ok: bool, msg: str) -> bool:
 # ------------------------------------------------------------------------------------------ the proposed skill data
 POLICY = {
     "allUpTo": 3, "perType": 3, "maxVignettes": 24,
-    "typeOrder": ["overlap", "contact", "record", "cell", "state", "navmesh"],
+    "typeOrder": ["overlap", "contact", "record", "cell", "state", "navmesh", "other"],
     "types": {"geometry.object-overlap": "overlap", "geometry.object-contact": "contact",
               "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
               "records.cell-attributes": "cell", "state.conditional-geometry": "state",
-              "geometry.navmesh-ownership": "navmesh"},
+              "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact"},
     "pictureTypes": ["overlap", "contact", "record", "state"],          # phase 2: placements and world states are pictured
     "drawableFields": ["Placement"],                                     # a record clash is pictured only for these fields
     "groupKey": ["type", "pair", "cell", "field"],                       # phase 3: instances of one problem
@@ -887,7 +887,9 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
         a_ = acc.get(t) or {}
         sets = [list(a_.get(k) or []) for k in ("pictured", "unpictured", "represented")]
         flat = [fk for s_ in sets for fk in s_]
-        scenes = [c["clash"].get("formKey") for c in view if c["kind"] in PICTURED and c["clash"].get("type") == t]
+        # accounted per clash (its object and partner), so a pictured clash cannot also be counted unpictured
+        scenes = ["|".join([str(c["clash"].get("formKey")), *map(str, c["clash"].get("other") or [])])
+                  for c in view if c["kind"] in PICTURED and c["clash"].get("type") == t]
         if x.get("count") != len(flat) or len(set(flat)) != len(flat) or sorted(sets[0]) != sorted(scenes):
             off.append((x.get("label"), x.get("count"), [len(s_) for s_ in sets], len(scenes)))
     check("N3-partition", bool(tp0.get("rows")) and bool(acc) and not off,

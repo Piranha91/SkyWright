@@ -2148,6 +2148,8 @@ def build_prediction(ctx: dict) -> dict:
 
     persistent_re = re.compile(words["persistentPlacePattern"]) if words.get("persistentPlacePattern") else None
 
+    place_labels = {}
+
     def located_place(fk, label):
         """(fourth review, Missives S3) a place that is only a worldspace's persistent cell (a bare form key) says the grid
         cell of the object's position, read from the plugin file of the version that loads last (its recorded bytes)."""
@@ -2706,7 +2708,17 @@ def build_prediction(ctx: dict) -> dict:
                 partner_arms.setdefault(others[0], arm_m)       # named in the record: which setup said so
             if (arm_m is None or (rk[0], arm_m) not in measured
                     or (str(arm_m).startswith("sibling:") and not sib_ok.get(rk[0]))):
-                return "with-target", t, None
+                # no setup equal to this one without the other mod: a measured setup of fewer of this setup's plugins that
+                # keeps the evaluated mod and leaves the other out still answers whether the clash needs it (the setups
+                # that pair the mod with each partner alone)
+                p_low_ = {x.lower() for x in all_orders.get(p_arm) or []}
+                alt_ = [a_ for a_, o_ in sorted(all_orders.items()) if a_ != p_arm and not str(a_).startswith("sibling:")
+                        and (rk[0], a_) in measured and t.lower() in {x.lower() for x in o_}
+                        and others[0].lower() not in {x.lower() for x in o_} and {x.lower() for x in o_} <= p_low_]
+                if not alt_:
+                    return "with-target", t, None
+                partner_arms.setdefault(others[0], alt_[0])
+                return ("single-mod" if any(there(a_, rk) for a_ in alt_) else "needs-both"), t, None
             if there(arm_m, rk):
                 return "single-mod", t, None
             # (seventh review, BPT r6 S3) a lost record change where the measured setup without the other mod also lacks
@@ -3129,7 +3141,9 @@ def build_prediction(ctx: dict) -> dict:
         if label and rk[1] != "LOST-EDIT":
             # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
             # part of its place
-            g.setdefault("_places", collections.Counter())[located_place(rk[4], re.sub(r"\s+\d+ tris -> \d+$", "", str(label)))] += 1
+            place_ = located_place(rk[4], re.sub(r"\s+\d+ tris -> \d+$", "", str(label)))
+            g.setdefault("_places", collections.Counter())[place_] += 1
+            place_labels.setdefault(str(rk[4]), place_)             # the reel says the same place the report does
         if hit["finding"].get("readerProvenance"):
             # the full sentence is in the limits and beside the finding; the item says it in short
             g["_provenance"] = words.get("itemReused") or hit["finding"]["readerProvenance"]
@@ -3965,16 +3979,38 @@ def build_prediction(ctx: dict) -> dict:
         where = ("both" if got_w is not None and {x["path"].lower() for x in got_p} == with_paths else
                  "withoutOnly" if got_w is not None and not with_paths else "only")
         owners = list(dict.fromkeys(o for x in got_p for o in x["namedBy"]))
+        # each file named by its kind (its extension), counted; never every file called a mesh
+        ak_ = words.get("missingAssetKinds") or {}
+        kinds_ = collections.Counter()
+        for x in got_p:
+            ext_ = str(x["path"]).rsplit(".", 1)[-1].lower()
+            kinds_[ext_ if ext_ in ak_ else "other"] += 1
+        by_word_ = collections.Counter()
+        for k_, n_ in kinds_.items():
+            by_word_[tuple(ak_.get(k_) or ak_.get("other") or ["file", "files"])] += n_
+        kinds_text_ = and_list([f"{fmt_n(n_)} {w_[0] if n_ == 1 else w_[1]}" for w_, n_ in by_word_.most_common()])
+        noun_key_ = "missingAssetNounKinds" if ak_ and words.get("missingAssetNounKinds") else "missingAssetNoun"
+        cap_ = int(ctx.get("rowsPerGroup") or 0) or len(got_p)
+        paths_ = "; ".join(x["path"] for x in got_p[:cap_]) + (
+            bind(words.get("missingAssetMore") or "", {"count": fmt_n(len(got_p) - cap_)}) if len(got_p) > cap_ else "")
         text = bind(words["missingAssetLine"], {
-            "count": fmt_n(len(got_p)), "noun": bind(words["missingAssetNoun"][0 if len(got_p) == 1 else 1], {
-                "owners": " and ".join(owners) if owners else words["missingAssetOwnersUnknown"]}),
+            "count": fmt_n(len(got_p)), "noun": bind(words[noun_key_][0 if len(got_p) == 1 else 1], {
+                "owners": " and ".join(owners) if owners else words["missingAssetOwnersUnknown"], "kinds": kinds_text_}),
             "where": bind(words["missingAssetWhere"][where], {"patch": patch_text}),
-            "paths": "; ".join(x["path"] for x in got_p),
+            "paths": paths_,
             # (eighth review, Pilgrim 27) what was searched, where every archive read: no install hedge
             "hedge": words["missingAssetSearched"] if words.get("missingAssetSearched") and asset_view_read_whole(
                 main_b, check_id, p_arm) else words.get("missingAssetHedge") or ""})
         if where == "only" and got_w:
             text += " " + bind(words["missingAssetWithPatch"], {"patch": patch_text, "count": fmt_n(len(got_w))})
+        # the same files missing in a measured setup without the evaluated mod do not come from it
+        for t_ in p_targets:
+            arm_t_ = arm_without({str(t_).lower()})
+            if arm_t_ and (check_id, arm_t_) in count_only and words.get("missingAssetNotSubject"):
+                got_t_ = missing_assets(main_b, check_id, arm_t_) or []
+                if {x["path"].lower() for x in got_p} <= {x["path"].lower() for x in got_t_}:
+                    text += " " + bind(words["missingAssetNotSubject"], {"count": fmt_n(len(got_p)), "subject": t_})
+                    break
         # (ninth review, BPT 33; gate A answer 3) what uses each missing mesh, read from every plugin file of each setup:
         # a placed user switched off for good in every setup is not drawn while off; a mesh no placed object uses is said
         # so, with the other uses (a script or a list creating the object) not read. A mesh with a placed user drawn, or a
@@ -5222,7 +5258,8 @@ def build_prediction(ctx: dict) -> dict:
         lines.append({"reason": reasons["notSeparable"], "count": not_sep,
                       "subject": "; ".join(sorted({title_of(g["checkId"]) for g in items
                                                    if g["attribution"] == "not-separable"}))})
-    co = {c: n for (c, a), n in count_only.items() if a == p_arm and c not in asset_named}
+    # a check that reported no count is not a result "given as a count": a 0 is never printed beside its title
+    co = {c: n for (c, a), n in count_only.items() if a == p_arm and c not in asset_named and n}
     if co:
         lines.append({"reason": reasons["countOnly"], "count": sum(co.values()),
                       "subject": "; ".join(sorted(title_of(c) for c in co))})
@@ -6264,18 +6301,28 @@ def build_prediction(ctx: dict) -> dict:
                 "count": fmt_n(len(on_)), "examples": "; ".join(list(dict.fromkeys(str(rk[4]) for rk in on_))[:3]),
                 "objects": (lambda n_: f"{fmt_n(n_)} {'object' if n_ == 1 else 'objects'}")(
                     len({str(rk[4]) for rk in on_}))}) if on_ else ""
-        if undone:
+        # with several patches, each undone change is said under the patch whose own record holds the winning value (the
+        # row's winner), never under all of them and never by load position
+        undone_groups_ = ([(patch, list(undone))] if len(patch_names) <= 1 else
+                          [(p_, [x_ for x_ in undone if str(x_[0][3]).lower() == str(p_).lower()]) for p_ in patch_names]
+                          + [(patch, [x_ for x_ in undone if str(x_[0][3]).lower() not in patch_lower])])
+        for who_, und_ in undone_groups_:
+            if not und_:
+                continue
+            und_keys_ = {id(x_[0]) for x_ in und_}
+            off_ = [rk_ for rk_ in undone_off if id(rk_) in und_keys_ or len(undone_groups_) == 1]
+            on_ = [rk_ for rk_ in switched_on if id(rk_) in und_keys_ or len(undone_groups_) == 1]
             # changes the patches undo are the patch author's choices, said in their own neutral line, never as new
             # clashes (coordinator, item 3 of the fifth review; P52): the objects switched back on are the examples
             sentences.append(bind(words["validationUndone"], {
-                "patch": patch, "count": fmt_n(len(undone)), "noun": words["fieldNoun"][0 if len(undone) == 1 else 1],
-                "by": by_plugin(undone),
-                "off": bind(words.get("validationUndoneOff") or "", {"count": fmt_n(len(undone_off)),
+                "patch": who_, "count": fmt_n(len(und_)), "noun": words["fieldNoun"][0 if len(und_) == 1 else 1],
+                "by": by_plugin(und_),
+                "off": bind(words.get("validationUndoneOff") or "", {"count": fmt_n(len(off_)),
                                                                       "patch": (lambda ps_: ps_[0] if len(ps_) == 1 else "a patch")(
-                                                                          list(dict.fromkeys(str(rk_[3]) for rk_ in undone_off)))})
-                if undone_off else "",
-                "enables": enables_text(switched_on, total_=len(undone))}))
-            undone_sentence = sentences[-1]
+                                                                          list(dict.fromkeys(str(rk_[3]) for rk_ in off_)))})
+                if off_ else "",
+                "enables": enables_text(on_, total_=len(und_))}))
+            undone_sentence = undone_sentence or sentences[-1]
         replaced_sentence = None
         if replaced and words.get("validationReplaced"):
             # (page budget, coordinator) with an undone line, said in its slot as a clause of its own
@@ -6380,7 +6427,7 @@ def build_prediction(ctx: dict) -> dict:
         # contested fields where it keeps the losing mod's version, the changes it undoes (an object switched back on
         # first), and the values it sets of its own (a move in metres, else the field). It leads the section and
         # replaces the patch-move lines; the counted lines stay below it.
-        does_ = []
+        does_, does_who_ = [], []
 
         def bare_(name_):
             return re.sub(r"^(a|an) ", "", str(name_))
@@ -6391,6 +6438,11 @@ def build_prediction(ctx: dict) -> dict:
                     ((e["A"], e["B"]), [x for x in restored_ if (x["A"], x["B"]) == (e["A"], e["B"])])
                     for e in restored_).items()):
                 objs_ = list(dict.fromkeys(object_name(e["formKey"]) or str(e["formKey"]) for e in es_))
+                # the patch whose own record wins the field with the patch loaded (a lost row's winner), else none named
+                who_ = list(dict.fromkeys(str(w_["winnerPlugin"]) for e in es_
+                                          for w_ in lost_w.get((e["checkId"], e["formKey"], e.get("field"))) or []
+                                          if str(w_["winnerPlugin"]).lower() in patch_lower))
+                does_who_.append(who_[0] if len(who_) == 1 else None)
                 does_.append(bind(dw_["keeps"], {"loser": los_, "winner": win_, "count": fmt_n(len(es_)),
                                                  "noun": words["fieldNoun"][0 if len(es_) == 1 else 1],
                                                  "objects": and_list(objs_[:4]) + (f" and {fmt_n(len(objs_) - 4)} more"
@@ -6402,33 +6454,51 @@ def build_prediction(ctx: dict) -> dict:
             for (fk_, mod_), xs_ in sorted(by_obj_.items(), key=lambda kv: (kv[0][0] not in on_keys_, kv[0][0])):
                 if fk_ in on_keys_:
                     fs_ = [field_word(h_["row"].get("field")) for _, h_, _ in xs_]
+                    does_who_.append(str(xs_[0][0][3]))
                     does_.append(bind(dw_["switchOn"], {"object": object_name(fk_) or fk_, "formKey": fk_, "mod": mod_,
                                                         "fields": and_list(list(dict.fromkeys(fs_)))}))
             moves_ = collections.OrderedDict()
+            offs_ = collections.OrderedDict()
             for (fk_, mod_), xs_ in by_obj_.items():
                 if fk_ in on_keys_:
                     continue
+                # a patch version that sets the object off for good (below the world, or opposite to an always-enabled
+                # parent) switches it off: said as that, never as a move or as flags it sets
+                won_ = plugin_record(str(xs_[0][0][3]), "placementFull", fk_) or {}
+                if dw_.get("switchesOff") and placement_off_for_good(won_, words):
+                    offs_.setdefault((mod_, str(xs_[0][0][3])), []).append(fk_)
+                    continue
                 put_ = [field_word(h_["row"].get("field")) for _, h_, r_ in xs_ if not r_]
                 if put_:
+                    does_who_.append(str(xs_[0][0][3]))
                     does_.append(bind(dw_["putBack"], {"object": object_name(fk_) or fk_, "mod": mod_,
                                                        "fields": and_list(list(dict.fromkeys(put_)))}))
                 own_ = [h_["row"].get("field") for _, h_, r_ in xs_ if r_]
                 moved_ = None
                 if any(str(f_) in set(words.get("placementFields") or ["Placement"]) for f_ in own_):
-                    for p_ in patch_names:
+                    # the move is read from the record of the patch that holds the winning placement, not by position
+                    for p_ in [str(xs_[0][0][3])]:
                         a_ = plugin_record(p_, "placementFull", fk_) or {}
                         b_ = plugin_record(mod_, "placementFull", fk_) or {}
                         if a_.get("position") and b_.get("position"):
                             moved_ = sum((float(x) - float(y)) ** 2 for x, y in zip(a_["position"], b_["position"])) ** 0.5
                             break
                 if moved_ is not None and moved_ >= 70.0:
-                    moves_.setdefault(mod_, []).append((fk_, moved_ / 70.0))
+                    moves_.setdefault((mod_, str(xs_[0][0][3])), []).append((fk_, moved_ / 70.0))
                     own_ = [f_ for f_ in own_ if str(f_) not in set(words.get("placementFields") or ["Placement"])]
                 if own_:
+                    does_who_.append(str(xs_[0][0][3]))
                     does_.append(bind(dw_["sets"], {"object": bare_(object_name(fk_) or fk_), "mod": mod_,
                                                     "fields": and_list(list(dict.fromkeys(field_word(f_) for f_ in own_)))}))
-            for mod_, ms_ in moves_.items():
+            for (mod_, who_), fks_ in offs_.items():
+                does_who_.append(who_)
+                objs_ = list(dict.fromkeys(bare_(object_name(f_) or f_) for f_ in fks_))
+                does_.append(bind(dw_["switchesOff"], {
+                    "mod": mod_, "count": fmt_n(len(fks_)), "noun": "object" if len(fks_) == 1 else "objects",
+                    "objects": and_list(objs_[:4]) + (f" and {fmt_n(len(objs_) - 4)} more" if len(objs_) > 4 else "")}))
+            for (mod_, mover_), ms_ in moves_.items():
                 lo_, hi_ = min(m_ for _, m_ in ms_), max(m_ for _, m_ in ms_)
+                does_who_.append(mover_)
                 does_.append(bind(dw_["moves"], {
                     "mod": mod_, "objects": and_list(list(dict.fromkeys(bare_(object_name(f_) or f_) for f_, _ in ms_))),
                     "m": fmt_n(round(lo_)) if round(lo_) == round(hi_) else f"{fmt_n(round(lo_))}-{fmt_n(round(hi_))}"}))
@@ -6436,7 +6506,18 @@ def build_prediction(ctx: dict) -> dict:
                 # the move lines are in the list; the undone and set-to lines stay below it as the counted detail with
                 # their evidence links
                 sentences = [x for x in sentences if x not in set(patch_moves_said_)]
-                sentences.insert(1, bind(dw_["lead"], {"patch": patch}) + " " + "; ".join(does_) + ".")
+                # one list per patch, each from the records that patch carries with the winning value
+                groups_ = collections.OrderedDict()
+                for who_, d_ in zip(does_who_, does_):
+                    key_ = next((p_ for p_ in patch_names if who_ and str(p_).lower() == str(who_).lower()), None)
+                    groups_.setdefault(patch if len(patch_names) <= 1 or key_ is None else key_, []).append(d_)
+                for k_ in list(groups_):
+                    # a clause said for several records with the same name is said once, with how many
+                    n_ = collections.Counter(groups_[k_])
+                    groups_[k_] = [d_ + (bind(dw_.get("times") or "", {"count": fmt_n(n_[d_])}) if n_[d_] > 1 else "")
+                                   for d_ in dict.fromkeys(groups_[k_])]
+                for k_, (who_, ds_) in enumerate(groups_.items()):
+                    sentences.insert(1 + k_, bind(dw_["lead"], {"patch": who_}) + " " + "; ".join(ds_) + ".")
         # (Missives r3 report review, finding 3) the setup with the patch's own gaps, said where the patch is judged
         if words.get("validationPatchGaps") and patched_arm:
             gaps_ = [m for m in ctx["missing"] if m.get("armId") == patched_arm and m.get("part") not in ("diff", "reverse")]
@@ -6872,6 +6953,8 @@ def build_prediction(ctx: dict) -> dict:
         new_rest = [rk_ for rk_ in problems if id(rk_) not in back_ids]
         sum_parts.append(bind(words["validationSummaryNew"], {"count": problems_text(True, new_rest)}) if new_rest
                          else words["validationSummaryNoNewBeyond"] if not_new and words.get("validationSummaryNoNewBeyond")
+                         else words["validationSummaryNoNewIncomplete"]
+                         if patched_arm in (ctx.get("physicalUnfinished") or ()) and words.get("validationSummaryNoNewIncomplete")
                          else words["validationSummaryNoNew"])
         # (eighth review, Snazzy 63 / 69) record fields the patch undoes, sets to another value or removes beside the
         # predicted clashes are said in the summary with their counts, never left behind "nothing new"
@@ -7012,7 +7095,187 @@ def build_prediction(ctx: dict) -> dict:
             f_["readerPlain"] = bind(sp_["lineFrom"], {**vals_, "origin": origin_, "carrier": carrier_})
         else:
             f_["readerPlain"] = bind(sp_["line"], vals_)
+    prediction["placeLabels"] = place_labels
     return {"prediction": prediction, "coverage": coverage, "validation": validation, "headings": headings}
+
+
+def is_physical_check(check_id, words: dict) -> bool:
+    """A check that judges objects in the world (skill data `physicalFamilies`)."""
+    return str(check_id).split(".")[0] in set((words.get("physicalFamilies") or {}).get("families") or [])
+
+
+def arm_check_state(ev: dict, missing: list, arm_id) -> tuple[set, dict]:
+    """(checks with an accepted arm result on the setup, {check: status} of its required checks with
+    none), read from the disposition: the setup's own runs, not its comparisons."""
+    measured = {str(x.get("checkId")) for x in (ev.get("findings") or []) + (ev.get("completedNullChecks") or [])
+                if x.get("armId") == arm_id and x.get("part") in ("arm", None)}
+    miss = {}
+    for m in missing or []:
+        if m.get("armId") == arm_id and m.get("part") in ("arm", None) and m.get("required", True):
+            miss.setdefault(str(m.get("checkId")), str(m.get("status")))
+    return measured, {c: s for c, s in miss.items() if c not in measured}
+
+
+def physical_unfinished(ev: dict, missing: list, arm_id, words: dict) -> bool:
+    """The setup has a physical check without a result and no physical check with one: nothing it says
+    about objects in the world can read as clean."""
+    measured, miss = arm_check_state(ev, missing, arm_id)
+    return any(is_physical_check(c, words) for c in miss) and not any(is_physical_check(c, words) for c in measured)
+
+
+def incomplete_line(ev: dict, missing: list, arm_id, label: str, words: dict, heading: str) -> str | None:
+    """The scale and cause of the setup's unfinished testing, said first; None when
+    every required check of the setup has a result."""
+    iw = words.get("incomplete") or {}
+    measured, miss = arm_check_state(ev, missing, arm_id)
+    if not miss or not iw.get("line"):
+        return None
+    n_budget = sum(1 for s in miss.values() if s in set(iw.get("budgetStatuses") or []))
+    line = bind(iw["line"], {"missing": len(miss), "total": len(set(miss) | measured),
+                             "setup": (lambda x: x[:1].lower() + x[1:])(label or "the measured setup"),
+                             "budget": bind(iw.get("budget") or "", {"count": n_budget}) if n_budget else ""})
+    if physical_unfinished(ev, missing, arm_id, words):
+        line += iw.get("physical") or ""
+    if iw.get("where") and heading:
+        line += " " + bind(iw["where"], {"heading": heading})
+    return line
+
+
+def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing: list, proper: dict) -> list[str]:
+    """One verdict for each supplied patch, from the clashes of the pair it is built
+    for (its masters), then one next step for each predicted kind still left; the report's box and the reel's closing
+    page say these same sentences. A verdict over a setup whose physical checks did not finish says so (G1 x G4)."""
+    ww = words.get("whatToDo") or {}
+    if not ww:
+        return []
+    pred, val = lead.get("prediction") or {}, lead.get("validation") or {}
+    items = [i for i in pred.get("items") or []]
+    by_item = list(val.get("byItem") or [])
+    compared = val.get("status") == "compared" and bool(val.get("patches"))
+    noun = ww.get("clashNoun") or ["clash", "clashes"]
+    name = lambda x: proper.get(str(x).lower(), str(x))  # noqa: E731
+
+    def unknown_of(k):
+        bi = by_item[k] if k < len(by_item) else {}
+        return int(bi.get("notMeasured") or 0) + int(bi.get("cannotTell") or 0)
+
+    def hits_of(k):
+        return int((by_item[k] if k < len(by_item) else {}).get("hits") or 0)
+
+    def left_of(k):
+        # still a clash with the patch: left as it was, or the losing mod's change kept lost (never a value the patch sets)
+        bi = by_item[k] if k < len(by_item) else {}
+        return int(bi.get("open") or 0) + int(bi.get("kept") or 0)
+    out = []
+    if compared:
+        patches = list(val["patches"])
+        phys_unknown = physical_unfinished(ev, missing, val.get("withPatchArm"), words)
+        new_n = int(val.get("patchProblems") or 0)
+        for p in patches:
+            pm = None if masters is None else masters.get(str(p).lower())
+            if pm is None:
+                mine = list(range(len(items)))
+            else:
+                mine = [k for k, it in enumerate(items)
+                        if len(it.get("mods") or []) >= 2 and {str(m).lower() for m in it["mods"]} <= set(pm)]
+            count = sum(int(items[k].get("count") or 0) for k in mine)
+            hits = sum(hits_of(k) for k in mine)
+            unknown = sum(unknown_of(k) for k in mine)
+            left = sum(left_of(k) for k in mine)
+            pair = and_list([name(m) for m in sorted(pm or []) if not is_base_game(name(m), words)])
+            vals = {"patch": p, "pair": pair, "count": count, "hits": hits, "clashNoun": noun[0 if count == 1 else 1]}
+            if pm is None:
+                s = bind(ww["noPair"] if hits or not ww.get("noPairNone") else ww["noPairNone"], vals)
+            elif not mine:
+                s = bind(ww["notItsPair"], vals)
+            elif hits:
+                tail = (bind(ww["left"], {"count": left, "verb": "is" if left == 1 else "are"}) if left else "") + (
+                    bind(ww["unknown"], {"count": unknown}) if unknown else "")
+                s = bind(ww["resolves"], {**vals, "left": tail})
+            else:
+                s = bind(ww["resolvesNone"], vals)
+                if unknown:
+                    s = s[:-1] + bind(ww["unknown"], {"count": unknown}) + "."
+            if len(patches) == 1:
+                s += (ww["physicalUnknown"] if phys_unknown else
+                      bind(ww["newSome"], {"count": new_n, "clashNoun": noun[0 if new_n == 1 else 1]}) if new_n
+                      else ww["noNew"])
+            elif mine:
+                s += bind(ww["joint"], {"patches": and_list(patches)})
+            out.append(s)
+        if len(patches) > 1:
+            jv = {"patches": and_list(patches), "count": new_n, "clashNoun": noun[0 if new_n == 1 else 1]}
+            out.append(bind(ww["physicalUnknownJoint"] if phys_unknown else ww["newSomeJoint"] if new_n
+                            else ww["noNewJoint"], jv))
+    ns = ww.get("nextStep") or {}
+    for k, it in enumerate(items):
+        if it.get("shownAs") == "alone":
+            continue
+        n = left_of(k) if compared else int(it.get("count") or 0)
+        if n <= 0:
+            continue
+        tmpl = ns.get(str(it.get("checkId"))) or ns.get(str(it.get("kind"))) or ns.get("default")
+        if not tmpl:
+            continue
+        out.append(bind(tmpl, {"title": it.get("title"), "count": n, "verb": "is" if n == 1 else "are",
+                               "them": "it" if n == 1 else "them", "mods": and_list([name(m) for m in it.get("mods") or []]),
+                               "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
+                               "candNoun": (ns.get("candNoun") or ["", ""])[0 if n == 1 else 1],
+                               "still": ns.get("still", "") if compared else ns.get("stillNone", "")}))
+    return out
+
+
+def load_precedent(folder) -> dict:
+    """{patch plugin (lower case): its source row} from a precedent cards folder's summary.json; {} when absent."""
+    doc = load_json(Path(folder) / "summary.json") if folder else None
+    return {str(x.get("patch")).lower(): x for x in (doc or {}).get("sources") or [] if isinstance(x, dict) and x.get("patch")}
+
+
+def precedent_census(lead: dict, folder, words: dict) -> None:
+    """The patch's own edits, counted from its records by the precedent stage, said beside what the checks compared; and
+    the stock "not listed" and "not recorded" lines withdrawn where this report lists or counts the edits."""
+    val = lead.get("validation") or {}
+    if val.get("status") != "compared":
+        return
+    pc = words.get("precedentCensus") or {}
+    prec = load_precedent(folder)
+    sentences = list(val.get("sentences") or [])
+    lines, carded = [], False
+    for p in val.get("patches") or []:
+        src = prec.get(str(p).lower())
+        if not src or not pc.get("line"):
+            continue
+        c = src.get("census") or {}
+        kinds = collections.Counter()
+        for k, n in (c.get("editKinds") or {}).items():
+            kinds["FIELD" if str(k).startswith("FIELD:") else str(k)] += int(n or 0)
+        kind_txt = and_list([bind(pc["kinds"][k], {"count": n}) for k, n in kinds.items() if n and k in pc["kinds"]])
+        lines.append(bind(pc["line"], {"patch": p, "records": int(c.get("patchRecords") or 0),
+                                       "additions": int(c.get("additions") or 0), "edits": int(c.get("edits") or 0),
+                                       "kinds": kind_txt or "none"}))
+        dc = (src.get("cardPass") or {}).get("decidingConstraint") or {}
+        given = {k: v for k, v in dc.items() if k != "not-established" and v}
+        if given and pc.get("cards"):
+            carded = True
+            lines.append(bind(pc["cards"], {"count": sum(given.values()), "reasons": and_list(
+                [f"{n} {(pc.get('constraints') or {}).get(k, k)}" for k, n in sorted(given.items(), key=lambda kv: -kv[1])])}))
+    listed = any("read from its own records" in str(x) for x in sentences)
+    if lines:
+        at = next((i for i, x in enumerate(sentences) if "read from its own records" in str(x)), 0)
+        sentences[at + 1 if listed else min(1, len(sentences)):at + 1 if listed else min(1, len(sentences))] = lines
+    if carded and pc.get("intentTail"):
+        sentences = [str(x).replace(" Whether that is intended is not recorded.", pc["intentTail"])
+                     .replace("; chosen or copied is not recorded.", ".") for x in sentences]
+    stock = list(words.get("validationMissingFacts") or [])
+    facts = list(val.get("missingFacts") or [])
+    if stock and (listed or lines):
+        facts = [x for x in facts if x != stock[0]]
+    if len(stock) > 1 and carded:
+        facts = [x for x in facts if x != stock[1]]
+    for k in ("undoneSentence", "replacedSentence"):
+        if val.get(k) and carded and pc.get("intentTail"):
+            val[k] = str(val[k]).replace(" Whether that is intended is not recorded.", pc["intentTail"])
+    val["sentences"], val["missingFacts"], val["censusLines"] = sentences, facts, lines
 
 
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
@@ -8111,19 +8374,53 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                                                           + (" with " + ", ".join(extra_) + " where it loads; whether "
                                                              + ", ".join(extra_) + " changes these locations was not measured."
                                                              if extra_ else ".")))
+    # every setup with its own measured list says the plugins it loads that this report names (a clash party, a patch the
+    # setup adds) and its list leaves out, so a list of locations never reads as the whole order of the setup
+    for a in arms_out:
+        if (a is measured_ or a["locationPluginScope"].get("basis") != "measured per-location contributors"
+                or a["locationPluginScope"].get("note")):
+            continue
+        a_list_ = {str(n).lower() for n in a.get("locationPluginOrder") or []}
+        named_ = {x.lower() for x in evidence_plugins_by_arm.get(a["armId"], set()) if x} | {
+            str(x).lower() for x in a.get("pluginsAdded") or []}
+        unc_ = [n for n in plugins_of_arm.get(a["armId"]) or [] if n and n.lower() in named_ and n.lower() not in a_list_]
+        if unc_:
+            a["locationPluginScope"]["note"] = ("The evidence index also names " + ", ".join(unc_)
+                                                + ", at locations this list does not cover.")
     # Several alternatives can share one display label (every removal-only arm is "Tested alternative setup").
     # A per-setup sentence then names WHICH one in the setups-compared list's own words, so a result on one
     # alternative is never read as another's and no-problem lines are never merged across them. A label no other
     # arm carries is kept as it is. Arms whose changes are also identical are numbered in the order the setups-compared
     # list shows them ("2 of 2 setups with this change"), and that list's row carries the same words, so the label
     # still points at one row without exposing the technical setup id.
+    base_order_ = next((list(a_.get("plugins") or []) for a_ in arms_out if a_.get("armId") == "baseline"), [])
+
+    def order_words(arm) -> str:
+        """A setup with the measured plugins in another order: the first two whose order is swapped, in words."""
+        if arm.get("pluginsAdded") or arm.get("pluginsRemoved") or arm.get("armId") == "baseline":
+            return ""
+        mine_ = [str(x) for x in arm.get("plugins") or []]
+        if sorted(x.lower() for x in mine_) != sorted(str(x).lower() for x in base_order_) or mine_ == base_order_:
+            return ""
+        pos_ = {str(x).lower(): i for i, x in enumerate(base_order_)}
+        for i_, x_ in enumerate(mine_):
+            for y_ in mine_[i_ + 1:]:
+                if pos_.get(x_.lower(), 0) > pos_.get(y_.lower(), 0):
+                    return bind(reader_data.get("orderSwapped") or "loads {first} before {second}", {"first": x_, "second": y_})
+        return ""
+
     def change_words(arm) -> str:
         return "; ".join(([f"adds {', '.join(arm['pluginsAdded'])}"] if arm.get("pluginsAdded") else []) +
-                         ([f"removes {', '.join(arm['pluginsRemoved'])}"] if arm.get("pluginsRemoved") else []))
+                         ([f"removes {', '.join(arm['pluginsRemoved'])}"] if arm.get("pluginsRemoved") else []) +
+                         ([order_words(arm)] if order_words(arm) else []))
 
+    for a in arms_out:
+        if order_words(a):
+            a["orderChange"] = order_words(a)
     shared_labels = collections.Counter(a["displayLabel"] for a in arms_out)
     for a in arms_out:
-        words = change_words(a) if shared_labels[a["displayLabel"]] > 1 else ""
+        # a setup is always named by what it changes when its label alone does not say it (an order-only setup)
+        words = change_words(a) if shared_labels[a["displayLabel"]] > 1 or order_words(a) else ""
         a["readerLabel"] = f"{a['displayLabel']} ({words})" if words else a["displayLabel"]
     shared_labels = collections.Counter(a["readerLabel"] for a in arms_out)
     seen_labels = collections.Counter()
@@ -8230,7 +8527,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             if state["refused"]:
                 return "comparison-refused|" + refused_words(state)
             if state["unmeasured"]:
-                return f"comparison-unmeasured|{state['unmeasured']}"
+                # a setup that leaves an evaluated mod out cannot measure that mod's own objects: said with the count
+                gone_ = [t_ for t_ in [x_.get("name") for x_ in targets if x_.get("name")] if str(t_).lower() in
+                         {str(x).lower() for x in ((arm_changes.get(m.get("armId")) or ([], []))[1] or [])}]
+                return f"comparison-unmeasured|{state['unmeasured']}" + (f"|{gone_[0]}" if gone_ else "")
         if status == "completed" and not state:
             return "completed(undetermined)"   # it ran and its detector reached no verdict
         return status
@@ -8419,9 +8719,16 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if f.get("readerRelevant"):
             single_mod_count += 1
     compared =", ".join(comparison_names) if comparison_names else "the measured load order"
-    unstated_text = (f" One tested setup differs by {', '.join(unstated_difference_plugins)}, "
-                     f"which is not declared as a patch; it is reported as a plugin that "
-                     f"differs, not as an evaluated patch."
+    # the tested setups leave out or add mods to attribute each clash; said as that, never as one setup differing by a
+    # list of plugins as if they were a patch
+    n_alt_ = sum(1 for k in comparison_kinds.values() if k not in ("baseline", "patch-comparison", "supplied-combination"))
+    unstated_text = ((" " + bind(reader_data["unstatedSetups"], {
+                          "count": fmt_n(n_alt_), "noun": "setup" if n_alt_ == 1 else "setups",
+                          "plugins": and_list(unstated_difference_plugins)}))
+                     if unstated_difference_plugins and reader_data.get("unstatedSetups") else
+                     (f" One tested setup differs by {', '.join(unstated_difference_plugins)}, "
+                      f"which is not declared as a patch; it is reported as a plugin that "
+                      f"differs, not as an evaluated patch.")
                      if unstated_difference_plugins else "")
     patch_text = ", ".join(supplied) if supplied else "no separate patch plugin"
     # One sentence for declared patches a mixed arm changes; number agreement is its only branch.
@@ -8679,8 +8986,12 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if status.startswith("comparison-refused|"):
             return bind(cmp_words["missingRefused"], {"why": status.split("|", 1)[1]})
         if status.startswith("comparison-unmeasured|"):
-            n_ = int(status.split("|", 1)[1])
-            return bind(cmp_words["missingUnmeasured"], {"count": fmt_n(n_), "rowNoun": "row" if n_ == 1 else "rows"})
+            parts_ = status.split("|")
+            n_ = int(parts_[1])
+            said_ = bind(cmp_words["missingUnmeasured"], {"count": fmt_n(n_), "rowNoun": "row" if n_ == 1 else "rows"})
+            if len(parts_) > 2 and cmp_words.get("missingUnmeasuredRemoved"):
+                said_ += bind(cmp_words["missingUnmeasuredRemoved"], {"mod": parts_[2]})
+            return said_
         return reason_labels.get(status, fallback)
     reason_explanations = reader_data.get("missingReasonExplanations") or {}
     # Grouped by status, as the reason is a statement about the status - but each subject names the setup it is
@@ -8856,7 +9167,45 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
         "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
-        "names": names_early, "masters": plugin_masters_doc, "orderSetups": list(order_setups or [])})
+        "names": names_early, "masters": plugin_masters_doc, "orderSetups": list(order_setups or []),
+        "rowsPerGroup": settings.get("rowsPerGroup") if settings.get("mode") != "exhaustive" else None,
+        "physicalUnfinished": {a_ for a_ in arm_ids
+                               if physical_unfinished(ev, missing, a_, reader_data.get("prediction") or {})}})
+    # the scale and cause of unfinished testing on the prediction's setup, said in the box first
+    pw_ = reader_data.get("prediction") or {}
+    p_arm_r2 = lead["prediction"].get("predictionArm") or "baseline"
+    lead["prediction"]["incompleteLine"] = incomplete_line(
+        ev, missing, p_arm_r2, arm_labels.get(p_arm_r2, "the measured setup"), pw_,
+        bind((pw_.get("headings") or {}).get("coverage") or "", {"subject": ""}))
+    lead["prediction"]["incompleteReel"] = incomplete_line(
+        ev, missing, p_arm_r2, arm_labels.get(p_arm_r2, "the measured setup"), pw_, "")
+    # a verdict per supplied patch and a next step per kind left; report and reel read these
+    proper_r2 = {str(q.get("name")).lower(): str(q.get("name")) for a_ in b.plan.get("arms") or []
+                 for q in ((a_.get("requested") or {}).get("plugins") or []) if isinstance(q, dict)}
+    lead["prediction"]["whatToDo"] = what_to_do(lead, plugin_masters_doc, pw_, ev, missing, proper_r2)
+    lead["prediction"]["whatToDoHeading"] = (pw_.get("whatToDo") or {}).get("heading")
+    precedent_census(lead, settings.get("precedentDir"), reader_data.get("prediction") or {})
+    # what a lost record change means in play, from the fields it is on (skill data fieldMeanings), where nothing does
+    fm_ = pw_.get("fieldMeanings") or {}
+    for it_ in lead["prediction"].get("items") or []:
+        if it_.get("kind") != "LOST-EDIT" or it_.get("inGameText") != pw_.get("inGameMissing") or not pw_.get("inGameFields"):
+            continue
+        vc_ = next((v_ for v_ in lead["prediction"].get("verdictCounts") or [] if v_.get("checkId") == it_.get("checkId")
+                    and v_.get("kind") == "LOST-EDIT"), {})
+        means_ = list(dict.fromkeys(fm_[f_.split(".")[0]] for f_ in (vc_.get("fieldNames") or {})
+                                    if f_.split(".")[0] in fm_))
+        if means_:
+            it_["inGameText"] = bind(pw_["inGameFields"], {"meanings": and_list(means_)})
+    # a report with clashes and no picture says so, rather than leaving the reader to wonder
+    lead["prediction"]["noPicturesLine"] = (pw_.get("noPictures") if lead["prediction"].get("items")
+                                            and not any(m_.get("assessed") for m_ in media) else None)
+    # no all-clear on the alternative setups when none of their physical checks finished
+    others_r2 = [a_ for a_ in arm_ids if a_ != p_arm_r2]
+    if others_r2 and all(physical_unfinished(ev, missing, a_, pw_) or not arm_check_state(ev, missing, a_)[0]
+                         for a_ in others_r2) and any(physical_unfinished(ev, missing, a_, pw_) for a_ in others_r2):
+        lead["validation"]["noRegressionLine"] = pw_.get("noRegressionUnknown")
+    elif not lead["validation"].get("noRegressionLine"):
+        lead["validation"]["noRegressionLine"] = pw_.get("noRegressionDefault")
     # (fourth review, Missives S2) fields a record import narrowed out of its comparison, said with what was not judged
     for fact_ in import_narrowed_facts(imports["rows"], pr, lambda c_: check_titles.get(c_) or b.check_title(c_)):
         if fact_ not in (lead["prediction"].get("missingFacts") or []):
@@ -9329,6 +9678,28 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
             if isinstance(sw, dict) and sw.get("key"):
                 switches[sw["key"]] = {"edid": sw.get("edid"), "baselineEnabled": sw.get("baselineEnabled"),
                                        "trigger": sw.get("trigger")}
+    # the patch search said in the report too, with the same cautions as the reel: one line per pair it covers
+    pred_ = (plan.get("reader") or {}).get("prediction") or {}
+    if search and words.get("reportLead"):
+        arm_ = next((a_ for a_ in (plan.get("scope") or {}).get("arms") or [] if a_.get("armId") == pred_.get("predictionArm")), {})
+        loaded_ = {str(x).lower() for x in arm_.get("plugins") or []}
+        supplied_ = [str(x) for x in (plan.get("reader") or {}).get("suppliedPatches") or []]
+        leads_ = []
+        for entry_ in search.get("pairs") or []:
+            pair_ = [str(x) for x in entry_.get("pair") or []]
+            if len(pair_) != 2:
+                continue
+            hits_ = entry_.get("hits") or []
+            evaluated_ = any({x.lower() for x in pair_} <= set(masters.get(p_.lower(), set())) for p_ in supplied_)
+            if hits_:
+                leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1], file=hits_[0].get("file"))
+                              + reel_plan.lead_qualifiers(hits_[0], words, loaded_, evaluated_))
+            else:
+                leads_.append(words["reportLead"]["notFound"].format(a=pair_[0], b=pair_[1]))
+        if leads_:
+            pred_.setdefault("whatToDo", [])
+            pred_["whatToDo"] = list(pred_["whatToDo"]) + [x for x in leads_ if x not in pred_["whatToDo"]]
+            pred_["whatToDoHeading"] = pred_.get("whatToDoHeading") or ((pr.get("reader") or {}).get("prediction") or {}).get("whatToDo", {}).get("heading")
     reel = reel_plan.plan_reel(view, names, masters, policy, words, search, mod_names, captures, markers=markers,
                                switches=switches, captures_final=bool(getattr(a, "captures_final", False)))
     reel["switchCensus"] = ({"path": str(census_path), "sha256": sha256_file(census_path), "switches": len(switches)}
@@ -9517,13 +9888,28 @@ def figure_units(figs: list[dict]) -> list[list[dict]]:
         st = {(m.get("captureState") or (m.get("provenance") or {}).get("vignetteState")): m for m in frames}
         if "left" in st or "right" in st:
             units.append([st[k] for k in ("left", "right") if k in st])
-        elif "highlight" in st:
-            units.append([st["highlight"]])
-        elif "with" in st:
-            units.append([st["with"]])
+        elif any(k in st for k in ("without", "with", "highlight")):
+            # a vignette is its plain pair and its marked view together: what the player sees, with and without the
+            # mod, then the marked shapes; one unit, so a figure limit never keeps only the marked view
+            units.append([st[k] for k in ("without", "with", "highlight") if k in st])
         else:
             units.append(frames[:1])
     return units
+
+
+def media_unaccounted(plan: dict, view: dict, report_md: str) -> list[str]:
+    """The assessed media of the plan that the report neither shows nor names in an omission line: a picture produced
+    and admitted is on the page or said to be left out, never dropped unsaid."""
+    said = " ".join(str(o.get("what") or "") for o in view.get("omissions") or [])
+    out = []
+    for m in plan.get("media") or []:
+        if not m.get("assessed"):
+            continue
+        shown = bool(m.get("reportPath")) and str(m["reportPath"]) in report_md
+        name = Path(str(m.get("path") or "")).name
+        if not shown and not (name and f"media/{name}" in report_md) and str(m.get("id")) not in said:
+            out.append(str(m.get("id")))
+    return out
 
 
 def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr: dict, layout: str = "normal") -> dict:
@@ -9554,7 +9940,9 @@ def effective_view(plan: dict, rows_per_group: int, figures_per_finding: int, pr
         figs = [media_by_id[m] for m in (f.get("mediaIds") or []) if m in media_by_id and media_by_id[m].get("assessed")]
         units = figure_units(figs)
         if mode != "exhaustive" and len(units) > figures_per_finding:
-            omissions.append({"what": f"{f['id']}: {len(units) - figures_per_finding} of {len(units)} figure(s) not shown",
+            left_ = [str(m_.get("id")) for u_ in units[figures_per_finding:] for m_ in u_]
+            omissions.append({"what": f"{f['id']}: {len(units) - figures_per_finding} of {len(units)} figure(s) not shown "
+                                      f"({', '.join(left_)})",
                               "why": f"concise mode shows {figures_per_finding} figure(s) per finding", "where": f"evidence-index.md#{f['id']}"})
             units = units[:figures_per_finding]
         g["figures"] = [m for u in units for m in u]
@@ -10085,7 +10473,8 @@ def cmd_plan(a) -> int:
                     "figuresPerFinding": (a.figures_per_finding if a.figures_per_finding is not None else conc.get("figuresPerFinding", 1)),
                     "reel": {k: (pr.get("reel") or {}).get(k) for k in ("maxSeconds", "fps", "width", "height", "stillFont", "stillFontBold")},
                     "singleMod": a.single_mod, "headlineUnit": a.headline_unit,
-                    "alsoBundles": list(getattr(a, "also_bundle", None) or [])}
+                    "alsoBundles": list(getattr(a, "also_bundle", None) or []),
+                    "precedentDir": getattr(a, "precedent", None)}
         if a.mode == "exhaustive":
             settings["maxPages"] = None
         for x_ in settings["alsoBundles"]:
@@ -10427,6 +10816,11 @@ def cmd_verify(a) -> int:
             elif sha256_file(p) != m.get("sha256"):
                 defects.append({"kind": "media-changed", "path": m["path"], "detail": "does not hash to the manifest's sha256"})
             r.advance(1)
+        # every assessed picture is on the page or named in an omission line, never dropped unsaid
+        if (out / "report.md").is_file():
+            for mid_ in media_unaccounted(plan, {"omissions": man.get("omissions") or []}, read_text(out / "report.md")):
+                defects.append({"kind": "media-not-shown", "path": "report.md",
+                                "detail": f"{mid_} is an assessed picture the report neither shows nor names as left out"})
         for e in man.get("supportingEvidence") or []:
             p = out / e["path"]
             counter["supportingEvidence"] += 1
@@ -10721,6 +11115,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sibling-bundle", default=None, metavar="DIR",
                    help="a bundle of the same order without the patch; its single-mod setups attribute this report's "
                         "prediction when its setup matches this bundle's setup without the patch plugin for plugin")
+    p.add_argument("--precedent", default=None, metavar="DIR",
+                   help="the precedent stage's cards folder (its summary.json: each patch's census of its own records and "
+                        "its cards' deciding reasons); the patch section counts the patch's own edits from it")
     p.add_argument("--patch-search", default=None, metavar="FILE",
                    help="the recorded Nexus patch search the review reel's patch sentences rest on (scene-policy.json "
                         "vignettes.patchSearch); without it the reel plan is refused and the report still compiles")

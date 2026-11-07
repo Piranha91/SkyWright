@@ -35,7 +35,7 @@
   "mdDoesNotContain": ["on balance", "introduced 1 new problem in the navmesh check", "F-001"],
   "mdNoAffirmativeNettingClaim": true,
   "print": {"status": "within-limit", "pagesAtMost": 8},
-  "overLimitKept": {"layout": "compact", "rowsPerGroupEqualsSettings": true, "figuresPerFinding": 1, "reasonMentions": "unreachable"}
+  "overLimitKept": {"layout": "compact", "rowsPerGroupEqualsSettings": true, "figuresPerFinding": 3, "reasonMentions": "unreachable"}
  },
  "notes": [
   "D3 (1): raw regression ordering is retained: the combined arm's navownprobe regression remains F-001 with priority 1 and keeps conflictdiff's DIFFERENTIAL-NEUTRAL verdict and all source counts in the evidence index. The reader context gate supersedes the former prominence claim because this fixture's differential contains only CLOBBERED overwrite history, with no independently measured winning-scene or link mismatch.",

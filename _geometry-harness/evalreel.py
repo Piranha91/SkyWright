@@ -946,9 +946,14 @@ def render_reel(a, run) -> int:
 
 
 # ---------------------------------------------------------------------------------------------- the vignette reel
-STILL_KINDS = ("opening", "unpictured", "closing")
+STILL_KINDS = ("opening", "unpictured", "verdict", "closing")
 SPLIT_HALF = (638, 680)              # a placement split's half (skill data scene-policy vignettes.split): two halves, a
 SPLIT_DIVIDER, SPLIT_STRIP = 4, 40   # 4 px divider and a 40 px label strip make the 1280x720 frame with nothing scaled
+
+
+def reel_stills_words(page: dict) -> int:
+    import reel_plan
+    return reel_plan.page_words(page)
 
 
 def frame_is_clean(media: dict, board: dict | None) -> bool:
@@ -1033,6 +1038,16 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                 continue
             seg["kind"] = "still"
             seg["dataSha256"] = sha256_text(json.dumps(pages, sort_keys=True, ensure_ascii=False))
+            # a page too full to read at a readable size is drawn as several pages, its hold shared by their words
+            split_ = []
+            for page in pages:
+                parts_ = reel_stills.paginate(page, font, bold)
+                if len(parts_) > 1 and page.get("seconds"):
+                    wsum_ = sum(max(1, reel_stills_words(x)) for x in parts_)
+                    parts_ = [{**x, "seconds": round(float(page["seconds"]) * max(1, reel_stills_words(x)) / wsum_, 2)}
+                              for x in parts_]
+                split_ += parts_
+            pages = split_
             for n, page in enumerate(pages):
                 ph = reel_stills.page_hash(page)
                 png = stills_dir / f"{cid}-p{n}-{ph[:10]}-{font_doc['sha256'][:8]}.png"
@@ -1043,7 +1058,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                         errors.append(f"{cid}: {e}")
                         break
                 seg["items"].append({"page": n, "layout": page.get("layout"), "path": str(png), "sha256": sha256_file(png),
-                                     "dataSha256": ph})
+                                     "dataSha256": ph, **({"seconds": float(page["seconds"])} if page.get("seconds") else {})})
         elif kind == "vignette":
             seg["kind"] = "sequence"
             frames = ch.get("frames") or []
@@ -1069,8 +1084,16 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                 poses.add((m.get("provenance") or {}).get("poseId"))
                 hdr = probe_header(ffmpeg["path"], path)
                 sizes.add((hdr.get("width"), hdr.get("height")))
-                seg["items"].append({"state": fr.get("state"), "mediaId": mid, "armId": (m.get("subject") or {}).get("armId"),
-                                     "path": str(path), "sha256": sha256_file(path), "poseId": (m.get("provenance") or {}).get("poseId")})
+                item_ = {"state": fr.get("state"), "mediaId": mid, "armId": (m.get("subject") or {}).get("armId"),
+                         "path": str(path), "sha256": sha256_file(path), "poseId": (m.get("provenance") or {}).get("poseId")}
+                if fr.get("label"):
+                    # the reel's label strip under the evidence frame: the setup, or which marked shape is which colour
+                    lab_ = stills_dir / f"{cid}-{fr.get('state')}-{sha256_text(fr['label'] + item_['sha256'])[:12]}.png"
+                    if not lab_.is_file():
+                        reel_stills.label_frame(path, fr["label"], font, bold).save(str(lab_), format="PNG")
+                    item_.update(evidencePath=item_["path"], evidenceSha256=item_["sha256"], label=fr["label"],
+                                 path=str(lab_), sha256=sha256_file(lab_))
+                seg["items"].append(item_)
             else:
                 if len(poses) != 1 or None in poses or len(sizes) != 1:
                     errors.append(f"{cid}: the vignette's frames were not taken at one pose and canvas "
@@ -1160,6 +1183,11 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
         speech = float(ah["durationSeconds"])
         if s["kind"] == "split":
             secs = [speech + float(hold.get("stillPause", 1.5))] * 2          # both halves for the whole scene
+        elif s["kind"] == "still" and all(it.get("seconds") for it in s["items"]):
+            # each page holds for its reading time; the narration spans the pages, so no page is longer silent than read
+            need_ = [float(it["seconds"]) for it in s["items"]]
+            scale_ = max(1.0, (speech + float(hold.get("stillPause", 1.5))) / sum(need_))
+            secs = [x * scale_ for x in need_]
         elif s["kind"] == "still":
             first = speech + float(hold.get("stillPause", 1.5))
             secs = [first] + [float(hold.get("loadOrderPage", 6.0))] * (len(s["items"]) - 1)

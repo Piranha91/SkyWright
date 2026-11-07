@@ -6,7 +6,14 @@
 ## {{ p.reader.sectionHeadings.prediction }}
 
 > **{{ pred.verdict }}**
-{% if pred.get("withPatchLines") %}
+{% if pred.get("incompleteLine") %}>
+> {{ pred.incompleteLine }}
+{% endif %}{% if pred.get("whatToDo") %}
+
+**{{ pred.whatToDoHeading }}:**
+
+{% for w in pred.whatToDo %}- {{ w }}
+{% endfor %}{% endif %}{% if pred.get("withPatchLines") %}
 
 {{ pred.withPatchHead }}
 
@@ -47,7 +54,9 @@
 
 {% endif %}{% for x in pred.get("alsoEvaluations") or [] %}{{ x }}
 
-{% endfor %}{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
+{% endfor %}{% if pred.get("noPicturesLine") %}{{ pred.noPicturesLine }}
+
+{% endif %}{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
 
 {% endif %}
 {% for item in pred.missingFacts %}{{ item }}
@@ -92,7 +101,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 
 ## Setups compared
 
-{% for a in p.scope.arms %}- **{{ a.displayLabel }}**{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}{{ "; " if a.pluginsAdded else ": " }}removes {{ a.pluginsRemoved|join(", ") }}{% endif %}{% if a.get("setupOrdinal") %} ({{ a.get("setupOrdinal") }}){% endif %}. {% for limit in a.readerLimits %}{{ limit }}{% if not loop.last %} {% endif %}{% endfor %}
+{% for a in p.scope.arms %}- **{{ a.displayLabel }}**{% if a.pluginsAdded %}: adds {{ a.pluginsAdded|join(", ") }}{% endif %}{% if a.pluginsRemoved %}{{ "; " if a.pluginsAdded else ": " }}removes {{ a.pluginsRemoved|join(", ") }}{% endif %}{% if a.get("orderChange") %}: {{ a.orderChange }}{% endif %}{% if a.get("setupOrdinal") %} ({{ a.get("setupOrdinal") }}){% endif %}. {% for limit in a.readerLimits %}{{ limit }}{% if not loop.last %} {% endif %}{% endfor %}
 
 {% endfor %}
 
@@ -134,7 +143,7 @@ Coverage: {{ "all contributors to the listed locations identified." if a.locatio
 {% for m in f.figures %}{% if m.reportPath and m.id not in figshown.ids %}{% set figshown.ids = figshown.ids + [m.id] %}![{{ m.caption or (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
 
 *{{ m.caption or "Evidence image." }}* [Image provenance](evidence-index.md#{{ m.id }}).
-{% endif %}{% endfor %}{% endfor %}{% else %}{{ val.get("noRegressionLine") or "The completed comparisons did not report a newly introduced physical defect." }}{% for x in p.reader.get('refusedSummary') or [] %} {{ x }}{% endfor %}
+{% endif %}{% endfor %}{% endfor %}{% else %}{{ val.get("noRegressionLine") }}{% for x in p.reader.get('refusedSummary') or [] %} {{ x }}{% endfor %}
 {% endif %}
 
 ## What the checks found

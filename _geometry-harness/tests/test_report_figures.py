@@ -33,7 +33,8 @@ def m(mid, req, state):
 
 def case_1_a_vignette_shows_its_marked_view():
     units = ER.figure_units([m("w", "r1", "with"), m("h", "r1", "highlight"), m("o", "r1", "without")])
-    assert [[x["id"] for x in u] for u in units] == [["h"]], f"the marked view states the claim, got {units}"
+    # a vignette is shown whole: the plain pair a player sees, then the marked view (one unit, never the marked view alone)
+    assert [[x["id"] for x in u] for u in units] == [["o", "w", "h"]], f"without, with, then the marked view, got {units}"
 
 
 def case_3_a_split_shows_both_halves_as_one_figure():

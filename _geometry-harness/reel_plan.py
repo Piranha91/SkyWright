@@ -180,8 +180,63 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
                     check=check_, patch=patch_name((has or patches)[0]))
             if line not in subs:
                 subs.append(line)
-        rows.append({"reason": m.get("reason"), "subjects": subs})
+        reason, comparison = plain_reason(m.get("reason"), words)
+        same = next((r_ for r_ in rows if r_["reason"] == reason), None)
+        if same is not None:
+            same["subjects"] += [x for x in subs if x not in same["subjects"]]
+            same["comparison"] = same["comparison"] or comparison
+        else:
+            rows.append({"reason": reason, "subjects": subs, "comparison": comparison})
     return rows
+
+
+def plain_reason(reason, words: dict) -> tuple[str, bool]:
+    """A closing group's reason in plain words, each clause once: a clause the skill's `closingShort` patterns match is
+    said by its short text (a comparison's row counts are in the report), and whether it is a comparison's."""
+    out, comparison = [], False
+    for ph in str(reason or "").split("; and "):
+        for x in words.get("closingShort") or []:
+            if re.search(x["pattern"], ph):
+                ph, comparison = x["text"], comparison or bool(x.get("comparison"))
+                break
+        if ph not in out:
+            out.append(ph)
+    return "; and ".join(out), comparison
+
+
+def lead_qualifiers(hit: dict, words: dict, loaded: set, evaluated: bool) -> str:
+    """What a reader must know about a patch file the Nexus search lists, from its own recorded fields: retired,
+    archived or an old version; other mods it names that this setup does not load; that it may be the evaluated patch
+    (Nexus does not name a file's plugins). The report and the reel say the same clauses."""
+    lw = words.get("leadCautions") or {}
+    out = []
+    for key in (str(hit.get("status") or ""), str(hit.get("category") or "")):
+        if key and lw.get(key) and lw[key] not in out:
+            out.append(lw[key])
+    other = hit.get("otherMentions")
+    other = [other] if isinstance(other, str) else list(other or [])
+    other = [m for m in other if str(m).lower() not in loaded]
+    if other and lw.get("other"):
+        out.append(lw["other"].format(mods=joined([str(m) for m in other])))
+    if evaluated and lw.get("maybeEvaluated"):
+        out.append(lw["maybeEvaluated"])
+    return "".join(" " + x for x in out)
+
+
+def page_words(page: dict) -> int:
+    """The words a still page puts on screen (its title, rows and lines)."""
+    bits = [page.get("title"), page.get("text"), page.get("incomplete")]
+    for r in page.get("rows") or []:
+        if isinstance(r, dict):
+            bits += [r.get("label"), r.get("reason"), *(r.get("subjects") or []), *(r.get("pairs") or [])]
+        else:
+            bits.append(r)
+    return sum(len(str(b).split()) for b in bits if b)
+
+
+def page_seconds(page: dict, rate: float, policy: dict) -> float:
+    """How long a still page holds so it can be read: its words at the skill's reading rate, at least the minimum."""
+    return round(max(float((policy.get("holdSeconds") or {}).get("pageMin") or 4.0), page_words(page) / rate), 2)
 
 
 def _sha(obj) -> str:
@@ -276,9 +331,21 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             if m_ and x.get("formKey"):
                 cap_cell.setdefault(str(x["formKey"]), m_.group(1))
 
+    place_labels = pred.get("placeLabels") or {}
+
     def place_of(summary, fks=()):
         m = re.search(r" in ([A-Za-z0-9_]+) \((?:int|ext)\)", summary or "") or re.search(r"^Cell ([A-Za-z0-9_]+):", summary or "")
-        cell = m.group(1) if m else next((cap_cell[str(f)] for f in fks if str(f) in cap_cell), None)
+        cell = m.group(1) if m else None
+        if cell and (places.get(cell) or {}).get("name"):
+            return places[cell]["name"]
+        # a cell known only by form key is said as the report says it (its worldspace and grid), never as a file name
+        lab = next((place_labels[str(f)] for f in fks if str(f) in place_labels), None)
+        if lab and re.match(r"^[0-9A-Fa-f]{6}:\S+", str(lab)):
+            rest = re.sub(r"^[0-9A-Fa-f]{6}:\S+(?: \((?:int|ext)\))?(?:,| in)?\s*", "", str(lab)).strip()
+            return rest or words.get("placeUnnamed") or "an unnamed place"
+        cell = cell or next((cap_cell[str(f)] for f in fks if str(f) in cap_cell), None)
+        if cell and re.search(r"(?:^|_)es[mpl]$", cell, re.I):
+            return words.get("placeUnnamed") or "an unnamed place"
         return (places.get(cell) or {}).get("name") or humanize(cell) or "this place"
 
     with_arm = pred.get("predictionArm")
@@ -298,7 +365,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     types = policy.get("types") or {}
     clashes = {}
     for r in kept_rows:
-        t = types.get(r.get("checkId"))
+        t = types.get(r.get("checkId")) or policy.get("otherType")
         if t is None:
             continue
         key = (t, r["formKey"]) if t in ("record", "cell") else (t, r["formKey"], tuple(r.get("other") or []))
@@ -537,7 +604,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         ev = {**evidence, "patch": own[0] if own else None,
               "masters": sorted(masters.get(own[0].lower(), set())) if own else None}
         if hits:
-            return lead + pick("listed").format(file=hits[0].get("file")), {**ev, "case": "listed", "hit": hits[0]}
+            q_ = lead_qualifiers(hits[0], words, {str(x).lower() for x in full_order or order}, bool(own))
+            return (lead + pick("listed").format(file=hits[0].get("file")) + q_,
+                    {**ev, "case": "listed", "hit": hits[0], "qualifiers": q_.strip() or None})
         # "No patch exists" only on a search that found its own known answer and read every source of this pair
         unread = entry.get("unreadSources") or []
         if known_found and not unread:
@@ -561,7 +630,40 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         first = (r["formKey"], a_owner) if a_owner == target else (o_fk, o_owner)
         second = (o_fk, o_owner) if first[0] == r["formKey"] else (r["formKey"], a_owner)
         return {"place": place_of(r.get("summary"), [r["formKey"], *(r.get("other") or [])]), "modA": mod(first[1]), "objectA": spoken_ref(first[0]),
-                "modB": mod(second[1]), "objectB": spoken_ref(second[0])}
+                "modB": mod(second[1]), "objectB": spoken_ref(second[0]),
+                "thingA": thing(first[0], first[1]), "thingB": thing(second[0], second[1])}
+
+    def clash_id(c):
+        r_ = c["rows"][0]
+        return "|".join([str(r_["formKey"]), *map(str, r_.get("other") or [])])
+
+    def frame_label(c, state, m):
+        """The label strip under a vignette frame: which setup it shows, and on the marked view which shape is which
+        colour (from the renderer's own --ref FORMKEY=colour marks)."""
+        lw = words.get("vignetteLabels") or {}
+        if not lw.get(state):
+            return None
+        if state != "highlight":
+            return lw[state].format(mod=mod(target))
+        argv = [str(x) for x in ((m or {}).get("provenance") or {}).get("argv") or []]
+        marks = {}
+        for i_, x_ in enumerate(argv[:-1]):
+            if x_ == "--ref" and "=" in argv[i_ + 1]:
+                fk_, col_ = argv[i_ + 1].rsplit("=", 1)
+                marks[col_] = fk_
+        parts = [lw["mark"].format(colour=col_, object=spoken_ref(fk_)) for col_, fk_ in marks.items()]
+        return lw["highlight"].format(marks="; ".join(parts)) if parts else lw.get("highlightNoMarks")
+
+    def thing(fk, owner_mod):
+        """The object as the plugin that made it: "<mod>'s <object>" only when the mod defines it; an object of the base
+        game (or of a third plugin) the mod only changes is said as that, never as the mod's own."""
+        obj = spoken_ref(fk)
+        made = str(fk).split(":", 1)[-1]
+        if made.lower() == str(owner_mod).lower() or not words.get("thingChanged"):
+            return words.get("thingOwn", "{mod}'s {object}").format(mod=mod(owner_mod), object=obj)
+        base_ = made.lower() in {x.lower() for x in policy.get("baseGameMasters") or []}
+        origin = words.get("baseGameName", "the base game") if base_ else re.sub(r"\.(esp|esm|esl)$", "", made, flags=re.I)
+        return words["thingChanged"].format(origin=origin, object=obj, mod=mod(owner_mod))
 
     def volume(fk):
         b = base_of(fk).get("bounds")
@@ -725,37 +827,63 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         counts.setdefault(c["type"], {"count": 0, "pairs": set()})
         counts[c["type"]]["count"] += 1
         counts[c["type"]]["pairs"].add(" and ".join(mod(m) for m in c["pair"]))
-    affected = {target} | {p for r in kept_rows if types.get(r.get("checkId")) is not None for p in (r["A"], r["B"])}
+    affected = {target} | {p for r in kept_rows if (types.get(r.get("checkId")) or policy.get("otherType")) is not None
+                            for p in (r["A"], r["B"])}
+    affected_low = {str(p).lower() for p in affected}
     runtime_mods = sorted({o for m in pres.get("media") or [] for o in ((m.get("provenance") or {}).get("runtimeOverlayMods") or [])})
+    unit_words = words.get("typeUnits") or {}
+    rows_n = collections.Counter(c["type"] for c in clashes.values() for _ in c["rows"])
+
+    def card_count(t):
+        # a type counted by its rows (a navmesh clash is one record with many broken links) says the rows, as the report
+        return rows_n[t] if t in (policy.get("countRows") or []) else counts[t]["count"]
+
+    def card_unit(t, n):
+        u = unit_words.get(t) or unit_words.get("default")
+        return (u[0] if n == 1 else u[1]) if u else None
+    incomplete = pred.get("incompleteReel")
     opening_pages = [
         {"layout": "types", "title": words["stillTitles"]["types"].format(mod=mod(target)),
-         "rows": [{"label": type_labels[t], "count": counts[t]["count"], "pairs": sorted(counts[t]["pairs"])}
+         "rows": [{"label": type_labels[t], "count": card_count(t), "unit": card_unit(t, card_count(t)),
+                   "pairs": sorted(counts[t]["pairs"])}
                   for t in policy["typeOrder"] if t in counts],
+         **({"incomplete": incomplete} if incomplete else {}),
          "leftOut": {"noInGameEffect": left_out, "markers": left_markers,
                      "line": words["stillTitles"]["leftOut"].format(count=left_out, noun="record field" if left_out == 1 else "record fields")
                      if left_out else None,
                      "markersLine": words["leftOutMarkers"].format(count=left_markers, noun="clash" if left_markers == 1 else "clashes")
                      if left_markers else None}},
         {"layout": "load-order", "title": words["stillTitles"]["loadOrder"], "legend": words["stillTitles"]["affected"],
-         "plugins": full_order or order, "targets": [target], "affected": [p for p in order if p in affected] or sorted(affected),
+         "plugins": full_order or order, "targets": [target],
+         "affected": [p for p in (full_order or order) if str(p).lower() in affected_low] or sorted(affected),
          "runtimeMods": runtime_mods, "runtimeTitle": words["stillTitles"]["runtime"] if runtime_mods else None}]
-    chapters = [{"id": "R-01", "kind": "opening",
-                 "narration": (words["opening"] if counts else words["openingNone"]).format(mod=mod(target)),
-                 "still": {"pages": opening_pages}}]
+    opening_say = (words["opening"] if counts else words["openingNone"]).format(mod=mod(target))
+    if incomplete:
+        opening_say += " " + incomplete
+    if words.get("loadOrderSay"):
+        n_aff = len(opening_pages[1]["affected"])
+        opening_say += " " + words["loadOrderSay"].format(count=len(opening_pages[1]["plugins"]), marked=n_aff)
+    rate = float(policy.get("readingWordsPerSecond") or 0) or None
+    for pg in opening_pages:
+        if rate:
+            pg["seconds"] = (float((policy.get("holdSeconds") or {}).get("loadOrderPage") or 6.0)
+                             if pg["layout"] == "load-order" else page_seconds(pg, rate, policy))
+    chapters = [{"id": "R-01", "kind": "opening", "narration": opening_say, "still": {"pages": opening_pages}}]
     accounting = {}
     for t in policy.get("typeOrder") or []:
         if t not in counts:
             continue
         chosen = chosen_by_type.get(t) or []
-        accounting[t] = {"pictured": [c["rows"][0]["formKey"] for c in chosen]
-                         + [g_["rows"][0]["formKey"] for c in chosen for g_ in in_split.get(c["rows"][0]["formKey"]) or []],
-                         "unpictured": [c["rows"][0]["formKey"] for c, _ in unpictured if c["type"] == t],
-                         "represented": [c["rows"][0]["formKey"] for c in represented.get(t, [])]}
+        # one entry per clash (its object and partner), never per object: a pictured clash is never also unpictured
+        accounting[t] = {"pictured": [clash_id(c) for c in chosen]
+                         + [clash_id(g_) for c in chosen for g_ in in_split.get(c["rows"][0]["formKey"]) or []],
+                         "unpictured": [clash_id(c) for c, _ in unpictured if c["type"] == t],
+                         "represented": [clash_id(c) for c in represented.get(t, [])]}
         for i, c in enumerate(chosen):
             patch, evidence = patch_sentence(c)
             text = sentence(c) + " " + patch
             if i == 0:
-                n, shown = counts[t]["count"], len(chosen)
+                n, shown = card_count(t), len(chosen)
                 intro = words["cases"]["one" if n == 1 else "many"].format(count=n, label=words["caseLabels"][t])
                 lead = ("" if n == 1 else words["lead"]["all"] if shown == n else
                         words["lead"]["one"] if shown == 1 else words["lead"]["some"].format(count=shown))
@@ -770,7 +898,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 m = frame_media(c, state)
                 # a cutaway or a sliced top-down says so on the reel too, not only in the frame's own label
                 frames.append({"state": state, "armId": arm_of[state], "mediaId": (m or {}).get("id"),
-                               "viewNote": view_kind_line((m or {}).get("provenance") or {}) or None})
+                               "viewNote": view_kind_line((m or {}).get("provenance") or {}) or None,
+                               **({"label": frame_label(c, state, m)} if not split and frame_label(c, state, m) else {})})
             notes_ = list(dict.fromkeys(f_["viewNote"] for f_ in frames if f_.get("viewNote")))
             if notes_:
                 text = (text + " " + " ".join(notes_)).strip()
@@ -800,6 +929,20 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     if unpictured or none_captured:
         n_un = len(unpictured)
         sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un) if unpictured else ""
+        if unpictured and words.get("unpicturedTyped"):
+            # in the opening card's units, by type, and where in the report to find them; then why, by reason
+            by_t = collections.Counter()
+            for c, _ in unpictured:
+                by_t[c["type"]] += len(c["rows"]) if c["type"] in (policy.get("countRows") or []) else 1
+            parts = [f"{n_} {card_unit(t_, n_) or words['caseLabels'].get(t_, t_)}" for t_, n_ in by_t.items()]
+            sentence_un = words["unpicturedTyped"].format(
+                parts=joined(parts), verb="isn't" if sum(by_t.values()) == 1 else "aren't",
+                heading=((reader.get("sectionHeadings") or {}).get("prediction") or ""))
+            why_n = collections.Counter(why for _, why in unpictured)
+            short = policy.get("stillReasonsShort") or {}
+            if short and words.get("unpicturedWhy"):
+                sentence_un += " " + words["unpicturedWhy"].format(reasons=joined(
+                    [f"{n_} {short.get(w_, w_)}" for w_, n_ in why_n.most_common()]))
         for t_, n_ in none_captured:
             sentence_un = (sentence_un + " " + words["noneCaptured"].format(
                 count=n_, label=words["caseLabels"][t_])).strip()
@@ -808,16 +951,50 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if gone and words.get("placementRemoved"):
             sentence_un += " " + " ".join(words["placementRemoved"].format(
                 winner=mod(c["rows"][0]["B"]), loser=mod(c["rows"][0]["A"]),
-                object=spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary"))) for c in gone)
+                object=spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary")),
+                places=(words.get("placesVerb") or {}).get(
+                    "own" if str(c["rows"][0]["formKey"]).split(":", 1)[-1].lower() == str(c["rows"][0]["A"]).lower()
+                    else "changes", "places")) for c in gone)
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "unpictured", "narration": sentence_un, "count": n_un,
                          "clashes": [{"formKey": c["rows"][0]["formKey"], "type": c["type"], "reason": why,
                                       "field": c["rows"][0].get("field"), "pair": [mod(m) for m in c["pair"]],
                                       "reasonText": (policy.get("stillReasons") or {}).get(why)}
                                      for c, why in unpictured],
-                         "still": {"pages": [{"layout": "statement", "text": sentence_un}]}})
+                         "still": {"pages": [{"layout": "statement", "text": sentence_un,
+                                              **({"seconds": page_seconds({"layout": "statement", "text": sentence_un},
+                                                                          rate, policy)} if rate else {})}]}})
+    # what to do: the report's own verdicts and next steps, the same sentences, before the closing list
+    todo = [str(x) for x in pred.get("whatToDo") or []]
+    if todo:
+        tpage = {"layout": "list", "title": pred.get("whatToDoHeading") or words["stillTitles"].get("whatToDo") or "",
+                 "rows": todo, **({"maxWords": policy["pageMaxWords"]} if policy.get("pageMaxWords") else {})}
+        if rate:
+            tpage["seconds"] = page_seconds(tpage, rate, policy)
+        chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "verdict", "narration": " ".join(todo),
+                         "still": {"pages": [tpage]}})
     checks = closing_checks(reader, pres, mod, patch_name, words)
-    chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": words["closing"],
-                     "still": {"pages": [{"layout": "checks", "title": words["stillTitles"]["checks"], "rows": checks}]}})
+    closing_say = words["closing"]
+    # a closing check that is also a headline kind: its arm result stands; what has no result is a comparison
+    head_titles = {str(i.get("title")): i for i in pred.get("items") or [] if i.get("shownAs") != "alone"}
+    reconcile = []
+    for row in checks:
+        for subj in row.get("subjects") or []:
+            it = head_titles.get(str(subj).split(", with")[0].split(", without")[0])
+            if it and words.get("closingReconcile") and row.get("comparison"):
+                reconcile.append(words["closingReconcile"].format(title=it.get("title"), count=it.get("count")))
+    if reconcile:
+        checks = [{"reason": " ".join(dict.fromkeys(reconcile)), "subjects": []}] + checks
+    if words.get("closingCount"):
+        closing_say += " " + " ".join(words["closingCount"].format(
+            reason=str(r_["reason"])[:1].upper() + str(r_["reason"])[1:], count=len(r_["subjects"]),
+            noun="check" if len(r_["subjects"]) == 1 else "checks") for r_ in checks if r_.get("subjects"))
+        closing_say += (" " + " ".join(dict.fromkeys(reconcile))) if reconcile else ""
+    cpage = {"layout": "checks", "title": words["stillTitles"]["checks"], "rows": checks,
+             **({"maxWords": policy["pageMaxWords"]} if policy.get("pageMaxWords") else {})}
+    if rate:
+        cpage["seconds"] = page_seconds(cpage, rate, policy)
+    chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": closing_say,
+                     "still": {"pages": [cpage]}})
     return {"schemaVersion": SCHEMA, "status": "planned", "reason": None,
             "policySha256": _sha(policy), "wordsSha256": _sha(words),
             "patchSearchSha256": _sha(patch_search) if patch_search is not None else None,

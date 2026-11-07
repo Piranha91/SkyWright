@@ -1033,6 +1033,9 @@ def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = Non
         argv += ["--mod-name", f"{p}={n}"]
     if ctx.entry.get("patchSearch"):
         argv += ["--patch-search", ctx.entry["patchSearch"]]
+    # the precedent stage's census of each patch's own edits, where that stage wrote it
+    if (ctx.out / "precedent" / "cards" / "summary.json").is_file():
+        argv += ["--precedent", fwd(ctx.out / "precedent" / "cards")]
     for c in captures:
         argv += ["--capture-results", fwd(c)]
     if final:

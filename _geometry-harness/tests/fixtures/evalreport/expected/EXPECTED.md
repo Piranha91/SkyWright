@@ -137,7 +137,7 @@ it was read only to confirm the disposition and manifest shapes above.
 21. **A-11 (Fable, 20:42): an unreachable limit keeps the least abridged content-preserving step.** R4's
     `within-limit` / `pages ≤ 4` expectations stand (they record the open decision on a machine where R4 prints
     over the limit); when the status IS `over-limit`, `print.kept` names `layout: compact`, `rowsPerGroup` equal
-    to `settings.rowsPerGroup`, `figuresPerFinding: 1`, and `print.reason` says the limit is unreachable.
+    to `settings.rowsPerGroup`, `figuresPerFinding: 3` (the reel's vignettes per type, since figures are never dropped to fit), and `print.reason` says the limit is unreachable.
 22. **D5 gains `provenance-missing`** (checked after `fingerprint-source-missing`). Every R5 item carries
     `provenance: {tool, capturedUtc}`; a sixth, otherwise valid item with no provenance is unassessed by that
     name. The closed reason list in `common.json` carries it.
