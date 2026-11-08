@@ -155,6 +155,9 @@ under its F1 condition), approx (--measured-approximations FILE: an in-game meas
 bound), absent (--absent-models FILE: a model no
 active provider supplies, measured drawing nothing, is no_geometry). primitive with --primitive-solidity FILE: the measured
 (base, layer) table decides; without the file the earlier activator rule stands.
+--reach-shapes FILE (with --reach): for every reach region holding a particle part or a measured approximation, one JSON line
+{formid, region, shapes}: the region read again under the same rules and placement with ReachOptions.ParticlesAside (the render
+shapes alone; particles are runtime state, not a body). The manifest itself is unchanged.
 See overlapprobe/Program.cs usage documentation. Help performs no load-order scan.
 """);
     return 0;
@@ -182,6 +185,7 @@ string? settleExemptionsPath = null;     // --settle-exemptions FILE (with --rea
 string? primitiveSolidityPath = null;    // --primitive-solidity FILE (with --reach-rules primitive; Part 3b measured table)
 string? absentModelsPath = null;         // --absent-models FILE (with --reach-rules absent; Part 3b measurements)
 string? settledGravityPath = null;       // --settled-gravity FILE (with --reach-rules gravity; Part 3b observations)
+string? reachShapesPath = null;         // --reach-shapes FILE (with --reach): the render shapes' region, particles set aside, as a sidecar
 string? approximationsPath = null;       // --measured-approximations FILE (with --reach-rules approx; Part 3b round 2 measurements)
 long maxTrianglePairs = 2_000_000;
 double pairSeconds = 120;
@@ -258,6 +262,7 @@ try
         else if (flag == "--absent-models") { absentModelsPath = NeedValue(i, flag); i++; }
         else if (flag == "--settled-gravity") { settledGravityPath = NeedValue(i, flag); i++; }
         else if (flag == "--measured-approximations") { approximationsPath = NeedValue(i, flag); i++; }
+        else if (flag == "--reach-shapes") { reachShapesPath = NeedValue(i, flag); i++; }
         else if (flag == "--reach-rules")
         {
             reachRules = NeedValue(i, flag).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -834,6 +839,7 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
         if (bytes is null) return Out(new ReachRegion("refused", "asset read failed: " + err, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
         if (reachRules is null) return Out(MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, Read, new ReachOptions(motionDelta)));
         var region = RegionOf(key, baseKey, p, bytes);
+        if (reachShapesPath is not null) ShapesOf(key, baseKey, p, bytes, region);
         if (!p.Interior && region.Drop is not null && terrainUnread.Contains(key))
             region = region with { Status = "uncertified", Labels = region.Labels.Append(PhysicsReach.TerrainNotReadLabel).ToList() };
         return Out(region);
@@ -1185,6 +1191,24 @@ ReachRegion RegionOf(FormKey key, FormKey baseKey, Snap p, byte[] bytes)
     }
     var r = MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, ReadAsset, new ReachOptions(motionDelta, Rules: RulesFor(key, baseKey, p)));
     return regionMemo[key] = r;
+}
+// --reach-shapes: the region with particles set aside, for a region that holds a particle part or a measured approximation
+var reachShapesRows = new List<object>();
+void ShapesOf(FormKey key, FormKey baseKey, Snap p, byte[] bytes, ReachRegion region)
+{
+    if (!region.UncertifiedParts.Any(x => x.Label.Contains("particle", StringComparison.Ordinal) || x.Label.StartsWith("in-game approximation", StringComparison.Ordinal))) return;
+    byte[]? ReadAsset(string rel)
+    {
+        try { var res = assets.ResolveForPlacement(rel); return res.Sources.Count == 0 ? null : AssetResolver.ReadPlacementSource(res.Sources[0]).Bytes; }
+        catch (ArgumentException) { return null; }
+    }
+    var opts = new ReachOptions(motionDelta, Rules: reachRules is null ? null : RulesFor(key, baseKey, p), ParticlesAside: true);
+    var s = MeshReach.OfModel(bytes, p.Pos, p.Rot, p.Scale, ReadAsset, opts);
+    static object? Box(Aabb b) => b.IsEmpty ? null
+        : new { min = new[] { (double)b.Min.X, b.Min.Y, b.Min.Z }, max = new[] { (double)b.Max.X, b.Max.Y, b.Max.Z } };
+    object Row(ReachRegion r) => new { status = r.Status, reason = r.Reason, box = Box(r.Box), labels = r.Labels,
+                                       parts = r.UncertifiedParts.Select(x => new { label = x.Label, box = Box(x.Box) }).ToArray() };
+    reachShapesRows.Add(new { formid = key.ToString(), region = Row(region), shapes = Row(s) });
 }
 // rest rule part 3: a loose body's role as a support, read once, lowest first by recursion (LooseReadings reports a cycle)
 LooseRole LooseRoleOf(FormKey k, Snap sp)
@@ -2296,6 +2320,11 @@ if (geometryManifestPath is not null)
         File.WriteAllText(geometryManifestPath, arms.StampForced(withLoose.ToJsonString(manifestJson)));
     }
     __run.Advance().Artifact(geometryManifestPath);
+    if (reachShapesPath is not null)
+    {
+        File.WriteAllLines(reachShapesPath, reachShapesRows.Select(r => JsonSerializer.Serialize(r)));
+        Console.WriteLine($"wrote reach shapes: {reachShapesRows.Count:N0} regions -> {reachShapesPath}");
+    }
     Console.WriteLine($"wrote geometry manifest: {recordRows.Count:N0} records, {pairRows.Count:N0} union pairs -> {geometryManifestPath}");
 }
 
