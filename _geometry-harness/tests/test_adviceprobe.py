@@ -198,7 +198,14 @@ def main() -> int:
         # ---- evalrun: the clash rows it records next to the rules
         run_dir = tmp / "evalrun"
         (run_dir / "outputs").mkdir(parents=True)
-        shutil.copy(out / "report-9002.json", run_dir / "outputs" / "report-9002.json")
+        # A hand-written report in adviceprobe's documented shape, so this check does not depend on the probe run.
+        (run_dir / "outputs" / "report-9002.json").write_text(json.dumps({
+            "modId": 9002, "rules": [{"before": "Beta.esp", "after": "AlphaHalls.esp", "hardness": "advice"}],
+            "clashes": [{"namedModId": 9002, "namedModName": "Beta - A Shrine Overhaul", "pageModId": 9001,
+                         "page": URL.format(9001), "readDate": "2026-11-08",
+                         "line": "-Beta - A Shrine Overhaul: Trapdoor entrance to the catacombs is blocked",
+                         "symptom": "Trapdoor entrance to the catacombs is blocked"}],
+            "pagesRead": ["mod 9002: archive", "mod 9001 (--with): archive"], "warnings": []}), encoding="utf-8")
         receipt = {"outputs": [{"path": "outputs/report-9002.json"}]}
         statements = getattr(evalrun, "advice_statements", None)
         rec = statements(run_dir, receipt) if statements else None
