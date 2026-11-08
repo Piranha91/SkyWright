@@ -331,7 +331,8 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         aside_n += sum(int(it.get("count") or 0) for _, it in alone)
     if aside_n:
         md += [bind(rd["setAside"], n=ER.fmt_n(aside_n)), ""]
-    files = list(mods) + list(val.get("patches") or [])
+    # a same-named patch by its label (its folder), never its bare name twice (item 20)
+    files = list(mods) + list(val.get("patchLabels") or val.get("patches") or [])
     md += [bind(rd["filesLine"], files=", ".join(files))]
     if index_link:
         md += ["", bind(rd["techLine"], link=f"[evidence index]({index_link})")]

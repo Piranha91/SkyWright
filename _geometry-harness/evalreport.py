@@ -1507,10 +1507,16 @@ def build_prediction(ctx: dict) -> dict:
         if kinds.get(arm_id) != "patch-comparison":
             continue
         added, removed = changes.get(arm_id) or ([], [])
-        if removed and not added:
-            comparisons.append({"withPatch": "baseline", "withoutPatch": arm_id, "patches": list(removed)})
-        elif added and not removed:
-            comparisons.append({"withPatch": arm_id, "withoutPatch": "baseline", "patches": list(added)})
+        # a same-named file replaced in place by a declared patch (item 20): the side whose copy is the patch has it
+        rep_ = (ctx.get("replacedPatches") or {}).get(arm_id) or {}
+        in_arm, in_base = list(rep_.get("arm") or []), list(rep_.get("baseline") or [])
+        if removed and not added and not in_arm:
+            comparisons.append({"withPatch": "baseline", "withoutPatch": arm_id, "patches": list(removed) + in_base})
+        elif added and not removed and not in_base:
+            comparisons.append({"withPatch": arm_id, "withoutPatch": "baseline", "patches": list(added) + in_arm})
+        elif not added and not removed and bool(in_arm) != bool(in_base):
+            comparisons.append({"withPatch": arm_id if in_arm else "baseline",
+                                "withoutPatch": "baseline" if in_arm else arm_id, "patches": in_arm or in_base})
     if comparisons:
         main = max(comparisons, key=lambda c: len(c["patches"]))
         p_arm, patched_arm, patch_names = main["withoutPatch"], main["withPatch"], main["patches"]
@@ -3904,7 +3910,8 @@ def build_prediction(ctx: dict) -> dict:
                         (x.get("Kind"), x.get("A"), x.get("B"), x.get("FormKey"), x.get("Other")):
                             (str(x.get("Physical")), str(x.get("Detail") or "")) for x in preds if isinstance(x, dict)}
         return remeasure_with_patch_cache[check_id]
-    patch_text = (", ".join(patch_names) if len(patch_names) <= 2 else
+    patch_labels = ctx.get("patchLabels") or {}
+    patch_text = (", ".join(patch_labels.get(str(n).lower(), str(n)) for n in patch_names) if len(patch_names) <= 2 else
                   bind(words["patchesShort"], {"count": len(patch_names)}))
 
     def navmesh_stub(plugin, fk):
@@ -5520,7 +5527,8 @@ def build_prediction(ctx: dict) -> dict:
     else:
         # several patches are named once (the scope line and the setups list name them all) and called "the N
         # patches" in each sentence after (P53: six names repeated in every line took a page)
-        patch = ", ".join(patch_names) if len(patch_names) <= 2 else bind(words["patchesShort"], {"count": len(patch_names)})
+        patch = (", ".join(patch_labels.get(str(n).lower(), str(n)) for n in patch_names) if len(patch_names) <= 2
+                 else bind(words["patchesShort"], {"count": len(patch_names)}))
         admitted = [e for e in record if e["admission"] == "admitted"]
         keyof = lambda e: (e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])  # noqa: E731
         not_measured = [e for e in admitted if (e["checkId"], patched_arm) not in measured]
@@ -7245,7 +7253,8 @@ def build_prediction(ctx: dict) -> dict:
                 alone_[str(p_)] = {"arm": a_, "byItem": rows_alone_}
         validation = {"status": "compared", "summary": summary_, "headline": old_, "alone": alone_,
                       "headlineShown": " ".join(ctx.get("refusedLines") or []),
-                      "patches": patch_names, **side_lines,
+                      "patches": patch_names, "patchLabels": [patch_labels.get(str(n).lower(), str(n)) for n in patch_names],
+                      **side_lines,
                       "itemLines": item_lines, "newByCheck": new_by_check,
                       "newByCheckHeading": words["validationNewByCheck"],
                       "withPatchArm": patched_arm, "withoutPatchArm": p_arm, "byItem": by_item,
@@ -7767,6 +7776,48 @@ def precedent_cards(folder, patch, pc: dict) -> list[dict]:
     return out
 
 
+def patch_declaration(v, source: str) -> dict | None:
+    """One patch declaration: {name, sha256, folder, source}, or None for a blank entry. A plugin name alone, a dict
+    {name, sha256?, folder?}, or the --declare-patch spellings NAME=sha256:<64 hex> and NAME=folder:<mod folder>.
+    Raises InputRefused for a malformed one."""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    if isinstance(v, str):
+        name, sha, folder = v.strip(), None, None
+        for marker in ("=sha256:", "=folder:"):
+            if marker in name:
+                name, rest = name.split(marker, 1)
+                sha, folder = (rest.strip(), None) if marker == "=sha256:" else (None, rest.strip())
+                break
+    elif isinstance(v, dict):
+        name, sha, folder = str(v.get("name") or ""), v.get("sha256"), v.get("folder")
+    else:
+        raise InputRefused(f"patch-declaration-invalid: the patch declaration {v!r} ({source}) is neither a plugin name "
+                           f"nor a {{name, sha256, folder}} object; give the patch's file name")
+    name = name.strip()
+    if not name:
+        raise InputRefused(f"patch-declaration-invalid: the patch declaration {v!r} ({source}) names no plugin; give "
+                           f"the patch's file name, with its sha256 or folder when another file has the same name")
+    if sha is not None and not (isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{64}", sha.strip())):
+        raise InputRefused(f"patch-declaration-invalid: the patch declaration {name} ({source}) gives sha256 {sha!r}; "
+                           f"give the file's full 64-character sha256")
+    if folder is not None and not (isinstance(folder, str) and folder.strip()):
+        raise InputRefused(f"patch-declaration-invalid: the patch declaration {name} ({source}) gives an empty folder; "
+                           f"give the mod folder that provides it")
+    return {"name": name, "sha256": sha.strip().lower() if sha else None,
+            "folder": folder.strip() if folder else None, "source": source}
+
+
+def copy_folder(row: dict) -> str | None:
+    """The mod folder a plan row's copy comes from: an own-view row's layer, else the folder its path sits in."""
+    src = str((row or {}).get("hashSource") or "")
+    if src.startswith("instance:"):
+        return src.split(":", 1)[1]
+    path = str((row or {}).get("path") or "")
+    parts = [p for p in re.split(r"[\\/]", path) if p]
+    return parts[-2] if len(parts) >= 2 else None
+
+
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
                  location_scopes: dict | None = None, sibling_dir: Path | None = None,
                  sibling_as_given: str | None = None, order_setups: list | None = None) -> dict:
@@ -7873,21 +7924,93 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # the plan's own `patches` list, an arm's `provenance.patch`/`patches`/`patchPlugins`, and
     # `--declare-patch` at report time for a plan that predates the field. Absent all three,
     # the difference is reported as UNSTATED rather than named as a patch.
-    declared_patches = set()
+    #
+    # Item 20: a patch is a FILE, not a name. An author's same-named "compatible" plugin shares its name with the mod
+    # it replaces, so a declaration may name the file by sha256 or by the folder that provides it, and then marks only
+    # the copies with those bytes / from that folder. A name alone marks every copy of the name, unless the plan loads
+    # different files under it (or cannot compare the baseline's copy with another's): then it marks none and the
+    # reader is told, so the baseline's copy is never taken for the patch.
+    decls_ = []
     for v in (b.plan.get("patches") or []):
-        name = v if isinstance(v, str) else (v or {}).get("name")
-        if name:
-            declared_patches.add(str(name).lower())
-    for a in plan_arms.values():
-        prov = (a or {}).get("provenance") or {}
+        decls_.append(patch_declaration(v, "the plan's patches list"))
+    for arm_id_ in arm_ids:
+        prov = (plan_arms.get(arm_id_) or {}).get("provenance") or {}
         for key in ("patch", "patches", "patchPlugins"):
             v = prov.get(key)
-            for name in ([v] if isinstance(v, str) else (v or [])):
-                if isinstance(name, str) and name.strip():
-                    declared_patches.add(name.strip().lower())
-    for name in (settings.get("declaredPatches") or []):
-        if isinstance(name, str) and name.strip():
-            declared_patches.add(name.strip().lower())
+            for x in ([v] if isinstance(v, (str, dict)) else (v or [])):
+                decls_.append(patch_declaration(x, f"setup {arm_id_}'s provenance"))
+    for v in (settings.get("declaredPatches") or []):
+        decls_.append(patch_declaration(v, "--declare-patch"))
+    copies_of = collections.defaultdict(list)
+    arms_with_rows = set()
+    for arm_id_ in arm_ids:
+        for p in ((plan_arms.get(arm_id_) or {}).get("requested") or {}).get("plugins") or []:
+            if p.get("name"):
+                copies_of[str(p["name"]).lower()].append((arm_id_, p))
+                arms_with_rows.add(arm_id_)
+
+    def name_ambiguous(cs) -> bool:
+        """Different files under one name, or a baseline copy that cannot be compared with another setup's copy."""
+        if len({stated(p) for _, p in cs if stated(p)}) > 1:
+            return True
+        base_ = [p for a_, p in cs if a_ == "baseline"]
+        others_ = [p for a_, p in cs if a_ != "baseline"]
+        return bool(base_ and others_ and (stated(base_[0]) is None or any(stated(p) != stated(base_[0]) for p in others_)))
+
+    declared_copies, patch_declarations_out, ambiguous_names = set(), [], []
+    for d in (x for x in decls_ if x):
+        cs = copies_of.get(d["name"].lower(), [])
+        ambiguous = False
+        if d["sha256"] or d["folder"]:
+            hit = [(a_, p) for a_, p in cs
+                   if (not d["sha256"] or stated(p) == d["sha256"])
+                   and (not d["folder"] or str(copy_folder(p) or "").lower() == d["folder"].lower())]
+            if not hit:
+                what = " and ".join(([f"sha256 {d['sha256'][:12]}…"] if d["sha256"] else [])
+                                    + ([f"folder {d['folder']}"] if d["folder"] else []))
+                unstated_in = [a_ for a_, p in cs if stated(p) is None]
+                raise InputRefused(
+                    f"patch-declaration-unmatched: the patch declaration {d['name']} with {what} ({d['source']}) "
+                    f"matches no plugin any setup of this plan loads; "
+                    + (f"the plan's hash of {d['name']} is unstated in {', '.join(unstated_in)}, so that copy cannot be "
+                       f"matched: plan the setups with --instance, --game and --profile, or declare the patch by name."
+                       if unstated_in else
+                       "check the hash or folder against the plan's requested plugins, or declare the patch by name."))
+        else:
+            ambiguous = name_ambiguous(cs)
+            hit = [] if ambiguous else cs
+            if ambiguous and d["name"].lower() not in {n.lower() for n, _ in ambiguous_names}:
+                ambiguous_names.append((d["name"], len({stated(p) for _, p in cs if stated(p)}) > 1))
+        declared_copies |= {(a_, d["name"].lower()) for a_, _ in hit}
+        patch_declarations_out.append({"source": d["source"], "name": d["name"], "sha256": d["sha256"],
+                                       "folder": d["folder"],
+                                       "copies": [{"armId": a_, "sha256": stated(p), "folder": copy_folder(p)}
+                                                  for a_, p in hit],
+                                       **({"ambiguous": True} if ambiguous else {})})
+    # names with at least one declared copy (for the readers that ask of a name, not of a setup's copy)
+    declared_patches = {n for _, n in declared_copies}
+
+    def declared_copy(arm_id, name) -> bool:
+        """Is this setup's copy of the name a declared patch?"""
+        return (arm_id, str(name or "").lower()) in declared_copies
+
+    def replaced_patch_side(arm_id, name):
+        """For a name this arm loads as another file than the baseline: which side's copy is the declared patch
+        ("arm" or "baseline"), or None when neither or both are."""
+        mine, theirs = declared_copy(arm_id, name), declared_copy("baseline", name)
+        return "arm" if mine and not theirs else "baseline" if theirs and not mine else None
+
+    def setup_of_rows(f) -> str | None:
+        """The setup whose plugins a finding's rows name: a reverse part is the baseline order (evalrun reference_arm)."""
+        return "baseline" if f.get("part") == "reverse" else f.get("armId")
+
+    def finding_declared(f, name) -> bool:
+        """A setup the plan requests no plugins for (a disposition-only arm, a sibling's) has no copies to ask of, so
+        its rows are judged by the name, as before item 20."""
+        setup_ = setup_of_rows(f)
+        if setup_ in arms_with_rows:
+            return declared_copy(setup_, name)
+        return str(name or "").lower() in declared_patches
 
     def arm_comparison_kind(arm_id) -> str:
         if arm_id == "baseline":
@@ -7905,15 +8028,21 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             # Calling it a control asserted an equality that was never checked. Nor is the same
             # NAME the same file (SW2): a same-named replacement is its own comparison.
             if replaced:
+                # a replaced file that is a declared patch on exactly one side is that patch, added or removed in place
+                if same_order and all(replaced_patch_side(arm_id, n) for n in replaced):
+                    return "patch-comparison"
                 return "same-name-replacement" if same_order else "mixed"
             if not same_order:
                 return "reordered-alternative"
             return "bytes-not-compared" if arm_unverified.get(arm_id) else "same-order-control"
         if replaced:
-            moved = added + removed + replaced
-            if any(n.lower() in plan_target_set for n in moved):
+            # a target's file replaced by its declared patch is the patch moving, not the target (item 20)
+            if any(n.lower() in plan_target_set for n in added + removed + [n for n in replaced
+                                                                           if not replaced_patch_side(arm_id, n)]):
                 return "mixed"
-            return ("patch-comparison" if all(n.lower() in declared_patches for n in moved)
+            return ("patch-comparison" if (all(declared_copy(arm_id, n) for n in added)
+                                           and all(declared_copy("baseline", n) for n in removed)
+                                           and all(replaced_patch_side(arm_id, n) for n in replaced))
                     else "unstated-difference")
         # An evaluated MOD moving decides the kind, whichever direction it moves in. Its
         # companion files travel with it and are collateral, not a patch: a mod's own extra
@@ -7927,8 +8056,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         # Only NON-target plugins move. That is a patch comparison in either direction ONLY
         # if every plugin that moved is a DECLARED patch. Otherwise the identity is unstated
         # and is reported as such.
-        moved = [n for n in added + removed]
-        if moved and all(n.lower() in declared_patches for n in moved):
+        if (added or removed) and (all(declared_copy(arm_id, n) for n in added)
+                                   and all(declared_copy("baseline", n) for n in removed)):
             return "patch-comparison"
         return "unstated-difference"
 
@@ -7942,26 +8071,56 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for arm_id in arm_ids:
         for i, n in enumerate(arm_orders.get(arm_id) or []):
             load_position.setdefault(n.lower(), len(load_position) + i)
+    def patch_moves(arm_id) -> list:
+        """The declared patch copies this arm moves against the baseline: added (its copy), removed (the baseline's),
+        and a same-named file replaced in place where exactly one side's copy is declared -- that one even under a
+        target's name (item 20: an author's compatible version of the evaluated mod)."""
+        added, removed = arm_changes.get(arm_id) or ([], [])
+        return ([n for n in added if declared_copy(arm_id, n) and n.lower() not in plan_target_set]
+                + [n for n in removed if declared_copy("baseline", n) and n.lower() not in plan_target_set]
+                + [n for n in arm_replaced.get(arm_id) or [] if replaced_patch_side(arm_id, n)])
+
     supplied = sorted({n
-                       for arm_id, (added, removed) in arm_changes.items()
+                       for arm_id in arm_changes
                        if comparison_kinds.get(arm_id) == "patch-comparison"
-                       for n in added + removed
-                       if n.lower() in declared_patches and n.lower() not in plan_target_set},
+                       for n in patch_moves(arm_id)},
                       key=lambda n: (load_position.get(n.lower(), 10 ** 6), n.lower()))
     # Differences carried by an arm whose patch identity is not declared. Named to the reader
-    # as what they are -- a plugin that differs -- and never as an evaluated patch.
+    # as what they are -- a plugin that differs -- and never as an evaluated patch: the moved files that are not
+    # declared copies, a replaced same-named file included.
     unstated_difference_plugins = sorted({n
                                           for arm_id, (added, removed) in arm_changes.items()
                                           if comparison_kinds.get(arm_id) == "unstated-difference"
-                                          for n in added + removed})
+                                          for n in ([x for x in added if not declared_copy(arm_id, x)]
+                                                    + [x for x in removed if not declared_copy("baseline", x)]
+                                                    + [x for x in arm_replaced.get(arm_id) or []
+                                                       if not replaced_patch_side(arm_id, x)])})
     # Declared patches changed by a MIXED arm (one that adds and removes at once). Such an arm
     # evaluates no patch on its own, but the reader must not be told no patch was declared.
     mixed_declared_patches = sorted({n
-                                     for arm_id, (added, removed) in arm_changes.items()
+                                     for arm_id in arm_changes
                                      if comparison_kinds.get(arm_id) == "mixed"
-                                     for n in added + removed
-                                     if n.lower() in declared_patches and n.lower() not in plan_target_set
-                                     and n not in supplied})
+                                     for n in patch_moves(arm_id)
+                                     if n not in supplied})
+    # A same-named patch is named with the folder it comes from (else its hash): its bare name is also the other file's.
+    patch_labels = {}
+    for arm_id in arm_changes:
+        for n in arm_replaced.get(arm_id) or []:
+            side_ = replaced_patch_side(arm_id, n)
+            if side_:
+                row_ = next((p for p in ((plan_arms.get(arm_id if side_ == "arm" else "baseline") or {}).get("requested")
+                                         or {}).get("plugins") or [] if str(p.get("name") or "").lower() == n.lower()), {})
+                patch_labels.setdefault(n.lower(), f"{n} from {copy_folder(row_)}" if copy_folder(row_) else
+                                        f"{n} (sha256 {str(stated(row_) or '')[:12]})")
+
+    def patch_label(n) -> str:
+        return patch_labels.get(str(n).lower(), str(n))
+    ambiguous_text = " ".join(
+        f"{n} is declared as a patch by name only, but the setups load different files with that name, so neither is "
+        f"read as the patch; declare it with its sha256 or its folder to compare it as one." if differ else
+        f"{n} is declared as a patch by name only, but the plan could not compare the bytes of its copies of that name, "
+        f"so neither is read as the patch; declare it with its sha256 or its folder to compare it as one."
+        for n, differ in ambiguous_names)
 
     def repair_claimable(ids) -> bool:
         """Can a reduction across these arms be read as REPAIR the reader could install?
@@ -8002,17 +8161,27 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
 
     def arm_subject(arm_id) -> str:
         added, removed = arm_changes.get(arm_id) or ([], [])
-        replaced = [f"replacing {n} with another file of the same name"
-                    + (f" (from {replacement_folder(arm_id, n)})" if replacement_folder(arm_id, n) else "")
+        def own_folder(n):
+            row_ = next((p for p in ((plan_arms.get(arm_id) or {}).get("requested") or {}).get("plugins") or []
+                         if str(p.get("name") or "").lower() == str(n).lower()), {})
+            return copy_folder(row_)
+        replaced = [(f"replacing {n} with the patch of the same name" + (f" from {own_folder(n)}" if own_folder(n) else "")
+                     if replaced_patch_side(arm_id, n) == "arm" else
+                     f"replacing the patch {patch_label(n)} with another file of the same name"
+                     + (f" (from {own_folder(n)})" if own_folder(n) else "")
+                     if replaced_patch_side(arm_id, n) == "baseline" else
+                     f"replacing {n} with another file of the same name"
+                     + (f" (from {replacement_folder(arm_id, n)})" if replacement_folder(arm_id, n) else ""))
                     for n in arm_replaced.get(arm_id) or []]
         unverified = ([f"keeping {', '.join(arm_unverified[arm_id])}, whose bytes were not compared"]
                       if not added and not removed and not replaced and arm_unverified.get(arm_id) else [])
-        def named(ns):
+        def named(ns, side):
             # more than two declared patches are "the N patches" here; the setups list names every one (P53)
-            if len(ns) > 2 and all(n.lower() in declared_patches for n in ns):
+            if len(ns) > 2 and all(declared_copy(side, n) for n in ns):
                 return f"the {len(ns)} patches"
             return ", ".join(ns)
-        change = " and ".join(([f"adding {named(added)}"] if added else []) + ([f"removing {named(removed)}"] if removed else [])
+        change = " and ".join(([f"adding {named(added, arm_id)}"] if added else [])
+                              + ([f"removing {named(removed, 'baseline')}"] if removed else [])
                               + replaced + unverified)
         return change[:1].upper() + change[1:] if change else "The supplied setup"
 
@@ -8624,7 +8793,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                            and " tris" not in str(r.get("label")).lower()
                            and not re.match(r"^[0-9a-f]{6}:", str(r.get("label")), re.I)), None)
             unit = phrases.get("unitSingular") if count_rows == 1 else phrases.get("unitPlural")
-            if group_kind == "LOST-EDIT" and str(c.get("B") or "").lower() in declared_patches:
+            if group_kind == "LOST-EDIT" and finding_declared(f, c.get("B")):
                 f["readerPlain"] = bind((pr.get("reader") or {}).get("patchChoiceLine") or "{count} {unit}: {patch}", {
                     "count": fmt_n(count_rows), "unit": unit or "record fields", "patch": c.get("B"), "other": c.get("A")})
                 f["readerPatchChoice"] = True
@@ -9043,7 +9212,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                  "dispositionCreatedUtc": disp.get("createdUtc"),
                  "locationScope": {"locations": scope_locations,
                                    "basis": "locations recorded in the target footprint"},
-                 "arms": arms_out, "states": b.plan.get("states") or {"selected": [], "notExplored": []},
+                 "arms": arms_out, "patchDeclarations": patch_declarations_out, "states": b.plan.get("states") or {"selected": [], "notExplored": []},
                  "completion": {"complete": bool(ev.get("complete")), "claim": ev.get("claim"), "missingRequired": len(missing),
                                 "byCause": dict(sorted(by_cause.items())), "unknownApplicability": ev.get("unknownApplicability") or []},
                  "integrity": ev.get("integrity") or {"ok": None, "defects": []},
@@ -9194,7 +9363,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                  "ownMaster" if (master_of(plugin_masters_doc, a_, b_)
                                  and not is_geometry_check(f.get("checkId"), reader_data.get("prediction") or {})
                                  and {str(a_).lower(), str(b_).lower()} & target_set
-                                 and not {str(a_).lower(), str(b_).lower()} & declared_patches) else None)
+                                 and not (finding_declared(f, a_) or finding_declared(f, b_))) else None)
         f["readerDetail"] = aside is None
         f["readerDetailAside"] = aside
         if aside and f.get("readerRelevant"):
@@ -9210,7 +9379,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             continue
         c = f.get("counts") or {}
         pair = {str(x).lower() for x in (c.get("A"), c.get("B"))}
-        if len(pair & target_set) != 1 or pair & supplied_lower:
+        if len(pair & target_set) != 1 or any(x in supplied_lower and finding_declared(f, x) for x in pair):
             continue
         f["readerDetail"] = False
         f["readerDetailAside"] = "singleMod"
@@ -9225,11 +9394,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for arm_id_, (added_, removed_) in arm_changes.items():
         if comparison_kinds.get(arm_id_) in ("baseline", "patch-comparison", "supplied-combination"):
             continue
-        keep_ = lambda xs: [n for n in xs if n.lower() not in plan_target_set and n.lower() not in declared_patches]  # noqa: E731
-        if keep_(added_) or keep_(removed_):
+        keep_ = lambda xs, side_: [n for n in xs if n.lower() not in plan_target_set and not declared_copy(side_, n)]  # noqa: E731
+        if keep_(added_, arm_id_) or keep_(removed_, "baseline"):
             n_alt_ += 1
-            alt_left_ += [n for n in keep_(removed_) if n not in alt_left_]
-            alt_added_ += [n for n in keep_(added_) if n not in alt_added_]
+            alt_left_ += [n for n in keep_(removed_, "baseline") if n not in alt_left_]
+            alt_added_ += [n for n in keep_(added_, arm_id_) if n not in alt_added_]
     us_words_ = (reader_data.get("prediction") or {}).get("unstatedSetupsVerbs") or {}
     alt_verb_ = ("both" if alt_left_ and alt_added_ else "add" if alt_added_ else "leave")
     unstated_text = ((" " + bind((reader_data.get("prediction") or {})["unstatedSetups"], {
@@ -9241,20 +9410,27 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                       f"which is not declared as a patch; it is reported as a plugin that "
                       f"differs, not as an evaluated patch.")
                      if unstated_difference_plugins else "")
-    patch_text = ", ".join(supplied) if supplied else "no separate patch plugin"
+    patch_text = ", ".join(patch_label(n) for n in supplied) if supplied else "no separate patch plugin"
     # One sentence for declared patches a mixed arm changes; number agreement is its only branch.
     _mixed_setup = ("The tested setup changes" if sum(1 for k in comparison_kinds.values() if k == "mixed") == 1
                     else "The tested setups change")
-    mixed_declared_text = ((f"{_mixed_setup} the declared patches {', '.join(mixed_declared_patches)} at once, "
-                            f"so none of them is evaluated on its own." if len(mixed_declared_patches) > 1 else
-                            f"{_mixed_setup} the declared patch {mixed_declared_patches[0]} together with another "
+    mixed_declared_text = ((f"{_mixed_setup} the declared patches {', '.join(map(patch_label, mixed_declared_patches))} "
+                            f"at once, so none of them is evaluated on its own." if len(mixed_declared_patches) > 1 else
+                            f"{_mixed_setup} the declared patch {patch_label(mixed_declared_patches[0])} together with another "
                             f"plugin, so it is not evaluated on its own.")
                            if mixed_declared_patches else "")
     patch_adds = any(n in supplied for added, _ in arm_changes.values() for n in added)
     patch_removes = any(n in supplied for _, removed in arm_changes.values() for n in removed)
+    # a same-named patch is loaded in place of the other file of its name (item 20)
+    in_place_ = {replaced_patch_side(a_, n) for a_ in arm_changes for n in arm_replaced.get(a_) or [] if n in supplied}
     patch_how = ("added or removed for comparison" if patch_adds and patch_removes else
                  "included in the measured load order and removed for comparison" if patch_removes else
-                 "added to the measured load order for comparison")
+                 "added to the measured load order for comparison" if patch_adds or not in_place_ else
+                 ("loaded in place of the evaluated mod's file of the same name for comparison"
+                  if all(n.lower() in plan_target_set for n in supplied) else
+                  "loaded in place of the file of the same name for comparison") if in_place_ == {"arm"} else
+                 "included in the measured load order and replaced by the file of the same name for comparison"
+                 if in_place_ == {"baseline"} else "added or removed in place of the file of the same name for comparison")
     scope_head = f"This report evaluates {', '.join(target_names) or 'the target mod'} within the measured load order. "
     scope_line = (scope_head
                   + (f"The main recorded conflicts involving the target are with {compared}. " if comparison_names else
@@ -9266,17 +9442,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                         (f"The patches evaluated are {patch_text}, {patch_how}." if len(supplied) <= 2 else
                         f"The {len(supplied)} patches named in the title are evaluated, {patch_how}.")) if supplied else
                        # never claim no patch was declared while a changed plugin is a declared patch
-                       "" if mixed_declared_patches else
+                       "" if mixed_declared_patches or ambiguous_names else
                        "No separate patch plugin was declared for this comparison."),
-                      mixed_declared_text) if x)
+                      mixed_declared_text, ambiguous_text) if x)
                   + unstated_text)
     scope_tail = (" ".join(x for x in (
                       ((f"The patch evaluated is {patch_text}, {patch_how}." if len(supplied) == 1 else
                         (f"The patches evaluated are {patch_text}, {patch_how}." if len(supplied) <= 2 else
                         f"The {len(supplied)} patches named in the title are evaluated, {patch_how}.")) if supplied else
-                       "" if mixed_declared_patches else
+                       "" if mixed_declared_patches or ambiguous_names else
                        "No separate patch plugin was declared for this comparison."),
-                      mixed_declared_text) if x)
+                      mixed_declared_text, ambiguous_text) if x)
                   + unstated_text)
     for _a in arms_out:
         _a["comparisonKind"] = comparison_kinds.get(_a.get("armId"))
@@ -9374,7 +9550,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             patch_clause = (" No setup containing a patch was compared, so these results do "
                             "not say whether a patch would resolve them.")
         else:
-            patch_named = ", ".join(supplied) if supplied else "a patch"
+            patch_named = ", ".join(map(patch_label, supplied)) if supplied else "a patch"
             patch_repaired = any(a in repair_arms for a in patch_arms)
             patch_regressed = any(a in {f.get("armId") for f in reader_regressions}
                                   for a in patch_arms)
@@ -9650,7 +9826,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # so the title says what was evaluated against what: the target within the measured load order. The mods its
     # recorded conflicts involve are named in the opening as the main conflicts found, not in the title as the
     # comparison.
-    title = (f"{title_subject} with {', '.join(supplied)} — patch review" if supplied else
+    title = (f"{title_subject} with {', '.join(map(patch_label, supplied))} — patch review" if supplied else
              f"{title_subject} within the measured load order — conflict review")
     reader = {"title": title,
               "scopeLine": scope_line, "verdict": verdict, "limitations": limitations,
@@ -9682,7 +9858,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     names_early = load_json(bundle_dir / names_early_row["path"]) if names_early_row else None
     lead = build_prediction({
         "findings": findings, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
-        "declared": declared_patches, "comparisonKinds": comparison_kinds, "armChanges": arm_changes, "armReplaced": arm_replaced,
+        "declared": declared_patches, "patchLabels": patch_labels, "replacedPatches": {
+            a_: {side_: [n for n in arm_replaced.get(a_) or [] if replaced_patch_side(a_, n) == side_]
+                 for side_ in ("arm", "baseline")} for a_ in arm_changes}, "comparisonKinds": comparison_kinds, "armChanges": arm_changes, "armReplaced": arm_replaced,
         "missing": reader_missing, "unassessed": un, "checkTitles": check_titles, "missingReason": missing_reason,
         "checkTitle": b.check_title, "armLabels": arm_labels,
         "familyTitle": lambda x: (b.families.get(x) or {}).get("title") or str(x),
@@ -11698,7 +11876,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="declare a plugin as a patch under evaluation; repeat for several. Patch "
                         "identity is never inferred from plugin membership, so an arm that differs "
                         "only by an undeclared plugin is reported as an unstated difference. Use "
-                        "this for a plan whose candidates predate the declaration field.")
+                        "this for a plan whose candidates predate the declaration field. A file that "
+                        "shares its name with another (an author's same-named compatible version) is "
+                        "declared by its bytes, PLUGIN=sha256:<64 hex>, or by its mod folder, "
+                        "PLUGIN=folder:<folder>; a declaration that matches no setup's copy is refused.")
     p.set_defaults(fn=cmd_plan)
     p = sub.add_parser("triage", help="compile an annotated overlap manifest into a readable incident catalogue")
     p.add_argument("--manifest", required=True)

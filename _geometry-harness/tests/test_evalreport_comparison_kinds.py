@@ -66,7 +66,7 @@ def arm(arm_id, names, kind="candidate", provenance=None):
 
 
 def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=None,
-                import_note=None, import_arm=None):
+                import_note=None, import_arm=None, targets=None):
     """A bundle small enough to build by hand and complete enough to reach the verdict.
 
     `repaired_on` / `created_on` name arms whose orderEvaluation reports a repair or a new
@@ -75,7 +75,7 @@ def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=Non
     root.mkdir(parents=True, exist_ok=True)
     plan = {"planId": "test00000000", "requestProviders": "arm-view",
             "createdUtc": "2026-01-01T00:00:00+00:00",
-            "targets": [{"name": t} for t in TARGETS],
+            "targets": [{"name": t} for t in (TARGETS if targets is None else targets)],
             "arms": arms, "states": {"selected": ["baseline"]},
             "checks": [{"checkId": CHECK, "family": "geometry", "title": "Contact",
                         "arms": [{"armId": a["armId"], "status": "probe"} for a in arms]}]}
@@ -168,10 +168,10 @@ def make_bundle(root: Path, arms, repaired_on=None, created_on=None, patches=Non
 
 
 def run_compiler(arms, repaired_on=None, created_on=None, patches=None, declared=None,
-                 import_note=None, import_arm=None):
+                 import_note=None, import_arm=None, targets=None):
     with tempfile.TemporaryDirectory() as td:
         bdir = make_bundle(Path(td) / "bundle", arms, repaired_on, created_on, patches,
-                           import_note, import_arm)
+                           import_note, import_arm, targets)
         pr = json.loads((HERE.parent.parent / ".claude/skills/evaluation-reporting/"
                          "references/report-priorities.json").read_text(encoding="utf-8"))
         conc, page = pr.get("concise") or {}, pr.get("page") or {}
