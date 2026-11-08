@@ -333,8 +333,9 @@ def c711(fx):
     pol = load(HARNESS.parent / ".claude/skills/evaluation-reporting/references/scene-policy.json")
     by = {r["requestType"]: (r.get("camera") or {}).get("support") or {} for r in pol["rules"]}
     nav = by.get("navmesh-version-comparison", {})
-    check("C711 the scene policy marks navmesh comparisons as having no camera path, with a plain reason",
-          nav.get("supported") is False and str(nav.get("reason", "")).endswith(".") and "navmesh" in nav.get("reason", ""))
+    check("C711 the scene policy marks navmesh comparisons as supported, with the command that acquires them "
+          "(test_capture_navmesh.py holds the path's own cases)",
+          nav.get("supported") is True and "capture_acquire.py acquire" in str(nav.get("command")))
     check("C711 overlap pairs carry the supported path, and the real selector copies it onto the request",
           by.get("overlap-pair", {}).get("supported") is True
           and (fx.request.get("camera") or {}).get("support", {}).get("supported") is True)
@@ -353,9 +354,10 @@ def c712(fx):
     proc, acq, env = acquire_with(fx, cross(fx.cy, fx.mg), "c712", "auto", trace=True, packet=pp)
     calls = [ln for ln in Path(env["FAKE_VIEWPROBE_TRACE"]).read_text(encoding="utf-8").splitlines() if ln.strip()]
     ref = (acq or {}).get("refusal") or {}
-    check("C712 a navmesh request is refused with the storyboard's sentence before any render",
-          proc.returncode == 2 and ref.get("code") == "request-type-unsupported" and ref.get("detail") == nav["reason"]
-          and len(calls) == 0, f"{ref.get('detail')!r}; {len(calls)} render(s)")
+    check("C712 a navmesh request takes the navmesh path: an overlap row relabelled as one (no corroboration) is refused "
+          "by that path's own prerequisite, not as an unsupported type, before any render",
+          proc.returncode == 2 and ref.get("code") == "navmesh-corroboration-unsupported" and len(calls) == 0,
+          f"{ref.get('code')}: {ref.get('detail')!r}; {len(calls)} render(s)")
 
 
 def c713(fx):

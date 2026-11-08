@@ -45,7 +45,13 @@ Scene JSON:
                                      # carries --allow-unreadable-assets (then SUPPRESSED, exit 0)
      "unreadableEnvOptOut": false,   # exit 0 without the flag, as VP_ALLOW_UNREADABLE_ASSETS=1 would
      "notDrawnByRule": ["meshes\\water.nif"],  # the not-drawn-by-rule block; never fails
-     "waterZ": -100.0}               # a cell water surface, printed as viewprobe's `water z` line
+     "waterZ": -100.0,               # a cell water surface, printed as viewprobe's `water z` line
+     "navLinks": {"SRC=TGT": {...}}, # --nav-link answers, printed as viewprobe's `nav-link {json}` rows
+     "navmeshes": [{"formKey": K, "cell": C, "winner": "P.esp", "tris": {"7": [[x,y],[x,y]]},
+                    "versions": {"P.esp": {"rect": [[x,y],[x,y]], "triangles": N}}}]}
+                                     # drawn on the floor plane from above: the positional cell's in
+                                     # --nav-color, each --nav-cell's in its colour, --red over both,
+                                     # --nav-version substituting; writes <cell>-navmeshes.json as viewprobe does
 
 Boxes may also carry "pos": [x,y,z] (the placement --eye-ref/--look-ref resolve to; default the
 box's bottom centre) and "drawn": "NOT DRAWN: base carries no model" (the --refs-at verdict).
@@ -142,7 +148,8 @@ def parse_args(argv):
            "clear_reach": 512.0,
            "eye": None, "yaw": 0.0, "pitch": 0.0, "fov": 65.0, "size": 320, "look": None,
            "cell": None, "cull": None, "eye_ref": None, "look_ref": None, "eye_height": 120.0,
-           "refs": [], "ref_surface": False, "worklist": None, "out": None}
+           "refs": [], "ref_surface": False, "worklist": None, "out": None,
+           "nav_link": [], "nav_cell": [], "nav_version": [], "red": [], "nav": "off", "nav_color": "auto"}
     takes = {"--eye", "--yaw", "--pitch", "--fov", "--size", "--look", "--msaa", "--nav",
              "--instance", "--profile", "--game", "--order"}
     i = 0
@@ -152,6 +159,12 @@ def parse_args(argv):
             out["pick"].append(argv[i + 1]); i += 2
         elif a == "--nav-at":
             out["nav_at"].append(argv[i + 1]); i += 2
+        elif a in ("--nav-link", "--nav-cell", "--nav-version", "--red"):
+            out[a[2:].replace("-", "_")].append(argv[i + 1]); i += 2
+        elif a == "--nav":
+            out["nav"] = argv[i + 1]; i += 2
+        elif a == "--nav-color":
+            out["nav_color"] = argv[i + 1]; i += 2
         elif a == "--inside-at":
             out["inside_at"].append(argv[i + 1]); i += 2
         elif a == "--refs-at":
@@ -244,6 +257,8 @@ def main(argv):
         if a["look_ref"]:
             a["look"] = ref_pos(a["look_ref"], 96.0)
     png = (os.path.join(a["out"], f"{a['cell']}-fp.png") if a["out"] and a["refs"] else None)
+    if a["out"] and a["eye"] is not None and a["nav"] != "off" and scene.get("navmeshes"):
+        png = os.path.join(a["out"], "".join(c if c.isalnum() else "_" for c in a["cell"]) + "-fp.png")
     return one_shot(scene, a, argv, png)
 
 
@@ -319,7 +334,18 @@ def one_shot(scene, a, argv, png):
             if bx["id"] in hl and bx.get("alpha"):
                 print(f"subject-surface-refused: {bx['id']}: alpha, effect, marker or non-depth-writing shape; "
                       "participant coverage incomplete")
-    if png:
+    for spec in a["nav_link"]:
+        row = dict((scene.get("navLinks") or {}).get(spec) or {
+            "source": spec.split("=")[0], "target": spec.split("=")[-1], "status": "refused",
+            "reason": f"the source navmesh {spec.split('=')[0]} has no winning version in this load order"})
+        row["configuration"] = (scene.get("configFingerprint")
+                                if ("--order" in argv or "--config-identity" in argv) else None)
+        print("   nav-link " + json.dumps(row))
+    if a["cull"] is not None and png:
+        print(f"view-label: SLICED TOP-DOWN above z {a['cull']:.0f}; not the player's view | rect 4,{size - 24},200,20")
+    if png and a["nav"] != "off" and scene.get("navmeshes"):
+        write_nav_frame(scene, a, eye, f, r, u, t, size, yaw, pitch, argv, png)
+    elif png:
         write_frame(scene, eye, f, r, u, t, size, hl if a["ref_surface"] else {}, a["cull"], png)
 
     silent_nav = {tuple(p) for p in scene.get("navSilent", [])}
@@ -491,6 +517,81 @@ def one_shot(scene, a, argv, png):
     if unread and not allowed and not env_opt:
         return 3
     return 0
+
+
+# The report-mode navmesh colours of the real renderer, measured on a lab frame (capture_acquire.NAV_RGB says where).
+NAV_RGB = {"cyan": (0, 255, 255), "magenta": (255, 0, 255), "red": (255, 0, 0), "green": (0, 255, 0),
+           "yellow": (255, 255, 0), "blue": (0, 0, 255)}
+
+
+def nav_layers(scene, a):
+    """(navmesh, plugin version, colour, red indices) per drawn navmesh, and the receipt's records."""
+    colours = {a["cell"]: a["nav_color"] if a["nav_color"] != "auto" else "green"}
+    for spec in a["nav_cell"]:
+        k, _, col = spec.partition("=")
+        colours[k] = col or "green"
+    subs = dict(spec.split("=", 1) for spec in a["nav_version"])
+    reds = {}
+    for spec in a["red"]:
+        k, _, idx = spec.rpartition(":")
+        reds.setdefault(k, []).append(int(idx))
+    drawn, records = [], []
+    for n in scene.get("navmeshes") or []:
+        if n["cell"] not in colours:
+            continue
+        plugin = n["winner"] if scene.get("ignoreNavVersion") else subs.get(n["formKey"], n["winner"])
+        if plugin not in n["versions"]:
+            print(f"--nav-version: {plugin} provides no version of {n['formKey']} in the selected cells.", file=sys.stderr)
+            raise SystemExit(2)
+        ver = n["versions"][plugin]
+        idx = reds.get(n["formKey"]) or []
+        drawn.append((n, ver, colours[n["cell"]], [i for i in idx if i < ver["triangles"]]))
+        records.append({"FormKey": n["formKey"], "Cell": n["cell"], "Provider": plugin, "TriangleCount": ver["triangles"],
+                        "Colour": colours[n["cell"]], "DrawableTrianglesInBand": ver["triangles"],
+                        "RedWholeRecord": False,
+                        "RedRequests": [{"Index": i, "Exists": i < ver["triangles"], "DrawableInBand": i < ver["triangles"]}
+                                        for i in sorted(idx)] or None})
+    return drawn, records
+
+
+def write_nav_frame(scene, a, eye, f, r, u, t, size, yaw, pitch, argv, path):
+    """A frame from above: each drawn navmesh version's rectangle on the floor plane in its colour, red triangles over it."""
+    from PIL import Image, PngImagePlugin
+    drawn, records = nav_layers(scene, a)
+    img = Image.new("RGB", (size, size), (110, 120, 100))
+    px = img.load()
+    fz = float(scene.get("floorZ") or 0.0)
+
+    def inside(rect, x, y):
+        return rect[0][0] <= x <= rect[1][0] and rect[0][1] <= y <= rect[1][1]
+    for iy in range(size):
+        ny = ((size - 1 - iy) + 0.5) / size * 2.0 - 1.0
+        for ix in range(size):
+            nx = (ix + 0.5) / size * 2.0 - 1.0
+            d = tuple(f[k] + r[k] * nx * t + u[k] * ny * t for k in range(3))
+            if d[2] >= -1e-9:
+                continue
+            k_ = (fz - eye[2]) / d[2]
+            x, y = eye[0] + d[0] * k_, eye[1] + d[1] * k_
+            colour = None
+            for n, ver, col, red in drawn:
+                if any(inside(n["tris"][str(i)], x, y) for i in red if str(i) in n.get("tris", {})):
+                    colour = "red"
+                    break
+                if inside(ver["rect"], x, y):
+                    colour = col
+            if colour:
+                px[ix, iy] = NAV_RGB[colour]
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    meta = PngImagePlugin.PngInfo()
+    meta.add_text("viewprobe", f"args: {' '.join(argv)} | pose: eye {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f} yaw {yaw:.1f} "
+                               f"pitch {pitch:.1f} fov {a['fov']:.0f} | cell {a['cell']}")
+    img.save(path, pnginfo=meta)
+    if a["nav_cell"] or a["nav_version"]:
+        receipt = {"SchemaVersion": 1, "TargetCell": a["cell"], "AdditionalCells": a["nav_cell"],
+                   "RecordSubstitutions": a["nav_version"], "Layers": [{"Label": "fake", "Records": records}]}
+        with open(path[:-len("-fp.png")] + "-navmeshes.json", "w", encoding="utf-8") as fh:
+            json.dump(receipt, fh, indent=1)
 
 
 def write_frame(scene, eye, f, r, u, t, size, hl, cull, path):
