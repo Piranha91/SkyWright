@@ -1413,6 +1413,9 @@ var baseObnd = new Dictionary<FormKey, (Vec3 Min, Vec3 Max)>();
 // Model-space render soups for the --inside-at ray test, by mesh path (the flat build keeps its
 // own cache further down; this one is filled only for the few refs whose box encloses a query).
 var insideMesh = new Dictionary<string, (Aabb? Bounds, TriangleSoup? Soup)>(StringComparer.OrdinalIgnoreCase);
+// Per soup triangle, how its face may be judged (the --inside-at facing): 0 one-sided (the renderer culls its back),
+// 1 two-sided (drawn both ways), 2 unknown (its shape's node chain mirrors it, which flips the winding; or no shape map).
+var insideFaceKind = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
 var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
@@ -1545,6 +1548,9 @@ bool IsControlEditorId(string ed) =>
             var b = o.Model?.Bounds;
             got = (b is { IsEmpty: false } ? b : null,
                    o.Model?.Soup is { TriangleCount: > 0 and <= 300_000 } sp ? sp : null);
+            if (got.Soup is { } gs && o.Model is { SoupShapeOfTriangle: { } map, Shapes: { } shapes } && map.Count == gs.TriangleCount)
+                insideFaceKind[rel] = map.Select(si => si < 0 || si >= shapes.Count || shapes[si].Mirrored ? (byte)2
+                                                       : shapes[si].DoubleSided ? (byte)1 : (byte)0).ToArray();
         }
     }
     insideMesh[rel] = got;
@@ -1613,6 +1619,45 @@ static float? NearestHit(Vector3 o, Vector3 d, Vector3[] v, int[] idx, float lim
     }
     return best;
 }
+// Nearest hit and the triangle it was on (NearestHit's test), or null.
+static (float T, int Tri)? NearestHitTri(Vector3 o, Vector3 d, Vector3[] v, int[] idx, float limit)
+{
+    (float T, int Tri)? best = null;
+    for (int i = 0; i + 2 < idx.Length; i += 3)
+    {
+        var a = v[idx[i]];
+        var e1 = v[idx[i + 1]] - a;
+        var e2 = v[idx[i + 2]] - a;
+        var p = Vector3.Cross(d, e2);
+        float det = Vector3.Dot(e1, p);
+        if (MathF.Abs(det) < 1e-6f) continue;
+        float inv = 1f / det;
+        var s = o - a;
+        float u = Vector3.Dot(s, p) * inv;
+        if (u < 0f || u > 1f) continue;
+        var q = Vector3.Cross(s, e1);
+        float w = Vector3.Dot(d, q) * inv;
+        if (w < 0f || u + w > 1f) continue;
+        float t = Vector3.Dot(e2, q) * inv;
+        if (t > 1e-3f && t <= limit && (best is null || t < best.Value.T)) best = (t, i / 3);
+    }
+    return best;
+}
+// Which way the face a ray met is turned: `back` when its normal (counter-clockwise winding, the face the renderer
+// keeps; back faces are culled) points along the ray, so the eye is BEHIND that surface and would see out through it;
+// `front` when it faces the eye; `two` for a two-sided shape, drawn either way; `-` when the facing cannot be told
+// (a mirrored node chain flips the winding, or the shape map is missing) or nothing was hit. From inside a closed
+// solid every ray meets a back face, at any thickness.
+static string Facing(Vector3 d, Vector3[] v, int[] idx, int tri, byte[]? kinds)
+{
+    byte k = kinds is not null && tri < kinds.Length ? kinds[tri] : (byte)2;
+    if (k == 2) return "-";
+    if (k == 1) return "two";
+    var a = v[idx[tri * 3]];
+    var n = Vector3.Cross(v[idx[tri * 3 + 1]] - a, v[idx[tri * 3 + 2]] - a);
+    float dn = Vector3.Dot(n, d);
+    return dn > 0f ? "back" : dn < 0f ? "front" : "-";
+}
 string InsideRays(PlacedRef r, string mesh, float qx, float qy, float qz)
 {
     if (InsideSoupFor(mesh) is not { } soup) return "rays n/a (mesh not loaded)";
@@ -1626,8 +1671,11 @@ string InsideRays(PlacedRef r, string mesh, float qx, float qy, float qz)
         ("+x", Vector3.UnitX), ("-x", -Vector3.UnitX), ("+y", Vector3.UnitY), ("-y", -Vector3.UnitY),
         ("up", Vector3.UnitZ), ("down", -Vector3.UnitZ),
     };
-    return "rays " + string.Join(" ", dirs.Select(dd =>
-        dd.Name + " " + (NearestHit(o, dd.D, wv, soup.Indices, 4096f) is { } h ? h.ToString("0") : "-")));
+    var hits = dirs.Select(dd => (dd.Name, dd.D, Hit: NearestHitTri(o, dd.D, wv, soup.Indices, 4096f))).ToArray();
+    insideFaceKind.TryGetValue(mesh, out var kinds);
+    return "rays " + string.Join(" ", hits.Select(h => h.Name + " " + (h.Hit is { } x ? x.T.ToString("0") : "-")))
+         + "  facing " + string.Join(" ", hits.Select(h => h.Name + " "
+             + (h.Hit is { } x ? Facing(h.D, wv, soup.Indices, x.Tri, kinds) : "-")));
 }
 
 // ---------------------------------------------------------------------------------------
