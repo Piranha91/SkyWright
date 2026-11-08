@@ -3329,6 +3329,63 @@ def plan_nexus_id(plan: dict):
     return None
 
 
+def meta_ini_mod_id(path: Path):
+    """The Nexus mod id in a mod folder's meta.ini ([General] modid=N), or None when there is none."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    section = None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("["):
+            section = s.lower()
+        elif section == "[general]" and s.lower().startswith("modid="):
+            v = s.split("=", 1)[1].strip()
+            return int(v) if v.isdigit() and int(v) > 0 else None
+    return None
+
+
+def advice_neighbour_ids(plan: dict) -> list[int]:
+    """adviceprobe's --with list: every mod folder the plan's configuration loads a plugin from, other than a
+    target's own, whose meta.ini carries a Nexus id. A clash an author states on one of those pages against the
+    evaluated mod is author advice for that pair."""
+    inst = (plan.get("options") or {}).get("instance")
+    if not inst:
+        return []
+    mods = os.path.normcase(os.path.abspath(os.path.join(inst, "mods")))
+    own = {str(t.get("provider") or "").lower() for t in plan.get("targets") or [] if isinstance(t, dict)}
+    target = plan_nexus_id(plan)
+    target = int(target) if str(target or "").isdigit() else None
+    ids = set()
+    for p in (plan.get("configuration") or {}).get("plugins") or []:
+        path = p.get("path") if isinstance(p, dict) else None
+        if not path:
+            continue
+        full = os.path.normcase(os.path.abspath(path))
+        if not full.startswith(mods + os.sep) or len(full[len(mods) + 1:].split(os.sep)) != 2:
+            continue                                   # not a plugin at the root of an instance mod folder
+        folder = Path(os.path.abspath(path)).parent.name
+        if folder.lower() in own:
+            continue
+        mid = meta_ini_mod_id(Path(inst) / "mods" / folder / "meta.ini")
+        if mid and mid != target:
+            ids.add(mid)
+    return sorted(ids)
+
+
+def advice_statements(run: Path, receipt: dict) -> dict:
+    """The rules and the stated clashes one adviceprobe receipt's report carries, for the disposition."""
+    outs = receipt.get("outputs") or []
+    doc = load_json(Path(run) / outs[0]["path"]) if outs and outs[0].get("path") else None
+    if not isinstance(doc, dict):
+        return {"rules": None, "clashCount": None, "clashes": [],
+                "statementsNote": "the receipt's report could not be read, so its rules and clashes are unknown here"}
+    keys = ("namedModId", "namedModName", "pageModId", "page", "readDate", "line", "symptom")
+    clashes = [{k: c.get(k) for k in keys} for c in doc.get("clashes") or [] if isinstance(c, dict)]
+    return {"rules": len(doc.get("rules") or []), "clashCount": len(clashes), "clashes": clashes}
+
+
 def target_pairs(ex: Executor, arm: dict):
     """The plugin pairs a patch check is about, computed STRUCTURALLY from the plugin lists rather
     than parsed out of a human sentence: every pair whose relative order FLIPS between the baseline
@@ -3576,6 +3633,10 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
                 return
         elif "--offline" not in argv:
             argv += ["--offline"]
+        if "--with" not in argv:
+            # The evaluated mod's neighbours: a clash stated on THEIR page is author advice for the pair.
+            for nid in advice_neighbour_ids(ex.plan):
+                argv += ["--with", str(nid)]
 
     # Where the RESULT actually lands: the file the probe writes, not a file we named for it.
     outputs = [emit]
@@ -5829,7 +5890,8 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
         "advice": [{"checkId": r["checkId"], "armId": r["armId"],
                     "provenance": (r.get("consumed") or {}).get("configuration", {}).get("source"),
                     "staleness": "read offline from the stored catalogue snapshot; the cached source's age "
-                                 "is not the date this report was assembled"}
+                                 "is not the date this report was assembled",
+                    **advice_statements(run, r)}
                    for r in receipts.values() if (r.get("adapter") or {}).get("kind") == "adviceprobe"],
         "listings": [c for c in catalogues if c.get("kind") == "discovery"],
         "note": "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was "
