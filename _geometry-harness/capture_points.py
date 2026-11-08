@@ -23,6 +23,9 @@ HOW, in three viewprobe runs, each one cell load:
   3. witnesses    one static worklist of stations on a ring around the pair (12 bearings x 3 standoffs, 150-400 u, eye at floor +
                   eye height, looking at the pair), every shot with `--ref A=cyan --ref B=magenta --ref-surface`, a
                   grid of `--pick` pixels and the planner's own placement queries at the station eye.
+                  Outdoors (the cell header's exterior flag) a station stands on the navmesh at its own level: one
+                  with no navmesh under it moves along its bearing to the nearest spot 100-1,000 u out that has some,
+                  its eye is that level + eye height, and the first surface under the eye must be that level.
 
 THE FALLBACKS (2026-10-31). A participant with non-opaque shapes is marked by its measured coverage too (viewprobe
 --coverage-of); "no opaque face" is no longer a refusal of its own. When no placed station sees both, the CUTAWAY tries up
@@ -73,6 +76,10 @@ EYE_LINE = re.compile(r"^\s*eye (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\
 NOT_PLACED = re.compile(r"'(.+?)' is not a placed ref in this cell's winning state")
 SURFACE_REFUSED = re.compile(r"^subject-surface-refused: (\S{6}:.+?\.es[pml]):")
 WATER_LINE = re.compile(r"^\s*water z (-?\d+(?:\.\d+)?): ")
+# the renderer's cell header: the CELL record's interior flag, which decides where a station may stand
+CELL_KIND = re.compile(r"^cell .*? \((interior|exterior)\)\s", re.M)
+# outdoors, a station with no navmesh under it moves along its own bearing to the nearest spot that has some
+SNAP_FROM, SNAP_TO, SNAP_STEP = 100, 1000, 50
 SHOT_HEAD = re.compile(r"^=== worklist cell \d+/\d+ shot (\d+)/(\d+): (.*) ===\s*$")
 LOOK_LIFT = 96.0   # viewprobe's --look-ref lift (Program.cs RefPos(lookRef, 96f))
 
@@ -411,6 +418,8 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
         raise Unpickable("points-renderer-failed", "viewprobe did not print the resolved camera, so the "
                                                    "participants' placements are unknown", transient=True)
     pos = {A: (float(m[1]), float(m[2]), float(m[3])), B: (float(m[4]), float(m[5]), float(m[6]) - LOOK_LIFT)}
+    kind_m = CELL_KIND.search(text)
+    exterior = bool(kind_m) and kind_m[1] == "exterior"
     counts = {}
     for ln in text.splitlines():
         sm = SURFACE_COUNTS.match(ln)
@@ -492,6 +501,17 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
     flags += ["--nav-at", f"{mid[0]:.0f},{mid[1]:.0f}"]
     for st in ring:
         flags += ["--nav-at", f"{st['xy'][0]},{st['xy'][1]}", "--clear-at", f"{st['xy'][0]},{st['xy'][1]},{zq}"]
+    # outdoors: navmesh samples along every bearing, where a station off the navmesh may move to (record queries only)
+    samples = {}
+    if exterior:
+        for st in ring:
+            if st["slot"] in samples:
+                continue
+            ux, uy = bearing_vec(st["bearing"])
+            samples[st["slot"]] = [(float(d), (int(round(mid[0] + ux * d)), int(round(mid[1] + uy * d))))
+                                   for d in range(SNAP_FROM, SNAP_TO + 1, SNAP_STEP)]
+            for _, (x, y) in samples[st["slot"]]:
+                flags += ["--nav-at", f"{x},{y}"]
     rc, text = R.call("p1-floor", [cell], flags)
     ensure_ok(rc, text, "floor")
     p1 = R.parsed(text)
@@ -503,7 +523,10 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                              f"{k} is not drawn by the renderer ({rows[0]['why']}), so no face of it can be measured",
                              final=True)
     nav = p1.nav()
-    levels = [z for e in nav.values() for z in e["levels"]]
+    # the request's floor is chosen from the pair's and the ring's own spots, never from the snap samples
+    asked = {(int(round(pos[k][0])), int(round(pos[k][1]))) for k in (A, B)} | {(int(round(mid[0])), int(round(mid[1])))} \
+        | {tuple(st["xy"]) for st in ring}
+    levels = [z for k, e in nav.items() if k in asked for z in e["levels"]]
     floor = choose_floor(levels, minz, maxz, 300.0, args.storey_tol)
     floor_src = "navmesh"
     # the ground actually under the stations (the first surface straight down, terrain or a placed ref, a participant
@@ -539,10 +562,35 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
     if _ctx is not None:
         _ctx["floor"] = floor
 
-    # 3. witnesses
-    ez = int(round(floor + args.eye_height))
+    # 3. witnesses. Indoors every station stands on the one floor. Outdoors a station stands on the navmesh at its own
+    # level: where its spot has none, it moves along its bearing to the nearest sampled spot that has some, and its eye
+    # is that level + the eye height (a player's eye where a player can stand; the ring's one floor put eyes in hillsides)
+    for st in ring:
+        st["floor"] = floor
+    merged = []
+    if exterior:
+        def level_at(xy):
+            lv = (nav.get(tuple(xy)) or {}).get("levels") or []
+            return min(lv, key=lambda z: abs(z - floor)) if lv else None
+        taken = set()
+        for st in ring:
+            lv = level_at(st["xy"])
+            if lv is None:
+                covered = [(d, xy) for d, xy in samples.get(st["slot"], []) if level_at(xy) is not None]
+                if covered:
+                    d, xy = min(covered, key=lambda c: (abs(c[0] - st["standoff"]), -c[0]))
+                    st.update(xy=xy, standoff=d, movedFrom=st["xy"])
+                    lv = level_at(xy)
+            if lv is not None:
+                st["floor"] = lv
+            if tuple(st["xy"]) in taken:
+                merged.append(st)
+            taken.add(tuple(st["xy"]))
+        ring = [st for st in ring if st not in merged]
+    for st in ring:
+        st["ez"] = int(round(st["floor"] + args.eye_height))
     lookz = min(max(mid[2], floor + 40.0), floor + 300.0)
-    shots = [{"label": st["id"], "eye": [st["xy"][0], st["xy"][1], ez], "floorZ": floor,
+    shots = [{"label": st["id"], "eye": [st["xy"][0], st["xy"][1], st["ez"]], "floorZ": st["floor"],
               "look": [round(mid[0], 1), round(mid[1], 1), round(lookz, 1)], "fov": fov} for st in ring]
     wl = {"label": f"capture point witnesses for {request.get('id')}", "eyeHeight": args.eye_height,
           "cells": [{"cell": cell, "shots": shots}]}
@@ -555,7 +603,7 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
         flags += ["--pick", f"{x},{y}"]
     for st in ring:
         x, y = st["xy"]
-        flags += ["--nav-at", f"{x},{y}", "--inside-at", f"{x},{y},{ez}", "--clear-at", f"{x},{y},{ez}"]
+        flags += ["--nav-at", f"{x},{y}", "--inside-at", f"{x},{y},{st['ez']}", "--clear-at", f"{x},{y},{st['ez']}"]
     rc, text = R.call("p2-witness", ["--worklist", str(work / "witness-worklist.json")], flags)
     ensure_ok(rc, text, "witness")
     chunks, cur = {}, None
@@ -571,6 +619,7 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
     seen = {p["formKey"]: 0 for p in parts}
     cov_states = {k: set() for k in see_through}
     for st in ring:
+        ez = st["ez"]
         st["eye"] = [st["xy"][0], st["xy"][1], ez]
         chunk = chunks.get(st["id"])
         pngs = sorted((work / "p2-witness").glob(f"*-c1s{ring.index(st) + 1}-{st['id']}-fp.png"))
@@ -585,15 +634,18 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                 cov_states[cs[1]].add(cs[2])
         pr = R.parsed(ctext)
         key3, key2 = (st["xy"][0], st["xy"][1], ez), st["xy"]
-        kind, nmsg = S.nav_verdict(pr.nav().get(key2), floor, args)
+        kind, nmsg = S.nav_verdict(pr.nav().get(key2), st["floor"], args)
         eye = (float(st["xy"][0]), float(st["xy"][1]), float(ez))
-        sup, smsg = S.support_verdict(pr.clear().get(key3), eye, floor, args)
+        sup, smsg = S.support_verdict(pr.clear().get(key3), eye, st["floor"], args)
         ikind, ifails, _notes = S.inside_verdict(pr.inside().get(key3), args)
         place = []
         if kind in ("wrong-storey", "no-floor", "unknown"):
             place.append(f"placement: {nmsg}")
         if kind == "off-mesh-near" and sup != "supported":
             place.append(f"placement: {nmsg}; and the geometry does not bear that out -- {smsg}")
+        elif exterior and kind == "on-storey" and sup != "supported":
+            # outdoors the eye stands on its own navmesh level, so the first surface under it must be that level
+            place.append(f"placement: outdoors this eye stands on the navmesh at z {st['floor']:.0f}, but {smsg}")
         place += ifails
         img = np.asarray(Image.open(pngs[0]).convert("RGB"))
         st["participants"] = measure_station(img, pngs[0], ctext, pr, parts, see_through, gridset, min_depth, size)
@@ -646,6 +698,9 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
         return (min(v["best"]["regionDepth"] for v in st["participants"].values()), neighbours(st), -st["standoff"],
                 -ring.index(st) if st in ring else 0)
     chosen = max(valid, key=score)
+    if exterior and chosen.get("floor") is not None and chosen["floor"] != floor:
+        floor_src = (f"outdoors, the witness station's own navmesh level (the request's floor, {floor_src}, is z "
+                     f"{floor:.0f})")
     rows = []
     for p in parts:
         b = chosen["participants"][p["formKey"]]["best"]
@@ -677,7 +732,7 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                           "--coverage-of mark) in an eye-level witness frame, so the ray from that station stops on, or "
                           "for a see-through mark reaches, the participant; the floor is "
                           f"{floor_src} at z {floor:.0f}." + (" SYNTHETIC renderer stand-in." if synthetic else "")),
-           "cell": cell, "floorZ": floor,
+           "cell": cell, "floorZ": chosen.get("floor", floor), "cellKind": "exterior" if exterior else "interior",
            "viewKind": view_kind, "viewFlags": view_flags, "cutaway": cutaway, "fallbackChain": chain,
            # should the planner refuse every camera at this pose, the chain goes on to the top-down with these
            "topDown": top_down_inputs(floor), "coverageStates": {k: sorted(v) for k, v in cov_states.items()},
@@ -692,10 +747,12 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                        "partlyUnmarked": sorted(see_through), "focus": focus if focus in pos else None,
                        "contacts": contacts,
                        "stations": [{"id": st["id"], "bearing": st["bearing"], "standoff": st["standoff"],
-                                     "eye": st.get("eye"), "valid": st["valid"], "why": st.get("why"),
+                                     "eye": st.get("eye"), "floorZ": st.get("floor"), "movedFrom": st.get("movedFrom"),
+                                     "valid": st["valid"], "why": st.get("why"),
                                      "participants": {k: {"pixels": v["pixels"], "maxDepth": v["maxDepth"]}
                                                       for k, v in (st.get("participants") or {}).items()}}
                                     for st in ring],
+                       "merged": [{"id": st["id"], "xy": list(st["xy"])} for st in merged],
                        "runs": R.calls,
                        "rule": (f"grid {grid} px on a {size} px, {fov:g} deg frame; a point needs {min_depth} px of its "
                                 f"own colour or coverage around it and a pick hit; stations must pass the planner's "
