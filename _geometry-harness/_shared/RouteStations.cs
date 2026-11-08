@@ -333,7 +333,9 @@ public static class RouteStations
                 foreach (var (link, bit) in new[] { (tri.EdgeLink01, 0x01), (tri.EdgeLink12, 0x02), (tri.EdgeLink20, 0x04) })
                 {
                     if ((tri.Flags & bit) == 0 || link < 0 || table is null || link >= table.Count) continue;
-                    if (!loaded.ContainsKey(table[link].Mesh)) { exitTris.Add(t); break; }
+                    // an exit is a link the graph would walk if its far side were loaded: a held ledge is not one
+                    if (!loaded.ContainsKey(table[link].Mesh) && NavGraph.Traverses(report.Policy ?? NavGraph.LinkPolicy.Default, table[link].Type))
+                    { exitTris.Add(t); break; }
                 }
             }
         }
