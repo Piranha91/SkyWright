@@ -1278,7 +1278,7 @@ def main():
             a = R.build_parser().parse_args(["plan", "--bundle", "B", "--out", "O", "--sibling-bundle", "S"])
         except SystemExit as ex:                                      # argparse refuses an unknown option by exiting
             return False, f"plan refused the option (exit {ex.code})"
-        return getattr(a, "sibling_bundle", None) == "S", f"parsed {vars(a).get('sibling_bundle')!r}"
+        return getattr(a, "sibling_bundle", None) == ["S"], f"parsed {vars(a).get('sibling_bundle')!r}"
 
     # 15. the measured load order takes its article mid-sentence
     def measured_load_order_article():

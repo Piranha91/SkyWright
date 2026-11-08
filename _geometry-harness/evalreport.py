@@ -1638,18 +1638,49 @@ def build_prediction(ctx: dict) -> dict:
                     prefixes.setdefault(key, set()).add(ident)
     collect(findings)
 
-    # --- the sibling: a separate evaluation of the same order without the patch, whose single-mod setups stand in
-    #     for the ones this bundle lacks. Strict by design: its setup must be this bundle's P plugin for plugin,
-    #     hash for hash, and a check is used only where both ran the same adapter and probe build and measured the
-    #     same rows on that shared setup. Otherwise nothing is joined (refusal) or the check stays unseparated.
-    sibling, sib_ok, sibling_record = ctx.get("sibling"), {}, None
+    # --- the siblings: separate evaluations of the same order without the patch, whose setups stand in for the ones
+    #     this bundle lacks. Strict by design. The first sibling holding this bundle's P plugin for plugin, hash for
+    #     hash, is the primary: a check is used from it only where both ran the same adapter and probe build and
+    #     measured the same rows on that shared setup. A further sibling holds P too (compared the same way on its own
+    #     copy) or holds only P with plugins left out ("sub-order"): then its population and location scope must be
+    #     this bundle's, and a check is used only where it ran the same adapter and probe build and its receipt records
+    #     that setup's plugins. Otherwise nothing is joined (refusal) or the check stays unseparated.
+    siblings_in = list(ctx.get("siblings") or ([ctx["sibling"]] if ctx.get("sibling") else []))
+    many_siblings = len(siblings_in) > 1
+    sibling, sib_ok, sibling_record = (siblings_in[0] if siblings_in else None), {}, None
+    sib_by_prefix = {s_.get("prefix") or "sibling:": s_ for s_ in siblings_in}
+    for s_ in siblings_in:
+        s_.setdefault("prefix", "sibling:")
+    sib_ok_by = {}                             # prefix -> {check: joined}
+    sib_infos = []                             # per sibling, in the order given: its setups, anchor and record
+    sib_dup_of, sib_disagree = {}, set()       # a setup two siblings both hold -> the one used; (used setup, check)
     sib_not_comparable = set()                 # checks not joined because the two probe builds cannot be compared
     sib_setup_plugins, p_plugin_names = {}, []
     sib_role_ref = []
-    sib_only, anchor = set(), None
+    sib_only, anchor, pp = set(), None, "sibling:"
+    sib_roles = {}                             # role -> prefixed setup
     all_orders = {a_: [str(x) for x in v_] for a_, v_ in orders.items()}      # every setup's plugins, sibling's prefixed
-    if sibling is not None and p_targets:
-        main_b, sib_b = ctx["mainBundle"], sibling["bundle"]
+    sib_prefix_re = re.compile(r"^(sibling\d*:)")
+
+    def sib_split(arm_id):
+        """(the sibling an arm id names, its own arm id), or (None, arm id) for this bundle's setup."""
+        m_ = sib_prefix_re.match(str(arm_id)) if arm_id is not None else None
+        if not m_ or m_.group(1) not in sib_by_prefix:
+            return None, arm_id
+        return sib_by_prefix[m_.group(1)], str(arm_id)[len(m_.group(1)):]
+
+    def sib_check_ok(arm_id, check_id):
+        """Whether a setup's rows for a check may be read: always for this bundle's, for a sibling's where it is joined."""
+        s_, _ = sib_split(arm_id)
+        return s_ is None or bool(sib_ok_by.get(s_["prefix"], {}).get(check_id))
+
+    def p_of(check_id):
+        """The setup a check's prediction rows come from: this bundle's P, or the primary sibling's identical setup when
+        only that sibling measured the check there."""
+        return pp + anchor if check_id in sib_only else p_arm
+
+    if siblings_in and p_targets:
+        main_b = ctx["mainBundle"]
 
         def ident(bundle, arm_id):
             a = next((x for x in bundle.plan.get("arms") or [] if x.get("armId") == arm_id), {}) or {}
@@ -1659,33 +1690,106 @@ def build_prediction(ctx: dict) -> dict:
             return plugs, req.get("population"), states
 
         p_plugs, p_pop, p_states = ident(main_b, p_arm)
-        sib_idents = {x.get("armId"): ident(sib_b, x.get("armId")) for x in sib_b.plan.get("arms") or []}
-        anchor = next((a for a, v in sib_idents.items() if v == (p_plugs, p_pop, p_states)), None)
-        if anchor is None:
-            raise InputRefused("sibling-foreign: the sibling bundle has no setup with the same plugins, in the same "
-                               "order and with the same bytes, as the setup without the patch, so nothing was joined.")
-        collect(sibling["findings"], "sibling:")
+
+        def sub_order(v):
+            """P with some plugins left out: the same plugins in the same order with the same bytes, population, states."""
+            it_ = iter(p_plugs)
+            return v[1] == p_pop and v[2] == p_states and all(x in it_ for x in v[0])
+
+        def why_unusable(v):
+            p_by = {n.lower(): h for n, h in p_plugs}
+            for n, h in v[0]:
+                if n.lower() not in p_by:
+                    return f"it holds {n}, which the setup without the patch does not"
+                if p_by[n.lower()] != h:
+                    return f"its {n} has other bytes than the setup without the patch's"
+            if v[1] != p_pop or v[2] != p_states:
+                return "its population or world states are not the setup without the patch's"
+            return "its plugins are not in the order of the setup without the patch"
+
+        def scope_cells(bundle):
+            sc = bundle.scope
+            if not isinstance(sc, dict):
+                return None
+            return {str(l_.get("cell")) for l_ in ((sc.get("locationContributors") or {}).get("locations") or [])}
+
+        def pop_identity(bundle):
+            pop = bundle.plan.get("population")
+            return pop.get("identity") if isinstance(pop, dict) else pop
+
+        main_cells, main_pop_id = scope_cells(main_b), pop_identity(main_b)
+        for s_ in siblings_in:
+            idents = {x.get("armId"): ident(s_["bundle"], x.get("armId")) for x in s_["bundle"].plan.get("arms") or []}
+            anc = next((a for a, v in idents.items() if v == (p_plugs, p_pop, p_states)), None)
+            usable = [a for a, v in idents.items() if sub_order(v)]
+            info = {"s": s_, "idents": idents, "anchor": anc, "usable": usable,
+                    "unusable": {a: why_unusable(v) for a, v in idents.items() if a not in usable}}
+            if anc is None:
+                if not many_siblings:
+                    raise InputRefused("sibling-foreign: the sibling bundle has no setup with the same plugins, in the "
+                                       "same order and with the same bytes, as the setup without the patch, so nothing "
+                                       "was joined.")
+                s_cells = scope_cells(s_["bundle"])
+                why_ = None
+                if pop_identity(s_["bundle"]) != main_pop_id:
+                    why_ = "its population is not the one this evaluation measured"
+                elif s_cells is not None and (main_cells is None or not main_cells <= s_cells):
+                    why_ = "its location scope does not cover this evaluation's locations"
+                elif not usable:
+                    why_ = ("it has no setup that is the setup without the patch, or that setup with plugins left out, "
+                            "with the same bytes")
+                if why_:
+                    raise InputRefused(f"sibling-foreign: the sibling bundle {s_['pathAsGiven']} cannot stand in for "
+                                       f"any setup here because {why_}, so nothing was joined.")
+            sib_infos.append(info)
+        primary = next((i_ for i_ in sib_infos if i_["anchor"] is not None), None)
+        if primary is None:
+            raise InputRefused("sibling-unanchored: none of the sibling bundles has a setup identical to the setup "
+                               "without the patch, so no check could be compared between the evaluations and nothing "
+                               "was joined.")
+        sibling, sib_b, anchor, pp = primary["s"], primary["s"]["bundle"], primary["anchor"], primary["s"]["prefix"]
+        ctx["sibling"] = sibling
+        sib_idents = primary["idents"]
+        collect(sibling["findings"], pp)
         setups_seen.extend({x[0].lower() for x in v[0]} for v in sib_idents.values())
-        all_orders.update({"sibling:" + a_: [x[0] for x in v_[0]] for a_, v_ in sib_idents.items()})
+        all_orders.update({pp + a_: [x[0] for x in v_[0]] for a_, v_ in sib_idents.items()})
+        # a further sibling's setups that are P or P with plugins left out (the others are never read)
+        for i_ in sib_infos:
+            if i_ is not primary:
+                setups_seen.extend({x[0].lower() for x in i_["idents"][a_][0]} for a_ in i_["usable"])
+                all_orders.update({i_["s"]["prefix"] + a_: [x[0] for x in i_["idents"][a_][0]] for a_ in i_["usable"]})
+        # who stands in for a role first: a sibling holding P (its checks are compared row for row), then one holding
+        # only P with plugins left out; among equals the earlier --sibling-bundle. A setup two siblings both hold is
+        # read from the first of them; the other is recorded as offering it.
+        sib_order = [i_ for i_ in sib_infos if i_["anchor"] is not None] + [i_ for i_ in sib_infos if i_["anchor"] is None]
+        seen_setups = {}
+        for i_ in sib_order:
+            for a_ in (i_["usable"] if i_ is not primary else list(i_["idents"])):
+                key_ = i_["idents"][a_]
+                if key_ in seen_setups:
+                    sib_dup_of[i_["s"]["prefix"] + a_] = seen_setups[key_]
+                else:
+                    seen_setups[key_] = i_["s"]["prefix"] + a_
 
         def sib_role(drop_lower):
             for drop in (drop_lower, drop_lower | companions(drop_lower)):
                 want = (tuple(x for x in p_plugs if x[0].lower() not in drop), p_pop, p_states)
-                found = next((a for a, v in sib_idents.items() if v == want), None)
-                if found:
-                    return found
+                for i_ in sib_order:
+                    found = next((a for a in (i_["usable"] if i_ is not primary else list(i_["idents"]))
+                                  if i_["idents"][a] == want), None)
+                    if found:
+                        return i_["s"]["prefix"] + found
             return None
         sib_role_ref.append(sib_role)
-        roles = {}
         if w_arm is None:
             w_sib = sib_role(pt_lower)
             if w_sib:
-                w_arm = roles["without the evaluated mods"] = "sibling:" + w_sib
+                w_arm = sib_roles["without the evaluated mods"] = w_sib
         for t in list(s_arms):
             if s_arms[t] is None:
                 s_sib = sib_role(pt_lower - {str(t).lower()})
                 if s_sib:
-                    s_arms[t] = roles[f"only {t}"] = "sibling:" + s_sib
+                    s_arms[t] = sib_roles[f"only {t}"] = s_sib
 
         def receipt_build(bundle, check_id, arm_id):
             """(program, dll, legacy): the probe build a receipt records -- the emitter's bound program identity
@@ -1700,11 +1804,12 @@ def build_prediction(ctx: dict) -> dict:
             dll = (t.get("dllSha256"), t.get("coreDllSha256")) if t.get("dllSha256") else None
             return program, dll, not isinstance(progs, dict)
 
-        def build_compare(check_id, main_arm, sib_arm):
-            """(basis, note, why): how the two receipts' probe builds compare. Program identity where both bind it,
-            else the dll fields where both record them (the note says one side has no program identity), else nothing
-            when the check runs no probe; otherwise the builds cannot be compared and the check is not joined."""
-            (mp, md_, ml), (sp, sd, sl) = receipt_build(main_b, check_id, main_arm), receipt_build(sib_b, check_id, sib_arm)
+        def build_compare_on(check_id, one, two):
+            """(basis, note, why): how two receipts' probe builds compare, each (bundle, arm). Program identity where
+            both bind it, else the dll fields where both record them (the note says one side has no program identity),
+            else nothing when the check runs no probe; otherwise the builds cannot be compared and the check is not
+            joined."""
+            (mp, md_, ml), (sp, sd, sl) = receipt_build(one[0], check_id, one[1]), receipt_build(two[0], check_id, two[1])
             if mp and sp:
                 return "program", None, None if mp == sp else "the two evaluations ran this check with different probe builds"
             if md_ and sd:
@@ -1719,6 +1824,9 @@ def build_prediction(ctx: dict) -> dict:
                                             "can be compared with the other's, so whether the two evaluations ran the "
                                             "same probe build cannot be told")
 
+        def build_compare(check_id, main_arm, sib_arm):
+            return build_compare_on(check_id, (main_b, main_arm), (sib_b, sib_arm))
+
         def receipt_config(bundle, check_id, arm_id):
             rc = bundle.receipt_by_key.get((check_id, arm_id, "arm")) or bundle.receipt_by_key.get((check_id, arm_id, None))
             cfg = ((rc or {}).get("consumed") or {}).get("configuration") or {}
@@ -1731,7 +1839,7 @@ def build_prediction(ctx: dict) -> dict:
             why, how, basis, note = None, None, None, None
             if (main_b.checks.get(check_id) or {}).get("adapter") != (sib_b.checks.get(check_id) or {}).get("adapter"):
                 why = "the two evaluations ran this check with different adapters"
-            elif (check_id, p_arm) not in measured and (check_id, "sibling:" + anchor) in measured:
+            elif (check_id, p_arm) not in measured and (check_id, pp + anchor) in measured:
                 # Only the sibling measured it on the shared setup: its rows stand in for this bundle's, and only when
                 # the configuration its own receipt records is this setup's, plugin for plugin, in order, byte for byte.
                 got = receipt_config(sib_b, check_id, anchor)
@@ -1744,32 +1852,93 @@ def build_prediction(ctx: dict) -> dict:
                 else:
                     how = "from-sibling-only"
                     sib_only.add(check_id)
-            elif (check_id, p_arm) not in measured or (check_id, "sibling:" + anchor) not in measured:
+            elif (check_id, p_arm) not in measured or (check_id, pp + anchor) not in measured:
                 why = "one of the two evaluations did not measure this check on the shared setup"
             else:
                 basis, note, why = build_compare(check_id, p_arm, anchor)
                 if basis == "not-comparable":
                     sib_not_comparable.add(check_id)
                 elif why is None and ((prefixes.get((check_id, p_arm)) or set())
-                                      != (prefixes.get((check_id, "sibling:" + anchor)) or set())):
+                                      != (prefixes.get((check_id, pp + anchor)) or set())):
                     why = "the two evaluations measured different results for this check on the shared setup"
             sib_ok[check_id] = why is None
             checks_record.append({"checkId": check_id, "joined": why is None, "why": why, "buildBasis": basis,
                                   **({"buildBasisNote": note} if note else {}), **({"how": how} if how else {})})
+        sib_ok_by[pp] = sib_ok
         sib_setup_plugins = {a_: [x[0] for x in v_[0]] for a_, v_ in sib_idents.items()}
         p_plugin_names = [x[0] for x in p_plugs]
         sibling_record = {"pathAsGiven": sibling.get("pathAsGiven"), "planId": sibling.get("planId"),
                           "manifestSha256": sibling.get("manifestSha256"), "anchorArm": anchor,
-                          "roles": {k: v.split(":", 1)[1] for k, v in roles.items()}, "checks": checks_record}
+                          "roles": {}, "checks": checks_record}
+        primary["record"] = sibling_record
 
-    def p_of(check_id):
-        """The setup a check's prediction rows come from: this bundle's P, or the sibling's identical setup when only
-        the sibling measured the check there."""
-        return "sibling:" + anchor if check_id in sib_only else p_arm
+        # a further sibling: its rows, then each check it measured, compared with the setup the prediction reads
+        for i_ in sib_infos:
+            if i_ is primary:
+                continue
+            pre_, s_b2, anc2 = i_["s"]["prefix"], i_["s"]["bundle"], i_["anchor"]
+            collect(i_["s"]["findings"], pre_)
+            ok2, recs2 = {}, []
+            for check_id in sorted({c for c, a_ in measured if c and str(a_).startswith(pre_)}):
+                why, basis, note = None, None, None
+                ref_ = p_of(check_id)
+                ref_b = sib_b if ref_ != p_arm else main_b
+                ref_a = anchor if ref_ != p_arm else p_arm
+                arms_ = [a_ for a_ in (i_["usable"]) if (check_id, pre_ + a_) in measured]
+                if (main_b.checks.get(check_id) or {}).get("adapter") != (s_b2.checks.get(check_id) or {}).get("adapter"):
+                    why = "the two evaluations ran this check with different adapters"
+                elif (check_id, ref_) not in measured:
+                    why = "this evaluation has no result for this check on the setup without the patch to compare with"
+                elif not arms_:
+                    why = "it measured this check on no setup that is the setup without the patch or that setup with plugins left out"
+                elif anc2 is not None and anc2 not in arms_:
+                    why = "it holds the setup without the patch but did not measure this check there"
+                else:
+                    for a_ in arms_:
+                        basis, note, why = build_compare_on(check_id, (ref_b, ref_a), (s_b2, a_))
+                        if why is None:
+                            got = receipt_config(s_b2, check_id, a_)
+                            if got != i_["idents"][a_][0]:
+                                why = ("its receipt for this check does not record the setup's own plugins, order and "
+                                       "bytes, so its result is not used")
+                        if why is not None:
+                            break
+                    if why is None and anc2 is not None and ((prefixes.get((check_id, ref_)) or set())
+                                                             != (prefixes.get((check_id, pre_ + anc2)) or set())):
+                        why = "the two evaluations measured different results for this check on the shared setup"
+                ok2[check_id] = why is None
+                recs2.append({"checkId": check_id, "joined": why is None, "why": why, "buildBasis": basis,
+                              **({"buildBasisNote": note} if note else {})})
+            sib_ok_by[pre_] = ok2
+            i_["record"] = {"pathAsGiven": i_["s"].get("pathAsGiven"), "planId": i_["s"].get("planId"),
+                            "manifestSha256": i_["s"].get("manifestSha256"), "anchorArm": anc2,
+                            "roles": {}, "checks": recs2}
+        for k_, v_ in sib_roles.items():
+            s_, a_ = sib_split(v_)
+            next(x for x in sib_infos if x["s"] is s_)["record"]["roles"][k_] = a_
+        # a setup two siblings hold and both may be read for a check: where their rows differ, neither is used for it
+        for dup_, used_ in sib_dup_of.items():
+            for check_id in {c for c, a_ in measured if a_ == dup_}:
+                if (check_id, used_) in measured and sib_check_ok(dup_, check_id) and sib_check_ok(used_, check_id) and (
+                        (prefixes.get((check_id, dup_)) or set()) != (prefixes.get((check_id, used_)) or set())):
+                    sib_disagree.add((used_, check_id))
+
+    def sib_usable_arm(arm_id):
+        """A sibling's setup that may be read for a fewer-plugins role: P or P with plugins left out (same bytes),
+        never a setup another sibling's copy stands in for."""
+        s_, a_ = sib_split(arm_id)
+        if s_ is None:
+            return True
+        if arm_id in sib_dup_of:
+            return False
+        i_ = next((x for x in sib_infos if x["s"] is s_), None)
+        return i_ is not None and a_ in i_["usable"]
 
     def present(arm_id, rk):
-        if arm_id is not None and str(arm_id).startswith("sibling:") and not sib_ok.get(rk[0]):
-            return False                       # a sibling check that does not match on the shared setup is unused
+        if arm_id is not None and not sib_check_ok(arm_id, rk[0]):
+            return False                       # a sibling check that is not joined is unused
+        if arm_id is not None and (arm_id, rk[0]) in sib_disagree:
+            return False                       # two siblings measured this setup differently for this check
         if arm_id == p_arm:
             arm_id = p_of(rk[0])
         return arm_id is not None and ident_of.get(rk, tuple(rk[:5])) in (prefixes.get((rk[0], arm_id)) or set())
@@ -1787,9 +1956,12 @@ def build_prediction(ctx: dict) -> dict:
             bundle, a = None, arm_id
             if arm_id is None or arm_id == p_arm:
                 pass
-            elif str(arm_id).startswith("sibling:"):
-                if sibling is not None and anchor == "baseline" and sib_ok.get(check_id) and p_of(check_id) == p_arm:
-                    bundle, a = sibling["bundle"], arm_id.split(":", 1)[1]
+            elif sib_split(arm_id)[0] is not None:
+                s_, a_ = sib_split(arm_id)
+                i_ = next((x for x in sib_infos if x["s"] is s_), None)
+                if (i_ is not None and i_["anchor"] == "baseline" and sib_check_ok(arm_id, check_id)
+                        and p_of(check_id) == p_arm):
+                    bundle, a = s_["bundle"], a_
             elif p_arm == "baseline" and p_of(check_id) == p_arm:
                 bundle = ctx.get("mainBundle")
             if bundle is not None:
@@ -2078,8 +2250,9 @@ def build_prediction(ctx: dict) -> dict:
         if key not in chain_cache:
             chain_cache[key] = None
             bundle, a = ctx.get("mainBundle"), arm_id
-            if str(arm_id).startswith("sibling:"):
-                bundle, a = (sibling or {}).get("bundle"), str(arm_id).split(":", 1)[1]
+            if sib_split(arm_id)[0] is not None:
+                s_, a = sib_split(arm_id)
+                bundle = s_.get("bundle")
             got = bundle.transcripts(check_id, a) if bundle is not None and needed_fks.get(key) else None
             if got:
                 if not chain_scope:
@@ -2827,6 +3000,7 @@ def build_prediction(ctx: dict) -> dict:
         return "admitted"
 
     without_cache, partner_arms, put_back = {}, {}, set()
+    fewer_setup_of = {}                         # row -> the fewer-plugins setup that decided its attribution
     unref_winners = collections.OrderedDict()
 
     def without_other(m_lower):
@@ -2834,8 +3008,7 @@ def build_prediction(ctx: dict) -> dict:
         if m_lower not in without_cache:
             found = arm_without({m_lower})
             if found is None and sib_role_ref:
-                s_ = sib_role_ref[0]({m_lower})
-                found = "sibling:" + s_ if s_ else None
+                found = sib_role_ref[0]({m_lower})
             without_cache[m_lower] = found
         return without_cache[m_lower]
 
@@ -2852,20 +3025,34 @@ def build_prediction(ctx: dict) -> dict:
             arm_m = without_other(others[0].lower())
             if arm_m is not None:
                 partner_arms.setdefault(others[0], arm_m)       # named in the record: which setup said so
+            if arm_m is not None and (arm_m, rk[0]) in sib_disagree:
+                return "not-separable", None, words["notSeparableWhy"]["siblingsDisagree"]
             if (arm_m is None or (rk[0], arm_m) not in measured
-                    or (str(arm_m).startswith("sibling:") and not sib_ok.get(rk[0]))):
+                    or not sib_check_ok(arm_m, rk[0])):
                 # no setup equal to this one without the other mod: a measured setup of fewer of this setup's plugins that
                 # keeps the evaluated mod and leaves the other out still answers whether the clash needs it (the setups
                 # that pair the mod with each partner alone)
                 p_low_ = {x.lower() for x in all_orders.get(p_arm) or []}
-                alt_ = [a_ for a_, o_ in sorted(all_orders.items()) if a_ != p_arm and not str(a_).startswith("sibling:")
+                # (item 21) a joined sibling's setup counts too, read only where that sibling's check is joined
+                alt_ = [a_ for a_, o_ in sorted(all_orders.items()) if a_ != p_arm
+                        and (sib_split(a_)[0] is None or (sib_usable_arm(a_) and sib_check_ok(a_, rk[0])))
                         and (rk[0], a_) in measured and t.lower() in {x.lower() for x in o_}
                         and others[0].lower() not in {x.lower() for x in o_} and {x.lower() for x in o_} <= p_low_]
                 if not alt_:
                     return "with-target", t, None
-                partner_arms.setdefault(others[0], alt_[0])
-                return ("single-mod" if any(there(a_, rk) for a_ in alt_) else "needs-both"), t, None
+                if any((a_, rk[0]) in sib_disagree for a_ in alt_):
+                    return "not-separable", None, words["notSeparableWhy"]["siblingsDisagree"]
+                decider_ = next((a_ for a_ in alt_ if there(a_, rk)), None)
+                partner_arms.setdefault(others[0], decider_ or alt_[0])
+                # the page names the setup that decided: it leaves out more than the other mod (item 21, A2)
+                fewer_setup_of[rk] = decider_ or alt_[0]
+                return ("single-mod" if decider_ else "needs-both"), t, None
+            # (item 21, A2) a setup without the other mod that also lacks plugins taken as its companions is named
+            # on the page, never called "the setup without" the other mod alone
+            fewer_m_ = {str(x).lower() for x in all_orders.get(arm_m) or []} != p_set - {others[0].lower()}
             if there(arm_m, rk):
+                if fewer_m_:
+                    fewer_setup_of[rk] = arm_m
                 return "single-mod", t, None
             # (seventh review, BPT r6 S3) a lost record change where the measured setup without the other mod also lacks
             # other plugins: judged by the prediction setup's own versions with the other mod's version left out. Where
@@ -2883,10 +3070,18 @@ def build_prediction(ctx: dict) -> dict:
                                         {str(y).lower() for y in all_orders.get(arm_m) or []} and x.lower() != others[0].lower()),
                                        key=str.lower)
                         return "single-mod", t, ["chain", provs_[rest_[-1]], miss_]
+            if fewer_m_:
+                fewer_setup_of[rk] = arm_m
             return "needs-both", t, None
-        if any(str(s_arms.get(t)).startswith("sibling:") for t in p_targets) and not sib_ok.get(rk[0]):
-            return "not-separable", None, words["notSeparableWhy"][
-                "siblingNotComparable" if rk[0] in sib_not_comparable else "siblingDisagrees"]
+        sib_single_ = [s_arms.get(t) for t in p_targets if sib_split(s_arms.get(t))[0] is not None]
+        bad_ = next((a_ for a_ in sib_single_ if not sib_check_ok(a_, rk[0])), None)
+        if bad_ is not None:
+            if sib_split(bad_)[0] is sibling:
+                return "not-separable", None, words["notSeparableWhy"][
+                    "siblingNotComparable" if rk[0] in sib_not_comparable else "siblingDisagrees"]
+            return "not-separable", None, words["notSeparableWhy"]["siblingNotJoined"]
+        if any((a_, rk[0]) in sib_disagree for a_ in sib_single_):
+            return "not-separable", None, words["notSeparableWhy"]["siblingsDisagree"]
         unmeasured = [t for t in p_targets if s_arms.get(t) is None or (rk[0], s_arms[t]) not in measured]
         if unmeasured:
             if all(s_arms.get(t) is None for t in p_targets):
@@ -3053,6 +3248,8 @@ def build_prediction(ctx: dict) -> dict:
             g.setdefault("_stateEntries", []).append(entry)
         if rk[0] in sib_only:
             g["_fromSibling"] = True
+        if rk in fewer_setup_of:
+            g.setdefault("_fewerSetups", []).append(fewer_setup_of[rk])
         if rk[1] != "LOST-EDIT" and hit["row"].get("other"):
             g.setdefault("_partners", []).extend(o_ for o_ in [str(rk[4])] + [str(x_) for x_ in hit["row"]["other"]]
                                                  if o_.split(":", 1)[-1].lower() not in pt_lower)
@@ -3332,6 +3529,16 @@ def build_prediction(ctx: dict) -> dict:
 
     def fields_text(counter):
         return ", ".join(f"{n_} {fmt_n(c_)}" for n_, c_ in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
+    def setup_phrase(arm_id):
+        """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
+        plugs = all_orders.get(arm_id) or []
+        low = {x.lower() for x in plugs}
+        kept = [x for x in plugs if not is_base_game(x, words)]
+        removed = [x for x in all_orders.get(p_arm) or [] if x.lower() not in low]
+        return (words["setupBaseGameAlone"] if not kept else
+                bind(words["setupOnly"], {"plugins": " and ".join(kept)}) if len(kept) <= len(removed) else
+                bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
+
     def pair_objects_of_base(g):
         """Every partner object of the item's rows is a base-game record (the other mod only edits it)."""
         others_ = [o_ for o_ in g.get("_partners") or []]
@@ -3372,6 +3579,11 @@ def build_prediction(ctx: dict) -> dict:
         elif (attr_key == "single-mod" and g["attributionMod"]
                 and str(g["attributionMod"]).lower() not in {m.lower() for m in g["mods"]}):
             attr_key = "single-mod-elsewhere"       # the same object is broken with the other evaluated mod alone
+        fewer_ = list(dict.fromkeys(g.pop("_fewerSetups", None) or []))
+        if fewer_ and words["attribution"].get(attr_key + "-fewer"):
+            # (item 21, A2) decided on a measured setup that leaves out more than the other mod: that setup is named,
+            # never "the setup without" the other mod
+            attr_key = attr_key + "-fewer"
         chain_why_ = g.get("attributionWhy") if isinstance(g.get("attributionWhy"), list) else None
         if attr_key == "single-mod-target" and chain_why_ and words["attribution"].get("single-mod-target-chain"):
             # (seventh review, BPT r6 S3) judged from the record's own versions, not from a setup lacking more
@@ -3379,8 +3591,9 @@ def build_prediction(ctx: dict) -> dict:
         attr_text = bind(words["attribution"][attr_key], {"mod": g["attributionMod"], "other": other_mod,
                                                           "next": chain_why_[1] if chain_why_ else "",
                                                           "missing": and_list(chain_why_[2]) if chain_why_ and chain_why_[2] else "",
-                                                          "replaced": fmt_n(replaced_) if attr_key.endswith("replaced") else "",
-                                                          "why": g["attributionWhy"] or ""})
+                                                          "replaced": fmt_n(replaced_) if "replaced" in attr_key else "",
+                                                          "why": g["attributionWhy"] or "",
+                                                          "setup": " or ".join(setup_phrase(a_) for a_ in fewer_)})
         subjects_of[id(g)] = g.pop("_subjects")
         pair_objects_of[id(g)] = g.pop("_pairObjects", set())
         field_names_of[id(g)] = g.pop("_fieldNames", collections.Counter())
@@ -5003,6 +5216,8 @@ def build_prediction(ctx: dict) -> dict:
     def sibling_source():
         """Which setups the separate evaluation measured and this report uses, in plugins (blind review of the BPT
         report: "each mod on its own" claimed setups that were never measured)."""
+        if many_siblings and sib_infos:
+            return siblings_source()
         if not (sibling_record and sibling_record["roles"]):
             return None
         # (third review, Clockwork S6) named against the measured load order (the bundle's baseline), which a "measured load
@@ -5020,6 +5235,27 @@ def build_prediction(ctx: dict) -> dict:
                   bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
             descs.append(d_)
         return bind(words["siblingSetups"], {"setups": "; ".join(descs)})
+    def siblings_source():
+        """(item 21) several separate evaluations: the setups each lends, named against the measured load order, with
+        the folder of the evaluation it came from."""
+        measured_ = all_orders.get("baseline") or p_plugin_names
+        p_low = [x.lower() for x in measured_]
+        parts = []
+        for i_ in sib_order:                   # the order roles are taken in, so the order given changes nothing
+            descs = []
+            for a_ in dict.fromkeys((i_.get("record") or {}).get("roles", {}).values()):
+                plugs = [x[0] for x in i_["idents"].get(a_, ((), None, ()))[0]]
+                low = {x.lower() for x in plugs}
+                kept = [x for x in plugs if not is_base_game(x, words)]
+                removed = [x for x, xl in zip(measured_, p_low) if xl not in low]
+                descs.append(words["setupBaseGameAlone"] if not kept else
+                             bind(words["setupOnly"], {"plugins": " and ".join(kept)}) if len(kept) <= len(removed) else
+                             bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
+            if descs:
+                name_ = Path(str(i_["s"].get("pathAsGiven") or "")).name or str(i_["s"].get("pathAsGiven") or "")
+                parts.append(bind(words["siblingSetupsFrom"], {"setups": "; ".join(descs), "name": name_}))
+        return bind(words["siblingSetupsMany"], {"setups": "; ".join(parts)}) if parts else None
+
     # A load-order risk the record lane measured: the setup without the patch with its plugins in another order (same
     # plugins, same bytes), whose record rows hold changes lost between a pair whose order differs, that the measured
     # order does not lose. Said as a measured record fact, one line per pair; no claim of how it shows in game.
@@ -5105,8 +5341,28 @@ def build_prediction(ctx: dict) -> dict:
     if sibling_record:
         # Snazzy review 1: the sibling's setup that decided "needs both" for a partner mod is named with the others
         for m_, a_ in partner_arms.items():
-            if str(a_).startswith("sibling:"):
-                sibling_record["roles"].setdefault(f"without {m_}", a_.split(":", 1)[1])
+            s_, bare_ = sib_split(a_)
+            if s_ is not None:
+                next(x for x in sib_infos if x["s"] is s_)["record"]["roles"].setdefault(f"without {m_}", bare_)
+    def siblings_out():
+        """(item 21) one record per sibling, in the order given: how it was joined, the roles it filled, the roles it
+        offered that another sibling's identical setup filled, the setups it could not lend and why."""
+        out_ = []
+        for i_ in sib_infos:
+            rec_ = dict(i_.get("record") or {})
+            if i_["s"] is sibling:
+                rec_["rows"] = sibling_rows()
+            offered_ = {}
+            for role_, used_ in [*sib_roles.items(), *((f"without {m_}", a_) for m_, a_ in partner_arms.items())]:
+                for dup_, canon_ in sib_dup_of.items():
+                    d_s, d_a = sib_split(dup_)
+                    if canon_ == used_ and d_s is i_["s"]:
+                        offered_[role_] = {"armId": d_a, "usedFrom": (sib_split(used_)[0] or {}).get("pathAsGiven")}
+            rec_.update({"joinBasis": "shared-setup" if i_["anchor"] is not None else "sub-order",
+                         "offered": offered_, "unusableSetups": dict(i_["unusable"])})
+            out_.append(rec_)
+        return out_
+
     prediction = {"subject": subject, "mods": subject_mods, "predictionArm": p_arm, "withoutArm": w_arm,
                   "referenceReads": ref_reads,
                   "pluginReads": plugin_reads,
@@ -5197,6 +5453,7 @@ def build_prediction(ctx: dict) -> dict:
                   "record": record, "detailAsideWords": words.get("detailAside") or {},
                   "doorLinkEntries": door_entries_,
                   "sibling": ({**sibling_record, "rows": sibling_rows()} if sibling_record else sibling_record),
+                  **({"siblings": siblings_out()} if many_siblings and sib_infos else {}),
                   "withoutPartnerArms": dict(partner_arms),
                   "siblingSource": sibling_source(),
                   "orderRiskLines": order_lines, "orderRisks": order_record,
@@ -5322,8 +5579,9 @@ def build_prediction(ctx: dict) -> dict:
 
     def own_coverage(check_id):
         arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
-        if str(arm_id).startswith("sibling:"):
-            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
+        if sib_split(arm_id)[0] is not None:
+            s_, arm_id = sib_split(arm_id)
+            bundle = s_.get("bundle")
         rc = None
         if bundle is not None:
             rc = bundle.receipt_by_key.get((check_id, arm_id, "arm")) or bundle.receipt_by_key.get((check_id, arm_id, None))
@@ -5352,8 +5610,9 @@ def build_prediction(ctx: dict) -> dict:
 
     def emit_unjudged(check_id):
         arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
-        if str(arm_id).startswith("sibling:"):
-            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
+        if sib_split(arm_id)[0] is not None:
+            s_, arm_id = sib_split(arm_id)
+            bundle = s_.get("bundle")
         if bundle is None:
             return None
         path = bundle.output_emit_path(check_id, arm_id, "arm") or bundle.output_emit_path(check_id, arm_id, None)
@@ -5365,8 +5624,9 @@ def build_prediction(ctx: dict) -> dict:
         """(item 18 A2) every unjudgeable count the check's rows file states on its own coverage lines, by reason
         (judged-elsewhere reasons excluded: they have their own line)."""
         arm_id, bundle = p_of(check_id), ctx.get("mainBundle")
-        if str(arm_id).startswith("sibling:"):
-            arm_id, bundle = arm_id.split(":", 1)[1], (sibling or {}).get("bundle")
+        if sib_split(arm_id)[0] is not None:
+            s_, arm_id = sib_split(arm_id)
+            bundle = s_.get("bundle")
         if bundle is None:
             return collections.Counter()
         path = bundle.output_emit_path(check_id, arm_id, "arm") or bundle.output_emit_path(check_id, arm_id, None)
@@ -7820,9 +8080,11 @@ def copy_folder(row: dict) -> str | None:
 
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
                  location_scopes: dict | None = None, sibling_dir: Path | None = None,
-                 sibling_as_given: str | None = None, order_setups: list | None = None) -> dict:
+                 sibling_as_given: str | None = None, order_setups: list | None = None,
+                 siblings: list | None = None) -> dict:
     """sibling_dir: a verified bundle of the same order without the patch; its single-mod setups stand in for the ones
     this bundle lacks (build_prediction's join). Raises InputRefused when it cannot be joined at all.
+    siblings: several such bundles, [(dir, as given)] in the order given; sibling_dir is a list of one.
     order_setups: the record lane's rows measured on the setup without the patch with its plugins in another order
     [{armId, planPath, rowsPath, plugins [{name, sha256}], rows [conflict rows, each with its `_check`]}]."""
     b = Bundle(bundle_dir)
@@ -7833,13 +8095,22 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     body_checks = set(((pr.get("reader") or {}).get("prediction") or {}).get("bodyChecks") or [])
     bodiless_types = set(((pr.get("reader") or {}).get("prediction") or {}).get("bodilessTypes") or [])
     by_object_checks = set(((pr.get("reader") or {}).get("prediction") or {}).get("identityByObject") or [])
-    sibling = None
-    if sibling_dir is not None:
-        sib_plan = compile_plan(Path(sibling_dir), verify, settings, pr, str(sibling_dir))
-        sibling = {"bundle": Bundle(Path(sibling_dir)), "findings": sib_plan.get("findings") or [],
-                   "planId": Bundle(Path(sibling_dir)).plan.get("planId"),
-                   "manifestSha256": sha256_file(Path(sibling_dir) / "manifest.json"),
-                   "pathAsGiven": sibling_as_given or str(sibling_dir)}
+    sibling_list = []
+    for s_dir, s_given in (list(siblings or []) or ([(sibling_dir, sibling_as_given)] if sibling_dir is not None else [])):
+        s_b = Bundle(Path(s_dir))
+        s_given = s_given or str(s_dir)
+        s_sha = sha256_file(Path(s_dir) / "manifest.json")
+        for prev in sibling_list:
+            if Path(s_dir).resolve() == prev["bundle"].dir.resolve() or (
+                    prev["manifestSha256"] == s_sha and prev["planId"] == s_b.plan.get("planId")):
+                raise InputRefused(f"sibling-repeated: the sibling bundle {s_given} is the same evaluation (plan "
+                                   f"{s_b.plan.get('planId')}) as an earlier --sibling-bundle, so nothing was joined.")
+        sib_plan = compile_plan(Path(s_dir), verify, settings, pr, str(s_dir))
+        k_ = len(sibling_list)
+        sibling_list.append({"bundle": s_b, "findings": sib_plan.get("findings") or [],
+                             "planId": s_b.plan.get("planId"), "manifestSha256": s_sha, "pathAsGiven": s_given,
+                             "prefix": "sibling:" if k_ == 0 else f"sibling{k_ + 1}:"})
+    sibling = sibling_list[0] if sibling_list else None
     disp = b.disposition
     ev = disp.get("evaluation") or {}
     arms_disp = disp.get("arms") or {}
@@ -9869,7 +10140,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         "oldVerdict": verdict, "genericVerdict": generic_verdict, "refusedLines": list(refused_lines),
         "limitations": limitations, "words": reader_data["prediction"],
         "inGame": reader_data.get("inGame") or {}, "kindPhrases": reader_data.get("kindPhrases") or {},
-        "mainBundle": b, "sibling": sibling, "comparisonState": comparison_state,
+        "mainBundle": b, "sibling": sibling, "siblings": sibling_list, "comparisonState": comparison_state,
         "singleMod": settings.get("singleMod"), "headlineUnit": settings.get("headlineUnit"),
         "names": names_early, "masters": plugin_masters_doc, "orderSetups": list(order_setups or []),
         "rowsPerGroup": settings.get("rowsPerGroup") if settings.get("mode") != "exhaustive" else None,
@@ -11221,24 +11492,29 @@ def cmd_plan(a) -> int:
             if not isinstance(aman, dict) or aman.get("bundleSchema") != BUNDLE_SCHEMA:
                 return refuse(r, f"also-bundle-unreadable: {Path(x_) / 'manifest.json'} is not a schema-{BUNDLE_SCHEMA} "
                                  f"bundle manifest, so it is not named.")
-        sibling = Path(a.sibling_bundle) if getattr(a, "sibling_bundle", None) else None
-        if sibling is not None:
+        sib_given = list(getattr(a, "sibling_bundle", None) or [])
+        for k_, given_ in enumerate(sib_given):
+            sibling = Path(given_)
             sman = load_json(sibling / "manifest.json")
             if not isinstance(sman, dict) or sman.get("bundleSchema") != BUNDLE_SCHEMA:
                 return refuse(r, f"sibling-unreadable: {sibling / 'manifest.json'} is not a schema-{BUNDLE_SCHEMA} bundle "
                                  f"manifest, so nothing was joined.")
-            sdir = out / "sibling-verify"
+            vname = "sibling-verify" if k_ == 0 else f"sibling-verify-{k_ + 1}"
+            sdir = out / vname
             sdir.mkdir(parents=True, exist_ok=True)
             sverify, _, serr = run_verify_bundle(sibling, sdir, a.verify_copy)
             if sverify is None or not (sverify.get("bundle") or {}).get("complete"):
-                return refuse(r, f"sibling-refused: verify-bundle did not find the sibling bundle complete "
-                                 f"({serr or 'see sibling-verify/verify.json'}), so nothing was joined.")
+                who_ = "the sibling bundle" if len(sib_given) == 1 else f"the sibling bundle {given_}"
+                return refuse(r, f"sibling-refused: verify-bundle did not find {who_} complete "
+                                 f"({serr or f'see {vname}/verify.json'}), so nothing was joined.")
         try:
             plan = compile_plan(bundle, verify, settings, pr, str(a.bundle), location_scopes,
-                                sibling_dir=sibling, sibling_as_given=getattr(a, "sibling_bundle", None),
-                                order_setups=order_setups)
+                                order_setups=order_setups, siblings=[(Path(x_), x_) for x_ in sib_given])
         except InputRefused as ex:
             return refuse(r, str(ex))
+        # the reel's media and masters come from the sibling the prediction anchors on (the first holding the shared setup)
+        primary_ = ((plan.get("reader") or {}).get("prediction") or {}).get("sibling") or {}
+        sibling = next((Path(x_) for x_ in sib_given if x_ == primary_.get("pathAsGiven")), None)
         for arm_id, doc in location_scopes.items():
             dest = out / "evidence" / f"location-scope-{arm_id}.json"
             write_json(dest, doc)
@@ -11856,9 +12132,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--also-bundle", action="append", default=[], metavar="DIR",
                    help="a further evaluation of the same mods, named in the report with the setups it measured; its "
                         "results are not joined into the counts")
-    p.add_argument("--sibling-bundle", default=None, metavar="DIR",
-                   help="a bundle of the same order without the patch; its single-mod setups attribute this report's "
-                        "prediction when its setup matches this bundle's setup without the patch plugin for plugin")
+    p.add_argument("--sibling-bundle", action="append", default=None, metavar="DIR",
+                   help="a bundle of the same order without the patch, given once per evaluation; its setups attribute "
+                        "this report's prediction where they are this bundle's setup without the patch, or that setup "
+                        "with plugins left out, plugin for plugin (at least one must hold that setup itself)")
     p.add_argument("--precedent", default=None, metavar="DIR",
                    help="the precedent stage's cards folder (its summary.json: each patch's census of its own records and "
                         "its cards' deciding reasons); the patch section counts the patch's own edits from it")

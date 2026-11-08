@@ -67,13 +67,16 @@ def combined_spec(order, name=COMBINED_DIR, plan_id="sibcombined0", without_rows
                          (C, "neighbours-only"): list(without_rows)}, [A], {"plan_id": plan_id})
 
 
-def alone_spec(name=ALONE_DIR, plan_id="sibalone0000", shows_vanilla=True, shas=None, setup=None):
-    """The evaluated mod with the dependency only against the dependency only: holds no P."""
+def alone_spec(name=ALONE_DIR, plan_id="sibalone0000", shows_vanilla=True, shas=None, setup=None, extra=None,
+               more_results=None):
+    """The evaluated mod with the dependency only against the dependency only: holds no P. shas: other bytes for these
+    plugins in every setup; extra: further make_bundle arguments; more_results: further rows by (check, arm)."""
     setup = setup or [BASE, DEP, A]
     arms = [T.arm("baseline", setup, kind="baseline", shas=shas),
             T.arm("dependency-only", [x for x in setup if x != A], shas=shas)]
     rows = [against_vanilla(BASE)] if shows_vanilla else []
-    return (name, arms, {(C, "baseline"): rows, (C, "dependency-only"): []}, [A], {"plan_id": plan_id})
+    return (name, arms, {(C, "baseline"): rows, (C, "dependency-only"): [], **(more_results or {})}, [A],
+            {"plan_id": plan_id, **(extra or {})})
 
 
 BLOCK = [BASE, DEP, NB1, NB2, A]                 # the Missives shape: the mod alone lacks every neighbour
@@ -89,7 +92,12 @@ def run_plan(main, siblings, declare=(PATCH,)):
         for spec in [main, *siblings]:
             name, arms, results, targets, kw = spec
             if name not in dirs:
+                kw = dict(kw)
+                files = kw.pop("_files", None) or {}          # further bundle files, {relative path: JSON document}
                 dirs[name] = T.make_bundle(td / name, arms, results, targets, **kw)
+                for rel_, doc_ in files.items():
+                    (dirs[name] / rel_).parent.mkdir(parents=True, exist_ok=True)
+                    (dirs[name] / rel_).write_text(json.dumps(doc_), encoding="utf-8")
         out = td / "out"
         args = ["plan", "--bundle", str(dirs[main[0]]), "--out", str(out)]
         for p_ in declare:
@@ -164,10 +172,15 @@ def main():
             return False, refused(res)
         got, text = attributions(res), page_text(res)
         unmeasured = f"whether it also needs {NB1} was not measured"
+        # (A2) the setup that decided leaves out both neighbours: the page names it, never "the setup without" one
+        named_ = f"the setup measured with only {DEP} and {A} besides the base game"
+        wrong_ = f"the setup without {NB1}"
         ok = (got == WANT and unmeasured not in text and f"It needs both {A} and {NB1}" in text
-              and f"It does not need {NB1}" in text)
+              and f"It does not need {NB1}" in text and text.count(named_) == 2 and wrong_ not in text
+              and f"without {NB1} too" not in text)
         return ok, (f"attributions {got} (want {WANT}); 'not measured' on the page: {unmeasured in text}; "
-                    f"'needs both' on the page: {f'It needs both {A} and {NB1}' in text}")
+                    f"'needs both' on the page: {f'It needs both {A} and {NB1}' in text}; the deciding setup named "
+                    f"{text.count(named_)} times (want 2); {wrong_!r} on the page: {wrong_ in text}")
 
     # S2. The order the siblings are given in does not change what the report says.
     def sibling_order_does_not_change_the_report():
@@ -311,6 +324,63 @@ def main():
               and str(((recs[0].get("offered") or {}).get(role) or {}).get("usedFrom") or "").endswith(COMBINED_DIR))
         return ok, f"first {recs[0].get('roles')} offered {recs[0].get('offered')}; second {recs[1].get('roles')}"
 
+    # S12 (A1). A further sibling's setup with a kept plugin of other bytes is not used: its ModA differs, so the setup
+    # with ModA alone stands in for nothing; the items stay as with the first sibling alone and the record says why.
+    def kept_plugin_other_bytes_not_used():
+        res = run_plan(main_spec(BLOCK), [alone_spec("eval-alone-other-bytes", "sibalonebyte", shas={A: "a" * 64}),
+                                          combined_spec(BLOCK)])
+        if refused(res):
+            return False, refused(res)
+        recs = sibling_records(res)
+        got = attributions(res)
+        if not isinstance(recs, list) or len(recs) != 2:
+            return False, f"siblings recorded: {recs!r}; attributions {got}"
+        why_ = str((recs[0].get("unusableSetups") or {}).get("baseline") or "")
+        ok = (got == {"000801": "with-target", "000802": "with-target"} and not recs[0].get("roles")
+              and A in why_ and "other bytes" in why_ and "dependency-only" not in (recs[0].get("unusableSetups") or {}))
+        return ok, f"attributions {got}; its roles {recs[0].get('roles')}; unusable setups {recs[0].get('unusableSetups')}"
+
+    # S13 (A1). A further sibling holding only P with plugins left out whose location scope does not cover this
+    # evaluation's (it measured one cell; this one measured the whole order) is refused by name, saying why.
+    def scope_not_covering_refused():
+        scope_ = {"schemaVersion": 1, "complete": True, "locationContributors": {"complete": True, "locations": [
+            {"cell": "000D74:Skyrim.esm", "kind": "exterior", "worldspace": "Tamriel", "x": 0, "y": 0, "plugins": []}]}}
+        res = run_plan(main_spec(BLOCK), [alone_spec("eval-alone-scoped", "sibalonescop", extra={
+            "manifest_extra": {"scope": "scope/scope.json"}, "_files": {"scope/scope.json": scope_}}),
+            combined_spec(BLOCK)])
+        if res["code"] == 0:
+            return False, (f"a sibling whose scope does not cover this evaluation's was joined; attributions "
+                           f"{attributions(res)}")
+        err = res["err"].removeprefix("REFUSED: ")
+        ok = (err.startswith("sibling-foreign:") and "eval-alone-scoped" in err and "location scope" in err
+              and err.rstrip(".").count(". ") == 0)
+        return ok, f"exit {res['code']}: {err[:300]!r}"
+
+    # S14 (A1). One check whose probe build the further sibling's receipt records in no comparable way is not joined
+    # from it (its item stays "not measured"); the other check is joined and separated.
+    def one_check_build_not_comparable_others_joined():
+        ov = T.OVERLAP
+        ov_row = T.row("OVERLAP", NB1, A, f"000803:{A}", other=VANILLA)
+        main_ = main_spec(BLOCK)
+        main_ = (main_[0], main_[1], {**main_[2], (ov, "baseline"): [ov_row], (ov, "patched"): []}, main_[3], main_[4])
+        comb_ = combined_spec(BLOCK)
+        comb_ = (comb_[0], comb_[1], {**comb_[2], (ov, "baseline"): [ov_row], (ov, "neighbours-only"): []},
+                 comb_[3], comb_[4])
+        alone_ = alone_spec(more_results={(ov, "baseline"): [T.row("OVERLAP", BASE, A, f"000803:{A}", other=VANILLA)],
+                                          (ov, "dependency-only"): []},
+                            extra={"tool_builds": {(ov, "baseline"): None}})
+        res = run_plan(main_, [alone_, comb_])
+        if refused(res):
+            return False, refused(res)
+        got = attributions(res)
+        recs = sibling_records(res)
+        if not isinstance(recs, list) or len(recs) != 2:
+            return False, f"siblings recorded: {recs!r}; attributions {got}"
+        joins = {c_.get("checkId"): (c_.get("joined"), c_.get("buildBasis")) for c_ in recs[0].get("checks") or []}
+        ok = (got == {"000801": "single-mod", "000802": "needs-both", "000803": "with-target"}
+              and joins.get(C, (None,))[0] is True and joins.get(ov) == (False, "not-comparable"))
+        return ok, f"attributions {got}; its checks {joins}"
+
     # G1 (a guard, green before and after). One sibling through the command line behaves as it did: the plan records
     # it as `sibling` and records no list of siblings.
     def one_sibling_as_before():
@@ -341,6 +411,10 @@ def main():
                       two_siblings_measure_one_setup_differently_not_separable),
                      ("siblings/S11-sibling-holding-the-shared-setup-takes-precedence",
                       sibling_holding_the_shared_setup_takes_precedence),
+                     ("siblings/S12-kept-plugin-other-bytes-not-used", kept_plugin_other_bytes_not_used),
+                     ("siblings/S13-scope-not-covering-refused", scope_not_covering_refused),
+                     ("siblings/S14-one-check-build-not-comparable-others-joined",
+                      one_check_build_not_comparable_others_joined),
                      ("siblings/G1-one-sibling-as-before", one_sibling_as_before)]:
         cell(name, fn)
 

@@ -64,6 +64,17 @@ The single-mod setups this prediction reads were measured in a separate bundle: 
 {% for r in sf.rows %}- {{ r.kind }} {{ r.A }} x {{ r.B }} `{{ r.formKey|txt }}`{% if r.other %} against `{{ r.other|join(", ")|txt }}`{% endif %}: {{ r.admission }}. {{ r.summary|txt }}
 {% endfor %}{% endfor %}
 {% endif %}
+{% for s2 in p.reader.prediction.get("siblings") or [] %}{% if not sib or s2.manifestSha256 != sib.manifestSha256 %}
+<a id="sibling-evaluation-{{ loop.index }}"></a>
+### Further sibling evaluation {{ loop.index }} of {{ loop.length }}
+
+Measured in a separate bundle: `{{ s2.pathAsGiven|txt }}`, plan `{{ s2.planId|txt }}`, manifest sha256 `{{ s2.manifestSha256|txt }}`. {% if s2.joinBasis == "shared-setup" %}Its setup `{{ s2.anchorArm|txt }}` has the same plugins, in the same order and with the same bytes, as `{{ p.reader.prediction.predictionArm }}`, and its checks are compared there.{% else %}It holds no setup identical to `{{ p.reader.prediction.predictionArm }}`; its setups used here are that setup with plugins left out (same order, bytes, population and location scope), and its rows are not compared on a shared setup.{% endif %}
+
+{% for role, arm in s2.roles.items() %}- {{ role }}: `{{ arm|txt }}`
+{% endfor %}{% for role, o in (s2.get("offered") or {}).items() %}- {{ role }}: also offered by its `{{ o.armId|txt }}`; taken from `{{ (o.usedFrom or "")|txt }}`
+{% endfor %}{% for arm, why in (s2.get("unusableSetups") or {}).items() %}- setup `{{ arm|txt }}` not used: {{ why }}
+{% endfor %}{% set bw2_ = {"program": " (probe builds compared by program identity)", "dll": " (probe builds compared by the probe dll)", "no-probe": " (this check runs no probe, so there is no probe build to compare)"} %}{% for c in s2.checks %}- `{{ c.checkId }}`: {{ (("joined" ~ bw2_.get(c.get("buildBasis"), "")) if c.joined else "not joined — " ~ c.why) ~ (("; " ~ c.buildBasisNote) if c.get("buildBasisNote") else "") }}
+{% endfor %}{% endif %}{% endfor %}
 {% set vp = (p.reader.get("validation") or {}).get("placedPairs") or [] %}{% if vp %}
 <a id="{{ p.reader.validation.placedAnchor }}"></a>
 ### Pairs a patch places that still cross, re-measured with the patch
