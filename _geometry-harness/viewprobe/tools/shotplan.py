@@ -307,6 +307,8 @@ INSIDE_COVER = re.compile(
 INSIDE_COVER_LEGACY = re.compile(r"nominated by RECORD OBND")
 INSIDE_ROW = re.compile(r"^\s*(\S{6}:.+?\.es[pml])\s{2}(\S+)\s{2}(\S+)\s{2}dims (-?\d+)x(-?\d+)x(-?\d+) u")
 INSIDE_RAYS = re.compile(r"\srays ((?:(?:[+-][xy]|up|down) (?:\d+|-)\s*){6})")
+# Which way the nearest face on each ray is turned (back / front / two / -), printed after the rays since 2026-11-08.
+INSIDE_FACING = re.compile(r"\sfacing ((?:(?:[+-][xy]|up|down) (?:back|front|two|-)\s*){6})")
 # `--clear-at` header and rows: what placed mesh geometry is really around a point, on each world
 # axis, whether or not any box encloses it. The header's four population counts are what makes an
 # EMPTY answer readable -- "nothing found" only means "nothing there" when the broad phase saw
@@ -518,8 +520,13 @@ class Probe:
                     toks = mr[1].split()
                     rays = {toks[i]: (None if toks[i + 1] == "-" else float(toks[i + 1]))
                             for i in range(0, len(toks) - 1, 2)}
+                facing = None
+                mf = INSIDE_FACING.search(ln)
+                if mf:
+                    toks = mf[1].split()
+                    facing = {toks[i]: toks[i + 1] for i in range(0, len(toks) - 1, 2)}
                 cur.append({"formkey": m[1], "type": m[2], "edid": None if m[3] == "-" else m[3],
-                            "dims": dims, "maxdim": max(dims), "rays": rays})
+                            "dims": dims, "maxdim": max(dims), "rays": rays, "facing": facing})
             elif ln.strip() and not ln.startswith("      "):
                 cur = None
         return out
@@ -1532,9 +1539,29 @@ def inside_verdict(entry, args):
         rays = h.get("rays")
         if rays is not None:
             close = [k for k in RAY_AXES if rays.get(k) is not None and rays[k] <= args.inside_reach]
+            # INSIDE THE SOLID, at any thickness. The reach count above cannot see an eye inside a solid thicker than
+            # the reach: only the faces near one side are close. What makes such a camera wrong is that the solid's
+            # faces around it are turned AWAY from it, and the renderer culls back faces, so it sees out through the
+            # solid -- a picture no player can stand to see (2026-10-31 base runs 2 and 3). Distance plays no part.
+            facing = h.get("facing")
+            hit = [k for k in RAY_AXES if rays.get(k) is not None]
+            back = [k for k in hit if (facing or {}).get(k) == "back"]
+            unknown = [k for k in hit if (facing or {}).get(k) in (None, "-")]
             if len(close) >= args.inside_rays:
                 fails.append(f"inside: eye ENCLOSED by `{name}` ({h['type']}): its geometry within "
                              f"{args.inside_reach:.0f} u on {len(close)} of 6 axes ({fmt(rays)})")
+            elif len(back) >= args.inside_back:
+                fails.append(f"inside: eye INSIDE the solid `{name}` ({h['type']}): the nearest surface on "
+                             f"{len(back)} of 6 axes ({' '.join(back)}) is a back face, which the renderer culls, so "
+                             f"the camera would see out through it ({fmt(rays)}); move the eye out of it")
+            elif facing is None and hit:
+                untested.append(f"inside: within `{name}`'s box ({dims}), but this renderer output does not say "
+                                "which way the faces its rays met are turned, so whether the eye is inside the solid "
+                                "is UNTESTED")
+            elif len(back) + len(unknown) >= args.inside_back:
+                untested.append(f"inside: within `{name}`'s box ({dims}), and the faces its rays met on "
+                                f"{' '.join(unknown)} cannot be told front from back (a mirrored node transform flips "
+                                "the winding), so whether the eye is inside the solid is UNTESTED")
             else:
                 notes.append(f"inside: within `{name}`'s box ({dims}) but open -- {fmt(rays)}")
         elif h["maxdim"] <= args.inside_cap:
@@ -3244,6 +3271,9 @@ def add_common(p, need_subjects=True):
                         "geometry within this distance on --inside-rays of the six world axes is "
                         "ENCLOSED and refused (default 96: a shelf above, a shelf below, a back "
                         "panel; a room's walls are further)")
+    p.add_argument("--inside-back", type=int, default=2,
+                   help="an eye is INSIDE a solid when the nearest face on at least this many of the six axis rays "
+                        "of one enclosing ref is a back face (default 2; any thickness)")
     p.add_argument("--inside-rays", type=int, default=3,
                    help="how many of the six axis rays must hit within --inside-reach (default 3)")
     p.add_argument("--inside-cap", type=float, default=1024.0,
