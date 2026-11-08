@@ -80,6 +80,16 @@ if (args.Length >= 2 && args[0] == "--only" && args[1] == "accel")
     return fail == 0 ? 0 : 1;
 }
 
+// --only particlesaside (2026-11-08): ReachOptions.ParticlesAside's known answers (PA-1..PA-5) alone, for red runs and sabotage arms.
+if (args.Length >= 2 && args[0] == "--only" && args[1] == "particlesaside")
+{
+    MotionProof.RunParticlesAside(Check);
+    Console.WriteLine();
+    Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
+    if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
+    return fail == 0 ? 0 : 1;
+}
+
 // --only samplingloop (2026-11-05): the shared sampling loop's known answers (SL-1..SL-4) alone, for red runs and sabotage arms.
 if (args.Length >= 2 && args[0] == "--only" && args[1] == "samplingloop")
 {
@@ -3556,6 +3566,8 @@ MotionProof.RunSkinRule(Check);
 // Reach region Part 3: particles, start-state pose confirmations, the primitive default (red until implemented).
 MotionProof.RunPart3Rules(Check);
 MotionProof.RunParticleModel(Check);
+// The render shapes alone, particles set aside (2026-11-08; red until implemented).
+MotionProof.RunParticlesAside(Check);
 // Lane B item 4 (2026-10-13): a planar bomb pushes along its own axis (Gamebryo 2.3 NiPSysBombModifier::Update; red until implemented).
 MotionProof.RunBombAxis(Check);
 MotionProof.RunLooseItems(Check);
