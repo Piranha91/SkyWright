@@ -57,6 +57,9 @@ def outdoors(fx, levels, *extra, exterior=True):
                    *ground, *extra)
     # the pair's own pad: the request's floor (z 0); the ring's 150, 250 and 400 u stations stand off it
     sc["nav"] = [{"min": [-60, -60], "max": [60, 60], "z": 0.0, "name": "Test.esm"}] + nav
+    # no ground plane: the only ground is the terrace slabs, so a ring station on the hillside between has nothing
+    # under it (the shape of the White River Watch stations: off the navmesh, over a slope or a drop)
+    del sc["floorZ"]
     if exterior:
         sc["exterior"] = True
         sc["clearTerrain"] = "terrain: ground at z 0.0"
