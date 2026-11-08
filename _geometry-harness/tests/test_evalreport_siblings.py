@@ -381,6 +381,62 @@ def main():
               and joins.get(C, (None,))[0] is True and joins.get(ov) == (False, "not-comparable"))
         return ok, f"attributions {got}; its checks {joins}"
 
+    # S15 (round 2, F1). Absence on a setup that leaves out the partner and more shows only that the clash needs one or
+    # more of the plugins it leaves out: "needs both" only where the row's other side is the partner's own record. A
+    # record field of a base-game record, and an object against a base-game object, are "needs one or more"; an
+    # object against the partner's own object stays "needs both".
+    def fewer_setup_absence_needs_some_unless_partner_owns():
+        lost_ = T.lost_row(NB1, A, "000E01:Skyrim.esm", "MaxHeight", "n", "a", "v")
+        vanilla_ = T.row("CONTACT", NB1, A, f"000804:{A}", other="000904:Skyrim.esm")
+        main_ = main_spec(BLOCK)
+        main_ = (main_[0], main_[1], {**main_[2], (C, "baseline"): main_[2][(C, "baseline")] + [vanilla_],
+                                       (T.RECORDS, "baseline"): [lost_], (T.RECORDS, "patched"): []},
+                 main_[3], main_[4])
+        comb_ = combined_spec(BLOCK)
+        comb_ = (comb_[0], comb_[1], {**comb_[2], (C, "baseline"): comb_[2][(C, "baseline")] + [vanilla_],
+                                       (T.RECORDS, "baseline"): [lost_], (T.RECORDS, "neighbours-only"): []},
+                 comb_[3], comb_[4])
+        alone_ = alone_spec(more_results={(T.RECORDS, "baseline"): [], (T.RECORDS, "dependency-only"): []})
+        res = run_plan(main_, [alone_, comb_])
+        if refused(res):
+            return False, refused(res)
+        got = attributions(res)
+        text = page_text(res)
+        some_ = (words().get("attribution") or {}).get("needs-some")
+        want = {"000801": "single-mod", "000802": "needs-both", "000804": "needs-some", "000E01": "needs-some"}
+        ok = (got == want and bool(some_) and f"It needs both {A} and {NB1}" in text
+              and text.count(f"It needs {A} together with one or more") == 2)
+        return ok, (f"attributions {got} (want {want}); needs-some words {'present' if some_ else 'absent'}; "
+                    f"'needs ... one or more' on the page {text.count(f'It needs {A} together with one or more')} "
+                    f"times (want 2)")
+
+    # S16 (round 2, F2). A check the sibling holding the shared setup could not join (its rows differ there) is not
+    # joined from a sub-order sibling either, which compares no rows: its item stays "not measured", the record says
+    # why; a check the shared-setup sibling joined is joined from the sub-order sibling as before.
+    def sub_order_check_needs_a_shared_setup_join():
+        ov = T.OVERLAP
+        ov_row = T.row("OVERLAP", NB1, A, f"000803:{A}", other=VANILLA)
+        main_ = main_spec(BLOCK)
+        main_ = (main_[0], main_[1], {**main_[2], (ov, "baseline"): [ov_row], (ov, "patched"): []}, main_[3], main_[4])
+        comb_ = combined_spec(BLOCK)
+        comb_ = (comb_[0], comb_[1], {**comb_[2], (ov, "baseline"): [], (ov, "neighbours-only"): []},
+                 comb_[3], comb_[4])                       # measured the overlap differently on the shared setup
+        alone_ = alone_spec(more_results={(ov, "baseline"): [T.row("OVERLAP", BASE, A, f"000803:{A}", other=VANILLA)],
+                                          (ov, "dependency-only"): []})
+        res = run_plan(main_, [alone_, comb_])
+        if refused(res):
+            return False, refused(res)
+        got = attributions(res)
+        recs = sibling_records(res)
+        if not isinstance(recs, list) or len(recs) != 2:
+            return False, f"siblings recorded: {recs!r}; attributions {got}"
+        joins = {c_.get("checkId"): (c_.get("joined"), c_.get("why")) for c_ in recs[0].get("checks") or []}
+        prim_ = {c_.get("checkId"): c_.get("joined") for c_ in recs[1].get("checks") or []}
+        ok = (got.get("000801") == "single-mod" and got.get("000803") == "with-target" and prim_.get(ov) is False
+              and joins.get(C, (None,))[0] is True and joins.get(ov, (None,))[0] is False
+              and "shared setup" in str(joins.get(ov, (None, ""))[1] or ""))
+        return ok, f"attributions {got}; shared-setup sibling joined {prim_}; sub-order sibling checks {joins}"
+
     # G1 (a guard, green before and after). One sibling through the command line behaves as it did: the plan records
     # it as `sibling` and records no list of siblings.
     def one_sibling_as_before():
@@ -415,6 +471,9 @@ def main():
                      ("siblings/S13-scope-not-covering-refused", scope_not_covering_refused),
                      ("siblings/S14-one-check-build-not-comparable-others-joined",
                       one_check_build_not_comparable_others_joined),
+                     ("siblings/S15-fewer-setup-absence-needs-some-unless-partner-owns",
+                      fewer_setup_absence_needs_some_unless_partner_owns),
+                     ("siblings/S16-sub-order-check-needs-a-shared-setup-join", sub_order_check_needs_a_shared_setup_join),
                      ("siblings/G1-one-sibling-as-before", one_sibling_as_before)]:
         cell(name, fn)
 
