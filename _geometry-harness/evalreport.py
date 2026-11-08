@@ -1873,7 +1873,7 @@ def build_prediction(ctx: dict) -> dict:
         primary["record"] = sibling_record
 
         # a further sibling: its rows, then each check it measured, compared with the setup the prediction reads
-        for i_ in sib_infos:
+        for i_ in sib_order:                   # holding the shared setup first: a sub-order join rests on theirs
             if i_ is primary:
                 continue
             pre_, s_b2, anc2 = i_["s"]["prefix"], i_["s"]["bundle"], i_["anchor"]
@@ -1893,6 +1893,12 @@ def build_prediction(ctx: dict) -> dict:
                     why = "it measured this check on no setup that is the setup without the patch or that setup with plugins left out"
                 elif anc2 is not None and anc2 not in arms_:
                     why = "it holds the setup without the patch but did not measure this check there"
+                elif anc2 is None and not any(sib_ok_by.get(x_["s"]["prefix"], {}).get(check_id)
+                                              for x_ in sib_infos if x_["anchor"] is not None):
+                    # (round 2, F2) it compares no rows itself: only a check an evaluation holding the shared setup
+                    # measured the same way as this one is taken from it
+                    why = ("no separate evaluation holding the shared setup measured this check the same way as this "
+                           "one, so its result is not used")
                 else:
                     for a_ in arms_:
                         basis, note, why = build_compare_on(check_id, (ref_b, ref_a), (s_b2, a_))
@@ -3012,6 +3018,18 @@ def build_prediction(ctx: dict) -> dict:
             without_cache[m_lower] = found
         return without_cache[m_lower]
 
+    def partner_owns(rk, other):
+        """(round 2, F1) whether the row's other side is the other mod's own record (a form it adds, so the clash
+        cannot exist without it): the row's object or a partner object whose FormKey names that plugin."""
+        row_ = (p_rows.get(rk) or {}).get("row") or {}
+        keys_ = [rk[4], *(row_.get("other") or [])]
+        return any(":" in str(k_) and str(k_).split(":", 1)[1].lower() == str(other).lower() for k_ in keys_)
+
+    def absent_on_fewer(rk, t, other):
+        """A clash absent on a setup that leaves out the other mod and more: it needs the other mod only where its
+        other side is that mod's own record; otherwise it needs one or more of the plugins the setup leaves out."""
+        return ("needs-both" if partner_owns(rk, other) else "needs-some"), t, None
+
     def attribution(rk):
         sides = [x for x in (rk[2], rk[3]) if x.lower() in pt_lower]
         if len(p_targets) <= 1:
@@ -3046,7 +3064,7 @@ def build_prediction(ctx: dict) -> dict:
                 partner_arms.setdefault(others[0], decider_ or alt_[0])
                 # the page names the setup that decided: it leaves out more than the other mod (item 21, A2)
                 fewer_setup_of[rk] = decider_ or alt_[0]
-                return ("single-mod" if decider_ else "needs-both"), t, None
+                return ("single-mod", t, None) if decider_ else absent_on_fewer(rk, t, others[0])
             # (item 21, A2) a setup without the other mod that also lacks plugins taken as its companions is named
             # on the page, never called "the setup without" the other mod alone
             fewer_m_ = {str(x).lower() for x in all_orders.get(arm_m) or []} != p_set - {others[0].lower()}
@@ -3072,6 +3090,7 @@ def build_prediction(ctx: dict) -> dict:
                         return "single-mod", t, ["chain", provs_[rest_[-1]], miss_]
             if fewer_m_:
                 fewer_setup_of[rk] = arm_m
+                return absent_on_fewer(rk, t, others[0])
             return "needs-both", t, None
         sib_single_ = [s_arms.get(t) for t in p_targets if sib_split(s_arms.get(t))[0] is not None]
         bad_ = next((a_ for a_ in sib_single_ if not sib_check_ok(a_, rk[0])), None)
@@ -3563,9 +3582,9 @@ def build_prediction(ctx: dict) -> dict:
         noun = (ph.get("unitSingular") if g["count"] == 1 else ph.get("unitPlural")) or ("clash" if g["count"] == 1 else "clashes")
         attr_key, replaced_ = g["attribution"], 0
         other_mod = next((m for m in g["mods"] if str(m).lower() != str(g["attributionMod"] or "").lower()), "")
-        if not multi and attr_key in ("needs-both", "single-mod", "with-target") and g["attributionMod"]:
+        if not multi and attr_key in ("needs-both", "single-mod", "with-target", "needs-some") and g["attributionMod"]:
             attr_key = {"needs-both": "needs-both-other", "single-mod": "single-mod-target",
-                        "with-target": "with-target"}[attr_key]
+                        "with-target": "with-target", "needs-some": "needs-some"}[attr_key]
         if (attr_key == "single-mod-target" and g["kind"] != "LOST-EDIT" and pair_objects_of_base(g)
                 and words["attribution"].get("single-mod-target-base")):
             attr_key = "single-mod-target-base"       # its partners are base-game objects the other mod edits
