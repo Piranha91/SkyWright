@@ -90,6 +90,16 @@ if (args.Length >= 2 && args[0] == "--only" && args[1] == "samplingloop")
     return fail == 0 ? 0 : 1;
 }
 
+// --only facing (2026-11-08): what the --inside-at facing reads off a shape (mirrored, two-sided), SF-1..SF-4, alone.
+if (args.Length >= 2 && args[0] == "--only" && args[1] == "facing")
+{
+    MotionProof.RunShapeFacing(Check);
+    Console.WriteLine();
+    Console.WriteLine($"==== {pass} passed, {fail} failed, {canariesRed} canaries red as designed ====");
+    if (fail > 0) Console.WriteLine("   failed: " + string.Join(", ", failures));
+    return fail == 0 ? 0 : 1;
+}
+
 // --only sweptnear (2026-10-21): the instanced swept near test (MV4-MV6) and the volume identity cases beside it, alone.
 if (args.Length >= 2 && args[0] == "--only" && args[1] == "sweptnear")
 {
@@ -3574,6 +3584,7 @@ OverlapSurfaceProof.RunStageA7(Check);
 StageBProof.Run(Check);
 // Lane 3b (2026-10-04): contactprobe pair-measure gaps (red until implemented).
 MotionProof.RunContactGaps(Check);
+MotionProof.RunShapeFacing(Check);
 // Pair-measure mesh defects (2026-10-05, Group 6 D1/D2): zero-area triangles skipped and counted; empty render shapes read.
 MotionProof.RunPairMeshDefects(Check);
 // Placed degenerate triangles (2026-10-10, lane D): a sliver that placement collapses centred on B is measured centred on A.
