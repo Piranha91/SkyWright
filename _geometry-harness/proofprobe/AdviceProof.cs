@@ -458,6 +458,49 @@ static class AdviceProof
         var cleaned = OrderAdvice.Clean("[size=5][b]Load Order:[/b][/size]<br />[url=https://x.invalid]Alpha Mod[/url]<br />Beta &amp; Co");
         Check("advice/markup: BBCode and HTML are stripped, [url=...]label[/url] keeps its label, entities decode",
               cleaned == "Load Order:\nAlpha Mod\nBeta & Co", cleaned.Replace("\n", "\\n"));
+
+        // -------------------------------------------------------------------------------------------------
+        //  S4 — a clash the author states, in a compatibility section, against a named mod. Hand-written text:
+        //  a heading, a lead-in that says the items are incompatibilities, and dash items glued to the name
+        //  ("-Name: what goes wrong"), one naming an unknown mod and one naming the pair's other mod (9002).
+        // -------------------------------------------------------------------------------------------------
+        var wClash = World(9001, "Alpha Halls Expanded", "https://www.nexusmods.com/skyrimspecialedition/mods/9001",
+            read: "2026-11-08", updated: "2022-04-05", mainVer: "1.0", mainDate: "2022-01-06", masters: Array.Empty<string>(),
+            mods: new[]
+            {
+                Mod(9001, "Alpha Halls Expanded", "Alpha Halls", new[] { "AlphaHalls.esp" }, "1.0", "2022-01-06"),
+                Mod(9002, "Beta - A Shrine Overhaul", "Beta Shrine", new[] { "Beta.esp" }, "1.0", "2023-01-01"),
+            });
+        const string clashSymptom = "Trapdoor entrance to the catacombs is blocked";
+        var tClash = "[b]Compatibility:[/b]\n\n"
+                   + "This mod should be compatible with almost everything. The following mods, however, do have some minor incompatibilities:\n\n"
+                   + "-Gamma College: Two placed notes will not spawn.\n\n"
+                   + "-Beta - A Shrine Overhaul: " + clashSymptom + "\n\n"
+                   + "____________________\n\nInstallation:\n\nExtract the archive into your data folder.";
+        var rClash = OrderAdvice.Extract(tClash, wClash);
+        Check("advice/S4: a '-Name: symptom' item under a compatibility heading whose lead-in states incompatibilities is ONE statement naming that mod, with the symptom — never 'no order stated'",
+              rClash.Statements.Count == 1 && rClash.Statements[0].Items.SequenceEqual(new[] { "Beta - A Shrine Overhaul" })
+              && rClash.Statements[0].Symptom == clashSymptom && rClash.NothingStated is null,
+              $"{rClash.Statements.Count} statement(s): {string.Join(" | ", rClash.Statements.Select(s => $"{s.Text} [{string.Join(", ", s.Items)}] symptom={s.Symptom}"))}; nothing={rClash.NothingStated}");
+        Check("advice/S4: a stated clash is NEVER an order rule — the fragment parses with 0 rules",
+              rClash.Rules.Count == 0 && OrderRules.Parse(OrderAdvice.ToRulesJson(rClash), "fixture 9001").Rules.Count == 0,
+              Rules(rClash));
+        Check("advice/S4: an item naming a mod that is not a known name (Gamma College) gives no statement",
+              !rClash.Statements.Any(s => s.Text.Contains("Gamma", StringComparison.Ordinal)),
+              string.Join(" | ", rClash.Statements.Select(s => s.Text)));
+
+        var tCompatible = "Compatibility:\n\nThe following mods were tested with this one:\n\n"
+                        + "-Beta - A Shrine Overhaul: Fully compatible, no patch needed.\n";
+        var rCompatible = OrderAdvice.Extract(tCompatible, wClash);
+        Check("advice/S4: '-Name: Fully compatible' under a lead-in with no clash word is NOT a clash",
+              rCompatible.Statements.Count == 0,
+              string.Join(" | ", rCompatible.Statements.Select(s => s.Text)));
+
+        var tSelf = "Known issues:\n\n-Alpha Halls Expanded: the surface teleporter is blocked\n";
+        var rSelf = OrderAdvice.Extract(tSelf, wClash);
+        Check("advice/S4: an item naming the page's OWN mod is not a clash with another mod",
+              rSelf.Statements.Count == 0,
+              string.Join(" | ", rSelf.Statements.Select(s => s.Text)));
     }
 
     // -----------------------------------------------------------------------------------------------------
