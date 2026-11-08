@@ -1539,29 +1539,13 @@ def inside_verdict(entry, args):
         rays = h.get("rays")
         if rays is not None:
             close = [k for k in RAY_AXES if rays.get(k) is not None and rays[k] <= args.inside_reach]
-            # INSIDE THE SOLID, at any thickness. The reach count above cannot see an eye inside a solid thicker than
-            # the reach: only the faces near one side are close. What makes such a camera wrong is that the solid's
-            # faces around it are turned AWAY from it, and the renderer culls back faces, so it sees out through the
-            # solid -- a picture no player can stand to see (2026-10-31 base runs 2 and 3). Distance plays no part.
-            facing = h.get("facing")
-            hit = [k for k in RAY_AXES if rays.get(k) is not None]
-            back = [k for k in hit if (facing or {}).get(k) == "back"]
-            unknown = [k for k in hit if (facing or {}).get(k) in (None, "-")]
             if len(close) >= args.inside_rays:
                 fails.append(f"inside: eye ENCLOSED by `{name}` ({h['type']}): its geometry within "
                              f"{args.inside_reach:.0f} u on {len(close)} of 6 axes ({fmt(rays)})")
-            elif len(back) >= args.inside_back:
-                fails.append(f"inside: eye INSIDE the solid `{name}` ({h['type']}): the nearest surface on "
-                             f"{len(back)} of 6 axes ({' '.join(back)}) is a back face, which the renderer culls, so "
-                             f"the camera would see out through it ({fmt(rays)}); move the eye out of it")
-            elif facing is None and hit:
+            elif h.get("facing") is None and any(rays.get(k) is not None for k in RAY_AXES):
                 untested.append(f"inside: within `{name}`'s box ({dims}), but this renderer output does not say "
-                                "which way the faces its rays met are turned, so whether the eye is inside the solid "
+                                "which way the faces its rays met are turned, so whether the eye is inside a solid "
                                 "is UNTESTED")
-            elif len(back) + len(unknown) >= args.inside_back:
-                untested.append(f"inside: within `{name}`'s box ({dims}), and the faces its rays met on "
-                                f"{' '.join(unknown)} cannot be told front from back (a mirrored node transform flips "
-                                "the winding), so whether the eye is inside the solid is UNTESTED")
             else:
                 notes.append(f"inside: within `{name}`'s box ({dims}) but open -- {fmt(rays)}")
         elif h["maxdim"] <= args.inside_cap:
@@ -1573,6 +1557,32 @@ def inside_verdict(entry, args):
                             "Whether the eye is INSIDE that ref or in the room it walls is UNTESTED: "
                             "the box was the only evidence and a box cannot tell a shell from a "
                             "solid. Support under the eye does not make it unobstructed")
+    # INSIDE A SOLID, at any thickness. The reach count above cannot see an eye inside a solid thicker than the reach:
+    # only the faces near one side are close. What makes such a camera wrong is what it would SEE: when the nearest
+    # surface in a direction is turned away from the eye, the renderer culls it and the camera sees out through the
+    # solid -- a picture no player can stand to see (2026-10-31 base runs 2 and 3). So each axis is judged by the
+    # NEAREST face any tested ref puts on it, not ref by ref: a tower's one-sided outer shell encloses the eye on its top
+    # floor, but the interior floor piece's walls stand nearer and face the eye, which is the view a player has there
+    # (White River Watch, 2026-11-08). Distance plays no part beyond deciding which face is nearest.
+    nearest = {}
+    for h in entry:
+        rays, facing = h.get("rays"), h.get("facing")
+        if rays is None or facing is None:
+            continue
+        for k in RAY_AXES:
+            if rays.get(k) is not None and (k not in nearest or rays[k] < nearest[k][0]):
+                nearest[k] = (rays[k], facing.get(k, "-"), h["edid"] or h["formkey"], h["type"])
+    back = [k for k in RAY_AXES if k in nearest and nearest[k][1] == "back"]
+    unknown = [k for k in RAY_AXES if k in nearest and nearest[k][1] == "-"]
+    owners = sorted({f"`{nearest[k][2]}` ({nearest[k][3]})" for k in back})
+    seen = " ".join(f"{k} {nearest[k][1]} {nearest[k][0]:.0f} `{nearest[k][2]}`" for k in RAY_AXES if k in nearest)
+    if len(back) >= args.inside_back:
+        fails.append(f"inside: eye INSIDE the solid {', '.join(owners)}: the nearest surface on {len(back)} of 6 axes "
+                     f"({' '.join(back)}) is a back face, which the renderer culls, so the camera would see out through "
+                     f"it ({seen}); move the eye out of it")
+    elif len(back) + len(unknown) >= args.inside_back:
+        untested.append(f"inside: the nearest faces on {' '.join(unknown)} cannot be told front from back (a mirrored "
+                        f"node transform flips the winding), so whether the eye is inside a solid is UNTESTED ({seen})")
     # THE NOMINATION'S OWN COVERAGE. The rows above are refs the query could test. What decides
     # whether their ABSENCE means anything is how many refs it could not: one whose mesh would not
     # read was never ruled out, and one selectable only by an unverified record box was selected on
