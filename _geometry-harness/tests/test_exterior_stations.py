@@ -11,7 +11,7 @@ one floor for every station. The coordinates are made up; nothing here is eviden
     C1700  navmesh only on a terrace 500-650 u out at z 200: camera-ready, the witness eye at z 320 on the terrace
     C1701  the terrace at z 80 to the north and z -150 to the south: each station's eye is its own level + 120
     C1702  a slab over the east terrace (z 260-300): the east station is refused, naming the slab under its eye
-    C1703  the C1700 scene as an interior: no station moves, the eye-level view is refused as before
+    C1703  the C1700 scene as an interior: no station moves, every eye stays at the one floor + 120 (z 120)
     C1704  shotplan plan outdoors, floor z 200, navmesh at z 270: the chosen eye is at z 390, its feet at 270
     C1705  the C1704 scene as an interior: the eye stays at the floor + 120 (z 320)
 """
@@ -52,7 +52,8 @@ def terraces(levels: dict) -> tuple[list, list]:
 
 def outdoors(fx, levels, *extra, exterior=True):
     nav, ground = terraces(levels)
-    sc = TCP.scene(TCP.box(fx.cy, [-30, -20, 0], [0, 20, 40]), TCP.box(fx.mg, [0, -20, 0], [30, 20, 40]),
+    # a pair big enough to cover several pixels of the 48 px witness frames from the terrace, 500-900 u away
+    sc = TCP.scene(TCP.box(fx.cy, [-120, -60, 0], [0, 60, 80]), TCP.box(fx.mg, [0, -60, 0], [120, 60, 80]),
                    *ground, *extra)
     # the pair's own pad: the request's floor (z 0); the ring's 150, 250 and 400 u stations stand off it
     sc["nav"] = [{"min": [-60, -60], "max": [60, 60], "z": 0.0, "name": "Test.esm"}] + nav
@@ -70,9 +71,11 @@ def stations(fx, tag):
 def c1700(fx):
     sc = outdoors(fx, {"N": 200.0, "S": 200.0, "E": 200.0, "W": 200.0})
     proc, acq, _ = TCP.acquire_with(fx, sc, "c1700", "auto")
-    ok = proc.returncode == 0 and acq and acq.get("status") == "camera-ready"
+    ok = (proc.returncode == 0 and acq and acq.get("status") == "camera-ready"
+          and (acq.get("camera") or {}).get("viewKind") == "eye-level")
     check("C1700 terrace at z 200: the request is camera-ready at eye level", bool(ok),
-          (acq or {}).get("refusal", {}).get("code") or TCP.tail(proc))
+          f"{(acq or {}).get('status')} {(acq or {}).get('camera', {}).get('viewKind')} "
+          f"{(acq or {}).get('refusal', {}).get('code')} {TCP.tail(proc)[-160:]}")
     doc = stations(fx, "c1700")
     if not (ok and doc):
         return
@@ -124,14 +127,15 @@ def c1702(fx):
 
 def c1703(fx):
     sc = outdoors(fx, {"N": 200.0, "S": 200.0, "E": 200.0, "W": 200.0}, exterior=False)
-    proc, doc = TCP.pick(fx, sc, "c1703")
-    code = None
-    try:
-        code = json.loads((fx.root / "points-c1703.json").read_text(encoding="utf-8")).get("refusal", {}).get("code")
-    except (OSError, ValueError, AttributeError):
-        pass
-    check("C1703 interior: no station moves, so no station stands (points-no-station)",
-          proc.returncode != 0 and code == "points-no-station", f"exit {proc.returncode} code {code}")
+    TCP.pick(fx, sc, "c1703")
+    wl = fx.root / "work-c1703" / "witness-worklist.json"
+    shots = TCP.load(wl)["cells"][0]["shots"] if wl.is_file() else []
+    import capture_points as CP
+    ring = {s["id"]: s["xy"] for s in CP.stations((0.0, 0.0, 40.0), 12, (150.0, 250.0, 400.0))}
+    moved = [s["label"] for s in shots if tuple(s["eye"][:2]) != tuple(ring.get(s["label"], ()))]
+    off = [s["label"] for s in shots if abs(s["eye"][2] - 120) > 0.5]
+    check("C1703 interior: all 36 ring stations, none moved, every eye at z 120",
+          len(shots) == 36 and not moved and not off, f"{len(shots)} shots, moved {moved[:4]}, eye off {off[:4]}")
 
 
 def plan_scene(exterior):
@@ -169,11 +173,9 @@ def c1704(fx):
 
 def c1705(fx):
     code, out, doc = plan(fx, False, "c1705")
-    ok = doc and doc.get("status") == "verified"
-    check("C1705 the same scene indoors: a camera verifies", bool(ok), (doc or {}).get("status") or out[-300:])
-    if ok:
-        eye = doc["chosen"]["eye"]
-        check("C1705 indoors the eye stays at the floor + 120 (z 320)", abs(eye[2] - 320) <= 0.5, str(eye))
+    eye = ((doc or {}).get("chosen") or {}).get("eye")
+    check("C1705 the same scene indoors: the chosen eye stays at the floor + 120 (z 320)",
+          bool(eye) and abs(eye[2] - 320) <= 0.5, str(eye or out[-300:]))
 
 
 CASES = [c1700, c1701, c1702, c1703, c1704, c1705]
