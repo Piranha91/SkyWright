@@ -336,6 +336,8 @@ CENSUS_AT = re.compile(r"^ {9}at ([0-9A-Fa-f]{6}:.+?\.es[pml])\s+(-?[\d.]+),(-?[
 # viewprobe's own configuration fingerprint, printed for a candidate configuration (--order).
 CONFIG_FINGERPRINT = re.compile(r"capture input configuration:\s*([0-9a-fA-F]{16,64})")
 RAY_AXES = ("+x", "-x", "+y", "-y", "up", "down")
+# The renderer's cell header carries the CELL record's interior flag: outdoors a camera stands on the navmesh at its own level.
+CELL_KIND = re.compile(r"^cell .*? \((interior|exterior)\)\s", re.M)
 
 
 class Probe:
@@ -373,6 +375,11 @@ class Probe:
         if self.echo:
             print(f"      ({self.seconds:.0f}s)", file=sys.stderr)
         return self
+
+    def cell_kind(self):
+        """'interior' or 'exterior' from the renderer's cell header, or None when it printed none."""
+        m = CELL_KIND.search(self.stdout)
+        return m[1] if m else None
 
     def census(self):
         """{'unreadable': {asset: {...}}, 'notDrawn': {asset: {...}}} from the census blocks.
@@ -1629,7 +1636,7 @@ def inside_verdict(entry, args):
 
 
 def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, inside_entry=None,
-             clear_entry=None):
+             clear_entry=None, exterior=False):
     """Every reason this camera could be wrong, collected rather than short-circuited.
 
     A planner that stops at the first failure teaches nothing when it refuses. The caller prints
@@ -1701,6 +1708,9 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
         v["support"] = sup
         if kind == "off-mesh-near" and sup != "supported":
             v["fail"].append(f"placement: {msg}; and the geometry does not bear that out -- {smsg}")
+        elif exterior and kind == "on-storey" and sup != "supported":
+            # outdoors the eye stands on its own navmesh level, so the first surface under it must be that level
+            v["fail"].append(f"placement: outdoors this eye stands on the navmesh at z {floor_z:.0f}, but {smsg}")
         else:
             v["note"].append(f"support: {smsg}")
     if skip_nav:
@@ -2634,15 +2644,39 @@ def cmd_plan(args):
     p3 = run.probe(*flags)
     nav, inside, near, clear = p3.nav(), p3.inside(), p3.refs_near(), p3.clear()
     doors = doors_near(subjects, near, args)
+    # Outdoors a camera stands on the navmesh at its OWN level, not at the request's floor: a point whose walkable level is
+    # within the storey band gets its eye at that level + the eye height, and is re-asked at that eye (one more render).
+    exterior = p3.cell_kind() == "exterior"
+    own = {}
+    if exterior:
+        for xy in pts:
+            lv = [z for z in (nav.get(xy) or {}).get("levels", []) if abs(z - floor_z) <= args.storey_tol]
+            if lv:
+                own[xy] = min(lv, key=lambda z: abs(z - floor_z))
+        moved = {xy: z for xy, z in own.items() if round(z + args.eye_height) != eye_z}
+        if moved:
+            print(f"  outdoors: {len(moved)} point(s) stand on navmesh off the floor z {floor_z:.0f}; "
+                  "re-asking inside and clear at each one's own eye")
+            fl2 = ["--eye", f"{cx:.1f},{cy:.1f},{floor_z + args.eye_height:.1f}", "--yaw", "0",
+                   "--clear-reach", f"{args.clear_reach:g}"]
+            for (x, y), z in moved.items():
+                ez = round(z + args.eye_height)
+                fl2 += ["--inside-at", f"{x},{y},{ez}", "--clear-at", f"{x},{y},{ez}"]
+            p3b = run.probe(*fl2)
+            inside.update(p3b.inside())
+            clear.update(p3b.clear())
     kept = set(pts)
     scored = []
     for v in live:
         if v["_xy"] not in kept:
             continue
-        v2 = evaluate(v["eye"], subjects, floor_z, nav.get(v["_xy"]), args, aim,
-                      inside_entry=inside.get((v["_xy"][0], v["_xy"][1], eye_z)),
-                      clear_entry=clear.get((v["_xy"][0], v["_xy"][1], eye_z)))
-        v2["_bearing"], v2["_standoff"], v2["_xy"] = v["_bearing"], v["_standoff"], v["_xy"]
+        fz = own.get(v["_xy"], floor_z)
+        ez = round(fz + args.eye_height) if v["_xy"] in own else eye_z
+        eye = (v["eye"][0], v["eye"][1], float(fz + args.eye_height)) if v["_xy"] in own else v["eye"]
+        v2 = evaluate(eye, subjects, fz, nav.get(v["_xy"]), args, aim,
+                      inside_entry=inside.get((v["_xy"][0], v["_xy"][1], ez)),
+                      clear_entry=clear.get((v["_xy"][0], v["_xy"][1], ez)), exterior=exterior)
+        v2["_bearing"], v2["_standoff"], v2["_xy"], v2["_floor"] = v["_bearing"], v["_standoff"], v["_xy"], fz
         scored.append(v2)
     ok = [v for v in scored if v["ok"]]
     ok.sort(key=lambda v: -v["score"])
@@ -2751,7 +2785,7 @@ def cmd_plan(args):
           f"below carries it)")
     print()
     print_verdict(best, args.fov, args.fill)
-    print(f"  feet       {best['eye'][0]:.1f}, {best['eye'][1]:.1f}, {floor_z:.1f}"
+    print(f"  feet       {best['eye'][0]:.1f}, {best['eye'][1]:.1f}, {best.get('_floor', floor_z):.1f}"
           "   (the player's spot: the eye's X,Y at the floor, placement-tested)")
     if status == "unverified":
         print("  !! --no-verify was given: this is a PROPOSAL whose final check was never run. "
@@ -2806,13 +2840,13 @@ def cmd_plan(args):
         shot = {"label": mark + (args.label or "planned camera")
                          + f" -- {', '.join(s.label for s in subjects)}",
                 "eye": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(best["eye"][2], 1)],
-                "floorZ": round(floor_z, 1),
+                "floorZ": round(best.get("_floor", floor_z), 1),
                 "poseId": pose_id,
                 "status": status,
                 "verification": verification,
                 # the PLAYER's spot: the point the placement test just passed, at the floor --
                 # a runner takes it from here, never from a coordinate typed at the storey's height
-                "feet": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(floor_z, 1)],
+                "feet": [round(best["eye"][0], 1), round(best["eye"][1], 1), round(best.get("_floor", floor_z), 1)],
                 "yaw": round(best["yaw"], 1), "pitch": round(best["pitch"], 1), "fov": args.fov,
                 "note": (f"planned by shotplan: bearing {best['_bearing']:.0f} deg, standoff "
                          f"{best['_standoff']:.0f} u, subjects fill {best['fill']:.2f} of the "
@@ -2862,7 +2896,7 @@ def cmd_plan(args):
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as f:
-            doc = {"cell": args.cell, "floorZ": floor_z, "aim": aim,
+            doc = {"cell": args.cell, "floorZ": best.get("_floor", floor_z), "requestFloorZ": floor_z, "aim": aim,
                    "bearingWindow": args.bearing_window,
                        # THE field to read. "verified" means the delivered pose was probed as
                        # itself and every target came back clear or confirmed; "refused" means it
@@ -2877,7 +2911,7 @@ def cmd_plan(args):
                        "verifyAttempts": attempts,
                        "subjects": [{"label": s.label, "pos": s.pos(), "kind": s.kind,
                                      "extent": s.extent} for s in subjects],
-                       "feet": [best["eye"][0], best["eye"][1], floor_z], "doors": doors,
+                       "feet": [best["eye"][0], best["eye"][1], best.get("_floor", floor_z)], "doors": doors,
                        "chosen": {k: v for k, v in best.items() if k != "_target"},
                        "top": [{k: v for k, v in x.items() if k != "_target"} for x in ok[:args.top]],
                        "renders": run.renders, "seconds": round(run.seconds, 1)}
@@ -3293,7 +3327,8 @@ def add_common(p, need_subjects=True):
     p.add_argument("--floor-z", type=float, default=None,
                    help="the storey the subjects stand on (default: the lowest subject z)")
     p.add_argument("--eye-height", type=float, default=120.0,
-                   help="camera height above the floor (default 120, viewprobe's own default)")
+                   help="camera height above the floor (default 120, viewprobe's own default); outdoors "
+                        "(an exterior cell) above each candidate's own navmesh level within --storey-tol")
     p.add_argument("--aim-height", type=float, default=100.0,
                    help="height above a subject's feet that the camera aims at (default 100, a "
                         "standing head). Aim at the MIDDLE of what should be centred -- a seated "
