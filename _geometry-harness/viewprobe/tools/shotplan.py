@@ -3282,8 +3282,8 @@ def add_common(p, need_subjects=True):
                         "ENCLOSED and refused (default 96: a shelf above, a shelf below, a back "
                         "panel; a room's walls are further)")
     p.add_argument("--inside-back", type=int, default=2,
-                   help="an eye is INSIDE a solid when the nearest face on at least this many of the six axis rays "
-                        "of one enclosing ref is a back face (default 2; any thickness)")
+                   help="an eye is INSIDE a solid when the nearest face on at least this many of the six axis rays, "
+                        "across every enclosing ref, is a back face (default 2; any thickness)")
     p.add_argument("--inside-rays", type=int, default=3,
                    help="how many of the six axis rays must hit within --inside-reach (default 3)")
     p.add_argument("--inside-cap", type=float, default=1024.0,
