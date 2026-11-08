@@ -69,7 +69,7 @@ static partial class MotionProof
         Case(check, "part3b K-PS1: CollisionMarker, no layer -> certified box (80,190,295)..(120,210,305), stops player (Q1)", () =>
         {
             var t = PrimitiveSolidity.Read(tableJson);
-            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", null, new Vector3(10, 20, 5), new Vec3(100, 200, 300), new Vec3(0, 0, MathF.PI / 2)), t, "REFUSAL");
+            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", null, "Box", new Vector3(10, 20, 5), new Vec3(100, 200, 300), new Vec3(0, 0, MathF.PI / 2)), t, "REFUSAL");
             bool box = Near3b(r.Box.Min.X, 80, 1e-2) && Near3b(r.Box.Max.X, 120, 1e-2) && Near3b(r.Box.Min.Y, 190, 1e-2) && Near3b(r.Box.Max.Y, 210, 1e-2) && Near3b(r.Box.Min.Z, 295, 1e-2) && Near3b(r.Box.Max.Z, 305, 1e-2);
             string lab = r.Reason ?? "";   // certified: labels stay empty by contract; the basis is in the reason (corrected before green)
             return (r.Status == "certified" && r.Labels.Count == 0 && box && lab.Contains("player") && lab.Contains("Q1") && !lab.Contains("items"), $"{r.Status} {B3b(r.Box)} [{lab}]");
@@ -78,26 +78,37 @@ static partial class MotionProof
         // Rejects "COLL decides".
         Case(check, "part3b K-PS2: AcousticSpace, no layer -> no_geometry (Q2)", () =>
         {
-            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("0FF495:Skyrim.esm", "AcousticSpace", null, new Vector3(500, 500, 400), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
+            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("0FF495:Skyrim.esm", "AcousticSpace", null, "Box", new Vector3(500, 500, 400), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
             return (r.Status == "no_geometry" && (r.Reason ?? "").Contains("Q2"), $"{r.Status} {r.Reason}");
         });
         // PS3: a base and type with no entry: refused, the caller's refusal kept and the gap named. Rejects a default verdict.
         Case(check, "part3b K-PS3: an unmeasured base refuses with the caller's text and 'no measurement'", () =>
         {
-            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000017:Skyrim.esm", "Furniture", null, new Vector3(1, 1, 1), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
+            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000017:Skyrim.esm", "Furniture", null, "Box", new Vector3(1, 1, 1), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
             return (r.Status == "refused" && (r.Reason ?? "").StartsWith("REFUSAL") && (r.Reason ?? "").Contains("no measurement"), $"{r.Status} {r.Reason}");
         });
         // PS4: a measured base with an unmeasured layer: refused. Rejects matching on the base alone.
         Case(check, "part3b K-PS4: a measured base stating an unmeasured layer refuses", () =>
         {
-            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", "L_TRANSPARENT_SMALL", new Vector3(1, 1, 1), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
+            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", "L_TRANSPARENT_SMALL", "Box", new Vector3(1, 1, 1), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
             return (r.Status == "refused", $"{r.Status} {r.Reason}");
         });
         // PS5: the stated layer selects its own entry. Rejects ignoring the layer.
         Case(check, "part3b K-PS5: CollisionMarker stating L_NAVCUT -> no_geometry (Q4)", () =>
         {
-            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", "L_NAVCUT", new Vector3(1, 1, 1), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
+            var r = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", "L_NAVCUT", "Box", new Vector3(1, 1, 1), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), PrimitiveSolidity.Read(tableJson), "REFUSAL");
             return (r.Status == "no_geometry" && (r.Reason ?? "").Contains("Q4"), $"{r.Status} {r.Reason}");
+        });
+        // PS7: station Q measured Box and PortalBox primitives only (F2: both shapes per base agreed). A Sphere on a base and layer
+        // measured solid is not in the measurement: refused, the shape named. Rejects certifying a sphere as a box of its bounds.
+        Case(check, "part3b K-PS7: a Sphere CollisionMarker on a measured-solid layer refuses, naming the shape; a PortalBox is decided", () =>
+        {
+            var t = PrimitiveSolidity.Read(tableJson);
+            var s = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", null, "Sphere", new Vector3(30, 30, 30), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), t, "REFUSAL");
+            var n = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", "L_NAVCUT", "Sphere", new Vector3(30, 30, 30), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), t, "REFUSAL");
+            var pb = PrimitiveSolidity.Decide(new PrimitiveFacts("000021:Skyrim.esm", "Static", null, "PortalBox", new Vector3(150, 1, 150), new Vec3(0, 0, 0), new Vec3(0, 0, 0)), t, "REFUSAL");
+            bool refusedByShape(ReachRegion r) => r.Status == "refused" && (r.Reason ?? "").StartsWith("REFUSAL") && (r.Reason ?? "").Contains("Sphere");
+            return (refusedByShape(s) && refusedByShape(n) && pb.Status == "certified", $"{s.Status} {s.Reason} | {n.Status} {n.Reason} | {pb.Status}");
         });
         // PS6: the list refuses an unknown verdict and an entry with no evidence, naming them.
         Case(check, "part3b K-PS6: a list with verdict 'maybe' or empty evidence is refused by name", () =>

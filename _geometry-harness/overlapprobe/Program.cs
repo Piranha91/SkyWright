@@ -869,7 +869,7 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
             if (Math.Abs(p.Scale - 1f) > 1e-4f) return Out(new ReachRegion("refused", primRefusal + $"; reference scale {p.Scale} (primitives were measured at scale 1)", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
             string? lname = li2 is null ? null : (idx.CollisionLayersByIndex.TryGetValue(li2.Value, out var cl2) ? cl2.Edid : null);
             if (li2 is not null && lname is null) return Out(earlier);
-            var facts = new PrimitiveFacts(baseKey.ToString(), btype, lname, new System.Numerics.Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2), p.Pos, p.Rot);
+            var facts = new PrimitiveFacts(baseKey.ToString(), btype, lname, prim.Type, new System.Numerics.Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2), p.Pos, p.Rot);
             return Out(PrimitiveSolidity.Decide(facts, table, primRefusal));
         }
         return Out(new ReachRegion("refused", primRefusal, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));

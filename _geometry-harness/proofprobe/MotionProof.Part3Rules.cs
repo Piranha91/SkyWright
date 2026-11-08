@@ -263,12 +263,25 @@ static partial class MotionProof
             var r = MeshReach.OfPrimitiveRule("Activator", false, null, "REFUSAL");
             return (r.Status == "no_geometry" && r.Reason == MeshReach.PrimitiveActivatorReason, SayA7(r));
         });
-        Case(check, "part3 K-T2: an Activator WITH a model, a stated layer, or another base type keeps the caller's refusal", () =>
+        // Station AD (2026-10-25): every layer stated on these references in real data passed an item and the player, so the
+        // stated layer does not keep a refusal. Rejects the layer condition and a reason that does not cite the station.
+        Case(check, "part3 K-T2: an Activator WITH a model or another base type keeps the caller's refusal; a stated layer does not", () =>
         {
             var a = MeshReach.OfPrimitiveRule("Activator", true, null, "REFUSAL");
             var b = MeshReach.OfPrimitiveRule("Activator", false, 1, "REFUSAL");
             var c = MeshReach.OfPrimitiveRule("Static", false, null, "REFUSAL");
-            return (new[] { a, b, c }.All(x => x.Status == "refused" && x.Reason == "REFUSAL"), $"{SayA7(a)} | {SayA7(b)} | {SayA7(c)}");
+            return (new[] { a, c }.All(x => x.Status == "refused" && x.Reason == "REFUSAL")
+                    && b.Status == "no_geometry" && b.Reason == MeshReach.PrimitiveActivatorReason && b.Reason.Contains("station AD"),
+                    $"{SayA7(a)} | {SayA7(b)} | {SayA7(c)}");
+        });
+        // K-T3: by type, whatever the layer: the station AD layers (L_NONCOLLIDABLE 15, L_TRIGGER 12, L_ACTORZONE 22,
+        // L_TRAP_TRIGGER 54, L_DEADACTORZONE 47, L_PROJECTILEZONE 23, L_LIVING_AND_DEAD_ACTORS 52, L_TRANSPARENT 3), station T's
+        // L_STATIC 1, and an index no COLL record names (200). Rejects a per-layer list.
+        Case(check, "part3 K-T3: a model-less Activator stating any layer -> no_geometry, the measured reason", () =>
+        {
+            var got = new uint[] { 15, 12, 22, 54, 47, 23, 52, 3, 1, 200 }.Select(li => (li, r: MeshReach.OfPrimitiveRule("ACTI", false, li, "REFUSAL"))).ToList();
+            var bad = got.Where(g => g.r.Status != "no_geometry" || g.r.Reason != MeshReach.PrimitiveActivatorReason).ToList();
+            return (bad.Count == 0, bad.Count == 0 ? "all no_geometry" : string.Join(" | ", bad.Select(g => $"{g.li}: {SayA7(g.r)}")));
         });
     }
 }
