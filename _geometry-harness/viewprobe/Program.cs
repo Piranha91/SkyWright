@@ -79,6 +79,8 @@ if (args.Length == 2 && args[0] == "--report-mode-smoke")
     return ViewProbe.TexturedScene.ReportModeSmoke(args[1]);
 if (args.Length == 1 && args[0] == "--nav-selection-smoke")
     return ViewProbe.NavmeshSelection.Smoke();
+if (args.Length == 1 && args[0] == "--nav-link-smoke")
+    return ViewProbe.NavmeshLinks.Smoke();
 // The deleter, on the command line, so its contract can be tested against a directory state a test
 // owns rather than against whatever a render happened to leave. Ahead of the harness Require()
 // calls below: it needs no MO2 instance, no game and no load order.
@@ -334,6 +336,8 @@ bool navModeExplicit = false;
 string? navPlugin = null;
 var navCellSpecs = new List<string>();
 var navVersionSpecs = new List<string>();
+// --nav-link SOURCE=TARGET: the source's edges that cross into the target, measured from the records (NavmeshLinks.cs).
+var navLinkSpecs = new List<string>();
 (string A, string B)? compare = null;
 // Terrain: LAND heightmaps for the target cell and its ring-1 neighbours, textured with each
 // quadrant's winning base landscape texture. --no-terrain turns it off.
@@ -633,6 +637,12 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--conflicts" && i + 1 < args.Length) conflictsPath = args[++i];
     else if (args[i] == "--red" && i + 1 < args.Length) redSpecs.Add(args[++i]);
     else if (args[i] == "--nav-plugin" && i + 1 < args.Length) navPlugin = args[++i];
+    else if (args[i] == "--nav-link")
+    {
+        if (i + 1 >= args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal))
+        { Console.Error.WriteLine("--nav-link requires SOURCE_NAVM=TARGET_NAVM, both full FormKeys."); return 2; }
+        navLinkSpecs.Add(args[++i]);
+    }
     else if (args[i] is "--nav-cell" or "--nav-version")
     {
         var option = args[i];
@@ -1375,6 +1385,7 @@ if (compare is { } cmp0) { navVersionPlugins.Add(cmp0.A); navVersionPlugins.Add(
 var cliNavVersionPlugins = navVersionPlugins.ToArray();
 var navByPlugin = new Dictionary<string, Dictionary<FormKey, NavmeshGeometry>>(StringComparer.OrdinalIgnoreCase);
 ViewProbe.NavmeshSelection? navSelection = null;
+ViewProbe.NavmeshLinks? navLinks = null;
 if (navVersionSpecs.Count > 0 && (navPlugin is not null || compare is not null))
 { Console.Error.WriteLine("--nav-version cannot be combined with --nav-plugin or --compare."); return 2; }
 var baseMesh = new Dictionary<FormKey, string>();
@@ -1867,6 +1878,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         $"the cell was found in plugin {scannedForCell} of {order.OrderedPaths.Count}; the rest were not walked");
     try { navSelection = new ViewProbe.NavmeshSelection(cellKey.Value, navCellSpecs, navVersionSpecs); }
     catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    try { navLinks = navLinkSpecs.Count > 0 ? new ViewProbe.NavmeshLinks(navLinkSpecs) : null; }
+    catch (ArgumentException ex) { Console.Error.WriteLine(ex.Message); return 2; }
     foreach (var plugin in navSelection.Overrides.Values) navVersionPlugins.Add(plugin);
 
     // The BOS form index fills on the FIRST walk only (a worklist re-walks per cell; the index does not change).
@@ -2056,6 +2069,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 // The navmesh selection sees every cell: a later sighting anywhere, a deletion-only copy included, can take
                 // a navmesh out of the winners (NavmeshSelection.Observe).
                 navSelection.Observe(cp, plgName, navVersionPlugins, winNav, navByPlugin);
+                navLinks?.Observe(cp, plgName);
                 if (cp.Refs.Count == 0 && cp.Navmeshes.Count == 0 && cp.DeletedRefs is not { Count: > 0 }) continue;
                 if (bosFill) bosIdx!.NoteCell(cp.Cell, cp.Worldspace);
                 foreach (var r in cp.Refs)
@@ -2148,6 +2162,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         foreach (var x in f.StationUnreadableLand) stationUnreadableLand[x.Key] = x.Value;
         stationReach = f.StationReach;
     }
+    // --nav-link: from this walk's own last sightings, in both render modes (a reused walk refuses in its row)
+    navLinks?.Print(reportedConfiguration?.Identity("load-time", stateSpec ?? "baseline").Fingerprint);
     if (cellScene is not null && !retainedWalkHit)
     {
         // Capture the raw walk boundary before BOS, state arms, persistent merging, synthetic
