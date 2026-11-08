@@ -351,7 +351,7 @@ if (mode == "arms" || mode == "cut")
     float top = controllerBand ? ActorBand.PhysicalControllerTop(nominalTop) : nominalTop;
     var ladder = new[] { 0f, 32f, 64f, 96f, 128f };
     var (gnodes, grpt) = NavGraph.Build(navs);
-    Console.WriteLine($"graph: {grpt.Triangles:N0} triangles, {grpt.IntraLinks:N0} intra + {grpt.CrossLinks:N0} cross links, {grpt.DanglingLinks} dangling, {grpt.ExternalLinks} external, {grpt.Components} component(s)");
+    Console.WriteLine($"graph: {grpt.Triangles:N0} triangles, {grpt.IntraLinks:N0} intra + {grpt.CrossLinks:N0} cross links, {grpt.DanglingLinks} dangling, {grpt.ExternalLinks} external, {grpt.Components} component(s); ledge links {grpt.LedgeUpLinks} up + {grpt.LedgeDownLinks} down, {grpt.EnableDisableLinks} enable/disable, {grpt.UnknownTypeLinks} unknown type, {grpt.HeldLinks} held (not walked)");
     Console.WriteLine($"band: {ActorBand.PhysicalStep:0.#}..{top:0.#} u above the FEET ({(controllerBand ? $"controller: nominal {nominalTop:0} × {ActorBand.ControllerFactor} + {ActorBand.StationOffset:0.#}" : "nominal")}; bottom measured 2026-09-05 + the station's {ActorBand.StationOffset:0.#} u offset (Q24), step band to {ActorBand.PhysicalStepBandTop:0.#} u and a float of {ActorBand.FloatWall:0} u or more named in the verdict (Q26)); capsule 22 u; window ±256 u, step 16");
     Console.WriteLine($"floor: physical, {floor.Candidates:N0} candidates, {floor.LandCells} land cell(s) (Q24); {floor.SkippedDisabled:N0} refs not present in the population");
     Console.WriteLine(pop.Describe() + "\n");
