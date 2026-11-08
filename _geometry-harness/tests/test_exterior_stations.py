@@ -14,6 +14,7 @@ one floor for every station. The coordinates are made up; nothing here is eviden
     C1703  the C1700 scene as an interior: no station moves, every eye stays at the one floor + 120 (z 120)
     C1704  shotplan plan outdoors, floor z 200, navmesh at z 270: the chosen eye is at z 390, its feet at 270
     C1705  the C1704 scene as an interior: the eye stays at the floor + 120 (z 320)
+    C1706  the C1704 scene under a roof (z 350-380): every outdoor eye (z 390) stands above the roof, so none verifies
 """
 from __future__ import annotations
 
@@ -141,11 +142,12 @@ def c1703(fx):
           len(shots) == 36 and not moved and not off, f"{len(shots)} shots, moved {moved[:4]}, eye off {off[:4]}")
 
 
-def plan_scene(exterior):
+def plan_scene(exterior, roof=False):
     import test_shotplan_plan as TSP
     slab = {"id": "000701:Test.esp", "edid": "Ground", "min": [-790, -790, 230], "max": [790, 790, 270]}
     plinth = {"id": "000702:Test.esp", "edid": "Plinth", "min": [-40, -40, 270], "max": [40, 40, 300]}
-    sc = TSP.room(slab, plinth)
+    extra = [{"id": "000703:Test.esp", "edid": "Roof", "min": [-790, -790, 350], "max": [790, 790, 380]}] if roof else []
+    sc = TSP.room(slab, plinth, *extra)
     sc["floorZ"] = 270.0
     sc["nav"] = [{"min": [-790, -790], "max": [790, 790], "z": 270.0, "name": "Test.esm"}]
     if exterior:
@@ -154,8 +156,8 @@ def plan_scene(exterior):
     return TSP, sc
 
 
-def plan(fx, exterior, tag):
-    TSP, sc = plan_scene(exterior)
+def plan(fx, exterior, tag, roof=False):
+    TSP, sc = plan_scene(exterior, roof)
     jp = fx.root / f"plan-{tag}.json"
     code, out = TSP.run_cli(["plan", "TestCell", "--subject", "0,0,270=target", "--floor-z", "200", "--vp", TSP.FAKE,
                              "--quiet", "--json", str(jp), "--worklist", str(fx.root / f"wl-{tag}.json")], sc)
@@ -181,7 +183,18 @@ def c1705(fx):
           bool(eye) and abs(eye[2] - 320) <= 0.5, str(eye or out[-300:]))
 
 
-CASES = [c1700, c1701, c1702, c1703, c1704, c1705]
+def c1706(fx):
+    code, out, doc = plan(fx, True, "c1706", roof=True)
+    ref = (doc or {}).get("refusal") or {}
+    probed = (ref.get("counts") or {}).get("probed")
+    why = [n for r, n in ref.get("reasons") or [] if r.startswith("outdoors this eye stands on the navmesh at z 270")]
+    check("C1706 under a roof outdoors: no camera verifies", (doc or {}).get("status") != "verified",
+          (doc or {}).get("status") or out[-200:])
+    check("C1706 every probed eye is refused because the surface under it is not its navmesh level",
+          bool(probed) and sum(why) == probed, f"probed {probed}; reasons {ref.get('reasons')}")
+
+
+CASES = [c1700, c1701, c1702, c1703, c1704, c1705, c1706]
 
 
 def main() -> int:

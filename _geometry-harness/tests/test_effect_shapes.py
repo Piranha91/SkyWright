@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import itertools
 import os
 import sys
 import tempfile
@@ -93,7 +94,8 @@ def run_all(rig):
         check("C1710", CLOUD not in listed, "the cloud was tested as an enclosing solid", f"{p}: rows {listed}")
         kind, fails, _ = S.inside_verdict(rows, ARGS)
         check("C1710", kind == "clear", "an eye inside the cloud was not accepted", f"{p}: {kind} {fails[:2]}")
-        block = out.split(f"inside-at {p[0]},{p[1]},{p[2]}:", 1)[-1].split("\n   ", 1)[0]
+        tail = out.split(f"inside-at {p[0]},{p[1]},{p[2]}:", 1)[-1].splitlines()
+        block = "\n".join([tail[0]] + list(itertools.takewhile(lambda ln: ln.startswith("      "), tail[1:])))
         check("C1710", f"effect-only, not solid: {CLOUD}" in block, "the cloud is not named effect-only, not solid",
               f"{p}: {block[:300]}")
 
