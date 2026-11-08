@@ -72,6 +72,14 @@ public sealed class StateTally
     /// <summary>Changed references whose base carries the Is-Marker flag and whose reference carries a collision primitive (a
     /// CollisionMarker's box, which may block: station Q): the check does not measure primitives, so unjudged, by name.</summary>
     public int MarkerPrimitive;
+    /// <summary>With station Q's table (stateprobe --primitive-solidity): marker primitives the table measures solid (a body; the
+    /// check does not measure primitive boxes, so unjudged, by name) and not solid (no body: set aside).</summary>
+    public int MarkerPrimitiveSolid, MarkerPrimitiveNotSolid;
+    /// <summary>The rest of the changed references without a box, by cause. Set aside: a decal (a placed TextureSet: a projected
+    /// texture, no model and no collision). Unjudged, by name: a placed actor (the check judges objects), a placed hazard or trap
+    /// (the placement reader reads no base link on those arms), an effects mesh in no role, a type in none of the check's role
+    /// sets, and a box over the volume cap in no role.</summary>
+    public int Decal, PlacedTrap, Actor, EffectVolume, TypeOutsideRoles, OverSizeCap;
 }
 
 /// <summary>Opt-in phase timers for <see cref="StateEvaluator.Evaluate"/> (stateprobe --phase-timers): ticks of
@@ -104,6 +112,8 @@ public sealed class StateEvaluator
     public ISet<string> Obstructing { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
     public RouteAsk? Route { get; set; }
+    /// <summary>Station Q's measured primitive table (stateprobe --primitive-solidity): decides a marker's primitive. Null: none given.</summary>
+    public IReadOnlyList<PrimitiveMeasurement>? PrimitiveTable { get; set; }
     /// <summary>A plan's population (window 2, task 1): a changed reference this says false for is not processed. Every row is
     /// computed from its own changed reference and the whole-order index, so the rows of a processed one are the whole-order
     /// run's. Null: every changed reference.</summary>
@@ -132,7 +142,9 @@ public sealed class StateEvaluator
             var s = snaps[^1];
             if (s.Deleted || Index.IsDeletedNow(key)) continue;
             var b = cidx.WinnerBase(key);
-            if (b.IsNull) continue;
+            if (b.IsNull) { if (Index.RefArm.TryGetValue(key, out var ta) && ta is not ("PlacedObject" or "PlacedNpc")) _why[key] = Why.PlacedTrap; continue; }
+            if (Index.RefArm.TryGetValue(key, out var arm) && arm == "PlacedNpc") { _why[key] = Why.Actor; BoxedNoGeometry++; continue; }
+            if (Index.TextureSetDiffuse.ContainsKey(b)) { _why[key] = Why.Decal; BoxedNoGeometry++; continue; }
             // A navcut box: its obstacle is the XPRM primitive, not a mesh (its base is a flagged marker with no drawn shape).
             if (sx.IsNavcut(key))
             {
@@ -145,7 +157,12 @@ public sealed class StateEvaluator
             }
             // A marker draws nothing; one whose reference carries a primitive may still block by it (station Q), so the two are
             // counted apart: the first set aside, the second unjudged.
-            if (cidx.IsMarker(b)) { BoxedMarkers++; (Index.RefPrimitive.ContainsKey(key) ? _markerPrimitive : _marker).Add(key); continue; }
+            if (cidx.IsMarker(b))
+            {
+                BoxedMarkers++;
+                if (Index.RefPrimitive.ContainsKey(key)) _markerPrimitive[key] = (b, s); else _marker.Add(key);
+                continue;
+            }
             // A light, activator or door with no model has no body: nothing to box, and nothing the check failed to judge.
             if (cidx.IsBodiless(b)) { _bodiless[key] = cidx.BodilessType(b); continue; }
             string type = Index.BaseInfo.TryGetValue(b, out var bi) ? bi.Type : "?";
@@ -166,7 +183,12 @@ public sealed class StateEvaluator
             if (cidx.IsDependentType(b) && g.CanDepend && dim <= cidx.MaxDependentDim) role |= Role.Dependent;
             if (cidx.IsPhysicalType(b) && g.CanHost) role |= Role.Physical;
             if (cidx.IsHostType(b) && g.CanHost && dim >= cidx.MinHostDim && dim <= cidx.MaxHostDim) role |= Role.Host;
-            if (role == Role.None) continue;
+            if (role == Role.None)
+            {
+                _why[key] = fx ? Why.EffectVolume : dim > MaxDim ? Why.OverSizeCap
+                    : !Obstructing.Contains(type) && !cidx.IsDependentType(b) && !cidx.IsPhysicalType(b) && !cidx.IsHostType(b) ? Why.TypeOutsideRoles : Why.None;
+                continue;
+            }
             _facts[key] = (box, role, b);
             _boxes.Add(s.Space, box, key);
         }
@@ -174,7 +196,28 @@ public sealed class StateEvaluator
 
     public bool HasBox(FormKey k) => _facts.ContainsKey(k);
     readonly Dictionary<FormKey, string> _bodiless = new();
-    readonly HashSet<FormKey> _marker = new(), _markerPrimitive = new();
+    readonly HashSet<FormKey> _marker = new();
+    enum Why { None, PlacedTrap, Actor, Decal, EffectVolume, OverSizeCap, TypeOutsideRoles }
+    readonly Dictionary<FormKey, Why> _why = new();
+    readonly Dictionary<FormKey, (FormKey Base, Snap Pose)> _markerPrimitive = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<FormKey, string> _markerVerdict = new();
+
+    /// <summary>A marker primitive under station Q's table: "solid", "not_solid", or "" (no table, a scaled reference, an unnamed
+    /// layer, a shape or a (base, layer) the table does not measure). The same reader and rule as overlapprobe's.</summary>
+    string MarkerVerdict(FormKey key) => _markerVerdict.GetOrAdd(key, k =>
+    {
+        if (PrimitiveTable is not { } table || !_markerPrimitive.TryGetValue(k, out var m) || !Index.RefPrimitive.TryGetValue(k, out var prim)) return "";
+        if (MathF.Abs(m.Pose.Scale - 1f) > 1e-4f) return "";   // measured at scale 1
+        string? lname = null;
+        if (Index.RefCollisionLayer.TryGetValue(k, out var li))
+        {
+            if (!Index.CollisionLayersByIndex.TryGetValue(li, out var cl) || cl.Edid is null) return "";
+            lname = cl.Edid;
+        }
+        string? btype = Index.BaseInfo.TryGetValue(m.Base, out var bi) ? bi.Type : null;
+        var facts = new PrimitiveFacts(m.Base.ToString(), btype, lname, prim.Type, new Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2), m.Pose.Pos, m.Pose.Rot);
+        return PrimitiveSolidity.Decide(facts, table, "").Status switch { "no_geometry" => "not_solid", "certified" => "solid", _ => "" };
+    });
 
     /// <summary>Whether any boxed reference within <paramref name="reach"/> of <paramref name="k"/>'s winning box (its winning space)
     /// satisfies <paramref name="pred"/>: the neighbourhood the contact half reads.</summary>
@@ -227,8 +270,21 @@ public sealed class StateEvaluator
             {
                 if (_bodiless.TryGetValue(key, out var bt)) { if (bt == "Light") tally.NoBody++; else if (bt == "Activator") tally.NoBodyActivator++; else tally.NoBodyDoor++; }
                 else if (_marker.Contains(key)) tally.EditorMarker++;
-                else if (_markerPrimitive.Contains(key)) tally.MarkerPrimitive++;
-                else tally.NoBox++;
+                else if (_markerPrimitive.ContainsKey(key))
+                {
+                    var v = MarkerVerdict(key);
+                    if (v == "not_solid") tally.MarkerPrimitiveNotSolid++; else if (v == "solid") tally.MarkerPrimitiveSolid++; else tally.MarkerPrimitive++;
+                }
+                else switch (_why.GetValueOrDefault(key))
+                {
+                    case Why.PlacedTrap: tally.PlacedTrap++; break;
+                    case Why.Actor: tally.Actor++; break;
+                    case Why.Decal: tally.Decal++; break;
+                    case Why.EffectVolume: tally.EffectVolume++; break;
+                    case Why.OverSizeCap: tally.OverSizeCap++; break;
+                    case Why.TypeOutsideRoles: tally.TypeOutsideRoles++; break;
+                    default: tally.NoBox++; break;
+                }
                 continue;
             }
             var win = Index.History.Winning(key)!.Value;

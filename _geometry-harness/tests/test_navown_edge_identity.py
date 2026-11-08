@@ -325,7 +325,10 @@ def t1402():
 # Was d87e7975... until 2026-10-25 (activators, doors and editor markers set aside by name; a marker carrying a primitive unjudged
 # apart): the same line also carries SetAside ActivatorWithNoModel, DoorWithNoModel, EditorMarker and Unjudgeable MarkerPrimitive,
 # all 0 on this fixture, and nothing else differs.
-STATE_ROWS_SHA = "f30ce37cff4bf41c45802aaf5cadb38e7c9a48da77ea4ab654640404783022f6"
+# Was f30ce37c... until 2026-11-08 (item 30: marker primitives by station Q's table, the rest of NoBox named by cause): the
+# same line also carries Unjudgeable MarkerPrimitiveSolid, Actor, PlacedTrap, EffectVolume, TypeOutsideRoles, OverSizeCap and
+# SetAside MarkerPrimitiveNotSolid, Decal, all 0 on this fixture; the old emit with those keys added hashes to this value.
+STATE_ROWS_SHA = "e72e787e0fcb682a2fea26bac1c864eb53181b21053ee93da93776a12be74b0b"
 
 
 def t1403():

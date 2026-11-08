@@ -37,6 +37,10 @@ namespace HarnessShared;
 //                                      (Gate B review B1)
 //   SG     slab, the same              a switch; a static whose model file is missing and has no bounds (no geometry, not a
 //                                      marker: what the check cannot judge), arriving with it
+// Cells added for item 30 (each a slab and a switch MaSw<X>, its one object arriving with the switch, see Extra):
+//   T Q R  the CollisionMarker-shaped marker: a Box stating L_NONCOLLIDABLE / a Box at scale 2 / a Sphere (station Q's table)
+//   H E F  a placed NPC / a decal (a placed TextureSet) / a static whose model is under effects\ and whose editor id starts FX (in no role)
+//   I O Z  an idle marker with 20 u bounds (a type in no role) / one with 6,000 u bounds (over the cap) / a placed hazard
 public static class ModellessActivatorFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -53,6 +57,13 @@ public static class ModellessActivatorFixture
     public const uint NoncollidableIndex = 15;
     const int IsMarkerFlag = 0x00800000;
 
+    /// <summary>Item 30's cells, by switch letter: the cell, the slab, the switch and the one object. Bases at 0x840+.</summary>
+    public static readonly string[] Extra = { "T", "Q", "R", "H", "E", "F", "I", "O", "Z" };
+    public static readonly FormKey NpcBase = K(0x840), DecalBase = K(0x841), FxStatic = K(0x842), IdleSmall = K(0x843), IdleBig = K(0x844), HazardBase = K(0x845);
+    public const string FxMesh = "effects\\ma\\mist.nif";
+    public static FormKey ExtraSwitch(int j) => KO(0x940u + (uint)j);
+    public static FormKey ExtraRef(int j) => KO(0x950u + (uint)j);
+
     public sealed record Written(IReadOnlyList<string> Order, string ModsDir);
 
     // Form ids: contact cells 0x811+i, state cells 0x821+i (i = 0..4 for A N B M D), SK 0x826, SG 0x827; walls 0x901+i, slabs
@@ -66,6 +77,36 @@ public static class ModellessActivatorFixture
     public static readonly FormKey SwK = KO(0x916), SwG = KO(0x917), XMarkerRef = KO(0x926), BareMarkerRef = KO(0x927), NoGeomRef = KO(0x928),
         SwP = KO(0x918), CollisionBoxRef = KO(0x929),
         CrateRef = KO(0x92A), UnderActRef = KO(0x92B);
+
+    static IPlaced Extra1(int j, FormKey parent)
+    {
+        string x = Extra[j];
+        var key = ExtraRef(j);
+        if (x == "H")
+        {
+            var n = new PlacedNpc(key, Rel) { Placement = new Placement { Position = new(0, 0, 0), Rotation = new(0, 0, 0) },
+                                              EnableParent = new EnableParent { Flags = EnableParent.Flag.SetEnableStateToOppositeOfParent } };
+            n.Base.SetTo(NpcBase);
+            n.EnableParent.Reference.SetTo(parent);
+            return n;
+        }
+        if (x == "Z")
+        {
+            var h = new PlacedHazard(key, Rel) { Placement = new Placement { Position = new(0, 0, 0), Rotation = new(0, 0, 0) },
+                                                 EnableParent = new EnableParent { Flags = EnableParent.Flag.SetEnableStateToOppositeOfParent } };
+            h.Hazard.SetTo(HazardBase);
+            h.EnableParent.Reference.SetTo(parent);
+            return h;
+        }
+        var r = Ref(key, x switch { "T" or "Q" or "R" => CollisionBox, "E" => DecalBase, "F" => FxStatic, "I" => IdleSmall, "O" => IdleBig, _ => Crate },
+                    0, 0, 0, null, parent);
+        if (x is "T" or "Q" or "R")
+            r.Primitive = new PlacedPrimitive { Type = x == "R" ? PlacedPrimitive.TypeEnum.Sphere : PlacedPrimitive.TypeEnum.Box, Bounds = new P3Float(40, 40, 40),
+                                                Color = System.Drawing.Color.FromArgb(255, 0, 255, 0), Unknown = 0.15f };
+        if (x == "T") r.CollisionLayer = NoncollidableIndex;
+        if (x == "Q") r.Scale = 2f;
+        return r;
+    }
 
     static PlacedObject Ref(FormKey key, FormKey baseKey, float x, float y, float z, string? edid = null, FormKey? parent = null)
     {
@@ -111,7 +152,7 @@ public static class ModellessActivatorFixture
             paths.Add(path);
             return path;
         }
-        void Room(SkyrimMod m, FormKey ck, string edid, params PlacedObject[] refs)
+        void Room(SkyrimMod m, FormKey ck, string edid, params IPlaced[] refs)
         {
             var c = new SkCell(ck, Rel) { EditorID = edid, Flags = SkCell.Flag.IsInteriorCell };
             foreach (var r in refs) c.Temporary.Add(r);
@@ -131,6 +172,13 @@ public static class ModellessActivatorFixture
         room.Statics.Add(new Static(Crate, Rel) { EditorID = "MaCrate", Model = new Model { File = LeverMesh }, ObjectBounds = Box10() });
         room.Statics.Add(new Static(CollisionBox, Rel) { EditorID = "MaCollisionMarker", MajorRecordFlagsRaw = IsMarkerFlag });
         room.Statics.Add(new Static(NoGeom, Rel) { EditorID = "MaMissingModel", Model = new Model { File = MissingMesh } });
+        room.Npcs.Add(new Npc(NpcBase, Rel) { EditorID = "MaNpc" });
+        room.Hazards.Add(new Hazard(HazardBase, Rel) { EditorID = "MaHazard" });
+        room.TextureSets.Add(new TextureSet(DecalBase, Rel) { EditorID = "MaDecal", Diffuse = "ma\\decal.dds", ObjectBounds = Box10() });
+        room.Statics.Add(new Static(FxStatic, Rel) { EditorID = "FXMaMist", Model = new Model { File = FxMesh }, ObjectBounds = Box10() });
+        room.IdleMarkers.Add(new IdleMarker(IdleSmall, Rel) { EditorID = "MaIdleMarker", ObjectBounds = Box10() });
+        room.IdleMarkers.Add(new IdleMarker(IdleBig, Rel) { EditorID = "MaIdleMarkerHuge",
+                                                            ObjectBounds = new ObjectBounds { First = new P3Int16(-3000, -3000, -10), Second = new P3Int16(3000, 3000, 10) } });
         room.CollisionLayers.Add(new CollisionLayer(LayerNc, Rel) { EditorID = "L_NONCOLLIDABLE", Name = "L_NONCOLLIDABLE", Index = NoncollidableIndex, Description = "collides with nothing" });
         room.CollisionLayers.Add(new CollisionLayer(LayerTrigger, Rel) { EditorID = "L_TRIGGER", Name = "L_TRIGGER", Index = 12, Flags = CollisionLayer.Flag.TriggerVolume, Description = "a trigger" });
         room.CollisionLayers.Add(new CollisionLayer(LayerStatic, Rel) { EditorID = "L_STATIC", Name = "L_STATIC", Index = 1, Description = "static" });
@@ -143,6 +191,8 @@ public static class ModellessActivatorFixture
         Room(room, K(0x827), "MaRoomSG", Ref(K(0x917), Wall, 0, 0, 0));
         Room(room, K(0x828), "MaRoomSP", Ref(K(0x918), Wall, 0, 0, 0));
         Room(room, K(0x829), "MaRoomCR", Ref(K(0x919), Wall, 0, 0, 0), Ref(K(0x91A), Wall, 180, 0, 0));
+        for (int j = 0; j < Extra.Length; j++)
+            Room(room, K(0x850u + (uint)j), $"MaRoomS{Extra[j]}", Ref(K(0x860u + (uint)j), Wall, 0, 0, 0));
         var roomPath = Save(room);
         using var roomOv = SkyrimMod.CreateFromBinaryOverlay(roomPath, Rel);
 
@@ -161,6 +211,8 @@ public static class ModellessActivatorFixture
                                                Color = System.Drawing.Color.FromArgb(255, 0, 255, 0), Unknown = 0.15f };
         Room(objs, K(0x828), "MaRoomSP", Ref(SwP, Switch, 0, 0, 400, "MaSwP"), cbox);
         Room(objs, K(0x829), "MaRoomCR", Ref(CrateRef, Crate, 80, 0, 0), Ref(UnderActRef, ActBox, 100, 0, 0));
+        for (int j = 0; j < Extra.Length; j++)
+            Room(objs, K(0x850u + (uint)j), $"MaRoomS{Extra[j]}", Ref(ExtraSwitch(j), Switch, 0, 0, 400, $"MaSw{Extra[j]}"), Extra1(j, ExtraSwitch(j)));
         Save(objs, roomOv);
 
         var mover = new SkyrimMod(MoverKey, Rel);
@@ -183,6 +235,8 @@ public static class ModellessActivatorFixture
         Directory.CreateDirectory(Path.Combine(meshes, "ma"));
         File.WriteAllBytes(Path.Combine(meshes, WallMesh), Cube(70f));
         File.WriteAllBytes(Path.Combine(meshes, LeverMesh), Cube(10f));
+        Directory.CreateDirectory(Path.Combine(meshes, "effects", "ma"));
+        File.WriteAllBytes(Path.Combine(meshes, FxMesh), Cube(10f));
         return new Written(paths, mods);
     }
 }

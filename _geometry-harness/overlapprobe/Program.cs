@@ -154,7 +154,9 @@ offset box), gravity (--settled-gravity FILE: observed gravity frame and sign pe
 under its F1 condition), approx (--measured-approximations FILE: an in-game measured box per model, a labelled part beside the file
 bound), absent (--absent-models FILE: a model no
 active provider supplies, measured drawing nothing, is no_geometry). primitive with --primitive-solidity FILE: the measured
-(base, layer) table decides; without the file the earlier activator rule stands.
+(base, layer) table decides a Box or PortalBox primitive (station Q measured no other shape; a Sphere keeps its refusal);
+without the file the activator rule stands. A model-less activator's primitive is no_geometry whatever its stated layer
+(stations T and AD).
 --reach-shapes FILE (with --reach): for every reach region holding a particle part or a measured approximation, one JSON line
 {formid, region, shapes}: the region read again under the same rules and placement with ReachOptions.ParticlesAside (the render
 shapes alone; particles are runtime state, not a body). The manifest itself is unchanged.
@@ -869,7 +871,7 @@ object ReachOf(FormKey key, FormKey baseKey, Snap p)
             if (Math.Abs(p.Scale - 1f) > 1e-4f) return Out(new ReachRegion("refused", primRefusal + $"; reference scale {p.Scale} (primitives were measured at scale 1)", Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
             string? lname = li2 is null ? null : (idx.CollisionLayersByIndex.TryGetValue(li2.Value, out var cl2) ? cl2.Edid : null);
             if (li2 is not null && lname is null) return Out(earlier);
-            var facts = new PrimitiveFacts(baseKey.ToString(), btype, lname, new System.Numerics.Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2), p.Pos, p.Rot);
+            var facts = new PrimitiveFacts(baseKey.ToString(), btype, lname, prim.Type, new System.Numerics.Vector3(prim.Bounds.X / 2, prim.Bounds.Y / 2, prim.Bounds.Z / 2), p.Pos, p.Rot);
             return Out(PrimitiveSolidity.Decide(facts, table, primRefusal));
         }
         return Out(new ReachRegion("refused", primRefusal, Aabb.Empty, MeshReach.PolicyVersion, Array.Empty<string>(), Array.Empty<ReachPart>()));
