@@ -3041,8 +3041,9 @@ def build_prediction(ctx: dict) -> dict:
             if not t or not others:
                 return "single-mod", t, None
             arm_m = without_other(others[0].lower())
-            if arm_m is not None:
-                partner_arms.setdefault(others[0], arm_m)       # named in the record: which setup said so
+            if arm_m is not None and sib_check_ok(arm_m, rk[0]):
+                # named in the record: which setup said so (a sibling's only where its check is joined, round 2)
+                partner_arms.setdefault(others[0], arm_m)
             if arm_m is not None and (arm_m, rk[0]) in sib_disagree:
                 return "not-separable", None, words["notSeparableWhy"]["siblingsDisagree"]
             if (arm_m is None or (rk[0], arm_m) not in measured

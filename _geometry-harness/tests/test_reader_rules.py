@@ -453,7 +453,9 @@ def pair_setups_bundle(with_q=True):
 def case_pair_setups_answer_whether_a_clash_needs_the_other_mod():
     plan, md, html = pair_setups_bundle()
     item = next(iter(pred_of(plan).get("items") or []), {})
-    ok = item.get("attribution") == "needs-both" and "was not measured" not in md
+    # (item 21 round 2) the setup without B also lacks Fourth.esp, and the rows name no object of B's: absence there
+    # shows the clash needs one or more of B and Fourth.esp, not B itself (was "needs-both", an overclaim)
+    ok = item.get("attribution") == "needs-some" and "was not measured" not in md
     return ok, f"attribution {item.get('attribution')}; text {item.get('plain', '')[:200]!r}"
 
 
