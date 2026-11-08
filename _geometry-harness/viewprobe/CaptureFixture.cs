@@ -46,13 +46,19 @@ namespace ViewProbe;
 //   CfThickWalls crate (0,30,20)       crate (30,10,20)                     walls of the crate at scale 6 (about 300 u thick and
 //               245 u tall, one tier centred z 115), inner faces 25 u clear of the pair: a station eye in the middle of a
 //               wall has no face within 96 u (the planner gap of the 2026-10-31 base run 3, made wider than any reach)
+//   CfTower     no pair, no floor: the vanilla Nordic tower ruin's outer shell and its interior top-floor piece, both at the
+//               origin unrotated (Walls[0], Walls[1]): an eye on the top floor is inside the shell's one-sided faces but the
+//               interior piece's walls stand nearer and face it, the view a player has there
 public static class CaptureFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
     public static readonly ModKey Key = new("CfFixture", ModType.Plugin);
     static FormKey K(uint id) => new(Key, id);
 
-    public static readonly FormKey FloorBase = K(0x801), CrateBase = K(0x802), GlowBase = K(0x803), WallBase = K(0x804);
+    public static readonly FormKey FloorBase = K(0x801), CrateBase = K(0x802), GlowBase = K(0x803), WallBase = K(0x804),
+        TowerBase = K(0x805), TowerTopBase = K(0x806);
+    public const string TowerMesh = @"Dungeons\Nordic\Exterior\Towers\NorTowerRuins01.nif";
+    public const string TowerTopMesh = @"Dungeons\Nordic\Exterior\Towers\NorTowerRuinsIntTopFloor01.nif";
     public const string WallMesh = "Dungeons\\Imperial\\Exterior\\ImpExtWall03.nif";
     public const string FloorMesh = "Dungeons\\Imperial\\Exterior\\ImpExtFloorChunk01.nif";
     public const string CrateMesh = "Clutter\\Common\\CrateSmallLong02.nif";
@@ -63,11 +69,12 @@ public static class CaptureFixture
     public static readonly CellIds Cutaway = Ids("CfCutaway", 0x810), Touch = Ids("CfTouch", 0x820), Buried = Ids("CfBuried", 0x830),
         Glow = Ids("CfGlow", 0x840), Focus = Ids("CfFocus", 0x850), NoNav = Ids("CfNoNav", 0x860), Disabled = Ids("CfDisabled", 0x870),
         CutMod = Ids("CfCutMod", 0x880), Open = Ids("CfOpen", 0x890), FocusLow = Ids("CfFocusLow", 0x8A0),
-        Void = Ids("CfVoid", 0x8B0), Thick = Ids("CfThick", 0x8C0), ThickWalls = Ids("CfThickWalls", 0x8D0);
+        Void = Ids("CfVoid", 0x8B0), Thick = Ids("CfThick", 0x8C0), ThickWalls = Ids("CfThickWalls", 0x8D0),
+        Tower = Ids("CfTower", 0x8E0);
     /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
     public static readonly ModKey ModKeyB = new("CfFixtureMod", ModType.Plugin);
     public static readonly FormKey CutModB = new(ModKeyB, 0x801);
-    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls };
+    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls, Tower };
 
     static CellIds Ids(string edid, uint b)
         => new(edid, K(b), K(b + 1), K(b + 2), K(b + 3), Enumerable.Range(0, 32).Select(n => K(0x2000 + (b - 0x810) / 0x10 * 0x40 + (uint)n)).ToArray(),
@@ -168,6 +175,10 @@ public static class CaptureFixture
             ObjectBounds = new ObjectBounds { First = new P3Int16(-25, -104, -20), Second = new P3Int16(25, 38, 20) } });
         m.Statics.Add(new Static(WallBase, Rel) { EditorID = "CfWall", Model = new Model { File = WallMesh },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-201, -272, -14), Second = new P3Int16(191, 289, 573) } });
+        m.Statics.Add(new Static(TowerBase, Rel) { EditorID = "CfTower", Model = new Model { File = TowerMesh },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-700, -700, -100), Second = new P3Int16(700, 700, 2400) } });
+        m.Statics.Add(new Static(TowerTopBase, Rel) { EditorID = "CfTowerTop", Model = new Model { File = TowerTopMesh },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-650, -650, 900), Second = new P3Int16(650, 650, 2400) } });
         m.Statics.Add(new Static(GlowBase, Rel) { EditorID = "CfGlow", Model = new Model { File = GlowMesh },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-258, -258, -258), Second = new P3Int16(258, 258, 258) } });
 
@@ -208,7 +219,10 @@ public static class CaptureFixture
         thick.Temporary.Add(Ref(Thick.Walls[3], CrateBase, 0, -600, 30.75f, scale: 1.5f));
         var thickWalls = NewCell(ThickWalls, true); Pair(thickWalls, ThickWalls);
         ThickWalls6(thickWalls, ThickWalls.Walls, -203f, 233f, -272f, 246f);   // inner faces 25 u clear of the pair
-        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell, thick, thickWalls })
+        var tower = NewCell(Tower, false, floor: false);
+        tower.Temporary.Add(Ref(Tower.Walls[0], TowerBase, 0, 0, 0));
+        tower.Temporary.Add(Ref(Tower.Walls[1], TowerTopBase, 0, 0, 0));
+        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell, thick, thickWalls, tower })
             MovedRefFixture.FileInterior(m, c);
 
         var path = Path.Combine(dir, Key.FileName.String);

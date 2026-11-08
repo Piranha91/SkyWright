@@ -309,6 +309,17 @@ def test_a_room_seen_from_inside_is_not_a_solid():
               not any("back face" in f for f in inside_fails(doc)), "; ".join(inside_fails(doc)))
 
 
+def test_a_room_inside_a_one_sided_shell_is_not_a_solid():
+    """A tower: its outer shell is one solid mesh whose faces turn away from an eye on its top floor, but the interior
+    floor piece stands nearer on every side and faces the eye -- the view a player has up there (White River Watch,
+    2026-11-08). Each axis is judged by its NEAREST face, so the shell's culled faces behind the room do not count."""
+    room_inside = solid("TowerInterior", [-150, -450, 0], [150, -150, 300], shell=True)
+    room_inside["id"] = "000502:Test.esp"
+    code, out, doc = check_cli(room(SOLID_400, room_inside), "--surface", LOW)
+    check("inside solid: a room inside a one-sided shell is not refused as inside the shell",
+          not any("back face" in f for f in inside_fails(doc)), "; ".join(inside_fails(doc)))
+
+
 def test_one_back_face_passes_two_refuse():
     one = dict(SOLID_400, shell=True, facing={"+x": "back"})
     two = dict(SOLID_400, shell=True, facing={"+x": "back", "-x": "back"})
@@ -1424,6 +1435,7 @@ ALL = [test_a_candidate_without_a_wall_margin_prints, test_devbench_reads_a_work
        test_failed_verification_cannot_export_success,
        test_an_eye_inside_a_solid_is_refused_at_any_thickness,
        test_a_room_seen_from_inside_is_not_a_solid,
+       test_a_room_inside_a_one_sided_shell_is_not_a_solid,
        test_one_back_face_passes_two_refuse,
        test_rays_without_facing_are_unresolved,
        test_a_mirrored_shape_is_unresolved,

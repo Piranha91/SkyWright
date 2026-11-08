@@ -2,7 +2,7 @@
 
     python tests/test_eye_inside_solid.py [--vp VIEWPROBE.exe] [--only IS1,IS4] [--keep DIR]
 
-The REAL viewprobe `--inside-at` on CfFixture.esp (viewprobe/CaptureFixture.cs, cells CfThick and CfThickWalls), laid out
+The REAL viewprobe `--inside-at` on CfFixture.esp (viewprobe/CaptureFixture.cs, cells CfThick, CfThickWalls and CfTower), laid out
 as an MO2 instance over a Skyrim SE game's own archives (tests/capture_fixture_lab.py), judged by the REAL shotplan
 `inside_verdict` at the planner's defaults. IS4 runs the real capture_acquire on a pair walled in by walls about 300 u thick.
 Without game data (HOUSECARL_FIXTURE_GAME or `fixtureGame` in the harness config) the cases are NOT RUN, exit 3.
@@ -165,6 +165,33 @@ def is4_thick_walls(rig):
               f"eye {c.get('eye')} view {c.get('viewKind')} inside {inside}")
 
 
+def is5_room_inside_a_shell(rig):
+    """CfTower: the vanilla Nordic tower ruin's outer shell and its interior top-floor piece, both at the origin. On the
+    top floor the eye is inside the shell's box and every lateral face of the shell is turned away from it, but the
+    interior piece's walls stand nearer and face it: that is the view a player has up there, so it must be accepted.
+    Wrong answer: judging each ref alone, which refuses it as inside the shell (the 2026-11-08 count found three such
+    White River Watch captures, one of them on this floor). An eye inside the tower's masonry is still refused."""
+    T = LAB.ids("CfTower")["walls"]["W"]
+    shell, top = T[0], T[1]
+    room = [((0, 0, 1400), "the top floor's middle"), ((-200, 0, 1400), "the top floor, west of its middle (no face within 96 u)")]
+    inside = ((-428, -191, 1400), "in the tower's masonry, behind the top floor's west wall")
+    got, out = inside_answers(rig, "CfTower", [p for p, _ in room] + [inside[0]])
+    for p, what in room:
+        e = got.get(p) or []
+        rows = {h["formkey"]: h for h in e}
+        sf, tf = (rows.get(shell) or {}).get("facing") or {}, (rows.get(top) or {}).get("facing") or {}
+        check("IS5", all(sf.get(k) == "back" for k in ("+x", "-x", "+y", "-y"))
+              and all(tf.get(k) == "front" for k in ("+x", "-x", "+y", "-y")),
+              f"the case is not the shape it tests (shell back, interior front on the four sides): {what}",
+              f"{p}: shell {sf} interior {tf}")
+        kind, fails, _ = S.inside_verdict(e, ARGS)
+        check("IS5", kind == "clear", f"an eye on the tower's top floor was refused as inside the shell: {what}",
+              f"{p}: {kind} {fails[:1]}")
+    kind, fails, _ = S.inside_verdict(got.get(inside[0]), ARGS)
+    check("IS5", kind == "inside" and any("back face" in f for f in fails),
+          f"an eye inside the tower's masonry was not refused: {inside[1]}", f"{inside[0]}: {kind} {fails[:1]}")
+
+
 class Rig:
     def __init__(self, tmp: Path, vp: Path, game: Path):
         self.tmp, self.vp, self.game = tmp, vp, game
@@ -174,13 +201,13 @@ class Rig:
         return self.lab.render(out, cell, *flags)
 
 
-CASES = [is1_is2_is3, is4_thick_walls]
+CASES = [is1_is2_is3, is4_thick_walls, is5_room_inside_a_shell]
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vp", default=str(PROD_VP))
-    ap.add_argument("--only", default="", help="IS1 (runs IS1-IS3) and/or IS4")
+    ap.add_argument("--only", default="", help="IS1 (runs IS1-IS3), IS4, IS5")
     ap.add_argument("--keep", default=None)
     a = ap.parse_args(argv)
     only = {x.strip().upper() for x in a.only.split(",") if x.strip()}
