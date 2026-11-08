@@ -272,6 +272,71 @@ def test_missing_placement_evidence_refuses():
 
 
 # --------------------------------------------------------------------------------------
+# 1a. an eye inside a solid, at any thickness
+# --------------------------------------------------------------------------------------
+#
+# EYE is (0,-300,120). From inside a solid every ray leaves through a back face, which the renderer culls, so the camera
+# would see out through the solid. The old reach rule (faces within 96 u on 3 of 6 axes) passed any solid thicker than
+# that with the eye nearer one face. The fake prints every ray of an enclosing box as `back` unless the box says
+# otherwise (fake_viewprobe.py).
+
+def solid(edid, lo, hi, **kw):
+    return dict({"id": "000501:Test.esp", "edid": edid, "min": lo, "max": hi}, **kw)
+
+
+SOLID_150 = solid("Solid150", [-140, -500, -100], [10, -100, 340])       # 10 u inside its +x face, nothing else near
+SOLID_400 = solid("Solid400", [-200, -500, -80], [200, -100, 320])       # the eye at its centre
+SOLID_2000 = solid("Solid2000", [-1000, -1300, -880], [1000, 700, 1120])
+
+
+def inside_fails(doc):
+    return [f for f in doc["fails"] if f.startswith("inside")]
+
+
+def test_an_eye_inside_a_solid_is_refused_at_any_thickness():
+    for box in (SOLID_150, SOLID_400, SOLID_2000):
+        code, out, doc = check_cli(room(box), "--surface", LOW)
+        fs = inside_fails(doc)
+        check(f"inside solid: {box['edid']} refuses the eye as inside it, by its back faces",
+              any("back face" in f and box["edid"] in f for f in fs), "; ".join(fs) or "no inside refusal")
+        check(f"inside solid: {box['edid']} -- and the camera is REFUSED", code == 1, f"exit {code}")
+
+
+def test_a_room_seen_from_inside_is_not_a_solid():
+    for name, box in (("shell", dict(SOLID_400, shell=True)), ("two-sided", dict(SOLID_400, twoSided=True))):
+        code, out, doc = check_cli(room(box), "--surface", LOW)
+        check(f"inside solid: a {name} box around the eye is not refused as a solid",
+              not any("back face" in f for f in inside_fails(doc)), "; ".join(inside_fails(doc)))
+
+
+def test_one_back_face_passes_two_refuse():
+    one = dict(SOLID_400, shell=True, facing={"+x": "back"})
+    two = dict(SOLID_400, shell=True, facing={"+x": "back", "-x": "back"})
+    code, out, doc = check_cli(room(one), "--surface", LOW)
+    check("inside solid: one back face of six is not called inside (--inside-back 2)",
+          not any("back face" in f for f in inside_fails(doc)), "; ".join(inside_fails(doc)))
+    code, out, doc = check_cli(room(two), "--surface", LOW)
+    check("inside solid: two back faces are", any("back face" in f for f in inside_fails(doc)),
+          "; ".join(inside_fails(doc)) or "no inside refusal")
+
+
+def test_rays_without_facing_are_unresolved():
+    sc = room(SOLID_400)
+    sc["insideFacingStyle"] = "none"
+    code, out, doc = check_cli(sc, "--surface", LOW)
+    check("inside solid: rays with no facing statement are UNRESOLVED, not clear",
+          any("which way" in f for f in inside_fails(doc)), "; ".join(inside_fails(doc)) or "no inside refusal")
+    check("inside solid: and the camera is refused", code == 1, f"exit {code}")
+
+
+def test_a_mirrored_shape_is_unresolved():
+    code, out, doc = check_cli(room(dict(SOLID_400, mirrored=True)), "--surface", LOW)
+    check("inside solid: a hit whose facing is unknown (mirrored) is UNRESOLVED, never front or back",
+          any("front from back" in f for f in inside_fails(doc)), "; ".join(inside_fails(doc)) or "no inside refusal")
+    check("inside solid: and the camera is refused", code == 1, f"exit {code}")
+
+
+# --------------------------------------------------------------------------------------
 # 1b. the off-mesh allowance, paid for in geometry
 # --------------------------------------------------------------------------------------
 #
@@ -1357,6 +1422,11 @@ def test_a_candidate_without_a_wall_margin_prints():
 
 ALL = [test_a_candidate_without_a_wall_margin_prints, test_devbench_reads_a_worklist_in_either_spelling_or_refuses_by_name,
        test_failed_verification_cannot_export_success,
+       test_an_eye_inside_a_solid_is_refused_at_any_thickness,
+       test_a_room_seen_from_inside_is_not_a_solid,
+       test_one_back_face_passes_two_refuse,
+       test_rays_without_facing_are_unresolved,
+       test_a_mirrored_shape_is_unresolved,
        test_pose_identity_binds_the_result,
        test_skipped_verification_is_not_a_pass,
        test_verified_run_publishes_cleanly,

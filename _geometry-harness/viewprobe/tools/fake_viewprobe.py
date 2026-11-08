@@ -22,7 +22,9 @@ Scene JSON:
                 "obnd": {"min": [...], "max": [...]},  # the record's CLAIM about it, if it differs
                 "alpha": false,      # true = draws with depth writes OFF: the ray passes through
                 "physical": true,    # false = not offered by --inside-at
-                "meshUnreadable": false}],  # true = --inside-at reports no rays for it
+                "meshUnreadable": false,    # true = --inside-at reports no rays for it
+                "shell": false, "twoSided": false, "mirrored": false,  # the --inside-at facing (see there)
+                "facing": {"+x": "back"}}],  # per-axis facing override
      "nav":  [{"min": [x,y], "max": [x,y], "z": 0.0, "name": "Test.esp tri",
                "flags": 0}],            # flags 8 = 0x08 deleted: printed NOT DRAWN, as viewprobe does
      "failOnCullAbove": false,       # exit 1 on any call carrying --cull-above (a failed fallback probe)
@@ -37,6 +39,7 @@ Scene JSON:
      "insideObndOnly": 0,            # refs --inside-at could nominate only by their record box
      "insideUnreadable": 0,          # physical refs whose mesh would not read, so never ruled out
      "insideCoverStyle": "mesh",     # "mesh" | "legacy" (the obnd arm) | "none" (older renderer)
+     "insideFacingStyle": "stated",  # "none" omits each row's `facing` field (a renderer from before it)
      "configFingerprint": "<64 hex>",  # what viewprobe prints for a candidate configuration
      "configFingerprintAsks": [1],     # print it only on these 1-based ASKING invocations
      "unreadable": [{"kind": "mesh", "asset": "meshes\\x.nif", "reason": "...",
@@ -417,6 +420,17 @@ def one_shot(scene, a, argv, png):
             # load: the row arrives with no ray distances at all, which is the shape the planner has
             # to decide on, and the only evidence left is the box.
             ray_txt = "rays n/a (mesh not loaded)" if b.get("meshUnreadable") else f"rays {txt}"
+            # Which way the nearest face on each ray is turned. From inside a solid box every ray leaves through a
+            # back face; `shell` is a box seen from inside its own hollow (faces turned in, so front), `twoSided` a
+            # shape drawn on both sides, `mirrored` a shape whose winding a mirrored transform flips (viewprobe prints
+            # `-`: the facing is unknown), `facing` an explicit per-axis answer. `insideFacingStyle: "none"` omits the
+            # field, as a renderer from before it existed does.
+            face = ("front" if b.get("shell") else "two" if b.get("twoSided") else "-" if b.get("mirrored")
+                    else "back")
+            fac = {k: face for k in ("+x", "-x", "+y", "-y", "up", "down")}
+            fac.update(b.get("facing") or {})
+            if not b.get("meshUnreadable") and scene.get("insideFacingStyle", "stated") != "none":
+                ray_txt += "  facing " + " ".join(f"{k} {fac[k]}" for k in ("+x", "-x", "+y", "-y", "up", "down"))
             print(f"      {b['id']}  {b.get('type', 'Static')}  {b.get('edid', '-')}  "
                   f"dims {dims[0]:.0f}x{dims[1]:.0f}x{dims[2]:.0f} u  {ray_txt}")
 
