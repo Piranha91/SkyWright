@@ -40,6 +40,12 @@ namespace ViewProbe;
 //   CfVoid      crate (0,30,20)        crate (30,10,20)                     no floor and no navmesh: no storey at all
 //   CfCutMod    crate (0,30,20)        crate (30,10,20) from CfFixtureMod.esp  the CfCutaway walls (B1/B2: the capture
 //                                      states; without the mod plugin, B is not there)
+//   CfThick     no pair: lone solids of the crate (drawn x +-25.5s, y -104s..37.75s, z +-20.5s at scale s), for the
+//               inside test (tests/test_eye_inside_solid.py): T1 scale 3 at (-600,0,61.5), T2 scale 4 at (0,600,82), T3
+//               scale 8 at (600,0,164), the thin wall scale 1.5 (76.5 u thick) at (0,-600,30.75); Walls[0..3] in that order
+//   CfThickWalls crate (0,30,20)       crate (30,10,20)                     walls of the crate at scale 6 (about 300 u thick and
+//               245 u tall, one tier centred z 115), inner faces 25 u clear of the pair: a station eye in the middle of a
+//               wall has no face within 96 u (the planner gap of the 2026-10-31 base run 3, made wider than any reach)
 public static class CaptureFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -57,11 +63,11 @@ public static class CaptureFixture
     public static readonly CellIds Cutaway = Ids("CfCutaway", 0x810), Touch = Ids("CfTouch", 0x820), Buried = Ids("CfBuried", 0x830),
         Glow = Ids("CfGlow", 0x840), Focus = Ids("CfFocus", 0x850), NoNav = Ids("CfNoNav", 0x860), Disabled = Ids("CfDisabled", 0x870),
         CutMod = Ids("CfCutMod", 0x880), Open = Ids("CfOpen", 0x890), FocusLow = Ids("CfFocusLow", 0x8A0),
-        Void = Ids("CfVoid", 0x8B0);
+        Void = Ids("CfVoid", 0x8B0), Thick = Ids("CfThick", 0x8C0), ThickWalls = Ids("CfThickWalls", 0x8D0);
     /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
     public static readonly ModKey ModKeyB = new("CfFixtureMod", ModType.Plugin);
     public static readonly FormKey CutModB = new(ModKeyB, 0x801);
-    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void };
+    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls };
 
     static CellIds Ids(string edid, uint b)
         => new(edid, K(b), K(b + 1), K(b + 2), K(b + 3), Enumerable.Range(0, 32).Select(n => K(0x2000 + (b - 0x810) / 0x10 * 0x40 + (uint)n)).ToArray(),
@@ -97,6 +103,20 @@ public static class CaptureFixture
                 cell.Temporary.Add(WallX(p[2 * 8 + t * 2 + k], k == 0 ? -80f : 110f, s, z));
                 cell.Temporary.Add(WallX(p[3 * 8 + t * 2 + k], k == 0 ? -80f : 110f, n, z));
             }
+    }
+
+    // walls of the crate at scale 6 (x +-153, y -624..226, z +-123 about the piece), one tier at z 115; W/E pieces at
+    // y 100 and 200 (y -524..426), S/N pieces at x -130 and 160 with a quarter turn (x -356..386 either way it swings);
+    // piece side*8 + k
+    static void ThickWalls6(SkCell cell, FormKey[] p, float w, float e, float s, float n)
+    {
+        for (int k = 0; k < 2; k++)
+        {
+            cell.Temporary.Add(Ref(p[0 * 8 + k], CrateBase, w, k == 0 ? 100f : 200f, 115f, scale: 6f));
+            cell.Temporary.Add(Ref(p[1 * 8 + k], CrateBase, e, k == 0 ? 100f : 200f, 115f, scale: 6f));
+            cell.Temporary.Add(Ref(p[2 * 8 + k], CrateBase, k == 0 ? -130f : 160f, s, 115f, 0, 0, HalfPi, 6f));
+            cell.Temporary.Add(Ref(p[3 * 8 + k], CrateBase, k == 0 ? -130f : 160f, n, 115f, 0, 0, HalfPi, 6f));
+        }
     }
 
     // a room around an open cell: four walls of the crate at scale 4 (200 u thick, 160 u tall, two tiers to z 320) about
@@ -181,7 +201,15 @@ public static class CaptureFixture
         var focusLow = NewCell(FocusLow, true);
         focusLow.Temporary.Add(Ref(FocusLow.A, WallBase, 0, 0, -380)); focusLow.Temporary.Add(Ref(FocusLow.B, GlowBase, 900, 0, 1400, scale: 6f));
         var voidCell = NewCell(Void, false, floor: false); Pair(voidCell, Void);
-        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell }) MovedRefFixture.FileInterior(m, c);
+        var thick = NewCell(Thick, true);
+        thick.Temporary.Add(Ref(Thick.Walls[0], CrateBase, -600, 0, 61.5f, scale: 3f));
+        thick.Temporary.Add(Ref(Thick.Walls[1], CrateBase, 0, 600, 82, scale: 4f));
+        thick.Temporary.Add(Ref(Thick.Walls[2], CrateBase, 600, 0, 164, scale: 8f));
+        thick.Temporary.Add(Ref(Thick.Walls[3], CrateBase, 0, -600, 30.75f, scale: 1.5f));
+        var thickWalls = NewCell(ThickWalls, true); Pair(thickWalls, ThickWalls);
+        ThickWalls6(thickWalls, ThickWalls.Walls, -203f, 233f, -272f, 246f);   // inner faces 25 u clear of the pair
+        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell, thick, thickWalls })
+            MovedRefFixture.FileInterior(m, c);
 
         var path = Path.Combine(dir, Key.FileName.String);
         m.BeginWrite.ToPath(path).WithNoLoadOrder().Write();
