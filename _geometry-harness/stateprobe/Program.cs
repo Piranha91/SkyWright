@@ -62,7 +62,9 @@ if (args.Length >= 2 && args[0] == "--write-scope-fixture") { var w = ScopeFixtu
 // conflictdiff refuses a pair of emits across the change rather than credit the vanished rows.
 // state-contact-route-v3 (2026-10-25): nor is an activator or a door with no model (station AD), and the changed references
 // with no box are split by name (editor markers set aside; markers carrying a primitive unjudged apart).
-const string StateMeasurementPolicy = "state-contact-route-v3|state-overlap-unmeasured-v1";
+// state-contact-route-v4 (2026-11-08): with --primitive-solidity, marker primitives station Q measured are decided (not solid
+// set aside, solid unjudged by name); the rest of the changed references with no box are named by cause.
+const string StateMeasurementPolicy = "state-contact-route-v4|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -521,7 +523,7 @@ ParallelArms.Run(arms, stateThreads, arm =>
 static void Merge(StateTally a, StateTally b)
 {
     a.States += b.States; a.Changes += b.Changes; a.Arrivals += b.Arrivals; a.Departures += b.Departures; a.SwitchesThemselves += b.SwitchesThemselves;
-    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NoBody += b.NoBody; a.NoBodyActivator += b.NoBodyActivator; a.NoBodyDoor += b.NoBodyDoor; a.EditorMarker += b.EditorMarker; a.MarkerPrimitive += b.MarkerPrimitive; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
+    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NoBody += b.NoBody; a.NoBodyActivator += b.NoBodyActivator; a.NoBodyDoor += b.NoBodyDoor; a.EditorMarker += b.EditorMarker; a.MarkerPrimitive += b.MarkerPrimitive; a.MarkerPrimitiveSolid += b.MarkerPrimitiveSolid; a.MarkerPrimitiveNotSolid += b.MarkerPrimitiveNotSolid; a.Decal += b.Decal; a.PlacedTrap += b.PlacedTrap; a.Actor += b.Actor; a.EffectVolume += b.EffectVolume; a.TypeOutsideRoles += b.TypeOutsideRoles; a.OverSizeCap += b.OverSizeCap; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
     a.HostsLeaving += b.HostsLeaving; a.HostsArriving += b.HostsArriving; a.DepsArriving += b.DepsArriving; a.DepsLeaving += b.DepsLeaving; a.ReSupported += b.ReSupported; a.FloatingOnArrival += b.FloatingOnArrival; a.TouchingOnArrival += b.TouchingOnArrival; a.ContactUnmeasured += b.ContactUnmeasured;
     a.RouteAsked += b.RouteAsked; a.RouteUnjudged += b.RouteUnjudged; a.RouteNoLine += b.RouteNoLine; a.RouteClipped += b.RouteClipped; a.RouteNone += b.RouteNone; a.ElapsedMs += b.ElapsedMs;
     a.OutsidePopulation += b.OutsidePopulation; a.MergedContactRows += b.MergedContactRows;
@@ -541,6 +543,10 @@ if (population is not null)
                     + string.Join(", ", new[] { "contact", "route-interior", "route-ring", "large-ref" }.Select(k => $"{k} {keptByRule.GetValueOrDefault(k):N0}"))
                     + $", dropped {keysDropped:N0}");
 Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry or a navcut without a primitive); {tally.MarkerPrimitive:N0} changed markers carrying a primitive (unjudged); {tally.EditorMarker:N0} changed editor markers; {tally.NoBody:N0} changed lights, {tally.NoBodyActivator:N0} activators and {tally.NoBodyDoor:N0} doors with no model (no body); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
+Console.WriteLine($"   changed references without a box, by cause: {tally.Actor:N0} placed actors, {tally.PlacedTrap:N0} placed hazards or traps (base not read), {tally.EffectVolume:N0} effects meshes in no role, {tally.TypeOutsideRoles:N0} of a type in no role, {tally.OverSizeCap:N0} over the volume cap in no role (unjudged); {tally.Decal:N0} decals (set aside); {tally.NoBox:N0} with no geometry (NoBox)");
+Console.WriteLine(primitiveTable is null
+    ? $"   marker primitives: no --primitive-solidity table given, so all {tally.MarkerPrimitive:N0} stay unjudged (MarkerPrimitive)"
+    : $"   marker primitives by station Q's table ({primitiveTable.Count} entries): {tally.MarkerPrimitiveNotSolid:N0} measured not solid (set aside), {tally.MarkerPrimitiveSolid:N0} measured solid (unjudged: the check does not measure primitive boxes), {tally.MarkerPrimitive:N0} not in the measurement (unjudged)");
 Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasured:N0} changed obstructing reference-state(s); strict placed render-surface migration is pending, so no box overlap is a finding or repair predicate");
 
 // ---- LEFT IN EMPTY SPACE per state (--empty-space): each state's arriving fixtures against every plugin that stepped on a
@@ -687,7 +693,7 @@ if (jsonPath is not null)
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, plugins = paths.Count,
         measurementPolicy = StateMeasurementPolicy,
         states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured, bodilessLights, bodilessActivators, bodilessDoors,
-        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.NoBody, tally.NoBodyActivator, tally.NoBodyDoor, tally.EditorMarker, tally.MarkerPrimitive, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
+        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.NoBody, tally.NoBodyActivator, tally.NoBodyDoor, tally.EditorMarker, tally.MarkerPrimitive, tally.MarkerPrimitiveSolid, tally.MarkerPrimitiveNotSolid, tally.Decal, tally.PlacedTrap, tally.Actor, tally.EffectVolume, tally.TypeOutsideRoles, tally.OverSizeCap, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
         perState = perState.Select(p => new { state = p.Arm.Name, flips = p.Arm.Flips.Select(f => f.ToString()), p.Changes, p.Rows, p.Conditional, ms = p.Ms }),
         rows = rows.Select(r => new
         {
@@ -722,10 +728,15 @@ if (emitPath is not null)
     {
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
         new("states", arms.Count, null, null, $"{tally.Changes:N0} changed references"),
-        new("changed references with a box", tally.Changes - tally.NoBox - tally.MarkerPrimitive - tally.NoBody - tally.NoBodyActivator - tally.NoBodyDoor - tally.EditorMarker,
-            new Dictionary<string, long> { ["NoBox"] = tally.NoBox, ["MarkerPrimitive"] = tally.MarkerPrimitive },
+        new("changed references with a box", tally.Changes - tally.NoBox - tally.MarkerPrimitive - tally.MarkerPrimitiveSolid - tally.MarkerPrimitiveNotSolid
+                                                  - tally.NoBody - tally.NoBodyActivator - tally.NoBodyDoor - tally.EditorMarker
+                                                  - tally.Decal - tally.PlacedTrap - tally.Actor - tally.EffectVolume - tally.TypeOutsideRoles - tally.OverSizeCap,
+            new Dictionary<string, long> { ["NoBox"] = tally.NoBox, ["MarkerPrimitive"] = tally.MarkerPrimitive, ["MarkerPrimitiveSolid"] = tally.MarkerPrimitiveSolid,
+                                           ["Actor"] = tally.Actor, ["PlacedTrap"] = tally.PlacedTrap, ["EffectVolume"] = tally.EffectVolume, ["TypeOutsideRoles"] = tally.TypeOutsideRoles,
+                                           ["OverSizeCap"] = tally.OverSizeCap },
             new Dictionary<string, long> { ["LightWithNoModel"] = tally.NoBody, ["ActivatorWithNoModel"] = tally.NoBodyActivator,
-                                           ["DoorWithNoModel"] = tally.NoBodyDoor, ["EditorMarker"] = tally.EditorMarker }),
+                                           ["DoorWithNoModel"] = tally.NoBodyDoor, ["EditorMarker"] = tally.EditorMarker,
+                                           ["MarkerPrimitiveNotSolid"] = tally.MarkerPrimitiveNotSolid, ["Decal"] = tally.Decal }),
         new("state-overlap changed obstructing references", 0,
             new Dictionary<string, long> { ["ActualSurfacePredicateUnavailable"] = tally.StateOverlapUnmeasured }, null,
             "STATE-OVERLAP is withheld: this evaluator does not yet carry strict placed render surfaces; diagnostic boxes provide no finding or repair credit"),
