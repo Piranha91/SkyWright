@@ -68,6 +68,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SHOTPLAN = HERE / "viewprobe" / "tools" / "shotplan.py"
+sys.path.insert(0, str(HERE))
+import capture_navmesh as NAVCAM  # noqa: E402  the navmesh comparison's camera (its own file)
 
 EXIT_OK, EXIT_REFUSED = 0, 2
 
@@ -187,7 +189,7 @@ class Refused(Exception):
 
 # ---------------------------------------------------------------- the request side --
 
-SUPPORTED_REQUEST_TYPES = ("overlap-pair", "state-pair", "placement-split")
+SUPPORTED_REQUEST_TYPES = ("overlap-pair", "state-pair", "placement-split", "navmesh-version-comparison")
 
 # Frozen at Gate B (2026-10-31): a top-down picture is accepted only when each participant shows at least this many of its
 # own marked pixels (--ref-surface colour or --coverage-of mask, the view label left out) in the probe frame, 320 px wide
@@ -1164,6 +1166,20 @@ def cmd_acquire(a) -> int:
                               f"{request.get('requestType')!r} is not one of "
                               f"{', '.join(SUPPORTED_REQUEST_TYPES)}; this adapter plans a camera "
                               f"for a two-object pair and nothing else")
+            if request.get("requestType") == "navmesh-version-comparison":
+                # checked before the source is re-hashed, so a shape this camera does not draw refuses before any work
+                NAVCAM.check_request(sys.modules[__name__], request, a.points)
+                bundle = Path(a.bundle).resolve() if a.bundle else packet_path.parent
+                source = verify_source(request, bundle)
+                result = NAVCAM.acquire(sys.modules[__name__], a, request, source, receipts_dir, shotplan_mod)
+                write_json(out, result)
+                run.advance(1)
+                run.artifact(str(out))
+                run.tally(ok=1)
+                print(f"camera-ready {a.request}: navmesh TOP-DOWN over {len(result['navmesh']['subjects']) // 2} broken "
+                      f"crossing(s), sliced above z {result['camera']['cullAbove']} -- not a player viewpoint; "
+                      f"{result['camera']['viewprobe']}")
+                return EXIT_OK
             parts = participants(request)
             bundle = Path(a.bundle).resolve() if a.bundle else packet_path.parent
             source = verify_source(request, bundle)
@@ -1344,7 +1360,17 @@ def _capture(a) -> int:
     states = list(seq.get("states") or [])
     vig = request.get("vignette") or {}
     split = request.get("requestType") == "placement-split"
-    if split:
+    navmesh = request.get("requestType") == "navmesh-version-comparison"
+    if navmesh:
+        # both states are the prediction setup at one camera; only the navmesh layer changes
+        arms = {s_: request.get("armId") for s_ in NAVCAM.STATES}
+        orders = {s_: a.with_order for s_ in NAVCAM.STATES}
+        cams = {s_: acq["camera"] for s_ in NAVCAM.STATES}
+        if states != list(NAVCAM.STATES) or not (acq.get("camera") or {}).get("navFlags"):
+            result["reason"] = (f"the request's sequence is {states}; this step captures a navmesh comparison's "
+                                f"{', '.join(NAVCAM.STATES)} at a navmesh camera")
+            return finish(EXIT_REFUSED)
+    elif split:
         sp = acq.get("split") or {}
         arms = {"left": vig.get("withoutArmId"), "right": request.get("armId")}
         orders = {"left": a.without_order, "right": a.with_order}
@@ -1356,11 +1382,12 @@ def _capture(a) -> int:
         arms = {"without": vig.get("withoutArmId"), "with": request.get("armId"), "highlight": request.get("armId")}
         orders = {"without": a.without_order, "with": a.with_order, "highlight": a.with_order}
         cams = {s_: acq["camera"] for s_ in ("without", "with", "highlight")}
-        if states != ["without", "with", "highlight"] or not arms["without"]:
+        if states != ["without", "with", "highlight"] or not arms["without"] or not a.without_order:
             result["reason"] = (f"the request's sequence is {states} with setup without the mod {arms['without']!r}; "
                                 f"this step captures the reel's without / with / highlight states of a vignette request")
             return finish(EXIT_REFUSED)
-    vp = Path(a.vp) if a.vp else VIEWPROBE
+    vp_cmd = shlex.split(a.vp) if a.vp and not Path(a.vp).is_file() else [str(a.vp or VIEWPROBE)]
+    vp = Path(vp_cmd[-1])
     renderer = {n: sha256_file(vp.parent / n) for n in ("viewprobe.exe", "viewprobe.dll", "housecarl-core.dll")
                 if (vp.parent / n).is_file()}
     media = {}
@@ -1368,7 +1395,8 @@ def _capture(a) -> int:
     for state in states:
         d = out / state
         d.mkdir(parents=True, exist_ok=True)
-        argv = ([str(vp)] + capture_argv(request, cams[state], state, str(Path(orders[state]).resolve()), a.passthrough, a.size)
+        build_argv = NAVCAM.capture_argv if navmesh else capture_argv
+        argv = (vp_cmd + build_argv(request, cams[state], state, str(Path(orders[state]).resolve()), a.passthrough, a.size)
                 + ["--out", str(d)])
         r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
         text = r.stdout + "\n--stderr--\n" + r.stderr
@@ -1395,6 +1423,14 @@ def _capture(a) -> int:
             result["reason"] = (f"viewprobe could not render the {state} state (exit {r.returncode}"
                                 + (f"; {refusals[0]}" if refusals else "") + ("" if fp else "; no configuration line") + ")")
             return finish(EXIT_REFUSED)
+        if navmesh:
+            rcpt = next(iter(sorted(d.glob("*-navmeshes.json"))), None)
+            bad = (NAVCAM.receipt_check_for_capture(sys.modules[__name__], request, acq, state, rcpt) if rcpt
+                   else f"the {state} frame wrote no -navmeshes.json receipt")
+            if bad:
+                result["reason"] = bad
+                return finish(EXIT_REFUSED)
+            row["navmeshReceipt"] = str(rcpt)
         # the pose the renderer itself wrote into the PNG ("... | pose: ..."), and the pixel size it drew
         from PIL import Image
         with Image.open(pngs[-1]) as im:
@@ -1413,7 +1449,8 @@ def _capture(a) -> int:
         media.setdefault(arms[state], []).append({
             "path": str(pngs[-1]), "mediaKind": "offline-render",
             "subject": {"checkId": request.get("checkId"), "armId": arms[state], "formKey": result["formKey"],
-                        "description": f"{'split' if split else 'vignette'} {vig.get('chapterId')} {state}: request {a.request}"},
+                        "description": f"{'navmesh comparison' if navmesh else 'split' if split else 'vignette'} "
+                                       f"{vig.get('chapterId')} {state}: request {a.request}"},
             "state": request.get("state") or "baseline", "configurationFingerprint": fp, "fingerprintSource": "emitted",
             "provenance": {"tool": "viewprobe", "capturedUtc": utcnow(), "argv": argv, "rendererHashes": renderer,
                            "captureRequest": a.request, "request": a.request,
@@ -1478,11 +1515,22 @@ def main(argv=None) -> int:
     c.add_argument("--packet", required=True, help="the storyboard packet holding the request")
     c.add_argument("--request", required=True)
     c.add_argument("--with-order", required=True, help="the prediction setup's candidate file (viewprobe --order)")
-    c.add_argument("--without-order", required=True, help="the setup without the evaluated mod's candidate file")
+    c.add_argument("--without-order", default=None,
+                   help="the setup without the evaluated mod's candidate file (a vignette or split; a navmesh comparison "
+                        "renders both its states from --with-order)")
     c.add_argument("--out", required=True, help="state folders, media-<arm>.json per setup, capture-result.json")
     c.add_argument("--size", type=int, default=1280)
     c.add_argument("--vp", default=None, help="viewprobe.exe (default: the production build)")
     c.set_defaults(fn=cmd_capture)
+    n = sub.add_parser("navmesh-control", help="render a navmesh comparison's camera in the setup without the evaluated mod, "
+                                                "red only where that setup's own links still cross past their target")
+    n.add_argument("--acquisition", required=True, help="the camera-ready navmesh acquisition")
+    n.add_argument("--packet", required=True)
+    n.add_argument("--request", required=True)
+    n.add_argument("--order", required=True, help="the setup without the evaluated mod's candidate file (viewprobe --order)")
+    n.add_argument("--out", required=True, help="nav-link query, frame and control-result.json")
+    n.add_argument("--vp", default=None, help="viewprobe command (default: the production build)")
+    n.set_defaults(fn=lambda a_: NAVCAM.control(sys.modules[__name__], a_))
     argv = list(sys.argv[1:] if argv is None else argv)
     passthrough = []
     if "--" in argv:

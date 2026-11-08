@@ -54,13 +54,29 @@ internal sealed class NavmeshLinks
     /// <summary>One cell of one plugin, in load order (every cell, as the selection sees them).</summary>
     public void Observe(CellPlacements cp, string plugin)
     {
-        CellsObserved++;   // RED STUB: the records are not followed yet
+        CellsObserved++;
+        foreach (var k in set.Observe(cp, (_, n) => watched.Contains(n.FormKey)))
+            if (set.Navs.ContainsKey(k)) { provider[k] = plugin; cells[cp.Cell] = new(cp.CellEditorId, cp.Interior, cp.Grid); }
     }
 
     /// <summary>Every source triangle edge whose edge-link entry names <paramref name="target"/>.</summary>
     public static List<Crossing> CrossingsOf(NavmeshGeometry src, FormKey target)
     {
-        var found = new List<Crossing>();   // RED STUB: no crossing is located yet
+        var found = new List<Crossing>();
+        var table = src.EdgeLinks;
+        if (table is null) return found;
+        for (int ti = 0; ti < src.Triangles.Count; ti++)
+        {
+            var t = src.Triangles[ti];
+            // edge i joins corner i to corner i+1; its flag bit switches the field to the link table (NavGraph.cs)
+            foreach (var (link, bit, name, i0, i1) in new[] {
+                (t.EdgeLink01, 0x01, "01", t.A, t.B), (t.EdgeLink12, 0x02, "12", t.B, t.C), (t.EdgeLink20, 0x04, "20", t.C, t.A) })
+            {
+                if ((t.Flags & bit) == 0 || link < 0 || link >= table.Count || table[link].Mesh != target) continue;
+                if (i0 < 0 || i1 < 0 || i0 >= src.Vertices.Count || i1 >= src.Vertices.Count) continue;
+                found.Add(new Crossing(ti, name, link, table[link].TriangleIndex, src.Vertices[i0], src.Vertices[i1]));
+            }
+        }
         return found;
     }
 
