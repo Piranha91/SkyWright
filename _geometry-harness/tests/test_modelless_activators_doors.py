@@ -41,6 +41,26 @@ CollisionMarker box held both). So no probe measures them, and stateprobe sets t
     1464  conflictdiff refuses, both ways round and with a sentence, each probe's emit against the same emit as a build before
           this change records it (its rule's earlier policy version).
 
+Item 30 (cases 1640-1652). stateprobe --primitive-solidity FILE reads station Q's measured (base, layer) table, as
+overlapprobe does, and decides a marker's primitive with PrimitiveSolidity.Decide at scale 1, a named or absent layer, and a
+Box or PortalBox shape (Q measured no other). The test writes its own table naming the fixture's CollisionMarker-shaped base:
+solid with no layer, not solid on L_NONCOLLIDABLE.
+
+    1640  the marker stating L_NONCOLLIDABLE (MaSwT) is decided by its layer's entry: set aside, MarkerPrimitiveNotSolid.
+    1641  the SP marker (no layer) measured solid stays unjudged under MarkerPrimitiveSolid, never set aside.
+    1642  the marker at scale 2 (MaSwQ) is not in the measurement: it stays MarkerPrimitive.
+    1643  the Sphere marker (MaSwR) is not in the measurement: it stays MarkerPrimitive.
+    1644  control: without the flag every marker primitive stays MarkerPrimitive, and the console says no table was given.
+    1645  a table entry with no evidence refuses the run with a sentence.
+And the rest of "changed references with a box" is named by cause rather than counted as NoBox:
+    1646  a placed NPC (MaSwH): unjudged, Actor.
+    1647  a decal, a placed TextureSet (MaSwE): set aside, Decal.
+    1648  a static whose model is under effects/ (MaSwF), in no role: unjudged, EffectVolume.
+    1649  an idle marker with bounds (MaSwI), a type in no role: unjudged, TypeOutsideRoles.
+    1650  an idle marker 6,000 u across (MaSwO), over the volume cap: unjudged, OverSizeCap.
+    1651  a placed hazard (MaSwZ), whose base link the placement reader does not read: unjudged, PlacedTrap.
+    1652  in each of those states only the switch itself (a static with no model and no bounds) is left in NoBox.
+
 HC_MA_DUMP=DIR keeps every emit and log.
 
 Each test names the wrong answer it rejects. Probes come from this checkout's Release builds unless HC_MA_HARNESS names another
@@ -64,6 +84,10 @@ FAILURES, PASSED = [], []
 ORDER = ["MaRoom.esm", "MaObjects.esp", "MaMover.esp"]
 OBJECTS = ["A", "N", "B", "M", "D"]          # act-box, act-nc, act-bare, act-model, door-bare (ModellessActivatorFixture)
 STATES = [f"MaSw{o}" for o in OBJECTS] + ["MaSwK", "MaSwG", "MaSwP"]
+EXTRA = ["T", "Q", "R", "H", "E", "F", "I", "O", "Z"]   # ModellessActivatorFixture.Extra
+COLLISION_BOX = "00080C:MaRoom.esm"                      # ModellessActivatorFixture.CollisionBox
+TABLE = [{"kind": "base", "value": COLLISION_BOX, "layer": "none", "verdict": "solid", "stops": ["player", "items"], "evidence": "fixture"},
+         {"kind": "base", "value": COLLISION_BOX, "layer": "L_NONCOLLIDABLE", "verdict": "not_solid", "stops": [], "evidence": "fixture"}]
 BOX_LINE = "changed references with a box"
 
 
@@ -143,6 +167,20 @@ class Lab:
         self.logs["sm-base"] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", self.sm_base, *tail, "--state", "MaSwG"])
         self.logs["sm-more"] = run([exe(PROBES, "stateprobe"), "--order", self.cand_more, "--emit", self.sm_more, *tail, "--state", "MaSwG"])
         self.logs["sk"] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", self.sk, *tail, "--state", "MaSwK"])
+        # item 30: one run per state, with the table for the marker primitives and without it for every new state
+        table, bad_table = tmp / "table.json", tmp / "table-bad.json"
+        table.write_text(json.dumps(TABLE), encoding="utf-8")
+        bad_table.write_text(json.dumps([dict(TABLE[0], evidence="")]), encoding="utf-8")
+        self.x = {}
+        for x in ["P", "T", "Q", "R"]:
+            self.x["tab-" + x] = tmp / f"tab-{x}.json"
+            self.logs["tab-" + x] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", self.x["tab-" + x], *tail,
+                                         "--state", f"MaSw{x}", "--primitive-solidity", table])
+        for x in EXTRA:
+            self.x["no-" + x] = tmp / f"no-{x}.json"
+            self.logs["no-" + x] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", self.x["no-" + x], *tail, "--state", f"MaSw{x}"])
+        self.logs["bad-table"] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", tmp / "bad.json", *tail, "--state", "MaSwP",
+                                      "--primitive-solidity", bad_table])
         self.state_emit, self.state_json = tmp / "state-emit.json", tmp / "state-rows.json"
         argv = [exe(PROBES, "stateprobe"), *common, "--route", "off", "--emit", self.state_emit, "--json", self.state_json]
         for s in STATES:
@@ -155,7 +193,7 @@ class Lab:
         self.empty_emit, self.empty_side = tmp / "empty-emit.json", tmp / "empty-side.json"
         self.logs["empty"] = run([exe(PROBES, "contactprobe"), *common, "--empty-space", self.empty_side, "--emit", self.empty_emit])
         for k, out in {"state": self.state_emit, "contact": self.contact_emit, "empty": self.empty_emit, "sm-base": self.sm_base,
-                       "sm-more": self.sm_more, "sk": self.sk, "sp": self.sp}.items():
+                       "sm-more": self.sm_more, "sk": self.sk, "sp": self.sp, **self.x}.items():
             lg = self.logs[k]
             if lg.returncode != 0 or not out.exists():
                 raise RuntimeError(f"{k} run exit {lg.returncode}: {lg.stdout[-1500:]} {lg.stderr[-800:]}")
@@ -183,7 +221,8 @@ def cov(path, line=BOX_LINE):
 
 
 # The policy version each probe's emit recorded before activators and doors with no model stopped being dependents (2026-10-25).
-PRE_CHANGE_VERSION = {"state": "state-contact-route-v2", "contact": "placement_contact_v2", "empty": "empty_space_v2"}
+# stateprobe's moved again on 2026-11-08 (item 30: marker primitives decided by station Q's table, the rest of NoBox named).
+PRE_CHANGE_VERSION = {"state": "state-contact-route-v3", "contact": "placement_contact_v2", "empty": "empty_space_v2"}
 
 
 def main() -> int:
@@ -286,6 +325,67 @@ def main() -> int:
             c = cov(L.sm_base)
             assert (c.get("Unjudgeable") or {}).get("NoBox", 0) >= 1, f"the static with a missing model is no longer unjudged: {c}"
 
+        def parts(key):
+            c = cov(L.x[key])
+            return c.get("Unjudgeable") or {}, c.get("SetAside") or {}, c
+
+        def c1640():
+            # Rejects: the stated layer ignored (read as "none", so measured solid), or a not-solid marker left unjudged.
+            unj, aside, c = parts("tab-T")
+            assert aside.get("MarkerPrimitiveNotSolid") == 1 and not unj.get("MarkerPrimitive") and not unj.get("MarkerPrimitiveSolid"), c
+
+        def c1641():
+            # Rejects: a marker measured solid set aside as if it had no body, or left under the unmeasured name.
+            unj, aside, c = parts("tab-P")
+            assert unj.get("MarkerPrimitiveSolid") == 1 and not unj.get("MarkerPrimitive") and not aside.get("MarkerPrimitiveNotSolid"), c
+
+        def c1642():
+            # Rejects: a scaled primitive decided by a measurement made at scale 1.
+            unj, aside, c = parts("tab-Q")
+            assert unj.get("MarkerPrimitive") == 1 and not unj.get("MarkerPrimitiveSolid") and not aside.get("MarkerPrimitiveNotSolid"), c
+
+        def c1643():
+            # Rejects: a Sphere decided by a measurement made on boxes.
+            unj, aside, c = parts("tab-R")
+            assert unj.get("MarkerPrimitive") == 1 and not unj.get("MarkerPrimitiveSolid") and not aside.get("MarkerPrimitiveNotSolid"), c
+
+        def c1644():
+            # Rejects: a default table, or a change in what is counted when no table is given.
+            for x in ("T", "Q", "R"):
+                unj, aside, c = parts("no-" + x)
+                assert unj.get("MarkerPrimitive") == 1 and not unj.get("MarkerPrimitiveSolid") and not aside.get("MarkerPrimitiveNotSolid"), c
+            assert "no --primitive-solidity table" in L.logs["no-T"].stdout, [x for x in L.logs["no-T"].stdout.splitlines() if "primitive" in x]
+
+        def c1645():
+            # Rejects: an entry without evidence accepted, or refused without a sentence.
+            lg = L.logs["bad-table"]
+            assert lg.returncode == 2 and "evidence" in lg.stderr and "--primitive-solidity" in lg.stderr, (lg.returncode, lg.stderr[-400:])
+
+        def named(key, want, side):
+            # Rejects: the cause left in NoBox, or counted on the wrong side (unjudged against set aside).
+            unj, aside, c = parts(key)
+            mine, other = (aside, unj) if side == "aside" else (unj, aside)
+            assert mine.get(want) == 1 and not other.get(want), f"want {want} 1 ({side}): {c}"
+
+        def c1652():
+            # Rejects: a fix that empties NoBox wholesale (the switch has no box and stays unjudged as NoBox).
+            bad = {x: parts("no-" + x)[0].get("NoBox") for x in EXTRA if parts("no-" + x)[0].get("NoBox") != 1}
+            assert not bad, f"want NoBox 1 (the switch) in each state: {bad}"
+
+        for name, fn in [("1640 a layer-stated marker primitive measured not solid is set aside", c1640),
+                         ("1641 a marker primitive measured solid stays unjudged by name", c1641),
+                         ("1642 a scaled marker primitive stays unmeasured", c1642),
+                         ("1643 a Sphere marker primitive stays unmeasured", c1643),
+                         ("1644 control: without the table nothing is decided, and the console says so", c1644),
+                         ("1645 a table entry without evidence refuses the run", c1645),
+                         ("1646 a placed NPC is unjudged as Actor, not NoBox", lambda: named("no-H", "Actor", "unj")),
+                         ("1647 a decal is set aside as Decal", lambda: named("no-E", "Decal", "aside")),
+                         ("1648 an effects mesh in no role is unjudged as EffectVolume", lambda: named("no-F", "EffectVolume", "unj")),
+                         ("1649 an idle marker is unjudged as TypeOutsideRoles", lambda: named("no-I", "TypeOutsideRoles", "unj")),
+                         ("1650 an over-cap box in no role is unjudged as OverSizeCap", lambda: named("no-O", "OverSizeCap", "unj")),
+                         ("1651 a placed hazard is unjudged as PlacedTrap, not NoBox", lambda: named("no-Z", "PlacedTrap", "unj")),
+                         ("1652 only the switch stays in NoBox", c1652)]:
+            check(name, fn)
         for name, fn in [("1454 adding editor markers does not move what the state check could not judge", c1454),
                          ("1455 editor markers that arrive are set aside by name", c1455),
                          ("1457 a marker with a primitive stays unjudged under its own name", c1457),
@@ -303,7 +403,7 @@ def main() -> int:
         if os.environ.get("HC_MA_DUMP"):
             d = Path(os.environ["HC_MA_DUMP"])
             d.mkdir(parents=True, exist_ok=True)
-            for f in (L.state_emit, L.state_json, L.contact_emit, L.empty_emit, L.sm_base, L.sm_more, L.sk, L.sp):
+            for f in (L.state_emit, L.state_json, L.contact_emit, L.empty_emit, L.sm_base, L.sm_more, L.sk, L.sp, *L.x.values()):
                 shutil.copyfile(f, d / f.name)
             for k, lg in L.logs.items():
                 (d / f"{k}.log").write_text(lg.stdout + "\n--- stderr\n" + lg.stderr, encoding="utf-8")

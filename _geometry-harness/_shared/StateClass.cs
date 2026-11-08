@@ -104,6 +104,8 @@ public sealed class StateEvaluator
     public ISet<string> Obstructing { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
     public RouteAsk? Route { get; set; }
+    /// <summary>Station Q's measured primitive table (stateprobe --primitive-solidity): decides a marker's primitive. Null: none given.</summary>
+    public IReadOnlyList<PrimitiveMeasurement>? PrimitiveTable { get; set; }
     /// <summary>A plan's population (window 2, task 1): a changed reference this says false for is not processed. Every row is
     /// computed from its own changed reference and the whole-order index, so the rows of a processed one are the whole-order
     /// run's. Null: every changed reference.</summary>

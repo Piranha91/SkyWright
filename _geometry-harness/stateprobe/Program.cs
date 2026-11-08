@@ -90,6 +90,7 @@ var stateSpecs = new List<string>(); var cellFilters = new List<string>();
 var enablePlugins = new List<string>(); var disablePlugins = new List<string>();
 string? orderFile = null;
 string? populationPath = null, populationAuditEmit = null, populationAuditOut = null;
+string? primitiveSolidityPath = null;   // --primitive-solidity FILE: station Q's measured (base, layer) table for marker primitives
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--list" && i + 1 < args.Length) listN = int.Parse(args[++i]);
@@ -118,6 +119,7 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--population" && i + 1 < args.Length) populationPath = args[++i];
     else if (args[i] == "--phase-timers" && i + 1 < args.Length) phaseTimersPath = args[++i];
+    else if (args[i] == "--primitive-solidity" && i + 1 < args.Length) primitiveSolidityPath = args[++i];
     else if (args[i] == "--population-audit" && i + 2 < args.Length) { populationAuditEmit = args[++i]; populationAuditOut = args[++i]; }
 }
 if (populationAuditEmit is not null && populationPath is null) { Console.Error.WriteLine("--population-audit needs --population"); return 2; }
@@ -132,6 +134,13 @@ if (populationPath is not null)
         Console.Error.WriteLine($"{string.Join(", ", population.RaceCarriers)} carries RACE records, which change every actor band the route half reads; run stateprobe on the whole order (no --population).");
         return 2;
     }
+}
+IReadOnlyList<PrimitiveMeasurement>? primitiveTable = null;
+if (primitiveSolidityPath is not null)
+{
+    if (!File.Exists(primitiveSolidityPath)) { Console.Error.WriteLine($"--primitive-solidity {primitiveSolidityPath}: no such file"); return 2; }
+    try { primitiveTable = PrimitiveSolidity.Read(File.ReadAllText(primitiveSolidityPath)); }
+    catch (Exception ex) when (ex is ArgumentException or System.Text.Json.JsonException) { Console.Error.WriteLine($"--primitive-solidity {primitiveSolidityPath}: {ex.Message}; fix the table or leave the flag out."); return 2; }
 }
 if (stateSpecs.Count == 0 && cellFilters.Count == 0 && !all) { Console.Error.WriteLine("nothing to evaluate: give --state, --cell or --all"); return 2; }
 
@@ -432,7 +441,7 @@ else Console.WriteLine("route oracle: off (--route on to measure the route half)
 // ---------------------------------------------------------------------------------------
 sw.Restart();
 phase.Mark("route-oracle");
-var ev = new StateEvaluator(cidx, sx) { Route = oracle };
+var ev = new StateEvaluator(cidx, sx) { Route = oracle, PrimitiveTable = primitiveTable };
 var stateTimer = phaseTimersPath is not null ? new StatePhaseTimer() : null;
 ev.Timer = stateTimer;
 if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();   // --phase-timers: the contact code's own split (changes no output)
