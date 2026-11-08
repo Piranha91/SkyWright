@@ -154,7 +154,9 @@ offset box), gravity (--settled-gravity FILE: observed gravity frame and sign pe
 under its F1 condition), approx (--measured-approximations FILE: an in-game measured box per model, a labelled part beside the file
 bound), absent (--absent-models FILE: a model no
 active provider supplies, measured drawing nothing, is no_geometry). primitive with --primitive-solidity FILE: the measured
-(base, layer) table decides; without the file the earlier activator rule stands.
+(base, layer) table decides a Box or PortalBox primitive (station Q measured no other shape; a Sphere keeps its refusal);
+without the file the activator rule stands. A model-less activator's primitive is no_geometry whatever its stated layer
+(stations T and AD).
 --reach-shapes FILE (with --reach): for every reach region holding a particle part or a measured approximation, one JSON line
 {formid, region, shapes}: the region read again under the same rules and placement with ReachOptions.ParticlesAside (the render
 shapes alone; particles are runtime state, not a body). The manifest itself is unchanged.
