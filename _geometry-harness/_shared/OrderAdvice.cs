@@ -25,6 +25,8 @@ namespace HarnessShared;
 //       patching". This is the trap. A naive "load after" matcher turns it into a rule about nothing, and it is
 //       what a large share of patch pages actually say. It is reported as a note (the engine's master rule already
 //       enforces it) and is explicitly NOT "no load order stated" — the page did say something, just nothing new.
+//   S4  a STATED CLASH — "-Other Mod: the trapdoor is blocked" in a compatibility section. A statement and a clash
+//       row, never a rule: the author says the two mods clash, not how to order them.
 //
 // REFUSALS, each a note carrying the sentence: a conditional anywhere in the statement; three or more known names
 // in a sentence that is not a list; two statements that disagree (both noted, no rule for the pair they disagree
@@ -45,7 +47,7 @@ namespace HarnessShared;
 // ---------------------------------------------------------------------------------------------------------
 
 /// <summary>A name the extractor is allowed to match a mention against: the page's own mod, or one of the page's
-/// Nexus requirements. Nothing else is a known name — an unlisted mod named in the text resolves to nothing and the
+/// Nexus requirements, or a neighbour the caller named (adviceprobe --with). Nothing else is a known name — an unlisted mod named in the text resolves to nothing and the
 /// statement that named it is refused, which is the point.</summary>
 public sealed record AdviceKnownName(int ModId, string Name, bool IsPageMod);
 
@@ -103,12 +105,19 @@ public enum AdviceShape
     PairSentence,
     /// <summary>S3 — "a patch loads after what it patches", naming nothing.</summary>
     GenericPatchAfterMasters,
+    /// <summary>S4 — a clash the page states against one named mod, in a compatibility section. Never a rule.</summary>
+    StatedClash,
 }
 
 /// <summary>One statement found in the text, as found: its shape, the text a reader can grep the page for, (for
 /// a list) the item lines in order, and the SYMPTOM the page states for the other order, if it states one.
 /// The symptom rides on the statement rather than in a side table because it is part of what the page said.</summary>
 public sealed record AdviceStatement(AdviceShape Shape, string Text, IReadOnlyList<string> Items, string? Symptom = null);
+
+/// <summary>One S4 clash: the page <paramref name="PageUrl"/> says the mod <paramref name="NamedModId"/> clashes with
+/// the page's own mod, in the words of <paramref name="Line"/>. It is the author's statement, not a measurement.</summary>
+public sealed record AdviceClash(int NamedModId, string NamedModName, int PageModId, string PageUrl, string ReadDate,
+                                 string Line, string Symptom);
 
 /// <summary>How one mention became a plugin filename, step by step. A rule that cannot show this chain is a rule
 /// nobody can check.</summary>
@@ -123,7 +132,9 @@ public sealed record AdviceRuleOut(
     string Checked,
     string VersionScope,
     string? Note,
-    IReadOnlyList<string> Chain);
+    IReadOnlyList<string> Chain,
+    int BeforeModId = 0,
+    int AfterModId = 0);
 
 /// <summary>The extractor's whole answer. <paramref name="NothingStated"/> is the explicit positive result — the
 /// page was read and states no order — and is non-null only when no statement and no note was produced.</summary>
@@ -142,7 +153,8 @@ public sealed record AdviceReport(
     IReadOnlyList<string> StalenessLines,
     IReadOnlyList<int> NamedModIds,
     string? NothingStated,
-    IReadOnlyList<string> Choices);
+    IReadOnlyList<string> Choices,
+    IReadOnlyList<AdviceClash> Clashes);
 
 // ---------------------------------------------------------------------------------------------------------
 
@@ -227,6 +239,25 @@ public static class OrderAdvice
     /// note, because "the skull is invisible" is what makes an advice rule checkable by a human.</summary>
     static readonly string[] SymptomMarkers =
     { "other way", "otherwise", "reversed", "wrong order", "the other order" };
+
+    /// <summary>S4: a heading line names a compatibility section when it contains one of these (lower-cased;
+    /// "incompatib" is covered by "compatib").</summary>
+    public static readonly string[] ClashHeadings = { "compatib", "conflict", "known issues" };
+
+    /// <summary>S4: words that say an item, or the section's lead-in, states something goes wrong.</summary>
+    public static readonly string[] ClashWords =
+    { "incompatib", "not compatible", "conflict", "blocked", "will not", "won't", "does not work", "doesn't work",
+      "broken", "breaks", "missing" };
+
+    /// <summary>S4: words that say an item is fine. Checked only when the item itself carries no clash word.</summary>
+    public static readonly string[] CompatibleWords = { "compatible", "no patch needed", "no issues", "works fine" };
+
+    /// <summary>S4's item marker: a dash or bullet WITH OR WITHOUT a following space ("-Name: …" is how pages write
+    /// it). Used only inside a compatibility section; S1's <see cref="Marker"/> is unchanged.</summary>
+    static readonly Regex ClashMarker = new(@"^\s*(•|●|▪|·|[-–—*])\s*", RegexOptions.None);
+
+    /// <summary>A separator line (underscores, dashes, equals) that ends a section.</summary>
+    static readonly Regex Separator = new(@"^\s*[_=\-–—*~]{3,}\s*$", RegexOptions.None);
 
     /// <summary>The generic-statement note, spelled once so the probe, the report and the proof case read the same
     /// sentence and a reader can grep for one string.</summary>
@@ -366,7 +397,7 @@ public static class OrderAdvice
             .ToList();
         if (matches.Count == 1)
             return new Hit(matches[0].ModId, matches[0].Name,
-                           $"'{mention.Trim()}' matches the {(matches[0].IsPageMod ? "page's own mod" : "requirement")} '{matches[0].Name}' (mod {matches[0].ModId})");
+                           $"'{mention.Trim()}' matches the {(matches[0].IsPageMod ? "page's own mod" : "known mod (a requirement or a --with neighbour)")} '{matches[0].Name}' (mod {matches[0].ModId})");
         if (matches.Count > 1)
         {
             // Two DIFFERENT mods with names that both match is genuinely ambiguous. The same mod listed twice is not.
@@ -560,6 +591,14 @@ public static class OrderAdvice
             "A supersession notice ('download X instead of this one') is a NOTE and never a rule, and it never " +
             "changes the rules. The page's stated order is still the page's stated order; whether to use the mod at " +
             "all is a different question, and answering the first while hiding the second would be a wrong answer.",
+            "S4 (a stated clash): a section starts at a short heading line (at most four words) containing " +
+            string.Join(", ", ClashHeadings.Select(h => $"'{h}'")) + ", and ends at a separator line, a load-order " +
+            "header or another short heading. Inside it, an item is a line starting with a dash or bullet (a space after " +
+            "it optional) shaped 'Name: text', where Name resolves as an S1 item does to a known mod other than the " +
+            "page's own. It is a clash when the text carries a clash word (" +
+            string.Join(", ", ClashWords.Select(w => $"'{w}'")) + "), or when the section's prose lead-in does and the " +
+            "text carries no compatible word (" + string.Join(", ", CompatibleWords.Select(w => $"'{w}'")) + "). A clash " +
+            "is never an order rule; an item naming nothing known is silent.",
         };
 
         // ---- S1 -----------------------------------------------------------------------------------------
@@ -619,6 +658,43 @@ public static class OrderAdvice
             }
             statements.Add(st);
             listPairs.Add((st, items));
+        }
+
+        // ---- S4: clashes stated in a compatibility section -----------------------------------------------
+        var clashes = new List<AdviceClash>();
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!IsClashHeading(lines[i])) continue;
+            bool leadClash = false;
+            for (int j = i + 1; j < lines.Length; j++)
+            {
+                var raw = lines[j].Trim();
+                if (raw.Length == 0) continue;
+                if (Separator.IsMatch(raw) || IsHeader(raw) || (IsSectionHeading(raw) && !IsClashHeading(raw))) break;
+                var mk = ClashMarker.Match(raw);
+                if (!mk.Success)
+                {
+                    // Prose inside the section: the lead-in that says what the items below it are.
+                    if (ClashWords.Any(w => Norm(raw).Contains(w, StringComparison.Ordinal))) leadClash = true;
+                    continue;
+                }
+                var body = raw[mk.Length..].Trim();
+                Hit? hit = null; string name = "", rest = "";
+                for (int c = body.IndexOf(':'); c > 0 && hit is null; c = body.IndexOf(':', c + 1))
+                {
+                    name = body[..c].Trim();
+                    rest = body[(c + 1)..].Trim();
+                    hit = ResolveMention(name, world, out _);
+                }
+                if (hit is null || hit.ModId == world.PageModId) continue;
+                var nr = Norm(rest);
+                bool itemClash = ClashWords.Any(w => nr.Contains(w, StringComparison.Ordinal));
+                bool itemFine = !itemClash && CompatibleWords.Any(w => nr.Contains(w, StringComparison.Ordinal));
+                if (!(itemClash || (leadClash && !itemFine))) continue;
+                consumed[j] = true;
+                statements.Add(new AdviceStatement(AdviceShape.StatedClash, raw, new[] { name }, rest));
+                clashes.Add(new AdviceClash(hit.ModId, hit.ModName, world.PageModId, world.PageUrl, world.ReadDate, raw, rest));
+            }
         }
 
         // ---- S2 / S3 / the refusals, sentence by sentence -------------------------------------------------
@@ -785,7 +861,7 @@ public static class OrderAdvice
                 st.Shape == AdviceShape.OrderList ? st.Text : st.Text,
                 world.PageUrl, world.ReadDate, VersionScope(world, st),
                 noteParts.Count == 0 ? null : string.Join("; ", noteParts),
-                new[] { hb.How, pb.How, ha.How, pa.How }));
+                new[] { hb.How, pb.How, ha.How, pa.How }, hb.ModId, ha.ModId));
         }
 
         string? nothing = null;
@@ -797,8 +873,22 @@ public static class OrderAdvice
             world.PageUpdatedDate, world.NewestMainVersion, world.NewestMainDate,
             statements, rules, resolutions, notes, stalenessLines,
             namedMods.Select(h => h.ModId).Distinct().OrderBy(x => x).ToList(),
-            nothing, choices);
+            nothing, choices, clashes);
     }
+
+    /// <summary>A short unmarked line that reads as a section heading: at most four words, and either ending in ':'
+    /// or carrying no sentence punctuation at its end.</summary>
+    static bool IsSectionHeading(string line)
+    {
+        var t = line.Trim();
+        if (t.Length == 0 || ClashMarker.IsMatch(t)) return false;
+        if (t[^1] is '.' or '!' or '?') return false;
+        return t.TrimEnd(':', '-', '–', '—').Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= 4;
+    }
+
+    /// <summary>S4's section start: a heading whose words name compatibility, conflicts or known issues.</summary>
+    static bool IsClashHeading(string line) =>
+        IsSectionHeading(line) && ClashHeadings.Any(h => Norm(line).Contains(h, StringComparison.Ordinal));
 
     static string PairKey(int a, int b) => a < b ? $"{a}|{b}" : $"{b}|{a}";
 
@@ -972,6 +1062,7 @@ public static class OrderAdvice
     {
         AdviceShape.OrderList => "S1, an order list",
         AdviceShape.PairSentence => "S2, a pair sentence",
+        AdviceShape.StatedClash => "S4, a stated clash",
         _ => "S3, the generic patch-after-masters statement",
     };
 
@@ -1000,6 +1091,9 @@ public static class OrderAdvice
                           (x.Note is null ? "" : $" — {x.Note}"));
             foreach (var c in x.Chain) sb.AppendLine($"        chain: {c}");
         }
+        sb.AppendLine($"  clashes stated: {r.Clashes.Count}");
+        foreach (var c in r.Clashes)
+            sb.AppendLine($"     '{c.NamedModName}' (mod {c.NamedModId}), stated on {c.PageUrl} (read {c.ReadDate}): \"{c.Symptom}\"");
         sb.AppendLine($"  notes / refusals: {r.Notes.Count}");
         foreach (var n in r.Notes) sb.AppendLine($"     {n}");
         sb.AppendLine($"  staleness: {r.StalenessLines.Count} line(s)");

@@ -482,6 +482,12 @@ static class AdviceProof
               rClash.Statements.Count == 1 && rClash.Statements[0].Items.SequenceEqual(new[] { "Beta - A Shrine Overhaul" })
               && rClash.Statements[0].Symptom == clashSymptom && rClash.NothingStated is null,
               $"{rClash.Statements.Count} statement(s): {string.Join(" | ", rClash.Statements.Select(s => $"{s.Text} [{string.Join(", ", s.Items)}] symptom={s.Symptom}"))}; nothing={rClash.NothingStated}");
+        Check("advice/S4: the statement's shape is S4, a stated clash, and it is carried as ONE clash row naming mod 9002 on page 9001",
+              rClash.Statements.Count == 1 && rClash.Statements[0].Shape == AdviceShape.StatedClash
+              && OrderAdvice.Shape(rClash.Statements[0].Shape) == "S4, a stated clash"
+              && rClash.Clashes.Count == 1 && rClash.Clashes[0].NamedModId == 9002 && rClash.Clashes[0].PageModId == 9001
+              && rClash.Clashes[0].Symptom == clashSymptom,
+              string.Join(" | ", rClash.Clashes.Select(c => $"{c.NamedModId}@{c.PageModId}: {c.Symptom}")));
         Check("advice/S4: a stated clash is NEVER an order rule — the fragment parses with 0 rules",
               rClash.Rules.Count == 0 && OrderRules.Parse(OrderAdvice.ToRulesJson(rClash), "fixture 9001").Rules.Count == 0,
               Rules(rClash));

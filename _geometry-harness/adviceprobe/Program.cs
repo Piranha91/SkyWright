@@ -22,9 +22,14 @@ using HousecarlNexus;
 //
 // usage: adviceprobe --mod <id|url> [--page [<id>=]FILE]... [--out DIR] [--offline]
 //                    [--catalog DIR] [--refresh offline|if-stale|force] [--max-requests N] [--no-import]
-//                    [--plugin-map FILE] [--instance DIR] [--profile NAME] [--game DIR]
+//                    [--plugin-map FILE] [--with <id|url>]... [--instance DIR] [--profile NAME] [--game DIR]
 //
 //   --mod <id|url>   the page to read. A full Nexus URL is accepted and the id taken out of it.
+//   --with <id|url>  a NEIGHBOUR: another mod in the order. Its page name becomes a known name on the --mod page,
+//                    and its own page is read too: a clash it states against the --mod mod (S4) is reported in
+//                    `clashes`, and an order rule naming both mods enters the rules fragment with that page as its
+//                    source. A neighbour page that cannot be read is a warning naming it, never a quiet empty answer.
+//                    Repeatable.
 //   --page FILE      replay an ARCHIVED response instead of reading the catalogue. `--page 45686=file.json` says
 //                    which mod the file is for; a bare `--page file.json` reads the id out of the file. Repeatable.
 //                    The replay is byte-identical to what it always was; unless --no-import the archive is ALSO
@@ -79,6 +84,7 @@ string? refreshWord = null;
 string? pluginMapPath = null;
 int? maxRequests = null;
 var archives = new Dictionary<int, string>();
+var withIds = new List<int>();
 var bareArchives = new List<string>();
 
 for (int i = 0; i < args.Length; i++)
@@ -105,6 +111,13 @@ for (int i = 0; i < args.Length; i++)
         if (id is null) { Console.Error.WriteLine($"--mod needs a Nexus mod id or a mod URL; got '{raw}'."); return 2; }
         modId = id;
     }
+    else if (args[i] == "--with" && i + 1 < args.Length)
+    {
+        var raw = args[++i];
+        var id = ModIdOf(raw);
+        if (id is null) { Console.Error.WriteLine($"--with needs a Nexus mod id or a mod URL; got '{raw}'."); return 2; }
+        if (!withIds.Contains(id.Value)) withIds.Add(id.Value);
+    }
     else if (args[i] == "--page" && i + 1 < args.Length)
     {
         var spec = args[++i];
@@ -122,6 +135,7 @@ if (modId is null)
     Console.Error.WriteLine("adviceprobe needs --mod <id|url>: the page whose stated load order is to be read.");
     return 2;
 }
+withIds.Remove(modId.Value);
 
 // --offline is the loud spelling of --refresh offline. Given both, offline wins: the flag that FORBIDS a request
 // beats the one that permits it, because the other way round a stray --refresh force would silently spend one.
@@ -209,6 +223,7 @@ var catalogOptions = new NexusCatalogOptions
 if (catalogDir is not null) catalogOptions.Dir = catalogDir;
 using var catalog = new NexusCatalog(catalogOptions);
 
+var pageCache = new Dictionary<int, PageRead>();
 int requestsAttempted = 0, requestsSucceeded = 0, pagesFromSnapshot = 0, pagesFetched = 0, pagesFromArchive = 0;
 long waitedMs = 0;
 
@@ -231,7 +246,7 @@ readLog.Add($"mod {modId}: {page.Provenance}");
 var pageName = page.Name;
 var description = page.Description;
 var updatedAt = page.UpdatedAt;
-var pageUrl = $"https://www.nexusmods.com/skyrimspecialedition/mods/{modId}";
+var pageUrl = UrlOf(modId.Value);
 var requirements = page.Requirements;
 var files = page.Files;
 var newestMain = files.Where(f => f.Category == "MAIN").OrderByDescending(f => f.Date).FirstOrDefault();
@@ -243,6 +258,26 @@ foreach (var r in requirements) Console.WriteLine($"   requirement: {r.Name} (mo
 
 var cleaned = OrderAdvice.Clean(description);
 File.WriteAllText(Path.Combine(outDir, $"description-{modId}.txt"), cleaned);
+
+// The neighbours' pages (--with). Read before anything is extracted, because their names are known names on the
+// page above. A page that cannot be read is a WARNING naming it: what that page states is unknown, not absent.
+var neighbours = new List<(int Id, PageRead Page)>();
+if (withIds.Count > 0) __run.Stage("neighbours", "reading the neighbours' pages", withIds.Count, "pages");
+int nRead = 0;
+foreach (var wid in withIds)
+{
+    try
+    {
+        var np = ReadPage(wid);
+        neighbours.Add((wid, np));
+        readLog.Add($"mod {wid} (--with): {np.Provenance}");
+    }
+    catch (Exception ex)
+    {
+        warnings.Add($"mod {wid}'s page (--with) could not be read: {ex.Message} What it states about mod {modId} is UNKNOWN for this run, not absent.");
+    }
+    __run.Progress(++nRead);
+}
 
 // ---------------------------------------------------------------------------------------------------------
 //  The instance: which mod folders carry which Nexus ids, and which plugins they put in the LOADED order.
@@ -346,6 +381,7 @@ AdviceWorld BuildWorld(IReadOnlyDictionary<int, string?> installedDates, IReadOn
 {
     var known = new List<AdviceKnownName> { new(modId.Value, pageName, true) };
     foreach (var r in requirements) if (r.Id != modId.Value) known.Add(new AdviceKnownName(r.Id, r.Name, false));
+    foreach (var (nid, np) in neighbours) if (known.All(k => k.ModId != nid)) known.Add(new AdviceKnownName(nid, np.Name, false));
 
     var installed = new Dictionary<int, AdviceWorldMod>();
     foreach (var (id, entries) in byModId)
@@ -433,7 +469,54 @@ foreach (var (id, sel) in selections)
 // Pass two, with the dates filled in (and the plugin map applied). Extract is pure and the statements do not depend
 // on a date, so the only differences between the two passes are the staleness annotation and any map narrowing —
 // and only this pass's answer is written.
-var report = OrderAdvice.Extract(description, BuildWorld(dates, sources));
+var pageReport = OrderAdvice.Extract(description, BuildWorld(dates, sources));
+
+// Each neighbour's page, read with the --mod mod as a known name. What it states about the PAIR is kept: a clash
+// naming the --mod mod, and an order rule naming both. Everything else on that page is about other mods.
+var neighbourReports = new List<(int Id, PageRead Page, AdviceReport Report, List<AdviceClash> Clashes, List<AdviceRuleOut> Rules)>();
+foreach (var (nid, np) in neighbours)
+{
+    var nMain = np.Files.Where(f => f.Category == "MAIN").OrderByDescending(f => f.Date).FirstOrDefault();
+    var nKnown = new List<AdviceKnownName> { new(nid, np.Name, true), new(modId.Value, pageName, false) };
+    foreach (var r in np.Requirements) if (nKnown.All(k => k.ModId != r.Id)) nKnown.Add(new AdviceKnownName(r.Id, r.Name, false));
+    var nWorld = BuildWorld(dates, sources) with
+    {
+        PageModId = nid, PageModName = np.Name, PageUrl = UrlOf(nid), ReadDate = np.ReadDate, Known = nKnown,
+        PagePluginMasters = Array.Empty<string>(),
+        PageUpdatedDate = np.UpdatedAt is null ? null : DayIso(np.UpdatedAt),
+        NewestMainVersion = nMain?.Version, NewestMainDate = nMain is null ? null : Day(nMain.Date),
+    };
+    var nr = OrderAdvice.Extract(np.Description, nWorld);
+    neighbourReports.Add((nid, np, nr,
+        nr.Clashes.Where(c => c.NamedModId == modId.Value).ToList(),
+        nr.Rules.Where(x => (x.BeforeModId == modId.Value && x.AfterModId == nid) || (x.BeforeModId == nid && x.AfterModId == modId.Value)).ToList()));
+}
+
+// The merge. A neighbour's rule that states the REVERSE of a rule already held is a disagreement between two pages:
+// neither is emitted, and both are named, the same answer one page disagreeing with itself gets.
+var mergedRules = new List<AdviceRuleOut>(pageReport.Rules);
+var mergeNotes = new List<string>();
+foreach (var nr in neighbourReports.SelectMany(n => n.Rules))
+{
+    var rev = mergedRules.FirstOrDefault(x => x.Before.Equals(nr.After, StringComparison.OrdinalIgnoreCase)
+                                           && x.After.Equals(nr.Before, StringComparison.OrdinalIgnoreCase));
+    if (rev is not null)
+    {
+        mergedRules.Remove(rev);
+        mergeNotes.Add($"{nr.Source} orders '{nr.Before}' before '{nr.After}' and {rev.Source} states the reverse; no rule is " +
+                       "emitted for that pair, and both statements are reported so a reader can decide.");
+        continue;
+    }
+    if (!mergedRules.Any(x => x.Before.Equals(nr.Before, StringComparison.OrdinalIgnoreCase)
+                           && x.After.Equals(nr.After, StringComparison.OrdinalIgnoreCase)))
+        mergedRules.Add(nr);
+}
+var report = pageReport with
+{
+    Rules = mergedRules,
+    Clashes = pageReport.Clashes.Concat(neighbourReports.SelectMany(n => n.Clashes)).ToList(),
+    Notes = pageReport.Notes.Concat(mergeNotes).ToList(),
+};
 
 // ---------------------------------------------------------------------------------------------------------
 //  The artifacts.
@@ -524,6 +607,19 @@ var reportDoc = new Dictionary<string, object?>
             ["chain"] = MapChainLine(kv.Value),
         }).ToList(),
     },
+    ["with"] = withIds,
+    // S4: clashes an author states, on this page or on a neighbour's page, each with the page it came from.
+    ["clashes"] = report.Clashes.Select(c => new Dictionary<string, object?>
+    {
+        ["namedModId"] = c.NamedModId, ["namedModName"] = c.NamedModName, ["pageModId"] = c.PageModId,
+        ["page"] = c.PageUrl, ["readDate"] = c.ReadDate, ["line"] = c.Line, ["symptom"] = c.Symptom,
+    }).ToList(),
+    ["neighbourPages"] = neighbourReports.Select(n => new Dictionary<string, object?>
+    {
+        ["modId"] = n.Id, ["modName"] = n.Page.Name, ["url"] = UrlOf(n.Id), ["readDate"] = n.Page.ReadDate,
+        ["provenance"] = n.Page.Provenance, ["statementsOnPage"] = n.Report.Statements.Count,
+        ["clashesNamingThisMod"] = n.Clashes.Count, ["rulesNamingBoth"] = n.Rules.Count,
+    }).ToList(),
     ["statements"] = report.Statements.Select(s => new Dictionary<string, object?>
     {
         ["shape"] = OrderAdvice.Shape(s.Shape), ["text"] = s.Text, ["items"] = s.Items, ["symptom"] = s.Symptom,
@@ -609,6 +705,8 @@ return 0;
 
 // ---------------------------------------------------------------------------------------------------------
 
+static string UrlOf(int id) => $"https://www.nexusmods.com/skyrimspecialedition/mods/{id}";
+
 /// <summary>The mod id out of a bare number or a Nexus URL.</summary>
 static int? ModIdOf(string raw)
 {
@@ -638,6 +736,15 @@ static int? ArchiveModId(string path)
 /// <summary>One page, however it arrived: a --page archive replayed verbatim, or the shared catalogue's snapshot.
 /// Both routes end here with the same five things the extractor needs, so the answer cannot depend on the route.</summary>
 PageRead ReadPage(int id, bool isPageMod = false)
+{
+    // One read per page per run: a neighbour that is also a named mod's base page is not counted twice.
+    if (pageCache.TryGetValue(id, out var cached)) return cached;
+    var read = ReadPageOnce(id, isPageMod);
+    pageCache[id] = read;
+    return read;
+}
+
+PageRead ReadPageOnce(int id, bool isPageMod)
 {
     // Only the page's OWN requirements become known names (D2), so only they can produce the
     // "not a known name" warning. A base mod's requirement list is read and discarded, and warning about
