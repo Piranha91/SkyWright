@@ -1,6 +1,6 @@
 """Known answers for the capture fallbacks: cutaway, top-down and see-through marks (CF1-CF24).
 
-    python tests/test_capture_fallbacks.py [--vp VIEWPROBE.exe] [--only CF1,CF2] [--keep DIR]
+    python tests/test_capture_fallbacks.py [--vp VIEWPROBE.exe] [--only CF1,CF2] [--keep DIR] [--code-only]
 
 Two kinds of case.
 
@@ -12,8 +12,11 @@ harness config. Without it these cases are NOT RUN, the run says so and exits 3:
 CODE CASES (CF13, CF20-CF24) call the real evalpipeline, reel_plan, capture_acquire and evalreport functions on hand-built
 inputs: the reuse rule, the reel's unmarkable skip, the top-down acceptance count and the view-kind caption words.
 
-Each case names the wrong answer it exists to reject. Exit 0: every case that ran passed and none was skipped; 1: a
-case failed; 3: render cases not run.
+With --code-only only the code cases run, and the run says the render cases were not attempted (the harness-suites
+guard runs the file this way, where there is no game data).
+
+Each case names the wrong answer it exists to reject. Exit 0: every case that ran passed and none was skipped (with
+--code-only: every code case passed); 1: a case failed; 3: render cases not run.
 """
 from __future__ import annotations
 
@@ -626,11 +629,16 @@ CODE_CASES = [cf13_planner_refusal, cf20_reuse, cf21_reel_unmarkable, cf22_top_d
               cf24_after_pick_rule]
 
 
+def render_names() -> str:
+    return ", ".join(fn.__name__.split("_")[0].upper() for fn in RENDER_CASES)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vp", default=str(PROD_VP))
     ap.add_argument("--only", default="")
     ap.add_argument("--keep", default=None, help="keep the work folder here")
+    ap.add_argument("--code-only", action="store_true", help="run the code cases only; the render cases are not attempted")
     a = ap.parse_args(argv)
     only = {x.strip().upper() for x in a.only.split(",") if x.strip()}
     tmp = Path(a.keep) if a.keep else Path(tempfile.mkdtemp(prefix="cf-"))
@@ -651,6 +659,8 @@ def main(argv=None) -> int:
                 RESULTS.append((fn.__name__.split("_")[0].upper(), "GREEN", ""))
     render = [fn for fn in RENDER_CASES if wanted(fn)]
     not_run = None
+    if a.code_only:
+        render = []
     if render:
         game, why = LAB.game_folder()
         if game is None:
@@ -670,7 +680,9 @@ def main(argv=None) -> int:
     for case, verdict, text in RESULTS:
         print(f"{case:5} {verdict:5} {text}")
     if not_run:
-        print(f"NOT RUN: render cases CF1-CF12, CF14-CF16 -- {not_run}")
+        print(f"NOT RUN: render cases {render_names()} -- {not_run}")
+    if a.code_only:
+        print(f"NOT ATTEMPTED: render cases {render_names()} (--code-only)")
     print(f"work folder: {tmp}")
     if FAILS:
         return 1
