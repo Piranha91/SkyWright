@@ -105,6 +105,10 @@ def run_all(rig):
         down = e["axes"].get("down") or {}
         check("C1711", down.get("formkey") in FLOOR and abs((down.get("dist") or 0) - ABOVE_CLOUD[2]) <= 25,
               "the first surface below the eye is not the floor", f"down {down}")
+        # the cloud is not a mesh the probe failed to read: an unreadable count would make an empty answer unresolved
+        head = next((ln for ln in out.splitlines() if ln.strip().startswith("clear-at %d,%d,%d:" % ABOVE_CLOUD)), "")
+        check("C1711", e["unread"] == 0 and "1 effect-only ref(s) in reach not tested, not solid" in head,
+              "the cloud is counted as an unreadable mesh, not as effect-only", head[:400])
         sup, smsg = S.support_verdict(e, tuple(float(c) for c in ABOVE_CLOUD), 0.0, ARGS)
         check("C1711", sup == "supported", "the floor under the cloud does not support an eye on it", f"{sup}: {smsg}")
 
