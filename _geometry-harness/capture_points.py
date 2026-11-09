@@ -680,7 +680,7 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
             code = "points-no-station"
             detail = (f"none of the {len(ring)} eye-level stations around the pair passed the planner's placement test on "
                       f"the floor at z {floor:.0f}; see the witness consoles")
-            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail})
+            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail, "stationsPlaced": 0})
             chain.append({"kind": "cutaway", "status": "skipped", "code": "cutaway-no-station",
                           "detail": "no station stands, so no cutaway can stand either"})
         else:
@@ -689,7 +689,9 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
             detail = (f"no eye-level camera {int(min(standoffs))}-{int(max(standoffs))} u around the pair sees both: "
                       f"{A} shows a measurable face from {counts_[A]} of {len(placed)} stations and {B} from "
                       f"{counts_[B]}")
-            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail})
+            # the counts as fields (F8): a participant no placed station sees is how a report tells a buried clash
+            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail,
+                          "stationsPlaced": len(placed), "visibleFrom": dict(counts_)})
             got = cutaway_attempt(R, S, args, cell, parts, marks, placed, contacts, see_through, cov_flags, floor,
                                   mid, lookz, fov, size, grid_px, gridset, min_depth, work)
             if got["status"] == "ok":

@@ -10644,6 +10644,40 @@ def reel_markers(plan: dict, names: dict, plans: list[dict], pr: dict) -> set:
     return out
 
 
+def buried_lines(plan: dict, captures: list[dict], names: dict, words: dict) -> int:
+    """F8: each prediction item one of whose clashes a capture found buried (reel_plan.buried_participant: unseen from
+    every placed eye-level station and from above) says so where its picture would be, with the count of camera spots
+    it rests on. The clash stays in the item and in every count; only the reason there is no picture is added. Returns
+    how many items got a line."""
+    import reel_plan
+    tmpl = str(words.get("buried") or "")
+    pred = (plan.get("reader") or {}).get("prediction") or {}
+    if not tmpl or not captures:
+        return 0
+    refs, bases, objects = ((names or {}).get(k) or {} for k in ("refs", "bases", "objects"))
+
+    def obj(fk):
+        eid = (bases.get((refs.get(str(fk)) or {}).get("base") or "") or {}).get("editorId")
+        return (objects.get(eid) or {}).get("name") or reel_plan.humanize(eid) or str(fk)
+    by_finding = {}
+    for r_ in pred.get("record") or []:
+        if r_.get("findingId") and r_.get("formKey"):
+            b_ = reel_plan.clash_buried([r_["formKey"], *(r_.get("other") or [])], captures)
+            if b_:
+                by_finding.setdefault(r_["findingId"], []).append(b_)
+    n = 0
+    for g in pred.get("items") or []:
+        found = [b_ for fid in g.get("findingIds") or [] for b_ in by_finding.get(fid, [])]
+        lines = list(dict.fromkeys(tmpl.format(object=obj(b_["formKey"]), partner=obj(b_["partner"]) if b_["partner"] else "another object",
+                                               count=b_["stations"], plural="" if b_["stations"] == 1 else "s",
+                                               verb="sees" if b_["stations"] == 1 else "see")
+                                   for b_ in found))
+        if lines:
+            g["buriedLines"] = lines
+            n += 1
+    return n
+
+
 def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out: Path) -> dict:
     """The review reel's plan (reel_plan.py) from the compiled presentation, the bundle's names and masters, the
     skill's vignette policy and words, the recorded patch search and the evaluation's mod names."""
@@ -10736,6 +10770,7 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     reel["media"] = extra_media
     reel["patchSearch"] = search_ref
     reel["captureResults"] = [{"formKey": c.get("formKey"), "status": c.get("status"), "reason": c.get("reason")} for c in captures]
+    reel["buriedItems"] = buried_lines(plan, captures, names, (pr.get("reader") or {}).get("figureCaptions") or {})
     return reel
 
 

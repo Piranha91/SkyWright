@@ -25,7 +25,7 @@
 {{ pred.withPatchLine }}
 {% endif %}
 
-{% for g in pred["items"] if g.get("shownAs") != "alone" %}- **{{ g.title }}:** {{ g.plain }}{% if g.inGameText %} {{ g.inGameText }}{% endif %}{% for fid in g.findingIds[:4] %} [{{ "Full evidence" if loop.first else "and " ~ fid }}](evidence-index.md#{{ fid }}){% if loop.last %}.{% endif %}{% endfor %}
+{% for g in pred["items"] if g.get("shownAs") != "alone" %}- **{{ g.title }}:** {{ g.plain }}{% if g.inGameText %} {{ g.inGameText }}{% endif %}{% for bl in g.get("buriedLines") or [] %} {{ bl }}{% endfor %}{% for fid in g.findingIds[:4] %} [{{ "Full evidence" if loop.first else "and " ~ fid }}](evidence-index.md#{{ fid }}){% if loop.last %}.{% endif %}{% endfor %}
 {% for fid in g.findingIds %}{% for m in (p.get("figuresByFinding") or {}).get(fid) or [] %}{% if m.reportPath and m.id not in figshown.ids %}{% set figshown.ids = figshown.ids + [m.id] %}{{ "
 " }}
 ![{{ m.caption or (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})

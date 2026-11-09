@@ -113,6 +113,37 @@ def clash_refused(fks, capture_results) -> bool:
     return any(x.get("status") == "refused" and result_about(x, fks) for x in capture_results or [])
 
 
+def buried_participant(x: dict) -> dict | None:
+    """{formKey, partner, stations} when a refused capture shows a participant buried: the top-down refused it as unseen
+    from above after every fallback, no cutaway step succeeded, and the eye-level step's own counts (fields, never its
+    sentence) say that participant showed a measurable face from none of the N >= 1 placed stations. Else None: a pose
+    the planner refused after a station saw both, a request with no station placed, or an older result without the
+    counts is never called buried."""
+    if x.get("status") != "refused":
+        return None
+    ref = x.get("refusal") or {}
+    if ref.get("final") is not True or ref.get("code") != "top-down-participant-unseen":
+        return None
+    chain = ref.get("chain") or []
+    if any(c.get("kind") == "cutaway" and c.get("status") == "ok" for c in chain):
+        return None
+    eye = next((c for c in chain if c.get("kind") == "eye-level"), None) or {}
+    vis, n = eye.get("visibleFrom"), eye.get("stationsPlaced")
+    if not isinstance(vis, dict) or not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        return None
+    unseen = sorted(str(k) for k, v in vis.items() if v == 0)
+    if not unseen:
+        return None
+    k = str(ref.get("participant")) if str(ref.get("participant")) in unseen else unseen[0]
+    keys = [str(o) for o in (x.get("recordKeys") or vis)]
+    return {"formKey": k, "partner": next((o for o in keys if o != k), None), "stations": n}
+
+
+def clash_buried(fks, capture_results) -> dict | None:
+    """The buried participant of the refused capture about this clash (`result_about`), or None."""
+    return next((b for x in capture_results or [] if result_about(x, fks) and (b := buried_participant(x))), None)
+
+
 def captured_request(fks, capture_results) -> str | None:
     """The id of the captured request about this clash (`result_about`), or None."""
     return next((x.get("request") for x in capture_results or []
@@ -550,7 +581,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 chosen.append(c)
                 others[c["rows"][0]["formKey"]] = [x for x in g if x is not c]
                 break
-        unpictured += [(c, "captureRefused") for c in tried_refused]
+        # a buried clash is said as buried (F8), counted like every refused one, never dropped
+        unpictured += [(c, "buried" if clash_buried([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])],
+                                                     capture_results) else "captureRefused") for c in tried_refused]
         if captures_final and not chosen and t in (policy.get("pictureTypes") or []) and len(draw) > len(tried_refused):
             none_captured.append((t, len(draw) - len(tried_refused)))
         chosen_by_type[t] = chosen
@@ -1125,6 +1158,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 objects=joined(names_[:4] + ([f"{len(names_) - 4} more"] if len(names_) > 4 else [])))
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "unpictured", "narration": sentence_un, "count": n_un,
                          "clashes": [{"formKey": c["rows"][0]["formKey"], "type": c["type"], "reason": why,
+                                      **({"buried": clash_buried([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])],
+                                                                 capture_results)} if why == "buried" else {}),
                                       "field": c["rows"][0].get("field"), "pair": [mod(m) for m in c["pair"]],
                                       "reasonText": (policy.get("stillReasons") or {}).get(why)}
                                      for c, why in unpictured],
