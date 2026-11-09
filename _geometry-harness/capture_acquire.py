@@ -431,6 +431,15 @@ def read_points(path: Path, request: dict, parts: list[dict], source: dict) -> d
 
 # ---------------------------------------------------------------- the planner call --
 
+def planner_out(receipts: Path) -> list[str]:
+    """`--out` for every `shotplan plan` call: the planner's probe frames stay with the request's receipts. Without it
+    viewprobe writes them into its own folder (a production build's shots/: the stray fixture renders of 2026-10-31
+    and 2026-11-08)."""
+    d = Path(receipts) / "planner-probes"
+    d.mkdir(parents=True, exist_ok=True)
+    return ["--out", str(d)]
+
+
 def planner_paths(receipts: Path) -> tuple[Path, Path]:
     """Where the planner is asked to write. Named once so they can be CLAIMED before it runs."""
     return receipts / "shotplan-plan.json", receipts / "shotplan-worklist.json"
@@ -476,7 +485,7 @@ def plan_argv(points: dict, parts: list[dict], receipts: Path, vp: str | None,
     argv = [sys.executable, str(SHOTPLAN), "plan", str(doc["cell"]),
             "--floor-z", repr(float(doc["floorZ"])),
             "--json", str(plan_json), "--worklist", str(worklist),
-            "--label", f"capture request {doc['requestId']}"]
+            "--label", f"capture request {doc['requestId']}", *planner_out(receipts)]
     for p in parts:
         row = points["byKey"][p["formKey"]]
         x, y, z = (float(v) for v in row["point"])
@@ -809,7 +818,7 @@ def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts
     why = (f"{chain[0]['code'] if chain else exc.code}" + (f", then {chain[-1]['code']}" if len(chain) > 1 else ""))
     argv = [sys.executable, str(SHOTPLAN), "plan", td["cell"], "--floor-z", repr(float(td["floorZ"])),
             "--top-down-only", f"eye-level refused ({why})", "--json", str(pj), "--worklist", str(wl),
-            "--label", f"capture request {request['id']} top-down", "--fov", "65", "--aspect", "16:9"]
+            "--label", f"capture request {request['id']} top-down", "--fov", "65", "--aspect", "16:9", *planner_out(d)]
     for s_ in td["subjects"]:
         x, y, z = s_["point"]
         argv.append(f"--subject={x:g},{y:g},{z:g}={s_['formKey'].replace(':', '-')[:18]}")
@@ -1062,7 +1071,7 @@ def acquire_split(a, request: dict, source: dict, receipts_dir: Path, shotplan_m
         for (x, y, z), lab in subjects:
             argv.append(f"--subject={x:g},{y:g},{z:g}={lab}")
         argv += ["--fov", "65", "--aspect", SPLIT_ASPECT, "--json", str(pj), "--worklist", str(wl),
-                 "--label", f"capture request {request['id']} {name}"]
+                 "--label", f"capture request {request['id']} {name}", *planner_out(d)]
         if a.vp:
             argv += ["--vp", a.vp]
         if a.passthrough:

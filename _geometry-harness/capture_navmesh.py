@@ -226,7 +226,7 @@ def acquire(CA, a, request: dict, source: dict, receipts: Path, shotplan_mod) ->
     argv = [sys.executable, str(CA.SHOTPLAN), "plan", cell, "--floor-z", repr(float(floor)),
             "--top-down-only", "a navmesh link is drawn from above: it names no placed object to stand in front of",
             "--json", str(pj), "--worklist", str(wl), "--label", f"capture request {request['id']} navmesh link",
-            "--fov", "65", "--aspect", "16:9", "--fallback-extent", f"{NAV_FRAME_MIN:g}"]
+            "--fov", "65", "--aspect", "16:9", "--fallback-extent", f"{NAV_FRAME_MIN:g}", *CA.planner_out(d)]
     for i, p in enumerate(pts):
         argv.append(f"--subject={p[0]:g},{p[1]:g},{p[2]:g}=crossing{i // 2}{'ab'[i % 2]}")
     if a.vp:
