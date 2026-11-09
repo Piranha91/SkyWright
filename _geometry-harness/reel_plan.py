@@ -561,7 +561,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 ordering.append(pairs[p].pop(0))
             i += 1
         quota = len(ordering) if len(ordering) <= policy["allUpTo"] else policy["perType"]
-        chosen, tried_refused, tried = [], [], 0
+        chosen, tried_refused, tried, shown_groups = [], [], 0, []
         for g in ordering:
             if len(chosen) >= quota or tried >= attempts:
                 break
@@ -579,17 +579,23 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     tried_refused.append(c)
                     continue
                 chosen.append(c)
+                shown_groups.append(g)
                 others[c["rows"][0]["formKey"]] = [x for x in g if x is not c]
                 break
-        # a buried clash is said as buried (F8), counted like every refused one, never dropped
-        unpictured += [(c, "buried" if clash_buried([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])],
-                                                     capture_results) else "captureRefused") for c in tried_refused]
+
+        def buried_(c):
+            return bool(clash_buried([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results))
+        # a refused member whose group another member pictures is represented by that picture (and named with it), never
+        # also counted as one the reel cannot picture; a buried clash is said as buried (F8), counted like every refused
+        # one, never dropped
+        stands_in = [c for c in tried_refused if not buried_(c) and any(c in g_ for g_ in shown_groups)]
+        unpictured += [(c, "buried" if buried_(c) else "captureRefused") for c in tried_refused if c not in stands_in]
         if captures_final and not chosen and t in (policy.get("pictureTypes") or []) and len(draw) > len(tried_refused):
             none_captured.append((t, len(draw) - len(tried_refused)))
         chosen_by_type[t] = chosen
         if t in (policy.get("pictureTypes") or []):
             candidates[t] = [c["rows"][0]["formKey"] for g in ordering for c in g][:attempts]
-        represented[t] = [c for c in draw if c not in chosen and c not in tried_refused]
+        represented[t] = [c for c in draw if c not in chosen and (c not in tried_refused or c in stands_in)]
     budget = int(policy["maxVignettes"])
     for t in policy.get("typeOrder") or []:
         keep = chosen_by_type.get(t, [])[:max(budget, 0)]
