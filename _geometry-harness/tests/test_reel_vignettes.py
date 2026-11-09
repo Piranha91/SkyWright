@@ -1539,6 +1539,21 @@ def case_gaps():
               f"case {case} is said {len(mine)} times with another case between, taking phrasings {mine} "
               f"(expected {[k % n for k in range(len(mine))]}; all uses {uses})")
 
+    # N7: a hit in housecarl_nexus_file_search's own shape (the file an object; Helgi's round-2 reel spoke that object
+    # raw) is said by the file's name, with its status and category cautions
+    pres, names, masters, search, mods, words = pool_fixture("listed")
+    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    words["leadCautions"] = shipped["leadCautions"]
+    search["pairs"][0]["hits"] = [{"modId": 34228, "pageName": "Alpha Patches", "otherMentions": [],
+                                   "file": {"fileId": "136332", "name": "Alpha - Target patch v2", "version": "1.0",
+                                            "category": "ARCHIVED", "status": "retired"}}]
+    got = planned(pres, names, masters, search, mods, words=words)
+    said = " ".join(c["narration"] for c in reel_view(got))
+    check("N7-hit-shape", "listed on Nexus: Alpha - Target patch v2." in said and "{'" not in said and "fileId" not in said
+          and shipped["leadCautions"]["retired"] in said and shipped["leadCautions"]["ARCHIVED"] in said,
+          f"a patch-search hit in the file-search tool's shape is said by its file's name with its retired and archived "
+          f"cautions, never as the raw object ({said[said.find('Nexus'):][:240]!r})")
+
     # N8: the grouping key part by part
     def split_keys(g):
         return [c["clash"].get("formKey") for c in reel_view(g) if c["kind"] == "split"]
@@ -2285,6 +2300,8 @@ CODE_SABOTAGE = {
         "stands_in = [c for c in tried_refused if not buried_(c) and any(c in g_ for g_ in shown_groups)]", "stands_in = []")]),
     "code-pool-shared-counter": ("gaps", "N7-rotate-noneOther", [("_geometry-harness/reel_plan.py",
         "        k = used.get(case, 0)\n        used[case] = k + 1\n", '        k = used.get("any", 0)\n        used["any"] = k + 1\n')]),
+    "code-hit-raw": ("gaps", "N7-hit-shape", [("_geometry-harness/reel_plan.py",
+        '"file": str(f["name"]).strip()}', '"file": f}')]),
     # item 36: the reel's mod names
     "code-names-folder-first": ("names", "NX1-nexus-over-folder", [("_geometry-harness/modnames.py",
         'e.update(name=nm, source="nexus-catalogue", catalogue=src, fetched=nid in by_id)', "e.update(catalogue=src, fetched=nid in by_id)")]),

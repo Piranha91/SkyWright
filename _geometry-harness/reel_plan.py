@@ -301,10 +301,27 @@ def plain_reason(reason, words: dict) -> tuple[str, bool]:
     return "; and ".join(out), comparison
 
 
+def flat_hit(hit: dict) -> dict:
+    """A patch-search hit with its file's name at `file` and the file's own fields (status, category, version, fileId)
+    beside it: housecarl_nexus_file_search records the file as an object, a hand-curated search as its name. A hit
+    whose file has no name is refused, never said raw."""
+    f = hit.get("file")
+    if isinstance(f, dict):
+        if not str(f.get("name") or "").strip():
+            raise Refused(f"a patch-search hit on page {hit.get('modId') or hit.get('pageId')} names no file; the search "
+                          f"file is not in a shape the reel can say")
+        return {**{k: v for k, v in f.items() if k != "name"}, **{k: v for k, v in hit.items() if k != "file"},
+                "file": str(f["name"]).strip()}
+    if not str(f or "").strip():
+        raise Refused("a patch-search hit names no file; the search file is not in a shape the reel can say")
+    return hit
+
+
 def lead_qualifiers(hit: dict, words: dict, loaded: set, evaluated: bool) -> str:
     """What a reader must know about a patch file the Nexus search lists, from its own recorded fields: retired,
     archived or an old version; other mods it names that this setup does not load; that it may be the evaluated patch
     (Nexus does not name a file's plugins). The report and the reel say the same clauses."""
+    hit = flat_hit(hit)
     lw = words.get("leadCautions") or {}
     out = []
     for key in (str(hit.get("status") or ""), str(hit.get("category") or "")):
@@ -329,7 +346,7 @@ def usable_first(hits: list, loaded: set) -> list:
         lacks = any(str(m).lower() not in loaded for m in other)
         stale = str(h.get("status") or "").lower() not in ("", "live") or str(h.get("category") or "") in ("ARCHIVED", "OLD_VERSION")
         return (lacks, stale)
-    return sorted(hits, key=rank)
+    return sorted([flat_hit(h) for h in hits], key=rank)
 
 
 def page_words(page: dict) -> int:

@@ -10739,7 +10739,11 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
                 continue
             hits_ = entry_.get("hits") or []
             evaluated_ = any({x.lower() for x in pair_} <= set(masters.get(p_.lower(), set())) for p_ in supplied_)
-            for h_ in reel_plan.usable_first(hits_, loaded_)[:3]:
+            try:
+                usable_ = reel_plan.usable_first(hits_, loaded_)[:3]
+            except reel_plan.Refused as ex:
+                raise InputRefused(f"patch-search-unreadable: {ex}")
+            for h_ in usable_:
                 leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1], file=h_.get("file"))
                               + reel_plan.lead_qualifiers(h_, words, loaded_, evaluated_))
             if not hits_:
