@@ -34,6 +34,7 @@ Scene JSON:
      "clearNoBox": 0,                # physical refs the OBND broad phase could not offer
      "clearUnread": 0,               # candidate meshes that could not be read
      "clearTerrain": "terrain: ...", # the terrain state clear-at reports (default: interior)
+     "exterior": false,              # true = the cell header says (exterior), as an exterior CELL record does
      "clearObndOnly": 0,             # refs the broad phase could select only by their record box
      "clearObndWouldMiss": 0,        # candidates the record box alone would have excluded
      "insideObndOnly": 0,            # refs --inside-at could nominate only by their record box
@@ -283,7 +284,7 @@ def one_shot(scene, a, argv, png):
     t = math.tan(math.radians(a["fov"]) / 2.0)
     size = a["size"]
 
-    print(f"cell {a['cell']} (interior)  000000:Test.esm")
+    print(f"cell {a['cell']} ({'exterior' if scene.get('exterior') else 'interior'})  000000:Test.esm")
     if scene.get("waterZ") is not None:
         print(f"      water z {scene['waterZ']:.0f}: 1 cell(s) - 1 from the cell's own XCLW, 0 inherited "
               "from the worldspace default")

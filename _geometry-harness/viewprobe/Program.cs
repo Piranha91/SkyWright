@@ -435,7 +435,9 @@ var refsAt = new List<(float X, float Y, float R)>();
 // probe answers WRONG: a knee-height probe looks out through the open back of the case and
 // reports clear — two low cameras in a row sat inside one (2026-09-03). Every enclosing box is
 // printed with its dimensions; what a room-scale box means is the caller's decision, so no cap
-// is applied here.
+// is applied here. Effect-shader shapes (clouds, glow cards, flames, editor markers) are not solid to --inside-at or
+// --clear-at: their triangles are left out of the rays, and a ref drawn only by them is listed "effect-only, not
+// solid". Limit: both queries test DRAWN geometry, so an effect-shaded shape with its own collision is ignored too.
 var insideAt = new List<(float X, float Y, float Z)>();
 // --clear-at X,Y,Z asks the question --inside-at structurally cannot: what placed mesh geometry
 // is actually AROUND this world point, in every direction, whether or not any box encloses it.
@@ -1416,6 +1418,7 @@ var insideMesh = new Dictionary<string, (Aabb? Bounds, TriangleSoup? Soup)>(Stri
 // Per soup triangle, how its face may be judged (the --inside-at facing): 0 one-sided (the renderer culls its back),
 // 1 two-sided (drawn both ways), 2 unknown (its shape's node chain mirrors it, which flips the winding; or no shape map).
 var insideFaceKind = new Dictionary<string, byte[]?>(StringComparer.OrdinalIgnoreCase);
+var insideEffectOnly = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 var ltexToTxst = new Dictionary<FormKey, FormKey>();
 var ltexEditorId = new Dictionary<FormKey, string>();
 var txstDiffuse = new Dictionary<FormKey, string>();
@@ -1549,14 +1552,34 @@ bool IsControlEditorId(string ed) =>
             got = (b is { IsEmpty: false } ? b : null,
                    o.Model?.Soup is { TriangleCount: > 0 and <= 300_000 } sp ? sp : null);
             if (got.Soup is { } gs && o.Model is { SoupShapeOfTriangle: { } map, Shapes: { } shapes } && map.Count == gs.TriangleCount)
-                insideFaceKind[rel] = map.Select(si => si < 0 || si >= shapes.Count || shapes[si].Mirrored ? (byte)2
+            {
+                // Effect-shader shapes (clouds, glow cards, flames, editor markers) are not solid: their triangles leave
+                // the soup these queries test. They are still drawn; only --inside-at and --clear-at ignore them.
+                bool IsEffect(int si) => si >= 0 && si < shapes.Count && shapes[si].Effect;
+                var keep = Enumerable.Range(0, map.Count).Where(t => !IsEffect(map[t])).ToArray();
+                if (keep.Length < map.Count)
+                {
+                    if (keep.Length == 0) { insideEffectOnly.Add(rel); got = (got.Bounds, null); }
+                    else
+                    {
+                        var idx = keep.SelectMany(t => new[] { gs.Indices[t * 3], gs.Indices[t * 3 + 1], gs.Indices[t * 3 + 2] }).ToArray();
+                        got = (got.Bounds, new TriangleSoup(gs.Vertices, idx,
+                                                            gs.TriangleMaterials is { } tm ? keep.Select(t => tm[t]).ToArray() : null,
+                                                            gs.TriangleRadii is { } tr ? keep.Select(t => tr[t]).ToArray() : null));
+                    }
+                }
+                if (got.Soup is not null)
+                    insideFaceKind[rel] = keep.Select(t => map[t]).Select(si => si < 0 || si >= shapes.Count || shapes[si].Mirrored ? (byte)2
                                                        : shapes[si].DoubleSided ? (byte)1 : (byte)0).ToArray();
+            }
         }
     }
     insideMesh[rel] = got;
     return got;
 }
 TriangleSoup? InsideSoupFor(string rel) => InsideMeshFor(rel).Soup;
+// A mesh every one of whose drawn shapes is an effect shader: never solid to --inside-at or --clear-at.
+bool InsideEffectOnly(string rel) { InsideMeshFor(rel); return insideEffectOnly.Contains(rel); }
 // A FLOOR candidate's solid, for --stations. Not InsideMeshFor's soup: that is the RENDER mesh,
 // and a floor is what an actor stands on — the collision soup on the actor-solid layers, with ITS
 // own box for the broad phase. navprobe's Geometry(), restated here over viewprobe's own resolver,
@@ -2804,12 +2827,25 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             string nomination = insideBounds == "obnd"
                 ? "nominated by RECORD OBND (the legacy arm, kept for comparison: a box that understates its mesh nominates nothing)"
                 : $"nominated by mesh bounds, {obndOnlyNom} by record OBND alone (mesh unreadable), {unreadable} physical ref(s) whose mesh could not be read at all";
+            // A ref drawn only by effect-shader shapes encloses without being solid: listed, never tested.
+            var effectOnlyHits = hits.Where(h => baseMesh.TryGetValue(h.Ref.Base!.Value, out var em) && InsideEffectOnly(em)).ToList();
+            hits.RemoveAll(h => effectOnlyHits.Contains(h));
+            if (effectOnlyHits.Count > 0)
+                nomination += $"; {effectOnlyHits.Count} effect-only ref(s) also enclose it, not solid (drawn geometry only: an effect shape's own collision is not tested)";
+            void PrintEffectOnly()
+            {
+                foreach (var h in effectOnlyHits)
+                    Console.WriteLine($"      effect-only, not solid: {h.Ref.FormKey}  {h.Edid ?? "-"}"
+                                    + (baseMesh.TryGetValue(h.Ref.Base!.Value, out var em2) ? $"  mesh {em2}" : ""));
+            }
             if (hits.Count == 0)
             {
                 Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: no physical ref's box encloses it; {nomination}");
+                PrintEffectOnly();
                 continue;
             }
             Console.WriteLine($"   inside-at {qx:0},{qy:0},{qz:0}: {hits.Count} ref(s) whose box encloses it (smallest first); {nomination}");
+            PrintEffectOnly();
             foreach (var (r, t, ed, box, fromNif, obndToo) in hits.OrderBy(h => MathF.Max(h.Box.Size.X, MathF.Max(h.Box.Size.Y, h.Box.Size.Z))))
             {
                 var s = box.Size;
@@ -3441,7 +3477,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // geometry, and what it could not see at all. The last one is the honest limit — a ref
             // with no usable OBND never reaches the ray test, so "nothing near this point" is a
             // statement about the boxes as much as about the meshes.
-            int candidates = 0, meshed = 0, unread = 0, noBox = 0, noMesh = 0, obndOnly = 0, obndWouldMiss = 0;
+            int candidates = 0, meshed = 0, unread = 0, noBox = 0, noMesh = 0, obndOnly = 0, obndWouldMiss = 0, effectOnly = 0;
             foreach (var r in winRef.Values)
             {
                 if (r.Deleted || DisabledWhy(r) is not null || r.Base is not { } bk) continue;
@@ -3488,6 +3524,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 if (SpatialOverlap.BoxDistance(box, sweep) > 0f) continue;
                 // Admitted. Would the record's own box have admitted it too? The count is the
                 // measurement behind the claim, one per query rather than a survey.
+                if (InsideEffectOnly(bm)) { effectOnly++; continue; }   // drawn only by effect shaders: not solid
                 if (fromNif && (!haveObnd || SpatialOverlap.BoxDistance(obndWorld, sweep) > 0f)) obndWouldMiss++;
                 candidates++;
                 if (InsideMeshFor(bm).Soup is not { } soup) { unread++; continue; }
@@ -3533,7 +3570,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                             + $"because their mesh could not be read, {obndWouldMiss} admitted by mesh bounds that the "
                             + $"record box alone would have excluded; {terrainNote} "
                             + $"(broad phase: {(clearBounds == "obnd" ? "RECORD OBND \u2014 the legacy arm, kept for comparison; a wrong box drops a ref silently" : "the mesh's own NIF bounds, with record OBND only as a counted fallback")}; "
-                            + "the four lateral rays ignore terrain)");
+                            + "the four lateral rays ignore terrain)"
+                            + $"; {effectOnly} effect-only ref(s) in reach not tested, not solid (drawn geometry only: an effect shape's own collision is not tested)");
             for (int k = 0; k < dirs.Length; k++)
             {
                 string who = owner[k] is { } orf
