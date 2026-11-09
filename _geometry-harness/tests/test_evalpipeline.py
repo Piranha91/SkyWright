@@ -896,6 +896,80 @@ def case_67_an_evaluation_stopped_at_its_budget_is_resumed_by_the_next_run_not_r
     assert not problems, "; ".join(problems)
 
 
+def case_68_a_stage_after_the_bundle_runs_again_when_its_tools_change():
+    """F7: the capture stage binds the code it runs. The driver under test is copied into a scratch harness with stand-in
+    tools beside it (tools resolve next to the driver), run through the capture, then a tool is edited. Wrong answers:
+    the capture reused after capture_points.py changed (the hand edit of stages.json in the WRW rerun); a stage re-run
+    after an edit to a file no stage runs; report-plan left reused after evalreel.py, which it runs, changed."""
+    import shutil
+    import types
+    problems = []
+    with tempfile.TemporaryDirectory() as t:
+        root = Path(t) / "repo"
+        harness = root / "_geometry-harness"
+        (harness / "viewprobe" / "tools").mkdir(parents=True)
+        (root / "scripts").mkdir()
+        shutil.copy(_path, harness / "evalpipeline.py")
+        for name in ("toolidentity.py",):
+            shutil.copy(HERE.parent / name, harness / name)
+        shutil.copy(HERE.parent.parent / "scripts" / "runlog.py", root / "scripts" / "runlog.py")
+        for rel in ("capture_acquire.py", "capture_points.py", "viewprobe/tools/shotplan.py", "evalreport.py",
+                    "evalreel.py", "evalrun.py", "unrelated.py"):
+            (harness / rel).write_text("# stand-in tool\n", encoding="utf-8")
+        spec = importlib.util.spec_from_file_location("evalpipeline_copy68", harness / "evalpipeline.py")
+        ep = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ep)
+        out = Path(t) / "run"
+        os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+        calls = []
+
+        class FakeCtx:
+            def __init__(self, entry, machine, o):
+                self.entry, self.machine, self.out, self.id = {"evaluation": {"budgetMinutes": 5}}, {}, Path(o), "m"
+
+            def resolve(self):
+                return {"arms": [], "subject": ["S.esp"], "keys": []}
+
+        def light(name):
+            def body(ctx, res, sdir):
+                calls.append(name)
+                f = sdir / f"{name}.json"
+                f.write_text("{}", encoding="utf-8")
+                return {}, [f]
+            return body
+        try:
+            ep.Context = FakeCtx
+            for n in list(ep.STAGE_BODIES):
+                ep.STAGE_BODIES[n] = light(n)
+            a = types.SimpleNamespace(entry="e.json", machine=None, out=str(out), through="capture")
+
+            def run_once():
+                calls.clear()
+                rc = ep.cmd_run(a)
+                return rc, list(calls)
+            rc1, first = run_once()
+            rc2, again = run_once()
+            (harness / "capture_points.py").write_text("# stand-in tool, changed\n", encoding="utf-8")
+            rc3, after_tool = run_once()
+            (harness / "unrelated.py").write_text("# changed, but no stage runs it\n", encoding="utf-8")
+            rc4, after_other = run_once()
+            (harness / "evalreel.py").write_text("# changed: report-plan and capture both run it\n", encoding="utf-8")
+            rc5, after_reel = run_once()
+        finally:
+            os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+    if rc1 != EP.EXIT_OK or "capture" not in first:
+        problems.append(f"the first run did not run through the capture (exit {rc1}, ran {first})")
+    if again:
+        problems.append(f"an unchanged run re-ran {again}")
+    if after_tool != ["capture"]:
+        problems.append(f"capture was reused after capture_points.py changed, or another stage re-ran with it: {after_tool}")
+    if after_other:
+        problems.append(f"an edit to a file no stage runs re-ran {after_other}")
+    if after_reel != ["report-plan", "capture"]:
+        problems.append(f"after evalreel.py changed, report-plan and capture must both run again, got {after_reel}")
+    assert not problems, "; ".join(problems)
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

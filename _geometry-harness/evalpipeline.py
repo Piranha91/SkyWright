@@ -20,7 +20,10 @@ variants) and the machine; everything else is derived or refused:
   stages    census, prepare, scope, plan, evaluate, records, scenes, bundle, precedent, report-plan, capture,
             image-observations, report, reel, deliver. Each stage is a receipt in RUN/stages.json bound to the hashes
             of its inputs and outputs; `run` reuses an accepted stage whose bindings are unchanged and reruns one that
-            changed. A stage that exits 0 without its outputs is not accepted.
+            changed. A stage that exits 0 without its outputs is not accepted. The stages after the bundle also bind
+            the code of the tools they run (STAGE_TOOLS: each script, the harness modules it imports, the renderer's
+            build), so a tool change runs that stage again; the measuring stages' tools are bound by evalrun's plan,
+            which refuses a resume under a changed program.
 
 What it does not do. It measures nothing itself and decides nothing about a mod: every finding comes from the probes,
 evalrun's ledger and the record reader. It never certifies absence on an empty read: an incomplete scope, an empty
@@ -38,6 +41,7 @@ judgement (status names it).
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -347,6 +351,85 @@ def accept_scope(scope: dict, expect: dict) -> dict:
 
 
 # ---------------------------------------------------------------- stage receipts
+
+#: the skill data and templates the report and reel words come from (evalreport's own compiler_hashes)
+REPORT_DATA = ("_geometry-harness/evalreport_templates", ".claude/skills/evaluation-reporting/references/report-priorities.json",
+               ".claude/skills/evaluation-reporting/references/scene-policy.json")
+#: the code each stage after the bundle runs, repository-relative: the scripts it launches and those they load by path
+#: (a harness module a listed script imports is followed by stage_tools itself). The measuring stages (census to
+#: bundle) are not here: evalrun's plan freezes every program it launches and refuses a resume under a changed one, and
+#: plan and bundle refuse to write over an earlier folder, so a measuring tool change is a new run folder.
+STAGE_TOOLS = {
+    "report-plan": ("_geometry-harness/evalreport.py", "_geometry-harness/evalreel.py", *REPORT_DATA),
+    "capture": ("_geometry-harness/capture_acquire.py", "_geometry-harness/capture_points.py",
+                "_geometry-harness/viewprobe/tools/shotplan.py", "_geometry-harness/evalrun.py",
+                "_geometry-harness/evalreport.py", "_geometry-harness/evalreel.py", *REPORT_DATA),
+    "report": ("_geometry-harness/evalreport.py", *REPORT_DATA),
+    "reel": ("_geometry-harness/evalreel.py", "_geometry-harness/evalspeech.py", *REPORT_DATA),
+}
+#: stages whose renderer build is part of their tools (capture_acquire's own default build when the machine names none)
+RENDERER_STAGES = frozenset({"capture"})
+#: this driver: modules a tool imports may import it, and its code is recorded on every receipt, not bound
+DRIVER = "_geometry-harness/evalpipeline.py"
+DEFAULT_VIEWPROBE_DIR = Path("_geometry-harness/viewprobe/bin/Release/net9.0-windows10.0.19041.0")
+
+
+def _local_imports(path: Path, roots: list[Path]) -> list[Path]:
+    """The harness modules a script imports anywhere in its text (a function-level import included), found in `roots`."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, ValueError):
+        return []
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            names.add(node.module.split(".")[0])
+    out = []
+    for n in sorted(names):
+        hit = next((r / f"{n}.py" for r in [path.parent, *roots] if (r / f"{n}.py").is_file()), None)
+        if hit is not None:
+            out.append(hit)
+    return out
+
+
+def _tool_digest(p: Path):
+    if not p.exists():
+        return None
+    if p.is_file():
+        return sha256_file(p)
+    return "dir:" + sha256_json([[fwd(f.relative_to(p)), sha256_file(f)] for f in sorted(p.rglob("*")) if f.is_file()])
+
+
+def stage_tools(stage: str, machine: dict | None = None, root: Path | None = None) -> dict:
+    """{repository-relative path: sha256} of the code a stage runs: its STAGE_TOOLS (or the precedent stage's own
+    script), every harness module those scripts import, followed transitively, and for the capture the renderer's build
+    (toolidentity's package digest). An absent file is None, so its appearing later is a change. {} for a stage with no
+    tools of its own (its code is this driver's, which is recorded, not bound)."""
+    root = Path(root or ROOT)
+    machine = machine or {}
+    listed = [root / x for x in STAGE_TOOLS.get(stage, ())]
+    if stage == "precedent":
+        script = script_of([str(x) for x in machine.get("precedentCmd") or []])
+        if script is not None:
+            listed.append(script if script.is_absolute() else root / script)
+    roots = [root / "_geometry-harness", root / "scripts"]
+    seen, todo = {}, list(listed)
+    while todo:
+        p = todo.pop(0)
+        key = fwd(p.relative_to(root)) if p.is_relative_to(root) else fwd(p)
+        if key in seen or key == DRIVER:
+            continue
+        seen[key] = _tool_digest(p)
+        if p.suffix == ".py" and p.is_file():
+            todo += _local_imports(p, roots)
+    if stage in RENDERER_STAGES:
+        import toolidentity
+        vp = machine.get("viewprobe")
+        folder = Path(vp).parent if vp else root / DEFAULT_VIEWPROBE_DIR
+        seen["viewprobe"] = toolidentity.package(folder)["digest"]
+    return dict(sorted(seen.items()))
 
 def _fingerprint(p: Path):
     if not p.exists():
@@ -1562,8 +1645,9 @@ def cmd_run(a) -> int:
                 return EXIT_REFUSED
             sdir = out / name
             sdir.mkdir(exist_ok=True)
-            # the entry and every earlier stage's binding decide reuse; the driver's own code is recorded, not bound,
-            # because the measurements' tool identities are bound inside evalrun's plan
+            # the entry, every earlier stage's binding and, after the bundle, the stage's own tools decide reuse; the
+            # driver's own code is recorded, not bound, because the measurements' tool identities are bound inside
+            # evalrun's plan
             measured = {k: v for k, v in ctx.entry.items() if k not in PRESENTATION_KEYS}
             # a budget-only change touches evaluate and what follows it: earlier stages hash the budget their plan froze,
             # so a run with an unchanged budget hashes byte for byte as it always did
@@ -1577,6 +1661,9 @@ def cmd_run(a) -> int:
                                    for s in STAGES[:STAGES.index(name)]}}
             if limit is not None and name == "evaluate":
                 inputs["budgetInForce"] = limit
+            tools = stage_tools(name, ctx.machine)
+            if tools:
+                inputs["tools"] = tools
             if ledger.decide(name, inputs) == "reuse":
                 print(f"{name}: reused (inputs and outputs unchanged)")
                 run.advance()
