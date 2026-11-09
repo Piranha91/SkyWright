@@ -1117,8 +1117,9 @@ def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = Non
     # the reel's mod names from the Nexus catalogue: a page it lacks is fetched once unless the entry says offline
     nexus_names = ctx.entry.get("nexusNames") or "fetch"
     argv += ["--nexus-names", nexus_names]
-    if nexus_names == "fetch" and (ctx.machine.get("readerCmd") or os.environ.get("HOUSECARL_RECORD_READER_CMD")):
-        argv += ["--nexus-reader-cmd", ctx.machine.get("readerCmd") or os.environ.get("HOUSECARL_RECORD_READER_CMD")]
+    server_ = (getattr(ctx, "machine", None) or {}).get("readerCmd") or os.environ.get("HOUSECARL_RECORD_READER_CMD")
+    if nexus_names == "fetch" and server_:
+        argv += ["--nexus-reader-cmd", server_]
     if ctx.entry.get("patchSearch"):
         argv += ["--patch-search", ctx.entry["patchSearch"]]
     # the precedent stage's census of each patch's own edits, where that stage wrote it
