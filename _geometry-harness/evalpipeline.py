@@ -63,7 +63,7 @@ STAGES = ("census", "prepare", "scope", "plan", "evaluate", "records", "scenes",
           "report-plan", "capture", "image-observations", "report", "reel", "deliver")
 NON_BLOCKING = frozenset({"precedent"})
 #: entry fields that change only what is presented (names, patch search, report shape); measuring stages ignore them
-PRESENTATION_KEYS = frozenset({"modNames", "patchSearch", "report", "captureSize"})
+PRESENTATION_KEYS = frozenset({"modNames", "nexusNames", "patchSearch", "report", "captureSize"})
 EXIT_OK, EXIT_REFUSED, EXIT_JUDGEMENT = 0, 2, 3
 MAX_PATH = 240  # leave room under Windows' 260-character limit for the probes' own file names
 
@@ -1114,6 +1114,11 @@ def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = Non
         argv += ["--declare-patch", k]
     for p, n in (ctx.entry.get("modNames") or {}).items():
         argv += ["--mod-name", f"{p}={n}"]
+    # the reel's mod names from the Nexus catalogue: a page it lacks is fetched once unless the entry says offline
+    nexus_names = ctx.entry.get("nexusNames") or "fetch"
+    argv += ["--nexus-names", nexus_names]
+    if nexus_names == "fetch" and (ctx.machine.get("readerCmd") or os.environ.get("HOUSECARL_RECORD_READER_CMD")):
+        argv += ["--nexus-reader-cmd", ctx.machine.get("readerCmd") or os.environ.get("HOUSECARL_RECORD_READER_CMD")]
     if ctx.entry.get("patchSearch"):
         argv += ["--patch-search", ctx.entry["patchSearch"]]
     # the precedent stage's census of each patch's own edits, where that stage wrote it

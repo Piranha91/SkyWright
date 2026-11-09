@@ -3329,21 +3329,7 @@ def plan_nexus_id(plan: dict):
     return None
 
 
-def meta_ini_mod_id(path: Path):
-    """The Nexus mod id in a mod folder's meta.ini ([General] modid=N), or None when there is none."""
-    try:
-        text = Path(path).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    section = None
-    for line in text.splitlines():
-        s = line.strip()
-        if s.startswith("["):
-            section = s.lower()
-        elif section == "[general]" and s.lower().startswith("modid="):
-            v = s.split("=", 1)[1].strip()
-            return int(v) if v.isdigit() and int(v) > 0 else None
-    return None
+from modnames import meta_ini_mod_id  # noqa: E402  (one meta.ini reader for the reel's names and adviceprobe's --with)
 
 
 def advice_neighbour_ids(plan: dict) -> list[int]:

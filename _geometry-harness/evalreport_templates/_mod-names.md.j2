@@ -1,0 +1,9 @@
+{% set mn_ = ((p.get("reel") or {}).get("modNames") or {}) %}{% if mn_ %}
+<a id="reel-mod-names"></a>
+## Mod names in the review reel ({{ mn_|length }})
+
+Where each name the review reel speaks for a plugin's mod came from.
+
+{% for k, v in mn_|dictsort %}- {{ k|md }}: said as "{{ v.get("name")|md }}". {% if v.get("source") == "nexus-catalogue" %}Nexus page {{ v.get("nexusId") }}{% if v.get("fetched") %}, fetched for this reel{% endif %}.{% elif v.get("source") == "declared" %}Declared with --mod-name.{% else %}MO2 folder name: no Nexus name was found, because {{ (v.get("reason") or "no reason was recorded")|md }}.{% endif %}
+
+{% endfor %}{% endif %}

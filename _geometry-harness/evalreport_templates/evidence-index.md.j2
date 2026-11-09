@@ -109,6 +109,7 @@ Each group of a patch's own edits, as its precedent card reads it: what the patc
 {% for e in p.reader.enrichment %}- `{{ e.path|txt }}` ({{ e.enrichment }}{% if e.checkId %}, `{{ e.checkId }}` on {{ e.armId }}{% endif %}), sha256 `{{ e.sha256|txt }}`; derived from {% for d in e.derivedFrom or [] %}`{{ d.path|txt }}` (`{{ d.sha256|txt }}`){{ ", " if not loop.last else "" }}{% else %}nothing recorded{% endfor %}
 {% endfor %}
 {% endif %}
+{% include "_mod-names.md.j2" %}
 
 <a id="detail-set-aside"></a>
 ## Set aside from the detail list ({{ p.detailAside|length }})

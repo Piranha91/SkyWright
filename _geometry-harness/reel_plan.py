@@ -8,7 +8,7 @@
 places); `masters` each plugin's own master list (lower case); `policy` the skill's `scene-policy.json` `vignettes`
 block (plus the report's `effectModelPattern`); `words` the skill's `report-priorities.json` `reel.words`;
 `patch_search` the recorded Nexus search (`evalreport plan --patch-search`); `mod_names` {plugin: {name, source}}
-(evalreport --mod-name, else the MO2 mod folder the evaluation recorded for the plugin); `capture_results` the
+(modnames.py: evalreport --mod-name, else the Nexus page's name, else the MO2 mod folder's); `capture_results` the
 capture step's per-request results: a refused clash is counted as one that cannot be pictured and the next drawable
 clash of its type takes its place (at most `captureAttemptsPerType` are tried); `switches` the prediction setup's
 switch census, for a world-state clash's condition.
@@ -407,7 +407,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             got = next((v.get("name") for k, v in mod_names.items() if k.lower() == str(plugin).lower()), None)
         if not got:
             raise Refused(f"the reel would speak about {plugin}, but no mod name is known for it: no --mod-name was "
-                          f"given and the evaluation records no mod folder for it")
+                          f"given, and the evaluation records no MO2 mod folder for it, so no Nexus page or folder name")
         return got
 
     def patch_name(plugin: str) -> str:

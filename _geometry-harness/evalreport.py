@@ -10577,20 +10577,6 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
 SCENE_POLICY = HERE.parent / ".claude" / "skills" / "evaluation-reporting" / "references" / "scene-policy.json"
 
 
-def plugin_mod_folders(plans: list[dict]) -> dict:
-    """{plugin: MO2 mod folder} from the evaluation's own record of where each arm's plugins were read (a plan's
-    arms[].requested.plugins[].path: <instance>/mods/<folder>/<plugin>). A plugin read from the game's Data folder has
-    none."""
-    out = {}
-    for plan in plans:
-        for arm in (plan or {}).get("arms") or []:
-            for p in ((arm.get("requested") or {}).get("plugins") or []):
-                parts = re.split(r"[\\/]+", str(p.get("path") or ""))
-                if len(parts) >= 3 and parts[-3].lower() == "mods" and p.get("name"):
-                    out.setdefault(str(p["name"]), parts[-2])
-    return out
-
-
 def bundle_media_rows(b: "Bundle", arms: set) -> list[dict]:
     """A bundle's admitted media for some of its arms, with absolute paths (a sibling bundle's frames for the reel)."""
     rows = []
@@ -10693,16 +10679,26 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     policy = dict((load_json(SCENE_POLICY) or {}).get("vignettes") or {})
     policy["effectModelPattern"] = ((pr.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")
     words = (pr.get("reel") or {}).get("words") or {}
-    folders = plugin_mod_folders([b.plan] + ([sb.plan] if sb is not None else []))
-    mod_names = {k: {"name": v, "source": "mo2-folder"} for k, v in folders.items()}
-    for k, v in ((names or {}).get("mods") or {}).items():
-        if v.get("source") == "declared":
-            mod_names[k] = {"name": v["name"], "source": "declared"}
+    # each mod's name: declared, else its Nexus page's (the catalogue, read offline or fetched when asked), else its MO2
+    # folder's with the reason no Nexus name was found; the lookups are kept beside the reel (modnames.py)
+    import modnames
+    declared = {k: v["name"] for k, v in ((names or {}).get("mods") or {}).items() if v.get("source") == "declared"}
     for pair in list(getattr(a, "mod_name", None) or []):
         if "=" not in pair:
             raise InputRefused(f"mod-name-invalid: --mod-name takes PLUGIN=NAME, got {pair!r}")
         k, v = pair.split("=", 1)
-        mod_names[k.strip()] = {"name": v.strip(), "source": "declared"}
+        declared[k.strip()] = v.strip()
+    nexus_mode = getattr(a, "nexus_names", None) or "offline"
+    reader_ = getattr(a, "nexus_reader_cmd", None) or os.environ.get("HOUSECARL_RECORD_READER_CMD") or None
+    if nexus_mode == "fetch" and not reader_:
+        exe_ = HERE.parent / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / ("housecarl-mcp.exe" if os.name == "nt" else "housecarl-mcp")
+        reader_ = f'"{exe_}"' if exe_.is_file() else None
+    mod_names, names_doc = modnames.resolve([b.plan] + ([sb.plan] if sb is not None else []),
+                                            ((b.scope or {}).get("targets") or []) + ((sb.scope or {}).get("targets") or [] if sb is not None else []),
+                                            declared, nexus_mode, reader_, out / "evidence" / "mod-names")
+    names_ev = out / "evidence" / "mod-names.json"
+    write_json(names_ev, names_doc)
+    print(modnames.summary(mod_names), file=sys.stderr)
     search, search_ref = None, None
     if getattr(a, "patch_search", None):
         sp = Path(a.patch_search)
@@ -10769,6 +10765,8 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
                             if census_path is not None and census_path.is_file() else None)
     reel["media"] = extra_media
     reel["patchSearch"] = search_ref
+    reel["modNames"] = mod_names
+    reel["modNamesEvidence"] = {"path": names_ev.relative_to(out).as_posix(), "sha256": sha256_file(names_ev)}
     reel["captureResults"] = [{"formKey": c.get("formKey"), "status": c.get("status"), "reason": c.get("reason")} for c in captures]
     reel["buriedItems"] = buried_lines(plan, captures, names, (pr.get("reader") or {}).get("figureCaptions") or {})
     return reel
@@ -12201,7 +12199,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the recorded Nexus patch search the review reel's patch sentences rest on (scene-policy.json "
                         "vignettes.patchSearch); without it the reel plan is refused and the report still compiles")
     p.add_argument("--mod-name", action="append", default=[], metavar="PLUGIN=NAME",
-                   help="the name the review reel speaks for a plugin's mod, over the MO2 mod folder the evaluation recorded")
+                   help="the name the review reel speaks for a plugin's mod, over its Nexus page's name and its MO2 mod folder")
+    p.add_argument("--nexus-names", choices=("offline", "fetch"), default="offline",
+                   help="the review reel's mod names from houseCARL's Nexus catalogue: offline reads the stored pages only; "
+                        "fetch also asks Nexus once (housecarl_nexus_catalog add=) for each page the catalogue lacks, and "
+                        "records each fetch in evidence/mod-names.json; a failed fetch leaves the folder name with its reason")
+    p.add_argument("--nexus-reader-cmd", default=None, metavar="CMD",
+                   help="the houseCARL server --nexus-names fetch asks through (default HOUSECARL_RECORD_READER_CMD, else "
+                        "this checkout's built server)")
     p.add_argument("--captures-final", action="store_true",
                    help="the capture stage is closed: the review reel pictures only clashes with captured frames and "
                         "says in one sentence when a kind has none (the report's own plan after the last capture round)")
