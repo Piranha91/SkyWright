@@ -63,8 +63,9 @@ def view_kind_line(provenance: dict) -> str:
         return f"Cutaway: {n} object{'' if n == 1 else 's'} hidden so the pair shows; the player's view has them."
     if kind == "top-down":
         cut = (provenance or {}).get("cullAbove")
+        n = len((provenance or {}).get("hidden") or [])
         return ("Sliced top-down view from above" + (f", everything above z {float(cut):.0f} removed" if cut is not None else "")
-                + "; not the player's view.")
+                + (f", {n} object{'' if n == 1 else 's'} over the pair hidden" if n else "") + "; not the player's view.")
     return ""
 
 def humanize(eid: str | None) -> str | None:

@@ -773,19 +773,62 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
     return doc
 
 
+def protected_keys(keys: list[str], contacts: dict) -> tuple[set | None, str | None]:
+    """What a cutaway may never hide: the participants and everything either touches, rests on or has undecided. (None,
+    the participant) when a participant's contacts were not measured: then nothing may be hidden."""
+    out = set(keys)
+    for k in keys:
+        c = contacts.get(k)
+        if c is None:
+            return None, k
+        out |= set(c["touches"]) | set(c["restsOn"]) | set(c["unassessed"])
+    return out, None
+
+
+def parse_occluders(lines, keys: list[str]) -> tuple[dict, dict, dict]:
+    """viewprobe --occluders-of report lines: per participant, the opaque objects in front of it ({key: px}), the other
+    geometry in front (px) and how many of its pixels are covered."""
+    occ, other, cover = {k: {} for k in keys}, {k: 0 for k in keys}, {k: 0 for k in keys}
+    for ln in lines:
+        om = OCCLUDER_LINE.match(ln)
+        if om and not om[4] and om[1] in occ:
+            occ[om[1]][om[2]] = int(om[3])
+        oo = OCCLUDER_OTHER.match(ln)
+        if oo and oo[1] in other:
+            other[oo[1]] = int(oo[2])
+        oc = OCCLUDER_COVERS.match(ln)
+        if oc and oc[1] in cover:
+            cover[oc[1]] = int(oc[2])
+    return occ, other, cover
+
+
+def hideable(occ: dict, other: dict, need: list[str], protected: set) -> tuple[set, int, int, dict]:
+    """The cutaway's one hide rule, at whatever camera listed the occluders: of what stands in front of each participant
+    in `need`, every opaque object not protected may be hidden. Returns (hide, pixels kept in front, pixels hidden, the
+    protected objects in front {key: px})."""
+    hide, kept_px, hide_px, blocked = set(), 0, 0, {}
+    for k in need:
+        for o, n in occ[k].items():
+            if o in protected:
+                kept_px += n
+                blocked[o] = blocked.get(o, 0) + n
+            else:
+                hide.add(o)
+                hide_px += n
+        kept_px += other[k]
+    return hide, kept_px, hide_px, blocked
+
+
 def cutaway_attempt(R, S, args, cell, parts, marks, placed, contacts, see_through, cov_flags, floor, mid, lookz, fov,
                     size, grid_px, gridset, min_depth, work) -> dict:
     """The cutaway: at stations that passed placement, hide what stands in front of a participant the station cannot see,
     never a participant, nothing either touches or rests on, nothing whose contact is undecided. At most
     CUTAWAY_STATIONS witness runs, each with --protect on both participants so the renderer refuses on its own too."""
     keys = [p["formKey"] for p in parts]
-    protected = set(keys)
-    for k in keys:
-        c = contacts.get(k)
-        if c is None:
-            return {"status": "refused", "code": "cutaway-contacts-unknown",
-                    "detail": f"the cutaway was refused: what {k} touches was not measured, so nothing may be hidden"}
-        protected |= set(c["touches"]) | set(c["restsOn"]) | set(c["unassessed"])
+    protected, unmeasured = protected_keys(keys, contacts)
+    if protected is None:
+        return {"status": "refused", "code": "cutaway-contacts-unknown",
+                "detail": f"the cutaway was refused: what {unmeasured} touches was not measured, so nothing may be hidden"}
     # which objects stand in front, at every placed station (one worklist run, report only)
     shots = [{"label": st["id"], "eye": st["eye"], "floorZ": floor, "look": [round(mid[0], 1), round(mid[1], 1), round(lookz, 1)],
               "fov": fov} for st in placed]
@@ -809,28 +852,11 @@ def cutaway_attempt(R, S, args, cell, parts, marks, placed, contacts, see_throug
     cands = []
     blocked_by = {}
     for st in placed:
-        occ, other, cover = {k: {} for k in keys}, {k: 0 for k in keys}, {k: 0 for k in keys}
-        for ln in chunks.get(st["id"], []):
-            om = OCCLUDER_LINE.match(ln)
-            if om and not om[4]:
-                occ[om[1]][om[2]] = int(om[3])
-            oo = OCCLUDER_OTHER.match(ln)
-            if oo:
-                other[oo[1]] = int(oo[2])
-            oc = OCCLUDER_COVERS.match(ln)
-            if oc:
-                cover[oc[1]] = int(oc[2])
+        occ, other, cover = parse_occluders(chunks.get(st["id"], []), keys)
         need = [k for k in keys if not st["participants"][k]["best"]]
-        hide, kept_px, hide_px = set(), 0, 0
-        for k in need:
-            for o, n in occ[k].items():
-                if o in protected:
-                    kept_px += n
-                    blocked_by.setdefault(o, 0)
-                    blocked_by[o] += n
-                else:
-                    hide.add(o); hide_px += n
-            kept_px += other[k]
+        hide, kept_px, hide_px, blocked = hideable(occ, other, need, protected)
+        for o, n in blocked.items():
+            blocked_by[o] = blocked_by.get(o, 0) + n
         if hide and all(cover[k] > 0 for k in need):
             cands.append((kept_px, len(hide), -hide_px, st["id"], st, sorted(hide), {k: occ[k] for k in keys}))
     if not cands:

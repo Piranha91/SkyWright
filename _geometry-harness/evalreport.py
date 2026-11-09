@@ -85,7 +85,10 @@ def view_kind_caption(provenance: dict, words: dict) -> str:
         return str(words.get("cutaway") or "").format(count=n, plural="" if n == 1 else "s", them="it" if n == 1 else "them")
     if kind == "top-down":
         cut = (provenance or {}).get("cullAbove")
-        return str(words.get("topDown") or "").format(cut="?" if cut is None else f"{float(cut):.0f}")
+        n = len((provenance or {}).get("hidden") or [])
+        return (str(words.get("topDown") or "").format(cut="?" if cut is None else f"{float(cut):.0f}")
+                + (str(words.get("topDownHidden") or "").format(count=n, plural="" if n == 1 else "s",
+                                                               them="it" if n == 1 else "them") if n else ""))
     return ""
 
 def utc_now() -> str:

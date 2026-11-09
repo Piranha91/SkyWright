@@ -863,18 +863,33 @@ def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts
                       "detail": f"the top-down probe did not render (viewprobe exit {rc})"})
         raise Refused("points-renderer-failed", f"the top-down probe did not render (viewprobe exit {rc})", final=False,
                       chain=chain)
-    img = np.asarray(Image.open(png).convert("RGB"))
-    counts = {}
-    for p in parts:
-        mask, _cov = CP.participant_mask(img, png, p, p["formKey"] in see, text)
-        counts[p["formKey"]] = int(mask.sum())
+    def count(png_, text_):
+        img = np.asarray(Image.open(png_).convert("RGB"))
+        out_ = {}
+        for p in parts:
+            mask, _cov = CP.participant_mask(img, png_, p, p["formKey"] in see, text_)
+            out_[p["formKey"]] = int(mask.sum())
+        return out_
+    counts = count(png, text)
     ok, why_not = top_down_accepts(counts)
+    hidden_rec, view_flags, hide_note = None, [], ""
+    if not ok:
+        # what covers a participant from above, hidden by the cutaway's own rule at this camera (F4)
+        got = top_down_hide(a, td, parts, shlex.split(vpcam), flags, counts, d, shotplan_mod, CP, count)
+        if got["status"] == "failed":
+            chain.append({"kind": "top-down", "status": "failed", "code": "points-renderer-failed", "detail": got["detail"]})
+            raise Refused("points-renderer-failed", got["detail"], final=False, chain=chain)
+        if got["status"] == "ok":
+            counts, hidden_rec, view_flags = got["counts"], got["record"], got["flags"]
+            ok, why_not = top_down_accepts(counts)
+        else:
+            hide_note = "; " + got["detail"]
     if not ok:
         short = min(counts, key=lambda k: counts[k])
         states = sorted((exc.extra.get("coverageStates") or {}).get(short) or [])
         code = ("see-through-unmarked" if short in set(td.get("allNonOpaque") or []) and "marked" not in states
                 else "top-down-participant-unseen")
-        detail = (f"{why_not} (the view sliced above z {float(cut):.0f})" if cut is not None else why_not)
+        detail = (f"{why_not} (the view sliced above z {float(cut):.0f})" if cut is not None else why_not) + hide_note
         if code == "see-through-unmarked":
             detail += (f"; it draws only alpha, effect or non-depth-writing shapes and its coverage never reached alpha "
                        f"0.25 in front of the scene from any station (states seen: {', '.join(states) or 'none'})")
@@ -883,10 +898,11 @@ def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts
             f"{c['kind']}: {c.get('code') or c['status']}" for c in chain), final=True, chain=chain,
             topDownPixels=counts, participant=short)
     chain.append({"kind": "top-down", "status": "ok", "code": None,
-                  "detail": f"sliced above z {float(cut):.0f}" if cut is not None else "top-down"})
+                  "detail": (f"sliced above z {float(cut):.0f}" if cut is not None else "top-down")
+                            + (f", with {len(hidden_rec['hidden'])} object(s) over the pair hidden" if hidden_rec else "")})
     camera = {"cell": td["cell"], "eye": list(shot["eye"]), "yaw": float(shot.get("yaw", 0)), "pitch": float(shot["pitch"]),
               "fov": shot.get("fov", 65), "aspect": aspect, "cullAbove": cut, "floorZ": td["floorZ"],
-              "viewKind": "top-down", "nav": nav, "renderFlags": rflags, "viewFlags": [], "viewprobe": vpcam}
+              "viewKind": "top-down", "nav": nav, "renderFlags": rflags, "viewFlags": view_flags, "viewprobe": vpcam}
     seq = request.get("sequence") or {}
     return {"schemaVersion": 1, "kind": "capture-acquisition", "status": "camera-ready", "generatedUtc": utcnow(),
             "synthetic": False, "viewKind": "top-down",
@@ -895,7 +911,7 @@ def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts
                         "location": request.get("location"), "recordKeys": request.get("recordKeys"),
                         "state": request.get("state"), "status": request.get("status")},
             "participants": [{**p, "markKind": "top-down", "pixelsFromAbove": counts[p["formKey"]]} for p in parts],
-            "source": source, "poseId": shot.get("poseId"), "camera": camera, "cutaway": None,
+            "source": source, "poseId": shot.get("poseId"), "camera": camera, "cutaway": hidden_rec,
             "fallbackChain": chain,
             "topDown": {"acceptance": {"minPixels": TOP_DOWN_MIN_PIXELS, "probeSize": TOP_DOWN_PROBE_SIZE, "counts": counts},
                         "subjects": td["subjects"], "cut": cut, "note": shot.get("note"), "label": shot.get("label")},
@@ -908,6 +924,53 @@ def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts
                                             "labelled in the frame and reviewed like any other"},
             "receipts": {"receiptsDir": str(receipts_dir), "planJson": str(pj), "worklist": str(wl),
                          "plannerLog": call["log"], "probe": str(d / "probe" / "console.txt")}}
+
+
+def top_down_hide(a, td: dict, parts: list[dict], cam: list[str], flags: list[str], counts: dict, d: Path, shotplan_mod,
+                  CP, count) -> dict:
+    """F4: when a participant is short from above, the objects standing over it at the top-down camera are listed
+    (--occluders-of) and the cutaway's one rule (capture_points.hideable) picks what may be hidden: never a participant,
+    nothing either touches, rests on or has undecided. The probe is rendered again with them hidden and both participants
+    protected (the renderer refuses on its own as well). {status: ok, counts, record, flags} | {status: refused|failed,
+    detail}."""
+    keys = [p["formKey"] for p in parts]
+    need = [k for k in keys if counts.get(k, 0) < TOP_DOWN_MIN_PIXELS]
+    contacts = td.get("contacts") or {}
+    protected, unmeasured = CP.protected_keys(keys, contacts)
+    if protected is None:
+        return {"status": "refused", "detail": f"nothing over the pair may be hidden: what {unmeasured} touches was not measured"}
+    rc, text = _vp_run(a, shotplan_mod, td["cell"], cam + ["--size", str(TOP_DOWN_PROBE_SIZE), "--msaa", "0", "--nav", "off",
+                                                          "--report-mode", *[x for k in need for x in ("--occluders-of", k)]],
+                       d / "occluders")
+    if rc != 0:
+        return {"status": "failed", "detail": f"listing what stands over the pair from above did not render (viewprobe exit {rc})"}
+    occ, other, _cover = CP.parse_occluders(text.splitlines(), keys)
+    hide, _kept, _hpx, blocked = CP.hideable(occ, other, need, protected)
+    names = ", ".join(f"{k} ({n} px)" for k, n in sorted(blocked.items(), key=lambda kv: -kv[1])[:4])
+    if not hide:
+        return {"status": "refused",
+                "detail": ("nothing over it may be hidden: " + (f"what stands over it is what the pair touches or rests on: "
+                                                               f"{names}" if names else "nothing hideable stands over it"))}
+    view_flags = [x for h in sorted(hide) for x in ("--hide", h)] + [x for k in keys for x in ("--protect", k)]
+    rc2, text2 = _vp_run(a, shotplan_mod, td["cell"], flags + view_flags, d / "probe-hidden")
+    png = next(iter(sorted((d / "probe-hidden").glob("*-fp.png"))), None)
+    if rc2 != 0 or png is None:
+        why = next((ln[len("protect refused: "):] for ln in text2.splitlines() if ln.startswith("protect refused: ")), None)
+        return {"status": "refused" if why else "failed",
+                "detail": (f"hiding {len(hide)} object(s) over the pair was refused: {why}" if why else
+                           f"the top-down probe with {len(hide)} object(s) hidden did not render (viewprobe exit {rc2})")}
+    got = count(png, text2)
+    ok, why_not = top_down_accepts(got)
+    if not ok:
+        return {"status": "refused", "detail": f"with {len(hide)} object(s) over the pair hidden, {why_not}"
+                                               + (f"; not hideable, as the pair touches or rests on it: {names}" if names else "")}
+    record = {"hidden": [{"formKey": h, "occludedPixels": {k: occ[k].get(h, 0) for k in keys}} for h in sorted(hide)],
+              "protected": {k: contacts[k] for k in keys}, "from": "top-down",
+              "rule": ("hidden: the opaque objects over a participant the top-down could not see, listed at the top-down "
+                       "camera; never a participant, nothing either touches (render surfaces within 8 u) or rests on, "
+                       "nothing whose contact is undecided"),
+              "before": counts}
+    return {"status": "ok", "counts": got, "record": record, "flags": view_flags}
 
 
 def refusal_doc(request_id: str, exc: Refused, extra: dict) -> dict:
