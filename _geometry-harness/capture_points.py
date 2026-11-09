@@ -360,6 +360,20 @@ def measure_station(img, png, text, pr, parts, see_through, gridset, min_depth, 
 
 # ---------------------------------------------------------------- the picker --
 
+def focus_storey_range(boxes: dict, focus: str) -> tuple[float, float]:
+    """The z range the ring's storey is searched in for a focus: where the two participants' drawn boxes overlap (the
+    clash is there, and a player meets it on that storey), else the focus's own drawn box. A tall focus's whole height
+    would let the storey land anywhere up it (F5: the WRW tower's top walkway). The ring's xy stays the focus's."""
+    fb = boxes[focus]
+    other = next((b for k, b in boxes.items() if k != focus), None)
+    if other is not None:
+        lo = [max(fb[i], other[i]) for i in range(3)]
+        hi = [min(fb[i + 3], other[i + 3]) for i in range(3)]
+        if all(lo[i] <= hi[i] for i in range(3)):
+            return lo[2], hi[2]
+    return fb[2], fb[5]
+
+
 def pick_points(request: dict, **kw) -> dict:
     """The points document, or Unpickable. A refusal that is neither final nor transient leaves here carrying the
     top-down's inputs and the chain so far, wherever in the picker it was raised (Unpickable's three kinds)."""
@@ -454,8 +468,7 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
         # fb173b065383), and a floor searched around it finds nothing
         mid, minz, maxz = pos[focus], pos[focus][2], pos[focus][2]
         if focus in boxes:
-            bz = boxes[focus]
-            minz, maxz = bz[2], bz[5]
+            minz, maxz = focus_storey_range(boxes, focus)
             mid = (pos[focus][0], pos[focus][1], (minz + maxz) / 2.0)
 
     # what a top-down needs, should every eye-level picture refuse: the subjects (the focus alone, else both), placed at
