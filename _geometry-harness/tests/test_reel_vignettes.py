@@ -517,6 +517,8 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
                     continue
                 chosen.append(c)
                 others[c["rows"][0]["formKey"]] = [x for x in g if x is not c]
+                # (item 36, D4) a refused member of this group is represented by this picture, not also unpictured
+                unpictured[:] = [u for u in unpictured if not (u[1] == "captureRefused" and u[0] in g)]
                 break
         chosen_by_type[t] = chosen
         if t in policy["pictureTypes"]:
@@ -1462,6 +1464,335 @@ def case_planner():
     rule_checks(gr, reel_view(gr), tag="refused capture: ", mods=mods)
 
 
+# ------------------------------------------------------------------------------------------ phase 3 gaps (item 36)
+def shipped_pool_words():
+    """The test's words with the shipped phrasing pools (every case the planner can say, as the skill ships it)."""
+    shipped = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))["reel"]["words"]
+    return {**WORDS, "patch": dict(shipped["patch"])}
+
+
+def pool_uses(view, words):
+    """[(case, phrasing index)] of every patch sentence in reel order, any slot filled in as anything."""
+    out = []
+    for c in view:
+        text, found = c.get("narration") or "", []
+        for case, vs in words["patch"].items():
+            for i, v in enumerate(vs if isinstance(vs, list) else [vs]):
+                rx = re.sub(r"\\\{\w+\\\}", ".+?", re.escape(v))
+                found += [(m.start(), -len(v), case, i) for m in re.finditer(rx, text)]
+        # one span is one sentence: a longer phrasing that contains a shorter one wins it
+        taken = []
+        for s, nl, case, i in sorted(found):
+            if any(s == s_ for s_, _ in taken):
+                continue
+            taken.append((s, (case, i)))
+        out += [x for _, x in taken]
+    return out
+
+
+def pool_fixture(case):
+    """The synthetic evaluation shaped so `case` is said at least twice with another case between (overlap scenes go
+    Alpha, Beta, Alpha by the pair rotation): which pair has the supplied patch, what the rows' withPatch says, what
+    the search found."""
+    pres, names, masters, search, mods = synthetic()
+    rec = pres["reader"]["prediction"]["record"]
+    alpha = [r for r in rec if r.get("B") == "Alpha.esp" and r["checkId"] == "geometry.object-overlap"]
+    beta_pair = search["pairs"][1]
+    wp = {"fixes": "resolved", "fixesOverlap": "resolved", "fixesOverlapMoved": "resolved", "keeps": "kept",
+          "own": "own"}.get(case, "left")
+    for r in alpha:
+        r["withPatch"] = wp
+    alpha_pair = search["pairs"][0]
+    if case in ("listed", "none", "notFound"):
+        pres["reader"]["suppliedPatches"] = []
+    if case in ("listed", "leaves"):
+        alpha_pair["hits"] = [{"file": "Alpha - Target patch v2", "page": "Alpha Patches", "mentions": []}]
+    if case in ("none",):
+        beta_pair["hits"] = [{"file": "Beta - Target patch", "page": "Beta Patches", "mentions": []}]
+    if case in ("notFound", "notFoundOther"):
+        alpha_pair["unreadSources"] = [{"source": "a page description", "why": "cut short"}]
+    if case == "fixesOverlapMoved":
+        for r in alpha:
+            names["refs"].setdefault(r["formKey"], {"base": "B1", "carriedBy": ["Target.esp"]})["placements"] = {"Target.esp": [0.0, 0.0, 0.0],
+                                                         "Alpha - Target patch.esp": [100.0, 0.0, 0.0]}
+    words = shipped_pool_words()
+    if case == "fixes":
+        words["patch"] = {k: v for k, v in words["patch"].items() if k not in ("fixesOverlap", "fixesOverlapMoved")}
+    return pres, names, masters, search, mods, words
+
+
+POOL_CASES = ["fixes", "fixesOverlap", "fixesOverlapMoved", "keeps", "own", "leaves", "listed", "none", "noneOther",
+              "notFound", "notFoundOther"]
+
+
+def case_gaps():
+    # N7: every pool case rotates: its k-th use in reel order takes phrasing k mod the pool's size
+    for case in POOL_CASES:
+        pres, names, masters, search, mods, words = pool_fixture(case)
+        got = planned(pres, names, masters, search, mods, words=words)
+        uses = pool_uses(reel_view(got), words)
+        mine = [i for c, i in uses if c == case]
+        n = len(words["patch"][case])
+        between = [j for j, (c, _) in enumerate(uses) if c == case]
+        inter = len(between) >= 2 and any(uses[k][0] != case for k in range(between[0], between[1]))
+        check(f"N7-rotate-{case}", len(mine) >= 2 and inter and mine == [k % n for k in range(len(mine))],
+              f"case {case} is said {len(mine)} times with another case between, taking phrasings {mine} "
+              f"(expected {[k % n for k in range(len(mine))]}; all uses {uses})")
+
+    # N8: the grouping key part by part
+    def split_keys(g):
+        return [c["clash"].get("formKey") for c in reel_view(g) if c["kind"] == "split"]
+
+    # pair: an Alpha x Target placement in the lamp's cell is its own problem, not one of Beta's lamps
+    gp, gn, gm, gs, gmods = synthetic_group()
+    rec = gp["reader"]["prediction"]["record"]
+    lamp2 = next(r for r in rec if r["formKey"] == "000406:Skyrim.esm")
+    lamp2.update(A="Alpha.esp", summary="PlacedObject LampTwo: Placement - Alpha.esp's value lost to Target.esp's")
+    gn["refs"]["000406:Skyrim.esm"]["carriedBy"] = ["Skyrim.esm", "Alpha.esp", "Target.esp"]
+    gn["refs"]["000406:Skyrim.esm"]["cells"] = {"Skyrim.esm": "000A01:Skyrim.esm", "Alpha.esp": "000A01:Skyrim.esm",
+                                                 "Target.esp": "000A01:Skyrim.esm"}
+    gg = planned(gp, gn, gm, gs, gmods)
+    keys, text = split_keys(gg), " ".join(c["narration"] for c in reel_view(gg))
+    check("N8-key-pair", "000406:Skyrim.esm" in keys and "Lamp Two and Lamp Three" not in text
+          and "Lamp Three is placed the same way." in text,
+          f"a placement of another pair in the same cell is its own split, not named with the first pair's group "
+          f"(splits {keys})")
+    # field (under a policy picturing two fields; the shipped one pictures Placement alone, so the part is dormant)
+    gp, gn, gm, gs, gmods = synthetic_group()
+    rec = gp["reader"]["prediction"]["record"]
+    l3 = next(r for r in rec if r["formKey"] == "000407:Skyrim.esm")
+    l3.update(field="Model", values={"lost": "a.nif", "winner": "b.nif"},
+              summary="PlacedObject LampThree: Model - Beta.esp's value lost to Target.esp's")
+    two = dict(POLICY, drawableFields=["Placement", "Model"])
+    gg = planned(gp, gn, gm, gs, gmods, policy=two)
+    keys = split_keys(gg)
+    check("N8-key-field", "000407:Skyrim.esm" in keys and len(keys) == 3,
+          f"with two fields pictured, a Model clash in the lamps' cell and pair is its own problem (splits {keys})")
+    # type: an overlap and a placement of one pair in one cell are two scenes (the planner groups inside each type, so
+    # no key edit can join them; this is the outcome only)
+    gp, gn, gm, gs, gmods = synthetic_group()
+    gp["reader"]["prediction"]["record"].append(
+        {"checkId": "geometry.object-overlap", "kind": "OVERLAP", "A": "Target.esp", "B": "Beta.esp",
+         "formKey": "000107:Target.esp", "other": ["000403:Skyrim.esm"], "admission": "admitted", "findingId": "F-O7",
+         "physical": "Holds", "withPatch": "left",
+         "summary": "Static from Beta.esp / Static from Target.esp: crossing in LampRoom (int) [mm] 000107:Target.esp / 000403:Skyrim.esm"})
+    gn["refs"]["000107:Target.esp"] = {"base": "B1", "carriedBy": ["Target.esp"]}
+    gg = planned(gp, gn, gm, gs, gmods, policy=dict(POLICY, allUpTo=0, perType=9))
+    v_ = reel_view(gg)
+    check("N8-key-type", any(c["kind"] == "vignette" and c["clash"].get("formKey") == "000107:Target.esp" for c in v_)
+          and "000403:Skyrim.esm" in split_keys(gg),
+          "an overlap and a placement of one pair in one cell are two scenes, one of each kind")
+    # geometry key: pair and cell from the row
+    gp, gn, gm, gs, gmods = synthetic()
+    rec = gp["reader"]["prediction"]["record"]
+    o2 = next(r for r in rec if r["formKey"] == "000102:Target.esp")
+    o2.update(B="Beta.esp", summary=o2["summary"].replace("from Alpha.esp", "from Beta.esp"))
+    gg = planned(gp, gn, gm, gs, gmods, policy=dict(POLICY, allUpTo=0, perType=9))
+    pic = [c["clash"].get("formKey") for c in reel_view(gg) if c["kind"] == "vignette"]
+    check("N8-key-geo-pair", "000101:Target.esp" in pic and "000102:Target.esp" in pic,
+          f"two overlaps in one cell with different pairs are two problems (pictured {pic})")
+    gp, gn, gm, gs, gmods = synthetic()
+    gg = planned(gp, gn, gm, gs, gmods, policy=dict(POLICY, allUpTo=0, perType=9))
+    pic = [c["clash"].get("formKey") for c in reel_view(gg) if c["kind"] == "vignette"]
+    check("N8-key-geo-cell", "000101:Target.esp" in pic and "000103:Target.esp" in pic and "000102:Target.esp" not in pic,
+          f"overlaps of one pair in two cells are two problems, and two in one cell are one (pictured {pic})")
+
+    # N8: the in-group capture fallback; the refused member is said once, with its group
+    gp, gn, gm, gs, gmods = synthetic_group()
+    base = planned(gp, gn, gm, gs, gmods)
+    caps = [{"formKey": "000403:Skyrim.esm", "status": "refused", "reason": "no camera"}]
+    gr = planned(gp, gn, gm, gs, gmods, captures=caps)
+    vr = reel_view(gr)
+    first = next((c for c in vr if c["kind"] == "split"), {})
+    check("N8-fallback", (first.get("clash") or {}).get("formKey") == "000406:Skyrim.esm"
+          and "Lamp and Lamp Three are placed the same way." in first.get("narration", ""),
+          f"a refused first member hands its group's split to the next member, which names it with the rest "
+          f"({(first.get('clash') or {}).get('formKey')}: {first.get('narration', '')[:200]!r})")
+
+    def unp(g):
+        acc = ((g.get("reel") or {}).get("accounting") or {}).get("record") or {}
+        said = next((c["narration"] for c in reel_view(g) if c["kind"] == "unpictured"), "")
+        m = re.match(r"(\d+) clash", said)
+        return len(acc.get("unpictured") or []), int(m.group(1)) if m else None, acc
+    n0, s0, _ = unp(base)
+    n1, s1, acc1 = unp(gr)
+    place = {k: [x for x in v if x == "000403:Skyrim.esm"] for k, v in acc1.items()}
+    check("N8-fallback-once", s1 == s0 and n1 == n0 and place.get("represented") == ["000403:Skyrim.esm"]
+          and not place.get("unpictured"),
+          f"the refused member is represented by its group's picture, not also counted unpictured: the unpictured "
+          f"count stays {s0} (said {s1}), record accounting {acc1}")
+
+
+# ------------------------------------------------------------------------------------------ mod names (item 36)
+NEXUS_STUB = r'''
+import json, os, sys
+from pathlib import Path
+marker, mode = sys.argv[1], sys.argv[2]
+Path(marker).write_text("started", encoding="utf-8")
+if mode == "exit":
+    sys.exit(3)
+store = Path(os.environ["HOUSECARL_NEXUS_CATALOG_DIR"])
+for line in sys.stdin:
+    m = json.loads(line)
+    if "id" not in m:
+        continue
+    if m["method"] == "initialize":
+        res = {"protocolVersion": "2025-06-18", "capabilities": {}, "serverInfo": {"name": "stub", "version": "1"}}
+    elif mode == "ok":
+        mid = m["params"]["arguments"]["add"]
+        page = store / "pages" / mid
+        page.mkdir(parents=True, exist_ok=True)
+        (page / "snapshot.json").write_text(json.dumps({"modId": int(mid), "name": "Environs - Master Plugin",
+                                                       "readDate": "2026-11-09", "sourceUrl": "stub"}), encoding="utf-8")
+        res = {"content": [{"type": "text", "text": "added page " + mid}], "isError": False}
+    else:
+        res = {"content": [{"type": "text", "text": "error: Nexus did not answer (HTTP 503)"}], "isError": True}
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": res}) + "\n")
+    sys.stdout.flush()
+'''
+
+
+def names_fixture(tmp: Path, target_meta: bool = True, footprint: bool = False):
+    """The synthetic evaluation as a bundle whose plugins sit in MO2 mod folders, and a Nexus catalogue: Target in the
+    lab-style folder "R2 SUP - Target Mod" (meta.ini modid 901, page held), Alpha in a folder with no meta.ini, Beta in a
+    folder whose meta.ini has modid 0, the patch in a folder naming Nexus mod 91160 (Environs Master Plugin's id, the
+    lab's real catalogue miss), whose page the catalogue lacks."""
+    pres, names, masters, search, mods = synthetic()
+    mdir, store, bundle = tmp / "inst" / "mods", tmp / "catalogue", tmp / "bundle"
+    folders = {"Target.esp": ("R2 SUP - Target Mod", "[General]\nmodid=901\nversion=1\n" if target_meta else None),
+               "Alpha.esp": ("Alpha Folder", None), "Beta.esp": ("Beta Folder", "[General]\nmodid=0\n"),
+               "Alpha - Target patch.esp": ("R2 SUP - Case Key", "[General]\nmodid=91160\n")}
+    plugins = [{"name": "Skyrim.esm", "path": str(tmp / "Data" / "Skyrim.esm")}]
+    for plugin, (folder, meta) in folders.items():
+        (mdir / folder).mkdir(parents=True, exist_ok=True)
+        if meta is not None:
+            (mdir / folder / "meta.ini").write_text(meta, encoding="utf-8")
+        plugins.append({"name": plugin, "path": str(mdir / folder / plugin)})
+    (store / "pages" / "901").mkdir(parents=True)
+    (store / "pages" / "901" / "snapshot.json").write_text(json.dumps({"modId": 901, "name": "Target Mod On Nexus",
+                                                                      "readDate": "2026-11-01", "sourceUrl": "x"}), encoding="utf-8")
+    bundle.mkdir(parents=True)
+    plan = {"targets": [{"name": "Target.esp"}], "arms": [{"armId": "with-target", "requested": {"plugins": plugins}}]}
+    (bundle / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    scope = {"targets": [{"name": "Target.esp", "footprint": {"nexusId": 901 if footprint else None}}]}
+    (bundle / "scope.json").write_text(json.dumps(scope), encoding="utf-8")
+    (bundle / "names.json").write_text(json.dumps({**names, "mods": {}}), encoding="utf-8")
+    (bundle / "manifest.json").write_text(json.dumps({"plan": "plan.json", "scope": "scope.json", "evidence": [
+        {"kind": "enrichment", "enrichment": "names", "path": "names.json"}]}), encoding="utf-8")
+    sp = tmp / "patch-search.json"
+    sp.write_text(json.dumps(search), encoding="utf-8")
+    stub = tmp / "nexus_stub.py"
+    stub.write_text(NEXUS_STUB, encoding="utf-8")
+    return pres, bundle, store, sp, stub
+
+
+def names_reel(tmp: Path, mode=None, stub_mode=None, mod_name=(), **fx):
+    """evalreport.reel_block on the fixture: (reel, the plan folder, the stub's start marker, the catalogue)."""
+    import argparse as ap_
+    import evalreport
+    pres, bundle, store, sp, stub = names_fixture(tmp, **fx)
+    out = tmp / "plan"
+    out.mkdir()
+    marker = tmp / "stub-started.txt"
+    a = ap_.Namespace(mod_name=list(mod_name), patch_search=str(sp), capture_results=[], captures_final=False,
+                      nexus_names=mode or "offline",
+                      nexus_reader_cmd=(f'"{sys.executable}" "{stub}" "{marker}" {stub_mode}' if stub_mode else None))
+    old = os.environ.get("HOUSECARL_NEXUS_CATALOG_DIR")
+    os.environ["HOUSECARL_NEXUS_CATALOG_DIR"] = str(store)
+    try:
+        reel = evalreport.reel_block(pres, bundle, None, evalreport.load_priorities(), a, out)
+    finally:
+        if old is None:
+            os.environ.pop("HOUSECARL_NEXUS_CATALOG_DIR", None)
+        else:
+            os.environ["HOUSECARL_NEXUS_CATALOG_DIR"] = old
+    return reel, out, marker, store
+
+
+def case_names():
+    def said(reel):
+        return " ".join(str(c.get("narration") or "") for c in reel.get("chapters") or [])
+    with tempfile.TemporaryDirectory(prefix="hc-reel-names-") as t:
+        reel, out, marker, store = names_reel(Path(t))
+        mn = reel.get("modNames") or {}
+        tgt = mn.get("Target.esp") or {}
+        check("NX1-nexus-over-folder", reel.get("status") == "planned" and tgt.get("name") == "Target Mod On Nexus"
+              and tgt.get("source") == "nexus-catalogue" and "Target Mod On Nexus" in said(reel)
+              and "R2 SUP - Target Mod" not in said(reel),
+              f"a plugin whose MO2 folder's meta.ini names a held Nexus page is spoken by that page's name, never the "
+              f"folder (status {reel.get('status')}, {tgt})")
+        al, be, pa = (mn.get(k) or {} for k in ("Alpha.esp", "Beta.esp", "Alpha - Target patch.esp"))
+        check("NX3-reason", al.get("source") == "mo2-folder" and "no meta.ini" in str(al.get("reason"))
+              and be.get("source") == "mo2-folder" and "names no Nexus mod id" in str(be.get("reason"))
+              and pa.get("source") == "mo2-folder" and "91160" in str(pa.get("reason"))
+              and "offline" in str(pa.get("reason")),
+              f"a folder name is said with which step found no Nexus name: no meta.ini, no id, no page offline "
+              f"({al.get('reason')!r}; {be.get('reason')!r}; {pa.get('reason')!r})")
+        ev = out / "evidence" / "mod-names.json"
+        doc = json.loads(ev.read_text(encoding="utf-8")) if ev.is_file() else {}
+        dt_ = (doc.get("mods") or {}).get("Target.esp") or {}
+        meta = Path(t) / "inst" / "mods" / "R2 SUP - Target Mod" / "meta.ini"
+        snap = store / "pages" / "901" / "snapshot.json"
+        cited = reel.get("modNamesEvidence") or {}
+        check("NX4-evidence", ev.is_file() and (dt_.get("metaIni") or {}).get("sha256") == sha256(meta)
+              and (dt_.get("catalogue") or {}).get("sha256") == sha256(snap)
+              and cited.get("sha256") == (sha256(ev) if ev.is_file() else None) and not marker.exists(),
+              f"evidence/mod-names.json beside the reel holds the meta.ini and catalogue page each name rests on, by "
+              f"hash, and the reel cites it ({ev.is_file()}, {cited})")
+        check("NX6-offline-no-call", not marker.exists() and doc.get("mode") == "offline" and doc.get("fetches") == [],
+              "names read offline start no server and record no fetch")
+    with tempfile.TemporaryDirectory(prefix="hc-reel-names-") as t:
+        reel, out, marker, store = names_reel(Path(t), mod_name=["Target.esp=Declared Target"])
+        tgt = (reel.get("modNames") or {}).get("Target.esp") or {}
+        check("NX2-declared-wins", tgt.get("name") == "Declared Target" and tgt.get("source") == "declared"
+              and "Declared Target" in said(reel), f"a --mod-name still wins over the Nexus name ({tgt})")
+    with tempfile.TemporaryDirectory(prefix="hc-reel-names-") as t:
+        reel, out, marker, store = names_reel(Path(t), mode="fetch", stub_mode="ok")
+        pa = (reel.get("modNames") or {}).get("Alpha - Target patch.esp") or {}
+        doc = json.loads((out / "evidence" / "mod-names.json").read_text(encoding="utf-8")) \
+            if (out / "evidence" / "mod-names.json").is_file() else {}
+        f_ = next((f for f in doc.get("fetches") or [] if f.get("modId") == 91160), {})
+        tr = doc.get("transcript") or []
+        ok_ok = (reel.get("status") == "planned" and pa.get("name") == "Environs - Master Plugin"
+                 and pa.get("source") == "nexus-catalogue" and pa.get("fetched") is True and f_.get("ok") is True
+                 and f_.get("time") and (f_.get("args") or {}).get("add") == "91160" and len(tr) == 2
+                 and all(Path(x["path"]).is_file() and sha256(Path(x["path"])) == x["sha256"] for x in tr)
+                 and [f.get("modId") for f in doc.get("fetches") or []] == [91160])
+    with tempfile.TemporaryDirectory(prefix="hc-reel-names-") as t:
+        reel2, out2, _, _ = names_reel(Path(t), mode="fetch", stub_mode="fail")
+        pf = (reel2.get("modNames") or {}).get("Alpha - Target patch.esp") or {}
+    with tempfile.TemporaryDirectory(prefix="hc-reel-names-") as t:
+        reel3, _, _, _ = names_reel(Path(t), mode="fetch", stub_mode="exit")
+        px = (reel3.get("modNames") or {}).get("Alpha - Target patch.esp") or {}
+    check("NX5-fetch", ok_ok and reel2.get("status") == "planned" and pf.get("source") == "mo2-folder"
+          and "HTTP 503" in str(pf.get("reason")) and reel3.get("status") == "planned"
+          and px.get("source") == "mo2-folder" and "could not start" in str(px.get("reason")),
+          f"fetch mode asks the catalogue once for the missing page (91160), records the fetch with its time, result "
+          f"and transcript, and a failed fetch or server leaves the folder name with the failure as its reason without "
+          f"stopping the reel ({pa}; {pf.get('reason')!r}; {px.get('reason')!r})")
+    with tempfile.TemporaryDirectory(prefix="hc-reel-names-") as t:
+        reel, out, marker, store = names_reel(Path(t), target_meta=False, footprint=True)
+        tgt = (reel.get("modNames") or {}).get("Target.esp") or {}
+        check("NX7-target-footprint", tgt.get("name") == "Target Mod On Nexus" and tgt.get("nexusId") == 901,
+              f"an evaluated mod's Nexus id from the scope is used when its folder has no meta.ini ({tgt})")
+    # D2: the evidence index says each name's source in plain words
+    try:
+        import evalreport
+        md = evalreport.env(False).get_template("_mod-names.md.j2").render(p={"reel": {"modNames": {
+            "A.esp": {"name": "A Mod", "source": "nexus-catalogue", "nexusId": 266},
+            "B.esp": {"name": "B Folder", "source": "mo2-folder", "reason": "mod folder 'B Folder' has no meta.ini"},
+            "C.esp": {"name": "C Mod", "source": "declared"}}}})
+    except Exception as exc:  # noqa: BLE001 - an absent partial is a red check, not a crash
+        md = f"(no partial: {type(exc).__name__})"
+    check("NX8-index-plain", "Nexus page 266" in md and "MO2 folder name: no Nexus name was found" in md
+          and "has no meta.ini" in md and "--mod-name" in md and "{" not in md,
+          f"the evidence index says each reel name's source in plain words ({md[:300]!r})")
+
+
+def sha256(p: Path) -> str:
+    return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+
+
 def case_reference():
     pres, names, masters, search, mods = synthetic()
     ref = reference_presentation(pres, names, masters, search, mods)
@@ -1923,6 +2254,50 @@ CODE_SABOTAGE = {
         'words["groupOthers"]["one" if len(rest) == 1 else "many"]', 'words["groupOthers"]["many"]')]),
     "code-others-more": ("planner", "N8-others-more", [("_geometry-harness/reel_plan.py",
         'nm = ", ".join(rest[:3]) if len(rest) > 3 else joined(rest)', "nm = joined(rest[:3])")]),
+    # item 36: the six N9 checks that had no arm
+    "code-structure-share-abs": ("planner", "N9-structure", [("_geometry-harness/reel_plan.py",
+        "abs(float(d) - dz_obj) <= tol", "abs(float(d)) <= tol")]),
+    "code-replaced-never": ("planner", "N9-structure-replaced", [("_geometry-harness/reel_plan.py",
+        'if off >= float(policy.get("structureShare") or 1.0):', "if False:")]),
+    "code-close-never": ("planner", "N9-where-close", [("_geometry-harness/reel_plan.py",
+        "if dist * mpu < 5:", "if dist * mpu < 0:")]),
+    "code-floor-as-empty": ("planner", "N9-empty", [("_geometry-harness/reel_plan.py",
+        '                elif sup.get("down") is None:\n', "                else:\n")]),
+    "code-ground-as-floor": ("planner", "N9-ground", [("_geometry-harness/reel_plan.py",
+        'extra = words["spotExtra"]["belowGround"]', 'extra = words["spotExtra"]["noFloor"]')]),
+    "code-no-base-mover": ("planner", "N9-no-base", [("_geometry-harness/reel_plan.py",
+        'who = words["placementSplit"].format(loser=mod(A), winner=mod(B), object=obj, mod=mod(target))',
+        'who = words["moverOne"].format(mover=mod(B), keeper=mod(A), object=obj)')]),
+    # item 36: the grouping key part by part, the in-group capture fallback, the pool's counter per case
+    "code-group-no-pair": ("gaps", "N8-key-pair", [("_geometry-harness/reel_plan.py",
+        'return (c["type"], c["pair"], cell or r["formKey"], r.get("field"))', 'return (c["type"], None, cell or r["formKey"], r.get("field"))')]),
+    "code-group-no-field": ("gaps", "N8-key-field", [("_geometry-harness/reel_plan.py",
+        'return (c["type"], c["pair"], cell or r["formKey"], r.get("field"))', 'return (c["type"], c["pair"], cell or r["formKey"], None)')]),
+    "code-group-geo-no-pair": ("gaps", "N8-key-geo-pair", [("_geometry-harness/reel_plan.py",
+        'return (c["type"], c["pair"], m.group(1) if m else r["formKey"], None)', 'return (c["type"], None, m.group(1) if m else r["formKey"], None)')]),
+    "code-group-geo-no-cell": ("gaps", "N8-key-geo-cell", [("_geometry-harness/reel_plan.py",
+        'return (c["type"], c["pair"], m.group(1) if m else r["formKey"], None)', 'return (c["type"], c["pair"], None, None)')]),
+    "code-fallback-next-group": ("gaps", "N8-fallback", [("_geometry-harness/reel_plan.py",
+        "                    tried_refused.append(c)\n                    continue\n", "                    tried_refused.append(c)\n                    break\n")]),
+    "code-fallback-double": ("gaps", "N8-fallback-once", [("_geometry-harness/reel_plan.py",
+        "stands_in = [c for c in tried_refused if not buried_(c) and any(c in g_ for g_ in shown_groups)]", "stands_in = []")]),
+    "code-pool-shared-counter": ("gaps", "N7-rotate-noneOther", [("_geometry-harness/reel_plan.py",
+        "        k = used.get(case, 0)\n        used[case] = k + 1\n", '        k = used.get("any", 0)\n        used["any"] = k + 1\n')]),
+    # item 36: the reel's mod names
+    "code-names-folder-first": ("names", "NX1-nexus-over-folder", [("_geometry-harness/modnames.py",
+        'e.update(name=nm, source="nexus-catalogue", catalogue=src, fetched=nid in by_id)', "e.update(catalogue=src, fetched=nid in by_id)")]),
+    "code-names-declared-last": ("names", "NX2-declared-wins", [("_geometry-harness/modnames.py",
+        "        if declared.get(plugin):\n", "        if declared.get(plugin) and plugin not in folders:\n")]),
+    "code-names-no-reason": ("names", "NX3-reason", [("_geometry-harness/modnames.py",
+        'e["reason"] = f"mod folder {folder.name!r} has no meta.ini, so no Nexus mod id is known"', 'e["reason"] = None')]),
+    "code-names-unhashed": ("names", "NX4-evidence", [("_geometry-harness/modnames.py",
+        'e["metaIni"] = {"path": str(meta), "sha256": _sha(meta),', 'e["metaIni"] = {"path": str(meta), "sha256": None,')]),
+    "code-names-fetch-offline": ("names", "NX5-fetch", [("_geometry-harness/modnames.py",
+        'if mode == "fetch" else []', "if False else []")]),
+    "code-names-offline-calls": ("names", "NX6-offline-no-call", [("_geometry-harness/modnames.py",
+        'if mode == "fetch" else []', 'if mode in ("fetch", "offline") else []')]),
+    "code-names-footprint-dropped": ("names", "NX7-target-footprint", [("_geometry-harness/modnames.py",
+        "        nid = footprint.get(plugin)\n", "        nid = None\n")]),
     "code-probe-dropped": ("capture", "N9-probe-argv", [("_geometry-harness/capture_acquire.py",
         '            argv += ["--clear-at", f"{float(spot[0]):g},{float(spot[1]):g},{float(spot[2]) + 64:g}"]', "            pass")]),
     "code-f3-states": ("capture", "F3-states", [(REF + "/scene-policy.json",
@@ -2063,7 +2438,7 @@ def main(argv=None) -> int:
     ap.add_argument("--reference", action="store_true")
     ap.add_argument("--sabotage")
     ap.add_argument("--code-sabotage", help="a CODE_SABOTAGE arm name, or all")
-    ap.add_argument("--case", choices=("planner", "capture", "binding", "data", "render"))
+    ap.add_argument("--case", choices=("planner", "capture", "binding", "data", "render", "names", "gaps"))
     a = ap.parse_args(argv)
     if a.code_sabotage:
         arms = list(CODE_SABOTAGE) if a.code_sabotage == "all" else [a.code_sabotage]
@@ -2080,7 +2455,7 @@ def main(argv=None) -> int:
         arms = SABOTAGE if a.sabotage == "all" else [a.sabotage]
         return max(case_sabotage(n, got) for n in arms)
     else:
-        cases = {"planner": case_planner, "capture": case_capture_plan, "binding": case_capture_binding, "data": case_skill_data, "render": case_render}
+        cases = {"planner": case_planner, "capture": case_capture_plan, "binding": case_capture_binding, "data": case_skill_data, "render": case_render, "names": case_names, "gaps": case_gaps}
         for case in ([cases[a.case]] if a.case else cases.values()):
             try:
                 case()
