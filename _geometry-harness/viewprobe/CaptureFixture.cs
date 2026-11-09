@@ -52,6 +52,16 @@ namespace ViewProbe;
 //   CfCloud     no pair: the vanilla cloud mesh (one effect-shader shape plus an effect-shader editor marker) at scale 0.1,
 //               its box about x -422..360, y -62..44, z 1..512 at (0,0,265) (Walls[0]); the vanilla burning campfire (lit
 //               logs and stones, effect-shader flames, glow and smoke) at (600,0,0) (Walls[1]): effect shapes are not solid
+//   CfRoofed    crate (0,30,20)        crate (30,10,20)                     no floor and no navmesh (CfVoid), under a roof:
+//               one floor chunk at z 61..80 (Walls[0]), 20 u above the crates' tops (40.5) and under the top-down's cut
+//               (the overlap's top + 64, about 104.5): it covers the pair from above and touches neither (F4)
+//   CfRoofTouch the same, the chunk's underside on the crates' tops (z 40.5..59.5, Walls[0]): it touches both, so it may
+//               not be hidden (F4)
+//   CfTallFocus A: the CfTower shell (drawn box about z -512..1837) and B: the crate x4 at (0,0,150) (z 68..232),
+//               overlapping only the tower's lower part; the tower's interior top floor (Walls[0], about z 1280); floor
+//               tiles and navmesh at z 0. (A glow was tried first: an effect billboard's drawn box is flat.) The test
+//               names A the request's focus. The ring's storey comes from where the two drawn boxes overlap, not from the
+//               tower's whole height (F5)
 public static class CaptureFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -75,11 +85,12 @@ public static class CaptureFixture
         Glow = Ids("CfGlow", 0x840), Focus = Ids("CfFocus", 0x850), NoNav = Ids("CfNoNav", 0x860), Disabled = Ids("CfDisabled", 0x870),
         CutMod = Ids("CfCutMod", 0x880), Open = Ids("CfOpen", 0x890), FocusLow = Ids("CfFocusLow", 0x8A0),
         Void = Ids("CfVoid", 0x8B0), Thick = Ids("CfThick", 0x8C0), ThickWalls = Ids("CfThickWalls", 0x8D0),
-        Tower = Ids("CfTower", 0x8E0), Cloud = Ids("CfCloud", 0x8F0);
+        Tower = Ids("CfTower", 0x8E0), Cloud = Ids("CfCloud", 0x8F0), Roofed = Ids("CfRoofed", 0x900),
+        RoofTouch = Ids("CfRoofTouch", 0x910), TallFocus = Ids("CfTallFocus", 0x920);
     /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
     public static readonly ModKey ModKeyB = new("CfFixtureMod", ModType.Plugin);
     public static readonly FormKey CutModB = new(ModKeyB, 0x801);
-    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls, Tower, Cloud };
+    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls, Tower, Cloud, Roofed, RoofTouch, TallFocus };
 
     static CellIds Ids(string edid, uint b)
         => new(edid, K(b), K(b + 1), K(b + 2), K(b + 3), Enumerable.Range(0, 32).Select(n => K(0x2000 + (b - 0x810) / 0x10 * 0x40 + (uint)n)).ToArray(),
@@ -234,7 +245,16 @@ public static class CaptureFixture
         var cloud = NewCell(Cloud, true);
         cloud.Temporary.Add(Ref(Cloud.Walls[0], CloudBase, 0, 0, 265, scale: 0.1f));
         cloud.Temporary.Add(Ref(Cloud.Walls[1], CampfireBase, 600, 0, 0));
-        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell, thick, thickWalls, tower, cloud })
+        var roofed = NewCell(Roofed, false, floor: false); Pair(roofed, Roofed);
+        roofed.Temporary.Add(Ref(Roofed.Walls[0], FloorBase, 15, -10, 61f));
+        var roofTouch = NewCell(RoofTouch, false, floor: false); Pair(roofTouch, RoofTouch);
+        roofTouch.Temporary.Add(Ref(RoofTouch.Walls[0], FloorBase, 15, -10, 40.5f));
+        var tall = NewCell(TallFocus, true);
+        tall.Temporary.Add(Ref(TallFocus.A, TowerBase, 0, 0, 0));
+        tall.Temporary.Add(Ref(TallFocus.B, CrateBase, 0, 0, 150, scale: 4f));
+        tall.Temporary.Add(Ref(TallFocus.Walls[0], TowerTopBase, 0, 0, 0));
+        foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell, thick, thickWalls, tower, cloud,
+                                  roofed, roofTouch, tall })
             MovedRefFixture.FileInterior(m, c);
 
         var path = Path.Combine(dir, Key.FileName.String);

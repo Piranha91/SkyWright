@@ -1,16 +1,17 @@
-"""Known answers for the capture fallbacks: cutaway, top-down and see-through marks (CF1-CF24).
+"""Known answers for the capture fallbacks: cutaway, top-down and see-through marks (CF1-CF29).
 
     python tests/test_capture_fallbacks.py [--vp VIEWPROBE.exe] [--only CF1,CF2] [--keep DIR] [--code-only]
 
 Two kinds of case.
 
-RENDER CASES (CF1-CF12, CF14-CF16) run the REAL viewprobe (--vp; default the in-tree production build), the REAL capture_points,
+RENDER CASES (CF1-CF12, CF14-CF16, CF25-CF27, CF29) run the REAL viewprobe (--vp; default the in-tree production build), the REAL capture_points,
 capture_acquire and shotplan on CfFixture.esp (viewprobe/CaptureFixture.cs), laid out as an MO2 instance over a Skyrim SE
 game's own archives (tests/capture_fixture_lab.py). The game folder is HOUSECARL_FIXTURE_GAME or `fixtureGame` in the
 harness config. Without it these cases are NOT RUN, the run says so and exits 3: never a pass.
 
-CODE CASES (CF13, CF20-CF24) call the real evalpipeline, reel_plan, capture_acquire and evalreport functions on hand-built
-inputs: the reuse rule, the reel's unmarkable skip, the top-down acceptance count and the view-kind caption words.
+CODE CASES (CF13, CF20-CF24, CF28) call the real evalpipeline, reel_plan, capture_acquire and evalreport functions on
+hand-built inputs: the reuse rule, the reel's unmarkable skip, the top-down acceptance count, the view-kind caption words
+and the buried-clash words.
 
 With --code-only only the code cases run, and the run says the render cases were not attempted (the harness-suites
 guard runs the file this way, where there is no game data).
@@ -97,7 +98,8 @@ class Rig:
             self._fp[order] = m.group(1)
         return self._fp[order]
 
-    def bundle(self, cell: str, a: str, b: str, fingerprint: str | None = None, plugins=None) -> tuple[Path, str]:
+    def bundle(self, cell: str, a: str, b: str, fingerprint: str | None = None, plugins=None,
+               focus: str | None = None) -> tuple[Path, str]:
         """A one-finding bundle and storyboard packet whose single overlap-pair request names A (cyan) and B (magenta)."""
         import report_scenes
         root = self.root / "bundles" / cell
@@ -123,6 +125,8 @@ class Rig:
         # the selector highlights the finding's own row first; pin the colours to A cyan, B magenta for the cases
         req["highlights"] = [{"formKey": a, "color": "cyan"}, {"formKey": b, "color": "magenta"}]
         req["recordKeys"] = [a, b]
+        if focus:
+            req["focus"] = focus          # the reel's volume rule names the participant the ring centres on
         # the vignette the capture step renders: without the evaluated mod, with it, and with both marked
         req["vignette"] = {"chapterId": f"cf-{cell}", "withoutArmId": "without", "states": ["without", "with", "highlight"]}
         req["sequence"] = {**(req.get("sequence") or {}), "states": ["without", "with", "highlight"],
@@ -132,11 +136,12 @@ class Rig:
                                       "capturePlan": plan}, indent=1), encoding="utf-8")
         return packet, req["id"]
 
-    def acquire(self, cell: str, a: str | None = None, b: str | None = None, order: Path | None = None) -> dict:
+    def acquire(self, cell: str, a: str | None = None, b: str | None = None, order: Path | None = None,
+                focus: str | None = None) -> dict:
         i = LAB.ids(cell)
         order = order or self.lab.cand
         packet, rid = self.bundle(cell, a or i["A"], b or i["B"], self.fingerprint_of(order),
-                                  [LAB.PLUGIN] + ([LAB.PLUGIN_MOD] if order == self.lab.cand_mod else []))
+                                  [LAB.PLUGIN] + ([LAB.PLUGIN_MOD] if order == self.lab.cand_mod else []), focus=focus)
         out = self.root / "acq" / cell
         out.mkdir(parents=True, exist_ok=True)
         r = run([sys.executable, HARNESS / "capture_acquire.py", "acquire", "--packet", packet, "--request", rid,
@@ -222,6 +227,16 @@ def cf3_buried(rig: Rig):
     check("CF3", doc.get("status") == "refused" and code == "top-down-participant-unseen" and i["B"] in str(ref.get("detail")),
           "the buried participant was not refused as unseen from above, by name", refusal_text(doc))
     check("CF3", ref.get("final") is True, "the refusal does not say every fallback was tried", str(ref.get("final")))
+    # F8: the eye-level step carries its station counts as fields, and the report's rule reads B as buried from them
+    eye = next((st for st in ref.get("chain") or [] if st.get("kind") == "eye-level"), {})
+    n = eye.get("stationsPlaced")
+    check("CF3", isinstance(n, int) and n >= 1 and (eye.get("visibleFrom") or {}).get(i["B"]) == 0,
+          "the eye-level step does not carry how many placed stations saw each participant", str(eye)[:300])
+    RP = load("cf_reel_plan4", HARNESS / "reel_plan.py")
+    fn = getattr(RP, "buried_participant", None)
+    got = fn({"status": "refused", "refusal": ref, "recordKeys": [i["A"], i["B"]]}) if fn else None
+    check("CF3", (got or {}).get("formKey") == i["B"], "the buried participant is not read as buried from the capture's own record",
+          str(got))
 
 
 def cf4_see_through(rig: Rig):
@@ -463,9 +478,101 @@ def cf15_no_floor_top_down(rig: Rig):
           "a pair with no storey got no top-down", refusal_text(doc))
 
 
+def capture_states(rig: Rig, doc: dict, cell: str) -> tuple[dict, Path]:
+    """capture_acquire capture of an acquisition with both setups on the candidate order: (result, its folder)."""
+    out = rig.root / "cap" / cell
+    r = run([sys.executable, HARNESS / "capture_acquire.py", "capture", "--acquisition", Path(doc["_dir"]) / "acquisition.json",
+             "--packet", doc["_packet"], "--request", doc["_rid"], "--with-order", rig.lab.cand,
+             "--without-order", rig.lab.cand, "--out", out, "--size", "320", "--vp", Path(rig.vp).as_posix(), "--",
+             *rig.lab.target(with_order=False)])
+    res_p = out / "capture-result.json"
+    res = json.loads(res_p.read_text(encoding="utf-8")) if res_p.is_file() else {"status": None, "reason": r.stderr[-300:]}
+    return res, out
+
+
+def cf25_roof_hidden_from_above(rig: Rig):
+    """F4: a pair with no storey (so straight to the top-down) under a roof 20 u above it that touches neither: from above
+    the roof covers both. The top-down hides what covers a participant from above by the cutaway's rule, and the frame
+    says so (cutaway and sliced top-down). Wrong answers: a refusal ('unseen from above') while the roof could be hidden;
+    a top-down that hides anything but the roof; states rendered without the hide flags."""
+    i = LAB.ids("CfRoofed")
+    roof = i["walls"]["W"][0]
+    doc = rig.acquire("CfRoofed")
+    if not check("CF25", doc.get("status") == "camera-ready" and doc.get("viewKind") == "top-down",
+                 "the roofed pair was refused instead of shown from above with the roof hidden", refusal_text(doc)):
+        return
+    hid = hidden_keys(doc)
+    check("CF25", hid == [roof], "the top-down hid something other than the roof, or nothing", str(hid))
+    flags = [str(x) for x in (doc.get("camera") or {}).get("viewFlags") or []]
+    check("CF25", roof in flags and all(k in flags for k in (i["A"], i["B"])) and "--protect" in flags,
+          "the top-down camera does not carry the hide and protect flags", str(flags))
+    res, out = capture_states(rig, doc, "CfRoofed")
+    if not check("CF25", res.get("status") == "captured", "the top-down's states were not captured",
+                 f"{res.get('status')}: {res.get('reason')}"):
+        return
+    for state in ("without", "with", "highlight"):
+        con = (out / state / "console.txt").read_text(encoding="utf-8") if (out / state / "console.txt").is_file() else ""
+        lab = next((ln for ln in con.splitlines() if ln.startswith("view-label: ")), "")
+        check("CF25", f"hidden: {roof}" in con and "CUTAWAY" in lab and "SLICED TOP-DOWN" in lab,
+              f"the {state} state was not rendered with the roof hidden under a cutaway and sliced label", lab)
+
+
+def cf26_touching_roof_kept(rig: Rig):
+    """F4's control: the roof's underside on the pair's tops, so it touches both. It may not be hidden, the request stays
+    refused as unseen from above, and the top-down step says why. Wrong answer: the touching roof hidden."""
+    i = LAB.ids("CfRoofTouch")
+    roof = i["walls"]["W"][0]
+    doc = rig.acquire("CfRoofTouch")
+    flags = [str(x) for x in (doc.get("camera") or {}).get("viewFlags") or []]
+    check("CF26", roof not in hidden_keys(doc) and roof not in flags, "a roof touching the pair was hidden",
+          str(hidden_keys(doc)))
+    ref = doc.get("refusal") or {}
+    td = next((st for st in ref.get("chain") or [] if st.get("kind") == "top-down"), {})
+    check("CF26", doc.get("status") == "refused" and ref.get("code") == "top-down-participant-unseen" and roof in str(td.get("detail")),
+          "the touching-roof pair was not refused as unseen from above with the roof named as not hideable",
+          f"{refusal_text(doc)} | top-down step: {str(td.get('detail'))[:300]}")
+
+
+def cf27_tall_focus_storey(rig: Rig):
+    """F5: a tall focus (the Nordic tower ruin, with its interior top floor) whose partner (a crate) overlaps only its lower
+    part. The ring stands on the storey of the overlap of the two drawn boxes: the floor at z 0. Wrong answer: the ring
+    on the tower's top floor, which the tower's whole height reaches (the WRW tower's top walkway)."""
+    i = LAB.ids("CfTallFocus")
+    doc = rig.acquire("CfTallFocus", focus=i["A"])
+    wl = rig.root / "acq" / "CfTallFocus" / "receipts" / "points-work" / "witness-worklist.json"
+    if not check("CF27", wl.is_file(), "no witness ring was written for the tall focus", refusal_text(doc)):
+        return
+    floors = sorted({sh_["floorZ"] for sh_ in json.loads(wl.read_text(encoding="utf-8"))["cells"][0]["shots"]})
+    check("CF27", floors and all(-16 <= f <= 8 for f in floors),
+          "the ring stands on the tower's top floor, above the part the partner overlaps", f"ring floors {floors}")
+
+
+def shots_state(vp: Path) -> dict:
+    d = Path(vp).parent / "shots"
+    return {f.name: (f.stat().st_size, f.stat().st_mtime_ns) for f in d.iterdir() if f.is_file()} if d.is_dir() else {}
+
+
+def cf29_planner_probes_stay_in_receipts(rig: Rig):
+    """F9: an acquisition writes nothing into the renderer's own folder. The planner's probe frames go to the request's
+    receipts (--out). Wrong answer: shotplan plan run without --out, so viewprobe writes <cell>-fp.png and
+    <cell>-configuration.json into its own shots/ folder (a production build's: the stray Cf* renders). CfOpen takes the
+    eye-level plan, CfVoid the top-down plan."""
+    for cell in ("CfOpen", "CfVoid"):
+        before = shots_state(rig.vp)
+        doc = rig.acquire(cell)
+        after = shots_state(rig.vp)
+        wrote = sorted(k for k, v in after.items() if before.get(k) != v)
+        check("CF29", not wrote, f"the {cell} acquisition wrote into the renderer's own shots folder", str(wrote[:6]))
+        probes = Path(doc["_dir"]) / "receipts" / ("top-down/planner-probes" if cell == "CfVoid" else "planner-probes")
+        check("CF29", probes.is_dir() and any(probes.iterdir()), f"the {cell} planner's probe frames are not in the receipts",
+              str(probes))
+
+
 RENDER_CASES = [cf1_cutaway, cf2_touching_blockers, cf3_buried, cf4_see_through, cf5_alpha_recovery, cf6_focus,
                 cf7_no_station, cf8_not_drawn, cf9_hide_protect_banner, cf10_contacts, cf11_occluders,
-                cf12_capture_states, cf14_focus_floor_from_box, cf15_no_floor_top_down, cf16_open_cell]
+                cf12_capture_states, cf14_focus_floor_from_box, cf15_no_floor_top_down, cf16_open_cell,
+                cf25_roof_hidden_from_above, cf26_touching_roof_kept, cf27_tall_focus_storey,
+                cf29_planner_probes_stay_in_receipts]
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -560,6 +667,10 @@ def cf23_caption_words(tmp: Path):
         check("CF23", "cutaway" in c.lower() and "2 objects hidden" in c, f"the {name} for a cutaway does not say so", c)
         check("CF23", "top-down" in t.lower() and "512" in t, f"the {name} for a top-down does not say so", t)
         check("CF23", e == "", f"the {name} labels an eye-level view", e)
+        # F4: a top-down that hid what stood over the pair says both
+        th = f({"viewKind": "top-down", "cullAbove": 512.0, "hidden": [{"formKey": "1:x.esp"}, {"formKey": "2:x.esp"}]})
+        check("CF23", "top-down" in th.lower() and "2 objects" in th and "hidden" in th,
+              f"the {name} for a top-down with objects hidden does not say how many were hidden", th)
 
 
 def cf13_planner_refusal(tmp: Path):
@@ -625,8 +736,94 @@ def cf24_after_pick_rule(tmp: Path):
         check("CF24", bool(u.extra.get("noFallback")), f"a {kind} picker refusal does not say why no fallback applies")
 
 
+def buried_result(vis: dict | None, placed: int | None, participant: str, cutaway: str = "refused",
+                  keys=("000101:Target.esp", "000201:Alpha.esp")) -> dict:
+    """A refused capture result shaped as capture_acquire writes it: the eye-level step with (or, vis None, without) the
+    station counts as fields, the cutaway step, the top-down's final unseen-from-above refusal."""
+    eye = {"kind": "eye-level", "status": "refused", "code": "points-no-visible-face", "detail": "no eye-level camera sees both"}
+    if vis is not None:
+        eye.update(visibleFrom=vis, stationsPlaced=placed)
+    chain = [eye, {"kind": "cutaway", "status": cutaway, "code": None if cutaway == "ok" else "cutaway-refused", "detail": "x"},
+             {"kind": "top-down", "status": "refused", "code": "top-down-participant-unseen", "detail": "0 px"}]
+    return {"request": "req-buried", "status": "refused", "formKey": keys[0], "recordKeys": list(keys),
+            "reason": "refused (top-down-participant-unseen)",
+            "refusal": {"code": "top-down-participant-unseen", "participant": participant, "final": True, "chain": chain}}
+
+
+def cf28_buried_said(tmp: Path):
+    """F8: a clash whose participant no placed eye-level station sees and the top-down cannot see either is told as
+    buried, with the count of camera spots it rests on, in the reel and in the report item; it is still counted.
+    Wrong answers: 'no camera could see the clash' for it; buried said for a pose the planner refused after a station
+    saw both (WRW 27aa), for a result without the counts, or when a cutaway step succeeded; the clash dropped."""
+    RP = load("cf_reel_plan3", HARNESS / "reel_plan.py")
+    A, B = "000101:Target.esp", "000201:Alpha.esp"
+    fn = getattr(RP, "buried_participant", None)
+    if not check("CF28", fn is not None, "reel_plan has no buried-participant rule a test can call"):
+        rv_reason_only(tmp, RP, A, B)
+        return
+    got = fn(buried_result({A: 13, B: 0}, 13, B))
+    check("CF28", got == {"formKey": B, "partner": A, "stations": 13}, "a participant seen from 0 of 13 stations is not buried",
+          str(got))
+    got = fn(buried_result({A: 0, B: 1}, 1, B))      # WRW 13cc: the one unseen at eye level is A
+    check("CF28", (got or {}).get("formKey") == A and got.get("stations") == 1,
+          "the participant no station saw (the other was short only from above) is not the buried one", str(got))
+    for name, x in (("a pose refused after a station saw both (no counts)", buried_result(None, None, B)),
+                    ("no station placed", buried_result({A: 0, B: 0}, 0, B)),
+                    ("a cutaway that succeeded", buried_result({A: 13, B: 0}, 13, B, cutaway="ok")),
+                    ("every participant seen from some station", buried_result({A: 5, B: 2}, 7, B))):
+        check("CF28", fn(x) is None, f"buried was said for {name}", str(fn(x)))
+    rv_reason_only(tmp, RP, A, B)
+    # the report item: its line, with the count, where its picture would be
+    ER = load("cf_evalreport3", HARNESS / "evalreport.py")
+    fr = getattr(ER, "buried_lines", None)
+    if not check("CF28", fr is not None, "evalreport has no buried-line rule a test can call"):
+        return
+    words = json.loads((HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+                        / "report-priorities.json").read_text(encoding="utf-8"))["reader"]["figureCaptions"]
+    plan = {"reader": {"prediction": {"record": [{"findingId": "F-1", "formKey": A, "other": [B]},
+                                                 {"findingId": "F-2", "formKey": "000103:Target.esp", "other": [B]}],
+                                      "items": [{"findingIds": ["F-1"]}, {"findingIds": ["F-2"]}]}}}
+    names = {"refs": {B: {"base": "b"}, A: {"base": "a"}}, "bases": {"b": {"editorId": "WRWRock"}, "a": {"editorId": "RynTower"}},
+             "objects": {"WRWRock": {"name": "Rock"}}}
+    n = fr(plan, [buried_result({A: 13, B: 0}, 13, B)], names, words)
+    items = plan["reader"]["prediction"]["items"]
+    line = " ".join(items[0].get("buriedLines") or [])
+    check("CF28", n == 1 and "Rock" in line and "buried" in line and "13 camera spots" in line and not items[1].get("buriedLines"),
+          "the report item of a buried clash does not say it is buried with its 13 camera spots, or another item says so",
+          f"{n} item(s): {line!r}")
+
+
+def rv_reason_only(tmp: Path, RP, A: str, B: str):
+    """The reel's own reason for the buried clash, through plan_reel on test_reel_vignettes' synthetic evaluation with
+    the shipped skill reasons: buried said, and the clash still in the unpictured statement's count."""
+    RV = load("cf_reel_vignettes", HERE / "test_reel_vignettes.py")
+    import copy as _copy
+    import inspect
+    pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
+    shipped = json.loads((HARNESS.parent / ".claude" / "skills" / "evaluation-reporting" / "references"
+                          / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"])
+    keep = [c for c in captures if c["request"] != "req-own"]
+    pres2 = _copy.deepcopy(pres)
+    pres2["media"] = [m for m in pres["media"] if m["provenance"]["captureRequest"] != "req-own"]
+    kw = {"captures_final": True} if "captures_final" in inspect.signature(RP.plan_reel).parameters else {}
+
+    def plan(result):
+        reel = RP.plan_reel(_copy.deepcopy(pres2), names, masters, pol, RV.binding_words(), search, mods, keep + [result],
+                            markers=RV.MARKERS, switches=RV.SWITCHES, **kw)
+        ch = next((c for c in reel.get("chapters") or [] if c.get("kind") == "unpictured"), {})
+        return ch, [c for c in ch.get("clashes") or [] if c.get("formKey") == A]
+    ch_b, rows_b = plan(buried_result({A: 13, B: 0}, 13, B))
+    ch_r, rows_r = plan(buried_result(None, None, B))
+    check("CF28", bool(rows_b) and rows_b[0].get("reason") == "buried" and "Buried" in str(ch_b.get("narration")),
+          "the buried clash was told as 'no camera could see' in the reel", f"{rows_b} | {str(ch_b.get('narration'))[:300]}")
+    check("CF28", bool(rows_r) and rows_r[0].get("reason") == "captureRefused" and ch_b.get("count") == ch_r.get("count"),
+          "a buried clash changed the reel's unpictured count, or a plain refusal was called buried",
+          f"buried count {ch_b.get('count')}, refused count {ch_r.get('count')}, refused rows {rows_r}")
+
+
 CODE_CASES = [cf13_planner_refusal, cf20_reuse, cf21_reel_unmarkable, cf22_top_down_count, cf23_caption_words,
-              cf24_after_pick_rule]
+              cf24_after_pick_rule, cf28_buried_said]
 
 
 def render_names() -> str:
