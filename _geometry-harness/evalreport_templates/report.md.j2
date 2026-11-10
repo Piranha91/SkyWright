@@ -58,6 +58,8 @@
 
 {% endfor %}{% if pred.get("noPicturesLine") %}{{ pred.noPicturesLine }}
 
+{% endif %}{% if (p.get("reel") or {}).get("reportLines") %}About the review reel: {{ p.reel.reportLines|join(" ") }}
+
 {% endif %}{% if pred.noneFoundBasis %}{{ pred.noneFoundBasis }}
 
 {% endif %}

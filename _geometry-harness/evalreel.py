@@ -1081,8 +1081,10 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
     if reel.get("status") != "planned":
         return refuse(f"reel-refused: {reel.get('reason') or 'the reel plan is not planned'}", out)
     chapters = reel.get("chapters") or []
-    if not chapters or chapters[0].get("kind") != "opening" or chapters[-1].get("kind") != "closing":
-        return refuse("storyboard-refused: the reel plan must open with the opening still and end with the closing still", out)
+    closings_ = [i for i, c in enumerate(chapters) if c.get("kind") == "closing"]
+    if not chapters or chapters[0].get("kind") != "opening" or closings_ not in ([], [len(chapters) - 1]):
+        return refuse("storyboard-refused: the reel plan must open with the opening still, and a closing, if it has one, "
+                      "must be its last scene", out)
     settings_reel = ((pres.get("settings") or {}).get("reel") or {})
     max_seconds = a.max_seconds if a.max_seconds is not None else settings_reel.get("maxSeconds")
     try:

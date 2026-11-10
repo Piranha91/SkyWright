@@ -287,6 +287,22 @@ def check_title_of(line: str) -> str:
     return re.split(r", (?:with|without|on the setup|on \d+ other) ", str(line), maxsplit=1)[0]
 
 
+def gap_title(line: str) -> str:
+    """The check or area a moved gap line is about, as the report names it: without the setup or the counts said with it."""
+    return check_title_of(str(line)).split(": ", 1)[0].strip()
+
+
+def strip_caveats(text: str, words: dict) -> tuple[str, list[dict]]:
+    """A sentence without the caveat clauses the skill's `caveats` list names: the reel says none (Piranha, 2026-11-10);
+    each removed clause is returned with the text the report must carry for it."""
+    removed = []
+    for c_ in [x_ for x_ in words.get("caveats") or [] if x_.get("pattern")]:
+        for m_ in list(re.finditer(c_["pattern"], text)):
+            removed.append({"caveat": c_.get("id"), "text": m_.group(0).strip(" ;,()"), "report": [c_["report"]] if c_.get("report") else []})
+        text = re.sub(c_["pattern"], "", text)
+    return re.sub(r"\s{2,}", " ", text).strip(), removed
+
+
 def plain_reason(reason, words: dict) -> tuple[str, bool]:
     """A closing group's reason in plain words, each clause once: a clause the skill's `closingShort` patterns match is
     said by its short text (a comparison's row counts are in the report), and whether it is a comparison's."""
@@ -998,7 +1014,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     def card_unit(t, n):
         u = unit_words.get(t) or unit_words.get("default")
         return (u[0] if n == 1 else u[1]) if u else None
-    incomplete = pred.get("incompleteReel")
+    # the opening's "testing is incomplete" line is a caveat: the report says it at its top, the reel's closing sentence
+    # points there (Piranha, 2026-11-10)
+    incomplete = None
     opening_pages = [
         {"layout": "types", "title": words["stillTitles"]["types"].format(mod=mod(target)),
          "rows": [{"label": type_labels[t], "count": card_count(t), "unit": card_unit(t, card_count(t)),
@@ -1030,6 +1048,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                              if pg["layout"] == "load-order" else page_seconds(pg, rate, policy))
     chapters = [{"id": "R-01", "kind": "opening", "narration": " ".join(x_ for x_ in (reel_stills.page_say(p_) for p_ in opening_pages) if x_),
                  "still": {"pages": opening_pages}}]
+    # what the reel leaves to the report (Piranha, 2026-11-10: no caveat but one closing sentence): each entry names the
+    # text the report carries for it; `report_lines` are the explanations the report prints because the reel does not
+    moved, report_lines = [], []
+    if pred.get("incompleteReel"):
+        moved.append({"from": "opening", "text": str(pred["incompleteReel"]), "report": [str(pred.get("incompleteLine")
+                      or pred["incompleteReel"]).split(".")[0]]})
     accounting = {}
     for t in policy.get("typeOrder") or []:
         if t not in counts:
@@ -1091,6 +1115,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 if t == "state":
                     m_ = STATE_KIND.match(str(r.get("kind") or ""))
                     clash.update(kind=r.get("kind"), state=m_.group(1) if m_ else None)
+            text, cut_ = strip_caveats(text, words)
+            moved += [{**x_, "from": "split" if split else "vignette", "formKey": r["formKey"]} for x_ in cut_]
             chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "split" if split else "vignette", "narration": text,
                              "clash": clash, "frames": frames, "patch": evidence})
     if unpictured or none_captured or any(represented.get(t_) for t_ in counts):
@@ -1126,7 +1152,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     unpictured=unp_) + (words.get("unpicturedOther", "").format(count=other_) if other_ else "") + ".")
             sentence_un = " ".join(parts_)
             if any_rep_ and words.get("representedMeans"):
-                sentence_un += " " + words["representedMeans"]
+                report_lines.append(words["representedMeans"])
             why_n = collections.Counter()
             for c_, why_ in unpictured:
                 why_n[why_] += units_(c_["type"], [c_])
@@ -1134,8 +1160,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 why_n["notCaptured"] += moved_
             reasons_ = policy.get("stillReasons") or {}
             if why_n and words.get("unpicturedReasons"):
-                sentence_un += " " + words["unpicturedReasons"].format(reasons=" ".join(
-                    str(reasons_.get(w_, w_)).rstrip(".") + f" ({n_} not pictured)." for w_, n_ in why_n.most_common()))
+                report_lines.append(words["unpicturedReasons"].format(reasons=" ".join(
+                    str(reasons_.get(w_, w_)).rstrip(".") + f" ({n_} not pictured)." for w_, n_ in why_n.most_common())))
             sentence_un += " " + words.get("unpicturedWhere", "").format(
                 heading=spoken((reader.get("sectionHeadings") or {}).get("prediction") or ""))
             sentence_un = sentence_un.strip()
@@ -1153,8 +1179,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 why_n[why_] += len(c_["rows"]) if c_["type"] in (policy.get("countRows") or []) else 1
             short = policy.get("stillReasonsShort") or {}
             if short and words.get("unpicturedWhy"):
-                sentence_un += " " + words["unpicturedWhy"].format(reasons=joined(
-                    [f"{n_} {short.get(w_, w_)}" for w_, n_ in why_n.most_common()]))
+                report_lines.append(words["unpicturedWhy"].format(reasons=joined(
+                    [f"{n_} {short.get(w_, w_)}" for w_, n_ in why_n.most_common()])))
         for t_, n_ in none_captured:
             sentence_un = (sentence_un + " " + words["noneCaptured"].format(
                 count=n_, label=case_labels[t_])).strip()
@@ -1190,7 +1216,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                                               **({"seconds": page_seconds({"layout": "statement", "text": sentence_un},
                                                                           rate, policy)} if rate else {})}]}})
     # what to do: the report's own verdicts and next steps, the same sentences, before the closing list
-    todo = [spoken(str(x)) for x in pred.get("whatToDo") or []]
+    todo = []
+    for x in pred.get("whatToDo") or []:
+        x_, cut_ = strip_caveats(str(x), words)
+        moved += [{**c_, "from": "verdict", "report": [str(x)]} for c_ in cut_]
+        if x_:
+            todo.append(spoken(x_))
     if todo:
         tpage = {"layout": "list", "title": pred.get("whatToDoHeading") or words["stillTitles"].get("whatToDo") or "",
                  "rows": todo, **({"maxWords": policy["pageMaxWords"]} if policy.get("pageMaxWords") else {})}
@@ -1198,7 +1229,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             tpage["seconds"] = page_seconds(tpage, rate, policy)
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "verdict", "narration": " ".join(todo),
                          "still": {"pages": [tpage]}})
-    # the closing, in the order a viewer reads it, each page saying its own words:
+    # the gaps the closing used to list, each in the report: computed as before, kept in `movedToReport`, never shown;
+    # the closing itself is one sentence, said only when some check has no result
     # 1. the opening's own count and the checks behind it, each under its own reason (the same list, by construction)
     ic_ = pred.get("incompleteChecks") or {}
     checks, measured_titles = [], set()
@@ -1232,7 +1264,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                                                                   verb="is" if it.get("count") == 1 else "are"))
     checks += other_
     if reconcile:
-        checks.append({"reason": " ".join(dict.fromkeys(reconcile)), "subjects": [], "comparison": True})
+        checks.append({"reason": " ".join(dict.fromkeys(reconcile)), "subjects": [], "comparison": True,
+                       "reconcile": [check_title_of(str(s_)) for r_ in other_ for s_ in r_["subjects"]
+                                     if check_title_of(str(s_)) in head_titles]})
     # 3. checks that ran and could not judge some of their items: parts of checks that ran, with what they did judge
     skip_ = tuple(words.get("closingCoverageSkip") or ())
     partial_ = words.get("closingPartial") or {}
@@ -1274,12 +1308,23 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     if play_ and any(play_ in str(n_) for n_ in (reader.get("coverage") or {}).get("notes") or []):
         checks.append({"reason": next(str(n_) for n_ in reader["coverage"]["notes"] if play_ in str(n_)),
                        "subjects": [], "comparison": False})
-    cpage = {"layout": "checks", "title": words["stillTitles"]["checks"], "rows": checks,
-             **({"maxWords": policy["pageMaxWords"]} if policy.get("pageMaxWords") else {})}
-    if rate:
-        cpage["seconds"] = page_seconds(cpage, rate, policy)
-    chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": reel_stills.page_say(cpage),
-                     "still": {"pages": [cpage]}})
+    for r_ in checks:
+        if r_.get("lead"):
+            trace_ = [f'{len(ic_["checks"])} of the {ic_.get("total")} checks']
+        elif r_.get("reconcile") is not None:
+            trace_ = list(dict.fromkeys(r_["reconcile"]))
+        elif r_["subjects"]:
+            trace_ = list(dict.fromkeys(gap_title(x_) for x_ in r_["subjects"]))
+        else:
+            trace_ = [r_["reason"]]
+        moved.append({"from": "closing", "reason": r_["reason"], "subjects": list(r_["subjects"]), "report": trace_})
+    moved += [{"from": "unpictured", "text": x_, "report": [x_]} for x_ in report_lines]
+    if (ic_.get("checks") or other_) and words.get("closing"):
+        cpage = {"layout": "statement", "text": words["closing"]}
+        if rate:
+            cpage["seconds"] = page_seconds(cpage, rate, policy)
+        chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": words["closing"],
+                         "still": {"pages": [cpage]}})
     return {"schemaVersion": SCHEMA, "status": "planned", "reason": None,
             "policySha256": _sha(policy), "wordsSha256": _sha(words),
             "patchSearchSha256": _sha(patch_search) if patch_search is not None else None,
@@ -1287,4 +1332,5 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             "sequence": list(policy["sequence"]), "holdSeconds": dict(policy.get("holdSeconds") or {}),
             "captureCandidates": candidates, "accounting": accounting, "capturesFinal": bool(captures_final),
             "noneCaptured": [{"type": t_, "count": n_} for t_, n_ in none_captured],
+            "movedToReport": moved, "reportLines": report_lines,
             "chapters": chapters}

@@ -73,7 +73,10 @@ POLICY = {
 WORDS = {
     "opening": "Here are the types of clashes that are predicted from adding {mod}.",
     "openingNone": "No clashes between mods are predicted from adding {mod}.",
-    "closing": "These are the checks that could not run or could not decide.",
+    "closing": "Some tests didn't produce a result; see the accompanying document for details.",
+    "caveats": [{"id": "visibility", "pattern": r"[;,]? *\(?whether a player sees (?:it|them) was not checked\)?", "report": "visual"},
+                {"id": "attribution", "pattern": r"[;,] *whether it also needs [^.;]+? was not measured(?:, because [^.]+)?",
+                 "report": "was not measured"}],
     "typeLabels": {"overlap": "Objects in the same space", "contact": "Objects touching or blocking",
                    "record": "Record clashes", "cell": "Cell setting clashes",
                    "state": "Objects that clash when a quest or switch changes the world", "navmesh": "Navmesh clashes"},
@@ -131,6 +134,12 @@ WORDS = {
                           r"\b[A-Z][A-Z-]{3,}\b"],                # check ids; detector codes such as LOST-EDIT, OVERLAP
 }
 DISCLAIMER_WORDS = ["offline", "not gameplay", "not tested", "testing is incomplete", "no play-time", "was not compared"]
+# caveat phrases the reel never says or draws anywhere (Piranha, 2026-11-10: no caveat but the one closing sentence);
+# this file's own list, independent of the skill's strip patterns
+CAVEAT_PHRASES = ["was not checked", "was not measured", "could not decide", "could not run", "could not judge",
+                  "could not be", "has no result", "have no result", "no accepted result", "Represented means",
+                  "Why some are not pictured", "Why:", "does not name a file", "does not show whether", "says nothing about",
+                  "cannot tell whether", "did not find", "not measured", "may apply", "incomplete"]
 
 
 # ------------------------------------------------------------------------------------------ the synthetic evaluation
@@ -379,6 +388,12 @@ def merged_checks(pres, mods, words=WORDS):
                 subs.append(line)
         rows.append({"reason": m.get("reason"), "subjects": subs})
     return rows
+
+
+def has_no_result(pres):
+    """Some check has no result: on the measured load order (the opening's incomplete checks) or on another setup."""
+    r = pres.get("reader") or {}
+    return bool(((r.get("prediction") or {}).get("incompleteChecks") or {}).get("checks") or r.get("missingSummary"))
 
 
 # the switch census rows the planner reads for a world-state clash's condition (state.switch-census, the prediction setup)
@@ -722,8 +737,8 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         chapters.append({"kind": "unpictured", "count": n_un,
                          "narration": words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un),
                          "clashes": [(c["rows"][0]["formKey"], c["type"], why) for c, why in unpictured]})
-    chapters.append({"kind": "closing", "narration": words["closing"],
-                     "checks": [(m["reason"], m["subjects"]) for m in merged_checks(pres, mods, words)]})
+    if has_no_result(pres):
+        chapters.append({"kind": "closing", "narration": words["closing"]})
     chapters[0]["accounting"] = accounting
     chapters[0]["candidates"] = candidates
     return chapters
@@ -740,7 +755,7 @@ def reel_view(pres: dict) -> list[dict]:
             out.append({"kind": ch.get("kind"), "narration": " ".join(str(ch.get("narration") or "").split()),
                         "pages": pages, "frames": ch.get("frames") or [], "clash": ch.get("clash") or {},
                         "patch": ch.get("patch") or {}, "patches": ch.get("patches") or [],
-                        "rows": [r for p in pages for r in p.get("rows") or []] + list(ch.get("clashes") or []),
+                        "rows": [r for p in pages for r in p.get("rows") or [] if isinstance(r, dict)] + list(ch.get("clashes") or []),
                         "count": ch.get("count")})
         return out
     out = []
@@ -840,21 +855,31 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
     check("5-disclaimers", any(narr) and not disc and (game or not play),
           f"{tag}no disclaimer or limitation is spoken and play-time is mentioned only with play-time media (narrated scenes "
           f"{sum(1 for n in narr if n)}; an empty reel fails; {disc[:3]})")
-    # 6 closing still: the checks that could not run or decide, and nothing else (capture refusals are counted, Gate A2 Q4)
-    cl = view[-1] if view else {}
-    want = [(m.get("reason"), list(m.get("subjects") or [])) for m in merged_checks(pres, mods, words)]
-    got = [(r.get("reason"), list(r.get("subjects") or [])) for p in cl.get("pages") or [] if p.get("layout") == "checks"
-           for r in p.get("rows") or []]
+    # 6 the closing is one sentence, said and drawn, last, and only when some check has no result (Piranha, 2026-11-10)
+    import reel_stills
     import reel_plan as _rp
-    said_ = {_rp.check_title_of(s) for _, subs in got for s in subs}       # each setup is named from its own arm
-    check("6-closing", cl.get("kind") == "closing" and all(_rp.check_title_of(s) in said_ for _, subs in want for s in subs)
-          and cl.get("narration") == _pages_say(cl.get("pages")),
-          f"{tag}the closing is a still listing each check that could not run or decide with its reason and nothing else, "
-          f"and says only the fixed sentence (narration {cl.get('narration', '')[:90]!r}, {len(got)} rows, {len(want)} expected)")
+    cls_ = [i for i, c in enumerate(view) if c["kind"] == "closing"]
+    cl = view[cls_[0]] if cls_ else {}
+    cl_drawn = [line for pg in cl.get("pages") or [] for _, line, _ in reel_stills._blocks(pg) if line.strip()]
+    want_cl = has_no_result(pres)
+    one_ = (cls_ == [len(view) - 1] and len(cl.get("pages") or []) == 1
+            and (cl.get("pages") or [{}])[0].get("layout") == "statement" and cl.get("narration") == words["closing"]
+            and " ".join(cl_drawn) == words["closing"]) if want_cl else not cls_
+    other_checks = [i for i, c in enumerate(view) for pg in c["pages"] if pg.get("layout") == "checks"]
+    check("6-closing-one-sentence", bool(view) and one_ and not other_checks,
+          f"{tag}the closing is the one sentence, said and drawn, as the last scene, only when some check has no result "
+          f"(want a closing {want_cl}; closings at {cls_} of {len(view)}; narration {cl.get('narration', '')[:80]!r}; "
+          f"drawn {cl_drawn[:3]}; checks pages at {other_checks})")
+    # 6b no caveat anywhere else in the reel, spoken or drawn
+    texts_ = [(c["kind"], c["narration"]) for c in view if c["kind"] != "closing"]
+    texts_ += [(c["kind"], line) for c in view if c["kind"] != "closing" for pg in c["pages"]
+               for _, line, _ in reel_stills._blocks(pg)]
+    cav_ = sorted({(k, ph) for k, t in texts_ for ph in CAVEAT_PHRASES if ph.lower() in str(t).lower()})
+    check("6-no-caveats", bool(view) and any(t for _, t in texts_) and not cav_,
+          f"{tag}no scene but the closing says or draws a caveat (found {cav_[:4]})")
     # C1: no still speaks the tool: no form key, no "request", no setup role label
     labels = {a.get("displayLabel") for a in (pres.get("scope") or {}).get("arms") or [] if a.get("displayLabel")}
     labels |= {"Measured load order", "Tested alternative setup"}
-    import reel_stills                                     # the text a still actually draws, not its page data
     still_text = " | ".join(line for c in view for pg in c["pages"] for _, line, _ in reel_stills._blocks(pg))
     fk_hits = re.findall(r"\b[0-9A-Fa-f]{6}:[^\s\"]+?\.(?:esp|esm|esl)\b", still_text)
     bad_lbl = sorted(x for x in labels if x in still_text)
@@ -877,7 +902,8 @@ def rule_checks(pres: dict, view: list[dict], words=WORDS, policy=POLICY, tag=""
         form = words["unpictured"]["one" if u.get("count") == 1 else "many"].format(count=u.get("count"))
         drawn = " ".join(line for pg in u["pages"] for _, line, _ in reel_stills._blocks(pg) if line)
         ok_un = (len(un) == 1 and u.get("count") == n_un == len(u["rows"]) and u["narration"] == form
-                 and form in drawn and last_pic < un[0] == len(view) - 2)
+                 and form in drawn and last_pic < un[0] < len(view) and all(
+                     c["kind"] in ("verdict", "closing") for c in view[un[0] + 1:]))
     else:
         u, form, ok_un = {}, None, bool(acc) and n_un == 0
     check("N3-unpictured", ok_un,
@@ -968,7 +994,7 @@ def oracle_checks(pres, view, expected, tag=""):
     # a still says its pages' own words (the opening's lead first); the other scenes the oracle's sentences exactly
     diffs = [(i, g["narration"], e["narration"]) for i, (g, e) in enumerate(zip(view, expected))
              if (not g["narration"].startswith(e["narration"]) if g["kind"] == "opening" else
-                 g["narration"] != _pages_say(g.get("pages")) if g["kind"] == "closing" else
+                 g["narration"] != e["narration"] if g["kind"] == "closing" else
                  g["narration"] != e["narration"])]
     check("sentences", len(view) == len(expected) and not diffs,
           f"{tag}every sentence is the skill template filled with the evaluation's names (first difference: {diffs[:1]})")
@@ -1018,7 +1044,7 @@ def reference_presentation(pres, names, masters, search, mods, captures=None):
                         "still": {"pages": [{"layout": "statement", "text": e["narration"]}]}})
         else:
             chs.append({"kind": "closing", "narration": e["narration"], "still": {"pages": [
-                {"layout": "checks", "rows": [{"reason": r, "subjects": s} for r, s in e["checks"]]}]}})
+                {"layout": "statement", "text": e["narration"]}]}})
     out["reel"] = {"schemaVersion": 1, "status": "planned", "modNames": mods, "markers": sorted(MARKERS), "chapters": chs,
                    "accounting": exp[0]["accounting"], "captureCandidates": exp[0]["candidates"]}
     return out
@@ -1056,13 +1082,24 @@ def sabotage(pres: dict, name: str) -> tuple[dict, str]:
     if name == "disclaimer":
         vig[0]["narration"] += " " + p["reader"]["limitations"][1]; return p, "5-disclaimers"
     if name == "closing-narrated":
-        chs[-1]["narration"] = "Testing is incomplete; outstanding areas are listed below."; return p, "6-closing"
+        chs[-1]["narration"] = "Testing is incomplete; outstanding areas are listed below."; return p, "6-closing-one-sentence"
+    if name == "closing-caveats":                          # the old closing back: a checks page with its rows
+        chs[-1]["still"]["pages"].append({"layout": "checks", "title": "Checks that could not run or could not decide",
+                                          "rows": [{"reason": "ran, but could not decide",
+                                                    "subjects": ["Whether a single object blocks an NPC route"]}]})
+        return p, "6-closing-one-sentence"
+    if name == "caveat-in-vignette":                       # a caveat clause said in a vignette
+        vig[0]["narration"] += " Whether a player sees it was not checked."; return p, "6-no-caveats"
+    if name == "caveat-on-verdict":                        # a caveat drawn on a still other than the closing
+        chs.insert(len(chs) - 1, {"kind": "verdict", "narration": "Look at them in game.", "still": {"pages": [
+            {"layout": "list", "title": "What to do", "rows": ["Look at them in game (whether a player sees them was not checked)."]}]}})
+        return p, "6-no-caveats"
     if name == "editorid":
         unp["clashes"].append({"formKey": "000404:Skyrim.esm", "type": "record", "reason": "record", "field": "EditorID"})
         return p, "F2-no-effect"
     if name == "formkey-on-still":
-        chs[-1]["still"]["pages"][0]["rows"].append({"reason": "ran, but could not decide",
-                                                     "subjects": ["027582:Lux.esp shows a measurable face"]})
+        chs[-1]["still"]["pages"].append({"layout": "checks", "rows": [{"reason": "ran, but could not decide",
+                                                                        "subjects": ["027582:Lux.esp shows a measurable face"]}]})
         return p, "C1-stills-plain"
     if name == "leftout-zero":                             # a reel that claims nothing was left out beside an EditorID clash
         chs[0]["still"]["pages"][0]["leftOut"]["noInGameEffect"] = 0; return p, "F2-no-effect"
@@ -1094,8 +1131,8 @@ def sabotage(pres: dict, name: str) -> tuple[dict, str]:
                                   "clash": {"type": "cell"}, "still": {"pages": [{"layout": "rows", "rows": [{"formKey": "000501:Skyrim.esm"}]}]}})
         return p, "N3-no-data-stills"
     if name == "refusal-on-closing":
-        chs[-1]["still"]["pages"][0]["rows"].append({"reason": "No camera could see both objects",
-                                                     "subjects": ["Giant Root and Shadow in Pelagius Wing"]})
+        chs[-1]["still"]["pages"].append({"layout": "checks", "rows": [{"reason": "No camera could see both objects",
+                                                                        "subjects": ["Giant Root and Shadow in Pelagius Wing"]}]})
         return p, "N3-no-data-stills"
     if name == "split-swapped":
         s = next(c for c in chs if c["kind"] == "split")
@@ -1123,7 +1160,7 @@ def sabotage(pres: dict, name: str) -> tuple[dict, str]:
 
 
 SABOTAGE = ["verdict-opening", "report-sentence", "hnh", "drop-pair", "patch-any-pair", "compared", "disclaimer",
-            "closing-narrated", "editorid", "leftout-zero", "empty-reel", "formkey-on-still",
+            "closing-narrated", "closing-caveats", "caveat-in-vignette", "caveat-on-verdict", "editorid", "leftout-zero", "empty-reel", "formkey-on-still",
             "affected-drop", "old-title", "unpictured-off", "unpictured-plural", "data-still-back", "refusal-on-closing",
             "split-swapped", "spoken-shown-count", "no-cases", "represented-lost", "both-marked"]
 
@@ -2028,6 +2065,36 @@ def case_capture_plan():
 
 
 # ------------------------------------------------------------------------------------------ the shipped skill data
+def case_caveats():
+    """No caveat anywhere (Piranha, 2026-11-10): a verdict sentence and an attribution caveat the report carries are said
+    without their caveat clauses, each recorded as left to the report; with no check lacking a result there is no
+    closing at all."""
+    pres, names, masters, search, mods = synthetic()
+    got0 = planned(pres, names, masters, search, mods)
+    vig = next(c for c in got0["reel"]["chapters"] if c["kind"] == "vignette")
+    row = next(r for r in pres["reader"]["prediction"]["record"] if r["formKey"] == vig["clash"]["formKey"])
+    a_, b_ = vig["clash"]["pair"]
+    pres["reader"]["prediction"]["incompleteReel"] = "Testing is incomplete: 1 of the 2 checks on the measured load order have no result."
+    pres["reader"]["prediction"]["whatToDo"] = [
+        "Look at the crossing objects in game at the places the report names (whether a player sees them was not checked)."]
+    pres["reader"]["prediction"]["items"] = list(pres["reader"]["prediction"].get("items") or []) + [
+        {"title": "x", "count": 1, "shownAs": "pair", "checkId": row["checkId"], "mods": [a_, b_],
+         "attributionText": f"It appears when {b_} is added; whether it also needs {a_} was not measured, because no "
+                            f"setup without {a_} was measured for this check."}]
+    got = planned(pres, names, masters, search, mods)
+    rule_checks(got, reel_view(got), tag="caveats: ", mods=mods)
+    cut = sorted({(m.get("from"), m.get("caveat")) for m in got["reel"].get("movedToReport") or [] if m.get("caveat")})
+    opened = [m for m in got["reel"].get("movedToReport") or [] if m.get("from") == "opening"]
+    check("6-caveats-moved", ("verdict", "visibility") in cut and any(c == "attribution" for _, c in cut) and bool(opened),
+          f"each caveat clause cut from the reel is recorded as left to the report (recorded {cut})")
+    # every check has a result: no closing
+    clean = copy.deepcopy(pres)
+    clean["reader"]["missingSummary"] = []
+    clean["reader"]["prediction"].pop("incompleteChecks", None)
+    got2 = planned(clean, names, masters, search, mods)
+    rule_checks(got2, reel_view(got2), tag="every check has a result: ", mods=mods)
+
+
 def case_skill_data():
     pr = json.loads((SKILL / "references/report-priorities.json").read_text(encoding="utf-8"))
     sp = json.loads((SKILL / "references/scene-policy.json").read_text(encoding="utf-8"))
@@ -2219,8 +2286,8 @@ CODE_SABOTAGE = {
     "code-verdict-opening": ("planner", "1-opening", [("_geometry-harness/reel_plan.py",
         'opening_say = (words["opening"] if counts else words["openingNone"]).format(mod=mod(target))',
         'opening_say = str(reader.get("verdict")) + " " + (words["opening"] if counts else words["openingNone"]).format(mod=mod(target))')]),
-    "code-c1-labels": ("planner", "C1-stills-plain", [("_geometry-harness/reel_plan.py",
-        "            line = check_\n", "            line = str(subj)\n")]),
+    # code-c1-labels retired 2026-11-10: the closing's check lines are no longer drawn (they are kept for the report in
+    # movedToReport), so a setup label in them cannot reach a still; the data arm formkey-on-still still guards C1
     # phase 2
     "code-affected": ("planner", "N2-affected", [("_geometry-harness/reel_plan.py",
         '    affected = {target} | {p for r in kept_rows if (types.get(r.get("checkId")) or policy.get("otherType")) is not None\n'
@@ -2347,6 +2414,15 @@ CODE_SABOTAGE = {
         '"generatedUtc": utcnow(), "stillFont": font_doc,', '"generatedUtc": utcnow(),')]),
     "code-pose": ("render", "3-same-pose", [("_geometry-harness/evalreel.py",
         "if len(poses) != 1 or None in poses or len(sizes) != 1:", "if False:")]),
+    "code-closing-rows": ("planner", "6-closing-one-sentence", [("_geometry-harness/reel_plan.py",
+        '        cpage = {"layout": "statement", "text": words["closing"]}',
+        '        cpage = {"layout": "checks", "title": words["stillTitles"]["checks"], "rows": checks}')]),
+    "code-closing-always": ("caveats", "6-closing-one-sentence", [("_geometry-harness/reel_plan.py",
+        '    if (ic_.get("checks") or other_) and words.get("closing"):', '    if words.get("closing"):')]),
+    "code-caveat-strip": ("caveats", "6-no-caveats", [("_geometry-harness/reel_plan.py",
+        '    for c_ in [x_ for x_ in words.get("caveats") or [] if x_.get("pattern")]:', '    for c_ in []:')]),
+    "code-opening-incomplete": ("caveats", "6-no-caveats", [("_geometry-harness/reel_plan.py",
+        "    incomplete = None\n", '    incomplete = pred.get("incompleteReel")\n')]),
     "code-sequence-order": ("render", "render-sequence", [("_geometry-harness/evalreel.py",
         '[(it["path"], it["frames"]) for it in s["items"]], s["audioPath"]',
         'list(reversed([(it["path"], it["frames"]) for it in s["items"]])), s["audioPath"]')]),
@@ -2474,7 +2550,7 @@ def main(argv=None) -> int:
     ap.add_argument("--reference", action="store_true")
     ap.add_argument("--sabotage")
     ap.add_argument("--code-sabotage", help="a CODE_SABOTAGE arm name, or all")
-    ap.add_argument("--case", choices=("planner", "capture", "binding", "data", "render", "names", "gaps"))
+    ap.add_argument("--case", choices=("planner", "capture", "binding", "data", "render", "names", "gaps", "caveats"))
     a = ap.parse_args(argv)
     if a.code_sabotage:
         arms = list(CODE_SABOTAGE) if a.code_sabotage == "all" else [a.code_sabotage]
@@ -2491,7 +2567,7 @@ def main(argv=None) -> int:
         arms = SABOTAGE if a.sabotage == "all" else [a.sabotage]
         return max(case_sabotage(n, got) for n in arms)
     else:
-        cases = {"planner": case_planner, "capture": case_capture_plan, "binding": case_capture_binding, "data": case_skill_data, "render": case_render, "names": case_names, "gaps": case_gaps}
+        cases = {"planner": case_planner, "capture": case_capture_plan, "binding": case_capture_binding, "data": case_skill_data, "render": case_render, "names": case_names, "gaps": case_gaps, "caveats": case_caveats}
         for case in ([cases[a.case]] if a.case else cases.values()):
             try:
                 case()

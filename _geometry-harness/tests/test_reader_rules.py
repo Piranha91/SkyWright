@@ -65,6 +65,19 @@ def chapter(reel, kind):
     return next((c for c in reel.get("chapters") or [] if c.get("kind") == kind), None)
 
 
+def moved_rows(reel, frm="closing"):
+    """The gaps and caveats the reel leaves to the report (its plan's `movedToReport`), from one part of the reel."""
+    return [m for m in reel.get("movedToReport") or [] if m.get("from") == frm]
+
+
+def closing_is_the_sentence(reel):
+    """The closing is one statement page that says and shows only the skill's one sentence."""
+    c = chapter(reel, "closing") or {}
+    pages = (c.get("still") or {}).get("pages") or []
+    return (c.get("narration") == WORDS["closing"] and len(pages) == 1 and pages[0].get("layout") == "statement"
+            and pages[0].get("text") == WORDS["closing"])
+
+
 # --------------------------------------------------------------------- a verdict and a next step for each patch
 
 def contact_patch_bundle(patch=PATCH, masters=None, base_extra=(), left=1, missing=()):
@@ -173,7 +186,9 @@ def case_incomplete_testing_said_first_with_its_cause():
           and line in head and line in unesc(html)
           and "No new physical defect" not in md and "No new physical defect" not in unesc(html)
           and "No check of objects in the world finished on the tested alternative setups" in str(val.get("noRegressionLine"))
-          and "Testing is incomplete" in str(opening.get("narration")))
+          and "Testing is incomplete" not in str(opening.get("narration"))
+          and any(m.get("from") == "opening" and all(t in line for t in m.get("report") or ["(none)"])
+                  for m in reel.get("movedToReport") or []))
     return ok, f"line {line!r}; regression line {val.get('noRegressionLine')!r}; opening {str(opening.get('narration'))[:200]!r}"
 
 
@@ -286,33 +301,28 @@ def case_reel_counts_in_the_reports_units():
     un = str((chapter(reel, "unpictured") or {}).get("narration"))
     ok = (rows.get(WORDS["typeLabels"]["navmesh"]) == (3, "broken navmesh links")
           and WORDS["typeLabels"]["contact"] in rows and len(flat) == len(set(flat))
-          and "not pictured" in un and "can't be visualized" not in un
+          and "pictured" in un and "can't be visualized" not in un
           and 'under "What adding ModA will do"' in un and ".esp" not in un)
     return ok, f"card {rows}; unpictured {un[:220]!r}"
 
 
 def case_reel_closing_reconciled_and_readable():
     reel = reel_of(reel_pres(subjects=40), MODS)
-    closing = chapter(reel, "closing") or {}
-    page = closing["still"]["pages"][0]
-    rows = page.get("rows") or []
-    pages = (reel_stills.paginate(page, FONT, BOLD) if hasattr(reel_stills, "paginate") else [page])
+    rows = moved_rows(reel)
+    page = ((chapter(reel, "closing") or {}).get("still") or {"pages": [{}]})["pages"][0]
     rate = float(POLICY.get("readingWordsPerSecond") or 3.0)
-    words_ = [reel_plan.page_words(p) if hasattr(reel_plan, "page_words") else
-              sum(len(str(x).split()) for r in p.get("rows") or [] for x in [r.get("reason"), *(r.get("subjects") or [])])
-              for p in pages]
     ok = (any("are from the measured load order" in str(r.get("reason")) for r in rows)
-          and len(pages) > 1 and max(words_) <= 160
-          and float(page.get("seconds") or 0) >= (reel_plan.page_words(page) if hasattr(reel_plan, "page_words") else 1e9) / rate - 0.01
+          and closing_is_the_sentence(reel)
+          and float(page.get("seconds") or 0) >= reel_plan.page_words(page) / rate - 0.01
           and "could not be measured in both setups, so it is not counted" not in json.dumps(rows))
-    return ok, f"pages {len(pages)} words {words_}; seconds {page.get('seconds')}; first rows {rows[:1]}"
+    return ok, f"closing {page}; first moved rows {rows[:1]}"
 
 
 def case_reel_closing_without_a_headline_check_has_no_reconciling_line():
     pres = reel_pres()
     pres["reader"]["prediction"]["items"] = [{"title": "Something else", "count": 2, "shownAs": "pair"}]
-    rows = (chapter(reel_of(pres, MODS), "closing") or {})["still"]["pages"][0].get("rows") or []
-    ok = not any("are from the measured load order" in str(r.get("reason")) for r in rows)
+    rows = moved_rows(reel_of(pres, MODS))
+    ok = bool(rows) and not any("are from the measured load order" in str(r.get("reason")) for r in rows)
     return ok, f"rows {rows[:2]}"
 
 
@@ -1245,7 +1255,7 @@ def case_the_closing_lists_the_other_unjudged_areas():
         {"reason": "No result: cannot yet be measured by this evaluator", "count": 1, "subject": "A check"},
         {"reason": "Could not be judged", "count": 398, "unit": "items", "subject": "Cell settings changed by more than one mod: x"}],
         "notes": ["No matching play-time evidence was supplied, so this does not show what happened during play."]}
-    rows = (chapter(reel_of(pres, MODS), "closing") or {})["still"]["pages"][0].get("rows") or []
+    rows = moved_rows(reel_of(pres, MODS))
     flat = json.dumps(rows)
     ok = ("Cell settings changed by more than one mod: 398 items it could not judge" in flat and "play-time evidence" in flat
           and "A check" not in flat)
@@ -1380,8 +1390,7 @@ def case_reel_closing_counts_the_openings_checks_and_parts():
     with no result only on another setup is said as that; items a check that ran could not judge are parts of that
     check, with what it did judge, never counted as failed checks; the narration is the page's own words in order."""
     reel = reel_of(closing_pres(), MODS)
-    page = chapter(reel, "closing")["still"]["pages"][0]
-    rows = page.get("rows") or []
+    rows = moved_rows(reel)
     flat = json.dumps(rows)
     measured = [s for r in rows[1:4] for s in r.get("subjects") or []]
     say = chapter(reel, "closing")["narration"]
@@ -1391,7 +1400,7 @@ def case_reel_closing_counts_the_openings_checks_and_parts():
           and "Quest aliases split between mods: 9,490 items it could not judge, beside 6,810 it did" in flat
           and "Objects occupying the same space: 18,510 placed objects (no geometry to measure) it could not judge, among others" in flat
           and '"Could not be judged"' not in flat and " 1 check." not in say and " checks." not in say
-          and hasattr(reel_stills, "page_say") and say == reel_stills.page_say(page))
+          and closing_is_the_sentence(reel))
     return ok, f"rows {flat[:500]}; say {say[:300]!r}"
 
 
@@ -1408,10 +1417,21 @@ def tone_wav(path: Path, seconds: float):
                                for i in range(int(rate * seconds))))
 
 
+LONG_TODO = [f"Look at the {i + 2} objects in the tower ruins number {i} in game, and move the second one a few steps "
+             f"aside if the shapes cross where a player walks past the gate on the road to the river." for i in range(12)]
+
+
+def still_pres():
+    """The closing fixture with a verdict too long for one page."""
+    pres = closing_pres()
+    pres["reader"]["prediction"]["whatToDo"] = list(LONG_TODO)
+    return pres
+
+
 def render_still_reel(td: Path):
     """The storyboard packet, one tone per scene as long as its words take to say, and the render: (map, status, srt)."""
     import evalreel
-    pres = closing_pres()
+    pres = still_pres()
     reel = reel_of(pres, MODS)
     pres.update({"schemaVersion": 1, "presentationId": "pres-r1", "reel": reel, "chapters": [{"id": "C-1", "captions": []}],
                  "settings": {"reel": {**{k: v for k, v in (PR.get("reel") or {}).items() if k != "words"}, "maxSeconds": 900}}})
@@ -1440,23 +1460,25 @@ def case_reel_pages_are_spoken_in_order_and_never_silent():
     """Decoded audio: every still page is its own scene with its own narration, in page order, held for its own speech;
     the rendered reel has no silence longer than the allowed pause (ffmpeg silencedetect on reel.mp4)."""
     import evalreel
-    closing_parts_ = ([" ".join(x["say"].split()) for x in reel_stills.still_parts(
-        chapter(reel_of(closing_pres(), MODS), "closing")["still"]["pages"], FONT, BOLD)]
+    verdict_parts_ = ([" ".join(x["say"].split()) for x in reel_stills.still_parts(
+        chapter(reel_of(still_pres(), MODS), "verdict")["still"]["pages"], FONT, BOLD)]
         if hasattr(reel_stills, "still_parts") else None)
     with tempfile.TemporaryDirectory() as td:
         mp, st, srt = render_still_reel(Path(td))
     if mp is None:
         return False, "storyboard packet refused"
-    segs = [s for s in mp.get("segments") or [] if s.get("chapterKind") == "closing"]
+    segs = [s for s in mp.get("segments") or [] if s.get("chapterKind") == "verdict"]
+    closing_ = [" ".join(str(s.get("narration") or "").split()) for s in mp.get("segments") or []
+                if s.get("chapterKind") == "closing"]
     held = all(abs(s["reelInterval"]["endSeconds"] - s["reelInterval"]["startSeconds"] - float(s.get("speechSeconds") or 0)
                    - 1.5) < 0.6 for s in segs if s.get("speechSeconds"))
     hold_ = float((POLICY.get("holdSeconds") or {}).get("maxSilence") or 3.0)
     said_ = [" ".join(str(s.get("narration") or "").split()) for s in segs]
     ok = (st.get("status") == "rendered" and len(segs) > 1 and [s.get("page") for s in segs] == list(range(len(segs)))
-          and said_ == closing_parts_
-          and said_[0].startswith("On the measured load order, 3 of the 21 checks have no result.")
+          and said_ == verdict_parts_ and said_[0].startswith(LONG_TODO[0])
+          and closing_ == [WORDS["closing"]] and (mp.get("segments") or [{}])[-1].get("chapterKind") == "closing"
           and held and "silencesOnPages" in st and not st["silencesOnPages"] and not st["silences"] and hold_ <= 3.0)
-    return ok, (f"status {st.get('status')} {st.get('errors')}; closing pages {[s.get('page') for s in segs]}; "
+    return ok, (f"status {st.get('status')} {st.get('errors')}; verdict pages {[s.get('page') for s in segs]}; closing {closing_}; "
                 f"silences {st.get('silences')}")
 
 
@@ -1741,9 +1763,11 @@ def case_the_unpictured_page_accounts_for_every_clash():
     parts = re.findall(r"([^.:]+): of (\d+) [^,]*, (\d+) pictured, (\d+) represented by the pictured example and (\d+) not pictured", un)
     parts += [(lab, n, "0", "0", n) for lab, n in re.findall(r"([^.:]+): (\d+) [^,.]*, none pictured", un)]
     ok_parts = parts and all(int(n) == int(a) + int(b) + int(c) and card.get(lab.strip()) == int(n) for lab, n, a, b, c in parts)
-    why = sum(int(x) for x in re.findall(r"\((\d+) not pictured\)", un))
-    ok = bool(ok_parts) and why == sum(int(c) for *_, c in parts) and "Why some are not pictured:" in un
-    return ok, f"parts {parts}; reasons {why}; {un[:300]!r}"
+    lines = " ".join(reel.get("reportLines") or [])
+    why = sum(int(x) for x in re.findall(r"\((\d+) not pictured\)", lines))
+    ok = (bool(ok_parts) and why == sum(int(c) for *_, c in parts) and "Why some are not pictured:" in lines
+          and "Why some are not pictured" not in un and "Represented means" not in un)
+    return ok, f"parts {parts}; reasons {why} (in the report's lines); {un[:300]!r}"
 
 
 def case_closing_names_each_setup_by_its_own_arm():
@@ -1757,7 +1781,7 @@ def case_closing_names_each_setup_by_its_own_arm():
     pres["reader"]["missingSummary"] = [
         {"reason": "ran, but could not decide", "subjects": ["Objects occupying the same space — Tested alternative setup (removes OtherMod.esp)"]},
         {"reason": "was not run", "subjects": ["Objects occupying the same space — Measured load order"]}]
-    flat = json.dumps(((chapter(reel_of(pres, MODS + [PATCH]), "closing") or {}).get("still") or {"pages": [{}]})["pages"][0].get("rows") or [])
+    flat = json.dumps(moved_rows(reel_of(pres, MODS + [PATCH])))
     other = re.sub(r"\.esp$", "", OTHER)
     ok = f"on the setup without {other}" in flat and re.sub(r"\.esp$", "", PATCH) not in flat
     return ok, f"rows {flat[:400]}"
@@ -1830,36 +1854,41 @@ def vignette_pres(**reader_extra):
     return pres, fk
 
 
-def vignette_said(pres, fk, masters=None):
+def vignette_said(pres, fk, masters=None, with_reel=False):
     names = {p: {"name": re.sub(r"\.(esp|esm|esl)$", "", p)} for p in MODS + [PATCH]}
     search = {"pairs": [{"pair": [OTHER, A], "hits": [], "queries": [{"tool": t} for t in
                                                                     POLICY["patchSearch"]["requiredTools"]]}]}
     reel = reel_plan.plan_reel(pres, {}, masters or {}, POLICY, WORDS, search, names,
                                capture_results=[{"status": "captured", "formKey": fk, "request": "q1"}],
                                captures_final=True)
-    return " ".join(str(c.get("narration")) for c in reel.get("chapters") or [] if c.get("kind") == "vignette")
+    said = " ".join(str(c.get("narration")) for c in reel.get("chapters") or [] if c.get("kind") == "vignette")
+    return (said, reel) if with_reel else said
 
 
-def case_a_supplied_patch_the_search_missed_is_said_as_a_miss():
-    """Where a supplied patch is for the pair and the name search found nothing, the reel says the search missed that
-    patch, never that no other patch exists."""
+def case_a_supplied_patch_the_search_missed_is_left_to_the_report():
+    """Where a supplied patch is for the pair and the name search found nothing, the reel never says that no other patch
+    exists; that the search missed the patch is a caveat, left to the report (Piranha, 2026-11-10)."""
     pres, fk = vignette_pres()
     pres["reader"]["suppliedPatches"] = [PATCH]
-    said = vignette_said(pres, fk, masters={PATCH.lower(): {OTHER.lower(), A.lower()}})
+    said, reel = vignette_said(pres, fk, masters={PATCH.lower(): {OTHER.lower(), A.lower()}}, with_reel=True)
     pname = re.sub(r"\.esp$", "", PATCH)
-    ok = f"did not find {pname}" in said and "No other patch" not in said and "No patch for these" not in said
-    return ok, f"vignette {said[:400]!r}"
+    cut = [m.get("caveat") for m in moved_rows(reel, "vignette")]
+    ok = (f"did not find {pname}" not in said and "No other patch" not in said and "No patch for these" not in said
+          and f"{pname} does not fix this one" in said and "search-missed" in cut)
+    return ok, f"vignette {said[:400]!r}; moved {cut}"
 
 
-def case_the_reel_keeps_the_reports_attribution_caveat():
-    """The report's "whether it also needs X was not measured" is said with the reel's vignette of that clash."""
+def case_the_reel_leaves_the_attribution_caveat_to_the_report():
+    """The report's "whether it also needs X was not measured" is a caveat: the vignette says only what the clash needs
+    as measured, and the clause is recorded as left to the report (Piranha, 2026-11-10)."""
     cav = f"It appears when {A} is added; whether it also needs {OTHER} was not measured, because no setup without {OTHER} was measured for this check."
     pres, fk = vignette_pres(items=[{"title": "Objects occupying the same space", "count": 1, "shownAs": "pair",
                                      "checkId": "geometry.object-overlap", "mods": [OTHER, A], "attributionText": cav}])
-    said = vignette_said(pres, fk)
-    other = re.sub(r"\.esp$", "", OTHER)
-    ok = f"whether it also needs {other} was not measured" in said
-    return ok, f"vignette {said[:400]!r}"
+    said, reel = vignette_said(pres, fk, with_reel=True)
+    a_ = re.sub(r"\.esp$", "", A)
+    cut = [m.get("caveat") for m in moved_rows(reel, "vignette")]
+    ok = "was not measured" not in said and f"It appears when {a_} is added." in said and "attribution" in cut
+    return ok, f"vignette {said[:400]!r}; moved {cut}"
 
 
 def case_a_check_on_many_setups_is_said_once():
@@ -1871,10 +1900,89 @@ def case_a_check_on_many_setups_is_said_once():
                                       "pluginsAdded": []})
     pres["reader"]["missingSummary"] = [{"reason": "ran, but could not decide", "subjects": [
         f"Which tested load order has fewer measured problems — Tested alternative setup {i_}" for i_ in range(3)]}]
-    rows = ((chapter(reel_of(pres, MODS + [B]), "closing") or {}).get("still") or {"pages": [{}]})["pages"][0].get("rows") or []
+    rows = moved_rows(reel_of(pres, MODS + [B]))
     subs = [s for r in rows for s in r.get("subjects") or [] if "fewer measured problems" in s]
     ok = subs == ["Which tested load order has fewer measured problems, on 3 other tested setups (the report names each)"]
     return ok, f"subjects {subs}"
+
+
+# --------------------------------------------------------------------- the closing is one sentence (2026-11-10)
+
+CAVEAT_TODO = ("Objects occupying the same space: 3 overlap candidates are left; look at them in game at the places its "
+               "item below names (whether a player sees them was not checked).")
+
+
+def gap_fixture(missing=True):
+    """A compiled evaluation: two clashes no picture shows, a check that ran but could not judge some items, and (with
+    `missing`) a check with no result on the measured load order and one with none on another setup."""
+    arms = [P.arm("baseline", [BASE, OTHER, A], kind="baseline"), P.arm("no-other", [BASE, A]), P.arm("no-a", [BASE, OTHER])]
+    rows = [P.row("CONTACT", OTHER, A, f"00080{i}:{A}") for i in (1, 2)]
+    pops = {(CONTACT, "baseline"): [{"Population": "placed references", "Judged": 10,
+                                     "Unjudgeable": {"a delta line the comparator could not read": 2}}]}
+    plan, md, html = P.compile_and_render(
+        arms, {(CONTACT, "baseline"): rows, (CONTACT, "no-other"): [], (CONTACT, "no-a"): []}, [A],
+        missing=[(OVERLAP, "baseline", "unknown-applicability"), (CONTACT, "no-other", "unjudged", "diff")] if missing else [],
+        coverage_pops=pops)
+    return plan
+
+
+def rendered_with_reel(plan, reel):
+    """report.md rendered from the plan with its reel, as `evalreport report` renders it."""
+    plan = dict(plan, reel=reel)
+    view = R.effective_view(plan, 3, 1, PR, "normal")
+    with tempfile.TemporaryDirectory() as td:
+        return R.render_all(plan, view, Path(td) / "out", "")["report.md"]
+
+
+def md_sections(md, headings):
+    """The text under each of the named `## ` headings, joined."""
+    out, keep = [], False
+    for ln in md.splitlines():
+        if ln.startswith("## "):
+            keep = ln[3:].strip() in headings
+        elif keep:
+            out.append(ln)
+    return NL.join(out)
+
+
+def case_every_moved_gap_is_in_the_report():
+    """Everything the reel no longer says is in the report: each gap the closing used to list under the report's own
+    gap sections (the opening's count in its top line), each explanation of the unpictured page, and each caveat clause
+    cut from a sentence the reel takes from the report."""
+    plan = gap_fixture()
+    plan["reader"]["prediction"]["whatToDo"] = list(plan["reader"]["prediction"].get("whatToDo") or []) + [CAVEAT_TODO]
+    reel = reel_of(plan, MODS)
+    md = rendered_with_reel(plan, reel)
+    heads = {str((plan["reader"].get("sectionHeadings") or {}).get(k) or "") for k in ("coverage", "missing")}
+    heads |= {"What the checks could not judge", "What still needs checking"}
+    gaps = md_sections(md, heads)
+    moved = reel.get("movedToReport") or []
+    lost = []
+    for m in moved:
+        home = gaps if m.get("from") == "closing" and m.get("subjects") else md
+        lost += [(m.get("from"), t) for t in m.get("report") or [] if t not in home]
+    froms = {m.get("from") for m in moved}
+    said = " ".join(str(c.get("narration")) for c in reel.get("chapters") or [])
+    # the overlap vignette's old "whether a player sees it" clause: the report says it with every overlap item
+    in_game_overlap = str(((PR.get("reader") or {}).get("inGame") or {}).get(OVERLAP) or "")
+    if "visual" not in in_game_overlap or "was not checked" in WORDS["overlap"]:
+        lost.append(("vignette", "the overlap item's in-game line no longer says it is a candidate for a visual check"))
+    ok = (not lost and {"closing", "unpictured", "verdict"} <= froms and all(m.get("report") for m in moved)
+          and "was not checked" not in said and "Why some are not pictured" not in said
+          and "Why some are not pictured" in md)
+    return ok, f"moved {len(moved)} from {sorted(froms)}; not in the report {lost[:4]}"
+
+
+def case_no_closing_when_every_check_has_a_result():
+    """Every check has a result (some items not judged, which is not a check without a result): no closing at all; with
+    a check that has none, the closing is the one sentence, last."""
+    reel = reel_of(gap_fixture(missing=False), MODS)
+    kinds = [c["kind"] for c in reel.get("chapters") or []]
+    reel2 = reel_of(gap_fixture(), MODS)
+    kinds2 = [c["kind"] for c in reel2.get("chapters") or []]
+    ok = (reel.get("status") == "planned" and "closing" not in kinds and moved_rows(reel)
+          and kinds2[-1] == "closing" and kinds2.count("closing") == 1 and closing_is_the_sentence(reel2))
+    return ok, f"without gaps {kinds}; with {kinds2}"
 
 
 CASES = [(k, v) for k, v in list(globals().items()) if k.startswith("case_") and callable(v)]

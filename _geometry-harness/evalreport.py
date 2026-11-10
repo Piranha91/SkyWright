@@ -7688,8 +7688,8 @@ def incomplete_line(ev: dict, missing: list, arm_id, label: str, words: dict, he
 
 def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing: list, proper: dict) -> list[str]:
     """One verdict for each supplied patch, from the clashes of the pair it is built
-    for (its masters), then one next step for each predicted kind still left; the report's box and the reel's closing
-    page say these same sentences. A verdict over a setup whose physical checks did not finish says so (G1 x G4)."""
+    for (its masters), then one next step for each predicted kind still left; the report's box says these sentences and
+    the reel's "What to do" page says them without their caveat clauses. A verdict over a setup whose physical checks did not finish says so (G1 x G4)."""
     ww = words.get("whatToDo") or {}
     if not ww:
         return []
@@ -10177,8 +10177,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         bind((pw_.get("headings") or {}).get("coverage") or "", {"subject": ""}))
     lead["prediction"]["incompleteReel"] = incomplete_line(
         ev, missing, p_arm_r2, arm_labels.get(p_arm_r2, "the measured setup"), pw_, "")
-    # the checks behind that line, each with its own reason: the reel's closing lists exactly these, so its count is the
-    # opening's by construction
+    # the checks behind that line, each with its own reason: the reel's closing sentence is said when any exists, and
+    # its plan's movedToReport lists exactly these
     meas_r2_, miss_r2_ = arm_check_state(ev, reader_missing, p_arm_r2)
     lead["prediction"]["incompleteChecks"] = {
         "total": len(set(miss_r2_) | meas_r2_),
