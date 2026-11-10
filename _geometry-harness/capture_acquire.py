@@ -1038,6 +1038,15 @@ def _strip_flag(args: list[str], flag: str) -> list[str]:
     return out
 
 
+def _order_lacks(order: str, plugin: str) -> bool:
+    """True when the order file reads and its Plugins list does not hold this plugin; an unreadable order says nothing."""
+    try:
+        plugins = json.loads(Path(order).read_text(encoding="utf-8")).get("Plugins") or []
+    except (OSError, ValueError, AttributeError):
+        return False
+    return plugin.lower() not in {str(p).lower() for p in plugins}
+
+
 def capture_argv(request: dict, camera: dict, state: str, order: str, passthrough: list[str], size: int) -> list[str]:
     """The viewprobe arguments (after the executable, before --out) for one frame of a request.
 
@@ -1055,7 +1064,10 @@ def capture_argv(request: dict, camera: dict, state: str, order: str, passthroug
             # a top-down's navmesh band and grid; a cutaway's hide and protect flags (the protect check runs again in
             # this state's own setup)
             *[str(x) for x in camera.get("renderFlags") or []], *[str(x) for x in camera.get("viewFlags") or []]]
-    if request.get("state") and request.get("requestType") == "state-pair":
+    # a switch the order cannot hold (defined by a plugin it leaves out, as the without-the-mod order does) is dropped:
+    # that world has no such switch and is drawn as it loads
+    owner = str(request.get("state") or "").partition(":")[2]
+    if request.get("state") and request.get("requestType") == "state-pair" and not (owner and _order_lacks(order, owner)):
         argv += ["--state", str(request["state"])]
     if split:
         fk = request["highlights"][0]["formKey"]
@@ -1492,8 +1504,10 @@ def _capture(a) -> int:
             result["reason"] = f"the {state} state of a {view_kind} picture carries no view label; an unlabelled picture is refused"
             return finish(EXIT_REFUSED)
         if r.returncode != 0 or not pngs or not fp:
+            # viewprobe's own sentence: a refusal line, else the last line it wrote to stderr
+            said = refusals[0] if refusals else next((ln.strip() for ln in reversed(r.stderr.splitlines()) if ln.strip()), "")
             result["reason"] = (f"viewprobe could not render the {state} state (exit {r.returncode}"
-                                + (f"; {refusals[0]}" if refusals else "") + ("" if fp else "; no configuration line") + ")")
+                                + (f"; {said}" if said else "") + ("" if fp else "; no configuration line") + ")")
             return finish(EXIT_REFUSED)
         if navmesh:
             rcpt = next(iter(sorted(d.glob("*-navmeshes.json"))), None)

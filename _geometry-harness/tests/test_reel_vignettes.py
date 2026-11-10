@@ -1940,6 +1940,21 @@ def case_capture_plan():
               and has(a_state, "--ref", "000601:Target.esp=cyan") and not any("000602" in x for x in a_state)
               and has(a_state, "--order", "order.json"),
               f"a state frame is rendered in its state, without the cell outline, marking only the named participant ({a_state})")
+        # a switch defined only by the mod under test: the without-the-mod order cannot hold it, so that frame drops it
+        import tempfile as _tf
+        with _tf.TemporaryDirectory() as _td:
+            o_without, o_with = Path(_td) / "without.json", Path(_td) / "with.json"
+            o_without.write_text(json.dumps({"Plugins": ["Skyrim.esm"]}), encoding="utf-8")
+            o_with.write_text(json.dumps({"Plugins": ["Skyrim.esm", "Mod.esp"]}), encoding="utf-8")
+            st_mod = {**st, "requestType": st.get("requestType"), "state": "00085E:Mod.esp"}
+            try:
+                a_wo = argv_of(st_mod, cam, "without", str(o_without), [], 1280) if argv_of else []
+                a_wi = argv_of(st_mod, cam, "with", str(o_with), [], 1280) if argv_of else []
+            except Exception as exc:  # noqa: BLE001
+                print(f"  NOTE  capture_argv raised: {type(exc).__name__}: {exc}")
+                a_wo, a_wi = ["--state"], []
+        check("N5-state-absent-order", "--state" not in a_wo and has(a_wi, "--state", "00085E:Mod.esp"),
+              f"the without frame drops a switch its order cannot hold ({a_wo}); the with frame keeps it ({a_wi})")
         check("N4-capture-argv", has(a_left, "--npc", "000403:Skyrim.esm") and has(a_left, "--npc-puck", "on")
               and has(a_left, "--size", "638") and has(a_left, "--aspect", "638:680") and "--no-cell-outline" in a_left
               and has(a_left, "--order", "without.json"),
@@ -2230,6 +2245,8 @@ CODE_SABOTAGE = {
         '"left": without_arm, "right": with_arm}', '"left": with_arm, "right": with_arm}')]),
     "code-state-token": ("capture", "N5-capture-argv", [("_geometry-harness/capture_acquire.py",
         '        argv += ["--state", str(request["state"])]', "        pass")]),
+    "code-state-absent-order": ("capture", "N5-state-absent-order", [("_geometry-harness/capture_acquire.py",
+        'and not (owner and _order_lacks(order, owner)):', "and True:")]),
     "code-cell-outline": ("capture", "N5-capture-argv", [("_geometry-harness/capture_acquire.py",
         '"--size", str(size), "--msaa", "4", "--report-mode", "--no-cell-outline",', '"--size", str(size), "--msaa", "4", "--report-mode",')]),
     "code-identity-state": ("capture", "N5-identity", [("_geometry-harness/capture_acquire.py",
