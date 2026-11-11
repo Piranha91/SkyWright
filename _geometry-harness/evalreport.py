@@ -623,9 +623,58 @@ def print_pdf(browser: Path, html: Path, pdf: Path, timeout: int = 180) -> tuple
         if not pdf.exists() or pdf.stat().st_size == 0:
             tail = (r.stderr or "")[-400:].strip().replace("\n", " | ")
             return False, f"the browser exited {r.returncode} and wrote no PDF: {tail or 'no stderr'}"
-        return True, ""
+        why = relative_pdf_links(pdf, html.resolve().parent)
+        return (True, "") if why is None else (False, why)
     finally:
         shutil.rmtree(profile, ignore_errors=True)
+
+
+def relative_pdf_links(pdf: Path, folder: Path) -> str | None:
+    """(Ice r3 report review) The browser prints every relative link of the page as an absolute file:/// address,
+    which breaks once the report folder is moved. Each link into `folder` becomes relative to it, and the PDF's
+    cross-reference offsets move by what each rewrite changed, so the file reads as before. None when done (or nothing
+    to do); the reason when the file has no plain cross-reference table to correct."""
+    data = pdf.read_bytes()
+    prefix = re.escape(folder.as_uri().rstrip("/").encode() + b"/")
+    pat = re.compile(rb"(/URI\s*\()" + prefix + rb"([^()\\]*)(\))", re.IGNORECASE)
+    hits = list(pat.finditer(data))
+    if not hits:
+        return None
+    m_ = list(re.finditer(rb"startxref\s+(\d+)\s+%%EOF\s*$", data))
+    xref_at = int(m_[-1].group(1)) if m_ else None
+    if xref_at is None or data[xref_at:xref_at + 4] != b"xref":
+        return "the PDF has no plain cross-reference table, so its links were left as the browser wrote them"
+    out, shifts, last, delta = [], [], 0, 0
+    for h in hits:
+        new = h.group(1) + h.group(2) + h.group(3)
+        out += [data[last:h.start()], new]
+        delta += len(new) - (h.end() - h.start())
+        shifts.append((h.start(), delta))
+        last = h.end()
+    out.append(data[last:])
+    body = b"".join(out)
+
+    def moved(off):
+        return off + next((d for at, d in reversed(shifts) if at < off), 0)
+    new_xref = moved(xref_at)
+    pos = new_xref + 4
+    sec = re.compile(rb"\s*(\d+) (\d+)[ \t]*\r?\n")
+    parts = [body[:pos]]
+    while True:
+        s_ = sec.match(body, pos)
+        if not s_:
+            break
+        parts.append(body[pos:s_.end()])
+        pos = s_.end()
+        for _ in range(int(s_.group(2))):
+            ent = body[pos:pos + 20]
+            if ent[17:18] == b"n":
+                ent = b"%010d" % moved(int(ent[:10])) + ent[10:]
+            parts.append(ent)
+            pos += 20
+    rest = re.sub(rb"startxref\s+\d+(\s+%%EOF\s*)$", lambda mm: b"startxref\n%d" % new_xref + mm.group(1), body[pos:])
+    pdf.write_bytes(b"".join(parts) + rest)
+    return None
 
 
 # ------------------------------------------------------------------------------ bundle verification --
