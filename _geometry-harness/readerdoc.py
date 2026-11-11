@@ -170,7 +170,8 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
             for who in whos:
                 causes[who] += 1
         phrase = bind(phrases.get(it["checkId"]) or phrases["default"], n=ER.fmt_n(n), units=plural(noun, n),
-                      title=it.get("title") or it["checkId"])
+                      title=it.get("title") or it["checkId"], verb="is" if n == 1 else "are",
+                      they="it" if n == 1 else "they", show="shows" if n == 1 else "show")
         # a place with no in-game name is counted, never printed by its editor name; a list may be capped
         shown_pl = per_place.most_common(limit) if limit else per_place.most_common()
         parts = [f"{p} ({c})" if len(per_place) > 1 else p for p, c in shown_pl]
