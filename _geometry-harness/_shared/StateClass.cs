@@ -47,7 +47,8 @@ public sealed record StateRow(
     ContactVerdict? ContactVerdict = null, ContactRelation Relation = ContactRelation.None,
     float Distance = float.NaN, float Penetration = float.NaN, float RawDistance = float.NaN, DependentMotion Motion = DependentMotion.Unknown,
     RouteCutVerdict? Route = null, bool Navcut = false,
-    PhysicalState Physical = PhysicalState.Holds, string PhysicalDetail = "", bool MemberDepends = false);
+    PhysicalState Physical = PhysicalState.Holds, string PhysicalDetail = "", bool MemberDepends = false,
+    bool PrimitiveBox = false);
 
 /// <summary>What one evaluation walked and set aside, counted per rule 6.</summary>
 public sealed class StateTally
@@ -79,8 +80,22 @@ public sealed class StateTally
     /// texture, no model and no collision). Unjudged, by name: a placed actor (the check judges objects), a placed hazard or trap
     /// (the placement reader reads no base link on those arms), an effects mesh in no role, a type in none of the check's role
     /// sets, and a box over the volume cap in no role.</summary>
-    public int Decal, PlacedTrap, Actor, EffectVolume, TypeOutsideRoles, OverSizeCap;
+    public int Decal, PlacedTrap, EffectVolume, TypeOutsideRoles, OverSizeCap;
+    /// <summary>Placed actors a state changes (never a row: what happens to an enabled actor is not measured in game). Set aside:
+    /// one that leaves (no object rests on an actor). Judged from placement: one arriving over the navmesh, on the floor, its body
+    /// clear. Unjudged, by name: off the navmesh, its body in a solid, floating, buried, or not measured.</summary>
+    public int ActorDeparts, ActorClear, ActorOffNavmesh, ActorInSolid, ActorFloating, ActorBuried, ActorUnmeasured;
+    /// <summary>One entry per (state, arriving actor), in evaluation order: the category and what decided it.</summary>
+    public List<(string State, FormKey Key, ActorPlacement Placement, string Detail)> ActorCensus { get; } = new();
 }
+
+/// <summary>Where an actor a state brings in stands, from its placement: see <see cref="ActorAsk"/>.</summary>
+public enum ActorPlacement { Clear, OffNavmesh, InSolid, Floating, Buried, Unmeasured }
+
+/// <summary>The probe's placement reading for an actor arriving IN ONE STATE: over the cell's winning navmesh or not, its feet
+/// against the state's physical floor, and whether an actor-solid surface of <paramref name="solidsNear"/> (physical references
+/// enabled in the state whose box meets the body's) enters the humanoid body. <paramref name="detail"/> says what decided it.</summary>
+public delegate ActorPlacement ActorAsk(StateArm arm, FormKey key, IReadOnlyList<FormKey> solidsNear, out string detail);
 
 /// <summary>Opt-in phase timers for <see cref="StateEvaluator.Evaluate"/> (stateprobe --phase-timers): ticks of
 /// <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/> per phase, summed over every state. Null on the evaluator: no clock reads.</summary>
@@ -93,7 +108,8 @@ public sealed class StatePhaseTimer
 
 /// <summary>The probe's route measurement for one reference IN ONE STATE — the route-cut verdict of its obstacle (its
 /// actor-solid collision, or its navcut box) against its cell's winning navmesh — or null when it cannot be measured,
-/// with why. The arm is a parameter (Q27, 2026-09-06) because the floor the band stands on and the band's own top
+/// with why. <c>navcut</c> (the bool) asks for the reference's XPRM primitive box rather than its mesh: a navcut's, or a
+/// collision marker's measured solid (task 2). The arm is a parameter (Q27, 2026-09-06) because the floor the band stands on and the band's own top
 /// belong to the state being judged: a flip can bring in a floor piece or a taller actor, and measuring an arriving
 /// obstacle against the baseline's floor mixes two worlds.</summary>
 public delegate RouteCutVerdict? RouteAsk(StateArm arm, FormKey key, bool navcut, out string why);
@@ -112,8 +128,32 @@ public sealed class StateEvaluator
     public ISet<string> Obstructing { get; init; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     { "Static", "MoveableStatic", "Tree", "Furniture", "Door", "Container", "Activator", "Flora" };
     public RouteAsk? Route { get; set; }
-    /// <summary>Station Q's measured primitive table (stateprobe --primitive-solidity): decides a marker's primitive. Null: none given.</summary>
-    public IReadOnlyList<PrimitiveMeasurement>? PrimitiveTable { get; set; }
+    /// <summary>The probe's placement reading for arriving actors (null: every arriving actor is ActorUnmeasured).</summary>
+    public ActorAsk? ActorAt { get; set; }
+    /// <summary>The box searched for solids around an arriving actor's placed point: the capsule radius sideways, up to this.</summary>
+    public const float ActorSearchTop = 260f;
+    /// <summary>Station Q's measured primitive table (stateprobe --primitive-solidity): decides a marker's primitive. Null: none given.
+    /// Setting it gives every marker primitive it measures solid its primitive box (task 2), as a navcut has: set it once.</summary>
+    public IReadOnlyList<PrimitiveMeasurement>? PrimitiveTable
+    {
+        get => _primitiveTable;
+        set
+        {
+            if (_primitiveTableSet) throw new InvalidOperationException("the primitive table is set once, before any state is evaluated");
+            _primitiveTableSet = true; _primitiveTable = value;
+            if (value is null) return;
+            foreach (var (key, m) in _markerPrimitive)
+            {
+                if (MarkerVerdict(key) != "solid" || !Index.RefPrimitive.TryGetValue(key, out var prim)) continue;
+                var box = SpatialOverlap.ToWorld(NavcutGeometry.ModelBox(prim), m.Pose.Pos, m.Pose.Rot, m.Pose.Scale);
+                if (box.IsEmpty) continue;
+                _facts[key] = (box, Role.PrimitiveBox, m.Base);
+                _boxes.Add(m.Pose.Space, box, key);
+            }
+        }
+    }
+    IReadOnlyList<PrimitiveMeasurement>? _primitiveTable;
+    bool _primitiveTableSet;
     /// <summary>A plan's population (window 2, task 1): a changed reference this says false for is not processed. Every row is
     /// computed from its own changed reference and the whole-order index, so the rows of a processed one are the whole-order
     /// run's. Null: every changed reference.</summary>
@@ -121,7 +161,8 @@ public sealed class StateEvaluator
     /// <summary>Opt-in phase timers (null: none, and no clock reads beyond the existing per-state stopwatch).</summary>
     public StatePhaseTimer? Timer { get; set; }
 
-    [Flags] enum Role { None = 0, Obstructing = 1, Dependent = 2, Physical = 4, Host = 8, Navcut = 16 }
+    // PrimitiveBox: a collision marker's box measured solid (station Q): a route obstacle only; the contact half measures meshes.
+    [Flags] enum Role { None = 0, Obstructing = 1, Dependent = 2, Physical = 4, Host = 8, Navcut = 16, PrimitiveBox = 32 }
     readonly BoxHash<FormKey> _boxes = new();
     readonly Dictionary<FormKey, (Aabb Box, Role Role, FormKey Base)> _facts = new();
     readonly HashSet<FormKey> _stateOverlapScope = new();
@@ -143,7 +184,7 @@ public sealed class StateEvaluator
             if (s.Deleted || Index.IsDeletedNow(key)) continue;
             var b = cidx.WinnerBase(key);
             if (b.IsNull) { if (Index.RefArm.TryGetValue(key, out var ta) && ta is not ("PlacedObject" or "PlacedNpc")) _why[key] = Why.PlacedTrap; continue; }
-            if (Index.RefArm.TryGetValue(key, out var arm) && arm == "PlacedNpc") { _why[key] = Why.Actor; BoxedNoGeometry++; continue; }
+            if (Index.RefArm.TryGetValue(key, out var arm) && arm == "PlacedNpc") { _actors.Add(key); BoxedNoGeometry++; continue; }
             if (Index.TextureSetDiffuse.ContainsKey(b)) { _why[key] = Why.Decal; BoxedNoGeometry++; continue; }
             // A navcut box: its obstacle is the XPRM primitive, not a mesh (its base is a flagged marker with no drawn shape).
             if (sx.IsNavcut(key))
@@ -197,7 +238,8 @@ public sealed class StateEvaluator
     public bool HasBox(FormKey k) => _facts.ContainsKey(k);
     readonly Dictionary<FormKey, string> _bodiless = new();
     readonly HashSet<FormKey> _marker = new();
-    enum Why { None, PlacedTrap, Actor, Decal, EffectVolume, OverSizeCap, TypeOutsideRoles }
+    enum Why { None, PlacedTrap, Decal, EffectVolume, OverSizeCap, TypeOutsideRoles }
+    readonly HashSet<FormKey> _actors = new();
     readonly Dictionary<FormKey, Why> _why = new();
     readonly Dictionary<FormKey, (FormKey Base, Snap Pose)> _markerPrimitive = new();
     readonly System.Collections.Concurrent.ConcurrentDictionary<FormKey, string> _markerVerdict = new();
@@ -270,6 +312,32 @@ public sealed class StateEvaluator
             {
                 if (_bodiless.TryGetValue(key, out var bt)) { if (bt == "Light") tally.NoBody++; else if (bt == "Activator") tally.NoBodyActivator++; else tally.NoBodyDoor++; }
                 else if (_marker.Contains(key)) tally.EditorMarker++;
+                else if (_actors.Contains(key))
+                {
+                    if (!after) { tally.ActorDeparts++; continue; }
+                    string detail = "no placement reading (the route half is off)";
+                    var p = ActorPlacement.Unmeasured;
+                    if (ActorAt is not null && Index.History.Winning(key) is { } aw)
+                    {
+                        var at = aw.Pos;
+                        var body = new Aabb(new Vec3(at.X - RouteConnectivity.DefaultCapsuleRadius, at.Y - RouteConnectivity.DefaultCapsuleRadius, at.Z),
+                                            new Vec3(at.X + RouteConnectivity.DefaultCapsuleRadius, at.Y + RouteConnectivity.DefaultCapsuleRadius, at.Z + ActorSearchTop), false);
+                        var near = new List<FormKey>();
+                        foreach (var (n, _, _) in _boxes.Near(aw.Space, body, 0f))
+                            if (n != key && (_facts[n].Role & Role.Physical) != 0 && Placed(n) && InState(n)) near.Add(n);
+                        p = ActorAt(arm, key, near, out detail);
+                    }
+                    switch (p)
+                    {
+                        case ActorPlacement.Clear: tally.ActorClear++; break;
+                        case ActorPlacement.OffNavmesh: tally.ActorOffNavmesh++; break;
+                        case ActorPlacement.InSolid: tally.ActorInSolid++; break;
+                        case ActorPlacement.Floating: tally.ActorFloating++; break;
+                        case ActorPlacement.Buried: tally.ActorBuried++; break;
+                        default: tally.ActorUnmeasured++; break;
+                    }
+                    tally.ActorCensus.Add((arm.Name, key, p, detail));
+                }
                 else if (_markerPrimitive.ContainsKey(key))
                 {
                     var v = MarkerVerdict(key);
@@ -278,7 +346,6 @@ public sealed class StateEvaluator
                 else switch (_why.GetValueOrDefault(key))
                 {
                     case Why.PlacedTrap: tally.PlacedTrap++; break;
-                    case Why.Actor: tally.Actor++; break;
                     case Why.Decal: tally.Decal++; break;
                     case Why.EffectVolume: tally.EffectVolume++; break;
                     case Why.OverSizeCap: tally.OverSizeCap++; break;
@@ -287,6 +354,7 @@ public sealed class StateEvaluator
                 }
                 continue;
             }
+            if ((f.Role & Role.PrimitiveBox) != 0) tally.MarkerPrimitiveSolid++;
             var win = Index.History.Winning(key)!.Value;
             int placer = PlacerOf(key), attacher = member?.Attacher ?? sx.AttacherOf(key), resp = ResponsibleOf(key);
             bool interior = win.Interior;
@@ -321,12 +389,12 @@ public sealed class StateEvaluator
 
             if (tm is not null) Lap(ref tm.Other);
             // ---- ROUTE ----
-            if (Route is not null && ((f.Role & Role.Navcut) != 0 || (f.Role & Role.Physical) != 0))
+            if (Route is not null && (f.Role & (Role.Navcut | Role.Physical | Role.PrimitiveBox)) != 0)
             {
-                bool navcut = (f.Role & Role.Navcut) != 0;
+                bool navcut = (f.Role & Role.Navcut) != 0, pbox = (f.Role & Role.PrimitiveBox) != 0;
                 // Memoised per (state, reference): the same reference measured in two different states can differ, because
                 // each state has its own floor and band (Q27). Before then the memo was keyed on the reference alone.
-                if (!_routeMemo.TryGetValue((arm.Name, key), out var rm)) { var v0 = Route(arm, key, navcut, out var w0); _routeMemo[(arm.Name, key)] = rm = (v0, w0); if (tm is not null) Interlocked.Increment(ref tm.RouteCalls); }
+                if (!_routeMemo.TryGetValue((arm.Name, key), out var rm)) { var v0 = Route(arm, key, navcut || pbox, out var w0); _routeMemo[(arm.Name, key)] = rm = (v0, w0); if (tm is not null) Interlocked.Increment(ref tm.RouteCalls); }
                 else if (tm is not null) Interlocked.Increment(ref tm.RouteMemoHits);
                 tally.RouteAsked++;
                 if (rm.V is null || rm.V == RouteCutVerdict.Unjudgeable) tally.RouteUnjudged++;
@@ -337,10 +405,13 @@ public sealed class StateEvaluator
                 {
                     var (v, why) = DetectorModel.StateDifferential(before, after);
                     // A route row has no other reference: its other side is the switch that brings the obstacle in or takes it out.
-                    rows.Add(new StateRow(arm.Name, root.Key, root.Owner, StateRowKind.Route, v, $"{rm.V}: {rm.Why}",
+                    rows.Add(new StateRow(arm.Name, root.Key, root.Owner, StateRowKind.Route, v,
+                        pbox ? $"{rm.V}: {rm.Why}; the obstacle is an invisible collision box (a collision marker measured solid), so a picture shows nothing at it" : $"{rm.V}: {rm.Why}",
                         key, after, placer, attacher, f.Base, null, -1, FormKey.Null, win.Cell, win.Space, interior,
                         Pop(resp, root.Owner), false, Route: rm.V, Navcut: navcut, MemberResponsible: resp,
-                        Physical: PhysicalState.Holds, PhysicalDetail: $"{rm.V} on the cell's winning navmesh"));
+                        Physical: PhysicalState.Holds, PrimitiveBox: pbox,
+                        PhysicalDetail: pbox ? $"{rm.V} on the cell's winning navmesh: a collision marker's box, measured solid (station Q: it stops the player); NPC pathing through it is not measured"
+                                             : $"{rm.V} on the cell's winning navmesh"));
                 }
             }
 

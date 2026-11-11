@@ -47,13 +47,15 @@ Box or PortalBox shape (Q measured no other). The test writes its own table nami
 solid with no layer, not solid on L_NONCOLLIDABLE.
 
     1640  the marker stating L_NONCOLLIDABLE (MaSwT) is decided by its layer's entry: set aside, MarkerPrimitiveNotSolid.
-    1641  the SP marker (no layer) measured solid stays unjudged under MarkerPrimitiveSolid, never set aside.
+    1641  the SP marker (no layer) measured solid gets its box (judged, a route obstacle since 2026-11-10; the box line's note counts
+          it), never set aside and never left unjudged.
     1642  the marker at scale 2 (MaSwQ) is not in the measurement: it stays MarkerPrimitive.
     1643  the Sphere marker (MaSwR) is not in the measurement: it stays MarkerPrimitive.
     1644  control: without the flag every marker primitive stays MarkerPrimitive, and the console says no table was given.
     1645  a table entry with no evidence refuses the run with a sentence.
 And the rest of "changed references with a box" is named by cause rather than counted as NoBox:
-    1646  a placed NPC (MaSwH): unjudged, Actor.
+    1646  a placed NPC (MaSwH): on the "changed placed actors" line since 2026-11-10, not the box line; with the route off it is
+          ActorUnmeasured.
     1647  a decal, a placed TextureSet (MaSwE): set aside, Decal.
     1648  a static whose model is under effects/ (MaSwF), in no role: unjudged, EffectVolume.
     1649  an idle marker with bounds (MaSwI), a type in no role: unjudged, TypeOutsideRoles.
@@ -337,7 +339,8 @@ def main() -> int:
         def c1641():
             # Rejects: a marker measured solid set aside as if it had no body, or left under the unmeasured name.
             unj, aside, c = parts("tab-P")
-            assert unj.get("MarkerPrimitiveSolid") == 1 and not unj.get("MarkerPrimitive") and not aside.get("MarkerPrimitiveNotSolid"), c
+            assert c.get("Judged") == 1 and not unj.get("MarkerPrimitiveSolid") and not unj.get("MarkerPrimitive") \
+                and not aside.get("MarkerPrimitiveNotSolid") and "1 measured solid" in str(c.get("Note") or ""), c
 
         def c1642():
             # Rejects: a scaled primitive decided by a measurement made at scale 1.
@@ -367,18 +370,24 @@ def main() -> int:
             mine, other = (aside, unj) if side == "aside" else (unj, aside)
             assert mine.get(want) == 1 and not other.get(want), f"want {want} 1 ({side}): {c}"
 
+        def c1646():
+            # Rejects: a placed NPC left in NoBox, or still on the box line.
+            box = cov(L.x["no-H"])
+            act = cov(L.x["no-H"], "changed placed actors")
+            assert "Actor" not in (box.get("Unjudgeable") or {}) and (act.get("Unjudgeable") or {}).get("ActorUnmeasured") == 1, (box, act)
+
         def c1652():
             # Rejects: a fix that empties NoBox wholesale (the switch has no box and stays unjudged as NoBox).
             bad = {x: parts("no-" + x)[0].get("NoBox") for x in EXTRA if parts("no-" + x)[0].get("NoBox") != 1}
             assert not bad, f"want NoBox 1 (the switch) in each state: {bad}"
 
         for name, fn in [("1640 a layer-stated marker primitive measured not solid is set aside", c1640),
-                         ("1641 a marker primitive measured solid stays unjudged by name", c1641),
+                         ("1641 a marker primitive measured solid gets its box", c1641),
                          ("1642 a scaled marker primitive stays unmeasured", c1642),
                          ("1643 a Sphere marker primitive stays unmeasured", c1643),
                          ("1644 control: without the table nothing is decided, and the console says so", c1644),
                          ("1645 a table entry without evidence refuses the run", c1645),
-                         ("1646 a placed NPC is unjudged as Actor, not NoBox", lambda: named("no-H", "Actor", "unj")),
+                         ("1646 a placed NPC is on the actor line, unmeasured with the route off", c1646),
                          ("1647 a decal is set aside as Decal", lambda: named("no-E", "Decal", "aside")),
                          ("1648 an effects mesh in no role is unjudged as EffectVolume", lambda: named("no-F", "EffectVolume", "unj")),
                          ("1649 an idle marker is unjudged as TypeOutsideRoles", lambda: named("no-I", "TypeOutsideRoles", "unj")),

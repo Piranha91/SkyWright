@@ -52,6 +52,8 @@ if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return RouteSelfTest.
 // Known answers for the class, emit and route-obstacle decisions over a synthetic order (_shared/StateFixture.cs).
 if (args.Length >= 1 && args[0] == "--self-test") return StateSelfTest.Run();
 // The modelless light fixture: written for tests/test_modelless_light.py, which runs the real stateprobe and contactprobe on it.
+// The marker-box and placed-actor fixture: written for tests/test_state_marker_box_and_actors.py, which runs the real stateprobe on it.
+if (args.Length >= 2 && args[0] == "--write-state-lane-fixture") { var w = StateLaneFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 if (args.Length >= 2 && args[0] == "--write-modelless-activator-fixture") { var w = ModellessActivatorFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 if (args.Length >= 2 && args[0] == "--write-modelless-light-fixture") { var w = ModellessLightFixture.Write(args[1]); Console.WriteLine(string.Join(Environment.NewLine, w.Order.Append(w.ModsDir))); return 0; }
 // The row identity fixture: written for tests/test_state_row_identity.py, which runs the real probe on it.
@@ -64,7 +66,11 @@ if (args.Length >= 2 && args[0] == "--write-scope-fixture") { var w = ScopeFixtu
 // with no box are split by name (editor markers set aside; markers carrying a primitive unjudged apart).
 // state-contact-route-v4 (2026-11-08): with --primitive-solidity, marker primitives station Q measured are decided (not solid
 // set aside, solid unjudged by name); the rest of the changed references with no box are named by cause.
-const string StateMeasurementPolicy = "state-contact-route-v4|state-overlap-unmeasured-v1";
+const string ActorLine = "changed placed actors";
+// state-contact-route-v5 (2026-11-10): a collision marker's box the table measures solid is a route obstacle; placed actors a state
+// changes are read from their placement on their own coverage line; and the policy names the table (primitive-table=<sha12>|none),
+// so emits measured with and without it never compare.
+const string StatePolicyBase = "state-contact-route-v5|state-overlap-unmeasured-v1";
 
 string Instance = HarnessTarget.Instance;
 string GamePath = HarnessTarget.Game;
@@ -138,9 +144,12 @@ if (populationPath is not null)
     }
 }
 IReadOnlyList<PrimitiveMeasurement>? primitiveTable = null;
+string primitiveTableSha = "";
+string StateMeasurementPolicy() => StatePolicyBase + "|primitive-table=" + (primitiveTable is null ? "none" : primitiveTableSha[..12]);
 if (primitiveSolidityPath is not null)
 {
     if (!File.Exists(primitiveSolidityPath)) { Console.Error.WriteLine($"--primitive-solidity {primitiveSolidityPath}: no such file"); return 2; }
+    primitiveTableSha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(primitiveSolidityPath))).ToLowerInvariant();
     try { primitiveTable = PrimitiveSolidity.Read(File.ReadAllText(primitiveSolidityPath)); }
     catch (Exception ex) when (ex is ArgumentException or System.Text.Json.JsonException) { Console.Error.WriteLine($"--primitive-solidity {primitiveSolidityPath}: {ex.Message}; fix the table or leave the flag out."); return 2; }
 }
@@ -249,6 +258,8 @@ var wantedCells = new HashSet<FormKey>();
 foreach (var a in arms) foreach (var c in a.Changes(sx)) if (idx.History.Winning(c.Key) is { } w) wantedCells.Add(w.Cell);
 Console.WriteLine($"cells touched by the states' changes: {wantedCells.Count:N0}");
 RouteAsk? oracle = null;
+ActorAsk? actorAsk = null;   // task 3: where an arriving actor stands (route on only)
+long actorColumnsBuilt = 0, actorSolidTests = 0; double actorSeconds = 0;
 Func<string>? routeFloorLine = null;
 Dictionary<FormKey, (FormKey Wrld, int X, int Y)>? routeCellGrid = null;
 long routeMeasured = 0, routeNoNav = 0, routeNoGeo = 0, routeSetAside = 0, routeNoCross = 0;
@@ -261,6 +272,8 @@ if (routeOn)
     sw.Restart();
     var npcFacts = new Dictionary<FormKey, ActorBand.NpcFacts>();
     var raceFacts = new Dictionary<FormKey, ActorBand.RaceFacts>();
+    var npcTypeKeywords = new HashSet<FormKey>();
+    var raceKeywords = new Dictionary<FormKey, HashSet<FormKey>>();
     // The walk's accumulation (the wanted cells' navmeshes and references, the floor filing) lives in RouteWalk.cs, so
     // --moved-ref-selftest runs the same code.
     var rwalk = new RouteWalk(wantedCells);
@@ -283,7 +296,13 @@ if (routeOn)
         {
             using (m as IDisposable)
             {
-                foreach (var rec in m.EnumerateMajorRecords()) ActorBand.CollectRecord(rec, npcFacts, raceFacts);
+                foreach (var rec in m.EnumerateMajorRecords())
+                {
+                    ActorBand.CollectRecord(rec, npcFacts, raceFacts);
+                    // a humanoid's race carries the ActorTypeNPC keyword; the body band is measured on humanoids only
+                    if (rec is IKeywordGetter kw && string.Equals(kw.EditorID, "ActorTypeNPC", StringComparison.OrdinalIgnoreCase)) npcTypeKeywords.Add(kw.FormKey);
+                    else if (rec is IRaceGetter rr) raceKeywords[rr.FormKey] = (rr.Keywords ?? (IReadOnlyList<Mutagen.Bethesda.Plugins.IFormLinkGetter<IKeywordGetter>>)Array.Empty<Mutagen.Bethesda.Plugins.IFormLinkGetter<IKeywordGetter>>()).Select(k => k.FormKey).ToHashSet();
+                }
                 rwalk.Plugin(m);
             }
         }
@@ -435,6 +454,89 @@ if (routeOn)
         why = vc.Why;
         return vc.Verdict;
     };
+    // ---- Task 3: where an actor a state brings in stands, from its placement (never a row). The humanoid body is the route's:
+    // from the feet + ActorBand.PhysicalStep up to ActorBand.PhysicalControllerTop(race height), radius 22 (memory
+    // actor-band-measurement-traps: the step is constant for humanoids, the top follows race height, never reference scale;
+    // creatures are not in the band). Over the navmesh: a non-deleted triangle of the cell's own winning navmesh under the
+    // placed point (searched ActorNavBelow u down and ActorNavAbove u up, the nearest kept) and within ActorNavBand u of the feet once
+    // they stand on the floor (an exterior's neighbours are not read: an upper bound on "off"). Floating / buried:
+    // the feet more than ActorFloorBand u above / below the state's physical floor (the harness's own landing check, memory
+    // navmesh-pose-can-slide).
+    const float ActorNavBand = 64f, ActorFloorBand = 30f, ActorNavBelow = 512f, ActorNavAbove = 256f;
+    var actorColumns = new System.Collections.Concurrent.ConcurrentDictionary<FormKey, Lazy<MeshColumnIndex?>>();
+    MeshColumnIndex? SolidColumns(FormKey k)
+        => actorColumns.GetOrAdd(k, kk => new Lazy<MeshColumnIndex?>(() =>
+        {
+            var b = cidx!.WinnerBase(kk);
+            if (b.IsNull || !idx.BaseMesh.TryGetValue(b, out var rel) || idx.History.Winning(kk) is not { } w) return null;
+            var g = Obstacle(rel);
+            if (g.Soup is null || g.Box.IsEmpty) return null;
+            Interlocked.Increment(ref actorColumnsBuilt);
+            return MeshColumnIndex.Build(NavcutGeometry.WorldVertices(g.Soup, w.Pos, w.Rot, w.Scale), g.Soup.Indices, triangleMaterials: g.Soup.TriangleMaterials);
+        })).Value;
+    bool Humanoid(FormKey npcBase, out float top, out string why)
+    {
+        top = float.NaN; why = "";
+        if (!npcFacts.TryGetValue(npcBase, out var n)) { why = "its base is not an NPC record (a leveled actor or unread)"; return false; }
+        if (n.Templated) { why = "a templated NPC: its race comes from its template, which this reading does not follow"; return false; }
+        if (!raceFacts.TryGetValue(n.Race, out var rc)) { why = $"race {n.Race} unresolved"; return false; }
+        if (!raceKeywords.TryGetValue(n.Race, out var kws) || !kws.Overlaps(npcTypeKeywords)) { why = $"race {rc.EditorId ?? n.Race.ToString()} is not a humanoid (no ActorTypeNPC keyword): the body band is measured on humanoids only"; return false; }
+        top = ActorBand.PhysicalControllerTop(ActorBand.ScaleOneHeight * (n.Female ? rc.Female : rc.Male) * n.Height);
+        return true;
+    }
+    actorAsk = (StateArm arm, FormKey key, IReadOnlyList<FormKey> solidsNear, out string detail) =>
+    {
+        long t0 = Stopwatch.GetTimestamp();
+        try
+        {
+            detail = "";
+            if (idx.History.Winning(key) is not { } w) { detail = "no winning placement"; return ActorPlacement.Unmeasured; }
+            var bk = cidx!.WinnerBase(key);
+            if (!Humanoid(bk, out var top, out var hwhy)) { detail = hwhy; return ActorPlacement.Unmeasured; }
+            if (!winNav.TryGetValue(w.Cell, out var navs) || navs.Count == 0) { detail = "the cell has no navmesh"; return ActorPlacement.Unmeasured; }
+            var ni = navIndex.GetOrAdd(w.Cell, _ => new Lazy<NavCell>(() => new NavCell(NavmeshIndex.Build(navs.Values.ToList(), out var _)))).Value;
+            if (FieldFor(w.Cell, arm, out var fwhy) is not { } field) { detail = fwhy; return ActorPlacement.Unmeasured; }
+            var at = w.Pos;
+            // solid first: a body inside a solid is that whatever the navmesh under it says
+            foreach (var s in solidsNear)
+            {
+                var cols = SolidColumns(s);
+                if (cols is null) continue;
+                Interlocked.Increment(ref actorSolidTests);
+                bool hit;
+                lock (cols) hit = cols.IntersectsDiscInSlab(at.X, at.Y, RouteConnectivity.DefaultCapsuleRadius, at.Z + ActorBand.PhysicalStep, at.Z + top)
+                                  || cols.Classify(new Vector3(at.X, at.Y, at.Z + (ActorBand.PhysicalStep + top) / 2f)) == ColumnPosition.Inside;
+                if (hit) { detail = $"an actor-solid surface of {s} enters the body ({ActorBand.PhysicalStep:0.#}..{top:0.#} u above the feet, radius {RouteConnectivity.DefaultCapsuleRadius:0} u)"; return ActorPlacement.InSolid; }
+            }
+            float? navZ = null;
+            var q = new Aabb(new Vec3(at.X - 1, at.Y - 1, at.Z - ActorNavBelow), new Vec3(at.X + 1, at.Y + 1, at.Z + ActorNavAbove), false);
+            foreach (var h in ni.Index.Query(q))
+            {
+                if ((h.Flags & 0x08) != 0) continue;
+                var g = ni.Index.NavAt(h.NavIndex);
+                var t = g.Triangles[h.TriangleIndex];
+                var (a, b, c) = (g.Vertices[t.A], g.Vertices[t.B], g.Vertices[t.C]);
+                if (ZAt(a, b, c, at.X, at.Y) is { } z && z >= at.Z - ActorNavBelow && z <= at.Z + ActorNavAbove && (navZ is null || MathF.Abs(z - at.Z) < MathF.Abs(navZ.Value - at.Z))) navZ = z;
+            }
+            if (navZ is null) { detail = $"no non-deleted triangle of the cell's winning navmesh under the placed point ({ActorNavBelow:0} u down to {ActorNavAbove:0} u up)"; return ActorPlacement.OffNavmesh; }
+            float floor = field.Floor.FloorAt(at.X, at.Y, navZ.Value), gap = at.Z - floor;
+            if (gap > ActorFloorBand) { detail = $"the feet stand {gap:0.#} u above the state's floor"; return ActorPlacement.Floating; }
+            if (gap < -ActorFloorBand) { detail = $"the feet stand {-gap:0.#} u below the state's floor"; return ActorPlacement.Buried; }
+            if (MathF.Abs(at.Z - navZ.Value) > ActorNavBand) { detail = $"the feet stand on a floor {at.Z - navZ.Value:0.#} u from the navmesh under them: no navmesh there"; return ActorPlacement.OffNavmesh; }
+            detail = $"over the navmesh ({at.Z - navZ.Value:0.#} u above it), {gap:0.#} u from the floor, no solid in the body (judged from placement)";
+            return ActorPlacement.Clear;
+        }
+        finally { lock (actorColumns) actorSeconds += (Stopwatch.GetTimestamp() - t0) / (double)Stopwatch.Frequency; }
+    };
+    static float? ZAt(Vec3 a, Vec3 b, Vec3 c, float x, float y)
+    {
+        float d = (b.Y - c.Y) * (a.X - c.X) + (c.X - b.X) * (a.Y - c.Y);
+        if (MathF.Abs(d) < 1e-6f) return null;
+        float l1 = ((b.Y - c.Y) * (x - c.X) + (c.X - b.X) * (y - c.Y)) / d, l2 = ((c.Y - a.Y) * (x - c.X) + (a.X - c.X) * (y - c.Y)) / d, l3 = 1 - l1 - l2;
+        const float e = -1e-4f;
+        if (l1 < e || l2 < e || l3 < e) return null;
+        return l1 * a.Z + l2 * b.Z + l3 * c.Z;
+    }
 }
 else Console.WriteLine("route oracle: off (--route on to measure the route half)");
 
@@ -443,7 +545,7 @@ else Console.WriteLine("route oracle: off (--route on to measure the route half)
 // ---------------------------------------------------------------------------------------
 sw.Restart();
 phase.Mark("route-oracle");
-var ev = new StateEvaluator(cidx, sx) { Route = oracle, PrimitiveTable = primitiveTable };
+var ev = new StateEvaluator(cidx, sx) { Route = oracle, PrimitiveTable = primitiveTable, ActorAt = actorAsk };
 var stateTimer = phaseTimersPath is not null ? new StatePhaseTimer() : null;
 ev.Timer = stateTimer;
 if (phaseTimersPath is not null) cidx.Timer = new ContactTimer();   // --phase-timers: the contact code's own split (changes no output)
@@ -523,7 +625,7 @@ ParallelArms.Run(arms, stateThreads, arm =>
 static void Merge(StateTally a, StateTally b)
 {
     a.States += b.States; a.Changes += b.Changes; a.Arrivals += b.Arrivals; a.Departures += b.Departures; a.SwitchesThemselves += b.SwitchesThemselves;
-    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NoBody += b.NoBody; a.NoBodyActivator += b.NoBodyActivator; a.NoBodyDoor += b.NoBodyDoor; a.EditorMarker += b.EditorMarker; a.MarkerPrimitive += b.MarkerPrimitive; a.MarkerPrimitiveSolid += b.MarkerPrimitiveSolid; a.MarkerPrimitiveNotSolid += b.MarkerPrimitiveNotSolid; a.Decal += b.Decal; a.PlacedTrap += b.PlacedTrap; a.Actor += b.Actor; a.EffectVolume += b.EffectVolume; a.TypeOutsideRoles += b.TypeOutsideRoles; a.OverSizeCap += b.OverSizeCap; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
+    a.NoGeometry += b.NoGeometry; a.NoBox += b.NoBox; a.NoBody += b.NoBody; a.NoBodyActivator += b.NoBodyActivator; a.NoBodyDoor += b.NoBodyDoor; a.EditorMarker += b.EditorMarker; a.MarkerPrimitive += b.MarkerPrimitive; a.MarkerPrimitiveSolid += b.MarkerPrimitiveSolid; a.MarkerPrimitiveNotSolid += b.MarkerPrimitiveNotSolid; a.Decal += b.Decal; a.PlacedTrap += b.PlacedTrap; a.ActorDeparts += b.ActorDeparts; a.ActorClear += b.ActorClear; a.ActorOffNavmesh += b.ActorOffNavmesh; a.ActorInSolid += b.ActorInSolid; a.ActorFloating += b.ActorFloating; a.ActorBuried += b.ActorBuried; a.ActorUnmeasured += b.ActorUnmeasured; a.ActorCensus.AddRange(b.ActorCensus); a.EffectVolume += b.EffectVolume; a.TypeOutsideRoles += b.TypeOutsideRoles; a.OverSizeCap += b.OverSizeCap; a.NotObstructing += b.NotObstructing; a.Volume += b.Volume; a.PairsTested += b.PairsTested; a.SameSetPairs += b.SameSetPairs; a.Unchanged += b.Unchanged; a.StateOverlapUnmeasured += b.StateOverlapUnmeasured;
     a.HostsLeaving += b.HostsLeaving; a.HostsArriving += b.HostsArriving; a.DepsArriving += b.DepsArriving; a.DepsLeaving += b.DepsLeaving; a.ReSupported += b.ReSupported; a.FloatingOnArrival += b.FloatingOnArrival; a.TouchingOnArrival += b.TouchingOnArrival; a.ContactUnmeasured += b.ContactUnmeasured;
     a.RouteAsked += b.RouteAsked; a.RouteUnjudged += b.RouteUnjudged; a.RouteNoLine += b.RouteNoLine; a.RouteClipped += b.RouteClipped; a.RouteNone += b.RouteNone; a.ElapsedMs += b.ElapsedMs;
     a.OutsidePopulation += b.OutsidePopulation; a.MergedContactRows += b.MergedContactRows;
@@ -543,10 +645,11 @@ if (population is not null)
                     + string.Join(", ", new[] { "contact", "route-interior", "route-ring", "large-ref" }.Select(k => $"{k} {keptByRule.GetValueOrDefault(k):N0}"))
                     + $", dropped {keysDropped:N0}");
 Console.WriteLine($"   set aside (rule 6): {tally.NoBox:N0} changed refs without a box (no geometry or a navcut without a primitive); {tally.MarkerPrimitive:N0} changed markers carrying a primitive (unjudged); {tally.EditorMarker:N0} changed editor markers; {tally.NoBody:N0} changed lights, {tally.NoBodyActivator:N0} activators and {tally.NoBodyDoor:N0} doors with no model (no body); route: {routeNoNav:N0} in a cell without navmesh, {routeNoGeo:N0} without actor-solid geometry, {routeSetAside:N0} doors / movables, {routeNoCross:N0} never entering an actor column, {tally.RouteUnjudged:N0} unjudged");
-Console.WriteLine($"   changed references without a box, by cause: {tally.Actor:N0} placed actors, {tally.PlacedTrap:N0} placed hazards or traps (base not read), {tally.EffectVolume:N0} effects meshes in no role, {tally.TypeOutsideRoles:N0} of a type in no role, {tally.OverSizeCap:N0} over the volume cap in no role (unjudged); {tally.Decal:N0} decals (set aside); {tally.NoBox:N0} with no geometry (NoBox)");
+Console.WriteLine($"   changed references without a box, by cause: {tally.PlacedTrap:N0} placed hazards or traps (base not read), {tally.EffectVolume:N0} effects meshes in no role, {tally.TypeOutsideRoles:N0} of a type in no role, {tally.OverSizeCap:N0} over the volume cap in no role (unjudged); {tally.Decal:N0} decals (set aside); {tally.NoBox:N0} with no geometry (NoBox)");
 Console.WriteLine(primitiveTable is null
     ? $"   marker primitives: no --primitive-solidity table given, so all {tally.MarkerPrimitive:N0} stay unjudged (MarkerPrimitive)"
-    : $"   marker primitives by station Q's table ({primitiveTable.Count} entries): {tally.MarkerPrimitiveNotSolid:N0} measured not solid (set aside), {tally.MarkerPrimitiveSolid:N0} measured solid (unjudged: the check does not measure primitive boxes), {tally.MarkerPrimitive:N0} not in the measurement (unjudged)");
+    : $"   marker primitives by station Q's table ({primitiveTable.Count} entries): {tally.MarkerPrimitiveNotSolid:N0} measured not solid (set aside), {tally.MarkerPrimitiveSolid:N0} measured solid (boxed: route obstacles), {tally.MarkerPrimitive:N0} not in the measurement (unjudged)");
+Console.WriteLine($"   placed actors: {tally.ActorDeparts:N0} leave (set aside); of those arriving, {tally.ActorClear:N0} judged from placement (over the navmesh, on the floor, no solid in the body; not checked in game), {tally.ActorOffNavmesh:N0} off the navmesh, {tally.ActorInSolid:N0} with a solid in the body, {tally.ActorFloating:N0} floating, {tally.ActorBuried:N0} buried, {tally.ActorUnmeasured:N0} not measured (unjudged); {actorColumnsBuilt:N0} solids read, {actorSolidTests:N0} body tests, {actorSeconds:0.0} s summed over threads");
 Console.WriteLine($"   state overlap: unmeasured for {tally.StateOverlapUnmeasured:N0} changed obstructing reference-state(s); strict placed render-surface migration is pending, so no box overlap is a finding or repair predicate");
 
 // ---- LEFT IN EMPTY SPACE per state (--empty-space): each state's arriving fixtures against every plugin that stepped on a
@@ -656,7 +759,7 @@ void PrintRow(StateRow r)
     {
         StateRowKind.Overlap => $"boxes {r.Depth:0}u deep, {r.Frac:0.00} of the smaller",
         StateRowKind.Contact => $"{r.ContactVerdict} {r.Relation} {r.Motion}; nearest {r.Distance:0.#}u, penetration {r.Penetration:0.#}u",
-        _ => $"{r.Route}{(r.Navcut ? " (navcut box)" : "")}",
+        _ => $"{r.Route}{(r.Navcut ? " (navcut box)" : r.PrimitiveBox ? " (collision marker box)" : "")}",
     };
     Console.WriteLine($"      {r.Kind,-8} {r.Verdict,-16} {r.Population,-24} switch {s.Label} ({ClassOf(r.SwitchOwner)}, baseline {(s.Baseline.Enabled ? "on" : "off")}, trigger {TriggerOf(r.Switch)}) in {CellOf(r.Cell)}");
     Console.WriteLine($"         member {(r.Arrives ? "ARRIVES" : "LEAVES ")} {RefLabel(r.Member)} (placed by {PluginName(r.MemberPlacer)}{(r.MemberResponsible != r.MemberPlacer ? $", geometry by {PluginName(r.MemberResponsible)}" : "")}, attached by {PluginName(r.MemberAttacher)})");
@@ -691,9 +794,11 @@ if (jsonPath is not null)
     var dump = new
     {
         generated = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), instance = Instance, profile = profileName, plugins = paths.Count,
-        measurementPolicy = StateMeasurementPolicy,
+        measurementPolicy = StateMeasurementPolicy(),
         states = arms.Count, elapsedSeconds = totalS, cellStates, routeMeasured, bodilessLights, bodilessActivators, bodilessDoors,
-        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.NoBody, tally.NoBodyActivator, tally.NoBodyDoor, tally.EditorMarker, tally.MarkerPrimitive, tally.MarkerPrimitiveSolid, tally.MarkerPrimitiveNotSolid, tally.Decal, tally.PlacedTrap, tally.Actor, tally.EffectVolume, tally.TypeOutsideRoles, tally.OverSizeCap, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
+        tally = new { tally.Changes, tally.Arrivals, tally.Departures, tally.NoBox, tally.NoBody, tally.NoBodyActivator, tally.NoBodyDoor, tally.EditorMarker, tally.MarkerPrimitive, tally.MarkerPrimitiveSolid, tally.MarkerPrimitiveNotSolid, tally.Decal, tally.PlacedTrap, tally.ActorDeparts, tally.ActorClear, tally.ActorOffNavmesh, tally.ActorInSolid, tally.ActorFloating, tally.ActorBuried, tally.ActorUnmeasured, tally.EffectVolume, tally.TypeOutsideRoles, tally.OverSizeCap, tally.PairsTested, tally.SameSetPairs, tally.StateOverlapUnmeasured, tally.HostsLeaving, tally.HostsArriving, tally.DepsArriving, tally.ReSupported, tally.FloatingOnArrival, tally.TouchingOnArrival, tally.ContactUnmeasured, tally.MergedContactRows, tally.RouteAsked, tally.RouteUnjudged, tally.RouteNoLine, tally.RouteClipped, tally.RouteNone, routeNoNav, routeNoGeo, routeSetAside, routeNoCross },
+        actorCensus = tally.ActorCensus.Select(a => new { state = a.State, actor = a.Key.ToString(), placement = a.Placement.ToString(), detail = a.Detail }),
+        actorColumnsBuilt, actorSolidTests, actorSeconds,
         perState = perState.Select(p => new { state = p.Arm.Name, flips = p.Arm.Flips.Select(f => f.ToString()), p.Changes, p.Rows, p.Conditional, ms = p.Ms }),
         rows = rows.Select(r => new
         {
@@ -704,7 +809,7 @@ if (jsonPath is not null)
             cell = CellOf(r.Cell), cellKey = r.Cell.ToString(), interior = r.Interior,
             depth = float.IsNaN(r.Depth) ? (float?)null : r.Depth, frac = float.IsNaN(r.Frac) ? (float?)null : r.Frac,
             contact = r.ContactVerdict?.ToString(), relation = r.Relation.ToString(), distance = float.IsNaN(r.Distance) ? (float?)null : r.Distance, penetration = float.IsNaN(r.Penetration) ? (float?)null : r.Penetration, motion = r.Motion.ToString(),
-            route = r.Route?.ToString(), navcut = r.Navcut, physical = r.Physical.ToString(), physicalDetail = r.PhysicalDetail,
+            route = r.Route?.ToString(), navcut = r.Navcut, primitiveBox = r.PrimitiveBox, physical = r.Physical.ToString(), physicalDetail = r.PhysicalDetail,
             memberPosition = idx.History.Winning(r.Member)?.Pos.ToString(), otherPosition = r.Other is { } o2 ? idx.History.Winning(o2)?.Pos.ToString() : null,
         }),
     };
@@ -728,15 +833,23 @@ if (emitPath is not null)
     {
         new("plugins", paths.Count - unreadable.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadable.Count }),
         new("states", arms.Count, null, null, $"{tally.Changes:N0} changed references"),
-        new("changed references with a box", tally.Changes - tally.NoBox - tally.MarkerPrimitive - tally.MarkerPrimitiveSolid - tally.MarkerPrimitiveNotSolid
+        new("changed references with a box", tally.Changes - tally.NoBox - tally.MarkerPrimitive - tally.MarkerPrimitiveNotSolid
                                                   - tally.NoBody - tally.NoBodyActivator - tally.NoBodyDoor - tally.EditorMarker
-                                                  - tally.Decal - tally.PlacedTrap - tally.Actor - tally.EffectVolume - tally.TypeOutsideRoles - tally.OverSizeCap,
-            new Dictionary<string, long> { ["NoBox"] = tally.NoBox, ["MarkerPrimitive"] = tally.MarkerPrimitive, ["MarkerPrimitiveSolid"] = tally.MarkerPrimitiveSolid,
-                                           ["Actor"] = tally.Actor, ["PlacedTrap"] = tally.PlacedTrap, ["EffectVolume"] = tally.EffectVolume, ["TypeOutsideRoles"] = tally.TypeOutsideRoles,
+                                                  - tally.Decal - tally.PlacedTrap - ActorStates(tally) - tally.EffectVolume - tally.TypeOutsideRoles - tally.OverSizeCap,
+            new Dictionary<string, long> { ["NoBox"] = tally.NoBox, ["MarkerPrimitive"] = tally.MarkerPrimitive,
+                                           ["PlacedTrap"] = tally.PlacedTrap, ["EffectVolume"] = tally.EffectVolume, ["TypeOutsideRoles"] = tally.TypeOutsideRoles,
                                            ["OverSizeCap"] = tally.OverSizeCap },
             new Dictionary<string, long> { ["LightWithNoModel"] = tally.NoBody, ["ActivatorWithNoModel"] = tally.NoBodyActivator,
                                            ["DoorWithNoModel"] = tally.NoBodyDoor, ["EditorMarker"] = tally.EditorMarker,
-                                           ["MarkerPrimitiveNotSolid"] = tally.MarkerPrimitiveNotSolid, ["Decal"] = tally.Decal }),
+                                           ["MarkerPrimitiveNotSolid"] = tally.MarkerPrimitiveNotSolid, ["Decal"] = tally.Decal },
+            primitiveTable is null
+                ? "no primitive table given (--primitive-solidity): every collision marker's primitive stays unjudged (MarkerPrimitive)"
+                : $"collision-marker primitives decided by station Q's table (sha256 {primitiveTableSha}, {primitiveTable.Count} entries): {tally.MarkerPrimitiveSolid:N0} measured solid are judged as route obstacles by their box"),
+        new(ActorLine, tally.ActorClear,
+            new Dictionary<string, long> { ["ActorOffNavmesh"] = tally.ActorOffNavmesh, ["ActorInSolid"] = tally.ActorInSolid, ["ActorFloating"] = tally.ActorFloating,
+                                           ["ActorBuried"] = tally.ActorBuried, ["ActorUnmeasured"] = tally.ActorUnmeasured },
+            new Dictionary<string, long> { ["ActorDeparts"] = tally.ActorDeparts },
+            "judged from placement, not checked in game: an arriving actor over the cell's winning navmesh, on the state's floor and with no actor-solid surface in its humanoid body is judged where its author put it; no actor is a row"),
         new("state-overlap changed obstructing references", 0,
             new Dictionary<string, long> { ["ActualSurfacePredicateUnavailable"] = tally.StateOverlapUnmeasured }, null,
             "STATE-OVERLAP is withheld: this evaluator does not yet carry strict placed render surfaces; diagnostic boxes provide no finding or repair credit"),
@@ -761,7 +874,7 @@ if (emitPath is not null)
     ConflictIo.Write(emitPath, new ConflictFile("stateprobe", Instance, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ssZ"), conflicts, coverage,
                                                 Population: populationIdentity, State: EnablePopulation.BaselineStateName,
                                                 Configuration: cfg.Identity(populationIdentity, EnablePopulation.BaselineStateName),
-                                                MeasurementPolicy: StateMeasurementPolicy));
+                                                MeasurementPolicy: StateMeasurementPolicy()));
     Console.WriteLine($"emitted {conflicts.Count:N0} StateConditional conflicts -> {emitPath}");
 }
 
@@ -780,6 +893,7 @@ if (phaseTimersPath is not null)
 }
 return 0;
 
+static int ActorStates(StateTally t) => t.ActorDeparts + t.ActorClear + t.ActorOffNavmesh + t.ActorInSolid + t.ActorFloating + t.ActorBuried + t.ActorUnmeasured;
 static string Short(string s, int n) => s.Length <= n ? s : s[..(n - 3)] + "...";
 
 /// <summary>stateprobe --phase-timers (lane O P0): wall seconds per top-level phase, the state evaluator's own phase split, and one

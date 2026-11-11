@@ -328,7 +328,11 @@ def t1402():
 # Was f30ce37c... until 2026-11-08 (item 30: marker primitives by station Q's table, the rest of NoBox named by cause): the
 # same line also carries Unjudgeable MarkerPrimitiveSolid, Actor, PlacedTrap, EffectVolume, TypeOutsideRoles, OverSizeCap and
 # SetAside MarkerPrimitiveNotSolid, Decal, all 0 on this fixture; the old emit with those keys added hashes to this value.
-STATE_ROWS_SHA = "e72e787e0fcb682a2fea26bac1c864eb53181b21053ee93da93776a12be74b0b"
+# Was e72e787e... until 2026-11-10 (stateprobe lane: solid collision-marker boxes, placed actors read from placement, the table
+# named in the emit). Its Conflicts and Predicates are unchanged; in Coverage only: "changed references with a box" drops the
+# Unjudgeable keys Actor and MarkerPrimitiveSolid (both 0 here) and gains the note that no primitive table was given, and a new
+# line "changed placed actors" (all 0 here) follows it. The base emit with exactly those changes hashes to this value.
+STATE_ROWS_SHA = "32771cec94bc5b94496b8f782bb99c6309eb5dc88038ba619bd95e126d53c458"
 
 
 def t1403():

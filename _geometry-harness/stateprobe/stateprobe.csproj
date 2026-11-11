@@ -21,6 +21,7 @@
     <Compile Include="..\_shared\RowIdentityFixture.cs" Link="RowIdentityFixture.cs" />
     <Compile Include="..\_shared\ModellessLightFixture.cs" Link="ModellessLightFixture.cs" />
     <Compile Include="..\_shared\ModellessActivatorFixture.cs" Link="ModellessActivatorFixture.cs" />
+    <Compile Include="..\_shared\StateLaneFixture.cs" Link="StateLaneFixture.cs" />
     <Compile Include="..\_shared\MovedRefSelfTest.cs" Link="MovedRefSelfTest.cs" />
     <Compile Include="..\_shared\MovedRefFloorCheck.cs" Link="MovedRefFloorCheck.cs" />
     <Compile Include="..\_shared\FloorReachFixture.cs" Link="FloorReachFixture.cs" />
