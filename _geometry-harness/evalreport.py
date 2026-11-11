@@ -3937,6 +3937,10 @@ def build_prediction(ctx: dict) -> dict:
                        if any(v_ and not v_["beyond"] and (v_["far"] or v_["rebased"] or v_["turned"])
                               for v_ in changes_.values()) else "")}))
         n_own, ex_own = g.pop("_winnerOwn", 0), g.pop("_winnerOwnExample", None)
+        if len(directions) == 1 and g.get("kind") == "LOST-EDIT":
+            # (Helgi r3 reviews) how many of the lost fields the winner changed itself: the next step forwards the losing
+            # mod's value on the rest, and asks for a patch that carries both only on these
+            g["lostSplit"] = {"loser": next(iter(directions))[0], "winner": next(iter(directions))[1], "own": n_own}
         if n_own and len(directions) == 1:
             loser, winner = next(iter(directions))
             detail.append(bind(words["itemWinnerOwn"], {"count": fmt_n(n_own), "loser": loser, "winner": winner,
@@ -8044,6 +8048,18 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
                                                  "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
                                                  "mods": and_list([name(m) for m in it.get("mods") or []]),
                                                  "winner": and_list([name(w) for w in winners_]) or "one mod"}))
+            continue
+        sp_ = it.get("lostSplit") or {}
+        own_ = int(sp_.get("own") or 0)
+        if sp_ and own_ < n and n == int(it.get("count") or 0) and ns.get("forwardAll") and ns.get("forwardSome"):
+            # the winner only keeps an earlier value on n - own of them: forwarding the losing mod's value keeps both
+            # mods' changes there (said only where the step's count is the item's whole count, which the split is of)
+            out.append(bind(ns["forwardAll" if own_ == 0 else "forwardSome"], {
+                "title": it.get("title"), "count": n, "verb": "is" if n == 1 else "are",
+                "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
+                "mods": and_list([name(m) for m in it.get("mods") or []]), "loser": name(sp_["loser"]),
+                "winner": name(sp_["winner"]), "fwd": fmt_n(n - own_), "own": fmt_n(own_),
+                "still": ns.get("still", "") if compared else ns.get("stillNone", "")}))
             continue
         tmpl = ns.get(str(it.get("checkId"))) or ns.get(str(it.get("kind"))) or ns.get("default")
         if not tmpl:
