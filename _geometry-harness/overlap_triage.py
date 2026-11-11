@@ -110,7 +110,8 @@ def _refr_rotation(rotation):
     rx = [[1, 0, 0], [0, math.cos(x), -math.sin(x)], [0, math.sin(x), math.cos(x)]]
     ry = [[math.cos(y), 0, math.sin(y)], [0, 1, 0], [-math.sin(y), 0, math.cos(y)]]
     rz = [[math.cos(z), -math.sin(z), 0], [math.sin(z), math.cos(z), 0], [0, 0, 1]]
-    return _mat_mul(_mat_mul(rx, ry), rz)
+    # SpatialOverlap.RefrRotation in row form (v * M, like Vector3.Transform): the transpose of Rx(-x)*Ry(-y)*Rz(-z)
+    return _transpose(_mat_mul(_mat_mul(rx, ry), rz))
 
 
 def _relative_transform(first, second):

@@ -249,11 +249,62 @@ def test_relative_transform_counterexamples_and_family_order():
     rotated_a = ident([0, 0, 0], [0, 0, math.pi / 2], 1, "a", "base-a")
     rotated_b = ident([0, 4, 0], [0, 0, math.pi / 2], 1, "b", "base-b")
     local = triage._relative_transform(rotated_a, rotated_b)["localOffset"]
-    assert abs(local[0] - 4) < 1e-9 and abs(local[1]) < 1e-9  # Rx(-x)*Ry(-y)*Rz(-z)
+    # A faces east (heading 90), B is 4 u north: B is on A's left. Was +4, the transpose (run 2026-11-10-primitive-box-rotation-sense, K7).
+    assert abs(local[0] + 4) < 1e-9 and abs(local[1]) < 1e-9
     policy = json.loads(triage.DEFAULT_POLICY.read_text(encoding="utf-8"))
     policy["meshFamilies"] = {"family-a": {"contentSha256": ["a"]}, "family-b": {"contentSha256": ["b"]}}
     assert [x[0] for x in triage._analogue_keys(a, b, policy)] == [
         "exact_mesh_pair", "mesh_family_pair", "exact_base_pair"]
+
+
+def _placed_box(lo, hi, pos, rot, scale):
+    """A model box placed corner by corner with the helper, as a caller does (row vectors, like Vector3.Transform)."""
+    m = triage._refr_rotation(rot)
+    cs = [triage._row_mul([x * scale, y * scale, z * scale], m) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])]
+    return [min(c[i] for c in cs) + pos[i] for i in range(3)] + [max(c[i] for c in cs) + pos[i] for i in range(3)]
+
+
+def test_refr_rotation_matches_spatial_overlap_to_world():
+    # crossprobe section 13 (Program.cs:300-344): the boxes the C# SpatialOverlap.ToWorld is pinned to
+    deg = math.pi / 180
+    near = lambda got, want: all(abs(g - w) < .02 for g, w in zip(got, want))
+    centred = ([-100, -20, -50], [100, 20, 50])
+    off = ([0, -20, 0], [200, 20, 100])
+    assert near(_placed_box(*centred, [1000, 2000, 300], [0, 0, 30 * deg], 1),
+                [903.3975, 1932.6795, 250, 1096.6025, 2067.3205, 350])
+    assert near(_placed_box(*centred, [1000, 2000, 300], [40 * deg, 0, 30 * deg], 1),
+                [903.3975, 1916.2901, 218.425, 1096.6025, 2083.7099, 381.575])
+    assert near(_placed_box(*off, [0, 0, 0], [0, 0, 90 * deg], 1), [-20, -200, 0, 20, 0, 100])
+    assert near(_placed_box(*off, [500, -300, 40], [20 * deg, -35 * deg, 110 * deg], 2),
+                [357.1434, -646.6001, 24.4199, 645.5053, -223.7372, 411.8254])
+
+
+def test_relative_transform_is_unchanged_by_moving_the_pair_rigidly():
+    # both references turned by one world rotation Q about the origin: their relation must not change
+    def mm(p, q): return [[sum(p[i][k] * q[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+    def engine(rot):  # the engine's matrix in row form, (Rx(-x)Ry(-y)Rz(-z))^T, written out apart from the helper
+        x, y, z = (-r for r in rot)
+        rx = [[1, 0, 0], [0, math.cos(x), -math.sin(x)], [0, math.sin(x), math.cos(x)]]
+        ry = [[math.cos(y), 0, math.sin(y)], [0, 1, 0], [-math.sin(y), 0, math.cos(y)]]
+        rz = [[math.cos(z), -math.sin(z), 0], [math.sin(z), math.cos(z), 0], [0, 0, 1]]
+        a = mm(mm(rx, ry), rz)
+        return [[a[j][i] for j in range(3)] for i in range(3)]
+
+    def euler_of(m):  # record angles whose engine matrix is m (row form, m[2][0] = sin(-y))
+        return [-math.atan2(-m[2][1], m[2][2]), -math.asin(max(-1, min(1, m[2][0]))), -math.atan2(-m[1][0], m[0][0])]
+    q = engine([.3, -.2, 1.1])
+    ident = lambda pos, rot: {"position": pos, "rotation": rot, "scale": 1}
+    pa, ra, pb, rb = [100, 50, 10], [.2, .1, .7], [160, 20, 30], [-.1, .4, 2.0]
+    for r in (ra, rb):
+        back, want = engine(euler_of(mm(engine(r), q))), mm(engine(r), q)
+        assert max(abs(back[i][j] - want[i][j]) for i in range(3) for j in range(3)) < 1e-9
+    row = lambda p: [sum(p[k] * q[k][j] for k in range(3)) for j in range(3)]
+    moved = lambda p, r: ident(row(p), euler_of(mm(engine(r), q)))
+    source = triage._relative_transform(ident(pa, ra), ident(pb, rb))
+    target = triage._relative_transform(moved(pa, ra), moved(pb, rb))
+    d = triage._transform_difference(target, source)
+    assert d["localOffsetDistance"] < 1e-6 and d["orientationDeltaRadians"] < 1e-6
 
 
 def test_contact_evidence_quantity():
@@ -304,6 +355,8 @@ def test_missing_source_identity_excludes_analogues():
 if __name__ == "__main__":
     test_contract(); test_cli(); test_report_catalogue(); test_cross_setup_analogue_and_nonfinite_pose()
     test_relative_transform_counterexamples_and_family_order()
+    test_refr_rotation_matches_spatial_overlap_to_world()
+    test_relative_transform_is_unchanged_by_moving_the_pair_rigidly()
     test_contact_evidence_quantity()
     test_comparison_direction_refusal()
     test_counterpart_locality_and_pair_order_invariance()
