@@ -5780,6 +5780,78 @@ def main():
                      ("round-2/C979-evaluated-linker-base-link-counted", c979_evaluated_linker_base_link_counted)]:
         cell(name, fn)
 
+    # C1760-C1762 (Helgi, three review rounds): a base-game link that OtherMod carries, where the evaluated mod's own
+    # version of the linking navmesh sits between them in the chain (Skyrim.esm -> ModA.esp -> OtherMod.esp). The base
+    # game's version holds the links, ModA's re-links them, OtherMod's copy of the base version wins over ModA's.
+    def helgi_bundle(a_has=False, without_other=True, other_rows=False, a_file=True, full=False):
+        rows_ = []
+        for t_ in (501, 502):
+            r_ = row("EDGE-IDX", OTHER, MOD_A, N_LINK, label="CityExterior07 (ext)", other=N_TGT)
+            r_["Summary"] = (f"navmesh {N_LINK} in CityExterior07 (ext) edge-links {N_TGT} triangle {t_} of 1   "
+                             f"[record provided by: {BASE} -> {MOD_A} -> {OTHER}]")
+            rows_.append(r_)
+        links_ = [(0x00000D43, 501), (0x00000D43, 502)]
+        arms = [arm("baseline", [BASE, MOD_A, OTHER], kind="baseline"), arm("without-a", [BASE, OTHER])]
+        res_ = {(NAVOWN, "baseline"): rows_, (NAVOWN, "without-a"): []}
+        if without_other:
+            arms.append(arm("without-other", [BASE, MOD_A]))
+            res_[(NAVOWN, "without-other")] = rows_ if other_rows else []
+        fs_ = {BASE: plugin_file_of(BASE, [], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_))], True)]),
+               MOD_A: plugin_file_of(MOD_A, [BASE], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_ if a_has else []))],
+                                                      False)]),
+               OTHER: plugin_file_of(OTHER, [BASE], [("NAVM", 0x00000E41, [("NVNM", nvnm(4, links_))], False)])}
+        if not a_file:
+            fs_.pop(MOD_A)
+        with_files(arms, fs_)
+        plan, md, _ = compile_and_render(arms, res_, [MOD_A])
+        es_ = rec_of(plan, N_LINK)
+        if full:
+            return plan, md, es_
+        aside = str((reader(plan).get("prediction") or {}).get("setAsideLine") or "")
+        return [e["admission"] for e in es_], [e.get("attribution") for e in es_], aside
+
+    # C1760: the setup with ModA and without OtherMod is measured and lacks both links: they need both mods, counted.
+    def c1760_two_mod_links_measured_need_both():
+        adm, att, aside = helgi_bundle()
+        ok = adm == ["admitted", "admitted"] and att == ["needs-both", "needs-both"] and "2 broken navmesh" not in aside
+        return ok, f"{adm}; {att}; aside {aside[-300:]!r}"
+
+    # C1761 (control): the same chain, where the setup without OtherMod shows both links: ModA's own break against the
+    # base game, set aside as before.
+    def c1761_control_links_with_mod_alone_set_aside():
+        adm, att, aside = helgi_bundle(a_has=True, other_rows=True)
+        return adm == ["baseLink", "baseLink"] and "2 broken navmesh links" in aside, f"{adm}; aside {aside[-300:]!r}"
+
+    # C1762: no setup without OtherMod measured; ModA's own version (the one that wins with OtherMod left out, read
+    # from its plugin file) does not hold the links, so they are not ModA's against the base game: counted.
+    def c1762_two_mod_links_unmeasured_read_from_versions():
+        adm, att, aside = helgi_bundle(without_other=False)
+        ok = adm == ["admitted", "admitted"] and "2 broken navmesh" not in aside
+        return ok, f"{adm}; {att}; aside {aside[-300:]!r}"
+
+    # C1763: no setup without OtherMod and ModA's version not read: never kept as ModA's break silently; counted as
+    # not separable, with the sentence that says why, on the page.
+    def c1763_unread_winner_not_separable():
+        plan, md, es_ = helgi_bundle(without_other=False, a_file=False, full=True)
+        adm, att = [e["admission"] for e in es_], [e.get("attribution") for e in es_]
+        why_ = "was not read from its plugin file, so whether"
+        ok = adm == ["admitted", "admitted"] and att == ["not-separable", "not-separable"] and why_ in md
+        return ok, f"{adm}; {att}; why on page {why_ in md}"
+
+    # C1764: the measured setup decides over the versions read: without OtherMod it shows both links although ModA's
+    # file holds none of them, so they are ModA's against the base game.
+    def c1764_measured_setup_decides_over_versions():
+        adm, att, aside = helgi_bundle(other_rows=True)
+        return adm == ["baseLink", "baseLink"] and "2 broken navmesh links" in aside, f"{adm}; {att}"
+
+    for name, fn in [("helgi/C1763-unread-winner-not-separable", c1763_unread_winner_not_separable),
+                     ("helgi/C1764-measured-setup-decides-over-versions", c1764_measured_setup_decides_over_versions),
+                     ("helgi/C1760-two-mod-links-measured-need-both", c1760_two_mod_links_measured_need_both),
+                     ("helgi/C1761-control-links-with-mod-alone-set-aside", c1761_control_links_with_mod_alone_set_aside),
+                     ("helgi/C1762-two-mod-links-unmeasured-read-from-versions",
+                      c1762_two_mod_links_unmeasured_read_from_versions)]:
+        cell(name, fn)
+
     # C1052 (Clockwork S2): a navmesh the evaluated mod's version replaces with the base game's triangle count (read from
     # the base game's plugin file) is said so on the navmesh-replacement line, so a reader sees the city mod's navmesh
     # work undone rather than "cut down".

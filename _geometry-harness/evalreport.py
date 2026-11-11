@@ -2837,6 +2837,23 @@ def build_prediction(ctx: dict) -> dict:
                 return ("base", None) if is_base_game(pv_, words) else ("added", pv_)
         return ("unread", None)
 
+    base_link_unsure = {}                         # row -> why it is not separated (the winner without the carrier unread)
+
+    def base_link_alone(rk):
+        """(Helgi, three review rounds) whether a base link the carrier holds breaks without that carrier, so it is the
+        evaluated mod's against the base game: the measured setup without the carrier decides; unmeasured, the version
+        that wins with the carrier left out (the provider before it in the chain, read from its plugin file) must hold
+        the link. True, False, or None where that version was not read."""
+        arm_c_ = without_other(str(rk[2]).lower())
+        if arm_c_ is not None and (rk[0], arm_c_) in measured and sib_check_ok(arm_c_, rk[0]):
+            return there(arm_c_, rk)
+        m_ = link_re.match(str(rk[5] or ""))
+        provs_ = [x.strip() for x in m_.group(4).split(" -> ")]
+        got_ = plugin_record(provs_[-2], "navmesh", m_.group(1))
+        if got_ is None:
+            return None
+        return (m_.group(2).upper(), int(m_.group(3))) in {(str(t_).upper(), int(n_)) for _, t_, n_ in got_.get("links") or []}
+
     def base_link_cut(rk):
         """(fifth review, Sewers S2) a base link the evaluated mod breaks: the base game's own version of the target
         navmesh (its origin plugin, read from the file) has the triangle the link points at, and the row's own count of
@@ -2938,8 +2955,16 @@ def build_prediction(ctx: dict) -> dict:
             return "alreadyPresent"
         if rk[1] == "EDGE-IDX" and (link_origin(rk) or ("",))[0] == "base":
             # (round 2, Sewers B1) the base game's own version of the linking navmesh holds the link and the other mod
-            # only carries it: the evaluated mod against the base game, not a clash with the mod that carries the record
-            return "baseLink"
+            # only carries it: the evaluated mod against the base game, not a clash with the mod that carries the record,
+            # but only where it breaks without that mod too (Helgi); otherwise the setups attribute it
+            alone_ = base_link_alone(rk)
+            if alone_:
+                return "baseLink"
+            if alone_ is None:
+                m_ = link_re.match(str(rk[5] or ""))
+                base_link_unsure[rk] = bind(words["notSeparableWhy"]["linkWinnerUnread"], {
+                    "navmesh": m_.group(1), "carrier": rk[2], "plugin": [x.strip() for x in m_.group(4).split(" -> ")][-2],
+                    "mod": rk[3]})
         if one_sided(rk):
             # new with the evaluated mods and only one side differs: their side against the base game's value
             return "baseGame"
@@ -3045,6 +3070,8 @@ def build_prediction(ctx: dict) -> dict:
 
     def attribution(rk):
         sides = [x for x in (rk[2], rk[3]) if x.lower() in pt_lower]
+        if rk in base_link_unsure:
+            return "not-separable", None, base_link_unsure[rk]
         if len(p_targets) <= 1:
             # One evaluated mod t, a clash with another mod m: does it need m too? Only the setup without m can say
             # (Snazzy review, P38): absent there, it needs both; present there, it comes from t; not measured, the
