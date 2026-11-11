@@ -5641,14 +5641,17 @@ def build_prediction(ctx: dict) -> dict:
             if str(m.get("status")) not in statuses_of[str(m.get("checkId"))]:
                 statuses_of[str(m.get("checkId"))].append(str(m.get("status")))
             arms_of.setdefault(str(m.get("checkId")), []).append((m.get("armId"), m.get("part")))
+    # one reason per check, by the skill's precedence, and one line per reason: a check with two statuses is listed with
+    # the other checks of its reason, never under a second line with the same heading (Hroggar r3 report review 3)
     by_status = collections.OrderedDict()
     for check_id, sts in statuses_of.items():
-        by_status.setdefault(tuple(sts), collections.OrderedDict())[check_id] = arms_of[check_id]
+        by_status.setdefault(ctx["missingReason"](first_status(sts, words.get("missingReasonPrecedence")),
+                                                  "has no accepted result"),
+                             collections.OrderedDict())[check_id] = arms_of[check_id]
     labels = ctx["armLabels"]
     all_relevant = len(relevant_arms)
     everywhere_ = missing_everywhere(ctx["missing"], labels.keys())
-    for status_set, by_check in by_status.items():
-        reason = ctx["missingReason"](first_status(status_set, words.get("missingReasonPrecedence")), "has no accepted result")
+    for reason, by_check in by_status.items():
         subjects = []
         for check_id, arms_ in sorted(by_check.items(), key=lambda kv: title_of(kv[0])):
             # a missing comparison part is the comparison with the measured order, not the setup's own result
@@ -7184,9 +7187,10 @@ def build_prediction(ctx: dict) -> dict:
             gaps_ = [m for m in ctx["missing"] if m.get("armId") == patched_arm and m.get("part") not in ("diff", "reverse")]
             by_check_ = collections.OrderedDict()
             for m in gaps_:
-                by_check_.setdefault(str(m.get("checkId")), []).append(
-                    ctx["missingReason"](str(m.get("status")), "has no accepted result"))
-            parts_ = [f"{title_of(c_)} ({'; and '.join(dict.fromkeys(rs_))})" for c_, rs_ in by_check_.items()]
+                by_check_.setdefault(str(m.get("checkId")), []).append(str(m.get("status")))
+            # the same one reason per check as "What the checks could not judge" says (the skill's precedence)
+            parts_ = [f"{title_of(c_)} ({ctx['missingReason'](first_status(sts_, words.get('missingReasonPrecedence')), 'has no accepted result')})"
+                      for c_, sts_ in by_check_.items()]
             if parts_:
                 sentences.append(bind(words["validationPatchGaps"], {"patch": patch, "parts": "; ".join(parts_)}))
         # the same counts per prediction item, in the items' order, so a reader can be told which items the patch fixes
