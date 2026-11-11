@@ -1302,7 +1302,7 @@ def field_name(row: dict) -> str:
 
 # lost-edit rows whose values show no change the game sees, or whose subject another check judges (window 2, cw)
 NOISE_ADMISSIONS = ("navmeshCheck", "doorLinkNavmesh", "noWater", "winnerListDrop", "orderOnly", "carriedList", "listKept",
-                    "unusedBits", "sameAsRead", "winnerOwnChange")
+                    "unusedBits", "sameAsRead", "winnerOwnChange", "storageFlag", "sameFlagsView")
 FIELD_SCOPE_FILE = (Path(__file__).resolve().parent.parent / ".claude" / "skills" / "world-edit-compatibility"
                     / "references" / "record-field-scope.json")
 _field_masks = []
@@ -1318,6 +1318,49 @@ def field_masks() -> dict:
         _field_masks.append({t: {k: int(m) for k, m in (v or {}).items() if not k.startswith("_")}
                              for t, v in (data.get("integerMasks") or {}).items() if isinstance(v, dict)})
     return _field_masks[0]
+
+
+_record_flags = []
+
+
+def record_flags_rule() -> dict:
+    """The record-flags table (record-field-scope.json `recordFlags`): the base field, its per-type views, the bits
+    by name and the mask of storage-only bits. Empty where the skill data has none."""
+    if not _record_flags:
+        try:
+            rf = json.loads(FIELD_SCOPE_FILE.read_text(encoding="utf-8")).get("recordFlags") or {}
+        except (OSError, ValueError):
+            rf = {}
+        bits = {str(k): int(v) for k, v in (rf.get("bits") or {}).items()}
+        _record_flags.append({"field": rf.get("field"), "views": set(rf.get("sameBitsAs") or []), "bits": bits,
+                              "storage": sum(bits[n] for n in rf.get("storageOnly") or [] if n in bits)})
+    return _record_flags[0]
+
+
+def record_flags_value(field: str, v):
+    """A record-flags value as an int: a number, or (on the base field) comma-separated names the table knows; None
+    otherwise (a per-type view's names are not in the table)."""
+    rule = record_flags_rule()
+    s = str((v[0] if isinstance(v, list) and len(v) == 1 else v) if v is not None else "").strip()
+    if re.fullmatch(r"-?\d+", s):
+        return int(s) & 0xFFFFFFFF
+    if field != rule["field"] or not s:
+        return None
+    total = 0
+    for part in [x.strip() for x in s.split(",") if x.strip()]:
+        if part not in rule["bits"]:
+            return None
+        total |= rule["bits"][part]
+    return total
+
+
+def storage_flag_only(field: str, lost, other) -> bool:
+    """A record-flags row whose two values differ only in storage bits (the compressed flag): no change in game."""
+    rule = record_flags_rule()
+    if not rule["field"] or (field != rule["field"] and field not in rule["views"]):
+        return False
+    a, b = record_flags_value(field, lost), record_flags_value(field, other)
+    return a is not None and b is not None and (a & ~rule["storage"]) == (b & ~rule["storage"])
 
 
 LEAF_VALUE = re.compile(r"^\s*([A-Za-z][\w.]*)\s*=\s*(.*?)\s*$")
@@ -2951,16 +2994,33 @@ def build_prediction(ctx: dict) -> dict:
                                                                      for d_, t_ in nav_.get("doors") or []]
         return False
 
+    flag_base_rows = {}                        # id(rows) -> (check, A, B, record) of each base-field flags row
+
     def lost_edit_noise(rk, rows=None, arm=None):
         """A lost-edit row whose values show no change the game sees, or whose subject another check judges: lists
         holding the same items in another order (lists are compared as sets of items, the record lane's rule; P108), a
         list the winner keeps in full (P105), a change only in bytes the game does not read (P21), and a navmesh's
         geometry, which the navmesh check judges by links and lost ground (P103). Kept in the record, said apart."""
-        r_ = ((p_rows if rows is None else rows).get(rk) or {}).get("row") or {}
+        rows_ = p_rows if rows is None else rows
+        r_ = (rows_.get(rk) or {}).get("row") or {}
         v = r_.get("values") or {}
         lost = v.get("lost")
         top = str(r_.get("field") or "")
         rtype = record_type_of(rk[5])
+        # record flags, by the record stage's rule (record-field-scope.json recordFlags): a difference only in the
+        # compressed-storage bit is how a record is stored, not what the game does; the same header bits under a
+        # per-type name are one change, judged on the base field where that row exists
+        if storage_flag_only(top, lost, v.get("overridden")) or storage_flag_only(top, lost, v.get("winner")):
+            return "storageFlag"
+        rf_ = record_flags_rule()
+        if top in rf_["views"] and rf_["field"]:
+            key_ = id(rows_)
+            if key_ not in flag_base_rows:
+                flag_base_rows[key_] = {(k_[0], str(k_[2]).lower(), str(k_[3]).lower(), str(k_[4]))
+                                        for k_, h_ in rows_.items()
+                                        if str(((h_ or {}).get("row") or {}).get("field") or "") == rf_["field"]}
+            if (rk[0], str(rk[2]).lower(), str(rk[3]).lower(), str(rk[4])) in flag_base_rows[key_]:
+                return "sameFlagsView"
         for j_ in judged_by:
             if (rtype == j_.get("recordType") and top == j_.get("field")
                     and (j_.get("check"), arm or p_of(j_.get("check"))) in measured):
