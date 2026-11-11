@@ -1481,6 +1481,109 @@ def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict)
     return fact
 
 
+def with_geometry(lo: dict | None, geo: dict | None) -> dict | None:
+    """The order fact with item 10's geometry part: its fact under `geometry` and its sentence after the record one."""
+    if geo is None:
+        return lo
+    if lo is None:
+        return {"geometry": geo, "sentence": geo["sentence"]}
+    return {**lo, "geometry": geo, "sentence": (str(lo.get("sentence") or "") + " " + geo["sentence"]).strip()}
+
+
+#: the geometry probes ordersweep runs in both orders (item 10), in the order their lines are said
+ORDER_GEOMETRY_PROBES = ("contactprobe", "overlapprobe", "navownprobe")
+
+
+def order_geometry(ctx: dict, p_arm: str, words: dict) -> tuple[list, dict | None]:
+    """Item 10: placed-object geometry in both orders of a free pair, from the bundle's order-geometry enrichment. A
+    row holding in one order and gone in the other is a load-order risk: one line per probe and direction. A row in
+    both orders is not; a row either order could not measure is counted as not judged. The two orders must hold the
+    same plugins with the same bytes, be different orders, and be the setup without the patch's plugins; a plugin
+    whose bytes differ from the bundle's is named (both orders were measured again on today's files)."""
+    main_b = ctx.get("mainBundle")
+    if main_b is None:
+        return [], None
+    ents = sorted((e for e in main_b.evidence if e.get("kind") == "enrichment" and e.get("enrichment") == "order-geometry"
+                   and e.get("role") is None), key=lambda e: str(e.get("path")))
+    if not ents:
+        return [], None
+    w = words.get("orderGeometryWords") or {}
+    arm = next((a for a in main_b.plan.get("arms") or [] if a.get("armId") == p_arm), {}) or {}
+    p_plugs = {str(x.get("name")).lower(): str(x.get("sha256") or "").lower()
+               for x in (arm.get("requested") or {}).get("plugins") or []}
+    lines, by, drifted, unj = [], {}, set(), 0
+    for e in ents:
+        doc = main_b.emit(e["path"]) or {}
+        orders = doc.get("orders") or {}
+        m = [(str(x.get("name")), str(x.get("sha256") or "").lower()) for x in orders.get("measured") or []]
+        r = [(str(x.get("name")), str(x.get("sha256") or "").lower()) for x in orders.get("reversed") or []]
+        if not m or sorted((n.lower(), s) for n, s in m) != sorted((n.lower(), s) for n, s in r):
+            raise InputRefused(f"order-geometry-foreign: {e['path']} does not hold the same plugins with the same bytes "
+                               f"in both orders, so it was not used.")
+        if [n.lower() for n, _ in m] == [n.lower() for n, _ in r]:
+            raise InputRefused(f"order-geometry-same-order: {e['path']} measured the same order twice, so it shows no "
+                               f"order risk.")
+        named = {str(x.get("name")).lower() for x in doc.get("drifted") or []}
+        if sorted(n.lower() for n, _ in m) != sorted(p_plugs) or any(
+                p_plugs.get(n.lower()) != s and n.lower() not in named for n, s in m):
+            raise InputRefused(f"order-geometry-foreign: {e['path']} does not hold the plugins of the setup without the "
+                               f"patch (other plugins, or other bytes it does not name), so it was not used.")
+        drifted |= {str(x.get("name")) for x in doc.get("drifted") or []}
+        probe = str(doc.get("probe"))
+        pair = [str(x) for x in doc.get("pair") or []]
+        low_m = [n.lower() for n, _ in m]
+        first, second = sorted(pair, key=lambda x: low_m.index(x.lower()) if x.lower() in low_m else 0)
+        meas = [x for x in doc.get("rows") or [] if x.get("measured") == "Holds" and x.get("reversed") == "Gone"]
+        rev = [x for x in doc.get("rows") or [] if x.get("measured") == "Gone" and x.get("reversed") == "Holds"]
+        bad = [x for x in doc.get("rows") or [] if "Unmeasured" in (x.get("measured"), x.get("reversed"))
+               or None in (x.get("measured"), x.get("reversed"))]
+        unj += len(bad)
+        by[probe] = {"measuredOnly": len(meas), "reversedOnly": len(rev), "unjudged": len(bad),
+                     "both": sum(1 for x in doc.get("rows") or [] if x.get("measured") == x.get("reversed") == "Holds"),
+                     "path": e["path"], "checkId": doc.get("checkId")}
+        nouns = (w.get("nouns") or {}).get(probe) or ["geometry row", "geometry rows"]
+        groups_ = []
+        for key_, rows_all in (("measured", meas), ("reversed", rev)):
+            by_pair = collections.OrderedDict()
+            for x in rows_all:
+                by_pair.setdefault(tuple(sorted((str(x.get("A")), str(x.get("B"))), key=str.lower)), []).append(x)
+            groups_ += [(key_, pr_, rs_) for pr_, rs_ in by_pair.items()]
+        for key_, pr_, rows_ in groups_:
+            labs = sorted({str(x.get("Label") or x.get("FormKey")) for x in rows_})
+            ex = ", ".join(labs) if len(labs) <= 4 else bind(w.get("more") or "{shown} and {count} more",
+                                                            {"shown": ", ".join(labs[:3]), "count": fmt_n(len(labs) - 3)})
+            lines.append({"path": e["path"], "probe": probe, "direction": key_, "rows": len(rows_), "between": list(pr_),
+                          "records": [{"formKey": x.get("FormKey"), "other": x.get("Other"), "kind": x.get("Kind"),
+                                       "A": x.get("A"), "B": x.get("B"), "label": x.get("Label")} for x in rows_],
+                          "text": bind(w["line"] if key_ == "measured" else w["lineReversed"], {
+                              "check": (w.get("checks") or {}).get(probe) or probe, "count": fmt_n(len(rows_)),
+                              "noun": nouns[0 if len(rows_) == 1 else 1], "verb": "is" if len(rows_) == 1 else "are",
+                              "first": first, "second": second, "examples": ex,
+                              "between": f"{pr_[0]} and {pr_[1]}"})})
+    order_ = {p: i for i, p in enumerate(ORDER_GEOMETRY_PROBES)}
+    lines.sort(key=lambda x: (order_.get(x["probe"], 9), x["direction"] != "measured"))
+    probes = sorted(by, key=lambda p: order_.get(p, 9))
+    not_measured = [p for p in ORDER_GEOMETRY_PROBES if p not in by and p in main_b.exe_to_check]
+    flips = sum(v["measuredOnly"] + v["reversedOnly"] for v in by.values())
+    chk = ", ".join((w.get("checks") or {}).get(p) or p for p in probes)
+    s_ = (bind(w["sentence"], {"checks": chk, "flips": fmt_n(flips), "flipNoun": "row" if flips == 1 else "rows",
+                               "flipVerb": "holds" if flips == 1 else "hold"}) if flips
+          else bind(w["sentenceNone"], {"checks": chk}))
+    if unj:
+        s_ += bind(w.get("unjudged") or "", {"count": fmt_n(unj), "rowNoun": "row" if unj == 1 else "rows"})
+    if not_measured:
+        s_ += bind(w.get("notMeasured") or "", {"checks": ", ".join((w.get("checks") or {}).get(p) or p
+                                                                     for p in not_measured),
+                                                 "why": ctx.get("orderGeometryWhyNot") or ""})
+    if drifted:
+        s_ += bind(w.get("drifted") or "", {"names": ", ".join(sorted(drifted))})
+    fact = {"measured": True, "probes": probes, "notMeasured": not_measured, "byProbe": by,
+            "measuredOnly": sum(v["measuredOnly"] for v in by.values()),
+            "reversedOnly": sum(v["reversedOnly"] for v in by.values()), "unjudged": unj,
+            "drifted": sorted(drifted), "sentence": s_}
+    return lines, fact
+
+
 def build_prediction(ctx: dict) -> dict:
     """The prediction, coverage and validation blocks a report leads with.
 
@@ -5321,6 +5424,7 @@ def build_prediction(ctx: dict) -> dict:
     # plugins, same bytes), whose record rows hold changes lost between a pair whose order differs, that the measured
     # order does not lose. Said as a measured record fact, one line per pair; no claim of how it shows in game.
     order_lines, order_record = [], []
+    geo_lines, geo_fact = order_geometry(ctx, p_arm, words)
     if ctx.get("orderSetups"):
         main_b = ctx.get("mainBundle")
         p_req = next((x for x in (main_b.plan.get("arms") if main_b else None) or [] if x.get("armId") == p_arm), {})
@@ -5518,8 +5622,10 @@ def build_prediction(ctx: dict) -> dict:
                   "withoutPartnerArms": dict(partner_arms),
                   "siblingSource": sibling_source(),
                   "orderRiskLines": order_lines, "orderRisks": order_record,
+                  # item 10: placed-object geometry measured in both orders of a free pair
+                  "orderGeometryLines": geo_lines,
                   # item 18 (4.24 phase 3): whether the order is a choice, and both orders weighed when it is
-                  "loadOrder": load_order_fact(ctx, p_arm, patched_arm, list(subject_mods), words)}
+                  "loadOrder": with_geometry(load_order_fact(ctx, p_arm, patched_arm, list(subject_mods), words), geo_fact)}
 
     sib_counted = {e["checkId"] for e in record if e.get("source") == "sibling" and e["admission"] == "admitted"}
     # (sixth review, Sewers S3) a check whose rows this report takes from the separate evaluation, counted or not
@@ -11633,6 +11739,22 @@ def cmd_plan(a) -> int:
                                      "bytes": dest.stat().st_size, "checkId": None, "armId": o_["armId"],
                                      "part": None, "strength": "measured-records", "recordedBy": "record lane",
                                      "storage": "presentation"})
+        # item 10: what the order-geometry lines rest on, kept with the report like the order setups
+        pred_ = (plan.get("reader") or {}).get("prediction") or {}
+        g_dest = {}
+        for ln_ in pred_.get("orderGeometryLines") or []:
+            src_ = str(ln_.get("path") or "")
+            if src_ not in g_dest:
+                dest = out / "evidence" / ("order-geometry-" + Path(src_).stem + ".json")
+                write_json(dest, load_json(Path(bundle) / src_))
+                g_sha = sha256_file(dest)
+                plan["evidence"].append({"id": "E-" + g_sha[:16], "kind": "order-geometry",
+                                         "path": dest.relative_to(out).as_posix(), "sha256": g_sha,
+                                         "bytes": dest.stat().st_size, "checkId": None, "armId": None, "part": None,
+                                         "strength": "geometric-measurement", "recordedBy": "enrichment:order-geometry",
+                                         "storage": "presentation", "source": src_})
+                g_dest[src_] = dest.relative_to(out).as_posix()
+            ln_["path"] = g_dest[src_]
         try:
             plan["reel"] = reel_block(plan, bundle, sibling, pr, a, out)
         except InputRefused as ex:

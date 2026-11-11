@@ -355,6 +355,127 @@ def enrich_order_variant(d: Path) -> dict:
     return {"kind": "order-variant", "files": len(outputs), "rows": rows, "rule": ch["rule"]}
 
 
+# ------------------------------------------------------------------------------------------ order geometry
+
+def _emit_conflicts(doc: dict) -> dict:
+    """identity -> (Kind, A, B, FormKey, Other, Label, Physical) for every necessary record of an emit, ordersweep's keys."""
+    import ordersweep as OS
+    out = {}
+    for c in (doc or {}).get("Conflicts") or []:
+        alt = c.get("Alternative") or []
+        other = alt[0]["FormKey"] if alt else None
+        part = alt[0].get("Triangle") if alt else None
+        for r in c.get("Necessary") or []:
+            out.setdefault(OS.row_identity(c["Kind"], r["FormKey"], other, c["A"], part),
+                           (c["Kind"], c["A"], c["B"], r["FormKey"], other, r.get("Label"), r.get("Physical")))
+    return out
+
+
+def order_geometry_rows(base_emit: Path, cand_emit: Path, reverse_emit: Path) -> list[dict]:
+    """Each geometry row of either order with its physical state in both, from ordersweep's three emits: the measured
+    order's (`base_emit`), the reversed order's measured against it (`cand_emit`, whose Predicates re-measure the measured
+    order's rows), and the measured order re-measuring the reversed order's rows (`reverse_emit`). A row's own emit says
+    Holds; the other order's predicate says Holds, Gone or Unmeasured (absent: Unmeasured)."""
+    import ordersweep as OS
+    base, cand, rev = (_load(Path(p)) or {} for p in (base_emit, cand_emit, reverse_emit))
+    b_rows, c_rows = _emit_conflicts(base), _emit_conflicts(cand)
+    c_pred, r_pred = OS.emit_predicates(Path(cand_emit)), OS.emit_predicates(Path(reverse_emit))
+    out = []
+    for ident in sorted(set(b_rows) | set(c_rows)):
+        kind, a, b, fk, other, label, _ = b_rows.get(ident) or c_rows[ident]
+        m = "Holds" if ident in b_rows and b_rows[ident][6] in (None, "Holds") else None
+        r = "Holds" if ident in c_rows and c_rows[ident][6] in (None, "Holds") else None
+        if m is None:
+            m = r_pred.get(ident, "Unmeasured") if ident not in b_rows else (b_rows[ident][6] or "Unmeasured")
+        if r is None:
+            r = c_pred.get(ident, "Unmeasured") if ident not in c_rows else (c_rows[ident][6] or "Unmeasured")
+        out.append({"identity": ident, "Kind": kind, "A": a, "B": b, "FormKey": fk, "Other": other, "Label": label,
+                    "measured": m, "reversed": r})
+    return out
+
+
+def enrich_order_geometry(d: Path, sweeps) -> dict:
+    """The setup without the patch's geometry rows in both orders of the evaluated free pair, from ordersweep launches
+    over the measured order and its reversal (item 10; per probe, the first launch that ran it). Refused, writing nothing, when the pair's order is not a choice,
+    when the launch holds other than those two orders, or when its plugins are not the setup's. Each probe's three emits
+    are copied into the bundle and cited by sha256; plugins whose bytes differ from the bundle's are named (`drifted`)."""
+    import ordersweep as OS
+    manifest = _guard(d, "order-geometry")
+    plan = _load(d / (manifest.get("plan") or "plan.json")) or {}
+    pair = [str(t.get("name")) for t in plan.get("targets") or [] if isinstance(t, dict) and t.get("name")]
+    if len(pair) != 2:
+        raise Refused(f"the plan names {len(pair)} evaluated plugin(s), not a pair, so there is no pair's order to reverse")
+    ch = order_choice(pair, pair_headers(d, manifest, plan, pair))
+    if ch["forced"] is not False:
+        raise Refused(f"the order of {pair[0]} and {pair[1]} is not established as a choice ({ch['rule'] or 'unknown'}), "
+                      f"so no reversed geometry was taken")
+    sweeps = [Path(x) for x in ([sweeps] if isinstance(sweeps, (str, Path)) else sweeps)]
+    registry = _load(d / (manifest.get("registry") or "registry/check-registry.json")) or {}
+    check_of = {str((c.get("adapter") or {}).get("exe")): c.get("id") for c in registry.get("checks") or []
+                if isinstance(c, dict) and str(c.get("id", "")).startswith("geometry.")}
+    # the setup without the patch: the plan arm whose plugins are the measured order's, by name
+    outputs, files, done = [], 0, set()
+    for sweep, probe in ((sw, pr) for sw in sweeps for pr in (_load(sw / "summary.json") or {}).get("probes") or []):
+        summ = _load(sweep / "summary.json") or {}
+        cands = summ.get("candidates") or {}
+        if len(cands) != 1:
+            raise Refused(f"{sweep} evaluated {len(cands)} candidate order(s); give a launch over the measured order and "
+                          f"its reversal only")
+        cand_id = next(iter(cands))
+        cid = check_of.get(probe)
+        if probe in done:
+            continue
+        trio = [sweep / probe / "baseline.json", sweep / probe / f"{cand_id}.json", sweep / probe / f"{cand_id}.reverse.json"]
+        if cid is None or not all(p.is_file() for p in trio):
+            continue
+        cfg = [[(str(x.get("Name")), str(x.get("Sha256") or "").lower())
+                for x in ((_load(p) or {}).get("Configuration") or {}).get("Plugins") or []] for p in trio[:2]]
+        if sorted(cfg[0]) != sorted(cfg[1]) or not cfg[0]:
+            raise Refused(f"{probe}: the two orders do not hold the same plugins with the same bytes")
+        names = [n for n, _ in cfg[0]]
+        low = [n.lower() for n in names]
+        if not all(x.lower() in low for x in pair):
+            raise Refused(f"{probe}: the measured order does not load both {pair[0]} and {pair[1]}")
+        i, j = sorted((low.index(pair[0].lower()), low.index(pair[1].lower())))
+        want = list(names)
+        want.insert(j, want.pop(i))
+        if [n.lower() for n, _ in cfg[1]] != [n.lower() for n in want]:
+            raise Refused(f"{probe}: the candidate order is not the measured order with {names[i]} moved to just after "
+                          f"{names[j]}, so it is not the pair's reversal")
+        arm = next((a for a in plan.get("arms") or [] if sorted(str(x.get("name")).lower() for x in
+                    (a.get("requested") or {}).get("plugins") or []) == sorted(low)), None)
+        if arm is None:
+            raise Refused(f"{probe}: no setup of this evaluation loads the plugins the sweep measured")
+        rec = {str(x.get("name")).lower(): str(x.get("sha256") or "").lower()
+               for x in (arm.get("requested") or {}).get("plugins") or []}
+        drifted = [{"name": n, "bundle": rec.get(n.lower()), "measured": s} for n, s in cfg[0] if rec.get(n.lower()) != s]
+        copies = []
+        for role, p in zip(("measured", "reversed", "reverse"), trio):
+            rel = f"enrichment/order-geometry/{probe}/{role}.json"
+            (d / rel).parent.mkdir(parents=True, exist_ok=True)
+            (d / rel).write_bytes(p.read_bytes())
+            copies.append({"path": rel, "sha256": sha(d / rel), "source": str(p)})
+        rows = order_geometry_rows(*trio)
+        doc = {"probe": probe, "checkId": cid, "pair": pair, "rule": ch["rule"], "armId": arm.get("armId"),
+               "orders": {"measured": [{"name": n, "sha256": s} for n, s in cfg[0]],
+                          "reversed": [{"name": n, "sha256": s} for n, s in cfg[1]]},
+               "drifted": drifted, "rows": rows, "derivedFrom": copies,
+               "sweep": {"candidate": cand_id, "classification": (cands[cand_id] or {}).get("classification")}}
+        rel = f"enrichment/order-geometry/{cid}.json"
+        _write(d / rel, doc)
+        files += 1
+        done.add(probe)
+        outputs.append(_row(rel, d, "order-geometry", checkId=cid, armId=arm.get("armId"),
+                            derivedFrom=[{"path": c["path"], "sha256": c["sha256"]} for c in copies]))
+        outputs += [_row(c["path"], d, "order-geometry", role="capture", checkId=cid, armId=arm.get("armId"))
+                    for c in copies]
+    if not files:
+        raise Refused(f"{', '.join(map(str, sweeps))} hold no geometry probe with all three emits (measured, reversed, "
+                      f"reverse)")
+    _commit(d, manifest, "order-geometry", outputs, [HERE / "bundleenrich.py", HERE / "ordersweep.py"])
+    return {"kind": "order-geometry", "files": files, "probes": [o["checkId"] for o in outputs if o.get("role") is None]}
+
+
 # ------------------------------------------------------------------------------------------------ names
 
 class Reader:
@@ -864,6 +985,12 @@ def verify(d: Path, manifest: dict, plan: dict, defect, memo_sha) -> None:
             # a reversed setup derived from a 2.0 tree capture cites the transcripts, not single reads (item 18)
             if bare and not (e.get("enrichment") == "order-variant" and doc.get("readForm") == "tree"):
                 defect("enrichment-source-missing", e["path"], f"{bare} derived row(s) do not cite the reads they came from")
+        elif e.get("enrichment") == "order-geometry":
+            for x in ((doc or {}).get("derivedFrom") if isinstance(doc, dict) else None) or [None]:
+                p = d / str((x or {}).get("path") or "")
+                if not x or not x.get("path") or not p.is_file() or memo_sha(p) != x.get("sha256"):
+                    defect("enrichment-source-changed", e["path"],
+                           f"a cited emit {(x or {}).get('path')} is absent from the bundle or does not hash as cited")
         elif e.get("enrichment") == "names":
             for x in ((doc or {}).get("derivedFrom") if isinstance(doc, dict) else None) or []:
                 if str(x.get("sha256") or "").lower() not in plan_shas:

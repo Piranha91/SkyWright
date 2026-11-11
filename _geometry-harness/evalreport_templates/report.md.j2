@@ -42,6 +42,9 @@
 {% endfor %}{% for o in pred.get("orderRiskLines") or [] %}{% if loop.first %}{{ "
 " }}{% endif %}- {{ o.text }} [Evidence]({{ o.path }}).
 
+{% endfor %}{% for o in pred.get("orderGeometryLines") or [] %}{% if loop.first and not pred.get("orderRiskLines") %}{{ "
+" }}{% endif %}- {{ o.text }} [Evidence]({{ o.path }}).
+
 {% endfor %}{% if pred.get("loadOrder") and pred.loadOrder.get("sentence") %}{{ pred.loadOrder.sentence }}
 
 {% endif %}{% set alone = pred["items"]|selectattr("shownAs", "equalto", "alone")|list %}{% if alone %}{{ "

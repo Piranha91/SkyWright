@@ -6825,7 +6825,11 @@ def cmd_enrich(a) -> int:
             out = st["result"]
         else:
             try:
+                if a.kind == "order-geometry" and not a.sweep:
+                    raise bundleenrich.Refused("--kind order-geometry needs --sweep, the ordersweep folder over the "
+                                               "measured order and its reversal")
                 out = (bundleenrich.enrich_order_variant(d) if a.kind == "order-variant"
+                       else bundleenrich.enrich_order_geometry(d, [Path(x) for x in a.sweep]) if a.kind == "order-geometry"
                        else bundleenrich.enrich_record_rows(d))
             except bundleenrich.Refused as ex:
                 msg = f"enrich refused: {ex}"
@@ -7082,7 +7086,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("enrich", help="add evidence derived after measurement to a bundle (record rows, names)")
     p.add_argument("--bundle", required=True)
-    p.add_argument("--kind", required=True, choices=("record-rows", "names", "order-variant"))
+    p.add_argument("--kind", required=True, choices=("record-rows", "names", "order-variant", "order-geometry"))
+    p.add_argument("--sweep", action="append", default=[],
+                   help="order-geometry: an ordersweep out folder over the measured order and its reversal (repeatable)")
     p.add_argument("--reader-cmd", help="names: the houseCARL MCP server command line to read records with (default: "
                                         f"{READER_ENV}, else this checkout's built server)")
     p.add_argument("--reader-env", action="append", metavar="KEY=VALUE",

@@ -307,6 +307,11 @@ def build(plan: dict, rd: dict, mod_names: dict, names: dict | None, order: dict
         o = bind(od["free"], first=disp.get(order.get("first"), str(order.get("first"))))
     else:
         o = od["unknown"]
+    geo_ = (lo_ or {}).get("geometry")
+    if geo_ and od.get("geometry"):
+        # item 10: placed-object geometry measured in both orders
+        n_ = int(geo_.get("measuredOnly") or 0) + int(geo_.get("reversedOnly") or 0)
+        o += " " + (bind(od["geometry"], count=ER.fmt_n(n_)) if n_ else od["geometryNone"])
     md += [f"## {h['order']}", "", o, ""]
     # how sure
     subjects = []
