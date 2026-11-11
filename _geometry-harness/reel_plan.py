@@ -456,6 +456,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             return nm["name"]
         stem = re.sub(r"\.(esp|esm|esl)$", "", plugin, flags=re.I)
         folder = mod(plugin)
+        got = (mod_names.get(plugin) or {}) or next((v for k, v in mod_names.items() if k.lower() == plugin.lower()), {})
+        if got.get("source") == "mo2-folder":
+            return stem                    # no Nexus name: the folder's own name (a lab label) is not said (item 36 F3)
         return stem if folder.lower() == stem.lower() else words["patchName"].format(plugin=stem, mod=folder)
 
     def ref_of(fk):

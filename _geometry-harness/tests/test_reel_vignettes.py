@@ -255,7 +255,7 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
                                   "hits": [{"file": "Alpha - Target patch", "page": "Alpha Patches"}] if known_found else []}}
     mods = {"Target.esp": {"name": "Target Mod", "source": "mo2-folder"}, "Alpha.esp": {"name": "Alpha Mod", "source": "mo2-folder"},
             "Beta.esp": {"name": "Beta Mod", "source": "mo2-folder"},
-            "Alpha - Target patch.esp": {"name": "Alpha Patches", "source": "mo2-folder"}}
+            "Alpha - Target patch.esp": {"name": "Alpha Patches", "source": "nexus-catalogue"}}
     return pres, names, masters, search, mods
 
 
@@ -326,6 +326,8 @@ def mod_name(mods, plugin):
 def patch_display(mods, plugin, words=None):
     stem = re.sub(r"\.(esp|esm|esl)$", "", plugin, flags=re.I)
     folder = mod_name(mods, plugin)
+    if (mods.get(plugin) or {}).get("source") == "mo2-folder":
+        return stem                        # item 36 F3: no Nexus name, so no folder name with the patch
     return stem if folder.lower() == stem.lower() else (words or WORDS)["patchName"].format(plugin=stem, mod=folder)
 
 
