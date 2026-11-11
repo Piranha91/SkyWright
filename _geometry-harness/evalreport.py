@@ -8444,7 +8444,7 @@ def copy_folder(row: dict) -> str | None:
 def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundle_dir_as_given: str,
                  location_scopes: dict | None = None, sibling_dir: Path | None = None,
                  sibling_as_given: str | None = None, order_setups: list | None = None,
-                 siblings: list | None = None) -> dict:
+                 siblings: list | None = None, mod_names: dict | None = None) -> dict:
     """sibling_dir: a verified bundle of the same order without the patch; its single-mod setups stand in for the ones
     this bundle lacks (build_prediction's join). Raises InputRefused when it cannot be joined at all.
     siblings: several such bundles, [(dir, as given)] in the order given; sibling_dir is a list of one.
@@ -9888,7 +9888,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     n_refs = (names_doc0 or {}).get("refs") or {}
     n_bases = (names_doc0 or {}).get("bases") or {}
     n_objects = (names_doc0 or {}).get("objects") or {}
-    n_mods = (names_doc0 or {}).get("mods") or {}
+    # each mod's name as the reel says it (the plan command's one resolution, modnames.py), else the bundle's
+    n_mods = {**((names_doc0 or {}).get("mods") or {}), **(mod_names or {})}
 
     def fig_object(fk_):
         eid_ = (n_bases.get((n_refs.get(str(fk_)) or {}).get("base") or "") or {}).get("editorId")
@@ -10708,6 +10709,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     names_doc = load_json(bundle_dir / names_row["path"]) if names_row else None
     reader["names"] = ({k: names_doc.get(k) for k in ("places", "objects", "mods", "missing", "derivedFrom")}
                        if isinstance(names_doc, dict) else None)
+    if reader["names"] is not None and mod_names:
+        # the report names a mod as its reel does: one resolution for both (item 36 F2)
+        reader["names"]["mods"] = {**(reader["names"].get("mods") or {}), **mod_names}
     reader["coverage"] = lead["coverage"]
     # P53 (accepted under the standing rule, 2026-10-17): in concise mode a check with no result on a setup the
     # coverage section already lists, by reason and with its setups, is not listed again on the page under "what
@@ -11017,7 +11021,7 @@ def buried_lines(plan: dict, captures: list[dict], names: dict, words: dict) -> 
     return n
 
 
-def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out: Path) -> dict:
+def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out: Path, resolved=None) -> dict:
     """The review reel's plan (reel_plan.py) from the compiled presentation, the bundle's names and masters, the
     skill's vignette policy and words, the recorded patch search and the evaluation's mod names."""
     import reel_plan
@@ -11032,9 +11036,31 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     policy = dict((load_json(SCENE_POLICY) or {}).get("vignettes") or {})
     policy["effectModelPattern"] = ((pr.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")
     words = (pr.get("reel") or {}).get("words") or {}
-    # each mod's name: declared, else its Nexus page's (the catalogue, read offline or fetched when asked), else its MO2
-    # folder's with the reason no Nexus name was found; the lookups are kept beside the reel (modnames.py)
+    mod_names, names_doc = resolved if resolved is not None else resolve_mod_names(bundle, sibling, a, out)
+    names_ev = out / "evidence" / "mod-names.json"
+    write_json(names_ev, names_doc)
+    search, search_ref = None, None
+    if getattr(a, "patch_search", None):
+        sp = Path(a.patch_search)
+        search = load_json(sp)
+        if not isinstance(search, dict) or not isinstance(search.get("pairs"), list):
+            raise InputRefused(f"patch-search-unreadable: {sp} is not a patch-search document with a `pairs` list")
+        dest = out / "evidence" / "patch-search.json"
+        write_json(dest, search)
+        search_ref = {"path": dest.relative_to(out).as_posix(), "sha256": sha256_file(dest), "source": str(sp)}
+    return _reel_block_rest(plan, bundle, sibling, pr, a, out, b, names, masters, sb, policy, words, mod_names,
+                            names_ev, search, search_ref)
+
+
+def resolve_mod_names(bundle: Path, siblings, a, out: Path) -> tuple[dict, dict]:
+    """Each mod's name, for the report and the reel alike: declared (the bundle's names or --mod-name), else its Nexus
+    page's (the catalogue, read offline or fetched when asked), else its MO2 folder's with the reason no Nexus name was
+    found; the lookups are kept beside the reel (modnames.py)."""
     import modnames
+    b = Bundle(bundle)
+    names_row = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
+    names = load_json(bundle / names_row["path"]) if names_row else {}
+    sbs = [Bundle(x) for x in (siblings if isinstance(siblings, (list, tuple)) else [siblings]) if x is not None]
     declared = {k: v["name"] for k, v in ((names or {}).get("mods") or {}).items() if v.get("source") == "declared"}
     for pair in list(getattr(a, "mod_name", None) or []):
         if "=" not in pair:
@@ -11046,21 +11072,18 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     if nexus_mode == "fetch" and not reader_:
         exe_ = HERE.parent / "src" / "housecarl-mcp" / "bin" / "Release" / "net9.0" / ("housecarl-mcp.exe" if os.name == "nt" else "housecarl-mcp")
         reader_ = f'"{exe_}"' if exe_.is_file() else None
-    mod_names, names_doc = modnames.resolve([b.plan] + ([sb.plan] if sb is not None else []),
-                                            ((b.scope or {}).get("targets") or []) + ((sb.scope or {}).get("targets") or [] if sb is not None else []),
+    mod_names, names_doc = modnames.resolve([b.plan] + [x.plan for x in sbs],
+                                            ((b.scope or {}).get("targets") or [])
+                                            + [t for x in sbs for t in ((x.scope or {}).get("targets") or [])],
                                             declared, nexus_mode, reader_, out / "evidence" / "mod-names")
-    names_ev = out / "evidence" / "mod-names.json"
-    write_json(names_ev, names_doc)
     print(modnames.summary(mod_names), file=sys.stderr)
-    search, search_ref = None, None
-    if getattr(a, "patch_search", None):
-        sp = Path(a.patch_search)
-        search = load_json(sp)
-        if not isinstance(search, dict) or not isinstance(search.get("pairs"), list):
-            raise InputRefused(f"patch-search-unreadable: {sp} is not a patch-search document with a `pairs` list")
-        dest = out / "evidence" / "patch-search.json"
-        write_json(dest, search)
-        search_ref = {"path": dest.relative_to(out).as_posix(), "sha256": sha256_file(dest), "source": str(sp)}
+    return mod_names, names_doc
+
+
+def _reel_block_rest(plan, bundle, sibling, pr, a, out, b, names, masters, sb, policy, words, mod_names, names_ev,
+                     search, search_ref):
+    """reel_block's body after the names and the patch search are read."""
+    import reel_plan
     captures = []
     for f in list(getattr(a, "capture_results", None) or []):
         doc = load_json(Path(f))
@@ -11920,9 +11943,15 @@ def cmd_plan(a) -> int:
                 who_ = "the sibling bundle" if len(sib_given) == 1 else f"the sibling bundle {given_}"
                 return refuse(r, f"sibling-refused: verify-bundle did not find {who_} complete "
                                  f"({serr or f'see {vname}/verify.json'}), so nothing was joined.")
+        # each mod's name, resolved once for the report and the reel (item 36 F2)
+        try:
+            resolved_ = resolve_mod_names(bundle, [Path(x_) for x_ in sib_given], a, out)
+        except InputRefused as ex:
+            return refuse(r, str(ex))
         try:
             plan = compile_plan(bundle, verify, settings, pr, str(a.bundle), location_scopes,
-                                order_setups=order_setups, siblings=[(Path(x_), x_) for x_ in sib_given])
+                                order_setups=order_setups, siblings=[(Path(x_), x_) for x_ in sib_given],
+                                mod_names=resolved_[0])
         except InputRefused as ex:
             return refuse(r, str(ex))
         # the reel's media and masters come from the sibling the prediction anchors on (the first holding the shared setup)
@@ -11965,7 +11994,7 @@ def cmd_plan(a) -> int:
                 g_dest[src_] = dest.relative_to(out).as_posix()
             ln_["path"] = g_dest[src_]
         try:
-            plan["reel"] = reel_block(plan, bundle, sibling, pr, a, out)
+            plan["reel"] = reel_block(plan, bundle, sibling, pr, a, out, resolved=resolved_)
         except InputRefused as ex:
             return refuse(r, str(ex))
         stamp(plan)
