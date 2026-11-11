@@ -43,6 +43,10 @@ foreach (var g in cells.SelectMany(c => c.Refs).GroupBy(r => r.RecordType).Order
 var all = cells.SelectMany(c => c.Refs).ToList();
 Console.WriteLine("\n-- health --");
 Console.WriteLine($"   no Base link      {all.Count(r => r.Base is null),9:N0}");
+Console.WriteLine("\n-- base link by arm (Base: the REFR/ACHR link; arm base: each arm's own link, PlacedRef.ArmBase) --");
+foreach (var g in all.GroupBy(r => r.RecordType).OrderByDescending(g => g.Count()))
+    Console.WriteLine($"   {g.Key,-16} {g.Count(),9:N0} refs  Base {g.Count(r => r.Base is not null),9:N0}  arm base {g.Count(r => r.ArmBase is not null),9:N0}"
+                    + $"  via {string.Join("/", g.Select(r => r.ArmBaseLink ?? "-").Distinct())}");
 Console.WriteLine($"   InitiallyDisabled {all.Count(r => r.InitiallyDisabled),9:N0}");
 Console.WriteLine($"   IsDeleted         {all.Count(r => r.Deleted),9:N0}");
 Console.WriteLine($"   Persistent        {all.Count(r => r.Persistent),9:N0}");
