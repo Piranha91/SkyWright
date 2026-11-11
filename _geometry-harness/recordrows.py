@@ -369,11 +369,20 @@ def _masked(v: str, mask: int) -> str:
     """An integer field compared on the bytes the game reads (a value its enum prints by name, as that value; any other
     value that is not an integer, as read)."""
     t = str(v).strip()
-    if isinstance(mask, _FlagsMask) and not re.fullmatch(r"-?\d+", t):
-        parts = [x.strip() for x in t.split(",") if x.strip()]
-        if not parts or any(x not in mask.names for x in parts):
-            return _norm(v)
-        t = str(sum(mask.names[x] for x in set(parts)))
+    if isinstance(mask, _FlagsMask):
+        # compared without the storage-only bits, and said as Mutagen prints it: the flag names where the table names
+        # every bit left, else the number
+        if re.fullmatch(r"-?\d+", t):
+            x = int(t) & 0xFFFFFFFF
+        else:
+            parts = [p.strip() for p in t.split(",") if p.strip()]
+            if not parts or any(p not in mask.names for p in parts):
+                return _norm(v)
+            x = sum(mask.names[p] for p in set(parts))
+        x &= int(mask)
+        by_bit = {b: n for n, b in mask.names.items()}
+        bits = [1 << i for i in range(32) if x >> i & 1]
+        return ", ".join(by_bit[b] for b in bits) if bits and all(b in by_bit for b in bits) else str(x)
     t = str(getattr(mask, "names", {}).get(t, t))
     try:
         return str(int(t) & mask)
