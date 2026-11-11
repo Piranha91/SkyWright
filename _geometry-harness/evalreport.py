@@ -3033,6 +3033,16 @@ def build_prediction(ctx: dict) -> dict:
         other side is that mod's own record; otherwise it needs one or more of the plugins the setup leaves out."""
         return ("needs-both" if partner_owns(rk, other) else "needs-some"), t, None
 
+    def setup_phrase(arm_id):
+        """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
+        plugs = all_orders.get(arm_id) or []
+        low = {x.lower() for x in plugs}
+        kept = [x for x in plugs if not is_base_game(x, words)]
+        removed = [x for x in all_orders.get(p_arm) or [] if x.lower() not in low]
+        return (words["setupBaseGameAlone"] if not kept else
+                bind(words["setupOnly"], {"plugins": " and ".join(kept)}) if len(kept) <= len(removed) else
+                bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
+
     def attribution(rk):
         sides = [x for x in (rk[2], rk[3]) if x.lower() in pt_lower]
         if len(p_targets) <= 1:
@@ -3117,6 +3127,17 @@ def build_prediction(ctx: dict) -> dict:
                        {rk[2].lower(), rk[3].lower()})
         if alone:
             return "single-mod", alone[0], None
+        # (only-t overclaim) a mod is shown needed where it owns a record on the row or another "only" setup lacks just it
+        p_all_ = {x.lower() for x in all_orders.get(p_arm) or []}
+        left_ = {u: p_all_ - {x.lower() for x in all_orders.get(s_arms[u]) or []} for u in p_targets}
+        for t in p_targets:
+            if partner_owns(rk, t) or any(left_[u] == {t.lower()} for u in p_targets if u != t):
+                continue
+            by_ = next((u for u in p_targets if u != t and t.lower() in left_[u]), None)
+            if by_ is None:
+                return "not-separable", None, bind(words["notSeparableWhy"]["noSetupLeavesOut"], {"other": t})
+            return "not-separable", None, bind(words["notSeparableWhy"]["onlyLeavesOutMore"],
+                                               {"setup": setup_phrase(s_arms[by_]), "other": t})
         return "needs-both", None, None
 
     record, set_aside, carried_notown, base_link_by, base_link_cut_by = [], collections.Counter(), [], [], {}
@@ -3552,16 +3573,6 @@ def build_prediction(ctx: dict) -> dict:
 
     def fields_text(counter):
         return ", ".join(f"{n_} {fmt_n(c_)}" for n_, c_ in sorted(counter.items(), key=lambda kv: (-kv[1], kv[0])))
-    def setup_phrase(arm_id):
-        """A measured setup in plugins, against the setup without the patch: what it holds, or what it lacks."""
-        plugs = all_orders.get(arm_id) or []
-        low = {x.lower() for x in plugs}
-        kept = [x for x in plugs if not is_base_game(x, words)]
-        removed = [x for x in all_orders.get(p_arm) or [] if x.lower() not in low]
-        return (words["setupBaseGameAlone"] if not kept else
-                bind(words["setupOnly"], {"plugins": " and ".join(kept)}) if len(kept) <= len(removed) else
-                bind(words["setupWithout"], {"plugins": ", ".join(removed)}))
-
     def pair_objects_of_base(g):
         """Every partner object of the item's rows is a base-game record (the other mod only edits it)."""
         others_ = [o_ for o_ in g.get("_partners") or []]
