@@ -77,7 +77,26 @@ class Scope:
         names = self.data.get("integerEnumNames") or {}
         self.masks = {t: {k: _Mask(int(m), (names.get(t) or {}).get(k)) for k, m in (v or {}).items()}
                       for t, v in (self.data.get("integerMasks") or {}).items() if isinstance(v, dict)}
+        # record flags (`recordFlags`, the record stage's rule): compared without the storage-only bits (Compressed);
+        # the base field's names read by the table, a per-type view's names left as printed; on a record whose base
+        # field is compared, its views are not compared again
+        rf = self.data.get("recordFlags") or {}
+        bits = {str(k): int(v) for k, v in (rf.get("bits") or {}).items()}
+        keep = ~sum(bits[n] for n in rf.get("storageOnly") or [] if n in bits) & 0xFFFFFFFF
+        self.flags_field = rf.get("field")
+        self.flags_views = set(rf.get("sameBitsAs") or [])
+        self.flag_masks = ({self.flags_field: _FlagsMask(keep, bits), **{v: _FlagsMask(keep) for v in self.flags_views}}
+                           if self.flags_field else {})
         self._contains = {}
+
+    def masks_for(self, rtype) -> dict:
+        """The masks one record type's integer fields are compared under: the record flags and integerMasks."""
+        return {**self.flag_masks, **(self.masks.get(rtype) or {})}
+
+    def one_flags_view(self, tops) -> list:
+        """Top-level fields with the record flags' per-type views dropped where the base field is among them."""
+        tops = list(tops)
+        return [t for t in tops if t not in self.flags_views] if self.flags_field in tops else tops
 
     def _type(self, name):
         if name in self.records:
@@ -342,10 +361,19 @@ class _Mask(int):
         return m
 
 
+class _FlagsMask(_Mask):
+    """A record-flags mask: a value printed as comma-separated flag names is the sum of their bits."""
+
+
 def _masked(v: str, mask: int) -> str:
     """An integer field compared on the bytes the game reads (a value its enum prints by name, as that value; any other
     value that is not an integer, as read)."""
     t = str(v).strip()
+    if isinstance(mask, _FlagsMask) and not re.fullmatch(r"-?\d+", t):
+        parts = [x.strip() for x in t.split(",") if x.strip()]
+        if not parts or any(x not in mask.names for x in parts):
+            return _norm(v)
+        t = str(sum(mask.names[x] for x in set(parts)))
     t = str(getattr(mask, "names", {}).get(t, t))
     try:
         return str(int(t) & mask)
@@ -567,7 +595,7 @@ def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, contain
             continue
         if c is not None:
             c["Judged"] += 1
-        views = [_View(rs, scope.angles, scope.masks.get(rtype)) for _, _, rs in chain]
+        views = [_View(rs, scope.angles, scope.masks_for(rtype)) for _, _, rs in chain]
         keys = sorted(set().union(*[set(v.keys) for v in views]))
         # The unit is one top-level field of the record, as the schema names it: a struct or list is one field whose
         # value is all of its compared leaves (the accepted scorecard's unit, 2026-09-28).
@@ -587,7 +615,8 @@ def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, contain
         rec = {"type": rtype, "providers": names, "values": {}, "reads": {},
                "editorId": next((r.get("editorId") for _, _, rs in chain for r in rs
                                  if r.get("editorId") not in (None, "", "<none>")), None)}
-        for top, leaves in by_top.items():
+        for top in scope.one_flags_view(by_top):
+            leaves = by_top[top]
             picked = [v.read_for(top) for v in views]
             if any(x is None for x in picked):
                 unjudge(top, REASON_TRUNCATED if any(v.truncated_at(top) for v in views) else REASON_NOT_READ)
@@ -599,7 +628,7 @@ def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, contain
             rec["values"][top] = [tuple((k, g.get(k, ())) for k in leaves) for g in got]
             rec["reads"][top] = picked
             its = [_items({k: v for k, v in x["fields"].items() if k.startswith(top + "[")}, scope.angles,
-                          scope.masks.get(rtype)).get(top) for x in picked]
+                          scope.masks_for(rtype)).get(top) for x in picked]
             if any(its):
                 rec.setdefault("items", {})[top] = [i or collections.Counter() for i in its]
         out[fk] = rec
@@ -747,7 +776,7 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
         if len(nodes) < 2:
             continue
         winner = str(nodes[-1].get("plugin"))
-        masks = scope.masks.get(rtype) or {}
+        masks = scope.masks_for(rtype)
         per_node, won_vals = [], {}
         for n in nodes:
             per = collections.defaultdict(list)
@@ -780,7 +809,7 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
                     val = "=" + norm(v)
                 per[key.split(".")[0].split("[")[0]].append(key + val)
             per_node.append({k: tuple(sorted(v)) for k, v in per.items()})
-        tops = sorted(set().union(*[set(v) for v in per_node]))
+        tops = scope.one_flags_view(sorted(set().union(*[set(v) for v in per_node])))
         # a field no provider differs in is absent: every provider holds the winner's value (`allListed`)
         out[fk] = {"type": rtype, "editorId": r.get("editorid"), "providers": [n.get("plugin") for n in nodes],
                    "values": {t: [v.get(t, ()) for v in per_node] for t in tops}, "reads": {}, "allListed": True,
