@@ -287,8 +287,8 @@ def c1808_recorder_keeps_listings_paths_and_build():
     answer = {"hits": [{"modId": 157450, "pageName": "Hub", "file": {"fileId": 808879, "name": "Hub Patch Collection",
                                                                     "status": "live", "category": "MAIN"},
                         "matches": [{"term": "ModA", "field": "contents", "contentPath": "Hub - ModA patch.esp"}]}],
-              "coverage": {"contentsUnread": [{"page": 266, "fileId": 38084, "reason": "not-read-yet",
-                                               "message": "The archive listing of file 38084 has not been read yet."}]}}
+              "coverage": {"contentsUnread": [{"modId": 266, "fileId": 38084, "reason": "not-read-yet",
+                                               "sentence": "The archive listing of file 38084 has not been read yet."}]}}
     pair = patchsearch.curate_pair(["ModB.esp", "ModA.esp"], [json.dumps(answer)], json.dumps(answer), queries=[])
     with tempfile.TemporaryDirectory() as td:
         exe = Path(td) / "housecarl-mcp.exe"
@@ -300,6 +300,67 @@ def c1808_recorder_keeps_listings_paths_and_build():
     ok = paths == ["Hub - ModA patch.esp"] and len(unread) == 1 and {"housecarl-mcp.dll", "housecarl-nexus.dll"} <= set(
         (build.get("sha256") or {})) and "commit" in build
     return ok, f"paths {paths}; unread {unread}; build {build}"
+
+
+PATCH_STUB = r'''
+import json, sys
+for line in sys.stdin:
+    m = json.loads(line)
+    if "id" not in m:
+        continue
+    if m["method"] == "initialize":
+        res = {"protocolVersion": "2025-06-18", "capabilities": {}, "serverInfo": {"name": "stub", "version": "1"}}
+    else:
+        name, args = m["params"]["name"], m["params"]["arguments"]
+        if name == "housecarl_nexus_catalog":
+            body = {"added": args.get("add")}
+        elif name == "housecarl_nexus_mod":
+            body = {"mod": args.get("mod"), "note": "description truncated"}
+        elif "\n" in args.get("terms", ""):
+            body = {"hits": [{"modId": 157450, "pageName": "Hub", "sourceUrl": "stub",
+                              "file": {"fileId": 808879, "name": "Hub Patch Collection", "status": "live",
+                                       "category": "MAIN", "version": "1.6.1"},
+                              "matches": [{"term": "ModA", "field": "contents", "contentPath": "opt/Hub - ModA patch.esp"}]}],
+                    "coverage": {"contentsUnread": [{"modId": 266, "fileId": 38084, "reason": "not-read-yet",
+                                                     "sentence": "The archive listing of file 38084 has not been read yet."}]}}
+        elif args.get("terms", "").startswith("ModB"):
+            body = {"hits": []}
+        else:
+            body = {"hits": [], "coverage": {"contentsUnread": []}}
+        res = {"content": [{"type": "text", "text": json.dumps(body)}], "isError": False}
+    sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": res}) + "\n")
+    sys.stdout.flush()
+'''
+
+
+def c1812_recorder_never_records_unread_as_none():
+    """Item 3 (D2: a missing unreadSources must never mean "everything read", by construction): the tracked recorder,
+    run against a stub server, writes `unreadSources` on every pair; an answer with no readable coverage becomes a
+    "not known" row; the reel on that record never says "No patch exists" even with the known answer found."""
+    try:
+        import patchsearch
+    except ImportError as exc:
+        return False, f"no tracked recorder: {exc}"
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        stub = td / "stub.py"
+        stub.write_text(PATCH_STUB, encoding="utf-8")
+        os.environ.setdefault("HOUSECARL_RUNLOG_DIR", str(td / "runlog"))
+        sink = io.StringIO()
+        with contextlib.redirect_stdout(sink):
+            code = patchsearch.main(["--reader-cmd", f'"{sys.executable}" "{stub}"', "--out", str(td / "out"),
+                                     "--pair", "ModA.esp=901=ModA", "--pair", "ModB.esp=902=ModB",
+                                     "--known", "ModA.esp,ModB.esp=Hub - ModA patch.esp=157450"])
+        doc = json.loads((td / "out" / "patch-search.json").read_text(encoding="utf-8")) if code == 0 else {}
+    pair = (doc.get("pairs") or [{}])[0]
+    unread = pair.get("unreadSources")
+    not_known = [u for u in unread or [] if "not known" in str(u.get("why"))]
+    paths = [p_ for h in pair.get("hits") or [] for p_ in h.get("contentPaths") or []]
+    reel, said = search_reel({"hits": [], "unreadSources": [u for u in unread or [] if u in not_known]},
+                             known=doc.get("knownAnswer") or KNOWN)
+    ok = (code == 0 and isinstance(unread, list) and len(not_known) == 1 and paths == ["opt/Hub - ModA patch.esp"]
+          and "No patch exists" not in said and (doc.get("build") or {}).get("sha256") is not None)
+    return ok, f"exit {code}; unread {unread}; paths {paths}; said {said[-160:]!r}"
 
 
 # ---------------------------------------------------------------------------------- 4. the author-advice count
@@ -427,6 +488,7 @@ CASES = [
     ("C1806-listed-hub-names-patch", c1806_listed_hub_names_the_patch_inside),
     ("C1807-unrecorded-unread-no-none", c1807_unrecorded_listings_never_say_no_patch),
     ("C1808-recorder-contents", c1808_recorder_keeps_listings_paths_and_build),
+    ("C1812-recorder-unread-by-construction", c1812_recorder_never_records_unread_as_none),
     ("C1809-advice-count-clashes", c1809_advice_count_includes_stated_clashes),
     ("C1810-index-says-clash", c1810_index_says_the_stated_clash),
     ("C1811-sibling-media", c1811_reel_reads_media_of_the_sibling_holding_the_setup),
