@@ -6907,6 +6907,20 @@ def build_prediction(ctx: dict) -> dict:
                                  "after": fmt_n(sum(x_[1] for x_ in tri_)),
                                  "each": words.get("validationPlacedEach") or "" if len(tri_) > 1 else ""})
                                 if tri_ and None not in tri_ and words.get("validationPlacedMeasured") else ""))
+            # (WRW r3 report review 1) pairs the patch's own placement makes cross more are said, with the largest
+            # rise, never only inside a total that falls
+            if tri_ and None not in tri_ and words.get("validationPlacedWorse"):
+                up_ = [(a_ - b_, k_) for k_, (b_, a_) in enumerate(tri_) if a_ > b_]
+                if up_:
+                    _, k_ = max(up_)
+                    e_ = placed[k_]
+                    o_ = (e_.get("other") or [None])[0]
+                    sentences[-1] += " " + bind(words["validationPlacedWorse"], {
+                        "up": fmt_n(len(up_)), "count": fmt_n(len(tri_)), "upVerb": "crosses" if len(up_) == 1 else "cross",
+                        "downVerb": "crosses" if sum(1 for b_, a_ in tri_ if a_ < b_) == 1 else "cross",
+                        "down": fmt_n(sum(1 for b_, a_ in tri_ if a_ < b_)), "same": fmt_n(sum(1 for b_, a_ in tri_ if a_ == b_)),
+                        "object": named(e_["formKey"], e_.get("summary")), "other": named(o_, None) if o_ else "another object",
+                        "before": fmt_n(tri_[k_][0]), "after": fmt_n(tri_[k_][1])})
             placed_sentence_ = sentences[-1] if placed_pairs and tri_ and None not in tri_ else None
         if stands:
             sentences.append(bind(words["validationStands"], {"patch": patch, "count": by_unit(stands)}))
