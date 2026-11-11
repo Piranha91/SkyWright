@@ -9561,6 +9561,10 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     lo_words = reader_data.get("locationOrder") or {}
     bound = lo_words.get("maxLocations")
     for a in arms_out:
+        # (Helgi and Cut Content r3 reviews) the list says what share of the setup's load order it is
+        shown_, total_ = len(a.get("locationPluginOrder") or []), len(a.get("plugins") or [])
+        a["locationShareLine"] = (bind(lo_words["share"], {"shown": fmt_n(shown_), "total": fmt_n(total_)})
+                                  if lo_words.get("share") and 0 < shown_ < total_ else None)
         locs = list(a["locationPluginScope"].get("locations") or [])
         k = bound if isinstance(bound, int) and bound > 0 else len(locs)
         a["locationPluginScope"]["shown"] = locs[:k]

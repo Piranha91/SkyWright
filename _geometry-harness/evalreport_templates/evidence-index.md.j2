@@ -232,7 +232,7 @@ No media row: nothing was supplied to this bundle under `--media`, and no unasse
 {% endif %}
 ### Load order for these locations
 
-{% for a in p.scope.arms %}- **{{ a.readerLabel }}**: {{ (a.locationPluginOrder or [])|join(", ") or "no evidenced plugin was identified" }}.
+{% for a in p.scope.arms %}- **{{ a.readerLabel }}**: {{ (a.locationPluginOrder or [])|join(", ") or "no evidenced plugin was identified" }}.{{ (" " ~ (p.reader.locationOrder.wholeOrder or "The whole load order of this setup:") ~ " " ~ a.plugins|join(", ") ~ ".") if a.get("plugins") else "" }}
 {% endfor %}
 
 ### The comparisons' other results

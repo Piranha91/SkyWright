@@ -17,7 +17,7 @@
 {% if "order" not in (p.layout or "").split() %}<h2>{{ p.reader.locationOrder.heading or "Load order for these locations" }}</h2><p>{{ p.reader.locationOrder.intro or "Plugins tied to the places discussed below, in measured order." }}</p>
 {% for a in p.scope.arms %}
 <h3>{{ a.readerLabel }}</h3>
-{% if a.get("sameListAs") %}<p>{{ a.locationPluginScope.missingInput }}</p>{% else %}{% if a.locationPluginOrder %}<p>{{ a.locationPluginOrder|join(", ") }}.</p>
+{% if a.get("sameListAs") %}<p>{{ a.locationPluginScope.missingInput }}</p>{% else %}{% if a.locationPluginOrder %}<p>{{ a.locationPluginOrder|join(", ") }}.{% if a.get("locationShareLine") %} {{ a.locationShareLine }}{% endif %}</p>
 {% else %}<p>{{ p.reader.locationOrder.empty or "No evidenced plugin was identified." }}</p>{% endif %}
 {% if a.locationPluginScope.get("sameAs") %}<p>{{ p.reader.locationOrder.sameScope or "Scope: the same locations as listed for" }} <strong>{{ a.locationPluginScope.sameAs }}</strong>.</p>{% else %}<p>Scope:</p><pre><code>{{ (a.locationPluginScope.get("shown", a.locationPluginScope.locations))|join("; ") or "no CELL or worldspace location was supplied" }}</code></pre>{% if a.locationPluginScope.get("moreLine") %}<p>{{ a.locationPluginScope.moreLine }} <a href="evidence-index.html#scope">Evidence index</a>.</p>{% endif %}{% endif %}
 <p>Coverage: {% if a.locationPluginScope.complete %}all contributors to the listed locations identified.{% else %}incomplete — {{ a.locationPluginScope.missingInput }}{% endif %}{% if a.locationPluginScope.get("note") %} {{ a.locationPluginScope.note }}{% endif %}</p>{% endif %}

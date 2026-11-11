@@ -121,7 +121,7 @@ Evaluation record: {{ p.reader.context.evaluatedAt or "date not supplied" }}. St
 
 {% if a.get("sameListAs") %}{{ a.locationPluginScope.missingInput }}
 
-{% else %}{% if a.locationPluginOrder %}{{ a.locationPluginOrder|join(", ") }}.
+{% else %}{% if a.locationPluginOrder %}{{ a.locationPluginOrder|join(", ") }}.{{ (" " ~ a.locationShareLine) if a.get("locationShareLine") else "" }}
 {% else %}{{ p.reader.locationOrder.empty or "No evidenced plugin was identified." }}
 {% endif %}
 
