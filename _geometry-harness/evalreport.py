@@ -7841,7 +7841,8 @@ def incomplete_line(ev: dict, missing: list, arm_id, label: str, words: dict, he
     return line
 
 
-def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing: list, proper: dict) -> list[str]:
+def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing: list, proper: dict,
+               plan_targets: list | None = None) -> list[str]:
     """One verdict for each supplied patch, from the clashes of the pair it is built
     for (its masters), then one next step for each predicted kind still left; the report's box says these sentences and
     the reel's "What to do" page says them without their caveat clauses. A verdict over a setup whose physical checks did not finish says so (G1 x G4)."""
@@ -7980,6 +7981,19 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
                                "candNoun": (ns.get("candNoun") or ["", ""])[0 if n == 1 else 1],
                                "still": ns.get("still", "") if compared else ns.get("stillNone", ""),
                                "state": bind(ns.get("state" if compared else "stateNone") or "", {"verb": "is" if n == 1 else "are"})}))
+    # (Cut Content r3 report review 3) generated distant scenery and occlusion: the check that would say whether they
+    # need rebuilding has no result on the measured setup, and the mod places objects in exterior cells (its own
+    # footprint), so the step is said; never for a mod with interior cells only
+    rb_ = ns.get("rebuildGenerated") or {}
+    if rb_ and any(str(m_.get("checkId")) == rb_.get("check") and m_.get("armId") == (pred.get("predictionArm") or "baseline")
+                   for m_ in missing or []):
+        for t_ in plan_targets or []:
+            ext_ = {str(c_.get("cell")) for c_ in (((t_.get("footprint") or {}).get("placed") or {}).get("cells") or [])
+                    if isinstance(c_, dict) and c_.get("kind") in set(rb_.get("cellKinds") or []) and c_.get("worldspace")
+                    and any(int(c_.get(k_) or 0) > 0 for k_ in ("refs", "navmesh", "land"))}
+            if ext_:
+                out.append(bind(rb_["line"], {"mod": name(t_.get("name")), "count": fmt_n(len(ext_)),
+                                               "cells": "cell" if len(ext_) == 1 else "cells"}))
     return out
 
 
@@ -10347,7 +10361,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     proper_r2 = {str(q.get("name")).lower(): str(q.get("name")) for a_ in b.plan.get("arms") or []
                  for q in ((a_.get("requested") or {}).get("plugins") or []) if isinstance(q, dict)}
     # each plugin's own master list (emits, else the recorded file's header): a patch no probe measured still has its pair
-    lead["prediction"]["whatToDo"] = what_to_do(lead, plugin_masters_doc, pw_, ev, missing, proper_r2)
+    lead["prediction"]["whatToDo"] = what_to_do(lead, plugin_masters_doc, pw_, ev, missing, proper_r2,
+                                                plan_targets=b.plan.get("targets") or [])
     lead["prediction"]["whatToDoHeading"] = (pw_.get("whatToDo") or {}).get("heading")
     precedent_census(lead, settings.get("precedentDir"), reader_data.get("prediction") or {})
     # what a lost record change means in play, from the fields it is on (skill data fieldMeanings), where nothing does
