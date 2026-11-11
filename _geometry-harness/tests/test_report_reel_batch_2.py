@@ -103,6 +103,21 @@ def c1802_record_rows_mask_and_dedupe_the_flags():
     return ok, f"rows {got} (want only 000812 SkyrimMajorRecordFlags)"
 
 
+def c1814_masked_flags_said_by_name():
+    """Item 1 (found at Gate C on WRW: "2048 against 0" where the report said "InitiallyDisabled against 0"): a
+    record-flags value compared without its storage bit is still said by its flag names."""
+    import test_recordrows as TR
+    fk = "000813:Skyrim.esm"
+    batches = TR.three(fk, TR.ref(SkyrimMajorRecordFlags="0"),
+                       TR.ref(SkyrimMajorRecordFlags="Compressed, InitiallyDisabled"),
+                       TR.ref(SkyrimMajorRecordFlags="0"), rtype="PlacedNpc")
+    with tempfile.TemporaryDirectory() as td:
+        emit, _ = TR.rows_of(batches, Path(td))
+    vals = [c["Necessary"][0]["Values"] for c in TR.conflicts(emit) if c["Field"] == "SkyrimMajorRecordFlags"]
+    ok = len(vals) == 1 and vals[0].get("lost") == "InitiallyDisabled"
+    return ok, f"values {vals}"
+
+
 def c1803_orderleads_reads_the_shared_flag_table():
     """Item 1 (merged orderleads-shared-flag-table): orderleads reads the record-flag bits from record-field-scope.json,
     so its rules file holds no copy of them that could drift."""
@@ -525,6 +540,7 @@ CASES = [
     ("C1800-compressed-only-flags", c1800_compressed_only_flags_are_no_lost_change),
     ("C1801-one-header-change-once", c1801_one_header_change_counted_once),
     ("C1802-record-rows-flags", c1802_record_rows_mask_and_dedupe_the_flags),
+    ("C1814-masked-flags-by-name", c1814_masked_flags_said_by_name),
     ("C1803-orderleads-shared-table", c1803_orderleads_reads_the_shared_flag_table),
     ("C1804-one-name-report-and-reel", c1804_report_and_reel_say_one_name),
     ("C1805-patch-by-plugin-name", c1805_patch_without_nexus_id_said_by_its_plugin),
