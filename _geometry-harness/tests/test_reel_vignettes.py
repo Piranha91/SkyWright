@@ -126,7 +126,7 @@ WORDS = {
               "notFound": ["No patch for these two mods was found.", "A patch for these two mods was not found."],
               "notFoundOther": ["No other patch for these two mods was found.", "Another patch for these two mods was not found."]},
     "playTime": "This was also recorded in play.",
-    "closingLines": {"withSetup": "{check}, with {patch}", "withoutSetup": "{check}, without {patch}"},
+    "closingLines": {"withoutSetup": "{check}, without {patch}"},
     "leftOutMarkers": "Not shown: {count} {noun} on editor-only markers",
     "forbidden": ["compared", "candidate", "offline", "render", "gameplay", "not tested", "testing is incomplete",
                   "OcclusionData", "EditorID", ".esp", ".esm", ".esl"],
@@ -355,39 +355,6 @@ def joined(xs):
 
 
 MARKERS = {"000405:Skyrim.esm"}                       # what evalreport's marker rule says of the synthetic refs
-
-
-def setup_words(pres, label, words=WORDS):
-    """A setup said in plain words: with or without the supplied patch, from the setup's own plugin order."""
-    arm = next((a for a in (pres.get("scope") or {}).get("arms") or [] if a.get("displayLabel") == label), {})
-    patches = list((pres.get("reader") or {}).get("suppliedPatches") or [])
-    has = [p for p in patches if p in (arm.get("locationPluginOrder") or [])]
-    return has, patches
-
-
-def merged_checks(pres, mods, words=WORDS):
-    """The closing's rows: one line per check and reason; a setup is named only where the check's reasons differ."""
-    reasons_of = {}
-    for m in (pres.get("reader") or {}).get("missingSummary") or []:
-        for subj in m.get("subjects") or []:
-            check_, _, setup = str(subj).partition(" — ")
-            reasons_of.setdefault(check_, {}).setdefault(m.get("reason"), []).append(setup)
-    rows = []
-    for m in (pres.get("reader") or {}).get("missingSummary") or []:
-        subs = []
-        for subj in m.get("subjects") or []:
-            check_, _, setup = str(subj).partition(" — ")
-            if len(reasons_of[check_]) == 1:
-                line = check_
-            else:
-                has, patches = setup_words(pres, setup, words)
-                name = patch_display(mods, (has or patches)[0], words) if patches else None
-                line = (words["closingLines"]["withSetup" if has else "withoutSetup"].format(check=check_, patch=name)
-                        if name else check_)
-            if line not in subs:
-                subs.append(line)
-        rows.append({"reason": m.get("reason"), "subjects": subs})
-    return rows
 
 
 def has_no_result(pres):

@@ -229,9 +229,8 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
                                                  "setupWith" if new_ and not gone_ else "setupBoth"].format(
                         check=check_, without=joined(gone_) if gone_ else "", with_=joined(new_) if new_ else "")
             elif not arm_ and len(reasons_of[check_]) > 1 and patches:
-                has = [p for p in patches if p in ((arms.get(setup) or {}).get("locationPluginOrder") or [])]
-                line = words["closingLines"]["withSetup" if has else "withoutSetup"].format(
-                    check=check_, patch=patch_name((has or patches)[0]))
+                # a setup that is no arm of the evaluation holds none of the supplied patches
+                line = words["closingLines"]["withoutSetup"].format(check=check_, patch=patch_name(patches[0]))
             if line not in subs:
                 subs.append(line)
         # a check named on several other setups is said once, with how many (the report lists each setup)
