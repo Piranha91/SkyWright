@@ -9267,12 +9267,26 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
              "rows": []})
 
     # (6) catalogues
+    advice_by = {(a_.get("checkId"), a_.get("armId")): a_ for a_ in (disp.get("discovery") or {}).get("advice") or []
+                 if isinstance(a_, dict)}
     for r in ev.get("completedCatalogues") or []:
         check_id, arm_id = r.get("checkId"), r.get("armId")
+        plain_ = bind(templates.get("catalogue", ""), {"count": r.get("count"), "unit": r.get("unit"), "armId": arm_id})
+        adv_ = advice_by.get((check_id, arm_id)) or {}
+        if (isinstance(adv_.get("rules"), int) and isinstance(adv_.get("clashCount"), int)
+                and templates.get("catalogueAdvice")):
+            # an author's page states order rules and clashes: said apart, each clash with the mod it names (item 23)
+            cl_ = [str(c_.get("namedModName") or c_.get("namedModId") or "") + (f" ({c_['symptom']})" if c_.get("symptom")
+                                                                                 else "")
+                   for c_ in adv_.get("clashes") or [] if isinstance(c_, dict)]
+            plain_ = bind(templates["catalogueAdvice"], {
+                "rules": adv_["rules"], "ruleNoun": "rule" if adv_["rules"] == 1 else "rules",
+                "clashes": adv_["clashCount"], "clashNoun": "clash" if adv_["clashCount"] == 1 else "clashes",
+                "named": (": " + "; ".join(x for x in cl_ if x)) if any(cl_) else "", "armId": arm_id})
         add({"id": None, "kind": "catalogue", "priority": 6, "checkId": check_id, "family": b.check_family(check_id),
              "armId": arm_id, "part": r.get("part"), "title": b.check_title(check_id),
              "strength": (b.checks.get(check_id, {}).get("evidence") or {}).get("strength"), "verdict": None,
-             "plain": bind(templates.get("catalogue", ""), {"count": r.get("count"), "unit": r.get("unit"), "armId": arm_id}),
+             "plain": plain_,
              "counts": {"count": r.get("count"), "unit": r.get("unit"), "resultKind": r.get("kind")},
              "evidenceIds": eids_for(check_id, arm_id, r.get("part")), "rows": []})
 

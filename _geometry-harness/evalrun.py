@@ -475,7 +475,18 @@ def dotted(doc, path: str):
 def resolve_spec(spec: str, doc, log_text: str):
     """A-6's `<spec>`: a dotted path into the JSON output, or `regex:<pattern>` with a named group
     `n` over the child's LOG. Returns (count, why-it-failed). None means it did not resolve — which
-    is `schema-unsupported`, never a zero."""
+    is `schema-unsupported`, never a zero. A list of dotted paths is their sum (rules and stated clashes are both
+    statements an author makes); any part that does not resolve makes the whole unresolved."""
+    if isinstance(spec, list):
+        if not spec or not all(isinstance(x, str) and x and not x.startswith("regex:") for x in spec):
+            return None, "a list spec must hold dotted paths only"
+        total = 0
+        for part in spec:
+            val, why = resolve_spec(part, doc, log_text)
+            if val is None:
+                return None, f"{part!r}: {why}"
+            total += val
+        return total, ""
     if not isinstance(spec, str):
         return None, "the spec is not a string"
     if spec.startswith("regex:"):

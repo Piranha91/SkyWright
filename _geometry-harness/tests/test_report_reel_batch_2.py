@@ -386,6 +386,49 @@ def c1809_advice_count_includes_stated_clashes():
     return ok, f"result.findings {spec.get('findings')!r} gives {got!r} {why}"
 
 
+def c1813_registry_v3_bundle_unchanged():
+    """Item 4, the D4 condition: a bundle frozen at registry v3 (findings "rules") whose disposition predates the
+    clash count compiles, and its author-advice line is the catalogue line it always was; the v3 registry still
+    validates beside the v4 one."""
+    import evalregistry
+    v4 = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    v3 = copy.deepcopy(v4)
+    v3["registryVersion"] = 3
+    next(c for c in v3["checks"] if c["id"] == ADVICE)["adapter"]["result"]["findings"] = "rules"
+    probs = {n: evalregistry.validate(d) for n, d in (("v3", v3), ("v4", v4))}
+    f_, _ = advice_bundle(advice=[{"checkId": ADVICE, "armId": "baseline", "provenance": None, "staleness": "x"}])
+    want = ("0 rows catalogued on arm baseline. A catalogue is evidence, not a defect; it completes its check and is "
+            "never a finding.")
+    ok = f_.get("plain") == want and not any(probs.values()) and v4.get("registryVersion") == 4
+    return ok, f"the v3 bundle's line {f_.get('plain')!r}; registry problems {probs}"
+
+
+def advice_bundle(advice):
+    """A bundle whose disposition holds an author-advice catalogue row with no rule found and `advice` as its
+    discovery.advice: (the catalogue finding, the evidence index)."""
+    arms = [P.arm("baseline", [BASE, OTHER, A, B], kind="baseline"), P.arm("without-a", [BASE, OTHER, B])]
+    res = {(CONTACT, "baseline"): [], (CONTACT, "without-a"): []}
+    with tempfile.TemporaryDirectory() as td:
+        bdir = P.make_bundle(Path(td) / "bundle", arms, res, [A])
+        disp = json.loads((bdir / "disposition.json").read_text(encoding="utf-8"))
+        disp["evaluation"].setdefault("completedCatalogues", []).append(
+            {"checkId": ADVICE, "armId": "baseline", "count": 0, "unit": "rows", "kind": "discovery"})
+        disp["discovery"] = {"advice": advice}
+        (bdir / "disposition.json").write_text(json.dumps(disp), encoding="utf-8")
+        reg = json.loads((bdir / "registry" / "check-registry.json").read_text(encoding="utf-8"))
+        reg["checks"].append({"id": ADVICE, "family": "patch", "title": "The patch author's stated requirements",
+                              "adapter": {"exe": "adviceprobe"}})
+        (bdir / "registry" / "check-registry.json").write_text(json.dumps(reg), encoding="utf-8")
+        pr = json.loads(P.PRIORITIES.read_text(encoding="utf-8"))
+        settings = {"mode": "concise", "layout": "normal", "maxPages": 8,
+                    "page": {"size": "A4", "marginMm": 16, "baseFontPt": 10.5}, "declaredPatches": [],
+                    "rowsPerGroup": 3, "figuresPerFinding": 1, "reel": {}}
+        plan = R.compile_plan(bdir, {"bundle": {"complete": True}}, settings, pr, str(bdir))
+        view = R.effective_view(plan, 3, 1, pr, "normal")
+        out = R.render_all(plan, view, Path(td) / "out", "")
+    return next((f for f in plan.get("findings") or [] if f.get("checkId") == ADVICE), {}), out["evidence-index.md"]
+
+
 def c1810_index_says_the_stated_clash():
     """Item 4: the evidence index's line for the author-advice catalogue says the clash the page states (the
     disposition's discovery.advice already records it), never a bare "0 rows"."""
@@ -491,6 +534,7 @@ CASES = [
     ("C1812-recorder-unread-by-construction", c1812_recorder_never_records_unread_as_none),
     ("C1809-advice-count-clashes", c1809_advice_count_includes_stated_clashes),
     ("C1810-index-says-clash", c1810_index_says_the_stated_clash),
+    ("C1813-registry-v3-bundle", c1813_registry_v3_bundle_unchanged),
     ("C1811-sibling-media", c1811_reel_reads_media_of_the_sibling_holding_the_setup),
 ]
 

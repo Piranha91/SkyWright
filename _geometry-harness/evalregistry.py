@@ -315,9 +315,14 @@ def validate(registry):
                         if not result.get("note"):
                             problems.append(f"{cid}: adapter.result.{field} is null with no note "
                                             "saying why the probe prints no such count")
+                    elif isinstance(spec, list):
+                        if output != "json" or not spec or not all(
+                                isinstance(x, str) and x and not x.startswith("regex:") for x in spec):
+                            problems.append(f"{cid}: adapter.result.{field} as a list must hold dotted paths "
+                                            "into a json output, summed")
                     elif not isinstance(spec, str) or not spec:
-                        problems.append(f"{cid}: adapter.result.{field} must be a dotted path, "
-                                        "regex:<pattern>, or null")
+                        problems.append(f"{cid}: adapter.result.{field} must be a dotted path, a list of "
+                                        "dotted paths, regex:<pattern>, or null")
                     elif spec.startswith("regex:"):
                         if output != "text":
                             problems.append(f"{cid}: adapter.result.{field} is a regex but the "

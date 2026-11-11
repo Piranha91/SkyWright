@@ -405,8 +405,8 @@ def default_json(probe: str, entry: dict, scen: dict, order_name: str) -> dict:
 
 
 def advice_report(entry: dict, mod_id: str) -> dict:
-    """adviceprobe's report-<id>.json: the registry reads findings=rules, judged=pagesRead,
-    unjudgeable=warnings, so all three keys are present and countable."""
+    """adviceprobe's report-<id>.json: the registry reads findings=rules+clashes, judged=pagesRead,
+    unjudgeable=warnings, so every key is present and countable."""
     return {"modId": mod_id,
             "rules": list(entry.get("rules", [{"before": "FixtureTarget.esp", "after": "FixtureBase.esp",
                                                "hardness": "advice", "source": "stored page",
@@ -418,6 +418,7 @@ def advice_report(entry: dict, mod_id: str) -> dict:
             "catalogue": {"dir": "fixture", "refresh": "offline", "maxRequests": 0, "requestsAttempted": 0,
                           "requestsSucceeded": 0, "waitedMs": 0, "pagesServedFromSnapshot": 1,
                           "pagesFetched": 0, "pagesReplayedFromArchive": 0, "imports": []},
+            "clashes": list(entry.get("clashes", [])),
             "warnings": list(entry.get("warnings", [])), "choices": []}
 
 
