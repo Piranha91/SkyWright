@@ -91,6 +91,13 @@ def view_kind_caption(provenance: dict, words: dict) -> str:
                                                                them="it" if n == 1 else "them") if n else ""))
     return ""
 
+def media_kind_caption(media: dict, words: dict) -> str:
+    """The figure caption's addition for a picture drawn offline from the game's files rather than taken in the game
+    ("" for a game capture), from the skill's figureCaptions words (Ice r3 report review 8)."""
+    kinds = (words.get("mediaKinds") or {})
+    return str(kinds.get(str((media or {}).get("mediaKind") or "")) or "")
+
+
 def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -9746,7 +9753,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                         winner=fig_mod(row_.get("B") or (f_.get("counts") or {}).get("B") or target_plugin))
             # a cutaway or a sliced top-down says so in its caption, not only in the frame's own label (a crop can cut that)
             if m_.get("caption"):
-                m_["caption"] += view_kind_caption(prov_, caption_words)
+                m_["caption"] += view_kind_caption(prov_, caption_words) + media_kind_caption(m_, caption_words)
             m_["captureState"] = state_
             m_["captureRequest"] = prov_.get("captureRequest")
 
