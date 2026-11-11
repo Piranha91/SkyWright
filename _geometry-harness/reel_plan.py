@@ -282,6 +282,14 @@ def largest_population(text: str):
     return (f"{best[0]:,}", best[1], len(parts) > 1) if best else None
 
 
+def patch_pair(patch: str, masters: dict) -> set:
+    """The plugins a patch is built for: its masters that are not themselves masters of its other masters (a shared
+    dependency is no side of the pair), as evalreport's what_to_do reads it. Lower case. (Cut Content r3 reels: a patch
+    whose masters reach the Unofficial Patch was taken as the patch of that mod's clashes.)"""
+    pm = {str(m).lower() for m in masters.get(str(patch).lower(), set())}
+    return {m for m in pm if not any(m in {str(x).lower() for x in masters.get(o, set())} for o in pm if o != m)}
+
+
 def check_title_of(line: str) -> str:
     """A closing line's check title, without the setup it names."""
     return re.split(r", (?:with|without|on the setup|on \d+ other) ", str(line), maxsplit=1)[0]
@@ -685,7 +693,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
 
     def own_patches(c):
         other = [m for m in c["pair"] if m != target][0]
-        return [p for p in supplied if {other.lower(), target.lower()} <= set(masters.get(p.lower(), set()))]
+        return [p for p in supplied if {other.lower(), target.lower()} <= patch_pair(p, masters)]
 
     used: dict = {}
 

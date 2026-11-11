@@ -2271,7 +2271,7 @@ def case_render():
 REF = ".claude/skills/evaluation-reporting/references"
 CODE_SABOTAGE = {
     "code-f1": ("planner", "F1-own-pair", [("_geometry-harness/reel_plan.py",
-        "return [p for p in supplied if {other.lower(), target.lower()} <= set(masters.get(p.lower(), set()))]",
+        "return [p for p in supplied if {other.lower(), target.lower()} <= patch_pair(p, masters)]",
         "return list(supplied)")]),
     "code-q1": ("planner", "Q1-patch-search", [
         ("_geometry-harness/reel_plan.py", "if selected and patch_search is None:", "if False:"),
