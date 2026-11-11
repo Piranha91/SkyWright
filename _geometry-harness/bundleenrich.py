@@ -343,7 +343,10 @@ def enrich_order_variant(d: Path) -> dict:
                                                      resp: f"evidence/{by_role['response']}"}, containers=containers,
                          masters=masters, masters_unread=unread)
         emit["configuration"] = {"plugins": cfg["plugins"]}
-        emit["order"] = {"pair": pair, "reversedFrom": rc["armId"], "rule": ch["rule"]}
+        # (item 18 review) the rows' values are differences from the measured order's winner, so "(the winning value)"
+        # here is that winner's value, not the reversed order's
+        emit["order"] = {"pair": pair, "reversedFrom": rc["armId"], "rule": ch["rule"],
+                         "values": "against the measured order's winning version: \"(the winning value)\" is its value"}
         emit["readForm"] = "text" if RR.parse_transcript(req, resp)["reads"] else "tree"
         emit["mastersUnread"] = sorted(unread)
         rel = f"enrichment/order-variant/{rc['checkId']}__{rc['armId']}.json"
