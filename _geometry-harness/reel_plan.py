@@ -1182,7 +1182,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 report_lines.append(words["unpicturedWhy"].format(reasons=joined(
                     [f"{n_} {short.get(w_, w_)}" for w_, n_ in why_n.most_common()])))
         for t_, n_ in none_captured:
-            sentence_un = (sentence_un + " " + words["noneCaptured"].format(
+            sentence_un = (sentence_un + " " + words["noneCapturedOne" if n_ == 1 and words.get("noneCapturedOne")
+                                                      else "noneCaptured"].format(
                 count=n_, label=case_labels[t_])).strip()
         # a removal is said, never only counted: which mod takes which object out of the world
         gone = [c for c, why in unpictured if why == "removed"]
