@@ -1411,21 +1411,27 @@ class InputRefused(Exception):
     """An input the compiler will not use, with the one-sentence reason; `plan` exits 2 with it."""
 
 
+def _pair_rows_paths(b: "Bundle", arm_id: str, variant: bool = False) -> list:
+    """The files the pair's record lost edits on one setup are read from: the setup's record emits, or (variant) its
+    order-variant enrichment files."""
+    if variant:
+        return [e["path"] for e in b.evidence if e.get("kind") == "enrichment" and e.get("enrichment") == "order-variant"
+                and e.get("armId") == arm_id]
+    paths = []
+    for cid in sorted({str(e.get("checkId")) for e in b.evidence if e.get("armId") == arm_id
+                       and str(e.get("checkId") or "").startswith("records.")}):
+        pth = b.output_emit_path(cid, arm_id, "arm") or b.output_emit_path(cid, arm_id, None)
+        if pth:
+            paths.append(pth)
+    return paths
+
+
 def _pair_lost_keys(b: "Bundle", arm_id: str, pair: list, variant: bool = False) -> tuple[set, dict]:
     """The pair's record lost edits on one setup: {(FormKey, field)} and {losing plugin: fields}. variant: the
     order-variant enrichment's rows for that setup (its reversed order) instead of the setup's own rows."""
     low = {str(x).lower() for x in pair}
-    keys, by_loser, paths = set(), collections.Counter(), []
-    if variant:
-        paths = [e["path"] for e in b.evidence if e.get("kind") == "enrichment" and e.get("enrichment") == "order-variant"
-                 and e.get("armId") == arm_id]
-    else:
-        for cid in sorted({str(e.get("checkId")) for e in b.evidence if e.get("armId") == arm_id
-                           and str(e.get("checkId") or "").startswith("records.")}):
-            pth = b.output_emit_path(cid, arm_id, "arm") or b.output_emit_path(cid, arm_id, None)
-            if pth:
-                paths.append(pth)
-    for pth in paths:
+    keys, by_loser = set(), collections.Counter()
+    for pth in _pair_rows_paths(b, arm_id, variant):
         doc = b.emit(pth)
         for r in (doc.get("Conflicts") if isinstance(doc, dict) else None) or []:
             if r.get("Kind") != "LOST-EDIT" or {str(r.get("A")).lower(), str(r.get("B")).lower()} != low:
@@ -1481,9 +1487,9 @@ def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict)
         fact.update({"bothWeighed": True, "ordersEvaluated": [f"{first} before {second}", f"{second} before {first}"],
                      "changeHands": {"fields": len(u), "records": len({k[0] for k in u}),
                                      "lostByMeasuredOrder": m_lost, "lostByReversed": r_lost,
-                                     "rowsPath": next((e["path"] for e in src[0].evidence
-                                                       if e.get("enrichment") == "order-variant"
-                                                       and e.get("armId") == src[1]), None)}})
+                                     # (item 18 review) every file the count was read from, both orders
+                                     "rowsPaths": (_pair_rows_paths(src[0], src[1])
+                                                   + _pair_rows_paths(src[0], src[1], variant=True))}})
     # session 1's record-level split, for the load-order table: of the fields that change hands, those on records the
     # declared patch has a version of (read from the patched setup's own record transcripts)
     patches_ = {str(x).lower() for x in ctx.get("declared") or []}

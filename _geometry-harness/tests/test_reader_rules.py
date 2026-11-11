@@ -1020,7 +1020,7 @@ def case_item18_p3_consumer_report_html_says_the_order():
 def case_item18_p3_consumer_evidence_index_lists_the_reversed_rows():
     """The evidence index has the pair's load-order section, naming the reversed setup's rows file."""
     plan, md, html, index = item18_free_both_plan(want_index=True)
-    path = ((lo_of(plan).get("changeHands") or {}).get("rowsPath")) or ""
+    path = next((x for x in (lo_of(plan).get("changeHands") or {}).get("rowsPaths") or [] if "order-variant" in x), "")
     ok = '<a id="load-order-pair"></a>' in index and bool(path) and path in index
     return ok, f"rows path {path!r}; section {'load-order-pair' in index}"
 
