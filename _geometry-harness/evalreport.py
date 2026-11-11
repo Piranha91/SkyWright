@@ -2636,8 +2636,32 @@ def build_prediction(ctx: dict) -> dict:
     persistent_re = re.compile(words["persistentPlacePattern"]) if words.get("persistentPlacePattern") else None
 
     place_labels = {}
+    # (Helgi and Ice r3 reviews) a cell the evaluated mod's own footprint records, with its worldspace and grid, and the
+    # in-game names the names enrichment read: a place to look is said by them, never by an editor ID or form key alone
+    footprint_cells = {}
+    for t_ in ((getattr(ctx.get("mainBundle"), "plan", None) or {}).get("targets") or []):
+        for c_ in (((t_.get("footprint") or {}).get("placed") or {}).get("cells") or []) if isinstance(t_, dict) else []:
+            if (isinstance(c_, dict) and c_.get("cell") and c_.get("worldspace")
+                    and c_.get("x") is not None and c_.get("y") is not None):
+                footprint_cells.setdefault(str(c_["cell"]).lower(), c_)
+    place_names = (names.get("places") or {}) if isinstance(names.get("places"), dict) else {}
+
+    def named_place(label):
+        m_ = re.match(r"^([A-Za-z][A-Za-z0-9_]*)(?: \((?:int|ext)\))?$", str(label))
+        if m_ and (place_names.get(m_.group(1)) or {}).get("name") and words.get("placeNamed"):
+            return bind(words["placeNamed"], {"name": place_names[m_.group(1)]["name"], "editorId": m_.group(1)})
+        m_ = re.match(r"^([0-9A-Fa-f]{6}:\S+?)(?: \(ext\))?$", str(label))
+        c_ = footprint_cells.get(m_.group(1).lower()) if m_ else None
+        if c_ and words.get("persistentPlaceGridWorld"):
+            return bind(words["persistentPlaceGridWorld"], {"label": f"{m_.group(1)} (ext)", "world": c_["worldspace"],
+                                                            "x": fmt_n(c_["x"]), "y": fmt_n(c_["y"])})
+        return label
 
     def located_place(fk, label):
+        got_ = placement_place(fk, label)
+        return got_ if got_ != label else named_place(label)
+
+    def placement_place(fk, label):
         """(fourth review, Missives S3) a place that is only a worldspace's persistent cell (a bare form key) says the grid
         cell of the object's position, read from the plugin file of the version that loads last (its recorded bytes)."""
         if persistent_re is None or not persistent_re.match(str(label)) or not words.get("persistentPlaceGrid"):
@@ -5780,7 +5804,7 @@ def build_prediction(ctx: dict) -> dict:
             else:
                 pass_ = bind(lw["atCap"] if (p_ is not None and cap_ is not None and p_ >= cap_) else lw["likely"],
                              {"passage": fmt_n(p_), "share": str(r.get("PassageShare") or "")})
-            return {"object": obj_, "text": bind(lw["item"], {"object": obj_, "whose": whose_, "cell": str(r.get("Cell")),
+            return {"object": obj_, "text": bind(lw["item"], {"object": obj_, "whose": whose_, "cell": located_place(fk_, str(r.get("Cell"))),
                                                                "passage": pass_})}
         shown_ = [lead_words(r) for r in rows_]
         cap_n = int(lw.get("pageMax") or 3)
