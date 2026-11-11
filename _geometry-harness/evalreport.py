@@ -8080,6 +8080,7 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
                 "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
                 "mods": and_list([name(m) for m in it.get("mods") or []]), "loser": name(sp_["loser"]),
                 "winner": name(sp_["winner"]), "fwd": fmt_n(n - own_), "own": fmt_n(own_),
+                "every": "it" if n == 1 else "every one",
                 "still": ns.get("still", "") if compared else ns.get("stillNone", "")}))
             continue
         tmpl = ns.get(str(it.get("checkId"))) or ns.get(str(it.get("kind"))) or ns.get("default")
@@ -9687,7 +9688,8 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     for a in arms_out:
         # (Helgi and Cut Content r3 reviews) the list says what share of the setup's load order it is
         shown_, total_ = len(a.get("locationPluginOrder") or []), len(a.get("plugins") or [])
-        a["locationShareLine"] = (bind(lo_words["share"], {"shown": fmt_n(shown_), "total": fmt_n(total_)})
+        a["locationShareLine"] = (bind(lo_words["share"], {"shown": fmt_n(shown_), "total": fmt_n(total_),
+                                                            "these": "This is" if shown_ == 1 else "These are"})
                                   if lo_words.get("share") and 0 < shown_ < total_ else None)
         locs = list(a["locationPluginScope"].get("locations") or [])
         k = bound if isinstance(bound, int) and bound > 0 else len(locs)
@@ -9810,6 +9812,11 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if req_:
             by_request[req_].append(m_["id"])
     media_by_id0 = {m_["id"]: m_ for m_ in media}
+    # the frame each figure shows first (figure_units' order), keyed by its capture request
+    first_frame_ = {}
+    for u_ in figure_units(media):
+        if u_:
+            first_frame_.setdefault((u_[0].get("provenance") or {}).get("captureRequest") or u_[0]["id"], u_[0]["id"])
     for f_ in findings:
         mids_ = list(f_.get("mediaIds") or [])
         for mid_ in list(mids_):
@@ -9881,7 +9888,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                         winner=fig_mod(row_.get("B") or (f_.get("counts") or {}).get("B") or target_plugin))
             # a cutaway or a sliced top-down says so in its caption, not only in the frame's own label (a crop can cut that)
             if m_.get("caption"):
-                m_["caption"] += view_kind_caption(prov_, caption_words) + media_kind_caption(m_, caption_words)
+                # how the picture was made is said once per figure, on the frame it shows first
+                m_["caption"] += view_kind_caption(prov_, caption_words) + (
+                    media_kind_caption(m_, caption_words) if first_frame_.get(prov_.get("captureRequest") or mid_) == mid_ else "")
             m_["captureState"] = state_
             m_["captureRequest"] = prov_.get("captureRequest")
 
