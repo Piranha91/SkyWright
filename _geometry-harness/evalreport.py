@@ -1530,7 +1530,8 @@ def load_order_fact(ctx: dict, p_arm: str, patched_arm, pair: list, words: dict)
         c = fact["changeHands"]
         parts = [bind(w.get("freeBoth") or "Neither mod has to load first, and both orders were weighed: {fields} "
                       "record fields on {records} records change hands between them. With {first} before {second}, "
-                      "{measured}; with {second} before {first}, {reversed}. Neither order is ranked here.",
+                      "{measured}; with {second} before {first}, {reversed}. Which order to choose depends on which of "
+                      "these changes matters more to you, not on how many there are.",
                       {"first": first, "second": second, "fields": fmt_n(c["fields"]), "records": fmt_n(c["records"]),
                        "measured": lost_words(c["lostByMeasuredOrder"]), "reversed": lost_words(c["lostByReversed"])})]
     if fact["withPatch"] is not None:
