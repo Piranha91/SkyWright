@@ -31,6 +31,7 @@ sys.path.insert(0, str(HERE.parent / "scripts"))
 from runlog import Run  # noqa: E402
 
 RULES = HERE / "orderleads-rules.json"
+SCOPE_FILE = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" / "references" / "record-field-scope.json"
 FIELD = re.compile(r"^\S+ \S+: (\S+) - ")
 REGISTRATION = {"Quest", "DialogTopic", "DialogResponses", "Scene", "FormList", "Location", "StoryManagerQuestNode", "StoryManagerBranchNode",
                 "StoryManagerEventNode", "Package", "DialogBranch", "DialogView"}
@@ -153,8 +154,25 @@ def rows(d):
 
 # ---- the compressed-storage flag --------------------------------------------------------------------------------------
 
-def _flag_table(rules):
-    return {k: int(v) for k, v in ((rules.get("maskedFlags") or {}).get("bits") or {}).items()}
+def record_flags(scope_file=None) -> dict:
+    """The record-flag table shared with the record lane (record-field-scope.json `recordFlags`): the fields that hold
+    the header flags, the bits by name and the storage-only bits; empty where the skill data has none."""
+    try:
+        rf = json.loads(Path(scope_file or SCOPE_FILE).read_text(encoding="utf-8")).get("recordFlags") or {}
+    except (OSError, ValueError):
+        rf = {}
+    bits = {str(k): int(v) for k, v in (rf.get("bits") or {}).items()}
+    if not rf.get("field") or not bits:
+        return {}
+    return {"fields": [rf["field"], *(rf.get("sameBitsAs") or [])], "bits": bits,
+            "mask": sum(bits[n] for n in rf.get("storageOnly") or [] if n in bits)}
+
+
+_FLAGS = record_flags()
+
+
+def _flag_table(rules=None):
+    return dict(_FLAGS.get("bits") or {})
 
 
 def flag_value(v, table):
@@ -173,13 +191,13 @@ def flag_value(v, table):
 
 
 def compressed_only(row, rules):
-    """True when a record row's lost and winning flag values differ only in the masked flag."""
-    mf = rules.get("maskedFlags")
+    """True when a record row's lost and winning flag values differ only in the storage-only flags (Compressed)."""
+    mf = _FLAGS
     src = row.get("src") or {}
     if not mf or src.get("Field") not in mf["fields"]:
         return False
     table = _flag_table(rules)
-    bit = table[mf["flag"]]
+    bit = mf["mask"]
     nec = src.get("Necessary") or []
     vals = (nec[0].get("Values") if nec else None) or {}
     a, b = flag_value(vals.get("lost"), table), flag_value(vals.get("winner"), table)
@@ -190,7 +208,7 @@ def compressed_only(row, rules):
 
 def flag_census(all_rows, rules):
     """Every record-flags row by field and check: masked, kept with the bits that differ named, kept unreadable."""
-    mf = rules.get("maskedFlags")
+    mf = _FLAGS
     if not mf:
         return {}
     table = _flag_table(rules)

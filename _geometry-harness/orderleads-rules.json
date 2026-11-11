@@ -56,26 +56,6 @@
   "oneModBlockedTier": 4,
   "admission": true,
   "admissionRule": "a lead names two different non-base plugins (or two mod folders whose bytes differ on a shared path) in every row; a row naming one plugin, a row against the base game only, and a map edge with no row stay in the record with a counted reason",
-  "maskedFlags": {
-    "fields": [
-      "MajorFlags",
-      "SkyrimMajorRecordFlags"
-    ],
-    "flag": "Compressed",
-    "why": "the compressed-storage flag changes how a record is stored, not what the game does with it; a row whose values differ only in it is set aside",
-    "bits": {
-      "ESM": 1,
-      "NotPlayable": 4,
-      "Deleted": 32,
-      "InitiallyDisabled": 2048,
-      "Ignored": 4096,
-      "VisibleWhenDistant": 32768,
-      "Dangerous_OffLimits_InteriorCell": 131072,
-      "Compressed": 262144,
-      "CantWait": 524288
-    },
-    "bitsSource": "Mutagen.Bethesda.Skyrim 0.54.4, SkyrimMajorRecord.SkyrimMajorRecordFlag"
-  },
   "orderOver": "leads",
   "tierShares": {
     "1": 4,
