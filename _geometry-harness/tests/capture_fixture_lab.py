@@ -22,7 +22,7 @@ PLUGIN = "CfFixture.esp"
 CELLS = {"CfCutaway": 0x810, "CfTouch": 0x820, "CfBuried": 0x830, "CfGlow": 0x840, "CfFocus": 0x850, "CfNoNav": 0x860,
          "CfDisabled": 0x870, "CfCutMod": 0x880, "CfOpen": 0x890, "CfFocusLow": 0x8A0,
          "CfVoid": 0x8B0, "CfThick": 0x8C0, "CfThickWalls": 0x8D0, "CfTower": 0x8E0, "CfCloud": 0x8F0,
-         "CfRoofed": 0x900, "CfRoofTouch": 0x910, "CfTallFocus": 0x920}
+         "CfRoofed": 0x900, "CfRoofTouch": 0x910, "CfTallFocus": 0x920, "CfFxLit": 0x930, "CfFxMissing": 0x940}
 PLUGIN_MOD = "CfFixtureMod.esp"      # CfCutMod's B (master CfFixture.esp); the "without" setup leaves it out
 CUTMOD_B = f"000801:{PLUGIN_MOD}"
 

@@ -57,6 +57,15 @@ namespace ViewProbe;
 //               (the overlap's top + 64, about 104.5): it covers the pair from above and touches neither (F4)
 //   CfRoofTouch the same, the chunk's underside on the crates' tops (z 40.5..59.5, Walls[0]): it touches both, so it may
 //               not be hidden (F4)
+//   CfFxLit     no pair: vanilla meshes under an effects\ folder, solid or not by their own shapes (C1720-C1729), each
+//               base with a non-FX editor id unless said: Walls[0] the frozen Falmer statue (lit, collision) at
+//               (-1050,0,0); Walls[1] the ice sheet (one lit shape) at (-350,0,100); Walls[2] the blue fire (its only lit
+//               shape a refraction plane) at (350,0,0); Walls[3] the crater FX (effect shapes and hidden emitter geometry
+//               only) at (1050,0,0); Walls[4] the thin waterfall (effect shapes and a shader-less plane), hung
+//               above the floor at (0,700,2100); Walls[5] the ice sheet again under an FX editor id (the editor-id rule still drops it) at
+//               (0,-700,100)
+//   CfFxMissing no pair: one ref (Walls[0]) at the origin whose base names an effects\ mesh that does not exist: a physical
+//               ref whose mesh cannot be read, so the inside and clear queries must count it (C1727)
 //   CfTallFocus A: the CfTower shell (drawn box about z -512..1837) and B: the crate x4 at (0,0,150) (z 68..232),
 //               overlapping only the tower's lower part; the tower's interior top floor (Walls[0], about z 1280); floor
 //               tiles and navmesh at z 0. (A glow was tried first: an effect billboard's drawn box is flat.) The test
@@ -69,7 +78,14 @@ public static class CaptureFixture
     static FormKey K(uint id) => new(Key, id);
 
     public static readonly FormKey FloorBase = K(0x801), CrateBase = K(0x802), GlowBase = K(0x803), WallBase = K(0x804),
-        TowerBase = K(0x805), TowerTopBase = K(0x806), CloudBase = K(0x807), CampfireBase = K(0x808);
+        TowerBase = K(0x805), TowerTopBase = K(0x806), CloudBase = K(0x807), CampfireBase = K(0x808),
+        FalmerBase = K(0x809), IceBase = K(0x80A), BlueFireBase = K(0x80B), CraterBase = K(0x80C), WaterfallBase = K(0x80D),
+        IceFxBase = K(0x80E), MissingFxBase = K(0x80F);
+    public const string FalmerMesh = @"DLC01\Effects\DLC1Falmer_VampFrozenPose01.nif";
+    public const string IceMesh = @"DLC01\Effects\DLC1IceFlat01.nif";
+    public const string BlueFireMesh = @"Effects\C06FXfireBlueWithEmbersHeavy.nif";
+    public const string CraterMesh = @"DLC01\Effects\CraterBehaviors\sc_crater01FX.nif";
+    public const string WaterfallMesh = @"Effects\FXWaterfallThin2048x128.nif";
     public const string CloudMesh = @"Sky\CloudShape05_50.nif";
     public const string CampfireMesh = @"Clutter\WoodFires\Campfire01Burning.nif";
     public const string TowerMesh = @"Dungeons\Nordic\Exterior\Towers\NorTowerRuins01.nif";
@@ -86,11 +102,12 @@ public static class CaptureFixture
         CutMod = Ids("CfCutMod", 0x880), Open = Ids("CfOpen", 0x890), FocusLow = Ids("CfFocusLow", 0x8A0),
         Void = Ids("CfVoid", 0x8B0), Thick = Ids("CfThick", 0x8C0), ThickWalls = Ids("CfThickWalls", 0x8D0),
         Tower = Ids("CfTower", 0x8E0), Cloud = Ids("CfCloud", 0x8F0), Roofed = Ids("CfRoofed", 0x900),
-        RoofTouch = Ids("CfRoofTouch", 0x910), TallFocus = Ids("CfTallFocus", 0x920);
+        RoofTouch = Ids("CfRoofTouch", 0x910), TallFocus = Ids("CfTallFocus", 0x920), FxLit = Ids("CfFxLit", 0x930),
+        FxMissing = Ids("CfFxMissing", 0x940);
     /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
     public static readonly ModKey ModKeyB = new("CfFixtureMod", ModType.Plugin);
     public static readonly FormKey CutModB = new(ModKeyB, 0x801);
-    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls, Tower, Cloud, Roofed, RoofTouch, TallFocus };
+    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls, Tower, Cloud, Roofed, RoofTouch, TallFocus, FxLit, FxMissing };
 
     static CellIds Ids(string edid, uint b)
         => new(edid, K(b), K(b + 1), K(b + 2), K(b + 3), Enumerable.Range(0, 32).Select(n => K(0x2000 + (b - 0x810) / 0x10 * 0x40 + (uint)n)).ToArray(),
@@ -199,6 +216,14 @@ public static class CaptureFixture
             ObjectBounds = new ObjectBounds { First = new P3Int16(-4223, -623, -2642), Second = new P3Int16(3604, 442, 2466) } });
         m.Statics.Add(new Static(CampfireBase, Rel) { EditorID = "CfCampfire", Model = new Model { File = CampfireMesh },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-140, -196, -97), Second = new P3Int16(140, 140, 267) } });
+        // CfFxLit's bases: generous record boxes (the queries nominate by the mesh's own bounds; the box is only a fallback)
+        foreach (var (k, ed, mesh) in new[] { (FalmerBase, "CfFrozenFalmer", FalmerMesh), (IceBase, "CfIceSheet", IceMesh),
+                     (BlueFireBase, "CfBlueFire", BlueFireMesh), (CraterBase, "CfCraterFx", CraterMesh),
+                     (WaterfallBase, "CfThinWaterfall", WaterfallMesh), (IceFxBase, "FXCfIceSheet", IceMesh) })
+            m.Statics.Add(new Static(k, Rel) { EditorID = ed, Model = new Model { File = mesh },
+                ObjectBounds = new ObjectBounds { First = new P3Int16(-600, -600, -600), Second = new P3Int16(600, 600, 2400) } });
+        m.Statics.Add(new Static(MissingFxBase, Rel) { EditorID = "CfMissingFx", Model = new Model { File = @"Effects\CfNoSuchMesh.nif" },
+            ObjectBounds = new ObjectBounds { First = new P3Int16(-100, -100, 0), Second = new P3Int16(100, 100, 200) } });
         m.Statics.Add(new Static(GlowBase, Rel) { EditorID = "CfGlow", Model = new Model { File = GlowMesh },
             ObjectBounds = new ObjectBounds { First = new P3Int16(-258, -258, -258), Second = new P3Int16(258, 258, 258) } });
 
@@ -253,8 +278,17 @@ public static class CaptureFixture
         tall.Temporary.Add(Ref(TallFocus.A, TowerBase, 0, 0, 0));
         tall.Temporary.Add(Ref(TallFocus.B, CrateBase, 0, 0, 150, scale: 4f));
         tall.Temporary.Add(Ref(TallFocus.Walls[0], TowerTopBase, 0, 0, 0));
+        var fxLit = NewCell(FxLit, true);
+        fxLit.Temporary.Add(Ref(FxLit.Walls[0], FalmerBase, -1050, 0, 0));
+        fxLit.Temporary.Add(Ref(FxLit.Walls[1], IceBase, -350, 0, 100));
+        fxLit.Temporary.Add(Ref(FxLit.Walls[2], BlueFireBase, 350, 0, 0));
+        fxLit.Temporary.Add(Ref(FxLit.Walls[3], CraterBase, 1050, 0, 0));
+        fxLit.Temporary.Add(Ref(FxLit.Walls[4], WaterfallBase, 0, 700, 2100));
+        fxLit.Temporary.Add(Ref(FxLit.Walls[5], IceFxBase, 0, -700, 100));
+        var fxMissing = NewCell(FxMissing, true);
+        fxMissing.Temporary.Add(Ref(FxMissing.Walls[0], MissingFxBase, 0, 0, 0));
         foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell, thick, thickWalls, tower, cloud,
-                                  roofed, roofTouch, tall })
+                                  roofed, roofTouch, tall, fxLit, fxMissing })
             MovedRefFixture.FileInterior(m, c);
 
         var path = Path.Combine(dir, Key.FileName.String);
