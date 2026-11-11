@@ -324,6 +324,12 @@ def plain_reason(reason, words: dict) -> tuple[str, bool]:
     return "; and ".join(out), comparison
 
 
+def without_arm_of(pred: dict) -> str | None:
+    """The prediction's setup without the evaluated mod, as the plan names it: a sibling evaluation's setup keeps its
+    prefix ("sibling2:dependency-only"), which its frames carry too, so it is never matched to this bundle's own."""
+    return str(pred.get("withoutArm") or "") or None
+
+
 def hit_paths(hit: dict) -> list:
     """The archive paths a hit was found by: the curated `contentPaths`, else the tool's own `matches[].contentPath`."""
     paths = list(hit.get("contentPaths") or [])
@@ -527,6 +533,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         return (places.get(cell) or {}).get("name") or humanize(cell) or "this place"
 
     with_arm = pred.get("predictionArm")
+    # the setup without the mod as the plan names it, a sibling's prefixed, so frames are matched to the right
+    # evaluation's setup; `without_arm` (the bare id) is what the capture requests carry
+    without_full = without_arm_of(pred)
     without_arm = str(pred.get("withoutArm") or "").split(":", 1)[-1] or None
     order = next((a.get("locationPluginOrder") for a in (pres.get("scope") or {}).get("arms") or []
                   if a.get("armId") == with_arm), None) or []
@@ -997,7 +1006,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
 
     game = {(m.get("subject") or {}).get("formKey") for m in pres.get("media") or []
             if m.get("assessed") and m.get("mediaKind") == "game-video"}
-    arm_of = {"without": without_arm, "with": with_arm, "highlight": with_arm, "left": without_arm, "right": with_arm}
+    arm_of = {"without": without_full, "with": with_arm, "highlight": with_arm, "left": without_full, "right": with_arm}
+    bare_of = {k_: (str(v_).split(":", 1)[-1] if v_ else v_) for k_, v_ in arm_of.items()}   # as capture requests name it
 
     def frame_media(c, state):
         """A clash's frame in one state, from ONE capture request: the captured request about the clash, else the
@@ -1124,7 +1134,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             for state in states:
                 m = frame_media(c, state)
                 # a cutaway or a sliced top-down says so on the reel too, not only in the frame's own label
-                frames.append({"state": state, "armId": arm_of[state], "mediaId": (m or {}).get("id"),
+                frames.append({"state": state, "armId": bare_of[state], "mediaId": (m or {}).get("id"),
                                "viewNote": view_kind_line((m or {}).get("provenance") or {}) or None,
                                **({"label": frame_label(c, state, m)} if not split and frame_label(c, state, m) else {})})
             notes_ = list(dict.fromkeys(f_["viewNote"] for f_ in frames if f_.get("viewNote")))

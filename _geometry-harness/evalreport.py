@@ -11035,7 +11035,8 @@ def buried_lines(plan: dict, captures: list[dict], names: dict, words: dict) -> 
     return n
 
 
-def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out: Path, resolved=None) -> dict:
+def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out: Path, resolved=None,
+               siblings_all=None) -> dict:
     """The review reel's plan (reel_plan.py) from the compiled presentation, the bundle's names and masters, the
     skill's vignette policy and words, the recorded patch search and the evaluation's mod names."""
     import reel_plan
@@ -11044,13 +11045,18 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
     names = load_json(bundle / names_row["path"]) if names_row else {}
     masters = plugin_masters(b) or {}
     sb = Bundle(sibling) if sibling is not None else None
-    if sb is not None:
-        for k, v in (plugin_masters(sb) or {}).items():
+    # every joined sibling, with the prefix the plan names its setups by ("sibling:", "sibling2:", ...), in the order
+    # given; the primary's masters first (item 21 follow-up: media and masters from every sibling, not the first only)
+    sibs = [(Path(p_), str(x_)) for p_, x_ in (siblings_all or ([(sibling, "sibling:")] if sibling is not None else []))]
+    for s_ in ([sb] if sb is not None else []) + [Bundle(p_) for p_, _ in sibs if sibling is None or Path(p_) != Path(sibling)]:
+        for k, v in (plugin_masters(s_) or {}).items():
             masters.setdefault(k, v)
     policy = dict((load_json(SCENE_POLICY) or {}).get("vignettes") or {})
     policy["effectModelPattern"] = ((pr.get("reader") or {}).get("prediction") or {}).get("effectModelPattern")
     words = (pr.get("reel") or {}).get("words") or {}
     mod_names, names_doc = resolved if resolved is not None else resolve_mod_names(bundle, sibling, a, out)
+    import modnames
+    print(modnames.summary(mod_names), file=sys.stderr)
     names_ev = out / "evidence" / "mod-names.json"
     write_json(names_ev, names_doc)
     search, search_ref = None, None
@@ -11063,7 +11069,7 @@ def reel_block(plan: dict, bundle: Path, sibling: Path | None, pr: dict, a, out:
         write_json(dest, search)
         search_ref = {"path": dest.relative_to(out).as_posix(), "sha256": sha256_file(dest), "source": str(sp)}
     return _reel_block_rest(plan, bundle, sibling, pr, a, out, b, names, masters, sb, policy, words, mod_names,
-                            names_ev, search, search_ref)
+                            names_ev, search, search_ref, sibs)
 
 
 def resolve_mod_names(bundle: Path, siblings, a, out: Path) -> tuple[dict, dict]:
@@ -11090,25 +11096,36 @@ def resolve_mod_names(bundle: Path, siblings, a, out: Path) -> tuple[dict, dict]
                                             ((b.scope or {}).get("targets") or [])
                                             + [t for x in sbs for t in ((x.scope or {}).get("targets") or [])],
                                             declared, nexus_mode, reader_, out / "evidence" / "mod-names")
-    print(modnames.summary(mod_names), file=sys.stderr)
     return mod_names, names_doc
 
 
 def _reel_block_rest(plan, bundle, sibling, pr, a, out, b, names, masters, sb, policy, words, mod_names, names_ev,
-                     search, search_ref):
+                     search, search_ref, sibs=()):
     """reel_block's body after the names and the patch search are read."""
     import reel_plan
     captures = []
     for f in list(getattr(a, "capture_results", None) or []):
         doc = load_json(Path(f))
         captures += doc if isinstance(doc, list) else [doc] if isinstance(doc, dict) else []
-    sibling_roles = set(((((plan.get("reader") or {}).get("prediction") or {}).get("sibling") or {}).get("roles") or {}).values())
-    extra_media = bundle_media_rows(sb, sibling_roles) if sb is not None else []
+    pred0_ = (plan.get("reader") or {}).get("prediction") or {}
+    records_ = [r_ for r_ in [pred0_.get("sibling")] + list(pred0_.get("siblings") or []) if isinstance(r_, dict)]
+    extra_media = []
+    for path_, prefix_ in sibs:
+        # the setups this sibling plays a role in (its own arm ids), and the prediction's own setups it holds
+        own_ = {a_ for r_ in records_ if r_.get("pathAsGiven") and Path(str(r_["pathAsGiven"])) == Path(path_) for a_ in (r_.get("roles") or {}).values()}
+        own_ |= {str(x_)[len(prefix_):] for x_ in [pred0_.get("withoutArm"), pred0_.get("predictionArm"),
+                                                    *((pred0_.get("withoutPartnerArms") or {}).values())]
+                 if str(x_ or "").startswith(prefix_)}
+        for m_ in bundle_media_rows(Bundle(path_), own_):
+            # the setup id as the plan names it: prefixed, so a sibling's setup is never read as this bundle's
+            m_["subject"] = dict(m_.get("subject") or {}, armId=prefix_ + str((m_.get("subject") or {}).get("armId")))
+            m_["setupFrom"] = str(path_)
+            extra_media.append(m_)
     view = dict(plan, media=list(plan.get("media") or []) + extra_media)
-    markers = reel_markers(plan, names, [b.plan] + ([sb.plan] if sb is not None else []), pr)
+    markers = reel_markers(plan, names, [b.plan] + [Bundle(p_).plan for p_, _ in sibs], pr)
     # the prediction setup's switch census: a world-state clash's condition is read from its switch's trigger
     arm = str(((plan.get("reader") or {}).get("prediction") or {}).get("predictionArm") or "")
-    census_bundle, census_arm = (sibling, arm.split(":", 1)[1]) if arm.startswith("sibling:") else (bundle, arm)
+    census_bundle, census_arm = next(((p_, arm[len(x_):]) for p_, x_ in sibs if arm.startswith(x_)), (bundle, arm))
     census_path = (census_bundle / "evidence" / "outputs" / "state.switch-census" / f"{census_arm}.json") if census_bundle else None
     switches = {}
     if census_path is not None and census_path.is_file():
@@ -12009,7 +12026,9 @@ def cmd_plan(a) -> int:
                 g_dest[src_] = dest.relative_to(out).as_posix()
             ln_["path"] = g_dest[src_]
         try:
-            plan["reel"] = reel_block(plan, bundle, sibling, pr, a, out, resolved=resolved_)
+            plan["reel"] = reel_block(plan, bundle, sibling, pr, a, out, resolved=resolved_,
+                                      siblings_all=[(Path(x_), "sibling:" if k_ == 0 else f"sibling{k_ + 1}:")
+                                                    for k_, x_ in enumerate(sib_given)])
         except InputRefused as ex:
             return refuse(r, str(ex))
         stamp(plan)

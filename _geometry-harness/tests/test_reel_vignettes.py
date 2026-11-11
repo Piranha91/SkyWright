@@ -2436,7 +2436,8 @@ def capture_binding_fixture():
     pres, names, masters, search, mods = synthetic()
 
     def media(req, fk, states=("without", "with", "highlight")):
-        arm = {"without": "without-target", "with": "with-target", "highlight": "with-target"}
+        # the sibling's setup as the plan names it, prefixed (as evalreport gives a sibling's media to the reel)
+        arm = {"without": "sibling:without-target", "with": "with-target", "highlight": "with-target"}
         return [{"id": f"M-{req}-{s}", "assessed": True, "mediaKind": "offline-render",
                  "subject": {"checkId": "geometry.object-overlap", "armId": arm[s], "formKey": fk},
                  "provenance": {"captureRequest": req, "vignetteState": s, "poseId": "pose-" + req}} for s in states]
