@@ -11120,7 +11120,8 @@ def _reel_block_rest(plan, bundle, sibling, pr, a, out, b, names, masters, sb, p
             except reel_plan.Refused as ex:
                 raise InputRefused(f"patch-search-unreadable: {ex}")
             for h_ in usable_:
-                leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1], file=h_.get("file"))
+                leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1],
+                                                                   file=reel_plan.said_file(h_, words))
                               + reel_plan.lead_qualifiers(h_, words, loaded_, evaluated_))
             if not hits_:
                 # a supplied patch for this pair that the search did not find: said as the search's miss, never as no patch

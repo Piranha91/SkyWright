@@ -324,6 +324,32 @@ def plain_reason(reason, words: dict) -> tuple[str, bool]:
     return "; and ".join(out), comparison
 
 
+def hit_paths(hit: dict) -> list:
+    """The archive paths a hit was found by: the curated `contentPaths`, else the tool's own `matches[].contentPath`."""
+    paths = list(hit.get("contentPaths") or [])
+    paths += [m.get("contentPath") for m in hit.get("matches") or [] if isinstance(m, dict) and m.get("contentPath")]
+    return list(dict.fromkeys(str(p) for p in paths if str(p or "").strip()))
+
+
+def said_file(hit: dict, words: dict) -> str:
+    """A listed file as said: its name, and where the search found it by a path inside the file's archive (a hub), the
+    plugins those paths name."""
+    hit = flat_hit(hit)
+    names = list(dict.fromkeys(re.split(r"[\\/]", p)[-1] for p in hit_paths(hit)))
+    lw = words.get("listedHolds") or {}
+    if not names or not lw.get("one"):
+        return hit["file"]
+    shown = joined(names) if len(names) <= 2 else lw["more"].format(names=", ".join(names[:2]), count=len(names) - 2)
+    return lw["one"].format(file=hit["file"], plugins=shown)
+
+
+def unread_sources(entry: dict):
+    """The sources a pair's search did not read, as recorded; None where the entry does not record them, which is
+    not known, never "everything was read"."""
+    got = entry.get("unreadSources")
+    return list(got) if isinstance(got, list) else None
+
+
 def flat_hit(hit: dict) -> dict:
     """A patch-search hit with its file's name at `file` and the file's own fields (status, category, version, fileId)
     beside it: housecarl_nexus_file_search records the file as an object, a hand-curated search as its name. A hit
@@ -767,11 +793,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             loaded_ = {str(x).lower() for x in full_order or order}
             hit_ = usable_first(hits, loaded_)[0]
             q_ = lead_qualifiers(hit_, words, loaded_, bool(own))
-            return (lead + pick("listed").format(file=hit_.get("file")) + q_,
+            return (lead + pick("listed").format(file=said_file(hit_, words)) + q_,
                     {**ev, "case": "listed", "hit": hit_, "qualifiers": q_.strip() or None})
         # "No patch exists" only on a search that found its own known answer and read every source of this pair
-        unread = entry.get("unreadSources") or []
-        if known_found and not unread:
+        unread = unread_sources(entry)
+        if known_found and unread == []:
             return lead + pick("noneOther" if own else "none"), {**ev, "case": "none-searched"}
         return (lead + pick("notFoundOther" if own else "notFound").format(patch=patch_name(own[0]) if own else ""),
                 {**ev, "case": "not-found", "knownAnswerFound": known_found, "unreadSources": unread})

@@ -248,7 +248,7 @@ def synthetic(play_time: bool = False, sentinel: bool = False, patch_search: boo
     search = None
     if patch_search:
         search = {"schemaVersion": 1, "tool": "housecarl_nexus_search + housecarl_nexus_file_search",
-                  "pairs": [{"pair": [x, "Target.esp"], "hits": [],
+                  "pairs": [{"pair": [x, "Target.esp"], "hits": [], "unreadSources": [],
                              "queries": [{"tool": t, "query": f"{x} {t}", "responseSha256": "0" * 64, "date": "2026-10-26"}
                                          for t in POLICY["patchSearch"]["requiredTools"]]} for x in ("Alpha.esp", "Beta.esp")],
                   "knownAnswer": {"pair": ["Alpha.esp", "Target.esp"], "patch": "Alpha - Target patch.esp",
@@ -544,7 +544,7 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
         known = (search or {}).get("knownAnswer") or {}
         want = re.sub(r"\.(esp|esm|esl)$", "", str(known.get("patch") or ""), flags=re.I).lower()
         found = bool(want) and any(want in json.dumps(h).lower() for h in known.get("hits") or [])
-        if found and not entry.get("unreadSources"):
+        if found and entry.get("unreadSources") == []:   # an entry that records no unread list is not known read
             return lead + pick("noneOther" if own else "none")
         return lead + pick("notFoundOther" if own else "notFound")
 
