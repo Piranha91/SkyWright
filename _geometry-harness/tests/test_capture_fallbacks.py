@@ -812,11 +812,18 @@ def rv_reason_only(tmp: Path, RP, A: str, B: str):
         reel = RP.plan_reel(_copy.deepcopy(pres2), names, masters, pol, RV.binding_words(), search, mods, keep + [result],
                             markers=RV.MARKERS, switches=RV.SWITCHES, **kw)
         ch = next((c for c in reel.get("chapters") or [] if c.get("kind") == "unpictured"), {})
+        ch = dict(ch, reportLines=" ".join(str(x) for x in reel.get("reportLines") or []))
         return ch, [c for c in ch.get("clashes") or [] if c.get("formKey") == A]
     ch_b, rows_b = plan(buried_result({A: 13, B: 0}, 13, B))
     ch_r, rows_r = plan(buried_result(None, None, B))
-    check("CF28", bool(rows_b) and rows_b[0].get("reason") == "buried" and "Buried" in str(ch_b.get("narration")),
-          "the buried clash was told as 'no camera could see' in the reel", f"{rows_b} | {str(ch_b.get('narration'))[:300]}")
+    # since 893df452 (Piranha, 2026-11-10: no caveats in the reel) the reasons a clash is not pictured are not narrated:
+    # they move to the plan's reportLines, which the report prints as "About the review reel"
+    nar_b = str(ch_b.get("narration"))
+    check("CF28", bool(rows_b) and rows_b[0].get("reason") == "buried" and "Buried" in ch_b["reportLines"]
+          and "No camera could see" not in ch_b["reportLines"] and "No camera could see" in ch_r["reportLines"]
+          and not any(w in nar_b for w in ("Buried", "No camera could see")),
+          "the buried clash was told as 'no camera could see' (in the report's reel lines), or a reason was narrated",
+          f"{rows_b} | report lines {ch_b['reportLines'][:300]} | narration {nar_b[:200]}")
     check("CF28", bool(rows_r) and rows_r[0].get("reason") == "captureRefused" and ch_b.get("count") == ch_r.get("count"),
           "a buried clash changed the reel's unpictured count, or a plain refusal was called buried",
           f"buried count {ch_b.get('count')}, refused count {ch_r.get('count')}, refused rows {rows_r}")
