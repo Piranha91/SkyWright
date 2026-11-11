@@ -60,7 +60,9 @@ And the rest of "changed references with a box" is named by cause rather than co
     1648  a static whose model is under effects/ (MaSwF), in no role: unjudged, EffectVolume.
     1649  an idle marker with bounds (MaSwI), a type in no role: unjudged, TypeOutsideRoles.
     1650  an idle marker 6,000 u across (MaSwO), over the volume cap: unjudged, OverSizeCap.
-    1651  a placed hazard (MaSwZ), whose base link the placement reader does not read: unjudged, PlacedTrap.
+    1651  a placed hazard (MaSwZ), whose body is not measured: unjudged, PlacedTrap.
+    C1756  the same state's console census names the hazard's own base: PlacedHazard, link Hazard, MaHazard (Hazard).
+    C1757  the --json dump's placedTrapBases holds that one entry (base 000845, type Hazard, editor id MaHazard, count 1).
     1652  in each of those states only the switch itself (a static with no model and no bounds) is left in NoBox.
 
 HC_MA_DUMP=DIR keeps every emit and log.
@@ -180,7 +182,9 @@ class Lab:
                                          "--state", f"MaSw{x}", "--primitive-solidity", table])
         for x in EXTRA:
             self.x["no-" + x] = tmp / f"no-{x}.json"
-            self.logs["no-" + x] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", self.x["no-" + x], *tail, "--state", f"MaSw{x}"])
+            zj = ["--json", tmp / "no-Z.rows.json"] if x == "Z" else []
+            self.z_rows = tmp / "no-Z.rows.json"
+            self.logs["no-" + x] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", self.x["no-" + x], *tail, "--state", f"MaSw{x}", *zj])
         self.logs["bad-table"] = run([exe(PROBES, "stateprobe"), "--order", self.cand, "--emit", tmp / "bad.json", *tail, "--state", "MaSwP",
                                       "--primitive-solidity", bad_table])
         self.state_emit, self.state_json = tmp / "state-emit.json", tmp / "state-rows.json"
@@ -376,6 +380,24 @@ def main() -> int:
             act = cov(L.x["no-H"], "changed placed actors")
             assert "Actor" not in (box.get("Unjudgeable") or {}) and (act.get("Unjudgeable") or {}).get("ActorUnmeasured") == 1, (box, act)
 
+        def c1756():
+            # Rejects: no census, or one naming the arm without its base (the attribution the arm base exists for), or the
+            # hazard moved out of PlacedTrap (its base read into Base, where the mesh consumers would see it).
+            out = L.logs["no-Z"].stdout
+            line = next((l for l in out.splitlines() if "placed hazards or traps by base" in l), None)
+            assert line is not None, out[-800:]
+            assert "PlacedHazard Hazard 000845" in line and "(Hazard MaHazard) 1" in line, line
+            named("no-Z", "PlacedTrap", "unj")
+
+        def c1757():
+            # Rejects: the --json census dropping the base key, its type or editor id, or counting the hazard twice.
+            j = json.loads(Path(L.z_rows).read_text(encoding="utf-8"))
+            ents = j.get("placedTrapBases") or []
+            want = [e for e in ents if (e.get("base") or "").startswith("000845") and e.get("baseType") == "Hazard"
+                    and e.get("editorId") == "MaHazard" and e.get("arm") == "PlacedHazard" and e.get("link") == "Hazard"
+                    and e.get("count") == 1]
+            assert len(want) == 1 and len(ents) == 1, ents
+
         def c1652():
             # Rejects: a fix that empties NoBox wholesale (the switch has no box and stays unjudged as NoBox).
             bad = {x: parts("no-" + x)[0].get("NoBox") for x in EXTRA if parts("no-" + x)[0].get("NoBox") != 1}
@@ -393,6 +415,8 @@ def main() -> int:
                          ("1649 an idle marker is unjudged as TypeOutsideRoles", lambda: named("no-I", "TypeOutsideRoles", "unj")),
                          ("1650 an over-cap box in no role is unjudged as OverSizeCap", lambda: named("no-O", "OverSizeCap", "unj")),
                          ("1651 a placed hazard is unjudged as PlacedTrap, not NoBox", lambda: named("no-Z", "PlacedTrap", "unj")),
+                         ("C1756 the placed hazard's console census names its own base", c1756),
+                         ("C1757 the --json census names the base, its type and editor id", c1757),
                          ("1652 only the switch stays in NoBox", c1652)]:
             check(name, fn)
         for name, fn in [("1454 adding editor markers does not move what the state check could not judge", c1454),

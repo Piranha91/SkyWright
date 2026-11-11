@@ -78,7 +78,7 @@ public sealed class StateTally
     public int MarkerPrimitiveSolid, MarkerPrimitiveNotSolid;
     /// <summary>The rest of the changed references without a box, by cause. Set aside: a decal (a placed TextureSet: a projected
     /// texture, no model and no collision). Unjudged, by name: a placed actor (the check judges objects), a placed hazard or trap
-    /// (the placement reader reads no base link on those arms), an effects mesh in no role, a type in none of the check's role
+    /// (Base is empty on those arms; the arm's own link is ArmBase, named in PlacedTrapCensus), an effects mesh in no role, a type in none of the check's role
     /// sets, and a box over the volume cap in no role.</summary>
     public int Decal, PlacedTrap, EffectVolume, TypeOutsideRoles, OverSizeCap;
     /// <summary>Placed actors a state changes (never a row: what happens to an enabled actor is not measured in game). Set aside:
@@ -87,6 +87,9 @@ public sealed class StateTally
     public int ActorDeparts, ActorClear, ActorOffNavmesh, ActorInSolid, ActorFloating, ActorBuried, ActorUnmeasured;
     /// <summary>One entry per (state, arriving actor), in evaluation order: the category and what decided it.</summary>
     public List<(string State, FormKey Key, ActorPlacement Placement, string Detail)> ActorCensus { get; } = new();
+    /// <summary>One entry per (state, placed hazard or trap) counted in <see cref="PlacedTrap"/>: which reference, so the census
+    /// can name its arm's own base (OverlapIndex.RefArmBase). Still unjudged: a hazard's or projectile's body is not measured.</summary>
+    public List<(string State, FormKey Key)> PlacedTrapCensus { get; } = new();
 }
 
 /// <summary>Where an actor a state brings in stands, from its placement: see <see cref="ActorAsk"/>.</summary>
@@ -345,7 +348,7 @@ public sealed class StateEvaluator
                 }
                 else switch (_why.GetValueOrDefault(key))
                 {
-                    case Why.PlacedTrap: tally.PlacedTrap++; break;
+                    case Why.PlacedTrap: tally.PlacedTrap++; tally.PlacedTrapCensus.Add((arm.Name, key)); break;
                     case Why.Decal: tally.Decal++; break;
                     case Why.EffectVolume: tally.EffectVolume++; break;
                     case Why.OverSizeCap: tally.OverSizeCap++; break;
