@@ -8297,6 +8297,120 @@ CASES["case-800"] = case_800
 CASES["case-801"] = case_801
 
 
+# ------------------------------------------------------- the measured primitive table in a plan: cases 1730-1733
+# stateprobe decides collision-marker primitives only when it is given station Q's table (--primitive-solidity). The plan
+# finds it (the flag, else HOUSECARL_PRIMITIVE_SOLIDITY, else `primitiveSolidity` in the file HOUSECARL_HARNESS_CONFIG
+# names), freezes a copy with its sha256, and the state check passes the copy; with none it says so and runs without.
+
+SL_TABLE = [{"kind": "base", "value": "000804:MxRoom.esm", "layer": "none", "verdict": "solid", "stops": ["player", "items"],
+             "evidence": "fixture"}]
+
+
+def _sl_plan_run(tmp: Path, name: str, env_over: dict, run_it: bool = True, between=None):
+    d = GEN / "cases" / P25_CASE
+    run = tmp / name
+    scen = d / "scenario.json"
+    env = {k: v for k, v in os.environ.items() if k not in ("HOUSECARL_HARNESS_CONFIG", "HOUSECARL_PRIMITIVE_SOLIDITY")}
+    env.update(env_over)
+    env["EVALRUN_FAKE_SCENARIO"] = str(scen)
+    args = ["plan", "--registry", GEN / "registry" / "fixture-check-registry.json", "--scope", d / "scope.json",
+            "--candidates", d / "candidates", "--out", run, "--harness", REAL_HARNESS, "--states", "baseline,fixture-switched",
+            "--select", "state.switch-census,state.conditional-geometry"] + probe_cmds()
+    p = subprocess.run([sys.executable, str(EVALRUN)] + [str(a) for a in args], capture_output=True, text=True, env=env, timeout=300)
+    if between and (run / "plan.json").exists():
+        between(run)
+    r = (subprocess.run([sys.executable, str(EVALRUN), "run", "--run", str(run)], capture_output=True, text=True, env=env, timeout=300)
+         if run_it and p.returncode == 0 else None)
+    return run, p, r
+
+
+def _sl_table(tmp: Path, name: str) -> Path:
+    f = tmp / f"{name}-table.json"
+    f.write_text(json.dumps(SL_TABLE), encoding="utf-8")
+    return f
+
+
+def _sl_config(tmp: Path, name: str, table: Path) -> Path:
+    cfg = tmp / f"{name}-harness.json"
+    cfg.write_text(json.dumps({"primitiveSolidity": str(table).replace("\\", "/")}), encoding="utf-8")
+    return cfg
+
+
+def _sl_state_entries(run: Path) -> list:
+    led = ledger_entries(load(run / "ledger.json") or {})
+    return [v for k, v in led.items() if k.startswith("state.conditional-geometry__")]
+
+
+def case_1730(tmp):
+    """The harness config names the table: the plan freezes a copy with its sha256 and every stateprobe launch gets it.
+    Rejects: an evaluation that never passes the table, or passes the live file rather than the plan's copy."""
+    case = "case-1730-primitive-table-frozen"
+    table = _sl_table(tmp, case)
+    run, p, r = _sl_plan_run(tmp, case, {"HOUSECARL_HARNESS_CONFIG": str(_sl_config(tmp, case, table))})
+    expect(p.returncode, 0, f"{case}: the plan is made ({p.stdout[-300:]} {p.stderr[-300:]})")
+    rec = ((load(run / "plan.json") or {}).get("inputs") or {}).get("primitiveSolidity") or {}
+    frozen = run / str(rec.get("file") or "missing")
+    check(rec.get("sha256") == sha_of(table) and frozen.is_file() and sha_of(frozen) == sha_of(table) and not same_file(frozen, table),
+          f"{case}: the plan records a frozen copy of the table and its sha256 ({rec})")
+    cmds = _w2_state_cmds(run)
+    check(cmds and all(("--primitive-solidity " + str(frozen)) in c for c in cmds),
+          f"{case}: every stateprobe launch gets --primitive-solidity <the plan's copy> ({[c[-200:] for c in cmds]})")
+
+
+def case_1731(tmp):
+    """No table anywhere: the plan says so in its record and on its console, and the state check runs without the flag.
+    Rejects: a silent run without the table, or a refusal that takes the check from a machine without one."""
+    case = "case-1731-primitive-table-absent"
+    run, p, r = _sl_plan_run(tmp, case, {})
+    expect(p.returncode, 0, f"{case}: the plan is made without a table ({p.stderr[-300:]})")
+    rec = ((load(run / "plan.json") or {}).get("inputs") or {}).get("primitiveSolidity") or {}
+    check(rec.get("given") is False and "primitiveSolidity" in str(rec.get("why") or ""),
+          f"{case}: the plan records that no table was given, and where it looked ({rec})")
+    check("no primitive table" in p.stdout.lower(), f"{case}: the plan's console says no primitive table was given")
+    cmds = _w2_state_cmds(run)
+    check(cmds and not any("--primitive-solidity" in c for c in cmds),
+          f"{case}: stateprobe runs without the flag ({[c[-160:] for c in cmds]})")
+
+
+def case_1732(tmp):
+    """The config names a table that is not there: the plan refuses in one sentence. Rejects: a silent fall-through to no table."""
+    case = "case-1732-primitive-table-missing"
+    run, p, r = _sl_plan_run(tmp, case, {"HOUSECARL_HARNESS_CONFIG": str(_sl_config(tmp, case, tmp / "no-such-table.json"))}, run_it=False)
+    out = (p.stdout + p.stderr)
+    check(p.returncode != 0 and "no-such-table.json" in out and "primitive" in out.lower() and not (run / "plan.json").exists(),
+          f"{case}: the plan refuses and names the missing table (exit {p.returncode}: {out.strip()[-300:]})")
+
+
+def case_1733(tmp):
+    """The plan's copy changed after planning: the state check is blocked by name and launches nothing.
+    Rejects: a run with a table other than the one the plan froze."""
+    case = "case-1733-primitive-table-changed"
+    table = _sl_table(tmp, case)
+
+    def damage(run):
+        rec = ((load(run / "plan.json") or {}).get("inputs") or {}).get("primitiveSolidity") or {}
+        if rec.get("file"):
+            (run / rec["file"]).write_text(json.dumps(SL_TABLE + [dict(SL_TABLE[0], layer="L_STATIC")]), encoding="utf-8")
+
+    run, p, r = _sl_plan_run(tmp, case, {"HOUSECARL_HARNESS_CONFIG": str(_sl_config(tmp, case, table))}, between=damage)
+    ent = _sl_state_entries(run)
+    check(ent and all(execution_of(e) == "blocked(primitive-table-changed)" for e in ent) and not _w2_state_cmds(run),
+          f"{case}: a changed copy blocks the state check and launches nothing ({[execution_of(e) for e in ent]})")
+
+
+def same_file(a: Path, b: Path) -> bool:
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
+CASES["case-1730"] = case_1730
+CASES["case-1731"] = case_1731
+CASES["case-1732"] = case_1732
+CASES["case-1733"] = case_1733
+
+
 
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""

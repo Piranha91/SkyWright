@@ -272,6 +272,11 @@ def validate(registry):
         # P25: a probe that can be scoped to the plan's population names the flag that takes the population file.
         # ordersweep passes it to a sweep probe and evalrun to a probe-emit check (window 2); no other kind runs a probe
         # that could take it, so the key means nothing there.
+        if "primitiveSolidityFlag" in adapter:
+            if kind != "probe-emit" or adapter.get("exe") != "stateprobe":
+                problems.append(f"{cid}: adapter.primitiveSolidityFlag is passed only to stateprobe's probe-emit check, not by kind {kind}")
+            elif adapter["primitiveSolidityFlag"] != "--primitive-solidity":
+                problems.append(f"{cid}: adapter.primitiveSolidityFlag must be \"--primitive-solidity\", the flag stateprobe takes")
         if "populationFlag" in adapter:
             if kind not in ("ordersweep-probe", "probe-emit"):
                 problems.append(f"{cid}: adapter.populationFlag is passed only by the ordersweep and probe-emit adapters, not by kind {kind}")

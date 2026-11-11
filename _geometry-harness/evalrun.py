@@ -1193,6 +1193,48 @@ def given_path(p) -> Path:
     return Path(os.path.abspath(p))
 
 
+PRIMITIVE_TABLE_FILE = "inputs/primitive-solidity.json"
+PRIMITIVE_TABLE_NONE = ("no --primitive-solidity, HOUSECARL_PRIMITIVE_SOLIDITY or primitiveSolidity in the harness config "
+                        "(HOUSECARL_HARNESS_CONFIG) names one")
+
+
+def primitive_table(flag: str | None) -> tuple[dict | None, bytes | None, str | None]:
+    """Station Q's measured primitive table for stateprobe --primitive-solidity: the flag, else HOUSECARL_PRIMITIVE_SOLIDITY,
+    else `primitiveSolidity` in the file HOUSECARL_HARNESS_CONFIG names (HarnessTarget's precedence). Returns (record, bytes,
+    refusal): a named table that is missing or is not a table refuses the plan; none anywhere is recorded as not given."""
+    source, path = None, None
+    if flag:
+        source, path = "--primitive-solidity", flag
+    elif os.environ.get("HOUSECARL_PRIMITIVE_SOLIDITY", "").strip():
+        source, path = "HOUSECARL_PRIMITIVE_SOLIDITY", os.environ["HOUSECARL_PRIMITIVE_SOLIDITY"].strip()
+    elif os.environ.get("HOUSECARL_HARNESS_CONFIG", "").strip():
+        cfg = Path(os.environ["HOUSECARL_HARNESS_CONFIG"].strip())
+        if not cfg.is_file():
+            return None, None, f"HOUSECARL_HARNESS_CONFIG points at {cfg}, which does not exist; fix the variable or unset it."
+        try:
+            got = json.loads(cfg.read_text(encoding="utf-8")).get("primitiveSolidity")
+        except (OSError, ValueError, AttributeError) as ex:
+            return None, None, f"the harness config {cfg} could not be read as JSON ({ex}); fix it before planning."
+        if isinstance(got, str) and got.strip():
+            source, path = f"primitiveSolidity in {cfg}", got.strip()
+    if path is None:
+        return {"given": False, "why": PRIMITIVE_TABLE_NONE}, None, None
+    p = Path(path)
+    if not p.is_file():
+        return None, None, (f"the primitive table {path} (from {source}) does not exist; point {source} at station Q's "
+                            f"table or remove it to evaluate without one.")
+    data = p.read_bytes()
+    try:
+        rows = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as ex:
+        return None, None, f"the primitive table {path} (from {source}) is not JSON ({ex}); fix the table or remove {source}."
+    if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) and str(r.get("evidence") or "").strip() for r in rows):
+        return None, None, (f"the primitive table {path} (from {source}) is not a list of measured entries each naming its "
+                            f"evidence; fix the table or remove {source}.")
+    return ({"given": True, "file": PRIMITIVE_TABLE_FILE, "sha256": hashlib.sha256(data).hexdigest(), "source": source,
+             "path": str(p), "entries": len(rows)}, data, None)
+
+
 def cmd_plan(a) -> int:
     run = Path(a.out)
     registry_path = given_path(a.registry)
@@ -1587,6 +1629,9 @@ def cmd_plan(a) -> int:
                       f"({getattr(ex.error, 'strerror', None) or ex.error}), so this plan cannot record which program "
                       f"would run. Make the file readable and plan again.")
 
+    table_record, table_bytes, table_refusal = primitive_table(getattr(a, "primitive_solidity", None))
+    if table_refusal:
+        return refuse(table_refusal)
     population_block, population_text = plan_population(checks, arms, (scope or {}).get("targets", []), population,
                                                         a.instance)
     if getattr(a, "population_from", None):
@@ -1655,6 +1700,7 @@ def cmd_plan(a) -> int:
         "options": options,
         "ordersweepProbes": sorted(set(ordersweep_probes)),
         "population": population_block,
+        "inputs": {"primitiveSolidity": table_record},
         "budgets": {
             "minutes": a.budget_minutes,
             "maxCandidates": a.max_candidates,
@@ -1681,6 +1727,9 @@ def cmd_plan(a) -> int:
     run.mkdir(parents=True, exist_ok=True)
     if population_text is not None:
         (run / population_block["file"]).write_text(population_text, encoding="utf-8", newline="\n")
+    if table_bytes is not None:
+        (run / PRIMITIVE_TABLE_FILE).parent.mkdir(parents=True, exist_ok=True)
+        (run / PRIMITIVE_TABLE_FILE).write_bytes(table_bytes)
     set_run_store(run)
     with Run("evalrun-plan", stage_source="counted") as r:
         r.feature("checks", len(checks), "checks")
@@ -1699,6 +1748,12 @@ def cmd_plan(a) -> int:
     print(f"plan {plan['planId']}: {len(checks)} checks, {len(arms)} arms, states {','.join(states)}, depth {depth}")
     for s in settings.sentences():
         print(s)
+    if table_record.get("given"):
+        print(f"primitive table: {table_record['path']} ({table_record['source']}, sha256 {table_record['sha256'][:12]}), "
+              f"frozen as {PRIMITIVE_TABLE_FILE}; stateprobe decides collision-marker primitives by it")
+    else:
+        print(f"no primitive table given: {PRIMITIVE_TABLE_NONE}, so stateprobe leaves every collision-marker primitive "
+              f"unjudged and its emit says so")
     for line in preflight_notes:
         print(line)
     for pid, rec in programs.items():
@@ -3607,6 +3662,16 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
                        f"the plan's population file {pfile.name} no longer hashes to the plan's value")
             return
         argv += [adapter.get("populationFlag") or "--population", str(pfile)]
+    table = (ex.plan.get("inputs") or {}).get("primitiveSolidity") or {}
+    if kind == "probe-emit" and adapter.get("primitiveSolidityFlag") and table.get("given"):
+        # the plan's frozen copy of station Q's table, gated by its hash; a plan frozen before it (no inputs) runs without
+        tfile = ex.run / table["file"]
+        if not tfile.is_file() or sha256_file(tfile) != table["sha256"]:
+            ex.account(check, arm, "blocked(primitive-table-changed)", "stale-inputs",
+                       f"the plan's primitive table {tfile.name} is gone" if not tfile.is_file() else
+                       f"the plan's primitive table {tfile.name} no longer hashes to the plan's value; plan again")
+            return
+        argv += [adapter["primitiveSolidityFlag"], str(tfile)]
 
     if kind == "adviceprobe":
         if "--refresh" in argv:
@@ -6954,6 +7019,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--instance"); p.add_argument("--profile"); p.add_argument("--game")
     p.add_argument("--harness", default=str(HERE))
     p.add_argument("--probe-args", default="")
+    p.add_argument("--primitive-solidity", metavar="FILE",
+                   help="station Q's measured primitive table for stateprobe (else HOUSECARL_PRIMITIVE_SOLIDITY, else "
+                        "primitiveSolidity in the harness config); the plan freezes a copy and the state check passes it")
     p.add_argument("--population-from", metavar="FILE",
                    help="use this population file (another plan's RUN/population.json) instead of the one this plan "
                         "would compute, so two evaluations that a report joins (a sibling bundle) scope their geometry "

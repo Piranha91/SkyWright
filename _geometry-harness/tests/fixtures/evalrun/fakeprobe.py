@@ -427,7 +427,7 @@ def parse(argv):
     while i < len(argv):
         t = argv[i]
         if t in ("--order", "--emit", "--base", "--json", "--out", "--instance", "--profile", "--game",
-                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population", "--reverse-of", "--pair-cache-write", "--pair-cache-read") and i + 1 < len(argv):
+                 "--state", "--target", "--mod", "--page", "--states-file", "--switch-map", "--population", "--primitive-solidity", "--reverse-of", "--pair-cache-write", "--pair-cache-read") and i + 1 < len(argv):
             if t == "--target":
                 a["target"].append(argv[i + 1])
             elif t == "--pair-cache-read":
