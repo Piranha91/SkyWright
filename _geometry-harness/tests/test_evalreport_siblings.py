@@ -437,6 +437,138 @@ def main():
               and "shared setup" in str(joins.get(ov, (None, ""))[1] or ""))
         return ok, f"attributions {got}; shared-setup sibling joined {prim_}; sub-order sibling checks {joins}"
 
+    # S17-S20, G2-G4 (only-t overclaim): with several evaluated mods, "needs both" only where every evaluated mod is
+    # shown needed -- it owns a record on the row, or another mod's "only" setup leaves out exactly it. An "only" setup
+    # that leaves out the other mod and more (a plugin taken as its companion, or a third evaluated mod) separates
+    # nothing: not-separable, naming that setup. Rows: 801 ModA's object against a base-game object, 802 against ModB's
+    # own object, 803 like 801 but there with ModA alone.
+    m_rows = [T.row("CONTACT", B, A, f"000801:{A}", other="000901:Skyrim.esm"),
+              T.row("CONTACT", B, A, f"000802:{A}", other=f"000902:{B}"),
+              T.row("CONTACT", B, A, f"000803:{A}", other="000903:Skyrim.esm")]
+    unrel = "Unrelated.esp"
+
+    def multi_main(arms, rows_by_arm, targets):
+        plan, md, _ = T.compile_and_render(arms, {(C, a_): r_ for a_, r_ in rows_by_arm.items()}, targets)
+        return {"plan": plan, "md": md, "code": 0, "err": ""}
+
+    def leaves_more_why(setup, other):
+        return T.R.bind((words().get("notSeparableWhy") or {}).get("onlyLeavesOutMore") or "\0",
+                        {"setup": setup, "other": other})
+
+    def multi_check(res, want, why_=None, why_count=0):
+        got, md = attributions(res), res["md"] or ""
+        ok = got == want and (why_ is None or md.count(why_) == why_count)
+        return ok, (f"attributions {got} (want {want})"
+                    + (f"; the why naming the setup on the page {md.count(why_)} times (want {why_count})"
+                       if why_ is not None else ""))
+
+    # S17. "Only ModA" lacks ModB and a plugin loaded in exactly the setups with ModB (taken as its companion).
+    def only_setup_with_companion_not_separable():
+        arms = [T.arm("baseline", [BASE, unrel, A, B], kind="baseline"), T.arm("dependency-only", [BASE]),
+                T.arm("plus-a", [BASE, A]), T.arm("plus-b", [BASE, unrel, B])]
+        res = multi_main(arms, {"baseline": m_rows, "dependency-only": [], "plus-a": m_rows[2:], "plus-b": []},
+                         [A, B])
+        return multi_check(res, {"000801": "not-separable", "000802": "needs-both", "000803": "single-mod"},
+                           leaves_more_why(f"only {A} besides the base game", B), 1)
+
+    # S18. The same with the "only" setups lent by a sibling (its companion form).
+    def sibling_only_setup_with_companion_not_separable():
+        main_ = ("main", [T.arm("baseline", [BASE, unrel, A, B, T.PATCH], kind="baseline"),
+                          T.arm("without-patch", [BASE, unrel, A, B])],
+                 {(C, "baseline"): [], (C, "without-patch"): m_rows}, [A, B], {"patches": [T.PATCH]})
+        sib = ("eval-each", [T.arm("baseline", [BASE, unrel, A, B], kind="baseline"), T.arm("dependency-only", [BASE]),
+                             T.arm("plus-a", [BASE, A]), T.arm("plus-b", [BASE, unrel, B])],
+               {(C, "baseline"): m_rows, (C, "dependency-only"): [], (C, "plus-a"): m_rows[2:], (C, "plus-b"): []},
+               [A, B], {"plan_id": "sibeach00000"})
+        res = run_plan(main_, [sib], declare=(T.PATCH,))
+        if refused(res):
+            return False, refused(res)
+        return multi_check(res, {"000801": "not-separable", "000802": "needs-both", "000803": "single-mod"},
+                           leaves_more_why(f"only {A} besides the base game", B), 1)
+
+    # S19. Three evaluated mods, exact "only" setups: each leaves out two, so no clash is shown to need all three.
+    def three_mods_only_setups_not_separable():
+        m3 = "ModC.esp"
+        arms = [T.arm("baseline", [BASE, A, B, m3], kind="baseline"), T.arm("dependency-only", [BASE]),
+                T.arm("plus-a", [BASE, A]), T.arm("plus-b", [BASE, B]), T.arm("plus-c", [BASE, m3])]
+        res = multi_main(arms, {"baseline": m_rows, "dependency-only": [], "plus-a": m_rows[2:], "plus-b": [],
+                                "plus-c": []}, [A, B, m3])
+        got, md = attributions(res), res["md"] or ""
+        want = {"000801": "not-separable", "000802": "not-separable", "000803": "single-mod"}
+        why_b, why_c = (leaves_more_why(f"only {A} besides the base game", B),
+                        leaves_more_why(f"only {A} besides the base game", m3))
+        ok = got == want and why_b in md and why_c in md
+        return ok, (f"attributions {got} (want {want}); why for {B} on the page: {why_b in md}; why for {m3}: "
+                    f"{why_c in md}")
+
+    # S20. A setup listing the mods in another case is the same setup: "only ModA" written in lower case still leaves
+    # out exactly ModB, so both clashes need both mods.
+    def only_setup_in_other_case_is_exact():
+        arms = [T.arm("baseline", [BASE, unrel, A, B], kind="baseline"),
+                T.arm("dependency-only", [BASE, unrel]),
+                T.arm("plus-a", [BASE.lower(), unrel.lower(), A.lower()]), T.arm("plus-b", [BASE, unrel, B])]
+        res = multi_main(arms, {"baseline": m_rows, "dependency-only": [], "plus-a": m_rows[2:], "plus-b": []},
+                         [A, B])
+        return multi_check(res, {"000801": "needs-both", "000802": "needs-both", "000803": "single-mod"})
+
+    # S21. No input reaches it (an "only" setup always lacks the other mods), so the compiler is loaded with its
+    # "only ModA" role pointed at a setup that still holds ModB: the row is not-separable with the plain sentence, and
+    # the report is still generated (no StopIteration).
+    def only_setup_holding_the_other_mod_not_separable():
+        import importlib.util
+        src_ = Path(T.R.__file__).read_text(encoding="utf-8")
+        line_ = "    s_arms = {t: arm_without(pt_lower - {str(t).lower()}) for t in p_targets} if len(p_targets) > 1 else {}\n"
+        if src_.count(line_) != 1:
+            return False, f"the 'only' setups line occurs {src_.count(line_)} times in evalreport.py (want 1)"
+        src_ = src_.replace(line_, line_ + "    if 'odd' in orders and p_targets:\n        s_arms[p_targets[0]] = 'odd'\n")
+        spec_ = importlib.util.spec_from_loader("evalreport_odd_only", loader=None)
+        mod_ = importlib.util.module_from_spec(spec_)
+        mod_.__file__ = T.R.__file__
+        exec(compile(src_, T.R.__file__, "exec"), mod_.__dict__)
+        arms = [T.arm("baseline", [BASE, A, B], kind="baseline"), T.arm("dependency-only", [BASE]),
+                T.arm("plus-a", [BASE, A]), T.arm("plus-b", [BASE, B]), T.arm("odd", [BASE, A, B, unrel])]
+        real_ = T.R
+        T.R = mod_
+        try:
+            res = multi_main(arms, {"baseline": m_rows[:1], "dependency-only": [], "plus-a": [], "plus-b": [],
+                                    "odd": []}, [A, B])
+        finally:
+            T.R = real_
+        why_ = T.R.bind((words().get("notSeparableWhy") or {}).get("noSetupLeavesOut") or "\0", {"other": B})
+        return multi_check(res, {"000801": "not-separable"}, why_, 1)
+
+    # G2 (a guard, green before and after). Exact "only" setups for two mods: "needs both", as before.
+    def exact_only_setups_needs_both():
+        arms = [T.arm("baseline", [BASE, unrel, A, B], kind="baseline"), T.arm("dependency-only", [BASE, unrel]),
+                T.arm("plus-a", [BASE, unrel, A]), T.arm("plus-b", [BASE, unrel, B])]
+        res = multi_main(arms, {"baseline": m_rows, "dependency-only": [], "plus-a": m_rows[2:], "plus-b": []},
+                         [A, B])
+        return multi_check(res, {"000801": "needs-both", "000802": "needs-both", "000803": "single-mod"})
+
+    # G3, G4 (guards). One evaluated mod: the setup without the other mod found only with its companion is item 21's
+    # fewer-plugins case, from this bundle and from a sibling: needs-some unless the other mod owns the partner object.
+    def one_mod_companion_setup_needs_some():
+        arms = [T.arm("baseline", [BASE, unrel, A, B], kind="baseline"), T.arm("without-b", [BASE, A]),
+                T.arm("only-b", [BASE, unrel, B])]
+        res = multi_main(arms, {"baseline": m_rows, "without-b": m_rows[2:], "only-b": []}, [A])
+        return multi_check(res, {"000801": "needs-some", "000802": "needs-both", "000803": "single-mod"})
+
+    def one_mod_sibling_companion_setup_needs_some():
+        rows_ = [T.row("CONTACT", NB1, A, f"000801:{A}", other="000901:Skyrim.esm"),
+                 T.row("CONTACT", NB1, A, f"000802:{A}", other=NB_OBJ),
+                 T.row("CONTACT", NB1, A, f"000803:{A}", other="000903:Skyrim.esm")]
+        order = [BASE, unrel, NB1, A]
+        main_ = ("main", [T.arm("baseline", order, kind="baseline"), T.arm("patched", order + [PATCH])],
+                 {(C, "baseline"): rows_, (C, "patched"): []}, [A], {"patches": [PATCH]})
+        sib = ("eval-split", [T.arm("baseline", order, kind="baseline"), T.arm("without-nb", [BASE, A]),
+                              T.arm("only-nb", [BASE, unrel, NB1])],
+               {(C, "baseline"): rows_, (C, "without-nb"): rows_[2:], (C, "only-nb"): []}, [A],
+               {"plan_id": "sibsplit0000"})
+        res = run_plan(main_, [sib])
+        if refused(res):
+            return False, refused(res)
+        return multi_check(res, {"000801": "needs-some", "000802": "needs-both", "000803": "single-mod"})
+
     # G1 (a guard, green before and after). One sibling through the command line behaves as it did: the plan records
     # it as `sibling` and records no list of siblings.
     def one_sibling_as_before():
@@ -474,7 +606,18 @@ def main():
                      ("siblings/S15-fewer-setup-absence-needs-some-unless-partner-owns",
                       fewer_setup_absence_needs_some_unless_partner_owns),
                      ("siblings/S16-sub-order-check-needs-a-shared-setup-join", sub_order_check_needs_a_shared_setup_join),
-                     ("siblings/G1-one-sibling-as-before", one_sibling_as_before)]:
+                     ("siblings/S17-only-setup-with-companion-not-separable", only_setup_with_companion_not_separable),
+                     ("siblings/S18-sibling-only-setup-with-companion-not-separable",
+                      sibling_only_setup_with_companion_not_separable),
+                     ("siblings/S19-three-mods-only-setups-not-separable", three_mods_only_setups_not_separable),
+                     ("siblings/S20-only-setup-in-other-case-is-exact", only_setup_in_other_case_is_exact),
+                     ("siblings/S21-only-setup-holding-the-other-mod-not-separable",
+                      only_setup_holding_the_other_mod_not_separable),
+                     ("siblings/G1-one-sibling-as-before", one_sibling_as_before),
+                     ("siblings/G2-exact-only-setups-needs-both", exact_only_setups_needs_both),
+                     ("siblings/G3-one-mod-companion-setup-needs-some", one_mod_companion_setup_needs_some),
+                     ("siblings/G4-one-mod-sibling-companion-setup-needs-some",
+                      one_mod_sibling_companion_setup_needs_some)]:
         cell(name, fn)
 
     for name, ok, detail in cells:
