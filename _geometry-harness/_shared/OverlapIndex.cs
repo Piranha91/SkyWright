@@ -626,6 +626,9 @@ public sealed class OverlapIndex
     public Dictionary<FormKey, (FormKey Cell, FormKey Worldspace)> RefCell { get; } = new();
     /// <summary>ref -> its placed arm ("PlacedObject", "PlacedNpc", …), winner wins. BOS swaps three arms and no actor.</summary>
     public Dictionary<FormKey, string> RefArm { get; } = new();
+    /// <summary>ref -> its arm's own base link (PlacedRef.ArmBase: a HAZD or PROJ on the trap arms), winner wins. Read only where a
+    /// consumer opts in (stateprobe's placed hazard census); RefBase stays the Base link alone.</summary>
+    public Dictionary<FormKey, (FormKey Base, string Link)> RefArmBase { get; } = new();
     /// <summary>ref -> its own XEZN under the winner; absent when none.</summary>
     public Dictionary<FormKey, FormKey> RefEncounterZone { get; } = new();
     /// <summary>The Base Object Swapper form index, filled during <see cref="Ingest"/> when a caller sets it before
@@ -815,6 +818,7 @@ public sealed class OverlapIndex
         Placements++;
         RefCell[r.FormKey] = (cell, worldspace);
         RefArm[r.FormKey] = r.RecordType;
+        if (r.ArmBase is { } ab) RefArmBase[r.FormKey] = (ab, r.ArmBaseLink ?? "?"); else RefArmBase.Remove(r.FormKey);
         Bos?.NotePlaced(r.FormKey, r.Persistent);
         if (r.EncounterZone is { } ez) RefEncounterZone[r.FormKey] = ez; else RefEncounterZone.Remove(r.FormKey);
         if (r.CollisionLayerIndex is { } cl) RefCollisionLayer[r.FormKey] = cl; else RefCollisionLayer.Remove(r.FormKey);
