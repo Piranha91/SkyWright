@@ -902,16 +902,16 @@ def check_patch_direction(bundle: Path):
         subject = subjects[variant]
         plan, md, html = patch_direction_control(bundle, variant, "overlap-regression")
         verdict = str(headline(plan.get("reader")) or "")
-        check(verdict.startswith(f"{subject} introduces 1 new overlap candidate for visual review."),
+        check(verdict.startswith(f"{subject} introduces 1 new pair of overlapping objects for visual review."),
               f"{label}/{variant}/overlap-regression: the overlap-only Result names the change (got {verdict!r})")
         got = plain_of(plan, "candidate-02-patchb", ("regression",), "geometry.object-overlap")
-        check(got.startswith(f"{subject} introduced 1 new overlap candidate for visual review."),
+        check(got.startswith(f"{subject} introduced 1 new pair of overlapping objects for visual review."),
               f"{label}/{variant}/overlap-regression: the overlap finding names the change (got {got!r})")
         check("supplied setup" not in md.lower() and "supplied setup" not in html.lower(),
               f"{label}/{variant}/overlap-regression: no supplied-setup wording in report.md or report.html")
         plan, md, html = patch_direction_control(bundle, variant, "overlap-reduction")
         verdict = str(headline(plan.get("reader")) or "")
-        check(verdict.startswith(f"{subject} reduces the number of overlap candidates reported by the checks that ran."),
+        check(verdict.startswith(f"{subject} reduces the number of pairs of overlapping objects reported by the checks that ran."),
               f"{label}/{variant}/overlap-reduction: the overlap-only Result names the change (got {verdict!r})")
         got = plain_of(plan, "candidate-02-patchb", ("repaired", "reclassified"), "geometry.object-overlap")
         check(f"no longer present after {subject[:1].lower() + subject[1:]}" in got,
@@ -2058,11 +2058,11 @@ def case_r4(tmp, index, common):
 
     reduction_control = overlap_wording_control(False)
     reduction_verdict = str(headline(reduction_control.get("reader")) or "").lower()
-    check("reduces the number of overlap candidates" in reduction_verdict and "resolves some measured conflicts" not in reduction_verdict,
+    check("reduces the number of pairs of overlapping objects" in reduction_verdict and "resolves some measured conflicts" not in reduction_verdict,
           f"{case}: compile_plan keeps an overlap-only reduction as candidates rather than a repair verdict")
     regression_control = overlap_wording_control(True)
     regression_verdict = str(headline(regression_control.get("reader")) or "").lower()
-    check("introduces 1 new overlap candidate" in regression_verdict and "new defect" not in regression_verdict,
+    check("introduces 1 new pair of overlapping objects" in regression_verdict and "new defect" not in regression_verdict,
           f"{case}: compile_plan keeps an overlap-only regression as a candidate rather than a defect verdict")
     policy_control = overlap_wording_control(False, policy_marker=True)
     policy_overlap = [f for f in policy_control.get("findings") or []
@@ -2134,7 +2134,7 @@ def case_r4(tmp, index, common):
                          and int((f.get("counts") or {}).get("readerRepaired") or 0)]
     if overlap_reductions and not confirmed_repairs:
         reader_headline = str(headline(pres.get("reader")) or "")
-        check("overlap candidates" in reader_headline.lower() and "resolves some measured conflicts" not in reader_headline.lower()
+        check("pairs of overlapping objects" in reader_headline.lower() and "resolves some measured conflicts" not in reader_headline.lower()
               and "resolves some measured conflicts" not in reader_verdict.lower(),
               f"{case}: overlap-candidate reductions do not become a repair claim in reader.verdict")
     check(rg["plainContainsNumber"] in [int(x) for x in re.findall(r"\b\d+\b", str(f1.get("plain") or ""))],
@@ -2156,14 +2156,14 @@ def case_r4(tmp, index, common):
             check(hit[0].get("priority", 0) > f1.get("priority", 0), f"{case}: {hit[0].get('id')} priority > the regression's")
             if spec["checkId"] == "geometry.object-overlap":
                 reader_plain = str(hit[0].get("readerPlain") or "").lower()
-                check("overlap candidate" in reader_plain and "visual review" in reader_plain,
+                check("overlapping objects" in reader_plain and "visual review" in reader_plain,
                       f"{case}: overlap reductions remain candidates for visual review")
                 check("repaired 1 existing problem" not in reader_plain,
                       f"{case}: overlap reductions are not narrated as confirmed problem repairs")
                 comparison_narration = " ".join(str(cap.get("narration") or "") for chapter in pres.get("chapters") or []
                                                 if chapter.get("kind") == "comparison" and hit[0].get("id") in (chapter.get("findingIds") or [])
                                                 for cap in chapter.get("captions") or []).lower()
-                check("overlap candidate" in comparison_narration and "repaired 1 existing problem" not in comparison_narration,
+                check("overlapping objects" in comparison_narration and "repaired 1 existing problem" not in comparison_narration,
                       f"{case}: comparison narration preserves the overlap-candidate qualification")
     for s in o["report"]["mdContains"]:
         check(s in md, f"{case}: report.md contains {s!r}")

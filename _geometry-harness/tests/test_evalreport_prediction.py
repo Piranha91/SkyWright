@@ -2137,7 +2137,7 @@ def main():
         results[(OVERLAP, "baseline")] = p_rows
         plan, md, html = compile_and_render(four_arms(), results, [MOD_A, MOD_B])
         v, scope = reader(plan).get("verdict") or "", reader(plan).get("scopeLine") or ""
-        ok = ("overlap candidate" in v and "inconsistenc" not in v and OTHER in scope and "counted" in scope
+        ok = ("pairs of objects" in v and "inconsistenc" not in v and OTHER in scope and "counted" in scope
               and scope in md)
         return ok, f"verdict {v!r}; scope {scope!r}"
 
@@ -2175,7 +2175,7 @@ def main():
         attr = {(e.get("formKey") or "")[:6]: e.get("attribution") for e in p.get("record") or []
                 if e.get("admission") == "admitted"}
         ok = (attr == {"000X01": "needs-both", "000X02": "single-mod"} and val.get("hits") == 1
-              and "1 overlap candidate" in (p.get("verdict") or ""))
+              and "1 pair of objects" in (p.get("verdict") or ""))
         return ok, f"attribution {attr}; credited to the patch {val.get('hits')}; verdict {p.get('verdict')!r}"
 
     # C500. A navmesh comparison counts navmesh records, the prediction broken links: the comparison says its unit
@@ -2767,7 +2767,7 @@ def main():
     def c550_headline_overlaps_as_objects():
         plan, md, html = stays_bundle()
         v = (reader(plan).get("prediction") or {}).get("verdict") or ""
-        ok = "3 overlap candidates found by the check" in v and "(4 objects)" in v
+        ok = "3 pairs of objects found by the check" in v and "(4 objects)" in v
         return ok, f"verdict {v!r}"
 
     # C551. No total adds overlap pairs to record fields: the with-patch summary gives each kind its own line in its own
@@ -4535,8 +4535,8 @@ def main():
         plan, md, html = compile_and_render(PATCHED_ARMS, {(OVERLAP, "without-patch"): p_rows, (OVERLAP, "baseline"): w_rows},
                                             [MOD_A, MOD_B], patches=[PATCH], order=order,
                                             diff_logs={(OVERLAP, "without-patch"): log})
-        line = next((ln for ln in md.splitlines() if "new overlap candidate" in ln and "introduced" in ln), "")
-        ok = "introduced 1 new overlap candidate " in line and re.search(r"\b1 more\b", line) is not None
+        line = next((ln for ln in md.splitlines() if "new pair of overlapping objects" in ln and "introduced" in ln), "")
+        ok = "introduced 1 new pair of overlapping objects " in line and re.search(r"\b1 more\b", line) is not None
         return ok, line[:300]
 
     for name, fn in [("after-review/C910-removing-patch-counts-new-defects", c910_removing_patch_counts_new_defects)]:
@@ -8622,7 +8622,7 @@ def main():
         adm = sorted(e["admission"] for e in (reader(plan).get("prediction") or {}).get("record") or []
                      if e["checkId"] == OVERLAP)
         v = str((reader(plan).get("prediction") or {}).get("verdict") or "")
-        return (adm == ["admitted", "noBody"] and "1 overlap candidate" in v), f"{adm}; {v[-200:]}"
+        return (adm == ["admitted", "noBody"] and "1 pair of objects" in v), f"{adm}; {v[-200:]}"
 
     # C1156 (Clockwork S3): the pairs still crossing where a patch places one of the objects were measured again in the
     # setup with the patch: the line says so, with the triangle pairs the re-measure found.
