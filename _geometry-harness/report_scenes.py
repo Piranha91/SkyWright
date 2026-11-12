@@ -88,7 +88,7 @@ def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[
             source, doc = got
             conflict = next(x for x in doc.get("Conflicts") or []
                             if (x.get("Kind") == c.get("kind") or f"@{c['state']}@" in str(x.get("Kind")))
-                            and any(n.get("FormKey") == c.get("formKey") for n in x.get("Necessary") or []))
+                            and any(_fold(n.get("FormKey")) == _fold(c.get("formKey")) for n in x.get("Necessary") or []))
             pair = [c.get("formKey"), *(c.get("other") or [])][:2]
             marks = [fk for fk in pair if fk in (c.get("highlight") or pair)]
             identity = json.dumps(["state-pair", c.get("armId"), pair, c.get("state"), source["sha256"]], separators=(",", ":"))
@@ -115,6 +115,21 @@ def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[
     return out, limits
 
 
+def _fold(name):
+    """A plugin name, or a form key (which carries one), compared as Skyrim compares it: without case."""
+    return name.casefold() if isinstance(name, str) else name
+
+
+def _distinct_plugins(names) -> list:
+    """Each plugin once, in first-seen order and first-seen spelling, compared without case."""
+    seen, out = set(), []
+    for n in names:
+        if _fold(n) not in seen:
+            seen.add(_fold(n))
+            out.append(n)
+    return out
+
+
 def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLICY) -> dict:
     policy_bytes = policy_path.read_bytes()
     policy = json.loads(policy_bytes)
@@ -124,7 +139,7 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
     for finding in presentation.get("findings") or []:
         if finding.get("kind") not in ("finding", "regression") or finding.get("part") == "reverse" or finding.get("readerRelevant") is False:
             continue
-        forms = {r.get("formKey") for r in finding.get("allRows") or []}
+        forms = {_fold(r.get("formKey")) for r in finding.get("allRows") or []}
         for rule in policy["rules"]:
             if finding.get("checkId") != rule["checkId"]:
                 continue
@@ -151,24 +166,27 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
                     if conflict.get("Kind") != rule["conflictKind"]:
                         continue
                     counts = finding.get("counts") or {}
-                    if not rule.get("corroborationKinds") and counts.get("A") and (counts["A"], counts.get("B")) != (conflict.get("A"), conflict.get("B")):
+                    # plugin names are case-insensitive: a re-scored evaluation's counts and the probe's own output may
+                    # spell one plugin two ways (Ice Blade, round 2 rerun, C1898)
+                    if not rule.get("corroborationKinds") and counts.get("A") and (
+                            _fold(counts["A"]), _fold(counts.get("B"))) != (_fold(conflict.get("A")), _fold(conflict.get("B"))):
                         continue
                     for record in conflict.get("Necessary") or []:
                         physical = rule["physical"] if isinstance(rule["physical"], list) else [rule["physical"]]
-                        if record.get("FormKey") not in forms or record.get("Physical") not in physical:
+                        if _fold(record.get("FormKey")) not in forms or record.get("Physical") not in physical:
                             continue
                         corroboration = []
                         if rule.get("corroborationKinds"):
                             # The outer finding must be the measured problem, not the historical overwrite.
                             bound_groups = (counts.get("groups") or []) if finding.get("kind") == "regression" else [
                                 {"kind": counts.get("groupKind"), "A": counts.get("A"), "B": counts.get("B")}]
-                            bound_keys = {(g.get("kind"), g.get("A"), g.get("B")) for g in bound_groups}
+                            bound_keys = {(g.get("kind"), _fold(g.get("A")), _fold(g.get("B"))) for g in bound_groups}
                             for support in doc.get("Conflicts") or []:
                                 if support.get("Kind") not in rule["corroborationKinds"] or (
-                                        support.get("Kind"), support.get("A"), support.get("B")) not in bound_keys:
+                                        support.get("Kind"), _fold(support.get("A")), _fold(support.get("B"))) not in bound_keys:
                                     continue
                                 for witness in support.get("Necessary") or []:
-                                    if witness.get("FormKey") == record["FormKey"] and witness.get("Physical") == "Holds":
+                                    if _fold(witness.get("FormKey")) == _fold(record["FormKey"]) and witness.get("Physical") == "Holds":
                                         corroboration.append({"kind": support["Kind"], "formKey": witness["FormKey"],
                                             "otherRecordKeys": [r["FormKey"] for r in support.get("Alternative") or []],
                                             "plugins": [support.get("A"), support.get("B")],
@@ -207,8 +225,8 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
                         row = {"id": rid, "requestType": rule["requestType"], "checkId": rule["checkId"],
                                "armId": finding["armId"], "findingIds": [finding["id"]], "newProblem": finding["kind"] == "regression",
                                "location": record.get("Label"), "recordKeys": refs,
-                               "plugins": list(dict.fromkeys([conflict["A"], conflict["B"]] +
-                                   [name for c in corroboration for name in c["plugins"] if name])), "state": doc.get("State"),
+                               "plugins": _distinct_plugins([conflict["A"], conflict["B"]] +
+                                   [name for c in corroboration for name in c["plugins"] if name]), "state": doc.get("State"),
                                "configurationFingerprint": (doc.get("Configuration") or {}).get("Fingerprint"),
                                "source": {"evidenceId": eid, "path": source["path"], "sha256": source["sha256"]},
                                "ranking": {"value": rank, "measurements": values, "basis": rule["metricLabel"], "limit": rule["metricLimit"]},
@@ -229,9 +247,9 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
         for ch in reel.get("chapters") or []:
             c = ch.get("clash") or {}
             if ch.get("kind") == "vignette" and c.get("type") in (None, "overlap", "contact"):
-                wanted[(c.get("armId"), c.get("formKey"))] = ch
+                wanted[(c.get("armId"), _fold(c.get("formKey")))] = ch
         for row in sorted(candidates.values(), key=lambda r: r["id"]):
-            ch = wanted.get((row["armId"], row["recordKeys"][0]))
+            ch = wanted.get((row["armId"], _fold(row["recordKeys"][0])))
             if ch is None:
                 continue
             row["vignette"] = {"chapterId": ch.get("id"), "withoutArmId": (ch.get("clash") or {}).get("withoutArmId"),

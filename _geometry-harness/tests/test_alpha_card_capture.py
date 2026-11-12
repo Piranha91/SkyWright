@@ -1,4 +1,4 @@
-"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1897).
+"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1898).
 
     python tests/test_alpha_card_capture.py [--only C1890,C1897]
 
@@ -19,6 +19,8 @@ up; nothing here is evidence about a real cell.
     C1896  a refused clash a station at eye height saw is never "No camera could see the clash"; nor is one whose object
            the renderer cannot mark
     C1897  an image key kept from an earlier capture (an empty one) does not stand for a capture that has frames
+    C1898  a finding whose counts spell a plugin in another case than its probe's evidence (Ice Blade's re-scored
+           evaluation against its overlapprobe output) still gets its capture request
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -315,10 +317,47 @@ def c1897_stale_image_key(tmp: Path):
           "the image key and packet were not rebuilt for the capture's frame", f"key {key}")
 
 
+def c1898_plugin_case_in_capture_requests(tmp: Path):
+    """Ice Blade's re-scored shape: the finding's counts name 'Unofficial Skyrim Special Edition Patch.esp', the
+    overlapprobe evidence 'unofficial skyrim special edition patch.esp'. Plugin names are case-insensitive. Wrong answer:
+    no capture request, so the reel's one vignette is never captured (Ice Blade, round 2 rerun)."""
+    import hashlib
+    import report_scenes as RS
+    bundle = tmp / "c1898" / "bundle"
+    rel = "evidence/sweep/overlapprobe/baseline.json"
+    doc = {"Probe": "overlapprobe", "Configuration": {"Fingerprint": "cd" * 32, "Plugins": []},
+           "Conflicts": [{"Kind": "OVERLAP", "A": "unofficial skyrim special edition patch.esp", "B": "icebladeofthemonarch.esp",
+                          "Necessary": [{"FormKey": "000D75:icebladeofthemonarch.esp", "Physical": "Holds", "Label": "Cave"}],
+                          "Alternative": [{"FormKey": "0FC98D:Skyrim.esm"}]}]}
+    (bundle / rel).parent.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(doc).encode("utf-8")
+    (bundle / rel).write_bytes(raw)
+    pres = {"evidence": [{"id": "E-1", "kind": "emit", "part": "arm", "armId": "baseline", "path": rel,
+                          "sha256": hashlib.sha256(raw).hexdigest()}],
+            "findings": [{"id": "F-110", "kind": "finding", "part": "arm", "checkId": "geometry.object-overlap",
+                          "armId": "baseline", "evidenceIds": ["E-1"], "readerRelevant": True,
+                          "allRows": [{"formKey": "000D75:icebladeofthemonarch.esp"}],
+                          "counts": {"groupKind": "OVERLAP", "A": "Unofficial Skyrim Special Edition Patch.esp",
+                                     "B": "icebladeofthemonarch.esp"}}]}
+    got = RS.capture_requests(pres, bundle)
+    keys = [r.get("recordKeys") for r in got.get("requests") or []]
+    check("C1898", any(k and k[0] == "000D75:icebladeofthemonarch.esp" for k in keys),
+          "a plugin spelled in another case in the finding's counts drops the finding's capture request",
+          f"requests {keys}, limitations {got.get('limitations')}")
+    # the form key carries the plugin name too: a finding row spelled in another case than the probe's record
+    pres["findings"][0]["allRows"] = [{"formKey": "000D75:IceBladeOfTheMonarch.esp"}]
+    got2 = RS.capture_requests(pres, bundle)
+    keys2 = [r.get("recordKeys") for r in got2.get("requests") or []]
+    check("C1898", any(k and k[0] == "000D75:icebladeofthemonarch.esp" for k in keys2),
+          "a form key whose plugin part is spelled in another case drops the finding's capture request",
+          f"requests {keys2}")
+
+
 CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_planner_refusal,
          "C1892": c1892_opaque_keeps_top_down, "C1893": c1893_witness_miss_goes_on,
          "C1894": c1894_station_view_caption, "C1895": c1895_old_pose_refusal_recaptured,
-         "C1896": c1896_refused_reason_true, "C1897": c1897_stale_image_key}
+         "C1896": c1896_refused_reason_true, "C1897": c1897_stale_image_key,
+         "C1898": c1898_plugin_case_in_capture_requests}
 
 
 def main(argv=None) -> int:
