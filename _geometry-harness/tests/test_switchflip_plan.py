@@ -239,6 +239,15 @@ def test_launch_job_is_accepted_by_the_runner():
         assert res.get("exitCode") == 0, res
 
 
+def test_c1915_the_arrival_reading_records_position_and_grid():
+    # rejects: a receipt that names the cell only, and a grid rounded instead of floored at a cell edge
+    ral = {"cell": "SomeCell", "fresh_game": True, "rows": [{"t": 0.0, "player": (-4096.0, 8191.96, -120.04)}]}
+    assert S.arrival_reading(ral) == {"cell": "SomeCell", "position": [-4096.0, 8192.0, -120.0], "grid": [-1, 1]}
+    ral["rows"][0]["player"] = (-4095.4, 2047.6, 0.0)
+    assert S.arrival_reading(ral)["grid"] == [-1, 0]
+    assert S.arrival_reading({"cell": "SomeCell", "rows": [{"player": None}]}) ==         {"cell": "SomeCell", "position": None, "grid": None}
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

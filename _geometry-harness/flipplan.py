@@ -36,8 +36,12 @@ Rules:
     refused (its branch structure is not read);
   - two branch paths that send the same calls are one group (`samePaths` names the others);
   - conditions per group and arm: `loaded` at the `coc`-reachable cell (an interior or a named exterior cell, not a
-    worldspace's persistent cell) holding most of the flipped switches' members; `away` at the
-    neutral cell when one is given (otherwise omitted and named); settle 0, window 60 s, two replicates.
+    worldspace's persistent cell) holding most of the flipped switches' members, of the switches' own kind: a path
+    with any exterior switch arrives only at an exterior cell (an interior does not load the exterior), and is
+    omitted with the reason when its members name none; a path of interior switches arrives at an interior; an
+    interior switch on an exterior path is flagged; `away` at the neutral cell when one is given (otherwise omitted
+    and named); settle 0, window 60 s, two replicates. The arrival is a cell, not a position: the exterior cells
+    loaded are the grid around the player's cell, and the driver records where the player arrived.
 The groups document beside the plan says what was planned, dropped, flagged, unmapped or not planned, and why.
 """
 from __future__ import annotations
@@ -262,10 +266,13 @@ def arm_groups(census: dict, scope: dict, scripts_dir: Path) -> dict:
                 same["samePaths"].append(n)   # another branch path sends the same calls: one group, both paths named
                 continue
             planned_keys.update(c["ref"] for c in calls)
+            arrival = arrival_choice([switches[c["ref"]] for c in calls])
+            flags += [{"ref": k, "flag": "an interior switch on an exterior path: the exterior arrival does not load "
+                                         "its interior members"} for k in arrival.pop("interiorSwitches")]
             groups.append({"id": f"{script}.{fn}" + (f"#{n}" if len(route) > 1 else ""), "script": script,
                            "function": fn, "stage": stages.get(fk), "path": n, "samePaths": [], "paths": len(route),
                            "calls": calls, "dropped": dropped, "flags": flags,
-                           "arrival": arrival_cell([switches[c["ref"]] for c in calls])})
+                           "arrival": arrival.pop("cell"), "arrivalNote": arrival})
     for k in sorted(in_pop):
         if k not in planned_keys and not any(x["ref"] == k for x in not_planned):
             raw, other, unfound = set(), False, False
@@ -298,18 +305,41 @@ def coc_name(label) -> str | None:
     return m.group(1) if m and not FORMKEY.match(m.group(1)) else None
 
 
-def arrival_cell(sw: list[dict]) -> str | None:
-    """The cell `coc` can reach that holds most of the flipped switches' members (the switch's own cell when it has
-    none)."""
-    tally = Counter()
+def is_interior(label) -> bool | None:
+    """A census cell label's kind from its `(int)` / `(ext)` suffix; None when it has neither."""
+    text = str(label or "")
+    return True if text.endswith(" (int)") else False if text.endswith(" (ext)") else None
+
+
+def switch_interior(s: dict) -> bool | None:
+    """Where a switch itself stands: the census `interior` field, else its cell label's suffix."""
+    return s["interior"] if isinstance(s.get("interior"), bool) else is_interior(s.get("cell"))
+
+
+def arrival_choice(sw: list[dict]) -> dict:
+    """{cell, why, members, of, interiorSwitches}: the cell `coc` can reach, of the switches' own kind, that holds
+    most of the flipped switches' members (the switch's own cell when it has none). A path with any exterior switch
+    arrives only at an exterior cell, since an interior does not load the exterior; `why` says why there is no cell."""
+    exterior = any(switch_interior(s) is False for s in sw)
+    tally, total = Counter(), 0
     for s in sw:
         members = [m for side in ("onSet", "offSet") for m in s.get(side) or [] if isinstance(m, dict)]
-        cells = [coc_name(m.get("cell")) for m in members] or [coc_name(s.get("cell"))]
-        tally.update(c for c in cells if c)
+        labels = [m.get("cell") for m in members] or [s.get("cell")]
+        total += len(labels)
+        tally.update(coc_name(c) for c in labels if coc_name(c) and (not exterior or is_interior(c) is False))
+    inner = [s["key"] for s in sw if exterior and switch_interior(s) is True]
     if not tally:
-        return None
+        why = ("an exterior switch path whose members name no exterior cell coc can reach" if exterior
+               else "no member names a cell")
+        return {"cell": None, "why": why, "members": 0, "of": total, "interiorSwitches": inner}
     best = max(tally.values())
-    return sorted(c for c, n in tally.items() if n == best)[0]
+    cell = sorted(c for c, n in tally.items() if n == best)[0]
+    return {"cell": cell, "why": None, "members": best, "of": total, "interiorSwitches": inner}
+
+
+def arrival_cell(sw: list[dict]) -> str | None:
+    """The arrival cell of `arrival_choice`, or None."""
+    return arrival_choice(sw)["cell"]
 
 
 # ------------------------------------------------------------------------------------------------ plan --
@@ -326,7 +356,8 @@ def build(arms: list[tuple[str, str, dict]], scope: dict, scripts_dir: Path, *, 
         for k, grp in enumerate(g["groups"], start=1):
             base = f"{arm_id}-g{k:02d}"
             if grp["arrival"] is None:
-                omitted.append({"group": grp["id"], "condition": "loaded", "reason": "no member names a cell"})
+                omitted.append({"group": grp["id"], "condition": "loaded",
+                                "reason": (grp.get("arrivalNote") or {}).get("why") or "no member names a cell"})
             else:
                 conditions.append({"id": f"{base}-loaded", "arm": arm_id, "arrival": {"cell": grp["arrival"]},
                                    "settleSeconds": 0, "windowSeconds": WINDOW_SECONDS, "replicates": REPLICATES,

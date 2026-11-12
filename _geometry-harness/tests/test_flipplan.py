@@ -425,6 +425,55 @@ def test_c319_a_dropped_switch_with_a_credit_the_source_lacks_keeps_the_generic_
             (GATE, "no supplied source line carries its recorded call")], arm["notPlanned"]
 
 
+# ---- 1913, 1914, 1917: the arrival follows where the switches stand ----
+
+def exterior_census(member_cells, interior_keys=()):
+    """census() with every switch on the exterior TownStreet (those in `interior_keys` in TownKeep) and its members in
+    the cells given."""
+    cen = census()
+    for s in cen["switches"]:
+        inside = s["key"] in interior_keys
+        s["cell"], s["interior"] = ("TownKeep (int)", True) if inside else ("TownStreet (ext)", False)
+        s["onSet"] = [{"key": f"{s['key'][:4]}{i:02X}:Target.esp", "cell": c, "cellKey": CELL_KEY,
+                       "placer": "Target.esp", "attacher": "Target.esp"} for i, c in enumerate(member_cells)]
+    return cen
+
+
+def loaded_arrivals(plan):
+    return sorted({c["arrival"]["cell"] for c in plan["conditions"] if c["id"].endswith("-loaded")})
+
+
+def test_c1913_an_exterior_path_never_arrives_in_an_interior():
+    # rejects: the interior holding most members drafted for switches that stand in the exterior (item 35's
+    # SolitudeCastleDour for the Dominion SetupSolitude path)
+    with tempfile.TemporaryDirectory() as tmp:
+        plan, doc = F.build([("patched", "Prof-P", exterior_census(["TownKeep (int)"] * 3 + ["TownStreet (ext)"]))],
+                            SCOPE, scripts_dir(tmp))
+        assert loaded_arrivals(plan) == ["TownStreet"], plan["conditions"]
+        g = group(doc, "TownScript.Setup#1")
+        assert g["arrivalNote"] == {"why": None, "members": 3, "of": 12}, g["arrivalNote"]
+
+
+def test_c1914_an_exterior_path_with_no_exterior_member_cell_is_omitted_by_name():
+    # rejects: falling back to an interior when no exterior member cell exists
+    with tempfile.TemporaryDirectory() as tmp:
+        plan, doc = F.build([("patched", "Prof-P", exterior_census(["TownKeep (int)"] * 2))], SCOPE, scripts_dir(tmp))
+        assert loaded_arrivals(plan) == [], plan["conditions"]
+        reasons = {o["reason"] for o in doc["arms"][0]["omittedConditions"] if o["condition"] == "loaded"}
+        assert reasons == {"an exterior switch path whose members name no exterior cell coc can reach"}, reasons
+
+
+def test_c1917_an_interior_switch_on_an_exterior_path_is_flagged():
+    # rejects: a mixed path drafted to the interior, or its interior switch passed over silently
+    with tempfile.TemporaryDirectory() as tmp:
+        cen = exterior_census(["TownKeep (int)"] * 3 + ["TownStreet (ext)"], interior_keys=("000A02:Target.esp",))
+        plan, doc = F.build([("patched", "Prof-P", cen)], SCOPE, scripts_dir(tmp))
+        assert loaded_arrivals(plan) == ["TownStreet"], plan["conditions"]
+        g = group(doc, "TownScript.Setup#1")
+        flagged = [f["ref"] for f in g["flags"] if f["flag"].startswith("an interior switch on an exterior path")]
+        assert flagged == ["000A02:Target.esp"], g["flags"]
+
+
 def main():
     tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

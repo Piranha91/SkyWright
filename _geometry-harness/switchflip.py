@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -215,6 +216,21 @@ def launch_job(job_id: str, argv: list[str], cond: dict) -> dict:
     """One launch as a Runner job; Runner features are {name: (value, unit)}."""
     return {"id": job_id, "argv": argv, "features": {"calls": (len(cond.get("calls") or []), "calls"),
                                                       "windowSeconds": (cond.get("windowSeconds"), "seconds")}}
+
+
+CELL_UNITS = 4096.0   # an exterior cell's side in game units
+
+
+def arrival_reading(ral: dict) -> dict:
+    """Where the player arrived, from dbharness.read_at_load's result: {cell, position, grid}. `grid` is the exterior
+    cell coordinates under that position (an exterior's loaded grid is centred there; it means nothing in an
+    interior); None without a position."""
+    rows = ral.get("rows") or []
+    pos = rows[0].get("player") if rows and isinstance(rows[0], dict) else None
+    raw = [float(v) for v in pos][:3] if isinstance(pos, (list, tuple)) and len(pos) >= 2 else None
+    position = [round(v, 1) for v in raw] if raw else None
+    grid = [math.floor(raw[0] / CELL_UNITS), math.floor(raw[1] / CELL_UNITS)] if raw else None   # raw, not rounded
+    return {"cell": ral.get("cell"), "position": position, "grid": grid}
 
 
 def profile_priority_refusal(instance: str, profile: str, earm: dict) -> str | None:
@@ -609,7 +625,8 @@ def cmd_launch(a) -> int:
             raise RuntimeError(f"a game is already loaded ({db.loaded()})")
         db.video_mark(f"arrive {cond['arrival']['cell']}")
         ral = db.read_at_load(cond["arrival"]["cell"], {}, schedule=(0,))
-        log(step="read_at_load", cell=ral.get("cell"), fresh=ral.get("fresh_game"))
+        receipt["arrival"] = arrival_reading(ral)
+        log(step="read_at_load", cell=ral.get("cell"), fresh=ral.get("fresh_game"), arrival=receipt["arrival"])
         ok, hours = db.unpause(strict=False)
         db.protect_body(log=None, note="switchflip: the body is not the subject")
         log(step="arrived", cell=db.loaded(), unpause=ok)
