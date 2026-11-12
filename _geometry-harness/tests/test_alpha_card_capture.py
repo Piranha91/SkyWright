@@ -1,4 +1,4 @@
-"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1899, C1930-C1932).
+"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1899, C1930-C1933, C1935).
 
     python tests/test_alpha_card_capture.py [--only C1890,C1897]
 
@@ -27,6 +27,9 @@ up; nothing here is evidence about a real cell.
     C1931  a still page's narration speaks no form key or editor ID; the page itself still shows them
     C1932  frames address the cell by its form key (a mod may rename it); a cell only the mod defines is refused as a
            place only the mod has; after a ready eye-level camera a refusal is never "No camera could see the clash"
+    C1933  the report stage's media bundle hands every pinned plan input whose original no longer hashes to the plan as
+           the evidence bundle's copy (the scope on a deleted folder), and refuses a pinned input it does not know
+    C1935  a vignette's capture request is its own clash pair, never every pair sharing its first form key
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -34,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -391,6 +395,11 @@ def c1930_media_bundle_frozen_registry(tmp: Path):
     reg = out / "bundle" / "evidence" / "registry" / "check-registry.json"
     reg.parent.mkdir(parents=True, exist_ok=True)
     reg.write_text("{}", encoding="utf-8")
+    live = out / "live-registry.json"
+    live.write_text('{"changed": true}', encoding="utf-8")
+    (out / "evaluation").mkdir(parents=True, exist_ok=True)
+    (out / "evaluation" / "plan.json").write_text(json.dumps({"registry": {"path": str(live), "sha256": hashlib.sha256(
+        b"{}").hexdigest()}}), encoding="utf-8")
     seq = out / "capture" / "capture-x" / "sequence"
     seq.mkdir(parents=True, exist_ok=True)
     (seq / "capture-result.json").write_text("{}", encoding="utf-8")
@@ -485,6 +494,100 @@ def c1932_cell_by_form_key_and_true_reasons(tmp: Path):
           "(or a refused acquisition is said as seen)", str(got))
 
 
+def c1933_media_bundle_frozen_scope(tmp: Path):
+    """Ice Blade's report stage: the plan's scope path was on a folder since deleted, so `evalrun bundle --media` refused
+    (scope-missing). Wrong answers: the media-bundle command does not name the evidence bundle's own scope copy; an
+    input the plan still holds unchanged is replaced by the copy; a plan pinning an input the report stage does not
+    know is passed on silently instead of refused."""
+    EP = load("ac_evalpipeline4", HARNESS / "evalpipeline.py")
+    out = tmp / "c1933"
+    ev = out / "bundle" / "evidence"
+    (ev / "registry").mkdir(parents=True, exist_ok=True)
+    (ev / "registry" / "check-registry.json").write_text("{}", encoding="utf-8")
+    (ev / "scope").mkdir(parents=True, exist_ok=True)
+    (ev / "scope" / "scope.json").write_text("{}", encoding="utf-8")
+    live = out / "registry-live.json"
+    live.write_text("{}", encoding="utf-8")                  # the registry's original still hashes to the plan
+    h = hashlib.sha256(b"{}").hexdigest()
+    plan = {"registry": {"path": str(live), "sha256": h}, "scope": {"path": str(out / "gone" / "scope.json"), "sha256": h},
+            "explicitDecisions": {"settings": {"path": "x", "sha256": h}}}
+    (out / "evaluation").mkdir(parents=True, exist_ok=True)
+    (out / "evaluation" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    seq = out / "capture" / "capture-x" / "sequence"
+    seq.mkdir(parents=True, exist_ok=True)
+    (seq / "capture-result.json").write_text("{}", encoding="utf-8")
+    (seq / "media-with.json").write_text(json.dumps({"items": [{"path": "x.png"}]}), encoding="utf-8")
+    (out / "capture" / "captures.json").write_text(json.dumps([{"id": "capture-x", "status": "captured",
+                                                                 "result": str(seq / "capture-result.json")}]),
+                                                    encoding="utf-8")
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_child(ctx, cdir, name, argv, **kw):
+        seen.append((name, [str(x) for x in argv]))
+        raise Stop()
+    EP.child = fake_child
+    EP.reader_cmd = lambda ctx: "reader"
+    EP.names_env = lambda ctx: {}
+    ctx = types.SimpleNamespace(out=out, entry={}, machine={})
+    try:
+        EP.stage_report(ctx, None, out / "report")
+    except Stop:
+        pass
+    argv = next((a for n, a in seen if n == "media-bundle"), [])
+    i = argv.index("--scope") if "--scope" in argv else -1
+    check("C1933", i >= 0 and Path(argv[i + 1]) == ev / "scope" / "scope.json" and "--registry" not in argv,
+          "the media bundle is built without the evidence bundle's own scope copy (or replaces an input the plan still "
+          "holds unchanged)", f"media-bundle argv {argv[:24]}")
+    # a plan pinning an input the report stage does not know fails in one sentence, not silently
+    plan["population"] = {"path": str(out / "gone" / "population.json"), "sha256": h}
+    (out / "evaluation" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    seen.clear()
+    said = None
+    try:
+        EP.stage_report(ctx, None, out / "report")
+    except Stop:
+        said = "went on to bundle"
+    except EP.Refusal as e:
+        said = str(e)
+    check("C1933", bool(said) and "population" in said and "went on" not in said,
+          "a plan pinning an input the report stage does not know is passed over silently", str(said))
+
+
+def c1935_vignette_requests_its_own_pair(tmp: Path):
+    """Helgi: the vignette's clash is 000941 x 000826, and 18 candidates start with the COTN static 000941; matched by the
+    first key alone, all 18 became the vignette's capture requests. Wrong answers: a request for a pair the vignette
+    does not show; no request for the vignette's own pair."""
+    import hashlib as _h
+    import report_scenes as RS
+    bundle = tmp / "c1935" / "bundle"
+    rel = "evidence/sweep/overlapprobe/baseline.json"
+    a, own, other = "000941:COTN - Morthal.esp", "000826:Finding_Helgi.esp", "00083D:Finding_Helgi.esp"
+    conflicts = [{"Kind": "OVERLAP", "A": "COTN - Morthal.esp", "B": "Finding_Helgi.esp",
+                  "Necessary": [{"FormKey": a, "Physical": "Holds", "Label": "Morthal"}],
+                  "Alternative": [{"FormKey": b}]} for b in (own, other)]
+    doc = {"Probe": "overlapprobe", "Configuration": {"Fingerprint": "ef" * 32, "Plugins": []}, "Conflicts": conflicts}
+    (bundle / rel).parent.mkdir(parents=True, exist_ok=True)
+    raw = json.dumps(doc).encode("utf-8")
+    (bundle / rel).write_bytes(raw)
+    pres = {"evidence": [{"id": "E-1", "kind": "emit", "part": "arm", "armId": "baseline", "path": rel,
+                          "sha256": _h.sha256(raw).hexdigest()}],
+            "findings": [{"id": "F-1", "kind": "finding", "part": "arm", "checkId": "geometry.object-overlap",
+                          "armId": "baseline", "evidenceIds": ["E-1"], "readerRelevant": True,
+                          "allRows": [{"formKey": a}],
+                          "counts": {"groupKind": "OVERLAP", "A": "COTN - Morthal.esp", "B": "Finding_Helgi.esp"}}],
+            "reel": {"status": "planned", "chapters": [{"id": "R-02", "kind": "vignette", "frames": [],
+                                                         "clash": {"type": "overlap", "armId": "baseline", "formKey": a,
+                                                                   "other": [own], "withoutArmId": "c-1"}}]}}
+    RS.reel_requests = lambda presentation, bundle_, policy: ([], [])
+    got = RS.capture_requests(pres, bundle)
+    pairs = [r.get("recordKeys") for r in got.get("requests") or []]
+    check("C1935", len(pairs) == 1 and pairs[0][:1] == [a] and own in pairs[0] and other not in pairs[0],
+          "a vignette gets capture requests for pairs it does not show (or none for its own pair)", f"requests {pairs}")
+
+
 CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_planner_refusal,
          "C1892": c1892_opaque_keeps_top_down, "C1893": c1893_witness_miss_goes_on,
          "C1894": c1894_station_view_caption, "C1895": c1895_old_pose_refusal_recaptured,
@@ -492,7 +595,9 @@ CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_pl
          "C1898": c1898_plugin_case_in_capture_requests,
          "C1899": c1899_marked_view_captions,
          "C1930": c1930_media_bundle_frozen_registry, "C1931": c1931_reel_speaks_no_ids,
-         "C1932": c1932_cell_by_form_key_and_true_reasons}
+         "C1932": c1932_cell_by_form_key_and_true_reasons,
+         "C1933": c1933_media_bundle_frozen_scope,
+         "C1935": c1935_vignette_requests_its_own_pair}
 
 
 def main(argv=None) -> int:

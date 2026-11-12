@@ -1510,12 +1510,29 @@ def media_bundle_dir(ctx) -> Path:
     return ctx.out / "report" / "media-bundle" / "evidence"
 
 
-def frozen_registry_args(ctx) -> list[str]:
-    """The media bundle reads the check registry the evaluation's plan froze: the evidence bundle's own copy (it hashes
-    to the plan, and evalrun bundle refuses one that does not), so a registry changed since the run never refuses the
-    report stage (Hroggar, round 2 rerun: registry-changed, C1930)."""
-    reg = bundle_dir(ctx) / "registry" / "check-registry.json"
-    return ["--registry", fwd(reg)] if reg.is_file() else []
+def frozen_input_args(ctx) -> list[str]:
+    """The media bundle's frozen inputs, by construction (C1930, C1933): every input the evaluation's plan pins by path
+    and hash at its top level (evalrun's PREMISE_COPIES: the check registry and the scope) whose original no longer
+    hashes to the plan (gone, or changed since) is handed to evalrun bundle as the evidence bundle's own copy, which
+    evalrun checks against the plan's hash and refuses if it differs. A pinned input this function does not know is
+    refused in one sentence rather than left for the bundle to trip on (Hroggar: registry-changed; Ice Blade:
+    scope-missing, its plan naming a scope on a deleted folder)."""
+    import evalrun as ER
+    plan = read_json(ctx.out / "evaluation" / "plan.json")
+    out = []
+    for label, frozen in plan.items():
+        if not (isinstance(frozen, dict) and frozen.get("path") and frozen.get("sha256")):
+            continue
+        dest = ER.PREMISE_COPIES.get(label)
+        if dest is None:
+            raise Refusal(f"the plan pins {label} ({frozen['path']}), which the report stage does not know how to hand "
+                          f"the media bundle; add it to frozen_input_args before reporting.")
+        if ER.premise_file_refusal(plan, label, "") is None:
+            continue
+        copy = bundle_dir(ctx) / dest
+        if copy.is_file():
+            out += [f"--{label}", fwd(copy)]
+    return out
 
 
 def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
@@ -1536,7 +1553,7 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         bundle = media_bundle_dir(ctx)
         run = ctx.out / "evaluation"
         for name, argv in (("media-bundle", evalrun("bundle", "--run", fwd(run), "--out", fwd(bundle), "--media",
-                                                    fwd(mdir / "media.json"), *frozen_registry_args(ctx),
+                                                    fwd(mdir / "media.json"), *frozen_input_args(ctx),
                                                     "--reader-cmd", reader_cmd(ctx),
                                                     *[x for k, v in names_env(ctx).items() for x in ("--reader-env", f"{k}={v}")],
                                                     *[x for p, n in (ctx.entry.get("modNames") or {}).items()
