@@ -612,6 +612,14 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     chosen_by_type, unpictured, represented, candidates, others = {}, [], {}, {}, {}
     none_captured = []      # (type, count) of kinds with clashes to picture and no captured frame, capture closed
 
+    strength_re = re.compile(policy["strengthPattern"]) if policy.get("strengthPattern") else None
+
+    def strength(c):
+        """How much of the pair crosses, from the row's own summary (skill data strengthPattern: its triangle pairs), or
+        None. It orders which example is pictured; it ranks no finding and changes no count."""
+        m = strength_re.search(str(c["rows"][0].get("summary") or "")) if strength_re else None
+        return int(m.group(1).replace(",", "")) if m else None
+
     def group_key(c):
         """Instances of one problem (skill data vignettes.groupKey): the type, the mod pair, the cell, and a record
         clash's field. A record clash's cell is the one the other mod's version is filed in (names enrichment); a
@@ -631,9 +639,15 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         groups: dict = {}
         for c in sorted(draw, key=lambda c: c["rows"][0]["formKey"]):
             groups.setdefault(group_key(c), []).append(c)
+        # the strongest crossing of a group is its example, and a pair's groups go strongest first (item 7); a clash with
+        # no stated strength keeps its place after those with one, ties keep the order above
+        for g in groups.values():
+            g.sort(key=lambda c: (strength(c) is None, -(strength(c) or 0)))
         pairs: dict = {}
         for g in groups.values():
             pairs.setdefault(g[0]["pair"], []).append(g)
+        for gs in pairs.values():
+            gs.sort(key=lambda g: (strength(g[0]) is None, -(strength(g[0]) or 0)))
         pair_order = sorted(pairs, key=lambda p: (-len(pairs[p]), p))
         ordering, i = [], 0                                 # round the pairs until every group has a place
         while any(pairs.values()):
@@ -671,12 +685,17 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         # one, never dropped
         stands_in = [c for c in tried_refused if not buried_(c) and any(c in g_ for g_ in shown_groups)]
         unpictured += [(c, "buried" if buried_(c) else "captureRefused") for c in tried_refused if c not in stands_in]
+        # a clash a capture found buried is said as buried even when its group was pictured before it was tried (the
+        # strongest member first, item 7): no picture of another member stands for what no player sees
+        untried_buried = [c for c in draw if c not in chosen and c not in tried_refused and buried_(c)]
+        unpictured += [(c, "buried") for c in untried_buried]
         if captures_final and not chosen and t in (policy.get("pictureTypes") or []) and len(draw) > len(tried_refused):
             none_captured.append((t, len(draw) - len(tried_refused)))
         chosen_by_type[t] = chosen
         if t in (policy.get("pictureTypes") or []):
             candidates[t] = [c["rows"][0]["formKey"] for g in ordering for c in g][:attempts]
-        represented[t] = [c for c in draw if c not in chosen and (c not in tried_refused or c in stands_in)]
+        represented[t] = [c for c in draw if c not in chosen and c not in untried_buried
+                          and (c not in tried_refused or c in stands_in)]
     budget = int(policy["maxVignettes"])
     for t in policy.get("typeOrder") or []:
         keep = chosen_by_type.get(t, [])[:max(budget, 0)]

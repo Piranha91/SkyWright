@@ -1,4 +1,4 @@
-"""Known answers for the capture follow-ups after item 28 (C1830-C1834).
+"""Known answers for the capture follow-ups after item 28 (C1830-C1836).
 
     python tests/test_capture_follow_ups.py [--only C1830,C1835]
 
@@ -15,6 +15,8 @@ refused capture result). Coordinates and counts are made up; nothing here is evi
     C1832  item 3: the reel's reason line for buried clashes says how many camera spots each rests on
     C1833  item 4: the picker's eye-level step says which participant is drawn only by see-through shapes
     C1834  item 4: a buried participant whose partner is see-through is not said to be buried inside that partner
+    C1835  item 7: of a group's clashes, the reel pictures the strongest crossing (most triangle pairs), not the first
+    C1836  item 7: a clash a capture found buried is said as buried even when its group was pictured before it was tried
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -167,13 +169,61 @@ def c1834_buried_partner_see_through(tmp: Path):
           f"line {line!r}")
 
 
+def c1835_strongest_crossing_pictured(tmp: Path):
+    """One group (one mod pair, one cell) holds three crossings: 000101 against 000201 (1 triangle pair), 000101 against
+    000209 (900) and 000102 against 000202 (9). Wrong answer: the reel's vignette for the group is the first clash in
+    record order (the 1-pair crossing), not the strongest (WRW: the 2-pair rubble shown while the tower's 676-pair
+    crossing with the lighthouse, also captured, went unpictured)."""
+    RV = load("fu_reel_vignettes2", HERE / "test_reel_vignettes.py")
+    import reel_plan as RP
+    pres, names, masters, search, mods = RV.synthetic()
+    rec = pres["reader"]["prediction"]["record"]
+    first = next(r for r in rec if r.get("formKey") == "000101:Target.esp")
+    first["summary"] = first["summary"].replace("9 triangle pairs", "1 triangle pairs")
+    strong = copy.deepcopy(first)
+    strong["other"] = ["000209:Alpha.esp"]
+    strong["summary"] = first["summary"].replace("1 triangle pairs", "900 triangle pairs").replace("000201:Alpha.esp",
+                                                                                                   "000209:Alpha.esp")
+    rec.insert(rec.index(first) + 1, strong)
+    names["refs"]["000209:Alpha.esp"] = {"base": "B2", "carriedBy": ["Alpha.esp"]}
+    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = dict(RV.POLICY, strengthPattern=shipped.get("strengthPattern"))
+    reel = RP.plan_reel(copy.deepcopy(pres), names, masters, pol, RV.binding_words(), search, mods, [],
+                        markers=RV.MARKERS, switches=RV.SWITCHES, captures_final=False)
+    vig = [ch.get("clash") or {} for ch in reel.get("chapters") or [] if ch.get("kind") == "vignette"
+           and (ch.get("clash") or {}).get("type") == "overlap"]
+    cell_one = [c for c in vig if c.get("formKey") in ("000101:Target.esp", "000102:Target.esp")]
+    check("C1835", len(cell_one) == 1 and cell_one[0].get("other") == ["000209:Alpha.esp"],
+          "the reel pictures the group's first clash in record order, not its strongest crossing (900 triangle pairs)",
+          f"CellOne vignettes {[(c.get('formKey'), c.get('other')) for c in cell_one]}")
 
 
+def c1836_untried_buried_said(tmp: Path):
+    """CellOne's group: 000101 x 000201 is captured and pictured; 000102 x 000202 was refused as buried (0 of 9 stations
+    see 000202) but is never tried, because its group is already pictured (item 7 puts the strongest first, so this is
+    the usual order). Wrong answer: the buried clash counted as represented by the other member's picture, so the reel
+    says nothing of it being buried."""
+    RV = load("fu_reel_vignettes3", HERE / "test_reel_vignettes.py")
+    CF = load("fu_capture_fallbacks3", HERE / "test_capture_fallbacks.py")
+    import reel_plan as RP
+    pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
+    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = dict(RV.POLICY, stillReasons=shipped["stillReasons"], stillReasonsCount=shipped.get("stillReasonsCount"))
+    a2, b2 = "000102:Target.esp", "000202:Alpha.esp"
+    buried = dict(CF.buried_result({a2: 9, b2: 0}, 9, b2, keys=(a2, b2)), request="req-buried-102")
+    reel = RP.plan_reel(copy.deepcopy(pres), names, masters, pol, RV.binding_words(), search, mods, captures + [buried],
+                        markers=RV.MARKERS, switches=RV.SWITCHES, captures_final=True)
+    un = [c for ch in reel.get("chapters") or [] if ch.get("kind") == "unpictured" for c in ch.get("clashes") or []]
+    row = next((c for c in un if c.get("formKey") == a2), None)
+    check("C1836", row is not None and row.get("reason") == "buried",
+          "a clash a capture found buried is counted as represented by its group's picture instead of said as buried",
+          f"unpictured rows for 000102: {row}; accounting {json.dumps(reel.get('accounting'))[:300]}")
 
 
 PICKER_CASES = {"C1830": c1830_storey_not_from_the_box_top, "C1831": c1831_flat_partner_box,
                 "C1833": c1833_eye_level_names_see_through}
-CODE_CASES = {"C1832": c1832_reel_buried_reason_counts, "C1834": c1834_buried_partner_see_through}
+CODE_CASES = {"C1832": c1832_reel_buried_reason_counts, "C1834": c1834_buried_partner_see_through,
+              "C1835": c1835_strongest_crossing_pictured, "C1836": c1836_untried_buried_said}
 
 
 def main(argv=None) -> int:
