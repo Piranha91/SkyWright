@@ -546,9 +546,22 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
     floor_src = "navmesh"
     # the ground actually under the stations (the first surface straight down, terrain or a placed ref, a participant
     # included: a landscape-scale participant IS the ground there). A navmesh level well below it is another storey --
-    # a path under a rock, a cellar -- and a camera standing on it would stand inside the ground.
-    ground = sorted(z - d["dist"] for (x, y, z), e in p1.clear().items()
-                    if (d := (e["axes"].get("down") or {})).get("dist") is not None)
+    # a path under a rock, a cellar -- and a camera standing on it would stand inside the ground. The ray starts a
+    # player's eye height plus the storey tolerance above the navmesh storey being judged, so it asks whether something
+    # solid stands between that storey and the eye; cast from the top of the pair's box it found any floor high up the
+    # focus instead (item 1: WRW 708f's ring on the tower's top floor, 1,000 u over the navmesh). Limit: a navmesh more
+    # than that height under the ground is not caught here; the inside and support verdicts still apply.
+    ground = []
+    if floor is not None:
+        zg = int(round(floor + args.eye_height + args.storey_tol))
+        gflags = ["--eye", f"{mid[0]:.0f},{mid[1]:.0f},{maxz + 600:.0f}", "--look", f"{mid[0]:.0f},{mid[1]:.0f},{mid[2]:.0f}",
+                  "--size", "64", "--msaa", "0", "--nav", "off", "--clear-reach", "2048"]
+        for st in ring:
+            gflags += ["--clear-at", f"{st['xy'][0]},{st['xy'][1]},{zg}"]
+        rc, gtext = R.call("p1-ground", [cell], gflags)
+        ensure_ok(rc, gtext, "ground")
+        ground = sorted(z - d["dist"] for (x, y, z), e in R.parsed(gtext).clear().items()
+                        if (d := (e["axes"].get("down") or {})).get("dist") is not None)
     if floor is not None and ground:
         g = ground[len(ground) // 2]
         if g - floor > args.storey_tol:

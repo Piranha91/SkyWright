@@ -1,4 +1,4 @@
-"""Known answers for the capture follow-ups after item 28 (C1831).
+"""Known answers for the capture follow-ups after item 28 (C1830-C1831).
 
     python tests/test_capture_follow_ups.py [--only C1830,C1835]
 
@@ -8,6 +8,8 @@ participant's drawn box as viewprobe's `--contacts-of` does. The reel and report
 real reel_plan and evalreport on hand-built inputs (test_reel_vignettes' synthetic evaluation, test_capture_fallbacks'
 refused capture result). Coordinates and counts are made up; nothing here is evidence about a real cell.
 
+    C1830  item 1: a tall focus whose see-through partner contains it, with a slab 1,800 u up over the ring's spots and
+           the navmesh at z 0: the ring stands on the navmesh storey, not on the slab far above a player's eye
     C1831  item 2: a tall focus whose see-through partner's drawn box is flat (no height) and 1,000 u above the floor:
            the floor at z 0 under the focus is still found, and the ring stands there
 
@@ -67,6 +69,19 @@ def ring_floors(fx, tag: str) -> list[float] | None:
     return sorted({float(s["floorZ"]) for s in json.loads(wl.read_text(encoding="utf-8"))["cells"][0]["shots"]})
 
 
+def c1830_storey_not_from_the_box_top(fx, TCP):
+    """A tower 2,000 u tall (the focus: its partner is a see-through cloud whose box contains it, as WRW 708f's cloud
+    contains the tower) with a slab at z 1,800-1,820 over every ring spot and the navmesh at z 0. Wrong answer: the ring
+    on the slab, 1,700 u above the eye of a player on the navmesh, because the ground was cast down from the box top."""
+    tower = TCP.box(fx.cy, [-100, -100, 0], [100, 100, 2000])
+    cloud = TCP.box(fx.mg, [-6000, -6000, -2000], [6000, 6000, 8000], alpha=True, physical=False)
+    slab = {"id": "000401:Test.esp", "edid": "Walkway", "min": [-500, -500, 1800], "max": [500, 500, 1820]}
+    sc = TCP.scene(tower, cloud, slab, shell=False, contacts=True)
+    proc, _doc = TCP.pick(fx, sc, "c1830")
+    floors = ring_floors(fx, "c1830")
+    check("C1830", floors is not None and all(-8 <= f <= 8 for f in floors),
+          "the ring stands on a slab far above the navmesh storey (the ground cast from the top of the focus box)",
+          f"ring floors {floors}; {TCP.tail(proc)}")
 
 
 def c1831_flat_partner_box(fx, TCP):
@@ -95,7 +110,7 @@ def c1831_flat_partner_box(fx, TCP):
 
 
 
-PICKER_CASES = { "C1831": c1831_flat_partner_box}
+PICKER_CASES = {"C1830": c1830_storey_not_from_the_box_top, "C1831": c1831_flat_partner_box}
 CODE_CASES = {
              }
 
