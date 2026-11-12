@@ -1596,6 +1596,10 @@ def cmd_capture(a) -> int:
         return code
 
 
+#: the acquisition refusal's fields a capture result carries for the reel and report (notDrawn: C1936)
+RESULT_REFUSAL_KEYS = ("code", "pickerCode", "participant", "detail", "chain", "notDrawn")
+
+
 def _capture(a) -> int:
     """Render one request's frames at its acquired camera and write the media items for each setup's bundle.
 
@@ -1629,8 +1633,7 @@ def _capture(a) -> int:
     if acq.get("status") != "camera-ready" or (acq.get("request") or {}).get("id") not in (None, a.request):
         # the acquisition's own refusal travels with the result, so the planner and a reader see why (WRW capture)
         ref_ = acq.get("refusal") or {}
-        result["refusal"] = {k: ref_.get(k) for k in ("code", "pickerCode", "participant", "detail", "chain")
-                             if ref_.get(k)}
+        result["refusal"] = {k: ref_.get(k) for k in RESULT_REFUSAL_KEYS if ref_.get(k)}
         if "final" in ref_:
             result["refusal"]["final"] = ref_["final"]
         result["reason"] = (f"the camera acquisition for {a.request} is {acq.get('status')!r}"

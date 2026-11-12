@@ -156,10 +156,26 @@ def station_saw(x: dict) -> bool:
     return any(c.get("code") == "cutaway-not-applicable" or c.get("kind") == "witness" for c in chain)
 
 
-def unpictured_refused_reason(fks, capture_results, unmarkable: set) -> str:
-    """Why a refused, unburied clash has no picture (stillReasons keys): a station at a player's eye height saw it but no
-    picture could be kept (`stationSaw`), the renderer cannot mark one of its objects' see-through shapes
-    (`unmarkable`), else no camera could see it (`captureRefused`)."""
+def refusal_reason(x: dict, table: dict | None) -> str:
+    """The stillReasons key for one refused capture result, from the skill's one table of reasons by refusal code
+    (scene-policy vignettes.refusalReasons; the picker's code first, then the acquisition's): every code the capture side
+    can emit has its own entry (C1936). A reference not drawn is said by viewprobe's own reason (notDrawn: switched off
+    for good, starts switched off, deleted, no model). `captureRefused` only for a code the table does not know."""
+    ref = x.get("refusal") or {}
+    code = ref.get("pickerCode") or ref.get("code")
+    why = (table or {}).get(str(code)) if code else None
+    if why == "notDrawn":
+        nd = ref.get("notDrawn") or {}
+        return ("switchedOff" if nd.get("forGood") else "startsOff" if nd.get("why") in ("enableParent", "initiallyDisabled")
+                else "deleted" if nd.get("why") == "deleted" else "notDrawn")
+    return why or "captureRefused"
+
+
+def unpictured_refused_reason(fks, capture_results, unmarkable: set, table: dict | None = None) -> str:
+    """Why a refused, unburied clash has no picture (stillReasons keys): a place only the mod has
+    (`placeOnlyWithMod`), a station at a player's eye height saw it but no picture could be kept (`stationSaw`), the
+    renderer cannot mark one of its objects' see-through shapes (`unmarkable`), else its refusal code's own reason from
+    the table (refusal_reason)."""
     if any(result_about(x, fks) and (x.get("refusal") or {}).get("code") == "place-only-with-mod"
            for x in capture_results or []):
         return "placeOnlyWithMod"
@@ -167,7 +183,8 @@ def unpictured_refused_reason(fks, capture_results, unmarkable: set) -> str:
         return "stationSaw"
     if {str(k) for k in fks} & set(unmarkable or ()):
         return "unmarkable"
-    return "captureRefused"
+    x = next((x for x in capture_results or [] if x.get("status") == "refused" and result_about(x, fks)), None)
+    return refusal_reason(x, table) if x is not None else "captureRefused"
 
 
 def clash_buried(fks, capture_results) -> dict | None:
@@ -713,7 +730,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         # one, never dropped
         stands_in = [c for c in tried_refused if not buried_(c) and any(c in g_ for g_ in shown_groups)]
         unpictured += [(c, "buried" if buried_(c) else unpictured_refused_reason(
-            [c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results, unmarkable))
+            [c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results, unmarkable,
+            policy.get("refusalReasons")))
             for c in tried_refused if c not in stands_in]
         # a clash a capture found buried is said as buried even when its group was pictured before it was tried (the
         # strongest member first, item 7): no picture of another member stands for what no player sees
@@ -1189,9 +1207,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 frames.append({"state": state, "armId": bare_of[state], "mediaId": (m or {}).get("id"),
                                "viewNote": view_kind_line((m or {}).get("provenance") or {}) or None,
                                **({"label": frame_label(c, state, m)} if not split and frame_label(c, state, m) else {})})
-            notes_ = list(dict.fromkeys(f_["viewNote"] for f_ in frames if f_.get("viewNote")))
-            if notes_:
-                text = (text + " " + " ".join(notes_)).strip()
+            # the frame's own label says how the picture was made; the narrator never reads it (no disclaimers, C1937)
             clash = {"type": t, "checkId": r["checkId"], "formKey": r["formKey"], "other": list(r.get("other") or []),
                      "pair": list(c["pair"]), "armId": with_arm, "withoutArmId": without_arm,
                      "findingId": r.get("findingId"), "highlight": highlight(c)}

@@ -278,6 +278,28 @@ FOCUS_RATIO = 4.0         # a see-through participant this many times the partne
 CUTAWAY_STATIONS = 3      # frozen at Gate B: at most three cutaway witness runs per request
 
 
+# viewprobe's reasons for a placed reference it does not draw (Program.cs: "NOT DRAWN: <why>")
+NOT_DRAWN_PARENT = re.compile(r"disabled via enable parent (\S{6}:\S+?\.es[pml])( OPPOSITE)?")
+PLAYER_REF = "000014:Skyrim.esm"
+
+
+def not_drawn_detail(form_key: str, why: str) -> dict:
+    """viewprobe's own reason a reference is not drawn, as fields (C1936, C1939): `deleted`, `enableParent` (with the
+    parent and, only when viewprobe says so, its set-to-opposite flag), `initiallyDisabled`, `noBase`, `noModel`, else
+    `other`. `forGood` (switched off in the game for good) needs both the player as enable parent (always enabled) AND
+    the opposite flag from viewprobe's own words; viewprobe's NOT DRAWN reason does not print that flag today, so
+    `forGood` stays False until it does, never inferred from the parent alone."""
+    w = str(why).split("NOT DRAWN:", 1)[-1].strip()
+    m = NOT_DRAWN_PARENT.search(w)
+    if m:
+        opposite = True if m[2] else None
+        return {"formKey": form_key, "why": "enableParent", "enableParent": m[1], "opposite": opposite,
+                "forGood": m[1] == PLAYER_REF and opposite is True, "said": w}
+    kind = ("deleted" if w.startswith("deleted") or "flagged deleted" in w else "initiallyDisabled" if w == "initially disabled"
+            else "noBase" if w == "no base" else "noModel" if w == "base carries no model" else "other")
+    return {"formKey": form_key, "why": kind, "forGood": False, "said": w}
+
+
 def keyset(text: str) -> set[str]:
     return {x.strip() for x in text.split(",") if x.strip()}
 
@@ -536,7 +558,7 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
         if rows and not rows[0]["why"].startswith("drawn"):
             raise Unpickable("points-not-drawn",
                              f"{k} is not drawn by the renderer ({rows[0]['why']}), so no face of it can be measured",
-                             final=True)
+                             final=True, notDrawn=not_drawn_detail(k, rows[0]["why"]))
     nav = p1.nav()
     # the request's floor is chosen from the pair's and the ring's own spots, never from the snap samples
     asked = {(int(round(pos[k][0])), int(round(pos[k][1]))) for k in (A, B)} | {(int(round(mid[0])), int(round(mid[1])))} \
