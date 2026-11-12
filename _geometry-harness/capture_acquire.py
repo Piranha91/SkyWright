@@ -729,19 +729,21 @@ def _vp_run(a, shotplan_mod, cell: str, flags: list[str], out: Path) -> tuple[in
 COVERAGE_AT = re.compile(r"^coverage-at (\S{6}:.+?\.es[pml]) \S+: (?:pixel (\d+),(\d+) (in the mark, (\d+) px inside|outside the mark)|off the frame)")
 
 
-def coverage_at_pose(a, result: dict, receipts_dir: Path, shotplan_mod) -> None:
+def coverage_at_pose(a, result: dict, receipts_dir: Path, shotplan_mod, size: int = 320, extra=(),
+                     sub: str = "coverage-at-pose") -> str | None:
     """For a participant marked by coverage, render the final pose and require its point to land in its own mark (at least
-    2 px inside, the picker's rule). Fills participant.coverage.atPose, or refuses."""
+    2 px inside, the picker's rule). Fills participant.coverage.atPose, or refuses. Returns the render's console text
+    (None when no participant is marked by coverage)."""
     cov = [p for p in result.get("participants") or [] if p.get("markKind") == "coverage"]
     if not cov:
-        return
+        return None
     cam = result["camera"]
-    flags = shlex.split(cam["viewprobe"]) + ["--size", "320", "--msaa", "0", "--nav", "off", "--report-mode",
-                                              *(cam.get("viewFlags") or [])]
+    flags = shlex.split(cam["viewprobe"]) + ["--size", str(int(size)), "--msaa", "0", "--nav", "off", "--report-mode",
+                                              *(cam.get("viewFlags") or []), *[str(x) for x in extra]]
     for p in cov:
         x, y, z = p["point"]
         flags += ["--coverage-of", f"{p['formKey']}@{x:g},{y:g},{z:g}"]
-    rc, text = _vp_run(a, shotplan_mod, cam["cell"], flags, receipts_dir / "coverage-at-pose")
+    rc, text = _vp_run(a, shotplan_mod, cam["cell"], flags, receipts_dir / sub)
     if rc != 0:
         raise Refused("points-renderer-failed", f"the coverage check at the final pose did not render (viewprobe exit {rc})")
     for p in cov:
@@ -753,7 +755,8 @@ def coverage_at_pose(a, result: dict, receipts_dir: Path, shotplan_mod) -> None:
                           f"({'no reading' if m is None else m.group(0).split(': ', 1)[1]}); no camera is published",
                           final=False)
         p["coverage"] = {**(p.get("coverage") or {}), "atPose": True, "insideAtPose": inside,
-                         "atPoseReceipt": str(receipts_dir / "coverage-at-pose" / "console.txt")}
+                         "atPoseReceipt": str(receipts_dir / sub / "console.txt")}
+    return text
 
 
 # A refusal raised after the picker returned a pose is one of two things, decided here and nowhere else: the pose was
@@ -798,6 +801,160 @@ def after_pick_refusal(exc: Refused, points_doc: dict) -> dict | None:
         why = NO_FALLBACK.get(exc.code) or f"{exc.code} is not classified for the fallback chain; no fallback was tried"
     exc.extra.setdefault("noFallback", why)
     return None
+
+
+# The interim alpha-card rule (round 2 rerun, C1890-C1895). viewprobe's flat highlight cannot mark a plant made of
+# alpha-tested cards, so a composed pose framed on a point of such a card can miss its thin coverage mark by a pixel
+# even though the picker's own witness station measured the plant there. When the composed pose is refused that way,
+# the witness station's own camera is tried before the top-down: it is kept only when the plant's point lands in its
+# mark at that camera (coverage_at_pose, 2 px inside) and the render is bound to the request's configuration. The
+# planner's composition checks never ran on it; the blind image review judges what the frame shows.
+WITNESS_FROM = frozenset({"see-through-not-covered-at-pose", "planner-not-verified"})
+
+
+def alpha_card_participants(points_doc: dict) -> list[str]:
+    """The participants the picker marked by coverage at its witness station and measured as drawn only by see-through
+    shapes (the eye-level step's own allNonOpaque): the plants the rule is for."""
+    eye = next((c for c in reversed(points_doc.get("fallbackChain") or []) if c.get("kind") == "eye-level"), {})
+    clear = {str(k) for k in eye.get("allNonOpaque") or []}
+    return [str(r["formKey"]) for r in points_doc.get("points") or []
+            if r.get("markKind") == "coverage" and str(r.get("formKey")) in clear]
+
+
+def witness_step_applies(exc, points_doc: dict) -> tuple[bool, str]:
+    """(whether the witness step is tried, why not): a composed eye-level pose refused for its pose (POSE_REFUSED, from
+    WITNESS_FROM), with a participant that is an alpha-card shape and a witness station whose camera was recorded."""
+    test = POSE_REFUSED.get(exc.code)
+    if exc.code not in WITNESS_FROM or not (test and test(exc)):
+        return False, f"the pose was refused for {exc.code}, not for its framing of a see-through mark"
+    if (points_doc.get("viewKind") or "eye-level") != "eye-level":
+        return False, "the picked view is not an eye-level station's"
+    if not alpha_card_participants(points_doc):
+        return False, "no participant is drawn only by see-through shapes, so the composed pose's refusal stands"
+    st = (points_doc.get("witness") or {}).get("station") or {}
+    if not (st.get("eye") and st.get("look") and st.get("fov")):
+        return False, "the picker recorded no camera for its witness station"
+    return True, ""
+
+
+def _aspect_ratio(aspect) -> float:
+    if isinstance(aspect, str) and ":" in aspect:
+        w, h = aspect.split(":", 1)
+        return float(w) / float(h)
+    return float(aspect or 1.0)
+
+
+def witness_camera(points_doc: dict, shotplan_mod) -> dict:
+    """The witness station's camera as a capture camera: its eye and the point it looked at (yaw and pitch by the
+    planner's own worklist rule), its vertical field of view, at the request's aspect (the station's square frame is the
+    middle of it)."""
+    import math
+    st = points_doc["witness"]["station"]
+    eye, look = [float(v) for v in st["eye"]], [float(v) for v in st["look"]]
+    yaw = shotplan_mod.bearing_deg(look[0] - eye[0], look[1] - eye[1])
+    dxy = math.hypot(look[0] - eye[0], look[1] - eye[1])
+    pitch = math.degrees(math.atan2(eye[2] - look[2], dxy)) if dxy > 1 else 0.0
+    eye, yaw, pitch = [round(v, 1) for v in eye], round(yaw, 1), round(pitch, 1)
+    aspect = _aspect_ratio((points_doc.get("camera") or {}).get("aspect") or "16:9")
+    fov = float(st["fov"])
+    return {"cell": points_doc.get("cell"), "eye": eye, "yaw": yaw, "pitch": pitch, "fov": fov, "aspect": aspect,
+            "floorZ": points_doc.get("floorZ"), "viewKind": "eye-level", "viewFlags": [],
+            "cameraSource": "witness-station", "witnessStation": st.get("id"),
+            "viewprobe": (f"--eye {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f} --yaw {yaw:.1f} --pitch {pitch:.1f} --fov {fov:g}"
+                          + shotplan_mod.aspect_flag(aspect))}
+
+
+def acquire_witness(a, request: dict, parts: list[dict], points: dict, source: dict, receipts_dir: Path, shotplan_mod,
+                    exc) -> tuple[dict | None, dict]:
+    """(the camera-ready result or None, the chain step) for the witness step. Raises only for a binding failure; a
+    coverage miss at the witness camera is the step's own refusal, and the chain goes on to the top-down."""
+    doc = points["doc"]
+    ok, why = witness_step_applies(exc, doc)
+    if not ok:
+        return None, {"kind": "witness", "status": "skipped", "code": "witness-not-applicable", "detail": why}
+    st = doc["witness"]["station"]
+    camera = witness_camera(doc, shotplan_mod)
+    rows = [{**p, "point": points["byKey"][p["formKey"]]["point"],
+             "label": points["byKey"][p["formKey"]].get("label"),
+             "markKind": points["byKey"][p["formKey"]].get("markKind") or "surface",
+             "coverage": dict(points["byKey"][p["formKey"]].get("coverage") or {}) or None,
+             "surfaceOf": points["byKey"][p["formKey"]].get("surfaceOf")} for p in parts]
+    probe = {"participants": rows, "camera": camera}
+    # the check frame keeps the station's own vertical pixel count, so "2 px inside" means what it meant there
+    size = int(round(int(st.get("size") or 320) * float(camera["aspect"])))
+    try:
+        text = coverage_at_pose(a, probe, receipts_dir, shotplan_mod, size=size, extra=["--config-identity"],
+                                sub="witness-coverage")
+    except Refused as wexc:
+        if wexc.code != "see-through-not-covered-at-pose":
+            raise
+        return None, {"kind": "witness", "status": "refused", "code": "witness-not-covered",
+                      "detail": f"the witness station {st.get('id')}'s own camera was tried: {wexc.detail}"}
+    m = shotplan_mod.CONFIG_FINGERPRINT.search(text or "")
+    observed = m[1] if m else None
+    expected = request.get("configurationFingerprint")
+    if not observed:
+        raise Refused("configuration-identity-absent",
+                      "the witness camera's coverage render reported no configuration identity, so the camera is bound "
+                      "to this scene by declaration only", expectedFingerprint=expected, observedFingerprint=None)
+    scoped = None
+    if observed != expected:
+        scoped = scene_identity(source, expected, state=request.get("state") if request.get("requestType") == "state-pair" else None)
+        if scoped is None or scoped["sceneFingerprint"] != observed:
+            raise Refused("configuration-mismatch",
+                          f"the witness camera rendered configuration {observed[:16]}… but this finding was measured in "
+                          f"{str(expected)[:16]}…", expectedFingerprint=expected, observedFingerprint=observed)
+    step = {"kind": "witness", "status": "ok", "code": None,
+            "detail": (f"the composed pose was refused ({exc.code}); witness station {st.get('id')} "
+                       f"({float(st.get('bearing') or 0):.0f} deg, {float(st.get('standoff') or 0):.0f} u), where the picker "
+                       f"measured both, is the camera; {', '.join(alpha_card_participants(doc))} is drawn only by "
+                       f"see-through shapes")}
+    chain = list(doc.get("fallbackChain") or [])
+    if chain and chain[-1].get("kind") == "eye-level" and chain[-1].get("status") == "ok":
+        chain[-1] = {**chain[-1], "status": "refused", "code": exc.code,
+                     "detail": f"the picked eye-level pose was refused: {exc.detail}"}
+    chain.append(step)
+    seq = request.get("sequence") or {}
+    pose_id = "witness-" + hashlib.sha256(camera["viewprobe"].encode("utf-8")).hexdigest()[:12]
+    result = {"schemaVersion": 1, "kind": "capture-acquisition", "status": "camera-ready", "generatedUtc": utcnow(),
+              "synthetic": bool(doc.get("synthetic")), "viewKind": "eye-level", "cameraSource": "witness-station",
+              "request": {"id": request["id"], "requestType": request.get("requestType"), "checkId": request.get("checkId"),
+                          "armId": request.get("armId"), "findingIds": request.get("findingIds"),
+                          "location": request.get("location"), "recordKeys": request.get("recordKeys"),
+                          "state": request.get("state"), "status": request.get("status")},
+              "participants": rows, "source": source, "poseId": pose_id, "camera": camera, "cutaway": None,
+              "fallbackChain": chain,
+              "witness": {"station": st, "rule": "alpha-card", "alphaCard": alpha_card_participants(doc),
+                          "composedPoseRefusal": {"code": exc.code, "detail": exc.detail},
+                          "note": ("a station view: the picker's own witness camera, not a planner-composed shot; the "
+                                   "planner's composition checks did not run on it")},
+              "configuration": {"expected": expected, "observed": observed, "match": True, "populationScoped": scoped,
+                                "source": "the witness coverage render's own `capture input configuration:` line"},
+              "states": [{"state": s_, "poseId": pose_id, "camera": camera, "setup": (seq.get("setups") or {}).get(s_),
+                          "highlight": s_ == "highlight"} for s_ in (seq.get("states") or [])],
+              "sequence": seq,
+              "visualQualification": {"status": "pending",
+                                      "note": "a station view is reviewed blind like any other picture"},
+              "receipts": {"receiptsDir": str(receipts_dir), "points": points.get("path"),
+                           "witnessCoverage": str(receipts_dir / "witness-coverage" / "console.txt")}}
+    return result, step
+
+
+def after_pose_refusal(a, request: dict, parts: list[dict], points: dict, source: dict, receipts_dir: Path, shotplan_mod,
+                       pexc) -> tuple[str, dict]:
+    """("witness" | "top-down", the camera-ready result) once the composed pose was refused: the alpha-card rule's
+    witness station camera first, then the labelled top-down with the witness step in its chain. Re-raises a refusal no
+    fallback can answer (after_pick_refusal's noFallback)."""
+    handed = after_pick_refusal(pexc, points["doc"])
+    if handed is None:
+        raise pexc
+    wresult, wstep = acquire_witness(a, request, parts, points, source, receipts_dir, shotplan_mod, pexc)
+    if wresult is not None:
+        return "witness", wresult
+    handed["chain"] = list(handed["chain"]) + [wstep]
+    handoff = type("PoseRefusal", (), {})()
+    handoff.code, handoff.extra = pexc.code, handed
+    return "top-down", acquire_top_down(a, request, parts, source, receipts_dir, shotplan_mod, handoff)
 
 
 def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts_dir: Path, shotplan_mod, exc) -> dict:
@@ -1336,18 +1493,17 @@ def cmd_acquire(a) -> int:
                                       shotplan_mod)
                 coverage_at_pose(a, result, receipts_dir, shotplan_mod)
             except Refused as pexc:
-                handed = after_pick_refusal(pexc, points["doc"])
-                if handed is None:
-                    raise
-                handoff = type("PoseRefusal", (), {})()
-                handoff.code, handoff.extra = pexc.code, handed
-                result = acquire_top_down(a, request, parts, source, receipts_dir, shotplan_mod, handoff)
+                kind, result = after_pose_refusal(a, request, parts, points, source, receipts_dir, shotplan_mod, pexc)
                 write_json(out, result)
                 run.advance(1)
                 run.artifact(str(out))
                 run.tally(ok=1)
-                print(f"camera-ready {a.request}: TOP-DOWN after the picked pose was refused ({pexc.code}); "
-                      f"{result['camera']['viewprobe']}")
+                if kind == "witness":
+                    print(f"camera-ready {a.request}: STATION VIEW from witness {result['camera']['witnessStation']} "
+                          f"after the picked pose was refused ({pexc.code}); {result['camera']['viewprobe']}")
+                else:
+                    print(f"camera-ready {a.request}: TOP-DOWN after the picked pose was refused ({pexc.code}); "
+                          f"{result['camera']['viewprobe']}")
                 return EXIT_OK
         except Refused as exc:
             write_json(out, refusal_doc(a.request, exc,

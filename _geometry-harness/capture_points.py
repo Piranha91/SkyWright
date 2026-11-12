@@ -775,7 +775,11 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                       "standoffMax": float(max(50, int(ws // 50) * 50) + 200),
                       # a coverage mark is a point on a see-through surface: framed as a 16 u box on it, not a standing figure
                       **({"subjectHeight": 16.0, "subjectWidth": 16.0} if any(r["markKind"] == "coverage" for r in rows) else {})},
-           "witness": {"station": {k: chosen[k] for k in ("id", "bearing", "standoff", "eye", "frame")},
+           # the station's own camera (its eye, the point it looks at, the field of view and square frame it was measured
+           # in): the alpha-card rule's witness step renders it again when the composed pose misses a see-through mark
+           "witness": {"station": {**{k: chosen[k] for k in ("id", "bearing", "standoff", "eye", "frame")},
+                                   "look": [round(mid[0], 1), round(mid[1], 1), round(lookz, 1)], "fov": float(fov),
+                                   "size": int(size)},
                        "placements": {k: list(v) for k, v in pos.items()},
                        "floor": {"z": floor, "source": floor_src, "water": water},
                        "partlyUnmarked": sorted(see_through), "focus": focus if focus in pos else None,
