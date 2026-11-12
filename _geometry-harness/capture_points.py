@@ -26,6 +26,10 @@ HOW, in three viewprobe runs, each one cell load:
                   Outdoors (the cell header's exterior flag) a station stands on the navmesh at its own level: one
                   with no navmesh under it moves along its bearing to the nearest spot 100-1,000 u out that has some,
                   its eye is that level + eye height, and the first surface under the eye must be that level.
+                  One that still has no floor (no level, nearest triangle beyond the off-mesh tolerance) may stand on
+                  the terrain at its own spot (shotplan.terrain_verdict, 2026-11-12): the LAND under its 64 u footprint
+                  planar to 4 deg and at most the measured 43.7 deg, nothing placed within 64 u beside it or 160 u over
+                  it, the floor ray on the terrain; its eye is that ground + eye height, labelled a terrain station.
 
 THE FALLBACKS (2026-10-31). A participant with non-opaque shapes is marked by its measured coverage too (viewprobe
 --coverage-of); "no opaque face" is no longer a refusal of its own. When no placed station sees both, the CUTAWAY tries up
@@ -560,6 +564,21 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                              f"{k} is not drawn by the renderer ({rows[0]['why']}), so no face of it can be measured",
                              final=True, notDrawn=not_drawn_detail(k, rows[0]["why"]))
     nav = p1.nav()
+    # outdoors, the stations today's rule leaves with no floor -- no navmesh level at the spot or along the bearing, the
+    # nearest triangle beyond the off-mesh tolerance -- may stand on the terrain; their footprints' LAND vertices are read
+    def has_level(xy):
+        return bool((nav.get(tuple(xy)) or {}).get("levels"))
+    tcands = {}
+    if exterior:
+        for st in ring:
+            e = nav.get(tuple(st["xy"]))
+            if e is None or has_level(st["xy"]) or any(has_level(xy) for _, xy in samples.get(st["slot"], [])):
+                continue
+            if e.get("nearest") is not None and e["nearest"] <= args.offmesh_tol:
+                continue
+            tcands[st["id"]] = tuple(st["xy"])
+    tverts = sorted({v for xy in tcands.values() for v in S.terrain_vertices(xy)})
+    heights = None   # the candidates' LAND vertex heights, once read
     # the request's floor is chosen from the pair's and the ring's own spots, never from the snap samples
     asked = {(int(round(pos[k][0])), int(round(pos[k][1]))) for k in (A, B)} | {(int(round(mid[0])), int(round(mid[1])))} \
         | {tuple(st["xy"]) for st in ring}
@@ -580,10 +599,16 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                   "--size", "64", "--msaa", "0", "--nav", "off", "--clear-reach", "2048"]
         for st in ring:
             gflags += ["--clear-at", f"{st['xy'][0]},{st['xy'][1]},{zg}"]
+        for vx, vy in tverts:   # the terrain candidates' LAND vertices: only each answer's terrain height is read
+            gflags += ["--clear-at", f"{vx},{vy},{zg}"]
         rc, gtext = R.call("p1-ground", [cell], gflags)
         ensure_ok(rc, gtext, "ground")
-        ground = sorted(z - d["dist"] for (x, y, z), e in R.parsed(gtext).clear().items()
-                        if (d := (e["axes"].get("down") or {})).get("dist") is not None)
+        gclear = R.parsed(gtext).clear()
+        heights = {(x, y): g for (x, y, z), e in gclear.items() if (x, y) in set(tverts)
+                   and (g := S.terrain_ground(e)) is not None}
+        spots = {tuple(st["xy"]) for st in ring}
+        ground = sorted(z - d["dist"] for (x, y, z), e in gclear.items()
+                        if (x, y) in spots and (d := (e["axes"].get("down") or {})).get("dist") is not None)
     if floor is not None and ground:
         g = ground[len(ground) // 2]
         if g - floor > args.storey_tol:
@@ -612,6 +637,35 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
     if _ctx is not None:
         _ctx["floor"] = floor
 
+    # 2b. terrain stations: the slope from the LAND vertices, then one clearance run for the footprints it allows
+    tverdict = {}
+    if tcands:
+        if heights is None:   # p1-ground did not run (no navmesh storey): the vertices get a record-only run of their own
+            lflags = ["--eye", f"{mid[0]:.0f},{mid[1]:.0f},{maxz + 600:.0f}", "--look", f"{mid[0]:.0f},{mid[1]:.0f},{mid[2]:.0f}",
+                      "--size", "64", "--msaa", "0", "--nav", "off", "--clear-reach", str(S.TERRAIN_REACH)]
+            for vx, vy in tverts:
+                lflags += ["--clear-at", f"{vx},{vy},{int(round(maxz + 600))}"]
+            rc, ltext = R.call("p1-land", [cell], lflags)
+            ensure_ok(rc, ltext, "LAND")
+            heights = {(x, y): g for (x, y, z), e in R.parsed(ltext).clear().items()
+                       if (g := S.terrain_ground(e)) is not None}
+        slopes = {sid: S.terrain_slope(heights, xy) for sid, xy in tcands.items()}
+        for sid, sl in slopes.items():
+            if not sl["ok"]:
+                tverdict[sid] = (None, sl["why"])
+        allowed = {sid: tcands[sid] for sid, sl in slopes.items() if sl["ok"]}
+        if allowed:
+            tflags = ["--eye", f"{mid[0]:.0f},{mid[1]:.0f},{maxz + 600:.0f}", "--look", f"{mid[0]:.0f},{mid[1]:.0f},{mid[2]:.0f}",
+                      "--size", "64", "--msaa", "0", "--nav", "off", "--clear-reach", str(S.TERRAIN_REACH)]
+            for xy in allowed.values():
+                for q in S.terrain_queries(heights, xy):
+                    tflags += ["--clear-at", f"{q[0]},{q[1]},{q[2]}"]
+            rc, ttext = R.call("p1-terrain", [cell], tflags)
+            ensure_ok(rc, ttext, "terrain clearance")
+            tclear = R.parsed(ttext).clear()
+            for sid, xy in allowed.items():
+                tverdict[sid] = S.terrain_verdict(heights, tclear, xy)
+
     # 3. witnesses. Indoors every station stands on the one floor. Outdoors a station stands on the navmesh at its own
     # level: where its spot has none, it moves along its bearing to the nearest sampled spot that has some, and its eye
     # is that level + the eye height (a player's eye where a player can stand; the ring's one floor put eyes in hillsides)
@@ -633,6 +687,14 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                     lv = level_at(xy)
             if lv is not None:
                 st["floor"] = lv
+                st["standing"] = {"kind": "navmesh"}
+            elif st["id"] in tverdict:
+                # no navmesh at its level: it stands on the terrain at its own spot when the LAND there allows it
+                standing, why = tverdict[st["id"]]
+                if standing:
+                    st["floor"], st["standing"] = standing["ground"], standing
+                else:
+                    st["terrainWhy"] = why
             if tuple(st["xy"]) in taken:
                 merged.append(st)
             taken.add(tuple(st["xy"]))
@@ -689,8 +751,13 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
         sup, smsg = S.support_verdict(pr.clear().get(key3), eye, st["floor"], args)
         ikind, ifails, _notes = S.inside_verdict(pr.inside().get(key3), args)
         place = []
-        if kind in ("wrong-storey", "no-floor", "unknown"):
-            place.append(f"placement: {nmsg}")
+        on_terrain = (st.get("standing") or {}).get("kind") == "terrain"
+        if kind == "no-floor" and on_terrain:
+            if sup != "supported":
+                place.append(f"placement: this eye stands on the terrain at z {st['floor']:.0f}, but {smsg}")
+        elif kind in ("wrong-storey", "no-floor", "unknown"):
+            place.append(f"placement: {nmsg}" + (f"; and it cannot stand on the terrain there: {st['terrainWhy']}"
+                                                 if st.get("terrainWhy") else ""))
         if kind == "off-mesh-near" and sup != "supported":
             place.append(f"placement: {nmsg}; and the geometry does not bear that out -- {smsg}")
         elif exterior and kind == "on-storey" and sup != "supported":
@@ -707,6 +774,13 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
             st["why"] = "; ".join(place)
         elif not st["valid"]:
             st["why"] = "not every participant shows a measurable face from here"
+
+    def station_rows(sts):
+        return [{"id": st["id"], "bearing": st["bearing"], "standoff": st["standoff"], "eye": st.get("eye"),
+                 "floorZ": st.get("floor"), "movedFrom": st.get("movedFrom"), "standing": st.get("standing"),
+                 "valid": st["valid"], "why": st.get("why"),
+                 "participants": {k: {"pixels": v["pixels"], "maxDepth": v["maxDepth"]}
+                                  for k, v in (st.get("participants") or {}).items()}} for st in sts]
 
     valid = [st for st in ring if st["valid"]]
     view_kind, cutaway, view_flags = "eye-level", None, []
@@ -742,6 +816,7 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                 chain.append({"kind": "cutaway", "status": got["status"], "code": got["code"], "detail": got["detail"]})
         if not valid:
             raise Unpickable(code, detail + "; " + chain[-1]["detail"], topDown=top_down_inputs(floor), chain=chain,
+                             stations=station_rows(ring),
                              coverageStates={k: sorted(v) for k, v in cov_states.items()},
                              visibleFrom={p["formKey"]: sum(1 for st in placed if st["participants"][p["formKey"]]["best"])
                                           for p in parts} if placed else None, pixelsSeen=seen)
@@ -800,18 +875,14 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
            # the station's own camera (its eye, the point it looks at, the field of view and square frame it was measured
            # in): the alpha-card rule's witness step renders it again when the composed pose misses a see-through mark
            "witness": {"station": {**{k: chosen[k] for k in ("id", "bearing", "standoff", "eye", "frame")},
+                                   "standing": chosen.get("standing"),
                                    "look": [round(mid[0], 1), round(mid[1], 1), round(lookz, 1)], "fov": float(fov),
                                    "size": int(size)},
                        "placements": {k: list(v) for k, v in pos.items()},
                        "floor": {"z": floor, "source": floor_src, "water": water},
                        "partlyUnmarked": sorted(see_through), "focus": focus if focus in pos else None,
                        "contacts": contacts,
-                       "stations": [{"id": st["id"], "bearing": st["bearing"], "standoff": st["standoff"],
-                                     "eye": st.get("eye"), "floorZ": st.get("floor"), "movedFrom": st.get("movedFrom"),
-                                     "valid": st["valid"], "why": st.get("why"),
-                                     "participants": {k: {"pixels": v["pixels"], "maxDepth": v["maxDepth"]}
-                                                      for k, v in (st.get("participants") or {}).items()}}
-                                    for st in ring],
+                       "stations": station_rows(ring),
                        "merged": [{"id": st["id"], "xy": list(st["xy"])} for st in merged],
                        "runs": R.calls,
                        "rule": (f"grid {grid} px on a {size} px, {fov:g} deg frame; a point needs {min_depth} px of its "

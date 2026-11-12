@@ -1473,6 +1473,143 @@ def support_verdict(entry, eye, floor_z, args):
                             f"{band:.0f} u storey band -- that floor belongs to another level")
 
 
+# Terrain stations (terrain standing-slope RESULT, 2026-11-12): outdoors, where no navmesh stands a camera, a player placed
+# on bare LAND stood 3/3 up to 43.71 deg and slid from 48.41 deg. A camera may stand there when the footprint is planar
+# and nothing placed crowds it, hangs over it or stands between it and the ground.
+TERRAIN_LIMIT_DEG = 43.71      # the highest slope measured to hold 3/3; printed as 43.7
+TERRAIN_PLANAR_DEG = 4.0       # steepest minus shallowest triangle, both diagonals of every quad the footprint touches
+TERRAIN_HALF = 32              # the 64 u footprint, centred on the station
+TERRAIN_SIDE = 64.0            # no placed mesh this close on a lateral ray
+TERRAIN_OVERHEAD = 160.0       # nothing this close above a clearance point
+TERRAIN_FLOOR_TOL = 8.0        # the floor ray's terrain hit against the LAND read there
+TERRAIN_REACH = 160            # --clear-reach for the clearance queries
+TERRAIN_PROBE_MAX = 60         # planner candidates read for terrain in one plan, in score order
+LAND_STEP = 128                # LAND vertices sit on world multiples of 128 u
+GROUND_AT = re.compile(r"ground at z (-?\d+(?:\.\d+)?)")
+
+
+def terrain_ground(entry):
+    """The LAND height a --clear-at header reports at its XY, or None."""
+    m = GROUND_AT.search((entry or {}).get("terrain") or "")
+    return float(m[1]) if m else None
+
+
+def terrain_vertices(xy) -> list[tuple[int, int]]:
+    """The LAND vertices of every quad the footprint centred on `xy` touches."""
+    x, y = xy
+    s = LAND_STEP
+    ix0, ix1 = math.floor((x - TERRAIN_HALF) / s), math.ceil((x + TERRAIN_HALF) / s)
+    iy0, iy1 = math.floor((y - TERRAIN_HALF) / s), math.ceil((y + TERRAIN_HALF) / s)
+    return [(i * s, j * s) for i in range(ix0, ix1 + 1) for j in range(iy0, iy1 + 1)]
+
+
+def land_z(heights: dict, x: float, y: float):
+    """The drawn LAND height at X,Y from vertex heights, on viewprobe's own diagonal (Program.cs terrainHeightAt)."""
+    s = LAND_STEP
+    fx, fy = math.floor(x / s), math.floor(y / s)
+    # a point on a quad's edge reads the same from either quad; the one whose vertices were read answers
+    for ix in ((fx, fx - 1) if x / s == fx else (fx,)):
+        for iy in ((fy, fy - 1) if y / s == fy else (fy,)):
+            try:
+                h00, h10 = heights[(ix * s, iy * s)], heights[((ix + 1) * s, iy * s)]
+                h11, h01 = heights[((ix + 1) * s, (iy + 1) * s)], heights[(ix * s, (iy + 1) * s)]
+            except KeyError:
+                continue
+            u, v = x / s - ix, y / s - iy
+            return h00 + (h10 - h00) * u + (h11 - h10) * v if u >= v else h00 + (h11 - h01) * u + (h01 - h00) * v
+    return None
+
+
+def _tri_slope(a, b, c) -> float:
+    ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
+    nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+    return math.degrees(math.atan2(math.hypot(nx, ny), abs(nz)))
+
+
+def terrain_slope(heights: dict, xy) -> dict:
+    """{ok, slope, spread, why} for the footprint centred on `xy`: the steepest of the four triangles (both diagonals) of
+    every quad it touches must be at most the measured limit, and steepest minus shallowest at most the planar bound."""
+    s = LAND_STEP
+    vs = terrain_vertices(xy)
+    missing = [v for v in vs if heights.get(v) is None]
+    if missing:
+        return {"ok": False, "slope": None, "spread": None,
+                "why": f"no LAND heightmap was read at {len(missing)} of the footprint's {len(vs)} vertices"}
+    xs, ys = sorted({v[0] for v in vs}), sorted({v[1] for v in vs})
+    tris = []
+    for x0 in xs[:-1]:
+        for y0 in ys[:-1]:
+            p = {(i, j): (x0 + i * s, y0 + j * s, heights[(x0 + i * s, y0 + j * s)]) for i in (0, 1) for j in (0, 1)}
+            tris += [_tri_slope(p[0, 0], p[1, 0], p[1, 1]), _tri_slope(p[0, 0], p[1, 1], p[0, 1]),
+                     _tri_slope(p[0, 0], p[1, 0], p[0, 1]), _tri_slope(p[1, 0], p[1, 1], p[0, 1])]
+    slope, spread = max(tris), max(tris) - min(tris)
+    out = {"slope": round(slope, 2), "spread": round(spread, 2)}
+    if spread > TERRAIN_PLANAR_DEG:
+        return {**out, "ok": False, "why": (f"the LAND under it is not planar: its triangles run {min(tris):.1f}-"
+                                           f"{slope:.1f} deg, a spread over {TERRAIN_PLANAR_DEG:g} deg")}
+    if slope > TERRAIN_LIMIT_DEG + 1e-6:
+        return {**out, "ok": False, "why": (f"the LAND under it slopes {slope:.1f} deg, over the measured standing limit "
+                                           f"{TERRAIN_LIMIT_DEG:.1f} deg")}
+    return {**out, "ok": True, "why": None}
+
+
+def terrain_queries(heights: dict, xy) -> list[tuple[int, int, int]]:
+    """The clearance points: the centre 20 u and 90 u over its ground, and each footprint corner 40 u over its own."""
+    x, y = xy
+    g = land_z(heights, x, y)
+    qs = [(x, y, round(g + 20)), (x, y, round(g + 90))]
+    for dx in (-TERRAIN_HALF, TERRAIN_HALF):
+        for dy in (-TERRAIN_HALF, TERRAIN_HALF):
+            qs.append((x + dx, y + dy, round(land_z(heights, x + dx, y + dy) + 40)))
+    return qs
+
+
+def terrain_clearance(heights: dict, clear: dict, xy):
+    """(ok, why) over the clearance points' --clear-at answers (TERRAIN_REACH): every one answered with full coverage, no
+    placed mesh within TERRAIN_SIDE on a lateral ray, nothing within TERRAIN_OVERHEAD above, the floor ray on the terrain."""
+    for q in terrain_queries(heights, xy):
+        e = clear.get(q)
+        where = f"at {q[0]},{q[1]},{q[2]}"
+        if e is None:
+            return False, f"no --clear-at answer {where}, so its clearance is untested"
+        if e["no_box"] or e["unread"] or e.get("obnd_only"):
+            return False, f"the clearance probe {where} could not read every mesh near it, so its clearance is untested"
+        for ax in ("+x", "-x", "+y", "-y"):
+            d = e["axes"].get(ax) or {}
+            if d.get("dist") is not None and d["dist"] <= TERRAIN_SIDE:
+                return False, (f"`{d.get('edid') or d.get('formkey')}` stands {d['dist']:.0f} u away {where} "
+                               f"(on {ax}), within {TERRAIN_SIDE:.0f} u")
+        up = e["axes"].get("up") or {}
+        if up.get("dist") is not None and up["dist"] <= TERRAIN_OVERHEAD:
+            who = "the ground itself" if up.get("formkey") == "000000:TERRAIN" else f"`{up.get('edid') or up.get('formkey')}`"
+            return False, f"{who} is overhead, {up['dist']:.0f} u above {where} (within {TERRAIN_OVERHEAD:.0f} u)"
+        if up.get("dist") is None and e["reach"] < TERRAIN_OVERHEAD:
+            return False, f"the probe {where} reached only {e['reach']:.0f} u, so overhead is untested"
+        dn = e["axes"].get("down") or {}
+        lz = land_z(heights, q[0], q[1])
+        if dn.get("formkey") != "000000:TERRAIN":
+            what = f"`{dn.get('edid') or dn.get('formkey')}`" if dn.get("dist") is not None else "nothing"
+            return False, f"the floor ray {where} meets {what}, not the terrain"
+        if lz is None or abs((q[2] - dn["dist"]) - lz) > TERRAIN_FLOOR_TOL:
+            return False, f"the floor ray {where} meets the terrain at z {q[2] - dn['dist']:.0f}, not the LAND read there"
+    return True, None
+
+
+def terrain_verdict(heights: dict, clear: dict, xy):
+    """(standing or None, why): a terrain station's standing record, or the plain reason it cannot stand there."""
+    sl = terrain_slope(heights, xy)
+    if not sl["ok"]:
+        return None, sl["why"]
+    ok, why = terrain_clearance(heights, clear, xy)
+    if not ok:
+        return None, why
+    g = land_z(heights, *xy)
+    return {"kind": "terrain", "ground": round(g, 1), "slope": sl["slope"], "spread": sl["spread"],
+            "limit": TERRAIN_LIMIT_DEG,
+            "label": f"terrain, slope {sl['slope']:.1f}°, measured limit {TERRAIN_LIMIT_DEG:.1f}°"}, None
+
+
 def frame_check(eye, yaw, pitch, fov, subjects, args):
     """Is every subject inside the frame, and how much of it do they fill?
 
@@ -1636,7 +1773,7 @@ def inside_verdict(entry, args):
 
 
 def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, inside_entry=None,
-             clear_entry=None, exterior=False):
+             clear_entry=None, exterior=False, standing=None, terrain_why=None):
     """Every reason this camera could be wrong, collected rather than short-circuited.
 
     A planner that stops at the first failure teaches nothing when it refuses. The caller prints
@@ -1688,11 +1825,18 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
     kind, msg = ("skipped", "not probed yet") if skip_nav else \
         nav_verdict(nav_entry, floor_z, args)
     v["nav"] = kind
+    on_terrain = kind == "no-floor" and (standing or {}).get("kind") == "terrain"
+    if standing:
+        v["standing"] = standing
     # "unknown" is a MISSING answer, not a passing one. A point the probe never reported on has
     # not been placement-tested, and letting it through would be exactly the silent degradation
     # the aimed-verification fix above exists to stop -- the same bug one query lower down.
-    if kind in ("wrong-storey", "no-floor", "unknown"):
-        v["fail"].append(f"placement: {msg}")
+    if on_terrain:
+        # outdoors with no navmesh: the terrain station rule allowed this footprint (terrain_verdict)
+        v["note"].append(f"placement: {msg}; it stands on the terrain, {standing['label']}")
+    elif kind in ("wrong-storey", "no-floor", "unknown"):
+        v["fail"].append(f"placement: {msg}" + (f"; and it cannot stand on the terrain there: {terrain_why}"
+                                                if terrain_why else ""))
     else:
         v["note"].append(f"placement: {msg}")
     # The off-mesh allowance is the one arm that passes a point NO navmesh covers, on the strength
@@ -1711,6 +1855,8 @@ def evaluate(eye, subjects, floor_z, nav_entry, args, aim, skip_nav=False, insid
         elif exterior and kind == "on-storey" and sup != "supported":
             # outdoors the eye stands on its own navmesh level, so the first surface under it must be that level
             v["fail"].append(f"placement: outdoors this eye stands on the navmesh at z {floor_z:.0f}, but {smsg}")
+        elif on_terrain and sup != "supported":
+            v["fail"].append(f"placement: this eye stands on the terrain at z {floor_z:.0f}, but {smsg}")
         else:
             v["note"].append(f"support: {smsg}")
     if skip_nav:
@@ -2665,17 +2811,74 @@ def cmd_plan(args):
             p3b = run.probe(*fl2)
             inside.update(p3b.inside())
             clear.update(p3b.clear())
+    # Outdoors, a point the navmesh leaves with no floor may stand on the terrain (terrain_verdict): its footprint's LAND
+    # vertices are read (one record-only run), then the clearance of the footprints the slope allows (a second), then the
+    # inside and clear queries at the eyes that stand (a third). Only points whose ground lies within the storey band of
+    # the floor count, as for the navmesh levels above; at most TERRAIN_PROBE_MAX, in score order, any dropped named.
+    terrain, terrain_why = {}, {}
+    if exterior:
+        tc = [xy for xy in pts if xy not in own and nav_verdict(nav.get(xy), floor_z, args)[0] == "no-floor"]
+        tc = [xy for xy in tc if (g := terrain_ground(clear.get((xy[0], xy[1], eye_z)))) is not None
+              and abs(g - floor_z) <= args.storey_tol]
+        tdrop = max(0, len(tc) - TERRAIN_PROBE_MAX)
+        tc = tc[:TERRAIN_PROBE_MAX]
+        if tc:
+            print(f"  outdoors: {len(tc)} point(s) with no navmesh stand over LAND within the storey band; reading their "
+                  "footprints" + (f" ({tdrop} more DROPPED by the {TERRAIN_PROBE_MAX}-point cap, NOT judged)" if tdrop else ""))
+            verts = sorted({vx for xy in tc for vx in terrain_vertices(xy)})
+            fl = ["--eye", f"{cx:.1f},{cy:.1f},{floor_z + args.eye_height:.1f}", "--yaw", "0",
+                  "--clear-reach", str(TERRAIN_REACH)]
+            for vx, vy in verts:
+                fl += ["--clear-at", f"{vx},{vy},{eye_z}"]
+            heights = {(x, y): g for (x, y, z), e in run.probe(*fl).clear().items()
+                       if (g := terrain_ground(e)) is not None}
+            allowed = []
+            for xy in tc:
+                sl = terrain_slope(heights, xy)
+                if sl["ok"]:
+                    allowed.append(xy)
+                else:
+                    terrain_why[xy] = sl["why"]
+            if allowed:
+                fl = ["--eye", f"{cx:.1f},{cy:.1f},{floor_z + args.eye_height:.1f}", "--yaw", "0",
+                      "--clear-reach", str(TERRAIN_REACH)]
+                for xy in allowed:
+                    for q in terrain_queries(heights, xy):
+                        fl += ["--clear-at", f"{q[0]},{q[1]},{q[2]}"]
+                tclear = run.probe(*fl).clear()
+                ok_xy = {}
+                for xy in allowed:
+                    st_, why = terrain_verdict(heights, tclear, xy)
+                    if st_:
+                        ok_xy[xy] = st_
+                    else:
+                        terrain_why[xy] = why
+                if ok_xy:
+                    fl = ["--eye", f"{cx:.1f},{cy:.1f},{floor_z + args.eye_height:.1f}", "--yaw", "0",
+                          "--clear-reach", f"{args.clear_reach:g}"]
+                    for (x, y), st_ in ok_xy.items():
+                        ez = round(st_["ground"] + args.eye_height)
+                        fl += ["--inside-at", f"{x},{y},{ez}", "--clear-at", f"{x},{y},{ez}"]
+                    pt = run.probe(*fl)
+                    inside.update(pt.inside())
+                    clear.update(pt.clear())
+                    terrain = ok_xy
+            print(f"  outdoors: {len(terrain)} of {len(tc)} stand on the terrain")
     kept = set(pts)
     scored = []
     for v in live:
         if v["_xy"] not in kept:
             continue
-        fz = own.get(v["_xy"], floor_z)
-        ez = round(fz + args.eye_height) if v["_xy"] in own else eye_z
-        eye = (v["eye"][0], v["eye"][1], float(fz + args.eye_height)) if v["_xy"] in own else v["eye"]
+        st_ = terrain.get(v["_xy"])
+        fz = own.get(v["_xy"], st_["ground"] if st_ else floor_z)
+        moved_eye = v["_xy"] in own or st_ is not None
+        ez = round(fz + args.eye_height) if moved_eye else eye_z
+        eye = (v["eye"][0], v["eye"][1], float(fz + args.eye_height)) if moved_eye else v["eye"]
         v2 = evaluate(eye, subjects, fz, nav.get(v["_xy"]), args, aim,
                       inside_entry=inside.get((v["_xy"][0], v["_xy"][1], ez)),
-                      clear_entry=clear.get((v["_xy"][0], v["_xy"][1], ez)), exterior=exterior)
+                      clear_entry=clear.get((v["_xy"][0], v["_xy"][1], ez)), exterior=exterior,
+                      standing=st_ or ({"kind": "navmesh"} if v["_xy"] in own else None),
+                      terrain_why=terrain_why.get(v["_xy"]))
         v2["_bearing"], v2["_standoff"], v2["_xy"], v2["_floor"] = v["_bearing"], v["_standoff"], v["_xy"], fz
         scored.append(v2)
     ok = [v for v in scored if v["ok"]]
