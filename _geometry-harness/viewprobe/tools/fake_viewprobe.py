@@ -34,6 +34,9 @@ Scene JSON:
      "clearNoBox": 0,                # physical refs the OBND broad phase could not offer
      "clearUnread": 0,               # candidate meshes that could not be read
      "clearTerrain": "terrain: ...", # the terrain state clear-at reports (default: interior)
+     "terrain": {"origin": [x0, y0], "step": 128, "z": [[...]]},  # a LAND vertex grid: clear-at reports the ground
+                                     # and its vertical rays meet it (000000:TERRAIN); outside the grid clearTerrain,
+                                     # else NO heightmap. Not drawn in frames
      "exterior": false,              # true = the cell header says (exterior), as an exterior CELL record does
      "contacts": false,              # true = --contacts-of K prints K's drawn box and its touches / rests-on lines
      "clearObndOnly": 0,             # refs the broad phase could select only by their record box
@@ -112,6 +115,26 @@ def ray_box(eye, d, lo, hi):
         if t0 > t1:
             return None
     return t0 if t0 > 1e-6 else None
+
+
+def terrain_z(scene, x, y):
+    """The fake LAND under a world X,Y, or None outside it. `terrain` is a vertex grid, {"origin": [x0, y0], "step": 128,
+    "z": [[z at (x0 + i*step, y0 + j*step) for j] for i]}, split on viewprobe's own diagonal (Program.cs terrainHeightAt:
+    the lower triangle (x,y)-(x+1,y)-(x+1,y+1) when u >= v). Only clear-at's vertical rays and its terrain note read it;
+    the frames do not draw it."""
+    t = scene.get("terrain")
+    if not t:
+        return None
+    s = float(t.get("step", 128))
+    zz = t["z"]
+    fx, fy = (x - t["origin"][0]) / s, (y - t["origin"][1]) / s
+    nx, ny = len(zz) - 1, len(zz[0]) - 1
+    if not (0 <= fx <= nx and 0 <= fy <= ny):
+        return None
+    ix, iy = min(int(math.floor(fx)), nx - 1), min(int(math.floor(fy)), ny - 1)
+    u, v = fx - ix, fy - iy
+    h00, h10, h11, h01 = zz[ix][iy], zz[ix + 1][iy], zz[ix + 1][iy + 1], zz[ix][iy + 1]
+    return h00 + (h10 - h00) * u + (h11 - h10) * v if u >= v else h00 + (h11 - h01) * u + (h01 - h00) * v
 
 
 def trace(scene, eye, d, cull=None):
@@ -474,6 +497,10 @@ def one_shot(scene, a, argv, png):
         if (x, y, z) in silent_clear:
             continue
         q = (x, y, z)
+        gz = terrain_z(scene, x, y)
+        tnote = (f"terrain: ground at z {gz:.1f}" if gz is not None else
+                 scene.get("clearTerrain") or ("terrain: NO heightmap covers this XY - absence below this eye is not "
+                                               "evidence" if scene.get("terrain") else None))
         print(f"   clear-at {x},{y},{z}: nearest placed geometry on each world axis within "
               f"{reach:.0f} u - {len(phys)} candidate(s) in the broad phase, {len(phys)} with a "
               f"readable mesh, {scene.get('clearUnread', 0)} unreadable, "
@@ -482,7 +509,7 @@ def one_shot(scene, a, argv, png):
               f"{scene.get('clearObndOnly', 0)} selected by record OBND because their mesh could not "
               f"be read, {scene.get('clearObndWouldMiss', 0)} admitted by mesh bounds that the record "
               f"box alone would have excluded; "
-              f"{scene.get('clearTerrain', 'terrain: interior cell, none expected')} "
+              f"{tnote or 'terrain: interior cell, none expected'} "
               "(broad phase: the mesh's own NIF bounds, with record OBND only as a counted fallback; "
               "the four lateral rays ignore terrain)")
         for name, ax, sgn in axes:
@@ -507,7 +534,15 @@ def one_shot(scene, a, argv, png):
                 if 1e-3 < t <= reach and (best is None or t < best):
                     best, who = t, {"id": "000000:Test.esm", "edid": "SceneFloor",
                                     "min": [0, 0, fz], "max": [0, 0, fz]}
-            if best is None:
+            # the fake LAND: the two vertical rays read the height field, as viewprobe's clear-at does
+            if gz is not None and name in ("up", "down"):
+                t = (gz - q[2]) * sgn
+                if 1e-3 < t <= reach and (best is None or t < best):
+                    best, who = t, {"terrain": True}
+            if best is not None and who.get("terrain"):
+                print(f"      {name:<4} {best:7.1f} u  000000:TERRAIN  LandHeightmap  at {x},{y},{gz:.0f}  "
+                      "scale 1.00  mesh (terrain)")
+            elif best is None:
                 print(f"      {name:<4}       -  nothing within {reach:.0f} u")
             else:
                 c = [(who["min"][k] + who["max"][k]) / 2.0 for k in range(3)]
