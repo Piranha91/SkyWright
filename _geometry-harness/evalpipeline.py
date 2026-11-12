@@ -1225,6 +1225,8 @@ FINAL_REFUSALS = {"top-down-participant-unseen", "see-through-unmarked", "points
 # a chain step that failed for a reason that is not the geometry's (a crash, memory, a lock or slot timeout, a renderer
 # exit) makes the whole refusal transient, whatever the other steps said
 TRANSIENT_STEP = {"failed"}
+# the eye-level codes capture_acquire's witness step answers (its WITNESS_FROM)
+POSE_REFUSAL_CODES = {"see-through-not-covered-at-pose", "planner-not-verified"}
 
 
 def deterministic_refusal(ref_: dict) -> bool:
@@ -1234,6 +1236,11 @@ def deterministic_refusal(ref_: dict) -> bool:
     code = ref_.get("pickerCode") or ref_.get("code")
     chain = ref_.get("chain") or []
     if any(str(st.get("status")) in TRANSIENT_STEP for st in chain):
+        return False
+    # a composed eye-level pose refused at the final camera, in a chain from before the alpha-card rule (no witness step):
+    # the witness station's own camera was never tried, so the refusal is not yet the geometry's (C1895)
+    if (any(st.get("kind") == "eye-level" and st.get("code") in POSE_REFUSAL_CODES for st in chain)
+            and not any(st.get("kind") == "witness" for st in chain)):
         return False
     if ref_.get("final") is True:
         return (ref_.get("code") in FINAL_REFUSALS or code in FINAL_REFUSALS)
@@ -1397,20 +1404,23 @@ def stage_image_observations(ctx: Context, res: dict, sdir: Path) -> tuple[dict,
     then a stop until the reviewer's agent banks RUN/image-observations/observations.json for exactly these frames."""
     caps = read_json(ctx.out / "capture" / "captures.json")
     packet = sdir / "indexed-images"
-    key = []
-    if not (sdir / "image-key.json").is_file():
+    # the key is derived from this capture's frames every time; a kept key stands only when it lists exactly these frames,
+    # so a capture rerun after an earlier key (an empty one, say) never inherits it (C1897)
+    key, n = [], 0
+    for row in caps:
+        if row.get("status") != "captured":
+            continue
+        for png in sorted(Path(row["result"]).parent.rglob("*.png")):
+            n += 1
+            key.append({"image": f"image-{n:03d}.png", "source": fwd(png), "sha256": sha256_file(png),
+                        "request": row["id"]})
+    kept = read_json(sdir / "image-key.json") if (sdir / "image-key.json").is_file() else None
+    if kept != key or not packet.is_dir():
         if packet.exists():
             shutil.rmtree(packet)
         packet.mkdir(parents=True)
-        n = 0
-        for row in caps:
-            if row.get("status") != "captured":
-                continue
-            for png in sorted(Path(row["result"]).parent.rglob("*.png")):
-                n += 1
-                shutil.copy2(png, packet / f"image-{n:03d}.png")
-                key.append({"image": f"image-{n:03d}.png", "source": fwd(png), "sha256": sha256_file(png),
-                            "request": row["id"]})
+        for k in key:
+            shutil.copy2(k["source"], packet / k["image"])
         write_json(sdir / "image-key.json", key)  # the key stays out of the packet a blind reviewer is given
         (packet / "README.txt").write_text("Indexed frames for a blind review. Describe what each image shows; no "
                                            "names or expectations are supplied.\n", encoding="utf-8")
