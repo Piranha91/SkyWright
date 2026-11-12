@@ -649,12 +649,12 @@ def cmd_storyboard_packet(a) -> int:
             if ch.get("kind") in STILL_KINDS and (ch.get("still") or {}).get("pages"):
                 for n, part in enumerate(reel_stills.still_parts(ch["still"]["pages"], font_, bold_)):
                     scenes.append({"chapterId": ch.get("id"), "captionIndex": n, "occurrenceIndex": 0, "mediaId": None,
-                                   "kind": ch.get("kind"), "page": n, "narration": part["say"],
+                                   "kind": ch.get("kind"), "page": n, "narration": reel_stills.spoken_text(part["say"]),
                                    "narrationAudio": (ch.get("pageAudio") or {}).get(str(n)), "omitFromReel": False,
                                    "omissionReason": None})
                 continue
             scenes.append({"chapterId": ch.get("id"), "captionIndex": 0, "occurrenceIndex": 0, "mediaId": None,
-                           "kind": ch.get("kind"), "narration": ch.get("narration"),
+                           "kind": ch.get("kind"), "narration": reel_stills.spoken_text(ch.get("narration") or ""),
                            "narrationAudio": ch.get("narrationAudio"), "omitFromReel": False, "omissionReason": None})
     for ch in ([] if scenes else pres["chapters"]):
         for i, cap in enumerate(ch.get("captions") or []):
@@ -1103,7 +1103,8 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
     segments, errors = [], []
     for ch in chapters:
         cid, kind = ch.get("id"), ch.get("kind")
-        narration = " ".join(str(ch.get("narration") or "").split())
+        # the final speech and subtitle string: no form key or editor ID (C1961)
+        narration = reel_stills.spoken_text(" ".join(str(ch.get("narration") or "").split()))
         if not narration:
             errors.append(f"{cid}: scene has no narration")
             continue
@@ -1131,7 +1132,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                     except ValueError as e:
                         errors.append(f"{cid}: {e}")
                         break
-                say = page["say"] or narration
+                say = reel_stills.spoken_text(page["say"] or narration)
                 segments.append({"chapterId": cid, "chapterKind": kind, "page": n, "kind": "still", "narration": say,
                                  "narrationOverlaid": False, "clash": ch.get("clash"), "patch": ch.get("patch"),
                                  "narrationAudio": page_audio.get(str(n)) or (ch.get("narrationAudio") if len(parts) == 1 else None),
