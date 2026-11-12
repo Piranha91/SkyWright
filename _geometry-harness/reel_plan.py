@@ -166,8 +166,11 @@ def refusal_reason(x: dict, table: dict | None) -> str:
     why = (table or {}).get(str(code)) if code else None
     if why == "notDrawn":
         nd = ref.get("notDrawn") or {}
+        # each line only on viewprobe's own cause fields; a refusal without them (an older capture) gets the neutral
+        # true line, never "no model to draw" (C1960)
         return ("switchedOff" if nd.get("forGood") else "startsOff" if nd.get("why") in ("enableParent", "initiallyDisabled")
-                else "deleted" if nd.get("why") == "deleted" else "notDrawn")
+                else "deleted" if nd.get("why") == "deleted" else "notDrawn" if nd.get("why") in ("noModel", "noBase")
+                else "notDrawnUnknown")
     return why or "captureRefused"
 
 
