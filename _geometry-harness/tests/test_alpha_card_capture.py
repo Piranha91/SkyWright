@@ -1,4 +1,4 @@
-"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1899, C1930-C1933, C1935).
+"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1899, C1930-C1933, C1935-C1939).
 
     python tests/test_alpha_card_capture.py [--only C1890,C1897]
 
@@ -30,6 +30,11 @@ up; nothing here is evidence about a real cell.
     C1933  the report stage's media bundle hands every pinned plan input whose original no longer hashes to the plan as
            the evidence bundle's copy (the scope on a deleted folder), and refuses a pinned input it does not know
     C1935  a vignette's capture request is its own clash pair, never every pair sharing its first form key
+    C1936  every refusal code the capture side can emit has its own reason in one table; captureRefused only for an
+           unknown code; a reference switched off for good is said so
+    C1937  a sliced top-down's (or cutaway's) note stays on its frame and is never narrated
+    C1938  "overlap candidate" never reaches the report or the reel; the overlap what-to-do line is in plain words
+    C1939  the picker's not-drawn reason travels as fields into the capture result and the reel's reason line
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -40,6 +45,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import re
 import os
 import sys
 import tempfile
@@ -588,6 +594,156 @@ def c1935_vignette_requests_its_own_pair(tmp: Path):
           "a vignette gets capture requests for pairs it does not show (or none for its own pair)", f"requests {pairs}")
 
 
+CODE_RE = re.compile(r"^[a-z]+(?:-[a-z0-9]+)+$")
+
+
+def emittable_refusal_codes() -> set:
+    """Every refusal code the capture side can emit: the first argument of a Refused / Unpickable call, a string
+    assigned to `code`, and a "code" value in a chain step or refusal dict, in capture_acquire, capture_points and
+    capture_navmesh (codes only: lower-case words joined by hyphens)."""
+    import ast
+    out = set()
+    for f in ("capture_acquire.py", "capture_points.py", "capture_navmesh.py"):
+        tree = ast.parse((HARNESS / f).read_text(encoding="utf-8"))
+        for n in ast.walk(tree):
+            vals = []
+            if isinstance(n, ast.Call) and (getattr(n.func, "id", None) or getattr(n.func, "attr", None)) in ("Refused", "Unpickable") and n.args:
+                vals = [n.args[0]]
+            elif isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "code" for t in n.targets):
+                vals = [n.value]
+            elif isinstance(n, ast.Dict):
+                vals = [v for k, v in zip(n.keys, n.values) if isinstance(k, ast.Constant) and k.value == "code"]
+            for v in vals:
+                for x in ast.walk(v):
+                    if isinstance(x, ast.Constant) and isinstance(x.value, str) and CODE_RE.match(x.value):
+                        out.add(x.value)
+    return out
+
+
+def c1936_refusal_reasons_by_table(tmp: Path):
+    """Four refusal paths fell into "No camera could see the clash" in one day. Wrong answers: a refusal code the capture
+    side can emit with no reason of its own in the table (or one naming a reason with no words); a reference switched
+    off for good said as one no camera could see; a camera-spot refusal said as one; an unknown code not falling back
+    to the generic line."""
+    import reel_plan as RP
+    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    table = pol.get("refusalReasons") or {}
+    codes = emittable_refusal_codes()
+    missing = sorted(c for c in codes if c not in table)
+    unworded = sorted(k for k in set(table.values()) if k not in (pol.get("stillReasons") or {})
+                      or k not in (pol.get("stillReasonsShort") or {}))
+    check("C1936", len(codes) > 40 and not missing and not unworded,
+          "a refusal code the capture side can emit has no reason of its own (or names a reason with no words)",
+          f"{len(codes)} codes; missing {missing[:8]}; unworded {unworded}")
+    fn = getattr(RP, "refusal_reason", None)
+    if not check("C1936", fn is not None, "reel_plan has no table-driven refusal reason"):
+        return
+    off = {"refusal": {"code": "points-unpickable", "pickerCode": "points-not-drawn", "final": True,
+                       "notDrawn": {"formKey": "0DFDA9:Skyrim.esm", "why": "enableParent", "enableParent": "000014:Skyrim.esm",
+                                    "forGood": True}}}
+    floor = {"refusal": {"code": "points-unpickable", "pickerCode": "points-no-floor"}}
+    unknown = {"refusal": {"code": "never-heard-of-it"}}
+    got = [fn(x, table) for x in (off, floor, unknown)]
+    words = pol["stillReasons"].get(got[0], "")
+    check("C1936", got == ["switchedOff", "noPlace", "captureRefused"] and "switched off" in words and "for good" in words,
+          "a reference switched off for good, or a camera-spot refusal, is not said by its own reason", f"{got}; {words!r}")
+
+
+def c1937_top_down_note_not_spoken(tmp: Path):
+    """Helgi's reel narrated "Sliced top-down view from above, everything above z -13444 removed; not the player's view."
+    Wrong answers: the frame's note is in the vignette's narration (and so its subtitles); the frames lose the note."""
+    RV = load("ac_reel_vignettes2", HERE / "test_reel_vignettes.py")
+    import reel_plan as RP
+    pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
+    for m in pres["media"]:
+        if m["provenance"]["captureRequest"] == "req-own":
+            m["provenance"].update(viewKind="top-down", cullAbove=-13444.0)
+    reel = RP.plan_reel(copy.deepcopy(pres), names, masters, RV.POLICY, RV.binding_words(), search, mods, captures,
+                        markers=RV.MARKERS, switches=RV.SWITCHES, captures_final=True)
+    vig = [ch for ch in reel.get("chapters") or [] if (ch.get("clash") or {}).get("formKey") == "000101:Target.esp"]
+    said = " ".join(str(ch.get("narration") or "") for ch in vig)
+    notes = [f.get("viewNote") for ch in vig for f in ch.get("frames") or [] if f.get("viewNote")]
+    check("C1937", bool(vig) and "top-down" not in said.lower() and "player's view" not in said and bool(notes),
+          "the top-down note is read in the narration (or the frames lost it)", f"narration {said[:300]!r}; notes {notes[:1]}")
+
+
+def c1938_no_overlap_candidate_words(tmp: Path):
+    """Ice Blade's and Helgi's What to do said "1 overlap candidate" / "37 overlap candidates" on screen and aloud.
+    Wrong answers: the words "overlap candidate" anywhere in the report and reel words or the code that builds them; the
+    what-to-do line for overlaps not in plain words."""
+    hits = []
+    for f in [SKILL / "report-priorities.json", SKILL / "scene-policy.json", HARNESS / "reel_plan.py", HARNESS / "evalreport.py",
+              HARNESS / "reel_stills.py", HARNESS / "evalreel.py", *sorted((HARNESS / "evalreport_templates").glob("*"))]:
+        if f.is_file() and "overlap candidate" in f.read_text(encoding="utf-8", errors="replace").lower():
+            hits.append(f.name)
+    ns = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))
+    def find(o):
+        if isinstance(o, dict):
+            if "geometry.object-overlap" in o and "candNoun" in o:
+                return o
+            for v in o.values():
+                r = find(v)
+                if r:
+                    return r
+        return None
+    step = find(ns) or {}
+    line = str(step.get("geometry.object-overlap") or "").format(title="Objects occupying the same space", count=1,
+                                                                  candNoun=(step.get("candNoun") or ["?"])[0],
+                                                                  state="is left with every supplied patch", them="it")
+    check("C1938", not hits and "candidate" not in line and "pair of objects" in line,
+          "the words 'overlap candidate' reach the report or reel", f"files {hits}; line {line!r}")
+    # nor built from parts: a template "overlap {noun}" with a noun "candidate(s)" says it too
+    words = (SKILL / "report-priorities.json").read_text(encoding="utf-8")
+    nouns = re.findall(r'"(?:candidateSingular|candidatePlural)": "([^"]*)"', words) + sum(
+        [re.findall(r'"([^"]*)"', m) for m in re.findall(r'"candNoun": \[([^\]]*)\]', words)], [])
+    built = re.findall(r"overlap \{(?:candNoun|candidateNoun)\}", words)
+    check("C1938", not built and nouns and not any("candidate" in n for n in nouns),
+          "'overlap candidate' is still built from a template and a noun", f"templates {built}; nouns {nouns}")
+
+
+def c1939_not_drawn_carried(tmp: Path):
+    """The picker's not-drawn refusal said why only in its sentence. Wrong answers: viewprobe's reason not carried as
+    fields (enable parent, for good); the capture result dropping them; the reel's reason line saying "No camera could
+    see the clash" for a reference switched off for good."""
+    CP = load("ac_capture_points_nd", HARNESS / "capture_points.py")
+    CA = load("ac_capture_acquire_nd", HARNESS / "capture_acquire.py")
+    fn = getattr(CP, "not_drawn_detail", None)
+    nd = fn("0DFDA9:Skyrim.esm", "NOT DRAWN: disabled via enable parent 000014:Skyrim.esm OPPOSITE") if fn else {}
+    check("C1939", nd.get("forGood") is True and nd.get("enableParent") == "000014:Skyrim.esm"
+          and "notDrawn" in getattr(CA, "RESULT_REFUSAL_KEYS", ()),
+          "the not-drawn refusal's reason is not carried as fields into the capture result", f"{nd}")
+    # the player as enable parent without viewprobe's opposite flag is not "for good": the flag is never inferred
+    plain = fn("0DFDA9:Skyrim.esm", "NOT DRAWN: disabled via enable parent 000014:Skyrim.esm") if fn else {}
+    check("C1939", plain.get("why") == "enableParent" and plain.get("forGood") is False,
+          "switched off for good is inferred from the enable parent alone, without the opposite flag", f"{plain}")
+    RV = load("ac_reel_vignettes3", HERE / "test_reel_vignettes.py")
+    import reel_plan as RP
+    pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
+    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"],
+               stillReasonsShort=shipped.get("stillReasonsShort"), refusalReasons=shipped.get("refusalReasons"))
+    keep = [c for c in captures if c["request"] not in ("req-own", "req-cell-two")]
+    pres2 = copy.deepcopy(pres)
+    pres2["media"] = [m for m in pres["media"] if m["provenance"]["captureRequest"] not in ("req-own", "req-cell-two")]
+    a1, b1 = "000101:Target.esp", "000201:Alpha.esp"
+    off = {"request": "req-off", "status": "refused", "formKey": a1, "recordKeys": [a1, b1],
+           "refusal": {"code": "points-unpickable", "pickerCode": "points-not-drawn", "final": True,
+                       "notDrawn": {"formKey": b1, "why": "enableParent", "enableParent": "000014:Skyrim.esm", "forGood": True}}}
+    reel = RP.plan_reel(copy.deepcopy(pres2), names, masters, pol, RV.binding_words(), search, mods, keep + [off],
+                        markers=RV.MARKERS, switches=RV.SWITCHES, captures_final=True)
+    lines = " ".join(str(x) for x in reel.get("reportLines") or [])
+    check("C1939", "switched off in the game for good" in lines and "No camera could see the clash" not in lines,
+          "a reference switched off for good is said as one no camera could see", f"lines {lines[:400]!r}")
+    # the same refusal without the opposite flag is not said as switched off for good
+    off2 = copy.deepcopy(off)
+    off2["refusal"]["notDrawn"].update(opposite=None, forGood=False)
+    reel2 = RP.plan_reel(copy.deepcopy(pres2), names, masters, pol, RV.binding_words(), search, mods, keep + [off2],
+                         markers=RV.MARKERS, switches=RV.SWITCHES, captures_final=True)
+    lines2 = " ".join(str(x) for x in reel2.get("reportLines") or [])
+    check("C1939", "for good" not in lines2 and "starts switched off" in lines2,
+          "a reference not drawn without the opposite flag is said as switched off for good", f"lines {lines2[:400]!r}")
+
+
 CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_planner_refusal,
          "C1892": c1892_opaque_keeps_top_down, "C1893": c1893_witness_miss_goes_on,
          "C1894": c1894_station_view_caption, "C1895": c1895_old_pose_refusal_recaptured,
@@ -597,7 +753,9 @@ CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_pl
          "C1930": c1930_media_bundle_frozen_registry, "C1931": c1931_reel_speaks_no_ids,
          "C1932": c1932_cell_by_form_key_and_true_reasons,
          "C1933": c1933_media_bundle_frozen_scope,
-         "C1935": c1935_vignette_requests_its_own_pair}
+         "C1935": c1935_vignette_requests_its_own_pair,
+         "C1936": c1936_refusal_reasons_by_table, "C1937": c1937_top_down_note_not_spoken,
+         "C1938": c1938_no_overlap_candidate_words, "C1939": c1939_not_drawn_carried}
 
 
 def main(argv=None) -> int:
