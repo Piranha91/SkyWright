@@ -114,7 +114,7 @@ def clash_refused(fks, capture_results) -> bool:
 
 
 def buried_participant(x: dict) -> dict | None:
-    """{formKey, partner, stations} when a refused capture shows a participant buried: the top-down refused it as unseen
+    """{formKey, partner, stations, partnerSeeThrough} when a refused capture shows a participant buried: the top-down refused it as unseen
     from above after every fallback, no cutaway step succeeded, and the eye-level step's own counts (fields, never its
     sentence) say that participant showed a measurable face from none of the N >= 1 placed stations. Else None: a pose
     the planner refused after a station saw both, a request with no station placed, or an older result without the
@@ -136,7 +136,10 @@ def buried_participant(x: dict) -> dict | None:
         return None
     k = str(ref.get("participant")) if str(ref.get("participant")) in unseen else unseen[0]
     keys = [str(o) for o in (x.get("recordKeys") or vis)]
-    return {"formKey": k, "partner": next((o for o in keys if o != k), None), "stations": n}
+    partner = next((o for o in keys if o != k), None)
+    # the partner drawn only by see-through shapes (the picker's own measurement) hides nothing, so it is not what buries k
+    clear = {str(o) for o in eye.get("allNonOpaque") or []}
+    return {"formKey": k, "partner": partner, "stations": n, "partnerSeeThrough": partner in clear}
 
 
 def clash_buried(fks, capture_results) -> dict | None:

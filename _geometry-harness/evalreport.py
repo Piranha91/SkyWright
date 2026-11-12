@@ -11025,7 +11025,8 @@ def buried_lines(plan: dict, captures: list[dict], names: dict, words: dict) -> 
     n = 0
     for g in pred.get("items") or []:
         found = [b_ for fid in g.get("findingIds") or [] for b_ in by_finding.get(fid, [])]
-        lines = list(dict.fromkeys(tmpl.format(object=obj(b_["formKey"]), partner=obj(b_["partner"]) if b_["partner"] else "another object",
+        lines = list(dict.fromkeys(str(words.get("buriedSeeThrough") if b_.get("partnerSeeThrough") and words.get("buriedSeeThrough")
+                                       else tmpl).format(object=obj(b_["formKey"]), partner=obj(b_["partner"]) if b_["partner"] else "another object",
                                                count=b_["stations"], plural="" if b_["stations"] == 1 else "s",
                                                verb="sees" if b_["stations"] == 1 else "see")
                                    for b_ in found))

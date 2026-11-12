@@ -695,7 +695,8 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
             code = "points-no-station"
             detail = (f"none of the {len(ring)} eye-level stations around the pair passed the planner's placement test on "
                       f"the floor at z {floor:.0f}; see the witness consoles")
-            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail, "stationsPlaced": 0})
+            chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail, "stationsPlaced": 0,
+                          "allNonOpaque": sorted(all_non_opaque)})
             chain.append({"kind": "cutaway", "status": "skipped", "code": "cutaway-no-station",
                           "detail": "no station stands, so no cutaway can stand either"})
         else:
@@ -706,7 +707,9 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
                       f"{counts_[B]}")
             # the counts as fields (F8): a participant no placed station sees is how a report tells a buried clash
             chain.append({"kind": "eye-level", "status": "refused", "code": code, "detail": detail,
-                          "stationsPlaced": len(placed), "visibleFrom": dict(counts_)})
+                          "stationsPlaced": len(placed), "visibleFrom": dict(counts_),
+                          # a participant drawn only by see-through shapes hides nothing (item 4: never "buried inside" it)
+                          "allNonOpaque": sorted(all_non_opaque)})
             got = cutaway_attempt(R, S, args, cell, parts, marks, placed, contacts, see_through, cov_flags, floor,
                                   mid, lookz, fov, size, grid_px, gridset, min_depth, work)
             if got["status"] == "ok":
@@ -754,7 +757,8 @@ def _pick_points(request: dict, *, vp: str | None, passthrough: list[str], work:
     ws = math.hypot(chosen["eye"][0] - cx, chosen["eye"][1] - cy)
     half = 10.0 if view_kind == "cutaway" else (20.0 if neighbours(chosen) == 2 else 10.0)
     chain.append({"kind": view_kind, "status": "ok", "code": None,
-                  "detail": f"station {chosen['id']} ({chosen['bearing']:.0f} deg, {chosen['standoff']:.0f} u)"})
+                  "detail": f"station {chosen['id']} ({chosen['bearing']:.0f} deg, {chosen['standoff']:.0f} u)",
+                  "allNonOpaque": sorted(all_non_opaque)})
     doc = {"schemaVersion": 1, "requestId": request.get("id"),
            "sourceSha256": (request.get("source") or {}).get("sha256"), "synthetic": bool(synthetic),
            "provenance": ("Measured by capture_points.py: each point is viewprobe's --pick at a pixel carrying the "

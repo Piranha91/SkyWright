@@ -762,7 +762,7 @@ def cf28_buried_said(tmp: Path):
         rv_reason_only(tmp, RP, A, B)
         return
     got = fn(buried_result({A: 13, B: 0}, 13, B))
-    check("CF28", got == {"formKey": B, "partner": A, "stations": 13}, "a participant seen from 0 of 13 stations is not buried",
+    check("CF28", got == {"formKey": B, "partner": A, "stations": 13, "partnerSeeThrough": False}, "a participant seen from 0 of 13 stations is not buried",
           str(got))
     got = fn(buried_result({A: 0, B: 1}, 1, B))      # WRW 13cc: the one unseen at eye level is A
     check("CF28", (got or {}).get("formKey") == A and got.get("stations") == 1,

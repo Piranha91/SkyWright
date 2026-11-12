@@ -1,4 +1,4 @@
-"""Known answers for the capture follow-ups after item 28 (C1830-C1832).
+"""Known answers for the capture follow-ups after item 28 (C1830-C1834).
 
     python tests/test_capture_follow_ups.py [--only C1830,C1835]
 
@@ -13,6 +13,8 @@ refused capture result). Coordinates and counts are made up; nothing here is evi
     C1831  item 2: a tall focus whose see-through partner's drawn box is flat (no height) and 1,000 u above the floor:
            the floor at z 0 under the focus is still found, and the ring stands there
     C1832  item 3: the reel's reason line for buried clashes says how many camera spots each rests on
+    C1833  item 4: the picker's eye-level step says which participant is drawn only by see-through shapes
+    C1834  item 4: a buried participant whose partner is see-through is not said to be buried inside that partner
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -99,6 +101,19 @@ def c1831_flat_partner_box(fx, TCP):
           f"ring floors {floors}; {TCP.tail(proc)}")
 
 
+def c1833_eye_level_names_see_through(fx, TCP):
+    """A crate beside a see-through glow (alpha only). The stand-in draws no coverage, so no station sees the glow and
+    the eye-level step refuses. Wrong answer: the eye-level step does not say the glow is drawn only by see-through
+    shapes, so a later reader cannot tell a see-through partner from a solid one."""
+    crate = TCP.box(fx.cy, [-80, -40, 0], [-10, 40, 60])
+    glow = TCP.box(fx.mg, [10, -40, 0], [80, 40, 60], alpha=True, physical=False)
+    sc = TCP.scene(crate, glow, contacts=True)
+    proc, doc = TCP.pick(fx, sc, "c1833")
+    chain = ((doc or {}).get("refusal") or {}).get("chain") or (doc or {}).get("fallbackChain") or []
+    eye = next((c for c in chain if c.get("kind") == "eye-level"), {})
+    check("C1833", eye.get("allNonOpaque") == [fx.mg],
+          "the eye-level step does not list the participant drawn only by see-through shapes",
+          f"eye-level step {json.dumps(eye)[:300]}; {TCP.tail(proc)}")
 
 
 # ---------------------------------------------------------------- reel and report (hand-built inputs) --
@@ -130,14 +145,35 @@ def c1832_reel_buried_reason_counts(tmp: Path):
           f"buried reason: {sent[:300]!r}")
 
 
+def c1834_buried_partner_see_through(tmp: Path):
+    """WRW fb17's shape: Ryn's rock no station sees (0 of 22), partnered with a cloud the renderer draws only by
+    see-through shapes. Wrong answer: the report says the rock is buried inside the cloud."""
+    CF = load("fu_capture_fallbacks2", HERE / "test_capture_fallbacks.py")
+    import evalreport as ER
+    rock, cloud = "000802:Ryn.esp", "000989:WRW.esp"
+    x = CF.buried_result({rock: 0, cloud: 22}, 22, cloud, keys=(rock, cloud))
+    eye = next(c for c in x["refusal"]["chain"] if c["kind"] == "eye-level")
+    eye["allNonOpaque"] = [cloud]                     # as the picker states it (C1833)
+    words = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))["reader"]["figureCaptions"]
+    plan = {"reader": {"prediction": {"record": [{"findingId": "F-1", "formKey": rock, "other": [cloud]}],
+                                      "items": [{"findingIds": ["F-1"]}]}}}
+    names = {"refs": {rock: {"base": "r"}, cloud: {"base": "c"}},
+             "bases": {"r": {"editorId": "RockCliff01"}, "c": {"editorId": "CloudFog01"}},
+             "objects": {"RockCliff01": {"name": "Rock"}, "CloudFog01": {"name": "Cloud"}}}
+    ER.buried_lines(plan, [x], names, words)
+    line = " ".join(plan["reader"]["prediction"]["items"][0].get("buriedLines") or [])
+    check("C1834", "Rock" in line and "buried" in line and "22 camera spots" in line and "inside Cloud" not in line,
+          "a buried object is said to be buried inside a see-through partner (or the line lost its count)",
+          f"line {line!r}")
 
 
 
 
 
 
-PICKER_CASES = {"C1830": c1830_storey_not_from_the_box_top, "C1831": c1831_flat_partner_box}
-CODE_CASES = {"C1832": c1832_reel_buried_reason_counts}
+PICKER_CASES = {"C1830": c1830_storey_not_from_the_box_top, "C1831": c1831_flat_partner_box,
+                "C1833": c1833_eye_level_names_see_through}
+CODE_CASES = {"C1832": c1832_reel_buried_reason_counts, "C1834": c1834_buried_partner_see_through}
 
 
 def main(argv=None) -> int:
