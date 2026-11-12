@@ -300,6 +300,106 @@ def pool_order(exe: Path, m: dict, out: Path, sz: str) -> None:
             check(same == first, f"{label}: hits and unjudgeable items identical to run 1")
 
 
+def hub_xml(core: str, options: list[tuple[str, list[str]]]) -> str:
+    """A FOMOD whose required file is `core` and whose SelectAny options, in this order, each install their plugins (in
+    this order) when B.esp is active."""
+    plugs = "".join(
+        f'<plugin name="{name}"><description>for B</description><files>'
+        + "".join(f'<file source="opt\\{f}" destination="{f}"/>' for f in files)
+        + '</files><typeDescriptor><dependencyType><defaultType name="Optional"/><patterns><pattern>'
+          '<dependencies operator="And"><fileDependency file="B.esp" state="Active"/></dependencies>'
+          '<type name="Recommended"/></pattern></patterns></dependencyType></typeDescriptor></plugin>'
+        for name, files in options)
+    return ('<?xml version="1.0" encoding="utf-8"?><config><moduleName>Order Hub</moduleName>'
+            f'<requiredInstallFiles><file source="core\\{core}" destination="{core}"/></requiredInstallFiles>'
+            '<installSteps order="Explicit"><installStep name="Patches"><optionalFileGroups order="Explicit">'
+            f'<group name="Patches" type="SelectAny"><plugins order="Explicit">{plugs}</plugins></group>'
+            '</optionalFileGroups></installStep></installSteps></config>')
+
+
+def fomod_order(exe: Path, m: dict, out: Path, sz: str) -> None:
+    """Cases 1871-1873: fomodprobe writes its hits sorted by (archive, option, entry) ordinal, keeps the ordinal-first mod
+    folder when one archive is installed into several, and lists an INACTIVE hit's folders in ordinal order, at any --jobs.
+    The fixture is built so that no other order passes, and none depends on thread timing: at --jobs 1 the probe reads the
+    mod folders in directory order, which on NTFS ignores case, while ordinal order puts upper case first.
+      mod folder   installed from   (directory order: a-home, a-hub, a-hub2, B-home, B-hub; ordinal: B-home, B-hub, a-home, ...)
+      a-hub        b-hub.7z         options in installer order "Z patch" (ZPatch.esp), "A patch" (Y2.esp, then X1.esp)
+      a-hub2       A-hub.7z         options "Only" (OnlyPatch.esp), "Inactive" (InPatch.esp)
+      B-hub        A-hub.7z         the same archive again: its hits are the same hits, reported once, for B-hub
+      a-home, B-home                each holds InPatch.esp, not active: the INACTIVE hit's onDiskIn is "B-home, a-home"
+    Completion order, installer order, file order and directory order each fail at least one row."""
+    root = m["root"] / "fomod-order"
+    pool, inst = root / "pool", root / "roots" / "FomodOrder"
+    pool.mkdir(parents=True)
+    plug = {n: plugin(["B.esp"], n) for n in ("CoreA.esp", "CoreB.esp", "ZPatch.esp", "Y2.esp", "X1.esp", "OnlyPatch.esp",
+                                              "InPatch.esp")}
+    plug["A.esp"], plug["B.esp"] = m["planted"]["A.esp"], m["planted"]["B.esp"]
+
+    def archive(name, core, options):
+        stage = root / "stage" / name
+        entries = {"fomod/ModuleConfig.xml": hub_xml(core, options).encode("utf-8"), f"core/{core}": plug[core]}
+        for _, files in options:
+            for f in files:
+                entries[f"opt/{f}"] = plug[f]
+        for rel, data in entries.items():
+            (stage / rel).parent.mkdir(parents=True, exist_ok=True)
+            (stage / rel).write_bytes(data)
+        r = subprocess.run([sz, "a", "-bso0", "-bsp0", str(pool / name), "fomod", "core", "opt"], cwd=stage,
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            raise SystemExit(f"  FAIL  7-Zip could not write {name}: {r.stderr.strip()[:300]}")
+
+    archive("b-hub.7z", "CoreB.esp", [("Z patch", ["ZPatch.esp"]), ("A patch", ["Y2.esp", "X1.esp"])])
+    archive("A-hub.7z", "CoreA.esp", [("Only", ["OnlyPatch.esp"]), ("Inactive", ["InPatch.esp"])])
+    folders = {"A": ({"A.esp"}, None), "B": ({"B.esp"}, None), "a-hub": ({"CoreB.esp"}, "b-hub.7z"),
+               "a-hub2": ({"CoreA.esp"}, "A-hub.7z"), "B-hub": ({"CoreA.esp"}, "A-hub.7z"),
+               "a-home": ({"InPatch.esp"}, None), "B-home": ({"InPatch.esp"}, None)}
+    (inst / "profiles" / "P").mkdir(parents=True)
+    (inst / "ModOrganizer.ini").write_text("[General]\nselected_profile=@ByteArray(P)\n", encoding="utf-8")
+    for mod, (files, meta) in folders.items():
+        d = inst / "mods" / mod
+        d.mkdir(parents=True)
+        for f in files:
+            (d / f).write_bytes(plug[f])
+        if meta:
+            (d / "meta.ini").write_text(f"[General]\ninstallationFile={meta}\n", encoding="utf-8")
+    order = ["A.esp", "B.esp", "CoreA.esp", "CoreB.esp", "InPatch.esp"]
+    active = {"A.esp", "B.esp", "CoreA.esp", "CoreB.esp"}
+    prof = inst / "profiles" / "P"
+    (prof / "plugins.txt").write_text("".join(("*" if n in active else "") + n + "\n" for n in order), encoding="utf-8")
+    (prof / "loadorder.txt").write_text("".join(n + "\n" for n in order), encoding="utf-8")
+    (prof / "modlist.txt").write_text("".join("+" + mod + "\n" for mod in ("A", "B", "a-hub", "a-hub2", "B-hub")),
+                                      encoding="utf-8")
+
+    want = [("A-hub.7z", "Inactive", "opt\\InPatch.esp", "B-hub", "INACTIVE"), ("A-hub.7z", "Only", "opt\\OnlyPatch.esp", "B-hub", "ABSENT"),
+            ("b-hub.7z", "A patch", "opt\\X1.esp", "a-hub", "ABSENT"), ("b-hub.7z", "A patch", "opt\\Y2.esp", "a-hub", "ABSENT"),
+            ("b-hub.7z", "Z patch", "opt\\ZPatch.esp", "a-hub", "ABSENT")]
+    mo = dict(m, env=dict(m["env"], HOUSECARL_SEARCH_ROOTS=str(root / "roots"), HOUSECARL_MO2_INSTANCE=str(inst),
+                          HOUSECARL_MO2_PROFILE="P", HOUSECARL_DOWNLOAD_POOL=str(pool)))
+    first = None
+    for i, jobs in enumerate((1, 2, 8, 8)):
+        label = f"fomodprobe order, --jobs {jobs} (run {i + 1})"
+        j = out / f"fomod-order-{i}.json"
+        r, _ = run(exe, ["--jobs", jobs, "--json", j], mo, label)
+        doc = load(j)
+        check(r.returncode == 0 and isinstance(doc, dict), f"{label}: exits 0 and writes a JSON object (exit {r.returncode})")
+        hits = (doc or {}).get("hits") or []
+        got = [(str((h.get("where") or {}).get("archive")), str((h.get("detail") or {}).get("option")),
+                str((h.get("where") or {}).get("entry")).replace("/", "\\"), str((h.get("detail") or {}).get("mod")),
+                str((h.get("detail") or {}).get("verdict"))) for h in hits]
+        check([g[:3] for g in got] == [w[:3] for w in want],
+              f"{label}: 1871 hits in (archive, option, entry) ordinal order\n        got  {got}\n        want {want}")
+        check([g[3] for g in got] == [w[3] for w in want],
+              f"{label}: 1872 an archive installed into two folders reports the ordinal-first folder\n        got  {[g[3] for g in got]}")
+        where = [str((h.get("detail") or {}).get("onDiskIn")) for h in hits if (h.get("detail") or {}).get("verdict") == "INACTIVE"]
+        check(where == ["B-home, a-home"], f"{label}: 1873 the INACTIVE hit lists its folders in ordinal order (got {where})")
+        same = json.dumps(hits, sort_keys=True)
+        if first is None:
+            first = same
+        else:
+            check(same == first, f"{label}: hits identical to run 1")
+
+
 def main() -> int:
     sz = seven_zip()
     if not sz or not Path(sz).exists():
@@ -394,6 +494,9 @@ def main() -> int:
         r, _ = run(exes["fomodprobe"], ["--no-such-flag", "x"], m, "fomodprobe with an unknown argument")
         check(r.returncode == 2 and "--no-such-flag" in (r.stdout + r.stderr),
               f"fomodprobe refuses an unknown argument with exit 2 and names it (exit {r.returncode})")
+
+        # ---- fomodprobe hit order: its own instance and pool, so the checks above keep theirs
+        fomod_order(exes["fomodprobe"], m, out, sz)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print()

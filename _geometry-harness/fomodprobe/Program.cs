@@ -46,7 +46,9 @@ using HousecarlCore.Progress;
 // --json PATH writes the hit list (schema 1, ../_shared/DiscoveryHits.cs): one hit per plugin an unselected option
 // in the WRONG-VARIANT, ABSENT or INACTIVE tier delivers, with the sha256 of that archive entry (extracted with
 // `7z e -so`, the same call that reads ModuleConfig.xml), its condition plugins and its tier; a NO-PLUGIN option is a
-// hit with no hash and the reason. The added extraction time is reported.
+// hit with no hash and the reason. The added extraction time is reported. Hits are listed by (archive, option, entry)
+// ordinal, then step, group and mod folder, at any --jobs; an archive installed into several folders is reported once, for the
+// ordinal-first folder, and an INACTIVE hit's onDiskIn lists folders in ordinal order.
 
 using var __run = RunLog.BeginProcess("fomodprobe", args);
 
@@ -220,6 +222,12 @@ Parallel.ForEach(targets, new ParallelOptions { MaxDegreeOfParallelism = jobs },
         if (++done % 100 == 0) Console.WriteLine($"   ... {done}/{targets.Count} archives, {sw.Elapsed.TotalSeconds:0}s");
     }
 });
+// The workers finish in any order: everything below reads results in (archive, mod folder) ordinal order.
+results.Sort((a, b) =>
+{
+    int c = string.CompareOrdinal(Path.GetFileName(a.Archive), Path.GetFileName(b.Archive));
+    return c != 0 ? c : string.CompareOrdinal(a.Mod, b.Mod);
+});
 
 // ---------------------------------------------------------------------------------------
 // 4. Answer
@@ -279,11 +287,16 @@ foreach (var r in trusted)
         if (plugins.All(active.Contains)) { optAlreadyActive++; continue; }
 
         var homes = plugins.SelectMany(p => pluginHome.GetValueOrDefault(p) ?? new List<string>())
-                           .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                           .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(h => h, StringComparer.Ordinal).ToList();
         if (o.WrongVariant) wanted.Add((r, o, hits, "WRONG-VARIANT", string.Join(", ", homes.Take(3))));
         else if (homes.Count == 0) wanted.Add((r, o, hits, "ABSENT", ""));
         else wanted.Add((r, o, hits, "INACTIVE", string.Join(", ", homes.Take(3))));
     }
+// Hits are listed by (archive, option, entry) ordinal; step, group and mod folder break ties, so one archive installed into
+// several folders is reported for the ordinal-first folder.
+wanted = wanted.OrderBy(w => Path.GetFileName(w.M.Archive), StringComparer.Ordinal).ThenBy(w => w.O.Name, StringComparer.Ordinal)
+               .ThenBy(w => w.O.Step, StringComparer.Ordinal).ThenBy(w => w.O.Group, StringComparer.Ordinal)
+               .ThenBy(w => w.M.Mod, StringComparer.Ordinal).ToList();
 
 if (hitList is not null)
 {
@@ -308,30 +321,35 @@ if (hitList is not null)
                             null, detail, "the option delivers no plugin, so there are no plugin bytes to hash");
             continue;
         }
-        foreach (var plugin in plugins)
+        // within an option, by archive entry ordinal (by the plugin's name when the archive has no entry for it)
+        var items = plugins.SelectMany(plugin =>
         {
             var entries = m.Entries.Where(e => string.Equals(Path.GetFileName(e.Replace('/', '\\').TrimEnd('\\')), plugin,
                                                              StringComparison.OrdinalIgnoreCase)).ToList();
-            if (entries.Count == 0)
+            return entries.Count == 0
+                ? new[] { (Key: plugin, Plugin: plugin, Entry: (string?)null, Count: 0) }
+                : entries.Select(e => (Key: e, Plugin: plugin, Entry: (string?)e, Count: entries.Count)).ToArray();
+        }).OrderBy(i => i.Key, StringComparer.Ordinal).ThenBy(i => i.Plugin, StringComparer.Ordinal).ToList();
+        foreach (var (_, plugin, entryOrNull, entryCount) in items)
+        {
+            if (entryOrNull is null)
             {
                 if (seenHit.Add($"{archiveName}|{o.Name}|{plugin}"))
                     hitList.Hit(plugin, "fomod-option", new() { ["archive"] = archiveName, ["path"] = m.Archive }, null, "",
                                 null, detail, $"no entry named {plugin} in the archive listing, so its bytes were not read");
                 continue;
             }
-            foreach (var entry in entries)
-            {
-                if (!seenHit.Add($"{archiveName}|{o.Name}|{entry}")) continue;
-                var bytes = Run7z($"e -so -bso0 -bse0 \"{m.Archive}\" \"{entry}\"", out var ok);
-                extracted++;
-                var d = new Dictionary<string, object?>(detail) { ["ambiguousEntry"] = entries.Count > 1 };
-                var w = new Dictionary<string, object?> { ["archive"] = archiveName, ["entry"] = entry, ["path"] = m.Archive };
-                if (ok && bytes.Length > 0)
-                    hitList.Hit(plugin, "fomod-option", w, DiscoveryHits.HashBytes(bytes), "archive-entry", null, d);
-                else
-                    hitList.Hit(plugin, "fomod-option", w, null, "", null, d,
-                                $"7-Zip could not extract {entry} from {archiveName}", ioFailure: true);
-            }
+            var entry = entryOrNull;
+            if (!seenHit.Add($"{archiveName}|{o.Name}|{entry}")) continue;
+            var bytes = Run7z($"e -so -bso0 -bse0 \"{m.Archive}\" \"{entry}\"", out var ok);
+            extracted++;
+            var d = new Dictionary<string, object?>(detail) { ["ambiguousEntry"] = entryCount > 1 };
+            var w = new Dictionary<string, object?> { ["archive"] = archiveName, ["entry"] = entry, ["path"] = m.Archive };
+            if (ok && bytes.Length > 0)
+                hitList.Hit(plugin, "fomod-option", w, DiscoveryHits.HashBytes(bytes), "archive-entry", null, d);
+            else
+                hitList.Hit(plugin, "fomod-option", w, null, "", null, d,
+                            $"7-Zip could not extract {entry} from {archiveName}", ioFailure: true);
         }
     }
     hitList.Detail("hashExtraction", new Dictionary<string, object?>
