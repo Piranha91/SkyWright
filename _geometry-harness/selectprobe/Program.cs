@@ -9,7 +9,7 @@
 // usage: selectprobe --newcomer PATH [--newcomer PATH ...] [--instance DIR] [--profile NAME] [--game DIR]
 //                    [--order FILE] [--out DIR] [--no-reverse-links]
 //        selectprobe --batch FILE.jsonl [same order flags] --out DIR      many newcomers against one indexed order
-//        selectprobe --selftest                                           synthetic plugins with known answers
+//        selectprobe --self-test                                          synthetic plugins with known answers (--selftest is the same)
 //
 //   --newcomer PATH     a mod folder (its plugins, loose files and BSAs) or a plugin file; repeat for several files
 //                       of one newcomer, or for further folders of one mod (the first folder gives the plugins, the
@@ -34,7 +34,7 @@ using HarnessShared;
 using HousecarlCore;
 using HousecarlCore.Progress;
 
-if (args.Length > 0 && args[0] == "--selftest") return SelfTest.Run();
+if (args.Length > 0 && (args[0] == "--self-test" || args[0] == "--selftest")) return SelfTest.Run();
 
 using var __run = RunLog.BeginProcess("selectprobe", args);
 
