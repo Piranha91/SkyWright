@@ -76,7 +76,7 @@ TRIAGE_POLICY = HERE.parent / ".claude" / "skills" / "world-edit-compatibility" 
 # ------------------------------------------------------------------------------------------ helpers --
 
 
-def view_kind_caption(provenance: dict, words: dict) -> str:
+def view_kind_caption(provenance: dict, words: dict, first: bool = True) -> str:
     """The figure caption's addition for a picture that is not what the player sees ("" for one that is), from the
     skill's figureCaptions words: a cutaway names how many objects it hides, a sliced top-down its cut."""
     kind = (provenance or {}).get("viewKind") or "eye-level"
@@ -90,9 +90,21 @@ def view_kind_caption(provenance: dict, words: dict) -> str:
                 + (str(words.get("topDownHidden") or "").format(count=n, plural="" if n == 1 else "s",
                                                                them="it" if n == 1 else "them") if n else ""))
     # the alpha-card rule's station view: the picker's own witness camera, not a composed shot (round 2 rerun, C1894)
+    # said once per figure, on the frame it shows first, as the render line is (C1899)
     if ((provenance or {}).get("camera") or {}).get("cameraSource") == "witness-station":
-        return str(words.get("stationView") or "")
+        return str(words.get("stationView") or "") if first else ""
     return ""
+
+
+def highlight_caption(marks: dict, fig_object, fig_mod) -> tuple[str, dict]:
+    """(the figureCaptions key, its slots) for a marked view: both participants marked (`highlight`), or one alone
+    (`highlightOne`: a world-state vignette marks only its focus), never a missing one named "None" (C1899)."""
+    cy_, mg_ = marks.get("cyan"), marks.get("magenta")
+    if cy_ and mg_:
+        return "highlight", {"a": fig_object(cy_), "modA": fig_mod(str(cy_).split(":", 1)[-1]),
+                             "b": fig_object(mg_), "modB": fig_mod(str(mg_).split(":", 1)[-1])}
+    one_, col_ = (cy_, "cyan") if cy_ else (mg_, "magenta")
+    return "highlightOne", {"one": fig_object(one_), "modOne": fig_mod(str(one_).split(":", 1)[-1]), "colour": col_}
 
 def media_kind_caption(media: dict, words: dict) -> str:
     """The figure caption's addition for a picture drawn offline from the game's files rather than taken in the game
@@ -9935,15 +9947,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             setup_ = str(setup_ or "").format(mod=fig_mod(target_plugin))
             fk_ = (m_.get("subject") or {}).get("formKey") or row_.get("formKey")
             slots_ = {"setup": setup_, "object": fig_object(fk_)}
-            if state_ == "highlight" and marks_:
-                cy_, mg_ = marks_.get("cyan"), marks_.get("magenta")
-                slots_.update(a=fig_object(cy_), modA=fig_mod(str(cy_).split(":", 1)[-1]) if cy_ else "",
-                              b=fig_object(mg_), modB=fig_mod(str(mg_).split(":", 1)[-1]) if mg_ else "")
+            key_ = state_
+            if state_ == "highlight" and (marks_.get("cyan") or marks_.get("magenta")):
+                key_, hs_ = highlight_caption(marks_, fig_object, fig_mod)
+                slots_.update(hs_)
             if state_ in ("left", "right"):
                 # the left half is the setup without the evaluated mod: the losing side's spot; the right, the winner's
                 ab_ = f_.get("counts") or {}
                 slots_["mod"] = fig_mod(row_.get("A") or ab_.get("A")) if state_ == "left" else fig_mod(row_.get("B") or ab_.get("B"))
-            tmpl_ = caption_words.get(state_) if state_ in caption_words else caption_words.get("fallback")
+            tmpl_ = caption_words.get(key_) if key_ in caption_words else caption_words.get("fallback")
             try:
                 m_["caption"] = str(tmpl_ or "").format(**slots_) or None
             except (KeyError, IndexError):
@@ -9967,8 +9979,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             # a cutaway or a sliced top-down says so in its caption, not only in the frame's own label (a crop can cut that)
             if m_.get("caption"):
                 # how the picture was made is said once per figure, on the frame it shows first
-                m_["caption"] += view_kind_caption(prov_, caption_words) + (
-                    media_kind_caption(m_, caption_words) if first_frame_.get(prov_.get("captureRequest") or mid_) == mid_ else "")
+                first_ = first_frame_.get(prov_.get("captureRequest") or mid_) == mid_
+                m_["caption"] += view_kind_caption(prov_, caption_words, first=first_) + (
+                    media_kind_caption(m_, caption_words) if first_ else "")
             m_["captureState"] = state_
             m_["captureRequest"] = prov_.get("captureRequest")
 
