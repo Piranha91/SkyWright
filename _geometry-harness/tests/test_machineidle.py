@@ -360,6 +360,80 @@ def test_q6_dotnet_run_of_a_probe_project_still_blocks_as_a_build():
     assert not v["idle"], v
 
 
+# ---- one rule for a hold-admitted caller (task 2026-11-08-idle-lock-keep-held-job-output, ruling D4 (C)) -----------
+# Standalone, a probe-naming shell still blocks (M1/M2). A caller an idle_lock hold admitted (its job environment names
+# a slot file whose token matches and whose holder runs) leaves such a shell to that hold's own check: noted, not
+# counted. Item 35's smoke (2026-11-09) was refused inside its hold by 18 leftover shells the hold had already noted.
+
+SHELL_ROW = {"name": "bash.exe", "pid": 120, "ppid": 1,
+             "cmd": '"C:\\Program Files\\Git\\bin\\bash.exe" -c "sha256sum X:/h/switchprobe/bin/Release/net9.0/switchprobe.dll"'}
+
+
+def _slot_env(tmp, token="tok", pid=None, file_token=None):
+    import json
+    p = os.path.join(tmp, "HEAVY-SLOT")
+    with open(p, "w", encoding="utf-8") as fh:
+        json.dump({"pid": os.getpid() if pid is None else pid, "token": file_token or token, "purpose": "ka hold"}, fh)
+    return {"IDLE_LOCK_SLOT": token, "IDLE_LOCK_SLOT_FILE": p}
+
+
+# C1826 -- rejects a hold-admitted caller refusing on a shell its admitting hold already noted
+def test_c1826_hold_admitted_caller_notes_a_probe_naming_shell():
+    import tempfile
+    v = M.decide(snap(SHELL_ROW), exists=no_lock, count_shells=False)
+    assert v["idle"] and any("pid 120" in n for n in v["noted"]), v
+    with tempfile.TemporaryDirectory() as d:
+        held = M.admitting_hold(_slot_env(d))
+        assert held and str(os.getpid()) in held, held
+        import switchflip
+        saved_env = {k: os.environ.get(k) for k in ("IDLE_LOCK_SLOT", "IDLE_LOCK_SLOT_FILE")}
+        saved_snap = M.snapshot
+        os.environ.update(_slot_env(d))
+        M.snapshot = lambda: snap(SHELL_ROW)
+        rows = []
+        try:
+            g = switchflip.idle_gate([], 16.0, rows.append, tries=1, wait_s=0)
+        finally:
+            M.snapshot = saved_snap
+            for k, val in saved_env.items():
+                os.environ.pop(k, None) if val is None else os.environ.__setitem__(k, val)
+        assert g["idle"] and rows[-1].get("admittedBy"), (g, rows)
+
+
+# C1827 -- rejects the admitted rule dropping anything but the shell: probes, hosted probes, builds and the game count
+def test_c1827_hold_admitted_caller_still_counts_probes_builds_and_the_game():
+    for p in ({"name": "switchprobe.exe", "pid": 130, "cmd": "X:\\h\\switchprobe.exe --x"},
+              {"name": "dotnet.exe", "pid": 131, "cmd": "dotnet exec X:\\h\\overlapprobe.dll --json"},
+              {"name": "VBCSCompiler.exe", "pid": 132, "cmd": "VBCSCompiler.exe -pipename:x"},
+              {"name": "SkyrimSE.exe", "pid": 133, "cmd": "SkyrimSE.exe"}):
+        v = M.decide(snap(p), exists=no_lock, count_shells=False)
+        assert not v["idle"], (p, v)
+
+
+# C1828 -- rejects the shell passing anywhere a hold did not admit the caller (no slot, a foreign token, a dead
+# holder, an unreadable slot file), including switchflip's own gate outside a hold
+def test_c1828_without_an_admitting_hold_the_shell_still_blocks():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        assert M.admitting_hold({}) is None
+        assert M.admitting_hold(_slot_env(d, token="tok", file_token="other")) is None
+        assert M.admitting_hold(_slot_env(d, pid=999999991)) is None
+        assert M.admitting_hold({"IDLE_LOCK_SLOT": "tok", "IDLE_LOCK_SLOT_FILE": os.path.join(d, "missing")}) is None
+        assert M.admitting_hold({"IDLE_LOCK_SLOT": "tok"}) is None
+    import switchflip
+    saved_env = {k: os.environ.pop(k, None) for k in ("IDLE_LOCK_SLOT", "IDLE_LOCK_SLOT_FILE")}
+    saved_snap = M.snapshot
+    M.snapshot = lambda: snap(SHELL_ROW)
+    try:
+        g = switchflip.idle_gate([], 16.0, lambda row: None, tries=1, wait_s=0)
+    finally:
+        M.snapshot = saved_snap
+        for k, val in saved_env.items():
+            if val is not None:
+                os.environ[k] = val
+    assert not g["idle"] and SHELL_WORDS in "; ".join(g["reasons"]), g
+
+
 def main():
     tests =[(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

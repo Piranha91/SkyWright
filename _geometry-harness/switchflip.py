@@ -25,7 +25,9 @@ census and the bound scripts' source:
 
 One block holds the lock file for every launch in it (created only when absent, removed in `finally`). Before the lock
 and before every launch the machine is measured idle (machineidle.py: probes by command line; the game, MO2, the
-recorder and build servers by process name; free memory). Each launch is a `scripts/runlog.py` Runner child with a
+recorder and build servers by process name; free memory). Inside an idle_lock hold that admitted the block
+(machineidle.admitting_hold), a shell whose command line names a probe is left to that hold's own check and only
+noted. Each launch is a `scripts/runlog.py` Runner child with a
 deadline, and runs: profile snapshot, launch outside this shell's job object, readiness, strict game-capture
 recording, one arrival (a new game and `coc`), the calls (send and return times, a readback before and after each
 call), the observation window (heartbeat, process liveness), crash-log capture, teardown, MO2 close, profile
@@ -192,11 +194,15 @@ def release_lock(lock: Path) -> None:
 
 
 def idle_gate(refuse_if, min_free_gb, log, tries=21, wait_s=30) -> dict | None:
-    """Measure until idle (every wait_s, at most tries times). The last verdict is returned either way."""
+    """Measure until idle (every wait_s, at most tries times). The last verdict is returned either way. Inside an
+    idle_lock hold that admitted this batch, a shell naming a probe is left to that hold's own check (noted, not
+    counted); outside one machineidle's conservative rule counts it."""
     v = None
+    held = machineidle.admitting_hold()
     for i in range(tries):
-        v = machineidle.check(min_free_gb=min_free_gb, refuse_if=refuse_if)
-        log({"step": "idle", "attempt": i, **{k: v[k] for k in ("idle", "reasons", "freeMB")}})
+        v = machineidle.check(min_free_gb=min_free_gb, refuse_if=refuse_if, count_shells=held is None)
+        log({"step": "idle", "attempt": i, **{k: v[k] for k in ("idle", "reasons", "freeMB")},
+             **({"admittedBy": held, "noted": v.get("noted")} if held else {})})
         if v["idle"]:
             return v
         time.sleep(wait_s)

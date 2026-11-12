@@ -9,7 +9,8 @@ Why it exists. A launch or a timing on a busy machine confounds what it measures
 matches process NAMES misses the commonest heavy job here: a probe run as `dotnet <probe>.dll`, whose
 process name is `dotnet`. So a probe is found by its process name, or by a dotnet host's PROGRAM argument
 being its dll; a shell or script interpreter whose command line names a probe also blocks, as a possible batch
-driver between two probe children. Any other process whose command line merely names a probe (an editor, a
+driver between two probe children (a caller an idle_lock hold admitted, `admitting_hold()`, may pass
+count_shells=False: that hold's own check has run, and such a shell is then noted, not counted). Any other process whose command line merely names a probe (an editor, a
 dotnet host of another program) does not. The game, Mod Organizer, the recorder and
 the build servers are found by process NAME only: an idle IDE language server carries "msbuild" in its
 command line, and matching that would refuse every launch on a machine with the editor open.
@@ -131,9 +132,52 @@ def _base(name: str) -> str:
     return n[:-4] if n.endswith(".exe") else n
 
 
-def decide(snap: dict, *, min_free_gb: float = DEFAULT_MIN_FREE_GB, refuse_if=(), exists=os.path.exists) -> dict:
-    """The verdict for one snapshot: {"idle": bool, "reasons": [...], "freeMB": n, "blocking": [...]}."""
-    reasons, blocking = [], []
+#: The environment an idle_lock hold gives its job: the slot's token and the slot file that names it.
+SLOT_ENV, SLOT_FILE_ENV = "IDLE_LOCK_SLOT", "IDLE_LOCK_SLOT_FILE"
+
+
+def _pid_alive(pid) -> bool:
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    if os.name == "nt":
+        import ctypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)
+        if not h:
+            return False
+        code = ctypes.c_ulong()
+        ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+        k.CloseHandle(h)
+        return bool(ok) and code.value == 259
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def admitting_hold(env=None, alive=_pid_alive) -> str | None:
+    """One line naming the idle_lock hold that admitted this process, or None. Admitted means the hold's job
+    environment names a slot file whose token is the environment's and whose holder pid is running: that hold has
+    already passed its own idle check, which notes a probe-naming shell rather than counting it."""
+    env = os.environ if env is None else env
+    tok, path = env.get(SLOT_ENV), env.get(SLOT_FILE_ENV)
+    if not tok or not path:
+        return None
+    try:
+        c = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(c, dict) or c.get("token") != tok or not alive(c.get("pid")):
+        return None
+    return f"admitted by idle_lock hold pid {c.get('pid')} ({c.get('purpose')}; slot {path})"
+
+
+def decide(snap: dict, *, min_free_gb: float = DEFAULT_MIN_FREE_GB, refuse_if=(), exists=os.path.exists,
+           count_shells: bool = True) -> dict:
+    """The verdict for one snapshot: {"idle": bool, "reasons": [...], "freeMB": n, "blocking": [...], "noted": [...]}.
+    With count_shells False (a caller an idle_lock hold admitted) a shell naming a probe is noted, not counted."""
+    reasons, blocking, noted = [], [], []
     own = _ancestors(snap.get("processes") or [], snap.get("self"))
     free = snap.get("freeMB") or 0
     if free < min_free_gb * 1024:
@@ -154,6 +198,9 @@ def decide(snap: dict, *, min_free_gb: float = DEFAULT_MIN_FREE_GB, refuse_if=()
         elif base in SHELLS and (PROBE_WORD_RE.search(cmd) or PROBE_FILE_RE.search(cmd)):
             m = PROBE_WORD_RE.search(cmd) or PROBE_FILE_RE.search(cmd)
             why = f"a shell or script naming a probe (may be a batch driver) ({m.group(1)}, process {name})"
+            if not count_shells:
+                noted.append(f"pid {p.get('pid')}: {why}; not counted: an idle_lock hold admitted this caller")
+                why = None
         elif base == "dotnet" and dotnet_first_arg(cmd) in DOTNET_BUILD_ARGS:
             why = f"a build running (dotnet build host, by command line)"
         if why:
@@ -163,14 +210,14 @@ def decide(snap: dict, *, min_free_gb: float = DEFAULT_MIN_FREE_GB, refuse_if=()
     for lock in refuse_if or ():
         if exists(lock):
             reasons.append(f"lock present: {lock}")
-    return {"idle": not reasons, "reasons": reasons, "freeMB": free, "blocking": blocking,
+    return {"idle": not reasons, "reasons": reasons, "freeMB": free, "blocking": blocking, "noted": noted,
             "minFreeGB": min_free_gb, "locksChecked": list(refuse_if or ())}
 
 
-def check(*, min_free_gb: float = DEFAULT_MIN_FREE_GB, refuse_if=()) -> dict:
+def check(*, min_free_gb: float = DEFAULT_MIN_FREE_GB, refuse_if=(), count_shells: bool = True) -> dict:
     """Snapshot now and decide. The snapshot's process count is kept with the verdict."""
     snap = snapshot()
-    verdict = decide(snap, min_free_gb=min_free_gb, refuse_if=refuse_if)
+    verdict = decide(snap, min_free_gb=min_free_gb, refuse_if=refuse_if, count_shells=count_shells)
     verdict["processCount"] = len(snap["processes"])
     return verdict
 
