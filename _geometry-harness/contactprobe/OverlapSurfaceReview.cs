@@ -78,6 +78,7 @@ static class OverlapSurfaceReview
 
         var records = new List<object>();
         int measured = 0, incomplete = 0, refused = 0, unavailable = 0;
+        bool solidApplied = false;   // a measured row's buried area, or a motion object, went through the solid rule
         foreach (var p in pairs)
         {
             var a = Load(p.A);
@@ -104,6 +105,7 @@ static class OverlapSurfaceReview
                                          bytes => { var s = MeshSurface.ModelSurface(bytes, g, pose); return s.Status == "measured" ? (s.Soup, s.Tags, null) : (null, null, s.Reason); },
                                          volume: false, alpha: alpha) is { } mr)
                 {
+                    solidApplied |= MotionReview.NamesRule(mr, Json);
                     Add(mr);
                     continue;
                 }
@@ -125,7 +127,7 @@ static class OverlapSurfaceReview
                     if (AlphaVisibility.HasAlphaCrossing(r.CrossingLengthByTags)) visibility = alpha.Block(v, p.A, p.B);
                 }
                 else (r, frame) = MeshSurface.MeasurePlacedFramed(sa.Soup!, sa.Tags, pa.Pos, pa.Rot, pa.Scale, sb.Soup!, sb.Tags, pb.Pos, pb.Rot, pb.Scale, g);
-                if (r.Status == "measured") measured++; else if (r.Status == "incomplete") incomplete++; else refused++;
+                if (r.Status == "measured") { measured++; solidApplied = true; } else if (r.Status == "incomplete") incomplete++; else refused++;
                 // lane 3b: the pair frame when placement collapsed a triangle; the particle systems set aside from either render surface;
                 // Group 6 D2: render shapes read as empty (no vertices, no triangles)
                 Add(ContactNotes.Attach(r, Json, ("pairFrame", ContactNotes.Frame(frame)), ("particlesA", sa.Labels), ("particlesB", sb.Labels),
@@ -138,7 +140,7 @@ static class OverlapSurfaceReview
         }
         var doc = new
         {
-            schema = "housecarl.overlap-surface/1", policy = MeshSurface.PolicyVersion, livePose = pose.ToString().ToLowerInvariant(),
+            schema = "housecarl.overlap-surface/1", policy = MeshSurface.PolicyVersion, solidPolicy = MotionReview.SolidPolicy(solidApplied), livePose = pose.ToString().ToLowerInvariant(),
             inputPath = Path.GetFullPath(inputPath), inputSha256 = Convert.ToHexString(SHA256.HashData(inputBytes)).ToLowerInvariant(),
             configuration = new { configuration.Fingerprint, configuration.Source, configuration.Population, configuration.State },
             notes = new[] { "Render and collision are measured separately and never mixed.",

@@ -104,7 +104,7 @@ static class BoxContactReview
                     }).ToList();
                     measured++;
                     records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "measured", reason = (string?)null, particles = (IReadOnlyList<string>?)null,
-                                      motion = new { mode = "swept", policy = MeshSurfaceBox.MotionPolicyVersion + "|" + MotionReview.Policy + "|" + MemberMotion.PolicyVersion, member = otherName,
+                                      motion = new { mode = "swept", policy = MeshSurfaceBox.MotionPolicyVersion + "|" + MotionReview.Policy + "|" + MemberMotion.PolicyVersion, solidPolicy = MotionReview.SolidPolicy(true), member = otherName,
                                                      label = string.Join("; ", member.Labels), mechanisms = member.Mechanisms.Select(m => m.Kind).ToArray() },
                                       boxes = decided });
                     continue;
@@ -130,7 +130,7 @@ static class BoxContactReview
                 }).ToList();
                 measured++;
                 records.Add(new { pairKey, a, b, boxOwner = owner, mesh, status = "measured", reason = (string?)null, particles = (IReadOnlyList<string>?)null,
-                                  motion = new { mode = "swept", policy = MeshSurfaceBox.MotionPolicyVersion + "|" + MotionReview.Policy, member = otherName, livePose = why },
+                                  motion = new { mode = "swept", policy = MeshSurfaceBox.MotionPolicyVersion + "|" + MotionReview.Policy, solidPolicy = MotionReview.SolidPolicy(true), member = otherName, livePose = why },
                                   boxes = swept });
                 continue;
             }

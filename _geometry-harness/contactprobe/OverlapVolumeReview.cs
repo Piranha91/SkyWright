@@ -66,6 +66,7 @@ static class OverlapVolumeReview
 
         var records = new List<object>();
         int measured = 0, refused = 0, unavailable = 0;
+        bool solidApplied = false;   // a member read as a solid, or a motion object, went through the solid rule
         foreach (var p in pairs)
         {
             var a = Load(p.A);
@@ -87,11 +88,14 @@ static class OverlapVolumeReview
                 }
                 var sa = MeshVolume.ModelSolid(a.Bytes, g);
                 var sb = MeshVolume.ModelSolid(b.Bytes, g);
+                // a member read as a solid passed the solid rule (a member the rule refused is not told apart from one refused earlier)
+                solidApplied |= sa.Status == "solid" || sb.Status == "solid";
                 if ((sa.Status != "solid" || sb.Status != "solid") && motion is not null
                     && MotionReview.Pair(motion, g, p.A, a.Bytes, a.Pose!.Value, p.B, b.Bytes, b.Pose!.Value,
                                          bytes => { var s = MeshVolume.ModelSolid(bytes, g); return s.Status == "solid" ? (s.Soup, null, null) : (null, null, s.Reason); },
                                          volume: true) is { } mr)
                 {
+                    solidApplied |= MotionReview.NamesRule(mr, json);
                     Add(mr);
                     continue;
                 }
@@ -116,7 +120,7 @@ static class OverlapVolumeReview
         }
         var doc = new
         {
-            schema = "housecarl.overlap-volume/1", policy = MeshVolume.PolicyVersion,
+            schema = "housecarl.overlap-volume/1", policy = MeshVolume.PolicyVersion, solidPolicy = MotionReview.SolidPolicy(solidApplied),
             inputPath = Path.GetFullPath(inputPath), inputSha256 = Convert.ToHexString(SHA256.HashData(inputBytes)).ToLowerInvariant(),
             configuration = new { configuration.Fingerprint, configuration.Source, configuration.Population, configuration.State },
             notes = new[] { "Render and collision are measured separately and never mixed.",

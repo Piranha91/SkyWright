@@ -148,7 +148,7 @@ static class AnchorReview
                         kind, at = new[] { (double)at.X, at.Y, at.Z },
                         entry = entry is null ? null : new { entry.AnimationType, entry.EntryPoints, heading = entry.Heading },
                         exclusion = ex is { } h3 ? new { normal = new[] { (double)h3.Normal.X, h3.Normal.Y, h3.Normal.Z }, offset = (double)h3.Offset } : null,
-                        motion = new { mode = "swept", policy = AnchorMotion.PolicyVersion + "|" + MotionReview.Policy + "|" + MemberMotion.PolicyVersion, member = "B",
+                        motion = new { mode = "swept", policy = AnchorMotion.PolicyVersion + "|" + MotionReview.Policy + "|" + MemberMotion.PolicyVersion, solidPolicy = MotionReview.SolidPolicy(true), member = "B",
                                        label = string.Join("; ", memberB.Labels), mechanisms = memberB.Mechanisms.Select(x => x.Kind).ToArray(),
                                        decision = md.Decision, reason = md.Decision == "witness" ? cap.WitnessReason : md.Reason, origin = md.Origin, witnessLabel = md.Label,
                                        note = md.Note, witnessAnimation = md.AnimationId, time = md.Time, animationB = md.AnimationB, timeB = md.TimeB, weights = md.Weights,
@@ -166,7 +166,7 @@ static class AnchorReview
                         kind, at = new[] { (double)at.X, at.Y, at.Z },
                         entry = entry is null ? null : new { entry.AnimationType, entry.EntryPoints, heading = entry.Heading },
                         exclusion = ex is { } h2 ? new { normal = new[] { (double)h2.Normal.X, h2.Normal.Y, h2.Normal.Z }, offset = (double)h2.Offset } : null,
-                        motion = new { mode = "swept", policy = AnchorMotion.PolicyVersion + "|" + MotionReview.Policy, member = "B", label = motionLabel,
+                        motion = new { mode = "swept", policy = AnchorMotion.PolicyVersion + "|" + MotionReview.Policy, solidPolicy = MotionReview.SolidPolicy(true), member = "B", label = motionLabel,
                                        mr.Decision, mr.Reason, witnessAnimation = mr.AnimationId, time = mr.Time, mr.Margin, mr.Converged, mr.Samples },
                     });
                     continue;
@@ -185,7 +185,9 @@ static class AnchorReview
         }
         var doc = new
         {
-            schema = "housecarl.anchor/1", policy = MeshAnchor.PolicyVersion, livePose = LivePoseDefault.Policy.ToString().ToLowerInvariant(),
+            schema = "housecarl.anchor/1", policy = MeshAnchor.PolicyVersion,
+            // the solid rule the body test validates every component with: named when at least one anchor was tested, else "none"
+            solidPolicy = MotionReview.SolidPolicy(decided + undecided > 0), livePose = LivePoseDefault.Policy.ToString().ToLowerInvariant(),
             body = new { bottom = body.Bottom, top = body.Top, radius = body.Radius,
                          note = "humanoid body from the route constants (PhysicalStep, PhysicalControllerTop(ScaleOneHeight), DefaultCapsuleRadius); a race's own height is not applied" },
             inputPath = Path.GetFullPath(inputPath), inputSha256 = Convert.ToHexString(SHA256.HashData(inputBytes)).ToLowerInvariant(),

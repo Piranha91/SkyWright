@@ -75,6 +75,10 @@ using HousecarlCore.Progress;
 //                          around its path (never / cannot_tell, never a witness). A pair whose world placement collapses a triangle
 //                          is measured centred on B, on the geometry or on A (pairFrame); particle systems set aside from a render surface are
 //                          labelled particlesA / particlesB.
+//                          The solid rule (MeshIntersection.PolicyVersion, which validates every solid) is named as solidPolicy: at the
+//                          top of --anchor (when an anchor was tested), --surface (when a row's buried area was measured or a motion
+//                          object names it) and --volume (when a member was read as a solid or a motion object names it), and beside
+//                          each motion object's policy (when that motion reached the rule); "none" otherwise, never a fixed string.
 //   --terrain              TERRAIN SUPPORT (2026-10-20): every exterior placed reference that rested on the ground in its placement
 //                          owner's view, against the winning LAND (both heightmap diagonals) and the winning arm's collision supports:
 //                          floating or buried where a plugin the owner could not see reshaped the ground (TerrainReview.cs,
