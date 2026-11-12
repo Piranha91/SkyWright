@@ -1,4 +1,4 @@
-"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1898).
+"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1899, C1930-C1932).
 
     python tests/test_alpha_card_capture.py [--only C1890,C1897]
 
@@ -21,6 +21,12 @@ up; nothing here is evidence about a real cell.
     C1897  an image key kept from an earlier capture (an empty one) does not stand for a capture that has frames
     C1898  a finding whose counts spell a plugin in another case than its probe's evidence (Ice Blade's re-scored
            evaluation against its overlapprobe output) still gets its capture request
+    C1899  a marked view with one mark names that mark (never "None"), and the station view line is said once per figure
+    C1930  the report stage's media bundle names the evidence bundle's frozen check registry, so a registry changed since
+           the run does not refuse the report
+    C1931  a still page's narration speaks no form key or editor ID; the page itself still shows them
+    C1932  frames address the cell by its form key (a mod may rename it); a cell only the mod defines is refused as a
+           place only the mod has; after a ready eye-level camera a refusal is never "No camera could see the clash"
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -353,11 +359,140 @@ def c1898_plugin_case_in_capture_requests(tmp: Path):
           f"requests {keys2}")
 
 
+def c1899_marked_view_captions(tmp: Path):
+    """Hroggar's report-02: a world-state vignette marks only its focus (magenta), so the marked view's caption read
+    "None () marked in cyan"; and the station view line was said on every frame of a figure. Wrong answers: a missing
+    mark named "None"; a single mark not named; the station line on a figure's later frames."""
+    import evalreport as ER
+    words = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8"))["reader"]["figureCaptions"]
+    fn = getattr(ER, "highlight_caption", None)
+    if not check("C1899", fn is not None, "evalreport has no marked-view caption rule a test can call"):
+        return
+    obj = {PLANT: "Tree Thicket Snow", HOUSE: "Farmhouse Snow"}.get
+    key, slots = fn({"magenta": PLANT}, obj, lambda p: p.rsplit(".", 1)[0])
+    text = str(words.get(key) or "").format(setup="With the mod", **slots)
+    check("C1899", key == "highlightOne" and "None" not in text and "Tree Thicket Snow" in text and "magenta" in text,
+          "a marked view with one mark names a missing participant or not the marked one", f"{key}: {text!r}")
+    key2, slots2 = fn({"cyan": HOUSE, "magenta": PLANT}, obj, lambda p: p.rsplit(".", 1)[0])
+    check("C1899", key2 == "highlight" and slots2.get("a") == "Farmhouse Snow" and slots2.get("b") == "Tree Thicket Snow",
+          "a marked view with both marks lost one", f"{key2}: {slots2}")
+    prov = {"viewKind": "eye-level", "camera": {"cameraSource": "witness-station"}}
+    first, later = ER.view_kind_caption(prov, words, first=True), ER.view_kind_caption(prov, words, first=False)
+    check("C1899", "station view" in first.lower() and later == "",
+          "the station view line is not said once per figure (on its first frame only)", f"{first!r} / {later!r}")
+
+
+def c1930_media_bundle_frozen_registry(tmp: Path):
+    """Hroggar's report stage: the check registry changed after the evaluation was planned, so `evalrun bundle --media`
+    refused (registry-changed) and the pipeline delivered no report. Wrong answer: the media-bundle command does not
+    name the evidence bundle's own registry copy, the one the plan froze."""
+    EP = load("ac_evalpipeline3", HARNESS / "evalpipeline.py")
+    out = tmp / "c1930"
+    reg = out / "bundle" / "evidence" / "registry" / "check-registry.json"
+    reg.parent.mkdir(parents=True, exist_ok=True)
+    reg.write_text("{}", encoding="utf-8")
+    seq = out / "capture" / "capture-x" / "sequence"
+    seq.mkdir(parents=True, exist_ok=True)
+    (seq / "capture-result.json").write_text("{}", encoding="utf-8")
+    (seq / "media-with.json").write_text(json.dumps({"items": [{"path": "x.png"}]}), encoding="utf-8")
+    (out / "capture" / "captures.json").write_text(json.dumps([{"id": "capture-x", "status": "captured",
+                                                                 "result": str(seq / "capture-result.json")}]),
+                                                    encoding="utf-8")
+    seen = []
+
+    class Stop(Exception):
+        pass
+
+    def fake_child(ctx, cdir, name, argv, **kw):
+        seen.append((name, [str(x) for x in argv]))
+        raise Stop()
+    EP.child = fake_child
+    EP.reader_cmd = lambda ctx: "reader"
+    EP.names_env = lambda ctx: {}
+    ctx = types.SimpleNamespace(out=out, entry={}, machine={})
+    try:
+        EP.stage_report(ctx, None, out / "report")
+    except Stop:
+        pass
+    argv = next((a for n, a in seen if n == "media-bundle"), [])
+    i = argv.index("--registry") if "--registry" in argv else -1
+    check("C1930", i >= 0 and Path(argv[i + 1]) == reg,
+          "the media bundle is built without the evidence bundle's own frozen registry, so a changed registry refuses "
+          "the report stage", f"media-bundle argv {argv[:20]}")
+
+
+def c1931_reel_speaks_no_ids(tmp: Path):
+    """Hroggar's reel-02 read "0138CE:Skyrim.esm" and "BUV_ControlQuestEffect_dunFrostmereCryptQST_90_100" aloud on its
+    What to do page. Wrong answers: a form key or an underscore editor ID in a still page's narration; a bracketed
+    editor ID after a place name spoken; the page's own text changed; tool names (DynDOLOD, xLODGen) or a plugin file
+    name altered."""
+    import reel_stills as RS
+    row = ("It also puts back the earlier value of 3 record fields that Lux changes, on Moorside Inn, 0138CE:Skyrim.esm; "
+           "if you use Lux, check that you want this. It switches off BUV_EisaFollowerRef (a placed BUV_EisaFollower, in "
+           "Moorside Inn). It removes the scripts from BUV_ControlQuestEffect_dunFrostmereCryptQST_90_100 and "
+           "BUV_ControlQuestEffect_dunFrostmereCryptQST_16. Rebuild generated output (DynDOLOD, xLODGen, Occlusion.esp). "
+           "It is in Alva's House (MorthalAlvasHouse). See Finding_Helgi_and_Laelette.esp.")
+    page = {"layout": "list", "title": "What to do", "rows": [row]}
+    said = RS.page_say(page)
+    bad = [x for x in ("0138CE", "Skyrim.esm", "BUV_", "_dun", "MorthalAlvasHouse") if x in said]
+    check("C1931", not bad and "Moorside Inn" in said and "Alva's House" in said,
+          "a still page's narration speaks a form key or an editor ID", f"spoken {bad}: {said[:400]!r}")
+    check("C1931", page["rows"] == [row] and "DynDOLOD, xLODGen, Occlusion.esp" in said
+          and "Finding_Helgi_and_Laelette.esp" in said,
+          "the page's text, a tool name or a plugin file name was changed by the spoken wording", said[-200:])
+
+
+def c1932_cell_by_form_key_and_true_reasons(tmp: Path):
+    """Cut Content 0b31: a verified eye-level camera in RiverwatchExterior01, Cut Content Restoration's editor ID for the
+    base-game cell 00B51E:Skyrim.esm; the setup without the mod has no cell of that editor ID, so viewprobe refused the
+    without frame and the reel said "No camera could see the clash". Wrong answers: a frame addressing the cell by an
+    editor ID a mod can change instead of its form key; a cell whose defining plugin the without order lacks not refused
+    as a place only the mod has (decided from the order, not viewprobe's words); after a ready eye-level camera, a
+    refusal said as one no camera could see; a refusal of the acquisition itself (no camera ready) said as seen."""
+    CA = load("ac_capture_acquire_cell", HARNESS / "capture_acquire.py")
+    import reel_plan as RP
+    root = tmp / "c1932"
+    rd = root / "receipts"
+    (rd / "points-work" / "p0-placements").mkdir(parents=True, exist_ok=True)
+    (rd / "points-work" / "p0-placements" / "console.txt").write_text(
+        "viewprobe ...\ncell RiverwatchExterior01 (exterior)  00B51E:Skyrim.esm\nmore\n", encoding="utf-8")
+    acq = {"status": "camera-ready", "receipts": {"receiptsDir": str(rd)}}
+    with_o, without_o, nomaster_o = root / "with.json", root / "without.json", root / "nomaster.json"
+    with_o.write_text(json.dumps({"Plugins": ["Skyrim.esm", "Update.esm", "CutContentRestoration.esp"]}), encoding="utf-8")
+    without_o.write_text(json.dumps({"Plugins": ["Skyrim.esm", "Update.esm"]}), encoding="utf-8")
+    fk, ref = CA.capture_cell(acq, {"without": str(without_o), "with": str(with_o)}) if hasattr(CA, "capture_cell") else (None, None)
+    cam = {"cell": "RiverwatchExterior01", "viewprobe": "--eye 1,2,3 --yaw 0 --pitch 0 --fov 65"}
+    argv = CA.capture_argv({"requestType": "overlap-pair"}, {**cam, **({"cellFormKey": fk} if fk else {})}, "without",
+                           str(without_o), [], 320)
+    check("C1932", argv[0] == "00B51E:Skyrim.esm" and ref is None,
+          "a frame addresses the cell by an editor ID a mod can change, not by its form key", f"cell argument {argv[0]!r}")
+    (rd / "points-work" / "p0-placements" / "console.txt").write_text(
+        "cell CCRNewPlace (exterior)  000801:CutContentRestoration.esp\n", encoding="utf-8")
+    nomaster_o.write_text(json.dumps({"Plugins": ["Skyrim.esm"]}), encoding="utf-8")
+    fk2, ref2 = CA.capture_cell(acq, {"without": str(nomaster_o), "with": str(with_o)}) if hasattr(CA, "capture_cell") else (None, None)
+    check("C1932", (ref2 or {}).get("code") == "place-only-with-mod" and (ref2 or {}).get("states") == ["without"],
+          "a cell only the mod defines is not refused as a place only the mod has", str(ref2))
+    a1, b1 = "000101:Target.esp", "000201:Alpha.esp"
+    ready = {"status": "refused", "formKey": a1, "recordKeys": [a1, b1], "request": "r1",
+             "acquisition": {"status": "camera-ready", "viewKind": "eye-level"}, "reason": "viewprobe could not render"}
+    only = dict(ready, request="r2", refusal={"code": "place-only-with-mod", "final": True})
+    acq_refused = {"status": "refused", "formKey": a1, "recordKeys": [a1, b1], "request": "r3",
+                   "refusal": {"code": "top-down-participant-unseen", "final": True,
+                               "chain": [{"kind": "eye-level", "status": "refused", "code": "points-no-station"}]}}
+    got = [RP.unpictured_refused_reason([a1, b1], [x], set()) for x in (ready, only, acq_refused)]
+    check("C1932", got == ["stationSaw", "placeOnlyWithMod", "captureRefused"],
+          "a refusal after a ready eye-level camera, or of a place only the mod has, is said as one no camera could see "
+          "(or a refused acquisition is said as seen)", str(got))
+
+
 CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_planner_refusal,
          "C1892": c1892_opaque_keeps_top_down, "C1893": c1893_witness_miss_goes_on,
          "C1894": c1894_station_view_caption, "C1895": c1895_old_pose_refusal_recaptured,
          "C1896": c1896_refused_reason_true, "C1897": c1897_stale_image_key,
-         "C1898": c1898_plugin_case_in_capture_requests}
+         "C1898": c1898_plugin_case_in_capture_requests,
+         "C1899": c1899_marked_view_captions,
+         "C1930": c1930_media_bundle_frozen_registry, "C1931": c1931_reel_speaks_no_ids,
+         "C1932": c1932_cell_by_form_key_and_true_reasons}
 
 
 def main(argv=None) -> int:
