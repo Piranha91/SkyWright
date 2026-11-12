@@ -333,7 +333,11 @@ try
 }
 catch (Exception ex) when (ex is not ArgumentException)
 {
-    var why = ex.GetType().Name + ": " + ex.Message;
+    // running out of memory belongs to the machine: one sentence with this run's sample knobs (sweep and deltacheck hold every sample)
+    var why = MemoryFailure.Find(ex) is not null && verb is "sweep" or "deltacheck"
+        ? $"motionprobe {verb}: ran out of memory holding the swept samples of {rel}; try a smaller sample budget or a coarser step than "
+          + $"this run's --budget {budget ?? 4096} and --delta {(delta ?? 0.5).ToString("R", CultureInfo.InvariantCulture)}, or run with more memory free."
+        : ex.GetType().Name + ": " + ex.Message;
     return Emit(verb == "sweep" ? new { verb, rel, status = "error", reason = why, solidPolicy = sweepSolid }
                                 : new { verb, rel, status = "error", reason = why }, false);
 }

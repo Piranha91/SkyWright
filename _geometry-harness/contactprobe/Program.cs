@@ -817,7 +817,14 @@ if (overlapJson is not null)
     }
     catch (Exception ex)
     {
-        Console.Error.WriteLine($"overlap contact review refused: {ex.GetType().Name}: {ex.Message}");
+        // running out of memory belongs to the machine: one sentence that says what to try (with --motion swept, this run's sample knobs)
+        if (MemoryFailure.Find(ex) is not null)
+            Console.Error.WriteLine(motionOptions is { Mode: "swept" } mo
+                ? "contactprobe: the overlap contact review ran out of memory holding swept samples; try a smaller sample budget or a coarser step than "
+                  + $"this run's --motion-budget {mo.Sweep.SampleBudget} and --motion-delta {mo.Sweep.DeltaTarget.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}, or run with more memory free."
+                : "contactprobe: the overlap contact review ran out of memory; supply fewer pairs or run with more memory free.");
+        else
+            Console.Error.WriteLine($"overlap contact review refused: {ex.GetType().Name}: {ex.Message}");
         return 2;
     }
 }
