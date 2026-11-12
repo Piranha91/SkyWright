@@ -142,6 +142,27 @@ def buried_participant(x: dict) -> dict | None:
     return {"formKey": k, "partner": partner, "stations": n, "partnerSeeThrough": partner in clear}
 
 
+def station_saw(x: dict) -> bool:
+    """Whether a refused capture's own chain says an eye-level station saw both participants: the cutaway step skipped
+    because a station saw both, or a witness step (the alpha-card rule) tried. Such a clash is never one no camera
+    could see (C1896)."""
+    if x.get("status") != "refused":
+        return False
+    chain = (x.get("refusal") or {}).get("chain") or []
+    return any(c.get("code") == "cutaway-not-applicable" or c.get("kind") == "witness" for c in chain)
+
+
+def unpictured_refused_reason(fks, capture_results, unmarkable: set) -> str:
+    """Why a refused, unburied clash has no picture (stillReasons keys): a station at a player's eye height saw it but no
+    picture could be kept (`stationSaw`), the renderer cannot mark one of its objects' see-through shapes
+    (`unmarkable`), else no camera could see it (`captureRefused`)."""
+    if any(result_about(x, fks) and station_saw(x) for x in capture_results or []):
+        return "stationSaw"
+    if {str(k) for k in fks} & set(unmarkable or ()):
+        return "unmarkable"
+    return "captureRefused"
+
+
 def clash_buried(fks, capture_results) -> dict | None:
     """The buried participant of the refused capture about this clash (`result_about`), or None."""
     return next((b for x in capture_results or [] if result_about(x, fks) and (b := buried_participant(x))), None)
@@ -684,7 +705,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         # also counted as one the reel cannot picture; a buried clash is said as buried (F8), counted like every refused
         # one, never dropped
         stands_in = [c for c in tried_refused if not buried_(c) and any(c in g_ for g_ in shown_groups)]
-        unpictured += [(c, "buried" if buried_(c) else "captureRefused") for c in tried_refused if c not in stands_in]
+        unpictured += [(c, "buried" if buried_(c) else unpictured_refused_reason(
+            [c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results, unmarkable))
+            for c in tried_refused if c not in stands_in]
         # a clash a capture found buried is said as buried even when its group was pictured before it was tried (the
         # strongest member first, item 7): no picture of another member stands for what no player sees
         untried_buried = [c for c in draw if c not in chosen and c not in tried_refused and buried_(c)]
