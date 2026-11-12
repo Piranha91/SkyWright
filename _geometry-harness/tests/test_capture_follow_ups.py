@@ -1,4 +1,4 @@
-"""Known answers for the capture follow-ups after item 28 (C1830-C1831).
+"""Known answers for the capture follow-ups after item 28 (C1830-C1832).
 
     python tests/test_capture_follow_ups.py [--only C1830,C1835]
 
@@ -12,6 +12,7 @@ refused capture result). Coordinates and counts are made up; nothing here is evi
            the navmesh at z 0: the ring stands on the navmesh storey, not on the slab far above a player's eye
     C1831  item 2: a tall focus whose see-through partner's drawn box is flat (no height) and 1,000 u above the floor:
            the floor at z 0 under the focus is still found, and the ring stands there
+    C1832  item 3: the reel's reason line for buried clashes says how many camera spots each rests on
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -102,6 +103,31 @@ def c1831_flat_partner_box(fx, TCP):
 
 # ---------------------------------------------------------------- reel and report (hand-built inputs) --
 
+def c1832_reel_buried_reason_counts(tmp: Path):
+    """Two buried clashes, resting on 8 and on 22 camera spots. Wrong answer: the reel's reason line (the report's
+    'About the review reel') says buried with no count of the camera spots either rests on."""
+    RV = load("fu_reel_vignettes", HERE / "test_reel_vignettes.py")
+    CF = load("fu_capture_fallbacks", HERE / "test_capture_fallbacks.py")
+    import reel_plan as RP
+    pres, names, masters, search, mods, captures = RV.capture_binding_fixture()
+    shipped = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    pol = dict(RV.POLICY, captureAttemptsPerType=1, stillReasons=shipped["stillReasons"],
+               stillReasonsCount=shipped.get("stillReasonsCount"))
+    keep = [c for c in captures if c["request"] not in ("req-own", "req-cell-two")]
+    pres2 = copy.deepcopy(pres)
+    pres2["media"] = [m for m in pres["media"] if m["provenance"]["captureRequest"] not in ("req-own", "req-cell-two")]
+    a1, b1 = "000101:Target.esp", "000201:Alpha.esp"
+    a2, b2 = "000104:Target.esp", "000204:Alpha.esp"
+    r1 = CF.buried_result({a1: 8, b1: 0}, 8, b1, keys=(a1, b1))
+    r2 = dict(CF.buried_result({a2: 22, b2: 0}, 22, b2, keys=(a2, b2)), request="req-buried-2")
+    reel = RP.plan_reel(copy.deepcopy(pres2), names, masters, pol, RV.binding_words(), search, mods, keep + [r1, r2],
+                        markers=RV.MARKERS, switches=RV.SWITCHES, captures_final=True)
+    lines = " ".join(str(x) for x in reel.get("reportLines") or [])
+    said = [s for s in lines.replace("? ", ". ").split(". ") if "Buried" in s or "buried" in s]
+    sent = " ".join(said)
+    check("C1832", bool(said) and "camera spot" in sent and "8" in sent and "22" in sent,
+          "the reel's buried reason does not say how many camera spots the buried clashes rest on (8 and 22)",
+          f"buried reason: {sent[:300]!r}")
 
 
 
@@ -111,8 +137,7 @@ def c1831_flat_partner_box(fx, TCP):
 
 
 PICKER_CASES = {"C1830": c1830_storey_not_from_the_box_top, "C1831": c1831_flat_partner_box}
-CODE_CASES = {
-             }
+CODE_CASES = {"C1832": c1832_reel_buried_reason_counts}
 
 
 def main(argv=None) -> int:

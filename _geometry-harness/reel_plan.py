@@ -1205,9 +1205,22 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             if moved_:
                 why_n["notCaptured"] += moved_
             reasons_ = policy.get("stillReasons") or {}
+            # a buried clash's reason says how many camera spots each rests on (skill data stillReasonsCount)
+            spots_ = sorted({b_["stations"] for c_, w_ in unpictured if w_ == "buried"
+                             if (b_ := clash_buried([c_["rows"][0]["formKey"], *(c_["rows"][0].get("other") or [])],
+                                                    capture_results))})
+
+            def count_(w_, n_):
+                tmpl_ = (policy.get("stillReasonsCount") or {}).get(w_)
+                if not (tmpl_ and w_ == "buried" and spots_):
+                    return f"{n_} not pictured"
+                said_ = (f"{spots_[0]} to {spots_[-1]}" if len(spots_) > 3
+                         else joined([str(x_) for x_ in spots_]))
+                return tmpl_.format(count=n_, spots=said_, plural="" if spots_ == [1] else "s",
+                                     rest="it rests" if n_ == 1 else "they rest")
             if why_n and words.get("unpicturedReasons"):
                 report_lines.append(words["unpicturedReasons"].format(reasons=" ".join(
-                    str(reasons_.get(w_, w_)).rstrip(".") + f" ({n_} not pictured)." for w_, n_ in why_n.most_common())))
+                    str(reasons_.get(w_, w_)).rstrip(".") + f" ({count_(w_, n_)})." for w_, n_ in why_n.most_common())))
             sentence_un += " " + words.get("unpicturedWhere", "").format(
                 heading=spoken((reader.get("sectionHeadings") or {}).get("prediction") or ""))
             sentence_un = sentence_un.strip()
