@@ -89,6 +89,9 @@ def view_kind_caption(provenance: dict, words: dict) -> str:
         return (str(words.get("topDown") or "").format(cut="?" if cut is None else f"{float(cut):.0f}")
                 + (str(words.get("topDownHidden") or "").format(count=n, plural="" if n == 1 else "s",
                                                                them="it" if n == 1 else "them") if n else ""))
+    # the alpha-card rule's station view: the picker's own witness camera, not a composed shot (round 2 rerun, C1894)
+    if ((provenance or {}).get("camera") or {}).get("cameraSource") == "witness-station":
+        return str(words.get("stationView") or "")
     return ""
 
 def media_kind_caption(media: dict, words: dict) -> str:
