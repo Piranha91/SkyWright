@@ -721,14 +721,21 @@ for (int i = argStart; i < args.Length; i++)
     else if (args[i] == "--cells" && i + 1 < args.Length) dumpCellsFile = args[++i];
     else if (args[i] == "--dump-terrain") dumpTerrain = true;
     else if (args[i] == "--no-nav-diff") navDiff = false;
-    else if (args[i] == "--nav-at" && i + 1 < args.Length)
-    { var p = args[++i].Split(','); if (p.Length == 2) navAt.Add((float.Parse(p[0]), float.Parse(p[1]))); }
-    else if (args[i] == "--refs-at" && i + 1 < args.Length)
-    { var p = args[++i].Split(','); if (p.Length >= 2) refsAt.Add((float.Parse(p[0]), float.Parse(p[1]), p.Length > 2 ? float.Parse(p[2]) : 256f)); }
-    else if (args[i] == "--inside-at" && i + 1 < args.Length)
-    { var p = args[++i].Split(','); if (p.Length == 3) insideAt.Add((float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]))); }
-    else if (args[i] == "--clear-at" && i + 1 < args.Length)
-    { var p = args[++i].Split(','); if (p.Length == 3) clearAt.Add((float.Parse(p[0]), float.Parse(p[1]), float.Parse(p[2]))); }
+    else if (args[i] is "--nav-at" or "--refs-at" or "--inside-at" or "--clear-at" && i + 1 < args.Length)
+    {
+        // Refused, not dropped: a point query that loses its point prints nothing, which reads like no answer at all.
+        var opt = args[i]; var spec = args[++i];
+        var (want, shape) = opt switch { "--nav-at" => (2, "X,Y"), "--refs-at" => (3, "X,Y[,R]"), _ => (3, "X,Y,Z") };
+        var p = spec.Split(',');
+        var v = new float[p.Length];
+        bool ok = (opt == "--refs-at" ? p.Length is 2 or 3 : p.Length == want);
+        for (int k = 0; ok && k < p.Length; k++) ok = float.TryParse(p[k], out v[k]);
+        if (!ok) { Console.Error.WriteLine($"{opt} '{spec}' is not {shape}: give {(opt == "--refs-at" ? "two or three" : want == 2 ? "two" : "three")} numbers separated by commas, with no spaces."); return 2; }
+        if (opt == "--nav-at") navAt.Add((v[0], v[1]));
+        else if (opt == "--refs-at") refsAt.Add((v[0], v[1], v.Length > 2 ? v[2] : 256f));
+        else if (opt == "--inside-at") insideAt.Add((v[0], v[1], v[2]));
+        else clearAt.Add((v[0], v[1], v[2]));
+    }
     else if (args[i] == "--clear-reach" && i + 1 < args.Length) clearReach = float.Parse(args[++i]);
     else if (args[i] == "--clear-bounds" && i + 1 < args.Length) clearBounds = args[++i].ToLowerInvariant();
     else if (args[i] == "--inside-bounds" && i + 1 < args.Length) insideBounds = args[++i].ToLowerInvariant();
@@ -1010,6 +1017,13 @@ if (navMode is not ("off" or "filled" or "wire" or "both"))
 { Console.Error.WriteLine($"--nav '{navMode}' is not one of: off, filled, wire, both."); return 1; }
 if (occlusionMode is not ("off" or "on" or "diff"))
 { Console.Error.WriteLine($"--occlusion '{occlusionMode}' is not one of: off, on, diff."); return 1; }
+// The point queries are answered inside the first-person pass (`if (textured)` below); a run without one answered none.
+if (!textured && worklistPaths.Count == 0 && navAt.Count + clearAt.Count + insideAt.Count + refsAt.Count > 0)
+{
+    var pointOpt = navAt.Count > 0 ? "--nav-at" : clearAt.Count > 0 ? "--clear-at" : insideAt.Count > 0 ? "--inside-at" : "--refs-at";
+    Console.Error.WriteLine($"{pointOpt} is answered only by the first-person pass, which this run does not make: add --eye X,Y,Z or --eye-ref FORMID (--size 64 --msaa 0 --nav off keeps that render cheap).");
+    return 2;
+}
 if (!planesReport && Array.IndexOf(args, "--planes-reach") >= 0)
 { Console.Error.WriteLine("--planes-reach only means anything with --planes-report: it is how far behind each plane the report looks for solid collision."); return 1; }
 if (Array.IndexOf(args, "--visibility-budget") >= 0 && (!planesReport || interactiveMode))

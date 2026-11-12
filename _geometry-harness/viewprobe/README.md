@@ -549,6 +549,11 @@ A successful save or size check alone does not establish clean pixels.
 
 All repeatable, all print to the console.
 
+The four point queries (`--nav-at`, `--refs-at`, `--inside-at`, `--clear-at`) are answered by the first-person pass, so
+they need `--eye` or `--eye-ref` (or a worklist shot); a run without one refuses in one sentence (exit 2) rather than
+render and print nothing, and a value that is not the query's numbers is refused the same way. `--size 64 --msaa 0
+--nav off` keeps that render cheap.
+
 | Flag | Answers |
 |---|---|
 | `--pick X,Y` | what is at this IMAGE pixel — unprojects the finished frame's depth to Skyrim coordinates, the cell, the distance, and the LAND surface height there |
@@ -3258,7 +3263,7 @@ The working sequence:
 1. **`--eye-ref FORMID` / `--look-ref FORMID`** when the shot is about an actor or a door — the
    camera lands exactly where the record says, at eye height. Always prefer this to coordinates.
 2. **Flat diagnostic mode** (no `--eye`) for the `bounds :` line and ref counts.
-3. **A cheap probe render** (`--size 320 --msaa 0 --nav off`) carrying `--nav-at X,Y` for the
+3. **A cheap probe render** (an `--eye` with `--size 320 --msaa 0 --nav off`) carrying `--nav-at X,Y` for the
    walkable surface height and `--refs-at` / `--pick` to identify what is at a spot.
 4. Only then the deliverable camera.
 
