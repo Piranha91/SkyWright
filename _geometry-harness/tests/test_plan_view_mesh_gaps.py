@@ -7,7 +7,9 @@ variant's folder loaded the variant's records without those meshes, and nothing 
 overlapprobe's scene preflight (run by `evalrun plan` on every arm, and by every scene capture) now reads the meshes
 the arm's plugins name and refuses when its view lacks some that an installed folder outside it has, naming the arm,
 the plugin, the count and the folder, and saying what to try. A mesh no installed folder has is the missing-assets
-check's, not this one's; a variant that ships its own meshes passes.
+check's, not this one's; a variant that ships its own meshes passes. Cases 1910-1918: the refusal gates only an arm
+where a planned check runs overlapprobe, and with the live switch check opted in it also says what the live driver's
+profile rule (switchflip P50) makes of its remedy; a receipt from before `addFolders` is still read.
 
 Every case builds a temporary MO2 instance (never a real install), writes its plugins and archives byte by byte, and
 drives the REAL overlapprobe and evalrun.py built in this checkout
@@ -418,7 +420,115 @@ def case_1366(root: Path):
           f"1366: one distinct path, counted once ({reason!r})")
 
 
-CASES = {f"case-{n}": globals()[f"case_{n}"] for n in range(1350, 1367)}
+# ---- 1910-1912, 1916, 1918: the mesh-gap refusal gates only an arm that captures scenes, and says what the live
+# driver's profile rule (switchflip P50) makes of its remedy when the plan opts in to the live switch check ----------
+
+LIVE = ["--opt-in", "runtime.state-switch-flip"]
+
+
+def plan_with(root: Path, cands: Path, inst: Path, game: Path, extra):
+    out = root / "run"
+    if out.exists():
+        shutil.rmtree(out)
+    args = [sys.executable, str(EVALRUN), "plan", "--registry", str(REGISTRY), "--candidates", str(cands),
+            "--out", str(out), "--harness", str(HARNESS), "--depth", "standard",
+            "--instance", str(inst), "--game", str(game), "--profile", "P"] + list(extra)
+    r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env=clean_env(), timeout=300)
+    doc = json.loads((out / "plan.json").read_text(encoding="utf-8")) if (out / "plan.json").exists() else None
+    return r, doc
+
+
+def gap_fixture(root: Path, modlist: list[str]) -> tuple[Path, Path, Path]:
+    """The bare variant with Parent's rows as given; one baseline candidate whose Mods is the variant alone."""
+    inst, game = make_instance(root, modlist, ["Variant.esp"])
+    plugin(inst / "mods" / "Variant" / "Variant.esp", [model_of(M1), model_of(M2)])
+    mesh(inst / "mods" / "Parent", M1)
+    mesh(inst / "mods" / "Parent", M2)
+    c = root / "c"
+    candidate(c, "candidate-00-x-baseline", ["Variant.esp"], ["Variant"])
+    return inst, game, c
+
+
+def arm_line(r) -> str:
+    hits = [ln for ln in (r.stdout + r.stderr).splitlines() if "arm baseline (" in ln]
+    return hits[0] if len(hits) == 1 else f"<{len(hits)} arm lines>"
+
+
+def case_1910(root: Path):
+    """A live-only plan (no check runs overlapprobe) is built over a mesh gap: the verdict is recorded, not gating."""
+    inst, game, c = gap_fixture(root, ["+Variant", "-Parent"])
+    r, doc = plan_with(root, c, inst, game, LIVE + ["--select", "runtime.state-switch-flip"])
+    check(r.returncode == 0 and doc is not None, f"1910: the plan is built (exit {r.returncode}; {arm_line(r)})")
+    sp = next((a.get("scenePreflight") for a in (doc or {}).get("arms") or [] if a.get("armId") == "baseline"), None) or {}
+    check(sp.get("status") == "refused" and sp.get("gating") is False and sp.get("code") == CODE,
+          f"1910: the arm records the refusal as not gating ({sp})")
+    note = [ln for ln in r.stdout.splitlines() if "no planned check on this arm captures scenes" in ln]
+    check(len(note) == 1 and "To fix" not in note[0], f"1910: one note, with no remedy ({note})")
+
+
+def case_1911(root: Path):
+    """Scenes and the live check, Parent disabled: the refusal says P50 would refuse the remedied arm."""
+    inst, game, c = gap_fixture(root, ["+Variant", "-Parent"])
+    r, doc = plan_with(root, c, inst, game, LIVE + ["--select", "runtime.state-switch-flip,geometry.object-overlap"])
+    line = arm_line(r)
+    check(r.returncode == 2 and doc is None, f"1911: refused (exit {r.returncode})")
+    check("To fix: add 'Parent' at the end of the candidate's Mods list" in line
+          and "the opted-in live switch check would then refuse this arm: arm baseline: profile 'P' does not enable "
+              "mod folder 'Parent'" in line, f"1911: the sentence carries P50's refusal ({line!r})")
+
+
+def case_1912(root: Path):
+    """The same with Parent enabled above the variant: the remedy's 'at the end' breaks P50's order rule."""
+    inst, game, c = gap_fixture(root, ["+Parent", "+Variant"])
+    r, doc = plan_with(root, c, inst, game, LIVE + ["--select", "runtime.state-switch-flip,geometry.object-overlap"])
+    line = arm_line(r)
+    check(r.returncode == 2 and doc is None, f"1912: refused (exit {r.returncode})")
+    check("profile 'P' orders 'Parent' above 'Variant'" in line, f"1912: the sentence carries P50's order refusal ({line!r})")
+
+
+def case_1916(root: Path):
+    """D1: a BaseProfile mismatch still refuses a live-only plan at plan time (every --order probe refuses it too)."""
+    inst, game, c = gap_fixture(root, ["+Variant", "-Parent"])
+    doc = json.loads((c / "candidate-00-x-baseline.json").read_text(encoding="utf-8"))
+    doc["BaseProfile"] = "Other"
+    (c / "candidate-00-x-baseline.json").write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    r, pdoc = plan_with(root, c, inst, game, LIVE + ["--select", "runtime.state-switch-flip"])
+    line = arm_line(r)
+    check(r.returncode == 2 and pdoc is None and "scene preflight refused it" in line,
+          f"1916: refused at plan time (exit {r.returncode}; {line!r})")
+
+
+OLD_RECEIPT = '''import json, sys
+a = sys.argv
+out = a[a.index("--json") + 1]
+json.dump({"schemaVersion": 1, "verdict": "refused", "code": "view-lacks-installed-meshes",
+           "reason": "plugin 'Variant.esp' (from 'Variant') names 2 meshes that no folder in the candidate's Mods provides",
+           "remedy": "add 'Parent' at the end of the candidate's Mods list, so the arm's own folders keep priority, then try again",
+           "candidate": "x", "profile": "P", "providers": []}, open(out, "w", encoding="utf-8"))
+sys.exit(2)
+'''
+
+
+def case_1918(root: Path):
+    """A receipt written before `addFolders` existed is still read: it gates as before, and with the live check the
+    sentence states P50's condition without naming a folder it cannot know."""
+    inst, game, c = gap_fixture(root, ["+Variant", "-Parent"])
+    fake = root / "old_overlapprobe.py"
+    fake.write_text(OLD_RECEIPT, encoding="utf-8")
+    cmd = ["--probe-cmd", f"overlapprobe={sys.executable} {fake}"]
+    r, doc = plan_with(root, c, inst, game, cmd + LIVE + ["--select", "runtime.state-switch-flip,geometry.object-overlap"])
+    line = arm_line(r)
+    check(r.returncode == 2 and "To fix: add 'Parent' at the end" in line
+          and "launches this arm only on a profile that enables every Mods folder in that order" in line,
+          f"1918: an old receipt gates, with P50's general condition (exit {r.returncode}; {line!r})")
+    (root / "b").mkdir()
+    r, doc = plan_with(root / "b", c, inst, game, cmd + LIVE + ["--select", "runtime.state-switch-flip"])
+    sp = next((a.get("scenePreflight") for a in (doc or {}).get("arms") or [] if a.get("armId") == "baseline"), None) or {}
+    check(r.returncode == 0 and sp.get("gating") is False, f"1918: and does not gate a live-only plan ({sp})")
+
+
+CASES = {f"case-{n}": globals()[f"case_{n}"] for n in [*range(1350, 1367), 1910, 1911, 1912, 1916, 1918]}
 
 
 def main() -> int:

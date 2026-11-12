@@ -564,12 +564,31 @@ def probe_argv(opts: dict, harness: Path, exe: str | None) -> list[str] | None:
 
 
 SCENE_PREFLIGHT_PROBE = "overlapprobe"
+MESH_GAP_CODE = "view-lacks-installed-meshes"   # the one preflight refusal that only a scene capture needs
 
 
-def scene_preflight(arms: list[dict], opts: dict, harness: Path) -> tuple[list[str], list[str]]:
+def live_p50_sentence(arm: dict, opts: dict, add: list[str] | None) -> str:
+    """What the opted-in live switch check's profile rule (switchflip's P50) says of the arm once the mesh-gap
+    remedy is followed; '' when it would pass. `add` is None for a receipt without `addFolders` (an older build)."""
+    if add is None:
+        return ("; the opted-in live switch check then launches this arm only on a profile that enables every Mods "
+                "folder in that order, strongest first, so check the launch profile too")
+    import switchflip   # one P50 rule, read where it lives
+    mods = [str(m) for m in (arm.get("mods") or [])] + [str(f) for f in add]
+    earm = {"armId": arm["armId"], "requested": {"providers": [{"name": m, "kind": "mod"} for m in mods]}}
+    instance = opts.get("instance") or os.environ.get("HOUSECARL_MO2_INSTANCE")
+    why = switchflip.profile_priority_refusal(str(instance), str(opts.get("profile")), earm)
+    return f"; the opted-in live switch check would then refuse this arm: {why}" if why else ""
+
+
+def scene_preflight(arms: list[dict], opts: dict, harness: Path, scene_arms: set[str] | None = None,
+                    live: bool = False) -> tuple[list[str], list[str]]:
     """Run overlapprobe's own scene preflight on every arm, the check its scene captures will run, and record
     each verdict on the arm as `scenePreflight`. Returns (refusals, notes): one line per arm the probe refused,
-    and lines for the plan's output. The rules live in the probe; this only acts on the verdict it writes."""
+    and lines for the plan's output. The rules live in the probe; this only acts on the verdict it writes.
+    A mesh-gap refusal gates only an arm in `scene_arms` (a planned check runs overlapprobe there; None means
+    every arm); every other refusal gates every arm. With `live`, a gating mesh-gap refusal also says what the
+    live driver's profile rule makes of its remedy."""
     refusals, notes = [], []
     if not (opts.get("instance") or os.environ.get("HOUSECARL_MO2_INSTANCE")):
         reason = ("no --instance was given, so the plan could not check the arms' asset views against the base "
@@ -617,9 +636,18 @@ def scene_preflight(arms: list[dict], opts: dict, harness: Path) -> tuple[list[s
                 arm["scenePreflight"] = {"status": "no-asset-view", "code": verdict["code"],
                                          "reason": verdict.get("reason"), "tool": tool}
                 notes.append(f"   {arm['armId']}: no scene can be captured from this arm: {verdict.get('reason')}")
+            elif verdict.get("code") == MESH_GAP_CODE and scene_arms is not None and arm["armId"] not in scene_arms:
+                arm["scenePreflight"] = {"status": "refused", "gating": False, "code": verdict["code"],
+                                         "reason": verdict.get("reason"), "tool": tool}
+                notes.append(f"   {arm['armId']}: no planned check on this arm captures scenes, so the scene preflight "
+                             f"does not gate it; a scene capture would refuse it: {verdict.get('reason')}")
             else:
+                p50 = ""
+                if live and verdict.get("code") == MESH_GAP_CODE:
+                    add = verdict.get("addFolders")
+                    p50 = live_p50_sentence(arm, opts, list(add) if isinstance(add, list) else None)
                 refusals.append(f"{where}: overlapprobe's scene preflight refused it: {verdict.get('reason')}. "
-                                f"To fix: {verdict.get('remedy')}.")
+                                f"To fix: {verdict.get('remedy')}{p50}.")
     return refusals, notes
 
 
@@ -1526,12 +1554,6 @@ def cmd_plan(a) -> int:
         "noReverse": bool(a.no_reverse), "population": population,
     }
 
-    # B9: an arm the scene captures will refuse is refused here, by the same check, before anything runs.
-    preflight_refusals, preflight_notes = scene_preflight(arms, options, harness)
-    if preflight_refusals:
-        return refuse("overlapprobe's scene preflight, the check every scene capture runs, refused this plan; "
-                      "nothing was planned:\n   - " + "\n   - ".join(preflight_refusals))
-
     for check in reg.checks:
         for tok in (check.get("adapter") or {}).get("args") or []:
             for name in re.findall(r"\{([A-Za-z0-9_]+)\}", str(tok)):
@@ -1630,6 +1652,15 @@ def cmd_plan(a) -> int:
             "arms": per_arm,
             "status": base_status,
         })
+
+    # B9: an arm the scene captures will refuse is refused here, by the same check, before anything runs. The
+    # mesh-gap refusal gates only an arm where a planned check runs overlapprobe (the scene captures' probe).
+    scene_arms = {x["armId"] for c in checks if (c["adapter"] or {}).get("exe") == SCENE_PREFLIGHT_PROBE
+                  for x in c["arms"] if x["status"] == "planned"}
+    preflight_refusals, preflight_notes = scene_preflight(arms, options, harness, scene_arms, LIVE_CHECK_ID in opted)
+    if preflight_refusals:
+        return refuse("overlapprobe's scene preflight, the check every scene capture runs, refused this plan; "
+                      "nothing was planned:\n   - " + "\n   - ".join(preflight_refusals))
 
     # The identity of every program this plan can launch, frozen with it (toolidentity.py's rule).
     try:

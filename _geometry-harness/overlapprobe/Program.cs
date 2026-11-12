@@ -401,8 +401,8 @@ if (sceneCapture || scenePreflight)
         Console.Error.WriteLine($"scene asset preflight refused: {ex.Message}. To fix: {remedy}.");
         if (scenePreflight && jsonPath is not null)
             WritePreflightReceipt(jsonPath, new { schemaVersion = 1, verdict = "refused", code = refusal?.Code ?? "preflight-failed",
-                reason = ex.Message, remedy, candidate = Path.GetFullPath(orderFile!), profile = profileName,
-                providers = Array.Empty<object>() });
+                reason = ex.Message, remedy, addFolders = refusal?.AddFolders ?? Array.Empty<string>(),
+                candidate = Path.GetFullPath(orderFile!), profile = profileName, providers = Array.Empty<object>() });
         return 2;
     }
     if (scenePreflight && jsonPath is not null)

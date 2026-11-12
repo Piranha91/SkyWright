@@ -89,7 +89,8 @@ static class ViewMeshGaps
             ? $"installed folder {folderList}, which the Mods list leaves out, has {(n == 1 ? "it" : "them")}"
             : $"installed folders {folderList}, which the Mods list leaves out, have {(n == 1 ? "it" : "them")}";
         throw new SceneCapture.PreflightRefusal(Code, $"{who} {what} {where}, and {has}",
-            $"add {folderList} at the end of the candidate's Mods list, so the arm's own folders keep priority, then try again");
+            $"add {folderList} at the end of the candidate's Mods list, so the arm's own folders keep priority, then try again",
+            folders);
     }
 
     /// <summary>The distinct Data-relative model paths a plugin's records name; a plugin that will not read is refused.</summary>

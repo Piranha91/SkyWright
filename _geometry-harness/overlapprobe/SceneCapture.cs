@@ -11,10 +11,13 @@ static class SceneCapture
     internal sealed record AssetProviderCheck(string CandidateName, string Mo2Name, int CandidateRank, int Mo2Priority,
         bool Enabled, string Directory);
     /// <summary>A preflight refusal: a stable code, the reason, and what to try.</summary>
-    internal sealed class PreflightRefusal(string code, string message, string remedy) : Exception(message)
+    internal sealed class PreflightRefusal(string code, string message, string remedy,
+                                           IReadOnlyList<string>? addFolders = null) : Exception(message)
     {
         public string Code { get; } = code;
         public string Remedy { get; } = remedy;
+        /// <summary>The folders the remedy adds at the end of the candidate's Mods list, strongest first; empty otherwise.</summary>
+        public IReadOnlyList<string> AddFolders { get; } = addFolders ?? Array.Empty<string>();
     }
 
     /// <param name="ReorderedProviders">Selected providers whose rank in the candidate differs from their rank among
