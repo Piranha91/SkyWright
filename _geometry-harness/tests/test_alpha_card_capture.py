@@ -1,4 +1,4 @@
-"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1899, C1930-C1933, C1935-C1939).
+"""Known answers for the interim alpha-card capture rule and the stale image key (C1890-C1899, C1930-C1933, C1935-C1939, C1960-C1961).
 
     python tests/test_alpha_card_capture.py [--only C1890,C1897]
 
@@ -35,6 +35,8 @@ up; nothing here is evidence about a real cell.
     C1937  a sliced top-down's (or cutaway's) note stays on its frame and is never narrated
     C1938  "overlap candidate" never reaches the report or the reel; the overlap what-to-do line is in plain words
     C1939  the picker's not-drawn reason travels as fields into the capture result and the reel's reason line
+    C1960  a not-drawn refusal without viewprobe's cause fields gets the neutral line, never "no model to draw"
+    C1961  the final string handed to speech and subtitles holds no form-key or editor-ID shape (Cut Content's real text)
 
 Each case names the wrong answer it exists to reject. Exit 0: every case passed; 1: a case failed.
 """
@@ -450,7 +452,7 @@ def c1931_reel_speaks_no_ids(tmp: Path):
     page = {"layout": "list", "title": "What to do", "rows": [row]}
     said = RS.page_say(page)
     bad = [x for x in ("0138CE", "Skyrim.esm", "BUV_", "_dun", "MorthalAlvasHouse") if x in said]
-    check("C1931", not bad and "Moorside Inn" in said and "Alva's House" in said,
+    check("C1931", not bad and "Moorside Inn" in said and "Alva's House" in said and "(Morthal" not in said,
           "a still page's narration speaks a form key or an editor ID", f"spoken {bad}: {said[:400]!r}")
     check("C1931", page["rows"] == [row] and "DynDOLOD, xLODGen, Occlusion.esp" in said
           and "Finding_Helgi_and_Laelette.esp" in said,
@@ -744,6 +746,82 @@ def c1939_not_drawn_carried(tmp: Path):
           "a reference not drawn without the opposite flag is said as switched off for good", f"lines {lines2[:400]!r}")
 
 
+def c1960_not_drawn_without_fields(tmp: Path):
+    """Helgi's regeneration 2: its captures predate the not-drawn fields, so the three switched-off pairs fell to the
+    no-model line, "The placed object has no model to draw", which is false (COTN switches them off). Wrong answers: a
+    not-drawn refusal without viewprobe's cause fields (or with an unknown cause) said as having no model; the no-model
+    line missing where viewprobe's fields say the base carries no model."""
+    import reel_plan as RP
+    pol = json.loads((SKILL / "scene-policy.json").read_text(encoding="utf-8"))["vignettes"]
+    table = pol.get("refusalReasons") or {}
+    base = {"code": "points-unpickable", "pickerCode": "points-not-drawn", "final": True}
+    got = [RP.refusal_reason({"refusal": dict(base, **extra)}, table) for extra in (
+        {}, {"notDrawn": {"why": "other", "forGood": False}}, {"notDrawn": {"why": "noModel", "forGood": False}},
+        {"notDrawn": {"why": "noBase", "forGood": False}})]
+    words = pol["stillReasons"]
+    check("C1960", got[:2] == ["notDrawnUnknown", "notDrawnUnknown"] and got[2:] == ["notDrawn", "notDrawn"]
+          and "model" not in words.get("notDrawnUnknown", "model") and "notDrawnUnknown" in (pol.get("stillReasonsShort") or {}),
+          "a not-drawn refusal without viewprobe's cause fields is said as having no model (or the no-model line is lost)",
+          f"{got}; {words.get('notDrawnUnknown')!r}")
+
+
+
+CC_WHAT_TO_DO = ("Lux - Skyrim Cut Content Restoration is a patch for Skyrim Cut Content Restoration and Lux. None of the "
+                 "predicted clashes is between them, so this evaluation does not show whether you need it. It switches off "
+                 "15E420:Skyrim Cut Content Restoration (a placed FarmInteriorFireLight01, in Frost River Meadery), "
+                 "15E455:Skyrim Cut Content Restoration (a placed FarmInteriorLight01, in Frost River Meadery) and "
+                 "15E475:Skyrim Cut Content Restoration (a placed FarmInteriorShadowLight01, in Frost River Meadery) and 49 "
+                 "more, which Skyrim Cut Content Restoration places (read from the patch's own records).")
+CC_PATCH = ("It switches off 1AA4FA:Skyrim Cut Content Restoration (a placed CollisionMarker, in Castle Dour), "
+            "1AA4F8:Skyrim Cut Content Restoration (a placed ImpCandelabraCandle02, in Castle Dour) and "
+            "1AA4F9:Skyrim Cut Content Restoration (a placed SolitudeInnCandleDefault, in Castle Dour), which Skyrim Cut "
+            "Content Restoration places (read from the patch's own records).")
+SYNTHETIC = ["It also puts back the earlier value of 3 record fields that Lux changes, on Moorside Inn, 0138CE:Skyrim.esm; if you use Lux.",
+             "It removes the scripts from BUV_ControlQuestEffect_dunFrostmereCryptQST_90_100 and BUV_ControlQuestEffect_dunFrostmereCryptQST_16.",
+             "It is in Alva's House (MorthalAlvasHouse).",
+             "In Morthal, 000941:COTN - Morthal.esp's MorthalLonghouse01 crosses a tree."]
+
+
+def c1961_final_speech_has_no_ids(tmp: Path):
+    """Cut Content's reel said "15E420:Skyrim Cut Content Restoration (a placed FarmInteriorFireLight01 ...)": the reel
+    had put the mod's name in place of the plugin, so the form-key rule no longer matched, and a one-word editor ID had
+    no underscore. Wrong answers: a form-key shape (six hex digits and a colon) or an editor-ID shape in the final string
+    the storyboard hands to speech (still pages and vignettes) or the render hands to speech and subtitles; the page's
+    own text changed; tool names or a plugin file name altered."""
+    import subprocess
+    import reel_stills as RS
+    shapes = getattr(RS, "speech_shapes", None) or (lambda t: re.findall(r"\b[0-9A-Fa-f]{6}:|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\b|\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b", t))
+    rows = [CC_WHAT_TO_DO, CC_PATCH, *SYNTHETIC, "If you use generated distant scenery or occlusion (DynDOLOD, xLODGen, Occlusion.esp), rebuild it."]
+    reel_words = json.loads((SKILL / "report-priorities.json").read_text(encoding="utf-8")).get("reel") or {}
+    fonts = {k: reel_words[k] for k in ("stillFont", "stillFontBold") if reel_words.get(k)}
+    pres = {"presentationId": "c1961", "chapters": [], "findings": [], "evidence": [], "settings": {"reel": fonts},
+            "reel": {"status": "planned", "chapters": [
+                {"id": "R-01", "kind": "verdict", "narration": " ".join(rows),
+                 "still": {"pages": [{"layout": "list", "title": "What to do", "rows": list(rows)}]}},
+                {"id": "R-02", "kind": "vignette", "narration": SYNTHETIC[3] + " " + CC_PATCH, "frames": []}]}}
+    root = tmp / "c1961"
+    (root / "bundle").mkdir(parents=True, exist_ok=True)
+    (root / "presentation.json").write_text(json.dumps(pres), encoding="utf-8")
+    r = subprocess.run([sys.executable, str(HARNESS / "evalreel.py"), "storyboard-packet", "--presentation",
+                        str(root / "presentation.json"), "--bundle", str(root / "bundle"), "--out", str(root / "sb.json")],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    sb = json.loads((root / "sb.json").read_text(encoding="utf-8")) if (root / "sb.json").is_file() else {}
+    said = [s_.get("narration") or "" for s_ in sb.get("scenes") or []]
+    bad = [(s_[:60], shapes(s_)) for s_ in said if shapes(s_)]
+    joined = " ".join(said)
+    check("C1961", r.returncode == 0 and said and not bad and "switches off a placed Farm Interior Fire Light" in joined
+          and "Castle Dour" in joined,
+          "the storyboard's speech text holds a form key or an editor ID (or lost the placed objects' words)",
+          f"exit {r.returncode} {r.stderr[-200:]!r}; bad {bad[:3]}")
+    check("C1961", pres["reel"]["chapters"][0]["still"]["pages"][0]["rows"] == rows and "DynDOLOD, xLODGen, Occlusion.esp" in joined,
+          "the page's own text, or a tool name, was changed by the speech rule", joined[-200:])
+    # the render's speech and subtitles pass the same rule: every narration it uses is spoken_text's
+    src = (HARNESS / "evalreel.py").read_text(encoding="utf-8")
+    check("C1961", 'narration = reel_stills.spoken_text(" ".join(str(ch.get("narration") or "").split()))' in src
+          and 'say = reel_stills.spoken_text(page["say"] or narration)' in src,
+          "the render hands speech and subtitles a narration that has not passed the final speech rule")
+
+
 CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_planner_refusal,
          "C1892": c1892_opaque_keeps_top_down, "C1893": c1893_witness_miss_goes_on,
          "C1894": c1894_station_view_caption, "C1895": c1895_old_pose_refusal_recaptured,
@@ -755,7 +833,9 @@ CASES = {"C1890": c1890_witness_after_pose_miss, "C1891": c1891_witness_after_pl
          "C1933": c1933_media_bundle_frozen_scope,
          "C1935": c1935_vignette_requests_its_own_pair,
          "C1936": c1936_refusal_reasons_by_table, "C1937": c1937_top_down_note_not_spoken,
-         "C1938": c1938_no_overlap_candidate_words, "C1939": c1939_not_drawn_carried}
+         "C1938": c1938_no_overlap_candidate_words, "C1939": c1939_not_drawn_carried,
+         "C1960": c1960_not_drawn_without_fields,
+         "C1961": c1961_final_speech_has_no_ids}
 
 
 def main(argv=None) -> int:
