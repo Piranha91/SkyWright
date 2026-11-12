@@ -126,9 +126,34 @@ def _sentence(x) -> str:
     return x if not x or x[-1] in ".:;!?" else x + "."
 
 
+# what a still page may show but the narrator never says (C1931): a form key, and an editor ID (a word joined by
+# underscores, or a lone identifier in brackets after the name it stands for). A plugin file name is not an editor ID.
+SPOKEN_FORM_KEY = re.compile(r"(,\s*)?\b[0-9A-Fa-f]{6}:[^\s,;()]+?\.(?:esp|esm|esl)\b")
+SPOKEN_EDITOR_ID = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b(?!\.(?:esp|esm|esl)\b)")
+SPOKEN_BRACKET_ID = re.compile(r"\s*\((?=[A-Za-z0-9]*[a-z][A-Z])[A-Za-z][A-Za-z0-9]{3,}\)")
+
+
+def spoken_text(text: str) -> str:
+    """A page's words as the narrator says them: a form key is dropped where it follows a name (", 0138CE:Skyrim.esm")
+    and said as "a record" where it stands alone; an editor ID in brackets after a name is dropped; any other editor ID
+    is said in words (reel_plan.humanize), the same words said twice in a row once with a count. The page shows them
+    unchanged."""
+    from reel_plan import humanize
+    text = SPOKEN_FORM_KEY.sub(lambda m: "" if m.group(1) else "a record", str(text))
+    text = SPOKEN_BRACKET_ID.sub("", text)
+    text = SPOKEN_EDITOR_ID.sub(lambda m: humanize(m.group(0)) or "a record", text)
+    text = re.sub(r"\b([A-Z][A-Za-z]*(?: [A-Za-z]+)*) and \1\b", r"\1 (two of them)", text)
+    return " ".join(text.split())
+
+
 def page_say(page: dict) -> str:
     """The narration a still page carries, from its own text: a fixed `say` (the load order, spoken as a summary), else
-    its lead sentence and then what the page shows, row by row, in the page's order."""
+    its lead sentence and then what the page shows, row by row, in the page's order; never a form key or editor ID
+    (spoken_text)."""
+    return spoken_text(_page_say(page))
+
+
+def _page_say(page: dict) -> str:
     if page.get("say"):
         return " ".join(str(page["say"]).split())
     lay = page.get("layout")
