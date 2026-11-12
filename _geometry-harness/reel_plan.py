@@ -144,10 +144,14 @@ def buried_participant(x: dict) -> dict | None:
 
 def station_saw(x: dict) -> bool:
     """Whether a refused capture's own chain says an eye-level station saw both participants: the cutaway step skipped
-    because a station saw both, or a witness step (the alpha-card rule) tried. Such a clash is never one no camera
-    could see (C1896)."""
+    because a station saw both, or a witness step (the alpha-card rule) tried; or an eye-level camera was ready and the
+    capture refused after it (C1932). Such a clash is never one no camera could see (C1896). A refusal of the
+    acquisition itself (no camera ready) keeps its own reasons."""
     if x.get("status") != "refused":
         return False
+    acq = x.get("acquisition") or {}
+    if acq.get("status") == "camera-ready" and acq.get("viewKind") == "eye-level":
+        return True
     chain = (x.get("refusal") or {}).get("chain") or []
     return any(c.get("code") == "cutaway-not-applicable" or c.get("kind") == "witness" for c in chain)
 
@@ -156,6 +160,9 @@ def unpictured_refused_reason(fks, capture_results, unmarkable: set) -> str:
     """Why a refused, unburied clash has no picture (stillReasons keys): a station at a player's eye height saw it but no
     picture could be kept (`stationSaw`), the renderer cannot mark one of its objects' see-through shapes
     (`unmarkable`), else no camera could see it (`captureRefused`)."""
+    if any(result_about(x, fks) and (x.get("refusal") or {}).get("code") == "place-only-with-mod"
+           for x in capture_results or []):
+        return "placeOnlyWithMod"
     if any(result_about(x, fks) and station_saw(x) for x in capture_results or []):
         return "stationSaw"
     if {str(k) for k in fks} & set(unmarkable or ()):

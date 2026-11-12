@@ -1204,6 +1204,45 @@ def _order_lacks(order: str, plugin: str) -> bool:
     return plugin.lower() not in {str(p).lower() for p in plugins}
 
 
+# viewprobe's own line naming the cell it loaded: "cell <editor id> (exterior)  <form key>"
+CELL_LINE = re.compile(r"^cell (.+?) \((?:interior|exterior)\)\s+([0-9A-Fa-f]{6}:\S+?\.es[pml])\s*$", re.M)
+
+
+def acquisition_cell_form_key(acq: dict) -> str | None:
+    """The form key of the cell the acquisition rendered, from viewprobe's own cell line in its receipts (the picker's
+    placement probe first), or None. A mod may give a base-game cell another editor ID (Cut Content Restoration's
+    RiverwatchExterior01 is 00B51E:Skyrim.esm), so a frame rendered in another setup addresses the cell by this key."""
+    rd = (acq.get("receipts") or {}).get("receiptsDir")
+    if not rd:
+        return None
+    root = Path(rd)
+    first = root / "points-work" / "p0-placements" / "console.txt"
+    for f in [first, *sorted(root.rglob("console.txt"))]:
+        try:
+            m = CELL_LINE.search(f.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+        if m:
+            return m[2]
+    return None
+
+
+def capture_cell(acq: dict, orders: dict) -> tuple[str | None, dict | None]:
+    """(the cell form key every state renders, or None to keep the camera's own cell; a refusal, or None) for one
+    request (C1932). The refusal is structured: `place-only-with-mod` when a state's order does not hold the plugin that
+    defines the cell, so that world has no such place (decided from the orders, never from viewprobe's sentence)."""
+    fk = acquisition_cell_form_key(acq)
+    if not fk:
+        return None, None
+    owner = fk.split(":", 1)[1]
+    lacking = sorted(st for st, order in orders.items() if order and _order_lacks(str(order), owner))
+    if lacking:
+        return fk, {"code": "place-only-with-mod", "final": True, "cell": fk, "states": lacking,
+                    "detail": (f"the cell {fk} is defined by {owner}, which the {', '.join(lacking)} setup does not load, "
+                               f"so that world has no such place")}
+    return fk, None
+
+
 def capture_argv(request: dict, camera: dict, state: str, order: str, passthrough: list[str], size: int) -> list[str]:
     """The viewprobe arguments (after the executable, before --out) for one frame of a request.
 
@@ -1216,7 +1255,8 @@ def capture_argv(request: dict, camera: dict, state: str, order: str, passthroug
     if split:
         cam = _strip_flag(cam, "--aspect") + ["--aspect", SPLIT_ASPECT]
         size = SPLIT_SIZE
-    argv = [camera["cell"], *passthrough, "--order", str(order), *cam, "--nav", camera.get("nav") or "off",
+    argv = [camera.get("cellFormKey") or camera["cell"], *passthrough, "--order", str(order), *cam, "--nav",
+            camera.get("nav") or "off",
             "--size", str(size), "--msaa", "4", "--report-mode", "--no-cell-outline",
             # a top-down's navmesh band and grid; a cutaway's hide and protect flags (the protect check runs again in
             # this state's own setup)
@@ -1626,6 +1666,17 @@ def _capture(a) -> int:
             result["reason"] = (f"the request's sequence is {states} with setup without the mod {arms['without']!r}; "
                                 f"this step captures the reel's without / with / highlight states of a vignette request")
             return finish(EXIT_REFUSED)
+    # the camera was ready: say so on the result, so a later refusal is never read as one no camera could see (C1932)
+    result["acquisition"] = {"status": "camera-ready",
+                             "viewKind": acq.get("viewKind") or (acq.get("camera") or {}).get("viewKind") or "eye-level"}
+    if not navmesh and not split:
+        cell_fk, place_ref = capture_cell(acq, orders)
+        if place_ref:
+            result["refusal"] = place_ref
+            result["reason"] = f"the place exists only with the mod: {place_ref['detail']}"
+            return finish(EXIT_REFUSED)
+        if cell_fk:
+            cams = {s_: {**c_, "cellFormKey": cell_fk} for s_, c_ in cams.items()}
     vp_cmd = shlex.split(a.vp) if a.vp and not Path(a.vp).is_file() else [str(a.vp or VIEWPROBE)]
     vp = Path(vp_cmd[-1])
     renderer = {n: sha256_file(vp.parent / n) for n in ("viewprobe.exe", "viewprobe.dll", "housecarl-core.dll")
