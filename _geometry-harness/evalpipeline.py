@@ -1510,6 +1510,14 @@ def media_bundle_dir(ctx) -> Path:
     return ctx.out / "report" / "media-bundle" / "evidence"
 
 
+def frozen_registry_args(ctx) -> list[str]:
+    """The media bundle reads the check registry the evaluation's plan froze: the evidence bundle's own copy (it hashes
+    to the plan, and evalrun bundle refuses one that does not), so a registry changed since the run never refuses the
+    report stage (Hroggar, round 2 rerun: registry-changed, C1930)."""
+    reg = bundle_dir(ctx) / "registry" / "check-registry.json"
+    return ["--registry", fwd(reg)] if reg.is_file() else []
+
+
 def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """The captured frames go into a second evidence bundle (evalrun bundle --media, every item checked against the
     arm's own configuration fingerprint), and the report is planned and compiled from it with the capture results."""
@@ -1528,7 +1536,8 @@ def stage_report(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         bundle = media_bundle_dir(ctx)
         run = ctx.out / "evaluation"
         for name, argv in (("media-bundle", evalrun("bundle", "--run", fwd(run), "--out", fwd(bundle), "--media",
-                                                    fwd(mdir / "media.json"), "--reader-cmd", reader_cmd(ctx),
+                                                    fwd(mdir / "media.json"), *frozen_registry_args(ctx),
+                                                    "--reader-cmd", reader_cmd(ctx),
                                                     *[x for k, v in names_env(ctx).items() for x in ("--reader-env", f"{k}={v}")],
                                                     *[x for p, n in (ctx.entry.get("modNames") or {}).items()
                                                       for x in ("--mod-name", f"{p}={n}")])),
