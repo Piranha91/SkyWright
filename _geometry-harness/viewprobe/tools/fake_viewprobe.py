@@ -35,6 +35,7 @@ Scene JSON:
      "clearUnread": 0,               # candidate meshes that could not be read
      "clearTerrain": "terrain: ...", # the terrain state clear-at reports (default: interior)
      "exterior": false,              # true = the cell header says (exterior), as an exterior CELL record does
+     "contacts": false,              # true = --contacts-of K prints K's drawn box and its touches / rests-on lines
      "clearObndOnly": 0,             # refs the broad phase could select only by their record box
      "clearObndWouldMiss": 0,        # candidates the record box alone would have excluded
      "insideObndOnly": 0,            # refs --inside-at could nominate only by their record box
@@ -153,7 +154,8 @@ def parse_args(argv):
            "eye": None, "yaw": 0.0, "pitch": 0.0, "fov": 65.0, "size": 320, "look": None,
            "cell": None, "cull": None, "eye_ref": None, "look_ref": None, "eye_height": 120.0,
            "refs": [], "ref_surface": False, "worklist": None, "out": None,
-           "nav_link": [], "nav_cell": [], "nav_version": [], "red": [], "nav": "off", "nav_color": "auto"}
+           "nav_link": [], "nav_cell": [], "nav_version": [], "red": [], "nav": "off", "nav_color": "auto",
+           "contacts_of": []}
     takes = {"--eye", "--yaw", "--pitch", "--fov", "--size", "--look", "--msaa", "--nav",
              "--instance", "--profile", "--game", "--order"}
     i = 0
@@ -175,6 +177,8 @@ def parse_args(argv):
             out["refs_at"].append(argv[i + 1]); i += 2
         elif a == "--clear-at":
             out["clear_at"].append(argv[i + 1]); i += 2
+        elif a == "--contacts-of":
+            out["contacts_of"].append(argv[i + 1]); i += 2
         elif a == "--eye-ref":
             out["eye_ref"] = argv[i + 1]; i += 2
         elif a == "--look-ref":
@@ -338,6 +342,26 @@ def one_shot(scene, a, argv, png):
             if bx["id"] in hl and bx.get("alpha"):
                 print(f"subject-surface-refused: {bx['id']}: alpha, effect, marker or non-depth-writing shape; "
                       "participant coverage incomplete")
+    # --contacts-of K (scene "contacts": true): K's drawn box and what its box touches or rests on, in viewprobe's two
+    # line shapes. Off by default, so a scene written before the picker read drawn boxes keeps its answers.
+    if scene.get("contacts"):
+        boxes = {b["id"]: b for b in scene.get("boxes", [])}
+        for key in a["contacts_of"]:
+            k = boxes.get(key)
+            if k is None:
+                continue
+            touch, rests = [], []
+            for o in scene.get("boxes", []):
+                if o["id"] == key:
+                    continue
+                if all(o["min"][i] <= k["max"][i] + 1 and k["min"][i] <= o["max"][i] + 1 for i in range(3)):
+                    touch.append(o["id"])
+                    if abs(o["max"][2] - k["min"][2]) <= 1 or o["min"][2] <= k["min"][2] <= o["max"][2]:
+                        rests.append(o["id"])
+            print(f"contacts-of {key}: touches [{', '.join(sorted(touch))}]; rests on [{', '.join(sorted(rests))}]; "
+                  "unassessed []")
+            print(f"contacts-of {key}: box {k['min'][0]:.0f},{k['min'][1]:.0f},{k['min'][2]:.0f} "
+                  f"{k['max'][0]:.0f},{k['max'][1]:.0f},{k['max'][2]:.0f}")
     for spec in a["nav_link"]:
         row = dict((scene.get("navLinks") or {}).get(spec) or {
             "source": spec.split("=")[0], "target": spec.split("=")[-1], "status": "refused",
