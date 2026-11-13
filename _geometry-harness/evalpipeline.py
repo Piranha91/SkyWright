@@ -1177,9 +1177,27 @@ def capture_request(ctx, q, sb: Path, qdir: Path, cands: dict) -> dict:
     if not acq.is_file():
         row["refused"] = f"the camera acquisition wrote no result (exit {a.get('exitCode')}); see {fwd(qdir / 'commands')}"
         return row
+    if q.get("requestType") == "navmesh-version-comparison":
+        # a navmesh comparison renders both its frames in the setup with the mod; the setup without it is its control,
+        # measured first at the same camera and handed to capture, which keeps no frame unless that control is clean.
+        # The control's folder is outside sequence/, so the blind image packet holds only the frames the reel shows
+        ctl_dir = qdir / "control"
+        k = child(ctx, qdir / "commands", "navmesh-control", [
+            sys.executable, fwd(HERE / "capture_acquire.py"), "navmesh-control", "--packet", fwd(sb), "--request", q["id"],
+            "--acquisition", fwd(acq), "--order", cands[row["without"]], "--out", fwd(ctl_dir), *vp_args, "--", *lab],
+            heavy=True, purpose=f"evalpipeline {ctx.id} capture", deadline_min=60)
+        row["controlExit"] = k.get("exitCode")
+        ctl = ctl_dir / "control-result.json"
+        if ctl.is_file():
+            got = read_json(ctl)
+            row["control"] = {"status": got.get("status"), "brokenCrossings": got.get("brokenCrossings"),
+                              "result": fwd(ctl)}
+        tail = ["--with-order", cands[row["arm"]], "--control", fwd(ctl)]
+    else:
+        tail = ["--with-order", cands[row["arm"]], "--without-order", cands[row["without"]]]
     c = child(ctx, qdir / "commands", "capture", [
         sys.executable, fwd(HERE / "capture_acquire.py"), "capture", "--packet", fwd(sb), "--request", q["id"],
-        "--acquisition", fwd(acq), "--with-order", cands[row["arm"]], "--without-order", cands[row["without"]],
+        "--acquisition", fwd(acq), *tail,
         "--out", fwd(qdir / "sequence"), "--size", str(ctx.entry.get("captureSize", 1280)), *vp_args, "--", *lab],
         heavy=True, purpose=f"evalpipeline {ctx.id} capture", deadline_min=60)
     row["captureExit"] = c.get("exitCode")

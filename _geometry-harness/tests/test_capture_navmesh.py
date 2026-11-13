@@ -191,10 +191,20 @@ def main():
               all(isinstance(v, dict) and v.get("cyan", 0) >= 25 and v.get("magenta", 0) >= 25 for v in pix.values())
               and (pix.get("winning-linked-navmeshes") or {}).get("red", 0) >= 25 and len(pix) == 2, json.dumps(pix))
 
-        # N08: capture renders both states at the acquired camera
+        # N08: capture renders both states at the acquired camera; a navmesh capture is handed its control (the setup
+        # without the mod at this camera, clean), which capture requires (navmesh-in-reel Gate A, C1974)
+        n08_ctl = base / "control-n08"
+        n08_scene = scene(navLinks={f"{S}={T}": link_row(splugin="Earlier.esp", count=20,
+                          crossings=[crossing(7, 14, [1000, 4096, 0], [1200, 4096, 0], False)])})
+        n08_scene["navmeshes"][0]["winner"] = "Earlier.esp"
+        n08_scene["navmeshes"][1]["versions"]["Earlier.esp"]["triangles"] = 20
+        run(base, n08_scene, "control-n08", ["navmesh-control", "--acquisition", str(acq_path), "--packet", str(pp),
+                                             "--request", rid, "--order", str(base / "without.json"),
+                                             "--out", str(n08_ctl), "--vp", FAKE])
         cap = base / "cap"
         proc_c, calls_c = run(base, scene(), "capture", ["capture", "--acquisition", str(acq_path), "--packet", str(pp),
                                                          "--request", rid, "--with-order", str(base / "order.json"),
+                                                         "--control", str(n08_ctl / "control-result.json"),
                                                          "--out", str(cap), "--size", "320", "--vp", FAKE])
         res = load(cap / "capture-result.json") if (cap / "capture-result.json").is_file() else {}
         rows = res.get("states") or []

@@ -1653,6 +1653,14 @@ def _capture(a) -> int:
             result["reason"] = (f"the request's sequence is {states}; this step captures a navmesh comparison's "
                                 f"{', '.join(NAVCAM.STATES)} at a navmesh camera")
             return finish(EXIT_REFUSED)
+        # the control (navmesh-control, the setup without the mod at this camera) is part of the picture's claim: no
+        # frame is kept unless that setup's own links are whole at the same pose
+        control, bad = NAVCAM.read_control(sys.modules[__name__], getattr(a, "control", None), acq, a.request)
+        if bad:
+            result["refusal"] = bad
+            result["reason"] = bad["detail"]
+            return finish(EXIT_REFUSED)
+        result["navmeshControl"] = control
     elif split:
         sp = acq.get("split") or {}
         arms = {"left": vig.get("withoutArmId"), "right": request.get("armId")}
@@ -1817,6 +1825,9 @@ def main(argv=None) -> int:
     c.add_argument("--out", required=True, help="state folders, media-<arm>.json per setup, capture-result.json")
     c.add_argument("--size", type=int, default=1280)
     c.add_argument("--vp", default=None, help="viewprobe.exe (default: the production build)")
+    c.add_argument("--control", default=None,
+                   help="a navmesh comparison's control-result.json (navmesh-control at this acquisition); required for "
+                        "a navmesh comparison, which is refused unless that setup's links are whole at the same pose")
     c.set_defaults(fn=cmd_capture)
     n = sub.add_parser("navmesh-control", help="render a navmesh comparison's camera in the setup without the evaluated mod, "
                                                 "red only where that setup's own links still cross past their target")

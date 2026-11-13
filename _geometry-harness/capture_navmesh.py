@@ -313,6 +313,42 @@ def receipt_check_for_capture(CA, request, acq, state, receipt_path):
     return None
 
 
+def read_control(CA, path, acq: dict, request_id: str):
+    """(the control as a capture result records it, None) or (None, a refusal dict): the control must exist, be this
+    request's, have been rendered at the acquisition's pose, and have found no broken crossing in its own setup."""
+    try:
+        return check_control(CA, path, acq, request_id), None
+    except CA.Refused as exc:
+        return None, {"code": exc.code, "detail": exc.detail}
+
+
+def check_control(CA, path, acq: dict, request_id: str) -> dict:
+    if not path:
+        raise CA.Refused("navmesh-control-missing", "a navmesh comparison is captured only with its control: run "
+                                                    "navmesh-control in the setup without the mod first and pass --control")
+    try:
+        doc = CA.load_json(Path(path).resolve())
+    except (OSError, ValueError) as exc:
+        raise CA.Refused("navmesh-control-missing", f"the control {path} could not be read: {exc}")
+    if doc.get("kind") != "navmesh-control" or doc.get("request") not in (None, request_id):
+        raise CA.Refused("navmesh-control-missing", f"{path} is not this request's navmesh control")
+    if doc.get("poseId") != acq.get("poseId"):
+        raise CA.Refused("navmesh-control-pose-mismatch", f"the control was rendered at pose {doc.get('poseId')}, not the "
+                                                          f"acquisition's {acq.get('poseId')}")
+    if doc.get("status") == "broken-crossing-present":
+        raise CA.Refused("navmesh-control-crossing-present",
+                         f"in the setup without the mod the source still has {doc.get('brokenCrossings')} broken "
+                         f"crossing(s) at this camera, so the picture cannot show what the mod changes")
+    if doc.get("status") != "no-broken-crossing":
+        raise CA.Refused("navmesh-control-missing", f"the control did not finish ({doc.get('status')!r}"
+                                                    + (f": {doc.get('reason')}" if doc.get("reason") else "") + ")")
+    png = Path(str(doc.get("png") or ""))
+    return {"status": doc["status"], "brokenCrossings": doc.get("brokenCrossings"), "poseId": doc.get("poseId"),
+            "path": str(Path(path).resolve()), "png": str(png) if doc.get("png") else None,
+            "pngSha256": CA.sha256_file(png) if doc.get("png") and png.is_file() else None,
+            "pixels": doc.get("pixels")}
+
+
 def control(CA, a) -> int:
     """The setup without the evaluated mod at the acquisition's camera: its own links re-measured, red only where ITS edges
     still cross past their target's count. A clean control shows no red crossing; one that still has it says so."""
