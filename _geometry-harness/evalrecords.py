@@ -505,8 +505,11 @@ class Session:
             self.resp.finish()
             return
         folder.mkdir(parents=True, exist_ok=True)
-        (folder / "request.jsonl").write_text("".join(json.dumps(m) + "\n" for m in self.req), encoding="utf-8")
-        (folder / "response.jsonl").write_text("".join(json.dumps(m) + "\n" for m in self.resp), encoding="utf-8")
+        # written under a new name and moved over, so a run's import that links the earlier transcript keeps its bytes
+        for name, msgs in (("request.jsonl", self.req), ("response.jsonl", self.resp)):
+            part = folder / (name + ".partial")
+            part.write_text("".join(json.dumps(m) + "\n" for m in msgs), encoding="utf-8")
+            os.replace(part, folder / name)
 
 
 # ---------------------------------------------------------------- one arm

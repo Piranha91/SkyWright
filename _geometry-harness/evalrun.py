@@ -156,6 +156,20 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def store_file(src: Path, dst: Path, *, link: bool) -> str:
+    """Put src at dst: a hard link when `link` and both are on one volume, else a copy. A file already at dst is
+    removed first, so a copy is never written through an earlier link into the file it shares (C2160-C2165)."""
+    dst.unlink(missing_ok=True)
+    if link:
+        try:
+            os.link(src, dst)
+            return "link"
+        except OSError:
+            pass
+    shutil.copy2(src, dst)
+    return "copy"
+
+
 def sha256_file(p: Path) -> str | None:
     try:
         h = hashlib.sha256()
@@ -5497,8 +5511,10 @@ def _cmd_import_results(a, runlog: Run) -> int:
         (temp / "result.json").write_bytes(manifest_bytes)
         names = [f"{i:02d}-rows.json" if str(r.get("role")) == "rows" else f"{i:02d}-{path.name}"
                  for i, (path, r) in enumerate(zip(sources, rows), start=1)]
-        for path, name in zip(sources, names):
-            shutil.copy2(path, temp / name)
+        # the raw transcripts are kept once per run: linked to the capture's own file where the volume allows; the
+        # rows file is copied, since its writer rewrites it in place
+        for path, name, r in zip(sources, names, rows):
+            store_file(path, temp / name, link=str(r.get("role")) in ("request", "response"))
         copied_hashes = [sha256_file(temp / name) for name in names]
         approved_hashes = [str(row["sha256"]).lower() for row in rows]
         if sha256_file(temp / "result.json") != manifest_sha256 or copied_hashes != approved_hashes:
@@ -6443,7 +6459,8 @@ def cmd_bundle(a) -> int:
                 return  # bundle_refusal already refuses this; never copy it under a new hash
             dst = out / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)
+            # an import folder is written once and never changed, so its files are linked rather than copied again
+            store_file(src, dst, link=src.resolve().is_relative_to((run / "imports").resolve()))
             row = {"id": sha256_text(rel)[:16], "kind": kind,
                    "path": rel, "sha256": recorded_sha256 if recorded_sha256 is not None else got,
                    "bytes": dst.stat().st_size, "checkId": check_id, "armId": arm_id,
