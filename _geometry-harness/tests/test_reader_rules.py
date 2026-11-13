@@ -1761,7 +1761,12 @@ def case_the_unpictured_page_accounts_for_every_clash():
     types = next(p for p in chapter(reel, "opening")["still"]["pages"] if p["layout"] == "types")
     card = {r["label"]: r["count"] for r in types["rows"]}
     un = str((chapter(reel, "unpictured") or {}).get("narration"))
-    parts = re.findall(r"([^.:]+): of (\d+) [^,]*, (\d+) pictured, (\d+) represented by the pictured example and (\d+) not pictured", un)
+    # each count's clause is present only when it is not 0 (C2167)
+    def count_(clauses, words):
+        m = re.search(r"(\d+) " + words, clauses)
+        return m.group(1) if m else "0"
+    parts = [(lab, n, count_(cl, "pictured"), count_(cl, "represented by the pictured example"), count_(cl, "not pictured"))
+             for lab, n, cl in re.findall(r"([^.:]+): of (\d+) [^,]*, ((?:\d+ [a-z ]+?)(?:(?:, | and )\d+ [a-z ]+?)*)(?=\.|, and \d+ other)", un)]
     parts += [(lab, n, "0", "0", n) for lab, n in re.findall(r"([^.:]+): (\d+) [^,.]*, none pictured", un)]
     ok_parts = parts and all(int(n) == int(a) + int(b) + int(c) and card.get(lab.strip()) == int(n) for lab, n, a, b, c in parts)
     lines = " ".join(reel.get("reportLines") or [])

@@ -641,6 +641,7 @@ def cmd_storyboard_packet(a) -> int:
         # the vignette reel: one narrated scene per reel chapter, its words the planner's; a still chapter one scene per
         # page as drawn, each with its own page's words, so each page is spoken and held for itself
         import reel_stills
+        reel_stills.keep_names(reel.get("modNames") or {})
         try:
             font_, bold_ = reel_stills.font_files(getattr(a, "font", None), ((pres.get("settings") or {}).get("reel") or {}))
         except reel_stills.FontMissing as e:
@@ -1088,6 +1089,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
     reel = pres["reel"]
     if reel.get("status") != "planned":
         return refuse(f"reel-refused: {reel.get('reason') or 'the reel plan is not planned'}", out)
+    reel_stills.keep_names(reel.get("modNames") or {})
     chapters = reel.get("chapters") or []
     closings_ = [i for i, c in enumerate(chapters) if c.get("kind") == "closing"]
     if not chapters or chapters[0].get("kind") != "opening" or closings_ not in ([], [len(chapters) - 1]):
@@ -1133,7 +1135,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                 continue
             for n, page in enumerate(parts):
                 ph = reel_stills.page_hash(page)
-                png = stills_dir / f"{cid}-p{n}-{ph[:10]}-{font_doc['sha256'][:8]}.png"
+                png = stills_dir / f"{cid}-p{n}-{ph[:10]}-{font_doc['sha256'][:8]}-{reel_stills.names_digest()}.png"
                 if not png.is_file():
                     try:
                         reel_stills.draw_page(page, font, bold).save(str(png), format="PNG")
@@ -1177,7 +1179,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                          "path": str(path), "sha256": sha256_file(path), "poseId": (m.get("provenance") or {}).get("poseId")}
                 if fr.get("label"):
                     # the reel's label strip under the evidence frame: the setup, or which marked shape is which colour
-                    lab_ = stills_dir / f"{cid}-{fr.get('state')}-{sha256_text(fr['label'] + item_['sha256'])[:12]}.png"
+                    lab_ = stills_dir / f"{cid}-{fr.get('state')}-{sha256_text(fr['label'] + item_['sha256'])[:12]}-{reel_stills.names_digest()}.png"
                     if not lab_.is_file():
                         reel_stills.label_frame(path, fr["label"], font, bold).save(str(lab_), format="PNG")
                     item_.update(evidencePath=item_["path"], evidenceSha256=item_["sha256"], label=fr["label"],
@@ -1236,7 +1238,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                 continue
             strip = reel_stills.draw_strip(labels, font, bold, size=(WIDTH, SPLIT_STRIP),
                                            split_at=SPLIT_HALF[0] + SPLIT_DIVIDER // 2)
-            sp = stills_dir / f"{cid}-strip-{sha256_text(json.dumps(labels, sort_keys=True))[:10]}-{font_doc['sha256'][:8]}.png"
+            sp = stills_dir / f"{cid}-strip-{sha256_text(json.dumps(labels, sort_keys=True))[:10]}-{font_doc['sha256'][:8]}-{reel_stills.names_digest()}.png"
             strip.save(str(sp), format="PNG")
             seg["strip"] = {"path": str(sp), "sha256": sha256_file(sp), "labels": labels}
         else:

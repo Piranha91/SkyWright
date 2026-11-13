@@ -146,19 +146,44 @@ SPOKEN_PASCAL_ID = re.compile(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]+)+\b(?!\.(?:esp
 SPOKEN_BRACKET_ID = re.compile(r"\s*\((?=[A-Za-z0-9]*[a-z][A-Z])[A-Za-z][A-Za-z0-9]{3,}\)")
 # the shapes the final speech string may not hold (the test's own check; spoken_text removes every one)
 FORM_KEY_SHAPE = re.compile(r"\b[0-9A-Fa-f]{6}:")
+# the reel's declared mod names and plugin file names without their extension: said as written, never put into words by
+# humanize, which strips a prefix or a capital word ("DBM_MAS_Patch" said as "Patch"; C2166)
+_NAMES: frozenset = frozenset()
+
+
+def keep_names(mod_names: dict) -> None:
+    """Set the names spoken_text leaves as written: each mod's display name and each plugin's file name without its
+    extension, from the reel plan's modNames (plugin -> name, or -> {name})."""
+    global _NAMES
+    kept = set()
+    for plugin, v in (mod_names or {}).items():
+        name = v.get("name") if isinstance(v, dict) else v
+        if name:
+            kept.add(str(name))
+        kept.add(re.sub(r"\.(?:esp|esm|esl)$", "", str(plugin), flags=re.I))
+    _NAMES = frozenset(kept)
+
+
+def names_digest() -> str:
+    """A short digest of the kept names, so a still drawn under other names is never reused from the stills folder."""
+    return hashlib.sha256("\n".join(sorted(_NAMES)).encode("utf-8")).hexdigest()[:8]
 
 
 def spoken_text(text: str) -> str:
     """The words the narrator says and the subtitles show: a placed reference's form key before "(a placed X, in Y)" is
     said as that phrase; any other form key is dropped where it follows a name (", 0138CE:Skyrim.esm") and said as "a
     record" where it stands alone; an editor ID in brackets after a name is dropped; any other editor ID is said in words
-    (reel_plan.humanize), the same words said twice in a row once with a count. Idempotent; the page shows the original."""
+    (reel_plan.humanize), the same words said twice in a row once with a count. A declared mod name or plugin file name
+    (keep_names) is said as written. Idempotent; the page shows the original."""
     from reel_plan import humanize
+
+    def words(m):
+        return m.group(0) if m.group(0) in _NAMES else humanize(m.group(0)) or "a record"
     text = SPOKEN_PLACED.sub(lambda m: m.group(1), str(text))
     text = SPOKEN_FORM_KEY.sub(lambda m: "" if m.group(1) else "a record", text)
-    text = SPOKEN_BRACKET_ID.sub("", text)
-    text = SPOKEN_EDITOR_ID.sub(lambda m: humanize(m.group(0)) or "a record", text)
-    text = SPOKEN_PASCAL_ID.sub(lambda m: humanize(m.group(0)) or "a record", text)
+    text = SPOKEN_BRACKET_ID.sub(lambda m: m.group(0) if m.group(0).strip()[1:-1] in _NAMES else "", text)
+    text = SPOKEN_EDITOR_ID.sub(words, text)
+    text = SPOKEN_PASCAL_ID.sub(words, text)
     text = re.sub(r"\b([A-Z][A-Za-z]*(?: [A-Za-z]+)*) and \1\b", r"\1 (two of them)", text)
     return " ".join(text.split())
 
@@ -170,9 +195,11 @@ def shown_text(text: str) -> str:
 
 
 def speech_shapes(text: str) -> list:
-    """The form-key and editor-ID shapes a string still holds (empty for a clean final speech string)."""
+    """The form-key and editor-ID shapes a string still holds (empty for a clean final speech string); a declared name
+    (keep_names) is not one."""
     t = str(text)
-    return (FORM_KEY_SHAPE.findall(t) + SPOKEN_EDITOR_ID.findall(t) + SPOKEN_PASCAL_ID.findall(t))
+    return (FORM_KEY_SHAPE.findall(t) + [x for x in SPOKEN_EDITOR_ID.findall(t) + SPOKEN_PASCAL_ID.findall(t)
+                                         if x not in _NAMES])
 
 
 def page_say(page: dict) -> str:

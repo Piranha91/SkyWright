@@ -85,6 +85,15 @@ def humanize(eid: str | None) -> str | None:
 NUMBER_WORDS = {2: "two", 3: "three", 4: "four", 5: "five"}
 
 
+def account_counts(words: dict, pictured: int, represented: int, unpictured: int) -> str:
+    """The unpictured account's counts in words: a clause per count that is not 0, joined with commas and a last "and"
+    ("2 pictured and 2 not pictured", never "0 represented by the pictured example"; C2167)."""
+    wc = words.get("unpicturedCounts") or {}
+    cl = [wc[k].format(count=n) for k, n in (("pictured", pictured), ("represented", represented),
+                                             ("unpictured", unpictured)) if n]
+    return cl[0] if len(cl) == 1 else ", ".join(cl[:-1]) + wc.get("and", " and ") + cl[-1] if cl else ""
+
+
 def say_names(names: list[str]) -> list[str]:
     """One phrase per distinct spoken name, in first-seen order, with how many records share it (Missives final reel
     review, finding 2: two barrels with one editor name sounded like one barrel moved, re-modelled and removed)."""
@@ -1342,8 +1351,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                                                                  unit=card_unit(t_, tot_) or "") + ".")
                     continue
                 parts_.append(words["unpicturedAccount"].format(
-                    label=type_labels[t_], total=tot_, unit=card_unit(t_, tot_) or "", pictured=pic_, represented=rep_,
-                    unpictured=unp_) + (words.get("unpicturedOther", "").format(count=other_) if other_ else "") + ".")
+                    label=type_labels[t_], total=tot_, unit=card_unit(t_, tot_) or "",
+                    counts=account_counts(words, pic_, rep_, unp_))
+                    + (words.get("unpicturedOther", "").format(count=other_) if other_ else "") + ".")
             sentence_un = " ".join(parts_)
             if any_rep_ and words.get("representedMeans"):
                 report_lines.append(words["representedMeans"])
