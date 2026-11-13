@@ -2156,8 +2156,8 @@ def case_r4(tmp, index, common):
             check(hit[0].get("priority", 0) > f1.get("priority", 0), f"{case}: {hit[0].get('id')} priority > the regression's")
             if spec["checkId"] == "geometry.object-overlap":
                 reader_plain = str(hit[0].get("readerPlain") or "").lower()
-                check("overlapping objects" in reader_plain and "visual review" in reader_plain,
-                      f"{case}: overlap reductions remain candidates for visual review")
+                check("overlapping objects" in reader_plain and "worth a look in game" in reader_plain,
+                      f"{case}: overlap reductions are still said to be worth a look in game (R10 wording)")
                 check("repaired 1 existing problem" not in reader_plain,
                       f"{case}: overlap reductions are not narrated as confirmed problem repairs")
                 comparison_narration = " ".join(str(cap.get("narration") or "") for chapter in pres.get("chapters") or []

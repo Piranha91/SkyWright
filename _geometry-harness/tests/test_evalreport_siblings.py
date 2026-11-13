@@ -405,9 +405,9 @@ def main():
         some_ = (words().get("attribution") or {}).get("needs-some")
         want = {"000801": "single-mod", "000802": "needs-both", "000804": "needs-some", "000E01": "needs-some"}
         ok = (got == want and bool(some_) and f"It needs both {A} and {NB1}" in text
-              and text.count(f"It needs {A} together with one or more") == 2)
+              and text.count(f"It needs {A} and at least one more mod") == 2)
         return ok, (f"attributions {got} (want {want}); needs-some words {'present' if some_ else 'absent'}; "
-                    f"'needs ... one or more' on the page {text.count(f'It needs {A} together with one or more')} "
+                    f"'needs ... at least one more' on the page {text.count(f'It needs {A} and at least one more mod')} "
                     f"times (want 2)")
 
     # S16 (round 2, F2). A check the sibling holding the shared setup could not join (its rows differ there) is not

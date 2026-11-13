@@ -1817,7 +1817,8 @@ def main():
         ov, nv = items.get(OVERLAP, ""), items.get(NAVOWN, "")
         want_more = len(set(places)) - 2           # the two most common places are named, the rest counted
         ok = (f"and {want_more} more places" in ov and "All are in" not in nv
-              and f"008EC2:{BASE} (ext)" in nv and "tris" not in nv.split("Most are in")[-1])
+              # N6: an unnamed cell whose plugin was not read is said as such, never by its form key
+              and "a cell with no name" in nv and f"008EC2:{BASE}" not in nv and "tris" not in nv.split("Most are in")[-1])
         return ok, f"overlap item {ov!r}; navmesh item {nv!r}"
 
     # C482. verify does not say ok while the printed report is over its page limit
@@ -1908,7 +1909,7 @@ def main():
         # (fourth review, Clockwork S4) the headline now says the replacement too: the measured line is the one read here
         line = next((x for x in sec.splitlines() if "navmesh replaces" in x and not x.startswith(">")), "")
         ok = (f"without the patch, {MOD_B}'s navmesh replaces {MOD_A}'s in 2 navmesh records, and in 2 of them" in line
-              and "CityExterior02 (ext) 689 -> 5 triangles" in line
+              and "City Exterior 02 689 -> 5 triangles" in line
               and f"2 of the broken navmesh links counted above point to triangles of a navmesh this replacement cut "
                   f"down: {n1} (689 -> 5 triangles)" in line
               and "NPC" not in line and "navmesh replaces" in html)
@@ -2804,7 +2805,7 @@ def main():
         plan, md, html = stays_bundle()
         sec = section_text(md, headings(plan).get("prediction") or "\0")
         st = next((ln for ln in sec.splitlines() if "Still there with" in ln), "")
-        ok = (f"2 overlap pairs between {MOD_A} and {MOD_B} (3 objects, all in Hall (int))" in st
+        ok = (f"2 overlap pairs between {MOD_A} and {MOD_B} (3 objects, all in Hall)" in st
               # after the final round (BPT review S5): each lost item says its unit
               and f"{MOD_A}'s changes to 2 record fields lost to {MOD_B}" in st)
         return ok, f"stays line {st!r}"
@@ -4661,7 +4662,7 @@ def main():
                    (STATE, "without-a"): []}
         plan, md, html = compile_and_render(STATE_ARMS, results, [MOD_A], patches=[PATCH])
         ln = next((x for x in md.splitlines() if "against base-game objects" in x), "")
-        ok = ("TestCairn" in ln and "Farm (ext)" in ln and "TestShrine" in ln and "Hall (int)" in ln
+        ok = ("TestCairn" in ln and "in Farm" in ln and "TestShrine" in ln and "in Hall" in ln and "(int)" not in ln
               and len(re.findall(r"\(evidence-index\.md#F-\d+\)", ln)) == 2)
         return ok, ln[:300]
 
@@ -4724,8 +4725,8 @@ def main():
         top = " ".join(x.get("text", "") for x in (reader(plan).get("prediction") or {}).get("historyLossLines") or [])
         m_ = re.search(r"The largest[^:]*: (.*?)\.", top)
         ex = m_.group(1) if m_ else ""
-        ok = bool(ex) and ex.index("CityExterior02") < ex.index("CityExterior03") < ex.index("CityExterior01") \
-            if all(x in ex for x in ("CityExterior01", "CityExterior02", "CityExterior03")) else False
+        ok = bool(ex) and ex.index("City Exterior 02") < ex.index("City Exterior 03") < ex.index("City Exterior 01") \
+            if all(x in ex for x in ("City Exterior 01", "City Exterior 02", "City Exterior 03")) else False
         return ok and "8 -> 94" not in ex and "1,463" in ex, top[:400]
 
     def c918_sample_said_as_test_point():
@@ -5242,7 +5243,7 @@ def main():
         plan, md, _ = compile_and_render(PATCH_ADDED_ARMS, {(OVERLAP, "baseline"): p_rows, (OVERLAP, "with-patch"): p_rows},
                                          [MOD_A, MOD_B], patches=[PATCH], predicates={(OVERLAP, "with-patch"): preds})
         st = next((ln for ln in md.splitlines() if ln.startswith("Still there with")), "")
-        return "most in PlaceNorth (int) (2 overlap pairs)" in st, st[:300]
+        return "most in Place North (2 overlap pairs)" in st, st[:300]
 
     for name, fn in [("third-review/C944-still-there-place-count-has-unit", c944_still_there_place_count_has_unit)]:
         cell(name, fn)
@@ -6074,7 +6075,7 @@ def main():
                                             [MOD_A, MOD_B], patches=[PATCH], order=order,
                                             names={"refs": refs, "bases": bases}, diff_logs={(CONTACT, "with-patch"): log})
         nb = next((ln for ln in md.splitlines() if ln.startswith("- New clashes with the patch, by check")), "")
-        return ("in game" in nb.lower() and "candidate for a visual check" in nb and "shadow" not in nb.lower()
+        return ("in game" in nb.lower() and "worth a look in game" in nb and "shadow" not in nb.lower()
                 .replace("shadowplane", "")), nb[-300:]
 
     for name, fn in [("fifth-review/C1084-new-by-check-in-game", c1084_new_by_check_in_game)]:
@@ -9276,8 +9277,8 @@ def main():
                   "bases": {f"000E95:{BASE}": {"type": "Static", "editorId": "Rock", "model": "Landscape\\Rock.nif"},
                             f"000E97:{MOD_B}": {"type": "Static", "editorId": "Crate", "model": "Clutter\\Crate.nif"}}}
         plan, md, _ = compile_and_render(arms, res, [MOD_A], patches=[PATCH], names=names_)
-        ln = next((x for x in md.splitlines() if x.startswith("- **") and cell_ in x), "")
-        return (f"{cell_} (ext) in TestWorld, grid cell 2, 1" in ln), ln[:500] or md[:800]
+        ln = next((x for x in md.splitlines() if x.startswith("- **") and "grid cell 2, 1" in x), "")
+        return ("Test World, grid cell 2, 1" in ln and cell_ not in ln), ln[:500] or md[:800]
 
     # C1194 (eighth review, Sewers 27): a switch clash whose direction the check did not find is settled by the records
     # where they settle it: the object's enable parent is the switch, not opposite, and the switch is not initially
@@ -10401,7 +10402,7 @@ def main():
         want_ = [f"000A01:{MOD_A}", f"000A02:{MOD_A}", f"000A03:{MOD_A}"]
         ok = ("Leads for an in-game check, not clashes" in sec_
               and all(k_ in sec_ and k_ in html for k_ in want_)
-              and "HallA" in sec_ and "YardB" in sec_
+              and "Hall A" in sec_ and "Yard B" in sec_
               and "32 u" in sec_ and "72 u" in sec_ and "about half the time" in sec_)
         return ok, sec_[-900:]
 

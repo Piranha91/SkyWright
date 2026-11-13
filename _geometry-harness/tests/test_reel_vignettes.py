@@ -56,6 +56,9 @@ POLICY = {
               "records.cell-attributes": "cell", "state.conditional-geometry": "state",
               "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact"},
     "pictureTypes": ["overlap", "contact", "record", "state", "navmesh"],   # phase 2: placements and world states; navmesh-in-reel
+    # R1 (2026-11-13): the checks capture can request, as shipped (C2120 keeps the shipped list equal to the capture rules)
+    "captureChecks": ["geometry.navmesh-ownership", "geometry.object-overlap", "records.contested-fields",
+                      "state.conditional-geometry"],
     "drawableFields": ["Placement"],                                     # a record clash is pictured only for these fields
     "groupKey": ["type", "pair", "cell", "field"],                       # phase 3: instances of one problem
     "structureShare": 0.5, "storeyTolerance": 96.0, "metresPerUnit": 0.01428,
@@ -116,15 +119,15 @@ WORDS = {
     "stillTitles": {"types": "Clashes predicted from adding {mod}", "loadOrder": "Plugins analysed", "affected": "(affected)",
                     "checks": "Checks that could not run or could not decide",
                     "leftOut": "Not shown: {count} {noun} with no effect in play", "runtime": "Mods changing these scenes at run time"},
-    "patch": {"fixes": ["Get {patch}; it fixes this.", "Installing {patch} fixes this.", "Install {patch} to fix this."],
-              "keeps": ["Get {patch}; it keeps {kept}'s version.", "Installing {patch} keeps {kept}'s version."],
-              "own": ["Get {patch}; it sets its own version.", "Installing {patch} sets its own version."],
-              "leaves": ["{patch} does not fix this one.", "{patch} leaves this one as it is."],
-              "listed": ["A patch for these two mods is listed on Nexus: {file}.", "Nexus lists a patch for these two mods: {file}."],
-              "none": ["No patch exists for these two mods.", "There is no patch for these two mods."],
-              "noneOther": ["No other patch exists for these two mods.", "There is no other patch for these two mods."],
-              "notFound": ["No patch for these two mods was found.", "A patch for these two mods was not found."],
-              "notFoundOther": ["No other patch for these two mods was found.", "Another patch for these two mods was not found."]},
+    "patch": {"fixes": "Get {patch}; it fixes this.",
+              "keeps": "Get {patch}; it keeps {kept}'s version.",
+              "own": "Get {patch}; it sets its own version.",
+              "leaves": "{patch} does not fix this one.",
+              "listed": "A patch for these two mods is listed on Nexus: {file}.",
+              "none": "No patch exists for these two mods.",
+              "noneOther": "No other patch exists for these two mods.",
+              "notFound": "No patch for these two mods was found.",
+              "notFoundOther": "No other patch for these two mods was found."},
     "playTime": "This was also recorded in play.",
     "closingLines": {"withoutSetup": "{check}, without {patch}"},
     "leftOutMarkers": "Not shown: {count} {noun} on editor-only markers",
@@ -520,11 +523,9 @@ def oracle(pres, names, masters, search, mods, policy=POLICY, words=WORDS, marke
     used = {}
 
     def pick(case):
-        """The k-th sentence of a case in reel order takes phrasing k mod the pool's size (skill data)."""
+        """A case's one phrasing (skill data, R2: one fact is said one way in every vignette)."""
         pool = words["patch"][case]
-        k = used.get(case, 0)
-        used[case] = k + 1
-        return pool[k % len(pool)]
+        return pool[0] if isinstance(pool, list) else pool
 
     def patch_sentence(c):
         other = [m for m in c["pair"] if m != target][0]
@@ -1287,12 +1288,10 @@ def case_planner():
           and WORDS["conditionFallback"].format(place="The Camp") in td and "The Camp Quest" not in td,
           "a quest that switches the clash on is named with its stage; one that only switches it off is not")
     # ---------------------------------------------------------------- phase 3
-    # N7: patch phrasings rotate through the pool, never the same one twice in a row; the same plan every time
+    # N7 (since R2, 2026-11-13): each patch case has one phrasing, said the same way every time; the same plan every time
     phr = [x for c in reel_view(got) for x in patch_phrasings(c["narration"])]
-    rep_ = [(a, b) for a, b in zip(phr, phr[1:]) if a == b]
-    check("N7-pool", len(phr) >= 3 and len({c for c, _ in phr}) >= 1 and not rep_
-          and any(i > 0 for _, i in phr),
-          f"no two consecutive patch sentences use the same phrasing, and the pool is used (phrasings {phr}, repeats {rep_})")
+    check("N7-pool", len(phr) >= 3 and all(i == 0 for _, i in phr),
+          f"every patch sentence is its case's one phrasing (phrasings {phr})")
     again = planned(pres, names, masters, search, mods)
     check("N7-deterministic", json.dumps((again.get("reel") or {}).get("chapters"), sort_keys=True)
           == json.dumps((got.get("reel") or {}).get("chapters"), sort_keys=True),
@@ -1532,16 +1531,16 @@ POOL_CASES = ["fixes", "fixesOverlap", "fixesOverlapMoved", "keeps", "own", "lea
 
 
 def case_gaps():
-    # N7: every pool case rotates: its k-th use in reel order takes phrasing k mod the pool's size
+    # N7 (since R2): every case is reached and said in its own one phrasing each time, with another case between
     for case in POOL_CASES:
         pres, names, masters, search, mods, words = pool_fixture(case)
         got = planned(pres, names, masters, search, mods, words=words)
         uses = pool_uses(reel_view(got), words)
         mine = [i for c, i in uses if c == case]
-        n = len(words["patch"][case])
+        n = 1 if isinstance(words["patch"][case], str) else len(words["patch"][case])
         between = [j for j, (c, _) in enumerate(uses) if c == case]
         inter = len(between) >= 2 and any(uses[k][0] != case for k in range(between[0], between[1]))
-        check(f"N7-rotate-{case}", len(mine) >= 2 and inter and mine == [k % n for k in range(len(mine))],
+        check(f"N7-rotate-{case}", len(mine) >= 2 and inter and n == 1 and mine == [0] * len(mine),
               f"case {case} is said {len(mine)} times with another case between, taking phrasings {mine} "
               f"(expected {[k % n for k in range(len(mine))]}; all uses {uses})")
 
@@ -2069,7 +2068,8 @@ def case_skill_data():
     sp = json.loads((SKILL / "references/scene-policy.json").read_text(encoding="utf-8"))
     words = ((pr.get("reel") or {}).get("words")) or {}
     vign = sp.get("vignettes") or {}
-    pools_ok = all(isinstance(v, list) and len(v) >= 2 for v in (words.get("patch") or {}).values()) and bool(words.get("patch"))
+    # since R2 (2026-11-13) each patch case is one phrasing: one fact said one way in every vignette
+    pools_ok = all(isinstance(v, str) for v in (words.get("patch") or {}).values()) and bool(words.get("patch"))
     check("data-words", set(WORDS) - {"forbidden", "forbiddenPatterns"} <= set(words) and set(WORDS["patch"]) <= set(words.get("patch") or {})
           and pools_ok,
           f"report-priorities.json reel.words carries every sentence and label the planner uses (missing "
@@ -2292,8 +2292,8 @@ CODE_SABOTAGE = {
     "code-c3-markers": ("planner", "C3-markers", [("_geometry-harness/reel_plan.py",
         "and r not in marker_rows]", "]")]),
     # phase 3
-    "code-pool-fixed": ("planner", "N7-pool", [("_geometry-harness/reel_plan.py",
-        "        return pool[k % len(pool)]", "        return pool[0]")]),
+    "code-pool-fixed": ("gaps", "N7-rotate-none", [("_geometry-harness/reel_plan.py",
+        '        pool = words["patch"][case]\n', '        pool = words["patch"]["notFound" if case == "none" else case]\n')]),
     "code-group-no-cell": ("planner", "N8-key", [("_geometry-harness/reel_plan.py",
         'return (c["type"], c["pair"], cell or r["formKey"], r.get("field"))', 'return (c["type"], c["pair"], None, r.get("field"))')]),
     "code-mover-from-row": ("planner", "N9-who", [("_geometry-harness/reel_plan.py",
@@ -2352,7 +2352,7 @@ CODE_SABOTAGE = {
     "code-fallback-double": ("gaps", "N8-fallback-once", [("_geometry-harness/reel_plan.py",
         "stands_in = [c for c in tried_refused if not buried_(c) and any(c in g_ for g_ in shown_groups)]", "stands_in = []")]),
     "code-pool-shared-counter": ("gaps", "N7-rotate-noneOther", [("_geometry-harness/reel_plan.py",
-        "        k = used.get(case, 0)\n        used[case] = k + 1\n", '        k = used.get("any", 0)\n        used["any"] = k + 1\n')]),
+        '        pool = words["patch"][case]\n', '        pool = words["patch"]["none" if case == "noneOther" else case]\n')]),
     "code-hit-raw": ("gaps", "N7-hit-shape", [("_geometry-harness/reel_plan.py",
         '"file": str(f["name"]).strip()}', '"file": f}')]),
     # item 36: the reel's mod names
@@ -2509,7 +2509,7 @@ def case_capture_binding():
     vigs3 = [ch for ch in reel3.get("chapters") or [] if ch.get("kind") in ("vignette", "split")]
     said = " ".join(str(ch.get("narration") or "") for ch in reel3.get("chapters") or [])
     check("B4-none-captured", reel3.get("status") == "planned" and not vigs3
-          and binding_words().get("noneCaptured", "(no closed-capture sentence in the skill data)")[:20] in said,
+          and " not pictured: " in said and "accompanying report" in said,   # R1: the sentence names its limit
           f"with nothing captured the reel plans no vignette and says so in one sentence (status {reel3.get('status')}, "
           f"vignettes {len(vigs3)})")
 

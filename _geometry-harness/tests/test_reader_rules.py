@@ -1142,7 +1142,8 @@ def case_every_place_is_named():
     rows = [P.row("CONTACT", B, A, f"00080{i}:{A}", label=cell) for i, cell in
             enumerate(["CellA (ext)"] * 3 + ["CellB (ext)"] * 2 + ["CellC (int)"])]
     plan, md, html = P.compile_and_render(arms, {(CONTACT, "baseline"): rows}, [A])
-    ok = "1 more place: CellC (int) (1)" in md and "more places." not in md
+    # since N6 (2026-11-13) a place is said as a name, an unnamed cell's editor ID in words, never the bare ID
+    ok = "1 more place: Cell C (1)" in md and "more places." not in md and "CellC" not in md
     return ok, f"places line {next((ln for ln in md.splitlines() if 'CellA' in ln), '')[:300]!r}"
 
 
@@ -1965,8 +1966,8 @@ def case_every_moved_gap_is_in_the_report():
     said = " ".join(str(c.get("narration")) for c in reel.get("chapters") or [])
     # the overlap vignette's old "whether a player sees it" clause: the report says it with every overlap item
     in_game_overlap = str(((PR.get("reader") or {}).get("inGame") or {}).get(OVERLAP) or "")
-    if "visual" not in in_game_overlap or "was not checked" in WORDS["overlap"]:
-        lost.append(("vignette", "the overlap item's in-game line no longer says it is a candidate for a visual check"))
+    if "worth a look in game" not in in_game_overlap or "was not checked" in WORDS["overlap"]:
+        lost.append(("vignette", "the overlap item's in-game line no longer says it is worth a look in game"))
     ok = (not lost and {"closing", "unpictured", "verdict"} <= froms and all(m.get("report") for m in moved)
           and "was not checked" not in said and "Why some are not pictured" not in said
           and "Why some are not pictured" in md)
