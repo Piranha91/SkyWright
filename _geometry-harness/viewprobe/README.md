@@ -2096,6 +2096,15 @@ this cell"* are told apart. (`housecarl-core`'s `NavmeshGeometry`/`NavTri` carry
 the extractor used to drop them, which produced a structure that looked complete and could not be
 walked.)
 
+**Cross-mesh links have a type.** Each `EdgeLinks` entry carries xEdit's Type (Mutagen calls it
+`EdgeLink.Unknown`): 0 Portal, 1 Ledge Up, 2 Ledge Down, 3 Enable/Disable Portal. The graph walks
+Portal and Ledge Down links and holds Ledge Up, Enable/Disable and any other type
+(`NavGraph.LinkPolicy.Default`). That follows an in-game test (2026-11-08): a walker dropped down a
+ledge every time and never climbed one. Enable/Disable is untested. A held link is counted, like a
+door, and the graph line says so: `ledge links U up + D down, E enable/disable, X unknown type,
+H held (not walked; this run walks Portal, Ledge Down links)`. Components are counted over links
+taken either way, so a drop you cannot climb back up leaves one piece but no path up it.
+
 **What it does per leg.** A* over the triangle graph (cost and heuristic are PLAN distance between
 centroids, so the heuristic never overestimates), then the Simple Stupid Funnel Algorithm over the
 channel's portal edges to pull the path taut, then the same 32 u sampling and the same off-mesh
@@ -2125,7 +2134,10 @@ drift onto the storey above without any single step looking wrong.
 **Refusals, all loud.**
 
 - *No path between a pair* → refused, with the cell's connected-component count and door-triangle
-  count. An unreachable pair is a FINDING, not something to paper over with a straight line.
+  count, and, when any link is held, how many and of which kinds (`12 cross-mesh link(s) are held,
+  not walked (4 Ledge Up, 7 Enable/Disable, 1 of no known type)`), so a pair that a held ledge
+  separates does not read as a separate room. An unreachable pair is a FINDING, not something to
+  paper over with a straight line.
 - *The graph came out with zero edges* → refused before any leg is attempted. A graph with no
   edges finds no path between ANY pair, and from the outside that is indistinguishable from a
   building whose rooms are genuinely separate. This is the build's own positive control.
@@ -3008,7 +3020,7 @@ worldspace; one run samples one worldspace.
   - `classify-<worldspace>.json`: every triangle's verdict (walkable, component, in A_W, clipped
     area, covered area), for reconciliation;
   - `navdump-<worldspace>.json`: the raw record fields (navmesh vertices, triangles, link fields,
-    `EdgeLinks`, `DoorTriangles`; the plugin's placed records with every version's position and
+    `EdgeLinks` with each link's raw `type`, `DoorTriangles`; the plugin's placed records with every version's position and
     header flags), written by code that classifies nothing, so an independent implementation can
     recompute the area and the coverage.
 

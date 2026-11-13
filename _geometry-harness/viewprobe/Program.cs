@@ -3923,12 +3923,23 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             if (routeSolve)
             {
                 var (gnodes, grpt) = NavGraph.Build(winNav);
+                // The typed links: a held ledge or toggle splits pieces and blocks a climb, so the counts say why.
+                var gpol = grpt.Policy ?? NavGraph.LinkPolicy.Default;
+                string walkedKinds = "Portal" + (gpol.LedgeUp ? ", Ledge Up" : "") + (gpol.LedgeDown ? ", Ledge Down" : "")
+                                   + (gpol.EnableDisablePortal ? ", Enable/Disable" : "");
+                var heldKinds = new List<string>();
+                if (!gpol.LedgeUp && grpt.LedgeUpLinks > 0) heldKinds.Add($"{grpt.LedgeUpLinks:N0} Ledge Up");
+                if (!gpol.LedgeDown && grpt.LedgeDownLinks > 0) heldKinds.Add($"{grpt.LedgeDownLinks:N0} Ledge Down");
+                if (!gpol.EnableDisablePortal && grpt.EnableDisableLinks > 0) heldKinds.Add($"{grpt.EnableDisableLinks:N0} Enable/Disable");
+                if (grpt.UnknownTypeLinks > 0) heldKinds.Add($"{grpt.UnknownTypeLinks:N0} of no known type");
                 Console.WriteLine($"   route-solve: graph over the winning navmesh — {grpt.Triangles:N0} triangle(s), "
                                 + $"{grpt.IntraLinks:N0} intra-mesh + {grpt.CrossLinks:N0} cross-mesh edge link(s), "
                                 + $"{grpt.DanglingLinks:N0} dangling, {grpt.Components:N0} connected component(s); "
                                 + $"{grpt.ExternalLinks:N0} cross-mesh link(s) lead OUT of the loaded cell (a boundary, not a defect) "
                                 + $"and {grpt.DoorTriangles:N0} door triangle(s) are recorded and NOT traversed "
-                                + "(the far side of a door is another cell, which this run never loaded)");
+                                + "(the far side of a door is another cell, which this run never loaded); "
+                                + $"ledge links {grpt.LedgeUpLinks:N0} up + {grpt.LedgeDownLinks:N0} down, {grpt.EnableDisableLinks:N0} enable/disable, "
+                                + $"{grpt.UnknownTypeLinks:N0} unknown type, {grpt.HeldLinks:N0} held (not walked; this run walks {walkedKinds} links)");
                 // A component count is a fact nobody can act on; an island's SIZE and WHERE it is
                 // are a coordinate to probe. Printed whenever the mesh is in more than one piece,
                 // because that is the thing that makes a pair unreachable.
@@ -4051,6 +4062,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     Console.Error.WriteLine($"   route REFUSED: --route-solve found no walkable path for {unreachable.Count} of "
                                           + $"{pts.Count - 1} leg(s). The navmesh has {grpt.Components:N0} connected component(s) in this cell"
                                           + (grpt.DoorTriangles > 0 ? $" and {grpt.DoorTriangles} door triangle(s) leading out of it — a route through a door is not something one cell's navmesh can answer" : "")
+                                          + (grpt.HeldLinks > 0 ? $"; {grpt.HeldLinks:N0} cross-mesh link(s) are held, not walked ({string.Join(", ", heldKinds)}), so a pair only they join has no path here" : "")
                                           + ". An unreachable pair is a FINDING, not something to paper over with a straight line.");
                     foreach (var m in unreachable) Console.Error.WriteLine($"      {m}");
                     return 1;

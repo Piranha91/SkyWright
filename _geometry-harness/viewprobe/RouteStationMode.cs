@@ -652,7 +652,7 @@ static class RouteStationMode
                         ["edges"] = new int[] { t.EdgeLink01, t.EdgeLink12, t.EdgeLink20 },
                     }).ToList(),
                     ["edgeLinks"] = (nv.EdgeLinks ?? Array.Empty<NavEdgeLink>()).Select(e => new Dictionary<string, object?>
-                    { ["mesh"] = e.Mesh.ToString(), ["tri"] = (int)e.TriangleIndex }).ToList(),
+                    { ["mesh"] = e.Mesh.ToString(), ["tri"] = (int)e.TriangleIndex, ["type"] = e.Type }).ToList(),
                     ["doorTriangles"] = (nv.DoorTriangles ?? Array.Empty<NavDoorTriangle>()).Select(d => new Dictionary<string, object?>
                     { ["tri"] = (int)d.TriangleBeforeDoor, ["door"] = d.Door.ToString() }).ToList(),
                 });
