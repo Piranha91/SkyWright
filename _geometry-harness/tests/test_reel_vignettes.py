@@ -55,7 +55,7 @@ POLICY = {
               "geometry.fixture-empty-space": "contact", "records.contested-fields": "record",
               "records.cell-attributes": "cell", "state.conditional-geometry": "state",
               "geometry.navmesh-ownership": "navmesh", "geometry.placement-contact": "contact"},
-    "pictureTypes": ["overlap", "contact", "record", "state"],          # phase 2: placements and world states are pictured
+    "pictureTypes": ["overlap", "contact", "record", "state", "navmesh"],   # phase 2: placements and world states; navmesh-in-reel
     "drawableFields": ["Placement"],                                     # a record clash is pictured only for these fields
     "groupKey": ["type", "pair", "cell", "field"],                       # phase 3: instances of one problem
     "structureShare": 0.5, "storeyTolerance": 96.0, "metresPerUnit": 0.01428,

@@ -246,15 +246,20 @@ def capture_requests(presentation: dict, bundle: Path, policy_path: Path = POLIC
         # a candidate is a vignette's request only when its record keys are that clash's own pair: the same first key
         # and every partner (reel_plan.result_about's rule), case folded. Matching the first key alone gave one
         # vignette every pair that shares it (Helgi: 18 requests for one COTN static, round 2 rerun, C1935)
+        # a navmesh vignette takes the navmesh comparison whose source is the chapter's linking navmesh and whose
+        # targets hold the chapter's; one source linking into several targets is one request (item 24's camera frames
+        # every broken crossing of the source)
         wanted = {}
         for ch in reel.get("chapters") or []:
             c = ch.get("clash") or {}
-            if ch.get("kind") == "vignette" and c.get("type") in (None, "overlap", "contact"):
-                wanted.setdefault((c.get("armId"), _fold(c.get("formKey"))), []).append(
+            if ch.get("kind") == "vignette" and c.get("type") in (None, "overlap", "contact", "navmesh"):
+                kind = "navmesh-version-comparison" if c.get("type") == "navmesh" else "overlap-pair"
+                wanted.setdefault((c.get("armId"), _fold(c.get("formKey")), kind), []).append(
                     (frozenset(_fold(o) for o in c.get("other") or []), ch))
         for row in sorted(candidates.values(), key=lambda r: r["id"]):
             keys = {_fold(k) for k in row["recordKeys"][1:]}
-            ch = next((ch_ for others, ch_ in wanted.get((row["armId"], _fold(row["recordKeys"][0])), [])
+            kind = "navmesh-version-comparison" if row["requestType"] == "navmesh-version-comparison" else "overlap-pair"
+            ch = next((ch_ for others, ch_ in wanted.get((row["armId"], _fold(row["recordKeys"][0]), kind), [])
                        if others <= keys), None)
             if ch is None:
                 continue

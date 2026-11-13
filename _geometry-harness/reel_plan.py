@@ -629,11 +629,30 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     def effect(fk):
         return bool(effect_re and effect_re.search(str(base_of(fk).get("model") or "")))
 
+    # a navmesh one plugin re-cut over another's (the navmesh check's CLOBBERED history rows): (formKey, overwriter) ->
+    # the earlier plugin. Item 24's camera draws a broken link only from such a navmesh, beside its earlier version
+    recut = {}
+    for r_ in pred.get("record") or []:
+        if r_.get("checkId") == "geometry.navmesh-ownership" and r_.get("kind") == "CLOBBERED" and r_.get("formKey"):
+            recut.setdefault((str(r_["formKey"]).casefold(), str(r_.get("B") or "").casefold()), r_.get("A"))
+
+    def earlier_navmesh(r):
+        """The plugin whose version of the row's linking navmesh the row's winner (A) re-cut, or None."""
+        return recut.get((str(r.get("formKey")).casefold(), str(r.get("A") or "").casefold()))
+
+    def navmesh_camera(r):
+        """Whether item 24's camera can draw this broken link: an edge-index link, outdoors, from a navmesh its winner
+        re-cut over another plugin's version."""
+        return (r.get("kind") == "EDGE-IDX" and " (ext)" in str(r.get("summary") or "")
+                and earlier_navmesh(r) is not None)
+
     def unpictured_reason(c):
         """None for a clash a picture can show; else the skill's reason it cannot (stillReasons keys)."""
         if c["type"] not in (policy.get("pictureTypes") or []):
             return c["type"]
         r = c["rows"][0]
+        if c["type"] == "navmesh":
+            return None if navmesh_camera(r) else "navmesh"
         if c["type"] == "record":
             if removed(r):
                 return "removed"
@@ -925,6 +944,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         lw = words.get("vignetteLabels") or {}
         if not lw.get(state):
             return None
+        if c["type"] == "navmesh":
+            return lw[state].format(mod=mod(target), earlier=mod(earlier_navmesh(c["rows"][0])))
         if state != "highlight":
             return lw[state].format(mod=mod(target))
         argv = [str(x) for x in ((m or {}).get("provenance") or {}).get("argv") or []]
@@ -1071,15 +1092,31 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         r = c["rows"][0]
         if c["type"] == "record":
             return orient(c)
+        if c["type"] == "navmesh":
+            return navmesh_sentence(c)
         s = geometry_slots(c)
         if c["type"] == "state":
             return words["stateClash"].format(condition=condition(r, names, switches, s["place"], words),
                                               **{k: v for k, v in s.items() if k != "place"})
         return words["overlap"].format(**s)
 
+    def navmesh_sentence(c):
+        """A navmesh vignette's words: which mod re-cut the navmesh over whose, where, and what the links point at; then
+        the control's own result (the setup without the mod, measured at the same camera), from the capture result."""
+        r = c["rows"][0]
+        text = words["navmeshClash"].format(place=place_of(r.get("summary"), [r["formKey"]]), modA=mod(r["A"]),
+                                            modB=mod(earlier_navmesh(r)))
+        fks_ = [r["formKey"], *(r.get("other") or [])]
+        res_ = next((x for x in capture_results if x.get("status") == "captured" and result_about(x, fks_)), None)
+        if ((res_ or {}).get("navmeshControl") or {}).get("status") == "no-broken-crossing" and words.get("navmeshControlClean"):
+            text += " " + words["navmeshControlClean"].format(mod=mod(target))
+        return text
+
     game = {(m.get("subject") or {}).get("formKey") for m in pres.get("media") or []
             if m.get("assessed") and m.get("mediaKind") == "game-video"}
     arm_of = {"without": without_full, "with": with_arm, "highlight": with_arm, "left": without_full, "right": with_arm}
+    # both navmesh states are rendered in the setup with the mod; only the source's version changes
+    arm_of.update({s_: with_arm for s_ in policy.get("navmeshSequence") or []})
     bare_of = {k_: (str(v_).split(":", 1)[-1] if v_ else v_) for k_, v_ in arm_of.items()}   # as capture requests name it
 
     def frame_media(c, state):
@@ -1102,6 +1139,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         return None
 
     def states_of(c):
+        if c["type"] == "navmesh":
+            return list(policy.get("navmeshSequence") or [])
         return ["left", "right"] if c["type"] == "record" else list(policy["sequence"])
 
     # one name for each kind of clash, wherever it is said: a kind whose clashes all come from one check is called by
@@ -1202,7 +1241,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 text += " " + words["playTime"]
             r = c["rows"][0]
             split = t == "record"
-            states = ["left", "right"] if split else list(policy["sequence"])
+            states = states_of(c)
             frames = []
             for state in states:
                 m = frame_media(c, state)
@@ -1227,6 +1266,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                              alsoMarked=[{"formKey": g_["rows"][0]["formKey"], "state": "left",
                                           "color": policy.get("removedMarkColour") or "magenta"}
                                          for g_ in in_split.get(r["formKey"]) or []])
+            elif t == "navmesh":
+                clash.update(place=place_of(r.get("summary"), [r["formKey"]]), earlier=earlier_navmesh(r))
             else:
                 clash["place"] = geometry_slots(c)["place"]
                 if t == "state":

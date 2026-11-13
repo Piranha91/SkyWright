@@ -1032,6 +1032,14 @@ def reel_stills_words(page: dict) -> int:
     return reel_plan.page_words(page)
 
 
+def vignette_seconds(n: int, speech: float, hold: dict) -> list[float]:
+    """How long each of a vignette's n frames is held: every frame but the last for its fixed hold (without, with), the
+    last until the narration ends (at least highlightMin). A three-frame vignette is without / with / highlight; a
+    two-frame navmesh vignette is winning / historical, whose last frame holds for the words too."""
+    fixed = [float(hold.get("without", 2.5)), float(hold.get("with", 2.5))][:max(n - 1, 0)]
+    return fixed + [max(float(hold.get("highlightMin", 4.0)), speech + 0.25 - sum(fixed))] if n else []
+
+
 def frame_is_clean(media: dict, board: dict | None) -> bool:
     """An evidence frame carries no added text: it came from viewprobe --report-mode (the capture step records its
     argv), or a reviewed storyboard declares the clean frame and the visible subject."""
@@ -1276,9 +1284,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
                               f"outruns its narration ({speech:.1f} s) by more than {max_sil_:.1f} s of silence", out)
             secs = [max(speech + pause_, read_)]
         else:
-            w, wi = float(hold.get("without", 2.5)), float(hold.get("with", 2.5))
-            secs = [w, wi, max(float(hold.get("highlightMin", 4.0)), speech + 0.25 - w - wi)]
-            secs = secs[:len(s["items"])]
+            secs = vignette_seconds(len(s["items"]), speech, hold)
         for it, sec in zip(s["items"], secs):
             it["frames"] = int(round(sec * FPS))
         s["plannedFrames"] = s["items"][0]["frames"] if s["kind"] == "split" else sum(it["frames"] for it in s["items"])

@@ -9951,6 +9951,13 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             if state_ == "highlight" and (marks_.get("cyan") or marks_.get("magenta")):
                 key_, hs_ = highlight_caption(marks_, fig_object, fig_mod)
                 slots_.update(hs_)
+            if state_ in NAVMESH_STATES:
+                # a navmesh frame: the plugin whose earlier version the historical frame draws, from that frame's own
+                # renderer command (--nav-version SOURCE=PLUGIN), never from the finding's pair (a finding's first pair
+                # need not be the pictured source's: Clockwork's Falkreath figure named the wrong winner)
+                hist_ = navmesh_earlier_plugin([media_by_id0.get(o_) or {}
+                                                for o_ in by_request.get(prov_.get("captureRequest"), [])])
+                slots_.update(earlier=fig_mod(hist_) if hist_ else (caption_words.get("navmeshEarlierUnknown") or "an earlier plugin"))
             if state_ in ("left", "right"):
                 # the left half is the setup without the evaluated mod: the losing side's spot; the right, the winner's
                 ab_ = f_.get("counts") or {}
@@ -11364,6 +11371,20 @@ def once_on_page(reader: dict, pr: dict) -> dict:
     return out
 
 
+NAVMESH_STATES = ("winning-linked-navmeshes", "historical-navmesh-context")
+
+
+def navmesh_earlier_plugin(request_media: list[dict]) -> str | None:
+    """The plugin whose earlier version of the source navmesh a navmesh comparison's historical frame draws, read from
+    that frame's own renderer command (--nav-version SOURCE=PLUGIN), or None."""
+    for m in request_media:
+        av = [str(x) for x in ((m or {}).get("provenance") or {}).get("argv") or []]
+        for i, x in enumerate(av[:-1]):
+            if x == "--nav-version" and "=" in av[i + 1]:
+                return av[i + 1].rsplit("=", 1)[1]
+    return None
+
+
 def figure_units(figs: list[dict]) -> list[list[dict]]:
     """A finding's figures as units: the frames of one capture request are one unit, and the unit shows the frames
     that state the claim (Missives review R2): a vignette's marked view, else its with-frame; a split's two halves,
@@ -11383,6 +11404,9 @@ def figure_units(figs: list[dict]) -> list[list[dict]]:
             # a vignette is its plain pair and its marked view together: what the player sees, with and without the
             # mod, then the marked shapes; one unit, so a figure limit never keeps only the marked view
             units.append([st[k] for k in ("without", "with", "highlight") if k in st])
+        elif any(k in st for k in NAVMESH_STATES):
+            # a navmesh comparison is its winning frame and the earlier version at the same camera: one unit
+            units.append([st[k] for k in NAVMESH_STATES if k in st])
         else:
             units.append(frames[:1])
     return units
