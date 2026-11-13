@@ -2313,7 +2313,12 @@ def case_fidelity(tmp, index, common):
         shutil.copy2(out / "presentation.json", pcopy)
         afile = work / "answers.json"
         afile.write_text(json.dumps({"answers": answers}, indent=1), encoding="utf-8")
-        r = evalreport(["narrate-apply", "--presentation", pcopy, "--answers", afile])
+        # every answer judged faithful, so these pairs test the lexical rules alone (the judge's gate is C2022-C2027)
+        jfile = work / "judgements.json"
+        jfile.write_text(json.dumps({"presentationId": pres.get("presentationId"), "judgements": [
+            {"id": k, "textSha256": hashlib.sha256(v.encode("utf-8")).hexdigest(), "faithful": True, "facts": [],
+             "added": [], "reason": "fixture"} for k, v in answers.items()]}, indent=1), encoding="utf-8")
+        r = evalreport(["narrate-apply", "--presentation", pcopy, "--answers", afile, "--judgements", jfile])
         check(r.returncode == 0, f"{name}: narrate-apply exits 0 (got {r.returncode})")
         if r.returncode != 0:
             print(r.stdout[-1500:]); print(r.stderr[-1500:])

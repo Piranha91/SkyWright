@@ -263,7 +263,8 @@ def t8(root):
 
 AGENTS = HARNESS.parent / "plugin" / "agents"
 SHORT_NAMES = ("haiku", "sonnet", "opus", "fable")
-MODEL_KEYS = ("models.recordChecks", "models.imageReview", "models.flipPlan", "models.rewriteExplanations")
+MODEL_KEYS = ("models.recordChecks", "models.imageReview", "models.flipPlan", "models.rewriteExplanations",
+              "models.checkExplanations")
 
 
 def shipped_agents() -> dict:

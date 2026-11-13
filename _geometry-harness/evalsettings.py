@@ -212,6 +212,11 @@ OPTIONS: list[dict] = [
      "label": "Rewriting finding explanations",
      "help": "An optional model rewrites finding sentences; a rewrite is accepted only where every number and name is bound.",
      "reason": "Off: the template sentences are already plain.", "cost": "Not measured."},
+    {"key": "models.checkExplanations", "type": "model", "default": "session", "section": "Models",
+     "label": "Checking rewritten explanations",
+     "help": "The fidelity judge: a rewritten sentence is accepted only where this model says it keeps the meaning.",
+     "reason": "Same as the session; a Fable session runs it on Opus.", "cost": "Not measured.",
+     "neverModel": "fable", "fallbackModel": "claude-opus-5-5"},
 ]
 BY_KEY = {o["key"]: o for o in OPTIONS}
 SOURCES = ("flag", "environment", "file", "built-in default")
@@ -758,6 +763,23 @@ def cmd_route(a, run) -> int:
     out = {"key": a.key, "value": v["value"], "source": v["source"]}
     if v["value"] == "off":
         out["use"] = "off"
+    elif o.get("neverModel") and o["neverModel"] in str(v["value"]).lower():
+        raise SettingsError(f"`{a.key}` never runs on a {o['neverModel'].title()} model: set it to session or "
+                            f"{o['fallbackModel']}.")
+    elif v["value"] == "session" and o.get("neverModel"):
+        sm = (a.session_model or "").strip()
+        if not sm:
+            raise SettingsError(f"`{a.key}` never runs on a {o['neverModel'].title()} model: pass --session-model "
+                                f"with this session's full model ID.")
+        if o["neverModel"] in sm.lower():
+            if os.environ.get("CLAUDECODE") != "1":
+                raise SettingsError(f"`{a.key}` must not run on the session's model {sm}, and only Claude Code can "
+                                    f"start an agent on {o['fallbackModel']}: run the evaluation in Claude Code.")
+            out.update(use="agent", agent=f"{_plugin_name()}:{MODEL_AGENTS[o['fallbackModel']]}",
+                       note=f"the session runs {sm}, which {a.key} never uses; it runs on {o['fallbackModel']}")
+            print(f"NOTE: {out['note']}", file=sys.stderr)
+        else:
+            out.update(use="session", agent="general-purpose")
     elif v["value"] == "session":
         out.update(use="session", agent="general-purpose")
     else:
@@ -801,6 +823,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=cmd_validate)
     p = sub.add_parser("route")
     p.add_argument("key", help="a models.* setting")
+    p.add_argument("--session-model", default=None,
+                   help="this session's full model ID; required for a setting that never runs on some models")
     p.set_defaults(fn=cmd_route)
     return ap
 

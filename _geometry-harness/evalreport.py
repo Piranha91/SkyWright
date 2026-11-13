@@ -59,6 +59,7 @@ except ImportError:  # pragma: no cover - stated, never worked around
 
 TEMPLATES = HERE / "evalreport_templates"
 PRIORITIES = HERE.parent / ".claude" / "skills" / "evaluation-reporting" / "references" / "report-priorities.json"
+NARRATION = PRIORITIES.parent / "narration.json"
 EVALRUN = HERE / "evalrun.py"
 
 PRESENTATION_SCHEMA = 1
@@ -12537,12 +12538,65 @@ def validate_answer(plan: dict, f: dict, text: str, pr: dict) -> list[dict]:
     return bad
 
 
+def load_narration() -> dict:
+    """The narrator's words, the glossary and the fidelity judge's instructions (the reporting skill's narration.json)."""
+    d = load_json(NARRATION)
+    n = (d or {}).get("narrator") if isinstance(d, dict) else None
+    if (not isinstance(n, dict) or not all(isinstance(n.get(k), str) for k in ("lead", "plainWords", "glossaryPointer", "binding"))
+            or not isinstance(d.get("glossary"), list) or not isinstance((d.get("judge") or {}).get("instructions"), str)):
+        raise SystemExit(f"REFUSED: narration.json is absent or incomplete at {NARRATION}")
+    return d
+
+
+def narrator_instructions(nd: dict) -> str:
+    n = nd["narrator"]
+    return " ".join(n[k] for k in ("lead", "plainWords", "glossaryPointer", "binding"))
+
+
+def read_answers(path: Path, plan: dict):
+    """(answers list, None) or (None, refusal reason)."""
+    answers = load_json(path)
+    if isinstance(answers, dict) and isinstance(answers.get("answers"), dict):
+        answers = {**answers, "answers": [{"id": k, "text": v} for k, v in answers["answers"].items()]}
+    if not isinstance(answers, dict) or not isinstance(answers.get("answers"), list):
+        return None, (f"answers-unreadable: {path} is not a JSON object with an `answers` list "
+                      f"([{{id, text}}]) or mapping ({{id: text}})")
+    if answers.get("presentationId") not in (None, plan.get("presentationId")):
+        return None, (f"answers-foreign: the answers name presentation {answers.get('presentationId')}, "
+                      f"this is {plan.get('presentationId')}")
+    return answers["answers"], None
+
+
 def cmd_narrate_packet(a) -> int:
     ppath = Path(a.presentation)
-    with Run("evalreport-narrate", mode="packet", stage_source="counted") as r:
+    nd = load_narration()
+    answers_path = getattr(a, "answers", None)   # a caller of the function form may predate --answers
+    with Run("evalreport-narrate", mode="judge-packet" if answers_path else "packet", stage_source="counted") as r:
         plan, err = load_presentation(ppath)
         if plan is None:
             return refuse(r, err)
+        if answers_path:
+            answers, err = read_answers(Path(answers_path), plan)
+            if answers is None:
+                return refuse(r, err)
+            by_id = {f["id"]: f for f in plan["findings"]}
+            r.stage("judge-packet", total=len(answers), unit="answers")
+            items = []
+            for ans in answers:
+                f = by_id.get((ans or {}).get("id"))
+                text = (ans or {}).get("text")
+                if f is not None and isinstance(text, str) and text.strip():
+                    # narrate-apply refuses an unknown id or an empty text by itself; the judge sees only real answers
+                    items.append({"id": f["id"], "title": f.get("title"), "template": f.get("plain"),
+                                  "counts": f.get("counts"), "text": text, "textSha256": sha256_text(text)})
+                r.advance(1)
+            packet = {"schemaVersion": 1, "presentationId": plan.get("presentationId"),
+                      "instructions": nd["judge"]["instructions"], "glossary": nd["glossary"], "answers": items}
+            write_json(Path(a.out), packet)
+            r.artifact(str(a.out))
+            r.feature("answers", len(items), "answers")
+            print(f"judge packet: {len(items)} answer(s) -> {a.out}")
+            return EXIT_OK
         r.stage("packet", total=len(plan["findings"]), unit="findings")
         items = []
         for f in plan["findings"]:
@@ -12553,10 +12607,7 @@ def cmd_narrate_packet(a) -> int:
                           "rows": (f.get("allRows") or f.get("rows") or [])[: max(1, plan["settings"].get("rowsPerGroup") or 3)]})
             r.advance(1)
         packet = {"schemaVersion": 1, "presentationId": plan.get("presentationId"),
-                  "instructions": "Rewrite each finding's `template` sentence in plain language. Use only the numbers in "
-                                  "boundNumbers and the names in boundNames; name no other check, arm, plugin, cell or form key; "
-                                  "never use the words pass, compatible, clean or verified-in-game; never claim completion. "
-                                  "Answer as {\"answers\": [{\"id\": \"F-001\", \"text\": \"...\"}]}. A refused answer keeps the template.",
+                  "instructions": narrator_instructions(nd), "glossary": nd["glossary"],
                   "checks": sorted(plan["scope"].get("checks") or {}), "arms": [x["armId"] for x in plan["scope"]["arms"]],
                   "findings": items,
                   # item 18 (4.24 phase 3): the order sentence, read-only for a narrator, with the numbers it binds
@@ -12571,25 +12622,41 @@ def cmd_narrate_packet(a) -> int:
     return EXIT_OK
 
 
+def judgement_refusal(j: dict | None, text: str) -> dict | None:
+    """None when a judgement made for exactly this text says the meaning is kept; else the refusal."""
+    if not isinstance(j, dict):
+        return {"rule": "unjudged", "detail": "the fidelity judge gave no judgement for this answer"}
+    if j.get("textSha256") != sha256_text(text):
+        return {"rule": "judgement-stale", "detail": "the judgement was made for another text"}
+    if j.get("faithful") is not True:
+        return {"rule": "judged-unfaithful", "detail": str(j.get("reason") or "the judge found the meaning changed")}
+    return None
+
+
 def cmd_narrate_apply(a) -> int:
     pr = load_priorities()
     ppath = Path(a.presentation)
     with Run("evalreport-narrate", mode="apply", stage_source="counted") as r:
+        if not a.judgements:
+            return refuse(r, "judgements-missing: pass --judgements FILE, the fidelity judge's answer to `narrate-packet "
+                             "--answers` run in the agent `evalsettings.py route models.checkExplanations` names")
         plan, err = load_presentation(ppath)
         if plan is None:
             return refuse(r, err)
-        answers = load_json(Path(a.answers))
-        if isinstance(answers, dict) and isinstance(answers.get("answers"), dict):
-            answers = {**answers, "answers": [{"id": k, "text": v} for k, v in answers["answers"].items()]}
-        if not isinstance(answers, dict) or not isinstance(answers.get("answers"), list):
-            return refuse(r, f"answers-unreadable: {a.answers} is not a JSON object with an `answers` list "
-                             f"([{{id, text}}]) or mapping ({{id: text}})")
-        if answers.get("presentationId") not in (None, plan.get("presentationId")):
-            return refuse(r, f"answers-foreign: the answers name presentation {answers.get('presentationId')}, this is {plan.get('presentationId')}")
+        answers, err = read_answers(Path(a.answers), plan)
+        if answers is None:
+            return refuse(r, err)
+        jd = load_json(Path(a.judgements))
+        if not isinstance(jd, dict) or not isinstance(jd.get("judgements"), list):
+            return refuse(r, f"judgements-unreadable: {a.judgements} is not a JSON object with a `judgements` list")
+        if jd.get("presentationId") != plan.get("presentationId"):
+            return refuse(r, f"judgements-foreign: the judgements name presentation {jd.get('presentationId')}, this is "
+                             f"{plan.get('presentationId')}: judge this presentation's answers")
+        judgements = {j.get("id"): j for j in jd["judgements"] if isinstance(j, dict)}
         by_id = {f["id"]: f for f in plan["findings"]}
-        r.stage("apply", total=len(answers["answers"]), unit="answers")
+        r.stage("apply", total=len(answers), unit="answers")
         accepted, refused = 0, []
-        for ans in answers["answers"]:
+        for ans in answers:
             fid = (ans or {}).get("id")
             text = (ans or {}).get("text")
             f = by_id.get(fid)
@@ -12602,6 +12669,9 @@ def cmd_narrate_apply(a) -> int:
                 r.advance(1)
                 continue
             bad = validate_answer(plan, f, text, pr)
+            if not bad:
+                jr = judgement_refusal(judgements.get(fid), text)
+                bad = [jr] if jr else []
             if bad:
                 for x in bad:
                     refused.append({"id": fid, **x})
@@ -12621,6 +12691,7 @@ def cmd_narrate_apply(a) -> int:
                 accepted += 1
             r.advance(1)
         plan["narration"] = {"source": f"answers:{sha256_file(Path(a.answers))[:12]}", "validated": True,
+                             "judgements": f"judgements:{sha256_file(Path(a.judgements))[:12]}",
                              "accepted": accepted, "refused": refused}
         dest = Path(a.out) if a.out else ppath
         stamp(plan)
@@ -12711,13 +12782,19 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify", help="re-hash the artifacts, resolve every link, recount the pages")
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_verify)
-    p = sub.add_parser("narrate-packet", help="write every finding's bound numbers and names for an optional narrator")
+    p = sub.add_parser("narrate-packet", help="write every finding's bound numbers and names for an optional narrator, "
+                                              "or, with --answers, the fidelity judge's packet")
     p.add_argument("--presentation", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--answers", default=None,
+                   help="a narrator's answers: write the fidelity judge's packet for them instead of the narrator's")
     p.set_defaults(fn=cmd_narrate_packet)
-    p = sub.add_parser("narrate-apply", help="accept narrated sentences only where every number and name is bound")
+    p = sub.add_parser("narrate-apply", help="accept narrated sentences only where every number and name is bound and a judgement says the meaning is kept")
     p.add_argument("--presentation", required=True)
     p.add_argument("--answers", required=True)
+    p.add_argument("--judgements", default=None,
+                   help="the fidelity judge's answer to `narrate-packet --answers`; required: a rewrite is accepted only "
+                        "where a judgement made for its exact text says it keeps the meaning")
     p.add_argument("--out", default=None)
     p.set_defaults(fn=cmd_narrate_apply)
     return ap
