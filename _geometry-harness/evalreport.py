@@ -12587,8 +12587,11 @@ def cmd_narrate_packet(a) -> int:
                 text = (ans or {}).get("text")
                 if f is not None and isinstance(text, str) and text.strip():
                     # narrate-apply refuses an unknown id or an empty text by itself; the judge sees only real answers
+                    # every bound row, not only the shown ones: the fields bound_sets lets a narrator use
+                    rows = [{k: row.get(k) for k in ("formKey", "label", "summary", "physicalDetail")}
+                            for row in f.get("allRows") or f.get("rows") or [] if isinstance(row, dict)]
                     items.append({"id": f["id"], "title": f.get("title"), "template": f.get("plain"),
-                                  "counts": f.get("counts"), "text": text, "textSha256": sha256_text(text)})
+                                  "counts": f.get("counts"), "rows": rows, "text": text, "textSha256": sha256_text(text)})
                 r.advance(1)
             packet = {"schemaVersion": 1, "presentationId": plan.get("presentationId"),
                       "instructions": nd["judge"]["instructions"], "glossary": nd["glossary"], "answers": items}

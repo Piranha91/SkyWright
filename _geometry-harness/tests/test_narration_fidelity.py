@@ -26,6 +26,16 @@ answer: these cases test the gate that reads them, not the judge.
            which never resolves to a Fable model: a Fable session is routed to the Opus agent and says so, and route
            without --session-model refuses in one sentence (wrong answer: the judge runs on whatever the session is)
     C2029  the presentation contract and the reporting skill say that a rewrite needs a faithful judgement
+    C2050  the judge's packet carries each answer's bound rows, every one (form key, cell, summary, physical detail),
+           not only the rows the report shows (wrong answer: template and counts only, so a plugin's role or a detail
+           only the rows give cannot be checked: a right rewrite citing a row is called unsupported, a wrong one
+           telling the objects as placed by the plugin pair is accepted)
+    C2051  the judge's instructions read the template with its `rows`: detail a row gives is supported, and a role or
+           detail the rows contradict is distorted (wrong answer: rows in the packet that the instructions never use)
+    C2052  the narrator's instructions forbid claiming the evaluation is complete or the mods compatible, and keep a
+           check's own completion as a fact (wrong answer: "never claim completion", which contradicts a template
+           saying a check ran to completion)
+    C2053  the presentation contract says the judge's packet carries the finding's bound rows
 
 Each case names the wrong answer it exists to reject. A case whose command does not exist in the tree under test (an
 argparse usage error) is RED with "usage error" in its line, never GREEN. Exit 0: every case passed; 1: a case failed.
@@ -36,6 +46,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -281,8 +292,67 @@ def c2029(tmp):
           f"standard has {[x for x in rules if x in std]}; skill names the setting: {'models.checkExplanations' in skill}")
 
 
+ROWS = [{"formKey": f"00000{i}:Alpha.esp", "label": f"AlphaCell0{i} (int)",
+         "summary": f"Stranded: Furniture Bed0{i} Supported on Static Floor0{i} which Beta.esp Removed; nearest thing now 128u "
+                    f"00000{i}:Alpha.esp / 00001{i}:Alpha.esp in AlphaCell0{i} (int)",
+         "physical": "Holds", "physicalDetail": "touches nothing within 4u (nearest 128u)", "evidenceId": "E-0"}
+        for i in range(1, 6)]
+
+
+def presentation_rows() -> dict:
+    """F-001 with five bound rows, three of them shown (rowsPerGroup 3), as plan writes `rows` and `allRows`."""
+    plan = presentation()
+    f1 = plan["findings"][0]
+    f1["allRows"], f1["rows"], f1["rowsTotal"], f1["rowsShown"] = ROWS, ROWS[:3], 5, 3
+    return plan
+
+
+def c2050(tmp):
+    p, a, _ = setup(tmp, "c2050", {"F-001": RIGHT, "F-002": SECOND + " Two notes."}, pres=presentation_rows())
+    out = tmp / "c2050" / "packet.json"
+    r = run(["narrate-packet", "--presentation", p, "--answers", a, "--out", out], tmp)
+    if usage_error(r):
+        return check("C2050", False, "usage error: narrate-packet has no --answers", r.stderr.strip()[-120:])
+    items = {x.get("id"): x for x in (jload(out) or {}).get("answers") or []}
+    got = (items.get("F-001") or {}).get("rows")
+    keys = ("formKey", "label", "summary", "physicalDetail")
+    ok_rows = isinstance(got, list) and [{k: x.get(k) for k in keys} for x in got] == [{k: x[k] for k in keys} for x in ROWS]
+    ok_none = (items.get("F-002") or {}).get("rows") == []
+    check("C2050", r.returncode == 0 and ok_rows and ok_none,
+          "the judge's packet does not carry every bound row of each answer's finding",
+          f"exit {r.returncode}; F-001 rows {len(got) if isinstance(got, list) else 'absent'} of {len(ROWS)}; "
+          f"F-002 rows {(items.get('F-002') or {}).get('rows', 'absent')!r}")
+
+
+def c2051(tmp):
+    ins = (data().get("judge") or {}).get("instructions") or ""
+    supported = re.search(r"taken correctly from `counts` or `rows`", ins)
+    contradicts = re.search(r"the rows contradict", ins)
+    check("C2051", bool(supported and contradicts and "`rows`" in ins.split("Give each fact")[0]),
+          "the judge's instructions do not read the template with its rows (support and contradiction)",
+          f"supported-by-rows {bool(supported)}; contradicted-by-rows {bool(contradicts)}")
+
+
+def c2052(tmp):
+    r, pk = packet(tmp, "c2052")
+    ins = pk.get("instructions") or ""
+    check("C2052", r.returncode == 0 and "never claim completion" not in ins
+          and "the evaluation is complete" in ins and "ran to completion" in ins and "keep that fact" in ins,
+          "the narrator's instructions ban every completion claim, against a template saying a check ran to completion",
+          f"exit {r.returncode}; blanket ban {'present' if 'never claim completion' in ins else 'absent'}")
+
+
+def c2053(tmp):
+    std = (TREE / "standards" / "HOUSECARL_EVALUATION_PRESENTATION.md").read_text(encoding="utf-8")
+    para = next((x for x in std.split("\n\n") if "narrate-packet --presentation P --answers" in x), "")
+    check("C2053", "bound rows" in para and "`rows`" in para,
+          "the contract does not say the judge's packet carries the finding's bound rows",
+          f"judge paragraph found {bool(para)}")
+
+
 CASES = {"C2020": c2020, "C2021": c2021, "C2022": c2022, "C2023": c2023, "C2024": c2024, "C2025": c2025,
-         "C2026": c2026, "C2027": c2027, "C2028": c2028, "C2029": c2029}
+         "C2026": c2026, "C2027": c2027, "C2028": c2028, "C2029": c2029,
+         "C2050": c2050, "C2051": c2051, "C2052": c2052, "C2053": c2053}
 
 
 def main() -> int:
