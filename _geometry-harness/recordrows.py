@@ -13,8 +13,9 @@ The fields compared come from the generated schema reference (.claude/skills/mut
 whose type is, or transitively contains, another major record is a child record and is not a field of this one; the
 identity field is not compared; file bookkeeping, group bookkeeping and runtime-merged fields are named in skill data
 (.claude/skills/world-edit-compatibility/references/record-field-scope.json) by their schema names. A field the
-capture did not read, a field the schema does not know and a record whose read failed are unjudged with the reason,
-never treated as equal, and listed (`Unjudged`: the record, field, reason and the plugins whose versions were compared).
+capture did not read, a field the schema does not know, a field the read printed without its values (an item shown
+only as its type name, a list only as its summary) and a record whose read failed are unjudged with the reason, never
+treated as equal (a difference in the part that was read is still a row), and listed (`Unjudged`: the record, field, reason and the plugins whose versions were compared).
 Generated bookkeeping (a worldspace's LargeReferences) is named in the same skill data and not compared. Lists are compared as multisets, and a plugin's change to a list is lost only where the winning list does not keep it item by item (`list_change_kept`); numbers at four decimals with -0 equal to 0; an integer
 field the game reads only in part (a cell's Grid flags) on the bytes it reads, by a mask named in the same skill data.
 """
@@ -43,6 +44,14 @@ REASON_TRUNCATED = "a field the read's expansion was cut off before"
 TRUNCATED = "\u2026"
 REASON_UNKNOWN = "a field the schema does not name"
 REASON_FAILED = "the record read failed for one plugin"
+REASON_UNEXPANDED = "a field the read printed without its values (an item or a list it did not expand)"
+#: what a read prints for an item or struct it did not expand: its type name (`[KeyValue`2]`, `[CellMaxHeightData]`)
+TYPE_NAME = re.compile(r"^\[[A-Za-z_][A-Za-z0-9_]*(?:`\d+)?\]$")
+LIST_COUNT = re.compile(r"^\[list: (\d+) item\(s\)\]$")
+#: field categories whose value is its leaves, never a printed line of its own
+COMPOSITE = {"substruct", "list", "polymorphic", "dict"}
+#: struct types the reads print as one line of text (a translated string, an asset path)
+TEXT_TYPES = {"ITranslatedStringGetter", "IAssetType"}
 MERGED = "merged at runtime, not compared"
 CONTAINER = "a worldspace's persistent cell, a container whose own fields are not compared"
 
@@ -193,14 +202,46 @@ class Scope:
             if ref and self.contains_record(ref):
                 return "child-record"
             if i + 1 < len(segs):
-                t = self._merged_type(ref) if ref else None
+                t = (self._entry_type(f) if segs[i + 1] in ("Key", "Value") else None) or (
+                    self._merged_type(ref) if ref else None)
                 if t is None:
                     return "unknown"
         return "compared"
 
+    def field_kind(self, rtype: str, path: str):
+        """The schema's category of the field a path names (scalar, value, enum, formlink, substruct, list,
+        polymorphic, dict); None where the schema does not resolve it."""
+        segs = INDEX.sub("", path).split(".")
+        t = self._merged_type(rtype) if rtype in self.poly else self.records.get(rtype)
+        f = None
+        for i, seg in enumerate(segs):
+            f = next((x for x in (t or {}).get("fields") or [] if x["n"] == seg), None)
+            if f is None:
+                return None
+            if i + 1 < len(segs):
+                ref = f.get("ref") or f.get("elemRef")
+                t = (self._entry_type(f) if segs[i + 1] in ("Key", "Value") else None) or (
+                    self._merged_type(ref) if ref else None)
+        if f and f.get("t") in TEXT_TYPES:
+            return "scalar"
+        return f.get("c") if f else None
+
+    @staticmethod
+    def _entry_type(f):
+        """A dictionary's entries as read (`Field[i].Key`, `Field[i].Value`); None for any other field."""
+        if f.get("c") != "dict":
+            return None
+        val = {"n": "Value", "c": "polymorphic" if f.get("elemRef") else "value"}
+        if f.get("elemRef"):
+            val["ref"] = f["elemRef"]
+        return {"name": f.get("t"), "fields": [{"n": "Key", "c": "value"}, val]}
+
     def _merged_type(self, name):
         """A struct, or a polymorphic base with its arms' fields (a condition's Data names the arm's own fields)."""
         t = self._type(name)
+        if t is not None and str(name).startswith("ReadOnlyArray2d<"):
+            # a grid is read as its entries, each a key (x,y) and a value
+            return dict(t, fields=list(t.get("fields") or []) + [{"n": "Key", "c": "value"}, {"n": "Value", "c": "value"}])
         if t is None or name not in self.poly:
             return t
         fields = list(t.get("fields") or [])
@@ -467,11 +508,13 @@ class _View:
     was not cut off before it (a text dump prints every top-level field, absent ones included, so a read cut off at its line limit
     covers every name it printed in full, that is every name but the one it was cut off in). A field is taken from the narrowest covering read."""
 
-    def __init__(self, reads, angles=frozenset(), masks=None):
+    def __init__(self, reads, angles=frozenset(), masks=None, kind=None):
         self.reads = reads
         self.angles = angles
         self.masks = masks or {}
+        self.kind = kind            # path -> the schema's category of the field (Scope.field_kind), or None
         self._k = {}
+        self._u = {}
         self.cut = {}
         for r in reads:
             f = r["fields"]
@@ -496,8 +539,38 @@ class _View:
         return True
 
     def read_for(self, top):
+        """The read a field is taken from: one that covers it and gave its values, the narrowest first."""
         ok = [r for r in self.reads if self.covers(r, top)]
-        return min(ok, key=lambda r: (0 if r.get("selection") else 1)) if ok else None
+        return min(ok, key=lambda r: (self.unexpanded(r, top), 0 if r.get("selection") else 1)) if ok else None
+
+    def unexpanded(self, r, top) -> bool:
+        """Whether this read printed some of a field's content without its value (`blind`)."""
+        return bool(self.blind(r, top))
+
+    def blind(self, r, top) -> dict:
+        """The leaf paths (indexes stripped) of a field this read printed without a value, each with how many items it
+        printed so: a non-empty list as its summary with no item under it (its count), or an item or struct as its type
+        name with nothing under it (one each). Such a line is not a value, and two versions printing the same one can
+        differ; only the count is known."""
+        key = (id(r), top)
+        if key not in self._u:
+            f = {k: v for k, v in r["fields"].items() if k != TRUNCATED}
+            mine = [k for k in f if k == top or k.startswith(top + ".") or k.startswith(top + "[")]
+            parents = {k[:i] for k in mine for i, ch in enumerate(k) if ch in ".[" and i}
+            out = collections.Counter()
+            for k in mine:
+                if k in parents:
+                    continue
+                v = str(f[k]).strip()
+                m = LIST_COUNT.match(v)
+                if m and int(m.group(1)) > 0:
+                    out[INDEX.sub("", k)] += int(m.group(1))
+                elif TYPE_NAME.match(v):
+                    kind = self.kind(k) if self.kind else None
+                    if kind is None or kind in COMPOSITE:
+                        out[INDEX.sub("", k)] += 1
+            self._u[key] = out
+        return self._u[key]
 
     def truncated_at(self, top) -> bool:
         return any(id(r) in self.cut and not self.covers(r, top) for r in self.reads)
@@ -604,7 +677,8 @@ def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, contain
             continue
         if c is not None:
             c["Judged"] += 1
-        views = [_View(rs, scope.angles, scope.masks_for(rtype)) for _, _, rs in chain]
+        views = [_View(rs, scope.angles, scope.masks_for(rtype), lambda p, t=rtype: scope.field_kind(t, p))
+                 for _, _, rs in chain]
         keys = sorted(set().union(*[set(v.keys) for v in views]))
         # The unit is one top-level field of the record, as the schema names it: a struct or list is one field whose
         # value is all of its compared leaves (the accepted scorecard's unit, 2026-09-28).
@@ -630,12 +704,24 @@ def _record_chains(reads: list[dict], plugins: list[dict], scope: Scope, contain
             if any(x is None for x in picked):
                 unjudge(top, REASON_TRUNCATED if any(v.truncated_at(top) for v in views) else REASON_NOT_READ)
                 continue
+            # a part printed without its values is left out of the comparison and the field marked partial: a
+            # difference in the rest still shows, sameness does not (rows_for_setup unjudges it)
+            blinds = [v.blind(x, top) for v, x in zip(views, picked)]
+            blind = sorted(set().union(*[set(b) for b in blinds]))
+            if blind:
+                leaves = [k for k in leaves if k not in blind and not any(k.startswith(b + ".") for b in blind)]
             got = [v.keyed(x) for v, x in zip(views, picked)]
             if len({x.get("depth") for x in picked}) > 1 and any(k not in g for k in leaves for g in got):
                 unjudge(top, REASON_DEPTH)
                 continue
-            rec["values"][top] = [tuple((k, g.get(k, ())) for k in leaves) for g in got]
+            # what is known of a part printed without values is how many items it has
+            rec["values"][top] = [tuple((k, g.get(k, ())) for k in leaves)
+                                  + tuple((b + "#items", (str(bl.get(b, 0)),)) for b in blind)
+                                  for g, bl in zip(got, blinds)]
             rec["reads"][top] = picked
+            if blind:
+                rec.setdefault("partial", set()).add(top)
+                continue
             its = [_items({k: v for k, v in x["fields"].items() if k.startswith(top + "[")}, scope.angles,
                           scope.masks_for(rtype)).get(top) for x in picked]
             if any(its):
@@ -675,6 +761,8 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
         win_i = len(names) - 1
         for top, vals in rec["values"].items():
             picked = (rec.get("reads") or {}).get(top)
+            partial = top in (rec.get("partial") or ())
+            unsure = False
             for i in range(1, win_i):
                 if masters_unread and names[i].lower() in masters_unread:
                     # whose value it inherits cannot be told without its masters: counted by name, never guessed from
@@ -689,6 +777,9 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                 its = (rec.get("items") or {}).get(top)
                 if its and j is not None and list_change_kept(its[j], its[i], its[win_i]):
                     continue           # every item it added or removed the winning list keeps so: nothing of it is lost
+                if partial and not (changed and vals[win_i] != vals[i]):
+                    unsure = True      # the part read agrees; the part printed without values may not
+                    continue
                 if changed and vals[win_i] != vals[i]:
                     reads_ = ([{"batch": picked[k]["batch"], "id": picked[k]["id"], "plugin": names[k]}
                                for k in (i - 1, i, win_i)] if picked else None)
@@ -703,6 +794,10 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
                                        "Values": {"lost": _show_field(vals[i]), "winner": _show_field(vals[win_i]),
                                                   "overridden": _show_field(vals[i - 1])},
                                        **({"Reads": reads_} if reads_ else {})}]})
+            if unsure:
+                line(rtype)["Unjudgeable"][REASON_UNEXPANDED] += 1
+                unjudged.append({"FormKey": fk, "Type": rtype, "Field": top, "Reason": REASON_UNEXPANDED,
+                                 "Plugins": names})
     coverage = [{"Population": v["Population"], "Judged": v["Judged"],
                  "Unjudgeable": dict(v["Unjudgeable"]), "SetAside": dict(v["SetAside"])} for v in cov.values()]
     return {"Population": "contested records", "State": "baseline", "Conflicts": conflicts, "Coverage": coverage,
