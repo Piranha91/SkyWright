@@ -12519,6 +12519,12 @@ PLUGIN_TOKEN = re.compile(r"[A-Za-z0-9_'()\-]+(?: [A-Za-z0-9_'()\-]+)*\.(?:esp|e
 FORMKEY = re.compile(r"\b[0-9A-Fa-f]{6}:[^\s,;()]+\.(?:esp|esm|esl)\b", re.I)
 
 
+def row_texts(f: dict) -> list[str]:
+    """The text of a finding's bound rows (every row, not only the shown ones): the fields a rewrite may quote."""
+    return [str(row[k]) for row in f.get("allRows") or f.get("rows") or [] if isinstance(row, dict)
+            for k in ("summary", "physicalDetail", "label") if row.get(k)]
+
+
 def bound_sets(plan: dict, f: dict) -> tuple[set, set]:
     nums = set()
 
@@ -12549,9 +12555,17 @@ def bound_sets(plan: dict, f: dict) -> tuple[set, set]:
             if g.get(k):
                 names.add(str(g[k]))
     for row in f.get("allRows") or f.get("rows") or []:
-        for k in ("formKey", "label", "summary"):
+        for k in ("formKey", "label", "summary", "physicalDetail"):
             if row.get(k):
                 names.add(str(row[k]))
+    # a bound row is usable whole, so the form keys, plan plugins and plan cells written inside it are bound too
+    texts = row_texts(f)
+    blob = "\n".join(texts).lower()
+    for t in texts:
+        for fk in FORMKEY.findall(t):
+            names.update((fk, fk.split(":", 1)[1]))
+    plugins, _, labels, _ = universe(plan)
+    names.update(n for n in plugins | labels if n.lower() in blob)
     if f.get("checkId"):
         names.add(f["checkId"])
     if f.get("armId"):
@@ -12619,8 +12633,9 @@ def validate_answer(plan: dict, f: dict, text: str, pr: dict) -> list[dict]:
         if p.lower() in low and p not in names:
             bad.append({"rule": "unbound-plugin", "detail": f"names {p}, which is not bound to this finding"})
     masked = text
+    whole = set(row_texts(f))
     for known in sorted(set(names) | set(plugins), key=len, reverse=True):
-        if known.lower().endswith((".esp", ".esm", ".esl")):
+        if known in whole or known.lower().endswith((".esp", ".esm", ".esl")):
             masked = re.sub(re.escape(known), " " * len(known), masked, flags=re.I)
     for tok in set(PLUGIN_TOKEN.findall(masked)):
         short = " ".join(tok.split()[-4:])

@@ -36,6 +36,10 @@ answer: these cases test the gate that reads them, not the judge.
            check's own completion as a fact (wrong answer: "never claim completion", which contradicts a template
            saying a check ran to completion)
     C2053  the presentation contract says the judge's packet carries the finding's bound rows
+    C2150-C2159  a bound row is usable whole: a rewrite pasting one of its finding's rows (or quoting a form key, plugin
+           or cell written inside it, in summary, physical detail or label) is not refused for those names, and the
+           narrator's boundNames lists them; another finding's or an invented form key, plugin or cell still is
+           (wrong answer: item 37's R controls, 5/5 refused for names inside their own bound rows)
 
 Each case names the wrong answer it exists to reject. A case whose command does not exist in the tree under test (an
 argparse usage error) is RED with "usage error" in its line, never GREEN. Exit 0: every case passed; 1: a case failed.
@@ -350,9 +354,140 @@ def c2053(tmp):
           f"judge paragraph found {bool(para)}")
 
 
+# ------------------------------------------------------------------------------------------- C2150-C2159 --
+# a bound row is usable whole: the form keys, plugins and cells inside it are bound too (item 37's R controls)
+
+BR_LEAD = ("With Alpha.esp and Beta.esp loaded together (setup candidate-01-both), the placement check found 5 objects "
+           "newly left touching nothing. For example: ")
+BR_HOST = ("Orphaned: Static Banner04 <Banner04.nif> Attached on Static Wall04 <Wall04.nif> which Beta.esp Removed; "
+           "nearest thing now 128u  00A004:Alpha.esp / 0C0004:Base.esm in CellOne (int)")
+BR_SEAM = "Westmarch (3,3) N Westmarch (3,4) Hillside: Δ 696 u over 10 vertices"
+BR_OUTSIDE = ("Stranded: Furniture Bed06 <Bed06.nif> Supported on Static Floor06 <Floor06.nif> which Epsilon Mod.esp Moved; "
+              "nearest thing now 128u  00A006:Alpha.esp / 00B006:Alpha.esp in CellOne (int)")
+BR_DETAIL = "rests on 0E0007:Base.esm, which Beta.esp moved 128u"
+
+
+def br_row(fk: str, label: str, summary: str, detail: str = "touches nothing within 4u (nearest 128u)") -> dict:
+    return {"formKey": fk, "label": label, "summary": summary, "physical": "Holds", "physicalDetail": detail,
+            "evidenceId": "E-0"}
+
+
+def presentation_bound_row() -> dict:
+    """F-001 binds seven rows, three shown; F-002 (Base.esm and Delta.esp) owns another form key, plugin and cells.
+    The quoted rows are past the shown three, so only `allRows` binds them."""
+    plan = presentation()
+    f1, f2 = plan["findings"]
+    f1["counts"].update({"created": 5, "newDefect": 5})
+    rows = [br_row(f"00A00{i}:Alpha.esp", "CellOne (int)",
+                   f"Orphaned: Static Pillar0{i} <Pillar0{i}.nif> Attached on Static Wall0{i} <Wall0{i}.nif> which Beta.esp "
+                   f"Removed; nearest thing now 128u  00A00{i}:Alpha.esp / 00B00{i}:Alpha.esp in CellOne (int)")
+            for i in (1, 2, 3)]
+    rows += [br_row("00A004:Alpha.esp", "CellOne (int)", BR_HOST),
+             br_row("00A005:Alpha.esp", "Westmarch (3,3)", BR_SEAM),
+             br_row("00A006:Alpha.esp", "CellOne (int)", BR_OUTSIDE),
+             br_row("00A007:Alpha.esp", "CellOne (int)", "Stranded: Static Crate07 on a moved shelf", BR_DETAIL)]
+    f1["allRows"], f1["rows"], f1["rowsTotal"], f1["rowsShown"] = rows, rows[:3], len(rows), 3
+    f2["counts"].update({"A": "Base.esm", "B": "Delta.esp"})
+    # F-002's summaries carry their own form keys, as real summaries do, so binding another finding's rows would bind them
+    f2rows = [br_row("0D0001:Delta.esp", "Westmarch (3,4) Hillside", "a seam at 0D0001:Delta.esp in Westmarch (3,4) Hillside"),
+              br_row("0D0002:Delta.esp", "Eastmarch (9,9) Ridge", "a seam at 0D0002:Delta.esp in Eastmarch (9,9) Ridge")]
+    f2["allRows"], f2["rows"] = f2rows, f2rows
+    return plan
+
+
+def br_apply(tmp: Path, name: str, text: str):
+    """(process, F-001 accepted, F-001's refusal rules) with the text judged faithful, so only the lexical rules decide."""
+    p, a, j = setup(tmp, name, {"F-001": text}, judged([("F-001", text, True)]), presentation_bound_row())
+    r = run(["narrate-apply", "--presentation", p, "--answers", a, "--judgements", j], tmp)
+    after = jload(p) or {}
+    plain = next((f.get("plain") for f in after.get("findings") or [] if f.get("id") == "F-001"), None)
+    rules = [f"{x.get('rule')}: {x.get('detail')}" for x in (after.get("narration") or {}).get("refused") or []
+             if isinstance(x, dict) and x.get("id") == "F-001"]
+    return r, plain == text, rules
+
+
+def br_accepted(case: str, tmp: Path, text: str, wrong: str):
+    r, ok, rules = br_apply(tmp, case.lower(), text)
+    check(case, r.returncode == 0 and ok and not rules, wrong, f"exit {r.returncode}; refused {rules}")
+
+
+def br_refused(case: str, tmp: Path, text: str, want: dict, wrong: str):
+    """`want` maps each rule that must be among the refusals to a word its detail names."""
+    r, ok, rules = br_apply(tmp, case.lower(), text)
+    hit = all(any(x.startswith(rule + ":") and word in x for x in rules) for rule, word in want.items())
+    check(case, r.returncode == 0 and not ok and hit, wrong, f"exit {r.returncode}; accepted {ok}; refused {rules}")
+
+
+def c2150(tmp):
+    br_accepted("C2150", tmp, BR_LEAD + BR_HOST,
+                "a rewrite pasting one of its finding's bound row summaries is refused for the host form key and "
+                "plugin inside it (unknown-formkey, unbound-plugin)")
+
+
+def c2151(tmp):
+    br_accepted("C2151", tmp, BR_LEAD + BR_SEAM,
+                "a rewrite pasting a bound row summary is refused for a cell named inside it (unbound-cell)")
+
+
+def c2152(tmp):
+    br_accepted("C2152", tmp, BR_LEAD + "one hung on 0C0004:Base.esm, an object in Base.esm that Beta.esp removed, "
+                                        "and one sits on the seam to Westmarch (3,4) Hillside.",
+                "a form key, plugin or cell quoted on its own from a bound row summary is refused (only the whole "
+                "summary would be bound)")
+
+
+def c2153(tmp):
+    br_refused("C2153", tmp, BR_LEAD + BR_HOST.replace("0C0004:Base.esm", "0C0999:Base.esm"),
+               {"unknown-formkey": "0C0999:Base.esm"},
+               "an invented form key that no bound row carries is accepted")
+
+
+def c2154(tmp):
+    br_refused("C2154", tmp, BR_LEAD + "one hung on 0D0001:Delta.esp.",
+               {"unbound-formkey": "0D0001:Delta.esp", "unbound-plugin": "Delta.esp"},
+               "another finding's form key and plugin, in none of this finding's rows, are accepted")
+
+
+def c2155(tmp):
+    br_refused("C2155", tmp, BR_LEAD + "one rests on an object from Gamma Extra.esp.",
+               {"unknown-plugin": "Gamma Extra.esp"},
+               "a plugin in no bound row and nowhere in the plan is accepted")
+
+
+def c2156(tmp):
+    br_refused("C2156", tmp, BR_LEAD + "one sits on the seam to Eastmarch (9,9) Ridge.",
+               {"unbound-cell": "Eastmarch (9,9) Ridge"},
+               "another finding's cell, in none of this finding's rows, is accepted")
+
+
+def c2157(tmp):
+    p, a, _ = setup(tmp, "c2157", {"F-001": BR_LEAD}, pres=presentation_bound_row())
+    out = tmp / "c2157" / "packet.json"
+    r = run(["narrate-packet", "--presentation", p, "--out", out], tmp)
+    f1 = next((x for x in (jload(out) or {}).get("findings") or [] if x.get("id") == "F-001"), {})
+    names = set(f1.get("boundNames") or [])
+    want = {"0C0004:Base.esm", "Base.esm", "Westmarch (3,4) Hillside", "0E0007:Base.esm"}
+    never = {"0D0001:Delta.esp", "Delta.esp", "Eastmarch (9,9) Ridge", "0D0002:Delta.esp"}
+    check("C2157", r.returncode == 0 and want <= names and not (never & names),
+          "the narrator's packet does not list the names inside a bound row as bound (or lists another finding's)",
+          f"exit {r.returncode}; missing {sorted(want - names)}; foreign {sorted(never & names)}")
+
+
+def c2158(tmp):
+    br_accepted("C2158", tmp, BR_LEAD + "one " + BR_DETAIL + ".",
+                "a form key or plugin named in a bound row's physical detail (which the judge reads) is refused")
+
+
+def c2159(tmp):
+    br_accepted("C2159", tmp, BR_LEAD + BR_OUTSIDE,
+                "a pasted bound row summary naming a plugin outside the plan is refused as unknown-plugin")
+
+
 CASES = {"C2020": c2020, "C2021": c2021, "C2022": c2022, "C2023": c2023, "C2024": c2024, "C2025": c2025,
          "C2026": c2026, "C2027": c2027, "C2028": c2028, "C2029": c2029,
-         "C2050": c2050, "C2051": c2051, "C2052": c2052, "C2053": c2053}
+         "C2050": c2050, "C2051": c2051, "C2052": c2052, "C2053": c2053,
+         "C2150": c2150, "C2151": c2151, "C2152": c2152, "C2153": c2153, "C2154": c2154, "C2155": c2155,
+         "C2156": c2156, "C2157": c2157, "C2158": c2158, "C2159": c2159}
 
 
 def main() -> int:
