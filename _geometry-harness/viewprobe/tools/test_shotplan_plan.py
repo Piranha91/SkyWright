@@ -19,6 +19,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 
@@ -345,6 +346,80 @@ def test_a_mirrored_shape_is_unresolved():
     check("inside solid: a hit whose facing is unknown (mirrored) is UNRESOLVED, never front or back",
           any("front from back" in f for f in inside_fails(doc)), "; ".join(inside_fails(doc)) or "no inside refusal")
     check("inside solid: and the camera is refused", code == 1, f"exit {code}")
+
+
+# A real witness station's --inside-at answer (2026-11-11, an exterior wall block; mod plugin names and world positions
+# left out): the eye is 25 u under the wall's top, and the wall shows back faces on five axes. A two-sided bush stands
+# nearer on -x and rubble and a rock pile stand nearer on +x, +y and -y, facing the eye.
+WALL_THICKET = [
+    "   inside-at 0,-300,120: 11 ref(s) whose box encloses it (smallest first); nominated by mesh bounds, 0 by record "
+    "OBND alone (mesh unreadable), 0 physical ref(s) whose mesh could not be read at all; 4 effect-only ref(s) also "
+    "enclose it, not solid (drawn geometry only: an effect shape's own collision is not tested)",
+    "      effect-only, not solid: 015ED2:Skyrim.esm  AutoLoadDoor01  mesh AutoLoadMarker01.nif",
+    "      effect-only, not solid: 10D285:Skyrim.esm  SkyrimCloudShape05_50  mesh Sky\\CloudShape05_50.nif",
+    "      effect-only, not solid: 10D284:Skyrim.esm  SkyrimCloudDistant04  mesh Sky\\CloudDistant04.nif",
+    "      effect-only, not solid: 000989:ModA.esp  SkyrimCloudDistant04  mesh Sky\\CloudDistant04.nif",
+    "      080B79:Skyrim.esm  Tree  TreeThicket01  dims 290x261x194 u  scale 0.95  rays +x - -x 73 +y - -y - up - "
+    "down -  facing +x - -x two +y - -y - up - down -  [mesh bounds; record box agrees]  mesh Landscape\\Plants\\Thicket01.nif",
+    "      000908:ModA.esp  Static  ImpExtWall05  dims 515x640x544 u  scale 1.00  rays +x 142 -x 239 +y 373 -y 158 up "
+    "25 down -  facing +x back -x back +y back -y back up back down -  [mesh bounds; record box agrees]  mesh "
+    "Dungeons\\Imperial\\Exterior\\ImpExtWall05.nif",
+    "      000933:ModA.esp  Static  ImpExtRubble01  dims 888x904x180 u  scale 0.76  rays +x 50 -x - +y 95 -y - up - "
+    "down -  facing +x front -x - +y front -y - up - down -  [mesh bounds; record box agrees]  mesh "
+    "Dungeons\\Imperial\\Exterior\\ImpExtRubble01.nif",
+    "      080B62:Skyrim.esm  Static  RockPileL01  dims 1022x865x373 u  scale 1.00  rays +x - -x - +y - -y 46 up - "
+    "down 65  facing +x - -x - +y - -y front up - down front  [mesh bounds; record box agrees]  mesh "
+    "Landscape\\Rocks\\RockPileL01.nif",
+    "      080B25:Skyrim.esm  Static  RockCliff06  dims 1091x1033x736 u  scale 1.00  rays +x - -x - +y - -y 130 up - "
+    "down -  facing +x - -x - +y - -y front up - down -  [mesh bounds; record box agrees]  mesh Landscape\\Rocks\\RockCliff06.nif",
+    "      000805:ModB.esp  Static  RockCliff03  dims 1699x1607x998 u  scale 0.86  rays +x - -x 435 +y - -y 690 up - "
+    "down -  facing +x - -x back +y - -y back up - down -  [mesh bounds; record box agrees]  mesh Landscape\\Rocks\\RockCliff03.nif",
+    "      02E2AF:Skyrim.esm  Static  RockCaveEntrance01  dims 1801x1882x1243 u  scale 1.00  rays +x - -x - +y - -y - "
+    "up - down -  facing +x - -x - +y - -y - up - down -  [mesh bounds; record box agrees]  mesh "
+    "Landscape\\Rocks\\RockCaveEntrance01.nif",
+    "      06E08D:Skyrim.esm  Static  RockCliff02FieldGrass01  dims 2329x2310x1269 u  scale 1.00  rays +x 174 -x - +y "
+    "- -y 200 up - down -  facing +x front -x - +y - -y front up - down -  [mesh bounds; record box agrees]  mesh "
+    "Landscape\\Rocks\\RockCliff02.nif",
+    "      06E06C:Skyrim.esm  Static  MountainCliffSlopeFieldGrass01  dims 4891x4118x2266 u  scale 1.00  rays +x - -x "
+    "- +y 796 -y - up - down -  facing +x - -x - +y front -y - up - down -  [mesh bounds; record box agrees]  mesh "
+    "Landscape\\Mountains\\MountainCliffSlope.nif",
+    "      080B1A:Skyrim.esm  Static  MountainCliffSm01  dims 5849x4471x2576 u  scale 0.75  rays +x 554 -x - +y - -y "
+    "244 up - down -  facing +x front -x - +y - -y front up - down -  [mesh bounds; record box agrees]  mesh "
+    "Landscape\\Mountains\\MountainCliffSm01.nif",
+    "      06E089:Skyrim.esm  Static  MountainCliff04_SparseSN  dims 7302x8112x7157 u  scale 0.87  rays +x - -x - +y - "
+    "-y 758 up - down -  facing +x - -x - +y - -y front up - down -  [mesh bounds; record box agrees]  mesh "
+    "Landscape\\Mountains\\MountainCliff04.nif",
+]
+
+
+def test_a_two_sided_face_does_not_hide_a_solid_around_the_eye():
+    """C2040. A two-sided face is drawn from both sides, so it says nothing about inside and outside. Wrong answer:
+    taking the bush's leaves as -x's nearest face, which leaves one back axis (up) and accepts the eye as clear."""
+    sc = room(PLINTH)
+    sc["insideVerbatim"] = {EYE: WALL_THICKET}
+    code, out, doc = check_cli(sc, "--surface", LOW)
+    fs = inside_fails(doc)
+    check("C2040 inside solid: an eye inside a wall block behind a nearer two-sided bush is refused, naming the wall",
+          any("back face" in f and "ImpExtWall05" in f and "-x" in re.search(r"axes \(([^)]*)\)", f)[1].split() for f in fs),
+          "; ".join(fs) or "no inside refusal")
+    check("C2040 inside solid: and the camera is refused", code == 1, f"exit {code}")
+
+
+def test_an_eye_inside_a_bush_in_the_open_is_not_a_solid():
+    """C2042, the guard. Only two-sided faces around the eye, beyond reach: the eye is in a bush, not in a solid, and the
+    room's one-sided walls beyond it face the eye. Within reach on three axes, the reach rule refuses it as enclosed,
+    as it always has, and still never as inside a solid by back faces."""
+    bush = solid("Bush", [-200, -500, -80], [200, -100, 320], twoSided=True)
+    code, out, doc = check_cli(room(PLINTH, bush), "--surface", LOW)
+    fs = inside_fails(doc)
+    check("C2042 inside solid: an eye inside a two-sided bush in the open is not refused", not fs and code == 0,
+          f"exit {code}; " + "; ".join(fs))
+    near = solid("BushNear", [-60, -360, 60], [60, -240, 180], twoSided=True)
+    code, out, doc = check_cli(room(PLINTH, near), "--surface", LOW)
+    fs = inside_fails(doc)
+    check("C2042 inside solid: a bush within reach is ENCLOSED by the reach rule, not inside a solid",
+          any("ENCLOSED by `BushNear`" in f for f in fs) and not any("back face" in f for f in fs),
+          "; ".join(fs) or "no inside refusal")
 
 
 # --------------------------------------------------------------------------------------
@@ -1439,6 +1514,8 @@ ALL = [test_a_candidate_without_a_wall_margin_prints, test_devbench_reads_a_work
        test_one_back_face_passes_two_refuse,
        test_rays_without_facing_are_unresolved,
        test_a_mirrored_shape_is_unresolved,
+       test_a_two_sided_face_does_not_hide_a_solid_around_the_eye,
+       test_an_eye_inside_a_bush_in_the_open_is_not_a_solid,
        test_pose_identity_binds_the_result,
        test_skipped_verification_is_not_a_pass,
        test_verified_run_publishes_cleanly,

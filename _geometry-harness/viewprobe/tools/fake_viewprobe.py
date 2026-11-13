@@ -30,6 +30,7 @@ Scene JSON:
      "failOnCullAbove": false,       # exit 1 on any call carrying --cull-above (a failed fallback probe)
      "navSilent": [[x,y]],           # queried points that get NO nav-at line at all
      "insideSilent": [[x,y,z]],      # queried points that get NO inside-at line at all
+     "insideVerbatim": {"x,y,z": ["   inside-at ...", "      row ..."]},  # a real renderer's printed answer, replayed
      "clearSilent": [[x,y,z]],       # queried points that get NO clear-at line at all
      "clearNoBox": 0,                # physical refs the OBND broad phase could not offer
      "clearUnread": 0,               # candidate meshes that could not be read
@@ -429,6 +430,9 @@ def one_shot(scene, a, argv, png):
     for spec in a["inside_at"]:
         x, y, z = (int(v) for v in spec.split(","))
         if (x, y, z) in silent_inside:
+            continue
+        if f"{x},{y},{z}" in scene.get("insideVerbatim", {}):
+            print("\n".join(scene["insideVerbatim"][f"{x},{y},{z}"]))
             continue
         def declared(bx):
             """The record OBND a ref claims, which may differ from its mesh -- see `obnd`."""

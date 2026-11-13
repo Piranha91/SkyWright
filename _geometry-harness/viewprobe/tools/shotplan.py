@@ -1707,19 +1707,25 @@ def inside_verdict(entry, args):
     # solid -- a picture no player can stand to see (2026-10-31 base runs 2 and 3). So each axis is judged by the
     # NEAREST face any tested ref puts on it, not ref by ref: a tower's one-sided outer shell encloses the eye on its top
     # floor, but the interior floor piece's walls stand nearer and face the eye, which is the view a player has there
-    # (White River Watch, 2026-11-08). Distance plays no part beyond deciding which face is nearest.
-    nearest = {}
+    # (White River Watch, 2026-11-08). Distance plays no part beyond deciding which face is nearest. A two-sided face is
+    # drawn from both sides, so it says nothing about inside or outside and is skipped: a bush nearer the eye does not
+    # hide the back faces of the wall block the eye stands in (a witness station, 2026-11-11).
+    nearest, skipped = {}, []
     for h in entry:
         rays, facing = h.get("rays"), h.get("facing")
         if rays is None or facing is None:
             continue
         for k in RAY_AXES:
-            if rays.get(k) is not None and (k not in nearest or rays[k] < nearest[k][0]):
+            if rays.get(k) is not None and facing.get(k) == "two":
+                skipped.append(f"{k} {rays[k]:.0f} `{h['edid'] or h['formkey']}`")
+            elif rays.get(k) is not None and (k not in nearest or rays[k] < nearest[k][0]):
                 nearest[k] = (rays[k], facing.get(k, "-"), h["edid"] or h["formkey"], h["type"])
     back = [k for k in RAY_AXES if k in nearest and nearest[k][1] == "back"]
     unknown = [k for k in RAY_AXES if k in nearest and nearest[k][1] == "-"]
     owners = sorted({f"`{nearest[k][2]}` ({nearest[k][3]})" for k in back})
     seen = " ".join(f"{k} {nearest[k][1]} {nearest[k][0]:.0f} `{nearest[k][2]}`" for k in RAY_AXES if k in nearest)
+    if skipped:
+        seen += "; two-sided, not counted: " + ", ".join(skipped)
     if len(back) >= args.inside_back:
         fails.append(f"inside: eye INSIDE the solid {', '.join(owners)}: the nearest surface on {len(back)} of 6 axes "
                      f"({' '.join(back)}) is a back face, which the renderer culls, so the camera would see out through "
