@@ -103,11 +103,13 @@ public static class CaptureFixture
         Void = Ids("CfVoid", 0x8B0), Thick = Ids("CfThick", 0x8C0), ThickWalls = Ids("CfThickWalls", 0x8D0),
         Tower = Ids("CfTower", 0x8E0), Cloud = Ids("CfCloud", 0x8F0), Roofed = Ids("CfRoofed", 0x900),
         RoofTouch = Ids("CfRoofTouch", 0x910), TallFocus = Ids("CfTallFocus", 0x920), FxLit = Ids("CfFxLit", 0x930),
-        FxMissing = Ids("CfFxMissing", 0x940);
+        FxMissing = Ids("CfFxMissing", 0x940), Ledge = Ids("CfLedge", 0x950);
+    /// <summary>CfLedge's upper and side navmeshes (its lower one is <c>Ledge.Nav</c>): LedgeLinkFixture.cs.</summary>
+    public static readonly FormKey LedgeUpper = K(0x958), LedgeSide = K(0x959);
     /// <summary>The second plugin (master CfFixture.esp): it places CfCutMod's B, so a setup without it has no B.</summary>
     public static readonly ModKey ModKeyB = new("CfFixtureMod", ModType.Plugin);
     public static readonly FormKey CutModB = new(ModKeyB, 0x801);
-    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls, Tower, Cloud, Roofed, RoofTouch, TallFocus, FxLit, FxMissing };
+    public static readonly CellIds[] All = { Cutaway, Touch, Buried, Glow, Focus, NoNav, Disabled, CutMod, Open, FocusLow, Void, Thick, ThickWalls, Tower, Cloud, Roofed, RoofTouch, TallFocus, FxLit, FxMissing, Ledge };
 
     static CellIds Ids(string edid, uint b)
         => new(edid, K(b), K(b + 1), K(b + 2), K(b + 3), Enumerable.Range(0, 32).Select(n => K(0x2000 + (b - 0x810) / 0x10 * 0x40 + (uint)n)).ToArray(),
@@ -287,8 +289,13 @@ public static class CaptureFixture
         fxLit.Temporary.Add(Ref(FxLit.Walls[5], IceFxBase, 0, -700, 100));
         var fxMissing = NewCell(FxMissing, true);
         fxMissing.Temporary.Add(Ref(FxMissing.Walls[0], MissingFxBase, 0, 0, 0));
+        // CfLedge: no floor, three navmeshes joined only by typed links (LedgeLinkFixture.cs)
+        var ledge = NewCell(Ledge, false, floor: false);
+        foreach (var nav in LedgeLinkFixture.Meshes(Ledge.Nav, LedgeUpper, LedgeSide,
+                     () => new CellNavmeshParent { Parent = new FormLink<ICellGetter>(Ledge.Cell) }))
+            ledge.NavigationMeshes.Add(nav);
         foreach (var c in new[] { cut, touch, buried, glow, focus, nonav, dis, cutMod, open, focusLow, voidCell, thick, thickWalls, tower, cloud,
-                                  roofed, roofTouch, tall, fxLit, fxMissing })
+                                  roofed, roofTouch, tall, fxLit, fxMissing, ledge })
             MovedRefFixture.FileInterior(m, c);
 
         var path = Path.Combine(dir, Key.FileName.String);

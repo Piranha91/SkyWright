@@ -218,5 +218,27 @@ internal static class MovedRefSelfTestVp
                       bnav[1].Navs.Select(kv => (kv.Key, (FormKey?)null, kv.Value)), new Dictionary<FormKey, (FormKey? Cell, float X)>());
         t.Check("B1-ident the cells' identity comes from the master (control)", ident.TryGetValue(0, out var i0) && i0.Key == F.E00
                 && ident.TryGetValue(1, out var i1) && i1.Key == F.E11, string.Join(",", ident.Select(kv => $"{kv.Key}:{kv.Value.Key}")));
+
+        // ---- C1994: the --stations navdump writes each edge link's type, as serialized to the file: LedgeLinkFixture's
+        // worldspace copy through the route mode's own pre-read, worldspace pass and Dump ----
+        var lp = LedgeLinkFixture.WriteWorld(Path.Combine(t.Root, "ledge"));
+        var lw = new RouteStationMode.Walk(LedgeLinkFixture.World, Array.Empty<FormKey>(), LedgeLinkFixture.PlaneBase);
+        lw.PreRead(lp, 1);
+        lw.Plugin(lp);
+        var ldump = System.Text.Json.JsonSerializer.Serialize(lw.Dump(lw.World("LlWorld", Path.GetFileName(lp), new[] { Path.GetFileName(lp) }, _ => null),
+                                                                      new HashSet<(int, int)>(), true));
+        using var ljson = System.Text.Json.JsonDocument.Parse(ldump);
+        var wantTypes = new Dictionary<string, string>
+        {
+            [LedgeLinkFixture.L.ToString()] = "1,1,1,1,3,3,3,3", [LedgeLinkFixture.U.ToString()] = "2,2,2,2",
+            [LedgeLinkFixture.S.ToString()] = "3,3,3,7",
+        };
+        var gotTypes = new Dictionary<string, string>();
+        foreach (var nm in ljson.RootElement.GetProperty("navmeshes").EnumerateArray())
+            gotTypes[nm.GetProperty("formKey").GetString()!] = string.Join(",", nm.GetProperty("edgeLinks").EnumerateArray()
+                .Select(e => e.TryGetProperty("type", out var ty) ? ty.ToString() : "absent"));
+        t.Check("C1994 the navdump's edge links carry the record's type (L 1x4 then 3x4, U 2x4, S 3x3 then 7)",
+                gotTypes.Count == 3 && wantTypes.All(kv => gotTypes.TryGetValue(kv.Key, out var g) && g == kv.Value),
+                string.Join("; ", gotTypes.Select(kv => $"{kv.Key}: {kv.Value}")));
     });
 }
