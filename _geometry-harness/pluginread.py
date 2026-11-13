@@ -195,6 +195,21 @@ def _cell(subs, fk, global_):
     return {"value": v, "flags": [n for b, n in CELL_FLAGS if v & b]}
 
 
+def _cell_grid(subs, fk, global_):
+    """An exterior cell's grid cell (XCLC: x and y, int32 each, then flags not read); None for a cell without XCLC (an
+    interior or a worldspace's persistent cell)."""
+    data = subs.get("XCLC")
+    if not data or len(data) < 8:
+        return None
+    return list(struct.unpack_from("<ii", data, 0))
+
+
+def cell_grids(path, form_keys):
+    """(R11/N6) {formKey: [x, y] or None}: the grid cell each named exterior cell record holds; a report says an unnamed
+    exterior cell by its worldspace and this grid, never by its form key."""
+    return _read(path, b"CELL", form_keys, _cell_grid)
+
+
 def _placement(subs, fk, global_):
     data = subs.get("DATA")
     if not data or len(data) < 24:

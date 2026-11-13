@@ -16,6 +16,14 @@ POLICY = Path(__file__).resolve().parent.parent / ".claude/skills/evaluation-rep
 
 
 COLOURS = ("cyan", "magenta")
+#: the checks whose clashes reel_requests turns into requests besides the skill's rules: a placement split, a world state
+SPLIT_CHECK, STATE_CHECK = "records.contested-fields", "state.conditional-geometry"
+
+
+def capturable_checks(policy: dict) -> list:
+    """Every check whose clashes a capture request can be built for: the skill's rules, the placement split and the
+    world-state pair. scene-policy vignettes.captureChecks must equal it (known answer C2120)."""
+    return sorted({r["checkId"] for r in policy.get("rules") or []} | {SPLIT_CHECK, STATE_CHECK})
 
 
 def _source(presentation: dict, bundle: Path, finding_id: str | None, want) -> tuple[dict, dict] | None:
@@ -61,7 +69,7 @@ def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[
             identity = json.dumps(["placement-split", c.get("armId"), fk, source["sha256"]]
                                   + ([sorted(m["formKey"] for m in marks)] if marks else []), separators=(",", ":"))
             out.append({"id": "capture-" + hashlib.sha256(identity.encode()).hexdigest()[:12],
-                        "requestType": "placement-split", "checkId": c.get("checkId") or "records.contested-fields",
+                        "requestType": "placement-split", "checkId": c.get("checkId") or SPLIT_CHECK,
                         "armId": c.get("armId"), "findingIds": [c.get("findingId")], "newProblem": False,
                         "location": None, "recordKeys": [fk], "plugins": list(c.get("pair") or []),
                         "state": doc.get("state") or "baseline",
@@ -95,7 +103,7 @@ def reel_requests(presentation: dict, bundle: Path, policy: dict) -> tuple[list[
             label = ((conflict.get("Necessary") or [{}])[0]).get("Label")
             rule = next((r for r in policy.get("rules") or [] if r.get("checkId") == "geometry.object-overlap"), {})
             out.append({"id": "capture-" + hashlib.sha256(identity.encode()).hexdigest()[:12],
-                        "requestType": "state-pair", "checkId": "state.conditional-geometry", "armId": c.get("armId"),
+                        "requestType": "state-pair", "checkId": STATE_CHECK, "armId": c.get("armId"),
                         "findingIds": [c.get("findingId")], "newProblem": False, "location": label,
                         "recordKeys": pair, "plugins": [conflict.get("A"), conflict.get("B")],
                         "state": c.get("state"), "kind": conflict.get("Kind"),

@@ -1804,28 +1804,34 @@ def cmd_status(a) -> int:
     return EXIT_OK
 
 
+def abs_path(s: str) -> Path:
+    """A path argument made absolute at parse time (N4): children run from the repo root, so a relative --entry
+    would be read there (the held capture-rounds child failed on one)."""
+    return Path(s).expanduser().resolve()
+
+
 def build_parser():
     ap = argparse.ArgumentParser(prog="evalpipeline", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("run", help="run every stage not yet accepted, in order")
-    p.add_argument("--entry", required=True, help="the mod's selection entry (JSON)")
-    p.add_argument("--out", required=True, help="the run folder")
-    p.add_argument("--machine", help="the machine file: lab, game, heavy-stage prefix, run-local stage commands")
+    p.add_argument("--entry", type=abs_path, required=True, help="the mod's selection entry (JSON)")
+    p.add_argument("--out", type=abs_path, required=True, help="the run folder")
+    p.add_argument("--machine", type=abs_path, help="the machine file: lab, game, heavy-stage prefix, run-local stage commands")
     p.add_argument("--through", choices=STAGES, help="stop after this stage")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("arms", help="print the arms the entry derives, before anything runs")
-    p.add_argument("--entry", required=True)
-    p.add_argument("--machine")
-    p.add_argument("--out")
+    p.add_argument("--entry", type=abs_path, required=True)
+    p.add_argument("--machine", type=abs_path)
+    p.add_argument("--out", type=abs_path)
     p.set_defaults(fn=cmd_arms)
     p = sub.add_parser("capture-rounds", help="the capture stage's rounds, inside the machine-slot hold the stage took "
                                               "(the stage runs it; not for direct use)")
-    p.add_argument("--entry", required=True)
-    p.add_argument("--out", required=True)
-    p.add_argument("--machine")
+    p.add_argument("--entry", type=abs_path, required=True)
+    p.add_argument("--out", type=abs_path, required=True)
+    p.add_argument("--machine", type=abs_path)
     p.set_defaults(fn=cmd_capture_rounds)
     p = sub.add_parser("status", help="print the accepted stages")
-    p.add_argument("--out", required=True)
+    p.add_argument("--out", type=abs_path, required=True)
     p.set_defaults(fn=cmd_status)
     return ap
 

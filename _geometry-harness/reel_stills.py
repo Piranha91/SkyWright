@@ -61,9 +61,16 @@ def _wrap(draw, text, font, width):
 
 
 def _blocks(page: dict) -> list[tuple[str, str, float]]:
-    """(style, text, size factor) lines of a page before wrapping. style: title, head, body, dim, mark."""
+    """(style, text, size factor) lines of a page before wrapping. style: title, head, body, dim, mark. Every line is
+    the text the page draws, so it passes through shown_text (R11: no form key or editor ID on screen), except the load
+    order's plugin files, which a modder must recognise by their file names."""
+    return [(s, t if keep else shown_text(t), k) for s, t, k, keep in _raw_blocks(page)]
+
+
+def _raw_blocks(page: dict) -> list[tuple[str, str, float, bool]]:
     out = [("title", page.get("title") or "", 1.4)]
     lay = page.get("layout")
+    keep = set()                                        # indices of lines drawn as given (plugin files)
     if lay == "types":
         for r in page.get("rows") or []:
             out.append(("head", f"{r.get('label')}: {r.get('count')}" + (f" {r['unit']}" if r.get("unit") else ""), 1.15))
@@ -82,6 +89,7 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
         if page.get("legend"):
             out.append(("mark", page["legend"], 0.9))
         for i, p in enumerate(page.get("plugins") or []):
+            keep.add(len(out))
             out.append(("mark" if p in marked else "body", f"{i + 1:>3}  {p}", 0.75))
         if page.get("runtimeMods"):
             out.append(("head", page.get("runtimeTitle") or "", 0.9))
@@ -94,7 +102,7 @@ def _blocks(page: dict) -> list[tuple[str, str, float]]:
         for r in page.get("rows") or []:
             out.append(("head", str(r.get("reason") or "")[:1].upper() + str(r.get("reason") or "")[1:], 0.95))
             out += [("body", s, 0.8) for s in r.get("subjects") or []]
-    return out
+    return [(s, t, k, i in keep) for i, (s, t, k) in enumerate(out)]
 
 
 def draw_strip(labels: dict, font: Path, bold: Path, size=(1280, 40), split_at: int = 640) -> Image.Image:
@@ -103,7 +111,8 @@ def draw_strip(labels: dict, font: Path, bold: Path, size=(1280, 40), split_at: 
     img = Image.new("RGB", size, BG)
     d = ImageDraw.Draw(img)
     f = ImageFont.truetype(str(bold), 22)
-    for text, (x0, x1) in ((labels.get("left") or "", (0, split_at)), (labels.get("right") or "", (split_at, w))):
+    for text, (x0, x1) in ((shown_text(labels.get("left") or ""), (0, split_at)),
+                           (shown_text(labels.get("right") or ""), (split_at, w))):
         tw = d.textlength(text, font=f)
         d.text((x0 + (x1 - x0 - tw) / 2, (h - 26) / 2), text, font=f, fill=FG)
     return img
@@ -152,6 +161,12 @@ def spoken_text(text: str) -> str:
     text = SPOKEN_PASCAL_ID.sub(lambda m: humanize(m.group(0)) or "a record", text)
     text = re.sub(r"\b([A-Z][A-Za-z]*(?: [A-Za-z]+)*) and \1\b", r"\1 (two of them)", text)
     return " ".join(text.split())
+
+
+def shown_text(text: str) -> str:
+    """The words a still page draws (R11): the same form-key and editor-ID rules as the narration (spoken_text), so the
+    screen never shows what the narrator would not say. A plugin file name is kept (spoken_text's rule)."""
+    return spoken_text(text) if str(text or "").strip() else str(text or "")
 
 
 def speech_shapes(text: str) -> list:
@@ -253,7 +268,8 @@ def page_words_drawn(page: dict) -> int:
 
 def label_frame(src: Path, label: str, font: Path, bold: Path, size=(1280, 720), strip_h: int = 40) -> Image.Image:
     """A vignette frame fitted above a label strip: which setup it shows, or which marked shape is which colour. The
-    evidence frame itself carries no text; the strip is the reel's."""
+    evidence frame itself carries no text; the strip is the reel's (drawn through shown_text, R11)."""
+    label = shown_text(label)
     w, h = size
     img = Image.new("RGB", size, BG)
     with Image.open(src) as fr:
@@ -281,7 +297,7 @@ def draw_page(page: dict, font: Path, bold: Path, size=(1280, 720), floor: int =
         sz = 40
         while True:
             f = ImageFont.truetype(str(bold), sz)
-            lines = _wrap(d, page.get("text") or "", f, w - 2 * margin)
+            lines = _wrap(d, blocks[0][1], f, w - 2 * margin)            # the statement as drawn (shown_text)
             if len(lines) * round(sz * 1.3) <= h - 2 * margin:
                 break
             if sz <= max(floor, 10):

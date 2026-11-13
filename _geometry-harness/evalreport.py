@@ -97,15 +97,108 @@ def view_kind_caption(provenance: dict, words: dict, first: bool = True) -> str:
     return ""
 
 
-def highlight_caption(marks: dict, fig_object, fig_mod) -> tuple[str, dict]:
+def highlight_caption(marks: dict, fig_object, fig_mod, participants=None) -> tuple[str, dict]:
     """(the figureCaptions key, its slots) for a marked view: both participants marked (`highlight`), or one alone
-    (`highlightOne`: a world-state vignette marks only its focus), never a missing one named "None" (C1899)."""
+    (`highlightOne`: a world-state vignette marks only its focus), never a missing one named "None" (C1899). With the
+    pair's participants, a one-mark view names the object left plain too (`highlightOneAgainst`, R13)."""
     cy_, mg_ = marks.get("cyan"), marks.get("magenta")
     if cy_ and mg_:
         return "highlight", {"a": fig_object(cy_), "modA": fig_mod(str(cy_).split(":", 1)[-1]),
                              "b": fig_object(mg_), "modB": fig_mod(str(mg_).split(":", 1)[-1])}
     one_, col_ = (cy_, "cyan") if cy_ else (mg_, "magenta")
-    return "highlightOne", {"one": fig_object(one_), "modOne": fig_mod(str(one_).split(":", 1)[-1]), "colour": col_}
+    slots = {"one": fig_object(one_), "modOne": fig_mod(str(one_).split(":", 1)[-1]), "colour": col_}
+    plain_ = [p for p in participants or [] if p and str(p).casefold() != str(one_).casefold()]
+    if plain_:
+        return "highlightOneAgainst", {**slots, "other": fig_object(plain_[0]),
+                                       "modOther": fig_mod(str(plain_[0]).split(":", 1)[-1])}
+    return "highlightOne", slots
+
+def patch_search_leads(search: dict, words: dict, loaded: set, supplied: list, masters: dict) -> list[str]:
+    """What to do's Nexus lines (R3, N1): one line per Nexus page the search found, said with its most usable version
+    (reel_plan.usable_first over every hit of that page, so a live file before a retired or old one, and a retired one's
+    caution only when the page has nothing live) and the pairs it covers named once; one line per pair the search found
+    nothing for. Never one line per listed file version, nor per pair that shares a page. Raises reel_plan.Refused for
+    a hit the reel cannot say."""
+    import reel_plan
+    lead = words["reportLead"]
+    out, pages = [], {}
+
+    def top_(p_):
+        pm_ = set(masters.get(p_.lower(), set()))
+        return {m_ for m_ in pm_ if not any(m_ in (masters.get(o_) or ()) for o_ in pm_ if o_ != m_)}
+    for entry in search.get("pairs") or []:
+        pair = [str(x) for x in entry.get("pair") or []]
+        if len(pair) != 2:
+            continue
+        hits = [reel_plan.flat_hit(h) for h in entry.get("hits") or []]
+        if not hits:
+            # a supplied patch for this pair that the search did not find: said as the search's miss, never as no patch
+            own = next((p_ for p_ in supplied if {x.lower() for x in pair} <= top_(p_)), None)
+            out.append(lead["notFoundSupplied"].format(a=pair[0], b=pair[1], patch=own)
+                       if own and lead.get("notFoundSupplied") else lead["notFound"].format(a=pair[0], b=pair[1]))
+            continue
+        evaluated = any({x.lower() for x in pair} <= set(masters.get(p_.lower(), set())) for p_ in supplied)
+        for h in hits:
+            key = str(h.get("pageId") or h.get("modId") or h["file"]).casefold()
+            if key not in pages:
+                pages[key] = {"hits": [], "pairs": [], "evaluated": False}
+                out.append(pages[key])                          # the page's line, in the search's order
+            pg = pages[key]
+            pg["hits"].append(h)
+            if pair not in pg["pairs"]:
+                pg["pairs"].append(pair)
+            pg["evaluated"] |= evaluated
+    lines = []
+    for x in out:
+        if isinstance(x, str):
+            lines.append(x)
+            continue
+        best = reel_plan.usable_first(x["hits"], loaded)[0]
+        file_ = reel_plan.said_file(best, words)
+        pairs = x["pairs"]
+        common = [p for p in pairs[0] if all(p.lower() in {q.lower() for q in pr} for pr in pairs)]
+        if len(pairs) == 1:
+            text = lead["listed"].format(a=pairs[0][0], b=pairs[0][1], file=file_)
+        elif common and lead.get("listedPage"):
+            others = [q for pr in pairs for q in pr if q.lower() != common[0].lower()]
+            text = lead["listedPage"].format(b=common[0], a=reel_plan.joined(list(dict.fromkeys(others))), file=file_)
+        else:
+            text = lead["listedPagePairs"].format(pairs="; ".join(f"{pr[0]} and {pr[1]}" for pr in pairs), file=file_)
+        lines.append(text + reel_plan.lead_qualifiers(best, words, loaded, x["evaluated"]))
+    return lines
+
+
+def id_words(eid) -> str:
+    """An editor ID said in words, its numbers kept so two cells stay apart ("SolitudeExterior01" -> "Solitude Exterior
+    01", "BUV_EisaFollowerRef" -> "BUV Eisa Follower Ref")."""
+    s = re.sub(r"[_]+", " ", str(eid or ""))
+    s = re.sub(r"(?<=[a-z])(?=[A-Z])|(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])", " ", s)
+    return " ".join(s.split())
+
+
+def said_place(label, places: dict, words: dict, reader) -> str:
+    """A place as the report prints it (N6): the cell's in-game name; else, for an exterior cell named by form key, its
+    worldspace and grid cell read from the cell's own plugin (reader(what, formKey) -> editorId, cellWorld, cellGrid);
+    else its editor ID said in words. Never a form key and never a bare editor ID: those stay in the evidence index."""
+    lab = str(label)
+    m = re.match(r"^([A-Za-z][A-Za-z0-9_]*)(?: \((?:int|ext)\))?$", lab)
+    if m:
+        return (places.get(m.group(1)) or {}).get("name") or id_words(m.group(1))
+    m = re.match(r"^([0-9A-Fa-f]{6}):(\S+?)(?: \((int|ext)\))?$", lab)
+    if not m:
+        return lab
+    fk = f"{m.group(1).upper()}:{m.group(2)}"
+    eid = reader("editorId", fk)
+    if isinstance(eid, str) and eid:
+        return (places.get(eid) or {}).get("name") or id_words(eid)
+    world, grid = reader("cellWorld", fk), reader("cellGrid", fk)
+    if isinstance(world, str) and isinstance(grid, (list, tuple)) and len(grid) == 2:
+        weid = reader("editorId", world)
+        wname = ((places.get(weid) or {}).get("name") or id_words(weid)) if isinstance(weid, str) and weid else None
+        if wname and words.get("persistentPlaceGridWorld"):
+            return bind(words["persistentPlaceGridWorld"], {"world": wname, "x": fmt_n(grid[0]), "y": fmt_n(grid[1])})
+    return str(words.get("placeUnnamed") or "a cell with no name")
+
 
 def media_kind_caption(media: dict, words: dict) -> str:
     """The figure caption's addition for a picture drawn offline from the game's files rather than taken in the game
@@ -2676,7 +2769,7 @@ def build_prediction(ctx: dict) -> dict:
                             res_ = {"records": pluginread.cell_worlds(path_, [str(fk)])}
                         else:
                             res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements,
-                                    "placementFull": pluginread.placements_full}.get(
+                                    "placementFull": pluginread.placements_full, "cellGrid": pluginread.cell_grids}.get(
                                 what, pluginread.cell_flags)(path_, [str(fk)])
                         got_ = res_["records"].get(str(fk))
                         plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
@@ -2712,16 +2805,21 @@ def build_prediction(ctx: dict) -> dict:
                 footprint_cells.setdefault(str(c_["cell"]).lower(), c_)
     place_names = (names.get("places") or {}) if isinstance(names.get("places"), dict) else {}
 
+    def place_reader(what, fk):
+        """said_place's reads: the evaluated mod's own footprint for a cell it records, else the cell's own plugin file
+        (recorded bytes only)."""
+        c_ = footprint_cells.get(str(fk).lower())
+        if c_ and what == "cellGrid":
+            return [c_["x"], c_["y"]]
+        if c_ and what == "cellWorld":
+            return "footprint:" + str(c_["worldspace"])
+        if what == "editorId" and str(fk).startswith("footprint:"):
+            return str(fk).split(":", 1)[1]
+        got_ = plugin_record(str(fk).split(":", 1)[-1], what, str(fk))
+        return got_ if got_ != {} else None
+
     def named_place(label):
-        m_ = re.match(r"^([A-Za-z][A-Za-z0-9_]*)(?: \((?:int|ext)\))?$", str(label))
-        if m_ and (place_names.get(m_.group(1)) or {}).get("name") and words.get("placeNamed"):
-            return bind(words["placeNamed"], {"name": place_names[m_.group(1)]["name"], "editorId": m_.group(1)})
-        m_ = re.match(r"^([0-9A-Fa-f]{6}:\S+?)(?: \(ext\))?$", str(label))
-        c_ = footprint_cells.get(m_.group(1).lower()) if m_ else None
-        if c_ and words.get("persistentPlaceGridWorld"):
-            return bind(words["persistentPlaceGridWorld"], {"label": f"{m_.group(1)} (ext)", "world": c_["worldspace"],
-                                                            "x": fmt_n(c_["x"]), "y": fmt_n(c_["y"])})
-        return label
+        return said_place(label, place_names, words, place_reader)
 
     def located_place(fk, label):
         got_ = placement_place(fk, label)
@@ -2747,10 +2845,11 @@ def build_prediction(ctx: dict) -> dict:
         w_name_ = (plugin_record(str(w_).split(":", 1)[1], "editorId", str(w_))
                    if isinstance(w_, str) and ":" in w_ else None)
         if isinstance(w_name_, str) and w_name_ and words.get("persistentPlaceGridWorld"):
-            return bind(words["persistentPlaceGridWorld"], {"label": label, "world": w_name_,
+            return bind(words["persistentPlaceGridWorld"], {"world": (place_names.get(w_name_) or {}).get("name")
+                                                            or id_words(w_name_),
                                                             "x": fmt_n(math.floor(pos_[0] / 4096)),
                                                             "y": fmt_n(math.floor(pos_[1] / 4096))})
-        return bind(words["persistentPlaceGrid"], {"label": label, "x": fmt_n(math.floor(pos_[0] / 4096)),
+        return bind(words["persistentPlaceGrid"], {"x": fmt_n(math.floor(pos_[0] / 4096)),
                                                    "y": fmt_n(math.floor(pos_[1] / 4096))})
 
     def winner_on_at_load(rk):
@@ -3823,8 +3922,11 @@ def build_prediction(ctx: dict) -> dict:
         if label and rk[1] != "LOST-EDIT":
             # every row's place counts, a place named by form key included; a navmesh row's triangle note is not
             # part of its place
-            place_ = located_place(rk[4], re.sub(r"\s+\d+ tris -> \d+$", "", str(label)))
-            g.setdefault("_places", collections.Counter())[place_] += 1
+            raw_ = re.sub(r"\s+\d+ tris -> \d+$", "", str(label))
+            place_ = located_place(rk[4], raw_)
+            # counted by the cell, said by its name (N6): two cells said alike are still two places
+            g.setdefault("_places", collections.Counter())[raw_] += 1
+            g.setdefault("_placeSaid", {})[raw_] = place_
             place_labels.setdefault(str(rk[4]), place_)             # the reel says the same place the report does
         if hit["finding"].get("readerProvenance"):
             # the full sentence is in the limits and beside the finding; the item says it in short
@@ -4131,8 +4233,10 @@ def build_prediction(ctx: dict) -> dict:
             detail.append(bind(words["itemExamples"], {"examples": "; ".join(g["_records"])}))
         detail.extend(carried_lines_)
         places = g.pop("_places", None)
+        said_ = g.pop("_placeSaid", {})
         if places:
-            top = places.most_common(2)
+            places = collections.Counter({said_.get(k_, k_) + "\x00" + k_: n_ for k_, n_ in places.items()})
+            top = [(k_.split("\x00", 1)[0], n_) for k_, n_ in places.most_common(2)]
             if len(places) == 1:
                 detail.append(bind(words["itemPlaceOne" if g["count"] == 1 else "itemPlaceAll"], {"place": top[0][0]}))
             else:
@@ -4142,8 +4246,8 @@ def build_prediction(ctx: dict) -> dict:
                                                             "count": len(places) - len(top),
                                                             "noun": "place" if len(places) - len(top) == 1 else "places",
                                                             # the rest named too, so the reader can find every one
-                                                            "rest": "; ".join(f"{pl} ({fmt_n(n)})" for pl, n in
-                                                                              places.most_common()[len(top):])})
+                                                            "rest": "; ".join(f"{pl.split(chr(0), 1)[0]} ({fmt_n(n)})"
+                                                                              for pl, n in places.most_common()[len(top):])})
                                                                  if len(places) > len(top) else "")}))
         g.pop("_records", None)
         partners_ = g.pop("_partnerSet", set())
@@ -4567,9 +4671,10 @@ def build_prediction(ctx: dict) -> dict:
             [(str((h["finding"].get("counts") or {}).get("groupKind") or "CLOBBERED"), loser, winner, h["row"].get("formKey"),
               h["row"].get("label")) for h in held])
         # with a re-measure the largest losses are named by its lost ground (below), not by triangles (fifth review, M2)
-        ex_ = ("; ".join(bind(words["historyPersistsExample"], {"place": pl_, "samples": fmt_n(n_)})
+        # a place is said as a name (N6), never its editor ID or form key
+        ex_ = ("; ".join(bind(words["historyPersistsExample"], {"place": named_place(pl_), "samples": fmt_n(n_)})
                          for n_, pl_ in lost_[:3]) if len(lost_) == len(held) else
-               "; ".join(f"{d[1]} {fmt_n(d[2])} -> {fmt_n(d[3])} triangles" for d in drops[:3] if d[0] > 0))
+               "; ".join(f"{named_place(d[1])} {fmt_n(d[2])} -> {fmt_n(d[3])} triangles" for d in drops[:3] if d[0] > 0))
         text = bind(words["historyLossLineMeasured" if (n_persist or not ex_) and words.get("historyLossLineMeasured")
                           else "historyLossLine"], {
             "setup": words["historyLossSetup"][("withoutPatches" if len(patch_names) > 1 else "withoutPatch")
@@ -4783,6 +4888,7 @@ def build_prediction(ctx: dict) -> dict:
             if ob_:
                 kind_ = (kinds_.get("types") or {}).get(ob_.group(1), "")
                 pl_ = str((p_rows.get((e["checkId"], e["kind"], e["A"], e["B"], e["formKey"], e["summary"])) or {}).get("row", {}).get("label") or "")
+                pl_ = named_place(pl_) if pl_ else pl_                  # a place is said as a name (N6)
                 # (sixth review, Sewers S3) an object of a Creation Club plugin is named with its plugin, not as the
                 # base game's
                 listed_ = {str(x).lower() for x in words.get("baseGamePlugins") or []}
@@ -7504,7 +7610,7 @@ def build_prediction(ctx: dict) -> dict:
                                           "quests": ", ".join(f"'{q_}'" for q_ in qs_)})
 
         def new_in_game(c):
-            """(fifth review, BPT S5) the check's in-game meaning, as a candidate for a visual check"""
+            """(fifth review, BPT S5) the check's in-game meaning, as worth a look in game"""
             ig_ = in_game.get(c)
             # said for the checks whose title does not say what a new problem does in game (skill data, page budget)
             if c not in set(words.get("newByCheckInGameChecks") or []):
@@ -9456,6 +9562,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                            and not (f.get("rowsNoBody") and row_has_no_body(names_doc0, r, bodiless_types))
                            and " tris" not in str(r.get("label")).lower()
                            and not re.match(r"^[0-9a-f]{6}:", str(r.get("label")), re.I)), None)
+            if sample:
+                # a place printed as a place is a name, never a bare editor ID (N6)
+                sample = said_place(sample, (names_doc0 or {}).get("places") or {}, {}, lambda what_, fk_: None)
             unit = phrases.get("unitSingular") if count_rows == 1 else phrases.get("unitPlural")
             if group_kind == "LOST-EDIT" and finding_declared(f, c.get("B")):
                 f["readerPlain"] = bind((pr.get("reader") or {}).get("patchChoiceLine") or "{count} {unit}: {patch}", {
@@ -9950,7 +10059,15 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             slots_ = {"setup": setup_, "object": fig_object(fk_)}
             key_ = state_
             if state_ == "highlight" and (marks_.get("cyan") or marks_.get("magenta")):
-                key_, hs_ = highlight_caption(marks_, fig_object, fig_mod)
+                # the pair (R13): the frame's subject and its marks; where the subject is the one marked, its partner
+                # from the finding's one row on that object (none said when several rows name it: not guessed)
+                pair_ = [fk_, *marks_.values()]
+                if {str(x).casefold() for x in pair_} == {str(fk_).casefold()}:
+                    own_rows_ = [r_ for r_ in (f_.get("rows") or f_.get("allRows") or [])
+                                 if str(r_.get("formKey")).casefold() == str(fk_).casefold()]
+                    if len(own_rows_) == 1:
+                        pair_ += list(own_rows_[0].get("other") or [])[:1]
+                key_, hs_ = highlight_caption(marks_, fig_object, fig_mod, participants=pair_)
                 slots_.update(hs_)
             if state_ in NAVMESH_STATES:
                 # a navmesh frame: the plugin whose earlier version the historical frame draws, from that frame's own
@@ -11158,36 +11275,16 @@ def _reel_block_rest(plan, bundle, sibling, pr, a, out, b, names, masters, sb, p
             if isinstance(sw, dict) and sw.get("key"):
                 switches[sw["key"]] = {"edid": sw.get("edid"), "baselineEnabled": sw.get("baselineEnabled"),
                                        "trigger": sw.get("trigger")}
-    # the patch search said in the report too, with the same cautions as the reel: one line per pair it covers
+    # the patch search said in the report too, with the same cautions as the reel: one line per Nexus page (R3, N1)
     pred_ = (plan.get("reader") or {}).get("prediction") or {}
     if search and words.get("reportLead"):
         arm_ = next((a_ for a_ in (plan.get("scope") or {}).get("arms") or [] if a_.get("armId") == pred_.get("predictionArm")), {})
         loaded_ = {str(x).lower() for x in arm_.get("plugins") or []}
         supplied_ = [str(x) for x in (plan.get("reader") or {}).get("suppliedPatches") or []]
-        leads_ = []
-        for entry_ in search.get("pairs") or []:
-            pair_ = [str(x) for x in entry_.get("pair") or []]
-            if len(pair_) != 2:
-                continue
-            hits_ = entry_.get("hits") or []
-            evaluated_ = any({x.lower() for x in pair_} <= set(masters.get(p_.lower(), set())) for p_ in supplied_)
-            try:
-                usable_ = reel_plan.usable_first(hits_, loaded_)[:3]
-            except reel_plan.Refused as ex:
-                raise InputRefused(f"patch-search-unreadable: {ex}")
-            for h_ in usable_:
-                leads_.append(words["reportLead"]["listed"].format(a=pair_[0], b=pair_[1],
-                                                                   file=reel_plan.said_file(h_, words))
-                              + reel_plan.lead_qualifiers(h_, words, loaded_, evaluated_))
-            if not hits_:
-                # a supplied patch for this pair that the search did not find: said as the search's miss, never as no patch
-                def top_(p_):
-                    pm_ = set(masters.get(p_.lower(), set()))
-                    return {m_ for m_ in pm_ if not any(m_ in (masters.get(o_) or ()) for o_ in pm_ if o_ != m_)}
-                own_ = next((p_ for p_ in supplied_ if {x.lower() for x in pair_} <= top_(p_)), None)
-                leads_.append(words["reportLead"]["notFoundSupplied"].format(a=pair_[0], b=pair_[1], patch=own_)
-                              if own_ and words["reportLead"].get("notFoundSupplied") else
-                              words["reportLead"]["notFound"].format(a=pair_[0], b=pair_[1]))
+        try:
+            leads_ = patch_search_leads(search, words, loaded_, supplied_, masters)
+        except reel_plan.Refused as ex:
+            raise InputRefused(f"patch-search-unreadable: {ex}")
         if leads_:
             # the search file names plugins by the file on disk; said in the load order's spelling, as every line is
             leads_ = proper_plugin_case(leads_, [str(q.get("name") if isinstance(q, dict) else q)

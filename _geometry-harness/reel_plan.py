@@ -578,6 +578,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if lab and re.match(r"^[0-9A-Fa-f]{6}:\S+", str(lab)):
             rest = re.sub(r"^[0-9A-Fa-f]{6}:\S+(?: \((?:int|ext)\))?(?:,| in)?\s*", "", str(lab)).strip()
             return rest or words.get("placeUnnamed") or "an unnamed place"
+        if lab:
+            # the report already says the place as a name (N6: a name, a worldspace and grid, an editor ID in words)
+            return str(lab)
         cell = cell or next((cap_cell[str(f)] for f in fks if str(f) in cap_cell), None)
         if cell and re.search(r"(?:^|_)es[mpl]$", cell, re.I):
             return words.get("placeUnnamed") or "an unnamed place"
@@ -677,7 +680,17 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     unmarkable = unmarkable_objects(capture_results)
     attempts = int(policy.get("captureAttemptsPerType") or policy.get("perType") or 1)
     chosen_by_type, unpictured, represented, candidates, others = {}, [], {}, {}, {}
-    none_captured = []      # (type, count) of kinds with clashes to picture and no captured frame, capture closed
+    none_captured = []      # (type, count, why) of kinds with clashes to picture and no captured frame, capture closed
+
+    def capture_why(cs_):
+        """Why clashes a picture could show have no frame once capture is closed (R1): captureNoRule when none of them is
+        of a check capture can request (skill data vignettes.captureChecks, kept equal to the capture rules), else
+        captureLimit (the rounds, the per-round cap or the tries per kind ran out first)."""
+        if "captureChecks" not in policy:
+            raise Refused("the skill's scene-policy vignettes.captureChecks is missing: the reel cannot say why a clash "
+                          "was not captured")
+        can_ = set(policy["captureChecks"])
+        return "captureLimit" if any(str(c_["rows"][0].get("checkId")) in can_ for c_ in cs_) else "captureNoRule"
 
     strength_re = re.compile(policy["strengthPattern"]) if policy.get("strengthPattern") else None
 
@@ -760,7 +773,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         untried_buried = [c for c in draw if c not in chosen and c not in tried_refused and buried_(c)]
         unpictured += [(c, "buried") for c in untried_buried]
         if captures_final and not chosen and t in (policy.get("pictureTypes") or []) and len(draw) > len(tried_refused):
-            none_captured.append((t, len(draw) - len(tried_refused)))
+            none_captured.append((t, len(draw) - len(tried_refused),
+                                  capture_why([c for c in draw if c not in tried_refused])))
         chosen_by_type[t] = chosen
         if t in (policy.get("pictureTypes") or []):
             candidates[t] = [c["rows"][0]["formKey"] for g in ordering for c in g][:attempts]
@@ -824,16 +838,16 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         other = [m for m in c["pair"] if m != target][0]
         return [p for p in supplied if {other.lower(), target.lower()} <= patch_pair(p, masters)]
 
-    used: dict = {}
-
     def pick(case):
-        """The k-th patch sentence of a case in reel order takes phrasing k mod the pool's size (skill data
-        reel.words.patch): deterministic, and never the same phrasing twice in a row for one case."""
+        """A patch case's one phrasing (skill data reel.words.patch): one fact is said one way in every vignette (R2);
+        a case given several phrasings is refused, never rotated."""
         pool = words["patch"][case]
-        pool = pool if isinstance(pool, list) else [pool]
-        k = used.get(case, 0)
-        used[case] = k + 1
-        return pool[k % len(pool)]
+        if isinstance(pool, list):
+            if len(pool) != 1:
+                raise Refused(f"the skill's reel.words.patch.{case} has {len(pool)} phrasings; one fact is said one way, "
+                              f"so give it one")
+            pool = pool[0]
+        return pool
 
     def needs(patch, c):
         """(Missives r3 reel review, finding 6) the plugins the patch needs beyond the clash's two mods and the base game."""
@@ -955,6 +969,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 fk_, col_ = argv[i_ + 1].rsplit("=", 1)
                 marks[col_] = fk_
         parts = [lw["mark"].format(colour=col_, object=spoken_ref(fk_)) for col_, fk_ in marks.items()]
+        # (R13) the pair's other object, left unmarked (too large: highlight's volume rule), is named on the strip too
+        marked_ = {str(v_).casefold() for v_ in marks.values()}
+        r_ = c["rows"][0]
+        parts += [lw["unmarked"].format(object=spoken_ref(fk_)) for fk_ in [r_["formKey"], *(r_.get("other") or [])]
+                  if parts and lw.get("unmarked") and str(fk_).casefold() not in marked_]
         return lw["highlight"].format(marks="; ".join(parts)) if parts else lw.get("highlightNoMarks")
 
     def thing(fk, owner_mod):
@@ -1236,6 +1255,14 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 intro = words["cases"]["one" if n == 1 else "many"].format(count=n, label=case_labels[t])
                 lead = ("" if n == 1 else words["lead"]["all"] if shown == n else
                         words["lead"]["one"] if shown == 1 else words["lead"]["some"].format(count=shown))
+                if t in (policy.get("countRows") or []) and words["cases"].get("rows"):
+                    # (N2) a type counted in rows (navmesh links) says its unit, and the groups its examples come from
+                    g_n = len({group_key(c_) for c_ in clashes.values() if c_["type"] == t})
+                    intro = words["cases"]["rowsOne" if n == 1 else "rows"].format(
+                        count=n, unit=card_unit(t, n) or case_labels[t], groups=g_n,
+                        groupNoun="group" if g_n == 1 else "groups")
+                    lead = ("" if g_n == 1 else words["lead"]["groupsAll"] if shown == g_n else
+                            words["lead"]["groupsOne"] if shown == 1 else words["lead"]["groupsSome"].format(count=shown))
                 text = " ".join(x for x in (intro, lead, text) if x)
             if any(r["formKey"] in game for r in c["rows"]):
                 text += " " + words["playTime"]
@@ -1277,6 +1304,14 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             moved += [{**x_, "from": "split" if split else "vignette", "formKey": r["formKey"]} for x_ in cut_]
             chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "split" if split else "vignette", "narration": text,
                              "clash": clash, "frames": frames, "patch": evidence})
+    def where_(key, **slots):
+        """Where in the report to find the clashes not pictured: under the prediction section's heading, or, when the
+        presentation names none, the report itself (key + "Report"); never an empty heading in quotes (C2130)."""
+        heading_ = spoken((reader.get("sectionHeadings") or {}).get("prediction") or "").strip()
+        if heading_:
+            return words.get(key, "").format(heading=heading_, **slots)
+        return words.get(key + "Report", "").format(**slots)
+
     if unpictured or none_captured or any(represented.get(t_) for t_ in counts):
         n_un = len(unpictured)
         sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un) if unpictured else ""
@@ -1285,7 +1320,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             # count, so every clash on the card is accounted for; then what "represented" means and why, as sentences
             def units_(t_, cs_):
                 return sum(len(c_["rows"]) if t_ in (policy.get("countRows") or []) else 1 for c_ in cs_)
-            parts_, any_rep_, moved_ = [], False, 0
+            parts_, any_rep_, moved_ = [], False, collections.Counter()
             for t_ in policy.get("typeOrder") or []:
                 if t_ not in counts:
                     continue
@@ -1295,7 +1330,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 unp_ = units_(t_, [c_ for c_, _ in unpictured if c_["type"] == t_])
                 tot_ = card_count(t_)
                 if not pic_:
-                    moved_ += rep_
+                    if rep_:
+                        moved_[capture_why(represented.get(t_) or [])] += rep_
                     unp_, rep_ = unp_ + rep_, 0                 # no example shown: nothing stands for them
                 if not (rep_ or unp_):
                     continue
@@ -1314,8 +1350,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             why_n = collections.Counter()
             for c_, why_ in unpictured:
                 why_n[why_] += units_(c_["type"], [c_])
-            if moved_:
-                why_n["notCaptured"] += moved_
+            why_n.update(moved_)
             reasons_ = policy.get("stillReasons") or {}
             # a buried clash's reason says how many camera spots each rests on (skill data stillReasonsCount)
             spots_ = sorted({b_["stations"] for c_, w_ in unpictured if w_ == "buried"
@@ -1333,8 +1368,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             if why_n and words.get("unpicturedReasons"):
                 report_lines.append(words["unpicturedReasons"].format(reasons=" ".join(
                     str(reasons_.get(w_, w_)).rstrip(".") + f" ({count_(w_, n_)})." for w_, n_ in why_n.most_common())))
-            sentence_un += " " + words.get("unpicturedWhere", "").format(
-                heading=spoken((reader.get("sectionHeadings") or {}).get("prediction") or ""))
+            sentence_un += " " + where_("unpicturedWhere")
             sentence_un = sentence_un.strip()
         elif unpictured and words.get("unpicturedTyped"):
             # in the opening card's units, by type, and where in the report to find them; then why, by reason
@@ -1342,9 +1376,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             for c, _ in unpictured:
                 by_t[c["type"]] += len(c["rows"]) if c["type"] in (policy.get("countRows") or []) else 1
             parts = [f"{n_} {card_unit(t_, n_) or words['caseLabels'].get(t_, t_)}" for t_, n_ in by_t.items()]
-            sentence_un = words["unpicturedTyped"].format(
-                parts=joined(parts), verb="isn't" if sum(by_t.values()) == 1 else "aren't",
-                heading=spoken((reader.get("sectionHeadings") or {}).get("prediction") or ""))
+            sentence_un = where_("unpicturedTyped", parts=joined(parts),
+                                 verb="isn't" if sum(by_t.values()) == 1 else "aren't")
             why_n = collections.Counter()
             for c_, why_ in unpictured:
                 why_n[why_] += len(c_["rows"]) if c_["type"] in (policy.get("countRows") or []) else 1
@@ -1352,10 +1385,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             if short and words.get("unpicturedWhy"):
                 report_lines.append(words["unpicturedWhy"].format(reasons=joined(
                     [f"{n_} {short.get(w_, w_)}" for w_, n_ in why_n.most_common()])))
-        for t_, n_ in none_captured:
+        for t_, n_, w_ in none_captured:
+            # which limit stopped the picture (R1): said, never "no picture was captured" alone
             sentence_un = (sentence_un + " " + words["noneCapturedOne" if n_ == 1 and words.get("noneCapturedOne")
                                                       else "noneCaptured"].format(
-                count=n_, label=case_labels[t_])).strip()
+                count=n_, label=case_labels[t_], why=(words.get("noneCapturedWhy") or {})[w_])).strip()
         # a removal is said, never only counted: which mod takes which object out of the world
         gone = [c for c, why in unpictured if why == "removed"]
         def verb_(c):
@@ -1503,6 +1537,6 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             "modNames": {k: v for k, v in mod_names.items()}, "markers": sorted(markers),
             "sequence": list(policy["sequence"]), "holdSeconds": dict(policy.get("holdSeconds") or {}),
             "captureCandidates": candidates, "accounting": accounting, "capturesFinal": bool(captures_final),
-            "noneCaptured": [{"type": t_, "count": n_} for t_, n_ in none_captured],
+            "noneCaptured": [{"type": t_, "count": n_, "why": w_} for t_, n_, w_ in none_captured],
             "movedToReport": moved, "reportLines": report_lines,
             "chapters": chapters}
