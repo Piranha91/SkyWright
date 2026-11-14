@@ -21,7 +21,7 @@ internal static class RecordsTree
 {
     /// <summary>Every placed reference the walk read, drawn or not (stage-3 review M-2): the walk's per-reference outcome
     /// from viewprobe, and the references whose meshes the scene holds. A reference the build placed but whose mesh
-    /// never loaded reads "no-mesh". Without the walk's outcomes (an older viewprobe) only the drawn ones are known.</summary>
+    /// never opened (a model path the scene could not resolve or load) reads "unresolved-mesh", distinct from "no-model" (a base with no model). Without the walk's outcomes (an older viewprobe) only the drawn ones are known.</summary>
     internal static IReadOnlyList<SceneRefEntry> Entries(IEnumerable<(FormKey Ref, string? BaseEditorId)> drawn,
         IReadOnlyDictionary<FormKey, (string Outcome, string? BaseEditorId)>? outcomes, IReadOnlyDictionary<FormKey, FormKey> cells)
     {
@@ -31,7 +31,7 @@ internal static class RecordsTree
         if (outcomes is not null)
             foreach (var (k, o) in outcomes)
                 if (!d.ContainsKey(k) && !k.IsNull)
-                    list.Add(new SceneRefEntry(k, Cell(k), o.BaseEditorId, o.Outcome == "drawn" ? "no-mesh" : o.Outcome));
+                    list.Add(new SceneRefEntry(k, Cell(k), o.BaseEditorId, o.Outcome == "drawn" ? "unresolved-mesh" : o.Outcome));
         return list;
     }
 

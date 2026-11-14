@@ -130,7 +130,9 @@ public class ShellTests
         Assert.Null(e[K(0x801)].NotDrawn);
         Assert.Equal("marker", e[K(0x802)].NotDrawn);
         Assert.Equal("disabled", e[K(0x803)].NotDrawn);
-        Assert.Equal("no-mesh", e[K(0x804)].NotDrawn);
+        Assert.Equal("unresolved-mesh", e[K(0x804)].NotDrawn);
+        // The tree's drawn set is exactly the scene's drawn set: nothing the scene did not draw is labelled drawn.
+        Assert.Equal(new[] { K(0x801) }, e.Values.Where(x => x.NotDrawn is null).Select(x => x.Ref).ToArray());
         var tree = RecordsTree.Build("w", e.Values, c => c.ToString(), new HashSet<string>(), new Dictionary<string, IReadOnlyList<string>>());
         var node = RecordsTree.Walk(tree).Single(n => n.Key == K(0x802).ToString());
         Assert.Equal("marker", node.NotDrawn);
