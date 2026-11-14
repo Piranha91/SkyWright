@@ -6411,6 +6411,13 @@ def media_item_refusal(item: dict, src: Path, fingerprints: dict,
     return None, None
 
 
+def receipt_evidence_rel(receipt_path: str) -> str:
+    """Where a bundle keeps a file a receipt names (an output, a base emit, a comparison input): bundle-relative, under
+    evidence/. The one rule `bundle` copies by and `verify-bundle` checks by; `verify-bundle --out` lists every receipt
+    output it resolved this way under `receiptOutputs`, so a reader of a bundle takes its paths from there."""
+    return f"evidence/{receipt_path}"
+
+
 def cmd_bundle(a) -> int:
     run = Path(a.run)
     set_run_store(run)
@@ -6488,7 +6495,7 @@ def cmd_bundle(a) -> int:
             accepted = bool((rec.get("validation") or {}).get("accepted"))
             for o in rec.get("outputs") or []:
                 src = run / o["path"]
-                copy_in(src, f"evidence/{o['path']}", check_id=rec["checkId"], arm_id=rec["armId"],
+                copy_in(src, receipt_evidence_rel(o["path"]), check_id=rec["checkId"], arm_id=rec["armId"],
                         strength=(rec.get("result") or {}).get("strength"), kind="emit",
                         provenance={"receiptId": rec["receiptId"], "runId": rec.get("runId")},
                         recorded_sha256=o.get("sha256") if accepted else None,
@@ -6593,7 +6600,7 @@ def cmd_bundle(a) -> int:
             for o in rec.get("outputs") or []:
                 if Path(o["path"]).suffix.lower() in BINARY_SUFFIXES:
                     continue  # never copied by policy (identity only), so never a required path
-                require(f"evidence/{o['path']}")
+                require(receipt_evidence_rel(o["path"]))
         for d in decisions:
             if d.get("accepted"):
                 for row in d.get("evidence") or []:
@@ -6675,6 +6682,7 @@ def cmd_verify_bundle(a) -> int:
     memo = HashMemo()
     identity_count = 0
     guarantee = None
+    receipt_outputs: list[dict] = []
 
     def defect(kind: str, path: str | None, detail: str) -> None:
         defects.append({"kind": kind, "path": path, "detail": detail})
@@ -6777,7 +6785,14 @@ def cmd_verify_bundle(a) -> int:
             for path, recorded, is_output in chain:
                 if not path:
                     continue
-                rel = f"evidence/{path}"
+                rel = receipt_evidence_rel(path)
+                if is_output:
+                    present = (d / rel).exists()
+                    receipt_outputs.append({
+                        "receipt": k, "receiptId": rec.get("receiptId"), "checkId": rec.get("checkId"),
+                        "armId": rec.get("armId"), "part": rec.get("part"), "recordedPath": path, "path": rel,
+                        "sha256": recorded, "present": present,
+                        "matches": bool(present and recorded is not None and memo.sha256(d / rel) == recorded)})
                 if not (d / rel).exists():
                     defect("evidence-missing", rel,
                            f"receipt {rec.get('receiptId')} records this file and the bundle omits it")
@@ -6844,6 +6859,9 @@ def cmd_verify_bundle(a) -> int:
               # package is intact, not whether the evaluation was finished.
               "evaluation": {"complete": ev.get("complete"), "claim": ev.get("claim"),
                              "missing": ev.get("missing", [])},
+              # every accepted terminal receipt's outputs as this verb resolved and checked them (bundle-relative):
+              # a reader takes a receipt's files from here, never by guessing a root
+              "receiptOutputs": receipt_outputs,
               "note": "every path is bundle-relative, so a relocated bundle validates identically; bundle "
                       "integrity and evaluation completion are two states and both are written here"}
     write_json(Path(getattr(a, "out", None) or d / "verify.json"), verify)
