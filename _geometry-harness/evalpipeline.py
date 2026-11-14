@@ -1099,7 +1099,7 @@ def report_plan_argv(ctx, res, out: Path, captures=(), bundle: Path | None = Non
     captured clashes instead of asking for captures no later round will take."""
     run = ctx.out / "evaluation"
     argv = [sys.executable, fwd(HERE / "evalreport.py"), "plan", "--bundle", fwd(bundle or bundle_dir(ctx)), "--out", fwd(out),
-            "--verify-copy", "--mode", ctx.entry.get("report", {}).get("mode", "concise")]
+            "--mode", ctx.entry.get("report", {}).get("mode", "concise")]
     if ctx.entry.get("report", {}).get("maxPages"):
         argv += ["--max-pages", str(ctx.entry["report"]["maxPages"])]
     arms = read_json(ctx.out / "prepare" / "preparation.json")["arms"]

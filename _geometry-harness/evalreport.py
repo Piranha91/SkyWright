@@ -11,7 +11,7 @@ lacks something the report says "not assessed" or "not supplied" - never a guess
 
 Subcommands (contract: standards/HOUSECARL_EVALUATION_PRESENTATION.md):
 
-  plan            --bundle DIR --out OUT [--mode concise|exhaustive] [--max-pages N] [--verify-copy]
+  plan            --bundle DIR --out OUT [--mode concise|exhaustive] [--max-pages N]
   triage          --manifest ANNOTATED.json --out OUT [--policy POLICY.json]
   report          --presentation OUT/presentation.json --out OUT [--no-print]
   verify          --out OUT
@@ -972,29 +972,18 @@ def relative_pdf_links(pdf: Path, folder: Path) -> str | None:
 
 # ------------------------------------------------------------------------------ bundle verification --
 
-def run_verify_bundle(bundle: Path, out: Path, copy: bool) -> tuple[dict | None, int, str]:
-    """D1: `evalrun.py verify-bundle DIR` is the authority. With --verify-copy the bundle is copied under
-    OUT first so the original directory is not written to (verify-bundle writes DIR/verify.json); the
-    copy verifies identically because verify-bundle reads nothing outside the bundle."""
-    target = bundle
-    tmp = None
-    if copy:
-        tmp = out / ".verify-copy"
-        shutil.rmtree(tmp, ignore_errors=True)
-        shutil.copytree(bundle, tmp)
-        target = tmp
+def run_verify_bundle(bundle: Path, out: Path) -> tuple[dict | None, int, str]:
+    """D1: `evalrun.py verify-bundle DIR` is the authority. It reads the bundle in place and writes its result to
+    OUT/verify.json (`--out`), so the bundle is never written and nothing is copied. An earlier OUT/verify.json is
+    removed first, so a verify that dies before writing cannot be read as this run's verdict."""
+    result = out / "verify.json"
+    result.unlink(missing_ok=True)
     try:
-        r = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(target)],
+        r = subprocess.run([sys.executable, str(EVALRUN), "verify-bundle", str(bundle), "--out", str(result)],
                            capture_output=True, text=True, timeout=900)
     except (OSError, subprocess.SubprocessError) as ex:
-        if tmp:
-            shutil.rmtree(tmp, ignore_errors=True)
         return None, EXIT_REFUSED_INPUT, f"verify-bundle could not run: {ex}"
-    verify = load_json(target / "verify.json")
-    if isinstance(verify, dict):
-        write_json(out / "verify.json", verify)
-    if tmp:
-        shutil.rmtree(tmp, ignore_errors=True)
+    verify = load_json(result)
     if not isinstance(verify, dict):
         return None, r.returncode, ("verify-bundle wrote no readable verify.json: " +
                                     (r.stderr or r.stdout or "")[-400:].strip())
@@ -12271,7 +12260,7 @@ def cmd_plan(a) -> int:
             return refuse(r, f"schema-unsupported: bundleSchema {manifest.get('bundleSchema')!r} is not {BUNDLE_SCHEMA}; "
                              "this bundle predates evidence-chain verification - rebuild it from its run")
         out.mkdir(parents=True, exist_ok=True)
-        verify, code, err = run_verify_bundle(bundle, out, a.verify_copy)
+        verify, code, err = run_verify_bundle(bundle, out)
         if verify is None:
             return refuse(r, f"verify-failed: {err}")
         bl = verify.get("bundle") or {}
@@ -12375,7 +12364,7 @@ def cmd_plan(a) -> int:
             vname = "sibling-verify" if k_ == 0 else f"sibling-verify-{k_ + 1}"
             sdir = out / vname
             sdir.mkdir(parents=True, exist_ok=True)
-            sverify, _, serr = run_verify_bundle(sibling, sdir, a.verify_copy)
+            sverify, _, serr = run_verify_bundle(sibling, sdir)
             if sverify is None or not (sverify.get("bundle") or {}).get("complete"):
                 who_ = "the sibling bundle" if len(sib_given) == 1 else f"the sibling bundle {given_}"
                 return refuse(r, f"sibling-refused: verify-bundle did not find {who_} complete "
@@ -13099,7 +13088,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rows-per-group", type=int, default=None)
     p.add_argument("--figures-per-finding", type=int, default=None)
     p.add_argument("--verify-copy", action="store_true",
-                   help="verify a temporary copy of the bundle so the bundle directory itself is never written to")
+                   help="no effect: plan never writes into a bundle it reads; kept so recorded commands still run")
     p.add_argument("--location-scope", action="append", default=[], metavar="ARM=FILE",
                    help="bind a scopeprobe location-contributor document to an arm; repeat for multiple arms")
     p.add_argument("--order-setup", action="append", default=[], metavar="ARM@PLAN=ROWS",

@@ -5,7 +5,7 @@
     python evalrun.py resume --run RUN [--rebuild-ledger]
     python evalrun.py finalize --run RUN
     python evalrun.py bundle --run RUN [--out DIR] [--media media.json] [--registry FILE] [--scope FILE]
-    python evalrun.py verify-bundle DIR
+    python evalrun.py verify-bundle DIR [--out FILE]
     python evalrun.py status --run RUN
 
 What this is for. The tools can already measure a load order; what still lived in the coordinating
@@ -6665,7 +6665,8 @@ def cmd_verify_bundle(a) -> int:
     bundle. Structural validity and evaluation completion are two separate states and both are written:
     a correctly accounted INCOMPLETE evaluation in an intact bundle is a valid deliverable and exits 0.
     A list that omits a required file cannot prove completeness, so the chain is walked from the
-    bundle's own ledger and receipts rather than from what the manifest chose to list."""
+    bundle's own ledger and receipts rather than from what the manifest chose to list. With --out the result goes to
+    that file and nothing is written into DIR."""
     d = Path(a.dir)
     defects: list[dict] = []
     missing: list[str] = []
@@ -6845,7 +6846,7 @@ def cmd_verify_bundle(a) -> int:
                              "missing": ev.get("missing", [])},
               "note": "every path is bundle-relative, so a relocated bundle validates identically; bundle "
                       "integrity and evaluation completion are two states and both are written here"}
-    write_json(d / "verify.json", verify)
+    write_json(Path(getattr(a, "out", None) or d / "verify.json"), verify)
     print(f"verify: {ok} file(s) verified, {len(missing)} missing, {len(mismatched)} mismatched, "
           f"{len(defects)} defect(s); bundle.complete: {complete}; "
           f"evaluation.complete: {ev.get('complete')}")
@@ -7141,6 +7142,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("verify-bundle", help="recompute every hash from the bundle-relative paths")
     p.add_argument("dir")
+    p.add_argument("--out", default=None, metavar="FILE",
+                   help="write the result to FILE instead of DIR/verify.json, so DIR is only read")
     p.set_defaults(fn=cmd_verify_bundle)
 
     p = sub.add_parser("enrich", help="add evidence derived after measurement to a bundle (record rows, names)")

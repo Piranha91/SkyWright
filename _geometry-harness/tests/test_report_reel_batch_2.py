@@ -171,7 +171,7 @@ def with_paths(arm_, paths):
 
 
 def run_plan_cmd(bdir: Path, out: Path, extra=()):
-    R.run_verify_bundle = lambda bundle, out_, copy_: ({"bundle": {"complete": True, "schemaSupported": True}}, 0, "")
+    R.run_verify_bundle = lambda bundle, out_: ({"bundle": {"complete": True, "schemaSupported": True}}, 0, "")
     err, sink = io.StringIO(), io.StringIO()
     with contextlib.redirect_stderr(err), contextlib.redirect_stdout(sink):
         code = R.cmd_plan(R.build_parser().parse_args(["plan", "--bundle", str(bdir), "--out", str(out), *extra]))

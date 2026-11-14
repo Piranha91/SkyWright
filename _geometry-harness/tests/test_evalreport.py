@@ -2279,7 +2279,7 @@ def case_r6(tmp, index, common):
         ok_pres = pres is not None and ((pres.get("scope") or {}).get("integrity") or {}).get("ok") is True
         check(not ok_pres, f"{case}/{spec['damage']}: no presentation with integrity ok was produced")
         if spec.get("verifyBundleSays"):
-            vj = load(b / "verify.json") or {}
+            vj = load(out / "verify.json") or {}                 # plan writes the verdict to OUT, never the bundle
             check(bool((vj.get("bundle") or {}).get("mismatched")), f"{case}/{spec['damage']}: verify-bundle listed the altered file under mismatched")
 
 
