@@ -142,4 +142,45 @@ public class BundleTests : IClassFixture<R3Bundle>
         var ex = Assert.ThrowsAny<Exception>(() => BundleConflicts.Read(dir, "baseline", v, said));
         Assert.Contains("did not resolve", ex.Message);
     }
+
+    /// <summary>Stage-3 review L-1: ranking key 4 on a candidate arm. The arm's overlap differential is made to name one
+    /// row as new; that row must read "new on this arm" and rank above every row that ties with it on keys 1-3, including
+    /// the ones its identity sorts after. The receipt is bound into the ledger, so an edited receipt cannot verify: the
+    /// bundle is verified first and the edit made after, so this tests the reader and the ranking, not verify-bundle.</summary>
+    [Fact]
+    public void On_a_candidate_arm_a_row_the_differential_names_new_ranks_above_its_equals_on_keys_one_to_three()
+    {
+        const string Arm = "candidate-01-reorder";
+        const string Diff = "receipts/geometry.object-overlap__" + Arm + "__diff.json";
+        var dir = _b.Copy();
+        var sevPath = Path.Combine(dir + "-work", "severity.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(sevPath)!);
+        File.WriteAllText(sevPath, """{ "unread": 25, "default": 25, "weights": { "*": { } } }""");
+        var sev = SeverityTable.Load(sevPath);
+
+        var v = Path.Combine(dir + "-work", "verify.json");
+        var said = BundleConflicts.Verify(dir, v, R3Bundle.Evalrun);
+        var first = BundleConflicts.Read(dir, Arm, v, said);
+        var r0 = ConflictRanking.Rank(first.Rows, first.Targets, sev).Where(r => r.Row.CheckId == "geometry.object-overlap").ToList();
+        Assert.All(r0, r => Assert.Equal("not new", r.NewLabel));
+        // The largest group that ties on keys 1-3; its last row by identity is the one made new.
+        var group = r0.GroupBy(r => (r.InvolvesTarget, r.PhysicalGrade, r.EvidenceGrade)).OrderByDescending(g => g.Count()).First().ToList();
+        Assert.True(group.Count >= 2, "the fixture has no two overlap rows that tie on keys 1-3");
+        var chosen = group.OrderBy(r => r.Row.Identity, StringComparer.Ordinal).Last().Row.Identity;
+
+        var p = Path.Combine(dir, Diff.Replace('/', Path.DirectorySeparatorChar));
+        var d = JsonNode.Parse(File.ReadAllText(p))!;
+        var created = d["orderEvaluation"]!["created"]!;
+        created["created"] = 1; created["newDefect"] = 1;
+        created["newExamples"] = new JsonArray(chosen);
+        File.WriteAllText(p, d.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        var second = BundleConflicts.Read(dir, Arm, v, said);
+        var r1 = ConflictRanking.Rank(second.Rows, second.Targets, sev).Where(r => r.Row.CheckId == "geometry.object-overlap").ToList();
+        var hit = r1.Single(r => r.Row.Identity == chosen);
+        Assert.Equal("new on this arm", hit.NewLabel);
+        var ties = r1.Where(r => r.Row.Identity != chosen && (r.InvolvesTarget, r.PhysicalGrade, r.EvidenceGrade) == (hit.InvolvesTarget, hit.PhysicalGrade, hit.EvidenceGrade)).ToList();
+        Assert.NotEmpty(ties);
+        Assert.All(ties, t => Assert.True(hit.Rank < t.Rank, $"the new row ranks {hit.Rank}, after {t.Row.Identity} at {t.Rank}"));
+        Assert.All(ties, t => Assert.Equal("not new", t.NewLabel));
+    }
 }
