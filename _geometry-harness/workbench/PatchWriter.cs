@@ -158,6 +158,18 @@ internal sealed class PatchWriter : IAsyncDisposable
         return await CallAsync("housecarl_apply", args, ct);
     }
 
+    /// <summary>One sentence naming the parent records a placement override carries with it (stage-2 review L-b): the
+    /// write path copies each edited reference's CELL, and for an exterior its WRLD, as they win when the patch is written,
+    /// so a patch loaded last masks any later edit to those records.</summary>
+    internal static string ParentRecordsSentence(IEnumerable<(Mutagen.Bethesda.Plugins.FormKey Ref, Mutagen.Bethesda.Plugins.FormKey? Cell)> edits,
+                                                 Mutagen.Bethesda.Plugins.FormKey? worldspace)
+    {
+        var cells = edits.Select(e => e.Cell is { } c ? c.ToString() : $"(the cell of {e.Ref}, not recorded by the scene)").Distinct().ToList();
+        string parents = (cells.Count == 1 ? "cell " : "cells ") + string.Join(", ", cells)
+                         + (worldspace is { IsNull: false } w ? $" and worldspace {w}" : "");
+        return $"The patch also carries {parents} as they win now, so loaded last it masks any later edit to those records.";
+    }
+
     static bool Near(HousecarlCore.Vec3 a, HousecarlCore.Vec3 b, float t) =>
         MathF.Abs(a.X - b.X) <= t && MathF.Abs(a.Y - b.Y) <= t && MathF.Abs(a.Z - b.Z) <= t;
     static bool NearAngles(HousecarlCore.Vec3 a, HousecarlCore.Vec3 b, float t)

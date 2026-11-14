@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Threading;
 using HousecarlCore;
 using Mutagen.Bethesda.Plugins;
 using OpenTK.Graphics.OpenGL4;
@@ -54,10 +55,11 @@ internal sealed class WorkbenchHost
         _fov = cam.FovDeg;
         _camera.FieldOfView = _fov;
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
-        _session.Changed += s => { Say(s); UpdateStatus(); };
+        _session.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate(); };
         _outDir = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : opt.OutDir;
         Directory.CreateDirectory(_outDir);
         renderer.Overlays.Add(_gizmo);
+        _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye));
     }
 
     /// <summary>The <see cref="InteractiveViewer.Host"/> entry: runs the window until it closes.</summary>
@@ -81,6 +83,7 @@ internal sealed class WorkbenchHost
         _camera.Elevation = Math.Clamp(float.RadiansToDegrees(MathF.Asin(off.Y / dist)), -89.5f, 89.5f);
         _camera.Azimuth = float.RadiansToDegrees(MathF.Atan2(off.X, off.Z));
         _gizmo.FitTo(_eye);
+        if (_window is not null) Invalidate();
     }
 
     // The view's client size in pixels, read each frame.
@@ -111,66 +114,12 @@ internal sealed class WorkbenchHost
             s => !(s.Mesh is { IsRendering: false }) && s.Kind is PickKind.Ref or PickKind.Terrain);
     }
 
-    // ---- input: a plain click selects; a drag on the handle edits ---------------------------------------------------
-    Vector2? _press; Handle _dragHandle; RefPlacementEdit.Pose _dragStart; bool _moved;
-
-    internal void OnPress(Vector2 px)
-    {
-        _press = px; _moved = false;
-        _dragHandle = _session.Selected is not null ? _gizmo.HitTest(px, Project) : Handle.None;
-        if (_dragHandle != Handle.None) _dragStart = _session.Current(_session.Selected!.Value);
-        _gizmo.Hot = _dragHandle;
-    }
-
-    internal void OnMove(Vector2 px)
-    {
-        if (_press is not { } p0) { _gizmo.Hot = _session.Selected is not null ? _gizmo.HitTest(px, Project) : Handle.None; return; }
-        if (Vector2.Distance(p0, px) > 3f) _moved = true;
-        if (_dragHandle == Handle.None || !_moved) return;
-        _session.Preview(_session.Selected!.Value, DragPose(p0, px));
-    }
-
-    internal void OnRelease(Vector2 px)
-    {
-        if (_press is not { } p0) return;
-        _press = null;
-        if (_dragHandle != Handle.None && _moved)
-        {
-            var key = _session.Selected!.Value;
-            _session.Stage(key, DragPose(p0, px));
-            _gizmo.Centre = ToV(_session.Current(key).Position);
-        }
-        else if (!_moved) SelectAt(px);
-        _dragHandle = Handle.None; _gizmo.Hot = Handle.None;
-    }
-
-    RefPlacementEdit.Pose DragPose(Vector2 from, Vector2 to)
-    {
-        var s = _dragStart;
-        if (_dragHandle == Handle.TurnZ)
-        {
-            float rad = _gizmo.TurnAmount(from, to, RayAt);
-            return s with { Rotation = RefPlacementEdit.Turned(s.Rotation, Vector3.UnitZ, rad) };
-        }
-        float amount = _gizmo.MoveAmount(_dragHandle, from, to, RayAt);
-        var axis = _dragHandle switch { Handle.MoveX => Vector3.UnitX, Handle.MoveY => Vector3.UnitY, _ => Vector3.UnitZ };
-        var np = ToV(s.Position) + axis * amount;
-        return s with { Position = new Vec3(np.X, np.Y, np.Z) };
-    }
-
-    void SelectAt(Vector2 px)
-    {
-        var hit = PickAt(px);
-        if (hit?.Shape is { Kind: PickKind.Ref } sh && _session.IsDrawn(sh.Ref.RefKey)) Select(sh.Ref.RefKey);
-        else Select(null);
-    }
-
-    void Select(FormKey? key)
-    {
-        _session.Select(key);
-        _gizmo.Centre = key is { } k ? ToV(_session.Current(k).Position) : null;
-        _gizmo.FitTo(_eye);
-    }
+    // ---- input: a plain click selects; a drag on the handle edits (ViewInput) ------------------------------------
+    ViewInput _input = null!;
+    internal void OnPress(Vector2 px) => _input.OnPress(px);
+    internal void OnMove(Vector2 px) => _input.OnMove(px);
+    internal void OnRelease(Vector2 px) => _input.OnRelease(px);
+    void Select(FormKey? key) => _input.Select(key);
 
     static Vector3 ToV(Vec3 v) => new(v.X, v.Y, v.Z);
 
@@ -184,16 +133,29 @@ internal sealed class WorkbenchHost
     // ---- the window ---------------------------------------------------------------------------------------------------
     NativeGlHost _view = null!;
     bool _vsync = Environment.GetEnvironmentVariable("WB_VSYNC") != "off";
-    // The frame loop. Default "cap60": the view draws itself at up to 60 frames a second, paced by a clock, because on
-    // this machine WPF's own frame tick ran at 31 ms with the view hosted and the child window's swap interval did not
-    // block (stage 2 receipts). "free": as fast as it can (measurement). "wpf-tick": once per WPF frame tick.
-    readonly string _loop = Environment.GetEnvironmentVariable("WB_LOOP") is { Length: > 0 } lp ? lp : "cap60";
+    // The frame loop. Default "demand": up to 60 frames a second, paced by a clock (on this machine WPF's own frame tick
+    // ran at 31 ms with the view hosted and the child window's swap interval did not block, stage 2 receipts), and only
+    // while something changed: input, the camera, the edit session, the script, the view's size or a repaint. "cap60":
+    // the same pacing, drawing every frame whether or not anything changed (stage 2's loop). "free": as fast as it can
+    // (measurement). "wpf-tick": once per WPF frame tick.
+    readonly string _loop = Environment.GetEnvironmentVariable("WB_LOOP") is { Length: > 0 } lp ? lp : "demand";
+    bool _dirty = true, _parked;
+    DispatcherTimer? _sizeWatch;
+
+    /// <summary>Something on screen changed: draw the next frame (wakes a parked demand loop).</summary>
+    internal void Invalidate()
+    {
+        _dirty = true;
+        if (_parked && _alive) { _parked = false; _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background); }
+    }
     bool _freeLoop => _loop != "wpf-tick";
     double _nextFrame;
 
+    DispatcherFrame? _frameLoop;
+    bool _alive;
+
     void RunWindow()
     {
-        var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
         var undo = new Button { Content = "Undo (Ctrl+Z)", Margin = new Thickness(4) };
         var dry = new Button { Content = "Dry run", Margin = new Thickness(4) };
         var write = new Button { Content = "Write patch", Margin = new Thickness(4) };
@@ -207,40 +169,71 @@ internal sealed class WorkbenchHost
         bar.Children.Add(buttons); bar.Children.Add(_status);
 
         // The view: a Win32 child window drawn with the scene's own context (NativeGlHost says why not GLWpfControl).
-        var gw = _opt.Window;
-        _view = NewView(gw);
+        _view = NewView(_opt.Window);
         _view.Message += OnViewMessage;
-        var root = new DockPanel();
-        DockPanel.SetDock(bar, Dock.Bottom);
-        root.Children.Add(bar); root.Children.Add(_view);
-        _window = new Window { Title = $"workbench — {_opt.CellLabel}", Width = 1440, Height = 960, Content = root };
-        if (Environment.GetEnvironmentVariable("WB_WINDOW") is { Length: > 0 } ws && ws.Split('x') is [var ww, var wh])
-        { _window.Width = double.Parse(ww, CultureInfo.InvariantCulture); _window.Height = double.Parse(wh, CultureInfo.InvariantCulture); }
-
-        System.Windows.Media.CompositionTarget.Rendering += (_, _) =>
+        bool first = Shell.Window is null;
+        _window = Shell.EnsureWindow($"workbench — {_opt.CellLabel}");
+        _window.Title = $"workbench — {_opt.CellLabel}";
+        if (first && Environment.GetEnvironmentVariable("WB_WINDOW") is { Length: > 0 } ws && ws.Split('x') is [var ww, var wh])
         {
-            TickStamps?.Add(Clock.Elapsed.TotalMilliseconds);
-            if (!_freeLoop) Frame();
-        };
-        _window.Closed += async (_, _) => { if (_writer is not null) await _writer.DisposeAsync(); };
-        _window.Loaded += (_, _) =>
+            double w = double.Parse(ww, CultureInfo.InvariantCulture), h = double.Parse(wh, CultureInfo.InvariantCulture);
+            if (w < Shell.MinWidth || h < Shell.MinHeight)
+                Say(FormattableString.Invariant($"window {w}x{h} asked for is below the workbench's minimum {Shell.MinWidth}x{Shell.MinHeight}; it opens at the minimum so the 3D view keeps room."));
+            _window.Width = Math.Max(w, Shell.MinWidth); _window.Height = Math.Max(h, Shell.MinHeight);
+        }
+        Shell.Current = this;
+        Shell.Mount(_view, bar);
+        Shell.FillTree(BuildTree());
+        if (Shell.SwitchClock is { } sw)
+        {
+            Say(FormattableString.Invariant($"cell switch to {Shell.SwitchCell}: scene rebuilt in {sw.Elapsed.TotalSeconds:0.0} s (request to window back)"));
+            Shell.SetBanner(FormattableString.Invariant($"cell {Shell.SwitchCell} loaded in {sw.Elapsed.TotalSeconds:0.0} s"));
+            Shell.SwitchClock = null;
+        }
+
+        EventHandler tick = (_, _) => { TickStamps?.Add(Clock.Elapsed.TotalMilliseconds); if (!_freeLoop && _alive) Frame(); };
+        System.Windows.Media.CompositionTarget.Rendering += tick;
+        _alive = true;
+        void Start()
         {
             _window.Activate(); _window.Topmost = true; _window.Topmost = false; _window.Focus();
             if (_view.MakeCurrent())
-            {
                 Say($"GL: {GL.GetString(StringName.Vendor)} | {GL.GetString(StringName.Renderer)} | {GL.GetString(StringName.Version)}; "
                     + $"swap interval {(_vsync ? 1 : 0)} set: {_view.SetSwapInterval(_vsync ? 1 : 0)}");
-            }
-            if (_freeLoop) _window.Dispatcher.BeginInvoke(FreeFrame, System.Windows.Threading.DispatcherPriority.Background);
-        };
+            if (_freeLoop) _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background);
+            if (Shell.PendingLand is { } land) { Shell.PendingLand = null; _landOnFirstFrame = land; }
+        }
         SyncCamera();
         UpdateStatus();
-        _script = Script.Load(this);
-        app.Run(_window);
+        _script = Script.Attach(this);
+        _frameLoop = new DispatcherFrame();
+        if (first) { _window.Loaded += (_, _) => Start(); _window.Show(); }
+        else _window.Dispatcher.BeginInvoke(Start, DispatcherPriority.Loaded);
+        if (!Shell.Closed) Dispatcher.PushFrame(_frameLoop);
+        _alive = false;
+        _sizeWatch?.Stop();
+        if (Shell.Closed && Environment.GetEnvironmentVariable("WB_DUMP") is { Length: > 0 } dump) Shell.Dump(this, dump);
+        System.Windows.Media.CompositionTarget.Rendering -= tick;
+        if (_writer is not null) _writer.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        Shell.Current = null;
+        Shell.Unmount();
+        _view.Dispose();
         // Hand the context back to its own (hidden) window: viewprobe's teardown clears it through GLFW, which fails
         // while it is current on the destroyed view.
         _opt.Window.MakeCurrent();
-        Say("window closed");
+        Say(Shell.Closed ? "window closed" : "scene closed for a cell switch");
+    }
+
+    /// <summary>End this scene's frame loop (the window closed, or a cell switch was asked for).</summary>
+    internal void StopFrame() { if (_frameLoop is { } f) f.Continue = false; }
+
+    /// <summary>Ask viewprobe for the worklist's cell <paramref name="index"/>: this scene closes, viewprobe rebuilds, and
+    /// the shell calls the host again with the new scene.</summary>
+    internal void RequestCell(int index)
+    {
+        _opt.CellSwitch = (index, 0);
+        Shell.Flush();
+        StopFrame();
     }
 
     static unsafe NativeGlHost NewView(OpenTK.Windowing.Desktop.NativeWindow gw) =>
@@ -248,20 +241,30 @@ internal sealed class WorkbenchHost
 
     void FreeFrame()
     {
-        if (_loop == "cap60")
+        if (!_alive) return;
+        if (_loop == "demand" && !_dirty && !(_script?.WantsFrames ?? false) && _view.ClientSize() == (_fbW, _fbH))
+        {
+            // Nothing to draw: park until Invalidate, with a slow timer that only watches for a resize.
+            _parked = true;
+            _sizeWatch ??= new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
+                (_, _) => { if (_parked && _view.ClientSize() != (_fbW, _fbH)) Invalidate(); }, _window.Dispatcher);
+            return;
+        }
+        if (_loop is "cap60" or "demand")
         {
             double now = Clock.Elapsed.TotalMilliseconds;
             if (now < _nextFrame - 1.5) { System.Threading.Thread.Sleep(1); }
             else { _nextFrame = Math.Max(_nextFrame + 1000.0 / 60.0, now - 5); Frame(); }
         }
         else Frame();
-        if (_window.IsLoaded) _window.Dispatcher.BeginInvoke(FreeFrame, System.Windows.Threading.DispatcherPriority.Background);
+        if (_alive) _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background);
     }
 
     internal bool Vsync => _vsync;
 
     void OnViewMessage(int msg, int x, int y, IntPtr wParam)
     {
+        Invalidate();
         var p = new Vector2(x, y);
         switch (msg)
         {
@@ -308,8 +311,10 @@ internal sealed class WorkbenchHost
     void Frame()
     {
         if (Paused || !_view.MakeCurrent()) return;
+        _dirty = false;
         var t0 = Clock.Elapsed.TotalMilliseconds;
         (_fbW, _fbH) = _view.ClientSize();
+        if (_landOnFirstFrame is { } land) { _landOnFirstFrame = null; Land(FormKey.Factory(land)); }
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.Viewport(0, 0, W, H);
         _renderer.Render(_camera, W, H);
@@ -322,6 +327,117 @@ internal sealed class WorkbenchHost
         _view.Swap();
         SwapMs.Add(Clock.Elapsed.TotalMilliseconds - t1);
         AfterFrame?.Invoke();
+    }
+
+    // ---- the shell's side of a scene: the Records tree, landing on a reference, the state dump ----------------------
+    string? _landOnFirstFrame;
+
+    /// <summary>The cell this scene was built for, as the bundle names cells (a FormKey string).</summary>
+    internal string? SceneCell => _opt.CellKey?.ToString();
+
+    internal IReadOnlyList<TreeNode> BuildTree()
+    {
+        var cells = _opt.RefCells ?? new Dictionary<FormKey, FormKey>();
+        var drawn = DrawnAll().Select(r => new SceneRefEntry(r.Ref.RefKey, cells.TryGetValue(r.Ref.RefKey, out var c) ? c : null, r.Ref.BaseEditorId)).ToList();
+        var conflictRefs = Shell.Ranked.SelectMany(r => new[] { r.Row.RefKey, r.Row.OtherKey }).Where(k => k is not null)
+                                 .Select(k => k!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var loadedCells = drawn.Where(d => d.Cell is not null).Select(d => d.Cell!.Value.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (SceneCell is { } sc) loadedCells.Add(sc);
+        var unloaded = Shell.Ranked.Where(r => r.Row.Cell is { } c && !loadedCells.Contains(c))
+            .GroupBy(r => r.Row.Cell!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(r => r.Row.RefKey).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+        string ws = _opt.Interior ? $"interior {_opt.CellLabel}" : $"worldspace {_opt.Worldspace}";
+        return RecordsTree.Build(ws, drawn, c => c == _opt.CellKey ? $"{c} {_opt.CellLabel} (this scene's cell)" : $"{c} (loaded ring)",
+                                 conflictRefs, unloaded);
+    }
+
+    /// <summary>Every drawn reference of the scene, one entry per reference.</summary>
+    internal IEnumerable<RefOcclusion> DrawnAll() =>
+        (_opt.Occlusion?.Refs ?? new List<RefOcclusion>()).Where(r => r.Meshes.Count > 0 && !r.Ref.RefKey.IsNull)
+            .GroupBy(r => r.Ref.RefKey).Select(g => g.First());
+
+    /// <summary>Select <paramref name="key"/> and frame the camera on it: the eye looks at the reference's box centre
+    /// from a distance that fits the box, trying a few headings and pitches until a pick at the screen centre names the
+    /// reference (other geometry can stand in front). Says which pose it kept and whether the centre pick named it.</summary>
+    internal bool Land(FormKey key)
+    {
+        if (!_session.IsDrawn(key)) { Shell.SetBanner($"{key} is not drawn in this scene; nothing to land on."); Shell.LastLanding = $"{key}: not drawn"; return false; }
+        var ro = _session.RefOf(key);
+        var p = ToV(_session.Current(key).Position);
+        Vector3 c = ro.Min.X <= ro.Max.X ? (ro.Min + ro.Max) * 0.5f : p;
+        float r = ro.Min.X <= ro.Max.X ? MathF.Max((ro.Max - ro.Min).Length() * 0.5f, 16f) : 64f;
+        float dist = MathF.Max(r * 3f, 250f);
+        Select(key);
+        // Prefer a pose where the reference is the first thing the centre ray meets; else the first pose where the
+        // centre ray at least crosses it (an overlap row's reference is often inside the other one, so covered).
+        (float Yaw, float Pitch)? clear = null, crossing = null; string coveredBy = "nothing";
+        int tried = 0;
+        foreach (var pitch in new[] { 30f, 55f, 80f })
+        {
+            foreach (var dy in new[] { 0f, 90f, 180f, 270f, 45f, 135f, 225f, 315f })
+            {
+                float yaw = (_yaw + dy) % 360f;
+                _yaw = yaw; _pitch = pitch; _eye = c - Forward() * dist; SyncCamera();
+                tried++;
+                var centre = new Vector2(W * 0.5f, H * 0.5f);
+                var first = CentreName(PickAt(centre));
+                if (first == key.ToString()) { clear = (yaw, pitch); break; }
+                if (crossing is null && PickOwn(centre, key) is not null) { crossing = (yaw, pitch); coveredBy = first; }
+            }
+            if (clear is not null) break;
+        }
+        var keep = clear ?? crossing;
+        if (keep is { } k) { _yaw = k.Yaw; _pitch = k.Pitch; _eye = c - Forward() * dist; SyncCamera(); }
+        string how = clear is not null ? $"it is the first thing the screen-centre ray meets (pose {tried} of 24 tried)"
+                   : crossing is not null ? $"the screen-centre ray crosses it, but {coveredBy} is in front from all 24 poses tried"
+                   : "the screen-centre ray misses its shapes from every pose tried (its box centre is outside them)";
+        Shell.LastLanding = FormattableString.Invariant(
+            $"{key}: box centre {c.X:0.#},{c.Y:0.#},{c.Z:0.#}, radius {r:0.#} u; eye {dist:0} u away at yaw {_yaw:0} pitch {_pitch:0}; ") + how;
+        Shell.SetBanner(clear is not null ? $"landed on {key}" : crossing is not null ? $"landed on {key}; it is inside or behind {coveredBy} from every side tried" : $"landed near {key}; the view's centre misses its shapes");
+        Say("landing: " + Shell.LastLanding);
+        return keep is not null;
+    }
+
+    static string CentreName(PickHit? h) => h?.Shape is { Kind: PickKind.Ref } sh ? sh.Ref.RefKey.ToString() : h is null ? "nothing" : h.Shape.Kind.ToString();
+
+    /// <summary>The ray through a pixel against <paramref name="key"/>'s own shapes only (what is in front does not count).</summary>
+    internal PickHit? PickOwn(Vector2 px, FormKey key)
+    {
+        var (o, d) = _camera.ScreenPointToRay(px.X, px.Y, W, H);
+        return ScenePick.Pick(_session.RefOf(key).Shapes, new Vector3(o.X, o.Y, o.Z), new Vector3(d.X, d.Y, d.Z), _ => true);
+    }
+
+    internal object SceneState()
+    {
+        var centre = PickAt(new Vector2(W * 0.5f, H * 0.5f));
+        return new
+        {
+            cell = SceneCell, cellLabel = _opt.CellLabel, worldspace = _opt.Worldspace.ToString(), interior = _opt.Interior,
+            worklistCell = _opt.WorklistCell, drawnRefs = DrawnAll().Count(),
+            drawnRefKeys = DrawnAll().Select(r => r.Ref.RefKey.ToString()).OrderBy(k => k, StringComparer.Ordinal),
+            selected = _session.Selected?.ToString(), staged = _session.Pending.Count,
+            camera = new { eye = new[] { _eye.X, _eye.Y, _eye.Z }, yaw = _yaw, pitch = _pitch, fov = _fov, framebuffer = new[] { W, H } },
+            centreRayCrossesSelected = _session.Selected is { } sk && PickOwn(new Vector2(W * 0.5f, H * 0.5f), sk) is not null,
+            pickAtCentre = centre?.Shape is { Kind: PickKind.Ref } sh ? sh.Ref.RefKey.ToString() : centre is null ? null : centre.Shape.Kind.ToString(),
+        };
+    }
+
+    /// <summary>Post a mouse message to the 3D view's own window at a framebuffer (device) pixel, so the Win32 path
+    /// (WndProc, lParam decoding) carries it exactly as it carries the real mouse.</summary>
+    internal void PostMouse(int msg, Vector2 px)
+    {
+        int x = (int)MathF.Round(px.X), y = (int)MathF.Round(px.Y);
+        var lp = (IntPtr)(((y & 0xFFFF) << 16) | (x & 0xFFFF));
+        var wp = (IntPtr)(msg == 0x202 ? 0 : 0x1);                       // MK_LBUTTON held while down and moving
+        if (!PostMessage(_view.Handle, msg, wp, lp)) Say($"PostMessage {msg:X} failed (Win32 error {Marshal.GetLastWin32Error()})");
+    }
+    [DllImport("user32.dll", SetLastError = true)] static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    internal int FrameCount => _frame;
+    internal string? SceneStateCentre()
+    {
+        var c = PickAt(new Vector2(W * 0.5f, H * 0.5f));
+        return c?.Shape is { Kind: PickKind.Ref } sh ? sh.Ref.RefKey.ToString() : c is null ? null : c.Shape.Kind.ToString();
     }
 
     // ---- what the script and the bar call ---------------------------------------------------------------------------
@@ -362,7 +478,11 @@ internal sealed class WorkbenchHost
         try
         {
             var w = await WriterAsync();
-            var text = await w.CommitAsync(_session.Net(), patchName, dryRun);
+            var net = _session.Net();
+            var cells = _opt.RefCells ?? new Dictionary<FormKey, FormKey>();
+            var parents = PatchWriter.ParentRecordsSentence(net.Select(e => (e.Ref, cells.TryGetValue(e.Ref, out var c) ? c : (FormKey?)null)),
+                                                            _opt.Interior ? null : _opt.Worldspace);
+            var text = parents + "\n" + await w.CommitAsync(net, patchName, dryRun);
             Say((dryRun ? "dry run" : "write") + " answer:\n" + text);
             return text;
         }

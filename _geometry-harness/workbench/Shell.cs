@@ -1,0 +1,184 @@
+using System.Diagnostics;
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using System.Windows.Threading;
+using Mutagen.Bethesda.Plugins;
+using Window = System.Windows.Window;
+
+namespace Workbench;
+
+/// <summary>The app shell, alive for the whole process while scenes come and go: the window, the Conflicts tab (the
+/// bundle's ranked rows, subject rows by default, a toggle to all rows), the Records tree, and the slot the current
+/// scene's 3D view sits in. viewprobe rebuilds the scene for another cell through its worklist cell switch (the host
+/// returns with <c>CellSwitch</c> set); the shell keeps the window and the bundle, and lands on the asked-for reference
+/// when the next scene arrives.</summary>
+internal static class Shell
+{
+    internal static BundleConflicts? Bundle;
+    internal static SeverityTable? Severity;
+    internal static IReadOnlyList<RankedRow> Ranked = Array.Empty<RankedRow>();
+    internal static IReadOnlyList<string> WorklistCells = Array.Empty<string>();
+    internal static bool ShowAll;
+    internal static string? PendingLand;            // a reference to land on when the next scene arrives
+    internal static Stopwatch? SwitchClock;         // runs from a cell switch's request to the next scene's arrival
+    internal static string? SwitchCell;
+    internal static int ExpectFailures;
+    internal static bool Closed;
+    internal static string? LastLanding;            // the last landing's one-line account, for the dump
+
+    static Application? _app;
+    internal static Window? Window;
+    static readonly ContentControl ViewSlot = new();
+    static readonly ContentControl BarSlot = new();
+    static readonly TextBlock Banner = new() { Margin = new Thickness(6, 4, 6, 4), TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold };
+    static readonly ListBox ConflictList = new();
+    static readonly TreeView Records = new();
+    static readonly CheckBox AllRows = new() { Content = "all rows on this arm", Margin = new Thickness(6, 2, 6, 2) };
+    internal static IReadOnlyList<TreeNode> Tree = Array.Empty<TreeNode>();
+    internal static WorkbenchHost? Current;
+
+    /// <summary>The rows the Conflicts tab lists now: subject rows (A or B a plan target) unless the toggle shows all.</summary>
+    internal static IReadOnlyList<RankedRow> Visible => ShowAll ? Ranked : Ranked.Where(r => r.InvolvesTarget).ToList();
+
+    internal static string RowText(RankedRow r) =>
+        $"{r.Rank}. {r.Row.Kind}  {r.Row.A} / {r.Row.B}  ref {r.Row.RefKey}{(r.Row.RefBaseEditorId is { } e ? " " + e : "")}"
+        + $"  [physical {r.PhysicalLabel}; check's evidence grade {r.EvidenceLabel}; {r.NewLabel}; severity {r.Severity} ({r.SeverityLabel})]";
+
+    internal const double MinWidth = 560 + 360, MinHeight = 480;   // the tabs' width plus a 360-wide view; device-independent units
+
+    internal static Window EnsureWindow(string title)
+    {
+        if (Window is not null) return Window;
+        _app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        ScrollViewer.SetHorizontalScrollBarVisibility(ConflictList, ScrollBarVisibility.Auto);
+        VirtualizingPanel.SetIsVirtualizing(Records, true);
+        ConflictList.SelectionChanged += (_, _) => { if (ConflictList.SelectedItem is ListBoxItem { Tag: RankedRow r }) OpenRow(r); };
+        Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) OpenRef(n.Key, CellOfRef(n.Key)); };
+        AllRows.Checked += (_, _) => { ShowAll = true; FillConflicts(); };
+        AllRows.Unchecked += (_, _) => { ShowAll = false; FillConflicts(); };
+        var conflictsTab = new DockPanel();
+        DockPanel.SetDock(AllRows, Dock.Top);
+        conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(ConflictList);
+        var tabs = new TabControl { Width = 560 };
+        tabs.Items.Add(new TabItem { Header = "Conflicts", Content = conflictsTab });
+        tabs.Items.Add(new TabItem { Header = "Records", Content = Records });
+        var root = new DockPanel();
+        DockPanel.SetDock(Banner, Dock.Top); DockPanel.SetDock(BarSlot, Dock.Bottom); DockPanel.SetDock(tabs, Dock.Left);
+        root.Children.Add(Banner); root.Children.Add(BarSlot); root.Children.Add(tabs); root.Children.Add(ViewSlot);
+        // The view keeps room of its own: below this the tabs would take the whole width (a 360x240 window drew the scene
+        // into a 1x66 view, stage 3 receipts). A smaller size asked for opens at this minimum and says so.
+        Window = new Window { Title = title, Width = 1440, Height = 960, MinWidth = MinWidth, MinHeight = MinHeight, Content = root };
+        Window.Closed += (_, _) => { Closed = true; Current?.StopFrame(); };
+        FillConflicts();
+        return Window;
+    }
+
+    internal static void SetBanner(string text) { Banner.Text = text; WorkbenchHost.Say("banner: " + text); }
+
+    /// <summary>Put a scene's view and bar into the window (replacing the last scene's).</summary>
+    internal static void Mount(UIElement view, UIElement bar) { ViewSlot.Content = view; BarSlot.Content = bar; }
+    internal static void Unmount() { ViewSlot.Content = null; BarSlot.Content = null; }
+
+    /// <summary>Let WPF draw what was just set (the loading banner) before the thread goes to rebuild the scene.</summary>
+    internal static void Flush()
+    {
+        var f = new DispatcherFrame();
+        Dispatcher.CurrentDispatcher.BeginInvoke(DispatcherPriority.Background, () => f.Continue = false);
+        Dispatcher.PushFrame(f);
+    }
+
+    internal static void FillConflicts()
+    {
+        ConflictList.Items.Clear();
+        foreach (var r in Visible)
+        {
+            var item = new ListBoxItem { Content = RowText(r), Tag = r };
+            if (r.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
+            ConflictList.Items.Add(item);
+        }
+    }
+
+    internal static void FillTree(IReadOnlyList<TreeNode> tree)
+    {
+        Tree = tree;
+        Records.Items.Clear();
+        foreach (var n in tree) Records.Items.Add(Item(n));
+        static TreeViewItem Item(TreeNode n)
+        {
+            var t = new TreeViewItem { Header = n.Label + (n.Conflict && n.Kind == "ref" ? "   (conflict)" : ""), Tag = n, IsExpanded = n.Kind == "worldspace" };
+            if (n.Conflict) { t.Foreground = Brushes.Firebrick; if (n.Kind == "ref") t.FontWeight = FontWeights.Bold; }
+            if (!n.Loaded) t.FontStyle = FontStyles.Italic;
+            // A cell's references are made when the cell is first expanded: a city scene draws thousands.
+            if (n.Kind == "cell" && n.Children.Count > 0)
+            {
+                t.Items.Add(new TreeViewItem { Header = $"{n.Children.Count} reference(s)" });
+                bool filled = false;
+                t.Expanded += (_, _) => { if (filled) return; filled = true; t.Items.Clear(); foreach (var c in n.Children) t.Items.Add(Item(c)); };
+            }
+            else foreach (var c in n.Children) t.Items.Add(Item(c));
+            return t;
+        }
+    }
+
+    internal static string? CellOfRef(string refKey) =>
+        Ranked.Select(r => r.Row).FirstOrDefault(r => string.Equals(r.RefKey, refKey, StringComparison.OrdinalIgnoreCase))?.Cell;
+
+    /// <summary>A click on a Conflicts row: land on the row's reference (its Necessary record, the one a fix touches).</summary>
+    internal static void OpenRow(RankedRow r) { WorkbenchHost.Say($"open conflict {r.Rank}: {r.Row.Identity}"); OpenRef(r.Row.RefKey, r.Row.Cell); }
+
+    /// <summary>Land on a reference: here if this scene draws it, else rebuild the scene for its cell.</summary>
+    internal static void OpenRef(string refKey, string? cell)
+    {
+        var h = Current;
+        if (h is null) return;
+        var plan = ClickThrough.Plan(refKey, cell, h.SceneCell, WorklistCells, h.Session.Pending.Count, k => h.Session.IsDrawn(k));
+        switch (plan)
+        {
+            case ClickPlan.Land l: h.Land(l.Ref); break;
+            case ClickPlan.Refuse f: SetBanner(f.Sentence); LastLanding = "refused: " + f.Sentence; break;
+            case ClickPlan.Switch s:
+                PendingLand = s.Ref.ToString(); SwitchCell = s.Cell; SwitchClock = Stopwatch.StartNew();
+                SetBanner($"loading cell {s.Cell} to show {s.Ref}: viewprobe is rebuilding the scene; the window does not respond until it is built.");
+                h.RequestCell(s.CellIndex);
+                break;
+        }
+    }
+
+    /// <summary>The structured state a test asserts (WB_DUMP, the script's <c>state</c> step).</summary>
+    internal static object State(WorkbenchHost? h) => new
+    {
+        bundle = Bundle is null ? null : new
+        {
+            dir = Bundle.Dir, planId = Bundle.PlanId, arm = Bundle.Arm, targets = Bundle.Targets, verify = Bundle.VerifyPath,
+            verifySummary = Bundle.VerifySummary, notes = Bundle.Notes,
+            emitsRead = Bundle.EmitsRead.Select(e => new { receipt = e.Receipt, path = e.Path }),
+            severityTable = Severity?.Source, severityStatus = Severity?.Status,
+        },
+        conflicts = new
+        {
+            showAll = ShowAll, total = Ranked.Count, subject = Ranked.Count(r => r.InvolvesTarget), listed = Visible.Count,
+            rows = Visible.Select(r => new
+            {
+                rank = r.Rank, identity = r.Row.Identity, check = r.Row.CheckId, kind = r.Row.Kind, a = r.Row.A, b = r.Row.B,
+                refKey = r.Row.RefKey, other = r.Row.OtherKey, cell = r.Row.Cell, refBase = r.Row.RefBaseEditorId, refType = r.Row.RefBaseType,
+                otherType = r.Row.OtherBaseType,
+                keys = new { involvesTarget = r.InvolvesTarget, physical = r.PhysicalGrade, physicalLabel = r.PhysicalLabel,
+                             evidenceGrade = r.EvidenceGrade, evidenceLabel = r.EvidenceLabel, newGrade = r.NewGrade, newLabel = r.NewLabel,
+                             severity = r.Severity, severityLabel = r.SeverityLabel },
+            }),
+        },
+        worklistCells = WorklistCells,
+        scene = h?.SceneState(),
+        tree = Tree,
+        lastLanding = LastLanding,
+    };
+
+    internal static string Dump(WorkbenchHost? h, string path)
+    {
+        File.WriteAllText(path, JsonSerializer.Serialize(State(h), new JsonSerializerOptions { WriteIndented = true }));
+        WorkbenchHost.Say($"state dumped to {path}");
+        return path;
+    }
+}

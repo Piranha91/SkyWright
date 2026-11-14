@@ -84,6 +84,7 @@ internal sealed class NativeGlHost : HwndHost
             if (msg == 0x202) ReleaseCapture();
             Message?.Invoke(msg, x, y, wParam);
         }
+        if (msg is 0x000F or 0x0005) Message?.Invoke(msg, 0, 0, IntPtr.Zero);   // WM_PAINT, WM_SIZE: the view needs a frame
         if (msg == 0x0087) { handled = true; return (IntPtr)0x0004; }   // WM_GETDLGCODE: DLGC_WANTALLKEYS
         return base.WndProc(hwnd, msg, wParam, lParam, ref handled);
     }

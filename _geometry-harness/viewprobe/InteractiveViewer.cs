@@ -111,6 +111,12 @@ sealed class InteractiveOptions
     public required Func<FormKey, string> RuntimeId;
     public Func<float, float, string?>? TerrainDescribe;   // Skyrim X,Y -> quadrant/layer description
     public required string CellLabel;
+    // Which cell this scene is, and where each drawn reference came from (the walk's own map): read by a host that lists
+    // the scene's references by cell (the conflict review workbench's Records tree). The fly-through does not use them.
+    public FormKey? CellKey;
+    public FormKey Worldspace;
+    public bool Interior;
+    public IReadOnlyDictionary<FormKey, FormKey>? RefCells;
     public required string OutDir;
     public required string SafeName;
     public HashSet<FormKey> RedNav = new();                // conflict-red navmeshes, tagged in reports

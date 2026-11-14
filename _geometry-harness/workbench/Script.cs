@@ -25,19 +25,45 @@ namespace Workbench;
 /// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
 /// commit dry|real PATCHNAME      dry-run or write the staged edits
 /// readback FORMKEY PLUGIN        read that plugin's Placement of the reference through the server
+/// conflict N                     click the Conflicts tab's row ranked N (as listed now)
+/// treeref FORMKEY                click that reference in the Records tree
+/// showall on|off                 the Conflicts tab's "all rows on this arm" toggle
+/// state NAME                     dump the shell's structured state (bundle, ranked rows, tree, scene, camera) as NAME.json
+/// msgclickworld X,Y,Z            post WM_LBUTTONDOWN/UP to the view's window at the point's device pixel (the real mouse path)
+/// msgclickref FORMKEY           the same, at the reference's box centre (where a landing points the camera)
+/// msgdragworld AXIS D            the same as dragworld, by posted WM_LBUTTONDOWN/MOUSEMOVE/LBUTTONUP messages
+/// expect selected FORMKEY|none   pass or fail on the selection (a failure makes the exit code 4)
+/// expect staged N                pass or fail on the number of staged edits
+/// expect moved FORMKEY DX,DY,DZ T   pass or fail on the selected reference's staged move from its built position, within T units
+/// expect landed [FORMKEY]        pass or fail: that reference (default: the selected one) selected, the screen-centre ray crossing its shapes
+/// idlecpu SECONDS                the process's CPU over SECONDS with nothing happening, by cycle counts, as a share of one busy core
 /// quit                           close the window
 /// </code>
 /// Every result line is printed with the prefix <c>[wb]</c>.</summary>
 internal sealed class Script
 {
-    readonly WorkbenchHost _h;
+    WorkbenchHost _h;
     readonly Queue<string> _steps;
+    static Script? _shared;
+    bool _quiet;                       // an idle measurement: the script does not ask for frames while it runs
+
+    /// <summary>The script still has work, so a demand loop keeps drawing (its steps run between frames).</summary>
+    internal bool WantsFrames => !_quiet && (_steps.Count > 0 || _wait > 0 || _busy);
     int _wait = 5;                     // settle a few frames before the first step
     bool _busy;
 
     Script(WorkbenchHost h, IEnumerable<string> steps) { _h = h; _steps = new(steps); }
 
-    internal static Script? Load(WorkbenchHost h)
+    /// <summary>The run's one script, attached to the scene now shown: a cell switch hands the remaining steps to the
+    /// next scene, which settles a few frames before the next step.</summary>
+    internal static Script? Attach(WorkbenchHost h)
+    {
+        if (_shared is null) return _shared = Load(h);
+        _shared._h = h; _shared._wait = 5; _shared._busy = false;
+        return _shared;
+    }
+
+    static Script? Load(WorkbenchHost h)
     {
         var path = Environment.GetEnvironmentVariable("WB_SCRIPT");
         if (path is not { Length: > 0 }) return null;
@@ -145,10 +171,131 @@ internal sealed class Script
                     return (string?)null;
                 });
                 break;
+            case "conflict":
+            {
+                int n = int.Parse(a[1]);
+                var row = Shell.Visible.FirstOrDefault(r => r.Rank == n);
+                if (row is null) { WorkbenchHost.Say($"conflict {n}: no row ranked {n} is listed"); break; }
+                Shell.OpenRow(row); _wait = 3; break;
+            }
+            case "treeref":
+            {
+                var node = RecordsTree.Walk(Shell.Tree).FirstOrDefault(t => t.Kind == "ref" && string.Equals(t.Key, a[1], StringComparison.OrdinalIgnoreCase));
+                if (node is null) { WorkbenchHost.Say($"treeref {a[1]}: the Records tree has no such reference"); break; }
+                Shell.OpenRef(node.Key, Shell.CellOfRef(node.Key)); _wait = 3; break;
+            }
+            case "showall": Shell.ShowAll = a[1] == "on"; Shell.FillConflicts(); break;
+            case "state": Shell.Dump(_h, Path.Combine(_h.OutDir, a[1] + ".json")); break;
+            case "msgclickworld":
+            {
+                var sp = _h.Project(P3(a[1]));
+                if (sp is not { } c) { WorkbenchHost.Say($"msgclickworld {a[1]}: behind the eye"); break; }
+                WorkbenchHost.Say(FormattableString.Invariant($"msgclickworld {a[1]} -> device pixel {c.X:0},{c.Y:0}"));
+                _h.PostMouse(0x201, c); _h.PostMouse(0x202, c); _wait = 3; break;
+            }
+            case "msgclickref":
+            {
+                var ro = _h.Session.RefOf(FormKey.Factory(a[1]));
+                var c3 = ro.Min.X <= ro.Max.X ? (ro.Min + ro.Max) * 0.5f : new Vector3(ro.Ref.Position.X, ro.Ref.Position.Y, ro.Ref.Position.Z);
+                var sp = _h.Project(c3);
+                if (sp is not { } c) { WorkbenchHost.Say($"msgclickref {a[1]}: behind the eye"); break; }
+                WorkbenchHost.Say(FormattableString.Invariant($"msgclickref {a[1]} -> device pixel {c.X:0},{c.Y:0} (framebuffer {_h.W}x{_h.H})"));
+                _h.PostMouse(0x201, c); _h.PostMouse(0x202, c); _wait = 3; break;
+            }
+            case "msgdragworld":
+            {
+                var g = _h.Handles;
+                if (g.Centre is not { } c) { WorkbenchHost.Say("msgdragworld: nothing selected"); break; }
+                var axis = a[1] switch { "x" => Vector3.UnitX, "y" => Vector3.UnitY, _ => Vector3.UnitZ };
+                var A = c + axis * g.Size * 0.9f; var B = A + axis * F(a[2]);
+                var q0 = _h.Project(A)!.Value; var q1 = _h.Project(B)!.Value;
+                WorkbenchHost.Say(FormattableString.Invariant($"msgdragworld {a[1]} {a[2]}: device pixels {q0.X:0},{q0.Y:0} -> {q1.X:0},{q1.Y:0}"));
+                _h.PostMouse(0x201, q0);
+                for (int i = 1; i <= 8; i++) _h.PostMouse(0x200, Vector2.Lerp(q0, q1, i / 8f));
+                _h.PostMouse(0x202, q1); _wait = 3; break;
+            }
+            case "expect": Expect(a); break;
+            case "idlecpu": IdleCpu(F(a[1])); break;
             case "quit": _h.MainWindow.Close(); break;
             default: WorkbenchHost.Say($"unknown step '{a[0]}'"); break;
         }
     }
+
+    void Expect(string[] a)
+    {
+        bool ok; string got;
+        var s = _h.Session;
+        switch (a[1])
+        {
+            case "selected":
+                got = s.Selected?.ToString() ?? "none"; ok = string.Equals(got, a[2], StringComparison.OrdinalIgnoreCase); break;
+            case "staged":
+                got = s.Pending.Count.ToString(CultureInfo.InvariantCulture); ok = got == a[2]; break;
+            case "moved":
+            {
+                var k = FormKey.Factory(a[2]); var want = P3(a[3]); float tol = F(a[4]);
+                var now = s.Current(k).Position; var built = RefPlacementEdit.BakedPose(s.RefOf(k).Ref).Position;
+                var d = new Vector3(now.X - built.X, now.Y - built.Y, now.Z - built.Z);
+                got = FormattableString.Invariant($"{d.X:0.###},{d.Y:0.###},{d.Z:0.###}");
+                ok = Vector3.Distance(d, want) <= tol; break;
+            }
+            case "landed":
+            {
+                // Landed: the reference is selected and the screen-centre ray crosses its own shapes (the camera is framed on
+                // it). What the ray meets first is reported, not required: an overlap row's reference is often inside another.
+                var st = _h.SceneStateCentre();
+                var want = a.Length > 2 ? a[2] : s.Selected?.ToString();
+                bool crosses = want is not null && FormKey.TryFactory(want, out var wk) && s.IsDrawn(wk) && _h.PickOwn(new Vector2(_h.W * 0.5f, _h.H * 0.5f), wk) is not null;
+                got = $"selected {s.Selected?.ToString() ?? "none"}, centre ray crosses it {crosses}, first thing it meets {st ?? "nothing"}";
+                ok = want is not null && string.Equals(s.Selected?.ToString(), want, StringComparison.OrdinalIgnoreCase) && crosses;
+                break;
+            }
+            default: got = "unknown expectation"; ok = false; break;
+        }
+        if (!ok) Shell.ExpectFailures++;
+        WorkbenchHost.Say($"EXPECT {(ok ? "PASS" : "FAIL")}: {string.Join(' ', a.Skip(1))} (got {got})");
+    }
+
+    /// <summary>CPU over a quiet window, by QueryProcessCycleTime (GetProcessTimes undercounts on this machine), then a
+    /// one-second busy spin on a fresh thread read by QueryThreadCycleTime as the cycles of one fully busy core.</summary>
+    void IdleCpu(float seconds)
+    {
+        _busy = true; _quiet = true;
+        var proc = System.Diagnostics.Process.GetCurrentProcess().Handle;
+        QueryProcessCycleTime(proc, out ulong c0);
+        var t0 = _h.Clock.Elapsed.TotalSeconds;
+        int frames0 = _h.FrameCount;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            QueryProcessCycleTime(proc, out ulong c1);
+            double el = _h.Clock.Elapsed.TotalSeconds - t0;
+            int frames = _h.FrameCount - frames0;
+            ulong busy = 0;
+            var th = new System.Threading.Thread(() =>
+            {
+                var me = GetCurrentThread();
+                QueryThreadCycleTime(me, out ulong b0);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                while (sw.Elapsed.TotalSeconds < 1.0) { }
+                QueryThreadCycleTime(me, out ulong b1);
+                busy = (ulong)((b1 - b0) / sw.Elapsed.TotalSeconds);
+            });
+            th.Start(); th.Join();
+            double cores = (c1 - c0) / el / busy;
+            WorkbenchHost.Say(string.Create(CultureInfo.InvariantCulture,
+                $"idlecpu: {el:0.0} s quiet, {frames} frames drawn; process cycles {c1 - c0:N0}; one busy core {busy:N0} cycles/s; "
+                + $"= {cores * 100:0.0} % of one core; loop {Environment.GetEnvironmentVariable("WB_LOOP") ?? "demand"}"));
+            _busy = false; _quiet = false;
+            _h.Invalidate();
+        };
+        timer.Start();
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern bool QueryProcessCycleTime(IntPtr process, out ulong cycles);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern bool QueryThreadCycleTime(IntPtr thread, out ulong cycles);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern IntPtr GetCurrentThread();
 
     void Async(Func<Task<string?>> f)
     {
