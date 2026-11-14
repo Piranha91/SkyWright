@@ -1,0 +1,199 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Numerics;
+using Mutagen.Bethesda.Plugins;
+using ViewProbe;
+
+namespace Workbench;
+
+/// <summary>The headless driver (<c>WB_SCRIPT=file</c>): one step per line, run between frames through the same
+/// handlers the mouse and the bar use, so a test exercises the real input path. Steps:
+/// <code>
+/// wait N                         render N frames
+/// pose X,Y,Z YAW PITCH           put the camera there
+/// click X,Y                      press and release at framebuffer pixel X,Y (a plain click selects)
+/// drag X0,Y0 X1,Y1 [N]           press, move in N steps (default 8), release (a drag on the handle edits)
+/// dragworld AXIS|ring D          drag the selected handle part by D units (D degrees for ring), from its own screen place
+/// select FORMKEY | none          select directly (what an MCP client will do)
+/// stage FORMKEY DX,DY,DZ DEG     stage a move and a turn about world Z, composed (what an MCP client will do)
+/// undo                           undo the last staged edit
+/// pickworld X,Y,Z                project a Skyrim point to the screen, pick there, print what is hit
+/// capture NAME                   save the frame as NAME.png
+/// dump FORMKEY NAME              save the reference's drawn vertices as NAME.json
+/// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
+/// commit dry|real PATCHNAME      dry-run or write the staged edits
+/// readback FORMKEY PLUGIN        read that plugin's Placement of the reference through the server
+/// quit                           close the window
+/// </code>
+/// Every result line is printed with the prefix <c>[wb]</c>.</summary>
+internal sealed class Script
+{
+    readonly WorkbenchHost _h;
+    readonly Queue<string> _steps;
+    int _wait = 5;                     // settle a few frames before the first step
+    bool _busy;
+
+    Script(WorkbenchHost h, IEnumerable<string> steps) { _h = h; _steps = new(steps); }
+
+    internal static Script? Load(WorkbenchHost h)
+    {
+        var path = Environment.GetEnvironmentVariable("WB_SCRIPT");
+        if (path is not { Length: > 0 }) return null;
+        var lines = File.ReadAllLines(path).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#')).ToList();
+        WorkbenchHost.Say($"script {path}: {lines.Count} step(s)");
+        return new Script(h, lines);
+    }
+
+    static float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
+    static Vector2 P2(string s) { var p = s.Split(','); return new(F(p[0]), F(p[1])); }
+    static Vector3 P3(string s) { var p = s.Split(','); return new(F(p[0]), F(p[1]), F(p[2])); }
+
+    internal void Tick()
+    {
+        if (_busy) return;
+        if (_wait > 0) { _wait--; return; }
+        if (_steps.Count == 0) return;
+        var line = _steps.Dequeue();
+        WorkbenchHost.Say("> " + line);
+        var a = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        try { Run(a); }
+        catch (Exception ex) { WorkbenchHost.Say($"step refused: {ex.Message}"); }
+    }
+
+    void Run(string[] a)
+    {
+        switch (a[0])
+        {
+            case "wait": _wait = int.Parse(a[1]); break;
+            case "pose": _h.SetPose(P3(a[1]), F(a[2]), F(a[3])); _wait = 2; break;
+            case "click": { var p = P2(a[1]); _h.OnPress(p); _h.OnRelease(p); _wait = 2; break; }
+            case "drag":
+            {
+                var p0 = P2(a[1]); var p1 = P2(a[2]); int n = a.Length > 3 ? int.Parse(a[3]) : 8;
+                _h.OnPress(p0);
+                for (int i = 1; i <= n; i++) _h.OnMove(Vector2.Lerp(p0, p1, i / (float)n));
+                _h.OnRelease(p1); _wait = 2; break;
+            }
+            case "dragworld":
+            {
+                var g = _h.Handles;
+                if (g.Centre is not { } c) { WorkbenchHost.Say("dragworld: nothing selected"); break; }
+                float d = F(a[2]);
+                Vector3 A, B;
+                if (a[1] == "ring")
+                {
+                    float r = g.Size * 0.8f, t = float.DegreesToRadians(d);
+                    A = c + new Vector3(r, 0, 0); B = c + new Vector3(MathF.Cos(t) * r, MathF.Sin(t) * r, 0);
+                    // a turn is read from the angle about the centre, so go there by the ring's own arc
+                    var p0 = _h.Project(A)!.Value; _h.OnPress(p0);
+                    for (int i = 1; i <= 16; i++) { float ti = t * i / 16; _h.OnMove(_h.Project(c + new Vector3(MathF.Cos(ti) * r, MathF.Sin(ti) * r, 0))!.Value); }
+                    _h.OnRelease(_h.Project(B)!.Value); _wait = 2; break;
+                }
+                var axis = a[1] switch { "x" => Vector3.UnitX, "y" => Vector3.UnitY, _ => Vector3.UnitZ };
+                A = c + axis * g.Size * 0.9f; B = A + axis * d;
+                var q0 = _h.Project(A)!.Value; var q1 = _h.Project(B)!.Value;
+                _h.OnPress(q0);
+                for (int i = 1; i <= 8; i++) _h.OnMove(Vector2.Lerp(q0, q1, i / 8f));
+                _h.OnRelease(q1); _wait = 2; break;
+            }
+            case "select": _h.SelectKey(a[1] == "none" ? null : FormKey.Factory(a[1])); _wait = 2; break;
+            case "stage":
+                _h.Session.StageDelta(FormKey.Factory(a[1]), P3(a[2]), Vector3.UnitZ, float.DegreesToRadians(F(a[3])));
+                _h.AfterStage(); _wait = 2; break;
+            case "undo": _h.Session.Undo(); _h.AfterStage(); _wait = 2; break;
+            case "pickworld":
+            {
+                var w = P3(a[1]);
+                var s = _h.Project(w);
+                if (s is not { } sp) { WorkbenchHost.Say($"pickworld {a[1]}: behind the eye"); break; }
+                var hit = _h.PickAt(sp);
+                string what = hit?.Shape is { Kind: PickKind.Ref } sh ? $"REFR {sh.Ref.RefKey}" : hit is null ? "nothing" : hit.Shape.Kind.ToString();
+                WorkbenchHost.Say(FormattableString.Invariant($"pickworld {a[1]} -> screen {sp.X:0},{sp.Y:0} -> {what}"));
+                break;
+            }
+            case "capture": _h.Capture(a[1]); break;
+            case "dump": _h.DumpRef(FormKey.Factory(a[1]), a[2]); break;
+            case "fps": Fps(int.Parse(a[1])); break;
+            case "ticks": Ticks(int.Parse(a[1])); break;
+            case "commit": Async(() => _h.CommitAsync(a[1] == "dry", a[2])); break;
+            case "readback":
+                Async(async () =>
+                {
+                    var w = await _h.WriterAsync();
+                    var (pos, rot) = await w.ReadPlacementAsync(a[1], source: a[2]);
+                    WorkbenchHost.Say(FormattableString.Invariant($"readback {a[1]} from {a[2]}: position {pos.X:R},{pos.Y:R},{pos.Z:R} rotation {rot.X:R},{rot.Y:R},{rot.Z:R}"));
+                    return (string?)null;
+                });
+                break;
+            case "quit": _h.MainWindow.Close(); break;
+            default: WorkbenchHost.Say($"unknown step '{a[0]}'"); break;
+        }
+    }
+
+    void Async(Func<Task<string?>> f)
+    {
+        _busy = true;
+        f().ContinueWith(t =>
+        {
+            if (t.Exception is { } ex) WorkbenchHost.Say("step refused: " + ex.GetBaseException().Message);
+            _busy = false;
+        }, TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    void Fps(int n)
+    {
+        _busy = true;
+        var stamps = new List<double>(n + 1);
+        var gpu = new List<double>(n);
+        bool fg = _h.IsForeground;
+        _h.TickStamps = new List<double>();
+        int callStart = _h.RenderCallMs.Count, swapStart = _h.SwapMs.Count;
+        _h.AfterFrame = () =>
+        {
+            var t0 = _h.Clock.Elapsed.TotalMilliseconds;
+            OpenTK.Graphics.OpenGL4.GL.Finish();
+            gpu.Add(_h.Clock.Elapsed.TotalMilliseconds - t0);
+            stamps.Add(_h.Clock.Elapsed.TotalMilliseconds);
+            if (stamps.Count <= n) return;
+            _h.AfterFrame = null;
+            var ticks = _h.TickStamps!; _h.TickStamps = null;
+            var tick = new List<double>(); for (int i = 1; i < ticks.Count; i++) tick.Add(ticks[i] - ticks[i - 1]);
+            var calls = _h.RenderCallMs.Skip(callStart).ToList();
+            var swaps = _h.SwapMs.Skip(swapStart).ToList();
+            var per = new List<double>();
+            for (int i = 1; i < stamps.Count; i++) per.Add(stamps[i] - stamps[i - 1]);
+            per.Sort();
+            double total = stamps[^1] - stamps[0];
+            WorkbenchHost.Say(string.Create(CultureInfo.InvariantCulture,
+                $"fps: {per.Count} frames in {total:0.0} ms = {per.Count * 1000.0 / total:0.0} fps mean; frame ms p50 {per[per.Count / 2]:0.00} p95 {per[(int)(per.Count * 0.95)]:0.00} max {per[^1]:0.00}; "
+                + $"foreground at start {fg}, at end {_h.IsForeground}; primary monitor refresh {WorkbenchHost.RefreshRate()} Hz; framebuffer {_h.W}x{_h.H}; "
+                + $"GL.Finish wait after the swap p50 {Median(gpu):0.00} ms; draw p50 {Median(calls):0.00} ms; SwapBuffers p50 {Median(swaps):0.00} ms; vsync {(_h.Vsync ? "on" : "off")}; loop {Environment.GetEnvironmentVariable("WB_LOOP") ?? "cap60"}; "
+                + $"WPF CompositionTarget.Rendering ticks {ticks.Count} in the window, interval p50 {(tick.Count > 0 ? Median(tick) : double.NaN):0.00} ms"));
+            _busy = false;
+        };
+    }
+
+    /// <summary>WPF's frame tick with the GL control NOT rendering: whether the window's pace is WPF's own or the draw's.</summary>
+    void Ticks(int n)
+    {
+        _busy = true;
+        _h.Paused = true;
+        var stamps = new List<double>();
+        EventHandler? h = null;
+        h = (_, _) =>
+        {
+            stamps.Add(_h.Clock.Elapsed.TotalMilliseconds);
+            if (stamps.Count <= n) return;
+            System.Windows.Media.CompositionTarget.Rendering -= h;
+            var per = new List<double>(); for (int i = 1; i < stamps.Count; i++) per.Add(stamps[i] - stamps[i - 1]);
+            WorkbenchHost.Say(string.Create(CultureInfo.InvariantCulture,
+                $"ticks with GL rendering stopped: {per.Count} intervals, p50 {Median(per):0.00} ms; WPF render tier {System.Windows.Media.RenderCapability.Tier >> 16} (2 = hardware); "
+                + $"process render mode {System.Windows.Media.RenderOptions.ProcessRenderMode}"));
+            _h.Paused = false;
+            _busy = false;
+        };
+        System.Windows.Media.CompositionTarget.Rendering += h;
+    }
+
+    static double Median(List<double> v) { var s = v.OrderBy(x => x).ToList(); return s[s.Count / 2]; }
+}

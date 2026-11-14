@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>workbench.tests</AssemblyName>
+    <RootNamespace>WorkbenchTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <UseWPF>true</UseWPF>
+    <NoWarn>CA1416</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <ProjectReference Include="..\workbench\workbench.csproj" />
+    <ProjectReference Include="..\viewprobe\viewprobe.csproj" />
+    <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <ProjectReference Include="..\..\src\housecarl-generator\housecarl-generator.csproj" />
+  </ItemGroup>
+</Project>
