@@ -16,6 +16,9 @@ identity field is not compared; file bookkeeping, group bookkeeping and runtime-
 capture did not read, a field the schema does not know, a field the read printed without its values (an item shown
 only as its type name, a list only as its summary) and a record whose read failed are unjudged with the reason, never
 treated as equal (a difference in the part that was read is still a row), and listed (`Unjudged`: the record, field, reason and the plugins whose versions were compared).
+On a houseCARL 2.0 capture the same holds for its by-name reads (a failed answer, or one without the record, is a failed
+read) and its tree answers (a plugin the tree could not compare in full, a narrowed tree's unselected fields, a cut-off
+plugin list).
 Generated bookkeeping (a worldspace's LargeReferences) is named in the same skill data and not compared. Lists are compared as multisets, and a plugin's change to a list is lost only where the winning list does not keep it item by item (`list_change_kept`); numbers at four decimals with -0 equal to 0; an integer
 field the game reads only in part (a cell's Grid flags) on the bytes it reads, by a mask named in the same skill data.
 """
@@ -45,6 +48,8 @@ TRUNCATED = "\u2026"
 REASON_UNKNOWN = "a field the schema does not name"
 REASON_FAILED = "the record read failed for one plugin"
 REASON_UNEXPANDED = "a field the read printed without its values (an item or a list it did not expand)"
+REASON_TREE_PART = "a field the tree answer could not compare in full for one plugin"
+REASON_TREE_CUT = "the tree answer's list of plugins was cut off"
 #: what a read prints for an item or struct it did not expand: its type name (`[KeyValue`2]`, `[CellMaxHeightData]`)
 TYPE_NAME = re.compile(r"^\[[A-Za-z_][A-Za-z0-9_]*(?:`\d+)?\]$")
 LIST_COUNT = re.compile(r"^\[list: (\d+) item\(s\)\]$")
@@ -735,12 +740,13 @@ MASTERS_UNREAD = "a removal by a plugin whose masters' headers could not all be 
 
 
 def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, containers: set | None = None,
-                   masters: dict | None = None, masters_unread: set | None = None, chains: dict | None = None) -> dict:
+                   masters: dict | None = None, masters_unread: set | None = None, chains: dict | None = None,
+                   chain_unjudged: list | None = None) -> dict:
     """The conflict-file emit for one setup: `plugins` in load order, each {name, path}. `containers`: persistent cells
     known from other captures of the same evaluation (a capture that read no worldspace cannot name them). `masters`:
     {plugin (lower case): its masters}; a value is a plugin's change only if it differs from the one it inherits from
     them (`own_change`); without them, from the plugin before it. `chains`: provider chains already read
-    (`chains_for_setup`, a 2.0 capture) in place of `reads`."""
+    (`chains_for_setup`, a 2.0 capture) in place of `reads`, with `chain_unjudged` what they could not judge."""
     conflicts, unjudged = [], []
     cov = collections.OrderedDict()
     # A worldspace's persistent cell (the one its TopCell names) holds the worldspace's persistent references; its
@@ -755,6 +761,12 @@ def rows_for_setup(reads: list[dict], plugins: list[dict], scope: Scope, contain
         chains = {fk: rec for fk, rec in chains.items() if fk not in containers}
         for rec in chains.values():
             line(rec["type"])["Judged"] += 1
+        # counted on the coverage line and listed, as the text-read path does; a persistent cell is set aside instead
+        for u in chain_unjudged or []:
+            if u["FormKey"] in containers:
+                continue
+            line(u["Type"])["Unjudgeable"][u["Reason"]] += 1
+            unjudged.append(u)
     for fk, rec in (chains if chains is not None else _record_chains(reads, plugins, scope, containers, line,
                                                                      unjudged)).items():
         names, rtype = rec["providers"], rec["type"]
@@ -822,13 +834,18 @@ def _answers(request: Path, response: Path, formkeys=None):
                 calls[(batch, m.get("id"))] = args
     for batch, m in _messages(response):
         args = calls.pop((batch, m.get("id")), None)
-        if args is None or "result" not in m:
+        if args is None:
+            continue
+        # a failed answer (an error, or text that is not JSON) is yielded with no body, so its records are unjudged
+        if "result" not in m or m["result"].get("isError"):
+            yield args, None
             continue
         text = "".join(c.get("text", "") for c in (m["result"].get("content") or []) if isinstance(c, dict))
         try:
-            yield args, json.loads(text)
+            body = json.loads(text)
         except ValueError:
-            continue
+            body = None
+        yield args, body
 
 
 def reads_of(request: Path, response: Path, plugins: list[dict], formkeys=None) -> list[dict]:
@@ -841,12 +858,19 @@ def reads_of(request: Path, response: Path, plugins: list[dict], formkeys=None) 
     for args, body in _answers(request, response, formkeys):
         form = (args.get("project") or {}).get("form")
         src = args.get("source")
-        if form not in ("everything", "fields") or not src or not isinstance(body, dict):
+        if form not in ("everything", "fields") or not src:
             continue
-        got = {r.get("formid"): r for r in body.get("records") or [] if isinstance(r, dict)}
+        got = {r.get("formid"): r for r in (body.get("records") or [] if isinstance(body, dict) else [])
+               if isinstance(r, dict)}
         for fk in args.get("formids") or []:
+            if formkeys is not None and fk not in formkeys:
+                continue
             r = got.get(fk)
-            if r is None or (formkeys is not None and fk not in formkeys):
+            if r is None:
+                # a failed answer, or one without a record it was asked for: that plugin's read of it failed
+                reads.append({"batch": None, "id": None, "plugin": path_of.get(str(src).lower(), src), "formKey": fk,
+                              "selection": None, "depth": None, "status": "error", "fields": {},
+                              "error": "the answer failed" if body is None else "the answer does not hold the record"})
                 continue
             reads.append({"batch": None, "id": None, "plugin": path_of.get(str(src).lower(), src), "formKey": fk,
                           "selection": (args.get("project") or {}).get("fields") if form == "fields" else None,
@@ -858,36 +882,66 @@ def reads_of(request: Path, response: Path, plugins: list[dict], formkeys=None) 
     return [r for r in reads if r.get("selection") or (r["plugin"], r["formKey"]) not in narrow]
 
 
-def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> dict:
+def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None, unjudged=None) -> dict:
     """The 2.0 tree answers (`housecarl_records` form tree): each record's providers, and each provider's value of a
     field as its listed differences from the winner (none: the winner's value). A tree narrowed to named fields stands
-    for a cell's or worldspace's own fields, whose full tree is cut off inside child records."""
-    rows, narrowed = {}, {}
+    for a cell's or worldspace's own fields, whose full tree is cut off inside child records. What a tree cannot judge
+    is listed in `unjudged` (a failed answer's records, a cut-off plugin list, a difference in a field the schema does
+    not name, a plugin it could not compare in full, a narrowed tree's unselected fields) and the record's `unjudged`
+    {field: reason} names the fields left out, which are not the winner's value."""
+    rows, narrowed, failed = {}, {}, set()
     for args, body in _answers(request, response, formkeys):
         proj = args.get("project") or {}
-        if proj.get("form") != "tree" or not isinstance(body, dict):
+        if proj.get("form") != "tree":
+            continue
+        if not isinstance(body, dict):
+            failed |= {fk for fk in args.get("formids") or [] if formkeys is None or fk in formkeys}
             continue
         for r in body.get("rows") or []:
             if formkeys is not None and r.get("formid") not in formkeys:
                 continue
-            (narrowed if proj.get("fields") else rows)[r.get("formid")] = r
-    for fk, r in narrowed.items():
+            if proj.get("fields"):
+                narrowed[r.get("formid")] = (r, list(proj["fields"]))
+            else:
+                rows[r.get("formid")] = (r, None)
+    for fk, (r, sel) in narrowed.items():
         if r.get("type") in ("Cell", "Worldspace") or fk not in rows:
-            rows[fk] = r
+            rows[fk] = (r, sel)
+
+    def unjudge(fk, rtype, field, reason, plugins):
+        if unjudged is not None:
+            unjudged.append({"FormKey": fk, "Type": rtype, "Field": field, "Reason": reason, "Plugins": plugins})
+    for fk in sorted(failed - set(rows)):
+        unjudge(fk, "unknown", None, REASON_FAILED, [])
     out = {}
-    for fk, r in rows.items():
+    for fk, (r, sel) in rows.items():
         rtype, nodes = r.get("type") or "unknown", r.get("nodes") or []
+        names = [n.get("plugin") for n in nodes if n.get("plugin")]
+        if any(not n.get("plugin") for n in nodes):
+            unjudge(fk, rtype, None, REASON_TREE_CUT, names)
+            continue
         if len(nodes) < 2:
             continue
         winner = str(nodes[-1].get("plugin"))
         masks = scope.masks_for(rtype)
+        # the record's compared top-level fields the tree answers for: its selection, or every one the schema names
+        tops_all = scope.one_flags_view(f["n"] for f in (scope.records.get(rtype) or {}).get("fields") or []
+                                        if scope.classify(rtype, f["n"]) == "compared")
+        left_out, unknown = {}, set()
+        if sel is not None:
+            for t in tops_all:
+                if t not in sel:
+                    left_out[t] = REASON_NOT_READ
         per_node, won_vals = [], {}
         for n in nodes:
             per = collections.defaultdict(list)
             for d in ([] if n.get("is_winner") else n.get("deltas") or []):
                 m = TREE_KEY.match(d)
                 key = m.group(1) if m else d.split("=")[0]
-                if scope.classify(rtype, key) != "compared":
+                cls = scope.classify(rtype, key)
+                if cls == "unknown":
+                    unknown.add(INDEX.sub("", key))
+                if cls != "compared":
                     continue
                 val = d[len(key):]
                 # (eighth review) "<field> only in <winner>: <value>": the winner holds the leaf and this provider does
@@ -913,11 +967,21 @@ def _tree_chains(request: Path, response: Path, scope: Scope, formkeys=None) -> 
                     val = "=" + norm(v)
                 per[key.split(".")[0].split("[")[0]].append(key + val)
             per_node.append({k: tuple(sorted(v)) for k, v in per.items()})
-        tops = scope.one_flags_view(sorted(set().union(*[set(v) for v in per_node])))
-        # a field no provider differs in is absent: every provider holds the winner's value (`allListed`)
-        out[fk] = {"type": rtype, "editorId": r.get("editorid"), "providers": [n.get("plugin") for n in nodes],
+            # a plugin the tree could not compare in full: a field it lists is a difference, any other is not known
+            if not n.get("is_winner") and n.get("complete") is False:
+                for t in tops_all:
+                    if t not in per and (sel is None or t in sel):
+                        left_out.setdefault(t, REASON_TREE_PART)
+        tops = scope.one_flags_view(sorted(set().union(*[set(v) for v in per_node]) - set(left_out)))
+        for f in sorted(unknown):
+            unjudge(fk, rtype, f, REASON_UNKNOWN, names)
+        for t in sorted(left_out):
+            unjudge(fk, rtype, t, left_out[t], names)
+        # a field no provider differs in is absent: every provider holds the winner's value (`allListed`), except the
+        # fields named in `unjudged`
+        out[fk] = {"type": rtype, "editorId": r.get("editorid"), "providers": names,
                    "values": {t: [v.get(t, ()) for v in per_node] for t in tops}, "reads": {}, "allListed": True,
-                   "winnerValues": won_vals}
+                   "winnerValues": won_vals, **({"unjudged": left_out} if left_out else {})}
     return out
 
 
@@ -946,33 +1010,51 @@ def _plugin_rows(plugins) -> list[dict]:
             for p in plugins or [] if isinstance(p, dict) and (p.get("name") or p.get("Name"))]
 
 
-def read_chains(request: Path, response: Path, plugins: list[dict], scope: Scope, formkeys=None) -> dict:
+def read_chains(request: Path, response: Path, plugins: list[dict], scope: Scope, formkeys=None,
+                unjudged: list | None = None) -> dict:
     """Each record's provider chain in one setup, from a record import's own transcripts in any capture form:
     {formKey: {type, providers, values {field: [value per provider]}}}. Values compare equal exactly when the
     providers hold the same value (a tree answer's values are differences from the winner, so only equality is
-    meaningful). A field no provider differs in is absent (every provider holds the winner's value)."""
+    meaningful). A field no provider differs in is absent (every provider holds the winner's value). `unjudged`, if
+    given, receives what the source used for each record could not judge (a record's by-name chain replaces its tree
+    chain, and its entries the tree's); a record no source gives a chain for keeps every entry."""
     fks = set(formkeys) if formkeys is not None else None
     plugins = _plugin_rows(plugins)
-    out = _tree_chains(request, response, scope, fks)
+    tree_u, named_u = [], []
+    out = _tree_chains(request, response, scope, fks, tree_u)
     reads = reads_of(request, response, plugins, fks)
-    if reads:
-        out.update(_record_chains(reads, plugins, scope, formkeys=fks))
+    named = _record_chains(reads, plugins, scope, formkeys=fks, unjudged=named_u) if reads else {}
+    out.update(named)
+    if unjudged is not None:
+        unjudged += [u for u in tree_u if u["FormKey"] not in named]
+        unjudged += [u for u in named_u if u["FormKey"] in named or u["FormKey"] not in out]
     return out
 
 
-def chains_for_setup(request: Path, response: Path, plugins: list[dict], scope: Scope) -> dict:
+def chains_for_setup(request: Path, response: Path, plugins: list[dict], scope: Scope,
+                     unjudged: list | None = None) -> dict:
     """A 2.0 capture's provider chains (read_chains: tree answers and by-name reads), each put in this configuration's
     load order. A tree lists a record's providers in the order the reader loaded them; a configuration with the same
     plugins in another order (a reversed pair) permutes them, and each value goes with its provider. A record holding a
-    provider the configuration does not load is left out (it was read in another setup)."""
+    provider the configuration does not load is left out (it was read in another setup), and so are its `unjudged`
+    entries; the others name their plugins in this order."""
     rows = _plugin_rows(plugins)
     idx = {}
     for i, p in enumerate(rows):
         idx.setdefault(str(p["name"]).lower(), i)
         if p.get("path"):
             idx.setdefault(_norm_path(p["path"]), i)
+    got = []
+    chains = read_chains(Path(request), Path(response), rows, scope, unjudged=got)
+    if unjudged is not None:
+        for u in got:
+            ps = list(u.get("Plugins") or [])
+            pos = [idx.get(str(n).lower(), idx.get(_norm_path(str(n)))) for n in ps]
+            if any(x is None for x in pos):
+                continue
+            unjudged.append(dict(u, Plugins=[rows[x]["name"] for x in sorted(pos)]))
     out = {}
-    for fk, rec in read_chains(Path(request), Path(response), rows, scope).items():
+    for fk, rec in chains.items():
         provs = list(rec.get("providers") or [])
         pos = [idx.get(str(n).lower(), idx.get(_norm_path(str(n)))) for n in provs]
         if not provs or any(x is None for x in pos):
@@ -994,8 +1076,10 @@ def derive(request: Path, response: Path, configuration: dict, scope: Scope, rel
     2.0 forms (chains_for_setup), in the configuration's order."""
     parsed = parse_transcript(Path(request), Path(response))
     plugins = list(configuration.get("plugins") or [])
-    chains = None if parsed["reads"] else chains_for_setup(Path(request), Path(response), plugins, scope)
-    emit = rows_for_setup(parsed["reads"], plugins, scope, containers, masters, masters_unread, chains=chains)
+    chain_unjudged = []
+    chains = None if parsed["reads"] else chains_for_setup(Path(request), Path(response), plugins, scope, chain_unjudged)
+    emit = rows_for_setup(parsed["reads"], plugins, scope, containers, masters, masters_unread, chains=chains,
+                          chain_unjudged=chain_unjudged)
     rel = rel or {}
     emit["derivedFrom"] = [{"path": str(rel.get(p, p)).replace("\\", "/"), "sha256": sha256(p), "role": role}
                            for role, p in (("request", Path(request)), ("response", Path(response)))]
