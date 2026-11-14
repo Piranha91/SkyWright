@@ -217,6 +217,90 @@ def captured_request(fks, capture_results) -> str | None:
                  if x.get("status") == "captured" and result_about(x, fks)), None)
 
 
+def short_mod_names(names, words: dict) -> dict:
+    """{full name: short form} for each long mod name (item 5): the part before its first separator, taken from its own
+    name (skill data `shortForm`: "BUVARP RE - Barely Used ..." -> "BUVARP RE"). None for a name that is not long, has no
+    separator, names itself a patch (its head is the mod it patches), or whose short form is not short, or equals
+    another name, another name's head or another candidate (casefolded): such a name is said in full every time.
+    `names` holds every name the text can say, plugin file stems included, so a collision is seen."""
+    sf = words.get("shortForm") or {}
+    if not sf:
+        return {}
+    seps = list(sf.get("separators") or [" - "])
+    patch_words = [str(x).casefold() for x in sf.get("patchWords") or []]
+    names = list(dict.fromkeys(str(n) for n in names if str(n or "").strip()))
+
+    def head(n):
+        cut = [n.find(s) for s in seps if n.find(s) > 0]
+        return (n[:min(cut)].strip(), n[min(cut):]) if cut else (None, "")
+    heads = {n: head(n) for n in names}
+    cand = {}
+    for n in names:
+        h, tail = heads[n]
+        if len(n) <= int(sf.get("minLength") or 40) or not h or len(h) < 2 or len(h) * 2 > len(n):
+            continue
+        if any(re.search(r"\b" + re.escape(w) + r"\b", tail.casefold()) for w in patch_words):
+            continue
+        cand[n] = h
+    out = {}
+    for n, h in cand.items():
+        hk = h.casefold()
+        clash = any(o != n and (o.casefold() == hk or (heads[o][0] or "").casefold() == hk
+                                or (cand.get(o) or "").casefold() == hk) for o in names)
+        if not clash:
+            out[n] = h
+    return out
+
+
+#: a still page's data fields, never text: left as they are when short forms are said
+SHORT_FORM_DATA_KEYS = frozenset({"id", "layout", "path", "png", "sha256", "mediaId", "formKey", "plugins", "affected",
+                                  "seconds", "maxWords", "kind"})
+
+
+def say_short_forms(chapters: list, short: dict) -> None:
+    """(item 5) Each long mod name said in full at its first mention and by its short form after, in the reel's own
+    order: once for the narration, once for the pages' spoken lines (say, sayLead) and once for what the pages and frame
+    labels show. A longer name holding a shorter one is matched whole first. Edits the chapters in place."""
+    if not short:
+        return
+    pat = re.compile("|".join(re.escape(n) for n in sorted(short, key=len, reverse=True)))
+    spoken_seen, shown_seen = set(), set()
+
+    def fix(s, seen):
+        def one(m):
+            n = m.group(0)
+            if n in seen:
+                return short[n]
+            seen.add(n)
+            return n
+        return pat.sub(one, s) if isinstance(s, str) else s
+
+    def page(x, key=None):
+        """A still page: its title on the shown channel; its lead, fixed say and body (what reel_stills.page_say speaks,
+        and the page also shows) on the spoken one, in page order; its data fields left as they are."""
+        if isinstance(x, str):
+            return x if key in SHORT_FORM_DATA_KEYS else fix(x, shown_seen if key == "title" else spoken_seen)
+        if isinstance(x, list):
+            return [page(v, key) for v in x]
+        if isinstance(x, dict):
+            order = sorted(x, key=lambda k: {"title": 0, "sayLead": 1, "say": 2}.get(k, 3))
+            done = {k: page(x[k], k) for k in order}
+            return {k: done[k] for k in x}
+        return x
+    for ch in chapters:
+        pages = (ch.get("still") or {}).get("pages") if isinstance(ch.get("still"), dict) else None
+        if pages:
+            # a still chapter's narration is its pages' words: said with the decisions its pages get
+            if isinstance(ch.get("narration"), str):
+                ch["narration"] = fix(ch["narration"], set(spoken_seen))
+            ch["still"] = {**ch["still"], "pages": [page(p) for p in pages]}
+        elif isinstance(ch.get("narration"), str):
+            ch["narration"] = fix(ch["narration"], spoken_seen)
+        if isinstance(ch.get("frames"), list):
+            ch["frames"] = [{**f, "label": fix(f["label"], shown_seen)} if isinstance(f, dict) and isinstance(
+                f.get("label"), str) else f for f in ch["frames"]]
+
+
 def joined(xs: list[str]) -> str:
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
 
@@ -1548,8 +1632,22 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             cpage["seconds"] = page_seconds(cpage, rate, policy)
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "closing", "narration": words["closing"],
                          "still": {"pages": [cpage]}})
+    # (item 5) a long mod name said in full once, then by its short form; every name the reel can say is in the pool,
+    # plugin stems too, so a short form never collides
+    pool_ = [v.get("name") if isinstance(v, dict) else v for v in mod_names.values()] + [
+        re.sub(r"\.(esp|esm|esl)$", "", str(k), flags=re.I) for k in mod_names] + [
+        (v or {}).get("name") for v in names_mods.values() if isinstance(v, dict)] + [
+        re.sub(r"\.(esp|esm|esl)$", "", str(x), flags=re.I) for x in full_order]
+    short_forms = short_mod_names(pool_, words)
+    say_short_forms(chapters, short_forms)
+    if short_forms and rate:
+        # a page's reading time is its text's, as shortened: the render holds it for that and refuses a long silence
+        for ch_ in chapters:
+            for pg_ in ((ch_.get("still") or {}).get("pages") or []) if isinstance(ch_.get("still"), dict) else []:
+                if isinstance(pg_, dict) and "seconds" in pg_:
+                    pg_["seconds"] = page_seconds(pg_, rate, policy)
     return {"schemaVersion": SCHEMA, "status": "planned", "reason": None,
-            "policySha256": _sha(policy), "wordsSha256": _sha(words),
+            "policySha256": _sha(policy), "wordsSha256": _sha(words), "shortForms": short_forms,
             "patchSearchSha256": _sha(patch_search) if patch_search is not None else None,
             "modNames": {k: v for k, v in mod_names.items()}, "markers": sorted(markers),
             "sequence": list(policy["sequence"]), "holdSeconds": dict(policy.get("holdSeconds") or {}),

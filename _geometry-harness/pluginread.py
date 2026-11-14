@@ -302,6 +302,12 @@ def navmesh_doors_all(path):
     return {fk: [d for d, _ in (v or {}).get("doors") or []] for fk, v in got.items()}
 
 
+def navmesh_places(path, form_keys):
+    """(item 1) These navmesh records' triangle counts and places (see _navmesh_place), as navmesh_places_all reads
+    them, for the records asked: {"records": {formKey: {"triangles", "place"}}}."""
+    return _read(path, b"NAVM", form_keys, _navmesh_place)
+
+
 def navmesh_places_all(path):
     """(tenth review) Every navmesh record the plugin holds, with its triangle count and place (see _navmesh):
     {formKey: {"triangles": n, "place": [...]}} (a navmesh without geometry: triangles None, place None)."""

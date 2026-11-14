@@ -641,7 +641,7 @@ def cmd_storyboard_packet(a) -> int:
         # the vignette reel: one narrated scene per reel chapter, its words the planner's; a still chapter one scene per
         # page as drawn, each with its own page's words, so each page is spoken and held for itself
         import reel_stills
-        reel_stills.keep_names(reel.get("modNames") or {})
+        reel_stills.keep_names(reel.get("modNames") or {}, reel.get("shortForms"))
         try:
             font_, bold_ = reel_stills.font_files(getattr(a, "font", None), ((pres.get("settings") or {}).get("reel") or {}))
         except reel_stills.FontMissing as e:
@@ -1089,7 +1089,7 @@ def render_vignettes(a, run, pres: dict, pres_path: Path, out: Path, ffmpeg: dic
     reel = pres["reel"]
     if reel.get("status") != "planned":
         return refuse(f"reel-refused: {reel.get('reason') or 'the reel plan is not planned'}", out)
-    reel_stills.keep_names(reel.get("modNames") or {})
+    reel_stills.keep_names(reel.get("modNames") or {}, reel.get("shortForms"))
     chapters = reel.get("chapters") or []
     closings_ = [i for i, c in enumerate(chapters) if c.get("kind") == "closing"]
     if not chapters or chapters[0].get("kind") != "opening" or closings_ not in ([], [len(chapters) - 1]):

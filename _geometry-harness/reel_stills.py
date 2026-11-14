@@ -151,7 +151,7 @@ FORM_KEY_SHAPE = re.compile(r"\b[0-9A-Fa-f]{6}:")
 _NAMES: frozenset = frozenset()
 
 
-def keep_names(mod_names: dict) -> None:
+def keep_names(mod_names: dict, short_forms: dict | None = None) -> None:
     """Set the names spoken_text leaves as written: each mod's display name and each plugin's file name without its
     extension, from the reel plan's modNames (plugin -> name, or -> {name})."""
     global _NAMES
@@ -161,6 +161,7 @@ def keep_names(mod_names: dict) -> None:
         if name:
             kept.add(str(name))
         kept.add(re.sub(r"\.(?:esp|esm|esl)$", "", str(plugin), flags=re.I))
+    kept |= {str(v) for v in (short_forms or {}).values()}          # a mod's short form (item 5), said as written
     _NAMES = frozenset(kept)
 
 

@@ -197,7 +197,191 @@ def said_place(label, places: dict, words: dict, reader) -> str:
         wname = ((places.get(weid) or {}).get("name") or id_words(weid)) if isinstance(weid, str) and weid else None
         if wname and words.get("persistentPlaceGridWorld"):
             return bind(words["persistentPlaceGridWorld"], {"world": wname, "x": fmt_n(grid[0]), "y": fmt_n(grid[1])})
-    return str(words.get("placeUnnamed") or "a cell with no name")
+    # (item 4) never a silent generic name: an unread cell says why it was not read; a read one with nothing to say it by
+    # says that, as a fact of its file
+    plugin = m.group(2)
+    why = reader("why", fk)
+    if why and why != "read":
+        reasons = words.get("placeUnreadWhy") or {}
+        return bind(words["placeUnread"], {"plugin": plugin, "why": reasons.get(why) or reasons.get("error") or why})
+    return bind(words["placeNoName"], {"plugin": plugin})
+
+
+FK_SHAPE = re.compile(r"^([0-9A-Fa-f]{6}):(.+)$")
+
+
+def record_object_name(fk, names: dict, words: dict) -> str | None:
+    """A placed object in words (item 1): its base's kind (skill data objectKinds) and its base's in-game name, else the
+    base's editor ID in words ("a tree (Tree Thicket 01 Snow)"); None when the names enrichment does not read its base."""
+    refs, bases = (names or {}).get("refs") or {}, (names or {}).get("bases") or {}
+    base = bases.get((refs.get(str(fk)) or {}).get("base") or "") or {}
+    eid = base.get("editorId")
+    if not eid:
+        return None
+    said = ((names.get("objects") or {}).get(eid) or {}).get("name") or id_words(eid)
+    kind = ((words.get("objectKinds") or {}).get("types") or {}).get(str(base.get("type") or ""), "")
+    return bind(words.get("recordObject") or "{kind} ({name})", {"kind": kind, "name": said}) if kind else said
+
+
+def said_record(fk, names: dict, labels: dict, words: dict, reader) -> str:
+    """A record as the report prints it (item 1), the way said_place says a place: a placed object by its kind and base
+    (record_object_name); a record the plugin files name by that name (labels: record_labels); else its editor ID, read
+    from its own plugin (reader("editorId", fk)), as an in-game name the names enrichment holds for it or in words; a
+    navmesh by its plugin and its place (reader("navmeshPlace", fk) -> ["cell", cellFk] or ["grid", worldFk, x, y]);
+    else "a record of <plugin> whose name was not read". Never a form key: those stay in the evidence index."""
+    m = FK_SHAPE.match(str(fk))
+    if not m:
+        return str(fk)
+    fk, plugin = f"{m.group(1).upper()}:{m.group(2)}", m.group(2)
+    obj = record_object_name(fk, names, words)
+    if obj:
+        return obj
+    places, objects = (names or {}).get("places") or {}, (names or {}).get("objects") or {}
+
+    def eid_said(eid):
+        return (places.get(eid) or {}).get("name") or (objects.get(eid) or {}).get("name") or id_words(eid)
+    lab = (labels or {}).get(fk)
+    if lab:
+        return eid_said(lab) if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", str(lab)) else str(lab)
+    eid = reader("editorId", fk)
+    if isinstance(eid, str) and eid:
+        return eid_said(eid)
+    base = reader("placedBase", fk)
+    if isinstance(base, str) and base:
+        obj = record_object_name(fk, {**(names or {}), "refs": {fk: {"base": base}}}, words)
+        beid = reader("editorId", base)
+        if obj or (isinstance(beid, str) and beid):
+            return obj or bind(words.get("recordPlaced") or "a placed {name}", {"name": eid_said(beid)})
+    place = reader("navmeshPlace", fk)
+    if isinstance(place, (list, tuple)) and place:
+        if place[0] == "cell" and len(place) >= 2:
+            where = said_place(str(place[1]), places, words, reader)
+            cp_ = str(place[1]).split(":", 1)[-1]
+            if words.get("placeNoName") and where == bind(words["placeNoName"], {"plugin": cp_}) or (
+                    words.get("placeUnread") and where.startswith(bind(words["placeUnread"], {"plugin": cp_, "why": ""})[:-3])):
+                where = None              # a cell nothing names does not tell this navmesh from another
+        elif place[0] == "grid" and len(place) >= 4:
+            weid = reader("editorId", str(place[1]))
+            wname = eid_said(weid) if isinstance(weid, str) and weid else None
+            where = bind(words["persistentPlaceGridWorld"], {"world": wname, "x": fmt_n(place[2]), "y": fmt_n(place[3])}) \
+                if wname and words.get("persistentPlaceGridWorld") else None
+        else:
+            where = None
+        if where:
+            return bind(words.get("recordNavmesh") or "a navmesh of {plugin} in {place}", {"plugin": plugin, "place": where})
+    if reader("why", fk) == "read":
+        # read from its own plugin: the record has no editor ID and nothing else here names it
+        return bind(words.get("recordNoName") or "a record of {plugin} with no editor ID", {"plugin": plugin})
+    return bind(words.get("recordUnread") or "a record of {plugin} whose name was not read", {"plugin": plugin})
+
+
+# data a later step parses (form keys, a row's summary, paths, ids) keeps its own spelling; only sentences are said
+SAY_SKIP_KEYS = frozenset({"sha256", "id", "formkey", "other", "record", "records", "object", "summary", "members", "fk",
+                           "recordkeys", "keys", "refs", "partners", "pair", "placelabels", "label", "door", "navmesh"})
+
+
+OBJECT_PAREN = re.compile(r" \(((?:a|an|the) [^,()]*?) ([A-Za-z][A-Za-z0-9_]*)(?=[,)])")
+
+
+def say_form_keys(obj, sayer, plugins, words: dict, objects: dict | None = None):
+    """Every form key left in a sentence said in words (item 1), at the one boundary the reader, groups and findings
+    leave the plan by: `sayer(fk) -> (said, editorId, label)` (said_record, and the names the builders print beside a
+    key). "<key> (<kind> <EditorID>, ...)" (the builders' object name) becomes "<kind> (<words>, ...)"; "<label>, <key>"
+    and "<key> <editorId>" become the words alone; a bare key becomes the words. A value (quoted, or written with its
+    editor ID) whose words another value in the same sentence shares keeps its form key, so two different values never
+    read the same."""
+    names_ = sorted({str(p) for p in plugins if p}, key=len, reverse=True)
+    if not names_:
+        return obj
+    pat = re.compile(r"(?<![0-9A-Fa-f])([0-9A-Fa-f]{6}):(" + "|".join(re.escape(n) for n in names_) + r")(?![\w])",
+                     re.IGNORECASE)
+    objects = objects or {}
+    cache = {}
+
+    def say(fk):
+        if fk not in cache:
+            cache[fk] = sayer(fk)
+        return cache[fk]
+
+    def fix(s):
+        ms = list(pat.finditer(s))
+        if not ms or (len(ms) == 1 and ms[0].span() == (0, len(s.strip()))):
+            return s                      # a field that is one form key is data (the evidence index prints it)
+        found = []
+        for m in ms:
+            fk = f"{m.group(1).upper()}:{m.group(2)}"
+            said, eid, lab = say(fk)
+            a, b = m.start(), m.end()
+            kind = "bare"
+            om = OBJECT_PAREN.match(s, b)
+            if om:
+                # the builder's own object name: its kind kept, its editor ID said in words
+                kind_, nm_ = om.group(1), (objects.get(om.group(2)) or {}).get("name") or id_words(om.group(2))
+                b, kind = om.end(), "object"
+                if kind_.split()[-1] == "placed":
+                    said = f"{kind_} {nm_}"
+                    if s.startswith(", ", b):
+                        said, b = said + " (", b + 2
+                    elif s.startswith(")", b):
+                        b += 1
+                else:
+                    said = bind(words.get("recordObject") or "{kind} ({name})", {"kind": kind_, "name": nm_})[:-1]
+            else:
+                for nm_ in (lab, eid):
+                    if nm_ and s[max(0, a - len(nm_) - 2):a].casefold() == f"{nm_}, ".casefold():
+                        a, kind = a - len(nm_) - 2, "label"
+                        break
+                if eid and kind == "bare" and s[b:].startswith(f" {eid}"):
+                    b, kind = b + 1 + len(eid), "value"
+                elif kind == "bare" and s[max(0, a - 1):a] == '"' and s[b:b + 1] == '"':
+                    kind = "value"
+            found.append([a, b, fk, said, kind])
+        # different values that would read the same keep their form keys, so a sentence never says "A has X, B has
+        # X" of two values (Gate A review, answer 2); different records named alike are numbered in the order the
+        # text first names them ("a tree (Tree Thicket 01 Snow #1)"), so one line never makes two of them one
+        # a record nothing names (its plugin not read, or read and holding no editor ID) keeps its form key: no words
+        # here can say which record it is
+        unnamed_ = {bind(words.get(k_) or d_, {"plugin": x[2].split(":", 1)[1]}).casefold() for x in found
+                    for k_, d_ in (("recordUnread", "a record of {plugin} whose name was not read"),
+                                   ("recordNoName", "a record of {plugin} with no editor ID"))}
+        apart = lambda x: x[4] == "value"  # noqa: E731
+        by_said = {}
+        for x in found:
+            if apart(x):
+                by_said.setdefault(x[3].casefold(), set()).add(x[2])
+        alike = {}
+        key_ = lambda w_: w_.rstrip(" (").rstrip(")").casefold()  # noqa: E731
+        for x in found:
+            if not apart(x) and x[3].casefold() not in unnamed_:
+                g_ = alike.setdefault(key_(x[3]), [])
+                if x[2] not in g_:
+                    g_.append(x[2])
+        out, last = [], 0
+        for x in found:
+            a, b, fk, said, kind = x
+            if a < last:
+                continue
+            keep = (apart(x) and len(by_said.get(said.casefold(), ())) > 1) or said.casefold() in unnamed_
+            group = alike.get(key_(said)) or []
+            if not keep and len(group) > 1:
+                tail_ = " (" if said.endswith(" (") else ")" if said.endswith(")") else ""
+                said = said[:len(said) - len(tail_)] + bind(words.get("recordNumbered") or " #{n}",
+                                                             {"n": group.index(fk) + 1}) + tail_
+            out.append(s[last:a])
+            out.append(s[a:b] if keep else said)
+            last = b
+        out.append(s[last:])
+        return "".join(out)
+
+    def walk(x, key=None):
+        if isinstance(x, str):
+            return x if (key and ("path" in str(key).lower() or str(key).lower() in SAY_SKIP_KEYS)) else fix(x)
+        if isinstance(x, list):
+            return [walk(v, key) for v in x]
+        if isinstance(x, dict):
+            return {k: walk(v, k) for k, v in x.items()}
+        return x
+    return walk(obj)
 
 
 def media_kind_caption(media: dict, words: dict) -> str:
@@ -1545,7 +1729,14 @@ def shown_value(v, n: int = 60) -> str:
     """A field's value as a sentence quotes it: list entries joined, cut at n characters."""
     t = "; ".join(str(x) for x in v) if isinstance(v, list) else str(v)
     t = re.sub(r"\s+", " ", t).strip()
-    return t if len(t) <= n else t[:n - 1].rstrip() + "\u2026"
+    if len(t) <= n:
+        return t
+    # (item 1) never cut inside a form key: a cut-off key names no plugin, so no sentence could say its record
+    cut = n - 1
+    starts = [m.start() for m in re.finditer(r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{6}:", t) if m.start() < cut]
+    if starts and cut - starts[-1] < 64 and (t.find(".es", starts[-1]) < 0 or t.find(".es", starts[-1]) + 4 > cut):
+        cut = starts[-1]
+    return t[:cut].rstrip() + "\u2026"
 
 
 def record_type_of(summary) -> str:
@@ -2752,15 +2943,19 @@ def build_prediction(ctx: dict) -> dict:
     # (round 2 of the third review) record data the imports do not carry, read from the plugin file the prediction setup
     # names, only where its bytes are the recorded ones (sha256): a navmesh's edge links, a cell's DATA flags. None where
     # there is no such read; every read is recorded in the prediction (pluginReads).
-    plugin_reads, pread_cache = [], {}
+    plugin_reads, pread_cache, pread_why = [], {}, {}
 
     def plugin_record(plugin, what, fk):
         key_ = (str(plugin).lower(), what, str(fk))
         if key_ not in pread_cache:
             got_, (path_, sha_) = None, plugin_file(plugin)
+            # (item 4) why a record was not read, so a place is never said as "no name" for want of a read
+            pread_why[key_] = ("noFile" if not (path_ and sha_) else "missing" if not Path(path_).is_file() else None)
             if path_ and sha_ and Path(path_).is_file():
                 if path_ not in sha_cache:
                     sha_cache[path_] = hashlib.sha256(Path(path_).read_bytes()).hexdigest().lower()
+                if sha_cache[path_] != sha_:
+                    pread_why[key_] = "changed"
                 if sha_cache[path_] == sha_:
                     try:
                         if what == "editorId":          # (seventh review, Missives S2) a record's editor ID
@@ -2769,7 +2964,8 @@ def build_prediction(ctx: dict) -> dict:
                             res_ = {"records": pluginread.cell_worlds(path_, [str(fk)])}
                         else:
                             res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements,
-                                    "placementFull": pluginread.placements_full, "cellGrid": pluginread.cell_grids}.get(
+                                    "placementFull": pluginread.placements_full, "cellGrid": pluginread.cell_grids,
+                                    "navmeshPlace": pluginread.navmesh_places}.get(
                                 what, pluginread.cell_flags)(path_, [str(fk)])
                         got_ = res_["records"].get(str(fk))
                         plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
@@ -2777,10 +2973,16 @@ def build_prediction(ctx: dict) -> dict:
                         if got_ is None:
                             got_ = {}                  # read: the plugin holds no such record
                     except pluginread.PluginReadError as e_:
+                        pread_why[key_] = "error"
                         plugin_reads.append({"plugin": plugin, "sha256": sha_, "record": str(fk), "read": what,
                                              "error": str(e_)})
             pread_cache[key_] = got_
         return pread_cache[key_]
+
+    def unread_why(plugin, what, fk):
+        """(item 4) Why plugin_record did not read this record (noFile, missing, changed, error); None once read."""
+        plugin_record(plugin, what, fk)
+        return pread_why.get((str(plugin).lower(), what, str(fk)))
 
     fk_any_re = re.compile(r"\b([0-9A-Fa-f]{6}):([^\s,;()\[\]]+?\.es[mpl])\b")
 
@@ -2815,8 +3017,26 @@ def build_prediction(ctx: dict) -> dict:
             return "footprint:" + str(c_["worldspace"])
         if what == "editorId" and str(fk).startswith("footprint:"):
             return str(fk).split(":", 1)[1]
+        if what == "why":
+            # "read" once the record's own plugin was read; else why it was not (noFile, missing, changed, error)
+            return unread_why(str(fk).split(":", 1)[-1], "editorId", str(fk)) or "read"
+        if what == "placedBase":
+            got_ = plugin_record(str(fk).split(":", 1)[-1], "placementFull", str(fk))
+            return (got_ or {}).get("base") if isinstance(got_, dict) else None
         got_ = plugin_record(str(fk).split(":", 1)[-1], what, str(fk))
+        if what == "navmeshPlace":
+            return (got_ or {}).get("place") if isinstance(got_, dict) else None
         return got_ if got_ != {} else None
+
+    record_labels_ = ctx.get("recordLabels") or {}
+
+    def say_record(fk):
+        """(item 1) say_form_keys's sayer: the record in words (said_record over the names enrichment, the plugin files'
+        names and this bundle's recorded reads) and the editor ID and label the builders print beside its key."""
+        eid_ = place_reader("editorId", fk)
+        return (said_record(fk, names, record_labels_, words, place_reader), eid_ if isinstance(eid_, str) else None,
+                record_labels_.get(fk))
+    ctx["sayRecord"] = say_record
 
     def named_place(label):
         return said_place(label, place_names, words, place_reader)
@@ -8236,6 +8456,11 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
             out.append(bind(ww["physicalUnknownJoint"] if phys_unknown else ww["newSomeJoint"] if new_n
                             else ww["noNewJoint"], jv))
     ns = ww.get("nextStep") or {}
+    nm_ = ww.get("nextStepMerged") or {}
+    # (item 2) one next step per check and step kind, across the mod pairs it is found between: the pairs of one check
+    # that take the same step are said in one line with the summed count (each pair's own count kept in a lost-field
+    # line); each pair's item below still lists its own
+    steps, order_ = {}, []
     for k, it in enumerate(items):
         if it.get("shownAs") == "alone":
             continue
@@ -8247,33 +8472,62 @@ def what_to_do(lead: dict, masters: dict | None, words: dict, ev: dict, missing:
             # every one left is a field the supplied patch carries with one mod's value: its choice, said as that
             kb_ = (by_item[k] if k < len(by_item) else {}).get("keptBy") or {}
             winners_ = list(dict.fromkeys(str(x).split("|")[1] for x in kb_ if "|" in str(x)))
-            out.append(bind(ns["keptByPatch"], {"title": it.get("title"), "count": n,
-                                                 "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
-                                                 "mods": and_list([name(m) for m in it.get("mods") or []]),
-                                                 "winner": and_list([name(w) for w in winners_]) or "one mod"}))
-            continue
-        sp_ = it.get("lostSplit") or {}
-        own_ = int(sp_.get("own") or 0)
-        if sp_ and own_ < n and n == int(it.get("count") or 0) and ns.get("forwardAll") and ns.get("forwardSome"):
-            # the winner only keeps an earlier value on n - own of them: forwarding the losing mod's value keeps both
-            # mods' changes there (said only where the step's count is the item's whole count, which the split is of)
-            out.append(bind(ns["forwardAll" if own_ == 0 else "forwardSome"], {
-                "title": it.get("title"), "count": n, "verb": "is" if n == 1 else "are",
-                "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
-                "mods": and_list([name(m) for m in it.get("mods") or []]), "loser": name(sp_["loser"]),
-                "winner": name(sp_["winner"]), "fwd": fmt_n(n - own_), "own": fmt_n(own_),
-                "every": "it" if n == 1 else "every one",
-                "still": ns.get("still", "") if compared else ns.get("stillNone", "")}))
-            continue
-        tmpl = ns.get(str(it.get("checkId"))) or ns.get(str(it.get("kind"))) or ns.get("default")
-        if not tmpl:
-            continue
-        out.append(bind(tmpl, {"title": it.get("title"), "count": n, "verb": "is" if n == 1 else "are",
-                               "them": "it" if n == 1 else "them", "mods": and_list([name(m) for m in it.get("mods") or []]),
-                               "fieldNoun": (ns.get("fieldNoun") or ["", ""])[0 if n == 1 else 1],
-                               "candNoun": (ns.get("candNoun") or ["", ""])[0 if n == 1 else 1],
-                               "still": ns.get("still", "") if compared else ns.get("stillNone", ""),
-                               "state": bind(ns.get("state" if compared else "stateNone") or "", {"verb": "is" if n == 1 else "are"})}))
+            step, extra = "keptByPatch", {"winners": winners_}
+        else:
+            sp_ = it.get("lostSplit") or {}
+            own_ = int(sp_.get("own") or 0)
+            if sp_ and own_ < n and n == int(it.get("count") or 0) and ns.get("forwardAll") and ns.get("forwardSome"):
+                # the winner only keeps an earlier value on n - own of them: forwarding the losing mod's value keeps both
+                # mods' changes there (said only where the step's count is the item's whole count, which the split is of)
+                step, extra = ("forwardAll" if own_ == 0 else "forwardSome"), {"split": sp_, "own": own_}
+            else:
+                key_ = next((x for x in (str(it.get("checkId")), str(it.get("kind"))) if ns.get(x)), "default")
+                if not ns.get(key_):
+                    continue
+                step, extra = key_, {}
+        gk = (str(it.get("checkId")), step)
+        if gk not in steps:
+            steps[gk] = []
+            order_.append(gk)
+        steps[gk].append({"item": it, "n": n, **extra})
+    noun_of = lambda key, n: (ns.get(key) or ["", ""])[0 if n == 1 else 1]  # noqa: E731
+    still_ = ns.get("still", "") if compared else ns.get("stillNone", "")
+    for gk in order_:
+        g_ = steps[gk]
+        step = gk[1]
+        n = sum(x["n"] for x in g_)
+        it = g_[0]["item"]
+        pairs_ = [[name(m) for m in x["item"].get("mods") or []] for x in g_]
+        if len(g_) == 1:
+            mods_ = and_list(pairs_[0])
+        else:
+            # each pair with its own count; the mod every pair shares said once
+            common_ = [m for m in pairs_[0] if all(m in p_ for p_ in pairs_)]
+            if common_:
+                mods_ = and_list([common_[0]] + [and_list([m for m in p_ if m != common_[0]]) + f" ({fmt_n(x['n'])})"
+                                                 for p_, x in zip(pairs_, g_)])
+            else:
+                mods_ = "; ".join(and_list(p_) + f" ({fmt_n(x['n'])})" for p_, x in zip(pairs_, g_))
+        base_ = {"title": it.get("title"), "count": n, "verb": "is" if n == 1 else "are", "mods": mods_,
+                 "them": "it" if n == 1 else "them", "fieldNoun": noun_of("fieldNoun", n),
+                 "candNoun": noun_of("candNoun", n), "still": still_, "pairs": fmt_n(len(g_))}
+        if step == "keptByPatch":
+            winners_ = list(dict.fromkeys(w for x in g_ for w in x["winners"]))
+            out.append(bind(ns["keptByPatch"], {**base_, "winner": and_list([name(w) for w in winners_]) or "one mod"}))
+        elif step in ("forwardAll", "forwardSome"):
+            win_ = {name(x["split"]["winner"]) for x in g_}
+            lose_ = {name(x["split"]["loser"]) for x in g_}
+            own_ = sum(x["own"] for x in g_)
+            out.append(bind(ns[step], {**base_, "loser": next(iter(lose_)) if len(lose_) == 1 else ns.get("anyLoser", "the losing mod"),
+                                       "winner": next(iter(win_)) if len(win_) == 1 else ns.get("anyWinner", "the winning mod"),
+                                       "fwd": fmt_n(n - own_), "own": fmt_n(own_),
+                                       "every": "it" if n == 1 else "every one"}))
+        else:
+            # a step that names no pair ("check them in game") says how many pairs it covers; one that names its mods
+            # takes the pairs with their counts
+            tmpl = nm_[step] if len(g_) > 1 and nm_.get(step) else ns[step]
+            out.append(bind(tmpl, {**base_, "state": bind(ns.get("state" if compared else "stateNone") or "",
+                                                          {"verb": "is" if n == 1 else "are"})}))
     # (Cut Content r3 report review 3) generated distant scenery and occlusion: the check that would say whether they
     # need rebuilding has no result on the measured setup, and the mod places objects in exterior cells (its own
     # footprint), so the step is said; never for a mod with interior cells only
@@ -8453,11 +8707,13 @@ def precedent_census(lead: dict, folder, words: dict) -> None:
         for mod_, objs_ in off_.items():
             if acts_w.get("switchesOff"):
                 add_ += bind(acts_w["switchesOff"], {"mod": mod_, "objects": and_list(objs_[:3]) + (
-                    f" and {len(objs_) - 3} more" if len(objs_) > 3 else ""), "count": len(objs_)})
+                    f" and {len(objs_) - 3} more" if len(objs_) > 3 else ""), "count": fmt_n(len(objs_)),
+                    "noun": (acts_w.get("objectNoun") or ["object", "objects"])[0 if len(objs_) == 1 else 1]})
         for mod_, recs_ in strip_.items():
             if acts_w.get("stripsScripts"):
                 add_ += bind(acts_w["stripsScripts"], {"mod": mod_, "records": and_list(recs_[:3]) + (
-                    f" and {len(recs_) - 3} more" if len(recs_) > 3 else ""), "count": len(recs_)})
+                    f" and {len(recs_) - 3} more" if len(recs_) > 3 else ""), "count": fmt_n(len(recs_)),
+                    "noun": (acts_w.get("recordNoun") or ["record", "records"])[0 if len(recs_) == 1 else 1]})
         if not add_:
             continue
         at_ = next((i for i, x in enumerate(todo) if str(x).startswith((str(p), f"Use {p} "))), None)
@@ -8485,12 +8741,14 @@ def patch_acts(folder, patch) -> tuple[dict, dict]:
         owner = fk.split(":", 1)[1] if ":" in fk else ""
         if not owner or owner.lower() == str(patch).lower():
             continue
-        eid = e.get("editorId") or fk
+        # (item 1) each record in words: a placed object by its base, a record by its editor ID; the form key and editor
+        # IDs stay in the precedent stage's edit list
+        eid = id_words(e.get("editorId")) if e.get("editorId") else fk
         if e.get("kind") == "DISABLE":
             base = ((e.get("touched") or {}).get("base") or {})
             cell = (((e.get("touched") or {}).get("cell") or {}).get("name"))
-            what = eid + (f" (a placed {base.get('editorId')}" + (f", in {cell}" if cell else "") + ")" if base.get("editorId")
-                          else f" (in {cell})" if cell else "")
+            what = (f"a placed {id_words(base.get('editorId'))}" + (f" in {cell}" if cell else "") if base.get("editorId")
+                    else eid + (f" (in {cell})" if cell else ""))
             off.setdefault(owner, []).append(what)
         elif str(e.get("kind")) == "FIELD:VirtualMachineAdapter":
             pv = ((e.get("values") or {}).get("patch") or {}).get("values") or {}
@@ -10658,8 +10916,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
     # the names enrichment: each named object's base and carriers, each base's type and model (W-B2, W-B3)
     names_early_row = next((e for e in b.enrichment() if e.get("enrichment") == "names"), None)
     names_early = load_json(bundle_dir / names_early_row["path"]) if names_early_row else None
-    lead = build_prediction({
-        "findings": findings, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
+    labels_ = record_labels(b)
+    lead = build_prediction(pctx_ := {
+        "findings": findings, "recordLabels": labels_, "armOrders": arm_orders, "armIds": arm_ids, "targets": target_names,
         "declared": declared_patches, "patchLabels": patch_labels, "replacedPatches": {
             a_: {side_: [n for n in arm_replaced.get(a_) or [] if replaced_patch_side(a_, n) == side_]
                  for side_ in ("arm", "baseline")} for a_ in arm_changes}, "comparisonKinds": comparison_kinds, "armChanges": arm_changes, "armReplaced": arm_replaced,
@@ -11079,10 +11338,17 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
               for q in (a_.get("requested") or {}).get("plugins") or [] if (q.get("name") if isinstance(q, dict) else q)]
     for k_ in ("reader", "scope", "groups", "findings"):
         plan[k_] = proper_plugin_case(plan[k_], names_)
-    # a record or place given by its form key is said with its name where the plugin files give one
-    labels_ = record_labels(b)
+    # (item 1) a record given by its form key is said in words (said_record) in every sentence; the form keys stay in
+    # the evidence index and in the rows' own fields
+    pw_say_ = (pr.get("reader") or {}).get("prediction") or {}
+    sayer_ =pctx_.get("sayRecord") or (lambda fk_: (said_record(fk_, names_early or {}, labels_, pw_say_, lambda w_, f_: None),
+                                                      None, labels_.get(fk_)))
     for k_ in ("reader", "groups", "findings"):
-        plan[k_] = label_form_keys(plan[k_], labels_)
+        plan[k_] = say_form_keys(plan[k_], sayer_, names_ + [str(fk_).split(":", 1)[1] for fk_ in labels_ if ":" in str(fk_)],
+                                 pw_say_, (names_early or {}).get("objects") or {})
+    for m_ in plan.get("media") or []:
+        if isinstance(m_, dict) and isinstance(m_.get("caption"), str):
+            m_["caption"] = say_form_keys(m_["caption"], sayer_, names_, pw_say_, (names_early or {}).get("objects") or {})
     return plan
 
 
