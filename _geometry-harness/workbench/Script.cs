@@ -76,6 +76,20 @@ internal sealed class Script
     }
 
     static float F(string s) => float.Parse(s, CultureInfo.InvariantCulture);
+    /// <summary>A step's words. A FormKey's plugin name may hold spaces ("00083C:unofficial skyrim special edition patch.esp"):
+    /// the words after one that holds a colon join it until a plugin extension ends the name.</summary>
+    internal static string[] Tokens(string line)
+    {
+        var o = new List<string>();
+        foreach (var w in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (o.Count > 0 && o[^1].Contains(':') && !EndsLikePlugin(o[^1])) o[^1] += " " + w;
+            else o.Add(w);
+        }
+        return o.ToArray();
+    }
+    static bool EndsLikePlugin(string w) => w.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) || w.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) || w.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
+
     static Vector2 P2(string s) { var p = s.Split(','); return new(F(p[0]), F(p[1])); }
     static Vector3 P3(string s) { var p = s.Split(','); return new(F(p[0]), F(p[1]), F(p[2])); }
 
@@ -86,7 +100,7 @@ internal sealed class Script
         if (_steps.Count == 0) return;
         var line = _steps.Dequeue();
         WorkbenchHost.Say("> " + line);
-        var a = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var a = Tokens(line);
         try { Run(a); }
         catch (Exception ex) { WorkbenchHost.Say($"step refused: {ex.Message}"); }
     }
@@ -251,6 +265,8 @@ internal sealed class Script
                 var want = a.Length > 2 ? a[2] : s.Selected?.ToString();
                 bool crosses = want is not null && FormKey.TryFactory(want, out var wk) && s.IsDrawn(wk) && _h.PickOwn(new Vector2(_h.W * 0.5f, _h.H * 0.5f), wk) is not null;
                 got = $"selected {s.Selected?.ToString() ?? "none"}, centre ray crosses it {crosses}, first thing it meets {st ?? "nothing"}";
+                if (want is not null && FormKey.TryFactory(want, out var wk2) && s.IsDrawn(wk2))
+                    got += $" [own shapes {s.RefOf(wk2).Shapes.Count}, scene pick shapes of that key {_h.ScenePickShapesOf(wk2)}]";
                 ok = want is not null && string.Equals(s.Selected?.ToString(), want, StringComparison.OrdinalIgnoreCase) && crosses;
                 break;
             }
@@ -273,7 +289,9 @@ internal sealed class Script
                 break;
             }
             case "partner":
-                got = _h.Marks.Partner?.Ref.RefKey.ToString() ?? "none"; ok = string.Equals(got, a[2], StringComparison.OrdinalIgnoreCase); break;
+                got = _h.Marks.Partner?.Ref.RefKey.ToString() ?? "none"; ok = string.Equals(got, a[2], StringComparison.OrdinalIgnoreCase);
+                if (_h.PartnerNote is { } pn) got += "; " + pn;
+                break;
             default: got = "unknown expectation"; ok = false; break;
         }
         if (!ok) Shell.ExpectFailures++;

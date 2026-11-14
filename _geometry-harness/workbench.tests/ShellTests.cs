@@ -163,4 +163,15 @@ public class ShellTests
         Assert.IsType<ClickPlan.Refuse>(ClickThrough.Plan(K(0x805).ToString(), "000900:Hc.esp", "000900:Hc.esp", cells, 0, Drawn));
         Assert.IsType<ClickPlan.Refuse>(ClickThrough.Plan(K(0x805).ToString(), "000902:Hc.esp", "000900:Hc.esp", cells, 0, Drawn));
     }
+
+    /// <summary>Stage 4 L-1: a script step naming a FormKey whose plugin name has spaces keeps it whole (run 1 of the
+    /// CONTACT click-through compared against the first word only).</summary>
+    [Fact]
+    public void A_script_step_keeps_a_FormKey_whose_plugin_name_has_spaces_whole()
+    {
+        Assert.Equal(new[] { "expect", "landed", "00083C:unofficial skyrim special edition patch.esp" }, Script.Tokens("expect landed 00083C:unofficial skyrim special edition patch.esp"));
+        Assert.Equal(new[] { "expect", "partner", "0094AB:The Great City of Falkreath.esp" }, Script.Tokens("expect partner 0094AB:The Great City of Falkreath.esp"));
+        Assert.Equal(new[] { "stage", "000801:Hc.esp", "1,2,3", "10" }, Script.Tokens("stage 000801:Hc.esp 1,2,3 10"));
+        Assert.Equal(new[] { "pose", "1,2,3", "10", "20" }, Script.Tokens("pose 1,2,3  10 20"));
+    }
 }

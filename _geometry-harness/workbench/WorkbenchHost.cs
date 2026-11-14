@@ -130,9 +130,23 @@ internal sealed class WorkbenchHost
     void UpdateMarks()
     {
         _marks.Selected = _session.Selected is { } k ? _session.RefOf(k) : null;
-        _marks.Partner = _session.Selected is { } s && Shell.CurrentRow is { } r && string.Equals(r.Row.RefKey, s.ToString(), StringComparison.OrdinalIgnoreCase)
-                         && r.Row.OtherKey is { } o && FormKey.TryFactory(o, out var ok) && _session.IsDrawn(ok) ? _session.RefOf(ok) : null;
+        _marks.Partner = null; PartnerNote = null;
+        if (_session.Selected is { } s && Shell.CurrentRow is { } r && string.Equals(r.Row.RefKey, s.ToString(), StringComparison.OrdinalIgnoreCase)
+            && r.Row.OtherKey is { } o && FormKey.TryFactory(o, out var ok))
+        {
+            if (_session.IsDrawn(ok)) _marks.Partner = _session.RefOf(ok);
+            else
+            {
+                // Said, never silently unmarked: the probe measured the row with this reference, the viewer did not draw it.
+                string why = _opt.RefOutcomes is { } ro && ro.TryGetValue(ok, out var w) ? (w.Outcome == "drawn" ? "unresolved-mesh" : w.Outcome)
+                           : "not walked in this scene";
+                PartnerNote = $"the conflict's other reference {o} is not drawn in this scene ({why}), so it cannot be marked";
+            }
+        }
     }
+
+    /// <summary>Why the open row's other reference is not marked, when it is not; null otherwise.</summary>
+    internal string? PartnerNote { get; private set; }
 
     internal ConflictMarks Marks => _marks;
 
@@ -141,7 +155,8 @@ internal sealed class WorkbenchHost
         string sel = _session.Selected is { } k ? $"selected {k} {EditSession.Describe(_session.Current(k))}" : "nothing selected (click a reference)";
         string target = _writer?.Target.ToString() ?? (TargetFromEnv()?.ToString() ?? "no write target set");
         string marks = !_marks.Enabled ? "marks off" : _marks.Selected is null ? "" :
-            $"cyan: selected {_marks.Selected.Ref.RefKey}" + (_marks.Partner is { } p ? $"; magenta: the conflict's other reference {p.Ref.RefKey}" : "") + " (drawn through anything in front)";
+            $"cyan: selected {_marks.Selected.Ref.RefKey}" + (_marks.Partner is { } p ? $"; magenta: the conflict's other reference {p.Ref.RefKey}" : "") + " (drawn through anything in front)"
+            + (PartnerNote is { } pn ? "; " + pn : "");
         _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}" + (marks.Length > 0 ? "\n" + marks : "");
     }
 
@@ -418,6 +433,8 @@ internal sealed class WorkbenchHost
     static string CentreName(PickHit? h) => h?.Shape is { Kind: PickKind.Ref } sh ? sh.Ref.RefKey.ToString() : h is null ? "nothing" : h.Shape.Kind.ToString();
 
     /// <summary>The ray through a pixel against <paramref name="key"/>'s own shapes only (what is in front does not count).</summary>
+    internal int ScenePickShapesOf(FormKey key) => _opt.PickShapes.Count(s => s.Kind == PickKind.Ref && s.Ref.RefKey == key);
+
     internal PickHit? PickOwn(Vector2 px, FormKey key)
     {
         var (o, d) = _camera.ScreenPointToRay(px.X, px.Y, W, H);
@@ -433,7 +450,7 @@ internal sealed class WorkbenchHost
             worklistCell = _opt.WorklistCell, drawnRefs = DrawnAll().Count(),
             walkedRefs = _opt.RefOutcomes?.Count,
             walkOutcomes = _opt.RefOutcomes?.GroupBy(x => x.Value.Outcome).ToDictionary(g => g.Key, g => g.Count()),
-            marks = new { enabled = _marks.Enabled, selected = _marks.Selected?.Ref.RefKey.ToString(), partner = _marks.Partner?.Ref.RefKey.ToString(), legend = ConflictMarks.Legend },
+            marks = new { enabled = _marks.Enabled, selected = _marks.Selected?.Ref.RefKey.ToString(), partner = _marks.Partner?.Ref.RefKey.ToString(), partnerNote = PartnerNote, legend = ConflictMarks.Legend },
             drawnRefKeys = DrawnAll().Select(r => r.Ref.RefKey.ToString()).OrderBy(k => k, StringComparer.Ordinal),
             selected = _session.Selected?.ToString(), staged = _session.Pending.Count,
             camera = new { eye = new[] { _eye.X, _eye.Y, _eye.Z }, yaw = _yaw, pitch = _pitch, fov = _fov, framebuffer = new[] { W, H } },
