@@ -81,7 +81,7 @@ def c2166_declared_names_said_as_written(tmp: Path):
           "the storyboard's speech changed a declared name", f"exit {r.returncode} {r.stderr[-200:]!r}; lost {lost}; {said[:300]!r}")
     # the render's speech and the still pages: the same names, set from the reel plan's modNames by the render itself
     src = (HARNESS / "evalreel.py").read_text(encoding="utf-8")
-    check("C2166", src.count('reel_stills.keep_names(reel.get("modNames") or {})') == 2,
+    check("C2166", src.count('reel_stills.keep_names(reel.get("modNames") or {}, reel.get("shortForms"))') == 2,
           "the render or the storyboard does not hand the reel's declared names to the speech rule")
     getattr(RS, "keep_names", lambda _names: None)(MOD_NAMES)   # absent before C2166: then nothing is kept
     shown = " ".join(RS.shown_text(x) for x in ROWS)

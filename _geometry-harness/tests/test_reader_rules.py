@@ -104,7 +104,7 @@ def case_verdict_on_a_patch_for_another_pair():
     plan, md, html = contact_patch_bundle(patch=PATCH_L, masters={PATCH_L: [BASE, A, LEG], A: [BASE], B: [BASE]},
                                           base_extra=(LEG,), left=3)
     todo = " ".join(pred_of(plan).get("whatToDo") or [])
-    want = f"{PATCH_L} is a patch for {A} and {LEG}. None of the predicted clashes is between them"
+    want = f"{PATCH_L} is a patch for {A} and {LEG}; none of the predicted clashes is between them"
     ok = want in todo and "resolves none" not in todo and want in md
     return ok, f"what to do {todo[:300]!r}"
 
@@ -1198,7 +1198,7 @@ def case_a_state_example_is_an_object_and_its_lost_support():
                        f"0B0002:{BASE}": {"editorId": "FarmIntBasement", "type": "Static", "model": "b.nif"}}}
     rows = [P.row(f"STATE-EMPTY@0008A8:{A}@Triggered", B, A, fk, other=host)]
     plan, md, html = P.compile_and_render(arms, {("state.conditional-geometry", "baseline"): rows}, [A], names=names)
-    line = next((ln for ln in md.splitlines() if "CommonWardrobe01" in ln), "")
+    line = next((ln for ln in md.splitlines() if "Common Wardrobe 01" in ln), "")
     ok = "left in empty space because" in line and " against " not in line
     return ok, f"line {line[:300]!r}"
 
@@ -1615,7 +1615,7 @@ def case_a_patchs_side_effect_is_in_its_verdict():
     """A patch that puts back another mod's changes says so beside its verdict, on the records it touches."""
     plan, md, html = two_patch_chain_bundle()
     todo = " ".join(pred_of(plan).get("whatToDo") or [])
-    ok = f"puts back the earlier value of 1 record field that {OTHER} changes, on 00C302:{BASE}" in todo
+    ok = f"undoes 1 of {OTHER}'s record field, on 00C302:{BASE}" in todo
     return ok, f"what to do {todo[:500]!r}"
 
 
@@ -1749,8 +1749,8 @@ def case_a_patch_that_switches_off_another_mods_object_says_so():
                         (RECORDS, "with-patch"): []},
             settings_extra={"precedentDir": str(d)})
     todo = " ".join(pred_of(plan).get("whatToDo") or [])
-    ok = ("It switches off ModBGuardRef (a placed ModBGuard, in The Town Inn), which " + B in todo
-          and "removes the scripts from ModBQuestEffect" in todo)
+    ok = (f"It switches off 1 object that {B} places (a placed Mod BGuard in The Town Inn; read from the patch's own"
+          in todo and f"removes the scripts from 1 record that {B} adds (Mod BQuest Effect;" in todo)
     return ok, f"what to do {todo[:500]!r}"
 
 

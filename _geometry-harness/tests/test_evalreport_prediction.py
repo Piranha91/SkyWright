@@ -1818,7 +1818,7 @@ def main():
         want_more = len(set(places)) - 2           # the two most common places are named, the rest counted
         ok = (f"and {want_more} more places" in ov and "All are in" not in nv
               # N6: an unnamed cell whose plugin was not read is said as such, never by its form key
-              and "a cell with no name" in nv and f"008EC2:{BASE}" not in nv and "tris" not in nv.split("Most are in")[-1])
+              and "could not be read" in nv and f"008EC2:{BASE}" not in nv and "tris" not in nv.split("Most are in")[-1])
         return ok, f"overlap item {ov!r}; navmesh item {nv!r}"
 
     # C482. verify does not say ok while the printed report is over its page limit
@@ -4009,7 +4009,7 @@ def main():
                  "bases": {f"0BC001:{BASE}": {"type": "Static", "editorId": "COCMarkerHeading", "model": "MarkerCOCHeading.nif"}}}
         plan, md, _ = core_bundle([r1, r2], [], names=names)
         # after-review (Pilgrim review 3): the base's kind, from its record type, is said before its editor ID
-        ok = f"{R1} (RorlundREF, position)" in md and f"{R2} (a static object COCMarkerHeading, position)" in md
+        ok = f"{R1} (RorlundREF, position)" in md and "a static object (COCMarker Heading, position)" in md and R2 not in md
         return ok, next((ln for ln in md.splitlines() if "For example" in ln), "")[-220:]
 
     # C817 (Missives review 6, BPT review S6): an overlap item names its objects by their bases, and rows that are all
@@ -4640,7 +4640,7 @@ def main():
         plan, md, _ = core_bundle([r1], [], extra_results=extra, names=names)
         # (reviewer) the kind is the record type, never a role read from a model's path
         ok = ("a movable static TestMist01" in md and "a container TestChest" in md
-              and "the NPC TestPriestREF" in md)
+              and "the NPC (Test Priest REF" in md)
         lines = [ln for ln in md.splitlines() if "TestMist01" in ln or "TestPriestREF" in ln]
         return ok, " | ".join(x[-160:] for x in lines[:2])
 
@@ -5964,9 +5964,10 @@ def main():
         md2, it2 = nudge_bundle([near_, far_])
         md3, it3 = nudge_bundle([rebase_])
         one_ = re.search(re.escape(OTHER) + r" only moves [^:]*?by 2.0 u", it1) is not None and "was not measured" in md1
-        two_ = (" only " not in it2.split("For example")[0] and "00CA79:Skyrim.esm" in it2 and "00CB79:Skyrim.esm" in it2
-                and re.search(r"00CB79:Skyrim\.esm[^;.]*300\.0 u[^;.]*turn", it2) is not None and "2.0 u" in it2)
-        three_ = ("00CC79:Skyrim.esm" in it3 and "another base" in it3 and "0.0 u" not in it3 and " only " not in it3)
+        two_ = (" only " not in it2.split("For example")[0] and "Rock 01 #1) moved 2.0 u" in it2
+                and re.search(r"Rock 01 #2\)[^;.]*300\.0 u[^;.]*turn", it2) is not None and "00CA79" not in it2)
+        three_ = ("a static object (Rock 01" in it3 and "00CC79" not in it3 and "another base" in it3 and "0.0 u" not in it3
+                  and " only " not in it3)
         return one_ and two_ and three_, f"{one_} {two_} {three_} || {it2[:700]} || {it3[:700]}"
 
     for name, fn in [("fifth-review/C1079-other-mod-nudge-said", c1079_other_mod_nudge_said)]:
@@ -7445,7 +7446,10 @@ def main():
                                   targets=(MOD_A, MOD_B), names={"refs": refs_, "bases": bases_})
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         sents = re.split(r"(?<=[.)])\s+(?=On |In |For |Most |\[)", it)
-        return it, {fk_: next((s_ for s_ in sents if fk_ in s_ and "no model" in s_), "") for fk_, _, _ in objs}
+        said_ = {fk_: R.record_object_name(fk_, {"refs": refs_, "bases": bases_},
+                                           json.loads(PRIORITIES.read_text(encoding="utf-8"))["reader"]["prediction"])
+                 for fk_, _, _ in objs}
+        return it, {fk_: next((s_ for s_ in sents if said_[fk_] in s_ and "no model" in s_), "") for fk_, _, _ in objs}
 
     def c1068_no_model_light_lights():
         it, seg = no_model_segments([(f"00CA68:{BASE}", "Light", "ShadowLight01")])
@@ -7799,7 +7803,7 @@ def main():
         # placement, in its own sentence; the nudged one is in neither
         s_ = " ".join(x for x in re.split(r"(?<=\.)\s+", it) if "may come from its own placement" in x
                       or "own placement, not the base game's" in x)
-        return ("00CB10:Skyrim.esm" in s_ and "00CA10:Skyrim.esm" not in s_), s_[:300]
+        return ("Rock 01 #2" in s_ and "Rock 01 #1" not in s_ and "00CB10" not in s_), s_[:300]
 
     # C1114 (BPT r5 S1): a patch that takes the losing mod's value over the winner's change (switched) is worded apart
     # from a patch carrying the winner's value (kept): "restores", never the kept wording.
@@ -7989,7 +7993,7 @@ def main():
                                   targets=(MOD_A, MOD_B), names=names_, arms=arms_)
         it = next((ln for ln in md.splitlines() if ln.startswith("- **Record fields")), "")
         drawn_ = next((x for x in re.split(r"(?<=[.)])\s+(?=On |In |For )", it) if "is drawn" in x), "")
-        return ("00CB18" in drawn_ and "00CA18" not in drawn_ and "editor marker" in it
+        return ("a static object (Crate 01)" in drawn_ and "XMarker" not in drawn_ and "editor marker" in it
                 and re.search(r"On 1 object, ", drawn_) is not None), it[-500:]
 
     # C1119 (Snazzy S1, gate A condition R3): a lost water height on an interior cell whose losing and winning versions
@@ -8287,9 +8291,9 @@ def main():
         md, it = nudge_bundle([far_, turn_])
         sents_ = re.split(r"(?<=\.)\s+", it)
         hedge_ = " ".join(x for x in sents_ if "as much as from the base game" in x)
-        credit_ = next((x for x in sents_ if "00CA40:Skyrim.esm" in x and f"{OTHER}'s own placement" in x
+        credit_ = next((x for x in sents_ if "Rock 01 #1" in x and f"{OTHER}'s own placement" in x
                         and "as much as" not in x), "")
-        return ("00CA40:Skyrim.esm" not in hedge_ and "00CB40:Skyrim.esm" in hedge_ and bool(credit_)), \
+        return ("Rock 01 #1" not in hedge_ and "Rock 01 #2" in hedge_ and bool(credit_)), \
             f"hedge {hedge_[:240]!r} || credit {credit_[:240]!r}"
 
     # C1141 (Snazzy S1): a kept lost change (the patch keeps ModB's base over ModA's) on an object both mods have on,
@@ -8553,7 +8557,7 @@ def main():
         plan, md, _ = core_bundle(p_rows, list(p_rows), check=CELLATTR, arms=arms, p_chains=chains,
                                   masters={HF_: [BASE], OTHER: [BASE], MOD_A: [BASE], MOD_B: [BASE]})
         line = next((ln for ln in md.splitlines() if f"wins over {HF_}'s own change of" in ln), "")
-        return ("018A59:Skyrim.esm TestCityLocation" in line), line[:400]
+        return ("Location: Test City Location" in line and "018A59" not in line), line[:400]
 
     # C1151 (Sewers S1): the quest-or-switch check's row puts its depth on its own object (the one that leaves) and
     # names no other; its state is Unknown. The overlap item says the depth is that object's, and a switch clash item of
