@@ -1413,6 +1413,7 @@ var baseMesh = new Dictionary<FormKey, string>();
 var bosIdx = bosMode != "off" ? new BosFormIndex() : null;
 var bosLight = new List<(ModKey Key, bool Light)>();
 var refCellOf = new Dictionary<FormKey, FormKey>();
+var refOutcome = new Dictionary<FormKey, (string Outcome, string? BaseEditorId)>();
 var winWalk = new ViewProbe.WinningRefWalk(winRef, persistentWin, refCellOf);
 // The ring edge (WinningRefs.cs): references the game loads two cells out whose bounds enter the 3x3, per shot.
 int edgeAdmittedCount = 0, edgePlanesAdmittedCount = 0;
@@ -2690,9 +2691,14 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         }
         var meshCensus = listMeshes ? new Dictionary<string, (int Count, string Class)>(StringComparer.OrdinalIgnoreCase) : null;
         int stateArrived = 0, stateDeparted = 0;
+        // Every walked ref's outcome in one word, for a host that lists the cells' placed refs (the workbench's
+        // Records tree): drawn, or why not. Read nowhere else.
+        refOutcome.Clear();
+        string? BaseEd(PlacedRef wr) => wr.Base is { } b && baseEditorId.TryGetValue(b, out var e) ? e : null;
         foreach (var r in winRef.Values)
         {
-            if (r.Deleted) { deletedSkipped++; continue; }
+            refOutcome[r.FormKey] = ("drawn", BaseEd(r));
+            if (r.Deleted) { deletedSkipped++; refOutcome[r.FormKey] = ("deleted", null); continue; }
             // --state: what the flip changed for this ref — arrives (+1), departs (−1), nothing (0). A departed ref is
             // drawn only in the diff view, tinted, so the eye sees what left.
             int stateChange = 0;
@@ -2704,6 +2710,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             }
             if (!enabledNow && !(stateChange == -1 && stateView == "diff"))
             {
+                refOutcome[r.FormKey] = ("disabled", BaseEd(r));
                 if (refEnableParent.ContainsKey(r.FormKey)) disabledParentSkipped++; else disabledFlagSkipped++;
                 if (stateChange == -1) stateDeparted++;
                 continue;
@@ -2714,7 +2721,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // ENABLED at runtime — the standard way a mod swaps a whole set in. These used to be
             // silently dropped (a third of the Temple's content).
             if (r.InitiallyDisabled) enabledByParentDrawn++;
-            if (r.Base is not { } bk0) { noModel++; continue; }
+            if (r.Base is not { } bk0) { noModel++; refOutcome[r.FormKey] = ("no-base", null); continue; }
             // The Base Object Swapper layer: the base the game LOADS for this ref, at the transform its overrides
             // give it. A ref the layer flags initially-disabled at init is not drawn, and counted.
             var bk = bk0; var rPos = r.Position; var rRot = r.Rotation; var rScale = r.Scale;
@@ -2744,7 +2751,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             }
             // --cell-lighting: every drawn LIGH reference is a point light (CellLighting.cs), model or not.
             if (ViewProbe.CellLighting.Requested && ViewProbe.CellLighting.Bases.ContainsKey(bk)) ViewProbe.CellLighting.Placed.Add((rPos, bk, r.FormKey));
-            if (!baseMesh.TryGetValue(bk, out var rel)) { noModel++; continue; }
+            if (!baseMesh.TryGetValue(bk, out var rel)) { noModel++; refOutcome[r.FormKey] = ("no-model", BaseEd(r)); continue; }
             // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
             // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
             // counted, and --fx puts them back. This is the WHOLE-FILE rule only — a solid mesh that
@@ -2759,10 +2766,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 var cls = isMarker ? "MARKER" : isFx ? "FX-file" : "geometry";
                 meshCensus[rel] = (meshCensus.TryGetValue(rel, out var c) ? c.Count + 1 : 1, cls);
             }
-            if (!keepFx && !fxStatic && isFx) { fxSkipped++; continue; }
+            if (!keepFx && !fxStatic && isFx) { fxSkipped++; refOutcome[r.FormKey] = ("effect", BaseEd(r)); continue; }
             // Editor markers are not world geometry; the game never draws them. --markers keeps them
             // as a translucent extra layer instead of dropping them.
-            if (isMarker && !showMarkers) { markerSkipped++; continue; }
+            if (isMarker && !showMarkers) { markerSkipped++; refOutcome[r.FormKey] = ("marker", BaseEd(r)); continue; }
             var explicitlyHighlighted = highlightColors.TryGetValue(r.FormKey, out var highlightColor);
             if (!explicitlyHighlighted && conflictDoors.Contains(r.FormKey)) highlightColor = new(1f,.35f,.10f);
             scene.Add(new ViewProbe.SceneRef(rel, rPos, rRot, rScale,
@@ -5346,6 +5353,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 Worldspace = targetWorldspace,
                 Interior = interior,
                 RefCells = refCellOf,
+                RefOutcomes = refOutcome,
                 OutDir = shotOutDir,
                 SafeName = safe,
                 RedNav = redNav.Keys.ToHashSet(),

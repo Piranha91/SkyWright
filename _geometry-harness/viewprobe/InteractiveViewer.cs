@@ -117,6 +117,7 @@ sealed class InteractiveOptions
     public FormKey Worldspace;
     public bool Interior;
     public IReadOnlyDictionary<FormKey, FormKey>? RefCells;
+    public IReadOnlyDictionary<FormKey, (string Outcome, string? BaseEditorId)>? RefOutcomes;   // every walked ref: drawn, or why not
     public required string OutDir;
     public required string SafeName;
     public HashSet<FormKey> RedNav = new();                // conflict-red navmeshes, tagged in reports

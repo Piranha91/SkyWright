@@ -35,6 +35,9 @@ namespace Workbench;
 /// expect selected FORMKEY|none   pass or fail on the selection (a failure makes the exit code 4)
 /// expect staged N                pass or fail on the number of staged edits
 /// expect moved FORMKEY DX,DY,DZ T   pass or fail on the selected reference's staged move from its built position, within T units
+/// expect marked                 pass or fail: cyan pixels in the selected reference's projected box (and magenta in the partner's)
+/// expect partner FORMKEY|none    pass or fail on the marked partner
+/// marks on|off                   the bar's Marks toggle
 /// expect landed [FORMKEY]        pass or fail: that reference (default: the selected one) selected, the screen-centre ray crossing its shapes
 /// idlecpu SECONDS                the process's CPU over SECONDS with nothing happening, by cycle counts, as a share of one busy core
 /// quit                           close the window
@@ -182,7 +185,7 @@ internal sealed class Script
             {
                 var node = RecordsTree.Walk(Shell.Tree).FirstOrDefault(t => t.Kind == "ref" && string.Equals(t.Key, a[1], StringComparison.OrdinalIgnoreCase));
                 if (node is null) { WorkbenchHost.Say($"treeref {a[1]}: the Records tree has no such reference"); break; }
-                Shell.OpenRef(node.Key, Shell.CellOfRef(node.Key)); _wait = 3; break;
+                Shell.CurrentRow = null; Shell.OpenRef(node.Key, Shell.CellOfRef(node.Key)); _wait = 3; break;
             }
             case "showall": Shell.ShowAll = a[1] == "on"; Shell.FillConflicts(); break;
             case "state": Shell.Dump(_h, Path.Combine(_h.OutDir, a[1] + ".json")); break;
@@ -215,6 +218,7 @@ internal sealed class Script
                 _h.PostMouse(0x202, q1); _wait = 3; break;
             }
             case "expect": Expect(a); break;
+            case "marks": _h.Marks.Enabled = a[1] == "on"; _h.Invalidate(); _wait = 2; break;
             case "idlecpu": IdleCpu(F(a[1])); break;
             case "quit": _h.MainWindow.Close(); break;
             default: WorkbenchHost.Say($"unknown step '{a[0]}'"); break;
@@ -250,6 +254,26 @@ internal sealed class Script
                 ok = want is not null && string.Equals(s.Selected?.ToString(), want, StringComparison.OrdinalIgnoreCase) && crosses;
                 break;
             }
+            case "marked":
+            {
+                // Mark-coloured pixels inside the selected (cyan) and, when a partner is marked, the partner's (magenta)
+                // projected box, read from this frame's back buffer before the swap.
+                var m = _h.Marks;
+                if (m.Selected is null) { got = "nothing selected"; ok = false; break; }
+                var sc = _h.CountMarked(m.Selected, (r, g, b) => r < 80 && g > 200 && b > 200);
+                got = $"selected {m.Selected.Ref.RefKey}: {sc.Marked} cyan of {sc.Box} pixels in its projected box";
+                ok = sc.Marked > 0;
+                if (m.Partner is { } p)
+                {
+                    var pc = _h.CountMarked(p, (r, g, b) => r > 200 && g < 80 && b > 200);
+                    got += $"; partner {p.Ref.RefKey}: {pc.Marked} magenta of {pc.Box}";
+                    ok &= pc.Marked > 0;
+                }
+                else got += "; no partner marked";
+                break;
+            }
+            case "partner":
+                got = _h.Marks.Partner?.Ref.RefKey.ToString() ?? "none"; ok = string.Equals(got, a[2], StringComparison.OrdinalIgnoreCase); break;
             default: got = "unknown expectation"; ok = false; break;
         }
         if (!ok) Shell.ExpectFailures++;

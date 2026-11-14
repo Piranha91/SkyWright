@@ -64,6 +64,7 @@ internal static class Program
         foreach (var r in Shell.Ranked) if (r.Row.Cell is { } c && !cells.Contains(c, StringComparer.OrdinalIgnoreCase)) cells.Add(c);
         Shell.WorklistCells = cells;
         Shell.PendingLand = first.Row.RefKey;
+        Shell.CurrentRow = first;
         var wl = new HarnessShared.WorklistFile("conflict review workbench: the cells the bundle's placed-object rows sit in",
             cells.Select(c => new HarnessShared.WorklistCell(c, new[] { new HarnessShared.WorklistShot(
                 "placeholder pose: the workbench frames the camera on the asked-for reference once the cell is built", new[] { 0f, 0f, 0f }) })).ToList());

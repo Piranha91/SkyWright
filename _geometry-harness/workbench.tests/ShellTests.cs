@@ -47,7 +47,7 @@ public class ShellTests
     }
 
     [Fact]
-    public void The_shipped_severity_table_loads_and_puts_a_door_above_a_static_above_flora()
+    public void The_shipped_severity_table_loads_puts_a_door_above_a_static_above_flora_and_says_how_it_was_accepted()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "housecarl.sln"))) root = root.Parent;
@@ -55,7 +55,7 @@ public class ShellTests
         var t = SeverityTable.Load(Path.Combine(root!.FullName, ".claude", "skills", "world-edit-compatibility", "references", "workbench-severity.json"));
         Assert.True(t.Of("OVERLAP", "Door").Weight > t.Of("OVERLAP", "Static").Weight);
         Assert.True(t.Of("OVERLAP", "Static").Weight > t.Of("OVERLAP", "Flora").Weight);
-        Assert.Contains("PROPOSED", t.Status);
+        Assert.Contains("accepted under the standing rule", t.Status);
     }
 
     static FormKey K(uint id) => new(new ModKey("Hc", ModType.Plugin), id);
@@ -112,6 +112,39 @@ public class ShellTests
         Assert.Single(s.Split(". ", StringSplitOptions.RemoveEmptyEntries));
         var interior = PatchWriter.ParentRecordsSentence(new[] { (K(0x801), (FormKey?)K(0x900)) }, null);
         Assert.DoesNotContain("worldspace", interior);
+    }
+
+    [Fact]
+    public void The_tree_entries_hold_every_walked_ref_and_say_why_an_undrawn_one_is_not_drawn()
+    {
+        var cell = K(0x900);
+        var drawn = new[] { (K(0x801), (string?)"Wall") };
+        var outcomes = new Dictionary<FormKey, (string Outcome, string? BaseEditorId)>
+        {
+            [K(0x801)] = ("drawn", "Wall"), [K(0x802)] = ("marker", "XMarker"), [K(0x803)] = ("disabled", "Crate"),
+            [K(0x804)] = ("drawn", "Barrel"),            // placed by the build, but its mesh never loaded
+        };
+        var cells = new Dictionary<FormKey, FormKey> { [K(0x801)] = cell, [K(0x802)] = cell, [K(0x803)] = cell, [K(0x804)] = cell };
+        var e = RecordsTree.Entries(drawn, outcomes, cells).ToDictionary(x => x.Ref);
+        Assert.Equal(4, e.Count);
+        Assert.Null(e[K(0x801)].NotDrawn);
+        Assert.Equal("marker", e[K(0x802)].NotDrawn);
+        Assert.Equal("disabled", e[K(0x803)].NotDrawn);
+        Assert.Equal("no-mesh", e[K(0x804)].NotDrawn);
+        var tree = RecordsTree.Build("w", e.Values, c => c.ToString(), new HashSet<string>(), new Dictionary<string, IReadOnlyList<string>>());
+        var node = RecordsTree.Walk(tree).Single(n => n.Key == K(0x802).ToString());
+        Assert.Equal("marker", node.NotDrawn);
+        Assert.Contains("[not drawn: marker]", node.Label);
+    }
+
+    [Fact]
+    public void The_marks_draw_each_triangle_edge_of_the_reference_once()
+    {
+        var ro = new ViewProbe.RefOcclusion();
+        var box = new System.Numerics.Vector3[] { new(0,0,0), new(1,0,0), new(1,1,0), new(0,1,0), new(0,0,1), new(1,0,1), new(1,1,1), new(0,1,1) };
+        int[] tris = { 0,1,2, 0,2,3, 4,5,6, 4,6,7, 0,1,5, 0,5,4, 1,2,6, 1,6,5, 2,3,7, 2,7,6, 3,0,4, 3,4,7 };
+        ro.Shapes.Add(new ViewProbe.PickShape { Kind = ViewProbe.PickKind.Ref, Verts = box, Tris = tris });
+        Assert.Equal(18, ConflictMarks.Edges(ro).Count());     // 12 box edges + 6 face diagonals
     }
 
     [Fact]

@@ -35,6 +35,7 @@ internal sealed class WorkbenchHost
     readonly OrbitCamera _camera = new() { NearPlane = ScenePick.NearPlane, FarPlane = 131072f, MaxDistance = 1_000_000f };
     readonly EditSession _session;
     readonly Gizmo _gizmo = new();
+    readonly ConflictMarks _marks = new();
     readonly TextBlock _status = new() { Margin = new Thickness(6, 2, 6, 2), TextWrapping = TextWrapping.Wrap };
     readonly string _outDir;
     Window _window = null!;
@@ -55,9 +56,10 @@ internal sealed class WorkbenchHost
         _fov = cam.FovDeg;
         _camera.FieldOfView = _fov;
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
-        _session.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate(); };
+        _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate(); };
         _outDir = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : opt.OutDir;
         Directory.CreateDirectory(_outDir);
+        renderer.Overlays.Add(_marks);
         renderer.Overlays.Add(_gizmo);
         _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye));
     }
@@ -123,11 +125,24 @@ internal sealed class WorkbenchHost
 
     static Vector3 ToV(Vec3 v) => new(v.X, v.Y, v.Z);
 
+    /// <summary>The marks follow the selection; the partner is the open conflict row's other reference while its own
+    /// reference is the one selected.</summary>
+    void UpdateMarks()
+    {
+        _marks.Selected = _session.Selected is { } k ? _session.RefOf(k) : null;
+        _marks.Partner = _session.Selected is { } s && Shell.CurrentRow is { } r && string.Equals(r.Row.RefKey, s.ToString(), StringComparison.OrdinalIgnoreCase)
+                         && r.Row.OtherKey is { } o && FormKey.TryFactory(o, out var ok) && _session.IsDrawn(ok) ? _session.RefOf(ok) : null;
+    }
+
+    internal ConflictMarks Marks => _marks;
+
     void UpdateStatus()
     {
         string sel = _session.Selected is { } k ? $"selected {k} {EditSession.Describe(_session.Current(k))}" : "nothing selected (click a reference)";
         string target = _writer?.Target.ToString() ?? (TargetFromEnv()?.ToString() ?? "no write target set");
-        _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}";
+        string marks = !_marks.Enabled ? "marks off" : _marks.Selected is null ? "" :
+            $"cyan: selected {_marks.Selected.Ref.RefKey}" + (_marks.Partner is { } p ? $"; magenta: the conflict's other reference {p.Ref.RefKey}" : "") + " (drawn through anything in front)";
+        _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}" + (marks.Length > 0 ? "\n" + marks : "");
     }
 
     // ---- the window ---------------------------------------------------------------------------------------------------
@@ -157,6 +172,8 @@ internal sealed class WorkbenchHost
     void RunWindow()
     {
         var undo = new Button { Content = "Undo (Ctrl+Z)", Margin = new Thickness(4) };
+        var marksBtn = new Button { Content = "Marks", Margin = new Thickness(4), ToolTip = ConflictMarks.Legend };
+        marksBtn.Click += (_, _) => { _marks.Enabled = !_marks.Enabled; UpdateStatus(); Invalidate(); };
         var dry = new Button { Content = "Dry run", Margin = new Thickness(4) };
         var write = new Button { Content = "Write patch", Margin = new Thickness(4) };
         undo.Click += (_, _) => { _session.Undo(); AfterStage(); };
@@ -164,7 +181,7 @@ internal sealed class WorkbenchHost
         write.Click += async (_, _) => await CommitAsync(dryRun: false, "Workbench");
         var bar = new DockPanel { LastChildFill = true };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write);
+        buttons.Children.Add(marksBtn); buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write);
         DockPanel.SetDock(buttons, Dock.Right);
         bar.Children.Add(buttons); bar.Children.Add(_status);
 
@@ -338,7 +355,7 @@ internal sealed class WorkbenchHost
     internal IReadOnlyList<TreeNode> BuildTree()
     {
         var cells = _opt.RefCells ?? new Dictionary<FormKey, FormKey>();
-        var drawn = DrawnAll().Select(r => new SceneRefEntry(r.Ref.RefKey, cells.TryGetValue(r.Ref.RefKey, out var c) ? c : null, r.Ref.BaseEditorId)).ToList();
+        var drawn = RecordsTree.Entries(DrawnAll().Select(r => (r.Ref.RefKey, r.Ref.BaseEditorId)), _opt.RefOutcomes, cells);
         var conflictRefs = Shell.Ranked.SelectMany(r => new[] { r.Row.RefKey, r.Row.OtherKey }).Where(k => k is not null)
                                  .Select(k => k!).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var loadedCells = drawn.Where(d => d.Cell is not null).Select(d => d.Cell!.Value.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -414,6 +431,9 @@ internal sealed class WorkbenchHost
         {
             cell = SceneCell, cellLabel = _opt.CellLabel, worldspace = _opt.Worldspace.ToString(), interior = _opt.Interior,
             worklistCell = _opt.WorklistCell, drawnRefs = DrawnAll().Count(),
+            walkedRefs = _opt.RefOutcomes?.Count,
+            walkOutcomes = _opt.RefOutcomes?.GroupBy(x => x.Value.Outcome).ToDictionary(g => g.Key, g => g.Count()),
+            marks = new { enabled = _marks.Enabled, selected = _marks.Selected?.Ref.RefKey.ToString(), partner = _marks.Partner?.Ref.RefKey.ToString(), legend = ConflictMarks.Legend },
             drawnRefKeys = DrawnAll().Select(r => r.Ref.RefKey.ToString()).OrderBy(k => k, StringComparer.Ordinal),
             selected = _session.Selected?.ToString(), staged = _session.Pending.Count,
             camera = new { eye = new[] { _eye.X, _eye.Y, _eye.Z }, yaw = _yaw, pitch = _pitch, fov = _fov, framebuffer = new[] { W, H } },
@@ -487,6 +507,46 @@ internal sealed class WorkbenchHost
             return text;
         }
         catch (Exception ex) { Say("refused: " + ex.Message); return null; }
+    }
+
+    /// <summary>Count the back buffer's pixels inside <paramref name="ro"/>'s projected box that a test says are its mark
+    /// colour (call between the draw and the swap). Returns (inside, of which mark-coloured).</summary>
+    internal (int Box, int Marked) CountMarked(RefOcclusion ro, Func<byte, byte, byte, bool> isMark)
+    {
+        var px = ReadBack();
+        float x0 = float.MaxValue, y0 = float.MaxValue, x1 = float.MinValue, y1 = float.MinValue;
+        foreach (var cx in new[] { ro.Min.X, ro.Max.X }) foreach (var cy in new[] { ro.Min.Y, ro.Max.Y }) foreach (var cz in new[] { ro.Min.Z, ro.Max.Z })
+            if (Project(new Vector3(cx, cy, cz)) is { } p) { x0 = MathF.Min(x0, p.X); y0 = MathF.Min(y0, p.Y); x1 = MathF.Max(x1, p.X); y1 = MathF.Max(y1, p.Y); }
+        int ix0 = Math.Max(0, (int)x0), iy0 = Math.Max(0, (int)y0), ix1 = Math.Min(W - 1, (int)x1), iy1 = Math.Min(H - 1, (int)y1);
+        int box = 0, marked = 0;
+        for (int y = iy0; y <= iy1; y++)
+            for (int x = ix0; x <= ix1; x++)
+            {
+                int i = ((H - 1 - y) * W + x) * 4;                    // GL rows run bottom-up
+                box++;
+                if (isMark(px[i], px[i + 1], px[i + 2])) marked++;
+            }
+        return (box, marked);
+    }
+
+    byte[] ReadBack()
+    {
+        int w = W, h = H;
+        int fbo = GL.GenFramebuffer(), rb = GL.GenRenderbuffer();
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+        GL.BindRenderbuffer(RenderbufferTarget.Renderbuffer, rb);
+        GL.RenderbufferStorage(RenderbufferTarget.Renderbuffer, RenderbufferStorage.Rgba8, w, h);
+        GL.FramebufferRenderbuffer(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, RenderbufferTarget.Renderbuffer, rb);
+        GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, 0);
+        GL.ReadBuffer(ReadBufferMode.Back);
+        GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, fbo);
+        GL.BlitFramebuffer(0, 0, w, h, 0, 0, w, h, ClearBufferMask.ColorBufferBit, BlitFramebufferFilter.Nearest);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+        var px = new byte[w * h * 4];
+        GL.ReadPixels(0, 0, w, h, PixelFormat.Rgba, PixelType.UnsignedByte, px);
+        GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        GL.DeleteFramebuffer(fbo); GL.DeleteRenderbuffer(rb);
+        return px;
     }
 
     /// <summary>Read the frame back (resolving the control's multisampled framebuffer) and save a captioned PNG.</summary>

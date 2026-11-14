@@ -5,15 +5,36 @@ namespace Workbench;
 /// <summary>One node of the Records tree (worldspace, cell or placed reference; the shape of SharpKit's Cell View, as an
 /// idea only). A reference node names its FormKey and base EditorID; <see cref="Conflict"/> marks a reference a Conflicts
 /// row names.</summary>
-internal sealed record TreeNode(string Kind, string Key, string Label, bool Conflict, bool Loaded, IReadOnlyList<TreeNode> Children);
+internal sealed record TreeNode(string Kind, string Key, string Label, bool Conflict, bool Loaded, IReadOnlyList<TreeNode> Children)
+{
+    /// <summary>On a reference node: why the scene did not draw it (one word), or null when drawn.</summary>
+    public string? NotDrawn { get; init; }
+}
 
-/// <summary>A drawn reference as the scene build placed it: its FormKey, the cell the walk read it from, its base's EditorID.</summary>
-internal sealed record SceneRefEntry(FormKey Ref, FormKey? Cell, string? BaseEditorId);
+/// <summary>A placed reference the walk read: its FormKey, its cell, its base's EditorID, and why the scene did not draw it
+/// (one word), or null when it is drawn.</summary>
+internal sealed record SceneRefEntry(FormKey Ref, FormKey? Cell, string? BaseEditorId, string? NotDrawn = null);
 
 /// <summary>The Records tree: the loaded scene's drawn references by worldspace and cell, then the conflict cells that are
 /// not loaded with only their conflict references (a click on one loads that cell).</summary>
 internal static class RecordsTree
 {
+    /// <summary>Every placed reference the walk read, drawn or not (stage-3 review M-2): the walk's per-reference outcome
+    /// from viewprobe, and the references whose meshes the scene holds. A reference the build placed but whose mesh
+    /// never loaded reads "no-mesh". Without the walk's outcomes (an older viewprobe) only the drawn ones are known.</summary>
+    internal static IReadOnlyList<SceneRefEntry> Entries(IEnumerable<(FormKey Ref, string? BaseEditorId)> drawn,
+        IReadOnlyDictionary<FormKey, (string Outcome, string? BaseEditorId)>? outcomes, IReadOnlyDictionary<FormKey, FormKey> cells)
+    {
+        FormKey? Cell(FormKey k) => cells.TryGetValue(k, out var c) ? c : null;
+        var d = drawn.GroupBy(x => x.Ref).ToDictionary(g => g.Key, g => g.First().BaseEditorId);
+        var list = d.Select(x => new SceneRefEntry(x.Key, Cell(x.Key), x.Value)).ToList();
+        if (outcomes is not null)
+            foreach (var (k, o) in outcomes)
+                if (!d.ContainsKey(k) && !k.IsNull)
+                    list.Add(new SceneRefEntry(k, Cell(k), o.BaseEditorId, o.Outcome == "drawn" ? "no-mesh" : o.Outcome));
+        return list;
+    }
+
     internal static IReadOnlyList<TreeNode> Build(string worldspaceLabel, IEnumerable<SceneRefEntry> drawn,
                                                   Func<FormKey, string> cellLabel, IReadOnlySet<string> conflictRefs,
                                                   IReadOnlyDictionary<string, IReadOnlyList<string>> unloadedConflictCells)
@@ -24,7 +45,8 @@ internal static class RecordsTree
             .Select(g => new TreeNode("cell", g.Key is { } c ? K(c) : "", g.Key is { } c2 ? cellLabel(c2) : "(cell not recorded by the walk)",
                 g.Any(d => conflictRefs.Contains(K(d.Ref))), true,
                 g.OrderBy(d => K(d.Ref), StringComparer.Ordinal)
-                 .Select(d => new TreeNode("ref", K(d.Ref), $"{K(d.Ref)}  {d.BaseEditorId ?? "(base EditorID not recorded)"}", conflictRefs.Contains(K(d.Ref)), true, Array.Empty<TreeNode>()))
+                 .Select(d => new TreeNode("ref", K(d.Ref), $"{K(d.Ref)}  {d.BaseEditorId ?? "(base EditorID not recorded)"}" + (d.NotDrawn is { } why ? $"  [not drawn: {why}]" : ""),
+                                           conflictRefs.Contains(K(d.Ref)), true, Array.Empty<TreeNode>()) { NotDrawn = d.NotDrawn })
                  .ToList()))
             .ToList();
         var roots = new List<TreeNode> { new("worldspace", worldspaceLabel, worldspaceLabel, cells.Any(c => c.Conflict), true, cells) };

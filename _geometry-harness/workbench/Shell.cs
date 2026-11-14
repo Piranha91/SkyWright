@@ -26,7 +26,8 @@ internal static class Shell
     internal static string? SwitchCell;
     internal static int ExpectFailures;
     internal static bool Closed;
-    internal static string? LastLanding;            // the last landing's one-line account, for the dump
+    internal static string? LastLanding;
+    internal static RankedRow? CurrentRow;          // the open conflict row: its other reference is marked beside the selected one            // the last landing's one-line account, for the dump
 
     static Application? _app;
     internal static Window? Window;
@@ -55,7 +56,7 @@ internal static class Shell
         ScrollViewer.SetHorizontalScrollBarVisibility(ConflictList, ScrollBarVisibility.Auto);
         VirtualizingPanel.SetIsVirtualizing(Records, true);
         ConflictList.SelectionChanged += (_, _) => { if (ConflictList.SelectedItem is ListBoxItem { Tag: RankedRow r }) OpenRow(r); };
-        Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) OpenRef(n.Key, CellOfRef(n.Key)); };
+        Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) { CurrentRow = null; OpenRef(n.Key, CellOfRef(n.Key)); } };
         AllRows.Checked += (_, _) => { ShowAll = true; FillConflicts(); };
         AllRows.Unchecked += (_, _) => { ShowAll = false; FillConflicts(); };
         var conflictsTab = new DockPanel();
@@ -126,7 +127,7 @@ internal static class Shell
         Ranked.Select(r => r.Row).FirstOrDefault(r => string.Equals(r.RefKey, refKey, StringComparison.OrdinalIgnoreCase))?.Cell;
 
     /// <summary>A click on a Conflicts row: land on the row's reference (its Necessary record, the one a fix touches).</summary>
-    internal static void OpenRow(RankedRow r) { WorkbenchHost.Say($"open conflict {r.Rank}: {r.Row.Identity}"); OpenRef(r.Row.RefKey, r.Row.Cell); }
+    internal static void OpenRow(RankedRow r) { WorkbenchHost.Say($"open conflict {r.Rank}: {r.Row.Identity}"); CurrentRow = r; OpenRef(r.Row.RefKey, r.Row.Cell); }
 
     /// <summary>Land on a reference: here if this scene draws it, else rebuild the scene for its cell.</summary>
     internal static void OpenRef(string refKey, string? cell)
