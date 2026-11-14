@@ -19,6 +19,7 @@
     <InternalsVisibleTo Include="workbench.tests" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\_shared\DifferentialRows.cs" Link="DifferentialRows.cs" />
     <ProjectReference Include="..\viewprobe\viewprobe.csproj" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
