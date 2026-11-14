@@ -3470,7 +3470,8 @@ static class TexturedScene
             // while deciding where to fly, and a census printed on exit is a census nobody used.
             PrintBuildCensus();
 
-            InteractiveViewer.Run(interactive, renderer, cam, wireOverlay);
+            if (InteractiveViewer.Host is { } host) host(interactive, renderer, cam, wireOverlay);
+            else InteractiveViewer.Run(interactive, renderer, cam, wireOverlay);
 
             shotResources.Dispose();
             graphicsCell?.EndShot();
