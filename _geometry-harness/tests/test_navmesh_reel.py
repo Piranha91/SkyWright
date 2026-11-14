@@ -121,7 +121,10 @@ def planner_fixture(captured: bool = True):
         pres["media"] = [{"id": f"M-nav-{s}", "assessed": True, "mediaKind": "offline-render",
                           "subject": {"checkId": "geometry.navmesh-ownership", "armId": WITH, "formKey": SRC},
                           "provenance": {"captureRequest": "req-nav", "vignetteState": s, "poseId": "pose-nav",
-                                         "viewKind": "top-down", "viewLabel": "SLICED TOP-DOWN"}} for s in STATES]
+                                         "viewKind": "top-down", "viewLabel": "SLICED TOP-DOWN",
+                                         # the historical frame's own renderer command names the version it draws
+                                         **({"argv": ["--nav", "both", "--nav-version", f"{SRC}={EARLIER}"]}
+                                            if s == STATES[1] else {})}} for s in STATES]
         captures = [{"request": "req-nav", "status": "captured", "formKey": SRC, "recordKeys": [SRC, TGT],
                      "requestType": "navmesh-version-comparison",
                      "navmeshControl": {"status": "no-broken-crossing", "brokenCrossings": 0, "poseId": "pose-nav"}}]

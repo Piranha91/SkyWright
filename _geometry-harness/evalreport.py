@@ -11728,14 +11728,9 @@ NAVMESH_STATES = ("winning-linked-navmeshes", "historical-navmesh-context")
 
 
 def navmesh_earlier_plugin(request_media: list[dict]) -> str | None:
-    """The plugin whose earlier version of the source navmesh a navmesh comparison's historical frame draws, read from
-    that frame's own renderer command (--nav-version SOURCE=PLUGIN), or None."""
-    for m in request_media:
-        av = [str(x) for x in ((m or {}).get("provenance") or {}).get("argv") or []]
-        for i, x in enumerate(av[:-1]):
-            if x == "--nav-version" and "=" in av[i + 1]:
-                return av[i + 1].rsplit("=", 1)[1]
-    return None
+    """The plugin a navmesh comparison's historical frame draws the earlier version from: reel_plan's one parser."""
+    import reel_plan
+    return reel_plan.navmesh_earlier_plugin(request_media)
 
 
 def figure_units(figs: list[dict]) -> list[list[dict]]:

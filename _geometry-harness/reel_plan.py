@@ -305,6 +305,17 @@ def joined(xs: list[str]) -> str:
     return xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]
 
 
+def navmesh_earlier_plugin(request_media: list[dict]) -> str | None:
+    """The plugin whose earlier version of the source navmesh a navmesh comparison's historical frame draws, read from
+    that frame's own renderer command (--nav-version SOURCE=PLUGIN), or None."""
+    for m in request_media:
+        av = [str(x) for x in ((m or {}).get("provenance") or {}).get("argv") or []]
+        for i, x in enumerate(av[:-1]):
+            if x == "--nav-version" and "=" in av[i + 1]:
+                return av[i + 1].rsplit("=", 1)[1]
+    return None
+
+
 def camera_of(argv) -> dict | None:
     """The renderer camera a capture state ran with, from its argv: eye, yaw (degrees clockwise from +Y), pitch (positive
     looks down), vertical fov and aspect (width:height)."""
@@ -1059,7 +1070,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if not lw.get(state):
             return None
         if c["type"] == "navmesh":
-            return lw[state].format(mod=mod(target), earlier=mod(earlier_navmesh(c["rows"][0])))
+            # the earlier version's plugin is the frame's own --nav-version, never the plan's history (C2241)
+            drawn = navmesh_earlier_plugin([m]) if state == "historical-navmesh-context" else None
+            if state == "historical-navmesh-context" and drawn is None:
+                return lw.get(state + "Unknown") or None
+            return lw[state].format(mod=mod(target), earlier=mod(drawn) if drawn else "",
+                                    winner=mod(c["rows"][0]["A"]))
         if state != "highlight":
             return lw[state].format(mod=mod(target))
         argv = [str(x) for x in ((m or {}).get("provenance") or {}).get("argv") or []]
