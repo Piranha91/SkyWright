@@ -185,12 +185,19 @@ def refusal_reason(x: dict, table: dict | None) -> str:
 
 def unpictured_refused_reason(fks, capture_results, unmarkable: set, table: dict | None = None) -> str:
     """Why a refused, unburied clash has no picture (stillReasons keys): a place only the mod has
-    (`placeOnlyWithMod`), a station at a player's eye height saw it but no picture could be kept (`stationSaw`), the
+    (`placeOnlyWithMod`), a camera that sees it with the mod stands inside another object without it (`stateBlocked`),
+    a station at a player's eye height saw it but no picture could be kept (`stationSaw`), the
     renderer cannot mark one of its objects' see-through shapes (`unmarkable`), else its refusal code's own reason from
     the table (refusal_reason)."""
     if any(result_about(x, fks) and (x.get("refusal") or {}).get("code") == "place-only-with-mod"
            for x in capture_results or []):
         return "placeOnlyWithMod"
+    # a camera that sees the clash with the mod but stands inside another object without it: said as that, not as
+    # "seen but not kept", whatever the last fallback refused for (C2168)
+    if any(result_about(x, fks) and x.get("status") == "refused"
+           and any(c.get("code") == "state-camera-blocked" for c in (x.get("refusal") or {}).get("chain") or [])
+           for x in capture_results or []):
+        return "stateBlocked"
     if any(result_about(x, fks) and station_saw(x) for x in capture_results or []):
         return "stationSaw"
     if {str(k) for k in fks} & set(unmarkable or ()):

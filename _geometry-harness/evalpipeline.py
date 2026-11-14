@@ -1168,10 +1168,13 @@ def capture_request(ctx, q, sb: Path, qdir: Path, cands: dict) -> dict:
         row["refused"] = "the request names no planned with- or without-arm"
         return row
     acq = qdir / "acquisition.json"
+    # a vignette renders its camera in the setup without the mod too, so the camera must pass the same checks there (C2168)
+    states = (["--state-order", f"without={cands[row['without']]}"]
+              if q.get("requestType") in ("overlap-pair", "state-pair") else [])
     a = child(ctx, qdir / "commands", "acquire", [
         sys.executable, fwd(HERE / "capture_acquire.py"), "acquire", "--packet", fwd(sb), "--request", q["id"],
         "--points", "auto", "--bundle", fwd(bundle_dir(ctx)), "--out", fwd(acq), "--receipts",
-        fwd(qdir / "camera-receipts"), *vp_args, "--", *lab, "--order", cands[row["arm"]]],
+        fwd(qdir / "camera-receipts"), *states, *vp_args, "--", *lab, "--order", cands[row["arm"]]],
         heavy=True, purpose=f"evalpipeline {ctx.id} capture", deadline_min=60)
     row["acquireExit"] = a.get("exitCode")
     if not acq.is_file():
@@ -1239,7 +1242,8 @@ def capture_identity(ctx) -> dict:
 DETERMINISTIC_REFUSALS = {"placement-unknown", "points-empty-pick", "request-participants-unusable"}
 # the final codes of a finished fallback chain (capture_acquire marks the refusal `final`): every fallback was tried and
 # each step's own verdict was the geometry's
-FINAL_REFUSALS = {"top-down-participant-unseen", "see-through-unmarked", "points-not-drawn", "points-not-placed"}
+FINAL_REFUSALS = {"top-down-participant-unseen", "see-through-unmarked", "points-not-drawn", "points-not-placed",
+                  "state-camera-blocked"}
 # a chain step that failed for a reason that is not the geometry's (a crash, memory, a lock or slot timeout, a renderer
 # exit) makes the whole refusal transient, whatever the other steps said
 TRANSIENT_STEP = {"failed"}

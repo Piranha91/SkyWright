@@ -187,6 +187,10 @@ class Refused(Exception):
         self.code, self.detail, self.extra = code, detail, extra
 
 
+#: a published camera refused because another state the capture renders fails the measured state's camera checks (C2168)
+STATE_BLOCKED = "state-camera-blocked"
+
+
 # ---------------------------------------------------------------- the request side --
 
 SUPPORTED_REQUEST_TYPES = ("overlap-pair", "state-pair", "placement-split", "navmesh-version-comparison")
@@ -765,6 +769,7 @@ def coverage_at_pose(a, result: dict, receipts_dir: Path, shotplan_mod, size: in
 POSE_REFUSED = {
     "planner-not-verified": lambda e: e.extra.get("plannerStatus") == "refused",
     "see-through-not-covered-at-pose": lambda e: True,
+    STATE_BLOCKED: lambda e: True,
 }
 NO_FALLBACK = {
     "planner-not-verified": "the planner did not finish judging the pose; the request is captured again",
@@ -809,7 +814,7 @@ def after_pick_refusal(exc: Refused, points_doc: dict) -> dict | None:
 # the witness station's own camera is tried before the top-down: it is kept only when the plant's point lands in its
 # mark at that camera (coverage_at_pose, 2 px inside) and the render is bound to the request's configuration. The
 # planner's composition checks never ran on it; the blind image review judges what the frame shows.
-WITNESS_FROM = frozenset({"see-through-not-covered-at-pose", "planner-not-verified"})
+WITNESS_FROM = frozenset({"see-through-not-covered-at-pose", "planner-not-verified", STATE_BLOCKED})
 
 
 def alpha_card_participants(points_doc: dict) -> list[str]:
@@ -904,6 +909,14 @@ def acquire_witness(a, request: dict, parts: list[dict], points: dict, source: d
             raise Refused("configuration-mismatch",
                           f"the witness camera rendered configuration {observed[:16]}… but this finding was measured in "
                           f"{str(expected)[:16]}…", expectedFingerprint=expected, observedFingerprint=observed)
+    wprobe = {"camera": camera, "participants": rows, "viewKind": "eye-level"}
+    try:
+        state_checks(a, wprobe, receipts_dir, shotplan_mod, tag="witness")
+    except Refused as sexc:
+        if sexc.code != STATE_BLOCKED:
+            raise
+        return None, {"kind": "witness", "status": "refused", "code": STATE_BLOCKED,
+                      "detail": f"the witness station {st.get('id')}'s own camera was tried: {sexc.detail}"}
     step = {"kind": "witness", "status": "ok", "code": None,
             "detail": (f"the composed pose was refused ({exc.code}); witness station {st.get('id')} "
                        f"({float(st.get('bearing') or 0):.0f} deg, {float(st.get('standoff') or 0):.0f} u), where the picker "
@@ -932,7 +945,7 @@ def acquire_witness(a, request: dict, parts: list[dict], points: dict, source: d
                                 "source": "the witness coverage render's own `capture input configuration:` line"},
               "states": [{"state": s_, "poseId": pose_id, "camera": camera, "setup": (seq.get("setups") or {}).get(s_),
                           "highlight": s_ == "highlight"} for s_ in (seq.get("states") or [])],
-              "sequence": seq,
+              "sequence": seq, "stateChecks": wprobe.get("stateChecks") or [],
               "visualQualification": {"status": "pending",
                                       "note": "a station view is reviewed blind like any other picture"},
               "receipts": {"receiptsDir": str(receipts_dir), "points": points.get("path"),
@@ -1061,7 +1074,7 @@ def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts
               "fov": shot.get("fov", 65), "aspect": aspect, "cullAbove": cut, "floorZ": td["floorZ"],
               "viewKind": "top-down", "nav": nav, "renderFlags": rflags, "viewFlags": view_flags, "viewprobe": vpcam}
     seq = request.get("sequence") or {}
-    return {"schemaVersion": 1, "kind": "capture-acquisition", "status": "camera-ready", "generatedUtc": utcnow(),
+    res = {"schemaVersion": 1, "kind": "capture-acquisition", "status": "camera-ready", "generatedUtc": utcnow(),
             "synthetic": False, "viewKind": "top-down",
             "request": {"id": request["id"], "requestType": request.get("requestType"), "checkId": request.get("checkId"),
                         "armId": request.get("armId"), "findingIds": request.get("findingIds"),
@@ -1081,6 +1094,17 @@ def acquire_top_down(a, request: dict, parts: list[dict], source: dict, receipts
                                             "labelled in the frame and reviewed like any other"},
             "receipts": {"receiptsDir": str(receipts_dir), "planJson": str(pj), "worklist": str(wl),
                          "plannerLog": call["log"], "probe": str(d / "probe" / "console.txt")}}
+    # the last fallback: a top-down that fails another state the capture renders ends the chain (C2168)
+    try:
+        state_checks(a, res, receipts_dir, shotplan_mod, tag="top-down")
+    except Refused as sexc:
+        if sexc.code != STATE_BLOCKED:
+            raise
+        chain[-1] = {"kind": "top-down", "status": "refused", "code": STATE_BLOCKED, "detail": sexc.detail}
+        raise Refused(STATE_BLOCKED, sexc.detail + "; every fallback was tried: " + "; ".join(
+            f"{c['kind']}: {c.get('code') or c['status']}" for c in chain), final=True, chain=chain,
+            state=sexc.extra.get("state"), objects=sexc.extra.get("objects"))
+    return res
 
 
 def top_down_hide(a, td: dict, parts: list[dict], cam: list[str], flags: list[str], counts: dict, d: Path, shotplan_mod,
@@ -1202,6 +1226,103 @@ def _order_lacks(order: str, plugin: str) -> bool:
     except (OSError, ValueError, AttributeError):
         return False
     return plugin.lower() not in {str(p).lower() for p in plugins}
+
+
+def state_orders(a) -> dict:
+    """{state: order file} from acquire's --state-order STATE=ORDER: the other setups the capture renders this camera in."""
+    out = {}
+    for x in getattr(a, "state_order", None) or []:
+        state, _, order = str(x).partition("=")
+        if state and order:
+            out[state] = order
+    return out
+
+
+def _passthrough_with_order(passthrough, order: str) -> list[str]:
+    return _strip_flag(list(passthrough or []), "--order") + ["--order", str(order)]
+
+
+class _Target:
+    """A sightline target for shotplan.target_pixels: a participant's point and how the planner judged it."""
+
+    def __init__(self, label, kind, point):
+        self.label, self.kind, self.point = label, kind, [float(v) for v in point]
+
+    def aim_point(self, _args):
+        return self.point
+
+
+def state_checks(a, result: dict, receipts_dir: Path, shotplan_mod, tag: str = "pose") -> list[dict]:
+    """Every other state the capture renders passes the camera checks the measured state passed, at the published camera,
+    in that state's own setup (C2168): the planner's inside test at the eye, and each participant's sightline where that
+    participant is placed in the setup (a participant the setup does not load has nothing to see). One probe render per
+    state. Returns one row per state, or raises STATE_BLOCKED naming the state and the object. BUVARP F-322: without the
+    mod, a pine the mod moves stood at the eye and filled the frame of a camera verified only with the mod."""
+    orders = state_orders(a)
+    if not orders:
+        return []
+    import argparse as _ap
+    cam = result["camera"]
+    ap = _ap.ArgumentParser()
+    shotplan_mod.add_common(ap, need_subjects=False)
+    args = ap.parse_args(["picker"])        # the planner's own defaults: inside test, sight margin, surface tolerance
+    args.fov, args.aspect = float(cam.get("fov") or args.fov), 1.0
+    eye = [float(v) for v in cam["eye"]]
+    eye_i = (round(eye[0]), round(eye[1]), round(eye[2]))
+    by_label = {str(p.get("label")): p for p in result.get("participants") or []}
+    verified = ((result.get("verification") or {}).get("targets") or [])
+    if verified:
+        targets = [(by_label.get(str(t["label"])) or {}, _Target(t["label"], t["kind"], t["point"])) for t in verified]
+    else:
+        # a station view or a top-down carries no planner sightlines: its participants' own points, as the picker marked them
+        targets = [(p, _Target(p.get("label") or p["formKey"], "nodepth" if p.get("markKind") == "coverage" else "surface",
+                               p["point"])) for p in result.get("participants") or [] if p.get("point")]
+    if (cam.get("viewKind") or result.get("viewKind")) == "top-down":
+        targets = []                        # a top-down's own acceptance counts marks from above; the eye is still tested
+    rows = []
+    for state, order in orders.items():
+        present = [(p, t) for p, t in targets
+                   if not (p.get("formKey") and _order_lacks(order, str(p["formKey"]).split(":", 1)[1]))]
+        px, probe_fov = shotplan_mod.target_pixels(tuple(eye), float(cam["yaw"]), float(cam["pitch"]),
+                                                  [t for _, t in present], args, 320)
+        flags = ["--eye", f"{eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f}", "--yaw", f"{float(cam['yaw']):.1f}",
+                 "--pitch", f"{float(cam['pitch']):.1f}", "--fov", f"{probe_fov:g}", "--size", "320", "--msaa", "0",
+                 "--nav", "off", "--inside-at", f"{eye_i[0]},{eye_i[1]},{eye_i[2]}",
+                 "--clear-at", f"{eye_i[0]},{eye_i[1]},{eye_i[2]}", *(cam.get("viewFlags") or [])]
+        for r_ in px:
+            if r_["pixel"] is not None:
+                flags += ["--pick", f"{r_['pixel'][0]},{r_['pixel'][1]}"]
+        sa = type("StateArgs", (), {})()
+        sa.vp, sa.passthrough = a.vp, _passthrough_with_order(a.passthrough, order)
+        rc, text = _vp_run(sa, shotplan_mod, cam["cell"], flags, receipts_dir / f"state-{state}-{tag}")
+        if rc != 0:
+            raise Refused("points-renderer-failed", f"the {state} state's camera check did not render (viewprobe exit {rc})")
+        probe = shotplan_mod.Probe([])
+        probe.stdout = text
+        picks, inside = probe.picks(), probe.inside().get(eye_i)
+        ikind, ifails, _notes = shotplan_mod.inside_verdict(inside, args)
+        near = [f"{h['formkey']} {h['edid'] or h['type']}" for h in (inside or [])]
+        blocked = []
+        for r_ in px:
+            hit = picks.get(r_["pixel"]) if r_["pixel"] is not None else None
+            if hit is None:
+                continue
+            tol = shotplan_mod.surface_tolerance(r_["dist"], probe_fov, 320, args)
+            margin = tol if r_["kind"] == "surface" else args.sight_margin
+            if hit[3] < r_["dist"] - margin:
+                blocked.append(f"{r_['label']}'s sightline stops at {hit[3]:.0f} u, short of its {r_['dist']:.0f} u")
+        row = {"state": state, "order": str(order), "inside": ikind, "insideFails": ifails, "enclosingBoxes": near,
+               "targets": [t.label for _, t in present], "blocked": blocked,
+               "receipt": str(receipts_dir / f"state-{state}-{tag}" / "console.txt")}
+        rows.append(row)
+        if ifails or blocked or ikind == "unknown":
+            what = (" and ".join(near) if near else "an object") + (" (its box holds the eye)" if near else "")
+            why = "; ".join(ifails + blocked) or "the inside test gave no answer at the eye"
+            raise Refused(STATE_BLOCKED, f"in the {state} setup the camera stands in {what}: {why}; the same camera "
+                                         f"cannot show that setup", final=False, state=state, objects=near,
+                          stateChecks=rows)
+    result["stateChecks"] = rows
+    return rows
 
 
 # viewprobe's own line naming the cell it loaded: "cell <editor id> (exterior)  <form key>"
@@ -1532,6 +1653,8 @@ def cmd_acquire(a) -> int:
                 result = build_result(request, parts, points, source, plan, call, receipts,
                                       shotplan_mod)
                 coverage_at_pose(a, result, receipts_dir, shotplan_mod)
+                # the camera is published only when every other state the capture renders passes the same checks (C2168)
+                state_checks(a, result, receipts_dir, shotplan_mod)
             except Refused as pexc:
                 kind, result = after_pose_refusal(a, request, parts, points, source, receipts_dir, shotplan_mod, pexc)
                 write_json(out, result)
@@ -1812,6 +1935,9 @@ def main(argv=None) -> int:
     p.add_argument("--bind-packet", default=None,
                    help="also write a copy of the packet with this request's camera.pose filled in")
     p.add_argument("--vp", default=None, help="viewprobe command, passed straight to shotplan")
+    p.add_argument("--state-order", action="append", default=[], metavar="STATE=ORDER",
+                   help="another state the capture renders this camera in, with its setup's candidate file (viewprobe "
+                        "--order); repeatable. The published camera passes the measured state's checks in each (C2168)")
     p.set_defaults(fn=cmd_acquire)
     c = sub.add_parser("capture", help="render a request's frames at its acquired camera: a vignette's without / with / "
                                          "highlight states, or a placement split's left and right halves")
