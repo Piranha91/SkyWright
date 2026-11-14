@@ -284,6 +284,67 @@ def plugin_top_groups_from_bytes(data: bytes) -> dict[str, int] | None:
     return out
 
 
+def population_file(plugins: list[dict], mod_names: list, target_names: list, instance: str | None):
+    """The population file for a delta: plugins as {name, path, sha256}, mod folders by name under `instance`, the targets.
+    Returns (text, sha256, plugins, mods, race carriers), or one sentence saying why the delta cannot be scoped. The one
+    rule `plan` freezes a plan's population by and `population` writes a file for an ad-hoc delta by."""
+    out_plugins, race_carriers = [], []
+    for row in plugins:
+        name, path, sha = row["name"], row["path"], row["sha256"]
+        # The probes refuse a population whose delta reaches every reference by a route they do not model; deciding it
+        # here leaves the plan unscoped at plan time instead of failing every scoped probe hours into the run.
+        try:
+            groups = plugin_top_groups_from_bytes(Path(path).read_bytes())
+        except OSError:
+            groups = None
+        if groups and groups.get("COLL", 0) > 0:
+            return (f"{name} carries collision-layer records (COLL), which change how every reference collides; "
+                    "the scoped probes do not model that, so these checks run on the whole order")
+        if groups and groups.get("RACE", 0) > 0:
+            race_carriers.append(name)
+        out_plugins.append({"name": name, "path": path, "sha256": sha})
+    mods = []
+    for name in mod_names:
+        if not instance:
+            return f"the population needs mod folder {name} by path, and no --instance was given"
+        folder = Path(instance) / "mods" / name
+        if not folder.is_dir():
+            return f"the population needs mod folder {name}, and {folder} is not a folder"
+        swap = next((f for f in folder.rglob("*") if f.is_file() and f.name.lower().endswith("_swap.ini")), None)
+        if swap is not None:
+            return (f"mod folder {name} ships a Base Object Swapper ini ({swap.name}), whose swaps the population "
+                    "does not model")
+        mods.append({"name": name, "path": str(folder)})
+    text = json.dumps({"schema": 1, "plugins": out_plugins, "mods": mods, "targets": list(target_names)}, indent=1,
+                      sort_keys=True) + "\n"
+    return text, hashlib.sha256(text.encode("utf-8")).hexdigest(), out_plugins, mods, race_carriers
+
+
+def cmd_population(a) -> int:
+    """`population`: the population file for an ad-hoc delta (a patch plugin and its mod folder), by the rule `plan` uses,
+    so a re-check of one patch scopes its probes the way an evaluation does. Writes only --out."""
+    plugins = []
+    for raw in a.plugin:
+        path = Path(raw)
+        sha = sha256_file(path) if path.is_file() else None
+        if not sha:
+            print(f"population: plugin {raw} is not a readable file; name the patch plugin by its path.", file=sys.stderr)
+            return EXIT_REFUSED_INPUT
+        plugins.append({"name": path.name, "path": str(path), "sha256": sha})
+    targets = a.target or [r["name"] for r in plugins]
+    made = population_file(plugins, a.mod or [], targets, a.instance)
+    if isinstance(made, str):
+        print(f"population: {made}.", file=sys.stderr)
+        return EXIT_REFUSED_INPUT
+    text, sha, _, mods, _ = made
+    out = Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8", newline="\n")
+    print(f"population {out}: {len(plugins)} plugin(s), {len(mods)} mod folder(s); sha256 {sha}; "
+          f"identity {a.enable_population}+population:{sha[:12]}")
+    return EXIT_OK
+
+
 def plan_population(checks: list[dict], arms: list[dict], targets: list, base_population: str,
                     instance: str | None) -> tuple[dict, str | None]:
     """The population the scoped geometry checks run on: the plan's targets plus every plugin and asset provider the
@@ -319,8 +380,7 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
                             if str(v.get("kind") or "").lower() == "mod" and v.get("name")] for a in arms])
     if not plugin_names and not mod_names:
         return unscoped("the arms do not differ and the plan names no target, so there is no population to scope to")
-    plugins = []
-    race_carriers = []
+    stated_plugins = []
     for name in sorted(plugin_names, key=str.lower):
         rows = [r for a in arms for r in ((a.get("requested") or {}).get("plugins") or [])
                 if Path(str(r.get("name") or "")).name.lower() == name.lower()]
@@ -329,32 +389,11 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
             return unscoped(f"the population needs {name} by path and hash, and the arms' frozen requests state "
                             + ("no copy of it" if not stated else f"{len(stated)} different copies"))
         path, sha = stated.pop()
-        # The probes refuse a population whose delta reaches every reference by a route they do not model; deciding it
-        # here leaves the plan unscoped at plan time instead of failing every scoped probe hours into the run.
-        try:
-            groups = plugin_top_groups_from_bytes(Path(path).read_bytes())
-        except OSError:
-            groups = None
-        if groups and groups.get("COLL", 0) > 0:
-            return unscoped(f"{name} carries collision-layer records (COLL), which change how every reference collides; "
-                            "the scoped probes do not model that, so these checks run on the whole order")
-        if groups and groups.get("RACE", 0) > 0:
-            race_carriers.append(name)
-        plugins.append({"name": name, "path": path, "sha256": sha})
-    mods = []
-    for name in mod_names:
-        if not instance:
-            return unscoped(f"the population needs mod folder {name} by path, and no --instance was given")
-        folder = Path(instance) / "mods" / name
-        if not folder.is_dir():
-            return unscoped(f"the population needs mod folder {name}, and {folder} is not a folder")
-        swap = next((f for f in folder.rglob("*") if f.is_file() and f.name.lower().endswith("_swap.ini")), None)
-        if swap is not None:
-            return unscoped(f"mod folder {name} ships a Base Object Swapper ini ({swap.name}), whose swaps the population "
-                            "does not model")
-        mods.append({"name": name, "path": str(folder)})
-    text = json.dumps({"schema": 1, "plugins": plugins, "mods": mods, "targets": target_names}, indent=1, sort_keys=True) + "\n"
-    sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        stated_plugins.append({"name": name, "path": path, "sha256": sha})
+    made = population_file(stated_plugins, mod_names, target_names, instance)
+    if isinstance(made, str):
+        return unscoped(made)
+    text, sha, plugins, mods, race_carriers = made
     scoped_checks = sorted(c["checkId"] for c in planned if c["adapter"].get("populationFlag"))
     for c in emit_scoped:
         if c["adapter"].get("exe") == "stateprobe" and race_carriers:
@@ -7163,6 +7202,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=None, metavar="FILE",
                    help="write the result to FILE instead of DIR/verify.json, so DIR is only read")
     p.set_defaults(fn=cmd_verify_bundle)
+
+    p = sub.add_parser("population", help="write the population file for an ad-hoc delta (a patch plugin and its mod folder)")
+    p.add_argument("--plugin", action="append", required=True, metavar="PATH", help="a delta plugin by its path (repeatable)")
+    p.add_argument("--mod", action="append", default=[], metavar="NAME", help="a delta mod folder under --instance (repeatable)")
+    p.add_argument("--instance", default=None, help="the MO2 instance the mod folders are in")
+    p.add_argument("--target", action="append", default=[], metavar="NAME", help="a target plugin (default: the delta plugins)")
+    p.add_argument("--enable-population", default="load-time", help="the enable population the identity is printed with")
+    p.add_argument("--out", required=True, metavar="FILE", help="the population file to write; nothing else is written")
+    p.set_defaults(fn=cmd_population)
 
     p = sub.add_parser("enrich", help="add evidence derived after measurement to a bundle (record rows, names)")
     p.add_argument("--bundle", required=True)
