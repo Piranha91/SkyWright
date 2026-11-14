@@ -53,31 +53,45 @@ internal sealed class Gizmo : IRenderOverlay
         return best;
     }
 
-    /// <summary>World units along a move axis for a drag from <paramref name="from"/> to <paramref name="to"/> on screen:
-    /// the drag's component along the axis's projected direction, scaled by the arrow's world length over its screen length.</summary>
-    internal float MoveAmount(Handle h, Vector2 from, Vector2 to, Func<Vector3, Vector2?> project)
+    /// <summary>World units along a move axis for a drag from <paramref name="from"/> to <paramref name="to"/>: for each
+    /// screen point, the point of the axis line (through the centre) nearest its eye ray (Skyrim space); the move is the
+    /// distance between the two along the axis, so a drag that follows the arrow 400 units moves 400 units from any eye.</summary>
+    internal float MoveAmount(Handle h, Vector2 from, Vector2 to, Func<Vector2, (Vector3 O, Vector3 D)> ray)
     {
-        if (Centre is not { } c || project(c) is not { } s0 || project(c + Axis(h) * Size) is not { } s1) return 0f;
-        var dir = s1 - s0; float len = dir.Length();
-        if (len < 1e-3f) return 0f;                      // the axis points at the eye: nothing sensible to drag along
-        return Vector2.Dot(to - from, dir / len) * (Size / len);
+        if (Centre is not { } c) return 0f;
+        var u = Axis(h);
+        if (Along(ray(from)) is not { } s0 || Along(ray(to)) is not { } s1) return 0f;
+        return s1 - s0;
+
+        float? Along((Vector3 O, Vector3 D) r)
+        {
+            var d = Vector3.Normalize(r.D);
+            float b = Vector3.Dot(u, d);
+            float den = 1f - b * b;
+            if (den < 1e-6f) return null;                            // the axis points at the eye: nothing to read
+            var w0 = c - r.O;
+            return (b * Vector3.Dot(d, w0) - Vector3.Dot(u, w0)) / den;
+        }
     }
 
-    /// <summary>Radians about world +Z (counter-clockwise seen from above) for a drag around the ring's centre on screen.</summary>
-    internal float TurnAmount(Vector2 from, Vector2 to, Func<Vector3, Vector2?> project)
+    /// <summary>Radians about world +Z (counter-clockwise seen from above) for a drag around the ring: each screen point's
+    /// ray (Skyrim space) is met with the ring's own horizontal plane and the turn is the world angle between the two
+    /// meeting points about the centre, so a drag that follows the ring by 30° turns the reference by 30° from any eye.</summary>
+    internal float TurnAmount(Vector2 from, Vector2 to, Func<Vector2, (Vector3 O, Vector3 D)> ray)
     {
-        if (Centre is not { } c || project(c) is not { } sc) return 0f;
-        float a0 = MathF.Atan2(from.Y - sc.Y, from.X - sc.X), a1 = MathF.Atan2(to.Y - sc.Y, to.X - sc.X);
-        float d = a1 - a0;
+        if (Centre is not { } c) return 0f;
+        if (OnPlane(ray(from), c.Z) is not { } p0 || OnPlane(ray(to), c.Z) is not { } p1) return 0f;
+        float d = MathF.Atan2(p1.Y - c.Y, p1.X - c.X) - MathF.Atan2(p0.Y - c.Y, p0.X - c.X);
         while (d > MathF.PI) d -= MathF.Tau;
         while (d < -MathF.PI) d += MathF.Tau;
-        // Screen y runs down, so a screen angle increases clockwise as drawn. Which way the ring's own counter-clockwise
-        // runs on screen depends on whether the eye is above or below it: read it off two projected ring points.
-        float r = Size * 0.8f;
-        if (project(c + Vector3.UnitX * r) is not { } px || project(c + Vector3.UnitY * r) is not { } py) return 0f;
-        float ax = MathF.Atan2(px.Y - sc.Y, px.X - sc.X), ay = MathF.Atan2(py.Y - sc.Y, py.X - sc.X);
-        float q = ay - ax; while (q > MathF.PI) q -= MathF.Tau; while (q < -MathF.PI) q += MathF.Tau;
-        return q >= 0 ? d : -d;
+        return d;
+
+        static Vector3? OnPlane((Vector3 O, Vector3 D) r, float z)
+        {
+            if (MathF.Abs(r.D.Z) < 1e-6f) return null;              // looking along the plane: no angle to read
+            float t = (z - r.O.Z) / r.D.Z;
+            return t <= 0 ? null : r.O + r.D * t;
+        }
     }
 
     static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)

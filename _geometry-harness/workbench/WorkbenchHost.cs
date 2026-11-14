@@ -97,6 +97,13 @@ internal sealed class WorkbenchHost
         return new Vector2((clip.X / clip.W * 0.5f + 0.5f) * W, (1f - (clip.Y / clip.W * 0.5f + 0.5f)) * H);
     }
 
+    /// <summary>The eye ray through a framebuffer pixel, in Skyrim space.</summary>
+    internal (Vector3 O, Vector3 D) RayAt(Vector2 px)
+    {
+        var (o, d) = _camera.ScreenPointToRay(px.X, px.Y, W, H);
+        return (new Vector3(o.X, -o.Z, o.Y), new Vector3(d.X, -d.Z, d.Y));
+    }
+
     internal PickHit? PickAt(Vector2 px)
     {
         var (o, d) = _camera.ScreenPointToRay(px.X, px.Y, W, H);
@@ -142,10 +149,10 @@ internal sealed class WorkbenchHost
         var s = _dragStart;
         if (_dragHandle == Handle.TurnZ)
         {
-            float rad = _gizmo.TurnAmount(from, to, Project);
+            float rad = _gizmo.TurnAmount(from, to, RayAt);
             return s with { Rotation = RefPlacementEdit.Turned(s.Rotation, Vector3.UnitZ, rad) };
         }
-        float amount = _gizmo.MoveAmount(_dragHandle, from, to, Project);
+        float amount = _gizmo.MoveAmount(_dragHandle, from, to, RayAt);
         var axis = _dragHandle switch { Handle.MoveX => Vector3.UnitX, Handle.MoveY => Vector3.UnitY, _ => Vector3.UnitZ };
         var np = ToV(s.Position) + axis * amount;
         return s with { Position = new Vec3(np.X, np.Y, np.Z) };
@@ -324,6 +331,8 @@ internal sealed class WorkbenchHost
     internal string OutDir => _outDir;
     internal void SetPose(Vector3 eye, float yaw, float pitch) { _eye = eye; _yaw = yaw; _pitch = pitch; SyncCamera(); }
     internal void SelectKey(FormKey? key) => Select(key);
+    internal IEnumerable<RefOcclusion> DrawnRefs() => (_opt.Occlusion?.Refs ?? new List<RefOcclusion>()).Where(r => r.Meshes.Count > 0 && _session.IsDrawn(r.Ref.RefKey));
+    internal float EyeDistance(Vec3 p) => Vector3.Distance(_eye, ToV(p));
     internal void AfterStage() { if (_session.Selected is { } k) _gizmo.Centre = ToV(_session.Current(k).Position); }
 
     internal static WriteTarget? TargetFromEnv()

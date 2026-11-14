@@ -11,6 +11,7 @@ namespace Workbench;
 /// <code>
 /// wait N                         render N frames
 /// pose X,Y,Z YAW PITCH           put the camera there
+/// clickworld X,Y,Z               click where a Skyrim point is drawn
 /// click X,Y                      press and release at framebuffer pixel X,Y (a plain click selects)
 /// drag X0,Y0 X1,Y1 [N]           press, move in N steps (default 8), release (a drag on the handle edits)
 /// dragworld AXIS|ring D          drag the selected handle part by D units (D degrees for ring), from its own screen place
@@ -20,6 +21,7 @@ namespace Workbench;
 /// pickworld X,Y,Z                project a Skyrim point to the screen, pick there, print what is hit
 /// capture NAME                   save the frame as NAME.png
 /// dump FORMKEY NAME              save the reference's drawn vertices as NAME.json
+/// tilted [N]                     list drawn references tilted about X and Y, nearest first
 /// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
 /// commit dry|real PATCHNAME      dry-run or write the staged edits
 /// readback FORMKEY PLUGIN        read that plugin's Placement of the reference through the server
@@ -66,6 +68,13 @@ internal sealed class Script
         {
             case "wait": _wait = int.Parse(a[1]); break;
             case "pose": _h.SetPose(P3(a[1]), F(a[2]), F(a[3])); _wait = 2; break;
+            case "clickworld":
+            {
+                var sp = _h.Project(P3(a[1]));
+                if (sp is not { } c) { WorkbenchHost.Say($"clickworld {a[1]}: behind the eye"); break; }
+                WorkbenchHost.Say(FormattableString.Invariant($"clickworld {a[1]} -> screen {c.X:0},{c.Y:0}"));
+                _h.OnPress(c); _h.OnRelease(c); _wait = 2; break;
+            }
             case "click": { var p = P2(a[1]); _h.OnPress(p); _h.OnRelease(p); _wait = 2; break; }
             case "drag":
             {
@@ -114,6 +123,17 @@ internal sealed class Script
             case "capture": _h.Capture(a[1]); break;
             case "dump": _h.DumpRef(FormKey.Factory(a[1]), a[2]); break;
             case "fps": Fps(int.Parse(a[1])); break;
+            case "tilted":
+            {
+                // Drawn references with X and Y rotation both non-zero, nearest the eye first: candidates for a
+                // composition test on real data.
+                int n = a.Length > 1 ? int.Parse(a[1]) : 5;
+                foreach (var ro in _h.DrawnRefs().Where(r => MathF.Abs(r.Ref.Rotation.X) > 0.02f && MathF.Abs(r.Ref.Rotation.Y) > 0.02f)
+                                                .OrderBy(r => _h.EyeDistance(r.Ref.Position)).Take(n))
+                    WorkbenchHost.Say(FormattableString.Invariant(
+                        $"tilted {ro.Ref.RefKey} {ro.Ref.BaseEditorId} pos {ro.Ref.Position.X:0.##},{ro.Ref.Position.Y:0.##},{ro.Ref.Position.Z:0.##} rot {ro.Ref.Rotation.X:0.#####},{ro.Ref.Rotation.Y:0.#####},{ro.Ref.Rotation.Z:0.#####} scale {ro.Ref.Scale:0.###} bos {ro.Ref.BosSwapped} shapes {ro.Shapes.Count}"));
+                break;
+            }
             case "ticks": Ticks(int.Parse(a[1])); break;
             case "commit": Async(() => _h.CommitAsync(a[1] == "dry", a[2])); break;
             case "readback":
