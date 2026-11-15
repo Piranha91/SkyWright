@@ -21,7 +21,7 @@ internal interface IWorkbenchSurface
     /// <summary>The bundle open, and the severity table, the Findings tab ranks from; null when none is open.</summary>
     BundleConflicts? Open => null;
     SeverityTable? Severity => null;
-    /// <summary>The Findings tab, ranked (DESIGN section 4).</summary>
+    /// <summary>The Findings tab, ranked.</summary>
     IReadOnlyList<RankedFinding> Findings => Open is { } b ? FindingRanking.Rank(b.Findings, b.Targets, Severity) : Array.Empty<RankedFinding>();
     /// <summary>What a click on a clickable Findings row does: the Records tree's path to its reference and cell.</summary>
     string OpenFinding(RankedFinding row) => $"finding {row.Rank} names {row.Row.RefKey} in cell {row.Row.Cell}, but no window is shown to open it in.";

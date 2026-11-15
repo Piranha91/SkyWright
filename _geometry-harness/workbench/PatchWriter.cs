@@ -35,7 +35,7 @@ internal sealed class PatchWriter : IAsyncDisposable
     { _client = client; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
 
     /// <summary>Start the server at <paramref name="serverExe"/> against <paramref name="target"/>. Refused when the
-    /// target's patch folder is one the output-folder rule refuses (GATE-B.md 3.2), whatever the instance.</summary>
+    /// target's patch folder is one the output-folder rule refuses, whatever the instance.</summary>
     internal static async Task<PatchWriter> StartAsync(string serverExe, WriteTarget target,
                                                        string dataDir, string corpusPath, Action<string> log, CancellationToken ct = default)
     {

@@ -3565,7 +3565,7 @@ def target_pairs(ex: Executor, arm: dict):
 def scope_measured_on(plan: dict, arm: dict) -> bool:
     """Whether the plan's scope (plan.configuration) was measured on this arm's candidate. The scope names its source as
     `candidate:<file>`; a scope of the real profile or one that names no candidate is the baseline's, as before. In a
-    manual-mode plan the scope is the profile as it is (the review arm), so it is not the baseline's configuration."""
+    manual-mode plan the scope is the profile as it is, so it is not the baseline's configuration."""
     src = str((plan.get("configuration") or {}).get("source") or "")
     if not src.startswith("candidate:"):
         return True
@@ -4746,7 +4746,7 @@ def hit_names(h: dict) -> set[str]:
 
 def discovery_relevance(ex, receipts: dict) -> dict:
     """{checkId: {armId: {...}}} for every accepted discovery receipt, by discovery_hit_rows' own rule, whether or not
-    candidate-qualification runs (R4.6): computed, the relevant hits' files and the not-relevant count with its
+    candidate-qualification runs: computed, the relevant hits' files and the not-relevant count with its
     reason; or computed false with the sentence, when the plan names no target and no pair, or the hit list cannot
     be read as the receipt recorded it."""
     relevant = relevant_plugins(ex)

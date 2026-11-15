@@ -31,7 +31,7 @@ internal sealed class BundleConflicts
     internal required string VerifyPath { get; init; }
     internal required string VerifySummary { get; init; }
     internal required IReadOnlyList<ConflictRow> Rows { get; init; }
-    /// <summary>The Findings tab's rows: every other check's accepted receipt outputs on the arm (DESIGN R4.3).</summary>
+    /// <summary>The Findings tab's rows: every other check's accepted receipt outputs on the arm.</summary>
     internal IReadOnlyList<FindingRow> Findings { get; init; } = Array.Empty<FindingRow>();
     /// <summary>Each ticked check on the arm: ran with its row count, or why it did not (rejected, blocked, not applicable).</summary>
     internal IReadOnlyList<CheckStatus> Checks { get; init; } = Array.Empty<CheckStatus>();
@@ -198,7 +198,7 @@ internal sealed class BundleConflicts
                 }
             }
         }
-        // finalize's discovery relevance (R4.6), from the bundle's disposition, by check and arm
+        // finalize's discovery relevance, from the bundle's disposition, by check and arm
         JsonElement? relevanceDoc = null;
         var dispPath = Path.Combine(dir, "disposition.json");
         if (File.Exists(dispPath))

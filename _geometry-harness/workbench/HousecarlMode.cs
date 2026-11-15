@@ -7,7 +7,7 @@ namespace Workbench;
 /// <summary>How the client starts its houseCARL server: the command, its arguments and its environment.</summary>
 internal sealed record ServerLaunch(string Command, IReadOnlyList<string> Args, IReadOnlyDictionary<string, string?> Env, string From);
 
-/// <summary>houseCARL mode (DESIGN R4.5): the instance is whatever the client's own houseCARL server manages. The
+/// <summary>houseCARL mode: the instance is whatever the client's own houseCARL server manages. The
 /// workbench starts that server exactly as the client does (command, arguments and environment), so the server applies
 /// its own precedence (saved config in HOUSECARL_DATA_DIR or beside the exe, then the install default), and reads the
 /// instance from the server's answer; it never reads houseCARL.user.json itself.</summary>

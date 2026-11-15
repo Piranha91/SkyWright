@@ -11,7 +11,7 @@ internal sealed record LauncherMod(string Name, int Priority, bool Enabled, bool
     internal bool Unmanaged { get; init; }
 }
 
-/// <summary>The launcher's state (DESIGN section 1 and 6): the mode, the chosen instance, profile and game, the profile's
+/// <summary>The launcher's state: the mode, the chosen instance, profile and game, the profile's
 /// mod folders and the ticked ones, the ticked probes, the Output Folder and the Work Folder. Every verb is a method here
 /// that the window's controls and <c>workbench_act</c> both call; a refusal is an <see cref="InvalidOperationException"/>
 /// carrying one sentence. It also owns the houseCARL server bound to the open profile, which the endpoint forwards to.</summary>
@@ -133,7 +133,7 @@ internal sealed class Launcher : IAsyncDisposable
         return $"{Mods.Count(x => x.Selected)} mod folder(s) selected";
     }
 
-    /// <summary>The registry's checks whose adapter runs a probe; every other kind is not a probe (DESIGN section 3).</summary>
+    /// <summary>The registry's checks whose adapter runs a probe; every other kind is not a probe.</summary>
     internal static readonly string[] ProbeKinds = { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe", "adviceprobe" };
 
     internal sealed record RegistryCheck(string Id, string Kind, string Title, string? Exe);
@@ -249,7 +249,7 @@ internal sealed class Launcher : IAsyncDisposable
         return line is not null && int.TryParse(line[6..].Trim(), out var id) ? id : null;
     }
 
-    /// <summary>Start a run of the selection through the existing pipeline (DESIGN section 2): an in-place entry under
+    /// <summary>Start a run of the selection through the existing pipeline: an in-place entry under
     /// the Work Folder, <c>evalpipeline.py run --through bundle</c>, and the bundle it verifies. Returns at once.</summary>
     internal string Run()
     {
@@ -290,7 +290,7 @@ internal sealed class Launcher : IAsyncDisposable
             var psi = new System.Diagnostics.ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (var a in new[] { "-I", pipeline, "run", "--entry", entry, "--machine", machine, "--out", run, "--through", "bundle" }) psi.ArgumentList.Add(a);
             psi.Environment["PYTHONIOENCODING"] = "utf-8";
-            psi.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dir, "runlog");      // set, not left to a default (GATE-B.md 3.1)
+            psi.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dir, "runlog");      // set, not left to a default
             var log = Path.Combine(dir, "pipeline.log");
             try
             {
@@ -316,7 +316,7 @@ internal sealed class Launcher : IAsyncDisposable
     static string StateServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
 
     /// <summary>The houseCARL server bound to the open profile by explicit paths, its data folder under the Work Folder
-    /// (GATE-B.md 3.1), started on the first forwarded call.</summary>
+    ///, started on the first forwarded call.</summary>
     Task<PatchWriter> BoundAsync()
     {
         lock (_gate)

@@ -28,7 +28,7 @@ public sealed class ShellCollection
     });
 }
 
-/// <summary>H3's fixture (Gate B review, DESIGN R4.3): a hand-built bundle with a verify-bundle verdict of its own, so the
+/// <summary>H3's fixture: a hand-built bundle with a verify-bundle verdict of its own, so the
 /// reader, the ranking and the state tools are tested without the controller. Arms baseline and candidate-01 (the review
 /// arm). Overlap rows (Conflicts): 7 created on the review arm, of which the differential's capped examples name 2. Findings:
 /// navmesh-ownership rows (calibrated-inference), one water row (record-fact) and two switch-census json entries.</summary>
@@ -137,7 +137,7 @@ public sealed class FindingsBundle : IDisposable
     public void Dispose() { try { Directory.Delete(Root, true); } catch { } }
 }
 
-/// <summary>H3 (Gate B review, DESIGN R4.3): routing, order, the projection, a click and the open of a Findings-only
+/// <summary>H3: routing, order, the projection, a click and the open of a Findings-only
 /// bundle, and the Conflicts tab marking every created row new.</summary>
 [Collection("Shell"), Trait("tier", "integration")]
 public sealed class FindingsTests

@@ -8,7 +8,7 @@ using ModelContextProtocol.Server;
 namespace Workbench;
 
 /// <summary>How the workbench endpoint treats each houseCARL tool it forwards to the server bound to the launcher's
-/// profile (DESIGN R2.7, R4.1). The instance setters are not forwarded at all.</summary>
+/// profile. The instance setters are not forwarded at all.</summary>
 internal enum ForwardKind { Read, RecordWrite, Decompile, PatchLane, PatchLaneWithOutPath }
 
 internal static class ForwardList
@@ -37,7 +37,7 @@ internal static class ForwardList
     internal static readonly string[] NeverForwarded = { "housecarl_set_mo2_instance", "housecarl_set_tool_path" };
 }
 
-/// <summary>The manual-mode write rule for a forwarded call (DESIGN R4.1): every write lands under the Output Folder O or
+/// <summary>The manual-mode write rule for a forwarded call: every write lands under the Output Folder O or
 /// is refused in one sentence. Returns the arguments to send, or a refusal.</summary>
 internal static class ForwardRule
 {

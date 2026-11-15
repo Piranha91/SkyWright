@@ -4,7 +4,7 @@ using System.Windows.Threading;
 
 namespace Workbench;
 
-/// <summary>The Start tab (DESIGN section 1): the launcher's controls. Each one calls the same <see cref="Launcher"/>
+/// <summary>The Start tab: the launcher's controls. Each one calls the same <see cref="Launcher"/>
 /// method the matching <c>workbench_act</c> verb calls; a refusal shows its one sentence in the status line.</summary>
 internal static class LauncherView
 {

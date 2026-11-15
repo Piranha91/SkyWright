@@ -59,7 +59,7 @@ internal sealed class StateServer : IAsyncDisposable
         })
         .WithHttpTransport(o => o.Stateless = true)
         .WithTools<StateTools>()
-        // the houseCARL tools of the server bound to the launcher's profile, forwarded under the manual-mode write rule (DESIGN R2.7, R4.1)
+        // the houseCARL tools of the server bound to the launcher's profile, forwarded under the manual-mode write rule
         .WithTools(await ForwardedTool.AllAsync(Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : SafeServerExe()));
         var url = $"http://127.0.0.1:{port}";
         b.WebHost.UseUrls(url);

@@ -116,7 +116,7 @@ public class PatchWriteTests : IClassFixture<TiltedRefWorld>
         for (int r = 0; r < 3; r++) for (int c = 0; c < 3; c++) Assert.Equal(drawn[r, c], back[r, c], 4);
     }
 
-    // The lab-only guard's test is replaced by OutputFolderRuleTests and ManualWriteTests.H2a (DESIGN R4, B9).
+    // The lab-only guard's test is replaced by OutputFolderRuleTests and ManualWriteTests.H2a.
 
     [Fact]
     public async Task A_commit_is_refused_when_the_scene_drew_a_different_placement_than_the_server_reads()

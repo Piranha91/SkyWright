@@ -169,7 +169,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     public async Task The_server_publishes_the_two_tools_with_their_inputs()
     {
         var tools = await _client.ListToolsAsync();
-        // the workbench's own two, and otherwise only forwarded houseCARL tools (DESIGN R2.7; B13 lists them)
+        // the workbench's own two, and otherwise only forwarded houseCARL tools
         Assert.Equal(new[] { "workbench_act", "workbench_state" }, tools.Select(t => t.Name).Where(n => !n.StartsWith("housecarl_")).OrderBy(n => n, StringComparer.Ordinal));
         var act = tools.Single(t => t.Name == "workbench_act").JsonSchema;
         var props = P(act, "properties").EnumerateObject().Select(p => p.Name).ToHashSet();
@@ -301,7 +301,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.Empty(_scene.Session.Pending);                                           // withdrawn, never run late
     }
 
-    // ---- Gate B (workbench manual mode): the launcher on the same two tools, and the forwarded houseCARL surface ----
+    // ---- manual mode: the launcher on the same two tools, and the forwarded houseCARL surface ----
 
     /// <summary>A free-mode instance on disk: ModOrganizer.ini, profile P with one enabled and one disabled mod folder.</summary>
     static string LauncherInstance()
@@ -364,7 +364,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.DoesNotContain("housecarl_set_tool_path", names);
     }
 
-    // ---- B13b (Gate B review H1, DESIGN R4.1): every forwarded write lands under the Output Folder or is refused ----
+    // ---- B13b: every forwarded write lands under the Output Folder or is refused ----
 
     static Dictionary<string, (long, DateTime)> Listing(params string[] roots) =>
         roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
@@ -498,7 +498,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.False(Directory.Exists(elsewhere));
     }
 
-    /// <summary>Coordinator note on 21f93de4: with the instance's mods folder as the Output Folder, a new plugin and a
+    /// <summary>with the instance's mods folder as the Output Folder, a new plugin and a
     /// placed file copy land in a new houseCARL folder there, through the endpoint.</summary>
     [Fact]
     public async Task B13c_with_the_mods_folder_as_output_create_plugin_and_place_land_in_new_houseCARL_folders()
@@ -520,7 +520,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.True(File.Exists(Path.Combine(mods, "houseCARL - WbPlaced", "meshes", "hcwb", "a.nif")), t2);
     }
 
-    // ---- H5 (Gate B review, DESIGN R4.5): houseCARL mode starts the server as the client does ----
+    // ---- H5: houseCARL mode starts the server as the client does ----
 
     /// <summary>A copy of the server this checkout builds, so a config can sit beside it without touching the build.</summary>
     static string ServerCopy(string dir)
@@ -582,7 +582,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         finally { Environment.SetEnvironmentVariable("WB_HOUSECARL_LAUNCH", null); }
     }
 
-    // ---- M7 (Gate B review, DESIGN R4.7, R4.8, L5): the launcher's verbs and its run ----
+    // ---- M7: the launcher's verbs and its run ----
 
     /// <summary>LauncherInstance with a second enabled mod and a separator (L5), and an Output Folder beside it.</summary>
     static string LauncherInstanceL5()
@@ -712,7 +712,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); }
     }
 
-    // ---- Gate C correction round ----
+    // ---- manual mode: to_file, statuses, refusals ----
 
     [Fact]
     public async Task M7h_patch_probes_are_greyed_when_this_machine_names_no_search_roots_or_download_pool()

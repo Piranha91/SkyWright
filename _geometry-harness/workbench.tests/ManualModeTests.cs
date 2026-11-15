@@ -16,7 +16,7 @@ using Xunit;
 
 namespace WorkbenchTests;
 
-/// <summary>Gate B of the workbench's manual mode (the run folder's GATE-B.md section 4). Tests that name a type or
+/// <summary>The workbench's manual mode. Tests that name a type or
 /// member the mode adds reach it through <see cref="Contract"/>, so this file compiles on the base commit and each such
 /// test fails there on an assertion naming what is missing; the names they reach are the frozen contract.</summary>
 internal static class Contract
@@ -41,7 +41,7 @@ internal static class Contract
          ?? throw new Xunit.Sdk.XunitException($"{o.GetType().Name} has no property {name}")).GetValue(o);
 }
 
-/// <summary>B2 (GATE-B.md 3.2, frozen with Piranha's answer): OutputFolderRule.Check(output, instance, profile, game)
+/// <summary>B2: OutputFolderRule.Check(output, instance, profile, game)
 /// returns null when a folder may take the workbench's output, else one sentence.</summary>
 public sealed class OutputFolderRuleTests : IDisposable
 {
@@ -59,7 +59,7 @@ public sealed class OutputFolderRuleTests : IDisposable
     }
     public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
 
-    string? Check(string output) => (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule (GATE-B.md 3.2)",
+    string? Check(string output) => (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule",
         output, Inst, "P", Game);
 
     [Theory]
@@ -75,7 +75,7 @@ public sealed class OutputFolderRuleTests : IDisposable
     [InlineData("instance", "instance")]
     [InlineData("game", "game folder")]
     [InlineData("afile.txt", "file")]
-    [InlineData("instance/NewOut", "instance")]          // review M4: inside the instance, on neither list
+    [InlineData("instance/NewOut", "instance")]          // inside the instance, on neither list
     [InlineData("instance/downloads", "instance")]
     [InlineData("instance/profiles/Other", "profiles")]
     [InlineData("instance/overwrite/sub", "overwrite")]
@@ -96,7 +96,7 @@ public sealed class OutputFolderRuleTests : IDisposable
     [InlineData("INSTANCE/MODS/ENABLED")]
     [InlineData("instance/mods/x/../Enabled")]
     [InlineData("game/data")]
-    public void A_refused_folder_spelled_another_way_is_still_refused(string rel) =>    // review L4
+    public void A_refused_folder_spelled_another_way_is_still_refused(string rel) =>    // 
         Assert.NotNull(Check(Path.Combine(_root, rel)));
 
     [Theory]
@@ -183,7 +183,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         var undo = await Call(c, "housecarl_remove", new() { ["formids"] = new[] { TiltedRefWorld.Ref.ToString() }, ["into"] = folder });
         Assert.False(undo.Error, "dropping the override from the patch under the output folder was refused: " + undo.Text);
         Assert.Empty(PatchesUnderMods("WbTwice"));
-        // review L1: read the patch back after the undo: the reference's override is gone
+        // read the patch back after the undo: the reference's override is gone
         using (var back = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(folder, "WbTwice.esp"), SkyrimRelease.SkyrimSE))
             Assert.Empty(back.EnumerateMajorRecords<IPlacedObjectGetter>());
     }
@@ -204,7 +204,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         Assert.Equal("not ours", File.ReadAllText(Path.Combine(foreign, "Foreign.esp")));
     }
 
-    /// <summary>Coordinator finding on 4474f75d: one rule. The server lane, which an MCP client reaches directly, refuses
+    /// <summary>one rule. The server lane, which an MCP client reaches directly, refuses
     /// every folder rule 3.2 refuses: here the instance root, the profiles folder, a new folder in the instance, and the
     /// game folder outside Data.</summary>
     [Fact]
@@ -220,7 +220,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         Assert.Empty(Directory.GetFiles(_w.Root, "WbRoot*.esp", SearchOption.AllDirectories));
     }
 
-    /// <summary>Coordinator finding on the forwarding slice: the server's out_path lane and the workbench's Output Folder
+    /// <summary>the server's out_path lane and the workbench's Output Folder
     /// rule are one rule with one owner. On the same folders both allow the same ones, and every refusal the server gives
     /// carries the workbench rule's own sentence, so the two callers cannot disagree.</summary>
     [Fact]
@@ -234,7 +234,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
                                   Path.Combine(_w.Instance, "NewOut"), _w.Instance, game, Path.Combine(game, "Other"), mods,
                                   Path.Combine(_w.Root, "one-rule-" + Guid.NewGuid().ToString("N")[..6]) })
         {
-            var wb = (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule (GATE-B.md 3.2)", o, _w.Instance, "Default", game);
+            var wb = (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule", o, _w.Instance, "Default", game);
             var (err, text) = await Call(c, "housecarl_apply", new() { ["ops"] = Move(77f), ["patch"] = "WbOne", ["out_path"] = o });
             bool refused = err || text.TrimStart().StartsWith("error:");
             Assert.True(refused == (wb is not null), $"{o}: the workbench rule {(wb is null ? "allows it" : "refuses it")} but the server {(refused ? "refused" : "wrote")}: {text}");
@@ -281,7 +281,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         Assert.Empty(Directory.GetFiles(_w.DataDir, "WbBad*.esp", SearchOption.AllDirectories));
     }
 
-    // B3c is replaced by ManualWriteTests.H2a, a behaviour test (DESIGN R4: its first assertion bound to the test host's Program).
+    // B3c is replaced by ManualWriteTests.H2a, a behaviour test.
 }
 
 /// <summary>B8 (D4 frozen, "Expand into rows"): one Findings reader per json-output probe. FindingReaders.Read(checkId,
@@ -297,7 +297,7 @@ public sealed class FindingReaderTests : IDisposable
     {
         var p = Path.Combine(_dir, checkId + ".json");
         File.WriteAllText(p, json);
-        var rows = Contract.Static("FindingReaders", "Read", $"the Findings reader for {checkId} (GATE-B.md section 2)", checkId, p);
+        var rows = Contract.Static("FindingReaders", "Read", $"the Findings reader for {checkId}", checkId, p);
         return ((System.Collections.IEnumerable)rows!).Cast<object>().ToList();
     }
 
@@ -402,7 +402,7 @@ public sealed class FindingReaderTests : IDisposable
         Assert.Equal(new[] { "finding", "finding", "incomplete" }, rows.Select(r => (string?)Contract.Prop(r, "Role")));
     }
 
-    /// <summary>B8i (R4.6): a discovery hit's relevance is read from what finalize recorded (disposition.discovery.relevance
+    /// <summary>B8i: a discovery hit's relevance is read from what finalize recorded (disposition.discovery.relevance
     /// for the check and arm), never re-derived: a relevant hit is a finding, a hit not relevant is context saying why, and
     /// with relevance not computed every hit is shown with the sentence, neither hidden nor called relevant.</summary>
     [Fact]
@@ -417,7 +417,7 @@ public sealed class FindingReaderTests : IDisposable
         List<object> Read(string relevance)
         {
             using var d = JsonDocument.Parse(relevance);
-            return ((System.Collections.IEnumerable)Contract.Static("FindingReaders", "Read", "the discovery reader with finalize's relevance (R4.6)",
+            return ((System.Collections.IEnumerable)Contract.Static("FindingReaders", "Read", "the discovery reader with finalize's relevance",
                 "patch.discovery-pool", p, null, d.RootElement.Clone())!).Cast<object>().ToList();
         }
         var computed = Read("""{"computed":true,"relevant":["SynPatch.esp"],"notRelevant":{"count":1,"why":"names no plan target"}}""");
@@ -501,13 +501,13 @@ public sealed class ManualModeBindingTests : IDisposable
     [Fact]
     public void B11b_the_default_arm_is_the_plans_review_arm_and_baseline_without_one()
     {
-        Assert.Equal("candidate-01", (string?)Contract.Static("BundleConflicts", "DefaultArm", "the default arm from plan.reviewArm (DESIGN R2.1)", Plan("candidate-01")));
-        Assert.Equal("baseline", (string?)Contract.Static("BundleConflicts", "DefaultArm", "the default arm from plan.reviewArm (DESIGN R2.1)", Plan(null)));
+        Assert.Equal("candidate-01", (string?)Contract.Static("BundleConflicts", "DefaultArm", "the default arm from plan.reviewArm", Plan("candidate-01")));
+        Assert.Equal("baseline", (string?)Contract.Static("BundleConflicts", "DefaultArm", "the default arm from plan.reviewArm", Plan(null)));
     }
 
-    // B12 and B12b (DESIGN R2.8) are superseded by R4.5: StateToolsTests.H5a and H5b start the server as the client does.
+    // B12 and B12b are superseded by R4.5: StateToolsTests.H5a and H5b start the server as the client does.
 
-    /// <summary>B12b under R4.5 (coordinator note on be533d2b): with no WB_HOUSECARL_LAUNCH and no housecarl entry in
+    /// <summary>B12b under R4.5: with no WB_HOUSECARL_LAUNCH and no housecarl entry in
     /// ~/.claude.json, houseCARL mode is refused in one sentence naming the setting that fixes it.</summary>
     [Fact]
     public void H5c_with_no_server_found_houseCARL_mode_refuses_in_one_sentence_naming_WB_HOUSECARL_LAUNCH()
@@ -516,7 +516,7 @@ public sealed class ManualModeBindingTests : IDisposable
         File.WriteAllText(claude, """{"projects":{"C:/elsewhere":{"mcpServers":{"housecarl":{"command":"x.exe"}}}},"mcpServers":{}}""");
         foreach (var cj in new[] { Path.Combine(_dir, "no-claude.json"), claude })
         {
-            var ex = Assert.ThrowsAny<InvalidOperationException>(() => Contract.Static("HousecarlMode", "Locate", "houseCARL mode's server launch (DESIGN R4.5)",
+            var ex = Assert.ThrowsAny<InvalidOperationException>(() => Contract.Static("HousecarlMode", "Locate", "houseCARL mode's server launch",
                 (string?)null, cj, _dir));
             Assert.DoesNotContain("\n", ex.Message);
             Assert.Contains("WB_HOUSECARL_LAUNCH", ex.Message);
@@ -575,7 +575,7 @@ public sealed class LauncherProcessTests
 }
 
 
-/// <summary>M2 (Gate B design review, decided under the standing rule): the run's work folder (bundle, logs, candidates,
+/// <summary>M2: the run's work folder (bundle, logs, candidates,
 /// re-checks) never goes under the instance's mods folder or anywhere MO2 would list it as a mod; only a patch's own new
 /// "houseCARL - name" folder may land there. WorkFolderRule.Check(work, instance, profile, game) returns null or one
 /// sentence; the default work folder is outside the instance.</summary>
@@ -592,7 +592,7 @@ public sealed class WorkFolderRuleTests : IDisposable
     }
     public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
 
-    string? Check(string w) => (string?)Contract.Static("WorkFolderRule", "Check", "the work-folder rule (GATE-B.md 3.1)", w, Inst, "P", Game);
+    string? Check(string w) => (string?)Contract.Static("WorkFolderRule", "Check", "the work-folder rule", w, Inst, "P", Game);
 
     [Theory]
     [InlineData("instance/mods")]
@@ -613,15 +613,14 @@ public sealed class WorkFolderRuleTests : IDisposable
     [Fact]
     public void A_work_folder_outside_the_instance_is_allowed() => Assert.Null(Check(Path.Combine(_root, "elsewhere", "work")));
 
-    // Coordinator ruling (2026-11-14, under the standing rule; Piranha's "any output can be written to the user's chosen
-    // location"): with the Output Folder outside the instance the Work Folder defaults to its "workbench-runs" subfolder;
+    // With the Output Folder outside the instance the Work Folder defaults to its "workbench-runs" subfolder;
     // with the Output Folder at <instance>/mods there is no default, and the launcher refuses until the user chooses one.
     // Never %LOCALAPPDATA%.
     [Fact]
     public void With_the_output_outside_the_instance_the_default_work_folder_is_its_workbench_runs_subfolder()
     {
         var o = Path.Combine(_root, "elsewhere", "out");
-        var d = (string?)Contract.Static("WorkFolderRule", "Default", "the default work folder (GATE-B.md 3.1)", o, Inst);
+        var d = (string?)Contract.Static("WorkFolderRule", "Default", "the default work folder", o, Inst);
         Assert.Equal(Path.GetFullPath(Path.Combine(o, "workbench-runs")), Path.GetFullPath(d!));
         Assert.Null(Check(d!));
     }
@@ -630,20 +629,20 @@ public sealed class WorkFolderRuleTests : IDisposable
     public void With_the_output_at_the_instances_mods_folder_there_is_no_default_and_the_reason_is_one_sentence()
     {
         var ex = Assert.ThrowsAny<InvalidOperationException>(() =>
-            Contract.Static("WorkFolderRule", "Default", "the default work folder (GATE-B.md 3.1)", Path.Combine(Inst, "mods"), Inst));
+            Contract.Static("WorkFolderRule", "Default", "the default work folder", Path.Combine(Inst, "mods"), Inst));
         Assert.DoesNotContain("\n", ex.Message);
         Assert.Contains("Work Folder", ex.Message);
         Assert.DoesNotContain("AppData", ex.Message);
     }
 }
 
-/// <summary>H2 (Gate B design review): every cell a clickable Findings row names is loadable in the session, and a
+/// <summary>H2: every cell a clickable Findings row names is loadable in the session, and a
 /// bundle with Findings rows and no Conflicts rows opens. SessionCells.From(conflictCells, findingCells) is the list of
 /// cells the worklist carries (today Program.OpenBundle builds it from Conflicts rows only and throws without one).</summary>
 public sealed class SessionCellTests
 {
     static IReadOnlyList<string> From(string?[] conflicts, string?[] findings) =>
-        (IReadOnlyList<string>)Contract.Static("SessionCells", "From", "the session's loadable cells from both tabs (DESIGN R2.16)",
+        (IReadOnlyList<string>)Contract.Static("SessionCells", "From", "the session's loadable cells from both tabs",
             (IEnumerable<string?>)conflicts, (IEnumerable<string?>)findings)!;
 
     [Fact]
@@ -665,7 +664,7 @@ public sealed class SessionCellTests
 }
 
 /// <summary>M6 and L2 on real outputs. The probes' real outputs carry load-order names, so they are not tracked
-/// fixtures: WB_READER_OUTPUTS names a run-local evaluation folder (run s3 of the task) and the tests read its receipts.
+/// fixtures: WB_READER_OUTPUTS names a run-local evaluation folder and the tests read its receipts.
 /// Without it the test fails saying so (it is a known answer for a real run, not a skip).</summary>
 [Trait("tier", "real-run")]
 public sealed class RealOutputReaderTests
@@ -724,7 +723,7 @@ public sealed class RealOutputReaderTests
         var diff = Path.Combine(run, "receipts", "geometry.object-overlap__candidate-01__diff.json");
         // Created is recomputed by the shared credit and must equal ordersweep's; the split needs ordersweep's reverse
         // measurement, so it is read from ordersweep's receipt, not recomputed (one owner)
-        var n = Contract.Static("ReviewCredit", "Counts", "new-on-the-review-arm from DifferentialRows (DESIGN R2.1)", diff, baseEmit, review)!;
+        var n = Contract.Static("ReviewCredit", "Counts", "new-on-the-review-arm from DifferentialRows", diff, baseEmit, review)!;
         Assert.Equal(created.GetProperty("created").GetInt32(), (int)Contract.Prop(n, "Created")!);
         Assert.Equal(created.GetProperty("newDefect").GetInt32(), (int)Contract.Prop(n, "NewDefect")!);
         Assert.Equal(created.GetProperty("unmeasured").GetInt32(), (int)Contract.Prop(n, "Unmeasured")!);
@@ -785,7 +784,7 @@ public sealed class InPlaceRunTests
             readerCmd = "\"" + Path.Combine(R3Bundle.Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe") + "\"",
         }));
         var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
-        var before = Listing(w.Root);                                 // review M2: the whole world root, not only instance and game
+        var before = Listing(w.Root);                                 // the whole world root, not only instance and game
         var psi = new ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in new[] { "-I", Path.Combine(R3Bundle.Checkout(), "_geometry-harness", "evalpipeline.py"), "run", "--entry", entry,
                                   "--machine", machine, "--out", work, "--through", "bundle" }) psi.ArgumentList.Add(a);
@@ -815,7 +814,7 @@ public sealed class InPlaceRunTests
 }
 
 
-/// <summary>Review M4: the output rule on layouts other than the plain one: an MO2 instance inside the game folder (a
+/// <summary>the output rule on layouts other than the plain one: an MO2 instance inside the game folder (a
 /// portable install), and an instance whose ModOrganizer.ini sets base_directory (mods and profiles elsewhere), read
 /// through the existing owner (housecarl-core Mo2Instance).</summary>
 public sealed class OutputFolderLayoutTests : IDisposable
@@ -823,7 +822,7 @@ public sealed class OutputFolderLayoutTests : IDisposable
     readonly string _root = Path.Combine(Path.GetTempPath(), "hc-wb-layout-" + Guid.NewGuid().ToString("N"));
     public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
 
-    string? Check(string o, string inst, string game) => (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule (GATE-B.md 3.2)", o, inst, "P", game);
+    string? Check(string o, string inst, string game) => (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule", o, inst, "P", game);
 
     [Fact]
     public void An_instance_inside_the_game_folder_still_allows_its_mods_folder_and_refuses_Data()
@@ -850,7 +849,7 @@ public sealed class OutputFolderLayoutTests : IDisposable
     }
 }
 
-/// <summary>H2 (Gate B review, DESIGN R4.2): the workbench's own write path in a manual session. A commit on a synthetic
+/// <summary>H2: the workbench's own write path in a manual session. A commit on a synthetic
 /// instance that is not the lab is not refused for being non-lab and lands under the Output Folder, with nothing new under
 /// the instance; the re-check of that patch reads it from the Output Folder. Replaces B3c, whose first assertion bound to
 /// the test host's Program. Members are reached by parameter name, so the same test runs on the base and after.</summary>
@@ -977,7 +976,7 @@ public sealed class ManualWriteTests
     }
 }
 
-/// <summary>Coordinator note on 21f93de4: the write tools whose lanes are patch= and into= (a new or existing houseCARL
+/// <summary>the write tools whose lanes are patch= and into= (a new or existing houseCARL
 /// folder in the instance's mods folder) are forwarded when the Output Folder is that mods folder, which the output rule
 /// allows; a tool with its own out_path gets it mapped to the Output Folder; the rest are refused naming the concrete
 /// reason (no out_path lane) and what to choose instead.</summary>

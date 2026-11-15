@@ -25,7 +25,7 @@ internal sealed record InstanceLayout(string Instance, string Root, string Mods,
     internal bool InsideInstance(string p) => AtOrUnder(p, Instance) || AtOrUnder(p, Root);
 }
 
-/// <summary>Where the workbench may write patches (GATE-B.md 3.2, frozen with Piranha's answer): the instance's mods
+/// <summary>Where the workbench may write patches: the instance's mods
 /// folder itself (each patch then goes to a new "houseCARL - name" folder there), or any folder outside the instance and
 /// the game folder. <see cref="Check"/> returns null when the folder may take output, else one sentence saying why not.</summary>
 internal static class OutputFolderRule
@@ -37,9 +37,8 @@ internal static class OutputFolderRule
 }
 
 /// <summary>Where a manual run keeps its own files (entry, candidates, plan, receipts, bundle, logs, re-checks): never
-/// inside the instance or the game folder (GATE-B.md 3.1). With the Output Folder outside the instance the default is
-/// its "workbench-runs" subfolder; with the Output Folder at the instance's mods folder there is no default (the
-/// coordinator's ruling, 2026-11-14).</summary>
+/// inside the instance or the game folder. With the Output Folder outside the instance the default is
+/// its "workbench-runs" subfolder; with the Output Folder at the instance's mods folder there is no default.</summary>
 internal static class WorkFolderRule
 {
     internal static string? Check(string work, string instance, string profile, string game)

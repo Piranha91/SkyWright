@@ -4,7 +4,7 @@ using Mutagen.Bethesda.Plugins;
 
 namespace Workbench;
 
-/// <summary>One row of the Findings tab (DESIGN section 4, R3.8): what it says, where it opens the viewer if it names a
+/// <summary>One row of the Findings tab: what it says, where it opens the viewer if it names a
 /// reference and a cell, and its role: <c>finding</c> (what the probe reports), <c>incomplete</c> (what it could not read
 /// or search; the output is not whole) or <c>context</c> (said beside the findings, not one of them).</summary>
 internal sealed record FindingRow(string CheckId, string Kind, string A, string B, string Summary, string? RefKey, string? Cell,
@@ -19,7 +19,7 @@ internal sealed record FindingRow(string CheckId, string Kind, string A, string 
 }
 
 /// <summary>One reader per json-output probe (D4, "Expand into rows"), each unpacking its result into one row per entry,
-/// on the entry shapes run s3 recorded. A cell given as an editor ID (route-cut, 78 of 80 rows in s3) is resolved through
+/// on the entry shapes the probes write. A cell given as an editor ID (route-cut names most cells that way) is resolved through
 /// <c>cellOfRef</c> (the names enrichment's cell for the row's reference); otherwise the row says it cannot open.</summary>
 internal static class FindingReaders
 {
@@ -196,7 +196,7 @@ internal static class SessionCells
 /// <summary>A ranked Findings row.</summary>
 internal sealed record RankedFinding(int Rank, FindingRow Row, bool InvolvesTarget, string NewLabel, int Severity);
 
-/// <summary>DESIGN section 4's Findings ranking, first difference wins: 1 names a target; 2 new on the review arm before
+/// <summary>'s Findings ranking, first difference wins: 1 names a target; 2 new on the review arm before
 /// not new before not compared; 3 the check's evidence grade; 4 physical half holds before unmeasured before anything
 /// else (conflict rows); 5 severity by the reference's base type; 6 checkId, then identity.</summary>
 internal static class FindingRanking

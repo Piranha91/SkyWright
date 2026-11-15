@@ -122,7 +122,7 @@ def test_the_review_arm_is_read_even_when_another_arm_loads_more_plugins():
 
 
 def test_a_review_arm_that_names_no_arm_is_refused_not_read_as_the_baseline():
-    """Review L6: a plan whose reviewArm names no arm is a broken plan; the names read refuses it in one sentence."""
+    """a plan whose reviewArm names no arm is a broken plan; the names read refuses it in one sentence."""
     try:
         names_read(MANUAL, review="candidate-09")
     except bundleenrich.Refused as ex:
@@ -132,7 +132,7 @@ def test_a_review_arm_that_names_no_arm_is_refused_not_read_as_the_baseline():
 
 
 def test_the_union_of_all_arms_is_not_what_is_read():
-    """Review L6: with a review arm the read order is that arm's plugins (plus the patches rule), not every arm's."""
+    """with a review arm the read order is that arm's plugins (plus the patches rule), not every arm's."""
     arms = MANUAL + [("candidate-02", "candidate", ["Base.esm", "Sel.esp", "Extra.esp"])]
     names = names_read(arms, review="candidate-01")
     # Extra.esp is loaded by another arm and is not a target: today's patches rule names it; a union would order it

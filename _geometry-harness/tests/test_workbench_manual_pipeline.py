@@ -6,7 +6,7 @@ Dependency-free: `python -I _geometry-harness/tests/test_workbench_manual_pipeli
 EVALPIPELINE_PATH / EVALRUN_PATH load the modules from other files. Plugins are synthetic header-only files.
 Cases that run a probe need the worktree's Release scopeprobe.
 
-The in-place entry (DESIGN.md 2.1 and Round 2):
+The in-place entry:
     {"id", "inPlace": {"instance", "profile", "game"}, "selection": {"mods": [...]},
      "evaluation": {"select": [...], "depth"?, "primitiveSolidity"?}}
 """
@@ -208,7 +208,7 @@ def case_b17_the_primitive_table_is_explicit_never_this_machines_harness_config(
 # ---- B6b: a selection that provides no plugin ----
 
 def case_b6b_an_asset_only_selection_has_no_target_and_a_population_of_its_folders_only():
-    """H3 (Gate B design review): no plugin outside the selection becomes a target. Tested basis: evalrun plan with no
+    """H3: no plugin outside the selection becomes a target. Tested basis: evalrun plan with no
     --scope over two candidates that differ only by a folder gives targets [] and population mods [Tex], plugins []
     (receipts/h3-asset-only-plan.log). So an asset-only in-place entry plans without --scope."""
     mods = {"Tex": {}, "A": {"A.esp": ["Base.esm"]}}
@@ -221,7 +221,7 @@ def case_b6b_an_asset_only_selection_has_no_target_and_a_population_of_its_folde
         ctx = EP.Context(in_place_entry(t, inst, game, ["Tex"], ["geometry.object-overlap"]), None, t / "out")
         res = ctx.resolve()
         assert res["subject"] == [] and res["keys"] == [], f"targets {res['subject']} {res['keys']}"
-        # review L3: the arms differ only by the folder, which is what evalrun's population takes (h3-asset-only-plan.log)
+        # the arms differ only by the folder, which is what evalrun's population takes (h3-asset-only-plan.log)
         by = {a["id"]: a for a in res["arms"]}
         assert ER.arm_delta([by["without-selection"]["mods"], by["combined"]["mods"]]) == ["Tex"]
         assert ER.arm_delta([by["without-selection"]["plugins"], by["combined"]["plugins"]]) == []
@@ -286,7 +286,7 @@ def case_b16_the_review_arms_pairs_are_each_target_with_each_plugin_it_clashes_w
         (run / "receipts" / "geometry.object-overlap__candidate-01__arm.json").write_text(json.dumps(
             {"checkId": "geometry.object-overlap", "armId": "candidate-01", "validation": {"accepted": True},
              "outputs": [{"path": "outputs/overlap-candidate-01.json"}]}), encoding="utf-8")
-        # review M5: rows and receipts that must yield no pair: a row naming no target, a receipt not accepted, and a
+        # rows and receipts that must yield no pair: a row naming no target, a receipt not accepted, and a
         # baseline-arm receipt with another pair
         (run / "outputs" / "o2.json").write_text(json.dumps({"Conflicts": [
             {"Kind": "OVERLAP", "A": "Other.esp", "B": "Base.esm", "Summary": "s", "Necessary": [], "Alternative": []}]}), encoding="utf-8")
@@ -311,7 +311,7 @@ def case_b16_the_review_arms_pairs_are_each_target_with_each_plugin_it_clashes_w
         assert sorted(map(sorted, pairs)) == [["Other.esp", "Sel.esp"]], f"pairs {pairs}"
 
 
-# ---- H1 (Gate B design review): a receipt's consumed configuration is the configuration of the arm it ran on ----
+# ---- H1: a receipt's consumed configuration is the configuration of the arm it ran on ----
 
 def consumed(scope_source):
     plan = {"tools": {}, "registry": {"sha256": "r"}, "scope": {"sha256": "s"}, "harness": {}, "states": {},
@@ -483,7 +483,7 @@ def _discovery_run(run: Path, targets):
 
 
 def case_b8i_finalize_records_discovery_relevance_by_evalruns_rule_for_every_accepted_discovery_receipt():
-    """R4.6 (review M6): relevance is recorded whether or not candidate-qualification runs, by discovery_hit_rows' rule,
+    """R4.6: relevance is recorded whether or not candidate-qualification runs, by discovery_hit_rows' rule,
     and as not computed, with the sentence, when the plan has no target and no pair."""
     rel = getattr(ER, "discovery_relevance", None)
     assert rel is not None, "evalrun records no discovery relevance outside candidate-qualification (no discovery_relevance)"
@@ -503,8 +503,8 @@ PATCHPROBE = HARNESS / "patchprobe" / "bin" / "Release" / "net9.0" / "patchprobe
 
 
 def case_e2e1_patchprobe_finds_the_run_instance_outside_its_search_roots():
-    """Gate C's end-to-end run: patch.discovery-installed was rejected on both arms because patchprobe looks for the run's
-    instance only under its search roots, and the chosen instance (free mode: any instance) was not under one."""
+    """A manual run picks any instance: patchprobe must find the run's instance even when none of its
+    search roots holds it."""
     assert PATCHPROBE.exists(), f"build patchprobe first: {PATCHPROBE}"
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
