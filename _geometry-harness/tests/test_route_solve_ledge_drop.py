@@ -16,7 +16,8 @@ crosses. Without game data (HOUSECARL_FIXTURE_GAME or `fixtureGame` in the harne
     C2252  CfLedgeGap, L (-224,-96) to P (-224,304), a Portal across a 48 u gap: still refused as leaving walkable
            ground, first off between L's edge (y 128) and P's (y 176)
     C2253  Legs on one storey are unchanged: inside CfLedge's L, inside its U, and round CfLedgeGap's notch, each leg
-           line equals the one measured on viewprobe before this change (fork cad3fb1d)
+           line equals the one measured on viewprobe before this change (fork cad3fb1d; the notch line re-pinned
+           2026-11-15 when its slack was fixed, C2306)
     C2254  CfLedgeGap, U (176,-32) to L (-224,32), the drop then the bend round the notch: every corner on the lower floor
            is inset off the mesh boundary (no corner within 3 u of a mesh vertex), as on one storey
 
@@ -45,11 +46,13 @@ import capture_fixture_lab as LAB  # noqa: E402
 PROD_VP = HARNESS / "viewprobe" / "bin" / "Release" / "net9.0-windows10.0.19041.0" / "viewprobe.exe"
 CASES = ("C2250", "C2251", "C2252", "C2253", "C2254")
 TOP = ["--eye", "0,0,1500", "--look", "0,1,0", "--size", "64", "--msaa", "0", "--nav", "off", "--route-solve"]
-# C2253's leg lines as viewprobe printed them at fork cad3fb1d, before this change
+# C2253's leg lines as viewprobe printed them at fork cad3fb1d, before this change. The notch line was re-pinned on
+# 2026-11-15 (C2306, tests/test_route_geometry.py): the path round the notch was slack, bending at an interior vertex
+# (272 u); it now bends at the notch's corners and says it was re-routed.
 PINNED = {
     "L": "leg 1: 7 triangle(s) crossed, 2 corner(s) after the funnel - 160 u to walk vs 160 u straight line  (x1.00), z 0..0",
     "U": "leg 1: 7 triangle(s) crossed, 3 corner(s) after the funnel - 160 u to walk vs 160 u straight line  (x1.00), z 200..200",
-    "notch": "leg 1: 11 triangle(s) crossed, 4 corner(s) after the funnel - 272 u to walk vs 192 u straight line  (x1.42), z 0..0",
+    "notch": "leg 1: 11 triangle(s) crossed, 4 corner(s) after the funnel - 261 u to walk vs 192 u straight line  (x1.36), z 0..0, re-routed round an interior vertex, 20 u shorter",
 }
 FAILS: list[str] = []
 RESULTS: list[tuple[str, str, str]] = []

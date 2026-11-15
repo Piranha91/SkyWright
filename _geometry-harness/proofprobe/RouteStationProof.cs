@@ -17,7 +17,7 @@ using Mutagen.Bethesda.Plugins;
 static class RouteStationProof
 {
     /// <summary>Cases run below, excluding this count's own check.</summary>
-    public const int DeclaredCases = 48;
+    public const int DeclaredCases = 52;
 
     static readonly ModKey Master = ModKey.FromNameAndExtension("Master.esm");
     static readonly ModKey City = ModKey.FromNameAndExtension("City.esp");
@@ -108,6 +108,17 @@ static class RouteStationProof
     }
 
     static Vector2 P(float x, float y) => new(x, y);
+
+    // PROOF_ROUTE_DUMP=1: every station of a sampled world, for a before/after list of verdicts (test output only).
+    static void Dump(string tag, RouteResult r)
+    {
+        if (Environment.GetEnvironmentVariable("PROOF_ROUTE_DUMP") != "1") return;
+        foreach (var p in r.Paths)
+            Console.WriteLine($"   [dump {tag}] path {p.Id} kept {p.Kept} length {p.Length:0.###}: " + string.Join(" ", p.Corners.Select(c => $"{c.X:0.###},{c.Y:0.###}")));
+        foreach (var st in r.Stations)
+            Console.WriteLine($"   [dump {tag}] {st.Id} {st.Family} {st.X:0.###},{st.Y:0.###} accepted {st.Accepted} drop {st.Drop} "
+                            + $"reason {st.Verdict?.Reason.ToString() ?? "-"} on {st.Verdict?.Covering?.Index.ToString() ?? "-"} z {st.Verdict?.Env.NavZ:0.###}");
+    }
 
     static (int, int) SquareOf(NavmeshGeometry m)
     {
@@ -349,6 +360,7 @@ static class RouteStationProof
             m.Door(left);
             var a = RouteStations.Classify(World(new[] { m.Build(FK(0x809)) }, new[] { Defined(0x70, 1024, 128) }));
             var r = RouteStations.Sample(a, Env(a));
+            Dump("RT7", r);
             var acc = r.Stations.Where(s => s.Accepted).ToList();
             int rightHalf = acc.Count(s => s.X > 1024f);
             float minGap = float.MaxValue;
@@ -368,8 +380,9 @@ static class RouteStationProof
             // A coarse L whose graph is a chain, so A*'s channel is unique and the rule's solved path
             // can be worked out by hand: start door T2 -> T1 -> T4 -> T5 -> end door T6 (T3 a dead end).
             // The straight line between the doors crosses the wall at x < 1536, y > 512, so the taut path
-            // bends once, at the inner corner (1536, 512). (A 128 u grid does NOT give that path: A* over
-            // centroid distances picks a staircase channel, and the funnel is taut only within its channel.)
+            // bends once, at the inner corner (1536, 512). (Until 2026-11-15 a 128 u grid did NOT give that path:
+            // A* over centroid distances picks a staircase channel, and the funnel was taut only within it.
+            // NavGraph.TautPath now straightens such a channel; the chain keeps this answer worked out by hand.)
             var m = new MeshB();
             int T1 = m.Tri(P(0, 0), P(1536, 0), P(1536, 512));
             int T2 = m.Tri(P(0, 0), P(1536, 512), P(0, 512));
@@ -386,6 +399,7 @@ static class RouteStationProof
             m.Door(T6);                 // centroid (1706.67, 1877.33)
             var a = RouteStations.Classify(World(new[] { m.Build(FK(0x80A)) }, new[] { Defined(0x80, 1024, 1024) }));
             var r = RouteStations.Sample(a, Env(a));
+            Dump("RT8-RT13", r);
             C("RT8 the L-shaped world has two door endpoints and keeps one solved path",
               r.DoorEndpoints == 2 && r.Paths.Count(p => p.Kept) == 1,
               $"{r.DoorEndpoints} door endpoint(s), {r.Paths.Count(p => p.Kept)} kept path(s) of {r.Paths.Count}");
@@ -445,6 +459,7 @@ static class RouteStationProof
             m.Door(leg2 + 2 * (15 * 4 + 2) + 1);
             var a = RouteStations.Classify(World(new[] { m.Build(FK(0x80F)) }, new[] { Defined(0x81, 1024, 1024) }));
             var r = RouteStations.Sample(a, Env(a));
+            Dump("RT8b", r);
             var path = r.Paths.FirstOrDefault(p => p.Kept);
             int checkedN = 0; float worst = 0f; bool ok = path is not null;
             foreach (var s in r.Stations.Where(s => s.Family == RouteFamily.Route && s.Accepted))
@@ -596,6 +611,52 @@ static class RouteStationProof
                 if (Math.Abs(p.X - expect[j - 1].X) > 1e-2 || Math.Abs(p.Y - expect[j - 1].Y) > 1e-2) all = false;
             }
             C("RT15 retry alternates 1-6 fall where the Python oracle puts them, folds included", all, string.Join(" ", got));
+        }
+
+        // ---- RT18 a candidate is tested on its own storey under a deck (C2307-C2309) -----------------
+        // A pad (z 0, 1,024 u square, a door in its south-west corner) and a deck (z 300, x/y 256..768, or over the whole pad).
+        // Coverage and the candidate dedup are plan measures, so each answer gets its own world.
+        {
+            static string Say(RouteStation s) => $"{s.Id} at {s.X:0.#},{s.Y:0.#} on {s.Verdict?.Covering} z {s.Verdict?.Env.NavZ:0.#} {s.Verdict?.Reason}";
+            static bool UnderDeck(RouteStation s, float lo, float hi) => s.X > lo && s.X < hi && s.Y > lo && s.Y < hi;
+            (RouteArea A, RouteResult R, FormKey Pad, FormKey Deck) DeckWorld(uint id, bool padExit, bool deckDoor, bool wholePad = false)
+            {
+                var pad = Pad();
+                if (padExit) pad.Door(127);                  // a second door, north-east: a solved path crosses the pad
+                var deck = new MeshB();
+                int d0 = wholePad ? deck.Grid(0, 0, 128, 128, 8, 8, z: 300f) : deck.Grid(256, 256, 128, 128, 4, 4, z: 300f);
+                if (deckDoor) deck.Door(d0, 0xE00);          // walkable ground of its own; without it, not walkable
+                FormKey kp = FK(id), kd = FK(id + 1);
+                var a = RouteStations.Classify(World(new[] { pad.Build(kp), deck.Build(kd) }, new[] { Defined(0xB0, 512, 512) }));
+                return (a, RouteStations.Sample(a, Env(a)), kp, kd);
+            }
+            bool OnPad(RouteStation s, FormKey kp) => s.Verdict!.Covering is { } c && c.Mesh == kp && MathF.Abs(s.Verdict.Env.NavZ) < 1e-3f;
+
+            // C2307: the path between the pad's two doors runs under an unwalkable deck.
+            var w1 = DeckWorld(0x820, padExit: true, deckDoor: false);
+            var routeUnder = w1.R.Stations.Where(s => s.Family == RouteFamily.Route && s.Verdict is not null && UnderDeck(s, 256f, 768f)).ToList();
+            C("RT18 fixture: a route candidate on the pad's solved path lies under the deck", routeUnder.Count >= 1,
+              $"{routeUnder.Count} route candidate(s) under the deck; paths " + string.Join(" | ", w1.R.Paths.Where(p => p.Kept)
+                  .Select(p => string.Join(" ", p.Corners.Select(c => $"{c.X:0.#},{c.Y:0.#}")))));
+            C("RT18 (C2307) a route candidate under a deck is tested on the path's own storey: the pad triangle, navmesh z 0",
+              routeUnder.Count >= 1 && routeUnder.All(s => OnPad(s, w1.Pad)), string.Join("; ", routeUnder.Select(Say)));
+
+            // C2308: one door, so no solved path; the pad's ground under an unwalkable deck over the whole pad is filled.
+            var w2 = DeckWorld(0x822, padExit: false, deckDoor: false, wholePad: true);
+            var padFillsUnder = w2.R.Stations.Where(s => s.Family != RouteFamily.Route && s.Verdict is not null
+                                                        && s.SourceTri is { } st && st.Mesh == w2.Pad && UnderDeck(s, 0f, 1024f)).ToList();
+            C("RT18 (C2308) a fill candidate from a pad triangle under a deck is tested on that triangle's storey, z 0",
+              padFillsUnder.Count >= 1 && padFillsUnder.All(s => OnPad(s, w2.Pad)),
+              $"{padFillsUnder.Count} candidate(s): " + string.Join("; ", padFillsUnder.Take(6).Select(Say)));
+
+            // C2309 (preservation): a walkable deck's own fill candidates are tested on the deck.
+            var w3 = DeckWorld(0x824, padExit: false, deckDoor: true);
+            var deckFills = w3.R.Stations.Where(s => s.Family != RouteFamily.Route && s.Verdict is not null
+                                                    && s.SourceTri is { } st && st.Mesh == w3.Deck).ToList();
+            C("RT18 (C2309) a fill candidate from a deck triangle is tested on the deck, z 300",
+              deckFills.Count >= 1 && deckFills.All(s => s.Verdict!.Covering is { } c && c.Mesh == w3.Deck
+                                                         && MathF.Abs(s.Verdict.Env.NavZ - 300f) < 1e-3f),
+              $"{deckFills.Count} candidate(s): " + string.Join("; ", deckFills.Take(6).Select(Say)));
         }
 
         check("stationrule: route declared case count", ran == DeclaredCases,
