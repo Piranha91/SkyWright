@@ -4731,6 +4731,49 @@ def relevant_plugins(ex) -> set[str]:
     return names
 
 
+NOT_RELEVANT_WHY = ("its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own "
+                    "masters only: a hit that masters just a dependent of a target is counted here)")
+
+
+def hit_names(h: dict) -> set[str]:
+    """The plugins a discovery hit names directly: its masters, its FOMOD condition plugins and the pair it was found for."""
+    detail = h.get("detail") or {}
+    names = {str(x).lower() for x in (h.get("masters") or [])}
+    names |= {str(x).lower() for x in (detail.get("conditions") or [])}
+    names |= {str(x).lower() for x in (detail.get("pair") or [])}
+    return names
+
+
+def discovery_relevance(ex, receipts: dict) -> dict:
+    """{checkId: {armId: {...}}} for every accepted discovery receipt, by discovery_hit_rows' own rule, whether or not
+    candidate-qualification runs (R4.6): computed, the relevant hits' files and the not-relevant count with its
+    reason; or computed false with the sentence, when the plan names no target and no pair, or the hit list cannot
+    be read as the receipt recorded it."""
+    relevant = relevant_plugins(ex)
+    out: dict[str, dict] = {}
+    for r in sorted(receipts.values(), key=lambda x: str(x.get("receiptId"))):
+        exe = (r.get("adapter") or {}).get("exe")
+        if exe not in DISCOVERY_EXES or not (r.get("validation") or {}).get("accepted"):
+            continue
+        slot = out.setdefault(str(r.get("checkId")), {})
+        arm = str(r.get("armId"))
+        if not relevant:
+            slot[arm] = {"computed": False, "why": "the plan names no target and no pair, so no hit can be judged "
+                                                   "relevant to it (the rule reads the plan's targets and pairs)"}
+            continue
+        outs = r.get("outputs") or []
+        o = outs[0] if outs else {}
+        f = ex.run / o["path"] if o.get("path") else None
+        doc = load_json(f) if f is not None and f.exists() and sha256_file(f) == o.get("sha256") else None
+        if not isinstance(doc, dict) or not isinstance(doc.get("hits"), list):
+            slot[arm] = {"computed": False, "why": f"receipt {r.get('receiptId')}'s hit list cannot be read as it recorded it"}
+            continue
+        hits = [h for h in doc["hits"] if isinstance(h, dict) and h.get("file")]
+        rel = [str(h["file"]) for h in hits if hit_names(h) & relevant]
+        slot[arm] = {"computed": True, "relevant": rel, "notRelevant": {"count": len(hits) - len(rel), "why": NOT_RELEVANT_WHY}}
+    return out
+
+
 def discovery_hit_rows(ex, receipts: dict, consumed_by: dict, by_name: dict):
     """(rows, notRelevant, inconclusive sentences, not-searched sentences) from the accepted discovery receipts.
 
@@ -4768,13 +4811,8 @@ def discovery_hit_rows(ex, receipts: dict, consumed_by: dict, by_name: dict):
             if not isinstance(h, dict) or not h.get("file"):
                 continue
             detail = h.get("detail") or {}
-            names = {str(x).lower() for x in (h.get("masters") or [])}
-            names |= {str(x).lower() for x in (detail.get("conditions") or [])}
-            names |= {str(x).lower() for x in (detail.get("pair") or [])}
-            if not names & relevant:
-                nr = not_relevant.setdefault(exe, {"count": 0, "why": (
-                    "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own "
-                    "masters only: a hit that masters just a dependent of a target is counted here)")})
+            if not hit_names(h) & relevant:
+                nr = not_relevant.setdefault(exe, {"count": 0, "why": NOT_RELEVANT_WHY})
                 nr["count"] += 1
                 continue
             hsha = str(h.get("sha256") or "").lower()
@@ -6102,6 +6140,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
                     **advice_statements(run, r)}
                    for r in receipts.values() if (r.get("adapter") or {}).get("kind") == "adviceprobe"],
         "listings": [c for c in catalogues if c.get("kind") == "discovery"],
+        "relevance": discovery_relevance(SimpleNamespace(run=Path(run), plan=plan), receipts),
         "note": "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was "
                 "in an evaluated arm",
     }

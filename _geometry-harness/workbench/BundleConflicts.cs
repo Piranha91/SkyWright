@@ -193,6 +193,16 @@ internal sealed class BundleConflicts
                 }
             }
         }
+        // finalize's discovery relevance (R4.6), from the bundle's disposition, by check and arm
+        JsonElement? relevanceDoc = null;
+        var dispPath = Path.Combine(dir, "disposition.json");
+        if (File.Exists(dispPath))
+        {
+            using var dd = JsonDocument.Parse(File.ReadAllText(dispPath));
+            if (dd.RootElement.TryGetProperty("discovery", out var di) && di.TryGetProperty("relevance", out var rv)) relevanceDoc = rv.Clone();
+        }
+        JsonElement? Relevance(string check, string a) =>
+            relevanceDoc is { } rd && rd.TryGetProperty(check, out var byArm) && byArm.TryGetProperty(a, out var one) ? one : null;
         var findings = new List<FindingRow>();
         foreach (var c in plan.GetProperty("checks").EnumerateArray())
         {
@@ -226,7 +236,7 @@ internal sealed class BundleConflicts
                 }
                 else
                 {
-                    got = FindingReaders.Read(check, full, fk => names?.Ref(fk)?.Cell)
+                    got = FindingReaders.Read(check, full, fk => names?.Ref(fk)?.Cell, Relevance(check, arm))
                         .Select(g => names?.Ref(g.RefKey ?? "") is { } rn2 ? g with { BaseType = rn2.BaseType } : g).ToList();
                     if (baseKey is not null && Outputs(baseKey).FirstOrDefault() is { Full: { } bj })
                         before = FindingReaders.Read(check, bj).Select(x => x.Identity).ToHashSet(StringComparer.OrdinalIgnoreCase);

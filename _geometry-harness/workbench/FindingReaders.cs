@@ -34,7 +34,12 @@ internal static class FindingReaders
 
     internal static IReadOnlyList<FindingRow> Read(string checkId, string path) => Read(checkId, path, null);
 
-    internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef)
+    internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef) => Read(checkId, path, cellOfRef, null);
+
+    /// <summary>With <paramref name="relevance"/>, finalize's record for this check and arm
+    /// (disposition.discovery.relevance, R4.6): a discovery hit is a finding when relevant, context saying why when not,
+    /// and, when relevance was not computed, a finding carrying that sentence. Relevance is never re-derived here.</summary>
+    internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef, JsonElement? relevance)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         var r = doc.RootElement;
@@ -112,9 +117,22 @@ internal static class FindingReaders
                 Unreadable("unreadable", "a record the probe could not read names no place");
                 break;
             case "patch.discovery-installed" or "patch.discovery-fomod" or "patch.discovery-pool":
-                foreach (var e in List(r, "hits"))
-                    rows.Add(Note(S(e, "kind") ?? "hit", $"{S(e, "file")} ({S(e, "kind")}), masters {string.Join(", ", List(e, "masters").Select(Text))}", "finding",
-                                  "a patch hit is a file, not a place in the world; open its folder", "hit:" + S(e, "file")));
+                {
+                    bool? computed = relevance is { ValueKind: JsonValueKind.Object } rv && rv.TryGetProperty("computed", out var cv) ? cv.ValueKind == JsonValueKind.True : null;
+                    var relevantFiles = computed == true && relevance!.Value.TryGetProperty("relevant", out var rl)
+                        ? rl.EnumerateArray().Select(Text).ToHashSet(StringComparer.OrdinalIgnoreCase) : new HashSet<string>();
+                    string? notWhy = computed == true && relevance!.Value.TryGetProperty("notRelevant", out var nr) ? S(nr, "why") : null;
+                    string? notComputed = computed == false ? S(relevance!.Value, "why") : null;
+                    foreach (var e in List(r, "hits"))
+                    {
+                        var file = S(e, "file") ?? "";
+                        var text = $"{file} ({S(e, "kind")}), masters {string.Join(", ", List(e, "masters").Select(Text))}";
+                        string role = "finding";
+                        if (computed == true && !relevantFiles.Contains(file)) { role = "context"; text += $"; not relevant: {notWhy}"; }
+                        else if (computed == false) text += $"; relevance not computed: {notComputed}";
+                        rows.Add(Note(S(e, "kind") ?? "hit", text, role, "a patch hit is a file, not a place in the world; open its folder", "hit:" + file));
+                    }
+                }
                 {
                     int i = 0;
                     foreach (var e in List(r, "unjudgeableItems"))
