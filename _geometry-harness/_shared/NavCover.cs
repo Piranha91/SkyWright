@@ -37,9 +37,11 @@ public static class NavCover
     /// Several drawn triangles can cover one XY where storeys overlap - a bridge deck over a path.
     /// The HIGHEST is taken and the count is reported, because a station stands on the top surface;
     /// the lower one would put the eye inside the deck above it. When nothing drawn covers the XY,
-    /// the height is the highest covering (deleted) triangle's and <paramref name="Tri"/> is null.</summary>
+    /// the height is the highest covering (deleted) triangle's and <paramref name="Tri"/> is null.
+    /// A caller that knows the storey it stands on (a route candidate on its path, 2026-11-15) passes
+    /// <paramref name="nearZ"/>, and the drawn triangle nearest that height is taken instead.</summary>
     public static (bool Answered, bool Covered, bool Drawn, float Z, int Covers, NavGraph.TriRef? Tri) At(
-        IEnumerable<NavmeshGeometry> navs, float qx, float qy)
+        IEnumerable<NavmeshGeometry> navs, float qx, float qy, float? nearZ = null)
     {
         bool answered = false, covered = false;
         float bestAny = float.NaN, bestDrawn = float.NaN;
@@ -64,7 +66,8 @@ public static class NavCover
                 covered = true; covers++;
                 float z = u * a.Z + v * b.Z + w * c.Z;
                 if (float.IsNaN(bestAny) || z > bestAny) bestAny = z;
-                if ((tri.Flags & 0x08) == 0 && (float.IsNaN(bestDrawn) || z > bestDrawn))
+                if ((tri.Flags & 0x08) == 0 && (float.IsNaN(bestDrawn)
+                    || (nearZ is { } nz ? MathF.Abs(z - nz) < MathF.Abs(bestDrawn - nz) : z > bestDrawn)))
                 {
                     bestDrawn = z;
                     bestTri = new NavGraph.TriRef(nav.FormKey, ti);

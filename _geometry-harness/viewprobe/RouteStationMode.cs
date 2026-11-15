@@ -192,7 +192,7 @@ static class RouteStationMode
                 ? new GridCellFacts(c.Cell, input.Worldspace.ToString(), c.Water) : null,
             name => walk.WorldChain.TryGetValue(name, out var wc) ? new WorldFacts(wc.Default, wc.Parent) : null,
             input.Worldspace.ToString(), walk.UnreadableLandWhy, walk.Floor.ReachOf(input.Worldspace));
-        RouteEnv Env(float x, float y) { var (e, t) = reader.Read(x, y); return new RouteEnv(e, t); }
+        RouteEnv Env(float x, float y, float? storeyZ) { var (e, t) = reader.Read(x, y, storeyZ); return new RouteEnv(e, t); }
         sw.Restart();
         var result = RouteStations.Sample(area, Env);
         var cov = RouteStations.CoverageL1(area, result);

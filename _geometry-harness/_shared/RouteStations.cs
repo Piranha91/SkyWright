@@ -136,7 +136,8 @@ public sealed class RouteArea
 }
 
 /// <summary>The load order's answer at one XY: the station environment the per-candidate checks
-/// read, and the covering triangle (C5's, the highest drawn one) it was read on.</summary>
+/// read, and the covering triangle it was read on (C5's highest drawn one, or with a storey height, the drawn
+/// one nearest it).</summary>
 public readonly record struct RouteEnv(StationEnvironment Env, NavGraph.TriRef? Covering);
 
 /// <summary>One gaze of an accepted station: level at the eye, bearing 0 = +Y clockwise.</summary>
@@ -431,9 +432,14 @@ public static class RouteStations
     /// <summary>§5: the per-candidate checks on one XY, in the sealed precedence. The ground and water
     /// checks are <see cref="StationRule.CheckGround"/> and <see cref="StationRule.CheckWater"/>, the
     /// code the face-on and observing composers run.</summary>
-    public static RouteTestVerdict Test(RouteArea area, Func<float, float, RouteEnv> environment, float x, float y)
+    /// <remarks>A candidate that knows its storey passes <paramref name="storeyZ"/>: the height of the triangle it was placed on
+    /// (its path's channel triangle, or its fill's source triangle), and it is tested on the drawn cover nearest that
+    /// height. An actor stands on the storey it walks, so a candidate on a path under a deck is not tested on the deck
+    /// (AMENDMENT-04, 2026-11-15). Without one, C5's highest drawn cover is taken.</remarks>
+    public static RouteTestVerdict Test(RouteArea area, Func<float, float, float?, RouteEnv> environment, float x, float y,
+                                        float? storeyZ = null)
     {
-        var e = environment(x, y);
+        var e = environment(x, y, storeyZ);
         var env = e.Env;
         var reasons = new List<StationRejection>(6);
         var (floorKnown, floorZ, eyeZ) = StationRule.CheckGround(env, reasons);    // C5, C2
@@ -521,7 +527,7 @@ public static class RouteStations
     // ============================================================ §4 and §6 sample ===============
 
     /// <summary>§4 and §6: route and fill candidates, each tested, with the gaze set per accepted station.</summary>
-    public static RouteResult Sample(RouteArea area, Func<float, float, RouteEnv> environment)
+    public static RouteResult Sample(RouteArea area, Func<float, float, float?, RouteEnv> environment)
     {
         var r = new RouteResult();
         foreach (var f in new[] { RouteFamily.Route, RouteFamily.Fill, RouteFamily.FillRetry })
@@ -566,15 +572,15 @@ public static class RouteStations
         }
         r.PairsConsidered = pairs.Count;
 
-        var solved = new List<(NavGraph.TriRef A, NavGraph.TriRef B, List<Vector2> Corners, float Length)>();
+        var solved = new List<(NavGraph.TriRef A, NavGraph.TriRef B, List<Vector2> Corners, float Length, List<NavGraph.TriRef> Channel)>();
         foreach (var (a, b) in pairs)
         {
             var ta = area.Triangles[a]; var tb = area.Triangles[b];
             if (ta.Component != tb.Component) { r.PairsNoPath++; continue; }     // counted, not solved
             var ca = area.Nodes[a].Centroid; var cb = area.Nodes[b].Centroid;
-            var corners = Solve(area, a, new Vector2(ca.X, ca.Y), ca.Z, b, new Vector2(cb.X, cb.Y));
-            if (corners is null) { r.PairsNoPath++; continue; }
-            solved.Add((a, b, corners, Length(corners)));
+            var sol = Solve(area, a, new Vector2(ca.X, ca.Y), ca.Z, b, new Vector2(cb.X, cb.Y));
+            if (sol is not { } sv) { r.PairsNoPath++; continue; }
+            solved.Add((a, b, sv.Corners, Length(sv.Corners), sv.Channel));
         }
         // §4.1 step 4: dedupe paths, shortest first, ties by the endpoints
         solved.Sort((p, q) =>
@@ -586,7 +592,7 @@ public static class RouteStations
         });
         var kept = new List<List<Vector2>>();
         int pathId = 0;
-        foreach (var (a, b, corners, len) in solved)
+        foreach (var (a, b, corners, len, channel) in solved)
         {
             bool dup = kept.Count > 0;
             if (dup)
@@ -600,16 +606,20 @@ public static class RouteStations
             r.Paths.Add(path);
             if (dup) continue;
             kept.Add(corners);
-            // §4.1 step 5: place at 256 u, then every S
+            // §4.1 step 5: place at 256 u, then every S. Each candidate's storey is the channel triangle it lies in
+            // (NavGraph.ChannelTriangleAt, searched forward as the candidates advance); one an inset corner put outside
+            // the channel keeps the last storey, as the inset does.
+            int cursor = 0; float storey = area.Nodes[a].Centroid.Z;
             for (float at = StartOffset; at <= len + 1e-3f; at += Spacing)
             {
                 var (pt, seg) = PointAt(corners, at);
+                if (NavGraph.ChannelTriangleAt(area.Nodes, channel, pt.X, pt.Y, cursor) is { } hit) { cursor = hit.Index; storey = hit.Z; }
                 var dir = corners[seg + 1] - corners[seg];
                 float fwd = StationRule.Bearing(dir.X, dir.Y);
                 var (aheadPt, _) = PointAt(corners, MathF.Min(at + Spacing, len));
                 var toAhead = aheadPt - pt;
                 float? vsAhead = toAhead.LengthSquared() > 1e-6f ? AngDiff(fwd, StationRule.Bearing(toAhead.X, toAhead.Y)) : null;
-                var v = Test(area, environment, pt.X, pt.Y);
+                var v = Test(area, environment, pt.X, pt.Y, storey);
                 RouteStation st;
                 string id = $"{ws}:R{nRoute++:D5}";
                 bool notKept = v.Reason is StationRejection.NoNavmeshAnswer or StationRejection.NoCoveringTriangle
@@ -657,7 +667,7 @@ public static class RouteStations
                 r.Stations.Add(sk); Count(r.Yields[RouteFamily.Fill], sk);
                 continue;
             }
-            var v = Test(area, environment, cen.X, cen.Y);
+            var v = Test(area, environment, cen.X, cen.Y, StoreyOf(area, cd.Src.Tri, cen));
             var st = new RouteStation { Id = id, Family = RouteFamily.Fill, X = cen.X, Y = cen.Y,
                                         Accepted = v.Reason == StationRejection.None, Verdict = v,
                                         SourceTri = cd.Src.Tri, SubPath = cd.Sub };
@@ -678,7 +688,7 @@ public static class RouteStations
                     r.Stations.Add(sk); Count(r.Yields[RouteFamily.FillRetry], sk);
                     continue;
                 }
-                var rv = Test(area, environment, pt.X, pt.Y);
+                var rv = Test(area, environment, pt.X, pt.Y, StoreyOf(area, cd.Src.Tri, pt));
                 var rs = new RouteStation { Id = rid, Family = RouteFamily.FillRetry, X = pt.X, Y = pt.Y,
                                             Accepted = rv.Reason == StationRejection.None, Verdict = rv,
                                             SourceTri = cd.Src.Tri, SubPath = cd.Sub, RetryJ = j };
@@ -743,8 +753,8 @@ public static class RouteStations
         {
             if (d >= best) break;
             var ec = area.Nodes[e.Tri].Centroid;
-            var corners = Solve(area, cov, here, s.Verdict.Env.NavZ, e.Tri, new Vector2(ec.X, ec.Y));
-            if (corners is null) continue;
+            if (Solve(area, cov, here, s.Verdict.Env.NavZ, e.Tri, new Vector2(ec.X, ec.Y)) is not { } sol) continue;
+            var corners = sol.Corners;
             float len = Length(corners);
             if (len < best) { best = len; bestPath = corners; }
         }
@@ -757,18 +767,25 @@ public static class RouteStations
         return null;
     }
 
+    /// <summary>A fill or retry candidate's storey: the height of its source triangle's plane at the point.</summary>
+    static float? StoreyOf(RouteArea area, NavGraph.TriRef src, Vector2 p)
+        => area.Nodes.ContainsKey(src)
+            ? NavGraph.ChannelTriangleAt(area.Nodes, new[] { src }, p.X, p.Y, 0)?.Z ?? area.Nodes[src].Centroid.Z
+            : null;
+
     /// <summary>§4.1 step 3: A* over the graph, the funnel, the corner inset - viewprobe
-    /// <c>--route-solve</c>'s method, through the same NavGraph functions.</summary>
-    static List<Vector2>? Solve(RouteArea area, NavGraph.TriRef from, Vector2 start, float startZ,
-                                NavGraph.TriRef to, Vector2 end)
+    /// <c>--route-solve</c>'s method, through the same NavGraph functions. Returns the channel too: a candidate on the
+    /// path takes its storey from it.</summary>
+    static (List<Vector2> Corners, List<NavGraph.TriRef> Channel)? Solve(RouteArea area, NavGraph.TriRef from, Vector2 start,
+                                float startZ, NavGraph.TriRef to, Vector2 end)
     {
-        var channel = NavGraph.FindChannel(area.Nodes, from, to);
-        if (channel is null) return null;
-        var corners = NavGraph.Funnel(area.Nodes, channel, start, end);
+        var taut = NavGraph.TautPath(area.Nodes, from, to, start, end);
+        if (taut is null) return null;
+        var (channel, corners) = (taut.Channel, taut.Corners);
         NavGraph.InsetCorners(corners, startZ,
             (ix, iy, iz) => NavCover.NearestCoverZ(area.MeshesNear(ix, iy, 1f), ix, iy, iz), NavCover.SameFloorZ,
             area.Nodes, channel);
-        return corners;
+        return (corners, channel);
     }
 
     /// <summary>§6 G-content: the bearing (every 5 deg, 0 = +Y clockwise) whose level 80 deg frustum

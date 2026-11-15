@@ -528,9 +528,11 @@ static class StationMode
             return f;
         }
 
-        public (StationEnvironment Env, NavGraph.TriRef? Tri) Read(float x, float y)
+        /// <summary>The environment at one XY, read on the highest drawn cover, or with <paramref name="storeyZ"/> on the
+        /// drawn cover nearest that height (a candidate that knows the storey it stands on).</summary>
+        public (StationEnvironment Env, NavGraph.TriRef? Tri) Read(float x, float y, float? storeyZ = null)
         {
-            var (answered, covered, drawn, navZ, covers, tri) = NavCover.At(_navsNear((x, y)), x, y);
+            var (answered, covered, drawn, navZ, covers, tri) = NavCover.At(_navsNear((x, y)), x, y, storeyZ);
             if (covers > 1) MultiCovered++;
             var place = StationLookup.At(x, y, _cellAt, _worldAt, _worldspace);
             if (!_refs.ContainsKey(place.Grid) && !_land.ContainsKey(place.Grid))

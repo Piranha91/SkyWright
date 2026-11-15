@@ -153,10 +153,10 @@ static class RouteStationProof
                                 null, exterior: true, fromWorldspace: WS);
 
     /// <summary>The environment the route mode would read, over every winning navmesh of the world.</summary>
-    static Func<float, float, RouteEnv> Env(RouteArea a, WaterResolution? water = null)
-        => (x, y) =>
+    static Func<float, float, float?, RouteEnv> Env(RouteArea a, WaterResolution? water = null)
+        => (x, y, storeyZ) =>
         {
-            var r = NavCover.At(a.Winning.Values, x, y);
+            var r = NavCover.At(a.Winning.Values, x, y, storeyZ);
             var floor = r.Drawn
                 ? new FloorReading(r.Z, r.Z, FloorSource.Mesh, NoFloorReason.Found, false, 1)
                 : new FloorReading(r.Z, 0f, FloorSource.None, NoFloorReason.NoSurface, false, 0);

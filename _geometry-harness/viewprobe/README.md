@@ -3008,12 +3008,12 @@ worldspace; one run samples one worldspace.
   plugin's own navmeshes.
 - **Route candidates.** Endpoints are door and exit triangles in A_W. Each door is paired with its
   4 nearest doors and its nearest exit (centroid plan distance, ties by mesh FormKey and index);
-  each pair is solved as `--route-solve` solves a leg (NavGraph A* on centroid distance, the
-  funnel, the 6 u corner inset). A path within 64 u of an already-kept path at every 32 u sample
-  is dropped. Candidates stand at 256 u along each kept path, then every 512 u. Note what the
-  method is: the funnel is taut **within A*'s channel**, which on a fine mesh can be a staircase,
-  so a solved path is not the shortest walk. Each route station publishes `fwdVsAheadDeg`, the
-  angle between its path direction and the path 512 u ahead, so that effect is measured.
+  each pair is solved as `--route-solve` solves a leg (`NavGraph.TautPath`: A* on centroid distance,
+  the funnel, the channel straightened round any interior vertex it bent at; then the 6 u corner
+  inset). A path within 64 u of an already-kept path at every 32 u sample is dropped. Candidates
+  stand at 256 u along each kept path, then every 512 u. The path is taut within the side of each
+  hole A* chose, which is not always the shorter side. Each route station publishes `fwdVsAheadDeg`,
+  the angle between its path direction and the path 512 u ahead.
 - **Fill candidates.** Every A_W piece with any point farther than 512 u from an accepted station
   is split by 4-way midpoint subdivision until each part is at most 512² u²; the parts' centroids
   are tested in the order of `sha256("g5-fill:20260925:<mesh>:<tri>:<subPath>")`, each only if it
@@ -3021,8 +3021,10 @@ worldspace; one run samples one worldspace.
   the same part (`g5-retry:20260925:…:<j>`).
 - **The player checks are the station rule's own** (`StationRule.CheckGround`, `CheckWater`: the
   navmesh answer, the covering triangle, the physical floor + 120.5 u, the water through the one
-  resolver), plus the route refusals: `Unreachable` (the covering triangle - the highest drawn one,
-  searched over **every** winning navmesh of the worldspace - is not walkable, or lies in a navmesh
+  resolver), plus the route refusals: `Unreachable` (the covering triangle - searched over **every**
+  winning navmesh of the worldspace: for a route candidate the drawn one nearest its path's storey,
+  for a fill or retry the one nearest its source triangle's storey, AMENDMENT-04 of 2026-11-15, so a
+  candidate on a path under a deck is tested on the path; the highest drawn one otherwise - is not walkable, or lies in a navmesh
   outside the loaded set), `OutsideArea`, `InChildWorldspaceFootprint` (a parent-worldspace XY
   under any winning triangle of a named child worldspace, any flags: such an XY can arrive in the
   child in the game), `TightClearance` (`NavCover.Clearance`, the test `--route` uses) and
