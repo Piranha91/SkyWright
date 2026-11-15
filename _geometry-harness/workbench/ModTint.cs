@@ -34,7 +34,20 @@ internal static class ModTint
     /// reference (drawn with the swap's transform) and one whose placement differs from the server's.</summary>
     internal static (IReadOnlyList<FormKey> Refs, string Note) Pick(IEnumerable<(FormKey Key, bool Bos)> drawn, IReadOnlyDictionary<FormKey, string> winners,
                                                                   IReadOnlyCollection<FormKey> mismatched, IReadOnlyCollection<string> plugins)
-        => (Select(drawn.Select(d => d.Key), winners, plugins), "");
+    {
+        var set = new HashSet<string>(plugins, StringComparer.OrdinalIgnoreCase);
+        var mis = new HashSet<FormKey>(mismatched);
+        var list = drawn.ToList();
+        bool Mine(FormKey k) => winners.TryGetValue(k, out var w) && set.Contains(w);
+        var refs = list.Where(d => !d.Bos && !mis.Contains(d.Key) && Mine(d.Key)).Select(d => d.Key).ToList();
+        var bos = list.Where(d => d.Bos && Mine(d.Key)).Select(d => d.Key).ToList();
+        var off = list.Where(d => mis.Contains(d.Key)).Select(d => d.Key).ToList();
+        static string Names(List<FormKey> ks) => string.Join(", ", ks.Take(10)) + (ks.Count > 10 ? $" and {ks.Count - 10} more" : "");
+        var parts = new List<string>();
+        if (bos.Count > 0) parts.Add($"{bos.Count} Base Object Swapper reference(s) of it, drawn with the swap's transform ({Names(bos)})");
+        if (off.Count > 0) parts.Add($"{off.Count} whose placement on the server is not the one the scene drew, so their winner is not used ({Names(off)})");
+        return (refs, parts.Count == 0 ? "" : "left out " + string.Join("; and ", parts) + ".");
+    }
 
     /// <summary>The drawn references whose winning plugin is one of <paramref name="plugins"/>.</summary>
     internal static IReadOnlyList<FormKey> Select(IEnumerable<FormKey> drawn, IReadOnlyDictionary<FormKey, string> winners, IReadOnlyCollection<string> plugins)

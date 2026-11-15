@@ -319,8 +319,14 @@ internal sealed class PatchWriter : IAsyncDisposable
         IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose? Drawn)> refs, CancellationToken ct = default)
     {
         var read = await ReadRecordsAsync(refs.Select(r => r.Ref), new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = new[] { "Placement" }, ["depth"] = 2 }, ct);
-        CheckAll(refs.Where(r => r.Drawn is not null).Select(r => (r.Ref, r.Drawn!.Value)).ToList(), read);
-        return (read.ToDictionary(kv => kv.Key, kv => kv.Value.Winner), Array.Empty<Mutagen.Bethesda.Plugins.FormKey>());
+        // the one placement check per reference; a reference drawn elsewhere is left out and listed, not a refusal of all
+        var mismatched = new List<Mutagen.Bethesda.Plugins.FormKey>();
+        foreach (var (k, drawn) in refs)
+        {
+            if (drawn is not { } pose) continue;
+            if (PlacementOf(read[k].Fields) is not { } pr || Mismatch(k, pr.Pos, pr.Rot, pose) is not null) mismatched.Add(k);
+        }
+        return (read.Where(kv => !mismatched.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value.Winner), mismatched);
     }
 
     /// <summary>Undo a written edit: remove the reference's override from the patch in <paramref name="patchFolder"/>
