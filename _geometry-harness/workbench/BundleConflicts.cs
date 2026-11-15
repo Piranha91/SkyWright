@@ -28,6 +28,15 @@ internal sealed class BundleConflicts
     internal required string VerifyPath { get; init; }
     internal required string VerifySummary { get; init; }
     internal required IReadOnlyList<ConflictRow> Rows { get; init; }
+    /// <summary>The Findings tab's rows: every other check's accepted receipt outputs on the arm (DESIGN R4.3).</summary>
+    internal IReadOnlyList<FindingRow> Findings { get; init; } = Array.Empty<FindingRow>();
+
+    /// <summary>The arm a bundle opens on: the plan's review arm (manual mode), else baseline.</summary>
+    internal static string DefaultArm(string dir)
+    {
+        using var p = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "plan.json")));
+        return p.RootElement.TryGetProperty("reviewArm", out var r) && r.ValueKind == JsonValueKind.String && r.GetString() is { Length: > 0 } a ? a : "baseline";
+    }
     internal required IReadOnlyList<string> Notes { get; init; }
     /// <summary>Every emit file read, bundle-relative, with the receipt that named it.</summary>
     internal required IReadOnlyList<(string Receipt, string Path)> EmitsRead { get; init; }
@@ -103,6 +112,33 @@ internal sealed class BundleConflicts
                 strength[c.GetProperty("checkId").GetString()!] = st.GetString()!;
 
         var names = Names.Load(Path.Combine(dir, "enrichment", "names", "names.json"));
+        var baselineArm = plan.GetProperty("arms").EnumerateArray().Where(a => a.TryGetProperty("kind", out var k) && k.GetString() == "baseline")
+                              .Select(a => a.GetProperty("armId").GetString()!).FirstOrDefault() ?? "baseline";
+        // a receipt's outputs, read only through verify-bundle's resolution and re-hashed before reading (the rule below)
+        List<(string Recorded, string Full)> Outputs(string receiptKey)
+        {
+            var list = new List<(string, string)>();
+            var rp = Path.Combine(dir, "receipts", receiptKey + ".json");
+            if (!File.Exists(rp)) return list;
+            using var rd = JsonDocument.Parse(File.ReadAllText(rp));
+            if (!(rd.RootElement.TryGetProperty("validation", out var vv) && vv.TryGetProperty("accepted", out var ac) && ac.GetBoolean())) return list;
+            foreach (var o in rd.RootElement.GetProperty("outputs").EnumerateArray())
+            {
+                var recorded = o.GetProperty("path").GetString()!;
+                if (!recorded.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!resolved.TryGetValue(receiptKey, out var byPath) || !byPath.TryGetValue(recorded, out var entry))
+                    throw new InvalidOperationException($"receipt {receiptKey} names output '{recorded}', which verify-bundle did not resolve; the bundle cannot say which file that is.");
+                var rel = entry.GetProperty("path").GetString()!;
+                var full = Path.Combine(dir, rel.Replace('/', Path.DirectorySeparatorChar));
+                if (!entry.GetProperty("present").GetBoolean() || !entry.GetProperty("matches").GetBoolean() || entry.GetProperty("sha256").GetString() is not { } want || Sha(full) != want)
+                    throw new InvalidOperationException($"receipt {receiptKey}'s output '{rel}' is missing or does not hash to the receipt; re-verify the bundle.");
+                list.Add((rel, full));
+            }
+            return list;
+        }
+        string? ReceiptKey(string check, string a) => new[] { $"{check}__{a}__arm", $"{check}__{a}" }.FirstOrDefault(k => File.Exists(Path.Combine(dir, "receipts", k + ".json")));
+        string? BaselineEmit(string check) => ReceiptKey(check, baselineArm) is { } k ? Outputs(k).Select(x => x.Full).FirstOrDefault() : null;
+        string? ArmEmit(string k) => Outputs(k).Select(x => x.Full).FirstOrDefault();
         var notes = new List<string>();
         if (names is null) notes.Add("the bundle carries no names enrichment, so no base type is known and every row's severity reads 'unread'");
         var rows = new List<ConflictRow>();
@@ -120,7 +156,12 @@ internal sealed class BundleConflicts
             var rec = rdoc.RootElement;
             if (!(rec.TryGetProperty("validation", out var val) && val.TryGetProperty("accepted", out var acc) && acc.GetBoolean()))
             { notes.Add($"{key} was not accepted, so its rows are not shown"); continue; }
-            HashSet<string>? newOnArm = arm == "baseline" ? null : NewRows(dir, check, arm, notes);
+            HashSet<string>? newOnArm = arm == baselineArm ? null : NewRows(dir, check, arm, notes);
+            if (newOnArm is not null && BaselineEmit(check) is { } be && ArmEmit(key) is { } ae)
+            {
+                newOnArm.UnionWith(ReviewCredit.CreatedIds(ConflictIo.Read(be), ConflictIo.Read(ae)));   // every created row, not the capped examples
+                notes.RemoveAll(n => n.StartsWith(check + " on '" + arm + "': the differential counts"));
+            }
             foreach (var o in rec.GetProperty("outputs").EnumerateArray())
             {
                 var recorded = o.GetProperty("path").GetString()!;
@@ -152,10 +193,52 @@ internal sealed class BundleConflicts
                 }
             }
         }
+        var findings = new List<FindingRow>();
+        foreach (var c in plan.GetProperty("checks").EnumerateArray())
+        {
+            var check = c.GetProperty("checkId").GetString()!;
+            if (PlacedChecks.Contains(check)) continue;
+            var key = ReceiptKey(check, arm);
+            if (key is null) continue;
+            bool conflictFile;
+            using (var rd = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "receipts", key + ".json"))))
+                conflictFile = rd.RootElement.TryGetProperty("adapter", out var ad) && ad.TryGetProperty("output", out var ot) && ot.GetString() == "conflict-file";
+            var outs = Outputs(key);
+            if (outs.Count == 0) { notes.Add($"{key} is not accepted or has no json output, so it gives no Findings rows"); continue; }
+            var baseKey = arm == baselineArm ? null : ReceiptKey(check, baselineArm);
+            var ev = strength.GetValueOrDefault(check, "unknown");
+            foreach (var (rel, full) in outs)
+            {
+                read.Add((key, rel));
+                IEnumerable<FindingRow> got;
+                HashSet<string>? before = null;
+                if (conflictFile)
+                {
+                    var file = ConflictIo.Read(full);
+                    if (baseKey is not null && Outputs(baseKey).FirstOrDefault() is { Full: { } bf }) before = DifferentialRows.Of(ConflictIo.Read(bf)).Select(x => x.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    got = DifferentialRows.Of(file).GroupBy(x => x.Id).Select(g => g.First()).Select(x =>
+                    {
+                        var rn = names?.Ref(x.FormKey);
+                        string? why = rn is null ? "the names read did not reach this reference, so its cell is not known" : rn.Value.Cell is null ? "the bundle records no cell for this reference" : null;
+                        var summary = file.Conflicts.FirstOrDefault(cf => cf.Kind == x.Kind && cf.A == x.A && cf.Necessary.Any(n => n.FormKey == x.FormKey))?.Summary ?? x.Kind;
+                        return new FindingRow(check, x.Kind, x.A, x.B, summary, x.FormKey, rn?.Cell, why, "finding", x.Id, x.Physical) { BaseType = rn?.BaseType };
+                    }).ToList();
+                }
+                else
+                {
+                    got = FindingReaders.Read(check, full, fk => names?.Ref(fk)?.Cell)
+                        .Select(g => names?.Ref(g.RefKey ?? "") is { } rn2 ? g with { BaseType = rn2.BaseType } : g).ToList();
+                    if (baseKey is not null && Outputs(baseKey).FirstOrDefault() is { Full: { } bj })
+                        before = FindingReaders.Read(check, bj).Select(x => x.Identity).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                }
+                foreach (var f in got)
+                    findings.Add(f with { Arm = arm, Source = rel, EvidenceStrength = ev, NewOnArm = before is null ? null : !before.Contains(f.Identity) });
+            }
+        }
         return new BundleConflicts
         {
             Dir = dir, PlanId = planId, Arm = arm, Targets = targets, VerifyPath = verifyPath, VerifySummary = verifySummary,
-            Rows = rows, Notes = notes, EmitsRead = read,
+            Rows = rows, Notes = notes, EmitsRead = read, Findings = findings,
         };
     }
 

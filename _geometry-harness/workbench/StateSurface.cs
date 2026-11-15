@@ -18,6 +18,13 @@ internal interface IWorkbenchSurface
     IWorkbenchScene? Scene { get; }
     /// <summary>What a click on the Conflicts tab's row does; returns what happened, in one sentence.</summary>
     string OpenConflict(RankedRow row);
+    /// <summary>The bundle open, and the severity table, the Findings tab ranks from; null when none is open.</summary>
+    BundleConflicts? Open => null;
+    SeverityTable? Severity => null;
+    /// <summary>The Findings tab, ranked (DESIGN section 4).</summary>
+    IReadOnlyList<RankedFinding> Findings => Open is { } b ? FindingRanking.Rank(b.Findings, b.Targets, Severity) : Array.Empty<RankedFinding>();
+    /// <summary>What a click on a clickable Findings row does: the Records tree's path to its reference and cell.</summary>
+    string OpenFinding(RankedFinding row) => $"finding {row.Rank} names {row.Row.RefKey} in cell {row.Row.Cell}, but no window is shown to open it in.";
 }
 
 /// <summary>The scene's side: the edit session and the members the bar and the script call.</summary>
@@ -53,6 +60,18 @@ internal sealed class LiveSurface : IWorkbenchSurface
     public string Banner => Shell.BannerText;
     public string? Loading => Shell.SwitchClock is not null ? Shell.SwitchCell : null;
     public IWorkbenchScene? Scene => Shell.Current;
+    public BundleConflicts? Open => Shell.Bundle;
+    public SeverityTable? Severity => Shell.Severity;
+    public IReadOnlyList<RankedFinding> Findings => Shell.Findings;
+
+    public string OpenFinding(RankedFinding row)
+    {
+        Shell.CurrentRow = null;
+        Shell.OpenRef(row.Row.RefKey!, row.Row.Cell);
+        return Shell.SwitchClock is not null
+            ? $"finding {row.Rank} is in cell {row.Row.Cell}, which is not loaded: the window is rebuilding the scene for it; read the state again in a minute."
+            : $"opened finding {row.Rank} ({row.Row.CheckId}) at {row.Row.RefKey}: " + (Shell.LastLanding ?? Shell.BannerText);
+    }
 
     public string OpenConflict(RankedRow row)
     {

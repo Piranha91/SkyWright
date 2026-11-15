@@ -19,6 +19,7 @@ internal static class Shell
     internal static BundleConflicts? Bundle;
     internal static SeverityTable? Severity;
     internal static IReadOnlyList<RankedRow> Ranked = Array.Empty<RankedRow>();
+    internal static IReadOnlyList<RankedFinding> Findings = Array.Empty<RankedFinding>();
     internal static IReadOnlyList<string> WorklistCells = Array.Empty<string>();
     internal static bool ShowAll;
     internal static string? PendingLand;            // a reference to land on when the next scene arrives
@@ -35,6 +36,7 @@ internal static class Shell
     static readonly ContentControl BarSlot = new();
     static readonly TextBlock Banner = new() { Margin = new Thickness(6, 4, 6, 4), TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold };
     static readonly ListBox ConflictList = new();
+    static readonly ListBox FindingList = new();
     static readonly TreeView Records = new();
     static readonly CheckBox AllRows = new() { Content = "all rows on this arm", Margin = new Thickness(6, 2, 6, 2) };
     internal static IReadOnlyList<TreeNode> Tree = Array.Empty<TreeNode>();
@@ -57,6 +59,13 @@ internal static class Shell
         VirtualizingPanel.SetIsVirtualizing(Records, true);
         ConflictList.SelectionChanged += (_, _) => { if (ConflictList.SelectedItem is ListBoxItem { Tag: RankedRow r }) OpenRow(r); };
         Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) { CurrentRow = null; OpenRef(n.Key, CellOfRef(n.Key)); } };
+        ScrollViewer.SetHorizontalScrollBarVisibility(FindingList, ScrollBarVisibility.Auto);
+        FindingList.SelectionChanged += (_, _) =>
+        {
+            if (FindingList.SelectedItem is not ListBoxItem { Tag: RankedFinding f }) return;
+            if (f.Row.Clickable) { WorkbenchHost.Say($"open finding {f.Rank}: {f.Row.Identity}"); CurrentRow = null; OpenRef(f.Row.RefKey!, f.Row.Cell); }
+            else SetBanner($"finding {f.Rank} ({f.Row.CheckId}) does not open the viewer: {f.Row.WhyNot}.");
+        };
         AllRows.Checked += (_, _) => { ShowAll = true; FillConflicts(); };
         AllRows.Unchecked += (_, _) => { ShowAll = false; FillConflicts(); };
         var conflictsTab = new DockPanel();
@@ -64,6 +73,7 @@ internal static class Shell
         conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(ConflictList);
         var tabs = new TabControl { Width = 560 };
         tabs.Items.Add(new TabItem { Header = "Conflicts", Content = conflictsTab });
+        tabs.Items.Add(new TabItem { Header = "Findings", Content = FindingList });
         tabs.Items.Add(new TabItem { Header = "Records", Content = Records });
         var root = new DockPanel();
         DockPanel.SetDock(Banner, Dock.Top); DockPanel.SetDock(BarSlot, Dock.Bottom); DockPanel.SetDock(tabs, Dock.Left);
@@ -73,6 +83,7 @@ internal static class Shell
         Window = new Window { Title = title, Width = 1440, Height = 960, MinWidth = MinWidth, MinHeight = MinHeight, Content = root };
         Window.Closed += (_, _) => { Closed = true; Current?.StopFrame(); };
         FillConflicts();
+        FillFindings();
         StartServer(Window.Dispatcher);
         return Window;
     }
@@ -124,6 +135,23 @@ internal static class Shell
             var item = new ListBoxItem { Content = RowText(r), Tag = r };
             if (r.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
             ConflictList.Items.Add(item);
+        }
+    }
+
+    /// <summary>The Findings tab: read-only, ranked; a clickable row opens the viewer, any other says why in the banner.</summary>
+    internal static void FillFindings()
+    {
+        FindingList.Items.Clear();
+        foreach (var f in Findings)
+        {
+            var item = new ListBoxItem
+            {
+                Content = $"{f.Rank}. [{f.Row.CheckId}] {f.Row.Role}, {f.NewLabel}: {f.Row.Summary}" + (f.Row.Clickable ? "" : "   (does not open the viewer)"),
+                Tag = f,
+            };
+            if (f.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
+            if (f.Row.Role == "incomplete") item.Foreground = Brushes.DarkOrange;
+            FindingList.Items.Add(item);
         }
     }
 

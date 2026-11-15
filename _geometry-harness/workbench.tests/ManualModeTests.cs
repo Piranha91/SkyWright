@@ -673,8 +673,7 @@ public sealed class RealOutputReaderTests
         };
         int entries = lists.Sum(k => o.RootElement.TryGetProperty(k, out var a) && a.ValueKind == JsonValueKind.Array ? a.GetArrayLength() : 0)
                       + (o.RootElement.TryGetProperty("complete", out var cc) && cc.ValueKind == JsonValueKind.False ? 1 : 0);
-        Assert.Equal(entries, rows.Count);
-        if (check == "geometry.route-cut") Assert.Equal(80, rows.Count);     // run s3's rows file
+        Assert.Equal(entries, rows.Count);                                     // route-cut: every row of its rows file
     }
 
     [Fact]
@@ -682,12 +681,15 @@ public sealed class RealOutputReaderTests
     {
         var run = Run();
         using var d = JsonDocument.Parse(File.ReadAllText(Path.Combine(run, "receipts", "geometry.object-overlap__candidate-01__diff.json")));
-        // ordersweep's own counts: in s3, created 19, of which newDefect 2 and unmeasured 17 (receipts/s5-derived-checks.txt
-        // has the same split). "New on the review arm" is every created row; the credit splits it the same way.
+        // ordersweep's own counts from the diff receipt. "New on the review arm" is every created row; the credit splits it
+        // the same way.
         var created = d.RootElement.GetProperty("orderEvaluation").GetProperty("created");
         var baseEmit = Path.Combine(run, "sweep", "inv-0001", "overlapprobe", "baseline.json");
         var review = Path.Combine(run, "sweep", "inv-0001", "overlapprobe", "candidate-01.json");
-        var n = Contract.Static("ReviewCredit", "Counts", "new-on-the-review-arm from DifferentialRows (DESIGN R2.1)", baseEmit, review)!;
+        var diff = Path.Combine(run, "receipts", "geometry.object-overlap__candidate-01__diff.json");
+        // Created is recomputed by the shared credit and must equal ordersweep's; the split needs ordersweep's reverse
+        // measurement, so it is read from ordersweep's receipt, not recomputed (one owner)
+        var n = Contract.Static("ReviewCredit", "Counts", "new-on-the-review-arm from DifferentialRows (DESIGN R2.1)", diff, baseEmit, review)!;
         Assert.Equal(created.GetProperty("created").GetInt32(), (int)Contract.Prop(n, "Created")!);
         Assert.Equal(created.GetProperty("newDefect").GetInt32(), (int)Contract.Prop(n, "NewDefect")!);
         Assert.Equal(created.GetProperty("unmeasured").GetInt32(), (int)Contract.Prop(n, "Unmeasured")!);

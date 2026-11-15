@@ -37,7 +37,7 @@ internal static class Program
     /// viewprobe's worklist cell switch is what loads another conflict's cell. Returns viewprobe's arguments.</summary>
     static string[] OpenBundle(string[] args)
     {
-        var rest = new List<string>(); string? dir = null; string arm = "baseline"; string? outDir = null;
+        var rest = new List<string>(); string? dir = null; string? arm = null; string? outDir = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--bundle" && i + 1 < args.Length) dir = args[++i];
@@ -45,6 +45,7 @@ internal static class Program
             else { if (args[i] == "--out" && i + 1 < args.Length) outDir = args[i + 1]; rest.Add(args[i]); }
         }
         if (dir is null) return args;
+        arm ??= BundleConflicts.DefaultArm(dir);               // the plan's review arm in manual mode, else baseline
         var work = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : outDir ?? Path.Combine(Path.GetTempPath(), "workbench");
         Directory.CreateDirectory(work);
         var evalrun = FromCheckout("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
@@ -56,19 +57,23 @@ internal static class Program
                           + FormattableString.Invariant($"verified and read in {sw.Elapsed.TotalSeconds:0.0} s"));
         foreach (var n in Shell.Bundle.Notes) WorkbenchHost.Say("bundle note: " + n);
         Shell.Ranked = ConflictRanking.Rank(Shell.Bundle.Rows, Shell.Bundle.Targets, Shell.Severity);
-        var first = Shell.Visible.FirstOrDefault(r => r.Row.Cell is not null)
-            ?? throw new InvalidOperationException($"no row on arm '{arm}' names a reference whose cell the bundle records; there is nothing to open.");
-        var cells = new List<string> { first.Row.Cell! };
-        foreach (var r in Shell.Ranked) if (r.Row.Cell is { } c && !cells.Contains(c, StringComparer.OrdinalIgnoreCase)) cells.Add(c);
+        Shell.Findings = FindingRanking.Rank(Shell.Bundle.Findings, Shell.Bundle.Targets, Shell.Severity);
+        var first = Shell.Visible.FirstOrDefault(r => r.Row.Cell is not null);
+        var firstFinding = first is null ? Shell.Findings.FirstOrDefault(f => f.Row.Clickable) : null;
+        if (first is null && firstFinding is null)
+            throw new InvalidOperationException($"no Conflicts or Findings row on arm '{arm}' names a reference whose cell the bundle records; there is nothing to open.");
+        var cells = SessionCells.From(new[] { first?.Row.Cell }.Concat(Shell.Ranked.Select(r => r.Row.Cell)),
+                                      new[] { firstFinding?.Row.Cell }.Concat(Shell.Findings.Where(f => f.Row.Clickable).Select(f => f.Row.Cell))).ToList();
         Shell.WorklistCells = cells;
-        Shell.PendingLand = first.Row.RefKey;
+        Shell.PendingLand = first?.Row.RefKey ?? firstFinding!.Row.RefKey;
         Shell.CurrentRow = first;
         var wl = new HarnessShared.WorklistFile("conflict review workbench: the cells the bundle's placed-object rows sit in",
             cells.Select(c => new HarnessShared.WorklistCell(c, new[] { new HarnessShared.WorklistShot(
                 "placeholder pose: the workbench frames the camera on the asked-for reference once the cell is built", new[] { 0f, 0f, 0f }) })).ToList());
         var wlPath = Path.Combine(work, "workbench-worklist.json");
         HarnessShared.WorklistIo.Write(wlPath, wl);
-        WorkbenchHost.Say($"{Shell.Ranked.Count} rows ranked ({Shell.Ranked.Count(r => r.InvolvesTarget)} name a target); {cells.Count} cell(s) in {wlPath}; opening on rank {first.Rank}'s cell {first.Row.Cell}");
+        WorkbenchHost.Say($"{Shell.Ranked.Count} rows ranked ({Shell.Ranked.Count(r => r.InvolvesTarget)} name a target), {Shell.Findings.Count} Findings rows; {cells.Count} cell(s) in {wlPath}; opening on "
+                          + (first is not null ? $"conflict {first.Rank}'s cell {first.Row.Cell}" : $"finding {firstFinding!.Rank}'s cell {firstFinding.Row.Cell}"));
         return new[] { "--worklist", wlPath }.Concat(rest).ToArray();
     }
 

@@ -25,7 +25,7 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "selection", "pending", "recheck", "launcher" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "launcher" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -40,12 +40,14 @@ internal sealed class StateTools
         [Description("Which parts to add, any of: bundle (the evaluation bundle open), conflicts (the ranked conflicts the Conflicts tab lists), " +
                      "selection (the open conflict and the selected reference: its placement as drawn, as the load order has it, and as written to a patch), " +
                      "pending (the edits staged and not written, and the edits written), recheck (the last re-check's result), " +
+                     "findings (the Findings tab: every other selected check's rows, ranked; each says whether it opens the viewer and why not), " +
                      "launcher (manual mode: the mode, instance, profile and game, the profile's mod folders, the probes, the Output and Work Folders, the run). " +
                      "Default: selection, pending, recheck.")]
             string[]? project = null,
         [Description("conflicts: how many rows to list (default 20).")] int limit = 20,
         [Description("conflicts: how many rows to skip (default 0).")] int offset = 0,
-        [Description("conflicts: list only rows whose kind, plugins, references or base EditorIDs contain this text (any case).")] string? filter = null,
+        [Description("conflicts or findings: list only rows whose kind, plugins, references or base EditorIDs (findings: summary) contain this text (any case).")] string? filter = null,
+        [Description("findings: list only the rows of this check id.")] string? check = null,
         [Description("If a re-check is running, wait up to this many seconds (at most 600) for it to finish before answering. Default 0.")]
             int wait_seconds = 0)
     {
@@ -63,6 +65,7 @@ internal sealed class StateTools
         return await hub.OnUi(() =>
         {
             var d = Project(hub.Surface, parts, limit, offset, filter);
+            if (parts.Contains("findings")) d["findings"] = FindingsPart(hub.Surface, limit, offset, filter, check);
             if (parts.Contains("launcher")) d["launcher"] = hub.Launcher.Project();
             return Task.FromResult(Answer(d));
         });
@@ -84,6 +87,7 @@ internal sealed class StateTools
         StateHub hub,
         [Description("select, stage, undo, commit or recheck.")] string verb,
         [Description("select: the rank of the conflict to open, as workbench_state's conflicts list it.")] int? conflict = null,
+        [Description("select: the rank of a Findings row to open, as workbench_state's findings list it.")] int? finding = null,
         [Description("select or stage: a reference as XXXXXX:Plugin.esp (6 hex digits, a colon, the defining plugin), or \"none\" for select.")] string? @ref = null,
         [Description("stage: the move, [dx, dy, dz] in Skyrim units (about 70 to a metre; +X east, +Y north, +Z up).")] float[]? delta = null,
         [Description("stage: the turn about the vertical (Z) axis, in degrees, composed with the current rotation.")] float? turn_degrees = null,
@@ -101,7 +105,35 @@ internal sealed class StateTools
         [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
         [Description("set_output or set_work_folder: the folder, by its full path.")] string? path = null)
         => hub.OnUi(() => LauncherVerb(verb) ? LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path)
+                                             : finding is { } fr ? SelectFinding(hub.Surface, verb, fr)
                                              : ActOnUi(hub.Surface, verb, conflict, @ref, delta, turn_degrees, position, rotation_degrees, dry_run, patch));
+
+    static Task<CallToolResult> SelectFinding(IWorkbenchSurface s, string verb, int rank)
+    {
+        if (!string.Equals(verb?.Trim(), "select", StringComparison.OrdinalIgnoreCase)) return Task.FromResult(Refuse("finding is an input of select only."));
+        var row = s.Findings.FirstOrDefault(r => r.Rank == rank);
+        if (row is null) return Task.FromResult(Refuse($"no Findings row ranked {rank} is listed; read workbench_state with project [\"findings\"] to see the ranks."));
+        if (!row.Row.Clickable) return Task.FromResult(Refuse($"finding {rank} does not open the viewer: {row.Row.WhyNot}."));
+        string said;
+        try { said = s.OpenFinding(row); } catch (InvalidOperationException ex) { return Task.FromResult(Refuse(ex.Message)); }
+        return Task.FromResult(Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) }));
+    }
+
+    static object FindingRowJson(RankedFinding f) => new
+    {
+        rank = f.Rank, checkId = f.Row.CheckId, arm = f.Row.Arm, kind = f.Row.Kind, a = f.Row.A, b = f.Row.B, summary = f.Row.Summary,
+        @ref = f.Row.RefKey, cell = f.Row.Cell, clickable = f.Row.Clickable, whyNot = f.Row.WhyNot, role = f.Row.Role,
+        isNew = f.NewLabel, evidence = f.Row.EvidenceStrength, severity = f.Severity, identity = f.Row.Identity, source = f.Row.Source,
+    };
+
+    static object FindingsPart(IWorkbenchSurface s, int limit, int offset, string? filter, string? check)
+    {
+        var all = s.Findings;
+        bool Has(string? v) => v is not null && filter is not null && v.Contains(filter, StringComparison.OrdinalIgnoreCase);
+        var rows = all.Where(r => (check is null || string.Equals(r.Row.CheckId, check, StringComparison.OrdinalIgnoreCase))
+                                  && (filter is null || Has(r.Row.Kind) || Has(r.Row.A) || Has(r.Row.B) || Has(r.Row.RefKey) || Has(r.Row.Summary))).ToList();
+        return new { total = all.Count, matched = rows.Count, offset, limit, rows = rows.Skip(offset).Take(limit).Select(FindingRowJson).ToList() };
+    }
 
     static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run" };
     static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
