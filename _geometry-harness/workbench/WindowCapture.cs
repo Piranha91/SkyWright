@@ -24,6 +24,8 @@ internal static class WindowCapture
         var dv = new DrawingVisual();
         using (var dc = dv.RenderOpen())
         {
+            // The window's own background first: WPF renders unpainted areas transparent, which a PNG viewer shows black.
+            dc.DrawRectangle(window.Background ?? Brushes.White, null, new Rect(0, 0, content.ActualWidth, content.ActualHeight));
             dc.DrawImage(ui, new Rect(0, 0, content.ActualWidth, content.ActualHeight));
             dc.DrawImage(view, new Rect(at, new Size(viewSlot.ActualWidth, viewSlot.ActualHeight)));
         }
