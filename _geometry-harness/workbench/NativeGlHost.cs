@@ -76,7 +76,7 @@ internal sealed class NativeGlHost : HwndHost
 
     protected override IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg is >= 0x200 and <= 0x20A or 0x100 or 0x101)
+        if (msg is >= 0x200 and <= 0x20A or 0x100 or 0x101 or 0x0008)
         {
             long l = lParam.ToInt64();
             int x = (short)(l & 0xFFFF), y = (short)((l >> 16) & 0xFFFF);
