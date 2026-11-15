@@ -174,6 +174,16 @@ internal static class Shell
         scene = h?.SceneState(),
         tree = Tree,
         lastLanding = LastLanding,
+        recheck = h is null ? null : new
+        {
+            running = h.Rechecking,
+            refused = h.RecheckRefusal,
+            row = h.LastRecheck?.Row,
+            created = h.LastRecheck?.New,
+            verdict = h.LastRecheck?.Verdict,
+            build = h.LastRecheck?.BuildSentence,
+            wallSeconds = h.LastRecheck?.WallSeconds,
+        },
     };
 
     internal static string Dump(WorkbenchHost? h, string path)

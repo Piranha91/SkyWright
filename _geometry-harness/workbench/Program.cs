@@ -27,6 +27,8 @@ internal static class Program
         return Path.Combine(root, "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
     }
 
+    internal static string FromCheckoutPublic(string env, string what, params string[] rel) => FromCheckout(env, what, rel);
+
     static string FromCheckout(string env, string what, params string[] rel)
     {
         if (Environment.GetEnvironmentVariable(env) is { Length: > 0 } v) return v;

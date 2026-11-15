@@ -23,7 +23,10 @@ namespace Workbench;
 /// dump FORMKEY NAME              save the reference's drawn vertices as NAME.json
 /// tilted [N]                     list drawn references tilted about X and Y, nearest first
 /// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
-/// commit dry|real PATCHNAME      dry-run or write the staged edits
+/// commit dry|real PATCHNAME      dry-run or write the staged edits (a real write re-checks the open conflict row)
+/// recheck PATCHNAME              re-check the open conflict row against that written patch
+/// expect recheck WORD            pass or fail on the last re-check's word for the open row (resolved, new, ...)
+/// expect created FORMKEY         pass or fail: the last re-check lists a new row naming that reference
 /// readback FORMKEY PLUGIN        read that plugin's Placement of the reference through the server
 /// conflict N                     click the Conflicts tab's row ranked N (as listed now)
 /// treeref FORMKEY                click that reference in the Records tree
@@ -179,6 +182,7 @@ internal sealed class Script
             }
             case "ticks": Ticks(int.Parse(a[1])); break;
             case "commit": Async(() => _h.CommitAsync(a[1] == "dry", a[2])); break;
+            case "recheck": Async(() => _h.RecheckAsync(a[1])); break;
             case "readback":
                 Async(async () =>
                 {
@@ -288,6 +292,12 @@ internal sealed class Script
                 else got += "; no partner marked";
                 break;
             }
+            case "recheck":
+                got = _h.LastRecheck is { } lr ? lr.Row.Word : _h.RecheckRefusal is { } rr ? "refused: " + rr : "none";
+                ok = string.Equals(_h.LastRecheck?.Row.Word, string.Join(' ', a.Skip(2)), StringComparison.Ordinal); break;
+            case "created":
+                got = _h.LastRecheck is { } lc ? (lc.New.Count == 0 ? "no new rows" : string.Join("; ", lc.New.Select(n => n.Id))) : "no re-check";
+                ok = _h.LastRecheck?.New.Any(n => n.Id.Contains(a[2], StringComparison.OrdinalIgnoreCase)) == true; break;
             case "partner":
                 got = _h.Marks.Partner?.Ref.RefKey.ToString() ?? "none"; ok = string.Equals(got, a[2], StringComparison.OrdinalIgnoreCase);
                 if (_h.PartnerNote is { } pn) got += "; " + pn;

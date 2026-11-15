@@ -157,7 +157,8 @@ internal sealed class WorkbenchHost
         string marks = !_marks.Enabled ? "marks off" : _marks.Selected is null ? "" :
             $"cyan: selected {_marks.Selected.Ref.RefKey}" + (_marks.Partner is { } p ? $"; magenta: the conflict's other reference {p.Ref.RefKey}" : "") + " (drawn through anything in front)"
             + (PartnerNote is { } pn ? "; " + pn : "");
-        _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}" + (marks.Length > 0 ? "\n" + marks : "");
+        string recheck = Rechecking ? "re-checking..." : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
+        _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}" + (recheck.Length > 0 ? "  |  " + recheck : "") + (marks.Length > 0 ? "\n" + marks : "");
     }
 
     // ---- the window ---------------------------------------------------------------------------------------------------
@@ -521,9 +522,61 @@ internal sealed class WorkbenchHost
                                                             _opt.Interior ? null : _opt.Worldspace);
             var text = parents + "\n" + await w.CommitAsync(net, patchName, dryRun);
             Say((dryRun ? "dry run" : "write") + " answer:\n" + text);
+            // After a write, the detector re-runs on the patch's cell when a conflict row is open (stage 4).
+            if (!dryRun && Shell.Bundle is not null && Shell.CurrentRow is not null) await RecheckAsync(patchName);
             return text;
         }
         catch (Exception ex) { Say("refused: " + ex.Message); return null; }
+    }
+
+    /// <summary>The last re-check: its result, or the sentence that refused it; and whether one is running.</summary>
+    internal RecheckResult? LastRecheck { get; private set; }
+    internal string? RecheckRefusal { get; private set; }
+    internal bool Rechecking { get; private set; }
+
+    /// <summary>Re-run the open row's detector on the written patch's cell, unpatched and patched, and show what conflictdiff
+    /// and the frozen rule say (<see cref="Recheck"/>). Runs off the UI thread; the banner says "re-checking" meanwhile.</summary>
+    internal async Task<string?> RecheckAsync(string patchName)
+    {
+        try
+        {
+            var open = Shell.CurrentRow ?? throw new InvalidOperationException("no conflict row is open, so there is nothing to re-check; open one from the Conflicts tab.");
+            var b = Shell.Bundle ?? throw new InvalidOperationException("no bundle is open, so the re-check has no detector command to run.");
+            var t = _writer?.Target ?? TargetFromEnv() ?? throw new InvalidOperationException("no write target is set, so the patch cannot be found.");
+            var plugin = patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";
+            var holders = Directory.EnumerateDirectories(Path.Combine(t.Instance, "mods")).Where(d => File.Exists(Path.Combine(d, plugin))).ToList();
+            if (holders.Count != 1)
+                throw new InvalidOperationException($"{holders.Count} mod folders hold {plugin}, so the re-check cannot tell which one the write made; it needs exactly one.");
+            var mod = Path.GetFileName(holders[0]);
+            var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
+            var harness = Path.GetDirectoryName(Path.GetFullPath(evalrun))!;
+            var conflictdiff = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF") is { Length: > 0 } cd ? cd
+                : Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
+            var buildDirs = (Environment.GetEnvironmentVariable("WB_PROBE_DIRS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
+            var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
+            var work = Path.Combine(_outDir, "recheck-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss"));
+            Rechecking = true; RecheckRefusal = null;
+            Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched; the window stays usable.");
+            UpdateStatus();
+            var row = open.Row; var arm = b.Arm; var dir = b.Dir;
+            var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, evalrun, conflictdiff,
+                buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s))));
+            LastRecheck = r;
+            string news = r.New.Count == 0 ? "no new conflict" : $"{r.New.Count} new conflict(s): " + string.Join("; ", r.New.Select(n => n.Id));
+            Shell.SetBanner(FormattableString.Invariant($"re-check of conflict {open.Rank}: {r.Row.Word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)"));
+            Say("re-check: row " + r.Row.Id + ": " + r.Row.Sentence);
+            foreach (var n in r.New) Say("re-check: new row " + n.Id + ": " + n.Sentence);
+            Say("re-check: " + r.BuildSentence);
+            Say(FormattableString.Invariant($"re-check: wall time {r.WallSeconds:0.0} s; conflictdiff's lines in {Path.Combine(work, "conflictdiff.txt")}"));
+            return r.Row.Word;
+        }
+        catch (Exception ex)
+        {
+            RecheckRefusal = ex is AggregateException ae ? ae.GetBaseException().Message : ex.Message;
+            Shell.SetBanner("re-check refused: " + RecheckRefusal);
+            return null;
+        }
+        finally { Rechecking = false; UpdateStatus(); }
     }
 
     /// <summary>Count the back buffer's pixels inside <paramref name="ro"/>'s projected box that a test says are its mark
