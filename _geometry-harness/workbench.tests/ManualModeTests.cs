@@ -255,13 +255,7 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         Assert.Empty(Directory.GetFiles(_w.DataDir, "WbBad*.esp", SearchOption.AllDirectories));
     }
 
-    [Fact]
-    public void B3c_the_write_guard_is_no_longer_a_lab_constant()
-    {
-        Assert.Null(typeof(Program).GetField("LabInstance", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public));
-        var start = typeof(PatchWriter).GetMethod("StartAsync", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
-        Assert.DoesNotContain(start.GetParameters(), p => p.Name == "allowedInstances");
-    }
+    // B3c is replaced by ManualWriteTests.H2a, a behaviour test (DESIGN R4: its first assertion bound to the test host's Program).
 }
 
 /// <summary>B8 (D4 frozen, "Expand into rows"): one Findings reader per json-output probe. FindingReaders.Read(checkId,

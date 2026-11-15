@@ -143,6 +143,25 @@ internal static class Recheck
         return (p.ExitCode, text);
     }
 
+    /// <summary>A patch folder as an order's Mods entry: its name when it sits directly in the instance's mods folder,
+    /// else its full path.</summary>
+    internal static string ModsEntry(string patchFolder, string instance)
+    {
+        var f = HousecarlCore.OutputFolderPolicy.Full(patchFolder);
+        var mods = HousecarlCore.OutputFolderPolicy.Full(Path.Combine(HousecarlCore.Mo2Instance.LayoutRoot(instance), "mods"));
+        return string.Equals(Path.GetDirectoryName(f), mods, StringComparison.OrdinalIgnoreCase) ? Path.GetFileName(f) : f;
+    }
+
+    /// <summary>The one folder under <paramref name="patchRoot"/> holding <paramref name="plugin"/>, by its full path; the
+    /// re-check needs exactly one.</summary>
+    internal static string PatchFolder(string patchRoot, string plugin)
+    {
+        var holders = Directory.Exists(patchRoot) ? Directory.EnumerateDirectories(patchRoot).Where(d => File.Exists(Path.Combine(d, plugin))).ToList() : new List<string>();
+        if (holders.Count != 1)
+            throw new InvalidOperationException($"{holders.Count} folders in '{patchRoot}' hold {plugin}, so the re-check cannot tell which one the write made; it needs exactly one.");
+        return HousecarlCore.OutputFolderPolicy.Full(holders[0]);
+    }
+
     /// <summary>toolidentity.py's package digest of a Release folder, computed by toolidentity.py itself.</summary>
     internal static string? PackageDigest(string folder, string harnessDir, string python = "python")
     {
@@ -152,7 +171,7 @@ internal static class Recheck
     }
 
     /// <summary>The whole re-check, off the UI thread. <paramref name="say"/> gets one line per step.</summary>
-    internal static RecheckResult RunAll(string bundleDir, string arm, ConflictRow row, string patchPlugin, string patchMod,
+    internal static RecheckResult RunAll(string bundleDir, string arm, ConflictRow row, string patchPlugin, string patchFolder,
         string instance, string profile, string game, string workDir, string evalrunPy, string conflictdiffExe,
         IEnumerable<string> buildDirs, string? localProbesRoot, Action<string> say)
     {
@@ -162,8 +181,10 @@ internal static class Recheck
         var harness = Path.GetDirectoryName(Path.GetFullPath(evalrunPy))!;
         var (adapter, candidate) = FromBundle(bundleDir, row.CheckId, arm);
 
-        var pluginPath = Directory.EnumerateFiles(Path.Combine(instance, "mods", patchMod), patchPlugin).FirstOrDefault()
-                         ?? throw new InvalidOperationException($"the patch {patchPlugin} is not in mod folder {patchMod}; write the patch first.");
+        var pluginPath = Path.Combine(patchFolder, patchPlugin);
+        if (!File.Exists(pluginPath)) throw new InvalidOperationException($"the patch {patchPlugin} is not in '{patchFolder}'; write the patch first.");
+        // the probes' view entry for the patch: its folder's name when it is a mod folder of the instance, else its full path (D1 a)
+        var patchMod = ModsEntry(patchFolder, instance);
         var population = Path.Combine(workDir, "population.json");
         var (pe, pt) = Run("python", new[] { evalrunPy, "population", "--plugin", pluginPath, "--mod", patchMod, "--instance", instance, "--out", population }, Path.Combine(workDir, "population.log"));
         if (pe != 0) throw new InvalidOperationException("evalrun population refused the patch: " + pt.Trim());

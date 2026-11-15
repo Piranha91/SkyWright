@@ -7,12 +7,16 @@ using ModelContextProtocol.Protocol;
 namespace Workbench;
 
 /// <summary>Where the houseCARL server reads and writes: an explicit game Data folder, MO2 mods folder and profile
-/// folder (the server's explicit-paths mode), so the profile is never whatever MO2 last had selected.</summary>
-internal sealed record WriteTarget(string Instance, string Profile, string DataDir)
+/// folder (the server's explicit-paths mode), so the profile is never whatever MO2 last had selected; and the Output
+/// Folder a new patch's houseCARL folder goes in (null: the instance's mods folder, the server's default lane).</summary>
+internal sealed record WriteTarget(string Instance, string Profile, string DataDir, string? Output = null)
 {
+    /// <summary>The folder new patches' houseCARL folders are made in.</summary>
+    internal string PatchRoot => Output ?? ModsDir;
+    internal string Game => Path.GetDirectoryName(Path.GetFullPath(DataDir.TrimEnd('\\', '/')))!;
     internal string ModsDir => Path.Combine(HousecarlCore.Mo2Instance.LayoutRoot(Instance), "mods");
     internal string ProfileDir => Path.Combine(HousecarlCore.Mo2Instance.LayoutRoot(Instance), "profiles", Profile);
-    public override string ToString() => $"instance '{Instance}', profile '{Profile}'";
+    public override string ToString() => $"instance '{Instance}', profile '{Profile}'" + (Output is null ? "" : $", output '{Output}'");
 }
 
 /// <summary>Writes the staged edits as placement overrides through the houseCARL server's own write path
@@ -31,14 +35,12 @@ internal sealed class PatchWriter : IAsyncDisposable
     { _client = client; Target = target; ServerExe = exe; ServerSha256 = sha; Log = log; }
 
     /// <summary>Start the server at <paramref name="serverExe"/> against <paramref name="target"/>. Refused when the
-    /// target's instance is not one of <paramref name="allowedInstances"/> (in development: the lab, and a test's own
-    /// synthetic instance).</summary>
-    internal static async Task<PatchWriter> StartAsync(string serverExe, WriteTarget target, IEnumerable<string> allowedInstances,
+    /// target's patch folder is one the output-folder rule refuses (GATE-B.md 3.2), whatever the instance.</summary>
+    internal static async Task<PatchWriter> StartAsync(string serverExe, WriteTarget target,
                                                        string dataDir, string corpusPath, Action<string> log, CancellationToken ct = default)
     {
-        static string Norm(string p) => Path.GetFullPath(p).TrimEnd('\\', '/');
-        if (!allowedInstances.Any(a => string.Equals(Norm(a), Norm(target.Instance), StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"writes to {target} are refused: only {string.Join(", ", allowedInstances.Select(a => $"'{a}'"))} may be written while the workbench is in development.");
+        if (OutputFolderRule.Check(target.PatchRoot, target.Instance, target.Profile, target.Game) is { } why)
+            throw new InvalidOperationException($"writes to {target} are refused: {why}");
         if (!File.Exists(serverExe))
             throw new InvalidOperationException($"the houseCARL server is not built at '{serverExe}'; build src/housecarl-mcp in this checkout first.");
         if (!File.Exists(corpusPath))
@@ -161,7 +163,12 @@ internal sealed class PatchWriter : IAsyncDisposable
                     + $"({V(e.Before.Position)} / {V(e.Before.Rotation)}); the scene and {Target} are not the same configuration.");
         }
         var args = new Dictionary<string, object?> { ["ops"] = Ops(net), ["dry_run"] = dryRun };
-        if (into is not null) args["into"] = into; else args["patch"] = patchName;
+        if (into is not null) args["into"] = into;
+        else
+        {
+            args["patch"] = patchName;
+            if (Target.Output is not null) args["out_path"] = Target.Output;           // manual mode: under the Output Folder
+        }
         Log($"{(dryRun ? "dry run" : "WRITE")} of {net.Count} placement edit(s) to {Target}, {(into is not null ? $"into '{into}'" : $"new patch '{patchName}'")}");
         return await CallAsync("housecarl_apply", args, ct);
     }

@@ -84,8 +84,8 @@ public class PatchWriteTests : IClassFixture<TiltedRefWorld>
         return exe;
     }
 
-    Task<PatchWriter> Start(string? allowed = null) => PatchWriter.StartAsync(ServerExe(),
-        new WriteTarget(_w.Instance, "Default", _w.DataDir), new[] { allowed ?? _w.Instance },
+    Task<PatchWriter> Start() => PatchWriter.StartAsync(ServerExe(),
+        new WriteTarget(_w.Instance, "Default", _w.DataDir),
         Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
 
     [Fact]
@@ -116,12 +116,7 @@ public class PatchWriteTests : IClassFixture<TiltedRefWorld>
         for (int r = 0; r < 3; r++) for (int c = 0; c < 3; c++) Assert.Equal(drawn[r, c], back[r, c], 4);
     }
 
-    [Fact]
-    public async Task A_write_to_an_instance_that_is_not_allowed_is_refused_before_the_server_starts()
-    {
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Start(allowed: @"X:\Skyrim Conflict Lab"));
-        Assert.Contains("refused", ex.Message);
-    }
+    // The lab-only guard's test is replaced by OutputFolderRuleTests and ManualWriteTests.H2a (DESIGN R4, B9).
 
     [Fact]
     public async Task A_commit_is_refused_when_the_scene_drew_a_different_placement_than_the_server_reads()

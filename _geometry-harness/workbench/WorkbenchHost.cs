@@ -539,12 +539,16 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal float EyeDistance(Vec3 p) => Vector3.Distance(_eye, ToV(p));
     internal void AfterStage() { if (_session.Selected is { } k) _gizmo.Centre = ToV(_session.Current(k).Position); }
 
+    /// <summary>A manual session's target (the launcher's instance, profile, game and Output Folder); null in the bundle path.</summary>
+    internal static WriteTarget? ManualTarget { get; set; }
+
     internal static WriteTarget? TargetFromEnv()
     {
         var inst = Environment.GetEnvironmentVariable("WB_INSTANCE");
         var prof = Environment.GetEnvironmentVariable("WB_PROFILE");
         var data = Environment.GetEnvironmentVariable("WB_GAME_DATA");
-        return inst is { Length: > 0 } && prof is { Length: > 0 } && data is { Length: > 0 } ? new WriteTarget(inst, prof, data) : null;
+        var output = Environment.GetEnvironmentVariable("WB_OUTPUT") is { Length: > 0 } o ? o : null;
+        return ManualTarget ?? (inst is { Length: > 0 } && prof is { Length: > 0 } && data is { Length: > 0 } ? new WriteTarget(inst, prof, data, output) : null);
     }
 
     internal async Task<PatchWriter> WriterAsync()
@@ -553,10 +557,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var target = TargetFromEnv()
             ?? throw new InvalidOperationException("no write target: set WB_INSTANCE, WB_PROFILE and WB_GAME_DATA to the MO2 instance, profile and game Data folder the scene was built from.");
         var exe = Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe();
-        var allowed = new[] { Program.LabInstance };
         var dataDir = Path.Combine(_outDir, "housecarl-data");
         var corpus = Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus();
-        _writer = await PatchWriter.StartAsync(exe, target, allowed, dataDir, corpus, Say);
+        _writer = await PatchWriter.StartAsync(exe, target, dataDir, corpus, Say);
         UpdateStatus();
         return _writer;
     }
@@ -574,8 +577,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             // The re-check finds the patch by its plugin name, so a real write goes to a name no mod folder holds yet
             // (the server would otherwise write a second, renamed patch).
             var plugin = PluginName(patchName);
-            if (!dryRun && Directory.Exists(w.Target.ModsDir)
-                && Directory.EnumerateDirectories(w.Target.ModsDir).FirstOrDefault(d => File.Exists(Path.Combine(d, plugin))) is { } holder)
+            if (!dryRun && Directory.Exists(w.Target.PatchRoot)
+                && Directory.EnumerateDirectories(w.Target.PatchRoot).FirstOrDefault(d => File.Exists(Path.Combine(d, plugin))) is { } holder)
                 throw new InvalidOperationException($"the mod folder '{Path.GetFileName(holder)}' already holds {plugin}; write to a new patch name.");
             var net = _session.Net();
             var cells = _opt.RefCells ?? new Dictionary<FormKey, FormKey>();
@@ -630,10 +633,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             var b = Shell.Bundle ?? throw new InvalidOperationException("no bundle is open, so the re-check has no detector command to run.");
             var t = _writer?.Target ?? TargetFromEnv() ?? throw new InvalidOperationException("no write target is set, so the patch cannot be found.");
             var plugin = patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";
-            var holders = Directory.EnumerateDirectories(Path.Combine(t.Instance, "mods")).Where(d => File.Exists(Path.Combine(d, plugin))).ToList();
-            if (holders.Count != 1)
-                throw new InvalidOperationException($"{holders.Count} mod folders hold {plugin}, so the re-check cannot tell which one the write made; it needs exactly one.");
-            var mod = Path.GetFileName(holders[0]);
+            var mod = Recheck.PatchFolder(t.PatchRoot, plugin);
             // The view shows the edited reference where this patch puts it (read back from the patch), never silently
             // where the load order still has it (stage-4 review M-1).
             if (FormKey.TryFactory(open.Row.RefKey, out var rk) && _session.IsDrawn(rk)

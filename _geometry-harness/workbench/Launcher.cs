@@ -203,12 +203,11 @@ internal sealed class Launcher : IAsyncDisposable
             if (WorkFolder is null) throw new InvalidOperationException("choose a Work Folder outside the instance and the game folder first (workbench_act verb set_work_folder): the houseCARL server keeps its data there.");
             var exe = Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe();
             var corpus = Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus();
-            var target = new WriteTarget(Instance!, Profile!, Path.Combine(Game!, "Data"));
+            var target = new WriteTarget(Instance!, Profile!, Path.Combine(Game!, "Data"), Output);
             var data = Path.Combine(WorkFolder, "hcdata");
-            var inst = Instance!;
             _starting = Task.Run(async () =>
             {
-                var w = await PatchWriter.StartAsync(exe, target, new[] { inst }, data, corpus, WorkbenchHost.Say);
+                var w = await PatchWriter.StartAsync(exe, target, data, corpus, WorkbenchHost.Say);
                 lock (_gate) { _bound = w; _starting = null; }
                 return w;
             });

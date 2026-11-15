@@ -7,10 +7,6 @@ namespace Workbench;
 /// <c>viewprobe --interactive</c> takes), then hands it to the workbench window instead of the fly-through.</summary>
 internal static class Program
 {
-    /// <summary>The only MO2 instance the workbench may write to while it is in development (the lab, a scratch
-    /// instance). A synthetic test instance is allowed by the test that builds it, never from the command line.</summary>
-    internal const string LabInstance = @"X:\Skyrim Conflict Lab";
-
     /// <summary>The houseCARL checkout this exe was built from (the folder holding housecarl.sln), or null.</summary>
     internal static string? CheckoutRoot()
     {
