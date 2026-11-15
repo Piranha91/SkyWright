@@ -31,7 +31,7 @@ internal sealed class Gizmo : IRenderOverlay
     /// <summary>Segments of each part, Skyrim space.</summary>
     internal IEnumerable<(Handle H, Vector3 A, Vector3 B)> Segments()
     {
-        if (Centre is not { } c) yield break;
+        if (Hidden || Centre is not { } c) yield break;
         foreach (var h in new[] { Handle.MoveX, Handle.MoveY, Handle.MoveZ }) yield return (h, c, c + Axis(h) * Size);
         float r = Size * 0.8f;
         for (int i = 0; i < RingSegments; i++)

@@ -46,6 +46,8 @@ internal sealed class ViewState
     {
         var edited = _session.Edited();
         ShowingOriginal = on;
+        if (_handle is not null) _handle.Hidden = on;         // no handle where the object is not
+        _tint = null;                                         // a see-through reference's tint follows what is drawn
         foreach (var k in edited)
             _session.Preview(k, on ? RefPlacementEdit.BakedPose(_session.RefOf(k).Ref) : _session.Current(k));
         var said = edited.Count == 0 ? (on ? "nothing is edited, so the originals are what the view shows" : "showing the edits")
@@ -123,12 +125,15 @@ internal sealed class ViewState
     internal string HideInFront(FormKey subject, Func<PickHit?> pick)
     {
         var hidNow = new List<FormKey>();
+        var hiddenBefore = new HashSet<GlMesh>(_meshesHidden);
         for (int i = 0; i < 256; i++)
         {
             var hit = pick();
             if (hit is null)
             {
-                foreach (var k in hidNow) { foreach (var m in Drawn(k).Meshes) { m.IsHiddenByHost = false; _meshesHidden.Remove(m); } _hidden.Remove(k); }
+                // only the meshes this call hid: a part hidden before stays hidden
+                foreach (var m in _meshesHidden.Where(m => !hiddenBefore.Contains(m)).ToList()) { m.IsHiddenByHost = false; _meshesHidden.Remove(m); }
+                foreach (var k in hidNow) _hidden.Remove(k);
                 var miss = $"the centre ray does not reach {subject}, so nothing was hidden; point the view at it first";
                 Say(miss);
                 return miss;
