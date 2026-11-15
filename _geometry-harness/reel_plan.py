@@ -41,6 +41,26 @@ class Refused(ValueError):
     pass
 
 
+def possessive(name) -> str:
+    """A name's possessive: an apostrophe alone after a final s ("Interesting NPCs'"), else "'s" ("Lux's")."""
+    s = str(name)
+    return s + "'" if s[-1:].casefold() == "s" else s + "'s"
+
+
+POSSESSIVE_SLOT = re.compile(r"\{(\w+)\}'s\b")
+
+
+def fill(template, **slots) -> str:
+    """Every report and reel template is filled here: a `{slot}'s` takes the possessive rule for the value filled in, so
+    a name ending in s never reads "s's"; then the slots are filled as str.format does."""
+    t = str(template)
+
+    def one(m):
+        v = slots.get(m.group(1))
+        return m.group(0)[:-1] if isinstance(v, str) and v[-1:].casefold() == "s" else m.group(0)
+    return POSSESSIVE_SLOT.sub(one, t).format(**slots)
+
+
 
 def unmarkable_objects(capture_results) -> set:
     """Objects no capture can mark, from FINISHED see-through refusals only: every fallback (eye-level with a measured
@@ -89,7 +109,7 @@ def account_counts(words: dict, pictured: int, represented: int, unpictured: int
     """The unpictured account's counts in words: a clause per count that is not 0, joined with commas and a last "and"
     ("2 pictured and 2 not pictured", never "0 represented by the pictured example"; C2167)."""
     wc = words.get("unpicturedCounts") or {}
-    cl = [wc[k].format(count=n) for k, n in (("pictured", pictured), ("represented", represented),
+    cl = [fill(wc[k], count=n) for k, n in (("pictured", pictured), ("represented", represented),
                                              ("unpictured", unpictured)) if n]
     return cl[0] if len(cl) == 1 else ", ".join(cl[:-1]) + wc.get("and", " and ") + cl[-1] if cl else ""
 
@@ -217,36 +237,60 @@ def captured_request(fks, capture_results) -> str | None:
                  if x.get("status") == "captured" and result_about(x, fks)), None)
 
 
-def short_mod_names(names, words: dict) -> dict:
+def short_mod_names(names, words: dict, subject=(), same=()) -> dict:
     """{full name: short form} for each long mod name (item 5): the part before its first separator, taken from its own
     name (skill data `shortForm`: "BUVARP RE - Barely Used ..." -> "BUVARP RE"). None for a name that is not long, has no
     separator, names itself a patch (its head is the mod it patches), or whose short form is not short, or equals
     another name, another name's head or another candidate (casefolded): such a name is said in full every time.
-    `names` holds every name the text can say, plugin file stems included, so a collision is seen."""
+    `names` holds every name the text can say, plugin file stems included, so a collision is seen.
+
+    (report words) A patch named after the evaluated mod (`subject`: its mod name and plugin stem), "<subject> - <rest>",
+    is said by its rest when the rest still names a patch ("Environs - Hroggars House - BUVARP Patch" -> "BUVARP
+    Patch"), at any length: the dropped words repeat the subject. A name that names a patch is never said by its own head,
+    so its head blocks no other name's short form; its own short form does. `same` holds groups of names that are one
+    plugin (its mod name and its file stem): they never collide with each other."""
     sf = words.get("shortForm") or {}
     if not sf:
         return {}
     seps = list(sf.get("separators") or [" - "])
     patch_words = [str(x).casefold() for x in sf.get("patchWords") or []]
     names = list(dict.fromkeys(str(n) for n in names if str(n or "").strip()))
+    group = {}
+    for i, g in enumerate(same or ()):
+        for n in g or ():
+            if str(n or "").strip():
+                group.setdefault(str(n).casefold(), set()).add(i)
+    subjects = [str(x) for x in subject or () if str(x or "").strip()]
 
     def head(n):
         cut = [n.find(s) for s in seps if n.find(s) > 0]
         return (n[:min(cut)].strip(), n[min(cut):]) if cut else (None, "")
+
+    def patchy(text):
+        return any(re.search(r"\b" + re.escape(w) + r"\b", text.casefold()) for w in patch_words)
     heads = {n: head(n) for n in names}
+    names_patch = {n for n in names if patchy(heads[n][1])}
     cand = {}
     for n in names:
         h, tail = heads[n]
+        if n in names_patch:
+            rest = next((n[len(sj) + len(sp):].strip() for sj in subjects for sp in seps
+                         if n.casefold().startswith((sj + sp).casefold())), None)
+            if rest and patchy(rest) and rest.casefold() != n.casefold():
+                cand[n] = rest
+            continue
         if len(n) <= int(sf.get("minLength") or 40) or not h or len(h) < 2 or len(h) * 2 > len(n):
             continue
-        if any(re.search(r"\b" + re.escape(w) + r"\b", tail.casefold()) for w in patch_words):
-            continue
         cand[n] = h
+
+    def one_plugin(a, b):
+        return bool(group.get(a.casefold(), set()) & group.get(b.casefold(), set()))
     out = {}
     for n, h in cand.items():
         hk = h.casefold()
-        clash = any(o != n and (o.casefold() == hk or (heads[o][0] or "").casefold() == hk
-                                or (cand.get(o) or "").casefold() == hk) for o in names)
+        clash = any(o != n and not one_plugin(o, n) and (
+            o.casefold() == hk or (o not in names_patch and (heads[o][0] or "").casefold() == hk)
+            or (cand.get(o) or "").casefold() == hk) for o in names)
         if not clash:
             out[n] = h
     return out
@@ -257,22 +301,42 @@ SHORT_FORM_DATA_KEYS = frozenset({"id", "layout", "path", "png", "sha256", "medi
                                   "seconds", "maxWords", "kind"})
 
 
+def plugin_name_groups(mod_names: dict) -> list:
+    """Each plugin's own names (its mod name and its file stem): one plugin, so they never collide in short_mod_names."""
+    return [{re.sub(r"\.(esp|esm|esl)$", "", str(k), flags=re.I), str((v or {}).get("name") if isinstance(v, dict) else v)}
+            for k, v in (mod_names or {}).items()]
+
+
+def short_form_pattern(short: dict, ext: bool = False):
+    """A name of `short` (longest first, so a longer name holding a shorter one is matched whole), then, with `ext`, its
+    plugin extension, then a possessive the filler wrote for it ("'s", or "'" after a final s)."""
+    names_ = "|".join(re.escape(n) for n in sorted(short, key=len, reverse=True))
+    return re.compile(r"(?P<name>" + names_ + r")(?P<ext>\.(?:esp|esm|esl))" + ("?" if ext else "{0}")
+                      + r"(?P<own>'s\b|(?<=s)'(?![A-Za-z]))?")
+
+
+def said_short(short_form: str, own) -> str:
+    """A short form in place of a name, its possessive said again by the one rule (possessive), so "Foo Patches'"
+    shortened to "Foo" reads "Foo's"."""
+    return possessive(short_form) if own else short_form
+
+
 def say_short_forms(chapters: list, short: dict) -> None:
     """(item 5) Each long mod name said in full at its first mention and by its short form after, in the reel's own
     order: once for the narration, once for the pages' spoken lines (say, sayLead) and once for what the pages and frame
     labels show. A longer name holding a shorter one is matched whole first. Edits the chapters in place."""
     if not short:
         return
-    pat = re.compile("|".join(re.escape(n) for n in sorted(short, key=len, reverse=True)))
+    pat = short_form_pattern(short)
     spoken_seen, shown_seen = set(), set()
 
     def fix(s, seen):
         def one(m):
-            n = m.group(0)
+            n = m.group("name")
             if n in seen:
-                return short[n]
+                return said_short(short[n], m.group("own"))
             seen.add(n)
-            return n
+            return m.group(0)
         return pat.sub(one, s) if isinstance(s, str) else s
 
     def page(x, key=None):
@@ -387,12 +451,12 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
                 new_ = [mod(x) for x in (arm_.get("pluginsAdded") if "pluginsAdded" in arm_ else
                                          [x for x in have_ if x.lower() not in {y.lower() for y in base_}]) or []]
                 if gone_ or new_:
-                    line = words["closingLines"]["setupWithout" if gone_ and not new_ else
-                                                 "setupWith" if new_ and not gone_ else "setupBoth"].format(
+                    line = fill(words["closingLines"]["setupWithout" if gone_ and not new_ else
+                                                 "setupWith" if new_ and not gone_ else "setupBoth"],
                         check=check_, without=joined(gone_) if gone_ else "", with_=joined(new_) if new_ else "")
             elif not arm_ and len(reasons_of[check_]) > 1 and patches:
                 # a setup that is no arm of the evaluation holds none of the supplied patches
-                line = words["closingLines"]["withoutSetup"].format(check=check_, patch=patch_name(patches[0]))
+                line = fill(words["closingLines"]["withoutSetup"], check=check_, patch=patch_name(patches[0]))
             if line not in subs:
                 subs.append(line)
         # a check named on several other setups is said once, with how many (the report lists each setup)
@@ -400,7 +464,7 @@ def closing_checks(reader: dict, pres: dict, mod, patch_name, words: dict) -> li
             by_check_ = collections.OrderedDict()
             for s_ in subs:
                 by_check_.setdefault(check_title_of(s_), []).append(s_)
-            subs = [ls_[0] if len(ls_) == 1 else words["closingLines"]["setupMany"].format(check=c_, count=len(ls_))
+            subs = [ls_[0] if len(ls_) == 1 else fill(words["closingLines"]["setupMany"], check=c_, count=len(ls_))
                     for c_, ls_ in by_check_.items()]
         reason, comparison = plain_reason(m.get("reason"), words)
         same = next((r_ for r_ in rows if r_["reason"] == reason), None)
@@ -507,8 +571,8 @@ def said_file(hit: dict, words: dict) -> str:
     lw = words.get("listedHolds") or {}
     if not names or not lw.get("one"):
         return hit["file"]
-    shown = joined(names) if len(names) <= 2 else lw["more"].format(names=", ".join(names[:2]), count=len(names) - 2)
-    return lw["one"].format(file=hit["file"], plugins=shown)
+    shown = joined(names) if len(names) <= 2 else fill(lw["more"], names=", ".join(names[:2]), count=len(names) - 2)
+    return fill(lw["one"], file=hit["file"], plugins=shown)
 
 
 def unread_sources(entry: dict):
@@ -548,7 +612,7 @@ def lead_qualifiers(hit: dict, words: dict, loaded: set, evaluated: bool) -> str
     other = [other] if isinstance(other, str) else list(other or [])
     other = [m for m in other if str(m).lower() not in loaded]
     if other and lw.get("other"):
-        out.append(lw["other"].format(mods=joined([str(m) for m in other])))
+        out.append(fill(lw["other"], mods=joined([str(m) for m in other])))
     if evaluated and lw.get("maybeEvaluated"):
         out.append(lw["maybeEvaluated"])
     return "".join(" " + x for x in out)
@@ -620,8 +684,8 @@ def condition(row: dict, names: dict, switches: dict, place: str, words: dict) -
         into = (t.group(3) == "Enable") != bool(sw.get("baselineEnabled"))
         quest = ((names.get("quests") or {}).get(t.group(1)) or {}).get("name")
         if into and quest:
-            return words["conditionQuest"].format(quest=quest, stage=t.group(2))
-    return words["conditionFallback"].format(place=place)
+            return fill(words["conditionQuest"], quest=quest, stage=t.group(2))
+    return fill(words["conditionFallback"], place=place)
 
 
 def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_results, markers, switches,
@@ -653,7 +717,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         got = (mod_names.get(plugin) or {}) or next((v for k, v in mod_names.items() if k.lower() == plugin.lower()), {})
         if got.get("source") == "mo2-folder":
             return stem                    # no Nexus name: the folder's own name (a lab label) is not said (item 36 F3)
-        return stem if folder.lower() == stem.lower() else words["patchName"].format(plugin=stem, mod=folder)
+        return stem if folder.lower() == stem.lower() else fill(words["patchName"], plugin=stem, mod=folder)
 
     def ref_of(fk):
         return refs.get(str(fk)) or {}
@@ -973,7 +1037,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 nm_.append(mod(next((k for k in mod_names if k.lower() == m), m)))
             except Refused:
                 nm_.append(m)
-        return " " + words["patchNeeds"].format(patch=patch_name(patch), mods=joined(nm_))
+        return " " + fill(words["patchNeeds"], patch=patch_name(patch), mods=joined(nm_))
 
     def patch_sentence(c):
         own = own_patches(c)
@@ -1002,30 +1066,30 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                             break
                 if moved and words["patch"].get("fixesOverlapMoved"):
                     key = "fixesOverlapMoved"
-                    text_ = pick(key).format(patch=patch_name(own[0]), object=spoken_ref(moved[0]),
+                    text_ = fill(pick(key), patch=patch_name(own[0]), object=spoken_ref(moved[0]),
                                              m=max(1, round(moved[1])))
                 else:
                     key = "fixesOverlap"
-                    text_ = pick(key).format(patch=patch_name(own[0]))
+                    text_ = fill(pick(key), patch=patch_name(own[0]))
                 return (text_ + needs(own[0], c), {**evidence, "case": "own-" + key, "patch": own[0],
                                 "masters": sorted(masters.get(own[0].lower(), set())),
                                 "moved": [moved[0], round(moved[1], 1)] if moved else None})
-            return (pick(key).format(patch=patch_name(own[0]), kept=kept) + needs(own[0], c),
+            return (fill(pick(key), patch=patch_name(own[0]), kept=kept) + needs(own[0], c),
                     {**evidence, "case": "own-" + key, "patch": own[0], "masters": sorted(masters.get(own[0].lower(), set()))})
-        lead = pick("leaves").format(patch=patch_name(own[0])) + " " if own else ""
+        lead = fill(pick("leaves"), patch=patch_name(own[0])) + " " if own else ""
         ev = {**evidence, "patch": own[0] if own else None,
               "masters": sorted(masters.get(own[0].lower(), set())) if own else None}
         if hits:
             loaded_ = {str(x).lower() for x in full_order or order}
             hit_ = usable_first(hits, loaded_)[0]
             q_ = lead_qualifiers(hit_, words, loaded_, bool(own))
-            return (lead + pick("listed").format(file=said_file(hit_, words)) + q_,
+            return (lead + fill(pick("listed"), file=said_file(hit_, words)) + q_,
                     {**ev, "case": "listed", "hit": hit_, "qualifiers": q_.strip() or None})
         # "No patch exists" only on a search that found its own known answer and read every source of this pair
         unread = unread_sources(entry)
         if known_found and unread == []:
             return lead + pick("noneOther" if own else "none"), {**ev, "case": "none-searched"}
-        return (lead + pick("notFoundOther" if own else "notFound").format(patch=patch_name(own[0]) if own else ""),
+        return (lead + fill(pick("notFoundOther" if own else "notFound"), patch=patch_name(own[0]) if own else ""),
                 {**ev, "case": "not-found", "knownAnswerFound": known_found, "unreadSources": unread})
 
     def owner(fk, r):
@@ -1074,23 +1138,23 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             drawn = navmesh_earlier_plugin([m]) if state == "historical-navmesh-context" else None
             if state == "historical-navmesh-context" and drawn is None:
                 return lw.get(state + "Unknown") or None
-            return lw[state].format(mod=mod(target), earlier=mod(drawn) if drawn else "",
+            return fill(lw[state], mod=mod(target), earlier=mod(drawn) if drawn else "",
                                     winner=mod(c["rows"][0]["A"]))
         if state != "highlight":
-            return lw[state].format(mod=mod(target))
+            return fill(lw[state], mod=mod(target))
         argv = [str(x) for x in ((m or {}).get("provenance") or {}).get("argv") or []]
         marks = {}
         for i_, x_ in enumerate(argv[:-1]):
             if x_ == "--ref" and "=" in argv[i_ + 1]:
                 fk_, col_ = argv[i_ + 1].rsplit("=", 1)
                 marks[col_] = fk_
-        parts = [lw["mark"].format(colour=col_, object=spoken_ref(fk_)) for col_, fk_ in marks.items()]
+        parts = [fill(lw["mark"], colour=col_, object=spoken_ref(fk_)) for col_, fk_ in marks.items()]
         # (R13) the pair's other object, left unmarked (too large: highlight's volume rule), is named on the strip too
         marked_ = {str(v_).casefold() for v_ in marks.values()}
         r_ = c["rows"][0]
-        parts += [lw["unmarked"].format(object=spoken_ref(fk_)) for fk_ in [r_["formKey"], *(r_.get("other") or [])]
+        parts += [fill(lw["unmarked"], object=spoken_ref(fk_)) for fk_ in [r_["formKey"], *(r_.get("other") or [])]
                   if parts and lw.get("unmarked") and str(fk_).casefold() not in marked_]
-        return lw["highlight"].format(marks="; ".join(parts)) if parts else lw.get("highlightNoMarks")
+        return fill(lw["highlight"], marks="; ".join(parts)) if parts else lw.get("highlightNoMarks")
 
     def thing(fk, owner_mod):
         """The object as the plugin that made it: "<mod>'s <object>" only when the mod defines it; an object of the base
@@ -1098,10 +1162,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         obj = spoken_ref(fk)
         made = str(fk).split(":", 1)[-1]
         if made.lower() == str(owner_mod).lower() or not words.get("thingChanged"):
-            return words.get("thingOwn", "{mod}'s {object}").format(mod=mod(owner_mod), object=obj)
+            return fill(words.get("thingOwn", "{mod}'s {object}"), mod=mod(owner_mod), object=obj)
         base_ = made.lower() in {x.lower() for x in policy.get("baseGameMasters") or []}
         origin = words.get("baseGameName", "the base game") if base_ else re.sub(r"\.(esp|esm|esl)$", "", made, flags=re.I)
-        return words["thingChanged"].format(origin=origin, object=obj, mod=mod(owner_mod))
+        return fill(words["thingChanged"], origin=origin, object=obj, mod=mod(owner_mod))
 
     def volume(fk):
         b = base_of(fk).get("bounds")
@@ -1150,18 +1214,18 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             off = float(ov.get("disabled") or 0) / float(ov["count"]) if ov.get("count") else 0.0
             cell = (ref_of(fk).get("cells") or {}).get(mover)
             place = next((v.get("name") for v in places.values() if v.get("formKey") == cell), None) \
-                or words["structurePlace"].format(object=obj)
+                or fill(words["structurePlace"], object=obj)
             if off >= float(policy.get("structureShare") or 1.0):
-                who = words["structureReplaced"].format(mover=mod(mover), keeper=mod(keeper), place=place, object=obj)
+                who = fill(words["structureReplaced"], mover=mod(mover), keeper=mod(keeper), place=place, object=obj)
             elif dzs and share >= float(policy.get("structureShare") or 1.0) and abs(dz_obj) > tol:
-                who = words["structureUp" if dz_obj > 0 else "structureDown"].format(
+                who = fill(words["structureUp" if dz_obj > 0 else "structureDown"],
                     mover=mod(mover), keeper=mod(keeper), place=place, object=obj)
             else:
-                who = words["moverOne"].format(mover=mod(mover), keeper=mod(keeper), object=obj)
+                who = fill(words["moverOne"], mover=mod(mover), keeper=mod(keeper), object=obj)
         elif moved is not None and len(moved) == 2:
-            who = words["moverBoth"].format(a=mod(A), b=mod(B), object=obj)
+            who = fill(words["moverBoth"], a=mod(A), b=mod(B), object=obj)
         else:
-            who = words["placementSplit"].format(loser=mod(A), winner=mod(B), object=obj, mod=mod(target))
+            who = fill(words["placementSplit"], loser=mod(A), winner=mod(B), object=obj, mod=mod(target))
         text = who
         lost, won = _position((r.get("values") or {}).get("lost")), _position((r.get("values") or {}).get("winner"))
         if lost and won:
@@ -1171,9 +1235,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             if dist * mpu < 5:
                 where = words["where"]["close"]
             elif abs(dz) >= 0.5 * dist:
-                where = words["where"]["below" if dz < 0 else "above"].format(m=int(round(abs(dz) * mpu / 5.0) * 5))
+                where = fill(words["where"]["below" if dz < 0 else "above"], m=int(round(abs(dz) * mpu / 5.0) * 5))
             else:
-                where = words["where"]["away"].format(m=int(round(dist * mpu / 5.0) * 5))
+                where = fill(words["where"]["away"], m=int(round(dist * mpu / 5.0) * 5))
             sup = ((frame_media(c, "right") or {}).get("provenance") or {}).get("support")
             extra = ""
             if sup:
@@ -1181,7 +1245,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     extra = words["spotExtra"]["belowGround"]
                 elif sup.get("down") is None:
                     extra = words["spotExtra"]["noFloor" if sup.get("interior") else "inAir"]
-            text += " " + words["rightSpot"].format(mod=mod(target), where=where) + extra + "."
+            text += " " + fill(words["rightSpot"], mod=mod(target), where=where) + extra + "."
         # (Missives r3 reel review, finding 5) the others are named by what they lose: a move is "moved the same way";
         # a model, a size or a turn alone is said as such, never folded into "placed the same way"
         group = [c, *(others.get(fk) or []), *(in_split.get(fk) or [])]
@@ -1206,20 +1270,20 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             # with more to count, the three names are a list the count ends: "A, B, C and 2 more"
             nm = ", ".join(rest[:3]) if len(rest) > 3 else joined(rest)
             if len(rest) > 3:
-                text += " " + words["groupOthers"]["more"].format(names=nm, count=len(rest) - 3)
+                text += " " + fill(words["groupOthers"]["more"], names=nm, count=len(rest) - 3)
             else:
-                text += " " + words["groupOthers"]["one" if len(rest) == 1 else "many"].format(names=nm)
+                text += " " + fill(words["groupOthers"]["one" if len(rest) == 1 else "many"], names=nm)
         if lost_items and words.get("alsoLost"):
             lw_ = dict(words.get("lostFieldWords") or {}, turn=words.get("lostTurnWord") or "the turn of {objects}")
-            text += " " + words["alsoLost"].format(loser=mod(A), winner=mod(B), items=joined(
-                [lw_[k_].format(objects=joined(say_names(v_))) for k_, v_ in lost_items.items()]))
+            text += " " + fill(words["alsoLost"], loser=mod(A), winner=mod(B), items=joined(
+                [fill(lw_[k_], objects=joined(say_names(v_))) for k_, v_ in lost_items.items()]))
         said_names_ = [spoken_ref(x["rows"][0]["formKey"], x["rows"][0].get("summary")) for x in group]
         for g_ in in_split.get(fk) or []:
             nm_g_ = spoken_ref(g_["rows"][0]["formKey"], g_["rows"][0].get("summary"))
             # a name another record of this chapter shares is said as "another" one, so the two are not heard as one
             if said_names_.count(nm_g_) > 1 and words.get("anotherObject"):
-                nm_g_ = words["anotherObject"].format(object=nm_g_)
-            text += " " + words["removedInSplit"].format(
+                nm_g_ = fill(words["anotherObject"], object=nm_g_)
+            text += " " + fill(words["removedInSplit"],
                 winner=mod(g_["rows"][0]["B"]), loser=mod(g_["rows"][0]["A"]), subject=obj, object=nm_g_)
         return text
 
@@ -1231,20 +1295,20 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             return navmesh_sentence(c)
         s = geometry_slots(c)
         if c["type"] == "state":
-            return words["stateClash"].format(condition=condition(r, names, switches, s["place"], words),
+            return fill(words["stateClash"], condition=condition(r, names, switches, s["place"], words),
                                               **{k: v for k, v in s.items() if k != "place"})
-        return words["overlap"].format(**s)
+        return fill(words["overlap"], **s)
 
     def navmesh_sentence(c):
         """A navmesh vignette's words: which mod re-cut the navmesh over whose, where, and what the links point at; then
         the control's own result (the setup without the mod, measured at the same camera), from the capture result."""
         r = c["rows"][0]
-        text = words["navmeshClash"].format(place=place_of(r.get("summary"), [r["formKey"]]), modA=mod(r["A"]),
+        text = fill(words["navmeshClash"], place=place_of(r.get("summary"), [r["formKey"]]), modA=mod(r["A"]),
                                             modB=mod(earlier_navmesh(r)))
         fks_ = [r["formKey"], *(r.get("other") or [])]
         res_ = next((x for x in capture_results if x.get("status") == "captured" and result_about(x, fks_)), None)
         if ((res_ or {}).get("navmeshControl") or {}).get("status") == "no-broken-crossing" and words.get("navmeshControlClean"):
-            text += " " + words["navmeshControlClean"].format(mod=mod(target))
+            text += " " + fill(words["navmeshControlClean"], mod=mod(target))
         return text
 
     game = {(m.get("subject") or {}).get("formKey") for m in pres.get("media") or []
@@ -1311,28 +1375,28 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     # points there (Piranha, 2026-11-10)
     incomplete = None
     opening_pages = [
-        {"layout": "types", "title": words["stillTitles"]["types"].format(mod=mod(target)),
+        {"layout": "types", "title": fill(words["stillTitles"]["types"], mod=mod(target)),
          "rows": [{"label": type_labels[t], "count": card_count(t), "unit": card_unit(t, card_count(t)),
                    "pairs": sorted(counts[t]["pairs"])}
                   for t in policy["typeOrder"] if t in counts],
          **({"incomplete": incomplete} if incomplete else {}),
          "leftOut": {"noInGameEffect": left_out, "markers": left_markers,
-                     "line": words["stillTitles"]["leftOut"].format(count=left_out, noun="record field" if left_out == 1 else "record fields")
+                     "line": fill(words["stillTitles"]["leftOut"], count=left_out, noun="record field" if left_out == 1 else "record fields")
                      if left_out else None,
-                     "markersLine": words["leftOutMarkers"].format(count=left_markers, noun="clash" if left_markers == 1 else "clashes")
+                     "markersLine": fill(words["leftOutMarkers"], count=left_markers, noun="clash" if left_markers == 1 else "clashes")
                      if left_markers else None}},
         {"layout": "load-order", "title": words["stillTitles"]["loadOrder"], "legend": words["stillTitles"]["affected"],
          "plugins": full_order or order, "targets": [target],
          "affected": [p for p in (full_order or order) if str(p).lower() in affected_low] or sorted(affected),
          "runtimeMods": runtime_mods, "runtimeTitle": words["stillTitles"]["runtime"] if runtime_mods else None}]
-    opening_say = (words["opening"] if counts else words["openingNone"]).format(mod=mod(target))
+    opening_say = fill((words["opening"] if counts else words["openingNone"]), mod=mod(target))
     if incomplete:
         opening_say += " " + incomplete
     # each page says its own words: the types page its lead and its rows, the load-order page what it highlights
     opening_pages[0]["sayLead"] = opening_say
     if words.get("loadOrderSay"):
         aff_ = [mod(p) for p in opening_pages[1]["affected"]]
-        opening_pages[1]["say"] = words["loadOrderSay"].format(
+        opening_pages[1]["say"] = fill(words["loadOrderSay"],
             count=len(opening_pages[1]["plugins"]), marked=len(aff_), names=joined(aff_))
     rate = float(policy.get("readingWordsPerSecond") or 0) or None
     for pg in opening_pages:
@@ -1368,17 +1432,17 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 text += " " + spoken(str(item_["attributionText"]))
             if i == 0:
                 n, shown = card_count(t), len(chosen)
-                intro = words["cases"]["one" if n == 1 else "many"].format(count=n, label=case_labels[t])
+                intro = fill(words["cases"]["one" if n == 1 else "many"], count=n, label=case_labels[t])
                 lead = ("" if n == 1 else words["lead"]["all"] if shown == n else
-                        words["lead"]["one"] if shown == 1 else words["lead"]["some"].format(count=shown))
+                        words["lead"]["one"] if shown == 1 else fill(words["lead"]["some"], count=shown))
                 if t in (policy.get("countRows") or []) and words["cases"].get("rows"):
                     # (N2) a type counted in rows (navmesh links) says its unit, and the groups its examples come from
                     g_n = len({group_key(c_) for c_ in clashes.values() if c_["type"] == t})
-                    intro = words["cases"]["rowsOne" if n == 1 else "rows"].format(
+                    intro = fill(words["cases"]["rowsOne" if n == 1 else "rows"],
                         count=n, unit=card_unit(t, n) or case_labels[t], groups=g_n,
                         groupNoun="group" if g_n == 1 else "groups")
                     lead = ("" if g_n == 1 else words["lead"]["groupsAll"] if shown == g_n else
-                            words["lead"]["groupsOne"] if shown == 1 else words["lead"]["groupsSome"].format(count=shown))
+                            words["lead"]["groupsOne"] if shown == 1 else fill(words["lead"]["groupsSome"], count=shown))
                 text = " ".join(x for x in (intro, lead, text) if x)
             if any(r["formKey"] in game for r in c["rows"]):
                 text += " " + words["playTime"]
@@ -1403,7 +1467,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                              # the cell each version is filed in (names enrichment, read from the plugin files)
                              cells={"left": (ref_of(r["formKey"]).get("cells") or {}).get(r["A"]),
                                     "right": (ref_of(r["formKey"]).get("cells") or {}).get(r["B"])},
-                             labels={k: v.format(loser=mod(r["A"]), winner=mod(r["B"]), mod=mod(target))
+                             labels={k: fill(v, loser=mod(r["A"]), winner=mod(r["B"]), mod=mod(target))
                                      for k, v in words["splitLabels"].items()},
                              # removals this split frames: marked on the left half, where they still stand
                              alsoMarked=[{"formKey": g_["rows"][0]["formKey"], "state": "left",
@@ -1425,12 +1489,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         presentation names none, the report itself (key + "Report"); never an empty heading in quotes (C2130)."""
         heading_ = spoken((reader.get("sectionHeadings") or {}).get("prediction") or "").strip()
         if heading_:
-            return words.get(key, "").format(heading=heading_, **slots)
-        return words.get(key + "Report", "").format(**slots)
+            return fill(words.get(key, ""), heading=heading_, **slots)
+        return fill(words.get(key + "Report", ""), **slots)
 
     if unpictured or none_captured or any(represented.get(t_) for t_ in counts):
         n_un = len(unpictured)
-        sentence_un = words["unpictured"]["one" if n_un == 1 else "many"].format(count=n_un) if unpictured else ""
+        sentence_un = fill(words["unpictured"]["one" if n_un == 1 else "many"], count=n_un) if unpictured else ""
         if words.get("unpicturedAccount"):
             # per kind, in the opening card's unit: pictured + represented by the example + not pictured = the card's
             # count, so every clash on the card is accounted for; then what "represented" means and why, as sentences
@@ -1454,13 +1518,13 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 any_rep_ = any_rep_ or bool(rep_)
                 other_ = tot_ - pic_ - rep_ - unp_
                 if not pic_ and not rep_ and not other_ and words.get("unpicturedNone"):
-                    parts_.append(words["unpicturedNone"].format(label=type_labels[t_], total=tot_,
+                    parts_.append(fill(words["unpicturedNone"], label=type_labels[t_], total=tot_,
                                                                  unit=card_unit(t_, tot_) or "") + ".")
                     continue
-                parts_.append(words["unpicturedAccount"].format(
+                parts_.append(fill(words["unpicturedAccount"],
                     label=type_labels[t_], total=tot_, unit=card_unit(t_, tot_) or "",
                     counts=account_counts(words, pic_, rep_, unp_))
-                    + (words.get("unpicturedOther", "").format(count=other_) if other_ else "") + ".")
+                    + (fill(words.get("unpicturedOther", ""), count=other_) if other_ else "") + ".")
             sentence_un = " ".join(parts_)
             if any_rep_ and words.get("representedMeans"):
                 report_lines.append(words["representedMeans"])
@@ -1480,10 +1544,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                     return f"{n_} not pictured"
                 said_ = (f"{spots_[0]} to {spots_[-1]}" if len(spots_) > 3
                          else joined([str(x_) for x_ in spots_]))
-                return tmpl_.format(count=n_, spots=said_, plural="" if spots_ == [1] else "s",
+                return fill(tmpl_, count=n_, spots=said_, plural="" if spots_ == [1] else "s",
                                      rest="it rests" if n_ == 1 else "they rest")
             if why_n and words.get("unpicturedReasons"):
-                report_lines.append(words["unpicturedReasons"].format(reasons=" ".join(
+                report_lines.append(fill(words["unpicturedReasons"], reasons=" ".join(
                     str(reasons_.get(w_, w_)).rstrip(".") + f" ({count_(w_, n_)})." for w_, n_ in why_n.most_common())))
             sentence_un += " " + where_("unpicturedWhere")
             sentence_un = sentence_un.strip()
@@ -1500,12 +1564,12 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
                 why_n[why_] += len(c_["rows"]) if c_["type"] in (policy.get("countRows") or []) else 1
             short = policy.get("stillReasonsShort") or {}
             if short and words.get("unpicturedWhy"):
-                report_lines.append(words["unpicturedWhy"].format(reasons=joined(
+                report_lines.append(fill(words["unpicturedWhy"], reasons=joined(
                     [f"{n_} {short.get(w_, w_)}" for w_, n_ in why_n.most_common()])))
         for t_, n_, w_ in none_captured:
             # which limit stopped the picture (R1): said, never "no picture was captured" alone
-            sentence_un = (sentence_un + " " + words["noneCapturedOne" if n_ == 1 and words.get("noneCapturedOne")
-                                                      else "noneCaptured"].format(
+            sentence_un = (sentence_un + " " + fill(words["noneCapturedOne" if n_ == 1 and words.get("noneCapturedOne")
+                                                      else "noneCaptured"],
                 count=n_, label=case_labels[t_], why=(words.get("noneCapturedWhy") or {})[w_])).strip()
         # a removal is said, never only counted: which mod takes which object out of the world
         gone = [c for c, why in unpictured if why == "removed"]
@@ -1519,13 +1583,13 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         for (win_, lose_, vb_), cs_ in groups_.items():
             if len(cs_) == 1 or not words.get("placementRemovedMany"):
                 if words.get("placementRemoved"):
-                    sentence_un += " " + " ".join(words["placementRemoved"].format(
+                    sentence_un += " " + " ".join(fill(words["placementRemoved"],
                         winner=win_, loser=lose_, places=vb_,
                         object=spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary"))) for c in cs_)
                 continue
             # several objects one mod takes out of the world: said once, with a few named and the rest counted
             names_ = list(dict.fromkeys(spoken_ref(c["rows"][0]["formKey"], c["rows"][0].get("summary")) for c in cs_))
-            sentence_un += " " + words["placementRemovedMany"].format(
+            sentence_un += " " + fill(words["placementRemovedMany"],
                 winner=win_, loser=lose_, places=vb_, count=len(cs_),
                 objects=joined(names_[:4] + ([f"{len(names_) - 4} more"] if len(names_) > 4 else [])))
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "unpictured", "narration": sentence_un, "count": n_un,
@@ -1558,7 +1622,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     ic_ = pred.get("incompleteChecks") or {}
     checks, measured_titles = [], set()
     if ic_.get("checks") and words.get("closingLead"):
-        checks.append({"reason": words["closingLead"].format(missing=len(ic_["checks"]), total=ic_.get("total")),
+        checks.append({"reason": fill(words["closingLead"], missing=len(ic_["checks"]), total=ic_.get("total")),
                        "subjects": [], "comparison": False, "lead": True})
     for c_ in ic_.get("checks") or []:
         reason_, comparison_ = plain_reason(c_.get("reason"), words)
@@ -1574,7 +1638,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     for r_ in closing_checks(reader, pres, mod, patch_name, words):
         subs_ = [s_ for s_ in r_["subjects"] if check_title_of(s_) not in measured_titles]
         if subs_:
-            other_.append({**r_, "reason": (words.get("closingOtherSetups") or "{reason}").format(reason=r_["reason"]),
+            other_.append({**r_, "reason": fill((words.get("closingOtherSetups") or "{reason}"), reason=r_["reason"]),
                            "subjects": subs_})
     head_titles = {str(i.get("title")): i for i in pred.get("items") or [] if i.get("shownAs") != "alone"}
     reconcile = []
@@ -1582,7 +1646,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         for subj in row.get("subjects") or []:
             it = head_titles.get(check_title_of(str(subj)))
             if it and words.get("closingReconcile") and row.get("comparison"):
-                reconcile.append(words["closingReconcile"].format(title=it.get("title"), count=it.get("count"),
+                reconcile.append(fill(words["closingReconcile"], title=it.get("title"), count=it.get("count"),
                                                                   cases="case" if it.get("count") == 1 else "cases",
                                                                   verb="is" if it.get("count") == 1 else "are"))
     checks += other_
@@ -1603,16 +1667,16 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             judged_ = re.search(r"beside ([\d,]+) the check did judge", rest_)
             cnt_ = line_.get("count")
             if isinstance(cnt_, int):
-                item_ = partial_["counted"].format(check=check_.strip(), count=f"{cnt_:,}", unit=line_.get("unit") or "items",
+                item_ = fill(partial_["counted"], check=check_.strip(), count=f"{cnt_:,}", unit=line_.get("unit") or "items",
                                                    judged=judged_.group(1) if judged_ else "")
                 if not judged_:
                     item_ = item_.split(partial_["judgedCut"])[0] if partial_.get("judgedCut") else item_
             else:
                 # the largest population it could not judge, as a count, in one short phrase; the rest are in the report
                 big_ = largest_population(rest_)
-                item_ = (partial_["uncountedOne"].format(check=check_.strip(), count=big_[0], what=big_[1],
+                item_ = (fill(partial_["uncountedOne"], check=check_.strip(), count=big_[0], what=big_[1],
                                                          more=partial_.get("uncountedMore", "") if big_[2] else "")
-                         if big_ and partial_.get("uncountedOne") else partial_["uncounted"].format(check=check_.strip()))
+                         if big_ and partial_.get("uncountedOne") else fill(partial_["uncounted"], check=check_.strip()))
             row_ = next((r_ for r_ in checks if r_["reason"] == partial_["heading"]), None)
             if row_ is None:
                 row_ = {"reason": partial_["heading"], "subjects": [], "comparison": False}
@@ -1654,7 +1718,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         re.sub(r"\.(esp|esm|esl)$", "", str(k), flags=re.I) for k in mod_names] + [
         (v or {}).get("name") for v in names_mods.values() if isinstance(v, dict)] + [
         re.sub(r"\.(esp|esm|esl)$", "", str(x), flags=re.I) for x in full_order]
-    short_forms = short_mod_names(pool_, words)
+    short_forms = short_mod_names(pool_, words, subject=[mod(target), re.sub(r"\.(esp|esm|esl)$", "", str(target), flags=re.I)],
+                                  same=plugin_name_groups(mod_names))
     say_short_forms(chapters, short_forms)
     if short_forms and rate:
         # a page's reading time is its text's, as shortened: the render holds it for that and refuses a long silence

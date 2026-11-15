@@ -52,7 +52,8 @@ def sha(p: Path) -> str:
 
 
 def bind(t: str, **kw) -> str:
-    return t.format(**kw)
+    import reel_plan
+    return reel_plan.fill(t, **kw)
 
 
 def plural(pair, n):

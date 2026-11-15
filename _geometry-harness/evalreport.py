@@ -83,12 +83,12 @@ def view_kind_caption(provenance: dict, words: dict, first: bool = True) -> str:
     kind = (provenance or {}).get("viewKind") or "eye-level"
     if kind == "cutaway":
         n = len((provenance or {}).get("hidden") or [])
-        return str(words.get("cutaway") or "").format(count=n, plural="" if n == 1 else "s", them="it" if n == 1 else "them")
+        return fill(str(words.get("cutaway") or ""), count=n, plural="" if n == 1 else "s", them="it" if n == 1 else "them")
     if kind == "top-down":
         cut = (provenance or {}).get("cullAbove")
         n = len((provenance or {}).get("hidden") or [])
-        return (str(words.get("topDown") or "").format(cut="?" if cut is None else f"{float(cut):.0f}")
-                + (str(words.get("topDownHidden") or "").format(count=n, plural="" if n == 1 else "s",
+        return (fill(str(words.get("topDown") or ""), cut="?" if cut is None else f"{float(cut):.0f}")
+                + (fill(str(words.get("topDownHidden") or ""), count=n, plural="" if n == 1 else "s",
                                                                them="it" if n == 1 else "them") if n else ""))
     # the alpha-card rule's station view: the picker's own witness camera, not a composed shot (round 2 rerun, C1894)
     # said once per figure, on the frame it shows first, as the render line is (C1899)
@@ -134,8 +134,8 @@ def patch_search_leads(search: dict, words: dict, loaded: set, supplied: list, m
         if not hits:
             # a supplied patch for this pair that the search did not find: said as the search's miss, never as no patch
             own = next((p_ for p_ in supplied if {x.lower() for x in pair} <= top_(p_)), None)
-            out.append(lead["notFoundSupplied"].format(a=pair[0], b=pair[1], patch=own)
-                       if own and lead.get("notFoundSupplied") else lead["notFound"].format(a=pair[0], b=pair[1]))
+            out.append(fill(lead["notFoundSupplied"], a=pair[0], b=pair[1], patch=own)
+                       if own and lead.get("notFoundSupplied") else fill(lead["notFound"], a=pair[0], b=pair[1]))
             continue
         evaluated = any({x.lower() for x in pair} <= set(masters.get(p_.lower(), set())) for p_ in supplied)
         for h in hits:
@@ -158,12 +158,12 @@ def patch_search_leads(search: dict, words: dict, loaded: set, supplied: list, m
         pairs = x["pairs"]
         common = [p for p in pairs[0] if all(p.lower() in {q.lower() for q in pr} for pr in pairs)]
         if len(pairs) == 1:
-            text = lead["listed"].format(a=pairs[0][0], b=pairs[0][1], file=file_)
+            text = fill(lead["listed"], a=pairs[0][0], b=pairs[0][1], file=file_)
         elif common and lead.get("listedPage"):
             others = [q for pr in pairs for q in pr if q.lower() != common[0].lower()]
-            text = lead["listedPage"].format(b=common[0], a=reel_plan.joined(list(dict.fromkeys(others))), file=file_)
+            text = fill(lead["listedPage"], b=common[0], a=reel_plan.joined(list(dict.fromkeys(others))), file=file_)
         else:
-            text = lead["listedPagePairs"].format(pairs="; ".join(f"{pr[0]} and {pr[1]}" for pr in pairs), file=file_)
+            text = fill(lead["listedPagePairs"], pairs="; ".join(f"{pr[0]} and {pr[1]}" for pr in pairs), file=file_)
         lines.append(text + reel_plan.lead_qualifiers(best, words, loaded, x["evaluated"]))
     return lines
 
@@ -252,14 +252,18 @@ def said_record(fk, names: dict, labels: dict, words: dict, reader) -> str:
         beid = reader("editorId", base)
         if obj or (isinstance(beid, str) and beid):
             return obj or bind(words.get("recordPlaced") or "a placed {name}", {"name": eid_said(beid)})
+    def cell_said(cell_fk):
+        """The cell said by said_place; None for a cell nothing names, which does not tell one record from another."""
+        where_ = said_place(str(cell_fk), places, words, reader)
+        cp_ = str(cell_fk).split(":", 1)[-1]
+        if words.get("placeNoName") and where_ == bind(words["placeNoName"], {"plugin": cp_}) or (
+                words.get("placeUnread") and where_.startswith(bind(words["placeUnread"], {"plugin": cp_, "why": ""})[:-3])):
+            return None
+        return where_
     place = reader("navmeshPlace", fk)
     if isinstance(place, (list, tuple)) and place:
         if place[0] == "cell" and len(place) >= 2:
-            where = said_place(str(place[1]), places, words, reader)
-            cp_ = str(place[1]).split(":", 1)[-1]
-            if words.get("placeNoName") and where == bind(words["placeNoName"], {"plugin": cp_}) or (
-                    words.get("placeUnread") and where.startswith(bind(words["placeUnread"], {"plugin": cp_, "why": ""})[:-3])):
-                where = None              # a cell nothing names does not tell this navmesh from another
+            where = cell_said(place[1])
         elif place[0] == "grid" and len(place) >= 4:
             weid = reader("editorId", str(place[1]))
             wname = eid_said(weid) if isinstance(weid, str) and weid else None
@@ -269,6 +273,13 @@ def said_record(fk, names: dict, labels: dict, words: dict, reader) -> str:
             where = None
         if where:
             return bind(words.get("recordNavmesh") or "a navmesh of {plugin} in {place}", {"plugin": plugin, "place": where})
+    # (report words, item 2) a landscape record is the ground of its cell: the cell-children group that files it, read
+    # from its own plugin (reader("recordCell", fk) -> {"type", "cell"}), said as said_place says that cell
+    held = reader("recordCell", fk)
+    if isinstance(held, dict) and held.get("type") == "LAND" and held.get("cell"):
+        where = cell_said(held["cell"])
+        if where:
+            return bind(words.get("recordLandscape") or "the ground of {place}", {"place": where})
     if reader("why", fk) == "read":
         # read from its own plugin: the record has no editor ID and nothing else here names it
         return bind(words.get("recordNoName") or "a record of {plugin} with no editor ID", {"plugin": plugin})
@@ -1298,12 +1309,22 @@ def infer_clobber_direction(finding: dict, plugin_order: list[str]) -> dict | No
             "basis": "conflict evidence and recorded plugin order"}
 
 
+def fill(template, **slots) -> str:
+    """A skill template filled with the reel's one filler (its possessive rule; reel_plan.fill)."""
+    import reel_plan
+    return reel_plan.fill(template, **slots)
+
+
 def bind(template: str, values: dict) -> str:
     class Safe(dict):
         def __missing__(self, k):
             return "not supplied"
+    import reel_plan
     vals = {k: (fmt_n(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else
                 ("not supplied" if v is None else v)) for k, v in values.items()}
+    # the reel's possessive rule: "{plugin}'s" over a name ending in s says "NPCs'", never "NPCs's"
+    template = reel_plan.POSSESSIVE_SLOT.sub(lambda m: m.group(0)[:-1] if isinstance(vals.get(m.group(1)), str) and str(
+        vals[m.group(1)])[-1:].casefold() == "s" else m.group(0), str(template))
     return template.format_map(Safe(vals))
 
 
@@ -2954,6 +2975,8 @@ def build_prediction(ctx: dict) -> dict:
                             res_ = {"records": pluginread.editor_ids(path_, [str(fk)])}
                         elif what == "cellWorld":       # (eighth review) the worldspace a cell is filed under
                             res_ = {"records": pluginread.cell_worlds(path_, [str(fk)])}
+                        elif what == "recordCell":      # (report words) the cell a record is filed under, and its type
+                            res_ = {"records": pluginread.record_cells(path_, [str(fk)])}
                         else:
                             res_ = {"navmesh": pluginread.navmesh_links, "placement": pluginread.placements,
                                     "placementFull": pluginread.placements_full, "cellGrid": pluginread.cell_grids,
@@ -8597,33 +8620,6 @@ def record_labels(b: "Bundle") -> dict:
     return out
 
 
-def label_form_keys(obj, labels: dict):
-    """A form key the reader's text gives bare is said with the record's name first ("The Town Inn, 00C401:Skyrim.esm"),
-    unless that name is already said beside it; a path or id is left as it is."""
-    if not labels:
-        return obj
-    pat = re.compile("(" + "|".join(re.escape(k) for k in sorted(labels, key=len, reverse=True)) + r")(?![\w.])")
-
-    def fix(s):
-        def one(m):
-            lab = labels[m.group(1)]
-            near = s[max(0, m.start() - 80):m.end() + 80]
-            return m.group(1) if lab.lower() in near.lower() else f"{lab}, {m.group(1)}"
-        return pat.sub(one, s)
-
-    def walk(x, key=None):
-        if isinstance(x, str):
-            # data a later step parses (form keys, a row's summary) keeps its own spelling; only sentences are labelled
-            return x if (key and ("path" in str(key).lower() or str(key).lower() in (
-                "sha256", "id", "formkey", "other", "record", "records", "object", "summary", "members", "fk"))) else fix(x)
-        if isinstance(x, list):
-            return [walk(v, key) for v in x]
-        if isinstance(x, dict):
-            return {k: walk(v, k) for k, v in x.items()}
-        return x
-    return walk(obj)
-
-
 def load_precedent(folder) -> dict:
     """{patch plugin (lower case): its source row} from a precedent cards folder's summary.json; {} when absent."""
     doc = load_json(Path(folder) / "summary.json") if folder else None
@@ -10304,7 +10300,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                     marks_[col_] = fk_
             arm_ = (m_.get("subject") or {}).get("armId")
             setup_ = (caption_words.get("setupWith") if arm_ == f_.get("armId") else caption_words.get("setupWithout") or "")
-            setup_ = str(setup_ or "").format(mod=fig_mod(target_plugin))
+            setup_ = fill(str(setup_ or ""), mod=fig_mod(target_plugin))
             fk_ = (m_.get("subject") or {}).get("formKey") or row_.get("formKey")
             slots_ = {"setup": setup_, "object": fig_object(fk_)}
             key_ = state_
@@ -10332,9 +10328,9 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 slots_["mod"] = fig_mod(row_.get("A") or ab_.get("A")) if state_ == "left" else fig_mod(row_.get("B") or ab_.get("B"))
             tmpl_ = caption_words.get(key_) if key_ in caption_words else caption_words.get("fallback")
             try:
-                m_["caption"] = str(tmpl_ or "").format(**slots_) or None
+                m_["caption"] = fill(str(tmpl_ or ""), **slots_) or None
             except (KeyError, IndexError):
-                m_["caption"] = str(caption_words.get("fallback") or "").format(**slots_) or None
+                m_["caption"] = fill(str(caption_words.get("fallback") or ""), **slots_) or None
             # (Missives retry 2 blind pass) a split's magenta mark is a removal the split frames, not a second clash
             # with the cyan object: said on both halves, from the left half's own renderer command
             if state_ in ("left", "right") and m_.get("caption"):
@@ -10348,7 +10344,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
                 gone_ = left_marks_.get("magenta")
                 key_ = "removedLeft" if state_ == "left" else "removedRight"
                 if gone_ and caption_words.get(key_):
-                    m_["caption"] += caption_words[key_].format(
+                    m_["caption"] += fill(caption_words[key_], 
                         removed=fig_object(gone_), object=fig_object(fk_),
                         winner=fig_mod(row_.get("B") or (f_.get("counts") or {}).get("B") or target_plugin))
             # a cutaway or a sliced top-down says so in its caption, not only in the frame's own label (a crop can cut that)
@@ -11414,7 +11410,9 @@ def buried_lines(plan: dict, captures: list[dict], names: dict, words: dict) -> 
 
     def obj(fk):
         eid = (bases.get((refs.get(str(fk)) or {}).get("base") or "") or {}).get("editorId")
-        return (objects.get(eid) or {}).get("name") or reel_plan.humanize(eid) or str(fk)
+        # the object in the words its item says it by (record_object_name: in-game name, else the editor ID with its
+        # numbers kept), so one object never reads under two names
+        return (objects.get(eid) or {}).get("name") or (id_words(eid) if eid else None) or str(fk)
     by_finding = {}
     for r_ in pred.get("record") or []:
         if r_.get("findingId") and r_.get("formKey"):
@@ -11424,8 +11422,8 @@ def buried_lines(plan: dict, captures: list[dict], names: dict, words: dict) -> 
     n = 0
     for g in pred.get("items") or []:
         found = [b_ for fid in g.get("findingIds") or [] for b_ in by_finding.get(fid, [])]
-        lines = list(dict.fromkeys(str(words.get("buriedSeeThrough") if b_.get("partnerSeeThrough") and words.get("buriedSeeThrough")
-                                       else tmpl).format(object=obj(b_["formKey"]), partner=obj(b_["partner"]) if b_["partner"] else "another object",
+        lines = list(dict.fromkeys(fill(str(words.get("buriedSeeThrough") if b_.get("partnerSeeThrough") and words.get("buriedSeeThrough")
+                                       else tmpl), object=obj(b_["formKey"]), partner=obj(b_["partner"]) if b_["partner"] else "another object",
                                                count=b_["stations"], plural="" if b_["stations"] == 1 else "s",
                                                verb="sees" if b_["stations"] == 1 else "see")
                                    for b_ in found))
@@ -12208,12 +12206,102 @@ def copy_supporting_evidence(plan: dict, presentation_dir: Path, out: Path) -> l
     return rows
 
 
+def report_short_forms(plan: dict, pr: dict) -> dict:
+    """(report words, item 3) {full name: short form} for the report's long plugin file stems and mod names, by the reel's
+    one rule (reel_plan.short_mod_names) over every name the report can say: each setup's plugins and their mod names,
+    the evaluated mod's own names as the subject, and each plugin's stem and mod name counted as one plugin."""
+    import reel_plan
+    words = (pr.get("reel") or {}).get("words") or {}
+    mods = ((plan.get("reel") or {}).get("modNames") or ((plan.get("reader") or {}).get("names") or {}).get("mods") or {})
+    plugins = []
+    for a_ in (plan.get("scope") or {}).get("arms") or []:
+        plugins += [str(x) for x in (a_.get("plugins") or []) if isinstance(a_, dict)]
+    targets = [str(t.get("name")) for t in (plan.get("scope") or {}).get("targets") or [] if isinstance(t, dict) and t.get("name")]
+    plugins = list(dict.fromkeys(plugins + targets + [str(k) for k in mods]))
+
+    def stem(x):
+        return re.sub(r"\.(esp|esm|esl)$", "", str(x), flags=re.I)
+
+    def name_of(x):
+        v = mods.get(x) or next((v_ for k_, v_ in mods.items() if str(k_).lower() == str(x).lower()), None)
+        return (v or {}).get("name") if isinstance(v, dict) else v
+    pool = [stem(x) for x in plugins] + [n for n in (name_of(x) for x in plugins) if n]
+    subject = [y for t in targets[:1] for y in (stem(t), name_of(t)) if y]
+    same = [{stem(x), *([name_of(x)] if name_of(x) else [])} for x in plugins]
+    got = reel_plan.short_mod_names(pool, words, subject=subject, same=same)
+    # the report prints file names a modder looks up: only a plugin whose file name is long (skill data minLength, the
+    # name as printed, extension included) is said short, by its stem and its mod name alike; a short file name such as
+    # "ModA - ModB patch.esp" stays in full even where the reel says it by the rest (a patch named after the mod)
+    floor = int(((words.get("shortForm") or {}).get("minLength")) or 40)
+    long_ = {n.casefold() for x in plugins if len(str(x)) > floor for n in (stem(x), name_of(x)) if n}
+    return {k: v for k, v in got.items() if k.casefold() in long_}
+
+
+#: rendered text a reader does not read as a sentence, or that quotes a name: left exactly as rendered
+REPORT_MD_KEEP = re.compile(r"```[\s\S]*?```|`[^`\n]*`|\]\([^)\s]*\)|!\[[^\]\n]*\]|<[^>\n]*>|\"[^\"\n]*\"|“[^”\n]*”")
+REPORT_HTML_KEEP = re.compile(r"<(style|script|title)\b[\s\S]*?</\1>|<[^>]*>", re.I)
+TEXT_QUOTED = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”")
+
+
+def say_report_short_forms(text: str, short: dict, gloss: str, as_html: bool = False) -> str:
+    """(report words, item 3) A long plugin file name or mod name said in full until its first plain mention, which
+    carries the gloss ("X.esp (X below)"), and by its short form after, in the rendered text's reading order. Link
+    targets, tags and attributes, image alt text, code and anything in double quotes (an in-game name quoted as a
+    value) are left as rendered. A possessive after the name is said again by the reel's rule for the short form."""
+    import reel_plan
+    if not short or not text:
+        return text
+    pat = reel_plan.short_form_pattern(short, ext=True)
+    glossed = set()
+
+    def one(m):
+        n, own = m.group("name"), m.group("own")
+        key = short[n].casefold()
+        if key in glossed:
+            return reel_plan.said_short(short[n], own)
+        if own or not gloss:
+            return m.group(0)
+        glossed.add(key)
+        return fill(gloss, name=m.group(0), short=short[n])
+
+    def plain(chunk):
+        out, last = [], 0
+        for q in TEXT_QUOTED.finditer(chunk):
+            out += [pat.sub(one, chunk[last:q.start()]), q.group(0)]
+            last = q.end()
+        return "".join(out + [pat.sub(one, chunk[last:])])
+    if not as_html:
+        out, last = [], 0
+        for k in REPORT_MD_KEEP.finditer(text):
+            out += [plain(text[last:k.start()]), k.group(0)]
+            last = k.end()
+        return "".join(out + [plain(text[last:])])
+    body = text.find("<body")
+    head, rest = (text[:body], text[body:]) if body >= 0 else ("", text)
+    out, last = [head], 0
+
+    def node(chunk):
+        said = plain(html.unescape(chunk))
+        return chunk if said == html.unescape(chunk) else html.escape(said, quote=False)
+    for k in REPORT_HTML_KEEP.finditer(rest):
+        out += [node(rest[last:k.start()]), k.group(0)]
+        last = k.end()
+    return "".join(out + [node(rest[last:])])
+
+
 def render_all(plan: dict, view: dict, out: Path, css: str) -> dict:
     e_md = env(False)
     e_html = env(True)
     ctx = {"p": view, "css": css}
     md = e_md.get_template("report.md.j2").render(**ctx)
     html = e_html.get_template("report.html.j2").render(**ctx)
+    # (report words, item 3) long names said in full once, then by their short forms; the evidence index keeps them
+    pr_ = load_priorities()
+    short_ = (plan.get("reader") or {}).get("shortForms")
+    short_ = report_short_forms(plan, pr_) if short_ is None else short_
+    gloss_ = str((((pr_.get("reel") or {}).get("words") or {}).get("shortForm") or {}).get("reportFirst") or "")
+    md = say_report_short_forms(md, short_, gloss_)
+    html = say_report_short_forms(html, short_, gloss_, as_html=True)
     idx = e_md.get_template("evidence-index.md.j2").render(**ctx)
     # the same index as a browser can read: report.html links into THIS one, report.md into the Markdown one.
     # One template per format, as the report itself has - not a converter, so every sentence stays a template
@@ -12421,6 +12509,7 @@ def cmd_plan(a) -> int:
             plan["reel"] = reel_block(plan, bundle, sibling, pr, a, out, resolved=resolved_,
                                       siblings_all=[(Path(x_), "sibling:" if k_ == 0 else f"sibling{k_ + 1}:")
                                                     for k_, x_ in enumerate(sib_given)])
+            plan["reader"]["shortForms"] = report_short_forms(plan, pr)
         except InputRefused as ex:
             return refuse(r, str(ex))
         stamp(plan)

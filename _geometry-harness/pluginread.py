@@ -489,3 +489,59 @@ def cell_worlds(path, form_keys):
         w_ = got.get((idx << 24) | int(obj, 16)) if idx is not None and len(obj) == 6 else None
         out[str(fk)] = global_(w_) if w_ is not None else None
     return out
+
+
+_CELLS = {}
+#: the groups whose label is the cell that holds the records inside: cell children, persistent, temporary, distant
+CELL_CHILD_GROUPS = (6, 8, 9, 10)
+
+
+def record_cells(path, form_keys):
+    """(report words, item 2) The cell each named record is filed under and the record's type: the cell-children group
+    (types 6, 8, 9, 10) holding it, whose label is the cell's FormID, as cell_worlds reads the worldspace's:
+    {formKey: {"type": "LAND", "cell": "XXXXXX:Origin.esm"}, or None where the plugin holds no such record or files it
+    under no cell}. Group headers only; the file is indexed once per state."""
+    p = Path(path)
+    try:
+        st = p.stat()
+        key = (str(p).lower(), st.st_size, st.st_mtime_ns)
+        if key not in _CELLS:
+            buf = p.read_bytes()
+            if buf[:4] != b"TES4":
+                raise PluginReadError(f"{p.name} is not a plugin file (no TES4 header)")
+            hsize = struct.unpack_from("<I", buf, 4)[0]
+            masters = [d.rstrip(b"\x00").decode("latin-1") for s_, d in _subrecords(buf[24:24 + hsize]) if s_ == "MAST"]
+            got = {}
+
+            def walk(i, end, cell):
+                while i + 24 <= end:
+                    size = struct.unpack_from("<I", buf, i + 4)[0]
+                    if buf[i:i + 4] == b"GRUP":
+                        if size < 24 or i + size > end:
+                            raise PluginReadError("a group whose size does not fit the file")
+                        gtype = struct.unpack_from("<I", buf, i + 12)[0]
+                        walk(i + 24, i + size, struct.unpack_from("<I", buf, i + 8)[0] if gtype in CELL_CHILD_GROUPS
+                             else None if gtype in (0, 1, 2, 3, 4, 5) else cell)
+                        i += size
+                        continue
+                    if cell is not None:
+                        got[struct.unpack_from("<I", buf, i + 12)[0]] = (buf[i:i + 4].decode("latin-1"), cell)
+                    i += 24 + size
+            walk(24 + hsize, len(buf), None)
+            _CELLS[key] = (masters, got)
+    except (OSError, struct.error) as e:
+        raise PluginReadError(f"cannot read {p}: {e}") from e
+    masters, got = _CELLS[key]
+    low = [m.lower() for m in masters]
+
+    def global_(fid):
+        idx = fid >> 24
+        return f"{fid & 0xFFFFFF:06X}:{masters[idx] if idx < len(masters) else p.name}"
+    out = {}
+    for fk in form_keys:
+        obj, _, origin = str(fk).partition(":")
+        idx = low.index(origin.lower()) if origin.lower() in low else (
+            len(masters) if origin.lower() == p.name.lower() else None)
+        hit = got.get((idx << 24) | int(obj, 16)) if idx is not None and len(obj) == 6 else None
+        out[str(fk)] = {"type": hit[0], "cell": global_(hit[1])} if hit else None
+    return out
