@@ -282,6 +282,8 @@ public sealed class FindingReaderTests : IDisposable
         Assert.Equal(cell, (string?)Contract.Prop(row, "Cell"));
     }
 
+    static void Role(object row, string role) => Assert.Equal(role, (string?)Contract.Prop(row, "Role"));
+
     static void NotClickable(object row)
     {
         Assert.False((bool)Contract.Prop(row, "Clickable")!);
@@ -293,13 +295,18 @@ public sealed class FindingReaderTests : IDisposable
     public void Dep_rows_one_per_entry_clickable_at_the_dependent()
     {
         var rows = Read("geometry.declared-dependencies", """
-            {"rows":[{"host":"000801:Syn.esp","dependent":"000802:Syn.esp","kind":"k","verdict":"left-behind","cell":"SynCell","cellKey":"000900:Syn.esp","why":"w"},
-                     {"host":"000803:Syn.esp","dependent":"000804:Syn.esp","kind":"k","verdict":"ok","cell":null,"cellKey":null,"why":"w"}],
-             "withheldRows":[],"modPairs":[]}
+            {"rows":[{"host":"000801:Syn.esp","dependent":"000802:Syn.esp","kind":"ActivateParent","verdict":"LeftBehind","cell":"SynCell (int)","cellKey":"000900:Syn.esp","why":"w"},
+                     {"host":"000803:Syn.esp","dependent":"000804:Syn.esp","kind":"ActivateParent","verdict":"LeftBehind","cell":null,"cellKey":null,"why":"w"}],
+             "withheldRows":[{"host":"000805:Syn.esp","dependent":"000806:Syn.esp","kind":"ActivateParent","verdict":"LeftBehind","cell":"SynCell (int)","cellKey":"000900:Syn.esp","why":"withheld"}],
+             "unreadable":["000807:Syn.esp: the record could not be read"],"modPairs":[]}
             """);
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(4, rows.Count);
         Clickable(rows[0], "000802:Syn.esp", "000900:Syn.esp");
+        Role(rows[0], "finding");
         NotClickable(rows[1]);
+        Role(rows[1], "finding");
+        Assert.Single(rows, r => (string?)Contract.Prop(r, "Role") == "context");      // the withheld row
+        Assert.Single(rows, r => (string?)Contract.Prop(r, "Role") == "incomplete");   // the unreadable entry
     }
 
     [Fact]
@@ -310,6 +317,7 @@ public sealed class FindingReaderTests : IDisposable
             """);
         Assert.Single(rows);
         Clickable(rows[0], "000801:Syn.esp", "000900:Syn.esp");
+        Role(rows[0], "finding");
     }
 
     [Fact]
@@ -318,10 +326,24 @@ public sealed class FindingReaderTests : IDisposable
         var rows = Read("geometry.route-cut", """
             {"Probe":"blockprobe","Schema":"1","Targets":["Syn.esp"],"Population":"p","Tally":{},
              "Rows":[{"Verdict":"Blocked","FormKey":"000801:Syn.esp","Cell":"000900:Syn.esp","Mesh":"m.nif","By":[],"Why":"w"},
-                     {"Verdict":"None","FormKey":"000802:Syn.esp","Cell":"000900:Syn.esp","Mesh":"m.nif","By":[],"Why":"w"}]}
+                     {"Verdict":"LikelyBlocked","FormKey":"000802:Syn.esp","Cell":"SynTunnels03","Mesh":"m.nif","By":[],"Why":"w"},
+                     {"Verdict":"NoLine","FormKey":"000803:Syn.esp","Cell":"SynTunnels03","Mesh":"m.nif","By":[],"Why":"w"},
+                     {"Verdict":"Unjudgeable","FormKey":"000804:Syn.esp","Cell":"SynTunnels03","Mesh":"m.nif","By":[],"Why":"w"}]}
             """);
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(4, rows.Count);
         Clickable(rows[0], "000801:Syn.esp", "000900:Syn.esp");
+        Role(rows[0], "finding");
+        // an editor ID for a cell is not a cell key: without the names enrichment the row says so
+        NotClickable(rows[1]);
+        Assert.Contains("SynTunnels03", (string?)Contract.Prop(rows[1], "WhyNot"));
+        Role(rows[1], "finding");
+        Role(rows[2], "context");
+        Role(rows[3], "incomplete");
+        // with the names enrichment's cell for the reference, the same row opens there
+        var p = Path.Combine(_dir, "geometry.route-cut.json");
+        var resolved = ((System.Collections.IEnumerable)Contract.Static("FindingReaders", "Read", "the route-cut reader with names", "geometry.route-cut", p,
+            (Func<string, string?>)(fk => fk == "000802:Syn.esp" ? "000901:Syn.esp" : null))!).Cast<object>().ToList();
+        Clickable(resolved[1], "000802:Syn.esp", "000901:Syn.esp");
     }
 
     [Fact]
@@ -329,11 +351,13 @@ public sealed class FindingReaderTests : IDisposable
     {
         var rows = Read("state.switch-census", """
             {"summary":{},"perPlugin":[],"switches":[{"key":"000801:Syn.esp","edid":"SynSwitch","cell":"SynCell","cellKey":"000900:Syn.esp","position":"0,0,0"}],
-             "jointFlips":[{"stage":"SynQuest 10","switches":["000801:Syn.esp"]}]}
+             "jointFlips":[{"stage":"C01:30","switches":["SynSwitchParent"]}],"unreadable":[]}
             """);
         Assert.Equal(2, rows.Count);
         Clickable(rows[0], "000801:Syn.esp", "000900:Syn.esp");
+        Role(rows[0], "finding");
         NotClickable(rows[1]);
+        Role(rows[1], "context");
     }
 
     [Theory]
@@ -349,6 +373,19 @@ public sealed class FindingReaderTests : IDisposable
             """);
         Assert.Equal(3, rows.Count);
         foreach (var r in rows) NotClickable(r);
+        Assert.Equal(new[] { "finding", "finding", "incomplete" }, rows.Select(r => (string?)Contract.Prop(r, "Role")));
+    }
+
+    [Fact]
+    public void An_incomplete_discovery_output_shows_its_unsearched_sources_and_that_it_is_incomplete()
+    {
+        var rows = Read("patch.discovery-pool", """
+            {"schemaVersion":1,"probe":"p","mode":"pair","complete":false,"counts":{},
+             "hits":[{"file":"SynPatch.esp","kind":"pool-archive","where":{},"masters":[]}],
+             "sourcesNotSearched":[{"kind":"pool","name":"SynDownloads","why":"the folder could not be read"}],"unjudgeableItems":[],"detail":{}}
+            """);
+        Assert.Equal(1, rows.Count(r => (string?)Contract.Prop(r, "Role") == "finding"));
+        Assert.Equal(2, rows.Count(r => (string?)Contract.Prop(r, "Role") == "incomplete"));   // the unsearched source, and complete false
     }
 
     [Fact]
@@ -358,18 +395,23 @@ public sealed class FindingReaderTests : IDisposable
             {"complete":false,"walkFailures":["a walk failure"],"unreadableRecords":[{"FormKey":"000801:Syn.esp","why":"bad"}],
              "unmeasured":[{"extent":"e","why":"w"}],"targets":[]}
             """);
-        Assert.Equal(3, rows.Count);
+        Assert.Equal(4, rows.Count);                 // with complete false, one row says the output is incomplete
         foreach (var r in rows) NotClickable(r);     // no cell is known for an unreadable record
+        Assert.Equal(3, rows.Count(r => (string?)Contract.Prop(r, "Role") == "incomplete"));
+        Assert.Single(rows, r => (string?)Contract.Prop(r, "Role") == "context");     // the unmeasured extent
     }
 
     [Fact]
     public void Author_advice_rows_one_per_clash_rule_statement_and_warning()
     {
         var rows = Read("patch.author-advice", """
-            {"modId":1,"clashes":[{"with":"Other"}],"rules":[{"r":1}],"statements":[{"s":1}],"resolutions":[],"requirements":[],"warnings":["w"]}
+            {"modId":1,"clashes":[{"with":"Other"}],"rules":[{"r":1}],"statements":[{"s":1}],"resolutions":[],"requirements":[],
+             "warnings":["mod 2's page could not be read. What it states about mod 1 is UNKNOWN for this run, not absent."]}
             """);
         Assert.Equal(4, rows.Count);
         foreach (var r in rows) NotClickable(r);
+        Assert.Equal(3, rows.Count(r => (string?)Contract.Prop(r, "Role") == "finding"));
+        Assert.Single(rows, r => (string?)Contract.Prop(r, "Role") == "incomplete");
     }
 
     [Fact]
@@ -381,6 +423,7 @@ public sealed class FindingReaderTests : IDisposable
             """);
         Assert.Single(rows);
         Clickable(rows[0], "000801:Syn.esp", "000900:Syn.esp");
+        Role(rows[0], "finding");
     }
 }
 
@@ -608,7 +651,8 @@ public sealed class RealOutputReaderTests
         var run = Run();
         using var r = JsonDocument.Parse(File.ReadAllText(Path.Combine(run, "receipts", $"{check}__{arm}.json")));
         var findings = r.RootElement.GetProperty("result").GetProperty("findings");
-        var output = r.RootElement.GetProperty("outputs")[0].GetProperty("path").GetString()!;
+        // the receipt's json output (route-cut's first output is its text log; the rows file ends .json)
+        var output = r.RootElement.GetProperty("outputs").EnumerateArray().Select(x => x.GetProperty("path").GetString()!).Last(x => x.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
         var rows = ((System.Collections.IEnumerable)Contract.Static("FindingReaders", "Read", $"the Findings reader for {check}", check, Path.Combine(run, output))!).Cast<object>().ToList();
         var findingRows = rows.Where(x => (string?)Contract.Prop(x, "Role") == "finding").ToList();
         if (findings.ValueKind == JsonValueKind.Number) Assert.Equal(findings.GetInt32(), findingRows.Count);
@@ -617,6 +661,20 @@ public sealed class RealOutputReaderTests
         bool incomplete = (o.RootElement.TryGetProperty("complete", out var c) && c.ValueKind == JsonValueKind.False)
             || new[] { "unreadable", "sourcesNotSearched", "unreadableRecords", "walkFailures" }.Any(k => o.RootElement.TryGetProperty(k, out var a) && a.ValueKind == JsonValueKind.Array && a.GetArrayLength() > 0);
         if (incomplete) Assert.Contains(rows, x => (string?)Contract.Prop(x, "Role") == "incomplete");
+        // and the reader returns one row per entry of the lists it reads, so a reader returning nothing cannot pass
+        var lists = check switch
+        {
+            "geometry.declared-dependencies" => new[] { "rows", "withheldRows", "unreadable" },
+            "state.switch-census" => new[] { "switches", "jointFlips", "unreadable" },
+            "patch.discovery-pool" or "patch.discovery-fomod" => new[] { "hits", "unjudgeableItems", "sourcesNotSearched" },
+            "loadability.masters-and-order" => new[] { "walkFailures", "unreadableRecords", "limits", "unmeasured" },
+            "geometry.route-cut" => new[] { "Rows" },
+            _ => new[] { "clashes", "rules", "statements", "resolutions", "requirements", "warnings" },
+        };
+        int entries = lists.Sum(k => o.RootElement.TryGetProperty(k, out var a) && a.ValueKind == JsonValueKind.Array ? a.GetArrayLength() : 0)
+                      + (o.RootElement.TryGetProperty("complete", out var cc) && cc.ValueKind == JsonValueKind.False ? 1 : 0);
+        Assert.Equal(entries, rows.Count);
+        if (check == "geometry.route-cut") Assert.Equal(80, rows.Count);     // run s3's rows file
     }
 
     [Fact]
