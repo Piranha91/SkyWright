@@ -1279,8 +1279,22 @@ def state_checks(a, result: dict, receipts_dir: Path, shotplan_mod, tag: str = "
                                p["point"])) for p in result.get("participants") or [] if p.get("point")]
     if (cam.get("viewKind") or result.get("viewKind")) == "top-down":
         targets = []                        # a top-down's own acceptance counts marks from above; the eye is still tested
+    # the cell by its form key, as capture renders every state (C1932): a mod may give a base-game cell an editor ID
+    # the setup without it does not know (INIGO names 008FC3:Skyrim.esm LangleyWalkway1); a setup that lacks the plugin
+    # defining the cell has no such place, which is capture's own true refusal (C2170)
+    cell_fk = (result.get("camera") or {}).get("cellFormKey") or acquisition_cell_form_key(
+        {"receipts": {"receiptsDir": str(receipts_dir)}})
+    if not cell_fk:
+        # never another setup by an editor ID, which only the measured setup is known to give the cell (C2172)
+        raise Refused("points-renderer-failed", f"no cell form key for the {', '.join(orders)} state's check: the "
+                                                f"acquisition's receipts name none, and the editor ID "
+                                                f"{cam.get('cell')!r} is known only in the measured setup", final=False)
     rows = []
     for state, order in orders.items():
+        if _order_lacks(str(order), cell_fk.split(":", 1)[1]):
+            raise Refused("place-only-with-mod", f"the cell {cell_fk} is defined by {cell_fk.split(':', 1)[1]}, which the "
+                                                 f"{state} setup does not load, so that world has no such place",
+                          final=True, cell=cell_fk, states=[state])
         present = [(p, t) for p, t in targets
                    if not (p.get("formKey") and _order_lacks(order, str(p["formKey"]).split(":", 1)[1]))]
         px, probe_fov = shotplan_mod.target_pixels(tuple(eye), float(cam["yaw"]), float(cam["pitch"]),
@@ -1294,7 +1308,7 @@ def state_checks(a, result: dict, receipts_dir: Path, shotplan_mod, tag: str = "
                 flags += ["--pick", f"{r_['pixel'][0]},{r_['pixel'][1]}"]
         sa = type("StateArgs", (), {})()
         sa.vp, sa.passthrough = a.vp, _passthrough_with_order(a.passthrough, order)
-        rc, text = _vp_run(sa, shotplan_mod, cam["cell"], flags, receipts_dir / f"state-{state}-{tag}")
+        rc, text = _vp_run(sa, shotplan_mod, cell_fk, flags, receipts_dir / f"state-{state}-{tag}")
         if rc != 0:
             raise Refused("points-renderer-failed", f"the {state} state's camera check did not render (viewprobe exit {rc})")
         probe = shotplan_mod.Probe([])
@@ -1311,7 +1325,7 @@ def state_checks(a, result: dict, receipts_dir: Path, shotplan_mod, tag: str = "
             margin = tol if r_["kind"] == "surface" else args.sight_margin
             if hit[3] < r_["dist"] - margin:
                 blocked.append(f"{r_['label']}'s sightline stops at {hit[3]:.0f} u, short of its {r_['dist']:.0f} u")
-        row = {"state": state, "order": str(order), "inside": ikind, "insideFails": ifails, "enclosingBoxes": near,
+        row = {"state": state, "order": str(order), "cell": cell_fk, "inside": ikind, "insideFails": ifails, "enclosingBoxes": near,
                "targets": [t.label for _, t in present], "blocked": blocked,
                "receipt": str(receipts_dir / f"state-{state}-{tag}" / "console.txt")}
         rows.append(row)
