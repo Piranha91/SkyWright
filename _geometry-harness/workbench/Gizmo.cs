@@ -38,6 +38,14 @@ internal sealed class Gizmo : IRenderOverlay
             float a0 = i * MathF.Tau / RingSegments, a1 = (i + 1) * MathF.Tau / RingSegments;
             yield return (Handle.TurnZ, c + new Vector3(MathF.Cos(a0), MathF.Sin(a0), 0) * r, c + new Vector3(MathF.Cos(a1), MathF.Sin(a1), 0) * r);
         }
+        // the tilt rings, a little smaller: about world X (in the Y-Z plane) and about world Y (in the X-Z plane)
+        float rt = Size * 0.6f;
+        for (int i = 0; i < RingSegments; i++)
+        {
+            float a0 = i * MathF.Tau / RingSegments, a1 = (i + 1) * MathF.Tau / RingSegments;
+            yield return (Handle.TurnX, c + new Vector3(0, MathF.Cos(a0), MathF.Sin(a0)) * rt, c + new Vector3(0, MathF.Cos(a1), MathF.Sin(a1)) * rt);
+            yield return (Handle.TurnY, c + new Vector3(MathF.Cos(a0), 0, MathF.Sin(a0)) * rt, c + new Vector3(MathF.Cos(a1), 0, MathF.Sin(a1)) * rt);
+        }
     }
 
     /// <summary>The part within <paramref name="pixels"/> of a screen point, nearest first; <see cref="Handle.None"/> if none.</summary>
@@ -94,6 +102,33 @@ internal sealed class Gizmo : IRenderOverlay
         }
     }
 
+    /// <summary>The axis a turn handle turns about, world space.</summary>
+    internal static Vector3 TurnAxis(Handle h) => h switch { Handle.TurnX => Vector3.UnitX, Handle.TurnY => Vector3.UnitY, _ => Vector3.UnitZ };
+
+    /// <summary>Radians about <paramref name="axis"/> (counter-clockwise seen from its tip) for a drag around that ring:
+    /// each screen point's ray meets the ring's plane, and the turn is the angle between the two meeting points.</summary>
+    internal float TurnAmountAbout(Vector3 axis, Vector2 from, Vector2 to, Func<Vector2, (Vector3 O, Vector3 D)> ray)
+    {
+        if (Centre is not { } c) return 0f;
+        if (axis == Vector3.UnitZ) return TurnAmount(from, to, ray);
+        if (Meet(ray(from)) is not { } p0 || Meet(ray(to)) is not { } p1) return 0f;
+        var u = Vector3.Normalize(Vector3.Cross(axis, MathF.Abs(axis.Z) < 0.9f ? Vector3.UnitZ : Vector3.UnitX));
+        var v = Vector3.Cross(axis, u);
+        float A(Vector3 p) => MathF.Atan2(Vector3.Dot(p - c, v), Vector3.Dot(p - c, u));
+        float d = A(p1) - A(p0);
+        while (d > MathF.PI) d -= MathF.Tau;
+        while (d < -MathF.PI) d += MathF.Tau;
+        return d;
+
+        Vector3? Meet((Vector3 O, Vector3 D) r)
+        {
+            float den = Vector3.Dot(r.D, axis);
+            if (MathF.Abs(den) < 1e-6f) return null;
+            float t = Vector3.Dot(c - r.O, axis) / den;
+            return t <= 0 ? null : r.O + r.D * t;
+        }
+    }
+
     static float DistanceToSegment(Vector2 p, Vector2 a, Vector2 b)
     {
         var ab = b - a; float l2 = ab.LengthSquared();
@@ -110,7 +145,8 @@ internal sealed class Gizmo : IRenderOverlay
         foreach (var (h, a, b) in Segments())
         {
             var col = h switch { Handle.MoveX => new GlVec3(1f, .2f, .2f), Handle.MoveY => new GlVec3(.2f, 1f, .2f),
-                                 Handle.MoveZ => new GlVec3(.3f, .5f, 1f), _ => new GlVec3(1f, .85f, .2f) };
+                                 Handle.MoveZ => new GlVec3(.3f, .5f, 1f), Handle.TurnX => new GlVec3(1f, .5f, .5f),
+                                 Handle.TurnY => new GlVec3(.5f, 1f, .5f), _ => new GlVec3(1f, .85f, .2f) };
             if (h == Hot) col = new GlVec3(1f, 1f, 1f);
             var ya = YUp(a); var yb = YUp(b);
             _lines.Add(new OverlayLineSegment { A = new GlVec3(ya.X, ya.Y, ya.Z), B = new GlVec3(yb.X, yb.Y, yb.Z), Color = col });

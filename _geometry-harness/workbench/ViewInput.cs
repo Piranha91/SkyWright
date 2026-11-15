@@ -23,6 +23,12 @@ internal sealed class ViewInput
 
     Vector2? _press; Handle _dragHandle; RefPlacementEdit.Pose _dragStart; bool _moved;
 
+    /// <summary>Snapping applied to a drag's result: the grid in units and the turn step in degrees (0 = off).</summary>
+    internal float SnapStep, AngleStep;
+    /// <summary>True while the view shows originals: a drag is refused then, and says so.</summary>
+    internal Func<bool> Holding = () => false;
+    internal Action<string>? Refused;
+
     internal ViewInput(EditSession session, Gizmo gizmo, Func<Vector3, Vector2?> project, Func<Vector2, (Vector3 O, Vector3 D)> ray,
                        Func<Vector2, PickHit?> pick, Action afterSelect)
     { _session = session; _gizmo = gizmo; _project = project; _ray = ray; _pick = pick; _afterSelect = afterSelect; }
@@ -31,6 +37,7 @@ internal sealed class ViewInput
     {
         _press = px; _moved = false;
         _dragHandle = _session.Selected is not null ? _gizmo.HitTest(px, _project) : Handle.None;
+        if (_dragHandle != Handle.None && Holding()) { Refused?.Invoke("release Space (or the Original button) to edit; the view is showing originals"); _dragHandle = Handle.None; }
         if (_dragHandle != Handle.None) _dragStart = _session.Current(_session.Selected!.Value);
         _gizmo.Hot = _dragHandle;
     }
@@ -61,15 +68,16 @@ internal sealed class ViewInput
     RefPlacementEdit.Pose DragPose(Vector2 from, Vector2 to)
     {
         var s = _dragStart;
-        if (_dragHandle == Handle.TurnZ)
+        if (_dragHandle is Handle.TurnZ or Handle.TurnX or Handle.TurnY)
         {
-            float rad = _gizmo.TurnAmount(from, to, _ray);
-            return s with { Rotation = RefPlacementEdit.Turned(s.Rotation, Vector3.UnitZ, rad) };
+            var turnAxis = Gizmo.TurnAxis(_dragHandle);
+            float rad = _gizmo.TurnAmountAbout(turnAxis, from, to, _ray);
+            return MoveRules.Snap(s, s with { Rotation = RefPlacementEdit.Turned(s.Rotation, turnAxis, rad) }, 0f, _dragHandle == Handle.TurnZ ? AngleStep : 0f);
         }
         float amount = _gizmo.MoveAmount(_dragHandle, from, to, _ray);
         var axis = _dragHandle switch { Handle.MoveX => Vector3.UnitX, Handle.MoveY => Vector3.UnitY, _ => Vector3.UnitZ };
         var np = ToV(s.Position) + axis * amount;
-        return s with { Position = new Vec3(np.X, np.Y, np.Z) };
+        return MoveRules.Snap(s, s with { Position = new Vec3(np.X, np.Y, np.Z) }, SnapStep, 0f);
     }
 
     void SelectAt(Vector2 px)
