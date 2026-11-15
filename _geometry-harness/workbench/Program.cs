@@ -74,6 +74,7 @@ internal static class Program
         HarnessShared.WorklistIo.Write(wlPath, wl);
         WorkbenchHost.Say($"{Shell.Ranked.Count} rows ranked ({Shell.Ranked.Count(r => r.InvolvesTarget)} name a target), {Shell.Findings.Count} Findings rows; {cells.Count} cell(s) in {wlPath}; opening on "
                           + (first is not null ? $"conflict {first.Rank}'s cell {first.Row.Cell}" : $"finding {firstFinding!.Rank}'s cell {firstFinding.Row.Cell}"));
+        if (Shell.Window is not null) { Shell.FillConflicts(); Shell.FillFindings(); }   // a window the launcher opened first
         return new[] { "--worklist", wlPath }.Concat(rest).ToArray();
     }
 
@@ -88,6 +89,23 @@ internal static class Program
     static int Main(string[] args)
     {
         InteractiveViewer.Host = WorkbenchHost.Run;
+        // no bundle and no scene asked for: the launcher (manual mode) first, in the same window and state server
+        if (!args.Contains("--bundle") && !args.Contains("--instance"))
+        {
+            var window = Shell.EnsureWindow("workbench — start");
+            string? ready = null;
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            Shell.Launcher.BundleReady += b => window.Dispatcher.BeginInvoke(() => { ready = b; frame.Continue = false; });
+            window.Closed += (_, _) => frame.Continue = false;
+            window.Show();
+            System.Windows.Threading.Dispatcher.PushFrame(frame);
+            if (ready is null) { Shell.StopServer(); return 0; }
+            var l = Shell.Launcher;
+            // the session's writes go under the launcher's Output Folder; its re-checks and files under the Work Folder
+            WorkbenchHost.ManualTarget = new WriteTarget(l.Instance!, l.Profile!, Path.Combine(l.Game!, "Data"), l.Output);
+            Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(l.RunFolder!, "workbench"));
+            args = new[] { "--bundle", ready, "--instance", l.Instance!, "--profile", l.Profile!, "--game", l.Game! };
+        }
         try { args = OpenBundle(args); }
         catch (InvalidOperationException ex) { Console.Error.WriteLine("workbench: " + ex.Message); return 2; }
         var a = args.Contains("--interactive") ? args : args.Append("--interactive").ToArray();

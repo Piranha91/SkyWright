@@ -58,7 +58,7 @@ internal sealed class StateTools
         if (wait_seconds > 0)
         {
             Task? running = null;
-            var r0 = await hub.OnUi(() => { running = hub.Surface.Scene is { Rechecking: true } s ? s.RecheckRunning : null; return Task.FromResult(Answer(new { })); });
+            var r0 = await hub.OnUi(() => { running = hub.Surface.Scene is { Rechecking: true } s ? s.RecheckRunning : hub.Launcher.RunTask is { IsCompleted: false } lr ? lr : null; return Task.FromResult(Answer(new { })); });
             if (r0.IsError == true) return r0;
             if (running is not null) await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(Math.Min(wait_seconds, 600))));
         }

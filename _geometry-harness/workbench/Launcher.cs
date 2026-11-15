@@ -29,6 +29,16 @@ internal sealed class Launcher : IAsyncDisposable
     internal string? WorkFolder { get; private set; }
     internal bool WorkFolderChosen { get; private set; }
     internal List<string> Probes { get; } = new();
+    /// <summary>Checks the launcher added for another, with the one that needs it (per-check table, row 10).</summary>
+    internal Dictionary<string, string> AddedFor { get; } = new();
+    /// <summary>standard, or deep when the conditional-geometry check is ticked (per-check table, row 11).</summary>
+    internal string Depth => Probes.Contains("state.conditional-geometry") ? "deep" : "standard";
+    internal string? RunBundle { get; private set; }
+    internal string? RunLine { get; private set; }
+    internal string? RunFolder { get; private set; }
+    internal Task? RunTask { get; private set; }
+    /// <summary>Raised on the run's thread with the verified bundle's folder when a run is done (the window opens it).</summary>
+    internal event Action<string>? BundleReady;
     internal string RunState { get; private set; } = "idle";
     internal string? RunRefusal { get; private set; }
 
@@ -146,18 +156,28 @@ internal sealed class Launcher : IAsyncDisposable
         var picked = new List<string>();
         foreach (var w in want)
         {
-            if (string.Equals(w, "all", StringComparison.OrdinalIgnoreCase)) { picked.AddRange(reg.Where(c => ProbeKinds.Contains(c.Kind)).Select(c => c.Id)); continue; }
+            if (string.Equals(w, "all", StringComparison.OrdinalIgnoreCase)) { picked.AddRange(reg.Where(c => WhyNotHere(c) is null).Select(c => c.Id)); continue; }
             var hits = reg.Where(c => string.Equals(c.Id, w, StringComparison.OrdinalIgnoreCase) || string.Equals(c.Exe, w, StringComparison.OrdinalIgnoreCase)).ToList();
             if (hits.Count == 0) throw new InvalidOperationException($"'{w}' is not a check of the registry; read workbench_state project launcher for the probes.");
             foreach (var c in hits)
             {
                 if (!ProbeKinds.Contains(c.Kind))
                     throw new InvalidOperationException($"'{c.Id}' is a check of kind {c.Kind}, which runs no probe, so the launcher does not run it.");
+                if (WhyNotHere(c) is { } why) throw new InvalidOperationException($"'{c.Id}' cannot run here: {why}.");
                 picked.Add(c.Id);
             }
         }
-        lock (_gate) { Probes.Clear(); Probes.AddRange(picked.Distinct()); }
-        return $"{Probes.Count} probe check(s) selected";
+        string extra = "";
+        lock (_gate)
+        {
+            Probes.Clear(); Probes.AddRange(picked.Distinct()); AddedFor.Clear();
+            // conditional geometry reads the switch census's receipt ({switchMap}), and runs only at depth deep
+            if (Probes.Contains("state.conditional-geometry") && !Probes.Contains("state.switch-census"))
+            { Probes.Add("state.switch-census"); AddedFor["state.switch-census"] = "state.conditional-geometry reads its switch map"; }
+            if (Probes.Contains("state.conditional-geometry"))
+                extra = "; state.conditional-geometry runs only at depth deep, so the whole run is deep" + (AddedFor.Count > 0 ? ", and state.switch-census was added for it" : "");
+        }
+        return $"{Probes.Count} probe check(s) selected" + extra;
     }
 
     /// <summary>The Output Folder, with the rule's verdict; the Work Folder defaults from it unless one was chosen.</summary>
@@ -190,11 +210,99 @@ internal sealed class Launcher : IAsyncDisposable
 
     /// <summary>Start a run of the selection (M7 builds the run itself); refused in one sentence until the launcher has
     /// what a run needs.</summary>
+    /// <summary>Why a check cannot run on this profile and selection, or null (the per-check table's greyed lines).</summary>
+    internal string? WhyNotHere(RegistryCheck c)
+    {
+        if (!ProbeKinds.Contains(c.Kind)) return $"a check of kind {c.Kind} runs no probe";
+        if (Instance is null) return null;
+        var mods = Path.Combine(Mo2Instance.LayoutRoot(Instance), "mods");
+        if (c.Id == "geometry.bos-overlay")
+        {
+            var roots = Mods.Where(m => m.Enabled && !m.Separator).Select(m => Path.Combine(mods, m.Name)).Append(Path.Combine(Game!, "Data"));
+            if (!roots.Any(r => Directory.Exists(r) && Directory.EnumerateFiles(r, "*_SWAP.ini").Any()))
+                return "no enabled mod folder and not the game's Data holds a *_SWAP.ini, so the profile loads no Base Object Swapper overlay to read";
+        }
+        if (c.Id == "patch.author-advice")
+        {
+            var sel = Mods.Where(m => m.Selected).ToList();
+            if (sel.Count > 0 && !sel.Any(m => NexusId(Path.Combine(mods, m.Name)) is > 0))
+                return "no selected mod folder's meta.ini carries a Nexus mod id, so there is no author page to read (blocked: no-nexus-id)";
+        }
+        return null;
+    }
+
+    static int? NexusId(string folder)
+    {
+        var ini = Path.Combine(folder, "meta.ini");
+        if (!File.Exists(ini)) return null;
+        var line = File.ReadLines(ini).FirstOrDefault(l => l.StartsWith("modid=", StringComparison.OrdinalIgnoreCase));
+        return line is not null && int.TryParse(line[6..].Trim(), out var id) ? id : null;
+    }
+
+    /// <summary>Start a run of the selection through the existing pipeline (DESIGN section 2): an in-place entry under
+    /// the Work Folder, <c>evalpipeline.py run --through bundle</c>, and the bundle it verifies. Returns at once.</summary>
     internal string Run()
     {
         if (Instance is null) throw new InvalidOperationException("there is nothing to run: open a profile first (workbench_act verb open_profile).");
-        throw new InvalidOperationException("the launcher's run is not built in this build yet; run evalpipeline.py with an in-place entry.");
+        if (RunTask is { IsCompleted: false }) throw new InvalidOperationException("a run is already going; read workbench_state with project [\"launcher\"] and wait_seconds for it.");
+        var sel = Mods.Where(m => m.Selected).Select(m => m.Name).ToList();
+        if (sel.Count == 0) throw new InvalidOperationException("no mod folder is selected; select the mods to evaluate (workbench_act verb select_mods).");
+        if (Probes.Count == 0) throw new InvalidOperationException("no probe is selected; select probes (workbench_act verb select_probes).");
+        if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output).");
+        if (WorkFolder is null) throw new InvalidOperationException("with the Output Folder at the instance's mods folder there is no default Work Folder; choose one outside the instance and the game folder (workbench_act verb set_work_folder).");
+        if (WorkFolderRule.Check(WorkFolder, Instance, Profile!, Game!) is { } bad) throw new InvalidOperationException(bad);
+        var stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'");
+        var dir = Path.Combine(WorkFolder, stamp);
+        Directory.CreateDirectory(dir);
+        var entry = Path.Combine(dir, "entry.json");
+        File.WriteAllText(entry, JsonSerializer.Serialize(new
+        {
+            schema = 1, id = "wb-" + stamp, inPlace = new { instance = Instance, profile = Profile, game = Game },
+            selection = new { mods = sel }, evaluation = new { select = Probes.ToArray(), depth = Depth },
+        }, new JsonSerializerOptions { WriteIndented = true }));
+        // the machine file: WB_MACHINE's (heavy-stage prefix and the rest), with the names read through this checkout's server
+        var machine = Path.Combine(dir, "machine.json");
+        var m = Environment.GetEnvironmentVariable("WB_MACHINE") is { Length: > 0 } mf && File.Exists(mf)
+            ? System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(mf))!.AsObject() : new System.Text.Json.Nodes.JsonObject();
+        if (!m.ContainsKey("readerCmd"))
+        {
+            var exe = Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } sx ? sx : StateServerExe();
+            m["readerCmd"] = "\"" + exe + "\"";
+        }
+        File.WriteAllText(machine, m.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        var pipeline = Environment.GetEnvironmentVariable("WB_PIPELINE_CMD") is { Length: > 0 } pc ? pc
+            : Program.FromCheckoutPublic("WB_PIPELINE", "evaluation pipeline evalpipeline.py", "_geometry-harness", "evalpipeline.py");
+        var run = Path.Combine(dir, "run");
+        lock (_gate) { RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; RunFolder = dir; }
+        RunTask = Task.Run(() =>
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "-I", pipeline, "run", "--entry", entry, "--machine", machine, "--out", run, "--through", "bundle" }) psi.ArgumentList.Add(a);
+            psi.Environment["PYTHONIOENCODING"] = "utf-8";
+            psi.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dir, "runlog");      // set, not left to a default (GATE-B.md 3.1)
+            var log = Path.Combine(dir, "pipeline.log");
+            try
+            {
+                using var p = System.Diagnostics.Process.Start(psi)!;
+                using var w = new StreamWriter(log) { AutoFlush = true };
+                p.OutputDataReceived += (_, e) => { if (e.Data is null) return; lock (w) w.WriteLine(e.Data); RunLine = e.Data; };
+                p.ErrorDataReceived += (_, e) => { if (e.Data is null) return; lock (w) w.WriteLine(e.Data); if (e.Data.Trim().Length > 0) RunLine = e.Data; };
+                p.BeginOutputReadLine(); p.BeginErrorReadLine();
+                p.WaitForExit();
+                var bundle = Path.Combine(run, "bundle", "evidence");
+                if (p.ExitCode == 0 && File.Exists(Path.Combine(bundle, "manifest.json")))
+                {
+                    lock (_gate) { RunState = "done"; RunBundle = bundle; }
+                    BundleReady?.Invoke(bundle);
+                }
+                else lock (_gate) { RunState = "refused"; RunRefusal = $"the pipeline exited {p.ExitCode} without a bundle: {RunLine?.Trim()} (its log: {log})"; }
+            }
+            catch (Exception ex) { lock (_gate) { RunState = "refused"; RunRefusal = $"the pipeline could not be started: {ex.Message}"; } }
+        });
+        return $"running the selection ({sel.Count} mod folder(s), {Probes.Count} probe check(s), depth {Depth}) in place on profile '{Profile}'; its files go under '{dir}'";
     }
+
+    static string StateServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
 
     /// <summary>The houseCARL server bound to the open profile by explicit paths, its data folder under the Work Folder
     /// (GATE-B.md 3.1), started on the first forwarded call.</summary>
@@ -259,11 +367,12 @@ internal sealed class Launcher : IAsyncDisposable
                 mods = Mods.Select(m => new { name = m.Name, priority = m.Priority, enabled = m.Enabled, separator = m.Separator, selected = m.Selected }).ToList(),
                 probes = Registry().Select(c => new
                 {
-                    checkId = c.Id, kind = c.Kind, title = c.Title, selectable = ProbeKinds.Contains(c.Kind), selected = Probes.Contains(c.Id),
-                    whyNot = ProbeKinds.Contains(c.Kind) ? null : $"a check of kind {c.Kind} runs no probe",
+                    checkId = c.Id, kind = c.Kind, title = c.Title, selectable = WhyNotHere(c) is null, selected = Probes.Contains(c.Id),
+                    whyNot = WhyNotHere(c), addedFor = AddedFor.GetValueOrDefault(c.Id),
                 }).ToList(),
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
-                run = new { state = RunState, refusal = RunRefusal },
+                depth = Depth,
+                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle },
             };
         }
     }

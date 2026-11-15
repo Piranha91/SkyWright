@@ -16,7 +16,7 @@ internal sealed class StateHub
     internal IWorkbenchSurface Surface { get; }
     internal TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(15);
     /// <summary>The launcher's state and the houseCARL server bound to its profile (manual mode).</summary>
-    internal Launcher Launcher { get; } = new();
+    internal Launcher Launcher { get; init; } = new();
 
     internal StateHub(Dispatcher ui, IWorkbenchSurface surface) { _ui = ui; Surface = surface; }
 

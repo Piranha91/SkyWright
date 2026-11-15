@@ -20,6 +20,8 @@ internal static class Shell
     internal static SeverityTable? Severity;
     internal static IReadOnlyList<RankedRow> Ranked = Array.Empty<RankedRow>();
     internal static IReadOnlyList<RankedFinding> Findings = Array.Empty<RankedFinding>();
+    /// <summary>The launcher (manual mode): the Start tab and the state tools drive this one instance.</summary>
+    internal static readonly Launcher Launcher = new();
     internal static IReadOnlyList<string> WorklistCells = Array.Empty<string>();
     internal static bool ShowAll;
     internal static string? PendingLand;            // a reference to land on when the next scene arrives
@@ -72,7 +74,10 @@ internal static class Shell
         DockPanel.SetDock(AllRows, Dock.Top);
         conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(ConflictList);
         var tabs = new TabControl { Width = 560 };
+        var start = new TabItem { Header = "Start", Content = LauncherView.Build() };
+        tabs.Items.Add(start);
         tabs.Items.Add(new TabItem { Header = "Conflicts", Content = conflictsTab });
+        tabs.SelectedIndex = Bundle is null ? 0 : 1;           // the Start tab until a bundle is open
         tabs.Items.Add(new TabItem { Header = "Findings", Content = FindingList });
         tabs.Items.Add(new TabItem { Header = "Records", Content = Records });
         var root = new DockPanel();
@@ -99,7 +104,7 @@ internal static class Shell
         try
         {
             // Started off the UI thread so no continuation waits for the dispatcher this thread is about to run.
-            Server = Task.Run(() => StateServer.StartAsync(port, new StateHub(ui, new LiveSurface()))).GetAwaiter().GetResult();
+            Server = Task.Run(() => StateServer.StartAsync(port, new StateHub(ui, new LiveSurface()) { Launcher = Launcher })).GetAwaiter().GetResult();
             WorkbenchHost.Say($"MCP state tools ({StateTools.StateName}, {StateTools.ActName}) served at {Server.Url}/ (Streamable HTTP)");
         }
         catch (Exception ex) { WorkbenchHost.Say($"MCP state tools not started on port {port}: {ex.GetBaseException().Message}"); }
