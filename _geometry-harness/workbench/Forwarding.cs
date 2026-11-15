@@ -9,7 +9,7 @@ namespace Workbench;
 
 /// <summary>How the workbench endpoint treats each houseCARL tool it forwards to the server bound to the launcher's
 /// profile (DESIGN R2.7, R4.1). The instance setters are not forwarded at all.</summary>
-internal enum ForwardKind { Read, RecordWrite, Decompile, NotYet }
+internal enum ForwardKind { Read, RecordWrite, Decompile, PatchLane, PatchLaneWithOutPath }
 
 internal static class ForwardList
 {
@@ -24,9 +24,12 @@ internal static class ForwardList
         ["housecarl_apply"] = ForwardKind.RecordWrite, ["housecarl_remove"] = ForwardKind.RecordWrite, ["housecarl_forward"] = ForwardKind.RecordWrite,
         ["housecarl_copy"] = ForwardKind.RecordWrite, ["housecarl_create"] = ForwardKind.RecordWrite,
         ["housecarl_decompile_script"] = ForwardKind.Decompile,
-        ["housecarl_create_plugin"] = ForwardKind.NotYet, ["housecarl_place"] = ForwardKind.NotYet, ["housecarl_nif_set"] = ForwardKind.NotYet,
-        ["housecarl_compile_script"] = ForwardKind.NotYet, ["housecarl_bsa_extract"] = ForwardKind.NotYet, ["housecarl_bsa_repack"] = ForwardKind.NotYet,
-        ["housecarl_write_seq"] = ForwardKind.NotYet, ["housecarl_compact_plugin"] = ForwardKind.NotYet, ["housecarl_merge_plugins"] = ForwardKind.NotYet,
+        // lanes patch= / into= only: a new or existing houseCARL folder in the instance's mods folder
+        ["housecarl_create_plugin"] = ForwardKind.PatchLane, ["housecarl_place"] = ForwardKind.PatchLane, ["housecarl_nif_set"] = ForwardKind.PatchLane,
+        ["housecarl_bsa_repack"] = ForwardKind.PatchLane, ["housecarl_compact_plugin"] = ForwardKind.PatchLane, ["housecarl_merge_plugins"] = ForwardKind.PatchLane,
+        // the same lanes, plus an out_path of their own
+        ["housecarl_compile_script"] = ForwardKind.PatchLaneWithOutPath, ["housecarl_bsa_extract"] = ForwardKind.PatchLaneWithOutPath,
+        ["housecarl_write_seq"] = ForwardKind.PatchLaneWithOutPath,
     };
 
     /// <summary>The tools that change which instance the server reads, refused by name (they persist houseCARL.user.json,
@@ -49,6 +52,17 @@ internal static class ForwardRule
     static string? Text(IReadOnlyDictionary<string, JsonElement> a, string k) =>
         a.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s ? s.Trim() : null;
 
+    /// <summary>A tool's own out_path: a folder its files are written straight into. It must be the Output Folder or under
+    /// it, pass the output rule, and not be the mods folder itself, where a loose file belongs to no mod.</summary>
+    static string? OwnOutPath(string op, string o, Mo2OutputLayout layout)
+    {
+        if (!Path.IsPathFullyQualified(op) || !OutputFolderPolicy.AtOrUnder(OutputFolderPolicy.Full(op), o))
+            return $"out_path '{op}' is not the Output Folder '{o}' or a folder under it; in manual mode every write goes under the Output Folder.";
+        if (string.Equals(OutputFolderPolicy.Full(op), OutputFolderPolicy.Full(layout.Mods), StringComparison.OrdinalIgnoreCase))
+            return $"out_path '{op}' is the mods folder itself, where a file written loose belongs to no mod; give a new folder outside the instance.";
+        return OutputFolderPolicy.Refusal(op, layout);
+    }
+
     internal static (Dictionary<string, JsonElement>? Args, string? Refusal) Prepare(string tool, IReadOnlyDictionary<string, JsonElement>? given,
                                                                                     string output, Mo2OutputLayout layout)
     {
@@ -61,16 +75,27 @@ internal static class ForwardRule
         {
             case ForwardKind.Read:
                 return (a, null);
-            case ForwardKind.NotYet:
-                return (null, $"{tool} writes into the instance's mods folder and takes no output folder yet, so in manual mode it is not available; use housecarl_apply, which writes under the Output Folder.");
+            case ForwardKind.PatchLane or ForwardKind.PatchLaneWithOutPath:
+            {
+                if (a.TryGetValue("in_place", out var pip) && Truthy(pip))
+                    return (null, $"in_place is refused in manual mode: an in-place edit writes a file the profile loads, and every write goes under the Output Folder '{o}'.");
+                var op = Text(a, "out_path");
+                if (op is not null || (kind == ForwardKind.PatchLaneWithOutPath && !modsIsOutput))
+                {
+                    if (kind != ForwardKind.PatchLaneWithOutPath)
+                        return (null, $"{tool} takes no out_path; in manual mode it writes only a houseCARL folder in the mods folder, which needs the Output Folder to be '{OutputFolderPolicy.Full(layout.Mods)}'.");
+                    if (op is null) { a["out_path"] = JsonSerializer.SerializeToElement(o); return (a, null); }
+                    return OwnOutPath(op, o, layout) is { } pw ? (null, pw) : (a, null);
+                }
+                if (modsIsOutput) return (a, null);   // patch= makes a new houseCARL folder in the mods folder, which the rule allows
+                return (null, $"in manual mode {tool} cannot write under the Output Folder '{o}': its lanes (patch=, into=) write a houseCARL folder in the instance's mods folder and it takes no out_path, so choose '{OutputFolderPolicy.Full(layout.Mods)}' as the Output Folder to use it.");
+            }
             case ForwardKind.Decompile:
             {
                 var op = Text(a, "out_path");
                 if (op is null)
                     return (null, $"in manual mode {tool} needs out_path, a folder under the Output Folder '{o}', because its other lanes write into the instance's mods folder.");
-                if (!Path.IsPathFullyQualified(op) || !OutputFolderPolicy.AtOrUnder(OutputFolderPolicy.Full(op), o))
-                    return (null, $"out_path '{op}' is not the Output Folder '{o}' or a folder under it; in manual mode every write goes under the Output Folder.");
-                return (a, null);
+                return OwnOutPath(op, o, layout) is { } dw ? (null, dw) : (a, null);
             }
             default: // RecordWrite
             {
