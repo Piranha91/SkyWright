@@ -472,4 +472,26 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.Contains("out_path", await Refused("housecarl_decompile_script", A(("pex", Path.Combine(w.Root, "HcWbScript.pex")))));
         Assert.False(Directory.Exists(elsewhere));
     }
+
+    /// <summary>Coordinator note on 21f93de4: with the instance's mods folder as the Output Folder, a new plugin and a
+    /// placed file copy land in a new houseCARL folder there, through the endpoint.</summary>
+    [Fact]
+    public async Task B13c_with_the_mods_folder_as_output_create_plugin_and_place_land_in_new_houseCARL_folders()
+    {
+        Environment.SetEnvironmentVariable("WB_CORPUS", TestCorpus.Path);
+        using var w = new TiltedRefWorld();
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        var mods = Path.Combine(w.Instance, "mods");
+        var mesh = Path.Combine(mods, "WorldMod", "meshes", "hcwb", "a.nif");
+        Directory.CreateDirectory(Path.GetDirectoryName(mesh)!); File.WriteAllText(mesh, "mesh bytes");
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", w.Instance), ("profile", "Default"), ("game", game)));
+        await Ok("workbench_act", A(("verb", "set_output"), ("path", mods)));
+        await Ok("workbench_act", A(("verb", "set_work_folder"), ("path", Path.Combine(w.Root, "work"))));
+        var (e1, t1) = await Call("housecarl_create_plugin", A(("patch", "WbPlug")));
+        Assert.False(e1, "the forwarded housecarl_create_plugin refused: " + t1);
+        Assert.True(Directory.GetFiles(mods, "WbPlug*.esp", SearchOption.AllDirectories).Any(f => Path.GetFileName(Path.GetDirectoryName(f)!).StartsWith("houseCARL - ")), t1);
+        var (e2, t2) = await Call("housecarl_place", A(("assets", new[] { new Dictionary<string, object?> { ["path"] = "meshes/hcwb/a.nif" } }), ("patch", "WbPlaced")));
+        Assert.False(e2, "the forwarded housecarl_place refused: " + t2);
+        Assert.True(File.Exists(Path.Combine(mods, "houseCARL - WbPlaced", "meshes", "hcwb", "a.nif")), t2);
+    }
 }

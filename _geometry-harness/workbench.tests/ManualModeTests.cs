@@ -871,3 +871,71 @@ public sealed class ManualWriteTests
         Assert.NotNull(result.Verdict);
     }
 }
+
+/// <summary>Coordinator note on 21f93de4: the write tools whose lanes are patch= and into= (a new or existing houseCARL
+/// folder in the instance's mods folder) are forwarded when the Output Folder is that mods folder, which the output rule
+/// allows; a tool with its own out_path gets it mapped to the Output Folder; the rest are refused naming the concrete
+/// reason (no out_path lane) and what to choose instead.</summary>
+public sealed class ForwardRuleTests : IDisposable
+{
+    readonly string _root = Path.Combine(Path.GetTempPath(), "hc-wb-fwdrule-" + Guid.NewGuid().ToString("N"));
+    string Inst => Path.Combine(_root, "instance");
+    string Game => Path.Combine(_root, "game");
+    string Mods => Path.Combine(Inst, "mods");
+    string Elsewhere => Path.Combine(_root, "out");
+    public ForwardRuleTests()
+    {
+        foreach (var d in new[] { "mods/Enabled", "profiles/P", "overwrite" }) Directory.CreateDirectory(Path.Combine(Inst, d));
+        Directory.CreateDirectory(Path.Combine(Game, "Data"));
+    }
+    public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
+
+    (Dictionary<string, JsonElement>? Args, string? Refusal) Prepare(string tool, string output, object args)
+    {
+        var given = JsonSerializer.SerializeToElement(args).EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone());
+        return ForwardRule.Prepare(tool, given, output, HousecarlCore.Mo2OutputLayout.Of(Inst, "P", Game));
+    }
+
+    public static readonly TheoryData<string> PatchLaneTools = new()
+    {
+        "housecarl_create_plugin", "housecarl_place", "housecarl_nif_set", "housecarl_compile_script", "housecarl_bsa_extract",
+        "housecarl_bsa_repack", "housecarl_write_seq", "housecarl_compact_plugin", "housecarl_merge_plugins",
+    };
+
+    [Theory, MemberData(nameof(PatchLaneTools))]
+    public void With_the_mods_folder_as_output_a_patch_lane_tool_is_forwarded_and_in_place_is_refused(string tool)
+    {
+        var (args, why) = Prepare(tool, Mods, new { patch = "WbNew" });
+        Assert.True(why is null, $"{tool} was refused with the mods folder as the Output Folder: {why}");
+        Assert.Equal("WbNew", args!["patch"].GetString());
+        Assert.NotNull(Prepare(tool, Mods, new { patch = "WbNew", in_place = true }).Refusal);
+    }
+
+    [Theory]
+    [InlineData("housecarl_compile_script")]
+    [InlineData("housecarl_bsa_extract")]
+    [InlineData("housecarl_write_seq")]
+    public void A_tool_with_its_own_out_path_gets_the_output_folder_and_an_out_path_outside_it_is_refused(string tool)
+    {
+        var (args, why) = Prepare(tool, Elsewhere, new { patch = "WbNew" });
+        Assert.True(why is null, $"{tool} was refused: {why}");
+        Assert.Equal(Elsewhere, args!["out_path"].GetString());
+        Assert.Contains("Output Folder", Prepare(tool, Elsewhere, new { out_path = Path.Combine(_root, "other") }).Refusal);
+    }
+
+    [Theory]
+    [InlineData("housecarl_create_plugin")]
+    [InlineData("housecarl_place")]
+    [InlineData("housecarl_nif_set")]
+    [InlineData("housecarl_bsa_repack")]
+    [InlineData("housecarl_compact_plugin")]
+    [InlineData("housecarl_merge_plugins")]
+    public void A_tool_with_no_out_path_lane_is_refused_with_the_output_folder_elsewhere_naming_why_and_what_to_choose(string tool)
+    {
+        var why = Prepare(tool, Elsewhere, new { patch = "WbNew" }).Refusal;
+        Assert.NotNull(why);
+        Assert.DoesNotContain("\n", why);
+        Assert.Contains("out_path", why);                                   // the concrete reason: its lane takes none
+        Assert.Contains(HousecarlCore.OutputFolderPolicy.Full(Mods), why);   // and the folder that would let it run
+    }
+}
