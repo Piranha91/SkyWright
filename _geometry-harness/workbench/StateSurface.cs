@@ -61,8 +61,8 @@ internal interface IWorkbenchScene
     /// <summary>The scene's pick shapes (drawn references and terrain) at their current placements.</summary>
     IReadOnlyList<PickShape> Shapes => Array.Empty<PickShape>();
     /// <summary>The drawn references whose winning record a plugin of this mod folder provides, in the arm's view, or why not.</summary>
-    Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> RefsOfModAsync(string modFolder, string? plugin) =>
-        Task.FromResult<(IReadOnlyList<FormKey>, string?)>((Array.Empty<FormKey>(), "this scene cannot read which mod provides a reference."));
+    Task<(IReadOnlyList<FormKey> Refs, string? Refusal, string Note)> RefsOfModAsync(string modFolder, string? plugin) =>
+        Task.FromResult<(IReadOnlyList<FormKey>, string?, string)>((Array.Empty<FormKey>(), "this scene cannot read which mod provides a reference.", ""));
     /// <summary>The detector row and the objects a decision on this row is keyed on, read now.</summary>
     Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
         throw new InvalidOperationException("this scene has no houseCARL server to read the row's objects from.");
@@ -97,6 +97,8 @@ internal sealed class LiveSurface : IWorkbenchSurface
         ?? (Environment.GetEnvironmentVariable("WB_WORK") is { Length: > 0 } w ? w : Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : null);
     public (string Instance, string Profile)? Binding => WorkbenchHost.TargetFromEnv() is { } t ? (t.Instance, t.Profile) : null;
     public string? SaveRefusal { get; set; }
+    public RowState RowStateOf(RankedRow r) => new(r.Row.Physical?.ToString(), r.Row.Summary,
+        Shell.Bundle is { } b && Recheck.ProbeOfCheck.TryGetValue(r.Row.CheckId, out var probe) ? Recheck.BundleDigest(b.Dir, probe) ?? "" : "");
 
     public string OpenFinding(RankedFinding row)
     {

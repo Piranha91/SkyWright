@@ -31,6 +31,8 @@ internal static class Decisions
     internal static readonly string[] Verdicts = { "real problem", "intentional", "unsure" };
 
     /// <summary>Fields a re-save changes with nothing a player meets; a change in only these keeps the decision.</summary>
+    /// <remarks>MajorRecordFlagsRaw is the raw flags word; the typed SkyrimMajorRecordFlags field carries the same bits and
+    /// is still compared, so a flag a player meets still flags the decision.</remarks>
     internal static readonly string[] Bookkeeping = { "FormVersion", "VersionControl", "Version2", "IsCompressed", "MajorRecordFlagsRaw" };
 
     /// <summary>The base record's fields geometry reads; the rest of the base is not part of the key.</summary>
@@ -89,7 +91,10 @@ internal static class Decisions
 
     /// <summary>The detector-row half alone (no scene, no server): reconsider when the row reads differently now, else
     /// applies with the objects not compared.</summary>
-    internal static DecisionMatch CompareRow(Decision stored, RowState row) => new(Standing.Undecided, "");
+    internal static DecisionMatch CompareRow(Decision stored, RowState row) =>
+        !string.Equals(stored.Row.Physical, row.Physical, StringComparison.OrdinalIgnoreCase) || stored.Row.Summary != row.Summary
+            ? new(Standing.Reconsider, $"reconsider: the detector reads the row differently now ({stored.Row.Physical ?? "unmeasured"}: \"{stored.Row.Summary}\" became {row.Physical ?? "unmeasured"}: \"{row.Summary}\").")
+            : new(Standing.Applies, "applies on its detector row; its objects are not compared until its cell is open.");
 
     /// <summary>The list order with decisions: reconsider, undecided, unsure, real problem, then intentional; the
     /// order within each group is kept.</summary>

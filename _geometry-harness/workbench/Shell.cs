@@ -24,6 +24,9 @@ internal static class Shell
     internal static readonly Launcher Launcher = new();
     internal static IReadOnlyList<string> WorklistCells = Array.Empty<string>();
     internal static bool ShowAll;
+    /// <summary>The "show decided" toggle: rows decided intentional that still apply are hidden unless it is on.</summary>
+    internal static bool ShowDecided;
+    static readonly CheckBox DecidedRows = new() { Content = "show rows decided intentional", Margin = new Thickness(6, 2, 6, 2) };
     internal static string? PendingLand;            // a reference to land on when the next scene arrives
     internal static Stopwatch? SwitchClock;         // runs from a cell switch's request to the next scene's arrival
     internal static string? SwitchCell;
@@ -68,11 +71,14 @@ internal static class Shell
             if (f.Row.Clickable) { WorkbenchHost.Say($"open finding {f.Rank}: {f.Row.Identity}"); CurrentRow = null; OpenRef(f.Row.RefKey!, f.Row.Cell); }
             else SetBanner($"finding {f.Rank} ({f.Row.CheckId}) does not open the viewer: {f.Row.WhyNot}.");
         };
+        DecidedRows.Checked += (_, _) => { ShowDecided = true; FillConflicts(); };
+        DecidedRows.Unchecked += (_, _) => { ShowDecided = false; FillConflicts(); };
+        ReviewList.Changed += () => Window?.Dispatcher.BeginInvoke(FillConflicts);
         AllRows.Checked += (_, _) => { ShowAll = true; FillConflicts(); };
         AllRows.Unchecked += (_, _) => { ShowAll = false; FillConflicts(); };
         var conflictsTab = new DockPanel();
-        DockPanel.SetDock(AllRows, Dock.Top);
-        conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(ConflictList);
+        DockPanel.SetDock(AllRows, Dock.Top); DockPanel.SetDock(DecidedRows, Dock.Top);
+        conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(DecidedRows); conflictsTab.Children.Add(ConflictList);
         var tabs = new TabControl { Width = 560 };
         var start = new TabItem { Header = "Start", Content = LauncherView.Build() };
         tabs.Items.Add(start);
@@ -138,10 +144,15 @@ internal static class Shell
     internal static void FillConflicts()
     {
         ConflictList.Items.Clear();
-        foreach (var r in Visible)
+        // the one list model the conflicts state part renders: decision order, intentional rows behind the toggle
+        foreach (var e in ReviewList.For(new LiveSurface(), Visible, Standings, ShowDecided))
         {
-            var item = new ListBoxItem { Content = RowText(r), Tag = r };
+            var r = e.Row;
+            string decided = e.Decision is { } d ? $"\n   {d.Verdict}: {d.Reason} — {e.Standing.Sentence}" : "";
+            var item = new ListBoxItem { Content = RowText(r) + decided, Tag = r };
             if (r.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
+            if (e.Standing.Standing == Standing.Reconsider) item.Foreground = Brushes.Firebrick;
+            else if (e.Decision is not null) item.Foreground = Brushes.DimGray;
             ConflictList.Items.Add(item);
         }
     }

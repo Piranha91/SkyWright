@@ -50,6 +50,7 @@ internal sealed class StateTools
         [Description("conflicts: how many rows to skip (default 0).")] int offset = 0,
         [Description("conflicts or findings: list only rows whose kind, plugins, references or base EditorIDs (findings: summary) contain this text (any case).")] string? filter = null,
         [Description("findings: list only the rows of this check id.")] string? check = null,
+        [Description("conflicts: also list rows decided intentional (hidden by default, as in the window).")] bool include_decided = false,
         [Description("If a re-check is running, wait up to this many seconds (at most 600) for it to finish before answering. Default 0.")]
             int wait_seconds = 0)
     {
@@ -72,7 +73,7 @@ internal sealed class StateTools
                 try { decisions = await DecisionsPart(hub); }
                 catch (InvalidOperationException ex) { return Refuse(ex.Message); }
             }
-            var d = Project(hub.Surface, parts, limit, offset, filter);
+            var d = Project(hub.Surface, parts, limit, offset, filter, hub.Standings, include_decided);
             if (decisions is not null) d["decisions"] = decisions;
             if (parts.Contains("findings")) d["findings"] = FindingsPart(hub.Surface, limit, offset, filter, check);
             if (parts.Contains("launcher")) d["launcher"] = hub.Launcher.Project();
@@ -89,9 +90,9 @@ internal sealed class StateTools
                  "previews the values and masters and writes nothing; false writes, and then re-checks the open conflict in the background, " +
                  "about 70-80 s, read with workbench_state wait_seconds); recheck (re-check the open conflict against the written patch `patch`). " +
                  "stage also takes `offset` (typed, such as \"+120 x\" or \"15°\"), `axis` (lock the move to x, y, z or xy), `snap` (round the moved axes to a grid, units) and `angle_snap` (degrees). " +
-                 "revert (drop one reference's staged edits; a written one is removed from its patch); drop (lower a reference straight down onto the drawn surface or terrain below it; it lowers only); " +
+                 "revert (drop one reference's staged edits; a written one is removed from its patch); drop (lower a reference straight down onto the drawn surface or terrain below it, measured from the reference's lowest 16 units, so a wider part higher up that would touch first is not seen; it lowers only, and is refused when another surface already crosses the reference; render triangles, not collision); " +
                  "view (`op`: show_original, show_edited, ghost_on, ghost_off, hide, hide_part with `part`, hide_in_front, see_through with `ref`, `mod` or `plugin`, isolate, restore; view only, never written); " +
-                 "decide (a Conflicts row by `conflict`, or a Findings row by `finding`: `verdict` real problem, intentional or unsure, and a short `reason`; it opens the next undecided row). " +
+                 "decide (a Conflicts row by `conflict`: `verdict` real problem, intentional or unsure, and a short `reason`; it opens the next row to decide, a flagged one first; Findings rows are not decided yet). " +
                  "Manual mode (the launcher): open_profile (`mode` free with `instance`, `profile`, optional `game`), select_mods (`mods`, `how` " +
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
                  "write goes under), set_work_folder (`path`, where a run keeps its files), run. " +
@@ -192,10 +193,10 @@ internal sealed class StateTools
                 case "see_through":
                     if (mod is not null || plugin is not null)
                     {
-                        var (refs, why) = await sc.RefsOfModAsync(mod!, plugin);
+                        var (refs, why, note) = await sc.RefsOfModAsync(mod!, plugin);
                         if (why is not null) return Refuse(why);
-                        if (refs.Count == 0) return Refuse($"no reference drawn in this scene is won by {mod ?? plugin}.");
-                        said = v.SeeThrough(refs, mod ?? plugin);
+                        if (refs.Count == 0) return Refuse($"no reference drawn in this scene is won by {mod ?? plugin}" + (note.Length > 0 ? "; " + note : "."));
+                        said = v.SeeThrough(refs, mod ?? plugin) + (note.Length > 0 ? "; " + note : "");
                     }
                     else if (K() is { } sk) said = v.SeeThrough(sk);
                     else return Refuse("see_through needs ref, mod or plugin, or a selected reference.");
@@ -271,21 +272,27 @@ internal sealed class StateTools
             var key = Decisions.RowKey(r.Row);
             var d = StoredFor(s, store, key);
             if (d is null) { rows.Add((r, null, new DecisionMatch(Standing.Undecided, "undecided"))); continue; }
-            if (!hub.Standings.TryGetValue(key, out var m))
+            // the row half needs no scene and no server; the object half needs the row's cell open, and is that row's own answer
+            var m = Decisions.CompareRow(d, s.RowStateOf(r));
+            if (m.Standing != Standing.Reconsider)
             {
-                if (s.Scene is not { } sc) m = new DecisionMatch(Standing.Undecided, "not compared: no scene is open to read the row's objects from");
-                else
+                if (hub.Standings.TryGetValue(key, out var cached)) m = cached;
+                else if (s.Scene is { } sc)
                 {
-                    var (row, objects, build) = await sc.DecisionInputsAsync(r);
-                    m = Decisions.Compare(d, row, objects, build);
+                    try
+                    {
+                        var (row, objects, build) = await sc.DecisionInputsAsync(r);
+                        m = Decisions.Compare(d, row, objects, build);
+                        hub.Standings[key] = m;
+                    }
+                    catch (InvalidOperationException ex) { m = new DecisionMatch(m.Standing, m.Sentence.TrimEnd('.') + " (" + ex.Message.TrimEnd('.') + ")."); }
                 }
-                hub.Standings[key] = m;
             }
             rows.Add((r, d, m));
         }
         var keys = s.Listed.Select(r => Decisions.RowKey(r.Row)).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var gone = store is not null && s.Binding is { } bb
-            ? store.Of(bb.Instance, bb.Profile).Where(d => !d.RowKey.StartsWith("finding|", StringComparison.Ordinal) && !keys.Contains(d.RowKey)).ToList()
+            ? store.Of(bb.Instance, bb.Profile).Where(d => !keys.Contains(d.RowKey)).ToList()
             : new List<Decision>();
         var ordered = Decisions.Order(rows, x => (x.M.Standing, x.D?.Verdict));
         return new
@@ -310,10 +317,11 @@ internal sealed class StateTools
         var v = (verdict ?? "").Trim().ToLowerInvariant();
         if (!Decisions.Verdicts.Contains(v)) return Refuse($"'{verdict}' is not a verdict; use real problem, intentional or unsure.");
         if (string.IsNullOrWhiteSpace(reason)) return Refuse("decide needs a reason, a few words saying why (for example: placed on purpose).");
-        if ((conflict is null) == (finding is null)) return Refuse("decide takes exactly one of conflict (a rank) or finding (a rank).");
+        if (finding is not null) return Refuse("Findings rows are not decided yet; decide takes conflict, a Conflicts row's rank.");
+        if (conflict is null) return Refuse("decide needs conflict, a Conflicts row's rank.");
         if (DecisionStore.For(s.WorkFolder) is not { } store) return Refuse("no Work Folder is set, so a decision cannot be kept; set one in the launcher, or WB_OUT for a bundle.");
         if (s.Binding is not { } b) return Refuse("no instance and profile are bound, so a decision cannot say which load order it is about.");
-        string said;
+        string said = "";
         try
         {
             if (conflict is { } n)
@@ -325,8 +333,8 @@ internal sealed class StateTools
                 var key = Decisions.RowKey(row.Row);
                 store.Put(new Decision(b.Instance, b.Profile, row.Row.CheckId, key, v, reason.Trim(), DateTimeOffset.UtcNow, state, objects, build));
                 standings[key] = new DecisionMatch(Standing.Applies, "applies, decided just now.");
-                var next = s.Listed.Where(r => r.Rank != n).OrderBy(r => r.Rank <= n ? 1 : 0).ThenBy(r => r.Rank)
-                                   .FirstOrDefault(r => store.Find(b.Instance, b.Profile, Decisions.RowKey(r.Row)) is null);
+                ReviewList.RaiseChanged();
+                var next = ReviewList.NextUndecided(ReviewList.For(s, s.Listed, standings, includeDecided: true), n);
                 said = $"recorded {v} for conflict {n} ({reason.Trim()})";
                 if (next is not null)
                 {
@@ -334,15 +342,6 @@ internal sealed class StateTools
                     catch (InvalidOperationException ex) { said += $"; conflict {next.Rank} is the next undecided, but it could not be opened: {ex.Message}"; }
                 }
                 else said += "; every listed conflict is decided";
-            }
-            else
-            {
-                var f = s.Findings.FirstOrDefault(r => r.Rank == finding);
-                if (f is null) return Refuse($"no Findings row ranked {finding} is listed; read workbench_state with project findings to see the ranks.");
-                var key = Decisions.FindingKey(f.Row);
-                store.Put(new Decision(b.Instance, b.Profile, f.Row.CheckId, key, v, reason.Trim(), DateTimeOffset.UtcNow,
-                                       new RowState(f.Row.Physical?.ToString(), f.Row.Summary, ""), Array.Empty<ObjectState>(), ""));
-                said = $"recorded {v} for finding {finding} ({reason.Trim()}); a Findings decision is keyed on the row's own summary, not on record contents";
             }
         }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }
@@ -455,7 +454,8 @@ internal sealed class StateTools
                     if (relative)
                     {
                         var dv = MoveRules.Lock(delta is { } d ? new Vector3(d[0], d[1], d[2]) : Vector3.Zero, lockAxes);
-                        float rad = float.DegreesToRadians(turnDeg ?? 0f);
+                        // the turn is snapped as an amount about the axis, so it applies to a tilted reference too
+                        float rad = float.DegreesToRadians(MoveRules.SnapTurn(turnDeg ?? 0f, angleSnap ?? 0f));
                         after = before with
                         {
                             Position = new Vec3(before.Position.X + dv.X, before.Position.Y + dv.Y, before.Position.Z + dv.Z),
@@ -469,7 +469,7 @@ internal sealed class StateTools
                             Rotation = rotationDeg is { } r ? new Vec3(float.DegreesToRadians(r[0]), float.DegreesToRadians(r[1]), float.DegreesToRadians(r[2])) : before.Rotation,
                         };
                     if (snap is < 0 || angleSnap is < 0) return Refuse("snap and angle_snap must be 0 or more.");
-                    sc.Session.Stage(k, MoveRules.Snap(before, after, snap ?? 0f, angleSnap ?? 0f));
+                    sc.Session.Stage(k, MoveRules.Snap(before, after, snap ?? 0f, relative ? 0f : angleSnap ?? 0f));
                     sc.AfterStage();
                     said = $"staged {k}: {EditSession.Describe(before)} -> {EditSession.Describe(sc.Session.Current(k))}; nothing is written until commit";
                     break;
@@ -544,7 +544,21 @@ internal sealed class StateTools
     };
 
     /// <summary>The state as <c>workbench_state</c> answers it, built from the live objects each time.</summary>
-    internal static Dictionary<string, object?> Project(IWorkbenchSurface s, IReadOnlyCollection<string> parts, int limit, int offset, string? filter)
+    static object ReviewJson(ReviewEntry e, RankedRow? open)
+    {
+        var r = e.Row;
+        return new
+        {
+            rank = r.Rank, open = ReferenceEquals(r, open) || (open is not null && open.Row.Identity == r.Row.Identity),
+            kind = r.Row.Kind, a = r.Row.A, b = r.Row.B, @ref = r.Row.RefKey, refBase = r.Row.RefBaseEditorId, refType = r.Row.RefBaseType,
+            other = r.Row.OtherKey, otherBase = r.Row.OtherBaseEditorId, cell = r.Row.Cell, summary = r.Row.Summary,
+            physical = r.PhysicalLabel, evidence = r.EvidenceLabel, isNew = r.NewLabel, severity = r.Severity,
+            verdict = e.Decision?.Verdict, reason = e.Decision?.Reason, standing = e.Standing.Standing.ToString().ToLowerInvariant(), decisionSentence = e.Standing.Sentence,
+        };
+    }
+
+    internal static Dictionary<string, object?> Project(IWorkbenchSurface s, IReadOnlyCollection<string> parts, int limit, int offset, string? filter,
+                                                        Dictionary<string, DecisionMatch>? standings = null, bool includeDecided = false)
     {
         var sc = s.Scene;
         var d = new Dictionary<string, object?>
@@ -555,9 +569,14 @@ internal sealed class StateTools
         if (parts.Contains("conflicts"))
         {
             bool Has(string? v) => v is not null && filter is not null && v.Contains(filter, StringComparison.OrdinalIgnoreCase);
-            var rows = s.Listed.Where(r => filter is null || Has(r.Row.Kind) || Has(r.Row.A) || Has(r.Row.B) || Has(r.Row.RefKey) || Has(r.Row.OtherKey)
-                                           || Has(r.Row.RefBaseEditorId) || Has(r.Row.OtherBaseEditorId)).ToList();
-            d["conflicts"] = new { total = s.Total, listed = s.Listed.Count, matched = rows.Count, offset, limit, rows = rows.Skip(offset).Take(limit).Select(r => RowJson(r, s.OpenRow)) };
+            var review = ReviewList.For(s, s.Listed, standings ?? new(StringComparer.OrdinalIgnoreCase), includeDecided);
+            var rows = review.Where(e => filter is null || Has(e.Row.Row.Kind) || Has(e.Row.Row.A) || Has(e.Row.Row.B) || Has(e.Row.Row.RefKey) || Has(e.Row.Row.OtherKey)
+                                           || Has(e.Row.Row.RefBaseEditorId) || Has(e.Row.Row.OtherBaseEditorId)).ToList();
+            d["conflicts"] = new
+            {
+                total = s.Total, listed = review.Count, hiddenDecided = s.Listed.Count - review.Count, matched = rows.Count, offset, limit,
+                rows = rows.Skip(offset).Take(limit).Select(e => ReviewJson(e, s.OpenRow)),
+            };
         }
         if (parts.Contains("selection"))
         {
