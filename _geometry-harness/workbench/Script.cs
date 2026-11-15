@@ -321,6 +321,11 @@ internal sealed class Script
             case "created":
                 got = _h.LastRecheck is { } lc ? (lc.New.Count == 0 ? "no new rows" : string.Join("; ", lc.New.Select(n => n.Id))) : "no re-check";
                 ok = _h.LastRecheck?.New.Any(n => n.Id.Contains(a[2], StringComparison.OrdinalIgnoreCase)) == true; break;
+            case "inview":
+            {
+                var (inView, account) = _h.InView(FormKey.Factory(a[2]));
+                ok = inView; got = account; break;
+            }
             case "partner":
                 got = _h.Marks.Partner?.Ref.RefKey.ToString() ?? "none"; ok = string.Equals(got, a[2], StringComparison.OrdinalIgnoreCase);
                 if (_h.PartnerNote is { } pn) got += "; " + pn;

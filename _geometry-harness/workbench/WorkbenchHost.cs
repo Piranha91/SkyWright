@@ -397,12 +397,33 @@ internal sealed class WorkbenchHost
     internal bool Land(FormKey key)
     {
         if (!_session.IsDrawn(key)) { Shell.SetBanner($"{key} is not drawn in this scene; nothing to land on."); Shell.LastLanding = $"{key}: not drawn"; return false; }
+        Select(key);
+        var (kept, clear, crossing, coveredBy) = FrameOn(key);
+        Shell.LastLanding = kept;
+        Shell.SetBanner(clear ? $"landed on {key}" : crossing ? $"landed on {key}; it is inside or behind {coveredBy} from every side tried" : $"landed near {key}; the view's centre misses its shapes");
+        Say("landing: " + Shell.LastLanding);
+        return clear || crossing;
+    }
+
+    /// <summary>After a write or a re-check moved a reference on screen, point the camera at where it is drawn now
+    /// (the selection and the banner stay as they are).</summary>
+    internal void Reframe(FormKey key)
+    {
+        if (!_session.IsDrawn(key)) return;
+        var (kept, _, _, _) = FrameOn(key);
+        Say("re-framed on the moved reference: " + kept);
+    }
+
+    /// <summary>Frame the camera on <paramref name="key"/> as drawn now (its pose, not the scene build's). Returns the
+    /// one-line account and whether the centre ray meets it first, or at least crosses it.</summary>
+    (string Account, bool Clear, bool Crossing, string CoveredBy) FrameOn(FormKey key)
+    {
         var ro = _session.RefOf(key);
         var p = ToV(_session.Current(key).Position);
+        // RefPlacementEdit.Apply moves the box with the reference, so its centre is where the reference is drawn now.
         Vector3 c = ro.Min.X <= ro.Max.X ? (ro.Min + ro.Max) * 0.5f : p;
         float r = ro.Min.X <= ro.Max.X ? MathF.Max((ro.Max - ro.Min).Length() * 0.5f, 16f) : 64f;
         float dist = MathF.Max(r * 3f, 250f);
-        Select(key);
         // Prefer a pose where the reference is the first thing the centre ray meets; else the first pose where the
         // centre ray at least crosses it (an overlap row's reference is often inside the other one, so covered).
         (float Yaw, float Pitch)? clear = null, crossing = null; string coveredBy = "nothing";
@@ -426,11 +447,22 @@ internal sealed class WorkbenchHost
         string how = clear is not null ? $"it is the first thing the screen-centre ray meets (pose {tried} of 24 tried)"
                    : crossing is not null ? $"the screen-centre ray crosses it, but {coveredBy} is in front from all 24 poses tried"
                    : "the screen-centre ray misses its shapes from every pose tried (its box centre is outside them)";
-        Shell.LastLanding = FormattableString.Invariant(
+        var account = FormattableString.Invariant(
             $"{key}: box centre {c.X:0.#},{c.Y:0.#},{c.Z:0.#}, radius {r:0.#} u; eye {dist:0} u away at yaw {_yaw:0} pitch {_pitch:0}; ") + how;
-        Shell.SetBanner(clear is not null ? $"landed on {key}" : crossing is not null ? $"landed on {key}; it is inside or behind {coveredBy} from every side tried" : $"landed near {key}; the view's centre misses its shapes");
-        Say("landing: " + Shell.LastLanding);
-        return keep is not null;
+        return (account, clear is not null, crossing is not null, coveredBy);
+    }
+
+    /// <summary>Whether <paramref name="key"/> is in view: its box centre projects inside the view, and the screen-centre
+    /// ray crosses its own shapes. Says what it measured.</summary>
+    internal (bool InView, string Account) InView(FormKey key)
+    {
+        var ro = _session.RefOf(key);
+        var c = ro.Min.X <= ro.Max.X ? (ro.Min + ro.Max) * 0.5f : ToV(_session.Current(key).Position);
+        var sp = Project(c);
+        bool inside = sp is { } s && s.X >= 0 && s.X < W && s.Y >= 0 && s.Y < H;
+        bool crosses = PickOwn(new Vector2(W * 0.5f, H * 0.5f), key) is not null;
+        string at = sp is { } q ? FormattableString.Invariant($"box centre {c.X:0.#},{c.Y:0.#},{c.Z:0.#} drawn at pixel {q.X:0},{q.Y:0} of {W}x{H}") : "box centre behind the eye";
+        return (inside && crosses, $"{at}; screen-centre ray crosses it {crosses}");
     }
 
     static string CentreName(PickHit? h) => h?.Shape is { Kind: PickKind.Ref } sh ? sh.Ref.RefKey.ToString() : h is null ? "nothing" : h.Shape.Kind.ToString();
@@ -565,6 +597,7 @@ internal sealed class WorkbenchHost
                 var wtr = await WriterAsync();
                 var (pp, pr) = await wtr.ReadPlacementAsync(open.Row.RefKey, source: plugin);
                 _session.ShowWritten(rk, new RefPlacementEdit.Pose(pp, pr, _session.Current(rk).Scale), plugin);
+                Reframe(rk);
             }
             var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
             var harness = Path.GetDirectoryName(Path.GetFullPath(evalrun))!;
