@@ -2085,27 +2085,30 @@ def build_prediction(ctx: dict) -> dict:
         relationship between two objects, whichever plugins own them on each setup. A check whose row is a state of
         its own object (skill data `identityByObject`: a fixture left hanging, an object left without support) is that
         object: a fixture hanging because both evaluated mods remove hosts hangs with one of them alone if that one
-        removes enough. Any other row is its object in that kind of clash."""
+        removes enough. Any other row is its object in that kind of clash. Plugin names are compared without regard to
+        case, as the game reads them: a probe names the file on disk, a sibling's rows the load order's spelling."""
+        fk = str(r.get("formKey")).lower() if r.get("formKey") is not None else None
+        other = tuple(str(o).lower() for o in r.get("other") or ())
         if kind == "LOST-EDIT":
             # whose change is lost, and where: the losing plugin's change to one field of one record, whoever wins it
             # (Clockwork review B1: a change already lost without the mod, to another winner, is not new with it)
-            return (check_id, kind, r.get("formKey"), r.get("field"), str(a).lower())
+            return (check_id, kind, fk, r.get("field"), str(a).lower())
         base_kind, in_state = state_split(kind)
         if in_state is not None:
             if base_kind in state_by_object:
-                return (check_id, base_kind, r.get("formKey"))
+                return (check_id, base_kind, fk)
             if r.get("other") is not None:
-                return (check_id, base_kind, r.get("formKey"), tuple(r.get("other") or ()))
-            return (check_id, base_kind, r.get("formKey"))
+                return (check_id, base_kind, fk, other)
+            return (check_id, base_kind, fk)
         if check_id in by_object:
-            return (check_id, kind, r.get("formKey"))
+            return (check_id, kind, fk)
         if check_id in by_summary:
             # one conflict the probe lists once per object it names (two aliases split in one quest): the conflict is
             # its words and its partner record, whichever of its objects the row names (Pilgrim review: 2 splits, 4 rows)
-            return (check_id, kind, tuple(r.get("other") or ()), str(r.get("summary") or ""))
+            return (check_id, kind, other, str(r.get("summary") or "").lower())
         if r.get("other") is not None:
-            return (check_id, kind, r.get("formKey"), tuple(r.get("other") or ()))
-        return (check_id, kind, r.get("formKey"))
+            return (check_id, kind, fk, other)
+        return (check_id, kind, fk)
 
     def collect(fs, prefix=""):
         for f in fs:

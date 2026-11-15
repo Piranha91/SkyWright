@@ -571,6 +571,86 @@ def main():
 
     # G1 (a guard, green before and after). One sibling through the command line behaves as it did: the plan records
     # it as `sibling` and records no list of siblings.
+    # S22-S24 (C2330-C2332): a probe names a plugin by its file on disk, the load order in its own spelling, and a
+    # sibling's rows reach the prediction in the load order's spelling while this bundle's are still the probe's
+    # (Missives E1a/E2b: ccVSVSSE002-Pets.esl). Plugin names are read without regard to case, as the game reads them:
+    # rows that differ only in a plugin name's case are the same rows.
+    CC, CC_DISK = "ccFoo-Pets.esl", "ccfoo-pets.esl"
+    CC_BLOCK = [BASE, CC, DEP, NB1, NB2, A]
+
+    def check_joins(res):
+        s_ = prediction(res).get("sibling") or {}
+        return {c_.get("checkId"): (c_.get("joined"), c_.get("why")) for c_ in s_.get("checks") or []}
+
+    # S22 (C2330). The partner object names the plugin in other case: the check is joined.
+    def sibling_rows_in_other_plugin_case_joined():
+        ov = T.OVERLAP
+        ov_row = lambda: T.row("OVERLAP", NB1, A, f"000803:{A}", other=f"000910:{CC_DISK}")
+        main_ = main_spec(CC_BLOCK)
+        main_ = (main_[0], main_[1], {**main_[2], (ov, "baseline"): [ov_row()], (ov, "patched"): []}, main_[3], main_[4])
+        comb_ = combined_spec(CC_BLOCK)
+        comb_ = (comb_[0], comb_[1], {**comb_[2], (ov, "baseline"): [ov_row()], (ov, "neighbours-only"): []},
+                 comb_[3], comb_[4])
+        res = run_plan(main_, [comb_])
+        if refused(res):
+            return False, refused(res)
+        joins = check_joins(res)
+        return joins.get(ov, (None,))[0] is True, f"sibling checks {joins}"
+
+    # S23 (C2331). The row's own object names the plugin in other case, and the evaluated mod's setup without any
+    # neighbour shows it: once the shared-setup sibling's check is joined, the sub-order sibling's setup is read, and the
+    # row is found there, so it comes from the evaluated mod alone.
+    def presence_on_sibling_setup_in_other_plugin_case():
+        fk = f"000911:{CC_DISK}"
+        main_ = main_spec(CC_BLOCK)
+        main_ = (main_[0], main_[1], {(C, "baseline"): [T.row("CONTACT", NB1, A, fk, other=VANILLA)], (C, "patched"): []},
+                 main_[3], main_[4])
+        comb_ = combined_spec(CC_BLOCK)
+        comb_ = (comb_[0], comb_[1], {(C, "baseline"): [T.row("CONTACT", NB1, A, fk, other=VANILLA)],
+                                      (C, "neighbours-only"): []}, comb_[3], comb_[4])
+        alone_ = alone_spec(setup=[BASE, CC, DEP, A], shows_vanilla=False,
+                            more_results={(C, "baseline"): [T.row("CONTACT", BASE, A, fk, other=VANILLA)]})
+        res = run_plan(main_, [alone_, comb_])
+        if refused(res):
+            return False, refused(res)
+        got = attributions(res)
+        return got.get("000911") == "single-mod", f"attributions {got} (want 000911 single-mod); joins {check_joins(res)}"
+
+    # S24 (C2332). A check whose rows are one conflict by their words (identityBySummary): words naming the plugin in
+    # other case are the same words, and the check is joined.
+    def quest_alias_summary_in_other_plugin_case():
+        al = "functional.quest-alias-split"
+
+        def al_row():
+            r_ = T.row("ALIAS-SPLIT", NB1, A, f"000804:{A}", other=VANILLA)
+            r_["Summary"] = f"alias Pet of quest 000912:{CC_DISK} split between {NB1} and {A}"
+            return r_
+        main_ = main_spec(CC_BLOCK)
+        main_ = (main_[0], main_[1], {**main_[2], (al, "baseline"): [al_row()], (al, "patched"): []}, main_[3], main_[4])
+        comb_ = combined_spec(CC_BLOCK)
+        comb_ = (comb_[0], comb_[1], {**comb_[2], (al, "baseline"): [al_row()], (al, "neighbours-only"): []},
+                 comb_[3], comb_[4])
+        res = run_plan(main_, [comb_])
+        if refused(res):
+            return False, refused(res)
+        joins = check_joins(res)
+        return joins.get(al, (None,))[0] is True, f"sibling checks {joins}"
+
+    # S25 (C2333). A record lost edit on a record of that plugin, its form key in other case: the check is joined.
+    def lost_edit_form_key_in_other_plugin_case_joined():
+        rc = T.RECORDS
+        le_row = lambda: T.lost_row(A, NB1, f"000913:{CC_DISK}", "Name", "Pet A", "Pet N", "Pet")
+        main_ = main_spec(CC_BLOCK)
+        main_ = (main_[0], main_[1], {**main_[2], (rc, "baseline"): [le_row()], (rc, "patched"): []}, main_[3], main_[4])
+        comb_ = combined_spec(CC_BLOCK)
+        comb_ = (comb_[0], comb_[1], {**comb_[2], (rc, "baseline"): [le_row()], (rc, "neighbours-only"): []},
+                 comb_[3], comb_[4])
+        res = run_plan(main_, [comb_])
+        if refused(res):
+            return False, refused(res)
+        joins = check_joins(res)
+        return joins.get(rc, (None,))[0] is True, f"sibling checks {joins}"
+
     def one_sibling_as_before():
         res = run_plan(main_spec(BLOCK), [combined_spec(BLOCK)])
         if refused(res):
@@ -613,6 +693,12 @@ def main():
                      ("siblings/S20-only-setup-in-other-case-is-exact", only_setup_in_other_case_is_exact),
                      ("siblings/S21-only-setup-holding-the-other-mod-not-separable",
                       only_setup_holding_the_other_mod_not_separable),
+                     ("siblings/S22-sibling-rows-in-other-plugin-case-joined", sibling_rows_in_other_plugin_case_joined),
+                     ("siblings/S23-presence-on-sibling-setup-in-other-plugin-case",
+                      presence_on_sibling_setup_in_other_plugin_case),
+                     ("siblings/S24-quest-alias-summary-in-other-plugin-case", quest_alias_summary_in_other_plugin_case),
+                     ("siblings/S25-lost-edit-form-key-in-other-plugin-case-joined",
+                      lost_edit_form_key_in_other_plugin_case_joined),
                      ("siblings/G1-one-sibling-as-before", one_sibling_as_before),
                      ("siblings/G2-exact-only-setups-needs-both", exact_only_setups_needs_both),
                      ("siblings/G3-one-mod-companion-setup-needs-some", one_mod_companion_setup_needs_some),
