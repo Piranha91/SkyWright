@@ -1130,6 +1130,107 @@ def case_2323_a_refused_stage_keeps_its_accepted_receipt_so_restoring_the_input_
     assert stages.get("bundle", {}).get("accepted") is True, "the bundle's accepted receipt is not back in stages.json"
 
 
+# ---- C2326-C2327: disk from measured per-record figures (item 39 follow-up 6) ----
+
+def write_counted_plugin(path: Path, records: int):
+    """A TES4 header with a HEDR subrecord stating `records` (version, record count, next object id)."""
+    import struct as st
+    body = b"HEDR" + (12).to_bytes(2, "little") + st.pack("<fII", 1.71, records, 0x800)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"TES4" + len(body).to_bytes(4, "little") + bytes(16) + body)
+
+
+def _counted_res(t: Path) -> dict:
+    heads = {}
+    for name, n in (("Base.esm", 100), ("A.esp", 10), ("B.esp", 7)):
+        write_counted_plugin(Path(t) / "plugins" / name, n)
+        heads[name] = {"path": str(Path(t) / "plugins" / name)}
+    return {"headers": heads, "baseline": ["Base.esm"], "subject": ["A.esp"], "keys": [],
+            "arms": [{"id": "subject", "plugins": ["Base.esm", "A.esp"]},
+                     {"id": "combined", "plugins": ["Base.esm", "A.esp", "B.esp"]}]}
+
+
+def case_2326_a_stage_receipt_records_the_bytes_it_added_with_each_file_once():
+    """C2326: a receipt's disk record counts a hard-linked file once and a new file fully, and the run's evaluated
+    records are the arms' non-baseline HEDR counts summed over the arms. Wrong answers: summed file sizes (Hroggar's
+    103.85 GB apparent against 8.76 GB stored); a count that includes the baseline or counts a plugin once overall."""
+    with tempfile.TemporaryDirectory() as t:
+        d = Path(t) / "u"
+        d.mkdir()
+        (d / "a.bin").write_bytes(b"x" * 1000)
+        os.link(d / "a.bin", d / "b.bin")
+        (d / "c.bin").write_bytes(b"y" * 500)
+        assert EP.unique_bytes(d) == 1500, f"unique bytes {EP.unique_bytes(d)}, expected 1500 (a link is one file)"
+        res = _counted_res(Path(t))
+        assert EP.evaluated_records(res) == 27, f"evaluated records {EP.evaluated_records(res)}, expected 10 + 17"
+
+        def write(name, ctx, sdir):
+            if name == "records":
+                (sdir / "transcript.bin").write_bytes(b"z" * 4000)
+            if name == "bundle":
+                os.link(ctx.out / "records" / "transcript.bin", sdir / "transcript.bin")
+            return None
+        out, got = _run_pipeline(t, {}, [], [{"evaluation": {}}], refuse_when=write, res=res)
+        stages = EP.StageLedger(out).doc["stages"]
+    assert got[0][0] == EP.EXIT_OK, f"the run did not finish: {got}"
+    rec, bun = stages["records"].get("disk") or {}, stages["bundle"].get("disk") or {}
+    assert rec == {"addedBytes": 4002, "evaluatedRecords": 27}, f"records stage disk {rec}, expected 4000 + its 2-byte receipt"
+    assert bun.get("addedBytes") == 2, f"the bundle's linked transcript was counted again: {bun}"
+
+
+def _figure_run(parent: Path, name: str, records_bytes: int, n: int = 100):
+    d = parent / name
+    d.mkdir(parents=True)
+    (d / "stages.json").write_text(json.dumps({"schema": 1, "history": [], "stages": {
+        "records": {"accepted": True, "disk": {"addedBytes": records_bytes, "evaluatedRecords": n}},
+        "bundle": {"accepted": True, "disk": {"addedBytes": 500, "evaluatedRecords": n}}}}), encoding="utf-8")
+    return d
+
+
+def case_2327_the_disk_forecast_uses_measured_figures_names_them_and_keeps_the_floor():
+    """C2327: the forecast is evaluated records x the largest measured per-record figure of each stage still to run,
+    names the run and stage it was measured at, and refuses when free space minus the slot's --min-disk floor is short;
+    with no figure it says so and the run goes on; the machine file's diskPerRecord fills in with its source named.
+    Wrong answers (round 2 Gate A, six times low): a figure from one stage's files alone, a floor ignored, a silent skip."""
+    import shutil as sh
+    import types
+    with tempfile.TemporaryDirectory() as t:
+        parent = Path(t) / "runs"
+        out = parent / "this"
+        out.mkdir(parents=True)
+        _figure_run(parent, "older", 2000)
+        _figure_run(parent, "newer", 3000)
+        drive = os.path.splitdrive(os.path.abspath(out))[0]
+        ctx = types.SimpleNamespace(out=out, machine={})
+        line, short = EP.disk_forecast(ctx, 1000, ["records", "bundle"])
+        assert short is None, f"a 35 KB forecast refused: {short}"
+        assert "about 34.2 KiB" in line and "newer" in line and "records" in line and "older" not in line, \
+            f"the forecast does not use and name the larger figure (30 B per record, newer): {line}"
+        need = 10 ** 9 * 35
+        free = sh.disk_usage(out).free / EP.GIB
+        floor = max(free - need / EP.GIB / 2, 0)
+        ctx.machine = {"heavyPrefix": ["python", "idle_lock.py", "--min-disk", f"{drive}={floor}"]}
+        line, short = EP.disk_forecast(ctx, 10 ** 9, ["records", "bundle"])
+        assert short and "newer" in short and f"{floor:g} GiB floor" in short and "32.6 GiB" in short, \
+            f"the floor was not kept, or the refusal does not name the figure's run: {short}"
+        empty = Path(t) / "alone" / "this"
+        empty.mkdir(parents=True)
+        ctx = types.SimpleNamespace(out=empty, machine={})
+        line, short = EP.disk_forecast(ctx, 1000, ["records"])
+        assert short is None and "no measured per-record figure" in line, f"no figure must be said plainly: {line}"
+        ctx.machine = {"diskPerRecord": {"bytes": 17920, "source": "Hroggar 2026-11-15 unique bytes"}}
+        line, short = EP.disk_forecast(ctx, 1000, ["records"])
+        assert short is None and "Hroggar 2026-11-15" in line and "17.5 KiB" in line, f"diskPerRecord not used: {line}"
+        res = _counted_res(Path(t))
+        calls = []
+        o2, got = _run_pipeline(Path(t) / "alone", {}, calls, [{"evaluation": {}}], res=res, machine={
+            "diskPerRecord": {"bytes": 10 ** 6, "source": "a test figure"},
+            "heavyPrefix": ["--min-disk", f"{drive}=1000000000"]})
+        status = json.loads((o2 / "status.json").read_text(encoding="utf-8"))
+    assert got[0] == (EP.EXIT_REFUSED, []), f"a short disk must stop the run before any stage, got {got}"
+    assert "a test figure" in status.get("sentence", ""), f"the refusal does not name its figure: {status}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

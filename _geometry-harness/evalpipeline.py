@@ -113,16 +113,15 @@ def utcnow() -> str:
 
 # ---------------------------------------------------------------- plugin headers
 
-def plugin_header(path) -> dict:
-    """The TES4 header of one plugin: masters, ESM/ESL flags and the file's sha256. Refuses a file that is not a plugin."""
-    p = Path(path)
+def _header_fields(p: Path) -> tuple[int, list[str], int | None]:
+    """(flags, masters, HEDR record count) from one plugin's TES4 header. Refuses a file that is not a plugin."""
     with open(p, "rb") as f:
         head = f.read(24)
         if len(head) < 24 or head[:4] != b"TES4":
             raise Refusal(f"{p.name} is not a plugin (no TES4 header); check the file at {fwd(p)}.")
         size, flags = struct.unpack_from("<II", head, 4)
         body = f.read(size)
-    masters, i, big = [], 0, None
+    masters, records, i, big = [], None, 0, None
     while i + 6 <= len(body):
         sig = body[i:i + 4]
         n = struct.unpack_from("<H", body, i + 4)[0]
@@ -133,9 +132,23 @@ def plugin_header(path) -> dict:
             big = struct.unpack_from("<I", data, 0)[0]
         elif sig == b"MAST":
             masters.append(data.split(b"\0", 1)[0].decode("cp1252"))
+        elif sig == b"HEDR" and len(data) >= 8:
+            records = struct.unpack_from("<I", data, 4)[0]
         i += 6 + n
+    return flags, masters, records
+
+
+def plugin_header(path) -> dict:
+    """The TES4 header of one plugin: masters, ESM/ESL flags and the file's sha256. Refuses a file that is not a plugin."""
+    p = Path(path)
+    flags, masters, _ = _header_fields(p)
     return {"path": fwd(p), "sha256": sha256_file(p), "masters": masters, "esm": bool(flags & 0x1),
             "esl": bool(flags & 0x200)}
+
+
+def plugin_records(path) -> int | None:
+    """The record count a plugin's TES4 header states (HEDR); None when it states none."""
+    return _header_fields(Path(path))[2]
 
 
 def is_master(name: str, headers: dict) -> bool:
@@ -2120,6 +2133,141 @@ def legacy_entry_hash(entry: dict, measured: dict, stage: str) -> str:
     return sha256_json(entry if STAGES.index(stage) >= STAGES.index("bundle") else measured)
 
 
+# ---------------------------------------------------------------- disk: measured per-record figures
+
+GIB = 2 ** 30
+
+
+def _size(b: float) -> str:
+    """Bytes in the largest binary unit that keeps them above 1 (GiB, MiB or KiB), to one decimal."""
+    for unit, n in (("GiB", GIB), ("MiB", 2 ** 20)):
+        if b >= n:
+            return f"{b / n:.1f} {unit}"
+    return f"{b / 1024:.1f} KiB"
+
+
+def unique_bytes(folder, top_files: bool = True) -> int:
+    """Bytes under a folder with each file counted once: a hard-linked file (item 1's links) is one file. Without
+    `top_files` the folder's own files are left out (a run folder's ledger and status, which the driver rewrites)."""
+    seen, total = set(), 0
+    for dirpath, _, files in os.walk(folder):
+        if not top_files and same_path(dirpath, folder):
+            continue
+        for f in files:
+            p = os.path.join(dirpath, f)
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            key = (st.st_dev, st.st_ino) if st.st_ino else p
+            if key not in seen:
+                seen.add(key)
+                total += st.st_size
+    return total
+
+
+def evaluated_records(res: dict) -> int | None:
+    """The records an evaluation reads: each arm's non-baseline plugins' HEDR counts, summed over the arms. None when
+    a header cannot be read."""
+    headers, base, counts, total = res.get("headers") or {}, set(res.get("baseline") or []), {}, 0
+    try:
+        for a in res.get("arms") or []:
+            for p in a.get("plugins") or []:
+                if p in base:
+                    continue
+                if p not in counts:
+                    counts[p] = plugin_records(headers[p]["path"]) or 0
+                total += counts[p]
+    except (KeyError, OSError, Refusal, struct.error):
+        return None
+    return total
+
+
+def disk_floor(machine: dict, out: Path) -> float:
+    """The GiB the machine slot keeps free on the run's volume: heavyPrefix's `--min-disk VOLUME=GIB` for that
+    volume (idle_lock's argument), else 0."""
+    prefix = [str(x) for x in machine.get("heavyPrefix") or []]
+    drive = os.path.splitdrive(os.path.abspath(out))[0].upper()
+    floor = 0.0
+    for i, tok in enumerate(prefix[:-1]):
+        if tok == "--min-disk" and "=" in prefix[i + 1]:
+            vol, gib = prefix[i + 1].rsplit("=", 1)
+            if os.path.splitdrive(os.path.abspath(vol))[0].upper() == drive:
+                try:
+                    floor = max(floor, float(gib))
+                except ValueError:
+                    pass
+    return floor
+
+
+def disk_figures(ctx, stages: list[str]) -> dict[str, tuple[float, str]]:
+    """{stage: (bytes per evaluated record, where it was measured)}: the largest figure among the accepted (or set
+    aside) receipts of that stage in this run, the run folders the machine file lists under diskFigures, else the run
+    folders beside this one."""
+    listed = ctx.machine.get("diskFigures")
+    if listed:
+        others = [Path(p) for p in listed]
+    else:
+        try:
+            others = sorted(p for p in Path(ctx.out).parent.iterdir()
+                            if p.is_dir() and not same_path(p, ctx.out) and (p / "stages.json").is_file())
+        except OSError:
+            others = []
+    best = {}
+    for src in [Path(ctx.out)] + others:
+        try:
+            doc = read_json(src / "stages.json") if (src / "stages.json").is_file() else {}
+        except (OSError, ValueError):
+            continue
+        for s in stages:
+            for rec in ((doc.get("stages") or {}).get(s), (doc.get("kept") or {}).get(s)):
+                d = (rec or {}).get("disk") or {}
+                n, b = d.get("evaluatedRecords"), d.get("addedBytes")
+                if not n or b is None:
+                    continue
+                per = max(float(b), 0.0) / n
+                if s not in best or per > best[s][0]:
+                    best[s] = (per, f"{fwd(src)} {s} ({max(b, 0) / GIB:.2f} GiB over {n} records)")
+    return best
+
+
+def disk_forecast(ctx, records: int | None, stages: list[str]) -> tuple[str, str | None]:
+    """(the forecast line, a refusal sentence or None) for the stages about to run, from measured per-record figures
+    (disk_figures, else the machine file's diskPerRecord {bytes, source}); the floor is the slot's --min-disk."""
+    span = f"{stages[0]}..{stages[-1]}" if len(stages) > 1 else stages[0]
+    if records is None:
+        return (f"disk not forecast for {span}: the run's evaluated records could not be counted from its plugin "
+                f"headers."), None
+    figs = disk_figures(ctx, stages)
+    known = {s: figs[s] for s in stages if s in figs}
+    unknown = [s for s in stages if s not in figs]
+    per_rec = ctx.machine.get("diskPerRecord") or {}
+    whole = float(per_rec["bytes"]) if per_rec.get("bytes") else None
+    if not known and whole is None:
+        return (f"disk not forecast for {span}: no measured per-record figure exists (no earlier receipt of these "
+                f"stages carries one, and the machine file names no diskPerRecord)."), None
+    need = records * sum(p for p, _ in known.values())
+    sources = [w for _, w in known.values()]
+    if whole is not None and (unknown or records * whole > need):
+        need = max(need, records * whole)
+        sources.append(f"diskPerRecord {whole / 1024:.1f} KiB per record ({per_rec.get('source') or 'source not named'})")
+    gaps = f"; no figure for {', '.join(unknown)}" if unknown and whole is None else ""
+    usage = shutil.disk_usage(ctx.out)
+    floor = disk_floor(ctx.machine, ctx.out)
+    drive = os.path.splitdrive(os.path.abspath(ctx.out))[0] or fwd(ctx.out)
+    each = need / records / 1024 if records else 0.0
+    line = (f"disk forecast for {span}: about {_size(need)} more on {drive} ({records} evaluated records at "
+            f"{each:.1f} KiB each, measured at: {'; '.join(sources)}){gaps}; {drive} has {usage.free / GIB:.1f} GiB "
+            f"free and keeps a {floor:g} GiB floor.")
+    if usage.free - floor * GIB < need:
+        return line, (f"the run needs about {_size(need)} more on {drive} for {span} ({records} evaluated "
+                      f"records at {each:.1f} KiB each, measured at: {'; '.join(sources)}), and {drive} has "
+                      f"{usage.free / GIB:.1f} GiB free, {max(usage.free / GIB - floor, 0):.1f} GiB above its "
+                      f"{floor:g} GiB floor; free space there or move the "
+                      f"run folder, then run again.")
+    return line, None
+
+
 # ---------------------------------------------------------------- driver
 
 def cmd_arms(a) -> int:
@@ -2165,7 +2313,8 @@ def cmd_run(a) -> int:
         reads = stage_entry_keys()
         # the receipts as they stood before this run: the earlier rule's upstream bindings (a re-key changes them)
         before = {s: (rec or {}).get("inputsSha256") for s, rec in ledger.doc["stages"].items()}
-        ran_any = False
+        records = evaluated_records(res)
+        forecast_line, size_before, ran_any = None, None, False
         run.stage("stages", "pipeline stages", STAGES.index(through) + 1, "stages")
         for name in STAGES[:STAGES.index(through) + 1]:
             body = STAGE_BODIES.get(name)
@@ -2221,6 +2370,20 @@ def cmd_run(a) -> int:
                 print(f"{name}: reused (inputs and outputs unchanged)")
                 run.advance()
                 continue
+            if forecast_line is None:
+                # once, before the first stage that will run: the disk this run still needs, from measured figures
+                todo = list(STAGES[STAGES.index(name):STAGES.index(through) + 1])
+                forecast_line, short = disk_forecast(ctx, records, todo)
+                write_json(out / "disk-forecast.json", {"line": forecast_line, "refused": short, "stages": todo,
+                                                        "evaluatedRecords": records, "at": utcnow()})
+                print(forecast_line)
+                if short:
+                    write_json(out / "status.json", {"status": "incomplete", "stoppedAt": name, "sentence": short,
+                                                     "at": utcnow()})
+                    print(f"{name}: REFUSED: {short}", file=sys.stderr)
+                    return EXIT_REFUSED
+            if size_before is None:
+                size_before = unique_bytes(out, top_files=False)
             ran_any = True
             t0 = time.perf_counter()
             try:
@@ -2237,6 +2400,7 @@ def cmd_run(a) -> int:
                 ledger.record(name, inputs, [], exit_code=2, extra=None)
                 ledger.doc["history"][-1]["reason"] = "refused: " + str(r)
                 ledger._save()
+                size_before = None   # a refused stage's writes are not the next stage's
                 outcome = stage_outcome(name, 2, False, str(r))
                 if isinstance(r, NonBlockingRefusal):
                     outcome["blocksLater"] = False
@@ -2250,8 +2414,12 @@ def cmd_run(a) -> int:
                 run.advance()
                 continue
             secs = round(time.perf_counter() - t0, 1)
+            size_after = unique_bytes(out, top_files=False)
             ledger.record(name, inputs, outputs, exit_code=0,
-                          extra={"bound": extra, "seconds": secs, "driverSha256": sha256_file(Path(__file__))})
+                          extra={"bound": extra, "seconds": secs, "driverSha256": sha256_file(Path(__file__)),
+                                 # what this stage added to the run folder, each file once, for later forecasts
+                                 "disk": {"addedBytes": size_after - size_before, "evaluatedRecords": records}})
+            size_before = size_after
             print(f"{name}: accepted in {secs} s")
             run.advance()
         if refusals:
@@ -2259,6 +2427,9 @@ def cmd_run(a) -> int:
                                              "refusals": refusals, "at": utcnow()})
         else:
             write_json(out / "status.json", {"status": "through " + through, "at": utcnow()})
+        if forecast_line:
+            st = read_json(out / "status.json")
+            write_json(out / "status.json", dict(st, diskForecast=forecast_line))
     return EXIT_OK
 
 
