@@ -37,7 +37,7 @@ internal static class FindingReaders
     internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef) => Read(checkId, path, cellOfRef, null);
 
     /// <summary>With <paramref name="relevance"/>, finalize's record for this check and arm
-    /// (disposition.discovery.relevance, R4.6): a discovery hit is a finding when relevant, context saying why when not,
+    /// (disposition.discovery.relevance): a discovery hit is a finding when relevant, context saying why when not,
     /// and, when relevance was not computed, a finding carrying that sentence. Relevance is never re-derived here.</summary>
     internal static IReadOnlyList<FindingRow> Read(string checkId, string path, Func<string, string?>? cellOfRef, JsonElement? relevance)
     {

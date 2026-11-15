@@ -506,9 +506,9 @@ public sealed class ManualModeBindingTests : IDisposable
         Assert.Equal("baseline", (string?)Contract.Static("BundleConflicts", "DefaultArm", "the default arm from plan.reviewArm", Plan(null)));
     }
 
-    // B12 and B12b are superseded by R4.5: StateToolsTests.H5a and H5b start the server as the client does.
+    // houseCARL mode: StateToolsTests.H5a and H5b start the server as the client does.
 
-    /// <summary>B12b under R4.5: with no WB_HOUSECARL_LAUNCH and no housecarl entry in
+    /// <summary>with no WB_HOUSECARL_LAUNCH and no housecarl entry in
     /// ~/.claude.json, houseCARL mode is refused in one sentence naming the setting that fixes it.</summary>
     [Fact]
     public void H5c_with_no_server_found_houseCARL_mode_refuses_in_one_sentence_naming_WB_HOUSECARL_LAUNCH()
@@ -576,7 +576,7 @@ public sealed class LauncherProcessTests
 }
 
 
-/// <summary>M2: the run's work folder (bundle, logs, candidates,
+/// <summary>the run's work folder (bundle, logs, candidates,
 /// re-checks) never goes under the instance's mods folder or anywhere MO2 would list it as a mod; only a patch's own new
 /// "houseCARL - name" folder may land there. WorkFolderRule.Check(work, instance, profile, game) returns null or one
 /// sentence; the default work folder is outside the instance.</summary>
@@ -664,7 +664,7 @@ public sealed class SessionCellTests
     }
 }
 
-/// <summary>M6 and L2 on real outputs. The probes' real outputs carry load-order names, so they are not tracked
+/// <summary>The readers and the review credit on real outputs. The probes' real outputs carry load-order names, so they are not tracked
 /// fixtures: WB_READER_OUTPUTS names a run-local evaluation folder and the tests read its receipts.
 /// Without it the test fails saying so (it is a known answer for a real run, not a skip).</summary>
 [Trait("tier", "real-run")]
@@ -731,7 +731,7 @@ public sealed class RealOutputReaderTests
     }
 }
 
-/// <summary>B4 (F11, M2): an in-place run through the bundle stage on a synthetic MO2 world, with the real probes and
+/// <summary>B4: an in-place run through the bundle stage on a synthetic MO2 world, with the real probes and
 /// the pipeline: nothing is written under the instance or the game folder, and every new file is under the work folder
 /// (or the system temp folder). The selection is a mod folder whose plugin places one reference in the master's cell.</summary>
 [Trait("tier", "integration")]

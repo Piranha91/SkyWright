@@ -636,7 +636,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         finally { Environment.SetEnvironmentVariable("WB_HOUSECARL_LAUNCH", null); }
     }
 
-    // ---- M7: the launcher's verbs and its run ----
+    // ---- the launcher's verbs and its run ----
 
     /// <summary>LauncherInstance with a second enabled mod and a separator (L5), and an Output Folder beside it.</summary>
     static string LauncherInstanceL5()

@@ -70,10 +70,25 @@ internal static class ForwardRule
         if (!Path.IsPathFullyQualified(tf)) return $"to_file '{tf}' is not a full path; in manual mode a file goes under the Output Folder or the Work Folder.";
         var dir = Path.GetDirectoryName(OutputFolderPolicy.Full(tf)) ?? "";
         if (work is not null && OutputFolderPolicy.AtOrUnder(dir, OutputFolderPolicy.Full(work))) return null;
+        if (string.Equals(dir, OutputFolderPolicy.Full(layout.Mods), StringComparison.OrdinalIgnoreCase))
+            return $"to_file '{tf}' is loose in the mods folder, where a file belongs to no mod; give a file under the Work Folder" + (work is null ? "." : $" '{work}'.");
         if (!modsIsOutput && OutputFolderPolicy.AtOrUnder(dir, o) && OutputFolderPolicy.Refusal(dir, layout) is null) return null;
         var why = OutputFolderPolicy.Refusal(dir, layout);
         return $"to_file '{tf}' is not under the Output Folder '{o}'" + (modsIsOutput ? "" : "") + (work is null ? "" : $" or the Work Folder '{work}'")
                + "; in manual mode a file a read writes goes under one of them" + (why is null ? "." : $" ({why.TrimEnd('.')}).");
+    }
+
+    /// <summary>The arguments under the names the server will bind them to (its own rule: case and underscores ignored),
+    /// or one sentence for a name that matches two parameters or repeats one already given.</summary>
+    internal static (Dictionary<string, JsonElement>? Args, string? Refusal) Canonical(string tool, IReadOnlyDictionary<string, JsonElement>? given, JsonElement schema)
+    {
+        var a = new Dictionary<string, JsonElement>(given ?? new Dictionary<string, JsonElement>(), StringComparer.Ordinal);
+        if (schema.ValueKind != JsonValueKind.Object || !schema.TryGetProperty("properties", out var props) || props.ValueKind != JsonValueKind.Object)
+            return (null, $"{tool}'s parameters could not be read from the houseCARL server, so its arguments cannot be checked against the Output Folder rule; the workbench does not forward it.");
+        var r = ArgumentNames.Resolve(a, schema);
+        if (r.Ambiguous.Count > 0) return (null, $"{tool}: the argument '{r.Ambiguous[0]}' matches more than one parameter; spell it as the parameter is declared.");
+        if (r.Duplicates.Count > 0) return (null, $"{tool}: the argument '{r.Duplicates[0]}' gives a parameter more than once under another spelling; give it once.");
+        return (r.Rewritten ?? a, null);
     }
 
     internal static (Dictionary<string, JsonElement>? Args, string? Refusal) Prepare(string tool, IReadOnlyDictionary<string, JsonElement>? given,
@@ -196,7 +211,7 @@ internal sealed class ForwardedTool : McpServerTool
     {
         var hub = request.Services?.GetService<StateHub>();
         if (hub is null) return StateTools.Refuse("the workbench endpoint has no launcher to forward to.");
-        try { return await hub.Launcher.ForwardAsync(_tool.Name, request.Params?.Arguments, cancellationToken); }
+        try { return await hub.Launcher.ForwardAsync(_tool.Name, request.Params?.Arguments, _tool.InputSchema, cancellationToken); }
         catch (InvalidOperationException ex) { return StateTools.Refuse(ex.Message); }
     }
 

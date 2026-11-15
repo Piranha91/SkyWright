@@ -185,7 +185,7 @@ def case_b7_select_is_closed_over_the_registry_prerequisites_and_derived_checks(
     for need in ("state.conditional-geometry", "state.switch-census", "loadability.masters-and-order", "patch.order-evaluation"):
         assert need in sel, f"--select lacks {need}: {sorted(sel)}"
     assert "patch.candidate-qualification" not in sel, "a derived check whose prerequisite (discovery-installed) is not selected was added"
-    # M5 (run s5): evalrun does not compute functional.linked-dependencies ("derived kind None is not one this controller
+    # the derived checks: evalrun does not compute functional.linked-dependencies ("derived kind None is not one this controller
     # computes"), so adding it would only plan an `unsupported` row; the launcher greys it instead
     assert "functional.linked-dependencies" not in sel, "a derived check evalrun does not compute was added"
     assert flag(argv, "--depth") == ["deep"], f"a selected states:selected check needs depth deep, got {flag(argv, '--depth')}"
@@ -339,7 +339,7 @@ def case_h1b_a_scope_measured_on_the_baseline_candidate_is_still_recorded_verbat
     assert got["configurationSource"] == "scope" and got["configuration"]["fingerprint"] == "scopefp", got["configurationSource"]
 
 
-# ---- M4: the review arm's pair source applies only when the plan names a review arm ----
+# ---- the review arm's pair source applies only when the plan names a review arm ----
 
 def pair_ex(t: Path, review, with_receipt=True):
     run = t / ("run-" + str(review))
@@ -414,7 +414,7 @@ def case_l4_an_inactive_plugin_stays_out_and_a_plugin_the_game_data_also_provide
         assert "Shared.esp" in by["without-selection"]["plugins"], "a plugin Data also provides stays loaded with Sel disabled"
 
 
-# ---- M3: the review arm in evalrun plan itself ----
+# ---- the review arm in evalrun plan itself ----
 
 def plan_run(t: Path, review=None):
     inst, game = world(t, {"A": {"A.esp": ["Base.esm"]}, "Sel": {"Sel.esp": ["Base.esm"]}}, ["Sel", "A"], ["A.esp", "Sel.esp"])
@@ -483,7 +483,7 @@ def _discovery_run(run: Path, targets):
 
 
 def case_b8i_finalize_records_discovery_relevance_by_evalruns_rule_for_every_accepted_discovery_receipt():
-    """R4.6: relevance is recorded whether or not candidate-qualification runs, by discovery_hit_rows' rule,
+    """relevance is recorded whether or not candidate-qualification runs, by discovery_hit_rows' rule,
     and as not computed, with the sentence, when the plan has no target and no pair."""
     rel = getattr(ER, "discovery_relevance", None)
     assert rel is not None, "evalrun records no discovery relevance outside candidate-qualification (no discovery_relevance)"

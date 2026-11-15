@@ -214,7 +214,7 @@ internal sealed class Launcher : IAsyncDisposable
         return $"the Work Folder is '{WorkFolder}'";
     }
 
-    /// <summary>Start a run of the selection (M7 builds the run itself); refused in one sentence until the launcher has
+    /// <summary>Start a run of the selection; refused in one sentence until the launcher has
     /// what a run needs.</summary>
     /// <summary>Why a check cannot run on this profile and selection, or null (the per-check table's greyed lines).</summary>
     internal string? WhyNotHere(RegistryCheck c)
@@ -340,8 +340,12 @@ internal sealed class Launcher : IAsyncDisposable
         }
     }
 
-    internal async Task<CallToolResult> ForwardAsync(string tool, IDictionary<string, JsonElement>? args, CancellationToken ct)
+    internal async Task<CallToolResult> ForwardAsync(string tool, IDictionary<string, JsonElement>? args, JsonElement schema, CancellationToken ct)
     {
+        // judge the names the server will bind, not only the spelling given (toFile binds as to_file)
+        var (canon, bad) = ForwardRule.Canonical(tool, args is null ? null : new Dictionary<string, JsonElement>(args), schema);
+        if (bad is not null) return StateTools.Refuse(bad);
+        args = canon;
         string output; Mo2OutputLayout layout; string? work;
         lock (_gate)
         {
