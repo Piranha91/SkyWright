@@ -1327,6 +1327,16 @@ def primitive_table(flag: str | None) -> tuple[dict | None, bytes | None, str | 
              "path": str(p), "entries": len(rows)}, data, None)
 
 
+def search_record(cdir: Path) -> dict:
+    """The plan's record of the candidate search (candidatesDir/candidates.json): its path and sha256, or a sentence
+    saying it is absent. A bundle copies it only when it hashes to this record, and says so when it is absent."""
+    f = Path(cdir) / "candidates.json"
+    if f.is_file():
+        return {"path": str(f), "sha256": sha256_file(f)}
+    return {"path": None, "sha256": None,
+            "absent": f"the candidates folder {cdir} holds no candidates.json, so this plan has no candidate-search record"}
+
+
 def cmd_plan(a) -> int:
     run = Path(a.out)
     registry_path = given_path(a.registry)
@@ -1755,6 +1765,9 @@ def cmd_plan(a) -> int:
                 "note": "states beyond the selected ones were not enumerated: this plan carries no "
                         "state census, so what was not explored is unknown in extent, not empty"})
 
+    search_rec = search_record(cdir)
+    if search_rec.get("absent"):
+        print(f"   search: {search_rec['absent']}")
     plan = {
         "schemaVersion": SCHEMA_VERSION,
         "planId": None,
@@ -1789,6 +1802,8 @@ def cmd_plan(a) -> int:
                           "providers": scope_providers,
                           "overlays": scope_overlays},
         "candidatesDir": str(cdir),
+        # the candidate search the plan read its Budget from: frozen by hash, or recorded absent with the reason
+        "search": search_rec,
         "arms": arms,
         **({"reviewArm": review_arm} if review_arm else {}),
         "states": {"selected": states, "depth": depth, "notExplored": states_not_explored,
@@ -1952,7 +1967,9 @@ def relative_path_refusal(plan: dict, only: tuple | None = None, remedy: str | N
 PREMISE_WORDS = {"registry": ("the checklist this run was derived from cannot be re-read",
                               "A checklist cannot change under a frozen plan."),
                  "scope": ("the applicability this plan froze cannot be re-derived",
-                           "A scope change changes the checklist.")}
+                           "A scope change changes the checklist."),
+                 "search": ("the candidate search this plan read cannot be re-read",
+                            "A candidate search cannot change under a frozen plan.")}
 
 
 def premise_file_refusal(plan: dict, label: str, nxt: str, named: str | None = None) -> str | None:
@@ -1990,7 +2007,8 @@ def premise_refusal(plan: dict) -> str | None:
 
 
 #: Where bundle copies each premise.
-PREMISE_COPIES = {"registry": "registry/check-registry.json", "scope": "scope/scope.json"}
+PREMISE_COPIES = {"registry": "registry/check-registry.json", "scope": "scope/scope.json",
+                  "search": "search/candidates.json"}
 
 
 def bundle_premise_sources(plan: dict, named: dict) -> tuple[dict, str | None, int]:
@@ -6577,7 +6595,8 @@ def cmd_bundle(a) -> int:
     if bad:
         print(f"REFUSED: {bad}", file=sys.stderr)
         return EXIT_REFUSED_RESULT
-    premises, bad, code = bundle_premise_sources(plan, {"registry": a.registry, "scope": a.scope})
+    premises, bad, code = bundle_premise_sources(plan, {"registry": a.registry, "scope": a.scope,
+                                                        "search": getattr(a, "search", None)})
     if bad:
         print(f"REFUSED: {bad}", file=sys.stderr)
         return code
@@ -6659,9 +6678,23 @@ def cmd_bundle(a) -> int:
         for label in ("scope", "registry"):  # checked against the plan's frozen hashes above; manifest order kept
             if label in premises:
                 copy_in(premises[label], PREMISE_COPIES[label], kind=label)
-        search = Path(plan["candidatesDir"]) / "candidates.json"
-        if search.exists():
-            copy_in(search, "search/candidates.json", kind="search")
+        search_rel, search_note = None, {}
+        if "search" in premises:
+            copy_in(premises["search"], PREMISE_COPIES["search"], kind="search")
+            search_rel = PREMISE_COPIES["search"]
+        elif "search" in plan:
+            search_note = {"searchAbsent": (plan.get("search") or {}).get("absent")
+                           or "the plan records no candidate search"}
+        else:
+            # a plan made before the search hash was frozen: copied as before, and said to be unfrozen
+            search = Path(plan["candidatesDir"]) / "candidates.json"
+            if search.exists():
+                copy_in(search, PREMISE_COPIES["search"], kind="search")
+                search_rel = PREMISE_COPIES["search"]
+            search_note = {"searchUnfrozen": "the plan predates the frozen search hash, so search/candidates.json "
+                                             + ("was copied unchecked" if search_rel else "was not found to copy")}
+        for k, v in search_note.items():
+            print(f"   search: {v}")
 
         unassessed_media = []
         media_doc = load_json(Path(a.media)) if a.media else None
@@ -6753,7 +6786,7 @@ def cmd_bundle(a) -> int:
             "plan": "plan.json", "ledger": "ledger.json", "journal": "journal.jsonl",
             "disposition": "disposition.json", "status": "STATUS.md",
             "registry": "registry/check-registry.json",
-            "search": "search/candidates.json", "scope": "scope/scope.json",
+            "search": search_rel, **search_note, "scope": "scope/scope.json",
             "discovery": (load_json(run / "disposition.json") or {}).get("discovery", {}),
             "excluded": [{"what": "plugin and asset binaries",
                           "why": "identities only: a shareable report package refers to a plugin by name "
@@ -6877,13 +6910,15 @@ def cmd_verify_bundle(a) -> int:
             defect("planid-disagreement", None,
                    "the manifest, plan, ledger and disposition do not agree on planId: " + canonical(ids))
 
-        # (4) the registry and scope copies against the hashes the plan froze
+        # (4) the registry, scope and candidate-search copies against the hashes the plan froze
         for rel, want, label in ((manifest.get("registry") or "registry/check-registry.json",
                                   (plan.get("registry") or {}).get("sha256"), "registry"),
                                  (manifest.get("scope") or "scope/scope.json",
-                                  (plan.get("scope") or {}).get("sha256"), "scope")):
+                                  (plan.get("scope") or {}).get("sha256"), "scope"),
+                                 (manifest.get("search") or "search/candidates.json",
+                                  (plan.get("search") or {}).get("sha256"), "search")):
             if want is None:
-                continue  # a plan made without --scope froze no scope hash
+                continue  # a plan made without --scope froze no scope hash; a search recorded absent froze none
             if not (d / rel).exists():
                 defect(f"{label}-missing", rel, f"the plan froze a {label} hash but the copy is absent")
             elif memo.sha256(d / rel) != want:
@@ -7291,6 +7326,8 @@ def build_parser() -> argparse.ArgumentParser:
                                       "(rebundling an older run after the registry changed); it must hash to the plan")
     p.add_argument("--scope", help="the scope file the plan froze, copied in place of the plan's stored path; it must "
                                    "hash to the plan")
+    p.add_argument("--search", help="the candidate search (candidates.json) the plan froze, copied in place of the plan's "
+                                    "stored path; it must hash to the plan")
     p.add_argument("--no-names", action="store_true",
                    help="skip the names step (each row's objects, their bases and models, read with the record reader); "
                         "the manifest says it was skipped, and `enrich --kind names` can add it later")

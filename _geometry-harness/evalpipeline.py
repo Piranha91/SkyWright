@@ -1886,8 +1886,8 @@ def media_bundle_dir(ctx) -> Path:
 
 def frozen_input_args(ctx) -> list[str]:
     """The media bundle's frozen inputs, by construction (C1930, C1933): every input the evaluation's plan pins by path
-    and hash at its top level (evalrun's PREMISE_COPIES: the check registry and the scope) whose original no longer
-    hashes to the plan (gone, or changed since) is handed to evalrun bundle as the evidence bundle's own copy, which
+    and hash at its top level (evalrun's PREMISE_COPIES: the check registry, the scope and the candidate search) whose
+    original no longer hashes to the plan (gone, or changed since) is handed to evalrun bundle as the evidence bundle's own copy, which
     evalrun checks against the plan's hash and refuses if it differs. A pinned input this function does not know is
     refused in one sentence rather than left for the bundle to trip on (Hroggar: registry-changed; Ice Blade:
     scope-missing, its plan naming a scope on a deleted folder)."""

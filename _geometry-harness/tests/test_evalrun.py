@@ -8411,6 +8411,87 @@ CASES["case-1732"] = case_1732
 CASES["case-1733"] = case_1733
 
 
+# ------------------------------------------------------- the candidate search frozen by the plan: cases 2328-2329
+# search/candidates.json used to be copied unhashed and left out silently (2026-11-06-search-candidates-unhashed): the
+# plan now freezes its hash or records it absent with a sentence, bundle copies it only when it hashes to the plan, and
+# verify checks the copy.
+
+def _search_fixture(tmp: Path, name: str, with_search: bool = True) -> tuple[Path, Path]:
+    """A private copy of case-01's inputs (its candidates folder is edited here, never the shared one)."""
+    src = GEN / "cases" / "case-01-geometry-and-quest"
+    d = tmp / f"{name}-inputs"
+    shutil.copytree(src, d)
+    if not with_search:
+        (d / "candidates" / "candidates.json").unlink()
+    return d, tmp / name
+
+
+def _search_plan(d: Path, run: Path):
+    args = ["plan", "--registry", GEN / "registry" / "fixture-check-registry.json", "--scope", d / "scope.json",
+            "--candidates", d / "candidates", "--out", run, "--harness", REAL_HARNESS] + probe_cmds()
+    return evalrun(args, d / "scenario.json", expect_exit=0)
+
+
+def _search_bundle(d: Path, run: Path):
+    evalrun(["run", "--run", run], d / "scenario.json")
+    evalrun(["finalize", "--run", run], d / "scenario.json")
+    return evalrun(["bundle", "--run", run], d / "scenario.json")
+
+
+def case_2328(tmp):
+    """C2328: the plan freezes candidates.json's sha256 and the bundle carries that copy; with no candidates.json the
+    plan and the manifest say so in a sentence. Rejects: a plan with no record of the search, a silent absence."""
+    case = "case-2328-search-frozen"
+    d, run = _search_fixture(tmp, case)
+    p = _search_plan(d, run)
+    rec = (load(run / "plan.json") or {}).get("search") or {}
+    want = sha_of(d / "candidates" / "candidates.json")
+    check(p.returncode == 0 and rec.get("sha256") == want, f"{case}: the plan freezes the search's sha256 ({rec})")
+    b = _search_bundle(d, run)
+    man = load(run / "bundle" / "manifest.json") or {}
+    copy = run / "bundle" / "search" / "candidates.json"
+    check(b.returncode == 0 and man.get("search") == "search/candidates.json" and copy.is_file()
+          and sha_of(copy) == want, f"{case}: the bundle carries the frozen copy (exit {b.returncode}, {man.get('search')})")
+    d2, run2 = _search_fixture(tmp, case + "-absent", with_search=False)
+    p2 = _search_plan(d2, run2)
+    rec2 = (load(run2 / "plan.json") or {}).get("search") or {}
+    check(p2.returncode == 0 and rec2.get("sha256") is None and "holds no candidates.json" in str(rec2.get("absent"))
+          and "holds no candidates.json" in p2.stdout,
+          f"{case}: an absent search is recorded and said by the plan ({rec2}; {p2.stdout[-200:]!r})")
+    b2 = _search_bundle(d2, run2)
+    man2 = load(run2 / "bundle" / "manifest.json") or {}
+    check(b2.returncode == 0 and man2.get("search") is None and "holds no candidates.json" in str(man2.get("searchAbsent")),
+          f"{case}: the manifest says the search is absent rather than naming a file it lacks "
+          f"(exit {b2.returncode}, search {man2.get('search')!r}, searchAbsent {man2.get('searchAbsent')!r})")
+
+
+def case_2329(tmp):
+    """C2329: a candidates.json changed after the plan refuses the bundle by name; a bundle copy changed after
+    bundling is a verify defect. Rejects: a search copied under a hash the plan never froze."""
+    case = "case-2329-search-changed"
+    d, run = _search_fixture(tmp, case)
+    _search_plan(d, run)
+    f = d / "candidates" / "candidates.json"
+    f.write_text(f.read_text(encoding="utf-8").replace('"evaluated"', '"evaluated" ', 1), encoding="utf-8")
+    b = _search_bundle(d, run)
+    out = b.stdout + b.stderr
+    check(b.returncode != 0 and "search-changed" in out and not (run / "bundle" / "manifest.json").exists(),
+          f"{case}: a changed search refuses the bundle by name (exit {b.returncode}: {out.strip()[-300:]})")
+    d2, run2 = _search_fixture(tmp, case + "-copy")
+    _search_plan(d2, run2)
+    _search_bundle(d2, run2)
+    copy = run2 / "bundle" / "search" / "candidates.json"
+    if copy.is_file():
+        copy.write_text(copy.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    evalrun(["verify-bundle", run2 / "bundle"])
+    kinds = [x.get("kind") for x in (((load(run2 / "bundle" / "verify.json") or {}).get("bundle") or {}).get("defects") or [])]
+    check(copy.is_file() and "search-mismatch" in kinds, f"{case}: verify reports the changed search copy ({kinds})")
+
+
+CASES["case-2328"] = case_2328
+CASES["case-2329"] = case_2329
+
+
 
 def main() -> int:
     want = sys.argv[1] if len(sys.argv) > 1 else ""
