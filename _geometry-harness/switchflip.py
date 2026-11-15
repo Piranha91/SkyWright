@@ -571,7 +571,7 @@ def cmd_launch(a) -> int:
                 continue
             if bool(before) == want_disabled:
                 events.append({"kind": "skipped", "name": c["ref"], "t": time.time(),
-                               "why": "no change from its load-time state: already " + c["target"]})
+                               "why": "no call sent: its live state, read just before the call, was already " + c["target"]})
                 log(step="skipped", ref=c["ref"])
                 continue
             call = timed("call", c["ref"], lambda: db.papyrus("ObjectReference",
