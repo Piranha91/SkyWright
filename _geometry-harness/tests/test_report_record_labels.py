@@ -250,7 +250,9 @@ def c2205_short_form_rule(tmp: Path):
     names = [LONG, gs1, gs2, snozz, "Lux", "Cities of the North - Falkreath", "Unofficial Skyrim Special Edition Patch"]
     got = fn(names, words)
     check("C2205", got.get(LONG) == "BUVARP RE", "BUVARP's short form is not taken from its own name", json.dumps(got))
-    check("C2205", gs1 not in got and gs2 not in got, "two mods share a short form", json.dumps(got))
+    # (report words, Gate A Q1) a name that names a patch is never said by its own head, so its head blocks no other
+    # name: Grand Solitude keeps its short form beside "Grand Solitude - ... patch", which is said in full
+    check("C2205", got.get(gs1) == "Grand Solitude" and gs2 not in got, "two mods share a short form", json.dumps(got))
     check("C2205", snozz not in got, "a patch named after the mods it patches is shortened to one of them",
           json.dumps(got))
     check("C2205", not any(k in got for k in ("Lux", "Cities of the North - Falkreath",

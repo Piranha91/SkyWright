@@ -1677,12 +1677,16 @@ def case_records_and_places_said_by_name():
         b = B_()
         b.dir = Path(td)
         b.enrichment = lambda: [{"enrichment": "names", "path": "enrichment/names/names.json"}]
-        if not (hasattr(R, "record_labels") and hasattr(R, "label_form_keys")):
+        if not (hasattr(R, "record_labels") and hasattr(R, "say_form_keys")):
             return False, "no record names read for the report"
         labels = R.record_labels(b)
-    said = R.label_form_keys({"line": f"it puts back the Lighting of 00C401:{BASE}, as on 00C402:{BASE} (AIData)",
-                              "formKey": f"00C401:{BASE}"}, labels)
-    ok = (said["line"] == f"it puts back the Lighting of The Town Inn, 00C401:{BASE}, as on TownGuardNpc, 00C402:{BASE} (AIData)"
+    # the current path (C2318): the record said in words by said_record over the plugin files' names, at the one
+    # sentence pass; the data field keeps its form key
+    pw = R.load_priorities()["reader"]["prediction"]
+    sayer = lambda fk: (R.said_record(fk, {}, labels, pw, lambda w, f: None), None, labels.get(fk))  # noqa: E731
+    said = R.say_form_keys({"line": f"it puts back the Lighting of 00C401:{BASE}, as on 00C402:{BASE} (AIData)",
+                            "formKey": f"00C401:{BASE}"}, sayer, [BASE], pw)
+    ok = (said["line"] == "it puts back the Lighting of The Town Inn, as on Town Guard Npc (AIData)"
           and said["formKey"] == f"00C401:{BASE}")
     return ok, f"labels {labels}; said {said}"
 
