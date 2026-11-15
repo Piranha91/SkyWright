@@ -31,7 +31,7 @@ internal static class Shell
 
     static Application? _app;
     internal static Window? Window;
-    static readonly ContentControl ViewSlot = new();
+    internal static readonly ContentControl ViewSlot = new();
     static readonly ContentControl BarSlot = new();
     static readonly TextBlock Banner = new() { Margin = new Thickness(6, 4, 6, 4), TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold };
     static readonly ListBox ConflictList = new();

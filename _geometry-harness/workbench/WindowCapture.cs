@@ -1,48 +1,39 @@
-using System.Runtime.InteropServices;
 using System.Windows;
-using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace Workbench;
 
-/// <summary>A picture of the whole workbench window as the modder sees it (tabs, banner, status bar and the 3D view), by
-/// Win32 PrintWindow with full content, so the GL child window is in it too. A scene capture is the 3D view alone.</summary>
+/// <summary>A picture of the workbench window as the modder sees it: the WPF content (tabs, banner, status bar) rendered by
+/// WPF, with the scene's own frame placed where the view sits. WPF cannot render the native GL child window and Win32
+/// PrintWindow returned a blank window here (stage 4, run 1), so the picture is a composite, and is called one.</summary>
 internal static class WindowCapture
 {
-    [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
-    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hwnd);
-    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hwnd, IntPtr hdc);
-    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr hdc);
-    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleBitmap(IntPtr hdc, int w, int h);
-    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
-    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
-    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr hdc);
-    [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
-    const uint PW_RENDERFULLCONTENT = 2;
-
-    /// <summary>Save the window as PNG; returns its size in device pixels, or throws one sentence.</summary>
-    internal static (int W, int H) Save(Window window, string path)
+    /// <summary>Save the composite as PNG; returns its size in device pixels.</summary>
+    internal static (int W, int H) SaveComposite(Window window, FrameworkElement viewSlot, string viewPng, string path)
     {
-        var hwnd = new WindowInteropHelper(window).Handle;
-        if (hwnd == IntPtr.Zero || !GetWindowRect(hwnd, out var r)) throw new InvalidOperationException("the workbench window has no handle yet, so it cannot be captured.");
-        int w = r.Right - r.Left, h = r.Bottom - r.Top;
-        var screen = GetDC(IntPtr.Zero);
-        var dc = CreateCompatibleDC(screen);
-        var bmp = CreateCompatibleBitmap(screen, w, h);
-        var old = SelectObject(dc, bmp);
-        try
+        if (window.Content is not FrameworkElement content || content.ActualWidth <= 0)
+            throw new InvalidOperationException("the workbench window has no laid-out content yet, so it cannot be captured.");
+        var dpi = VisualTreeHelper.GetDpi(window);
+        int w = (int)Math.Ceiling(content.ActualWidth * dpi.DpiScaleX), h = (int)Math.Ceiling(content.ActualHeight * dpi.DpiScaleY);
+        var ui = new RenderTargetBitmap(w, h, dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        ui.Render(content);
+        var view = new BitmapImage();
+        view.BeginInit(); view.CacheOption = BitmapCacheOption.OnLoad; view.UriSource = new Uri(Path.GetFullPath(viewPng)); view.EndInit();
+        var at = viewSlot.TranslatePoint(new Point(0, 0), content);
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
         {
-            if (!PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT)) throw new InvalidOperationException("Windows refused to print the workbench window (PrintWindow failed).");
-            SelectObject(dc, old);
-            var src = Imaging.CreateBitmapSourceFromHBitmap(bmp, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-            using var f = File.Create(path);
-            var enc = new PngBitmapEncoder();
-            enc.Frames.Add(BitmapFrame.Create(src));
-            enc.Save(f);
-            return (w, h);
+            dc.DrawImage(ui, new Rect(0, 0, content.ActualWidth, content.ActualHeight));
+            dc.DrawImage(view, new Rect(at, new Size(viewSlot.ActualWidth, viewSlot.ActualHeight)));
         }
-        finally { DeleteObject(bmp); DeleteDC(dc); ReleaseDC(IntPtr.Zero, screen); }
+        var all = new RenderTargetBitmap(w, h, dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        all.Render(dv);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        using var f = File.Create(path);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(all));
+        enc.Save(f);
+        return (w, h);
     }
 }

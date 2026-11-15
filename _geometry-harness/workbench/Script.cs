@@ -170,8 +170,9 @@ internal sealed class Script
             case "capture": _h.Capture(a[1]); break;
             case "capturewindow":
             {
-                var (w, hh) = WindowCapture.Save(Shell.Window!, Path.Combine(_h.OutDir, a[1] + ".png"));
-                WorkbenchHost.Say($"window captured ({w}x{hh}) to {Path.Combine(_h.OutDir, a[1] + ".png")}"); break;
+                var viewPng = _h.Capture(a[1] + "-view");
+                var (w, hh) = WindowCapture.SaveComposite(Shell.Window!, Shell.ViewSlot, viewPng, Path.Combine(_h.OutDir, a[1] + ".png"));
+                WorkbenchHost.Say($"window captured as a composite ({w}x{hh}: WPF's render of the window, the scene frame {Path.GetFileName(viewPng)} in the view's place) to {Path.Combine(_h.OutDir, a[1] + ".png")}"); break;
             }
             case "dump": _h.DumpRef(FormKey.Factory(a[1]), a[2]); break;
             case "fps": Fps(int.Parse(a[1])); break;
