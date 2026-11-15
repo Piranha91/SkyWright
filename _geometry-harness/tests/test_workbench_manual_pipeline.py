@@ -180,10 +180,12 @@ def flag(argv, name):
 def case_b7_select_is_closed_over_the_registry_prerequisites_and_derived_checks():
     argv, _ = plan_argv({}, ["state.conditional-geometry", "loadability.masters-and-order"])
     sel = {c for s in flag(argv, "--select") for c in s.split(",")}
-    for need in ("state.conditional-geometry", "state.switch-census", "loadability.masters-and-order",
-                 "functional.linked-dependencies", "patch.order-evaluation"):
+    for need in ("state.conditional-geometry", "state.switch-census", "loadability.masters-and-order", "patch.order-evaluation"):
         assert need in sel, f"--select lacks {need}: {sorted(sel)}"
     assert "patch.candidate-qualification" not in sel, "a derived check whose prerequisite (discovery-installed) is not selected was added"
+    # M5 (run s5): evalrun does not compute functional.linked-dependencies ("derived kind None is not one this controller
+    # computes"), so adding it would only plan an `unsupported` row; the launcher greys it instead
+    assert "functional.linked-dependencies" not in sel, "a derived check evalrun does not compute was added"
     assert flag(argv, "--depth") == ["deep"], f"a selected states:selected check needs depth deep, got {flag(argv, '--depth')}"
 
 
