@@ -569,7 +569,7 @@ internal sealed class StateTools
                 int staged = sc.Session.Pending.Count(e => e.Ref == k);
                 sel = new
                 {
-                    @ref = k.ToString(), @base = ro.Ref.BaseEditorId, cell = sc.CellOf(k),
+                    @ref = k.ToString(), @base = ro.Ref.BaseEditorId, cell = sc.CellOf(k), parts = ro.Shapes.Count,
                     drawn = PoseJson(sc.Session.Current(k)),
                     loadOrder = PoseJson(RefPlacementEdit.BakedPose(ro.Ref)),
                     written = written ? new { patch = w.Patch, pose = PoseJson(w.Pose) } : null,
