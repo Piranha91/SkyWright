@@ -1522,6 +1522,12 @@ def cmd_plan(a) -> int:
     for i, (declared, cand) in enumerate(supplied, start=1):
         add_arm("supplied-combination", cand, i, declared)
 
+    review_arm = getattr(a, "review_arm", None)
+    if review_arm and review_arm not in {x["armId"] for x in arms}:
+        return refuse(f"--review-arm {review_arm} names no arm of this plan (its arms are "
+                      f"{', '.join(x['armId'] for x in arms)}); name one of them or leave it out")
+    single_arm = review_arm or "baseline"
+
     manifest = load_json(cdir / "candidates.json") or {}
     budget_block = manifest.get("Budget") if isinstance(manifest, dict) else None
 
@@ -1638,7 +1644,7 @@ def cmd_plan(a) -> int:
             return refuse(f"registry check {cid}: applicability {applicability!r} is not yes/no/unknown")
 
         want = (check.get("inputs") or {}).get("arms", "all")
-        arm_ids = [x["armId"] for x in arms] if want == "all" else ["baseline"]
+        arm_ids = [x["armId"] for x in arms] if want == "all" else [single_arm]
 
         exe = adapter.get("exe")
         if exe and exe not in tools:
@@ -1661,7 +1667,7 @@ def cmd_plan(a) -> int:
             arm = next(x for x in arms if x["armId"] == aid)
             st = base_status
             if st is None:
-                if want == "baseline" and aid != "baseline":
+                if want == "baseline" and aid != single_arm:
                     st = "unsupported-for-arm"
                 elif arm.get("supplied", {}).get("payloadMissing"):
                     st = "blocked-payload-missing"
@@ -1784,6 +1790,7 @@ def cmd_plan(a) -> int:
                           "overlays": scope_overlays},
         "candidatesDir": str(cdir),
         "arms": arms,
+        **({"reviewArm": review_arm} if review_arm else {}),
         "states": {"selected": states, "depth": depth, "notExplored": states_not_explored,
                    **({"fromCensus": {"generator": "stategen.py", "sha256": sha256_file(HERE / "stategen.py"),
                                       "checks": census_checks,
@@ -2884,7 +2891,7 @@ class Executor:
             tool = self.plan["tools"].get(exe) if exe else None
         if identity is not None:
             cfg, source = dict(identity), "emit"
-        elif arm.get("kind") == "baseline":
+        elif arm.get("kind") == "baseline" and scope_measured_on(self.plan, arm):
             cfg, source = {
                 "fingerprint": self.plan["configuration"].get("fingerprint"),
                 "source": self.plan["configuration"].get("source"),
@@ -3555,11 +3562,62 @@ def target_pairs(ex: Executor, arm: dict):
     return pairs
 
 
+def scope_measured_on(plan: dict, arm: dict) -> bool:
+    """Whether the plan's scope (plan.configuration) was measured on this arm's candidate. The scope names its source as
+    `candidate:<file>`; a scope of the real profile or one that names no candidate is the baseline's, as before. In a
+    manual-mode plan the scope is the profile as it is (the review arm), so it is not the baseline's configuration."""
+    src = str((plan.get("configuration") or {}).get("source") or "")
+    if not src.startswith("candidate:"):
+        return True
+    return src.split(":", 1)[1] == str(arm.get("candidateFile") or "")
+
+
+PAIR_SOURCE_NONE = ("no geometry check ran on the review arm, so there is no clash to take a plugin pair from; select "
+                    "overlap, contact or navmesh ownership with patch discovery.")
+
+
+def review_pairs(ex) -> list:
+    """A plan with a reviewArm: each target with each plugin it clashes with on that arm, read from the A and B fields of
+    the review arm's accepted conflict-file receipts. A row naming no target, a receipt not accepted and another arm's
+    receipts yield none."""
+    review = (ex.plan or {}).get("reviewArm")
+    if not review:
+        return []
+    targets = {str(t.get("name")).lower(): str(t.get("name")) for t in (ex.plan.get("targets") or [])
+               if isinstance(t, dict) and t.get("name")}
+    out, seen = [], set()
+    for f in sorted((Path(ex.run) / "receipts").glob(f"*__{review}__arm.json")) +             sorted((Path(ex.run) / "receipts").glob(f"*__{review}.json")):
+        r = load_json(f) or {}
+        if r.get("armId") != review or not (r.get("validation") or {}).get("accepted"):
+            continue
+        for o in r.get("outputs") or []:
+            doc = load_json(Path(ex.run) / str(o.get("path") or "")) if o.get("path") else None
+            for c in (doc or {}).get("Conflicts") or [] if isinstance(doc, dict) else []:
+                a_, b_ = str(c.get("A") or ""), str(c.get("B") or "")
+                for t, other in ((a_, b_), (b_, a_)):
+                    if t.lower() in targets and other and other.lower() not in targets:
+                        key = tuple(sorted([t, other], key=str.lower))
+                        if key not in seen:
+                            seen.add(key)
+                            out.append(list(key))
+    return out
+
+
+def pair_source_sentence(ex) -> str:
+    """Why a reviewArm plan has no pair: the sentence the launcher shows."""
+    return PAIR_SOURCE_NONE
+
+
 def all_plan_pairs(ex: Executor) -> list:
     """Every pair the WHOLE plan is about. A discovery check runs on the baseline arm, but what a
     patch would have to reconcile is what the candidate arms move: deriving the pairs from the
     baseline alone yields none, which is not the same as none existing."""
     out, seen = [], set()
+    for pair in review_pairs(ex):
+        key = tuple(sorted(pair, key=str.lower))
+        if key not in seen:
+            seen.add(key)
+            out.append(list(key))
     for arm in ex.plan["arms"]:
         for pair in target_pairs(ex, arm):
             key = tuple(sorted(pair, key=str.lower))
@@ -3693,11 +3751,13 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
             # The BASELINE arm is the reference: what a patch would have to reconcile is what every
             # OTHER arm moves, so the baseline runs once with the plan-wide set. A candidate or
             # supplied arm runs with its OWN pairs - the moves that arm actually makes.
-            pairs = all_plan_pairs(ex) if arm["kind"] == "baseline" else target_pairs(ex, arm)
-            if not pairs and arm["kind"] != "baseline":
+            reference = arm["armId"] == ex.plan.get("reviewArm") or (not ex.plan.get("reviewArm") and arm["kind"] == "baseline")
+            pairs = all_plan_pairs(ex) if reference else target_pairs(ex, arm)
+            if not pairs and not reference:
                 pairs = all_plan_pairs(ex)
             if not pairs:
                 ex.account(check, arm, "blocked(no-pair-source)", None,
+                           pair_source_sentence(ex) if ex.plan.get("reviewArm") else
                            "the candidate manifest records no move involving a target plugin, so "
                            "there is no plugin pair for this check to verify")
                 return
@@ -6064,6 +6124,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
                        "note": "the words pass, compatible and clean are not claims this finalizer makes; "
                                "a completed check that found a defect is a completed check with a finding"},
         "arms": arms,
+        **({"reviewArm": plan["reviewArm"]} if plan.get("reviewArm") else {}),
         "manualDecisions": decisions,
         "unassessed": unassessed,
         "explicitDecisions": plan["explicitDecisions"],
@@ -7123,6 +7184,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--settings", metavar="FILE",
                    help="the evaluation settings file (default: evalsettings.py's resolution order)")
     p.add_argument("--select", action="append", help="CHECK,... — narrows what RUNS, never what is PLANNED")
+    p.add_argument("--review-arm", metavar="ARM",
+                   help="the arm whose configuration is under review (the one the player runs); default the baseline. "
+                        "A manual-mode plan reviews the profile as it is (a candidate arm) against the profile without "
+                        "the selected mods (the baseline). Checks that run on one arm only run on it")
     p.add_argument("--exclude", action="append", metavar="CHECK=reason")
     p.add_argument("--opt-in", action="append", metavar="CHECK[,CHECK...]",
                    help="plan an opt-in check (registry optIn: true), such as the live runtime.state-switch-flip; "
