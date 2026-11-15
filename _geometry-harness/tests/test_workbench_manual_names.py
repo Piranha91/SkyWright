@@ -59,48 +59,75 @@ def sha(p: Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
-def manual_bundle(root: Path) -> Path:
+def manual_bundle(root: Path, arms, review=None) -> Path:
+    """A bundle whose plan has `arms` [(armId, kind, [plugins])], target Sel.esp, and one overlap row naming a reference
+    Sel.esp defines; `review` is the plan's reviewArm (absent when None)."""
     d = root / "bundle"
     (d / "emits").mkdir(parents=True)
     files = root / "files"
     files.mkdir()
-    header_only_plugin(files / "Base.esm")
-    header_only_plugin(files / "Sel.esp", masters=("Base.esm",))
+    names = sorted({p for _, _, ps in arms for p in ps})
+    for n in names:
+        header_only_plugin(files / n, masters=() if n == "Base.esm" else ("Base.esm",))
     row = lambda n: {"name": n, "path": str(files / n), "sha256": sha(files / n)}
     plan = {"planId": "manual-names", "targets": [{"name": "Sel.esp"}],
-            "arms": [{"armId": "baseline", "kind": "baseline", "candidateFile": "candidate-00-baseline.json",
-                      "plugins": ["Base.esm"], "requested": {"plugins": [row("Base.esm")]}},
-                     {"armId": "candidate-01", "kind": "candidate", "candidateFile": "candidate-01.json",
-                      "plugins": ["Base.esm", "Sel.esp"], "requested": {"plugins": [row("Base.esm"), row("Sel.esp")]}}]}
+            "arms": [{"armId": a, "kind": k, "candidateFile": f"{a}.json", "plugins": ps,
+                      "requested": {"plugins": [row(n) for n in ps]}} for a, k, ps in arms]}
+    if review:
+        plan["reviewArm"] = review
     (d / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     emit = {"Conflicts": [{"Kind": "OVERLAP", "A": "Sel.esp", "B": "Base.esm", "Summary": "s",
                            "Necessary": [{"FormKey": "000801:Sel.esp"}], "Alternative": [{"FormKey": "000900:Base.esm"}]}]}
-    (d / "emits" / "overlap-candidate-01.json").write_text(json.dumps(emit), encoding="utf-8")
+    (d / "emits" / "overlap.json").write_text(json.dumps(emit), encoding="utf-8")
     (d / "disposition.json").write_text("{}", encoding="utf-8")
-    (d / "manifest.json").write_text(json.dumps({"evidence": [{"kind": "emit", "path": "emits/overlap-candidate-01.json",
-                                                                "checkId": "geometry.object-overlap",
-                                                                "armId": "candidate-01"}]}), encoding="utf-8")
+    (d / "manifest.json").write_text(json.dumps({"evidence": [{"kind": "emit", "path": "emits/overlap.json",
+                                                                "checkId": "geometry.object-overlap"}]}), encoding="utf-8")
     return d
 
 
-def test_selection_references_are_read():
+def names_read(arms, review=None):
     with tempfile.TemporaryDirectory(prefix="wb-manual-names-") as t:
         root = Path(t)
-        d = manual_bundle(root)
+        d = manual_bundle(root, arms, review)
         stub = root / "stub_reader.py"
         stub.write_text(STUB, encoding="utf-8")
         bundleenrich.enrich_names(d, f'"{sys.executable}" "{stub}"', {})
         names = json.loads((d / "enrichment" / "names" / "names.json").read_text(encoding="utf-8"))
-        unread = names["unread"]["objects"]
-        print(f"readOrder {names['readOrder']}; unread objects {unread}")
-        assert "Sel.esp" in names["readOrder"], "the names read skipped the selected plugin (only the candidate arm loads it)"
-        assert "000801:Sel.esp" not in unread, "a reference the selected plugin defines was left unread"
+        print(f"   review={review}: readOrder {names['readOrder']}; unread objects {names['unread']['objects']}")
+        return names
+
+
+MANUAL = [("baseline", "baseline", ["Base.esm"]), ("candidate-01", "candidate", ["Base.esm", "Sel.esp"])]
+
+
+def test_the_review_arms_plugins_are_read():
+    """A manual plan: the baseline is the profile without the selection, the review arm the profile as it is."""
+    names = names_read(MANUAL, review="candidate-01")
+    assert "Sel.esp" in names["readOrder"], "the names read skipped the review arm's selected plugin"
+    assert "000801:Sel.esp" not in names["unread"]["objects"], "a reference the selected plugin defines was left unread"
+
+
+def test_a_plan_without_a_review_arm_reads_the_baseline_as_today():
+    """A pipeline plan: no reviewArm, the baseline is the combined arm; the read order is its plugins."""
+    arms = [("baseline", "baseline", ["Base.esm", "Sel.esp"]), ("candidate-01", "candidate", ["Base.esm"])]
+    names = names_read(arms)
+    assert names["readOrder"] == ["Base.esm", "Sel.esp"], names["readOrder"]
+
+
+def test_the_review_arm_is_read_even_when_another_arm_loads_more_plugins():
+    """Rejects a 'largest arm' heuristic: the largest arm lacks the selection; only the review arm's list reads it."""
+    arms = MANUAL + [("candidate-02", "candidate", ["Base.esm", "Big1.esp", "Big2.esp"])]
+    names = names_read(arms, review="candidate-01")
+    assert "000801:Sel.esp" not in names["unread"]["objects"], "the review arm's selected plugin was not read"
 
 
 if __name__ == "__main__":
-    try:
-        test_selection_references_are_read()
-    except AssertionError as ex:
-        print("FAIL:", ex)
-        sys.exit(1)
-    print("PASS")
+    failed = 0
+    for name, fn in [(k, v) for k, v in list(globals().items()) if k.startswith("test_")]:
+        try:
+            fn()
+            print("PASS", name)
+        except AssertionError as ex:
+            failed += 1
+            print("FAIL", name, "-", ex)
+    sys.exit(1 if failed else 0)

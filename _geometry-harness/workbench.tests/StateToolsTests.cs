@@ -299,4 +299,67 @@ public sealed class StateToolsTests : IAsyncLifetime
         await Task.Delay(200);
         Assert.Empty(_scene.Session.Pending);                                           // withdrawn, never run late
     }
+
+    // ---- Gate B (workbench manual mode): the launcher on the same two tools, and the forwarded houseCARL surface ----
+
+    /// <summary>A free-mode instance on disk: ModOrganizer.ini, profile P with one enabled and one disabled mod folder.</summary>
+    static string LauncherInstance()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hc-wb-launch-" + Guid.NewGuid().ToString("N"));
+        var prof = Path.Combine(root, "profiles", "P");
+        Directory.CreateDirectory(prof);
+        Directory.CreateDirectory(Path.Combine(root, "mods", "OnMod"));
+        Directory.CreateDirectory(Path.Combine(root, "mods", "OffMod"));
+        Directory.CreateDirectory(Path.Combine(root, "overwrite"));
+        File.WriteAllText(Path.Combine(root, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\ngamePath=@ByteArray(" + root.Replace("\\", "\\\\") + ")\r\nselected_profile=@ByteArray(P)\r\n");
+        File.WriteAllText(Path.Combine(prof, "modlist.txt"), "+OnMod\r\n-OffMod\r\n");
+        File.WriteAllText(Path.Combine(prof, "plugins.txt"), "");
+        File.WriteAllText(Path.Combine(prof, "loadorder.txt"), "");
+        return root;
+    }
+
+    [Fact]
+    public async Task B10a_the_launcher_state_is_readable_with_no_scene_open()
+    {
+        _surface.SceneShown = null;                                                      // B11: no scene yet
+        var s = await Ok("workbench_state", A(("project", new[] { "launcher" })));
+        var l = P(s, "launcher");
+        foreach (var part in new[] { "mode", "instance", "profiles", "mods", "probes", "output", "run" }) P(l, part);
+        Assert.Equal("idle", P(l, "run", "state").GetString());
+    }
+
+    [Fact]
+    public async Task B10b_select_probes_refuses_a_check_that_is_not_a_probe_naming_its_kind()
+    {
+        var why = await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "loadability.dangling-references" })));
+        Assert.Contains("mcp-only", why);
+    }
+
+    [Fact]
+    public async Task B10c_a_free_mode_profile_opens_and_ticking_a_disabled_mod_is_refused()
+    {
+        var inst = LauncherInstance();
+        var opened = await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P")));
+        var mods = P(opened, "launcher", "mods").EnumerateArray().ToList();
+        Assert.Contains(mods, m => P(m, "name").GetString() == "OnMod" && P(m, "enabled").GetBoolean());
+        Assert.Contains("disabled", await Refused("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OffMod" }))));
+        var set = await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
+        Assert.Contains(P(set, "launcher", "mods").EnumerateArray(), m => P(m, "name").GetString() == "OnMod" && P(m, "selected").GetBoolean());
+    }
+
+    [Fact]
+    public async Task B10d_run_with_no_profile_open_is_refused_saying_what_to_do()
+    {
+        Assert.Contains("open a profile", await Refused("workbench_act", A(("verb", "run"))));
+    }
+
+    [Fact]
+    public async Task B13_the_endpoint_forwards_the_stated_houseCARL_tools_and_never_an_instance_setter()
+    {
+        var names = (await _client.ListToolsAsync()).Select(t => t.Name).ToHashSet();
+        foreach (var n in new[] { "housecarl_records", "housecarl_apply", "housecarl_remove", "housecarl_check" })
+            Assert.True(names.Contains(n), $"the workbench endpoint does not forward {n}; it lists {string.Join(", ", names.OrderBy(x => x))}");
+        Assert.DoesNotContain("housecarl_set_mo2_instance", names);
+        Assert.DoesNotContain("housecarl_set_tool_path", names);
+    }
 }
