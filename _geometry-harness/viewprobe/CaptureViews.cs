@@ -238,6 +238,9 @@ public static class CaptureViews
     }
 
     /// <summary>The first other drawn ref straight below <paramref name="o"/> within <paramref name="reach"/>, and how far.</summary>
+    /// <summary>Rays cast on this thread (each <see cref="FirstBelow"/> call), so a test can pin the sampling without a clock.</summary>
+    [ThreadStatic] internal static long RayCasts;
+
     static (string? Hit, float Distance) FirstBelow(Geometry g, string key, Vector3 o, float reach)
     {
         string? hit = null; float best = reach;

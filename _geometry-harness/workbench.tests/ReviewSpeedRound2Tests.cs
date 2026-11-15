@@ -213,11 +213,15 @@ public sealed class ReviewSpeedRound2Tests : IDisposable
         for (int y = 0; y < m - 1; y++) for (int x = 0; x < m - 1; x++) { int i = y * m + x; tt.AddRange(new[] { i, i + 1, i + m, i + 1, i + m + 1, i + m }); }
         var ground = new PickShape { Kind = PickKind.Terrain, Verts = tv.ToArray(), Tris = tt.ToArray(), Mesh = new SkyRender.GlMesh() };
         ground.ComputeBounds();
+        CaptureViews.RayCasts = 0;
         var sw = Stopwatch.StartNew();
         var d = CaptureViews.Drop(CaptureViews.FromPickShapes(new[] { big, ground }), key.ToString());
         sw.Stop();
         _out.WriteLine($"drop of {verts.Count} low vertices over {tt.Count / 3} terrain triangles: {sw.Elapsed.TotalMilliseconds:0} ms; {d.Refusal ?? d.Distance?.ToString()}");
         Assert.True(d.Refusal is null, "refused: " + d.Refusal);
-        Assert.True(sw.Elapsed.TotalSeconds < 1.0, $"the drop took {sw.Elapsed.TotalSeconds:0.00} s");
+        // pinned by count, not by the clock: the sunk check and the support rays each cast at most one ray per sampled point
+        long casts = CaptureViews.RayCasts;
+        _out.WriteLine($"ray casts: {casts}");
+        Assert.True(casts > 0 && casts <= 2 * (CaptureViews.SupportRays + 1), $"the drop cast {casts} rays; sampling allows at most {2 * (CaptureViews.SupportRays + 1)}");
     }
 }

@@ -67,7 +67,9 @@ public sealed class StateToolsTests : IAsyncLifetime
         public Task<(IReadOnlyList<FormKey> Refs, string? Refusal, string Note)> RefsOfModAsync(string modFolder, string? plugin) =>
             Task.FromResult<(IReadOnlyList<FormKey>, string?, string)>(ModRefs.TryGetValue(modFolder ?? plugin ?? "", out var r) ? (r, null, "") : (Array.Empty<FormKey>(), $"{modFolder} provides no plugin of this order.", ""));
         internal string ServerBuild = "srv-1";
+        internal Func<RankedRow, Exception?> Fail = _ => null;     // a read that fails some other way (a server that died)
         public Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
+            Fail(row) is { } failure ? throw failure :
             !Session.IsDrawn(FormKey.Factory(row.Row.RefKey))      // as the host: a reference the scene does not draw cannot be checked
             ? throw new InvalidOperationException($"{row.Row.RefKey} is not drawn in this scene, so its objects are not compared until its cell is open.")
             : Task.FromResult<(RowState, IReadOnlyList<ObjectState>, string)>((new RowState(row.Row.Physical?.ToString(), row.Row.Summary, ""),
@@ -1123,6 +1125,51 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         _surface.WorkFolder = NewWorkFolder();
         Assert.Contains("Findings rows are not decided", await Refused("workbench_act", A(("verb", "decide"), ("finding", 1), ("verdict", "unsure"), ("reason", "x"))));
+    }
+
+    // ---- Gate C round 3
+
+    // R1: a scene's arrival compares the decided rows it draws, with no state-tool call
+    [Fact]
+    public async Task R1_the_scene_opened_hook_flags_a_drawn_rows_changed_field_without_a_client()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        var stored = new Decision("C:/Instance", "Default", "geometry.object-overlap", "a-first", "intentional", "why", DateTimeOffset.UtcNow,
+            new RowState("Holds", "", ""), new[] { new ObjectState(RefKey, "Subject.esp", new[] { new FieldValue("Placement.Position", "9,9,9") }, null, Array.Empty<FieldValue>(), null, null, null) }, "srv-1");
+        new DecisionStore(Path.Combine(work, DecisionStore.FileName)).Put(stored);
+        var cache = new Dictionary<string, DecisionMatch>(StringComparer.OrdinalIgnoreCase);
+        int changed = 0;
+        Action count = () => changed++;
+        ReviewList.Changed += count;
+        try { await DecisionCompare.SceneOpenedAsync(_surface, cache); }
+        finally { ReviewList.Changed -= count; }
+        var row = ReviewList.For(_surface, _surface.Rows, cache, includeDecided: true).Single(e => e.Row.Rank == 1);
+        Assert.Equal(Standing.Reconsider, row.Standing.Standing);
+        Assert.Contains("Placement.Position", row.Standing.Sentence);
+        Assert.True(changed > 0, "the list was not told to redraw");
+    }
+
+    // R3: a row's read failure of any kind is that row's sentence
+    [Fact]
+    public async Task R3_a_failed_read_of_any_kind_is_the_rows_sentence_not_a_refused_part()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        new DecisionStore(Path.Combine(work, DecisionStore.FileName)).Put(Stored("a-first", "intentional", ""));
+        _scene.Fail = r => r.Rank == 1 ? new IOException("the server closed the pipe") : null;
+        var st = await Ok("workbench_state", A(("project", new[] { "decisions" })));
+        var first = P(st, "decisions", "rows").EnumerateArray().Single(x => P(x, "rank").GetInt32() == 1);
+        Assert.Contains("the server closed the pipe", P(first, "sentence").GetString());
+    }
+
+    // R4: angle_snap with an absolute rotation is never silent
+    [Fact]
+    public async Task R4_angle_snap_with_an_absolute_rotation_says_it_was_not_applied()
+    {
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var r = await Ok("workbench_act", A(("verb", "stage"), ("rotation_degrees", new[] { 10f, -5f, 22f }), ("angle_snap", 15f)));
+        Assert.Contains("angle_snap is not applied", P(r, "said").GetString());
     }
 
     // B7: the running workbench keeps the session file up to date
