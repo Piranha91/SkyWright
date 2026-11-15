@@ -970,6 +970,166 @@ def case_68_a_stage_after_the_bundle_runs_again_when_its_tools_change():
     assert not problems, "; ".join(problems)
 
 
+# ---- C2320-C2323: stage keys and kept receipts (item 39 follow-ups 2 and 3) ----
+
+def _fake_pipeline(entry_box: dict, calls: list, refuse_when=None, res=None, machine_doc=None):
+    """A FakeCtx whose entry is read from entry_box at each run, and light bodies for every stage that record their call;
+    `refuse_when(name, ctx, sdir)` returning a sentence makes that stage refuse (the bundle's own 'exists' refusal)."""
+    class FakeCtx:
+        def __init__(self, entry, machine, o):
+            self.entry, self.out, self.id = json.loads(json.dumps(entry_box["entry"])), Path(o), "m"
+            self.machine = dict(machine_doc or {})
+
+        def resolve(self):
+            return json.loads(json.dumps(res)) if res is not None else {"arms": [], "subject": ["S.esp"], "keys": []}
+
+    def light(name):
+        def body(ctx, res_, sdir):
+            calls.append(name)
+            why = refuse_when(name, ctx, sdir) if refuse_when else None
+            if why:
+                raise EP.Refusal(why)
+            f = sdir / f"{name}.json"
+            f.write_text("{}", encoding="utf-8")
+            return {}, [f]
+        return body
+    return FakeCtx, {n: light(n) for n in EP.STAGES}
+
+
+def _run_pipeline(t, entry_box, calls, runs, refuse_when=None, res=None, machine=None):
+    """Run the driver once per entry in `runs` (each replaces entry_box['entry']); returns [(exit, stages run)]."""
+    import types
+    saved = EP.Context, dict(EP.STAGE_BODIES)
+    out = Path(t) / "run"
+    os.environ["HOUSECARL_RUNLOG_DIR"] = str(Path(t) / "runlog")
+    got = []
+    try:
+        fake, bodies = _fake_pipeline(entry_box, calls, refuse_when, res, machine)
+        EP.Context = fake
+        EP.STAGE_BODIES.update(bodies)
+        a = types.SimpleNamespace(entry="e.json", machine=None, out=str(out), through=None)
+        for e in runs:
+            entry_box["entry"] = e
+            calls.clear()
+            rc = EP.cmd_run(a)
+            got.append((rc, list(calls)))
+    finally:
+        EP.Context = saved[0]
+        EP.STAGE_BODIES.clear()
+        EP.STAGE_BODIES.update(saved[1])
+        os.environ.pop("HOUSECARL_RUNLOG_DIR", None)
+    return out, got
+
+
+AFTER_REPORT_PLAN = ["report-plan", "capture", "image-observations", "report", "reel", "deliver"]
+
+
+def case_2320_each_stage_binds_the_presentation_keys_its_code_reads():
+    """C2320: which presentation key each stage reads is derived from the driver's code (the stage body and the module
+    functions it calls), not a hand list. Wrong answers: the bundle bound to patchSearch (it never reads it); report-plan
+    or capture not bound to patchSearch (report_plan_argv passes it); a measuring stage bound to any presentation key."""
+    reads = EP.stage_entry_keys()
+    want = {"bundle": ["modNames"],
+            "report-plan": ["modNames", "nexusNames", "patchSearch", "report"],
+            "capture": ["captureSize", "modNames", "nexusNames", "patchSearch", "report"],
+            "report": ["modNames", "nexusNames", "patchSearch", "report"]}
+    for s in EP.STAGES:
+        assert sorted(reads.get(s, [])) == want.get(s, []), f"{s} reads {sorted(reads.get(s, []))}, expected {want.get(s, [])}"
+    # a read the derivation cannot attribute to a key is refused, never left out
+    head = "def stage_deliver(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:\n"
+    text = Path(_path).read_text(encoding="utf-8")
+    assert head in text, "stage_deliver's signature moved; update this case"
+    for bad in ('    k = "patchSearch"\n    print(ctx.entry[k])\n', "    print(json.dumps(ctx.entry))\n"):
+        refuses(lambda: EP.stage_entry_keys(text.replace(head, head + bad, 1)), "cannot attribute")
+
+
+def case_2321_a_patch_search_change_reruns_report_plan_and_later_not_the_bundle():
+    """C2321 (item 2): after a run through deliver, adding a patch search reruns report-plan and the stages after it,
+    and not the bundle or precedent; a mod-name change reruns the bundle. Wrong answer (Hroggar 2026-11-09): the bundle
+    re-ran for a patch search it never reads, and refused over its own earlier folder."""
+    base = {"evaluation": {"budgetMinutes": 5}, "modNames": {"S.esp": "S"}}
+    with tempfile.TemporaryDirectory() as t:
+        _, got = _run_pipeline(t, {}, [], [base, dict(base, patchSearch="X:/ps.json"),
+                                           dict(base, patchSearch="X:/ps.json", modNames={"S.esp": "Ess"})])
+    (rc1, first), (rc2, after_search), (rc3, after_names) = got
+    assert rc1 == EP.EXIT_OK and first == list(EP.STAGES), f"the first run ran {first} (exit {rc1})"
+    assert after_search == AFTER_REPORT_PLAN, f"a patch-search change re-ran {after_search}"
+    assert after_names == ["bundle", "precedent"] + AFTER_REPORT_PLAN, f"a mod-name change re-ran {after_names}"
+
+
+def _legacy_inputs(entry, name, ledger_doc, tools):
+    """The stage inputs as the driver at 02d9ea09 hashed them: the whole entry from the bundle on, else the entry
+    without its presentation keys; every earlier stage's recorded inputsSha256; the stage's tools."""
+    measured = {k: v for k, v in entry.items() if k not in EP.PRESENTATION_KEYS}
+    h = EP.sha256_json(entry if EP.STAGES.index(name) >= EP.STAGES.index("bundle") else measured)
+    inputs = {"entry": h, "upstream": {s: (ledger_doc["stages"].get(s) or {}).get("inputsSha256")
+                                       for s in EP.STAGES[:EP.STAGES.index(name)]}}
+    if tools:
+        inputs["tools"] = tools
+    return inputs
+
+
+def case_2322_a_ledger_from_the_earlier_rule_is_reused_and_then_follows_the_new_one():
+    """C2322 (item 2, existing runs): a stages.json written under the earlier whole-entry rule (Hroggar's) is reused
+    with nothing re-run while the entry is unchanged, and a patch-search change after that reruns only report-plan and
+    later. Wrong answers: the rule change alone reruns the bundle (which then refuses over its folder); the upgrade
+    hides a real change."""
+    e = {"evaluation": {"budgetMinutes": 5}, "modNames": {"S.esp": "S"}, "patchSearch": "X:/a.json"}
+    with tempfile.TemporaryDirectory() as t:
+        out, _ = _run_pipeline(t, {}, [], [e])
+        led = EP.StageLedger(out)
+        for s in EP.STAGES:   # rewrite every receipt as the earlier driver would have hashed it
+            rec = led.doc["stages"][s]
+            legacy = _legacy_inputs(e, s, led.doc, rec["inputs"].get("tools"))
+            rec.update(inputs=legacy, inputsSha256=EP.sha256_json(legacy))
+        led._save()
+        _, got = _run_pipeline(t, {}, [], [e, dict(e, patchSearch="X:/b.json")])
+    (rc1, same), (rc2, changed) = got
+    assert rc1 == EP.EXIT_OK and same == [], f"a ledger from the earlier rule re-ran {same} with the entry unchanged"
+    assert changed == AFTER_REPORT_PLAN, f"after the upgrade a patch-search change re-ran {changed}"
+
+
+def case_2322_b_the_earlier_rule_never_reuses_a_stage_after_one_that_ran():
+    """C2322 (b): the earlier-rule fallback holds only while every earlier stage was reused. A raised budget reruns
+    evaluate; every stage after it must run again. Wrong answer (caught by test_records_keep_work p1 before this case
+    existed): records re-keyed and reused against the upstream hashes from before the run."""
+    def plan_json(name, ctx, sdir):
+        if name == "plan":
+            (ctx.out / "evaluation").mkdir(exist_ok=True)
+            (ctx.out / "evaluation" / "plan.json").write_text('{"budgets": {"minutes": 5}}', encoding="utf-8")
+        return None
+    e = {"evaluation": {"budgetMinutes": 5}, "modNames": {"S.esp": "S"}}
+    with tempfile.TemporaryDirectory() as t:
+        _, got = _run_pipeline(t, {}, [], [e, dict(e, evaluation={"budgetMinutes": 9})], refuse_when=plan_json)
+    (rc1, first), (rc2, raised) = got
+    assert rc1 == EP.EXIT_OK and first == list(EP.STAGES), f"the first run ran {first} (exit {rc1})"
+    want = list(EP.STAGES[EP.STAGES.index("evaluate"):])
+    assert raised == want, f"a raised budget re-ran {raised}, expected {want}"
+
+
+def case_2323_a_refused_stage_keeps_its_accepted_receipt_so_restoring_the_input_restores_it():
+    """C2323 (item 3): the bundle refuses to write over its own folder; a mod-name change reruns it and it refuses;
+    putting the name back reuses the earlier accepted bundle and every stage after it. Wrong answer (Hroggar): the
+    refusal dropped the receipt (stages.json bundle null), so restoring the entry ran the bundle again into the same
+    refusal."""
+    def bundle_exists(name, ctx, sdir):
+        if name != "bundle":
+            return None
+        if (sdir / "made").exists():
+            return "bundle/evidence exists from an earlier bundle; move it aside rather than overwrite it."
+        (sdir / "made").write_text("1", encoding="utf-8")
+        return None
+    e = {"evaluation": {"budgetMinutes": 5}, "modNames": {"S.esp": "S"}}
+    with tempfile.TemporaryDirectory() as t:
+        out, got = _run_pipeline(t, {}, [], [e, dict(e, modNames={"S.esp": "Ess"}), e], refuse_when=bundle_exists)
+        stages = EP.StageLedger(out).doc["stages"]
+    (rc1, first), (rc2, changed), (rc3, restored) = got
+    assert rc1 == EP.EXIT_OK and first == list(EP.STAGES), f"the first run ran {first} (exit {rc1})"
+    assert rc2 == EP.EXIT_REFUSED and changed == ["bundle"], f"the changed entry ran {changed} (exit {rc2})"
+    assert rc3 == EP.EXIT_OK and restored == [], f"restoring the entry re-ran {restored} (exit {rc3})"
+    assert stages.get("bundle", {}).get("accepted") is True, "the bundle's accepted receipt is not back in stages.json"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

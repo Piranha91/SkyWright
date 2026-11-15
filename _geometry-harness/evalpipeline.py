@@ -454,14 +454,37 @@ class StageLedger:
     def _save(self):
         write_json(self.path, self.doc)
 
-    def decide(self, stage: str, inputs: dict) -> str:
+    @staticmethod
+    def _intact(rec: dict) -> bool:
+        return all(_fingerprint(Path(path)) == fp for path, fp in (rec.get("outputs") or {}).items())
+
+    def decide(self, stage: str, inputs: dict, legacy: dict | None = None) -> str:
+        """'reuse' when the accepted receipt matches these inputs and its outputs are unchanged, else 'run'. Two more
+        ways to reuse, each with a history line: a receipt keyed by the earlier entry rule (`legacy`: the inputs as the
+        02d9ea09 driver hashed them) is re-keyed in place when that rule matches, so a rule change alone reruns nothing;
+        and a receipt a later refusal set aside (`kept`) is put back when the inputs are again the ones it was accepted
+        under, so restoring an input restores the stage."""
+        want = sha256_json(inputs)
         rec = self.doc["stages"].get(stage)
-        if not rec or rec.get("inputsSha256") != sha256_json(inputs):
-            return "run"
-        for path, fp in rec["outputs"].items():
-            if _fingerprint(Path(path)) != fp:
-                return "run"
-        return "reuse"
+        if rec and rec.get("inputsSha256") == want:
+            return "reuse" if self._intact(rec) else "run"
+        if rec and legacy is not None and rec.get("inputsSha256") == sha256_json(legacy) and self._intact(rec):
+            old = rec["inputsSha256"]
+            rec.update(inputs=inputs, inputsSha256=want, upgradedFrom=old)
+            self.doc["history"].append({"stage": stage, "at": utcnow(), "rekeyed": True, "from": old, "to": want,
+                                        "reason": "the receipt was re-keyed under the rule that binds each stage to the "
+                                                  "presentation keys it reads; its outputs are unchanged"})
+            self._save()
+            return "reuse"
+        kept = (self.doc.get("kept") or {}).get(stage)
+        if kept and kept.get("inputsSha256") == want and self._intact(kept):
+            self.doc["stages"][stage] = self.doc["kept"].pop(stage)
+            self.doc["history"].append({"stage": stage, "at": utcnow(), "restored": True, "inputsSha256": want,
+                                        "reason": "the inputs are again the ones this receipt was accepted under and its "
+                                                  "outputs are unchanged, so the receipt a refusal set aside is restored"})
+            self._save()
+            return "reuse"
+        return "run"
 
     def record(self, stage: str, inputs: dict, outputs, exit_code: int, extra: dict | None = None):
         outs = [Path(o) for o in outputs]
@@ -470,7 +493,10 @@ class StageLedger:
         if exit_code != 0 or missing:
             entry["accepted"] = False
             entry["reason"] = (f"exit {exit_code}" if exit_code != 0 else "missing outputs: " + ", ".join(missing))
-            self.doc["stages"].pop(stage, None)
+            # the accepted receipt is set aside, not dropped: restoring the input restores the stage (decide)
+            prev = self.doc["stages"].pop(stage, None)
+            if prev is not None:
+                self.doc.setdefault("kept", {})[stage] = prev
             self.doc["history"].append(entry)
             self._save()
             if missing and exit_code == 0:
@@ -478,6 +504,7 @@ class StageLedger:
             return entry
         entry.update(accepted=True, inputs=inputs, outputs={fwd(o): _fingerprint(o) for o in outs}, **(extra or {}))
         self.doc["stages"][stage] = entry
+        (self.doc.get("kept") or {}).pop(stage, None)   # a new acceptance supersedes one set aside
         self.doc["history"].append({k: entry[k] for k in ("stage", "at", "exitCode", "inputsSha256", "accepted")})
         self._save()
         return entry
@@ -1985,6 +2012,114 @@ STAGE_BODIES = {"census": stage_census, "prepare": stage_prepare, "scope": stage
                 "reel": stage_reel, "deliver": stage_deliver}
 
 
+# ---------------------------------------------------------------- which entry keys each stage reads
+
+def _is_entry_expr(node) -> bool:
+    """`ctx.entry`, `self.entry` or a name ending in `entry` (a parameter such as `ctx_entry`)."""
+    return ((isinstance(node, ast.Attribute) and node.attr == "entry")
+            or (isinstance(node, ast.Name) and node.id.endswith("entry") and isinstance(node.ctx, ast.Load)))
+
+
+def stage_entry_keys(source: str | None = None) -> dict[str, list[str]]:
+    """{stage: [presentation keys its code reads]}, derived from this driver's code: each STAGE_BODIES function and
+    every module function or Context method it calls (transitively), scanned for `<entry>.get("key")` and
+    `<entry>["key"]`. The entry passed whole to a followed function is read there, under its parameter's name. Any
+    other use of the entry inside a stage's code (a computed key, the entry handed to something not followed) is
+    refused in one sentence, never left out, so a stage cannot read a key its hash does not bind."""
+    text = source if source is not None else Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(text)
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    ctx_cls = next((n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "Context"), None)
+    methods = {n.name: n for n in (ctx_cls.body if ctx_cls else []) if isinstance(n, ast.FunctionDef)}
+    bodies = next((n.value for n in tree.body if isinstance(n, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == "STAGE_BODIES" for t in n.targets)), None)
+    if not isinstance(bodies, ast.Dict):
+        raise Refusal("the key derivation found no STAGE_BODIES dict in the driver; it cannot tell which stage reads "
+                      "which entry key.")
+    for parent in ast.walk(tree):
+        for c in ast.iter_child_nodes(parent):
+            c._parent = parent
+    scanned: dict[str, tuple[set, set]] = {}
+
+    def callee(call):
+        f = call.func
+        if isinstance(f, ast.Name) and f.id in funcs:
+            return f.id, funcs[f.id]
+        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id in ("ctx", "self") \
+                and f.attr in methods:
+            return "Context." + f.attr, methods[f.attr]
+        return None, None
+
+    def scan(name, fn):
+        if name in scanned:
+            return scanned[name]
+        keys, calls = set(), set()
+        scanned[name] = (keys, calls)
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Call):
+                cname, _ = callee(node)
+                if cname:
+                    calls.add(cname)
+            if not _is_entry_expr(node):
+                continue
+            up = node._parent
+            if isinstance(up, ast.Call) and up.func is node:
+                continue
+            if isinstance(up, ast.Subscript) and up.value is node:
+                k = up.slice
+                if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                    keys.add(k.value)
+                    continue
+            elif isinstance(up, ast.Attribute) and up.value is node and up.attr == "get" \
+                    and isinstance(up._parent, ast.Call) and up._parent.func is up:
+                args = up._parent.args
+                if args and isinstance(args[0], ast.Constant) and isinstance(args[0].value, str):
+                    keys.add(args[0].value)
+                    continue
+            elif isinstance(up, ast.Call) and node in up.args:
+                cname, cfn = callee(up)
+                params = [p.arg for p in cfn.args.args] if cfn is not None else []
+                if cname and cname.startswith("Context."):
+                    params = params[1:]
+                i = up.args.index(node)
+                if i < len(params) and params[i].endswith("entry"):
+                    continue
+            raise Refusal(f"{name} (line {node.lineno}) uses the entry as `{ast.unparse(up)[:80]}`, which the key "
+                          f"derivation cannot attribute to a key; read it as entry.get(\"<key>\") or entry[\"<key>\"] "
+                          f"so the stage's hash binds what it reads.")
+        return keys, calls
+
+    def closure(name, fn):
+        seen, todo, keys = set(), [(name, fn)], set()
+        while todo:
+            n, f = todo.pop()
+            if n in seen:
+                continue
+            seen.add(n)
+            k, calls = scan(n, f)
+            keys |= k
+            for c in calls:
+                todo.append((c, methods[c.split(".", 1)[1]] if c.startswith("Context.") else funcs[c]))
+        return keys
+
+    out = {}
+    for k, v in zip(bodies.keys, bodies.values):
+        if isinstance(k, ast.Constant) and isinstance(v, ast.Name) and v.id in funcs:
+            out[k.value] = sorted(closure(v.id, funcs[v.id]) & PRESENTATION_KEYS)
+    return out
+
+
+def stage_entry_hash(entry: dict, measured: dict, reads: list[str]) -> str:
+    """A stage's entry binding: the entry without its presentation keys, plus the presentation keys the stage reads.
+    A stage that reads none hashes exactly what the measuring stages always hashed."""
+    return sha256_json({**measured, **{k: entry[k] for k in reads if k in entry}})
+
+
+def legacy_entry_hash(entry: dict, measured: dict, stage: str) -> str:
+    """The binding the 02d9ea09 driver used (the whole entry from the bundle on), kept only to re-key its receipts."""
+    return sha256_json(entry if STAGES.index(stage) >= STAGES.index("bundle") else measured)
+
+
 # ---------------------------------------------------------------- driver
 
 def cmd_arms(a) -> int:
@@ -2027,6 +2162,10 @@ def cmd_run(a) -> int:
                 else:
                     print(f"preparation: not reused: {why}")
             write_json(out / PR.KEY_FILE, key)
+        reads = stage_entry_keys()
+        # the receipts as they stood before this run: the earlier rule's upstream bindings (a re-key changes them)
+        before = {s: (rec or {}).get("inputsSha256") for s, rec in ledger.doc["stages"].items()}
+        ran_any = False
         run.stage("stages", "pipeline stages", STAGES.index(through) + 1, "stages")
         for name in STAGES[:STAGES.index(through) + 1]:
             body = STAGE_BODIES.get(name)
@@ -2049,10 +2188,16 @@ def cmd_run(a) -> int:
             if limit is not None:
                 frozen = float(planned_budget(out))
                 measured["evaluation"] = dict(measured["evaluation"], budgetMinutes=int(frozen) if frozen == int(frozen) else frozen)
-            entry_hash = sha256_json(ctx.entry if STAGES.index(name) >= STAGES.index("bundle") else measured)
+            # each stage binds the presentation keys its own code reads (stage_entry_keys), so a patch search reruns
+            # report-plan and later, never the bundle
+            entry_hash = stage_entry_hash(ctx.entry, measured, reads.get(name, []))
+            earlier = STAGES[:STAGES.index(name)]
             inputs = {"entry": entry_hash,
-                      "upstream": {s: (ledger.doc["stages"].get(s) or {}).get("inputsSha256")
-                                   for s in STAGES[:STAGES.index(name)]}}
+                      "upstream": {s: (ledger.doc["stages"].get(s) or {}).get("inputsSha256") for s in earlier}}
+            # the same inputs as the 02d9ea09 driver hashed them, with the receipts as they stood before this run; only
+            # while every earlier stage was reused, since a stage that ran this run changed what later stages bind
+            legacy = None if ran_any else {"entry": legacy_entry_hash(ctx.entry, measured, name),
+                                           "upstream": {s: before.get(s) for s in earlier}}
             if limit is not None and name == "evaluate":
                 inputs["budgetInForce"] = limit
             tools = stage_tools(name, ctx.machine)
@@ -2067,12 +2212,16 @@ def cmd_run(a) -> int:
                               extra={"bound": old.get("bound"), "seconds": 0.0, "driverSha256": sha256_file(Path(__file__)),
                                      "reusedFrom": fwd(reused_from), "reusedSeconds": old.get("seconds")})
                 print(f"{name}: reused from an earlier run")
+                ran_any = True
                 run.advance()
                 continue
-            if ledger.decide(name, inputs) == "reuse":
+            if legacy is not None:
+                legacy.update({k: inputs[k] for k in ("budgetInForce", "tools") if k in inputs})
+            if ledger.decide(name, inputs, legacy) == "reuse":
                 print(f"{name}: reused (inputs and outputs unchanged)")
                 run.advance()
                 continue
+            ran_any = True
             t0 = time.perf_counter()
             try:
                 extra, outputs = body(ctx, res, sdir)
