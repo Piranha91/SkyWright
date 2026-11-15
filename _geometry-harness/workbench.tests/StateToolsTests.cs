@@ -64,8 +64,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         public ViewState? View { get; set; }
         public IReadOnlyList<ViewProbe.PickShape> Shapes { get; set; } = Array.Empty<ViewProbe.PickShape>();
         internal Dictionary<string, IReadOnlyList<FormKey>> ModRefs = new(StringComparer.OrdinalIgnoreCase);
-        public Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> RefsOfModAsync(string modFolder, string? plugin) =>
-            Task.FromResult<(IReadOnlyList<FormKey>, string?)>(ModRefs.TryGetValue(modFolder ?? plugin ?? "", out var r) ? (r, null) : (Array.Empty<FormKey>(), $"{modFolder} provides no plugin of this order."));
+        public Task<(IReadOnlyList<FormKey> Refs, string? Refusal, string Note)> RefsOfModAsync(string modFolder, string? plugin) =>
+            Task.FromResult<(IReadOnlyList<FormKey>, string?, string)>(ModRefs.TryGetValue(modFolder ?? plugin ?? "", out var r) ? (r, null, "") : (Array.Empty<FormKey>(), $"{modFolder} provides no plugin of this order.", ""));
         internal string ServerBuild = "srv-1";
         public Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
             !Session.IsDrawn(FormKey.Factory(row.Row.RefKey))      // as the host: a reference the scene does not draw cannot be checked
@@ -1112,7 +1112,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
         var before = _scene.Session.Current(FormKey.Factory(RefKey));
         await Ok("workbench_act", A(("verb", "stage"), ("turn_degrees", 22f), ("angle_snap", 15f)));
-        var want = HousecarlCore.SpatialOverlap.RefrRotation(RefPlacementEdit.Turned(before.Rotation, System.Numerics.Vector3.UnitZ, float.DegreesToRadians(30)));
+        var want = HousecarlCore.SpatialOverlap.RefrRotation(RefPlacementEdit.Turned(before.Rotation, System.Numerics.Vector3.UnitZ, float.DegreesToRadians(15)));   // 22 rounds to 15 on a 15 step
         var got = HousecarlCore.SpatialOverlap.RefrRotation(_scene.Session.Current(FormKey.Factory(RefKey)).Rotation);
         for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) Assert.Equal(want[i, j], got[i, j], 3);
     }

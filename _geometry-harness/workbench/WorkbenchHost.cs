@@ -57,7 +57,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _camera.FieldOfView = _fov;
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
         _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate(); SaveSession(); };
-        _viewState = new ViewState(_session, () => DrawnRefs());
+        _viewState = new ViewState(_session, () => DrawnRefs(), _gizmo);
         _viewState.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate(); };
         _tints.State = _viewState;
         _outDir = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : opt.OutDir;
@@ -553,7 +553,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     float[]? IWorkbenchScene.Camera { get => new[] { _eye.X, _eye.Y, _eye.Z, _yaw, _pitch }; set { if (value is { Length: 5 } c) SetPose(new Vector3(c[0], c[1], c[2]), c[3], c[4]); } }
     string? IWorkbenchScene.PatchFolderOf(string patch) => PatchFolderOf(patch);
     Task<string> IWorkbenchScene.RevertWrittenAsync(FormKey key) => RevertWrittenAsync(key);
-    Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> IWorkbenchScene.RefsOfModAsync(string modFolder, string? plugin) => RefsOfModAsync(modFolder, plugin);
+    Task<(IReadOnlyList<FormKey> Refs, string? Refusal, string Note)> IWorkbenchScene.RefsOfModAsync(string modFolder, string? plugin) => RefsOfModAsync(modFolder, plugin);
     Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> IWorkbenchScene.DecisionInputsAsync(RankedRow row) => DecisionInputsAsync(row);
     string? IWorkbenchScene.Cell => SceneCell;
     string IWorkbenchScene.Status => _status.Text;
@@ -610,8 +610,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         {
             try
             {
-                var (refs, why) = await RefsOfModAsync(mod.Text.Trim(), null);
-                Do(() => why ?? (refs.Count == 0 ? $"no object drawn here is won by {mod.Text.Trim()}" : _viewState.SeeThrough(refs, mod.Text.Trim())));
+                var (refs, why, note) = await RefsOfModAsync(mod.Text.Trim(), null);
+                Do(() => (why ?? (refs.Count == 0 ? $"no object drawn here is won by {mod.Text.Trim()}" : _viewState.SeeThrough(refs, mod.Text.Trim()))) + (note.Length > 0 ? "; " + note : ""));
             }
             catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); }
         }));
@@ -634,8 +634,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             if (why is not null) return why;
             var c = _session.Current(k);
             var after = c with { Position = new Vec3(c.Position.X + d.X, c.Position.Y + d.Y, c.Position.Z + d.Z),
-                                 Rotation = turn == 0 ? c.Rotation : RefPlacementEdit.Turned(c.Rotation, Vector3.UnitZ, float.DegreesToRadians(turn)) };
-            _session.Stage(k, MoveRules.Snap(c, after, _input.SnapStep, _input.AngleStep));
+                                 Rotation = turn == 0 ? c.Rotation : RefPlacementEdit.Turned(c.Rotation, Vector3.UnitZ, float.DegreesToRadians(MoveRules.SnapTurn(turn, _input.AngleStep))) };
+            _session.Stage(k, MoveRules.Snap(c, after, _input.SnapStep, 0f));
             AfterStage();
             return $"staged: {EditSession.Sentence(_session.Pending[^1], _session.RefOf(k).Ref.BaseEditorId)}";
         })));
@@ -668,7 +668,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 var res = await StateTools.DecideOn(new LiveSurface(), Shell.Standings, r.Rank, null, v, _reason.Text);
                 var text = string.Join(" ", res.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Select(c => c.Text));
                 Shell.SetBanner(res.IsError == true ? text : (System.Text.Json.JsonDocument.Parse(text).RootElement.GetProperty("said").GetString() ?? ""));
-                if (res.IsError != true) _reason.Text = "";
+                if (res.IsError != true) { _reason.Text = ""; Shell.FillConflicts(); }
             }));
         return row;
     }
@@ -736,7 +736,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     /// <summary>The drawn references whose winning record a plugin of this mod folder (in the arm's view, by the probes'
     /// layer map) or this plugin provides. The winners are read in one call, each checked against the scene's pose.</summary>
-    internal async Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> RefsOfModAsync(string? modFolder, string? plugin)
+    internal async Task<(IReadOnlyList<FormKey> Refs, string? Refusal, string Note)> RefsOfModAsync(string? modFolder, string? plugin)
     {
         var w = await WriterAsync();
         IReadOnlyList<string> plugins;
@@ -744,16 +744,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         {
             var (mods, order) = ArmOrder();
             var t = w.Target;
-            var map = HarnessShared.HarnessOrderCli.PluginLayerMap(t.ProfileDir, mods, t.ModsDir, t.DataDir, Path.Combine(Mo2Instance.LayoutRoot(t.Instance), "overwrite"));
-            var (ps, why) = ModTint.PluginsOf(modFolder, map, t.ModsDir, order);
-            if (why is not null) return (Array.Empty<FormKey>(), why);
+            var (ps, why) = ModTint.PluginsOf(modFolder, t.ProfileDir, mods, t.ModsDir, t.DataDir, Path.Combine(Mo2Instance.LayoutRoot(t.Instance), "overwrite"), order);
+            if (why is not null) return (Array.Empty<FormKey>(), why, "");
             plugins = ps;
         }
         else plugins = new[] { plugin! };
-        // a Base Object Swapper reference is drawn with the swap's base and transform, not its record's, so it is left out
-        var drawn = DrawnAll().Where(r => !r.Ref.BosSwapped).Select(r => (r.Ref.RefKey, (RefPlacementEdit.Pose?)RefPlacementEdit.BakedPose(r.Ref))).ToList();
-        var (winners, _) = await w.WinnersAsync(drawn);
-        return (ModTint.Select(drawn.Select(d => d.RefKey), winners, plugins), null);
+        // a Base Object Swapper reference is drawn with the swap's transform, not its record's: its winner is read
+        // without the placement check, and it is left out and counted; one drawn elsewhere is counted too
+        var all = DrawnAll().Select(r => (Key: r.Ref.RefKey, Bos: r.Ref.BosSwapped, Pose: r.Ref.BosSwapped ? (RefPlacementEdit.Pose?)null : RefPlacementEdit.BakedPose(r.Ref))).ToList();
+        var (winners, mismatched) = await w.WinnersAsync(all.Select(a => (a.Key, a.Pose)).ToList());
+        var (refs, note) = ModTint.Pick(all.Select(a => (a.Key, a.Bos)), winners, mismatched, plugins);
+        return (refs, null, note);
     }
 
     /// <summary>The detector row and the objects a decision on it is keyed on, read now through the bound server; each
@@ -764,10 +765,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var keys = new[] { row.Row.RefKey, row.Row.OtherKey }.Where(k => k is not null && FormKey.TryFactory(k, out _)).Select(k => FormKey.Factory(k!)).ToList();
         var notDrawn = keys.Where(k => !_session.IsDrawn(k)).ToList();
         if (notDrawn.Count > 0)
-            throw new InvalidOperationException($"{string.Join(" and ", notDrawn)} is not drawn in this scene, so its placement cannot be checked against the server; open the row's cell first.");
+            throw new InvalidOperationException($"{string.Join(" and ", notDrawn)} is not drawn in this scene, so its objects are not compared until its cell is open.");
         var objects = await w.ReadObjectsAsync(keys.Select(k => (k, RefPlacementEdit.BakedPose(_session.RefOf(k).Ref))).ToList());
-        var build = Shell.Bundle is { } b && Recheck.ProbeOfCheck.TryGetValue(row.Row.CheckId, out var probe) ? Recheck.BundleDigest(b.Dir, probe) ?? "" : "";
-        return (new RowState(row.Row.Physical?.ToString(), row.Row.Summary, build), objects, w.ServerSha256);
+        return (((IWorkbenchSurface)new LiveSurface()).RowStateOf(row), objects, w.ServerSha256);
     }
 
     /// <summary>The session file follows every change; a failed write is said, never silent.</summary>
@@ -786,7 +786,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var (path, _) = SessionFile.PathFor(live.WorkFolder, plan, arm);
         if (path is null || SessionFile.Read(path) is not { } d) return;
         var notes = SessionFile.Restore(_session, d, (k, sw) => ReadPatchPose(k, sw));
-        if (d.Camera is { Length: 5 } c) SetPose(new Vector3(c[0], c[1], c[2]), c[3], c[4]);
+        if (SessionFile.CameraFor(d, SceneCell) is { Length: 5 } c) SetPose(new Vector3(c[0], c[1], c[2]), c[3], c[4]);
         AfterStage();
         var said = $"restored the session from {path}: {_session.Pending.Count} staged edit(s), {_session.Written.Count} written" + (notes.Count > 0 ? "; " + string.Join(" ", notes) : "");
         Say(said); Shell.SetBanner(said);
