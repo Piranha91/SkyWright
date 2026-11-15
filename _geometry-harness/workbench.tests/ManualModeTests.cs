@@ -85,7 +85,8 @@ public sealed class OutputFolderRuleTests : IDisposable
         Assert.False(why is null, $"{rel} was allowed");
         Assert.DoesNotContain("\n", why);
         Assert.EndsWith(".", why);
-        Assert.Contains(word, why, StringComparison.OrdinalIgnoreCase);
+        // the reason, not the quoted path, names it: the path itself often holds the word
+        Assert.Contains(word, why![(why.LastIndexOf('\'') + 1)..], StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
