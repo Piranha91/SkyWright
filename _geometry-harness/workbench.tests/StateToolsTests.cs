@@ -556,4 +556,134 @@ public sealed class StateToolsTests : IAsyncLifetime
         }
         finally { Environment.SetEnvironmentVariable("WB_HOUSECARL_LAUNCH", null); }
     }
+
+    // ---- M7 (Gate B review, DESIGN R4.7, R4.8, L5): the launcher's verbs and its run ----
+
+    /// <summary>LauncherInstance with a second enabled mod and a separator (L5), and an Output Folder beside it.</summary>
+    static string LauncherInstanceL5()
+    {
+        var root = LauncherInstance();
+        Directory.CreateDirectory(Path.Combine(root, "mods", "TopMod"));
+        File.WriteAllText(Path.Combine(root, "profiles", "P", "modlist.txt"), "+TopMod\r\n+Stuff_separator\r\n+OnMod\r\n-OffMod\r\n");
+        Directory.CreateDirectory(Path.Combine(root, "Data"));
+        return root;
+    }
+
+    [Fact]
+    public async Task M7a_the_mod_list_is_in_MO2_priority_order_and_a_separator_cannot_be_ticked()
+    {
+        var inst = LauncherInstanceL5();
+        var opened = await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P")));
+        var mods = P(opened, "launcher", "mods").EnumerateArray().ToList();
+        Assert.Equal(new[] { "TopMod", "Stuff_separator", "OnMod", "OffMod" }, mods.Select(m => P(m, "name").GetString()));
+        Assert.True(P(mods[0], "priority").GetInt32() > P(mods[2], "priority").GetInt32(), "the strongest folder has the highest priority");
+        Assert.True(P(mods[1], "separator").GetBoolean());
+        Assert.Contains("separator", await Refused("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "Stuff_separator" }))));
+    }
+
+    [Fact]
+    public async Task M7b_set_output_answers_with_the_rules_verdict_and_set_work_folder_is_checked()
+    {
+        var inst = LauncherInstanceL5();
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P")));
+        Assert.Contains("Data", await Refused("workbench_act", A(("verb", "set_output"), ("path", Path.Combine(inst, "Data")))));
+        var o = inst + "-out";
+        var set = await Ok("workbench_act", A(("verb", "set_output"), ("path", o)));
+        Assert.Equal("allowed", P(set, "launcher", "outputVerdict").GetString());
+        Assert.Equal(Path.Combine(o, "workbench-runs"), P(set, "launcher", "workFolder").GetString());
+        Assert.Contains("instance", await Refused("workbench_act", A(("verb", "set_work_folder"), ("path", Path.Combine(inst, "work")))));
+        var w = await Ok("workbench_act", A(("verb", "set_work_folder"), ("path", inst + "-work")));
+        Assert.Equal(inst + "-work", P(w, "launcher", "workFolder").GetString());
+    }
+
+    [Fact]
+    public async Task M7c_select_probes_all_takes_every_probe_check_and_each_other_kind_is_refused_naming_it()
+    {
+        var all = await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "all" })));
+        var probes = P(all, "launcher", "probes").EnumerateArray().ToList();
+        var kinds = new[] { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe", "adviceprobe" };
+        Assert.All(probes.Where(p => kinds.Contains(P(p, "kind").GetString())), p => Assert.True(P(p, "selected").GetBoolean(), P(p, "checkId").GetString()));
+        Assert.Equal(probes.Count(p => kinds.Contains(P(p, "kind").GetString())), probes.Count(p => P(p, "selected").GetBoolean()));
+        foreach (var kind in new[] { "mcp-only", "unsupported", "derived", "manual", "media", "live-import" })
+        {
+            var one = probes.First(p => P(p, "kind").GetString() == kind);
+            Assert.False(P(one, "selectable").GetBoolean());
+            Assert.Contains(kind, await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { P(one, "checkId").GetString() }))));
+        }
+    }
+
+    [Fact]
+    public async Task M7d_ticking_conditional_geometry_adds_the_switch_census_and_makes_the_run_deep_and_says_so()
+    {
+        var r = await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "state.conditional-geometry" })));
+        var probes = P(r, "launcher", "probes").EnumerateArray().ToList();
+        var census = probes.Single(p => P(p, "checkId").GetString() == "state.switch-census");
+        Assert.True(P(census, "selected").GetBoolean(), "the switch census was not added");
+        Assert.Contains("conditional-geometry", P(census, "addedFor").GetString());
+        Assert.Equal("deep", P(r, "launcher", "depth").GetString());
+        Assert.Contains("deep", P(r, "said").GetString());
+    }
+
+    [Fact]
+    public async Task M7e_bos_and_author_advice_are_greyed_with_a_sentence_when_the_profile_cannot_feed_them()
+    {
+        var inst = LauncherInstanceL5();
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+        await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
+        var s = await Ok("workbench_state", A(("project", new[] { "launcher" })));
+        var probes = P(s, "launcher", "probes").EnumerateArray().ToList();
+        string? Why(string id) => P(probes.Single(p => P(p, "checkId").GetString() == id), "whyNot").GetString();
+        Assert.Contains("_SWAP.ini", Why("geometry.bos-overlay"));
+        Assert.Contains("meta.ini", Why("patch.author-advice"));
+    }
+
+    [Fact]
+    public async Task M7f_with_the_output_at_the_mods_folder_run_is_refused_until_a_work_folder_is_chosen()
+    {
+        var inst = LauncherInstanceL5();
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+        await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
+        await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" })));
+        await Ok("workbench_act", A(("verb", "set_output"), ("path", Path.Combine(inst, "mods"))));
+        Assert.Contains("Work Folder", await Refused("workbench_act", A(("verb", "run"))));
+    }
+
+    [Fact]
+    public async Task M7g_run_starts_the_pipeline_on_the_selection_reaches_done_and_the_same_server_keeps_answering()
+    {
+        var inst = LauncherInstanceL5();
+        var fake = Path.Combine(inst + "-fake", "fake_pipeline.py");
+        Directory.CreateDirectory(Path.GetDirectoryName(fake)!);
+        // a stand-in for evalpipeline.py: records its arguments and the entry, and writes a bundle where the run asks
+        File.WriteAllText(fake, string.Join("\n",
+            "import json, os, sys",
+            "a = sys.argv[1:]",
+            "out = a[a.index('--out') + 1]",
+            "ev = os.path.join(out, 'bundle', 'evidence'); os.makedirs(ev, exist_ok=True)",
+            "open(os.path.join(ev, 'manifest.json'), 'w').write('{}')",
+            "json.dump({'args': a, 'entry': json.load(open(a[a.index('--entry') + 1]))}, open(os.path.join(os.path.dirname(sys.argv[0]), 'called.json'), 'w'))",
+            "print('stage bundle: done')"));
+        Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", fake);
+        try
+        {
+            await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+            await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
+            await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" })));
+            await Ok("workbench_act", A(("verb", "set_output"), ("path", inst + "-out")));
+            var started = await Ok("workbench_act", A(("verb", "run")));
+            Assert.Equal("running", P(started, "launcher", "run", "state").GetString());
+            var done = await Ok("workbench_state", A(("project", new[] { "launcher", "bundle" }), ("wait_seconds", 60)));
+            Assert.Equal("done", P(done, "launcher", "run", "state").GetString());
+            var bundle = P(done, "launcher", "run", "bundle").GetString()!;
+            Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), bundle);
+            Assert.StartsWith(Path.Combine(inst + "-out", "workbench-runs"), bundle);
+            using var called = JsonDocument.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(fake)!, "called.json")));
+            var entry = P(called.RootElement, "entry");
+            Assert.Equal(new[] { "OnMod" }, P(entry, "selection", "mods").EnumerateArray().Select(x => x.GetString()));
+            Assert.Equal(inst, P(entry, "inPlace", "instance").GetString());
+            Assert.Contains("geometry.object-overlap", P(entry, "evaluation", "select").EnumerateArray().Select(x => x.GetString()));
+            Assert.Equal("test-plan", P(done, "bundle", "planId").GetString());     // the same server still answers
+        }
+        finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); }
+    }
 }
