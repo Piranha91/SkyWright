@@ -32,6 +32,9 @@ internal static class MoveRules
         return after with { Position = pos, Rotation = rot };
     }
 
+    /// <summary>A turn amount in degrees rounded to the step (0: as given).</summary>
+    internal static float SnapTurn(float degrees, float stepDegrees) => stepDegrees > 0 ? MathF.Round(degrees / stepDegrees) * stepDegrees : degrees;
+
     /// <summary>The part of a move the lock allows.</summary>
     internal static Vector3 Lock(Vector3 delta, AxisLock axes) => axes switch
     {

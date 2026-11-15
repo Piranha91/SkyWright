@@ -71,8 +71,8 @@ internal sealed class ViewInput
         if (_dragHandle is Handle.TurnZ or Handle.TurnX or Handle.TurnY)
         {
             var turnAxis = Gizmo.TurnAxis(_dragHandle);
-            float rad = _gizmo.TurnAmountAbout(turnAxis, from, to, _ray);
-            return MoveRules.Snap(s, s with { Rotation = RefPlacementEdit.Turned(s.Rotation, turnAxis, rad) }, 0f, _dragHandle == Handle.TurnZ ? AngleStep : 0f);
+            float rad = float.DegreesToRadians(MoveRules.SnapTurn(float.RadiansToDegrees(_gizmo.TurnAmountAbout(turnAxis, from, to, _ray)), AngleStep));
+            return s with { Rotation = RefPlacementEdit.Turned(s.Rotation, turnAxis, rad) };
         }
         float amount = _gizmo.MoveAmount(_dragHandle, from, to, _ray);
         var axis = _dragHandle switch { Handle.MoveX => Vector3.UnitX, Handle.MoveY => Vector3.UnitY, _ => Vector3.UnitZ };
