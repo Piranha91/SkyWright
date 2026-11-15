@@ -494,4 +494,66 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.False(e2, "the forwarded housecarl_place refused: " + t2);
         Assert.True(File.Exists(Path.Combine(mods, "houseCARL - WbPlaced", "meshes", "hcwb", "a.nif")), t2);
     }
+
+    // ---- H5 (Gate B review, DESIGN R4.5): houseCARL mode starts the server as the client does ----
+
+    /// <summary>A copy of the server this checkout builds, so a config can sit beside it without touching the build.</summary>
+    static string ServerCopy(string dir)
+    {
+        var src = Path.Combine(R3Bundle.Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0");
+        Assert.True(File.Exists(Path.Combine(src, "housecarl-mcp.exe")), "build src/housecarl-mcp in Release first");
+        foreach (var f in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
+        {
+            var t = Path.Combine(dir, Path.GetRelativePath(src, f));
+            Directory.CreateDirectory(Path.GetDirectoryName(t)!);
+            File.Copy(f, t);
+        }
+        return Path.Combine(dir, "housecarl-mcp.exe");
+    }
+
+    static void Mo2Ini(TiltedRefWorld w) => File.WriteAllText(Path.Combine(w.Instance, "ModOrganizer.ini"),
+        "[General]\r\ngameName=Skyrim Special Edition\r\ngamePath=@ByteArray(" + Path.GetDirectoryName(w.DataDir)!.Replace("\\", "\\\\") + ")\r\nselected_profile=@ByteArray(Default)\r\n");
+
+    [Fact]
+    public async Task H5a_houseCARL_mode_reports_the_instance_of_the_server_started_with_the_clients_environment()
+    {
+        using var a = new TiltedRefWorld(); using var b = new TiltedRefWorld();
+        Mo2Ini(a); Mo2Ini(b);
+        var root = Path.Combine(a.Root, "client");
+        var exe = ServerCopy(Path.Combine(root, "server"));
+        // beside the exe: instance B (what a workbench that ignores the client's environment would read)
+        File.WriteAllText(Path.Combine(root, "server", "houseCARL.user.json"), JsonSerializer.Serialize(new { Mo2InstanceDir = b.Instance }));
+        // the client's environment: HOUSECARL_DATA_DIR, whose config names instance A
+        var data = Path.Combine(root, "plugin-data"); Directory.CreateDirectory(data);
+        File.WriteAllText(Path.Combine(data, "houseCARL.user.json"), JsonSerializer.Serialize(new { Mo2InstanceDir = a.Instance }));
+        var launch = Path.Combine(root, "launch.json");
+        File.WriteAllText(launch, JsonSerializer.Serialize(new { command = exe, args = new[] { $"--HouseCarl:CorpusPath={TestCorpus.Path}" }, env = new Dictionary<string, string> { ["HOUSECARL_DATA_DIR"] = data } }));
+        Environment.SetEnvironmentVariable("WB_HOUSECARL_LAUNCH", launch);
+        try
+        {
+            var opened = await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "housecarl")));
+            Assert.Equal(Path.GetFullPath(a.Instance).TrimEnd('\\'), Path.GetFullPath(P(opened, "launcher", "instance").GetString()!).TrimEnd('\\'));
+            Assert.Equal("housecarl", P(opened, "launcher", "mode").GetString());
+        }
+        finally { Environment.SetEnvironmentVariable("WB_HOUSECARL_LAUNCH", null); }
+    }
+
+    [Fact]
+    public async Task H5b_a_server_that_manages_no_instance_is_refused_in_one_sentence()
+    {
+        using var a = new TiltedRefWorld();
+        var root = Path.Combine(a.Root, "client");
+        var exe = ServerCopy(Path.Combine(root, "server"));
+        var data = Path.Combine(root, "plugin-data"); Directory.CreateDirectory(data);     // no saved config: no instance
+        var launch = Path.Combine(root, "launch.json");
+        File.WriteAllText(launch, JsonSerializer.Serialize(new { command = exe, args = new[] { $"--HouseCarl:CorpusPath={TestCorpus.Path}" }, env = new Dictionary<string, string> { ["HOUSECARL_DATA_DIR"] = data } }));
+        Environment.SetEnvironmentVariable("WB_HOUSECARL_LAUNCH", launch);
+        try
+        {
+            var why = await Refused("workbench_act", A(("verb", "open_profile"), ("mode", "housecarl")));
+            Assert.Contains("manages no MO2 instance", why);                     // the server's own answer, not a missing feature
+            Assert.Contains("free mode", why);
+        }
+        finally { Environment.SetEnvironmentVariable("WB_HOUSECARL_LAUNCH", null); }
+    }
 }

@@ -453,40 +453,7 @@ public sealed class ManualModeBindingTests : IDisposable
         Assert.Equal("baseline", (string?)Contract.Static("BundleConflicts", "DefaultArm", "the default arm from plan.reviewArm (DESIGN R2.1)", Plan(null)));
     }
 
-    [Fact]
-    public async Task B12_houseCARL_mode_takes_the_instance_the_server_itself_reports()
-    {
-        using var a = new TiltedRefWorld();
-        var src = Path.Combine(R3Bundle.Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0");
-        Assert.True(File.Exists(Path.Combine(src, "housecarl-mcp.exe")), "build src/housecarl-mcp in Release first");
-        var server = Path.Combine(_dir, "server");
-        foreach (var f in Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories))
-        {
-            var t = Path.Combine(server, Path.GetRelativePath(src, f));
-            Directory.CreateDirectory(Path.GetDirectoryName(t)!);
-            File.Copy(f, t);
-        }
-        // The server's own saved config (beside its exe) names instance A; a stray config elsewhere names B.
-        File.WriteAllText(Path.Combine(server, "houseCARL.user.json"), JsonSerializer.Serialize(new { Mo2InstanceDir = a.Instance }));
-        var stray = Path.Combine(_dir, "stray");
-        Directory.CreateDirectory(stray);
-        File.WriteAllText(Path.Combine(stray, "houseCARL.user.json"), JsonSerializer.Serialize(new { Mo2InstanceDir = Path.Combine(_dir, "B") }));
-        File.WriteAllText(Path.Combine(a.Instance, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\ngamePath=@ByteArray(" + Path.GetDirectoryName(a.DataDir)!.Replace("\\", "\\\\") + ")\r\nselected_profile=@ByteArray(Default)\r\n");
-        var task = (Task)Contract.Static("HousecarlMode", "ReportedInstanceAsync", "houseCARL mode's read of the server's own instance (DESIGN R2.8)",
-                                         Path.Combine(server, "housecarl-mcp.exe"))!;
-        await task;
-        var got = (string?)task.GetType().GetProperty("Result")!.GetValue(task);
-        Assert.Equal(Path.GetFullPath(a.Instance).TrimEnd('\\'), Path.GetFullPath(got!).TrimEnd('\\'));
-    }
-
-    [Fact]
-    public void B12b_with_no_server_found_houseCARL_mode_refuses_in_one_sentence()
-    {
-        var ex = Assert.ThrowsAny<InvalidOperationException>(() => Contract.Static("HousecarlMode", "Locate", "houseCARL mode's server location (DESIGN R2.8)",
-            (string?)null, Path.Combine(_dir, "no-claude.json"), _dir));
-        Assert.DoesNotContain("\n", ex.Message);
-        Assert.Contains("WB_HOUSECARL_SERVER", ex.Message);
-    }
+    // B12 and B12b (DESIGN R2.8) are superseded by R4.5: StateToolsTests.H5a and H5b start the server as the client does.
 }
 
 /// <summary>B11: the window and its state server exist before any scene. workbench.exe started with no bundle answers
