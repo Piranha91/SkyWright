@@ -75,6 +75,10 @@ public sealed class OutputFolderRuleTests : IDisposable
     [InlineData("instance", "instance")]
     [InlineData("game", "game folder")]
     [InlineData("afile.txt", "file")]
+    [InlineData("instance/NewOut", "instance")]          // review M4: inside the instance, on neither list
+    [InlineData("instance/downloads", "instance")]
+    [InlineData("instance/profiles/Other", "profiles")]
+    [InlineData("instance/overwrite/sub", "overwrite")]
     public void A_folder_the_rule_refuses_is_refused_in_one_sentence_naming_why(string rel, string word)
     {
         var why = Check(Path.Combine(_root, rel));
@@ -179,6 +183,38 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         var undo = await Call(c, "housecarl_remove", new() { ["formids"] = new[] { TiltedRefWorld.Ref.ToString() }, ["into"] = folder });
         Assert.False(undo.Error, "dropping the override from the patch under the output folder was refused: " + undo.Text);
         Assert.Empty(PatchesUnderMods("WbTwice"));
+        // review L1: read the patch back after the undo: the reference's override is gone
+        using (var back = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(folder, "WbTwice.esp"), SkyrimRelease.SkyrimSE))
+            Assert.Empty(back.EnumerateMajorRecords<IPlacedObjectGetter>());
+    }
+
+    [Fact]
+    public async Task B3d_into_an_absolute_folder_houseCARL_does_not_own_is_refused()
+    {
+        var foreign = Path.Combine(_w.Root, "foreign-" + Guid.NewGuid().ToString("N")[..6]);
+        Directory.CreateDirectory(foreign);
+        File.WriteAllText(Path.Combine(foreign, "Foreign.esp"), "not ours");
+        await using var c = await Server();
+        var (err, text) = await Call(c, "housecarl_apply", new() { ["ops"] = Move(74f), ["into"] = foreign });
+        // the server answers some refusals as text starting "error:" without the error flag; either counts as refused
+        Assert.True(err || text.TrimStart().StartsWith("error:"), "a write into a folder without houseCARL's ownership marker was accepted: " + text);
+        // and it is refused as that folder, by its path, for lacking the marker; not as an unknown patch name
+        Assert.Contains(foreign, text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("marker", text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("not ours", File.ReadAllText(Path.Combine(foreign, "Foreign.esp")));
+    }
+
+    [Fact]
+    public async Task B3e_an_out_path_in_the_games_Data_or_an_existing_mod_folder_is_refused_by_the_server()
+    {
+        await using var c = await Server();
+        foreach (var bad in new[] { _w.DataDir, Path.Combine(_w.Instance, "mods", "WorldMod") })
+        {
+            var (err, text) = await Call(c, "housecarl_apply", new() { ["ops"] = Move(75f), ["patch"] = "WbBad", ["out_path"] = bad });
+            Assert.True((err || text.TrimStart().StartsWith("error:")) && !text.Contains("unknown parameter"), $"out_path {bad} was not refused by the lane's own rule: {text}");
+        }
+        Assert.Empty(PatchesUnderMods("WbBad"));
+        Assert.Empty(Directory.GetFiles(_w.DataDir, "WbBad*.esp", SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -467,13 +503,27 @@ public sealed class WorkFolderRuleTests : IDisposable
     [Fact]
     public void A_work_folder_outside_the_instance_is_allowed() => Assert.Null(Check(Path.Combine(_root, "elsewhere", "work")));
 
+    // Coordinator ruling (2026-11-14, under the standing rule; Piranha's "any output can be written to the user's chosen
+    // location"): with the Output Folder outside the instance the Work Folder defaults to its "workbench-runs" subfolder;
+    // with the Output Folder at <instance>/mods there is no default, and the launcher refuses until the user chooses one.
+    // Never %LOCALAPPDATA%.
     [Fact]
-    public void The_default_work_folder_is_outside_the_instance_even_when_the_output_folder_is_its_mods_folder()
+    public void With_the_output_outside_the_instance_the_default_work_folder_is_its_workbench_runs_subfolder()
     {
-        var d = (string?)Contract.Static("WorkFolderRule", "Default", "the default work folder (GATE-B.md 3.1)", Path.Combine(Inst, "mods"), Inst);
-        Assert.NotNull(d);
-        Assert.False(Path.GetFullPath(d!).StartsWith(Path.GetFullPath(Inst), StringComparison.OrdinalIgnoreCase), $"default work folder {d} is inside the instance");
+        var o = Path.Combine(_root, "elsewhere", "out");
+        var d = (string?)Contract.Static("WorkFolderRule", "Default", "the default work folder (GATE-B.md 3.1)", o, Inst);
+        Assert.Equal(Path.GetFullPath(Path.Combine(o, "workbench-runs")), Path.GetFullPath(d!));
         Assert.Null(Check(d!));
+    }
+
+    [Fact]
+    public void With_the_output_at_the_instances_mods_folder_there_is_no_default_and_the_reason_is_one_sentence()
+    {
+        var ex = Assert.ThrowsAny<InvalidOperationException>(() =>
+            Contract.Static("WorkFolderRule", "Default", "the default work folder (GATE-B.md 3.1)", Path.Combine(Inst, "mods"), Inst));
+        Assert.DoesNotContain("\n", ex.Message);
+        Assert.Contains("Work Folder", ex.Message);
+        Assert.DoesNotContain("AppData", ex.Message);
     }
 }
 
@@ -607,20 +657,68 @@ public sealed class InPlaceRunTests
         {
             readerCmd = "\"" + Path.Combine(R3Bundle.Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe") + "\"",
         }));
-        var before = Listing(w.Instance, game);
+        var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
+        var before = Listing(w.Root);                                 // review M2: the whole world root, not only instance and game
         var psi = new ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var a in new[] { "-I", Path.Combine(R3Bundle.Checkout(), "_geometry-harness", "evalpipeline.py"), "run", "--entry", entry,
                                   "--machine", machine, "--out", work, "--through", "bundle" }) psi.ArgumentList.Add(a);
         psi.Environment["PYTHONIOENCODING"] = "utf-8";
-        psi.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(work, "runlog");
+        psi.Environment["HOUSECARL_RUNLOG_DIR"] = decoy;              // the run must set its own, under the work folder (not setdefault)
         using var p = Process.Start(psi)!;
         var o = p.StandardOutput.ReadToEndAsync(); var e = p.StandardError.ReadToEndAsync();
         p.WaitForExit();
         var text = o.Result + e.Result;
-        var after = Listing(w.Instance, game);
-        var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
-        Assert.True(changed.Count == 0, $"the run wrote into the instance or game: {string.Join("; ", changed.Take(5))}");
+        var after = Listing(w.Root);
+        bool Under(string path, string dir) => Path.GetFullPath(path).StartsWith(Path.GetFullPath(dir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                                             || string.Equals(Path.GetFullPath(path), Path.GetFullPath(dir), StringComparison.OrdinalIgnoreCase);
+        var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a)
+                            .Where(k => !Under(k, work) && !string.Equals(Path.GetFullPath(k), Path.GetFullPath(w.Root), StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.True(changed.Count == 0, $"the run wrote outside its work folder: {string.Join("; ", changed.Take(5))}");
         Assert.True(p.ExitCode == 0, $"evalpipeline run --through bundle exited {p.ExitCode}: {text[^Math.Min(800, text.Length)..]}");
-        Assert.True(File.Exists(Path.Combine(work, "bundle", "evidence", "manifest.json")), "no bundle under the work folder");
+        Assert.Empty(Directory.EnumerateFileSystemEntries(decoy));
+        var bundle = Path.Combine(work, "bundle", "evidence");
+        Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), "no bundle under the work folder");
+        using var plan = JsonDocument.Parse(File.ReadAllText(Path.Combine(bundle, "plan.json")));
+        Assert.Equal("candidate-01", plan.RootElement.GetProperty("reviewArm").GetString());
+        var baseArm = plan.RootElement.GetProperty("arms").EnumerateArray().Single(a => a.GetProperty("kind").GetString() == "baseline");
+        Assert.DoesNotContain(baseArm.GetProperty("plugins").EnumerateArray(), x => x.GetString() == sel.FileName.String);
+        var names = Directory.GetFiles(bundle, "names.json", SearchOption.AllDirectories).Single();
+        Assert.DoesNotContain("000800:HcWbSel.esp", File.ReadAllText(names).Split("\"unread\"")[1], StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+
+/// <summary>Review M4: the output rule on layouts other than the plain one: an MO2 instance inside the game folder (a
+/// portable install), and an instance whose ModOrganizer.ini sets base_directory (mods and profiles elsewhere), read
+/// through the existing owner (housecarl-core Mo2Instance).</summary>
+public sealed class OutputFolderLayoutTests : IDisposable
+{
+    readonly string _root = Path.Combine(Path.GetTempPath(), "hc-wb-layout-" + Guid.NewGuid().ToString("N"));
+    public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
+
+    string? Check(string o, string inst, string game) => (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule (GATE-B.md 3.2)", o, inst, "P", game);
+
+    [Fact]
+    public void An_instance_inside_the_game_folder_still_allows_its_mods_folder_and_refuses_Data()
+    {
+        var game = Path.Combine(_root, "game"); var inst = Path.Combine(game, "MO2");
+        foreach (var d in new[] { "mods/Enabled", "profiles/P", "overwrite" }) Directory.CreateDirectory(Path.Combine(inst, d));
+        Directory.CreateDirectory(Path.Combine(game, "Data"));
+        File.WriteAllText(Path.Combine(inst, "profiles", "P", "modlist.txt"), "+Enabled\r\n");
+        Assert.Null(Check(Path.Combine(inst, "mods"), inst, game));
+        Assert.NotNull(Check(Path.Combine(game, "Data"), inst, game));
+        Assert.NotNull(Check(Path.Combine(game, "Other"), inst, game));
+    }
+
+    [Fact]
+    public void A_base_directory_instance_is_read_through_its_ini()
+    {
+        var inst = Path.Combine(_root, "inst"); var bd = Path.Combine(_root, "basedir"); var game = Path.Combine(_root, "game");
+        foreach (var d in new[] { "mods/Enabled", "profiles/P", "overwrite" }) Directory.CreateDirectory(Path.Combine(bd, d));
+        Directory.CreateDirectory(inst); Directory.CreateDirectory(Path.Combine(game, "Data"));
+        File.WriteAllText(Path.Combine(bd, "profiles", "P", "modlist.txt"), "+Enabled\r\n");
+        File.WriteAllText(Path.Combine(inst, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\nselected_profile=@ByteArray(P)\r\n[Settings]\r\nbase_directory=" + bd.Replace("\\", "/") + "\r\n");
+        Assert.NotNull(Check(Path.Combine(bd, "mods", "Enabled"), inst, game));
+        Assert.Null(Check(Path.Combine(bd, "mods"), inst, game));
     }
 }

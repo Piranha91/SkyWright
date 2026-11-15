@@ -94,8 +94,8 @@ def in_place_entry(t: Path, inst, game, mods, select, **evaluation):
     return p
 
 
-SHADOW_MODS = {"Sel": {"Sel.esp": ["Base.esm"], "Dup.esp": ["Base.esm"]}, "Other": {"Dup.esp": ["Base.esm"]},
-               "A": {"A.esp": ["Base.esm"]}}
+SHADOW_MODS = {"Sel": {"Sel.esp": ["Base.esm"], "Dup.esp": ["Base.esm"], "Off.esp": ["Base.esm"]},
+               "Other": {"Dup.esp": ["Base.esm"]}, "A": {"A.esp": ["Base.esm"]}}
 SHADOW_ENABLED = ["Sel", "Other", "A"]
 SHADOW_PLUGINS = ["A.esp", "Sel.esp", "Dup.esp"]
 
@@ -219,6 +219,10 @@ def case_b6b_an_asset_only_selection_has_no_target_and_a_population_of_its_folde
         ctx = EP.Context(in_place_entry(t, inst, game, ["Tex"], ["geometry.object-overlap"]), None, t / "out")
         res = ctx.resolve()
         assert res["subject"] == [] and res["keys"] == [], f"targets {res['subject']} {res['keys']}"
+        # review L3: the arms differ only by the folder, which is what evalrun's population takes (h3-asset-only-plan.log)
+        by = {a["id"]: a for a in res["arms"]}
+        assert ER.arm_delta([by["without-selection"]["mods"], by["combined"]["mods"]]) == ["Tex"]
+        assert ER.arm_delta([by["without-selection"]["plugins"], by["combined"]["plugins"]]) == []
 
 
 # ---- B6: a selected master with a dependent left behind is refused by the probes' own order check ----
@@ -280,6 +284,23 @@ def case_b16_the_review_arms_pairs_are_each_target_with_each_plugin_it_clashes_w
         (run / "receipts" / "geometry.object-overlap__candidate-01__arm.json").write_text(json.dumps(
             {"checkId": "geometry.object-overlap", "armId": "candidate-01", "validation": {"accepted": True},
              "outputs": [{"path": "outputs/overlap-candidate-01.json"}]}), encoding="utf-8")
+        # review M5: rows and receipts that must yield no pair: a row naming no target, a receipt not accepted, and a
+        # baseline-arm receipt with another pair
+        (run / "outputs" / "o2.json").write_text(json.dumps({"Conflicts": [
+            {"Kind": "OVERLAP", "A": "Other.esp", "B": "Base.esm", "Summary": "s", "Necessary": [], "Alternative": []}]}), encoding="utf-8")
+        (run / "receipts" / "geometry.navmesh-ownership__candidate-01__arm.json").write_text(json.dumps(
+            {"checkId": "geometry.navmesh-ownership", "armId": "candidate-01", "validation": {"accepted": True},
+             "outputs": [{"path": "outputs/o2.json"}]}), encoding="utf-8")
+        (run / "outputs" / "o3.json").write_text(json.dumps({"Conflicts": [
+            {"Kind": "OVERLAP", "A": "Sel.esp", "B": "Rejected.esp", "Summary": "s", "Necessary": [], "Alternative": []}]}), encoding="utf-8")
+        (run / "receipts" / "geometry.placement-contact__candidate-01__arm.json").write_text(json.dumps(
+            {"checkId": "geometry.placement-contact", "armId": "candidate-01", "validation": {"accepted": False},
+             "outputs": [{"path": "outputs/o3.json"}]}), encoding="utf-8")
+        (run / "outputs" / "o4.json").write_text(json.dumps({"Conflicts": [
+            {"Kind": "OVERLAP", "A": "Sel.esp", "B": "BaseArm.esp", "Summary": "s", "Necessary": [], "Alternative": []}]}), encoding="utf-8")
+        (run / "receipts" / "geometry.object-overlap__baseline__arm.json").write_text(json.dumps(
+            {"checkId": "geometry.object-overlap", "armId": "baseline", "validation": {"accepted": True},
+             "outputs": [{"path": "outputs/o4.json"}]}), encoding="utf-8")
         plan = {"reviewArm": "candidate-01", "targets": [{"name": "Sel.esp"}],
                 "arms": [{"armId": "baseline", "kind": "baseline", "plugins": ["Base.esm", "Other.esp"]},
                          {"armId": "candidate-01", "kind": "candidate", "plugins": ["Base.esm", "Other.esp", "Sel.esp"]}]}
@@ -346,7 +367,8 @@ def case_m4b_with_no_geometry_receipt_the_launcher_gets_a_sentence_naming_the_mi
         ex = pair_ex(Path(t), "candidate-01", with_receipt=False)
         assert ER.all_plan_pairs(ex) == []
         why = ER.pair_source_sentence(ex)
-        assert "geometry" in why and why.endswith(".") and "\n" not in why, why
+        assert why == ("no geometry check ran on the review arm, so there is no clash to take a plugin pair from; select "
+                       "overlap, contact or navmesh ownership with patch discovery."), why
 
 
 # ---- L1: the Python twins of the order reader agree on an absolute Mods entry ----
@@ -374,6 +396,71 @@ def case_l1b_a_population_takes_a_mod_folder_named_by_absolute_path():
                                   [f.name], str(inst))
         assert not isinstance(made, str), f"refused: {made}"
         assert Path(made[3][0]["path"]).resolve() == out_patch.resolve(), made[3]
+
+
+def case_l4_an_inactive_plugin_stays_out_and_a_plugin_the_game_data_also_provides_stays_in():
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        mods = {"Sel": {"Sel.esp": ["Base.esm"], "Off.esp": ["Base.esm"], "Shared.esp": ["Base.esm"]}, "A": {"A.esp": ["Base.esm"]}}
+        inst, game = world(t, mods, ["Sel", "A"], ["A.esp", "Sel.esp", "Shared.esp"], data=("Base.esm", "Shared.esp"))
+        # Off.esp is in loadorder.txt but not ticked in plugins.txt
+        lo = inst / "profiles" / "P" / "loadorder.txt"
+        lo.write_text(lo.read_text(encoding="utf-8") + "Off.esp\n", encoding="utf-8")
+        ctx = EP.Context(in_place_entry(t, inst, game, ["Sel"], ["geometry.object-overlap"]), None, t / "out")
+        by = {a["id"]: a for a in ctx.resolve()["arms"]}
+        assert "Off.esp" not in by["combined"]["plugins"], "an unticked plugin must not load"
+        assert "Shared.esp" in by["without-selection"]["plugins"], "a plugin Data also provides stays loaded with Sel disabled"
+
+
+# ---- M3: the review arm in evalrun plan itself ----
+
+def plan_run(t: Path, review=None):
+    inst, game = world(t, {"A": {"A.esp": ["Base.esm"]}, "Sel": {"Sel.esp": ["Base.esm"]}}, ["Sel", "A"], ["A.esp", "Sel.esp"])
+    c = t / "cands"
+    c.mkdir()
+    for name, pl, mods in (("candidate-00-baseline.json", ["Base.esm", "A.esp"], ["A"]),
+                           ("candidate-01.json", ["Base.esm", "A.esp", "Sel.esp"], ["Sel", "A"])):
+        (c / name).write_text(json.dumps({"SchemaVersion": 1, "Name": name, "BaseProfile": "P", "Plugins": pl, "Mods": mods,
+                                          "Changes": []}), encoding="utf-8")
+    argv = [sys.executable, str(HARNESS / "evalrun.py"), "plan", "--registry",
+            str(HARNESS.parent / ".claude/skills/world-edit-compatibility/references/check-registry.json"), "--candidates", str(c),
+            "--depth", "standard", "--select", "patch.discovery-fomod,geometry.object-overlap", "--out", str(t / "run"),
+            "--instance", str(inst), "--profile", "P", "--game", str(game)]
+    if review:
+        argv += ["--review-arm", review]
+    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env={**os.environ, "HOUSECARL_RUNLOG_DIR": str(t / "rl")})
+    plan = json.loads((t / "run" / "plan.json").read_text(encoding="utf-8")) if (t / "run" / "plan.json").is_file() else None
+    return r, plan
+
+
+def fomod_arms(plan):
+    c = next(x for x in plan["checks"] if x.get("checkId") == "patch.discovery-fomod")
+    return [a["armId"] for a in c["arms"]]
+
+
+def case_m3a_plan_review_arm_is_frozen_and_moves_the_baseline_only_checks():
+    with tempfile.TemporaryDirectory() as t:
+        r, plan = plan_run(Path(t), "candidate-01")
+        assert r.returncode == 0, f"evalrun plan --review-arm exit {r.returncode}: {(r.stdout + r.stderr)[-400:]}"
+        assert plan.get("reviewArm") == "candidate-01", plan.get("reviewArm")
+        assert fomod_arms(plan) == ["candidate-01"], f"a baseline-only check must be planned on the review arm: {fomod_arms(plan)}"
+
+
+def case_m3b_without_a_review_arm_the_plan_is_as_today():
+    with tempfile.TemporaryDirectory() as t:
+        r, plan = plan_run(Path(t))
+        assert r.returncode == 0, (r.stdout + r.stderr)[-400:]
+        assert "reviewArm" not in plan or plan["reviewArm"] in (None, "baseline"), plan.get("reviewArm")
+        assert fomod_arms(plan) == ["baseline"], fomod_arms(plan)
+
+
+def case_m3c_a_review_arm_the_plan_does_not_have_is_refused_in_one_sentence():
+    with tempfile.TemporaryDirectory() as t:
+        r, plan = plan_run(Path(t), "candidate-07")
+        out = (r.stdout + r.stderr)
+        assert r.returncode == 2 and "candidate-07" in out and "--review-arm" in out and "unrecognized" not in out, \
+            f"exit {r.returncode}: {out[-400:]}"
 
 
 def main():
