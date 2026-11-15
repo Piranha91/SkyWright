@@ -424,6 +424,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         var before = Listing(w.Instance, game);
         var why = await Refused("housecarl_apply", A(("ops", MoveOps(82f)), ("in_place", true)));
         Assert.Contains("in_place", why);
+        Assert.Contains("Output Folder", why);                     // the workbench's rule refuses it, not the server's own consent gate
         Unchanged(before, Listing(w.Instance, game), "the instance or the game folder");
     }
 

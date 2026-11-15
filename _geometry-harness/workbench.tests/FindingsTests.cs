@@ -76,7 +76,7 @@ public sealed class FindingsBundle : IDisposable
         }
         // navmesh: N1 target vs N2 not (key 1); N3 created vs N4 in both (key 2); N6 Holds vs N7 unmeasured (key 4);
         // N8 a Static base vs N9 unread (key 5)
-        var navBase = new[] { Nav(Other, Base, "000B04:" + Other), Nav(Other, Base, "000B06:" + Other), Nav(Other, Base, "000B07:" + Other, null),
+        var navBase = new[] { Nav(Other, Base, "000B00:" + Other), Nav(Other, Base, "000B04:" + Other), Nav(Other, Base, "000B06:" + Other), Nav(Other, Base, "000B07:" + Other, null),
                               Nav(Other, Base, "000B08:" + Other), Nav(Other, Base, "000B09:" + Other) };
         var navCand = navBase.Concat(new[] { Nav(Sel, Base, "000B01:" + Sel), Nav(Other, Base, "000B02:" + Other), Nav(Other, Base, "000B03:" + Other) }).ToArray();
         // N1 and N2 are created too; N1 is the only one naming a target
@@ -89,7 +89,7 @@ public sealed class FindingsBundle : IDisposable
                 """{"summary":{},"perPlugin":[],"unreadable":[],"switches":[{"key":"000D02:HcOther.esp","edid":"HcSw2","cell":"HcCell (int)","cellKey":"000A01:HcBase.esm","position":"(0, 0, 0)","owner":"HcOther.esp"},{"key":"000D01:HcOther.esp","edid":"HcSw1","cell":"HcCell (int)","cellKey":"000A01:HcBase.esm","position":"(0, 0, 0)","owner":"HcOther.esp"}],"jointFlips":[]}""", "json");
         // names: the navmesh references sit in CellA; N8's base is a Static
         var refs = new JsonObject();
-        foreach (var fk in new[] { "000B01:" + Sel, "000B02:" + Other, "000B03:" + Other, "000B04:" + Other, "000B06:" + Other, "000B07:" + Other, "000B08:" + Other, "000B09:" + Other, "000C01:" + Other })
+        foreach (var fk in new[] { "000B00:" + Other, "000B01:" + Sel, "000B02:" + Other, "000B03:" + Other, "000B04:" + Other, "000B06:" + Other, "000B07:" + Other, "000B08:" + Other, "000B09:" + Other, "000C01:" + Other })
             refs[fk] = new JsonObject { ["base"] = fk.EndsWith("B08:" + Other) ? "000E01:" + Base : null, ["carriedBy"] = new JsonArray(fk.Split(':')[1]), ["cells"] = new JsonObject { [fk.Split(':')[1]] = CellA } };
         Directory.CreateDirectory(Path.Combine(Dir, "enrichment", "names"));
         File.WriteAllText(Path.Combine(Dir, "enrichment", "names", "names.json"), new JsonObject
@@ -186,7 +186,7 @@ public sealed class FindingsTests
         Assert.All(P(s, "conflicts", "rows").EnumerateArray(), r => Assert.Equal("OVERLAP", P(r, "kind").GetString()));
         var checks = FindingRows(s).Select(r => P(r, "checkId").GetString()).ToHashSet();
         Assert.Equal(new[] { "environment.water-boundaries", "geometry.navmesh-ownership", "state.switch-census" }, checks.OrderBy(x => x));
-        Assert.Equal(8 + 1 + 2, FindingRows(s).Count);
+        Assert.Equal(9 + 1 + 2, FindingRows(s).Count);
     }
 
     [Fact]
@@ -198,7 +198,7 @@ public sealed class FindingsTests
         var rows = FindingRows(s);
         string O(string id) => id + ":" + FindingsBundle.Other;
         Assert.True(RankOf(rows, "000B01:" + FindingsBundle.Sel) < RankOf(rows, O("000B02")), "key 1: a row naming a target ranks first");
-        Assert.True(RankOf(rows, O("000B03")) < RankOf(rows, O("000B04")), "key 2: a row new on the review arm ranks before one that is not");
+        Assert.True(RankOf(rows, O("000B03")) < RankOf(rows, O("000B00")), "key 2: a row new on the review arm ranks before one that is not, whose identity sorts first");
         Assert.True(RankOf(rows, O("000C01")) < RankOf(rows, O("000B04")), "key 3: record-fact before calibrated-inference");
         Assert.True(RankOf(rows, O("000B06")) < RankOf(rows, O("000B07")), "key 4: holds before unmeasured");
         Assert.True(RankOf(rows, O("000B08")) < RankOf(rows, O("000B09")), "key 5: the heavier base type first");
@@ -211,8 +211,8 @@ public sealed class FindingsTests
         using var f = new FindingsBundle();
         var (s, _, stop) = await Serve(f, new() { ["project"] = new[] { "findings" }, ["limit"] = 2, ["offset"] = 1, ["check"] = "geometry.navmesh-ownership" });
         await using var _s = stop;
-        Assert.Equal(8, P(s, "findings", "matched").GetInt32());
-        Assert.Equal(11, P(s, "findings", "total").GetInt32());
+        Assert.Equal(9, P(s, "findings", "matched").GetInt32());
+        Assert.Equal(12, P(s, "findings", "total").GetInt32());
         var rows = FindingRows(s);
         Assert.Equal(2, rows.Count);
         Assert.All(rows, r => Assert.Equal("geometry.navmesh-ownership", P(r, "checkId").GetString()));

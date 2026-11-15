@@ -988,7 +988,8 @@ public sealed class ForwardRuleTests : IDisposable
     {
         var (args, why) = Prepare(tool, Elsewhere, new { patch = "WbNew" });
         Assert.True(why is null, $"{tool} was refused: {why}");
-        Assert.Equal(Elsewhere, args!["out_path"].GetString());
+        Assert.True(args!.ContainsKey("out_path"), $"{tool} was forwarded without the Output Folder as its out_path");
+        Assert.Equal(Elsewhere, args["out_path"].GetString());
         Assert.Contains("Output Folder", Prepare(tool, Elsewhere, new { out_path = Path.Combine(_root, "other") }).Refusal);
     }
 
