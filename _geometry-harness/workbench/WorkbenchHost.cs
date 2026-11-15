@@ -44,6 +44,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     int _frame;
 
     internal static readonly List<string> Log = new();
+    /// <summary>The decided rows this scene draws, compared when it arrives so the window's list needs no client; a failure is said.</summary>
+    static async Task CompareDecidedAsync()
+    {
+        try { await DecisionCompare.SceneOpenedAsync(new LiveSurface(), Shell.Standings); }
+        catch (Exception ex) { var m = "the stored decisions could not be compared: " + ex.Message; Say(m); Shell.SetBanner(m); }
+    }
+
     internal static void Say(string line) { Console.WriteLine("   [wb] " + line); Log.Add(line); }
 
     WorkbenchHost(InteractiveOptions opt, GlRenderer renderer, (Vector3 Eye, Vector3 Look, float FovDeg) cam, Action<GlMatrix4, GlMatrix4>? overlay)
@@ -234,6 +241,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         Shell.Current = this;
         try { RestoreSession(); } catch (InvalidOperationException ex) { Say(ex.Message); Shell.SetBanner(ex.Message); }
+        _ = CompareDecidedAsync();
         Shell.Mount(_view, bar);
         Shell.FillTree(BuildTree());
         if (Shell.SwitchClock is { } sw)

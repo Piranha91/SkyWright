@@ -273,21 +273,7 @@ internal sealed class StateTools
             var d = StoredFor(s, store, key);
             if (d is null) { rows.Add((r, null, new DecisionMatch(Standing.Undecided, "undecided"))); continue; }
             // the row half needs no scene and no server; the object half needs the row's cell open, and is that row's own answer
-            var m = Decisions.CompareRow(d, s.RowStateOf(r));
-            if (m.Standing != Standing.Reconsider)
-            {
-                if (hub.Standings.TryGetValue(key, out var cached)) m = cached;
-                else if (s.Scene is { } sc)
-                {
-                    try
-                    {
-                        var (row, objects, build) = await sc.DecisionInputsAsync(r);
-                        m = Decisions.Compare(d, row, objects, build);
-                        hub.Standings[key] = m;
-                    }
-                    catch (InvalidOperationException ex) { m = new DecisionMatch(m.Standing, m.Sentence.TrimEnd('.') + " (" + ex.Message.TrimEnd('.') + ")."); }
-                }
-            }
+            var m = await DecisionCompare.RowAsync(s, d, r, hub.Standings);
             rows.Add((r, d, m));
         }
         var keys = s.Listed.Select(r => Decisions.RowKey(r.Row)).ToHashSet(StringComparer.OrdinalIgnoreCase);
