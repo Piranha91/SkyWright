@@ -49,6 +49,12 @@ internal static class ForwardRule
         _ => true,
     };
 
+    static string Kind(JsonValueKind k) => k switch
+    {
+        JsonValueKind.Number => "a number", JsonValueKind.True or JsonValueKind.False => "true or false",
+        JsonValueKind.Array => "a list", JsonValueKind.Object => "an object", _ => "a value that is not text",
+    };
+
     static string? Text(IReadOnlyDictionary<string, JsonElement> a, string k) =>
         a.TryGetValue(k, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s ? s.Trim() : null;
 
@@ -97,6 +103,10 @@ internal static class ForwardRule
         var a = new Dictionary<string, JsonElement>(given ?? new Dictionary<string, JsonElement>(), StringComparer.Ordinal);
         if (!ForwardList.Tools.TryGetValue(tool, out var kind))
             return (null, $"{tool} is not forwarded by the workbench in manual mode.");
+        // The server binds a number given for a text parameter as its text, so a guarded argument must be text (or null).
+        foreach (var name in new[] { "into", "out_path", "to_file" })
+            if (a.TryGetValue(name, out var gv) && gv.ValueKind is not (JsonValueKind.String or JsonValueKind.Null or JsonValueKind.Undefined))
+                return (null, $"{name} must be text, a full path; {Kind(gv.ValueKind)} was given.");
         var o = OutputFolderPolicy.Full(output);
         bool modsIsOutput = string.Equals(o, OutputFolderPolicy.Full(layout.Mods), StringComparison.OrdinalIgnoreCase);
         switch (kind)
