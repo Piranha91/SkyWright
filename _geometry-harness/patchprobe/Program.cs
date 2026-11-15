@@ -69,6 +69,9 @@ var hits = jsonPath is null ? null : new DiscoveryHits("patchprobe", wantPairs.C
 roots = HarnessTarget.RequireRoots(roots, "--roots");
 downloadPool = HarnessTarget.Require(downloadPool, "download pool directory", "downloadPool");
 target = HarnessTarget.Require(target, "MO2 instance directory", "instance");
+// The run's own instance is searched even when no search root holds it (a manual run picks any instance).
+if (File.Exists(Path.Combine(target, "ModOrganizer.ini")) && !roots.Any(r => (Norm(target) + Path.DirectorySeparatorChar).StartsWith(Norm(r) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+    roots.Add(target);
 
 var sw = Stopwatch.StartNew();
 
