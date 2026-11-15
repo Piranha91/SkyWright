@@ -26,9 +26,11 @@ internal sealed class ViewState
     internal int Version { get; private set; }
     internal event Action<string>? Changed;
 
-    internal ViewState(EditSession session, Func<IEnumerable<RefOcclusion>> drawn)
+    readonly Gizmo? _handle;
+
+    internal ViewState(EditSession session, Func<IEnumerable<RefOcclusion>> drawn, Gizmo? handle = null)
     {
-        _session = session; _drawn = drawn;
+        _session = session; _drawn = drawn; _handle = handle;
         // One rule for every edit path: before anything re-places a reference, the edits go back on screen.
         _session.Replacing += () => { if (ShowingOriginal) ShowOriginal(false); };
         // an edit moves a see-through reference's tint and can add a ghost

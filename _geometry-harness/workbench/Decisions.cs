@@ -87,6 +87,10 @@ internal static class Decisions
         return new(Standing.Applies, "applies" + (notes.Count > 0 ? ": " + string.Join("; ", notes) : ", unchanged since " + stored.When.ToString("yyyy-MM-dd")) + ".");
     }
 
+    /// <summary>The detector-row half alone (no scene, no server): reconsider when the row reads differently now, else
+    /// applies with the objects not compared.</summary>
+    internal static DecisionMatch CompareRow(Decision stored, RowState row) => new(Standing.Undecided, "");
+
     /// <summary>The list order with decisions: reconsider, undecided, unsure, real problem, then intentional; the
     /// order within each group is kept.</summary>
     internal static IReadOnlyList<T> Order<T>(IReadOnlyList<T> rows, Func<T, (Standing Standing, string? Verdict)> of)

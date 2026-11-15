@@ -20,14 +20,16 @@ public sealed class ReviewSpeedModTintTests : IDisposable
 
     public ReviewSpeedModTintTests()
     {
-        foreach (var d in new[] { Profile, Data, Overwrite, Path.Combine(Mods, "ModA"), Path.Combine(Mods, "ModB"), Path.Combine(Mods, "ModC", "textures") })
+        foreach (var d in new[] { Profile, Data, Overwrite, Path.Combine(Mods, "ModA"), Path.Combine(Mods, "ModB"), Path.Combine(Mods, "ModC", "textures"), Path.Combine(Mods, "ModE") })
             Directory.CreateDirectory(d);
         File.WriteAllText(Path.Combine(Data, "Base.esm"), "x");
         File.WriteAllText(Path.Combine(Mods, "ModA", "A1.esp"), "x");
         File.WriteAllText(Path.Combine(Mods, "ModA", "A2.esp"), "x");
         File.WriteAllText(Path.Combine(Mods, "ModB", "B.esp"), "x");
         File.WriteAllText(Path.Combine(Mods, "ModC", "textures", "t.dds"), "x");
-        File.WriteAllText(Path.Combine(Profile, "modlist.txt"), "# header\r\n+ModC\r\n+ModB\r\n+ModA\r\n");
+        // enabled in the profile, above ModA, but not in the arm's view: its copy of A1.esp is not the one the arm loads
+        File.WriteAllText(Path.Combine(Mods, "ModE", "A1.esp"), "x");
+        File.WriteAllText(Path.Combine(Profile, "modlist.txt"), "# header\r\n+ModE\r\n+ModC\r\n+ModB\r\n+ModA\r\n");
         File.WriteAllText(Path.Combine(Profile, "plugins.txt"), "*A1.esp\r\n*A2.esp\r\n*B.esp\r\n");
         File.WriteAllText(Path.Combine(Profile, "loadorder.txt"), "# header\r\nBase.esm\r\nA1.esp\r\nA2.esp\r\nB.esp\r\n");
     }
@@ -39,22 +41,22 @@ public sealed class ReviewSpeedModTintTests : IDisposable
     [Fact]
     public void A_mod_folder_resolves_to_the_plugins_it_provides_in_the_arms_view()
     {
-        var (plugins, why) = ModTint.PluginsOf("ModA", Map(), Mods, Order);
+        var (plugins, why) = ModTint.PluginsOf("ModA", Profile, View, Mods, Data, Overwrite, Order);
         Assert.Null(why);
         Assert.Equal(new[] { "A1.esp", "A2.esp" }, plugins.OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
-        Assert.Equal(new[] { "B.esp" }, ModTint.PluginsOf("modb", Map(), Mods, Order).Plugins);
+        Assert.Equal(new[] { "B.esp" }, ModTint.PluginsOf("modb", Profile, View, Mods, Data, Overwrite, Order).Plugins);
     }
 
     // B1c
     [Fact]
     public void A_mod_folder_that_provides_no_plugin_of_the_order_is_refused_in_one_sentence()
     {
-        var (plugins, why) = ModTint.PluginsOf("ModC", Map(), Mods, Order);
+        var (plugins, why) = ModTint.PluginsOf("ModC", Profile, View, Mods, Data, Overwrite, Order);
         Assert.Empty(plugins);
         Assert.NotNull(why);
         Assert.Contains("ModC", why);
         Assert.DoesNotContain("\n", why);
-        Assert.NotNull(ModTint.PluginsOf("NoSuchMod", Map(), Mods, Order).Refusal);
+        Assert.NotNull(ModTint.PluginsOf("NoSuchMod", Profile, View, Mods, Data, Overwrite, Order).Refusal);
     }
 
     // B1b

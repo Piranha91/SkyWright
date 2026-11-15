@@ -751,8 +751,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         else plugins = new[] { plugin! };
         // a Base Object Swapper reference is drawn with the swap's base and transform, not its record's, so it is left out
-        var drawn = DrawnAll().Where(r => !r.Ref.BosSwapped).Select(r => (r.Ref.RefKey, RefPlacementEdit.BakedPose(r.Ref))).ToList();
-        var winners = await w.WinnersAsync(drawn);
+        var drawn = DrawnAll().Where(r => !r.Ref.BosSwapped).Select(r => (r.Ref.RefKey, (RefPlacementEdit.Pose?)RefPlacementEdit.BakedPose(r.Ref))).ToList();
+        var (winners, _) = await w.WinnersAsync(drawn);
         return (ModTint.Select(drawn.Select(d => d.RefKey), winners, plugins), null);
     }
 

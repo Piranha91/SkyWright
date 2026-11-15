@@ -315,12 +315,12 @@ internal sealed class PatchWriter : IAsyncDisposable
     }
 
     /// <summary>The winning plugin of each reference, read in one call, each checked against the pose the scene drew.</summary>
-    internal async Task<IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, string>> WinnersAsync(
-        IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose Drawn)> refs, CancellationToken ct = default)
+    internal async Task<(IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, string> Winners, IReadOnlyList<Mutagen.Bethesda.Plugins.FormKey> Mismatched)> WinnersAsync(
+        IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose? Drawn)> refs, CancellationToken ct = default)
     {
         var read = await ReadRecordsAsync(refs.Select(r => r.Ref), new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = new[] { "Placement" }, ["depth"] = 2 }, ct);
-        CheckAll(refs, read);
-        return read.ToDictionary(kv => kv.Key, kv => kv.Value.Winner);
+        CheckAll(refs.Where(r => r.Drawn is not null).Select(r => (r.Ref, r.Drawn!.Value)).ToList(), read);
+        return (read.ToDictionary(kv => kv.Key, kv => kv.Value.Winner), Array.Empty<Mutagen.Bethesda.Plugins.FormKey>());
     }
 
     /// <summary>Undo a written edit: remove the reference's override from the patch in <paramref name="patchFolder"/>

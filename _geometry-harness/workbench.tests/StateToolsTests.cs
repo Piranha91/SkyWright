@@ -7,6 +7,7 @@ using ModelContextProtocol.Protocol;
 using Mutagen.Bethesda.Plugins;
 using HarnessShared;
 using Workbench;
+using ViewProbe;
 using Xunit;
 
 namespace WorkbenchTests;
@@ -67,7 +68,9 @@ public sealed class StateToolsTests : IAsyncLifetime
             Task.FromResult<(IReadOnlyList<FormKey>, string?)>(ModRefs.TryGetValue(modFolder ?? plugin ?? "", out var r) ? (r, null) : (Array.Empty<FormKey>(), $"{modFolder} provides no plugin of this order."));
         internal string ServerBuild = "srv-1";
         public Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
-            Task.FromResult<(RowState, IReadOnlyList<ObjectState>, string)>((new RowState(row.Row.Physical?.ToString(), row.Row.Summary, "probe-1"),
+            !Session.IsDrawn(FormKey.Factory(row.Row.RefKey))      // as the host: a reference the scene does not draw cannot be checked
+            ? throw new InvalidOperationException($"{row.Row.RefKey} is not drawn in this scene, so its objects are not compared until its cell is open.")
+            : Task.FromResult<(RowState, IReadOnlyList<ObjectState>, string)>((new RowState(row.Row.Physical?.ToString(), row.Row.Summary, ""),
                 new[] { new ObjectState(row.Row.RefKey, "Subject.esp", new[] { new FieldValue("Placement.Position", "1,2,3") }, null, Array.Empty<FieldValue>(), null, null, null) },
                 ServerBuild));
         public float[]? Camera { get; set; } = { 1f, 2f, 3f, 90f, 10f };
@@ -1031,6 +1034,95 @@ public sealed class StateToolsTests : IAsyncLifetime
         await Ok("workbench_act", A(("verb", "undo")));
         var locked = await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 30f, -40f, 12f }), ("axis", "x")));
         Assert.Equal(new[] { 30f, 0f, 0f }, P(P(locked, "state", "pending").EnumerateArray().Single(), "moved").EnumerateArray().Select(e => e.GetSingle()));
+    }
+
+    // ---- Gate C review, round 2
+
+    static readonly RefPlacementEdit.Pose Z0 = new(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(0, 0, 0), 1f);
+
+    // C1d: another cell's staged and written edits survive a save from this scene
+    [Fact]
+    public async Task C1d_a_save_keeps_the_edits_of_references_in_another_cell()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        var (path, _) = SessionFile.PathFor(work, "test-plan", "baseline");
+        SessionFile.Write(path!, new SessionData("test-plan", "baseline", null, 2, null,
+            new[] { new SavedEdit("000A01:HcWbTest.esp", Z0, Z0 with { Position = new HousecarlCore.Vec3(5, 0, 0) }) },
+            new[] { new SavedWritten("000A02:HcWbTest.esp", "WbOld.esp", Path.Combine(work, "houseCARL - WbOld")) }));
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var saved = SessionFile.Read(path!)!;
+        Assert.Contains(saved.Staged, e => e.Ref == "000A01:HcWbTest.esp");
+        Assert.Contains(saved.Written, e => e.Ref == "000A02:HcWbTest.esp");
+        Assert.Equal(RefKey, saved.Selected);
+    }
+
+    static Decision Stored(string key, string verdict, string summary) => new("C:/Instance", "Default", "geometry.object-overlap", key, verdict, "why",
+        DateTimeOffset.UtcNow, new RowState("Holds", summary, ""), Array.Empty<ObjectState>(), "srv-1");
+
+    // C2: the decisions part answers per row; a row in another cell is compared on its row half
+    [Fact]
+    public async Task C2_the_decisions_part_answers_per_row_and_says_what_it_could_not_compare()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        var store = new DecisionStore(Path.Combine(work, DecisionStore.FileName));
+        store.Put(Stored("a-first", "intentional", ""));
+        store.Put(Stored("b-second", "real problem", ""));
+        var st = await Ok("workbench_state", A(("project", new[] { "decisions" })));
+        var rows = P(st, "decisions", "rows").EnumerateArray().ToList();
+        var second = rows.Single(x => P(x, "rank").GetInt32() == 2);
+        Assert.Contains("not compared until its cell is open", P(second, "sentence").GetString());
+        var first = rows.Single(x => P(x, "rank").GetInt32() == 1);
+        Assert.Equal("applies", P(first, "standing").GetString());
+        Assert.DoesNotContain("not compared", P(first, "sentence").GetString());
+    }
+
+    [Fact]
+    public async Task C2b_a_changed_row_summary_flags_a_decision_whose_cell_is_not_open()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        new DecisionStore(Path.Combine(work, DecisionStore.FileName)).Put(Stored("b-second", "intentional", "an older summary"));
+        var st = await Ok("workbench_state", A(("project", new[] { "decisions" })));
+        var second = P(st, "decisions", "rows").EnumerateArray().Single(x => P(x, "rank").GetInt32() == 2);
+        Assert.Equal("reconsider", P(second, "standing").GetString());
+    }
+
+    // C3: the conflicts part carries the decision, and decide offers a reconsider row next
+    [Fact]
+    public async Task C3_the_conflicts_part_carries_each_rows_decision_and_decide_opens_a_reconsider_row_next()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        new DecisionStore(Path.Combine(work, DecisionStore.FileName)).Put(Stored("b-second", "intentional", "an older summary"));
+        var st = await Ok("workbench_state", A(("project", new[] { "conflicts" })));
+        var two = P(st, "conflicts", "rows").EnumerateArray().Single(x => P(x, "rank").GetInt32() == 2);
+        Assert.Equal("intentional", P(two, "verdict").GetString());
+        Assert.Equal("reconsider", P(two, "standing").GetString());
+        var r = await Ok("workbench_act", A(("verb", "decide"), ("conflict", 1), ("verdict", "unsure"), ("reason", "need to look in game")));
+        Assert.Contains("conflict 2", P(r, "said").GetString());
+        Assert.Contains(2, _surface.Opened);
+    }
+
+    // C7: an angle snap applies to a tilted reference's turn
+    [Fact]
+    public async Task C7_angle_snap_snaps_the_turn_of_a_tilted_reference()
+    {
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var before = _scene.Session.Current(FormKey.Factory(RefKey));
+        await Ok("workbench_act", A(("verb", "stage"), ("turn_degrees", 22f), ("angle_snap", 15f)));
+        var want = HousecarlCore.SpatialOverlap.RefrRotation(RefPlacementEdit.Turned(before.Rotation, System.Numerics.Vector3.UnitZ, float.DegreesToRadians(30)));
+        var got = HousecarlCore.SpatialOverlap.RefrRotation(_scene.Session.Current(FormKey.Factory(RefKey)).Rotation);
+        for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) Assert.Equal(want[i, j], got[i, j], 3);
+    }
+
+    // (d3): Findings rows are not decided yet
+    [Fact]
+    public async Task Cd3_decide_refuses_a_findings_row()
+    {
+        _surface.WorkFolder = NewWorkFolder();
+        Assert.Contains("Findings rows are not decided", await Refused("workbench_act", A(("verb", "decide"), ("finding", 1), ("verdict", "unsure"), ("reason", "x"))));
     }
 
     // B7: the running workbench keeps the session file up to date

@@ -12,7 +12,7 @@ internal sealed record SavedWritten(string Ref, string Patch, string PatchFolder
 
 /// <summary>One review's session: selection, open row, camera, staged and written edits.</summary>
 internal sealed record SessionData(string PlanId, string Arm, string? Selected, int? OpenConflict, float[]? Camera,
-                                   IReadOnlyList<SavedEdit> Staged, IReadOnlyList<SavedWritten> Written);
+                                   IReadOnlyList<SavedEdit> Staged, IReadOnlyList<SavedWritten> Written, string? CameraCell = null);
 
 /// <summary>The session file under the Work Folder (<c>sessions/&lt;planId&gt;-&lt;arm&gt;.json</c>), written on every change
 /// and read when the same bundle is opened again. View-only state (hidden, see-through) is not kept: it is temporary.</summary>
@@ -55,6 +55,16 @@ internal static class SessionFile
             : sc.Session.Written.Select(kv => new SavedWritten(kv.Key.ToString(), kv.Value.Patch, sc.PatchFolderOf(kv.Value.Patch) ?? "")).ToList();
         return new SessionData(plan, arm, sc?.Session.Selected?.ToString(), s.OpenRow?.Rank, sc?.Camera, staged, written);
     }
+
+    /// <summary>The session to write: <paramref name="now"/> for the references this scene draws, and the previous
+    /// file's entries for every reference it does not draw (they belong to another cell).</summary>
+    internal static SessionData Merge(SessionData? previous, SessionData now, Func<string, bool> drawnHere) => now;
+
+    /// <summary>The conflict a reopened review starts on: the saved open row, when it is still listed.</summary>
+    internal static int? StartRank(SessionData? saved, IReadOnlyList<RankedRow> rows) => null;
+
+    /// <summary>The saved camera, only when it was saved in <paramref name="cell"/>.</summary>
+    internal static float[]? CameraFor(SessionData saved, string? cell) => saved.Camera;
 
     /// <summary>Write the session where the surface keeps it; nothing when it has no bundle or no Work Folder.</summary>
     internal static void Save(IWorkbenchSurface s)

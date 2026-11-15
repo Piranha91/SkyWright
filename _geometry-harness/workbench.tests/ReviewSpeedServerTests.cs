@@ -152,19 +152,20 @@ public class ReviewSpeedServerTests
         Assert.True(v.Active, "the write cleared the view state");
     }
 
-    // B1d: the winner read for a see-through by mod goes through the placement check
+    // B1d, revised by the Gate C review (C8): a reference drawn elsewhere is left out and counted, not a refusal of all
     [Fact]
-    public async Task Winners_are_read_in_one_call_and_refused_for_a_reference_drawn_elsewhere()
+    public async Task Winners_are_read_in_one_call_and_a_reference_drawn_elsewhere_is_left_out()
     {
         using var w = new TiltedRefWorld();
         await using var p = await Start(w);
-        var winners = await p.WinnersAsync(new[] { (TiltedRefWorld.Ref, Drawn) });
+        var (winners, mismatched) = await p.WinnersAsync(new[] { (TiltedRefWorld.Ref, (RefPlacementEdit.Pose?)Drawn) });
         Assert.True(winners.TryGetValue(TiltedRefWorld.Ref, out var win), "no winner read");
         Assert.Equal(TiltedRefWorld.Master.FileName.String, win, ignoreCase: true);
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => p.WinnersAsync(new[] { (TiltedRefWorld.Ref, Drawn with { Position = new Vec3(9, 9, 9) }) }));
-        Assert.Contains("not the same configuration", ex.Message);
+        Assert.Empty(mismatched);
+        var (w2, m2) = await p.WinnersAsync(new[] { (TiltedRefWorld.Ref, (RefPlacementEdit.Pose?)(Drawn with { Position = new Vec3(9, 9, 9) })) });
+        Assert.Equal(new[] { TiltedRefWorld.Ref }, m2);
+        Assert.False(w2.ContainsKey(TiltedRefWorld.Ref), "a reference drawn elsewhere was given a winner to use");
     }
-
     // B4: the base's fields are the ones geometry reads, and the mesh is keyed by its content hash
     [Fact]
     public async Task Decision_objects_keep_the_bases_geometry_fields_and_the_meshes_content_hash()

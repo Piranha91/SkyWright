@@ -17,6 +17,7 @@ internal sealed class Gizmo : IRenderOverlay
     internal Vector3? Centre;          // Skyrim space; null = nothing selected, nothing drawn
     internal float Size = 100f;        // arrow length in world units, set per frame from the eye distance
     internal Handle Hot;               // the part under the cursor or being dragged, drawn brighter
+    internal bool Hidden;              // while originals show: no handle where the object is not
     const int RingSegments = 48;
 
     static Vector3 Axis(Handle h) => h switch { Handle.MoveX => Vector3.UnitX, Handle.MoveY => Vector3.UnitY, _ => Vector3.UnitZ };

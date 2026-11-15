@@ -29,6 +29,8 @@ internal interface IWorkbenchSurface
     /// <summary>The open bundle's plan id and arm.</summary>
     string? PlanId => Open?.PlanId;
     string? Arm => Open?.Arm;
+    /// <summary>The detector row's state as the bundle measured it: physical state, summary, the probe build.</summary>
+    RowState RowStateOf(RankedRow r) => new(r.Row.Physical?.ToString(), r.Row.Summary, "");
     /// <summary>Why the last session save failed, said in the window; null when it did not.</summary>
     string? SaveRefusal { get => null; set { } }
     /// <summary>The Findings tab, ranked.</summary>

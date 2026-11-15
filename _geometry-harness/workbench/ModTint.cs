@@ -24,6 +24,18 @@ internal static class ModTint
         return (plugins, null);
     }
 
+    /// <summary>The mod folder's plugins in the arm's view: the layer map built from <paramref name="viewMods"/>, the
+    /// arm's own mod list.</summary>
+    internal static (IReadOnlyList<string> Plugins, string? Refusal) PluginsOf(string modFolder, string profileDir, IReadOnlyList<string> viewMods,
+        string modsDir, string dataDir, string overwriteDir, IReadOnlyList<string> orderPlugins)
+        => PluginsOf(modFolder, HarnessShared.HarnessOrderCli.PluginLayerMap(profileDir, viewMods, modsDir, dataDir, overwriteDir), modsDir, orderPlugins);
+
+    /// <summary>The references to tint, and one sentence naming what was left out and why: a Base Object Swapper
+    /// reference (drawn with the swap's transform) and one whose placement differs from the server's.</summary>
+    internal static (IReadOnlyList<FormKey> Refs, string Note) Pick(IEnumerable<(FormKey Key, bool Bos)> drawn, IReadOnlyDictionary<FormKey, string> winners,
+                                                                  IReadOnlyCollection<FormKey> mismatched, IReadOnlyCollection<string> plugins)
+        => (Select(drawn.Select(d => d.Key), winners, plugins), "");
+
     /// <summary>The drawn references whose winning plugin is one of <paramref name="plugins"/>.</summary>
     internal static IReadOnlyList<FormKey> Select(IEnumerable<FormKey> drawn, IReadOnlyDictionary<FormKey, string> winners, IReadOnlyCollection<string> plugins)
     {
