@@ -2111,6 +2111,21 @@ channel's portal edges to pull the path taut, then the same 32 u sampling and th
 check a straight leg gets. Without the funnel a solved route is a chain of centroids: it zigzags,
 it draws badly, and it OVER-REPORTS the walk — which matters, because the length is half the point.
 
+**The path is taut through the mesh, not just through A*'s channel** (`NavGraph.TautPath`, 2026-11-15).
+The funnel is exact within the channel it is given, and A* on centroid distance can give a channel
+that passes a vertex on the wrong side: on a 64 u grid two channels round a notch tie exactly, and
+the one taken bent at a vertex the mesh surrounds on every side (CfLedgeGap, 272 u for a 251 u
+walk). A shortest path bends only at the mesh boundary, so such a bend is re-routed round the other
+side of that vertex's ring of triangles and the funnel run again; a re-route is kept only if the
+path gets strictly shorter, repeats no triangle and walks every link its own way. The leg line says
+so: `, re-routed round an interior vertex, 20 u shorter`. It does not choose a different side of a
+hole than A* did. Two funnel faults were fixed with it: a side of the funnel shrunk onto the apex no
+longer re-adds the apex as a second corner (printed corner counts drop where that happened), and
+a portal that passes through the apex itself (a waypoint lying on its own triangle's edge) is
+skipped as no constraint, where it used to open the funnel to a half-plane and bend the path on
+the mesh's outer edge. Known answers C2300-C2306
+(`tests/test_route_geometry.py`, `src/housecarl-mcp-tests/NavGraphFunnelTests.cs`).
+
 **The corner inset (6 u).** A taut path hugs the wall — that is what taut means — so its interior
 corners land exactly ON the mesh boundary and the segment between two of them runs ALONG it. At
 that precision "is this on navmesh" is decided by float rounding: a leg measured here grazed the

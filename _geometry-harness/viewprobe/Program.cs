@@ -3975,11 +3975,13 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     var g0 = NavGraph.TriangleAt(gnodes, b.X, b.Y, b.Z);
                     if (s0 is not { } sTri || g0 is not { } gTri)
                     { unreachable.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}): an endpoint is not on any drawable triangle"); legs.Add(new[] { a, b }); continue; }
-                    var channel = NavGraph.FindChannel(gnodes, sTri.Tri, gTri.Tri);
-                    if (channel is null)
-                    { unreachable.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}, {straight:0} u apart in plan): NO walkable path over the navmesh"); legs.Add(new[] { a, b }); continue; }
-                    var corners = NavGraph.Funnel(gnodes, channel,
+                    // A*, the funnel, and the channel straightened round any interior vertex it bent at (NavGraph.TautPath).
+                    var taut = NavGraph.TautPath(gnodes, sTri.Tri, gTri.Tri,
                         new System.Numerics.Vector2(a.X, a.Y), new System.Numerics.Vector2(b.X, b.Y));
+                    if (taut is null)
+                    { unreachable.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}, {straight:0} u apart in plan): NO walkable path over the navmesh"); legs.Add(new[] { a, b }); continue; }
+                    var channel = taut.Channel;
+                    var corners = taut.Corners;
 
                     // Sampled the same 32 u as a straight leg, but with the storey reference taken from
                     // the channel triangle each sample lies in rather than interpolated between the
@@ -4099,7 +4101,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                                     + $" — {walked:0} u to walk vs {straight:0} u straight line"
                                     + (straight > 1f ? $"  (x{walked / straight:0.00})" : "")
                                     + $", z {lz0:0}..{lz1:0}"
-                                    + (airborne > 0 ? $", {airborne} sample(s) in the air over a walked ledge link, longest {longestAir:0} u" : ""));
+                                    + (airborne > 0 ? $", {airborne} sample(s) in the air over a walked ledge link, longest {longestAir:0} u" : "")
+                                    + (taut.Reroutes > 0 ? $", re-routed round {(taut.Reroutes == 1 ? "an interior vertex" : $"{taut.Reroutes} interior vertices")}, {taut.Saved:0} u shorter" : ""));
                     legs.Add(leg);
                 }
                 if (unreachable.Count > 0)
