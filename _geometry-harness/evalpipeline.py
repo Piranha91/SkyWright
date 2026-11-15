@@ -508,6 +508,16 @@ class Context:
         self.entry = normalise_entry(read_json(entry_path), self.names)
         self.machine = read_json(machine_path) if machine_path else {}
         self.out = Path(out)
+        # an in-place entry (the workbench's manual mode): a chosen profile of any MO2 instance, read where it is; no lab,
+        # no generated profile, no mod copy
+        self.in_place = self.entry.get("inPlace")
+        if self.in_place:
+            ip = self.in_place
+            self.instance, self.game, self.template = Path(ip["instance"]), Path(ip["game"]), None
+            self.source_instance, self.source_profile, self.source_game = self.instance, ip["profile"], self.game
+            self.id = self.entry["id"]
+            self.profile = ip["profile"]
+            return
         lab = {**self.machine.get("lab", {}), **self.entry.get("lab", {})}
         self.instance = Path(lab["instance"])
         self.game = Path(lab["game"])
@@ -553,6 +563,8 @@ class Context:
 
     def resolve(self) -> dict:
         """Headers, baseline and every arm's ordered plugins, providers and mods."""
+        if self.in_place:
+            return resolve_in_place(self)
         e = self.entry
         subj = list(e["subject"].get("plugins") or [e["subject"]["plugin"]])
         keys = [k["plugin"] for k in e.get("keys", [])]
@@ -636,9 +648,105 @@ class Context:
 
 # ---------------------------------------------------------------- preparation
 
+#: the plugins the game loads whether or not plugins.txt lists them (Mo2LoadOrder's implicit masters)
+OFFICIAL_MASTERS = ("Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm")
+
+
+def _profile_lines(path: Path) -> list[str]:
+    try:
+        return [l.strip() for l in path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+                if l.strip() and not l.lstrip().startswith("#")]
+    except OSError:
+        return []
+
+
+def resolve_in_place(ctx: Context) -> dict:
+    """An in-place entry's two arms, from the chosen profile as MO2 resolves it: `combined` = the profile as it is,
+    `without-selection` = the profile with the selected mod folders disabled. A plugin only selected folders provide
+    drops; one an unselected folder (or the game's Data) also provides stays, from there. The plugin providers come from
+    evalrun.plugin_layers, the one Python spelling of the probes' layer map; the census stage cross-checks the result
+    against scopeprobe's own resolution."""
+    import evalrun as ER
+    inst, prof, game = str(ctx.instance), ctx.profile, str(ctx.game)
+    pdir = ctx.instance / "profiles" / prof
+    enabled, _disabled, read, mpath = ER._modlist(inst, prof)
+    if not read:
+        raise Refusal(f"the profile {prof} has no readable modlist.txt at {fwd(pdir)}; name a profile of this instance.")
+    sel = list((ctx.entry.get("selection") or {}).get("mods") or [])
+    if not sel:
+        raise Refusal("the selection names no mod folder; tick at least one of the profile's enabled mods.")
+    low_enabled = {m.lower(): m for m in enabled}
+    for m in sel:
+        if m.lower() not in low_enabled:
+            raise Refusal(f"{m} is not an enabled mod folder of profile {prof}; a disabled mod is not part of this "
+                          f"profile, so enable it in MO2 or pick a profile that loads it.")
+    sel_low = {m.lower() for m in sel}
+    order = ctx.names.many(_profile_lines(pdir / "loadorder.txt"))
+    starred = {l[1:].strip().lower() for l in _profile_lines(pdir / "plugins.txt") if l.startswith("*")}
+    active = [p for p in order if p.lower() in starred or p in OFFICIAL_MASTERS]
+    without_mods = [m for m in enabled if m.lower() not in sel_low]
+
+    def view(mods):
+        plugins, providers, headers = [], {}, {}
+        for p in active:
+            rows = ER.plugin_layers(p, mods, instance=inst, profile=prof, game=game, hash_rows=False)
+            in_view = [r for r, v in zip(rows["rows"], rows["views"]) if v == "in-view"]
+            if not in_view:
+                continue                                   # nothing in this view provides it: MO2 would not load it
+            layer, path = in_view[0]["layer"], in_view[0]["path"]
+            plugins.append(p)
+            providers[p] = None if layer in ("Data", "overwrite") else layer
+            headers[p] = plugin_header(path)
+            headers[p]["masters"] = ctx.names.many(headers[p]["masters"])
+        return plugins, providers, headers
+
+    c_plugins, c_providers, c_headers = view(enabled)
+    w_plugins, w_providers, w_headers = view(without_mods)
+    subject = [p for p in c_plugins if (c_providers.get(p) or "").lower() in sel_low and p not in w_plugins]
+    arms = [{"id": "combined", "role": "the profile as it is", "keys": [], "evaluated": subject, "plugins": c_plugins,
+             "mods": list(enabled)},
+            {"id": "without-selection", "role": "the profile without the selected mods", "keys": [], "evaluated": [],
+             "plugins": w_plugins, "mods": without_mods}]
+    headers = {**w_headers, **c_headers}
+    providers = {**w_providers, **c_providers}
+    return {"headers": headers, "providers": providers, "baseline": w_plugins, "arms": arms, "subject": subject,
+            "partners": [], "keys": [], "selection": sel, "withoutProviders": w_providers}
+
+
+def in_place_select(ctx: Context) -> tuple[list[str], str]:
+    """The entry's ticked checks closed over the registry: every prerequisite of a ticked check, every derived check
+    whose prerequisites are all selected and which evalrun computes, and depth deep when a ticked check judges a state
+    other than the baseline. Returns (check ids, depth)."""
+    reg = {c["id"]: c for c in read_json(REGISTRY)["checks"]}
+    sel = set((ctx.entry.get("evaluation") or {}).get("select") or [])
+    unknown = sorted(c for c in sel if c not in reg)
+    if unknown:
+        raise Refusal(f"the selection names {', '.join(unknown)}, which the check registry does not have.")
+    todo = list(sel)
+    while todo:
+        c = todo.pop()
+        for pre in reg[c].get("prerequisites") or []:
+            if pre not in sel:
+                sel.add(pre)
+                todo.append(pre)
+    computed_derived = {"patch.order-evaluation", "patch.candidate-qualification"}   # evalrun's own derived set
+    changed = True
+    while changed:
+        changed = False
+        for cid, c in reg.items():
+            if ((c.get("adapter") or {}).get("kind") == "derived" and cid in computed_derived and cid not in sel
+                    and all(p in sel for p in c.get("prerequisites") or [])):
+                sel.add(cid)
+                changed = True
+    deep = any((reg[c].get("inputs") or {}).get("states") == "selected" for c in sel)
+    depth = "deep" if deep else ((ctx.entry.get("evaluation") or {}).get("depth") or "standard")
+    return sorted(sel), depth
+
+
 def candidate_files(ctx: Context, res: dict) -> list[dict]:
     """Candidate configurations: the combined arm is candidate-00-baseline.json (evalrun's baseline), the rest in order."""
-    arms = sorted(res["arms"], key=lambda a: 0 if a["id"] == "combined" else 1)
+    first = "without-selection" if getattr(ctx, "in_place", None) else "combined"
+    arms = sorted(res["arms"], key=lambda a: 0 if a["id"] == first else 1)
     out = []
     for i, a in enumerate(arms):
         name = "candidate-00-baseline.json" if i == 0 else f"candidate-{i:02d}.json"
@@ -757,6 +865,11 @@ def scopeprobe_exe() -> Path:
 def stage_census(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """The subject's census on the source profile: cells and record types it touches, for the scope reconciliation."""
     out = sdir / "source-scope.json"
+    if getattr(ctx, "in_place", None) and not res["subject"]:
+        write_json(sdir / "census.json", {"source": None, "cells": {}, "recordTypes": {},
+                                          "note": "the selection provides no plugin, so there is no subject to census"})
+        print("census: the selection provides no plugin; skipped, and the plan runs without a scope")
+        return {"subject": []}, [sdir / "census.json"]
     argv = [scopeprobe_exe(), "--instance", fwd(ctx.source_instance), "--profile", ctx.source_profile,
             "--game", fwd(ctx.source_game), "--assets", "1000000", "--json", fwd(out)]
     for p in res["subject"][:1]:
@@ -788,8 +901,11 @@ def stage_prepare(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         rows.append({"file": name, "arm": arm["id"], "role": arm["role"], "variant": arm.get("variant"),
                      "keys": arm["keys"], "plugins": arm["plugins"], "mods": arm["mods"],
                      "sha256": sha256_file(cdir / name)})
-    files = profile_payload(ctx, res)
-    pdir = write_profile(ctx, files)
+    if getattr(ctx, "in_place", None):
+        files, pdir = {}, ctx.instance / "profiles" / ctx.profile          # the chosen profile, read in place, never written
+    else:
+        files = profile_payload(ctx, res)
+        pdir = write_profile(ctx, files)
     write_json(sdir / "preparation.json", {"profile": ctx.profile, "profileDir": fwd(pdir),
                                            "profileFiles": {n: hashlib.sha256(b).hexdigest() for n, b in files.items()},
                                            "baseline": res["baseline"], "arms": rows, "headers": res["headers"],
@@ -799,6 +915,12 @@ def stage_prepare(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
 
 def scope_targets(ctx: Context, res: dict, arm: dict) -> list[str]:
     ev = set(arm["plugins"])
+    if getattr(ctx, "in_place", None):
+        # the selection's plugins this arm loads; an arm that loads none (the without-selection arm, or an asset-only
+        # selection) scopes its last plugin only to prove the order loads: the plan's targets come from the combined
+        # arm's scope, and an asset-only selection plans without one
+        t = [p for p in res["subject"] if p in ev]
+        return t or ([arm["plugins"][-1]] if arm["plugins"] else [])
     if res["subject"][0] in ev:
         t = [res["subject"][0]]
     else:
@@ -807,6 +929,21 @@ def scope_targets(ctx: Context, res: dict, arm: dict) -> list[str]:
         if not t:
             t = [ctx.entry.get("baselineScopeTarget") or res["baseline"][-1]]
     return t + [k for k in res["keys"] if k in ev]
+
+
+def order_refusal(logs: Path) -> str | None:
+    """The order reader's own refusal (MISSING MASTER, CANNOT ENABLE, PROFILE MISMATCH) from a probe's job logs, as one
+    line, or None."""
+    for log in sorted(Path(logs).glob("*.txt")) if Path(logs).is_dir() else []:
+        try:
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines):
+            if any(k in line for k in ("MISSING MASTER", "CANNOT ENABLE", "PROFILE MISMATCH")):
+                more = [x.strip() for x in lines[i + 1:i + 4] if x.strip().startswith(("-", "'")) or "master" in x.lower()]
+                return " ".join([" ".join(line.split())] + more).rstrip(".") + "."
+    return None
 
 
 def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
@@ -825,6 +962,10 @@ def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
             argv += ["--target", t]
         r = child(ctx, adir / "commands", "scope-" + row["file"].replace(".json", ""), argv)
         if r.get("exitCode") != 0 or not out.is_file():
+            why = order_refusal(adir / "commands")
+            if why and getattr(ctx, "in_place", None) and arm["id"] == "without-selection":
+                raise Refusal(f"the profile without the selected mods would not load: {why} Tick the mods that need the "
+                              f"selection too, or pick another mod.")
             raise Refusal(f"scope of arm {arm['id']} did not complete (exit {r.get('exitCode')}); read {fwd(adir)}.")
         expect = {"plugins": [{"name": p, "path": prep["headers"][p]["path"], "sha256": prep["headers"][p]["sha256"]}
                               for p in arm["plugins"]],
@@ -863,14 +1004,32 @@ def stage_plan(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     if run.exists():
         raise Refusal(f"{fwd(run)} exists from an earlier plan; move it aside to replan, never plan over it.")
     ev = ctx.entry.get("evaluation", {})
-    argv = evalrun("plan", "--registry", fwd(REGISTRY), "--scope", scopes["combined"]["scope"],
-                   "--candidates", fwd(ctx.out / "prepare" / "candidates"),
-                   "--depth", ev.get("depth", "deep"), "--budget-minutes", ev.get("budgetMinutes", 90),
-                   "--max-candidates", len(scopes), "--out", fwd(run),
-                   "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game))
+    env = None
+    if getattr(ctx, "in_place", None):
+        select, depth = in_place_select(ctx)
+        # an asset-only selection plans without a scope: a scope needs a target, and any target would be a plugin
+        # outside the selection (receipts/h3-asset-only-plan.log: no scope gives targets [] and a population of the folders)
+        scope_args = ["--scope", scopes["combined"]["scope"]] if res["subject"] else []
+        argv = evalrun("plan", "--registry", fwd(REGISTRY), *scope_args,
+                       "--candidates", fwd(ctx.out / "prepare" / "candidates"),
+                       "--depth", depth, "--budget-minutes", ev.get("budgetMinutes", 90),
+                       "--max-candidates", len(scopes), "--out", fwd(run), "--select", ",".join(select),
+                       "--review-arm", "candidate-01",
+                       "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game))
+        if ev.get("primitiveSolidity"):
+            argv += ["--primitive-solidity", ev["primitiveSolidity"]]
+        else:
+            # never this machine's harness config: a manual run on another machine would get another table or none
+            env = {"HOUSECARL_HARNESS_CONFIG": "", "HOUSECARL_PRIMITIVE_SOLIDITY": ""}
+    else:
+        argv = evalrun("plan", "--registry", fwd(REGISTRY), "--scope", scopes["combined"]["scope"],
+                       "--candidates", fwd(ctx.out / "prepare" / "candidates"),
+                       "--depth", ev.get("depth", "deep"), "--budget-minutes", ev.get("budgetMinutes", 90),
+                       "--max-candidates", len(scopes), "--out", fwd(run),
+                       "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game))
     for o in ev.get("optIn", []):
         argv += ["--opt-in", o]
-    r = child(ctx, sdir / "commands", "plan", argv)
+    r = child(ctx, sdir / "commands", "plan", argv, env=env)
     if r.get("exitCode") != 0 or not (run / "plan.json").is_file():
         raise Refusal(f"evalrun plan refused or failed (exit {r.get('exitCode')}); its sentence is in {fwd(sdir / 'commands')}.")
     plan = read_json(run / "plan.json")
@@ -964,6 +1123,10 @@ def slot_wait_sentence(log: Path, ctx) -> str | None:
 
 def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     run = ctx.out / "evaluation"
+    if getattr(ctx, "in_place", None):
+        write_json(sdir / "records.json", {"note": "a manual run offers no model-driven record check; mcp-only rows stay "
+                                                   "open and the bundle says they were not assessed"})
+        return {"openArms": 0}, [sdir / "records.json"]
     led = read_json(run / "ledger.json").get("entries") or {}
     open_arms = sorted({k.split("__")[1] for k, v in led.items() if str(v.get("status")) == "mcp-only" and "__" in k})
     if not open_arms:
@@ -1694,6 +1857,8 @@ def cmd_run(a) -> int:
     out.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HOUSECARL_RUNLOG_DIR", fwd(out / "runlog"))
     ctx = Context(a.entry, a.machine, out)
+    if getattr(ctx, "in_place", None):
+        os.environ["HOUSECARL_RUNLOG_DIR"] = fwd(out / "runlog")     # a manual run's log stays in its work folder, set
     ledger = StageLedger(out)
     through = a.through or STAGES[-1]
     refusals = []      # non-blocking refusals: the run goes on, and its final status still names each one

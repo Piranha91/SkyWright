@@ -79,7 +79,9 @@ def world(t: Path, mods: dict, enabled: list, plugins: list, data=("Base.esm",))
                                       + "".join(f"-{m}\n" for m in mods if m not in enabled), encoding="utf-8")
     order = list(data) + plugins
     (prof / "loadorder.txt").write_text("".join(p + "\n" for p in order), encoding="utf-8")
-    (prof / "plugins.txt").write_text("".join("*" + p + "\n" for p in plugins), encoding="utf-8")
+    # MO2 lists every active plugin in plugins.txt except the official masters it loads implicitly; a synthetic master
+    # in the game's Data is not one of those, so it is listed (Round 4 correction of this fixture)
+    (prof / "plugins.txt").write_text("".join("*" + p + "\n" for p in list(data) + plugins), encoding="utf-8")
     (inst / "overwrite").mkdir(parents=True, exist_ok=True)
     (inst / "ModOrganizer.ini").write_text("[General]\ngameName=Skyrim Special Edition\nselected_profile=@ByteArray(P)\n",
                                            encoding="utf-8")
