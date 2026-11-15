@@ -115,6 +115,18 @@ internal sealed class EditSession
         return order.Select(k => new PendingEdit(k, RefPlacementEdit.BakedPose(RefOf(k).Ref), Current(k))).ToList();
     }
 
+    /// <summary>Raised before any verb re-places a reference (stage, undo, revert, write), so the view can stop showing originals first.</summary>
+    internal event Action? Replacing;
+
+    /// <summary>Drop every staged edit of one reference and draw it where it was before them. Null when it has none.</summary>
+    internal PendingEdit? Revert(FormKey key) => null;
+
+    /// <summary>After a written edit is removed from its patch: forget it and draw the reference at its load-order place.</summary>
+    internal void ForgetWritten(FormKey key) { }
+
+    /// <summary>One edit in words, e.g. "Moved barrel 150 units east".</summary>
+    internal static string Sentence(PendingEdit e, string? baseName) => Describe(e.After);
+
     internal static string Describe(RefPlacementEdit.Pose p) =>
         FormattableString.Invariant($"pos ({p.Position.X:0.###}, {p.Position.Y:0.###}, {p.Position.Z:0.###}) rot ({p.Rotation.X:0.#####}, {p.Rotation.Y:0.#####}, {p.Rotation.Z:0.#####})");
 }

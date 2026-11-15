@@ -195,5 +195,19 @@ internal sealed class PatchWriter : IAsyncDisposable
         return D(a.X, b.X) <= t && D(a.Y, b.Y) <= t && D(a.Z, b.Z) <= t;
     }
 
+    /// <summary>Null when the server's winning placement of <paramref name="key"/> is the one the scene drew, else the one
+    /// sentence a commit refuses with. Every server answer about a drawn reference goes through it first.</summary>
+    internal Task<string?> PlacementMismatchAsync(Mutagen.Bethesda.Plugins.FormKey key, ViewProbe.RefPlacementEdit.Pose drawn, CancellationToken ct = default)
+        => Task.FromResult<string?>(null);
+
+    /// <summary>The objects a decision is keyed on, read from the server for references the scene drew at these poses.</summary>
+    internal Task<IReadOnlyList<ObjectState>> ReadObjectsAsync(IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose Drawn)> refs,
+                                                               CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ObjectState>>(Array.Empty<ObjectState>());
+
+    /// <summary>Undo a written edit: remove the reference's override from the patch in <paramref name="patchFolder"/>.</summary>
+    internal Task<string> RevertWrittenAsync(Mutagen.Bethesda.Plugins.FormKey key, string patchFolder, CancellationToken ct = default)
+        => Task.FromResult("");
+
     public async ValueTask DisposeAsync() => await _client.DisposeAsync();
 }

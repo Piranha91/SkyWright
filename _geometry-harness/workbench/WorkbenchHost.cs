@@ -112,9 +112,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal PickHit? PickAt(Vector2 px)
     {
         var (o, d) = _camera.ScreenPointToRay(px.X, px.Y, W, H);
-        return ScenePick.Pick(_opt.PickShapes, new Vector3(o.X, o.Y, o.Z), new Vector3(d.X, d.Y, d.Z),
-            s => !(s.Mesh is { IsRendering: false }) && s.Kind is PickKind.Ref or PickKind.Terrain);
+        return ScenePick.Pick(_opt.PickShapes, new Vector3(o.X, o.Y, o.Z), new Vector3(d.X, d.Y, d.Z), Pickable);
     }
+
+    /// <summary>What a click can hit: a drawn reference or the terrain.</summary>
+    internal static bool Pickable(PickShape s) => !(s.Mesh is { IsRendering: false }) && s.Kind is PickKind.Ref or PickKind.Terrain;
 
     // ---- input: a plain click selects; a drag on the handle edits (ViewInput) ------------------------------------
     ViewInput _input = null!;

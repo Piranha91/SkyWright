@@ -60,6 +60,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         public RecheckResult? LastRecheck { get; private set; }
         public string? RecheckRefusal => null;
         public bool Rechecking { get; private set; }
+        public ViewState? View { get; set; }
+        public IReadOnlyList<ViewProbe.PickShape> Shapes { get; set; } = Array.Empty<ViewProbe.PickShape>();
     }
 
     sealed class FakeSurface : IWorkbenchSurface
@@ -820,5 +822,111 @@ public sealed class StateToolsTests : IAsyncLifetime
         File.Copy(Path.Combine(inst, "profiles", "P", "modlist.txt"), Path.Combine(bd, "profiles", "P", "modlist.txt"));
         File.AppendAllText(Path.Combine(inst, "ModOrganizer.ini"), "[Settings]" + Environment.NewLine + "base_directory=" + bd.Replace(Path.DirectorySeparatorChar, '/') + Environment.NewLine);
         Assert.Contains("base_directory", await Refused("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst))));
+    }
+    // ---- review speed: guarded arguments on the wire, and the new state-tool values ----
+
+    // R31d: the reachable case through the endpoint
+    [Fact]
+    public async Task R31d_a_number_for_into_is_refused_through_the_endpoint_and_nothing_is_written()
+    {
+        var (w, o, game) = await OpenWorld();
+        using var _w = w;
+        var before = Listing(w.Instance, game);
+        var why = await Refused("housecarl_apply", A(("ops", MoveOps(85f)), ("into", 123)));
+        Assert.Contains("into", why);
+        Assert.Contains("text", why);
+        Unchanged(before, Listing(w.Instance, game), "the instance or the game folder");
+        Assert.False(Directory.Exists(o) && Directory.EnumerateFiles(o, "*.esp", SearchOption.AllDirectories).Any(), "a patch was written");
+    }
+
+    // R31e (pin): the server reads a null or empty into as absent, as the workbench does
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task R31e_a_null_or_empty_into_is_absent_on_both_sides(string? into)
+    {
+        var (w, o, _) = await OpenWorld();
+        using var _w = w;
+        var name = into is null ? "WbNullInto" : "WbEmptyInto";
+        var (err, text) = await Call("housecarl_apply", A(("ops", MoveOps(86f)), ("patch", name), ("into", into)));
+        Assert.False(err, "refused: " + text);
+        Assert.True(File.Exists(Path.Combine(o, "houseCARL - " + name, name + ".esp")), $"no new patch under the Output Folder: {text}");
+    }
+
+    // I3h: the view on the wire
+    [Fact]
+    public async Task I3h_view_hides_and_restores_through_the_state_tools_and_the_state_says_so()
+    {
+        _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
+        await Ok("workbench_act", A(("verb", "view"), ("op", "hide"), ("ref", RefKey)));
+        var st = await Ok("workbench_state", A(("project", new[] { "view" })));
+        Assert.Contains(RefKey, P(st, "view", "hidden").EnumerateArray().Select(e => e.GetString()));
+        Assert.Contains("Restore visibility", P(st, "view", "label").GetString());
+        await Ok("workbench_act", A(("verb", "view"), ("op", "restore")));
+        st = await Ok("workbench_state", A(("project", new[] { "view" })));
+        Assert.Empty(P(st, "view", "hidden").EnumerateArray());
+        Assert.Contains("is not a view operation", await Refused("workbench_act", A(("verb", "view"), ("op", "blur"))));
+    }
+
+    // I1g: originals on the wire, and a stage while they show puts the edits back
+    [Fact]
+    public async Task I1g_show_original_through_the_state_tools_and_a_stage_while_showing_clears_it()
+    {
+        _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 50f, 0f, 0f })));
+        await Ok("workbench_act", A(("verb", "view"), ("op", "show_original")));
+        Assert.True(P(await Ok("workbench_state", A(("project", new[] { "view" }))), "view", "showingOriginal").GetBoolean());
+        await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 5f, 0f, 0f })));
+        Assert.False(P(await Ok("workbench_state", A(("project", new[] { "view" }))), "view", "showingOriginal").GetBoolean(), "a stage left originals showing");
+        await Ok("workbench_act", A(("verb", "view"), ("op", "show_original")));
+        await Ok("workbench_act", A(("verb", "undo")));
+        Assert.False(P(await Ok("workbench_state", A(("project", new[] { "view" }))), "view", "showingOriginal").GetBoolean(), "an undo left originals showing");
+    }
+
+    // E4h: the pending list in words, and revert on the wire
+    [Fact]
+    public async Task E4h_pending_rows_carry_a_sentence_and_revert_drops_one_reference()
+    {
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var r = await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 150f, 0f, 0f })));
+        Assert.StartsWith("Moved ", P(P(r, "state", "pending").EnumerateArray().First(), "sentence").GetString());
+        var v = await Ok("workbench_act", A(("verb", "revert"), ("ref", RefKey)));
+        Assert.Empty(P(v, "state", "pending").EnumerateArray());
+        Assert.Contains("nothing staged", await Refused("workbench_act", A(("verb", "revert"), ("ref", RefKey))));
+    }
+
+    // M6k: snapping on the wire rounds only the moved axis
+    [Fact]
+    public async Task M6k_stage_with_snap_rounds_the_moved_axis_only()
+    {
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var before = _scene.Session.Current(FormKey.Factory(RefKey));
+        var r = await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 101f, 0f, 0f }), ("snap", 128f)));
+        var drawn = Pos(P(r, "state", "selection", "drawn"));
+        Assert.Equal(MathF.Round((before.Position.X + 101f) / 128f) * 128f, drawn[0]);
+        Assert.Equal(before.Position.Y, drawn[1]);
+        Assert.Equal(before.Position.Z, drawn[2]);
+    }
+
+    // M6l: drop on the wire, refused in one sentence when nothing is below
+    [Fact]
+    public async Task M6l_drop_with_nothing_below_is_refused_saying_it_lowers_only()
+    {
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var why = await Refused("workbench_act", A(("verb", "drop"), ("ref", RefKey)));
+        Assert.Contains("lowers only", why);
+    }
+
+    // D2k: decisions on the wire
+    [Fact]
+    public async Task D2k_decisions_are_a_part_of_the_state_and_decide_takes_only_the_three_verdicts()
+    {
+        var st = await Ok("workbench_state", A(("project", new[] { "decisions" })));
+        Assert.Equal(JsonValueKind.Array, P(st, "decisions", "rows").ValueKind);
+        var why = await Refused("workbench_act", A(("verb", "decide"), ("conflict", 1), ("verdict", "maybe"), ("reason", "x")));
+        Assert.Contains("real problem", why);
+        Assert.Contains("intentional", why);
+        Assert.Contains("unsure", why);
     }
 }

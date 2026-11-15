@@ -1,4 +1,5 @@
 using Mutagen.Bethesda.Plugins;
+using ViewProbe;
 
 namespace Workbench;
 
@@ -44,6 +45,10 @@ internal interface IWorkbenchScene
     RecheckResult? LastRecheck { get; }
     string? RecheckRefusal { get; }
     bool Rechecking { get; }
+    /// <summary>The view-only state; null where the scene has none.</summary>
+    ViewState? View => null;
+    /// <summary>The scene's pick shapes (drawn references and terrain) at their current placements.</summary>
+    IReadOnlyList<PickShape> Shapes => Array.Empty<PickShape>();
 }
 
 /// <summary>The running app: <see cref="Shell"/> and its current scene.</summary>

@@ -6,7 +6,7 @@ using GlMatrix4 = OpenTK.Mathematics.Matrix4;
 namespace Workbench;
 
 /// <summary>Which part of the handle a press grabbed.</summary>
-internal enum Handle { None, MoveX, MoveY, MoveZ, TurnZ }
+internal enum Handle { None, MoveX, MoveY, MoveZ, TurnZ, TurnX, TurnY }
 
 /// <summary>The move/rotate handle on the selected reference: three world-axis arrows (Skyrim X red, Y green, Z blue)
 /// that move it along that axis, and a ring about world Z that turns it (a yaw, composed with the reference's existing

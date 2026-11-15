@@ -131,6 +131,15 @@ public static class CaptureViews
     public sealed record ContactAnswer(string Key, HashSet<string> Touches, HashSet<string> RestsOn, HashSet<string> Unassessed,
                                        string? Refusal, Aabb Box);
 
+    /// <summary>How far a ref can be lowered straight down onto what is below it, and onto what; or why it cannot.</summary>
+    public sealed record DropAnswer(string Key, float? Distance, string? Onto, string? OntoName, string? Refusal);
+
+    /// <summary>A live scene's drawn refs and terrain, from its pick shapes at their current placements.</summary>
+    internal static Geometry FromPickShapes(IEnumerable<PickShape> shapes) => new();
+
+    /// <summary>The support rays' answer as a distance: the nearest drawn surface below the ref's lowest band.</summary>
+    public static DropAnswer Drop(Geometry g, string key) => new(key, null, null, null, "drop to surface is not built yet.");
+
     static float BoxGap(Aabb a, Aabb b) => SpatialOverlap.BoxDistance(a, b);
 
     /// <summary>What <paramref name="key"/> touches and rests on in this shot, or a refusal when that cannot be decided.</summary>

@@ -61,6 +61,9 @@ static class RefPlacementEdit
 
     internal static Pose BakedPose(SceneRef r) => new(r.Position, r.Rotation, r.Scale);
 
+    /// <summary>A shape's triangle vertices where the build placed them (Y-up), whatever re-placement has happened since.</summary>
+    internal static Vector3[] BakedVerts(PickShape s) => s.Verts;
+
     /// <summary>Re-place <paramref name="ro"/>'s reference at <paramref name="now"/>. Throws a one-sentence refusal for a
     /// reference whose drawn placement is not its record's.</summary>
     internal static Edit Apply(RefOcclusion ro, Pose now)
