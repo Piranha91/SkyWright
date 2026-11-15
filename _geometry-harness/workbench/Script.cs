@@ -20,6 +20,7 @@ namespace Workbench;
 /// undo                           undo the last staged edit
 /// pickworld X,Y,Z                project a Skyrim point to the screen, pick there, print what is hit
 /// capture NAME                   save the frame as NAME.png
+/// capturewindow NAME             save the whole window (tabs, banner, status bar, view) as NAME.png
 /// dump FORMKEY NAME              save the reference's drawn vertices as NAME.json
 /// tilted [N]                     list drawn references tilted about X and Y, nearest first
 /// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
@@ -167,6 +168,11 @@ internal sealed class Script
                 break;
             }
             case "capture": _h.Capture(a[1]); break;
+            case "capturewindow":
+            {
+                var (w, hh) = WindowCapture.Save(Shell.Window!, Path.Combine(_h.OutDir, a[1] + ".png"));
+                WorkbenchHost.Say($"window captured ({w}x{hh}) to {Path.Combine(_h.OutDir, a[1] + ".png")}"); break;
+            }
             case "dump": _h.DumpRef(FormKey.Factory(a[1]), a[2]); break;
             case "fps": Fps(int.Parse(a[1])); break;
             case "tilted":
