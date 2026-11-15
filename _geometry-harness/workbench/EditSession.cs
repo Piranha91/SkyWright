@@ -32,10 +32,36 @@ internal sealed class EditSession
     internal RefOcclusion RefOf(FormKey key) => _refs.TryGetValue(key, out var ro) ? ro
         : throw new InvalidOperationException($"{key} is not a drawn reference in this scene; select one the window shows.");
 
+    /// <summary>Edits written to a patch that is not enabled: what the view shows for them and which patch holds them.</summary>
+    internal IReadOnlyDictionary<FormKey, (string Patch, RefPlacementEdit.Pose Pose)> Written => _written;
+    readonly Dictionary<FormKey, (string Patch, RefPlacementEdit.Pose Pose)> _written = new();
+
+    /// <summary>After a write: the staged edits become written ones (stage-4 review M-1).</summary>
+    internal void MarkWritten(string patch)
+    {
+        var net = Net();
+        foreach (var e in net) _written[e.Ref] = (patch, e.After);
+        _pending.Clear();
+        Changed?.Invoke($"{net.Count} edit(s) written to {patch}; the view keeps them where the patch puts them (the patch is not enabled)");
+    }
+
+    /// <summary>Draw a reference at a placement a patch holds (read back from it), labelled as written.</summary>
+    internal void ShowWritten(FormKey key, RefPlacementEdit.Pose pose, string patch)
+    {
+        RefPlacementEdit.Apply(RefOf(key), pose);
+        _written[key] = (patch, pose);
+        Changed?.Invoke($"{key} drawn as {patch} places it ({Describe(pose)})");
+    }
+
+    /// <summary>What the status bar says about a written reference the view shows.</summary>
+    internal static string WrittenLabel(FormKey key, string patch) =>
+        $"the view shows {key} as written to {patch}, not enabled (the load order still places it where it was)";
+
     /// <summary>The pose the reference is drawn at now: its last staged edit, else the build's.</summary>
     internal RefPlacementEdit.Pose Current(FormKey key)
     {
         for (int i = _pending.Count - 1; i >= 0; i--) if (_pending[i].Ref == key) return _pending[i].After;
+        if (_written.TryGetValue(key, out var w)) return w.Pose;
         return RefPlacementEdit.BakedPose(RefOf(key).Ref);
     }
 
@@ -73,7 +99,7 @@ internal sealed class EditSession
     /// <summary>Undo the last staged edit, on screen and in the list. Returns null when there is nothing to undo.</summary>
     internal PendingEdit? Undo()
     {
-        if (_pending.Count == 0) { Changed?.Invoke("nothing to undo"); return null; }
+        if (_pending.Count == 0) { Changed?.Invoke(_written.Count > 0 ? "nothing staged to undo; a written edit is undone by a new write" : "nothing to undo"); return null; }
         var last = _pending[^1];
         _pending.RemoveAt(_pending.Count - 1);
         RefPlacementEdit.Apply(RefOf(last.Ref), last.Before);

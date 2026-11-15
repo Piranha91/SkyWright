@@ -157,8 +157,10 @@ internal sealed class WorkbenchHost
         string marks = !_marks.Enabled ? "marks off" : _marks.Selected is null ? "" :
             $"cyan: selected {_marks.Selected.Ref.RefKey}" + (_marks.Partner is { } p ? $"; magenta: the conflict's other reference {p.Ref.RefKey}" : "") + " (drawn through anything in front)"
             + (PartnerNote is { } pn ? "; " + pn : "");
+        string written = _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
+                       : _session.Selected is { } bk ? "\nthe view shows " + bk + " where the load order places it" : "";
         string recheck = Rechecking ? "re-checking..." : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
-        _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}" + (recheck.Length > 0 ? "  |  " + recheck : "") + (marks.Length > 0 ? "\n" + marks : "");
+        _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}" + (recheck.Length > 0 ? "  |  " + recheck : "") + written + (marks.Length > 0 ? "\n" + marks : "");
     }
 
     // ---- the window ---------------------------------------------------------------------------------------------------
@@ -522,6 +524,8 @@ internal sealed class WorkbenchHost
                                                             _opt.Interior ? null : _opt.Worldspace);
             var text = parents + "\n" + await w.CommitAsync(net, patchName, dryRun);
             Say((dryRun ? "dry run" : "write") + " answer:\n" + text);
+            // A written edit stays drawn where the patch puts it, labelled (stage-4 review M-1).
+            if (!dryRun && text.Contains("wrote ", StringComparison.Ordinal)) _session.MarkWritten(PluginName(patchName));
             // After a write, the detector re-runs on the patch's cell when a conflict row is open (stage 4).
             if (!dryRun && Shell.Bundle is not null && Shell.CurrentRow is not null) await RecheckAsync(patchName);
             return text;
@@ -530,6 +534,11 @@ internal sealed class WorkbenchHost
     }
 
     /// <summary>The last re-check: its result, or the sentence that refused it; and whether one is running.</summary>
+    internal static string PluginName(string patchName) => patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";
+
+    /// <summary>What the status bar says about the selected reference's drawn placement (written or load order).</summary>
+    internal string StatusText => _status.Text;
+
     internal RecheckResult? LastRecheck { get; private set; }
     internal string? RecheckRefusal { get; private set; }
     internal bool Rechecking { get; private set; }
@@ -548,6 +557,15 @@ internal sealed class WorkbenchHost
             if (holders.Count != 1)
                 throw new InvalidOperationException($"{holders.Count} mod folders hold {plugin}, so the re-check cannot tell which one the write made; it needs exactly one.");
             var mod = Path.GetFileName(holders[0]);
+            // The view shows the edited reference where this patch puts it (read back from the patch), never silently
+            // where the load order still has it (stage-4 review M-1).
+            if (FormKey.TryFactory(open.Row.RefKey, out var rk) && _session.IsDrawn(rk)
+                && !(_session.Written.TryGetValue(rk, out var wr) && string.Equals(wr.Patch, plugin, StringComparison.OrdinalIgnoreCase)))
+            {
+                var wtr = await WriterAsync();
+                var (pp, pr) = await wtr.ReadPlacementAsync(open.Row.RefKey, source: plugin);
+                _session.ShowWritten(rk, new RefPlacementEdit.Pose(pp, pr, _session.Current(rk).Scale), plugin);
+            }
             var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
             var harness = Path.GetDirectoryName(Path.GetFullPath(evalrun))!;
             var conflictdiff = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF") is { Length: > 0 } cd ? cd
@@ -562,7 +580,7 @@ internal sealed class WorkbenchHost
             var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, evalrun, conflictdiff,
                 buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s))));
             LastRecheck = r;
-            string news = r.New.Count == 0 ? "no new conflict" : $"{r.New.Count} new conflict(s): " + string.Join("; ", r.New.Select(n => n.Id));
+            string news = r.New.Count == 0 ? "no new conflict involving the moved reference" : $"{r.New.Count} new conflict(s) involving the moved reference: " + string.Join("; ", r.New.Select(n => n.Id));
             Shell.SetBanner(FormattableString.Invariant($"re-check of conflict {open.Rank}: {r.Row.Word}. {news}. ({r.Verdict}; {r.WallSeconds:0.0} s)"));
             Say("re-check: row " + r.Row.Id + ": " + r.Row.Sentence);
             foreach (var n in r.New) Say("re-check: new row " + n.Id + ": " + n.Sentence);

@@ -190,6 +190,22 @@ internal sealed class Script
             case "ticks": Ticks(int.Parse(a[1])); break;
             case "commit": Async(() => _h.CommitAsync(a[1] == "dry", a[2])); break;
             case "recheck": Async(() => _h.RecheckAsync(a[1])); break;
+            case "expectwritten":
+                // M-1: the reference is drawn where the patch puts it (read back through the server), and the status bar says so.
+                Async(async () =>
+                {
+                    var key = FormKey.Factory(a[1]); var plugin = WorkbenchHost.PluginName(a[2]);
+                    var w = await _h.WriterAsync();
+                    var (pos, _) = await w.ReadPlacementAsync(a[1], source: plugin);
+                    var now = _h.Session.Current(key).Position;
+                    float d = Vector3.Distance(new Vector3(now.X, now.Y, now.Z), new Vector3(pos.X, pos.Y, pos.Z));
+                    bool label = _h.StatusText.Contains($"written to {plugin}, not enabled", StringComparison.Ordinal);
+                    bool ok = d <= 0.01f && label;
+                    WorkbenchHost.Say(FormattableString.Invariant($"EXPECT {(ok ? "PASS" : "FAIL")}: written {a[1]} {plugin} (got drawn {now.X:0.###},{now.Y:0.###},{now.Z:0.###}; patch {pos.X:0.###},{pos.Y:0.###},{pos.Z:0.###}; {d:0.###} u apart; label in status bar {label})"));
+                    if (!ok) Shell.ExpectFailures++;
+                    return (string?)null;
+                });
+                break;
             case "readback":
                 Async(async () =>
                 {
