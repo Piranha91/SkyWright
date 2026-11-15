@@ -150,21 +150,26 @@ public static class CaptureViews
     public const string TerrainKey = "terrain";
 
     /// <summary>The support rays' answer as a distance: the nearest drawn surface below the ref's lowest band, which the
-    /// ref can be lowered onto. It lowers only: a ref already sunk into a surface (another drawn surface between its
-    /// lowest band and its top) is refused, as is one with nothing within reach below.</summary>
+    /// ref can be lowered onto. It lowers only: a ref another drawn surface already crosses (between its lowest band and
+    /// its top, at up to <see cref="SupportRays"/> sampled points) is refused, as is one with nothing within reach below.
+    /// The distance is measured from the lowest <see cref="SupportBand"/> units of the ref only, so a wider part higher up
+    /// that would touch first is not seen.</summary>
     public static DropAnswer Drop(Geometry g, string key)
     {
         if (!g.Refs.TryGetValue(key, out var p) || p.I.Count == 0)
             return new(key, null, null, null, $"{key} is not drawn in this scene, so it has nothing to drop.");
         // sunk: cast from just under the top, over the lowest band's points; another surface above the band is one it is sunk into
+        // sampled like the support rays: up to SupportRays of the lowest band's points
         float zmin = p.Box.Min.Z, zmax = p.Box.Max.Z;
-        foreach (var v in p.V)
+        var band = p.V.Where(v => v.Z <= zmin + SupportBand).ToList();
+        int stride = Math.Max(1, band.Count / SupportRays);
+        for (int i = 0; i < band.Count; i += stride)
         {
-            if (v.Z > zmin + SupportBand) continue;
+            var v = band[i];
             var top = new Vector3(v.X, v.Y, zmax + 0.5f);
             var (above, d) = FirstBelow(g, key, top, zmax - zmin);
             if (above is not null && zmax + 0.5f - d > zmin + 0.5f)
-                return new(key, null, null, null, $"{key} is already sunk into {Describe(g, above)}; drop lowers only, so move it up first.");
+                return new(key, null, null, null, $"{Describe(g, above)} crosses {key} above its lowest {SupportBand:0} units, so it is already sunk into it; drop lowers only, so move it up first.");
         }
         var hits = SupportHits(g, key, p).Where(h => h.Hit is not null).ToList();
         if (hits.Count == 0)
