@@ -15,7 +15,18 @@ namespace WorkbenchTests;
 
 /// <summary>Tests that set the window's shared state (<see cref="Shell"/>'s statics) run one at a time.</summary>
 [CollectionDefinition("Shell", DisableParallelization = true)]
-public sealed class ShellCollection { }
+public sealed class ShellCollection
+{
+    /// <summary>The one STA thread every test that touches the window's shared state runs on: its controls belong to the
+    /// thread that first made them.</summary>
+    internal static readonly Lazy<Dispatcher> Ui = new(() =>
+    {
+        Dispatcher? d = null; using var ready = new ManualResetEventSlim();
+        var t = new Thread(() => { d = Dispatcher.CurrentDispatcher; ready.Set(); Dispatcher.Run(); }) { IsBackground = true, Name = "shell tests" };
+        t.SetApartmentState(ApartmentState.STA); t.Start(); ready.Wait();
+        return d!;
+    });
+}
 
 /// <summary>H3's fixture (Gate B review, DESIGN R4.3): a hand-built bundle with a verify-bundle verdict of its own, so the
 /// reader, the ranking and the state tools are tested without the controller. Arms baseline and candidate-01 (the review
@@ -42,7 +53,7 @@ public sealed class FindingsBundle : IDisposable
         if (file is ConflictFile cf) ConflictIo.Write(full, cf); else File.WriteAllText(full, (string)file!);
         File.WriteAllText(Path.Combine(Dir, "receipts", key + ".json"), JsonSerializer.Serialize(new
         {
-            checkId = check, validation = new { accepted = true, sentence = "accepted" },
+            checkId = check, result = new { execution = "completed" }, validation = new { accepted = true, sentence = "accepted" },
             outputs = new[] { new { path = relOut } }, adapter = new { output = adapterOutput },
         }));
         _outputs.Add(new JsonObject { ["receipt"] = key, ["recordedPath"] = relOut, ["path"] = relOut, ["present"] = true, ["matches"] = true, ["sha256"] = Sha(full) });
@@ -268,12 +279,11 @@ public sealed class FindingsTests
         string[]? args = null; Exception? failed = null;
         try
         {
-            var t = new Thread(() =>
+            ShellCollection.Ui.Value.Invoke(() =>
             {
                 try { args = (string[]?)open.Invoke(null, new object[] { new[] { "--bundle", f.Dir, "--arm", "candidate-01" } }); }
                 catch (TargetInvocationException ex) { failed = ex.InnerException ?? ex; }
             });
-            t.SetApartmentState(ApartmentState.STA); t.Start(); t.Join();
         }
         finally { foreach (var v in new[] { "WB_EVALRUN", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null); }
         return (args, failed);
@@ -304,12 +314,11 @@ public sealed class FindingsTests
         try
         {
             string[]? args = null; Exception? failed = null;
-            var t = new Thread(() =>                                   // the window's controls need an STA thread
+            ShellCollection.Ui.Value.Invoke(() =>                      // the window's controls need their one STA thread
             {
                 try { args = (string[])open.Invoke(null, new object[] { new[] { "--bundle", f.Dir, "--arm", "candidate-01" } })!; }
                 catch (TargetInvocationException ex) { failed = ex.InnerException ?? ex; }
             });
-            t.SetApartmentState(ApartmentState.STA); t.Start(); t.Join();
             if (failed is not null) throw new Xunit.Sdk.XunitException("the Findings-only bundle did not open: " + failed.Message);
             var wl = args![Array.IndexOf(args, "--worklist") + 1];
             Assert.Contains(FindingsBundle.CellA, File.ReadAllText(wl));

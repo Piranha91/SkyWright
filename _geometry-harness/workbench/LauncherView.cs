@@ -9,7 +9,8 @@ namespace Workbench;
 internal static class LauncherView
 {
     static readonly ComboBox Mode = new() { ItemsSource = new[] { "free", "housecarl" }, SelectedIndex = 0, Width = 110 };
-    static readonly TextBox Instance = new() { MinWidth = 300 }, Profile = new() { MinWidth = 120 }, Output = new() { MinWidth = 300 }, Work = new() { MinWidth = 300 };
+    static readonly TextBox Instance = new() { MinWidth = 300 }, Output = new() { MinWidth = 300 }, Work = new() { MinWidth = 300 };
+    static readonly ComboBox Profile = new() { MinWidth = 160, IsEditable = true };
     static readonly StackPanel ModList = new(), ProbeList = new();
     static readonly TextBlock Status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
     static bool _filling;
@@ -20,6 +21,17 @@ internal static class LauncherView
 
     internal static UIElement Build()
     {
+        Button Browse(TextBox box, Action? after = null)
+        {
+            var b = new Button { Content = "Browse…", Margin = new Thickness(4, 0, 0, 0) };
+            b.Click += (_, _) =>
+            {
+                var d = new Microsoft.Win32.OpenFolderDialog { InitialDirectory = Directory.Exists(box.Text) ? box.Text : null };
+                if (d.ShowDialog() == true) { box.Text = d.FolderName; after?.Invoke(); }
+            };
+            return b;
+        }
+        Instance.LostFocus += (_, _) => FillProfiles();
         var open = new Button { Content = "Open profile", Margin = new Thickness(4, 0, 0, 0) };
         open.Click += async (_, _) =>
         {
@@ -44,10 +56,10 @@ internal static class LauncherView
         }
         var panel = new StackPanel();
         panel.Children.Add(Row("Mode", Mode));
-        panel.Children.Add(Row("Instance", Instance));
+        panel.Children.Add(Row("Instance", Instance, Browse(Instance, FillProfiles)));
         panel.Children.Add(Row("Profile", Profile, open));
-        panel.Children.Add(Row("Output", Output, setOut));
-        panel.Children.Add(Row("Work folder", Work, setWork));
+        panel.Children.Add(Row("Output", Output, Browse(Output), setOut));
+        panel.Children.Add(Row("Work folder", Work, Browse(Work), setWork));
         panel.Children.Add(new TextBlock { Text = "Mods (MO2 priority order, strongest first)", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 2) });
         panel.Children.Add(ModList);
         panel.Children.Add(new TextBlock { Text = "Probes", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 2) });
@@ -62,18 +74,25 @@ internal static class LauncherView
         return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     }
 
+    /// <summary>The profile picker: the profiles folder of the instance typed or browsed to.</summary>
+    static void FillProfiles()
+    {
+        try { Profile.ItemsSource = Directory.Exists(Instance.Text) ? Launcher.ProfilesOf(Instance.Text) : Array.Empty<string>(); }
+        catch (IOException) { Profile.ItemsSource = Array.Empty<string>(); }
+    }
+
     internal static void Fill()
     {
         _filling = true;
         try
         {
-            if (L.Instance is not null) { Instance.Text = L.Instance; Profile.Text = L.Profile ?? ""; }
+            if (L.Instance is not null) { Instance.Text = L.Instance; FillProfiles(); Profile.Text = L.Profile ?? ""; }
             Output.Text = L.Output ?? Output.Text; Work.Text = L.WorkFolder ?? Work.Text;
             ModList.Children.Clear();
             foreach (var m in L.Mods)
             {
                 if (m.Separator) { ModList.Children.Add(new TextBlock { Text = "— " + m.Name[..^"_separator".Length] + " —", Margin = new Thickness(4, 4, 4, 0) }); continue; }
-                var cb = new CheckBox { Content = m.Name + (m.Enabled ? "" : "  (disabled)"), IsChecked = m.Selected, IsEnabled = m.Enabled, Margin = new Thickness(8, 1, 4, 1) };
+                var cb = new CheckBox { Content = new TextBlock { Text = m.Name + (m.Unmanaged ? "  (unmanaged)" : m.Enabled ? "" : "  (disabled)") }, IsChecked = m.Selected, IsEnabled = m.Enabled && !m.Unmanaged, Margin = new Thickness(8, 1, 4, 1) };
                 var name = m.Name;
                 cb.Click += (_, _) => { if (_filling) return; Try(() => L.SelectMods(new[] { name }, cb.IsChecked == true ? "add" : "remove")); };
                 ModList.Children.Add(cb);
@@ -84,7 +103,7 @@ internal static class LauncherView
                 var why = L.WhyNotHere(c);
                 var cb = new CheckBox
                 {
-                    Content = c.Id + (L.AddedFor.TryGetValue(c.Id, out var f) ? $"  (added: {f})" : "") + (why is null ? "" : $"  ({why})"),
+                    Content = new TextBlock { Text = c.Id + (L.AddedFor.TryGetValue(c.Id, out var f) ? $"  (added: {f})" : "") + (why is null ? "" : $"  ({why})") },   // a TextBlock shows an underscore as itself
                     IsChecked = L.Probes.Contains(c.Id), IsEnabled = why is null, Margin = new Thickness(8, 1, 4, 1), ToolTip = c.Title,
                 };
                 var id = c.Id;

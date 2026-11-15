@@ -147,6 +147,10 @@ internal static class Shell
     internal static void FillFindings()
     {
         FindingList.Items.Clear();
+        // each ticked check first: ran with its rows, or why not, so a check that failed never reads as one that found nothing
+        foreach (var c in Bundle?.Checks ?? Array.Empty<CheckStatus>())
+            FindingList.Items.Add(new ListBoxItem { Content = c.State == "ran" ? $"{c.CheckId}: ran, {c.Rows} row(s)" : $"{c.CheckId}: {c.State}: {c.Why}",
+                                                    Foreground = c.State == "ran" ? Brushes.DimGray : Brushes.Firebrick });
         foreach (var f in Findings)
         {
             var item = new ListBoxItem

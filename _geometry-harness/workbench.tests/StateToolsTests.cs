@@ -719,6 +719,9 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         var saved = new[] { "HOUSECARL_HARNESS_CONFIG", "HOUSECARL_SEARCH_ROOTS", "HOUSECARL_DOWNLOAD_POOL" }.ToDictionary(k => k, Environment.GetEnvironmentVariable);
         foreach (var k in saved.Keys) Environment.SetEnvironmentVariable(k, null);
+        // the harness config is read once per process; read it afresh with these variables, and again after
+        var reload = typeof(Workbench.PatchWriter).Assembly.GetReferencedAssemblies().Select(n => System.Reflection.Assembly.Load(n)).First(x => x.GetName().Name == "viewprobe").GetType("HarnessTarget")!.GetMethod("Reload", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        reload.Invoke(null, null);
         try
         {
             var inst = LauncherInstanceL5();
@@ -728,7 +731,7 @@ public sealed class StateToolsTests : IAsyncLifetime
             Assert.False(P(p, "selectable").GetBoolean(), "patch discovery was offered with no search roots configured");
             Assert.Contains("search roots", P(p, "whyNot").GetString());
         }
-        finally { foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v); }
+        finally { foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v); reload.Invoke(null, null); }
     }
 
     [Fact]
@@ -745,7 +748,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         var prop = typeof(Launcher).GetProperty("RunBlocker", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
         Assert.True(prop is not null, "the launcher has no way to know a scene is open (RunBlocker)");
-        prop!.SetValue(_hub.Launcher, (Func<string?>)(() => "a scene is open"));
+        prop!.SetValue(_hub.Launcher, (Func<string?>)(() => "a scene is open in this window."));
         var inst = LauncherInstanceL5();
         await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
         await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));

@@ -63,8 +63,21 @@ internal static class ForwardRule
         return OutputFolderPolicy.Refusal(op, layout);
     }
 
+    /// <summary>A read tool's to_file: a file under the Work Folder, or under an Output Folder that is not the mods folder
+    /// and that the output rule allows; else one sentence.</summary>
+    static string? ToFileRefusal(string tf, string o, string? work, Mo2OutputLayout layout, bool modsIsOutput)
+    {
+        if (!Path.IsPathFullyQualified(tf)) return $"to_file '{tf}' is not a full path; in manual mode a file goes under the Output Folder or the Work Folder.";
+        var dir = Path.GetDirectoryName(OutputFolderPolicy.Full(tf)) ?? "";
+        if (work is not null && OutputFolderPolicy.AtOrUnder(dir, OutputFolderPolicy.Full(work))) return null;
+        if (!modsIsOutput && OutputFolderPolicy.AtOrUnder(dir, o) && OutputFolderPolicy.Refusal(dir, layout) is null) return null;
+        var why = OutputFolderPolicy.Refusal(dir, layout);
+        return $"to_file '{tf}' is not under the Output Folder '{o}'" + (modsIsOutput ? "" : "") + (work is null ? "" : $" or the Work Folder '{work}'")
+               + "; in manual mode a file a read writes goes under one of them" + (why is null ? "." : $" ({why.TrimEnd('.')}).");
+    }
+
     internal static (Dictionary<string, JsonElement>? Args, string? Refusal) Prepare(string tool, IReadOnlyDictionary<string, JsonElement>? given,
-                                                                                    string output, Mo2OutputLayout layout)
+                                                                                    string output, Mo2OutputLayout layout, string? work = null)
     {
         var a = new Dictionary<string, JsonElement>(given ?? new Dictionary<string, JsonElement>(), StringComparer.Ordinal);
         if (!ForwardList.Tools.TryGetValue(tool, out var kind))
@@ -74,6 +87,8 @@ internal static class ForwardRule
         switch (kind)
         {
             case ForwardKind.Read:
+                // a read that writes its answer to a file (records, check, asset_status: to_file) writes under O or W
+                if (Text(a, "to_file") is { } tf && ToFileRefusal(tf, o, work, layout, modsIsOutput) is { } tw) return (null, tw);
                 return (a, null);
             case ForwardKind.PatchLane or ForwardKind.PatchLaneWithOutPath:
             {

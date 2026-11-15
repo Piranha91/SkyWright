@@ -17,6 +17,9 @@ internal sealed record ConflictRow(
 /// the controller's own verb (<c>evalrun.py verify-bundle DIR --out FILE</c>) and every file a receipt names is read
 /// from the path that verb resolved and checked (<c>receiptOutputs</c> in its verdict), never from a guessed root.
 /// Anything the app cannot read that way is refused in one sentence.</summary>
+/// <summary>A ticked check's state on the arm: ran (with its rows), rejected, blocked, not-applicable, and why.</summary>
+internal sealed record CheckStatus(string CheckId, string State, int? Rows, string? Why);
+
 internal sealed class BundleConflicts
 {
     internal static readonly string[] PlacedChecks = { "geometry.object-overlap", "geometry.placement-contact", "geometry.fixture-empty-space" };
@@ -30,6 +33,8 @@ internal sealed class BundleConflicts
     internal required IReadOnlyList<ConflictRow> Rows { get; init; }
     /// <summary>The Findings tab's rows: every other check's accepted receipt outputs on the arm (DESIGN R4.3).</summary>
     internal IReadOnlyList<FindingRow> Findings { get; init; } = Array.Empty<FindingRow>();
+    /// <summary>Each ticked check on the arm: ran with its row count, or why it did not (rejected, blocked, not applicable).</summary>
+    internal IReadOnlyList<CheckStatus> Checks { get; init; } = Array.Empty<CheckStatus>();
 
     /// <summary>The arm a bundle opens on: the plan's review arm (manual mode), else baseline.</summary>
     internal static string DefaultArm(string dir)
@@ -245,10 +250,30 @@ internal sealed class BundleConflicts
                     findings.Add(f with { Arm = arm, Source = rel, EvidenceStrength = ev, NewOnArm = before is null ? null : !before.Contains(f.Identity) });
             }
         }
+        var checks = new List<CheckStatus>();
+        foreach (var f in Directory.EnumerateFiles(Path.Combine(dir, "receipts"), $"*__{arm}*.json").OrderBy(x => x, StringComparer.Ordinal))
+        {
+            var name = Path.GetFileNameWithoutExtension(f);
+            if (name != name.Split("__")[0] + "__" + arm && name != name.Split("__")[0] + "__" + arm + "__arm") continue;   // not a diff or reverse receipt
+            using var rd = JsonDocument.Parse(File.ReadAllText(f));
+            var r = rd.RootElement;
+            var check = name.Split("__")[0];
+            var exec = r.TryGetProperty("result", out var res) && res.TryGetProperty("execution", out var ex) && ex.ValueKind == JsonValueKind.String ? ex.GetString()! : "";
+            if (exec is "skipped-user" or "not-opted-in" || checks.Any(c => c.CheckId == check)) continue;   // not ticked, or already listed
+            bool accepted = r.TryGetProperty("validation", out var val) && val.TryGetProperty("accepted", out var acc) && acc.ValueKind == JsonValueKind.True;
+            string why = string.Join("; ", (r.TryGetProperty("validation", out var v2) && v2.TryGetProperty("rejections", out var rj) && rj.ValueKind == JsonValueKind.Array
+                ? rj.EnumerateArray().Select(x => $"{x.GetProperty("cause").GetString()}: {(x.TryGetProperty("detail", out var d) ? d.GetString() : "")}") : Enumerable.Empty<string>()));
+            if (why.Length == 0 && res.ValueKind == JsonValueKind.Object)
+                why = new[] { "why", "reason", "sentence", "note" }.Select(k => res.TryGetProperty(k, out var w) && w.ValueKind == JsonValueKind.String ? w.GetString() : null).FirstOrDefault(x => x is { Length: > 0 }) ?? exec;
+            string state = accepted && exec == "completed" ? "ran" : exec.StartsWith("rejected") || (!accepted && exec == "completed") ? "rejected"
+                         : exec.StartsWith("blocked") ? "blocked" : exec.Length == 0 ? "no result" : exec;
+            int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check);
+            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why));
+        }
         return new BundleConflicts
         {
             Dir = dir, PlanId = planId, Arm = arm, Targets = targets, VerifyPath = verifyPath, VerifySummary = verifySummary,
-            Rows = rows, Notes = notes, EmitsRead = read, Findings = findings,
+            Rows = rows, Notes = notes, EmitsRead = read, Findings = findings, Checks = checks,
         };
     }
 

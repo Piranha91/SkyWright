@@ -304,6 +304,9 @@ internal static class HarnessTarget
         _ => "HOUSECARL_" + key.ToUpperInvariant(),
     };
 
+    /// <summary>Forget the loaded config, so the next read takes the environment and the config file afresh.</summary>
+    internal static void Reload() { _configLoaded = false; _config = null; }
+
     static void LoadConfig()
     {
         if (_configLoaded) return;

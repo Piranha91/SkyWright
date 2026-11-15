@@ -85,7 +85,7 @@ public class PatchWriteTests : IClassFixture<TiltedRefWorld>
     }
 
     Task<PatchWriter> Start() => PatchWriter.StartAsync(ServerExe(),
-        new WriteTarget(_w.Instance, "Default", _w.DataDir),
+        new WriteTarget(_w.Instance, "Default", _w.DataDir, Path.Combine(_w.Instance, "mods")),
         Path.Combine(_w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), TestCorpus.Path, _ => { });
 
     [Fact]

@@ -681,6 +681,10 @@ def resolve_in_place(ctx: Context) -> dict:
             raise Refusal(f"{m} is not an enabled mod folder of profile {prof}; a disabled mod is not part of this "
                           f"profile, so enable it in MO2 or pick a profile that loads it.")
     sel_low = {m.lower() for m in sel}
+    for need in ("loadorder.txt", "plugins.txt"):
+        if not (pdir / need).is_file():
+            raise Refusal(f"the profile {prof} has no {need} at {fwd(pdir)}, so its load order cannot be read; open the "
+                          f"profile in MO2 once so it writes the file, or pick another profile.")
     order = ctx.names.many(_profile_lines(pdir / "loadorder.txt"))
     starred = {l[1:].strip().lower() for l in _profile_lines(pdir / "plugins.txt") if l.startswith("*")}
     active = [p for p in order if p.lower() in starred or p in OFFICIAL_MASTERS]

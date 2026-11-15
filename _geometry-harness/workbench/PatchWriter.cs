@@ -39,6 +39,8 @@ internal sealed class PatchWriter : IAsyncDisposable
     internal static async Task<PatchWriter> StartAsync(string serverExe, WriteTarget target,
                                                        string dataDir, string corpusPath, Action<string> log, CancellationToken ct = default)
     {
+        if (target.Output is null)
+            throw new InvalidOperationException($"writes to {target} are refused: no Output Folder is chosen; choose one in the launcher or set WB_OUTPUT (the instance's mods folder itself is allowed).");
         if (OutputFolderRule.Check(target.PatchRoot, target.Instance, target.Profile, target.Game) is { } why)
             throw new InvalidOperationException($"writes to {target} are refused: {why}");
         if (!File.Exists(serverExe))

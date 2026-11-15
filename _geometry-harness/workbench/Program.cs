@@ -35,7 +35,7 @@ internal static class Program
     /// <summary>--bundle DIR [--arm A]: verify and read the bundle, rank its rows, and turn the cells its rows sit in into
     /// a worklist (one placeholder shot per cell: the workbench frames the camera on the reference after each build), so
     /// viewprobe's worklist cell switch is what loads another conflict's cell. Returns viewprobe's arguments.</summary>
-    static string[] OpenBundle(string[] args)
+    static string[]? OpenBundle(string[] args)
     {
         var rest = new List<string>(); string? dir = null; string? arm = null; string? outDir = null;
         for (int i = 0; i < args.Length; i++)
@@ -61,7 +61,13 @@ internal static class Program
         var first = Shell.Visible.FirstOrDefault(r => r.Row.Cell is not null);
         var firstFinding = first is null ? Shell.Findings.FirstOrDefault(f => f.Row.Clickable) : null;
         if (first is null && firstFinding is null)
-            throw new InvalidOperationException($"no Conflicts or Findings row on arm '{arm}' names a reference whose cell the bundle records; there is nothing to open.");
+        {
+            // nothing to build a scene for: the results are listed in the window, and the Start tab stays usable
+            Shell.WorklistCells = Array.Empty<string>(); Shell.CurrentRow = null; Shell.PendingLand = null;
+            if (Shell.Window is not null) { Shell.FillConflicts(); Shell.FillFindings(); }
+            Shell.SetBanner($"no row on arm '{arm}' names a placed reference to open; the results are listed ({Shell.Ranked.Count} Conflicts, {Shell.Findings.Count} Findings rows).");
+            return null;
+        }
         var cells = SessionCells.From(new[] { first?.Row.Cell }.Concat(Shell.Ranked.Select(r => r.Row.Cell)),
                                       new[] { firstFinding?.Row.Cell }.Concat(Shell.Findings.Where(f => f.Row.Clickable).Select(f => f.Row.Cell))).ToList();
         Shell.WorklistCells = cells;
@@ -95,21 +101,49 @@ internal static class Program
         if (!args.Contains("--bundle") && !args.Contains("--instance"))
         {
             var window = Shell.EnsureWindow("workbench — start");
-            string? ready = null;
-            var frame = new System.Windows.Threading.DispatcherFrame();
-            Shell.Launcher.BundleReady += b => window.Dispatcher.BeginInvoke(() => { ready = b; frame.Continue = false; });
-            window.Closed += (_, _) => frame.Continue = false;
+            Shell.Launcher.RunBlocker = () => Shell.Current is not null ? "a scene is open in this window; restart the workbench to run another selection." : null;
             window.Show();
-            System.Windows.Threading.Dispatcher.PushFrame(frame);
-            if (ready is null) { Shell.StopServer(); return 0; }
-            var l = Shell.Launcher;
-            // the session's writes go under the launcher's Output Folder; its re-checks and files under the Work Folder
-            WorkbenchHost.ManualTarget = new WriteTarget(l.Instance!, l.Profile!, Path.Combine(l.Game!, "Data"), l.Output);
-            Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(l.RunFolder!, "workbench"));
-            args = new[] { "--bundle", ready, "--instance", l.Instance!, "--profile", l.Profile!, "--game", l.Game! };
+            while (true)
+            {
+                string? ready = null;
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                Action<string> onReady = b => window.Dispatcher.BeginInvoke(() => { ready = b; frame.Continue = false; });
+                EventHandler onClosed = (_, _) => frame.Continue = false;
+                Shell.Launcher.BundleReady += onReady; window.Closed += onClosed;
+                if (!Shell.Closed) System.Windows.Threading.Dispatcher.PushFrame(frame);
+                Shell.Launcher.BundleReady -= onReady; window.Closed -= onClosed;
+                if (ready is null) { Shell.StopServer(); return 0; }
+                var l = Shell.Launcher;
+                // the session's writes go under the launcher's Output Folder; its re-checks and files under the Work Folder
+                WorkbenchHost.ManualTarget = new WriteTarget(l.Instance!, l.Profile!, Path.Combine(l.Game!, "Data"), l.Output);
+                Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(l.RunFolder!, "workbench"));
+                string[]? opened;
+                try { opened = OpenBundle(new[] { "--bundle", ready, "--instance", l.Instance!, "--profile", l.Profile!, "--game", l.Game! }); }
+                catch (InvalidOperationException ex) { Shell.SetBanner("the run's bundle could not be opened: " + ex.Message); continue; }
+                if (opened is null) continue;                 // listed with no scene; another run can open the next
+                args = opened;
+                break;
+            }
         }
-        try { args = OpenBundle(args); }
-        catch (InvalidOperationException ex) { Console.Error.WriteLine("workbench: " + ex.Message); return 2; }
+        else
+        {
+            string[]? opened;
+            try { opened = OpenBundle(args); }
+            catch (InvalidOperationException ex) { Console.Error.WriteLine("workbench: " + ex.Message); return 2; }
+            if (opened is null)
+            {
+                // a bundle with nothing to open: shown in the window with no scene until it is closed
+                var window = Shell.EnsureWindow("workbench — results");
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                window.Closed += (_, _) => frame.Continue = false;
+                window.Show();
+                Shell.FillConflicts(); Shell.FillFindings();
+                System.Windows.Threading.Dispatcher.PushFrame(frame);
+                Shell.StopServer();
+                return 0;
+            }
+            args = opened;
+        }
         var a = args.Contains("--interactive") ? args : args.Append("--interactive").ToArray();
         var entry = typeof(InteractiveViewer).Assembly.EntryPoint
             ?? throw new InvalidOperationException("viewprobe has no entry point");

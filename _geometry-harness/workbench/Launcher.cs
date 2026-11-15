@@ -8,6 +8,7 @@ namespace Workbench;
 internal sealed record LauncherMod(string Name, int Priority, bool Enabled, bool Separator)
 {
     internal bool Selected { get; set; }
+    internal bool Unmanaged { get; init; }
 }
 
 /// <summary>The launcher's state (DESIGN section 1 and 6): the mode, the chosen instance, profile and game, the profile's
@@ -39,6 +40,8 @@ internal sealed class Launcher : IAsyncDisposable
     internal Task? RunTask { get; private set; }
     /// <summary>Raised on the run's thread with the verified bundle's folder when a run is done (the window opens it).</summary>
     internal event Action<string>? BundleReady;
+    /// <summary>Why Run cannot start now (a scene is open in the window), or null.</summary>
+    internal Func<string?>? RunBlocker { get; set; }
     internal string RunState { get; private set; } = "idle";
     internal string? RunRefusal { get; private set; }
 
@@ -62,6 +65,8 @@ internal sealed class Launcher : IAsyncDisposable
         if (!File.Exists(Mo2Instance.IniPath(inst)) && !Directory.Exists(Path.Combine(inst, "profiles")))
             throw new InvalidOperationException($"'{inst}' is not an MO2 instance: it has no ModOrganizer.ini and no profiles folder.");
         var root = Mo2Instance.LayoutRoot(inst);
+        if (!string.Equals(OutputFolderPolicy.Full(root), inst, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"'{inst}' keeps its mods and profiles in '{root}' (ModOrganizer.ini base_directory), and the probes read <instance>/mods and <instance>/profiles, so a manual run cannot use this instance yet.");
         var prof = string.IsNullOrWhiteSpace(profile) ? Mo2Instance.ReadSelectedProfile(inst) : profile.Trim();
         if (prof is null) throw new InvalidOperationException($"name a profile of '{inst}'; its ModOrganizer.ini selects none.");
         var profDir = Path.Combine(root, "profiles", prof);
@@ -81,7 +86,7 @@ internal sealed class Launcher : IAsyncDisposable
             for (int i = 0; i < lines.Count; i++)
             {
                 var name = lines[i][1..].Trim();
-                Mods.Add(new LauncherMod(name, lines.Count - 1 - i, lines[i][0] != '-', name.EndsWith("_separator", StringComparison.OrdinalIgnoreCase)));
+                Mods.Add(new LauncherMod(name, lines.Count - 1 - i, lines[i][0] != '-', name.EndsWith("_separator", StringComparison.OrdinalIgnoreCase)) { Unmanaged = lines[i][0] == '*' });
             }
             Output = null; WorkFolder = null; WorkFolderChosen = false; RunState = "idle"; RunRefusal = null;
         }
@@ -117,6 +122,7 @@ internal sealed class Launcher : IAsyncDisposable
             {
                 var m = Mods.FirstOrDefault(x => string.Equals(x.Name, n, StringComparison.OrdinalIgnoreCase))
                         ?? throw new InvalidOperationException($"'{n}' is not a mod folder of profile '{Profile}'.");
+                if (m.Unmanaged) throw new InvalidOperationException($"'{n}' is an unmanaged entry (a DLC or a file MO2 does not manage), not a mod folder, so it cannot be selected.");
                 if (m.Separator) throw new InvalidOperationException($"'{n}' is a separator, not a mod folder; tick the mods under it.");
                 if (!m.Enabled && h != "remove")
                     throw new InvalidOperationException($"'{n}' is disabled: a disabled mod is not part of this profile; enable it in MO2 or pick a profile that loads it.");
@@ -222,6 +228,10 @@ internal sealed class Launcher : IAsyncDisposable
             if (!roots.Any(r => Directory.Exists(r) && Directory.EnumerateFiles(r, "*_SWAP.ini").Any()))
                 return "no enabled mod folder and not the game's Data holds a *_SWAP.ini, so the profile loads no Base Object Swapper overlay to read";
         }
+        if (c.Id is "patch.discovery-installed" && HarnessTarget.SearchRoots.Length == 0)
+            return "this machine names no search roots for MO2 instances (HOUSECARL_SEARCH_ROOTS or the harness config's searchRoots), which the installed-patch search needs";
+        if (c.Id is "patch.discovery-installed" or "patch.discovery-pool" or "patch.discovery-fomod" && HarnessTarget.DownloadPool.Length == 0)
+            return "this machine names no download pool (HOUSECARL_DOWNLOAD_POOL or the harness config's downloadPool), which the patch search reads";
         if (c.Id == "patch.author-advice")
         {
             var sel = Mods.Where(m => m.Selected).ToList();
@@ -244,6 +254,7 @@ internal sealed class Launcher : IAsyncDisposable
     internal string Run()
     {
         if (Instance is null) throw new InvalidOperationException("there is nothing to run: open a profile first (workbench_act verb open_profile).");
+        if (RunBlocker?.Invoke() is { } blocked) throw new InvalidOperationException(blocked);
         if (RunTask is { IsCompleted: false }) throw new InvalidOperationException("a run is already going; read workbench_state with project [\"launcher\"] and wait_seconds for it.");
         var sel = Mods.Where(m => m.Selected).Select(m => m.Name).ToList();
         if (sel.Count == 0) throw new InvalidOperationException("no mod folder is selected; select the mods to evaluate (workbench_act verb select_mods).");
@@ -331,15 +342,18 @@ internal sealed class Launcher : IAsyncDisposable
 
     internal async Task<CallToolResult> ForwardAsync(string tool, IDictionary<string, JsonElement>? args, CancellationToken ct)
     {
-        string output; Mo2OutputLayout layout;
+        string output; Mo2OutputLayout layout; string? work;
         lock (_gate)
         {
             NeedProfile(tool);
             if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output): in manual mode every houseCARL write goes under it.");
-            output = Output; layout = Layout();
+            output = Output; layout = Layout(); work = WorkFolder;
         }
-        var (send, refusal) = ForwardRule.Prepare(tool, args is null ? null : new Dictionary<string, JsonElement>(args), output, layout);
+        var (send, refusal) = ForwardRule.Prepare(tool, args is null ? null : new Dictionary<string, JsonElement>(args), output, layout, work);
         if (refusal is not null) return StateTools.Refuse(refusal);
+        // the folder an allowed to_file goes in may not exist yet; it is under the Output or the Work Folder
+        if (send!.TryGetValue("to_file", out var tfe) && tfe.ValueKind == JsonValueKind.String && Path.GetDirectoryName(tfe.GetString()!) is { Length: > 0 } tfd)
+            Directory.CreateDirectory(tfd);
         var server = await BoundAsync();
         return await server.ForwardAsync(tool, send!, ct);
     }
@@ -364,7 +378,7 @@ internal sealed class Launcher : IAsyncDisposable
             {
                 mode = Mode, instance = Instance, game = Game, profile = Profile,
                 profiles = Instance is null ? Array.Empty<string>() : ProfilesOf(Instance),
-                mods = Mods.Select(m => new { name = m.Name, priority = m.Priority, enabled = m.Enabled, separator = m.Separator, selected = m.Selected }).ToList(),
+                mods = Mods.Select(m => new { name = m.Name, priority = m.Priority, enabled = m.Enabled, separator = m.Separator, unmanaged = m.Unmanaged, selected = m.Selected }).ToList(),
                 probes = Registry().Select(c => new
                 {
                     checkId = c.Id, kind = c.Kind, title = c.Title, selectable = WhyNotHere(c) is null, selected = Probes.Contains(c.Id),
@@ -377,7 +391,7 @@ internal sealed class Launcher : IAsyncDisposable
         }
     }
 
-    static string[] ProfilesOf(string inst)
+    internal static string[] ProfilesOf(string inst)
     {
         var dir = Path.Combine(Mo2Instance.LayoutRoot(inst), "profiles");
         return Directory.Exists(dir) ? Directory.GetDirectories(dir).Select(Path.GetFileName).OfType<string>().OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray() : Array.Empty<string>();
