@@ -169,7 +169,8 @@ public sealed class StateToolsTests : IAsyncLifetime
     public async Task The_server_publishes_the_two_tools_with_their_inputs()
     {
         var tools = await _client.ListToolsAsync();
-        Assert.Equal(new[] { "workbench_act", "workbench_state" }, tools.Select(t => t.Name).OrderBy(n => n, StringComparer.Ordinal));
+        // the workbench's own two, and otherwise only forwarded houseCARL tools (DESIGN R2.7; B13 lists them)
+        Assert.Equal(new[] { "workbench_act", "workbench_state" }, tools.Select(t => t.Name).Where(n => !n.StartsWith("housecarl_")).OrderBy(n => n, StringComparer.Ordinal));
         var act = tools.Single(t => t.Name == "workbench_act").JsonSchema;
         var props = P(act, "properties").EnumerateObject().Select(p => p.Name).ToHashSet();
         foreach (var p in new[] { "verb", "conflict", "ref", "delta", "turn_degrees", "position", "rotation_degrees", "dry_run", "patch" })
@@ -361,5 +362,114 @@ public sealed class StateToolsTests : IAsyncLifetime
             Assert.True(names.Contains(n), $"the workbench endpoint does not forward {n}; it lists {string.Join(", ", names.OrderBy(x => x))}");
         Assert.DoesNotContain("housecarl_set_mo2_instance", names);
         Assert.DoesNotContain("housecarl_set_tool_path", names);
+    }
+
+    // ---- B13b (Gate B review H1, DESIGN R4.1): every forwarded write lands under the Output Folder or is refused ----
+
+    static Dictionary<string, (long, DateTime)> Listing(params string[] roots) =>
+        roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
+             .ToDictionary(p => p, p => File.Exists(p) ? (new FileInfo(p).Length, File.GetLastWriteTimeUtc(p)) : (-1L, Directory.GetLastWriteTimeUtc(p)));
+
+    static void Unchanged(Dictionary<string, (long, DateTime)> before, Dictionary<string, (long, DateTime)> after, string what)
+    {
+        var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
+        Assert.True(changed.Count == 0, $"{what} changed: {string.Join("; ", changed.Take(5))}");
+    }
+
+    static List<Dictionary<string, object?>> MoveOps(float z) => new()
+    {
+        new() { ["formid"] = TiltedRefWorld.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = $"512,-256,{z}" },
+    };
+
+    /// <summary>A free-mode profile on a synthetic world, with the Output Folder outside the instance and the game.</summary>
+    async Task<(TiltedRefWorld W, string O, string Game)> OpenWorld()
+    {
+        Environment.SetEnvironmentVariable("WB_CORPUS", TestCorpus.Path);
+        var w = new TiltedRefWorld();
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        var o = Path.Combine(w.Root, "out");
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", w.Instance), ("profile", "Default"), ("game", game)));
+        await Ok("workbench_act", A(("verb", "set_output"), ("folder", o)));
+        return (w, o, game);
+    }
+
+    [Fact]
+    public async Task B13b_a_apply_with_no_out_path_lands_in_the_output_folder_and_the_instance_is_unchanged()
+    {
+        var (w, o, game) = await OpenWorld();
+        using var _ = w;
+        var before = Listing(w.Instance, game);
+        var (err, text) = await Call("housecarl_apply", A(("ops", MoveOps(80f)), ("patch", "WbFwd")));
+        Assert.False(err, "the forwarded housecarl_apply refused: " + text);
+        Assert.True(File.Exists(Path.Combine(o, "houseCARL - WbFwd", "WbFwd.esp")), $"no patch at {o}\\houseCARL - WbFwd\\WbFwd.esp: {text}");
+        Unchanged(before, Listing(w.Instance, game), "the instance or the game folder");
+    }
+
+    [Fact]
+    public async Task B13b_b_an_out_path_outside_the_output_folder_is_refused()
+    {
+        var (w, o, _) = await OpenWorld();
+        using var _w = w;
+        var elsewhere = Path.Combine(w.Root, "elsewhere");
+        var why = await Refused("housecarl_apply", A(("ops", MoveOps(81f)), ("patch", "WbElse"), ("out_path", elsewhere)));
+        Assert.Contains("Output Folder", why);
+        Assert.False(Directory.Exists(elsewhere), "the refused folder was created");
+    }
+
+    [Fact]
+    public async Task B13b_c_an_in_place_write_is_refused()
+    {
+        var (w, _, game) = await OpenWorld();
+        using var _w = w;
+        var before = Listing(w.Instance, game);
+        var why = await Refused("housecarl_apply", A(("ops", MoveOps(82f)), ("in_place", true)));
+        Assert.Contains("in_place", why);
+        Unchanged(before, Listing(w.Instance, game), "the instance or the game folder");
+    }
+
+    [Fact]
+    public async Task B13b_d_into_a_houseCARL_folder_under_the_instances_mods_is_refused_when_the_output_is_elsewhere()
+    {
+        var (w, _, game) = await OpenWorld();
+        using var _w = w;
+        var owned = Path.Combine(w.Instance, "mods", "houseCARL - Old");
+        Directory.CreateDirectory(owned);
+        File.WriteAllText(Path.Combine(owned, "meta.ini"), "[houseCARL]\r\ngenerated=true\r\n");
+        File.WriteAllText(Path.Combine(owned, "Old.esp"), "old bytes");
+        var before = Listing(w.Instance, game);
+        foreach (var into in new[] { "houseCARL - Old", "Old", owned })
+            Assert.Contains("Output Folder", await Refused("housecarl_apply", A(("ops", MoveOps(83f)), ("into", into))));
+        Unchanged(before, Listing(w.Instance, game), "the instance or the game folder");
+    }
+
+    [Fact]
+    public async Task B13b_e_a_write_tool_whose_lane_takes_no_out_path_is_refused_in_one_sentence()
+    {
+        var (w, _, game) = await OpenWorld();
+        using var _w = w;
+        var before = Listing(w.Instance, game);
+        Assert.Contains("manual mode", await Refused("housecarl_create_plugin", A(("name", "WbNew"))));
+        Unchanged(before, Listing(w.Instance, game), "the instance or the game folder");
+    }
+
+    [Fact]
+    public async Task B13b_f_a_forwarded_read_answers_from_the_bound_instance()
+    {
+        var (w, _, _) = await OpenWorld();
+        using var _w = w;
+        var (err, text) = await Call("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }), ("format", "json")));
+        Assert.False(err, "the forwarded housecarl_records refused: " + text);
+        Assert.Contains("HcWbRef", text);                        // the reference only the synthetic world has
+    }
+
+    [Fact]
+    public async Task B13b_g_a_decompile_out_path_outside_the_output_folder_is_refused()
+    {
+        var (w, _, _) = await OpenWorld();
+        using var _w = w;
+        var elsewhere = Path.Combine(w.Root, "elsewhere-psc");
+        Assert.Contains("Output Folder", await Refused("housecarl_decompile_script", A(("pex", Path.Combine(w.Root, "HcWbScript.pex")), ("out_path", elsewhere))));
+        Assert.Contains("out_path", await Refused("housecarl_decompile_script", A(("pex", Path.Combine(w.Root, "HcWbScript.pex")))));
+        Assert.False(Directory.Exists(elsewhere));
     }
 }

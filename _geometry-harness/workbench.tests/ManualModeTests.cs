@@ -220,6 +220,28 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         Assert.Empty(Directory.GetFiles(_w.Root, "WbRoot*.esp", SearchOption.AllDirectories));
     }
 
+    /// <summary>Coordinator finding on the forwarding slice: the server's out_path lane and the workbench's Output Folder
+    /// rule are one rule with one owner. On the same folders both allow the same ones, and every refusal the server gives
+    /// carries the workbench rule's own sentence, so the two callers cannot disagree.</summary>
+    [Fact]
+    public async Task B3g_the_server_lane_and_the_workbench_rule_give_one_verdict_and_one_sentence()
+    {
+        var game = Path.GetDirectoryName(_w.DataDir)!;
+        var mods = Path.Combine(_w.Instance, "mods");
+        await using var c = await Server();
+        foreach (var o in new[] { _w.DataDir, Path.Combine(_w.DataDir, "meshes"), Path.Combine(mods, "WorldMod"), Path.Combine(mods, "NewSub"),
+                                  Path.Combine(_w.Instance, "overwrite"), Path.Combine(_w.Instance, "profiles", "Default"), Path.Combine(_w.Instance, "profiles"),
+                                  Path.Combine(_w.Instance, "NewOut"), _w.Instance, game, Path.Combine(game, "Other"), mods,
+                                  Path.Combine(_w.Root, "one-rule-" + Guid.NewGuid().ToString("N")[..6]) })
+        {
+            var wb = (string?)Contract.Static("OutputFolderRule", "Check", "the output-folder rule (GATE-B.md 3.2)", o, _w.Instance, "Default", game);
+            var (err, text) = await Call(c, "housecarl_apply", new() { ["ops"] = Move(77f), ["patch"] = "WbOne", ["out_path"] = o });
+            bool refused = err || text.TrimStart().StartsWith("error:");
+            Assert.True(refused == (wb is not null), $"{o}: the workbench rule {(wb is null ? "allows it" : "refuses it")} but the server {(refused ? "refused" : "wrote")}: {text}");
+            if (wb is not null) Assert.True(text.Contains(wb), $"{o}: the server's refusal is not the rule's sentence.\n  rule:   {wb}\n  server: {text}");
+        }
+    }
+
     [Fact]
     public async Task B3e_an_out_path_in_the_games_Data_or_an_existing_mod_folder_is_refused_by_the_server()
     {
