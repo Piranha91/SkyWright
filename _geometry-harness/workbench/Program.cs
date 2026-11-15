@@ -59,6 +59,19 @@ internal static class Program
         Shell.Ranked = ConflictRanking.Rank(Shell.Bundle.Rows, Shell.Bundle.Targets, Shell.Severity);
         Shell.Findings = FindingRanking.Rank(Shell.Bundle.Findings, Shell.Bundle.Targets, Shell.Severity);
         var first = Shell.Visible.FirstOrDefault(r => r.Row.Cell is not null);
+        // a review saved earlier reopens on the row it was on, so its cell (and that cell's edits) come back first
+        try
+        {
+            IWorkbenchSurface live = new LiveSurface();
+            if (SessionFile.PathFor(live.WorkFolder, Shell.Bundle.PlanId, arm).Path is { } sp
+                && SessionFile.StartRank(SessionFile.Read(sp), Shell.Visible) is { } start
+                && Shell.Visible.FirstOrDefault(r => r.Rank == start && r.Row.Cell is not null) is { } saved)
+            {
+                first = saved;
+                WorkbenchHost.Say($"reopening the saved review on conflict {start}");
+            }
+        }
+        catch (InvalidOperationException ex) { WorkbenchHost.Say(ex.Message); }
         var firstFinding = first is null ? Shell.Findings.FirstOrDefault(f => f.Row.Clickable) : null;
         if (first is null && firstFinding is null)
         {
