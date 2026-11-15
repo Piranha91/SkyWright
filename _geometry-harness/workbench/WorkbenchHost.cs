@@ -207,7 +207,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         undo.Click += (_, _) => { _session.Undo(); AfterStage(); };
         dry.Click += async (_, _) => await CommitAsync(dryRun: true, "Workbench");
         write.Click += async (_, _) => await CommitAsync(dryRun: false, "Workbench");
-        var bar = new DockPanel { LastChildFill = true };
+        // a fixed height, so the 3D view keeps its size whatever the edits list, the status line or the buttons hold
+        var bar = new DockPanel { LastChildFill = true, Height = 240 };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(marksBtn); buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write);
         DockPanel.SetDock(buttons, Dock.Right);
@@ -580,8 +581,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     // ---- the review controls: view-only (originals, ghost, hide, see-through, isolate, restore), precise moves
     // (typed offset, axis lock, snap, drop), decisions, and the pending-edits list with a revert per reference.
     // Each control calls the same method its state-tool verb calls.
-    readonly Button _restore = new() { Content = "Restore visibility", Margin = new Thickness(4), Background = System.Windows.Media.Brushes.IndianRed,
-                                       Foreground = System.Windows.Media.Brushes.White, FontWeight = FontWeights.Bold, Visibility = Visibility.Collapsed };
+    readonly Button _restore = new() { Content = "Restore visibility", Margin = new Thickness(4), Width = 300, Background = System.Windows.Media.Brushes.IndianRed,
+                                       Foreground = System.Windows.Media.Brushes.White, FontWeight = FontWeights.Bold, Visibility = Visibility.Hidden };
     readonly StackPanel _pendingRows = new();
     readonly TextBox _reason = new() { Width = 180, Margin = new Thickness(4), ToolTip = "a few words saying why" };
 
@@ -621,7 +622,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             return _viewState.Isolate(a, b);
         })));
         _restore.Click += (_, _) => Do(() => _viewState.Restore());
-        _viewState.Changed += _ => { _restore.Content = _viewState.Label.Length > 0 ? _viewState.Label : "Restore visibility"; _restore.Visibility = _viewState.Active ? Visibility.Visible : Visibility.Collapsed; };
+        _viewState.Changed += _ => { _restore.Content = _viewState.Label.Length > 0 ? _viewState.Label : "Restore visibility"; _restore.Visibility = _viewState.Active ? Visibility.Visible : Visibility.Hidden; };
         row.Children.Add(_restore);
 
         var offset = new TextBox { Width = 90, Margin = new Thickness(4), ToolTip = "a typed move, such as +120 x, -30 z or 15°" };
@@ -699,7 +700,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         _session.Changed += _ => Fill();
         Fill();
-        return new Expander { Header = "Edits", IsExpanded = true, Content = new ScrollViewer { MaxHeight = 140, Content = _pendingRows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+        return new Expander { Header = "Edits", IsExpanded = true, Content = new ScrollViewer { Height = 90, Content = _pendingRows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
     }
     readonly ViewTints _tints = new();
     internal ViewState View => _viewState;
@@ -749,7 +750,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             plugins = ps;
         }
         else plugins = new[] { plugin! };
-        var drawn = DrawnAll().Select(r => (r.Ref.RefKey, RefPlacementEdit.BakedPose(r.Ref))).ToList();
+        // a Base Object Swapper reference is drawn with the swap's base and transform, not its record's, so it is left out
+        var drawn = DrawnAll().Where(r => !r.Ref.BosSwapped).Select(r => (r.Ref.RefKey, RefPlacementEdit.BakedPose(r.Ref))).ToList();
         var winners = await w.WinnersAsync(drawn);
         return (ModTint.Select(drawn.Select(d => d.RefKey), winners, plugins), null);
     }

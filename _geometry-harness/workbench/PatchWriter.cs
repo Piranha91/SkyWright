@@ -215,14 +215,19 @@ internal sealed class PatchWriter : IAsyncDisposable
     {
         var list = keys.Distinct().ToList();
         var result = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, (string, List<FieldValue>)>();
-        if (list.Count == 0) return result;
+        // in chunks, so each answer stays under the server's render ceiling; a cut answer is refused below, never read short
+        foreach (var chunk in list.Chunk(60))
+        {
         var text = await CallAsync("housecarl_records", new Dictionary<string, object?>
         {
-            ["formids"] = list.Select(k => k.ToString()).ToArray(), ["project"] = project, ["format"] = "json", ["limit"] = list.Count + 10,
+            ["formids"] = chunk.Select(k => k.ToString()).ToArray(), ["project"] = project, ["format"] = "json", ["limit"] = chunk.Length + 10,
+            ["max_chars"] = 1_000_000,
         }, ct);
         using var doc = JsonDocument.Parse(text);
         if (!doc.RootElement.TryGetProperty("records", out var recs))
             throw new InvalidOperationException("the server's records answer carried no records; read it with housecarl_records to see why.");
+        if (doc.RootElement.TryGetProperty("truncated", out var cut) && cut.ValueKind == JsonValueKind.True)
+            throw new InvalidOperationException($"the server cut its records answer for {chunk.Length} references short; read them with housecarl_records to see why.");
         foreach (var r in recs.EnumerateArray())
         {
             var fid = r.TryGetProperty("formid", out var f) ? f.GetString() : null;
@@ -235,6 +240,7 @@ internal sealed class PatchWriter : IAsyncDisposable
                     if (x.TryGetProperty("path", out var path) && x.TryGetProperty("value", out var value))
                         fields.Add(new FieldValue(path.GetString()!, value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText()));
             result[k] = (r.TryGetProperty("winner", out var w) ? w.GetString() ?? "" : "", fields);
+        }
         }
         foreach (var k in list)
             if (!result.ContainsKey(k)) throw new InvalidOperationException($"the server's answer had no row for {k}; read it with housecarl_records to see why.");
