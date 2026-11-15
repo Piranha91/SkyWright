@@ -135,10 +135,45 @@ public static class CaptureViews
     public sealed record DropAnswer(string Key, float? Distance, string? Onto, string? OntoName, string? Refusal);
 
     /// <summary>A live scene's drawn refs and terrain, from its pick shapes at their current placements.</summary>
-    internal static Geometry FromPickShapes(IEnumerable<PickShape> shapes) => new();
+    internal static Geometry FromPickShapes(IEnumerable<PickShape> shapes)
+    {
+        var g = new Geometry();
+        foreach (var s in shapes)
+        {
+            if (s.Kind == PickKind.Ref && !s.Ref.RefKey.IsNull) g.Add(s.Ref.RefKey.ToString(), s.Ref.BaseEditorId ?? s.Ref.RefKey.ToString(), s.Verts, s.Tris);
+            else if (s.Kind == PickKind.Terrain) g.Add(TerrainKey, TerrainKey, s.Verts, s.Tris);
+        }
+        return g;
+    }
 
-    /// <summary>The support rays' answer as a distance: the nearest drawn surface below the ref's lowest band.</summary>
-    public static DropAnswer Drop(Geometry g, string key) => new(key, null, null, null, "drop to surface is not built yet.");
+    /// <summary>The key the terrain carries in a live geometry.</summary>
+    public const string TerrainKey = "terrain";
+
+    /// <summary>The support rays' answer as a distance: the nearest drawn surface below the ref's lowest band, which the
+    /// ref can be lowered onto. It lowers only: a ref already sunk into a surface (another drawn surface between its
+    /// lowest band and its top) is refused, as is one with nothing within reach below.</summary>
+    public static DropAnswer Drop(Geometry g, string key)
+    {
+        if (!g.Refs.TryGetValue(key, out var p) || p.I.Count == 0)
+            return new(key, null, null, null, $"{key} is not drawn in this scene, so it has nothing to drop.");
+        // sunk: cast from just under the top, over the lowest band's points; another surface above the band is one it is sunk into
+        float zmin = p.Box.Min.Z, zmax = p.Box.Max.Z;
+        foreach (var v in p.V)
+        {
+            if (v.Z > zmin + SupportBand) continue;
+            var top = new Vector3(v.X, v.Y, zmax + 0.5f);
+            var (above, d) = FirstBelow(g, key, top, zmax - zmin);
+            if (above is not null && zmax + 0.5f - d > zmin + 0.5f)
+                return new(key, null, null, null, $"{key} is already sunk into {Describe(g, above)}; drop lowers only, so move it up first.");
+        }
+        var hits = SupportHits(g, key, p).Where(h => h.Hit is not null).ToList();
+        if (hits.Count == 0)
+            return new(key, null, null, null, $"nothing drawn lies within {SupportReach:0} units below {key}; drop lowers only, onto a drawn surface below it.");
+        var nearest = hits.MinBy(h => h.Distance);
+        return new(key, MathF.Max(nearest.Distance - 0.5f, 0f), nearest.Hit, g.Refs[nearest.Hit!].Name, null);
+    }
+
+    static string Describe(Geometry g, string k) => k == TerrainKey ? "the terrain" : $"{k} ({g.Refs[k].Name})";
 
     static float BoxGap(Aabb a, Aabb b) => SpatialOverlap.BoxDistance(a, b);
 
@@ -170,32 +205,50 @@ public static class CaptureViews
             if (c.Distance <= TouchTolerance || c.Crosses) touches.Add(r.Key);
         }
         // rests on: the first drawn geometry straight below the participant's lowest band of vertices
-        float zmin = p.Box.Min.Z;
-        var low = new List<Vector3>();
-        foreach (var v in p.V) if (v.Z <= zmin + SupportBand) low.Add(v);
-        int step = Math.Max(1, low.Count / SupportRays);
-        for (int i = 0; i < low.Count; i += step)
+        foreach (var (hit, _) in SupportHits(g, key, p))
         {
-            var o = low[i] + new Vector3(0, 0, 0.5f);
-            string? hit = null; float best = SupportReach;
-            foreach (var r in g.Refs.Values)
-            {
-                if (r.Key == key || r.I.Count == 0) continue;
-                if (o.X < r.Box.Min.X || o.X > r.Box.Max.X || o.Y < r.Box.Min.Y || o.Y > r.Box.Max.Y) continue;
-                if (r.Box.Min.Z > o.Z || r.Box.Max.Z < o.Z - SupportReach) continue;
-                var vs = r.V; var ix = r.I;
-                for (int t = 0; t + 2 < ix.Count; t += 3)
-                {
-                    float d = DownHit(o, vs[ix[t]], vs[ix[t + 1]], vs[ix[t + 2]]);
-                    if (d >= 0f && d < best) { best = d; hit = r.Key; }
-                }
-            }
             if (hit is not null)
             {
                 if (g.Refs[hit].Unassessed is not null) unassessed.Add(hit); else rests.Add(hit);
             }
         }
         return new ContactAnswer(key, touches, rests, unassessed, null, p.Box);
+    }
+
+    /// <summary>The support rays: from up to <see cref="SupportRays"/> of the ref's lowest band of vertices (0.5 above
+    /// each), straight down within <see cref="SupportReach"/>, the first other drawn ref hit and how far, or (null, reach).</summary>
+    static List<(string? Hit, float Distance)> SupportHits(Geometry g, string key, Geometry.Ref p)
+    {
+        var hits = new List<(string?, float)>();
+        float zmin = p.Box.Min.Z;
+        var low = new List<Vector3>();
+        foreach (var v in p.V) if (v.Z <= zmin + SupportBand) low.Add(v);
+        int step = Math.Max(1, low.Count / SupportRays);
+        for (int i = 0; i < low.Count; i += step)
+        {
+            var (hit, best) = FirstBelow(g, key, low[i] + new Vector3(0, 0, 0.5f), SupportReach);
+            hits.Add((hit, best));
+        }
+        return hits;
+    }
+
+    /// <summary>The first other drawn ref straight below <paramref name="o"/> within <paramref name="reach"/>, and how far.</summary>
+    static (string? Hit, float Distance) FirstBelow(Geometry g, string key, Vector3 o, float reach)
+    {
+        string? hit = null; float best = reach;
+        foreach (var r in g.Refs.Values)
+        {
+            if (r.Key == key || r.I.Count == 0) continue;
+            if (o.X < r.Box.Min.X || o.X > r.Box.Max.X || o.Y < r.Box.Min.Y || o.Y > r.Box.Max.Y) continue;
+            if (r.Box.Min.Z > o.Z || r.Box.Max.Z < o.Z - reach) continue;
+            var vs = r.V; var ix = r.I;
+            for (int t = 0; t + 2 < ix.Count; t += 3)
+            {
+                float d = DownHit(o, vs[ix[t]], vs[ix[t + 1]], vs[ix[t + 2]]);
+                if (d >= 0f && d < best) { best = d; hit = r.Key; }
+            }
+        }
+        return (hit, best);
     }
 
     /// <summary>Distance along -Z from <paramref name="o"/> to the triangle, or -1 (Möller-Trumbore, both faces).</summary>
