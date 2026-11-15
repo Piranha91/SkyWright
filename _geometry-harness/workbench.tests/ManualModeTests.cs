@@ -760,3 +760,120 @@ public sealed class OutputFolderLayoutTests : IDisposable
         Assert.Null(Check(Path.Combine(bd, "mods"), inst, game));
     }
 }
+
+/// <summary>H2 (Gate B review, DESIGN R4.2): the workbench's own write path in a manual session. A commit on a synthetic
+/// instance that is not the lab is not refused for being non-lab and lands under the Output Folder, with nothing new under
+/// the instance; the re-check of that patch reads it from the Output Folder. Replaces B3c, whose first assertion bound to
+/// the test host's Program. Members are reached by parameter name, so the same test runs on the base and after.</summary>
+[Trait("tier", "integration")]
+public sealed class ManualWriteTests
+{
+    static string Checkout() => R3Bundle.Checkout();
+    static string ServerExe() => Path.Combine(Checkout(), "src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe");
+
+    static Dictionary<string, (long, DateTime)> Listing(params string[] roots) =>
+        roots.Where(Directory.Exists).SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
+             .ToDictionary(p => p, p => File.Exists(p) ? (new FileInfo(p).Length, File.GetLastWriteTimeUtc(p)) : (-1L, Directory.GetLastWriteTimeUtc(p)));
+
+    static object Target(TiltedRefWorld w, string output)
+    {
+        var ctor = typeof(WriteTarget).GetConstructors().OrderByDescending(c => c.GetParameters().Length).First();
+        var args = ctor.GetParameters().Select(p => p.Name switch
+        {
+            "Instance" => (object?)w.Instance, "Profile" => "Default", "DataDir" => w.DataDir, "Output" => output,
+            _ => throw new Xunit.Sdk.XunitException($"WriteTarget has a parameter {p.Name} this test does not know"),
+        }).ToArray();
+        return ctor.Invoke(args);
+    }
+
+    static async Task<PatchWriter> Start(TiltedRefWorld w, string output)
+    {
+        var m = typeof(PatchWriter).GetMethod("StartAsync", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+        var args = m.GetParameters().Select(p => p.Name switch
+        {
+            "serverExe" => (object?)ServerExe(), "target" => Target(w, output),
+            "allowedInstances" => Array.Empty<string>(),            // the base's lab guard: no instance named as allowed
+            "dataDir" => Path.Combine(w.Root, "hcdata-" + Guid.NewGuid().ToString("N")), "corpusPath" => TestCorpus.Path,
+            "log" => (Action<string>)(_ => { }), "ct" => CancellationToken.None,
+            _ => throw new Xunit.Sdk.XunitException($"PatchWriter.StartAsync has a parameter {p.Name} this test does not know"),
+        }).ToArray();
+        try { return await (Task<PatchWriter>)m.Invoke(null, args)!; }
+        catch (InvalidOperationException ex) { throw new Xunit.Sdk.XunitException("the write on a non-lab instance in a manual session was refused: " + ex.Message); }
+    }
+
+    [Fact]
+    public async Task H2a_a_manual_commit_on_a_non_lab_instance_lands_under_the_output_folder_and_nothing_under_the_instance()
+    {
+        using var w = new TiltedRefWorld();
+        var o = Path.Combine(w.Root, "out");
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        var before = Listing(w.Instance, game);
+        await using var writer = await Start(w, o);
+        var pose = new ViewProbe.RefPlacementEdit.Pose(TiltedRefWorld.Pos, TiltedRefWorld.Rot, 1f);
+        var answer = await writer.CommitAsync(new[] { new PendingEdit(TiltedRefWorld.Ref, pose, pose with { Position = new HousecarlCore.Vec3(600f, -256f, 64f) }) }, "WbManual", dryRun: false);
+        Assert.True(File.Exists(Path.Combine(o, "houseCARL - WbManual", "WbManual.esp")), $"no patch under the Output Folder {o}: {answer}");
+        var after = Listing(w.Instance, game);
+        var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
+        Assert.True(changed.Count == 0, $"the commit changed the instance or the game folder: {string.Join("; ", changed.Take(5))}");
+    }
+
+    [Fact]
+    public async Task H2b_the_re_check_of_a_patch_in_the_output_folder_reads_it_from_there()
+    {
+        using var w = new TiltedRefWorld();
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        File.WriteAllText(Path.Combine(w.Instance, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\ngamePath=@ByteArray(" + game.Replace("\\", "\\\\") + ")\r\nselected_profile=@ByteArray(Default)\r\n");
+        Directory.CreateDirectory(Path.Combine(w.Instance, "overwrite"));
+        var o = Path.Combine(w.Root, "out");
+        // the patch, written under the Output Folder by the server's out_path lane
+        var data = Path.Combine(w.Root, "hcdata"); Directory.CreateDirectory(data);
+        await using (var c = await McpClient.CreateAsync(new StdioClientTransport(new StdioClientTransportOptions
+        {
+            Name = "housecarl", Command = ServerExe(),
+            Arguments = new[] { $"--HouseCarl:DataDir={w.DataDir}", $"--HouseCarl:ModsDir={Path.Combine(w.Instance, "mods")}",
+                                $"--HouseCarl:ProfileDir={Path.Combine(w.Instance, "profiles", "Default")}", $"--HouseCarl:CorpusPath={TestCorpus.Path}" },
+            EnvironmentVariables = new Dictionary<string, string?> { ["HOUSECARL_DATA_DIR"] = data, ["HOUSECARL_RUNLOG_DIR"] = Path.Combine(data, "runs") },
+        })))
+        {
+            var r = await c.CallToolAsync("housecarl_apply", new Dictionary<string, object?>
+            {
+                ["ops"] = new[] { new Dictionary<string, object?> { ["formid"] = TiltedRefWorld.Ref.ToString(), ["field_path"] = "Placement.Position", ["value"] = "600,-256,64" } },
+                ["patch"] = "WbRe", ["out_path"] = o,
+            });
+            Assert.False(r.IsError == true, string.Join("\n", r.Content.OfType<TextContentBlock>().Select(b => b.Text)));
+        }
+        var folder = Path.Combine(o, "houseCARL - WbRe");
+        Assert.True(File.Exists(Path.Combine(folder, "WbRe.esp")));
+        // a bundle of one overlap receipt on arm candidate-01, its candidate the profile as it is
+        var bundle = Path.Combine(w.Root, "bundle");
+        Directory.CreateDirectory(Path.Combine(bundle, "receipts")); Directory.CreateDirectory(Path.Combine(bundle, "candidates"));
+        File.WriteAllText(Path.Combine(bundle, "plan.json"), """{"planId":"p","reviewArm":"candidate-01","arms":[{"armId":"candidate-01","kind":"candidate","candidateFile":"candidate-01.json"}]}""");
+        File.WriteAllText(Path.Combine(bundle, "candidates", "candidate-01.json"), JsonSerializer.Serialize(new { SchemaVersion = 1, Name = "the profile as it is", BaseProfile = "Default", Plugins = new[] { TiltedRefWorld.Master.FileName.String }, Mods = new[] { "WorldMod" }, Changes = Array.Empty<string>() }));
+        File.WriteAllText(Path.Combine(bundle, "receipts", "geometry.object-overlap__candidate-01__arm.json"),
+            """{"adapter":{"kind":"ordersweep-probe","exe":"overlapprobe","args":["--order","{order}","--emit","{emit}","--base","{base}"],"populationFlag":"--population","commonFlags":true}}""");
+        var row = new ConflictRow("overlap|" + TiltedRefWorld.Ref + "|x", "geometry.object-overlap", "OVERLAP", "HcWbWorld.esm", "HcWbWorld.esm", "",
+                                  TiltedRefWorld.Ref.ToString(), null, null, "000802:HcWbWorld.esm", null, null, null, null, "calibrated-inference", null);
+        var harness = Path.Combine(Checkout(), "_geometry-harness");
+        var work = Path.Combine(w.Root, "work", "recheck");
+        var m = typeof(Recheck).GetMethod("RunAll", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+        var args = m.GetParameters().Select(p => p.Name switch
+        {
+            "bundleDir" => (object?)bundle, "arm" => "candidate-01", "row" => row, "patchPlugin" => "WbRe.esp",
+            "patchFolder" => folder,                                 // the patch's folder by its full path
+            "patchMod" => Path.GetFileName(folder),                  // the base: the folder's name, which the window found under the instance's mods
+            "instance" => w.Instance, "profile" => "Default", "game" => game, "workDir" => work,
+            "evalrunPy" => Path.Combine(harness, "evalrun.py"), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
+            "buildDirs" => Array.Empty<string>(), "localProbesRoot" => harness, "say" => (Action<string>)(_ => { }),
+            _ => throw new Xunit.Sdk.XunitException($"Recheck.RunAll has a parameter {p.Name} this test does not know"),
+        }).ToArray();
+        RecheckResult result;
+        try { result = (RecheckResult)m.Invoke(null, args)!; }
+        catch (TargetInvocationException ex) when (ex.InnerException is { } ie)
+        { throw new Xunit.Sdk.XunitException($"the re-check of the patch under the Output Folder did not read it ({ie.GetType().Name}): {ie.Message}"); }
+        var patched = JsonNode.Parse(File.ReadAllText(Path.Combine(work, "order-patched.json")))!;
+        Assert.Equal(folder, (string?)patched["Mods"]![0]);          // the probes read the patch from the Output Folder
+        Assert.Contains("WbRe.esp", patched["Plugins"]!.AsArray().Select(x => (string?)x));
+        Assert.Contains("WbRe.esp", File.ReadAllText(Path.Combine(work, "population.json")));
+        Assert.NotNull(result.Verdict);
+    }
+}
