@@ -1,4 +1,4 @@
-"""Known answers for a capture camera checked in every state it renders (C2168, C2169).
+"""Known answers for a capture camera checked in every state it renders (C2168-C2172).
 
     python _geometry-harness/tests/test_capture_every_state.py [--only C2168]
 
@@ -19,6 +19,11 @@ own `inside-at` and `pick` line formats, judged by the real shotplan.
            the setup without the mod (--state-order) for a vignette; the refusal has its own reel reason.
     C2169  guard: a camera clear in every state keeps its single camera, records the check per state, and does not test
            a participant the setup does not place; with no other state named nothing is rendered.
+    C2170  the other state's check addresses the cell by its form key (a mod may give a base-game cell an editor ID the
+           setup without it does not know; INIGO's LangleyWalkway1), as capture renders every state (C1932).
+    C2171  guard: a setup that lacks the plugin defining the cell is not rendered; capture's own final refusal,
+           place-only-with-mod, names the cell and the setup.
+    C2172  with no form key known for the cell, no other setup is rendered by an editor ID; the check refuses and says so.
 """
 from __future__ import annotations
 
@@ -65,6 +70,18 @@ def load(name: str, path: Path):
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
+
+
+CELL_LINE = "cell BrandyMugFarmExterior (exterior)  00B4FB:Skyrim.esm"
+
+
+def seed_cell(receipts: Path, line: str = CELL_LINE) -> Path:
+    """An acquisition's receipts as the picker leaves them: its placement probe's console names the cell and its form
+    key (the line acquisition_cell_form_key reads)."""
+    d = receipts / "points-work" / "p0-placements"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "console.txt").write_text(line + "\n", encoding="utf-8")
+    return receipts
 
 
 def orders(tmp: Path) -> dict:
@@ -162,7 +179,7 @@ def c2168_blocked_state_refused_or_reposed(tmp: Path):
     if not check("C2168", fn is not None, "capture_acquire checks the published camera in no state but the measured one"):
         return
     try:
-        fn(a_ns({"without": o["without"]}, o["with"]), result_fixture(), tmp / "c2168" / "r", S)
+        fn(a_ns({"without": o["without"]}, o["with"]), result_fixture(), seed_cell(tmp / "c2168" / "r"), S)
         got = None
     except CA.Refused as e:
         got = e
@@ -185,7 +202,7 @@ def c2168_blocked_state_refused_or_reposed(tmp: Path):
     CA2.acquire_top_down = no_top_down
     try:
         kind, res = CA2.after_pose_refusal(a_ns({"without": o["without"]}, o["with"]), request_fixture(), PARTICIPANTS,
-                                           points_fixture(), {}, tmp / "c2168" / "w1", CA2._load_shotplan(), pexc)
+                                           points_fixture(), {}, seed_cell(tmp / "c2168" / "w1"), CA2._load_shotplan(), pexc)
     except CA2.Refused as e:
         kind, res = "refused:" + e.code, None
     check("C2168", kind == "witness" and ((res or {}).get("stateChecks") or [{}])[0].get("state") == "without",
@@ -201,7 +218,7 @@ def c2168_blocked_state_refused_or_reposed(tmp: Path):
     CA3.acquire_top_down = fake_top_down
     try:
         kind3, _r3 = CA3.after_pose_refusal(a_ns({"without": o["without"]}, o["with"]), request_fixture(), PARTICIPANTS,
-                                            points_fixture(), {}, tmp / "c2168" / "w2", CA3._load_shotplan(), pexc)
+                                            points_fixture(), {}, seed_cell(tmp / "c2168" / "w2"), CA3._load_shotplan(), pexc)
     except CA3.Refused as e:
         kind3 = "refused:" + e.code
     wit = next((c for c in (handoffs[-1].get("chain") if handoffs else []) if c.get("kind") == "witness"), {})
@@ -245,7 +262,7 @@ def c2169_clear_states_keep_one_camera(tmp: Path):
     fn = getattr(CA, "state_checks", None)
     res = result_fixture()
     try:
-        rows = fn(a_ns({"without": o["without"]}, o["with"]), res, tmp / "c2169" / "r", S) if fn else None
+        rows = fn(a_ns({"without": o["without"]}, o["with"]), res, seed_cell(tmp / "c2169" / "r"), S) if fn else None
         err = None
     except Exception as e:  # a clear state must never refuse
         rows, err = None, e
@@ -263,7 +280,88 @@ def c2169_clear_states_keep_one_camera(tmp: Path):
           "with no other state named, a state probe was rendered anyway", f"{rows2}; renders {len(calls) - n}")
 
 
-CASES = {"C2168": c2168_blocked_state_refused_or_reposed, "C2169": c2169_clear_states_keep_one_camera}
+def cell_env(tmp: Path, cell_line: str):
+    """capture_acquire whose renderer knows a cell only by the names the setup gives it: the base-game form key always,
+    the editor ID only in the setup with the mod that names it (viewprobe's own refusal otherwise)."""
+    CA = load(f"ces_cell_{abs(hash(cell_line)) % 10 ** 8}", HARNESS / "capture_acquire.py")
+    calls = []
+    rec = tmp / "receipts"
+    (rec / "points-work" / "p0-placements").mkdir(parents=True, exist_ok=True)
+    (rec / "points-work" / "p0-placements" / "console.txt").write_text(cell_line + "\n", encoding="utf-8")
+
+    def fake_vp(a, shotplan_mod, cell, flags, out):
+        flags = [str(f) for f in flags]
+        order = next((a.passthrough[k + 1] for k, f in enumerate(a.passthrough) if f == "--order"), "")
+        calls.append({"cell": cell, "order": order})
+        if not str(cell)[:6].isalnum() or ":" not in str(cell):
+            if "without" in Path(order).stem:
+                return 1, f"--stderr--\ncell '{cell}' not found in the active load order.\n"
+        return 0, probe_text(flags, False)
+    CA._vp_run = fake_vp
+    return CA, calls, rec
+
+
+def c2170_state_cell_by_form_key(tmp: Path):
+    """INIGO (2026-11-14): its F-request's state check rendered the setup without INIGO by the cell's editor ID
+    LangleyWalkway1, which only INIGO gives 008FC3:Skyrim.esm; viewprobe refused the cell and the capture was refused as a
+    renderer failure. Wrong answers: the editor ID handed to the setup without the mod; a refusal for a cell that setup
+    has under its form key."""
+    o = orders(tmp / "c2170")
+    CA, calls, rec = cell_env(tmp / "c2170", "cell LangleyWalkway1 (exterior)  008FC3:Skyrim.esm")
+    res = result_fixture()
+    res["camera"]["cell"] = "LangleyWalkway1"
+    try:
+        rows = CA.state_checks(a_ns({"without": o["without"]}, o["with"]), res, rec, CA._load_shotplan())
+        err = None
+    except CA.Refused as e:
+        rows, err = None, e
+    probe = next((c for c in calls if "without" in Path(c["order"]).stem), {})
+    check("C2170", err is None and probe.get("cell") == "008FC3:Skyrim.esm"
+          and (rows or [{}])[0].get("cell") == "008FC3:Skyrim.esm",
+          "the setup without the mod was rendered by an editor ID only the mod gives the cell, or refused",
+          f"{getattr(err, 'code', None)}: {getattr(err, 'detail', '')[:200]}; calls {calls}")
+
+
+def c2171_place_only_with_mod(tmp: Path):
+    """Guard: the cell is defined by the mod itself, so the setup without it has no such place. Wrong answers: a render
+    of that setup at all; any refusal but capture's own final place-only-with-mod naming the cell and the setup."""
+    o = orders(tmp / "c2171")
+    CA, calls, rec = cell_env(tmp / "c2171", "cell HouseInterior (interior)  000D62:House.esp")
+    res = result_fixture()
+    res["camera"]["cell"] = "HouseInterior"
+    try:
+        CA.state_checks(a_ns({"without": o["without"]}, o["with"]), res, rec, CA._load_shotplan())
+        err = None
+    except CA.Refused as e:
+        err = e
+    check("C2171", err is not None and err.code == "place-only-with-mod" and err.extra.get("final") is True
+          and err.extra.get("cell") == "000D62:House.esp" and err.extra.get("states") == ["without"] and not calls,
+          "a setup that lacks the plugin defining the cell was rendered, or refused for another reason",
+          f"{getattr(err, 'code', None)} {getattr(err, 'extra', None)}; renders {len(calls)}")
+
+
+def c2172_no_form_key_no_editor_id_render(tmp: Path):
+    """No form key is known for the cell (the camera carries none and the receipts name none). Wrong answers: the other
+    setup rendered by the editor ID, which only the measured setup is known to give the cell (INIGO's failure, made
+    silent); a refusal that does not say why."""
+    o = orders(tmp / "c2172")
+    CA, calls = env(blocked_states=())
+    rec = tmp / "c2172" / "receipts"
+    rec.mkdir(parents=True, exist_ok=True)
+    try:
+        CA.state_checks(a_ns({"without": o["without"]}, o["with"]), result_fixture(), rec, CA._load_shotplan())
+        err = None
+    except CA.Refused as e:
+        err = e
+    check("C2172", err is not None and err.code == "points-renderer-failed" and "no cell form key" in err.detail
+          and "without" in err.detail and not calls,
+          "the setup without the mod was rendered by an editor ID when no form key was known, or refused without saying why",
+          f"{getattr(err, 'code', None)}: {getattr(err, 'detail', '')[:200]}; renders {len(calls)}")
+
+
+CASES = {"C2168": c2168_blocked_state_refused_or_reposed, "C2169": c2169_clear_states_keep_one_camera,
+         "C2170": c2170_state_cell_by_form_key, "C2171": c2171_place_only_with_mod,
+         "C2172": c2172_no_form_key_no_editor_id_render}
 
 
 def main(argv=None) -> int:
