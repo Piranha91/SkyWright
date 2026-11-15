@@ -498,6 +498,31 @@ def case_b8i_finalize_records_discovery_relevance_by_evalruns_rule_for_every_acc
         none = rel(ex, receipts)["patch.discovery-pool"]["candidate-01"]
         assert none["computed"] is False and "no target" in none["why"], none
 
+
+PATCHPROBE = HARNESS / "patchprobe" / "bin" / "Release" / "net9.0" / "patchprobe.exe"
+
+
+def case_e2e1_patchprobe_finds_the_run_instance_outside_its_search_roots():
+    """Gate C's end-to-end run: patch.discovery-installed was rejected on both arms because patchprobe looks for the run's
+    instance only under its search roots, and the chosen instance (free mode: any instance) was not under one."""
+    assert PATCHPROBE.exists(), f"build patchprobe first: {PATCHPROBE}"
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        inst, roots, pool = t / "elsewhere" / "inst", t / "roots", t / "pool"
+        for d in (inst / "profiles" / "P", inst / "mods" / "M", roots, pool):
+            d.mkdir(parents=True)
+        (inst / "ModOrganizer.ini").write_text("[General]\nselected_profile=@ByteArray(P)\n", encoding="utf-8")
+        (inst / "profiles" / "P" / "modlist.txt").write_text("+M\n", encoding="utf-8")
+        (inst / "profiles" / "P" / "plugins.txt").write_text("*A.esp\n", encoding="utf-8")
+        write_plugin(inst / "mods" / "M" / "A.esp")
+        env = dict(os.environ, HOUSECARL_MO2_INSTANCE=str(inst), HOUSECARL_MO2_PROFILE="P", HOUSECARL_SEARCH_ROOTS=str(roots),
+                   HOUSECARL_DOWNLOAD_POOL=str(pool), HOUSECARL_HARNESS_CONFIG="", PYTHONIOENCODING="utf-8")
+        r = subprocess.run([str(PATCHPROBE), "--pair", "A.esp", "B.esp", "--json", str(t / "out.json")], env=env,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        said = r.stdout + r.stderr
+        assert "target instance not found" not in said, "patchprobe did not find the run's instance: " + said[-400:]
+        assert r.returncode == 0, f"patchprobe exited {r.returncode}: {said[-400:]}"
+
 def main():
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("case_")):
         check(name, fn)
