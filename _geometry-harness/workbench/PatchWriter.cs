@@ -10,8 +10,8 @@ namespace Workbench;
 /// folder (the server's explicit-paths mode), so the profile is never whatever MO2 last had selected.</summary>
 internal sealed record WriteTarget(string Instance, string Profile, string DataDir)
 {
-    internal string ModsDir => Path.Combine(Instance, "mods");
-    internal string ProfileDir => Path.Combine(Instance, "profiles", Profile);
+    internal string ModsDir => Path.Combine(HousecarlCore.Mo2Instance.LayoutRoot(Instance), "mods");
+    internal string ProfileDir => Path.Combine(HousecarlCore.Mo2Instance.LayoutRoot(Instance), "profiles", Profile);
     public override string ToString() => $"instance '{Instance}', profile '{Profile}'";
 }
 
@@ -80,6 +80,14 @@ internal sealed class PatchWriter : IAsyncDisposable
         var text = string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text));
         if (r.IsError == true) throw new InvalidOperationException($"{tool} refused: {text}");
         return text;
+    }
+
+    /// <summary>A forwarded call (the workbench endpoint's houseCARL surface): the arguments as the client sent them,
+    /// after the manual-mode rule, and the server's own answer.</summary>
+    internal async Task<CallToolResult> ForwardAsync(string tool, IReadOnlyDictionary<string, System.Text.Json.JsonElement> args, CancellationToken ct = default)
+    {
+        Log($"forwarded {tool} to the houseCARL server of {Target}");
+        return await _client.CallToolAsync(new CallToolRequestParams { Name = tool, Arguments = args.ToDictionary(kv => kv.Key, kv => kv.Value) }, ct);
     }
 
     static string F(float v) => v.ToString("R", CultureInfo.InvariantCulture);

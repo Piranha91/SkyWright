@@ -15,6 +15,8 @@ internal sealed class StateHub
     readonly Dispatcher _ui;
     internal IWorkbenchSurface Surface { get; }
     internal TimeSpan Wait { get; init; } = TimeSpan.FromSeconds(15);
+    /// <summary>The launcher's state and the houseCARL server bound to its profile (manual mode).</summary>
+    internal Launcher Launcher { get; } = new();
 
     internal StateHub(Dispatcher ui, IWorkbenchSurface surface) { _ui = ui; Surface = surface; }
 
@@ -40,9 +42,10 @@ internal sealed class StateHub
 internal sealed class StateServer : IAsyncDisposable
 {
     readonly WebApplication _app;
+    readonly StateHub _hub;
     internal string Url { get; }
 
-    StateServer(WebApplication app, string url) { _app = app; Url = url; }
+    StateServer(WebApplication app, string url, StateHub hub) { _app = app; Url = url; _hub = hub; }
 
     internal static async Task<StateServer> StartAsync(int port, StateHub hub)
     {
@@ -55,14 +58,18 @@ internal sealed class StateServer : IAsyncDisposable
             o.ServerInstructions = StateTools.Instructions;
         })
         .WithHttpTransport(o => o.Stateless = true)
-        .WithTools<StateTools>();
+        .WithTools<StateTools>()
+        // the houseCARL tools of the server bound to the launcher's profile, forwarded under the manual-mode write rule (DESIGN R2.7, R4.1)
+        .WithTools(await ForwardedTool.AllAsync(Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : SafeServerExe()));
         var url = $"http://127.0.0.1:{port}";
         b.WebHost.UseUrls(url);
         var app = b.Build();
         app.MapMcp();
         await app.StartAsync();
-        return new StateServer(app, url);
+        return new StateServer(app, url, hub);
     }
 
-    public async ValueTask DisposeAsync() { await _app.StopAsync(); await _app.DisposeAsync(); }
+    static string SafeServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return ""; } }
+
+    public async ValueTask DisposeAsync() { await _app.StopAsync(); await _app.DisposeAsync(); await _hub.Launcher.DisposeAsync(); }
 }

@@ -25,7 +25,7 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "selection", "pending", "recheck" };
+    static readonly string[] Parts = { "bundle", "conflicts", "selection", "pending", "recheck", "launcher" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -39,7 +39,8 @@ internal sealed class StateTools
         StateHub hub,
         [Description("Which parts to add, any of: bundle (the evaluation bundle open), conflicts (the ranked conflicts the Conflicts tab lists), " +
                      "selection (the open conflict and the selected reference: its placement as drawn, as the load order has it, and as written to a patch), " +
-                     "pending (the edits staged and not written, and the edits written), recheck (the last re-check's result). " +
+                     "pending (the edits staged and not written, and the edits written), recheck (the last re-check's result), " +
+                     "launcher (manual mode: the mode, instance, profile and game, the profile's mod folders, the probes, the Output and Work Folders, the run). " +
                      "Default: selection, pending, recheck.")]
             string[]? project = null,
         [Description("conflicts: how many rows to list (default 20).")] int limit = 20,
@@ -59,7 +60,12 @@ internal sealed class StateTools
             if (r0.IsError == true) return r0;
             if (running is not null) await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(Math.Min(wait_seconds, 600))));
         }
-        return await hub.OnUi(() => Task.FromResult(Answer(Project(hub.Surface, parts, limit, offset, filter))));
+        return await hub.OnUi(() =>
+        {
+            var d = Project(hub.Surface, parts, limit, offset, filter);
+            if (parts.Contains("launcher")) d["launcher"] = hub.Launcher.Project();
+            return Task.FromResult(Answer(d));
+        });
     }
 
     [McpServerTool(Name = ActName, Destructive = false, OpenWorld = false, Title = "Act on the workbench"),
@@ -70,6 +76,9 @@ internal sealed class StateTools
                  "undo (the last staged edit); commit (write the staged edits to the new patch plugin `patch`: `dry_run` true, the default, " +
                  "previews the values and masters and writes nothing; false writes, and then re-checks the open conflict in the background, " +
                  "about 70-80 s, read with workbench_state wait_seconds); recheck (re-check the open conflict against the written patch `patch`). " +
+                 "Manual mode (the launcher): open_profile (`mode` free with `instance`, `profile`, optional `game`), select_mods (`mods`, `how` " +
+                 "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
+                 "write goes under), set_work_folder (`path`, where a run keeps its files), run. " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
         StateHub hub,
@@ -82,8 +91,41 @@ internal sealed class StateTools
         [Description("stage: an absolute rotation, [x, y, z] in degrees, as the record's rotation fields.")] float[]? rotation_degrees = null,
         [Description("commit: true (default) previews and writes nothing; false writes the patch.")] bool dry_run = true,
         [Description("commit or recheck: the patch plugin's name, for example WbFixBarrel (.esp is added). A commit needs a name no mod folder holds yet.")]
-            string? patch = null)
-        => hub.OnUi(() => ActOnUi(hub.Surface, verb, conflict, @ref, delta, turn_degrees, position, rotation_degrees, dry_run, patch));
+            string? patch = null,
+        [Description("open_profile: free (any MO2 instance, in place) or housecarl.")] string? mode = null,
+        [Description("open_profile: the MO2 instance folder, by its full path (free mode).")] string? instance = null,
+        [Description("open_profile: the profile's name (default: the instance's selected profile).")] string? profile = null,
+        [Description("open_profile: the game's folder (the one holding Data), when the instance's ModOrganizer.ini names none.")] string? game = null,
+        [Description("select_mods: mod folder names, as the launcher lists them.")] string[]? mods = null,
+        [Description("select_mods: set (default), add or remove.")] string? how = null,
+        [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
+        [Description("set_output or set_work_folder: the folder, by its full path.")] string? path = null)
+        => hub.OnUi(() => LauncherVerb(verb) ? LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path)
+                                             : ActOnUi(hub.Surface, verb, conflict, @ref, delta, turn_degrees, position, rotation_degrees, dry_run, patch));
+
+    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run" };
+    static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
+
+    static async Task<CallToolResult> LauncherOnUi(StateHub hub, string verb, string? mode, string? instance, string? profile, string? game,
+                                                   string[]? mods, string? how, string[]? checks, string? path)
+    {
+        var l = hub.Launcher;
+        string said;
+        try
+        {
+            said = verb.Trim().ToLowerInvariant() switch
+            {
+                "open_profile" => await l.OpenProfileAsync(mode, instance, profile, game),
+                "select_mods" => l.SelectMods(mods, how),
+                "select_probes" => l.SelectProbes(checks),
+                "set_output" => l.SetOutput(path),
+                "set_work_folder" => l.SetWorkFolder(path),
+                _ => l.Run(),
+            };
+        }
+        catch (InvalidOperationException ex) { return Refuse(ex.Message); }
+        return Answer(new { said, launcher = l.Project() });
+    }
 
     static async Task<CallToolResult> ActOnUi(IWorkbenchSurface s, string verb, int? conflict, string? refKey, float[]? delta, float? turnDeg,
                                              float[]? position, float[]? rotationDeg, bool dryRun, string? patch)
@@ -169,7 +211,7 @@ internal sealed class StateTools
                     break;
                 }
                 default:
-                    return Refuse($"'{verb}' is not a verb; use select, stage, undo, commit or recheck.");
+                    return Refuse($"'{verb}' is not a verb; use select, stage, undo, commit, recheck, open_profile, select_mods, select_probes, set_output, set_work_folder or run.");
             }
         }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }

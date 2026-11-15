@@ -389,7 +389,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         var game = Path.GetDirectoryName(w.DataDir)!;
         var o = Path.Combine(w.Root, "out");
         await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", w.Instance), ("profile", "Default"), ("game", game)));
-        await Ok("workbench_act", A(("verb", "set_output"), ("folder", o)));
+        await Ok("workbench_act", A(("verb", "set_output"), ("path", o)));
         return (w, o, game);
     }
 
