@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mutagen.Bethesda.Plugins;
 using ViewProbe;
 
@@ -13,18 +14,87 @@ internal sealed record SavedWritten(string Ref, string Patch, string PatchFolder
 internal sealed record SessionData(string PlanId, string Arm, string? Selected, int? OpenConflict, float[]? Camera,
                                    IReadOnlyList<SavedEdit> Staged, IReadOnlyList<SavedWritten> Written);
 
-/// <summary>The session file under the Work Folder, written on every change and read when the same bundle is opened.</summary>
+/// <summary>The session file under the Work Folder (<c>sessions/&lt;planId&gt;-&lt;arm&gt;.json</c>), written on every change
+/// and read when the same bundle is opened again. View-only state (hidden, see-through) is not kept: it is temporary.</summary>
 internal static class SessionFile
 {
+    static readonly JsonSerializerOptions Json = new() { WriteIndented = true, IncludeFields = true };
+
+    static string Safe(string s) => string.Concat(s.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+
     /// <summary>The session file for a bundle and arm, or one sentence when there is no Work Folder to keep it in.</summary>
-    internal static (string? Path, string? Refusal) PathFor(string? workFolder, string planId, string arm) => (null, null);
+    internal static (string? Path, string? Refusal) PathFor(string? workFolder, string planId, string arm)
+    {
+        if (string.IsNullOrWhiteSpace(workFolder))
+            return (null, "no Work Folder is set, so this review's session is not saved; set one in the launcher, or WB_OUT for a bundle.");
+        return (Path.Combine(workFolder, "sessions", $"{Safe(planId)}-{Safe(arm)}.json"), null);
+    }
 
-    internal static void Write(string path, SessionData data) { }
+    internal static void Write(string path, SessionData data)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(data, Json));
+        File.Move(tmp, path, overwrite: true);
+    }
 
-    internal static SessionData? Read(string path) => null;
+    internal static SessionData? Read(string path)
+    {
+        if (!File.Exists(path)) return null;
+        try { return JsonSerializer.Deserialize<SessionData>(File.ReadAllText(path), Json); }
+        catch (JsonException ex) { throw new InvalidOperationException($"the session file '{path}' could not be read ({ex.Message}); move it aside to start a fresh session."); }
+    }
+
+    /// <summary>The session as it stands, from the surface's own objects.</summary>
+    internal static SessionData? Capture(IWorkbenchSurface s)
+    {
+        if (s.PlanId is not { } plan || s.Arm is not { } arm) return null;
+        var sc = s.Scene;
+        var staged = sc?.Session.Pending.Select(e => new SavedEdit(e.Ref.ToString(), e.Before, e.After)).ToList() ?? new List<SavedEdit>();
+        var written = sc is null ? new List<SavedWritten>()
+            : sc.Session.Written.Select(kv => new SavedWritten(kv.Key.ToString(), kv.Value.Patch, sc.PatchFolderOf(kv.Value.Patch) ?? "")).ToList();
+        return new SessionData(plan, arm, sc?.Session.Selected?.ToString(), s.OpenRow?.Rank, sc?.Camera, staged, written);
+    }
+
+    /// <summary>Write the session where the surface keeps it; nothing when it has no bundle or no Work Folder.</summary>
+    internal static void Save(IWorkbenchSurface s)
+    {
+        if (Capture(s) is not { } d) return;
+        var (path, _) = PathFor(s.WorkFolder, d.PlanId, d.Arm);
+        if (path is not null) Write(path, d);
+    }
 
     /// <summary>Re-stage the saved edits whose reference still sits where it did, redraw written ones from their patch,
-    /// and say, one sentence each, what was not restored.</summary>
+    /// restore the selection, and say, one sentence each, what was not restored.</summary>
     internal static IReadOnlyList<string> Restore(EditSession session, SessionData data,
-                                                  Func<FormKey, SavedWritten, RefPlacementEdit.Pose?> readWritten) => Array.Empty<string>();
+                                                  Func<FormKey, SavedWritten, RefPlacementEdit.Pose?> readWritten)
+    {
+        var notes = new List<string>();
+        foreach (var w in data.Written)
+        {
+            if (!FormKey.TryFactory(w.Ref, out var k) || !session.IsDrawn(k)) { notes.Add($"{w.Ref}'s written edit in {w.Patch} was not restored: it is not drawn in this scene."); continue; }
+            if (readWritten(k, w) is { } pose) session.ShowWritten(k, pose, w.Patch);
+            else notes.Add($"{w.Ref}'s written edit was not restored: {w.Patch} no longer holds it.");
+        }
+        var stale = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in data.Staged)
+        {
+            if (stale.Contains(e.Ref)) continue;
+            if (!FormKey.TryFactory(e.Ref, out var k) || !session.IsDrawn(k)) { notes.Add($"{e.Ref}'s staged edit was not restored: it is not drawn in this scene."); stale.Add(e.Ref); continue; }
+            var now = session.Current(k);
+            if (!Same(now, e.Before))
+            {
+                notes.Add($"{e.Ref}'s staged edit was not restored: its placement changed since the session was saved.");
+                stale.Add(e.Ref);
+                continue;
+            }
+            session.Stage(k, e.After);
+        }
+        if (data.Selected is { } sel && FormKey.TryFactory(sel, out var sk) && session.IsDrawn(sk)) session.Select(sk);
+        return notes;
+    }
+
+    static bool Same(RefPlacementEdit.Pose a, RefPlacementEdit.Pose b) =>
+        MathF.Abs(a.Position.X - b.Position.X) <= 0.01f && MathF.Abs(a.Position.Y - b.Position.Y) <= 0.01f && MathF.Abs(a.Position.Z - b.Position.Z) <= 0.01f
+        && MathF.Abs(a.Rotation.X - b.Rotation.X) <= 1e-4f && MathF.Abs(a.Rotation.Y - b.Rotation.Y) <= 1e-4f && MathF.Abs(a.Rotation.Z - b.Rotation.Z) <= 1e-4f;
 }

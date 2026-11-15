@@ -36,6 +36,17 @@ internal sealed class BundleConflicts
     /// <summary>Each ticked check on the arm: ran with its row count, or why it did not (rejected, blocked, not applicable).</summary>
     internal IReadOnlyList<CheckStatus> Checks { get; init; } = Array.Empty<CheckStatus>();
 
+    /// <summary>The arm's candidate order file the bundle carries (its plugins and mod folders), or one sentence why not.</summary>
+    internal static string CandidateFile(string bundleDir, string arm)
+    {
+        using var plan = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(bundleDir, "plan.json")));
+        var a = plan.RootElement.GetProperty("arms").EnumerateArray().FirstOrDefault(x => x.GetProperty("armId").GetString() == arm);
+        if (a.ValueKind != System.Text.Json.JsonValueKind.Object) throw new InvalidOperationException($"the plan has no arm '{arm}'.");
+        var cand = Path.Combine(bundleDir, "candidates", a.GetProperty("candidateFile").GetString()!);
+        if (!File.Exists(cand)) throw new InvalidOperationException($"the bundle does not carry arm '{arm}''s candidate file {Path.GetFileName(cand)}.");
+        return cand;
+    }
+
     /// <summary>The arm a bundle opens on: the plan's review arm (manual mode), else baseline.</summary>
     internal static string DefaultArm(string dir)
     {

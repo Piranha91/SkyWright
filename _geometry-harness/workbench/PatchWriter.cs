@@ -160,9 +160,7 @@ internal sealed class PatchWriter : IAsyncDisposable
         foreach (var e in net)
         {
             var (pos, rot) = await ReadPlacementAsync(e.Ref.ToString(), ct: ct);
-            if (!Near(pos, e.Before.Position, tolerance) || !NearAngles(rot, e.Before.Rotation, 1e-4f))
-                throw new InvalidOperationException($"{e.Ref}'s winning placement on the server ({V(pos)} / {V(rot)}) is not the one the scene drew "
-                    + $"({V(e.Before.Position)} / {V(e.Before.Rotation)}); the scene and {Target} are not the same configuration.");
+            if (Mismatch(e.Ref, pos, rot, e.Before, tolerance) is { } why) throw new InvalidOperationException(why);
         }
         var args = new Dictionary<string, object?> { ["ops"] = Ops(net), ["dry_run"] = dryRun };
         if (into is not null) args["into"] = into;
@@ -195,24 +193,145 @@ internal sealed class PatchWriter : IAsyncDisposable
         return D(a.X, b.X) <= t && D(a.Y, b.Y) <= t && D(a.Z, b.Z) <= t;
     }
 
+    /// <summary>The one placement check: null when the server's winning placement <paramref name="pos"/>/<paramref name="rot"/>
+    /// is the pose the scene drew, else the one sentence every server answer about that reference is refused with.</summary>
+    internal string? Mismatch(Mutagen.Bethesda.Plugins.FormKey key, HousecarlCore.Vec3 pos, HousecarlCore.Vec3 rot, ViewProbe.RefPlacementEdit.Pose drawn,
+                              float tolerance = 0.01f)
+        => Near(pos, drawn.Position, tolerance) && NearAngles(rot, drawn.Rotation, 1e-4f) ? null
+         : $"{key}'s winning placement on the server ({V(pos)} / {V(rot)}) is not the one the scene drew "
+           + $"({V(drawn.Position)} / {V(drawn.Rotation)}); the scene and {Target} are not the same configuration.";
+
     /// <summary>Null when the server's winning placement of <paramref name="key"/> is the one the scene drew, else the one
     /// sentence a commit refuses with. Every server answer about a drawn reference goes through it first.</summary>
-    internal Task<string?> PlacementMismatchAsync(Mutagen.Bethesda.Plugins.FormKey key, ViewProbe.RefPlacementEdit.Pose drawn, CancellationToken ct = default)
-        => Task.FromResult<string?>(null);
+    internal async Task<string?> PlacementMismatchAsync(Mutagen.Bethesda.Plugins.FormKey key, ViewProbe.RefPlacementEdit.Pose drawn, CancellationToken ct = default)
+    {
+        var (pos, rot) = await ReadPlacementAsync(key.ToString(), ct: ct);
+        return Mismatch(key, pos, rot, drawn);
+    }
 
-    /// <summary>The objects a decision is keyed on, read from the server for references the scene drew at these poses.</summary>
-    internal Task<IReadOnlyList<ObjectState>> ReadObjectsAsync(IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose Drawn)> refs,
-                                                               CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<ObjectState>>(Array.Empty<ObjectState>());
+    /// <summary>One records read of many references, json: each record's winner and its fields, by FormKey.</summary>
+    async Task<Dictionary<Mutagen.Bethesda.Plugins.FormKey, (string Winner, List<FieldValue> Fields)>> ReadRecordsAsync(
+        IEnumerable<Mutagen.Bethesda.Plugins.FormKey> keys, object project, CancellationToken ct)
+    {
+        var list = keys.Distinct().ToList();
+        var result = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, (string, List<FieldValue>)>();
+        if (list.Count == 0) return result;
+        var text = await CallAsync("housecarl_records", new Dictionary<string, object?>
+        {
+            ["formids"] = list.Select(k => k.ToString()).ToArray(), ["project"] = project, ["format"] = "json", ["limit"] = list.Count + 10,
+        }, ct);
+        using var doc = JsonDocument.Parse(text);
+        if (!doc.RootElement.TryGetProperty("records", out var recs))
+            throw new InvalidOperationException("the server's records answer carried no records; read it with housecarl_records to see why.");
+        foreach (var r in recs.EnumerateArray())
+        {
+            var fid = r.TryGetProperty("formid", out var f) ? f.GetString() : null;
+            if (fid is null || !Mutagen.Bethesda.Plugins.FormKey.TryFactory(fid, out var k)) continue;
+            if (r.TryGetProperty("error", out var err))
+                throw new InvalidOperationException($"the server could not read {fid}: {err.GetString()}");
+            var fields = new List<FieldValue>();
+            if (r.TryGetProperty("fields", out var fs))
+                foreach (var x in fs.EnumerateArray())
+                    if (x.TryGetProperty("path", out var path) && x.TryGetProperty("value", out var value))
+                        fields.Add(new FieldValue(path.GetString()!, value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText()));
+            result[k] = (r.TryGetProperty("winner", out var w) ? w.GetString() ?? "" : "", fields);
+        }
+        foreach (var k in list)
+            if (!result.ContainsKey(k)) throw new InvalidOperationException($"the server's answer had no row for {k}; read it with housecarl_records to see why.");
+        return result;
+    }
+
+    static (HousecarlCore.Vec3 Pos, HousecarlCore.Vec3 Rot)? PlacementOf(List<FieldValue> fields)
+    {
+        string? p = fields.FirstOrDefault(f => f.Path == "Placement.Position")?.Value, r = fields.FirstOrDefault(f => f.Path == "Placement.Rotation")?.Value;
+        if (p is null || r is null) return null;
+        static HousecarlCore.Vec3 Parse(string s)
+        {
+            var parts = s.Trim('[', ']', '(', ')', ' ').Split(',');
+            float P(string x) => float.Parse(x.Trim(), CultureInfo.InvariantCulture);
+            return new HousecarlCore.Vec3(P(parts[0]), P(parts[1]), P(parts[2]));
+        }
+        return (Parse(p), Parse(r));
+    }
+
+    void CheckAll(IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose Drawn)> refs,
+                  Dictionary<Mutagen.Bethesda.Plugins.FormKey, (string Winner, List<FieldValue> Fields)> read)
+    {
+        foreach (var (k, drawn) in refs)
+        {
+            if (PlacementOf(read[k].Fields) is not { } pr)
+                throw new InvalidOperationException($"the server's answer for {k} carried no Placement.Position and Placement.Rotation; read it with housecarl_records to see why.");
+            if (Mismatch(k, pr.Pos, pr.Rot, drawn) is { } why) throw new InvalidOperationException(why);
+        }
+    }
+
+    /// <summary>The objects a decision is keyed on, read from the server for references the scene drew at these poses:
+    /// each reference's winning record (every field), its base's geometry fields (model, bounds), and the base model's
+    /// winning copy with its content hash (<c>housecarl_asset_status hash=true</c>). Each placement is checked first.</summary>
+    internal async Task<IReadOnlyList<ObjectState>> ReadObjectsAsync(IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose Drawn)> refs,
+                                                                     CancellationToken ct = default)
+    {
+        var read = await ReadRecordsAsync(refs.Select(r => r.Ref), new Dictionary<string, object?> { ["form"] = "everything", ["depth"] = 2 }, ct);
+        CheckAll(refs, read);
+        var bases = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, Mutagen.Bethesda.Plugins.FormKey>();
+        foreach (var (k, (_, fields)) in read)
+            if (fields.FirstOrDefault(f => f.Path == "Base")?.Value is { } b && Mutagen.Bethesda.Plugins.FormKey.TryFactory(b.Split(' ')[0], out var bk)) bases[k] = bk;
+        var baseRead = await ReadRecordsAsync(bases.Values, new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = Decisions.BaseGeometryFields, ["depth"] = 2 }, ct);
+        var models = new Dictionary<Mutagen.Bethesda.Plugins.FormKey, string>();
+        foreach (var (bk, (_, fields)) in baseRead)
+            if (fields.FirstOrDefault(f => f.Path == "Model.File")?.Value is { Length: > 0 } m)
+                models[bk] = m.StartsWith("meshes\\", StringComparison.OrdinalIgnoreCase) || m.StartsWith("meshes/", StringComparison.OrdinalIgnoreCase) ? m : "meshes\\" + m;
+        var hashes = new Dictionary<string, (string? Winner, string? Sha)>(StringComparer.OrdinalIgnoreCase);
+        if (models.Count > 0)
+        {
+            var text = await CallAsync("housecarl_asset_status", new Dictionary<string, object?>
+            {
+                ["asset_paths"] = models.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), ["hash"] = true, ["format"] = "json",
+            }, ct);
+            using var doc = JsonDocument.Parse(text);
+            foreach (var r in doc.RootElement.GetProperty("results").EnumerateArray())
+            {
+                var path = r.GetProperty("path").GetString()!;
+                string? win = r.TryGetProperty("winner", out var w) && w.ValueKind == JsonValueKind.Object && w.TryGetProperty("name", out var src) ? src.GetString() : null;
+                string? sha = r.TryGetProperty("winner_sha256", out var sh) && sh.ValueKind == JsonValueKind.String ? sh.GetString() : null;
+                hashes[path] = (win, sha);
+            }
+        }
+        return refs.Select(r =>
+        {
+            var (winner, fields) = read[r.Ref];
+            bases.TryGetValue(r.Ref, out var bk);
+            var bf = bases.ContainsKey(r.Ref) && baseRead.TryGetValue(bk, out var b) ? b.Fields : new List<FieldValue>();
+            string? model = bases.ContainsKey(r.Ref) && models.TryGetValue(bk, out var m) ? m : null;
+            var h = model is not null && hashes.TryGetValue(model.Replace('/', '\\'), out var hh) ? hh : model is not null && hashes.TryGetValue(model, out var h2) ? h2 : (null, null);
+            return new ObjectState(r.Ref.ToString(), winner, fields, bases.ContainsKey(r.Ref) ? bk.ToString() : null, bf, model, h.Winner, h.Sha);
+        }).ToList();
+    }
 
     /// <summary>The winning plugin of each reference, read in one call, each checked against the pose the scene drew.</summary>
-    internal Task<IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, string>> WinnersAsync(
+    internal async Task<IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, string>> WinnersAsync(
         IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose Drawn)> refs, CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, string>>(new Dictionary<Mutagen.Bethesda.Plugins.FormKey, string>());
+    {
+        var read = await ReadRecordsAsync(refs.Select(r => r.Ref), new Dictionary<string, object?> { ["form"] = "fields", ["fields"] = new[] { "Placement" }, ["depth"] = 2 }, ct);
+        CheckAll(refs, read);
+        return read.ToDictionary(kv => kv.Key, kv => kv.Value.Winner);
+    }
 
-    /// <summary>Undo a written edit: remove the reference's override from the patch in <paramref name="patchFolder"/>.</summary>
-    internal Task<string> RevertWrittenAsync(Mutagen.Bethesda.Plugins.FormKey key, string patchFolder, CancellationToken ct = default)
-        => Task.FromResult("");
+    /// <summary>Undo a written edit: remove the reference's override from the patch in <paramref name="patchFolder"/>
+    /// (<c>housecarl_remove into=</c>), never by writing the old pose back, which would leave an override that masks
+    /// later edits. The patch file is kept even when it holds no placed reference afterwards.</summary>
+    internal async Task<string> RevertWrittenAsync(Mutagen.Bethesda.Plugins.FormKey key, string patchFolder, CancellationToken ct = default)
+    {
+        var text = await CallAsync("housecarl_remove", new Dictionary<string, object?> { ["formids"] = new[] { key.ToString() }, ["into"] = patchFolder }, ct);
+        var plugin = Directory.EnumerateFiles(patchFolder, "*.esp").FirstOrDefault();
+        int left = -1;
+        if (plugin is not null)
+            using (var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(plugin, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE))
+                left = mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.IPlacedGetter>().Count();
+        var first = text.Split('\n')[0].Trim();
+        return $"removed {key}'s override from {Path.GetFileName(plugin) ?? patchFolder} ({first})"
+               + (left == 0 ? "; the patch now holds no placed reference, and the file is kept (delete it yourself if you no longer want it)." : left > 0 ? $"; {left} placed reference(s) remain in it." : ".");
+    }
 
     public async ValueTask DisposeAsync() => await _client.DisposeAsync();
 }

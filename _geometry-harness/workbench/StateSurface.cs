@@ -29,6 +29,8 @@ internal interface IWorkbenchSurface
     /// <summary>The open bundle's plan id and arm.</summary>
     string? PlanId => Open?.PlanId;
     string? Arm => Open?.Arm;
+    /// <summary>Why the last session save failed, said in the window; null when it did not.</summary>
+    string? SaveRefusal { get => null; set { } }
     /// <summary>The Findings tab, ranked.</summary>
     IReadOnlyList<RankedFinding> Findings => Open is { } b ? FindingRanking.Rank(b.Findings, b.Targets, Severity) : Array.Empty<RankedFinding>();
     /// <summary>What a click on a clickable Findings row does: the Records tree's path to its reference and cell.</summary>
@@ -62,6 +64,12 @@ internal interface IWorkbenchScene
     /// <summary>The detector row and the objects a decision on this row is keyed on, read now.</summary>
     Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
         throw new InvalidOperationException("this scene has no houseCARL server to read the row's objects from.");
+    /// <summary>What the screen-centre ray hits first (a drawn, not hidden, reference or the terrain); null for nothing.</summary>
+    PickHit? PickCentre() => null;
+    /// <summary>Undo a written edit by removing its override from its patch; one sentence saying what was done.</summary>
+    Task<string> RevertWrittenAsync(FormKey key) => throw new InvalidOperationException("this scene has no houseCARL server to remove a written edit with.");
+    /// <summary>The folder of a patch this session wrote, by its plugin name; null when not known.</summary>
+    string? PatchFolderOf(string patch) => null;
     /// <summary>The camera as [x, y, z, yaw, pitch]; null where there is none.</summary>
     float[]? Camera { get => null; set { } }
 }
@@ -83,6 +91,10 @@ internal sealed class LiveSurface : IWorkbenchSurface
     public BundleConflicts? Open => Shell.Bundle;
     public SeverityTable? Severity => Shell.Severity;
     public IReadOnlyList<RankedFinding> Findings => Shell.Findings;
+    public string? WorkFolder => Shell.Launcher.WorkFolder
+        ?? (Environment.GetEnvironmentVariable("WB_WORK") is { Length: > 0 } w ? w : Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : null);
+    public (string Instance, string Profile)? Binding => WorkbenchHost.TargetFromEnv() is { } t ? (t.Instance, t.Profile) : null;
+    public string? SaveRefusal { get; set; }
 
     public string OpenFinding(RankedFinding row)
     {
