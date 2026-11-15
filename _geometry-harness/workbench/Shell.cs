@@ -93,6 +93,9 @@ internal static class Shell
         return Window;
     }
 
+    /// <summary>Each decided row's standing as last compared, shared by the window's decision buttons and the state tools.</summary>
+    internal static readonly Dictionary<string, DecisionMatch> Standings = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>The MCP state tools' server, when <c>WB_MCP_PORT</c> asks for one (DESIGN.md section 7).</summary>
     internal static StateServer? Server;
 
@@ -104,7 +107,7 @@ internal static class Shell
         try
         {
             // Started off the UI thread so no continuation waits for the dispatcher this thread is about to run.
-            Server = Task.Run(() => StateServer.StartAsync(port, new StateHub(ui, new LiveSurface()) { Launcher = Launcher })).GetAwaiter().GetResult();
+            Server = Task.Run(() => StateServer.StartAsync(port, new StateHub(ui, new LiveSurface()) { Launcher = Launcher, Standings = Standings })).GetAwaiter().GetResult();
             WorkbenchHost.Say($"MCP state tools ({StateTools.StateName}, {StateTools.ActName}) served at {Server.Url}/ (Streamable HTTP)");
         }
         catch (Exception ex) { WorkbenchHost.Say($"MCP state tools not started on port {port}: {ex.GetBaseException().Message}"); }

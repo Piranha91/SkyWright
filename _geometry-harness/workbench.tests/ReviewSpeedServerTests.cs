@@ -41,8 +41,10 @@ public class ReviewSpeedServerTests
         foreach (var c in m.Cells.Records.SelectMany(b => b.SubBlocks).SelectMany(s => s.Cells))
             foreach (var r in c.Temporary.OfType<PlacedObject>())
                 if (r.FormKey == TiltedRefWorld.Ref) r.Placement = new Placement { Position = new P3Float(pos.X, pos.Y, pos.Z), Rotation = new P3Float(TiltedRefWorld.Rot.X, TiltedRefWorld.Rot.Y, TiltedRefWorld.Rot.Z) };
-        m.BeginWrite.ToPath(path + ".new").WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
-        File.Move(path + ".new", path, overwrite: true);
+        var tmp = Path.Combine(w.Root, "rewrite-" + Guid.NewGuid().ToString("N"), Path.GetFileName(path));
+        Directory.CreateDirectory(Path.GetDirectoryName(tmp)!);
+        m.BeginWrite.ToPath(tmp).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        File.Move(tmp, path, overwrite: true);
     }
 
     // S4a: one placement check, used before any server answer about a drawn reference

@@ -56,12 +56,20 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _fov = cam.FovDeg;
         _camera.FieldOfView = _fov;
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
-        _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate(); };
+        _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate(); SaveSession(); };
+        _viewState = new ViewState(_session, () => DrawnRefs());
+        _viewState.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate(); };
+        _tints.State = _viewState;
         _outDir = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : opt.OutDir;
         Directory.CreateDirectory(_outDir);
         renderer.Overlays.Add(_marks);
         renderer.Overlays.Add(_gizmo);
-        _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye));
+        renderer.Overlays.Insert(0, _tints);
+        _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye))
+        {
+            Holding = () => _viewState.ShowingOriginal,
+            Refused = s => { Say(s); Shell.SetBanner(s); },
+        };
     }
 
     /// <summary>The <see cref="InteractiveViewer.Host"/> entry: runs the window until it closes.</summary>
@@ -115,8 +123,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         return ScenePick.Pick(_opt.PickShapes, new Vector3(o.X, o.Y, o.Z), new Vector3(d.X, d.Y, d.Z), Pickable);
     }
 
-    /// <summary>What a click can hit: a drawn reference or the terrain.</summary>
-    internal static bool Pickable(PickShape s) => !(s.Mesh is { IsRendering: false }) && s.Kind is PickKind.Ref or PickKind.Terrain;
+    /// <summary>What a click can hit: a drawn reference or the terrain, not one the view has hidden.</summary>
+    internal static bool Pickable(PickShape s) => !(s.Mesh is { IsRendering: false } or { IsHiddenByHost: true }) && s.Kind is PickKind.Ref or PickKind.Terrain;
 
     // ---- input: a plain click selects; a drag on the handle edits (ViewInput) ------------------------------------
     ViewInput _input = null!;
@@ -203,6 +211,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(marksBtn); buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write);
         DockPanel.SetDock(buttons, Dock.Right);
+        var tools = ToolsRow();
+        DockPanel.SetDock(tools, Dock.Bottom);
+        var pendingPanel = PendingPanel();
+        DockPanel.SetDock(pendingPanel, Dock.Bottom);
+        bar.Children.Add(tools); bar.Children.Add(pendingPanel);
         bar.Children.Add(buttons); bar.Children.Add(_status);
 
         // The view: a Win32 child window drawn with the scene's own context (NativeGlHost says why not GLWpfControl).
@@ -219,6 +232,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             _window.Width = Math.Max(w, Shell.MinWidth); _window.Height = Math.Max(h, Shell.MinHeight);
         }
         Shell.Current = this;
+        try { RestoreSession(); } catch (InvalidOperationException ex) { Say(ex.Message); Shell.SetBanner(ex.Message); }
         Shell.Mount(_view, bar);
         Shell.FillTree(BuildTree());
         if (Shell.SwitchClock is { } sw)
@@ -305,6 +319,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var p = new Vector2(x, y);
         switch (msg)
         {
+            case 0x201 when (GetKeyState(0x12) & 0x8000) != 0:              // Alt+click: hide (Alt+Shift: one part); view only
+            {
+                bool part = (GetKeyState(0x10) & 0x8000) != 0;
+                if (PickAt(p) is { Shape: { Kind: PickKind.Ref } sh })
+                    try { Shell.SetBanner(part ? _viewState.HidePart(sh) : _viewState.Hide(sh.Ref.RefKey)); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); }
+                break;
+            }
             case 0x201: OnPress(p); break;                                   // WM_LBUTTONDOWN
             case 0x202: OnRelease(p); break;                                 // WM_LBUTTONUP
             case 0x204: _look = p; break;                                    // WM_RBUTTONDOWN
@@ -314,9 +335,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 { _yaw = (_yaw + (p.X - l.X) * 0.15f + 360f) % 360f; _pitch = Math.Clamp(_pitch + (p.Y - l.Y) * 0.15f, -89f, 89f); _look = p; SyncCamera(); }
                 else OnMove(p);
                 break;
+            case 0x0008: _viewState.OnFocusLost(); break;                         // WM_KILLFOCUS: a held key's release will not come
+            case 0x101:                                                      // WM_KEYUP
+                _viewState.OnKey((int)wParam.ToInt64(), down: false, repeat: false);
+                break;
             case 0x100:                                                      // WM_KEYDOWN
             {
                 int vk = (int)wParam.ToInt64();
+                if (_viewState.OnKey(vk, down: true, repeat: (y & 0x4000) != 0)) break;
                 bool ctrl = (GetKeyState(0x11) & 0x8000) != 0, shift = (GetKeyState(0x10) & 0x8000) != 0;
                 if (ctrl && vk == 'Z') { _session.Undo(); AfterStage(); break; }
                 float step = shift ? 300f : 60f;
@@ -520,6 +546,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     // The MCP state tools reach the scene through these: the same members the bar and the script call.
     EditSession IWorkbenchScene.Session => _session;
+    ViewState? IWorkbenchScene.View => _viewState;
+    IReadOnlyList<PickShape> IWorkbenchScene.Shapes => _opt.PickShapes;
+    PickHit? IWorkbenchScene.PickCentre() => PickAt(new Vector2(W / 2f, H / 2f));
+    float[]? IWorkbenchScene.Camera { get => new[] { _eye.X, _eye.Y, _eye.Z, _yaw, _pitch }; set { if (value is { Length: 5 } c) SetPose(new Vector3(c[0], c[1], c[2]), c[3], c[4]); } }
+    string? IWorkbenchScene.PatchFolderOf(string patch) => PatchFolderOf(patch);
+    Task<string> IWorkbenchScene.RevertWrittenAsync(FormKey key) => RevertWrittenAsync(key);
+    Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> IWorkbenchScene.RefsOfModAsync(string modFolder, string? plugin) => RefsOfModAsync(modFolder, plugin);
+    Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> IWorkbenchScene.DecisionInputsAsync(RankedRow row) => DecisionInputsAsync(row);
     string? IWorkbenchScene.Cell => SceneCell;
     string IWorkbenchScene.Status => _status.Text;
     string? IWorkbenchScene.CellOf(FormKey key) => CellOf(key);
@@ -540,6 +574,231 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal IEnumerable<RefOcclusion> DrawnRefs() => (_opt.Occlusion?.Refs ?? new List<RefOcclusion>()).Where(r => r.Meshes.Count > 0 && _session.IsDrawn(r.Ref.RefKey));
     internal float EyeDistance(Vec3 p) => Vector3.Distance(_eye, ToV(p));
     internal void AfterStage() { if (_session.Selected is { } k) _gizmo.Centre = ToV(_session.Current(k).Position); }
+
+    readonly ViewState _viewState;
+
+    // ---- the review controls: view-only (originals, ghost, hide, see-through, isolate, restore), precise moves
+    // (typed offset, axis lock, snap, drop), decisions, and the pending-edits list with a revert per reference.
+    // Each control calls the same method its state-tool verb calls.
+    readonly Button _restore = new() { Content = "Restore visibility", Margin = new Thickness(4), Background = System.Windows.Media.Brushes.IndianRed,
+                                       Foreground = System.Windows.Media.Brushes.White, FontWeight = FontWeights.Bold, Visibility = Visibility.Collapsed };
+    readonly StackPanel _pendingRows = new();
+    readonly TextBox _reason = new() { Width = 180, Margin = new Thickness(4), ToolTip = "a few words saying why" };
+
+    static Button B(string text, string tip, Action click) { var b = new Button { Content = text, Margin = new Thickness(4), ToolTip = tip }; b.Click += (_, _) => click(); return b; }
+
+    void Do(Func<string> act) { try { var s = act(); Say(s); Shell.SetBanner(s); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); } UpdateStatus(); Invalidate(); }
+
+    UIElement ToolsRow()
+    {
+        var row = new WrapPanel { Orientation = Orientation.Horizontal };
+        var original = new System.Windows.Controls.Primitives.ToggleButton { Content = "Original (hold Space)", Margin = new Thickness(4), ToolTip = "draw every edited object where the load order puts it" };
+        original.Checked += (_, _) => Do(() => _viewState.ShowOriginal(true));
+        original.Unchecked += (_, _) => Do(() => _viewState.ShowOriginal(false));
+        _viewState.Changed += _ => { if (original.IsChecked != _viewState.ShowingOriginal) original.IsChecked = _viewState.ShowingOriginal; };
+        var ghost = new System.Windows.Controls.Primitives.ToggleButton { Content = "Ghost", Margin = new Thickness(4), ToolTip = "a see-through copy of each edited object at its load-order place" };
+        ghost.Checked += (_, _) => Do(() => { _viewState.Ghost = true; return "ghost shown"; });
+        ghost.Unchecked += (_, _) => Do(() => { _viewState.Ghost = false; return "ghost hidden"; });
+        row.Children.Add(original); row.Children.Add(ghost);
+        row.Children.Add(B("Hide in front", "hide whatever stands between the camera and the selected object (Alt+click hides one object, Alt+Shift+click one part)",
+            () => Do(() => _session.Selected is { } k ? _viewState.HideInFront(k, () => PickAt(new Vector2(W / 2f, H / 2f))) : "select an object first")));
+        row.Children.Add(B("See-through", "draw the selected object as a flat see-through tint", () => Do(() => _session.Selected is { } k ? _viewState.SeeThrough(k) : "select an object first")));
+        var mod = new TextBox { Width = 140, Margin = new Thickness(4), ToolTip = "a mod folder, as the launcher lists it" };
+        row.Children.Add(mod);
+        row.Children.Add(B("Mod see-through", "draw every object the named mod folder's plugins win as a see-through tint", async () =>
+        {
+            try
+            {
+                var (refs, why) = await RefsOfModAsync(mod.Text.Trim(), null);
+                Do(() => why ?? (refs.Count == 0 ? $"no object drawn here is won by {mod.Text.Trim()}" : _viewState.SeeThrough(refs, mod.Text.Trim())));
+            }
+            catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); }
+        }));
+        row.Children.Add(B("Isolate", "hide everything but the selected object and the open conflict's other object", () => Do(() =>
+        {
+            if (_session.Selected is not { } a) return "select an object first";
+            FormKey? b = Shell.CurrentRow?.Row.OtherKey is { } o && FormKey.TryFactory(o, out var ok) && ok != a ? ok : null;
+            return _viewState.Isolate(a, b);
+        })));
+        _restore.Click += (_, _) => Do(() => _viewState.Restore());
+        _viewState.Changed += _ => { _restore.Content = _viewState.Label.Length > 0 ? _viewState.Label : "Restore visibility"; _restore.Visibility = _viewState.Active ? Visibility.Visible : Visibility.Collapsed; };
+        row.Children.Add(_restore);
+
+        var offset = new TextBox { Width = 90, Margin = new Thickness(4), ToolTip = "a typed move, such as +120 x, -30 z or 15°" };
+        row.Children.Add(offset);
+        row.Children.Add(B("Move", "stage the typed move on the selected object", () => Do(() =>
+        {
+            if (_session.Selected is not { } k) return "select an object first";
+            var (d, turn, why) = MoveRules.ParseOffset(offset.Text);
+            if (why is not null) return why;
+            var c = _session.Current(k);
+            var after = c with { Position = new Vec3(c.Position.X + d.X, c.Position.Y + d.Y, c.Position.Z + d.Z),
+                                 Rotation = turn == 0 ? c.Rotation : RefPlacementEdit.Turned(c.Rotation, Vector3.UnitZ, float.DegreesToRadians(turn)) };
+            _session.Stage(k, MoveRules.Snap(c, after, _input.SnapStep, _input.AngleStep));
+            AfterStage();
+            return $"staged: {EditSession.Sentence(_session.Pending[^1], _session.RefOf(k).Ref.BaseEditorId)}";
+        })));
+        var snap = new ComboBox { Margin = new Thickness(4), ToolTip = "snap moves to a grid and turns to a step", ItemsSource = new[] { "no snap", "grid 1", "grid 8", "grid 32", "grid 128", "turn 5°", "turn 15°", "turn 45°" }, SelectedIndex = 0 };
+        snap.SelectionChanged += (_, _) =>
+        {
+            var t = (string)snap.SelectedItem;
+            if (t == "no snap") { _input.SnapStep = 0; _input.AngleStep = 0; }
+            else if (t.StartsWith("grid")) _input.SnapStep = float.Parse(t[5..], CultureInfo.InvariantCulture);
+            else _input.AngleStep = float.Parse(t[5..].TrimEnd('°'), CultureInfo.InvariantCulture);
+            Shell.SetBanner($"snap: grid {_input.SnapStep} units, turn {_input.AngleStep}°");
+        };
+        row.Children.Add(snap);
+        row.Children.Add(B("Drop to surface", "lower the selected object straight down onto the drawn surface or terrain below it; it lowers only", () => Do(() =>
+        {
+            if (_session.Selected is not { } k) return "select an object first";
+            var ans = CaptureViews.Drop(CaptureViews.FromPickShapes(_opt.PickShapes), k.ToString());
+            if (ans.Refusal is { } why) return why;
+            _session.StageDelta(k, new Vector3(0, 0, -ans.Distance!.Value), Vector3.UnitZ, 0f);
+            AfterStage();
+            return FormattableString.Invariant($"lowered {k} {ans.Distance:0.##} units onto {(ans.Onto == CaptureViews.TerrainKey ? "the terrain" : $"{ans.Onto} ({ans.OntoName})")}");
+        })));
+
+        row.Children.Add(new TextBlock { Text = "  Decide:", VerticalAlignment = VerticalAlignment.Center });
+        row.Children.Add(_reason);
+        foreach (var v in Decisions.Verdicts)
+            row.Children.Add(B(char.ToUpperInvariant(v[0]) + v[1..], $"record '{v}' for the open conflict with the reason typed, then open the next undecided one", async () =>
+            {
+                if (Shell.CurrentRow is not { } r) { Shell.SetBanner("open a conflict first"); return; }
+                var res = await StateTools.DecideOn(new LiveSurface(), Shell.Standings, r.Rank, null, v, _reason.Text);
+                var text = string.Join(" ", res.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Select(c => c.Text));
+                Shell.SetBanner(res.IsError == true ? text : (System.Text.Json.JsonDocument.Parse(text).RootElement.GetProperty("said").GetString() ?? ""));
+                if (res.IsError != true) _reason.Text = "";
+            }));
+        return row;
+    }
+
+    UIElement PendingPanel()
+    {
+        void Fill()
+        {
+            _pendingRows.Children.Clear();
+            foreach (var k in _session.Edited())
+            {
+                var line = new DockPanel { Margin = new Thickness(6, 1, 6, 1) };
+                bool staged = _session.Pending.Any(e => e.Ref == k);
+                string text = staged
+                    ? EditSession.Sentence(new PendingEdit(k, _session.Pending.First(e => e.Ref == k).Before, _session.Current(k)), _session.RefOf(k).Ref.BaseEditorId)
+                    : $"written to {_session.Written[k].Patch}: {_session.RefOf(k).Ref.BaseEditorId ?? k.ToString()}";
+                var revert = new Button { Content = "Revert", Margin = new Thickness(4, 0, 0, 0), ToolTip = staged ? "drop this object's staged edits" : "remove this object's override from its patch" };
+                var key = k;
+                revert.Click += async (_, _) =>
+                {
+                    try { Shell.SetBanner(_session.Revert(key) is { } r ? $"reverted {key}" : await RevertWrittenAsync(key)); AfterStage(); }
+                    catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); }
+                };
+                DockPanel.SetDock(revert, Dock.Right);
+                line.Children.Add(revert);
+                line.Children.Add(new TextBlock { Text = (staged ? "staged: " : "") + text, VerticalAlignment = VerticalAlignment.Center });
+                _pendingRows.Children.Add(line);
+            }
+        }
+        _session.Changed += _ => Fill();
+        Fill();
+        return new Expander { Header = "Edits", IsExpanded = true, Content = new ScrollViewer { MaxHeight = 140, Content = _pendingRows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+    }
+    readonly ViewTints _tints = new();
+    internal ViewState View => _viewState;
+
+    /// <summary>The folder of a patch this session wrote, by plugin name, under the write target's patch root.</summary>
+    internal string? PatchFolderOf(string patch)
+    {
+        var t = _writer?.Target ?? TargetFromEnv();
+        if (t is null) return null;
+        try { return Recheck.PatchFolder(t.PatchRoot, PluginName(patch)); } catch (InvalidOperationException) { return null; }
+    }
+
+    /// <summary>Undo a written edit: its override is removed from the patch, and the view draws the load order's place.</summary>
+    internal async Task<string> RevertWrittenAsync(FormKey key)
+    {
+        if (!_session.Written.TryGetValue(key, out var w)) throw new InvalidOperationException($"{key} has no written edit to undo.");
+        var folder = PatchFolderOf(w.Patch) ?? throw new InvalidOperationException($"the folder holding {w.Patch} was not found under the write target, so its override cannot be removed.");
+        var said = await (await WriterAsync()).RevertWrittenAsync(key, folder);
+        _session.ForgetWritten(key);
+        return said;
+    }
+
+    /// <summary>The bundle arm's candidate order: its mod folders (the view) and plugins.</summary>
+    (IReadOnlyList<string> Mods, IReadOnlyList<string> Plugins) ArmOrder()
+    {
+        var b = Shell.Bundle ?? throw new InvalidOperationException("no bundle is open, so the arm's mod folders are not known.");
+        var cand = BundleConflicts.CandidateFile(b.Dir, b.Arm);
+        using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(cand));
+        static List<string> L(System.Text.Json.JsonElement r, string n) => r.TryGetProperty(n, out var a) && a.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? a.EnumerateArray().Select(x => x.GetString() ?? "").Where(x => x.Length > 0).ToList() : new List<string>();
+        return (L(doc.RootElement, "Mods"), L(doc.RootElement, "Plugins"));
+    }
+
+    /// <summary>The drawn references whose winning record a plugin of this mod folder (in the arm's view, by the probes'
+    /// layer map) or this plugin provides. The winners are read in one call, each checked against the scene's pose.</summary>
+    internal async Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> RefsOfModAsync(string? modFolder, string? plugin)
+    {
+        var w = await WriterAsync();
+        IReadOnlyList<string> plugins;
+        if (modFolder is not null)
+        {
+            var (mods, order) = ArmOrder();
+            var t = w.Target;
+            var map = HarnessShared.HarnessOrderCli.PluginLayerMap(t.ProfileDir, mods, t.ModsDir, t.DataDir, Path.Combine(Mo2Instance.LayoutRoot(t.Instance), "overwrite"));
+            var (ps, why) = ModTint.PluginsOf(modFolder, map, t.ModsDir, order);
+            if (why is not null) return (Array.Empty<FormKey>(), why);
+            plugins = ps;
+        }
+        else plugins = new[] { plugin! };
+        var drawn = DrawnAll().Select(r => (r.Ref.RefKey, RefPlacementEdit.BakedPose(r.Ref))).ToList();
+        var winners = await w.WinnersAsync(drawn);
+        return (ModTint.Select(drawn.Select(d => d.RefKey), winners, plugins), null);
+    }
+
+    /// <summary>The detector row and the objects a decision on it is keyed on, read now through the bound server; each
+    /// drawn reference's placement is checked against the scene first.</summary>
+    internal async Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row)
+    {
+        var w = await WriterAsync();
+        var keys = new[] { row.Row.RefKey, row.Row.OtherKey }.Where(k => k is not null && FormKey.TryFactory(k, out _)).Select(k => FormKey.Factory(k!)).ToList();
+        var notDrawn = keys.Where(k => !_session.IsDrawn(k)).ToList();
+        if (notDrawn.Count > 0)
+            throw new InvalidOperationException($"{string.Join(" and ", notDrawn)} is not drawn in this scene, so its placement cannot be checked against the server; open the row's cell first.");
+        var objects = await w.ReadObjectsAsync(keys.Select(k => (k, RefPlacementEdit.BakedPose(_session.RefOf(k).Ref))).ToList());
+        var build = Shell.Bundle is { } b && Recheck.ProbeOfCheck.TryGetValue(row.Row.CheckId, out var probe) ? Recheck.BundleDigest(b.Dir, probe) ?? "" : "";
+        return (new RowState(row.Row.Physical?.ToString(), row.Row.Summary, build), objects, w.ServerSha256);
+    }
+
+    /// <summary>The session file follows every change; a failed write is said, never silent.</summary>
+    void SaveSession()
+    {
+        try { SessionFile.Save(new LiveSurface()); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Say($"the session file could not be written ({ex.Message})"); }
+    }
+
+    /// <summary>Restore this bundle's saved session, once, when its scene opens: written edits are redrawn from the patch file
+    /// itself (Mutagen reads the plugin), staged edits re-staged where their reference has not moved, the selection and camera.</summary>
+    void RestoreSession()
+    {
+        IWorkbenchSurface live = new LiveSurface();
+        if (live.PlanId is not { } plan || live.Arm is not { } arm) return;
+        var (path, _) = SessionFile.PathFor(live.WorkFolder, plan, arm);
+        if (path is null || SessionFile.Read(path) is not { } d) return;
+        var notes = SessionFile.Restore(_session, d, (k, sw) => ReadPatchPose(k, sw));
+        if (d.Camera is { Length: 5 } c) SetPose(new Vector3(c[0], c[1], c[2]), c[3], c[4]);
+        AfterStage();
+        var said = $"restored the session from {path}: {_session.Pending.Count} staged edit(s), {_session.Written.Count} written" + (notes.Count > 0 ? "; " + string.Join(" ", notes) : "");
+        Say(said); Shell.SetBanner(said);
+    }
+
+    static RefPlacementEdit.Pose? ReadPatchPose(FormKey key, SavedWritten w)
+    {
+        var plugin = Path.Combine(w.PatchFolder, PluginName(w.Patch));
+        if (!File.Exists(plugin)) return null;
+        using var mod = Mutagen.Bethesda.Skyrim.SkyrimMod.CreateFromBinaryOverlay(plugin, Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+        var r = mod.EnumerateMajorRecords<Mutagen.Bethesda.Skyrim.IPlacedObjectGetter>().FirstOrDefault(x => x.FormKey == key);
+        if (r?.Placement is not { } p) return null;
+        return new RefPlacementEdit.Pose(new Vec3(p.Position.X, p.Position.Y, p.Position.Z), new Vec3(p.Rotation.X, p.Rotation.Y, p.Rotation.Z), r.Scale ?? 1f);
+    }
 
     /// <summary>A manual session's target (the launcher's instance, profile, game and Output Folder); null in the bundle path.</summary>
     internal static WriteTarget? ManualTarget { get; set; }
