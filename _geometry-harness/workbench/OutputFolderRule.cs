@@ -1,0 +1,96 @@
+using HousecarlCore;
+
+namespace Workbench;
+
+/// <summary>The folders of one MO2 instance and its game that the workbench's folder rules compare against, read through
+/// housecarl-core (<see cref="Mo2Instance.LayoutRoot"/> honours the ini's base_directory). Paths compare as resolved full
+/// paths, case-insensitively; a junction is not followed.</summary>
+internal sealed record InstanceLayout(string Instance, string Root, string Mods, string Profiles, string Overwrite, string Game, string Data)
+{
+    internal static InstanceLayout Of(string instance, string game)
+    {
+        var inst = Full(instance);
+        var root = Full(Mo2Instance.LayoutRoot(inst));
+        var g = Full(game);
+        return new InstanceLayout(inst, root, Path.Combine(root, "mods"), Path.Combine(root, "profiles"), Path.Combine(root, "overwrite"), g, Path.Combine(g, "Data"));
+    }
+
+    internal static string Full(string p) => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    internal static bool Same(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    internal static bool AtOrUnder(string path, string dir) => Same(path, dir)
+        || path.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    internal bool InsideInstance(string p) => AtOrUnder(p, Instance) || AtOrUnder(p, Root);
+}
+
+/// <summary>Where the workbench may write patches (GATE-B.md 3.2, frozen with Piranha's answer): the instance's mods
+/// folder itself (each patch then goes to a new "houseCARL - name" folder there), or any folder outside the instance and
+/// the game folder. <see cref="Check"/> returns null when the folder may take output, else one sentence saying why not.</summary>
+internal static class OutputFolderRule
+{
+    internal static string? Check(string output, string instance, string profile, string game)
+    {
+        if (string.IsNullOrWhiteSpace(output) || !Path.IsPathFullyQualified(output.Trim()))
+            return $"'{output}' is not a full path; choose the Output Folder by its full path.";
+        string o;
+        try { o = InstanceLayout.Full(output.Trim()); }
+        catch (Exception ex) { return $"'{output}' is not a usable path ({ex.Message}); choose another Output Folder."; }
+        if (File.Exists(o)) return $"'{o}' is a file, not a folder; choose a folder as the Output Folder.";
+        var l = InstanceLayout.Of(instance, game);
+        if (InstanceLayout.AtOrUnder(o, l.Data))
+            return $"'{o}' is the game's Data folder or inside it; the workbench never writes into Data, so choose another Output Folder.";
+        if (InstanceLayout.Same(o, l.Mods)) return null;
+        if (InstanceLayout.AtOrUnder(o, l.Mods))
+        {
+            var first = Path.GetRelativePath(l.Mods, o).Split(Path.DirectorySeparatorChar)[0];
+            return Directory.Exists(Path.Combine(l.Mods, first))
+                ? $"'{o}' is an existing mod folder or inside one; choose the mods folder itself, where each patch gets a new houseCARL folder, or a folder outside the instance."
+                : $"'{o}' is a new folder inside the mods folder, where MO2 would list it as a mod with the patch a level down that never loads; choose the mods folder itself.";
+        }
+        var profileDir = Path.Combine(l.Profiles, profile);
+        if (InstanceLayout.AtOrUnder(o, profileDir))
+            return $"'{o}' is the profile folder or inside it, which MO2 rewrites; choose another Output Folder.";
+        if (InstanceLayout.AtOrUnder(o, l.Profiles))
+            return $"'{o}' is MO2's profiles folder or inside it, which MO2 rewrites; choose another Output Folder.";
+        if (InstanceLayout.AtOrUnder(o, l.Overwrite))
+            return $"'{o}' is the instance's overwrite folder or inside it, which MO2 always loads; choose another Output Folder.";
+        if (l.InsideInstance(o))
+            return $"'{o}' is inside the MO2 instance but is not its mods folder; choose the mods folder itself or a folder outside the instance.";
+        if (InstanceLayout.AtOrUnder(o, l.Game))
+            return $"'{o}' is inside the game folder, where a manual run writes nothing; choose a folder outside the game folder.";
+        return null;
+    }
+}
+
+/// <summary>Where a manual run keeps its own files (entry, candidates, plan, receipts, bundle, logs, re-checks): never
+/// inside the instance or the game folder (GATE-B.md 3.1). With the Output Folder outside the instance the default is
+/// its "workbench-runs" subfolder; with the Output Folder at the instance's mods folder there is no default (the
+/// coordinator's ruling, 2026-11-14).</summary>
+internal static class WorkFolderRule
+{
+    internal static string? Check(string work, string instance, string profile, string game)
+    {
+        if (string.IsNullOrWhiteSpace(work) || !Path.IsPathFullyQualified(work.Trim()))
+            return $"'{work}' is not a full path; choose the Work Folder by its full path.";
+        var w = InstanceLayout.Full(work.Trim());
+        if (File.Exists(w)) return $"'{w}' is a file, not a folder; choose a folder as the Work Folder.";
+        var l = InstanceLayout.Of(instance, game);
+        if (l.InsideInstance(w))
+            return $"'{w}' is inside the MO2 instance, where MO2 would list or load the run's files; choose a Work Folder outside the instance.";
+        if (InstanceLayout.AtOrUnder(w, l.Game))
+            return $"'{w}' is inside the game folder; choose a Work Folder outside the game folder.";
+        return null;
+    }
+
+    internal static string Default(string output, string instance)
+    {
+        var o = InstanceLayout.Full(output);
+        var inst = InstanceLayout.Full(instance);
+        var root = InstanceLayout.Full(Mo2Instance.LayoutRoot(inst));
+        if (InstanceLayout.AtOrUnder(o, inst) || InstanceLayout.AtOrUnder(o, root))
+            throw new InvalidOperationException("the Output Folder is inside the MO2 instance, so there is no default Work Folder; choose a Work Folder outside the instance and the game folder before running.");
+        return Path.Combine(o, "workbench-runs");
+    }
+}
