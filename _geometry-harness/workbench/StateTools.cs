@@ -455,9 +455,11 @@ internal sealed class StateTools
                             Rotation = rotationDeg is { } r ? new Vec3(float.DegreesToRadians(r[0]), float.DegreesToRadians(r[1]), float.DegreesToRadians(r[2])) : before.Rotation,
                         };
                     if (snap is < 0 || angleSnap is < 0) return Refuse("snap and angle_snap must be 0 or more.");
-                    sc.Session.Stage(k, MoveRules.Snap(before, after, snap ?? 0f, relative ? 0f : angleSnap ?? 0f));
+                    // an absolute rotation is the record's own angles; snapping them would not snap a tilted reference's turn, so it is said instead
+                    sc.Session.Stage(k, MoveRules.Snap(before, after, snap ?? 0f, 0f));
                     sc.AfterStage();
                     said = $"staged {k}: {EditSession.Describe(before)} -> {EditSession.Describe(sc.Session.Current(k))}; nothing is written until commit";
+                    if (absolute && rotationDeg is not null && angleSnap is > 0) said += "; angle_snap is not applied to an absolute rotation_degrees (use turn_degrees to snap a turn)";
                     break;
                 }
                 case "undo":
