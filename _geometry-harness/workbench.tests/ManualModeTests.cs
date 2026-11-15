@@ -376,6 +376,32 @@ public sealed class FindingReaderTests : IDisposable
         Assert.Equal(new[] { "finding", "finding", "incomplete" }, rows.Select(r => (string?)Contract.Prop(r, "Role")));
     }
 
+    /// <summary>B8i (R4.6): a discovery hit's relevance is read from what finalize recorded (disposition.discovery.relevance
+    /// for the check and arm), never re-derived: a relevant hit is a finding, a hit not relevant is context saying why, and
+    /// with relevance not computed every hit is shown with the sentence, neither hidden nor called relevant.</summary>
+    [Fact]
+    public void B8i_discovery_hits_take_their_relevance_from_finalize()
+    {
+        var p = Path.Combine(_dir, "patch.discovery-pool.json");
+        File.WriteAllText(p, """
+            {"schemaVersion":1,"probe":"p","mode":"pool","complete":true,"counts":{},
+             "hits":[{"file":"SynPatch.esp","kind":"pool-archive","where":{},"masters":["Syn.esp"]},{"file":"SynFar.esp","kind":"pool-archive","where":{},"masters":["Far.esp"]}],
+             "unjudgeableItems":[],"detail":{}}
+            """);
+        List<object> Read(string relevance)
+        {
+            using var d = JsonDocument.Parse(relevance);
+            return ((System.Collections.IEnumerable)Contract.Static("FindingReaders", "Read", "the discovery reader with finalize's relevance (R4.6)",
+                "patch.discovery-pool", p, null, d.RootElement.Clone())!).Cast<object>().ToList();
+        }
+        var computed = Read("""{"computed":true,"relevant":["SynPatch.esp"],"notRelevant":{"count":1,"why":"names no plan target"}}""");
+        Assert.Equal(new[] { "finding", "context" }, computed.Select(r => (string?)Contract.Prop(r, "Role")));
+        Assert.Contains("names no plan target", (string?)Contract.Prop(computed[1], "Summary"));
+        var not = Read("""{"computed":false,"why":"the plan names no target and no pair"}""");
+        Assert.Equal(new[] { "finding", "finding" }, not.Select(r => (string?)Contract.Prop(r, "Role")));
+        Assert.All(not, r => Assert.Contains("no target and no pair", (string?)Contract.Prop(r, "Summary")));
+    }
+
     [Fact]
     public void An_incomplete_discovery_output_shows_its_unsearched_sources_and_that_it_is_incomplete()
     {

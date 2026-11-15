@@ -465,6 +465,39 @@ def case_m3c_a_review_arm_the_plan_does_not_have_is_refused_in_one_sentence():
             f"exit {r.returncode}: {out[-400:]}"
 
 
+
+def _discovery_run(run: Path, targets):
+    (run / "receipts").mkdir(parents=True)
+    (run / "outputs").mkdir()
+    hits = [{"file": "SelFix.esp", "kind": "pool-archive", "masters": ["Sel.esp"], "sha256": "11" * 32},
+            {"file": "Far1.esp", "kind": "pool-archive", "masters": ["Zed.esp"], "sha256": "22" * 32},
+            {"file": "Far2.esp", "kind": "pool-archive", "masters": ["Skyrim.esm"], "sha256": "33" * 32}]
+    out = run / "outputs" / "pool.json"
+    out.write_text(json.dumps({"schemaVersion": 1, "probe": "poolprobe", "complete": True, "hits": hits}), encoding="utf-8")
+    receipts = {"r-pool": {"receiptId": "r-pool", "armId": "candidate-01", "checkId": "patch.discovery-pool",
+                           "validation": {"accepted": True}, "adapter": {"kind": "patchprobe", "exe": "poolprobe"},
+                           "outputs": [{"path": "outputs/pool.json", "sha256": ER.sha256_file(out)}]}}
+    plan = {"planId": "p", "reviewArm": "candidate-01", "targets": [{"name": t} for t in targets],
+            "arms": [{"armId": "baseline", "kind": "baseline"}, {"armId": "candidate-01", "kind": "candidate"}], "checks": []}
+    return SimpleNamespace(run=run, plan=plan), receipts
+
+
+def case_b8i_finalize_records_discovery_relevance_by_evalruns_rule_for_every_accepted_discovery_receipt():
+    """R4.6 (review M6): relevance is recorded whether or not candidate-qualification runs, by discovery_hit_rows' rule,
+    and as not computed, with the sentence, when the plan has no target and no pair."""
+    rel = getattr(ER, "discovery_relevance", None)
+    assert rel is not None, "evalrun records no discovery relevance outside candidate-qualification (no discovery_relevance)"
+    with tempfile.TemporaryDirectory() as t:
+        ex, receipts = _discovery_run(Path(t) / "with-target", ["Sel.esp"])
+        got = rel(ex, receipts)
+        one = got["patch.discovery-pool"]["candidate-01"]
+        assert one["computed"] is True, one
+        assert one["relevant"] == ["SelFix.esp"], one
+        assert one["notRelevant"]["count"] == 2 and one["notRelevant"]["why"], one
+        ex, receipts = _discovery_run(Path(t) / "no-target", [])
+        none = rel(ex, receipts)["patch.discovery-pool"]["candidate-01"]
+        assert none["computed"] is False and "no target" in none["why"], none
+
 def main():
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("case_")):
         check(name, fn)
