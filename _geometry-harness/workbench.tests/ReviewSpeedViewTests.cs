@@ -87,6 +87,8 @@ public class ReviewSpeedViewTests
         Assert.True(v.ShowingOriginal, "the view does not say it shows originals");
         Assert.All(new[] { a, b }, ro => Assert.True(ro.Meshes[0].ModelTransform is null, $"{ro.Ref.RefKey} is not drawn at its load-order place while originals show"));
         Assert.Equal(pending, s.Pending);                              // the hold never changes what a commit writes
+        var bakedMin = Boxes.Box(0x800, new Vec3(0, 0, 0), new Vector3(40, 40, 60)).Shapes[0].Min;
+        Assert.True(Vector3.Distance(bakedMin, a.Shapes[0].Min) < 0.01f, $"the pick shape is at {a.Shapes[0].Min} while originals show; the load-order place is {bakedMin}");
         v.ShowOriginal(false);
         Assert.False(v.ShowingOriginal);
         Assert.NotNull(a.Meshes[0].ModelTransform); Assert.NotNull(b.Meshes[0].ModelTransform);
@@ -114,7 +116,7 @@ public class ReviewSpeedViewTests
         s.Stage(a.Ref.RefKey, Boxes.Moved(a, 150));
         v.ShowOriginal(true);
         Assert.True(v.ShowingOriginal, "the view does not say it shows originals");
-        s.StageDelta(a.Ref.RefKey, new Vector3(10, 0, 0), Vector3.UnitZ, 0f);
+                s.StageDelta(a.Ref.RefKey, new Vector3(10, 0, 0), Vector3.UnitZ, 0f);
         Assert.False(v.ShowingOriginal, "staging while originals show left the originals on screen");
         Assert.Equal(160f, s.Current(a.Ref.RefKey).Position.X, 3);
         Assert.NotNull(a.Meshes[0].ModelTransform);
@@ -226,7 +228,7 @@ public class ReviewSpeedViewTests
         var said = v.HideInFront(subject.Ref.RefKey, () => ScenePick.Pick(shapes, o, d, WorkbenchHost.Pickable));
         Assert.Equal(new[] { near.Ref.RefKey, nearer.Ref.RefKey }.OrderBy(k => k.ToString()), v.Hidden.OrderBy(k => k.ToString()));
         Assert.False(subject.Meshes[0].IsHiddenByHost, "the subject was hidden");
-        Assert.Contains("2", said);
+        Assert.Contains("hid 2 references", said);
     }
 
     // I3e: terrain in front is said, not hidden
@@ -275,5 +277,70 @@ public class ReviewSpeedViewTests
         Assert.False(a.Meshes[0].IsHiddenByHost || b.Meshes[0].IsHiddenByHost, "isolate hid one of the two");
         v.Restore();
         Assert.True(all.All(r => !r.Meshes[0].IsHiddenByHost));
+    }
+
+    // I1h: a stage on one reference while originals show puts every edited reference back at its edit
+    [Fact]
+    public void Staging_one_reference_while_originals_show_redraws_the_other_edited_reference_at_its_edit()
+    {
+        var (s, v, a, b) = Two();
+        s.Stage(a.Ref.RefKey, Boxes.Moved(a, 150));
+        s.Stage(b.Ref.RefKey, Boxes.Moved(b, 0, 90));
+        v.ShowOriginal(true);
+        Assert.True(v.ShowingOriginal, "the view does not say it shows originals");
+        s.StageDelta(a.Ref.RefKey, new Vector3(5, 0, 0), Vector3.UnitZ, 0f);
+        Assert.NotNull(b.Meshes[0].ModelTransform);
+        Assert.False(v.ShowingOriginal);
+    }
+
+    // I1i: releasing the key shows the edits
+    [Fact]
+    public void Releasing_Space_shows_the_edits_again()
+    {
+        var (s, v, a, _) = Two();
+        s.Stage(a.Ref.RefKey, Boxes.Moved(a, 150));
+        v.OnKey(ViewState.SpaceKey, down: true, repeat: false);
+        Assert.True(v.ShowingOriginal, "Space down did not show originals");
+        Assert.True(v.OnKey(ViewState.SpaceKey, down: false, repeat: false));
+        Assert.False(v.ShowingOriginal, "Space up left originals showing");
+        Assert.NotNull(a.Meshes[0].ModelTransform);
+    }
+
+    // I1j: revert, a write, forgetting a written edit and a session restore each clear the hold first
+    [Fact]
+    public void Revert_write_forget_and_restore_while_originals_show_clear_the_hold()
+    {
+        var steps = new (string Name, Action<EditSession, RefOcclusion, RefOcclusion> Do)[]
+        {
+            ("revert", (s, a, b) => s.Revert(a.Ref.RefKey)),
+            ("write", (s, a, b) => s.MarkWritten("WbTest.esp")),
+            ("forget", (s, a, b) => { s.MarkWritten("WbTest.esp"); }),
+            ("restore", (s, a, b) => SessionFile.Restore(s, new SessionData("p", "arm", null, null, null,
+                new[] { new SavedEdit(b.Ref.RefKey.ToString(), RefPlacementEdit.BakedPose(b.Ref), Boxes.Moved(b, 0, 30)) }, Array.Empty<SavedWritten>()), (_, _) => null)),
+        };
+        foreach (var (name, step) in steps)
+        {
+            var (s, v, a, b) = Two();
+            s.Stage(a.Ref.RefKey, Boxes.Moved(a, 150));
+            if (name == "forget") { s.MarkWritten("WbTest.esp"); v.ShowOriginal(true); s.ForgetWritten(a.Ref.RefKey); }
+            else { v.ShowOriginal(true); Assert.True(v.ShowingOriginal, $"{name}: the view does not say it shows originals"); step(s, a, b); }
+            Assert.False(v.ShowingOriginal, $"{name} while originals show left them showing");
+        }
+    }
+
+    // I3i: a subject the centre ray never reaches: nothing is hidden, and that is said
+    [Fact]
+    public void Hide_what_is_in_front_hides_nothing_when_the_ray_never_reaches_the_subject()
+    {
+        var subject = Boxes.Box(0x850, new Vec3(2000, 0, 0), new Vector3(40, 40, 60));
+        var wall = Boxes.Box(0x851, new Vec3(0, -300, 0), new Vector3(60, 20, 80));
+        var all = new[] { subject, wall };
+        var v = new ViewState(new EditSession(all), () => all);
+        var shapes = all.SelectMany(r => r.Shapes).ToList();
+        var o = TexturedScene.YUp(new Vector3(0, -1000, 50)); var d = TexturedScene.YUp(new Vector3(0, 1, 0));
+        var said = v.HideInFront(subject.Ref.RefKey, () => ScenePick.Pick(shapes, o, d, WorkbenchHost.Pickable));
+        Assert.Contains("does not reach", said);
+        Assert.Empty(v.Hidden);
+        Assert.False(wall.Meshes[0].IsHiddenByHost, "a reference was left hidden although the subject was never reached");
     }
 }

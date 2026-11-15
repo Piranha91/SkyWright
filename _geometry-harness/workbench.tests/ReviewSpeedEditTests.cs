@@ -37,6 +37,10 @@ public class ReviewSpeedEditTests : IDisposable
         Assert.Equal("Turned shrub 90° right", EditSession.Sentence(Edit(b, right), "shrub"));
         var tilt = b with { Rotation = RefPlacementEdit.Turned(b.Rotation, Vector3.UnitX, float.DegreesToRadians(10)) };
         Assert.Equal("Tilted shrub 10° about the east-west axis", EditSession.Sentence(Edit(b, tilt), "shrub"));
+        var tiltY = b with { Rotation = RefPlacementEdit.Turned(b.Rotation, Vector3.UnitY, float.DegreesToRadians(10)) };
+        Assert.Equal("Tilted shrub 10° about the north-south axis", EditSession.Sentence(Edit(b, tiltY), "shrub"));
+        var slanted = b with { Rotation = RefPlacementEdit.Turned(b.Rotation, Vector3.Normalize(new Vector3(1, 1, 0)), float.DegreesToRadians(20)) };
+        Assert.Equal("Rotated shrub 20° about a slanted axis", EditSession.Sentence(Edit(b, slanted), "shrub"));
         var moveAndTurn = At(150, 0, 0) with { Rotation = left.Rotation };
         Assert.Equal("Moved shrub 150 units east; turned it 15° left", EditSession.Sentence(Edit(b, moveAndTurn), "shrub"));
     }
@@ -117,6 +121,7 @@ public class ReviewSpeedEditTests : IDisposable
         Assert.True(s.Written.TryGetValue(w.Ref.RefKey, out var written), "the written edit was not redrawn from its patch");
         Assert.Equal("WbOld.esp", written.Patch);
         Assert.Equal(fromPatch, s.Current(w.Ref.RefKey));
+        Assert.Equal(a.Ref.RefKey, s.Selected);                          // the saved selection is restored
         var note = Assert.Single(notes);
         Assert.Contains(b.Ref.RefKey.ToString(), note);
         Assert.Contains("not restored", note);

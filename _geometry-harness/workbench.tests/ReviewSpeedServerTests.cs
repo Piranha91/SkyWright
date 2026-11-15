@@ -56,6 +56,9 @@ public class ReviewSpeedServerTests
         Assert.NotNull(why);
         Assert.Contains("not the same configuration", why);
         Assert.DoesNotContain("\n", why);
+        var turned = await p.PlacementMismatchAsync(TiltedRefWorld.Ref, Drawn with { Rotation = new Vec3(TiltedRefWorld.Rot.X, TiltedRefWorld.Rot.Y, TiltedRefWorld.Rot.Z + 0.2f) });
+        Assert.NotNull(turned);                                      // a rotation-only difference is a different placement
+        Assert.Contains("not the same configuration", turned);
     }
 
     // S4b: a bundle whose arm places the reference elsewhere than the profile: no decision key is read
@@ -145,5 +148,41 @@ public class ReviewSpeedServerTests
         var (pos, _) = await p.ReadPlacementAsync(TiltedRefWorld.Ref.ToString(), source: "WbViewOnly.esp");
         Assert.Equal(after.Position.X, pos.X, 3); Assert.Equal(after.Position.Y, pos.Y, 3); Assert.Equal(after.Position.Z, pos.Z, 3);
         Assert.True(v.Active, "the write cleared the view state");
+    }
+
+    // B1d: the winner read for a see-through by mod goes through the placement check
+    [Fact]
+    public async Task Winners_are_read_in_one_call_and_refused_for_a_reference_drawn_elsewhere()
+    {
+        using var w = new TiltedRefWorld();
+        await using var p = await Start(w);
+        var winners = await p.WinnersAsync(new[] { (TiltedRefWorld.Ref, Drawn) });
+        Assert.True(winners.TryGetValue(TiltedRefWorld.Ref, out var win), "no winner read");
+        Assert.Equal(TiltedRefWorld.Master.FileName.String, win, ignoreCase: true);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => p.WinnersAsync(new[] { (TiltedRefWorld.Ref, Drawn with { Position = new Vec3(9, 9, 9) }) }));
+        Assert.Contains("not the same configuration", ex.Message);
+    }
+
+    // B4: the base's fields are the ones geometry reads, and the mesh is keyed by its content hash
+    [Fact]
+    public async Task Decision_objects_keep_the_bases_geometry_fields_and_the_meshes_content_hash()
+    {
+        using var w = new TiltedRefWorld(withMesh: true);
+        ObjectState o;
+        await using (var p = await Start(w)) o = Assert.Single(await p.ReadObjectsAsync(new[] { (TiltedRefWorld.Ref, Drawn) }));
+        Assert.Contains(o.BaseFields, f => f.Path.StartsWith("Model", StringComparison.Ordinal));
+        Assert.DoesNotContain(o.BaseFields, f => f.Path.StartsWith("EditorID", StringComparison.Ordinal));
+        Assert.Equal(@"meshes\hcwb\box.nif", o.Model, ignoreCase: true);
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(w.MeshFile))).ToLowerInvariant();
+        Assert.Equal(sha, o.ModelSha256);
+
+        File.WriteAllText(w.MeshFile, "nif bytes, version two");
+        ObjectState o2;
+        await using (var q = await Start(w)) o2 = Assert.Single(await q.ReadObjectsAsync(new[] { (TiltedRefWorld.Ref, Drawn) }));
+        var row = new RowState("Holds", "s", "b");
+        var m = Decisions.Compare(new Decision(w.Instance, "Default", "geometry.object-overlap", "k", "intentional", "r", DateTimeOffset.UtcNow, row, new[] { o }, "srv"),
+                                  row, new[] { o2 }, "srv");
+        Assert.Equal(Standing.Reconsider, m.Standing);
+        Assert.Contains("mesh", m.Sentence);
     }
 }

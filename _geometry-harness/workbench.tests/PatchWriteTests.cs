@@ -23,7 +23,12 @@ public sealed class TiltedRefWorld : IDisposable
     public string Instance => Path.Combine(Root, "instance");
     public string DataDir => Path.Combine(Root, "game", "Data");
 
-    public TiltedRefWorld()
+    public TiltedRefWorld() : this(withMesh: false) { }
+
+    /// <summary>The model file the static names, when the world carries one: loose in the world's mod folder.</summary>
+    internal string MeshFile => Path.Combine(Instance, "mods", "WorldMod", "meshes", "hcwb", "box.nif");
+
+    internal TiltedRefWorld(bool withMesh)
     {
         Root = Path.Combine(Path.GetTempPath(), "hc-wb-world-" + Guid.NewGuid().ToString("N"));
         var profile = Path.Combine(Instance, "profiles", "Default");
@@ -31,6 +36,7 @@ public sealed class TiltedRefWorld : IDisposable
         Directory.CreateDirectory(profile); Directory.CreateDirectory(mods); Directory.CreateDirectory(DataDir);
         var m = new SkyrimMod(Master, SkyrimRelease.SkyrimSE);
         var stat = new Static(new FormKey(Master, 0x801), SkyrimRelease.SkyrimSE) { EditorID = "HcWbStatic" };
+        if (withMesh) stat.Model = new Model { File = @"hcwb\box.nif" };
         m.Statics.Add(stat);
         var cell = new Cell(new FormKey(Master, 0x802), SkyrimRelease.SkyrimSE) { EditorID = "HcWbCell", Flags = Cell.Flag.IsInteriorCell };
         cell.Temporary.Add(new PlacedObject(Ref, SkyrimRelease.SkyrimSE)
@@ -44,6 +50,7 @@ public sealed class TiltedRefWorld : IDisposable
         sub.Cells.Add(cell); block.SubBlocks.Add(sub); m.Cells.Records.Add(block);
         var dir = Path.Combine(mods, "WorldMod"); Directory.CreateDirectory(dir);
         m.BeginWrite.ToPath(Path.Combine(dir, Master.FileName.String)).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+        if (withMesh) { Directory.CreateDirectory(Path.GetDirectoryName(MeshFile)!); File.WriteAllText(MeshFile, "nif bytes, version one"); }
         File.WriteAllText(Path.Combine(profile, "loadorder.txt"), "# header\r\n" + Master.FileName + "\r\n");
         File.WriteAllText(Path.Combine(profile, "plugins.txt"), "*" + Master.FileName + "\r\n");
         File.WriteAllText(Path.Combine(profile, "modlist.txt"), "# header\r\n+WorldMod\r\n");

@@ -62,6 +62,15 @@ public sealed class StateToolsTests : IAsyncLifetime
         public bool Rechecking { get; private set; }
         public ViewState? View { get; set; }
         public IReadOnlyList<ViewProbe.PickShape> Shapes { get; set; } = Array.Empty<ViewProbe.PickShape>();
+        internal Dictionary<string, IReadOnlyList<FormKey>> ModRefs = new(StringComparer.OrdinalIgnoreCase);
+        public Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> RefsOfModAsync(string modFolder, string? plugin) =>
+            Task.FromResult<(IReadOnlyList<FormKey>, string?)>(ModRefs.TryGetValue(modFolder ?? plugin ?? "", out var r) ? (r, null) : (Array.Empty<FormKey>(), $"{modFolder} provides no plugin of this order."));
+        internal string ServerBuild = "srv-1";
+        public Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
+            Task.FromResult<(RowState, IReadOnlyList<ObjectState>, string)>((new RowState(row.Row.Physical?.ToString(), row.Row.Summary, "probe-1"),
+                new[] { new ObjectState(row.Row.RefKey, "Subject.esp", new[] { new FieldValue("Placement.Position", "1,2,3") }, null, Array.Empty<FieldValue>(), null, null, null) },
+                ServerBuild));
+        public float[]? Camera { get; set; } = { 1f, 2f, 3f, 90f, 10f };
     }
 
     sealed class FakeSurface : IWorkbenchSurface
@@ -70,6 +79,10 @@ public sealed class StateToolsTests : IAsyncLifetime
         internal IReadOnlyList<RankedRow> Rows = Array.Empty<RankedRow>();
         internal readonly List<int> Opened = new();
         public object? Bundle => new { planId = "test-plan", arm = "baseline" };
+        public string? WorkFolder { get; set; }
+        public (string Instance, string Profile)? Binding { get; set; } = ("C:/Instance", "Default");
+        public string? PlanId => "test-plan";
+        public string? Arm => "baseline";
         public IReadOnlyList<RankedRow> Listed => Rows;
         public int Total => Rows.Count;
         public RankedRow? OpenRow { get; set; }
@@ -928,5 +941,113 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.Contains("real problem", why);
         Assert.Contains("intentional", why);
         Assert.Contains("unsure", why);
+    }
+
+    string NewWorkFolder() { var w = Path.Combine(Path.GetTempPath(), "hc-wb-work-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(w); return w; }
+
+    // B1b (wire): see-through by mod folder tints exactly the references that mod's plugins win
+    [Fact]
+    public async Task B1_see_through_by_mod_tints_exactly_that_mods_references_and_refuses_a_mod_with_none()
+    {
+        var ro = _scene.Session.RefOf(FormKey.Factory(RefKey));
+        _scene.View = new ViewState(_scene.Session, () => new[] { ro });
+        _scene.ModRefs["ModA"] = new[] { FormKey.Factory(RefKey) };
+        await Ok("workbench_act", A(("verb", "view"), ("op", "see_through"), ("mod", "ModA")));
+        var st = await Ok("workbench_state", A(("project", new[] { "view" })));
+        Assert.Equal(new[] { RefKey }, P(st, "view", "seeThrough").EnumerateArray().Select(e => e.GetString()));
+        Assert.Contains("ModZ", await Refused("workbench_act", A(("verb", "view"), ("op", "see_through"), ("mod", "ModZ"))));
+    }
+
+    // B3: decide stores the verdict and reason, needs a reason, and opens the next undecided row
+    [Fact]
+    public async Task B3_decide_stores_the_verdict_and_reason_and_opens_the_next_undecided_row()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        Assert.Contains("reason", await Refused("workbench_act", A(("verb", "decide"), ("conflict", 1), ("verdict", "intentional"))));
+        var r = await Ok("workbench_act", A(("verb", "decide"), ("conflict", 1), ("verdict", "intentional"), ("reason", "placed on purpose")));
+        Assert.Contains("conflict 2", P(r, "said").GetString());
+        Assert.Contains(2, _surface.Opened);
+        var file = Path.Combine(work, "review-decisions.json");
+        Assert.True(File.Exists(file), "no decisions file in the Work Folder");
+        Assert.Contains("placed on purpose", File.ReadAllText(file));
+        var st = await Ok("workbench_state", A(("project", new[] { "decisions" })));
+        var row = P(st, "decisions", "rows").EnumerateArray().Single(x => P(x, "rank").GetInt32() == 1);
+        Assert.Equal("intentional", P(row, "verdict").GetString());
+        Assert.Equal("placed on purpose", P(row, "reason").GetString());
+        Assert.Equal("applies", P(row, "standing").GetString());
+    }
+
+    // B3: a stored decision whose row is not in this run is kept and listed
+    [Fact]
+    public async Task B3_a_decision_for_a_row_not_in_this_run_is_listed_and_kept()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        new DecisionStore(Path.Combine(work, "review-decisions.json")).Put(new Decision("C:/Instance", "Default", "geometry.object-overlap", "overlap|000a77:hcwbtest.esp|000a78:hcwbtest.esp",
+            "real problem", "gone now", DateTimeOffset.UtcNow, new RowState("Holds", "s", "probe-1"), Array.Empty<ObjectState>(), "srv-1"));
+        var st = await Ok("workbench_state", A(("project", new[] { "decisions" })));
+        var gone = P(st, "decisions", "notInThisRun").EnumerateArray().ToList();
+        Assert.Contains(gone, g => P(g, "key").GetString() == "overlap|000a77:hcwbtest.esp|000a78:hcwbtest.esp");
+        Assert.Contains("gone now", File.ReadAllText(Path.Combine(work, "review-decisions.json")));
+    }
+
+    // B3: a decision is remembered by a new process on the same Work Folder
+    [Fact]
+    public async Task B3_a_decision_is_remembered_by_a_new_process_on_the_same_work_folder()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        await Ok("workbench_act", A(("verb", "decide"), ("conflict", 1), ("verdict", "real problem"), ("reason", "the box floats")));
+        var surface2 = new FakeSurface { SceneShown = _scene, Rows = _surface.Rows, WorkFolder = work };
+        var hub2 = new StateHub(_ui, surface2) { Wait = TimeSpan.FromSeconds(2) };
+        await using var server2 = await StateServer.StartAsync(FreePort(), hub2);
+        await using var client2 = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions { Endpoint = new Uri(server2.Url + "/"), TransportMode = HttpTransportMode.StreamableHttp }));
+        var res = await client2.CallToolAsync("workbench_state", A(("project", new[] { "decisions" })));
+        var text = string.Join("\n", res.Content.OfType<TextContentBlock>().Select(c => c.Text));
+        Assert.False(res.IsError == true, text);
+        using var d = JsonDocument.Parse(text);
+        var row = P(d.RootElement, "decisions", "rows").EnumerateArray().Single(x => P(x, "rank").GetInt32() == 1);
+        Assert.Equal("real problem", P(row, "verdict").GetString());
+        Assert.Equal("applies", P(row, "standing").GetString());
+    }
+
+    // B6: drop succeeds on the wire and names what it landed on; stage takes an axis lock
+    [Fact]
+    public async Task B6_drop_stages_one_lowering_onto_the_terrain_and_stage_honours_an_axis_lock()
+    {
+        var key = FormKey.Factory(RefKey);
+        var ro = _scene.Session.RefOf(key);
+        _scene.Shapes = ro.Shapes.Append(Boxes.Terrain(0, 1000, 2000)).ToList();
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var before = _scene.Session.Current(key);
+        var r = await Ok("workbench_act", A(("verb", "drop"), ("ref", RefKey)));
+        Assert.Contains("terrain", P(r, "said").GetString());
+        var pending = P(r, "state", "pending").EnumerateArray().ToList();
+        Assert.Single(pending);
+        var moved = P(pending[0], "moved").EnumerateArray().Select(e => e.GetSingle()).ToArray();
+        Assert.True(moved[2] < 0 && moved[0] == 0 && moved[1] == 0, $"drop moved by [{string.Join(", ", moved)}]");
+        Assert.True(_scene.Session.Current(key).Position.Z < before.Position.Z);
+        await Ok("workbench_act", A(("verb", "undo")));
+        var locked = await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 30f, -40f, 12f }), ("axis", "x")));
+        Assert.Equal(new[] { 30f, 0f, 0f }, P(P(locked, "state", "pending").EnumerateArray().Single(), "moved").EnumerateArray().Select(e => e.GetSingle()));
+    }
+
+    // B7: the running workbench keeps the session file up to date
+    [Fact]
+    public async Task B7_select_stage_and_revert_are_saved_to_the_session_file()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        var (path, why) = SessionFile.PathFor(work, "test-plan", "baseline");
+        Assert.True(path is not null, "no session path: " + why);
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 40f, 0f, 0f })));
+        var saved = SessionFile.Read(path!);
+        Assert.True(saved is not null, "the session file was not written");
+        Assert.Equal(RefKey, saved!.Selected);
+        Assert.Single(saved.Staged);
+        await Ok("workbench_act", A(("verb", "revert"), ("ref", RefKey)));
+        Assert.Empty(SessionFile.Read(path!)!.Staged);
     }
 }

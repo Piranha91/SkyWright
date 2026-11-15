@@ -22,6 +22,13 @@ internal interface IWorkbenchSurface
     /// <summary>The bundle open, and the severity table, the Findings tab ranks from; null when none is open.</summary>
     BundleConflicts? Open => null;
     SeverityTable? Severity => null;
+    /// <summary>The Work Folder decisions and sessions are kept in; null where none is set.</summary>
+    string? WorkFolder => null;
+    /// <summary>The instance and profile the scene and the houseCARL server are bound to.</summary>
+    (string Instance, string Profile)? Binding => null;
+    /// <summary>The open bundle's plan id and arm.</summary>
+    string? PlanId => Open?.PlanId;
+    string? Arm => Open?.Arm;
     /// <summary>The Findings tab, ranked.</summary>
     IReadOnlyList<RankedFinding> Findings => Open is { } b ? FindingRanking.Rank(b.Findings, b.Targets, Severity) : Array.Empty<RankedFinding>();
     /// <summary>What a click on a clickable Findings row does: the Records tree's path to its reference and cell.</summary>
@@ -49,6 +56,14 @@ internal interface IWorkbenchScene
     ViewState? View => null;
     /// <summary>The scene's pick shapes (drawn references and terrain) at their current placements.</summary>
     IReadOnlyList<PickShape> Shapes => Array.Empty<PickShape>();
+    /// <summary>The drawn references whose winning record a plugin of this mod folder provides, in the arm's view, or why not.</summary>
+    Task<(IReadOnlyList<FormKey> Refs, string? Refusal)> RefsOfModAsync(string modFolder, string? plugin) =>
+        Task.FromResult<(IReadOnlyList<FormKey>, string?)>((Array.Empty<FormKey>(), "this scene cannot read which mod provides a reference."));
+    /// <summary>The detector row and the objects a decision on this row is keyed on, read now.</summary>
+    Task<(RowState Row, IReadOnlyList<ObjectState> Objects, string ServerBuild)> DecisionInputsAsync(RankedRow row) =>
+        throw new InvalidOperationException("this scene has no houseCARL server to read the row's objects from.");
+    /// <summary>The camera as [x, y, z, yaw, pitch]; null where there is none.</summary>
+    float[]? Camera { get => null; set { } }
 }
 
 /// <summary>The running app: <see cref="Shell"/> and its current scene.</summary>

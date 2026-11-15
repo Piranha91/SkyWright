@@ -121,7 +121,8 @@ public class ReviewSpeedMoveTests
         Assert.NotNull(alone.Refusal);
         Assert.Contains("lowers only", alone.Refusal);
         var sunk = Boxes.Box(0x904, new Vec3(0, 0, -30), new Vector3(20, 20, 40));
-        var s = CaptureViews.Drop(World(sunk.Shapes.Append(Boxes.Terrain(0)).ToArray()), sunk.Ref.RefKey.ToString());
+        // a second surface under the terrain: a sunk object is refused, never lowered onto what lies below
+        var s = CaptureViews.Drop(World(sunk.Shapes.Append(Boxes.Terrain(0)).Append(Boxes.Terrain(-500)).ToArray()), sunk.Ref.RefKey.ToString());
         Assert.Null(s.Distance);
         Assert.Contains("lowers only", s.Refusal);
     }
@@ -130,11 +131,13 @@ public class ReviewSpeedMoveTests
     [Fact]
     public void Contacts_still_names_the_reference_a_box_rests_on()
     {
-        var box = Boxes.Box(0x905, new Vec3(0, 0, 100), new Vector3(20, 20, 20));
+        var box = Boxes.Box(0x905, new Vec3(0, 0, 104), new Vector3(20, 20, 20));        // 4 units above the table
         var table = Boxes.Box(0x906, new Vec3(0, 0, 0), new Vector3(60, 60, 50));
+        var floor = Boxes.Box(0x907, new Vec3(0, 0, -40), new Vector3(200, 200, 10));     // under the table, within reach
         var g = new CaptureViews.Geometry();
-        foreach (var ro in new[] { box, table }) foreach (var s in ro.Shapes) g.Add(ro.Ref.RefKey.ToString(), "x", s.Verts, s.Tris);
+        foreach (var ro in new[] { box, table, floor }) foreach (var s in ro.Shapes) g.Add(ro.Ref.RefKey.ToString(), "x", s.Verts, s.Tris);
         var c = CaptureViews.Contacts(g, box.Ref.RefKey.ToString());
         Assert.Contains(table.Ref.RefKey.ToString(), c.RestsOn);
+        Assert.DoesNotContain(floor.Ref.RefKey.ToString(), c.RestsOn);
     }
 }

@@ -205,6 +205,11 @@ internal sealed class PatchWriter : IAsyncDisposable
                                                                CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<ObjectState>>(Array.Empty<ObjectState>());
 
+    /// <summary>The winning plugin of each reference, read in one call, each checked against the pose the scene drew.</summary>
+    internal Task<IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, string>> WinnersAsync(
+        IReadOnlyList<(Mutagen.Bethesda.Plugins.FormKey Ref, ViewProbe.RefPlacementEdit.Pose Drawn)> refs, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyDictionary<Mutagen.Bethesda.Plugins.FormKey, string>>(new Dictionary<Mutagen.Bethesda.Plugins.FormKey, string>());
+
     /// <summary>Undo a written edit: remove the reference's override from the patch in <paramref name="patchFolder"/>.</summary>
     internal Task<string> RevertWrittenAsync(Mutagen.Bethesda.Plugins.FormKey key, string patchFolder, CancellationToken ct = default)
         => Task.FromResult("");
