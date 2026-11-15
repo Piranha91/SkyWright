@@ -82,7 +82,9 @@ internal static class Program
     internal static string DefaultCorpus()
     {
         var exe = DefaultServerExe();
-        return Path.Combine(Path.GetDirectoryName(exe)!, "..", "..", "..", "..", "..", "generated", "corpus.json");
+        // the server's own default is the corpus.json beside it, where the generator writes it; else the checkout's generated/
+        var beside = Path.Combine(Path.GetDirectoryName(exe)!, "corpus.json");
+        return File.Exists(beside) ? beside : Path.Combine(Path.GetDirectoryName(exe)!, "..", "..", "..", "..", "..", "generated", "corpus.json");
     }
 
     [STAThread]
