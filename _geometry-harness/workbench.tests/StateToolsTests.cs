@@ -458,9 +458,33 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         var (w, _, _) = await OpenWorld();
         using var _w = w;
+        // a second profile of the same instance that loads nothing: a server bound to it would not have the reference
+        var other = Path.Combine(w.Instance, "profiles", "Other");
+        Directory.CreateDirectory(other);
+        foreach (var f in new[] { "modlist.txt", "plugins.txt", "loadorder.txt" }) File.WriteAllText(Path.Combine(other, f), "");
         var (err, text) = await Call("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }), ("format", "json")));
         Assert.False(err, "the forwarded housecarl_records refused: " + text);
         Assert.Contains("HcWbRef", text);                        // the reference only the synthetic world has
+    }
+
+    /// <summary>A forwarded read's to_file (records, check, asset_status) is a write: it lands under the Output Folder or
+    /// the Work Folder, else it is refused by the output rule's verdict.</summary>
+    [Fact]
+    public async Task B13b_h_a_read_tools_to_file_outside_the_output_and_work_folders_is_refused()
+    {
+        var (w, o, game) = await OpenWorld();
+        using var _w = w;
+        var before = Listing(w.Instance, game);
+        foreach (var bad in new[] { Path.Combine(w.Instance, "mods", "WorldMod", "x.jsonl"), Path.Combine(w.DataDir, "x.jsonl"),
+                                    Path.Combine(w.Instance, "profiles", "Default", "x.jsonl"), Path.Combine(w.Root, "elsewhere", "x.jsonl") })
+        {
+            var why = await Refused("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }), ("to_file", bad)));
+            Assert.Contains("to_file", why);
+        }
+        Unchanged(before, Listing(w.Instance, game), "the instance or the game folder");
+        var good = Path.Combine(o, "reads", "x.jsonl");
+        var (err, text) = await Call("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }), ("to_file", good)));
+        Assert.False(err, "a to_file under the Output Folder was refused: " + text);
     }
 
     [Fact]
@@ -686,5 +710,58 @@ public sealed class StateToolsTests : IAsyncLifetime
             Assert.Equal("test-plan", P(done, "bundle", "planId").GetString());     // the same server still answers
         }
         finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); }
+    }
+
+    // ---- Gate C correction round ----
+
+    [Fact]
+    public async Task M7h_patch_probes_are_greyed_when_this_machine_names_no_search_roots_or_download_pool()
+    {
+        var saved = new[] { "HOUSECARL_HARNESS_CONFIG", "HOUSECARL_SEARCH_ROOTS", "HOUSECARL_DOWNLOAD_POOL" }.ToDictionary(k => k, Environment.GetEnvironmentVariable);
+        foreach (var k in saved.Keys) Environment.SetEnvironmentVariable(k, null);
+        try
+        {
+            var inst = LauncherInstanceL5();
+            await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+            var s = await Ok("workbench_state", A(("project", new[] { "launcher" })));
+            var p = P(s, "launcher", "probes").EnumerateArray().Single(x => P(x, "checkId").GetString() == "patch.discovery-installed");
+            Assert.False(P(p, "selectable").GetBoolean(), "patch discovery was offered with no search roots configured");
+            Assert.Contains("search roots", P(p, "whyNot").GetString());
+        }
+        finally { foreach (var (k, v) in saved) Environment.SetEnvironmentVariable(k, v); }
+    }
+
+    [Fact]
+    public async Task M7i_an_unmanaged_modlist_entry_is_listed_but_cannot_be_ticked()
+    {
+        var inst = LauncherInstanceL5();
+        File.AppendAllText(Path.Combine(inst, "profiles", "P", "modlist.txt"), "*DLC: Dawnguard\r\n");
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+        Assert.Contains("unmanaged", await Refused("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "DLC: Dawnguard" }))));
+    }
+
+    [Fact]
+    public async Task M7j_run_is_refused_in_one_sentence_while_a_scene_is_open()
+    {
+        var prop = typeof(Launcher).GetProperty("RunBlocker", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+        Assert.True(prop is not null, "the launcher has no way to know a scene is open (RunBlocker)");
+        prop!.SetValue(_hub.Launcher, (Func<string?>)(() => "a scene is open"));
+        var inst = LauncherInstanceL5();
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+        await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
+        await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" })));
+        await Ok("workbench_act", A(("verb", "set_output"), ("path", inst + "-out")));
+        Assert.Contains("scene", await Refused("workbench_act", A(("verb", "run"))));
+    }
+
+    [Fact]
+    public async Task M7k_an_instance_whose_mods_live_elsewhere_by_base_directory_is_refused_naming_it()
+    {
+        var inst = LauncherInstanceL5();
+        var bd = inst + "-base";
+        foreach (var d in new[] { "mods/OnMod", "profiles/P", "overwrite" }) Directory.CreateDirectory(Path.Combine(bd, d));
+        File.Copy(Path.Combine(inst, "profiles", "P", "modlist.txt"), Path.Combine(bd, "profiles", "P", "modlist.txt"));
+        File.AppendAllText(Path.Combine(inst, "ModOrganizer.ini"), "[Settings]" + Environment.NewLine + "base_directory=" + bd.Replace(Path.DirectorySeparatorChar, '/') + Environment.NewLine);
+        Assert.Contains("base_directory", await Refused("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst))));
     }
 }

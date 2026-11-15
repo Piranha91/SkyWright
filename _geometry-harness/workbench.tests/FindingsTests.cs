@@ -48,7 +48,9 @@ public sealed class FindingsBundle : IDisposable
         _outputs.Add(new JsonObject { ["receipt"] = key, ["recordedPath"] = relOut, ["path"] = relOut, ["present"] = true, ["matches"] = true, ["sha256"] = Sha(full) });
     }
 
-    public FindingsBundle(bool findingsOnly = false)
+    /// <param name="variant">full; findingsOnly (no overlap rows); unclickable (navmesh and water rows only, and no
+    /// names, so no row opens the viewer); clean (every receipt accepted, no row anywhere).</param>
+    public FindingsBundle(bool findingsOnly = false, string variant = "full")
     {
         Directory.CreateDirectory(Path.Combine(Dir, "receipts"));
         var checks = new JsonArray(
@@ -63,6 +65,8 @@ public sealed class FindingsBundle : IDisposable
             ["targets"] = new JsonArray(new JsonObject { ["name"] = Sel }), ["checks"] = checks,
         }.ToJsonString());
         string T = "2026-11-15T00:00:00Z";
+        bool clean = variant == "clean", unclickable = variant == "unclickable";
+        if (clean || unclickable) findingsOnly = true;
         if (!findingsOnly)
         {
             var created = Enumerable.Range(0, 7).Select(i => new Conflict("OVERLAP", Sel, Base, "an overlap",
@@ -78,19 +82,31 @@ public sealed class FindingsBundle : IDisposable
         // N8 a Static base vs N9 unread (key 5)
         var navBase = new[] { Nav(Other, Base, "000B00:" + Other), Nav(Other, Base, "000B04:" + Other), Nav(Other, Base, "000B06:" + Other), Nav(Other, Base, "000B07:" + Other, null),
                               Nav(Other, Base, "000B08:" + Other), Nav(Other, Base, "000B09:" + Other) };
-        var navCand = navBase.Concat(new[] { Nav(Sel, Base, "000B01:" + Sel), Nav(Other, Base, "000B02:" + Other), Nav(Other, Base, "000B03:" + Other) }).ToArray();
+        if (clean) navBase = Array.Empty<Conflict>();
+        var navCand = clean ? navBase : navBase.Concat(new[] { Nav(Sel, Base, "000B01:" + Sel), Nav(Other, Base, "000B02:" + Other), Nav(Other, Base, "000B03:" + Other) }).ToArray();
         // N1 and N2 are created too; N1 is the only one naming a target
         Receipt("geometry.navmesh-ownership__baseline__arm", "geometry.navmesh-ownership", "conflict-file", "outputs/nav/baseline.json", new ConflictFile("navownprobe", "i", T, navBase), "conflict-file");
         Receipt("geometry.navmesh-ownership__candidate-01__arm", "geometry.navmesh-ownership", "conflict-file", "outputs/nav/candidate-01.json", new ConflictFile("navownprobe", "i", T, navCand), "conflict-file");
-        var water = new[] { new Conflict("WATER", Other, Base, "a water row", new[] { new ConflictRecord("000C01:" + Other, "placed-ref", null, PhysicalState.Holds) }) };
+        var water = clean ? Array.Empty<Conflict>() : new[] { new Conflict("WATER", Other, Base, "a water row", new[] { new ConflictRecord("000C01:" + Other, "placed-ref", null, PhysicalState.Holds) }) };
         Receipt("environment.water-boundaries__baseline__arm", "environment.water-boundaries", "conflict-file", "outputs/water/baseline.json", new ConflictFile("waterprobe", "i", T, water), "conflict-file");
         Receipt("environment.water-boundaries__candidate-01__arm", "environment.water-boundaries", "conflict-file", "outputs/water/candidate-01.json", new ConflictFile("waterprobe", "i", T, water), "conflict-file");
         Receipt("state.switch-census__candidate-01", "state.switch-census", "json", "outputs/switch/candidate-01.json",
-                """{"summary":{},"perPlugin":[],"unreadable":[],"switches":[{"key":"000D02:HcOther.esp","edid":"HcSw2","cell":"HcCell (int)","cellKey":"000A01:HcBase.esm","position":"(0, 0, 0)","owner":"HcOther.esp"},{"key":"000D01:HcOther.esp","edid":"HcSw1","cell":"HcCell (int)","cellKey":"000A01:HcBase.esm","position":"(0, 0, 0)","owner":"HcOther.esp"}],"jointFlips":[]}""", "json");
+                clean || unclickable ? """{"summary":{},"perPlugin":[],"unreadable":[],"switches":[],"jointFlips":[]}""" : """{"summary":{},"perPlugin":[],"unreadable":[],"switches":[{"key":"000D02:HcOther.esp","edid":"HcSw2","cell":"HcCell (int)","cellKey":"000A01:HcBase.esm","position":"(0, 0, 0)","owner":"HcOther.esp"},{"key":"000D01:HcOther.esp","edid":"HcSw1","cell":"HcCell (int)","cellKey":"000A01:HcBase.esm","position":"(0, 0, 0)","owner":"HcOther.esp"}],"jointFlips":[]}""", "json");
+        if (variant == "full")
+        {
+            // a ticked check that was rejected, and one that was not ticked (the plan lists every check)
+            foreach (var (key, exec, acc) in new[] { ("patch.discovery-installed__candidate-01", "rejected(exit-nonzero)", false), ("patch.discovery-pool__candidate-01", "skipped-user", false) })
+                File.WriteAllText(Path.Combine(Dir, "receipts", key + ".json"), JsonSerializer.Serialize(new
+                {
+                    checkId = key.Split("__")[0], armId = "candidate-01", outputs = Array.Empty<object>(), result = new { execution = exec },
+                    validation = new { accepted = acc, rejections = new[] { new { cause = "exit-nonzero", detail = "exit code 1" } } },
+                }));
+        }
         // names: the navmesh references sit in CellA; N8's base is a Static
         var refs = new JsonObject();
         foreach (var fk in new[] { "000B00:" + Other, "000B01:" + Sel, "000B02:" + Other, "000B03:" + Other, "000B04:" + Other, "000B06:" + Other, "000B07:" + Other, "000B08:" + Other, "000B09:" + Other, "000C01:" + Other })
             refs[fk] = new JsonObject { ["base"] = fk.EndsWith("B08:" + Other) ? "000E01:" + Base : null, ["carriedBy"] = new JsonArray(fk.Split(':')[1]), ["cells"] = new JsonObject { [fk.Split(':')[1]] = CellA } };
+        if (unclickable) refs = new JsonObject();               // the names read reached none of these references
         Directory.CreateDirectory(Path.Combine(Dir, "enrichment", "names"));
         File.WriteAllText(Path.Combine(Dir, "enrichment", "names", "names.json"), new JsonObject
         {
@@ -242,6 +258,41 @@ public sealed class FindingsTests
         Assert.True(overlap.All(r => r.NewOnArm == true), $"{overlap.Count(r => r.NewOnArm == true)} of 7 created rows are marked new");
     }
 
+    /// <summary>Opens a bundle as the window does (OpenBundle, on an STA thread) and returns its answer or the failure.</summary>
+    static (string[]? Args, Exception? Failed) OpenOnSta(FindingsBundle f)
+    {
+        var open = typeof(PatchWriter).Assembly.GetType("Workbench.Program")!.GetMethod("OpenBundle", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Environment.SetEnvironmentVariable("WB_EVALRUN", Path.Combine(f.Root, "fake_evalrun.py"));
+        Environment.SetEnvironmentVariable("WB_SEVERITY", Path.Combine(f.Root, "severity.json"));
+        Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(f.Root, "work"));
+        string[]? args = null; Exception? failed = null;
+        try
+        {
+            var t = new Thread(() =>
+            {
+                try { args = (string[]?)open.Invoke(null, new object[] { new[] { "--bundle", f.Dir, "--arm", "candidate-01" } }); }
+                catch (TargetInvocationException ex) { failed = ex.InnerException ?? ex; }
+            });
+            t.SetApartmentState(ApartmentState.STA); t.Start(); t.Join();
+        }
+        finally { foreach (var v in new[] { "WB_EVALRUN", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null); }
+        return (args, failed);
+    }
+
+    [Theory]
+    [InlineData("clean")]
+    [InlineData("unclickable")]
+    public void H3g_a_bundle_with_no_row_to_open_is_opened_with_no_scene_and_its_rows_listed(string variant)
+    {
+        using var f = new FindingsBundle(variant: variant);
+        var (args, failed) = OpenOnSta(f);
+        Assert.True(failed is null, $"the {variant} bundle was not opened: {failed?.Message}");
+        Assert.Null(args);                                                   // no scene to build
+        var findings = (System.Collections.ICollection)typeof(PatchWriter).Assembly.GetType("Workbench.Shell")!
+            .GetField("Findings", BindingFlags.Static | BindingFlags.NonPublic)!.GetValue(null)!;
+        Assert.Equal(variant == "clean" ? 0 : 9 + 1, findings.Count);
+    }
+
     [Fact]
     public void H3f_a_bundle_whose_only_rows_are_Findings_rows_opens_on_a_Findings_cell()
     {
@@ -267,5 +318,19 @@ public sealed class FindingsTests
         {
             foreach (var v in new[] { "WB_EVALRUN", "WB_SEVERITY", "WB_OUT" }) Environment.SetEnvironmentVariable(v, null);
         }
+    }
+
+    [Fact]
+    public async Task H3h_each_ticked_check_says_whether_it_ran_or_why_not_and_an_unticked_one_is_left_out()
+    {
+        using var f = new FindingsBundle();
+        var (s, _, stop) = await Serve(f, new() { ["project"] = new[] { "findings" }, ["limit"] = 1 });
+        await using var _s = stop;
+        var checks = P(s, "findings", "checks").EnumerateArray().ToList();
+        string? State(string id) => checks.Where(c => P(c, "checkId").GetString() == id).Select(c => P(c, "state").GetString()).SingleOrDefault();
+        Assert.Equal("ran", State("geometry.navmesh-ownership"));
+        Assert.Equal("rejected", State("patch.discovery-installed"));
+        Assert.Contains("exit-nonzero", P(checks.Single(c => P(c, "checkId").GetString() == "patch.discovery-installed"), "why").GetString());
+        Assert.Null(State("patch.discovery-pool"));
     }
 }

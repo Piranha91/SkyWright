@@ -523,6 +523,24 @@ def case_e2e1_patchprobe_finds_the_run_instance_outside_its_search_roots():
         assert "target instance not found" not in said, "patchprobe did not find the run's instance: " + said[-400:]
         assert r.returncode == 0, f"patchprobe exited {r.returncode}: {said[-400:]}"
 
+
+def case_c7_a_missing_loadorder_or_plugins_file_is_refused_not_read_as_an_empty_order():
+    """A profile with no loadorder.txt or no plugins.txt has no order to read; the run refuses naming the file instead of
+    carrying on as if no plugin were active."""
+    for missing in ("loadorder.txt", "plugins.txt"):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            inst, game = world(t, SHADOW_MODS, SHADOW_ENABLED, SHADOW_PLUGINS)
+            prof = next((Path(inst) / "profiles").iterdir())
+            (prof / missing).unlink()
+            ctx = EP.Context(in_place_entry(t, inst, game, ["Sel"], ["geometry.object-overlap"]), None, t / "out")
+            try:
+                ctx.resolve()
+            except EP.Refusal as e:
+                assert missing in str(e), f"the refusal does not name {missing}: {e}"
+                continue
+            raise AssertionError(f"a profile with no {missing} was read as an empty order")
+
 def main():
     for name, fn in sorted((k, v) for k, v in globals().items() if k.startswith("case_")):
         check(name, fn)

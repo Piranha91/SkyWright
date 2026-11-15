@@ -242,6 +242,32 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         }
     }
 
+    /// <summary>With out_path at the mods folder itself a new patch keeps the default lane's name rules: a stem an active
+    /// plugin already has is refused or suffixed exactly as it is without out_path.</summary>
+    [Fact]
+    public async Task B3h_out_path_at_the_mods_folder_keeps_the_default_lanes_name_collision_rule()
+    {
+        var shadow = new ModKey("WbShadow", ModType.Plugin);
+        var dir = Path.Combine(_w.Instance, "mods", "ShadowMod");
+        if (!Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+            new SkyrimMod(shadow, SkyrimRelease.SkyrimSE).BeginWrite.ToPath(Path.Combine(dir, shadow.FileName.String)).WithLoadOrder(Array.Empty<ISkyrimModGetter>()).Write();
+            var prof = Path.Combine(_w.Instance, "profiles", "Default");
+            File.AppendAllText(Path.Combine(prof, "plugins.txt"), "*" + shadow.FileName + "\r\n");
+            File.AppendAllText(Path.Combine(prof, "loadorder.txt"), shadow.FileName + "\r\n");
+            File.AppendAllText(Path.Combine(prof, "modlist.txt"), "+ShadowMod\r\n");
+        }
+        await using var c = await Server();
+        var plain = await Call(c, "housecarl_apply", new() { ["ops"] = Move(78f), ["patch"] = "WbShadow", ["dry_run"] = true });
+        var withOut = await Call(c, "housecarl_apply", new() { ["ops"] = Move(78f), ["patch"] = "WbShadow", ["dry_run"] = true, ["out_path"] = Path.Combine(_w.Instance, "mods") });
+        bool Refused((bool Error, string Text) r) => r.Error || r.Text.TrimStart().StartsWith("error:");
+        string Named((bool Error, string Text) r) => Refused(r) ? "refused" : System.Text.RegularExpressions.Regex.Match(r.Text, @"WbShadow[_0-9]*\.esp").Value;
+        // the premise: without out_path the default lane does not hand out the name an active plugin has
+        Assert.True(Named(plain) != "WbShadow.esp", "the fixture's active WbShadow.esp did not make the default lane avoid the name: " + plain.Text);
+        Assert.Equal(Named(plain), Named(withOut));
+    }
+
     [Fact]
     public async Task B3e_an_out_path_in_the_games_Data_or_an_existing_mod_folder_is_refused_by_the_server()
     {
@@ -878,6 +904,16 @@ public sealed class ManualWriteTests
         var after = Listing(w.Instance, game);
         var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
         Assert.True(changed.Count == 0, $"the commit changed the instance or the game folder: {string.Join("; ", changed.Take(5))}");
+    }
+
+    /// <summary>A write with no Output Folder chosen is refused, never defaulted to the instance's mods folder.</summary>
+    [Fact]
+    public async Task H2c_a_write_with_no_output_folder_chosen_is_refused_in_one_sentence()
+    {
+        using var w = new TiltedRefWorld();
+        var ex = await Assert.ThrowsAsync<Xunit.Sdk.XunitException>(() => Start(w, null!));
+        Assert.Contains("Output Folder", ex.Message);
+        Assert.Empty(Directory.GetFiles(Path.Combine(w.Instance, "mods"), "*.esp", SearchOption.AllDirectories).Where(f => !f.Contains("WorldMod")));
     }
 
     [Fact]
