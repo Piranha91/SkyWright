@@ -467,6 +467,60 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.Contains("HcWbRef", text);                        // the reference only the synthetic world has
     }
 
+    /// <summary>The server binds an argument by its name with case and underscores ignored (toFile, inPlace, Into), so
+    /// the forwarded rule judges the names the server will bind, not only their exact spelling.</summary>
+    [Fact]
+    public async Task B13b_i_an_argument_spelled_another_way_is_judged_as_the_parameter_it_binds()
+    {
+        var (w, o, game) = await OpenWorld();
+        using var _w = w;
+        var before = Listing(w.Instance, game);
+        var bad = Path.Combine(w.Instance, "mods", "WorldMod", "x.jsonl");
+        Assert.Contains("to_file", await Refused("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }), ("toFile", bad))));
+        Assert.Contains("to_file", await Refused("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }), ("TO_FILE", bad))));
+        // the same parameter given twice, under two spellings, is refused rather than one silently winning
+        Assert.Contains("more than once", await Refused("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }),
+            ("to_file", Path.Combine(o, "a.jsonl")), ("toFile", bad))));
+        var owned = Path.Combine(w.Instance, "mods", "houseCARL - Old");
+        Directory.CreateDirectory(owned);
+        File.WriteAllText(Path.Combine(owned, "meta.ini"), "[houseCARL]\r\ngenerated=true\r\n");
+        File.WriteAllText(Path.Combine(owned, "Old.esp"), "old bytes");
+        var before2 = Listing(w.Instance, game);
+        Assert.Contains("Output Folder", await Refused("housecarl_apply", A(("ops", MoveOps(84f)), ("Into", "houseCARL - Old"))));
+        Unchanged(before2, Listing(w.Instance, game), "the instance or the game folder");
+        Assert.False(File.Exists(bad), "a to_file spelled another way was written into a mod folder");
+    }
+
+    [Fact]
+    public async Task B13b_j_in_place_spelled_another_way_is_refused_with_the_output_at_the_mods_folder()
+    {
+        Environment.SetEnvironmentVariable("WB_CORPUS", TestCorpus.Path);
+        using var w = new TiltedRefWorld();
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", w.Instance), ("profile", "Default"), ("game", game)));
+        await Ok("workbench_act", A(("verb", "set_output"), ("path", Path.Combine(w.Instance, "mods"))));
+        await Ok("workbench_act", A(("verb", "set_work_folder"), ("path", Path.Combine(w.Root, "work"))));
+        var why = await Refused("housecarl_compact_plugin", A(("source", TiltedRefWorld.Master.FileName.String), ("inPlace", true)));
+        Assert.Contains("in_place", why);
+        Assert.Contains("Output Folder", why);
+    }
+
+    /// <summary>With the Output Folder an ancestor of the instance (a drive root, say), a to_file loose in the mods folder
+    /// is still refused: a file there belongs to no mod.</summary>
+    [Fact]
+    public async Task B13b_k_a_to_file_loose_in_the_mods_folder_is_refused_when_the_output_folder_holds_the_instance()
+    {
+        Environment.SetEnvironmentVariable("WB_CORPUS", TestCorpus.Path);
+        using var w = new TiltedRefWorld();
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", w.Instance), ("profile", "Default"), ("game", game)));
+        await Ok("workbench_act", A(("verb", "set_output"), ("path", w.Root)));
+        await Ok("workbench_act", A(("verb", "set_work_folder"), ("path", Path.Combine(w.Root, "work"))));
+        var loose = Path.Combine(w.Instance, "mods", "x.jsonl");
+        Assert.Contains("to_file", await Refused("housecarl_records", A(("formids", new[] { TiltedRefWorld.Ref.ToString() }), ("to_file", loose))));
+        Assert.False(File.Exists(loose));
+    }
+
     /// <summary>A forwarded read's to_file (records, check, asset_status) is a write: it lands under the Output Folder or
     /// the Work Folder, else it is refused by the output rule's verdict.</summary>
     [Fact]
