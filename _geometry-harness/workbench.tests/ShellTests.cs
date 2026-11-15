@@ -173,5 +173,8 @@ public class ShellTests
         Assert.Equal(new[] { "expect", "partner", "0094AB:The Great City of Falkreath.esp" }, Script.Tokens("expect partner 0094AB:The Great City of Falkreath.esp"));
         Assert.Equal(new[] { "stage", "000801:Hc.esp", "1,2,3", "10" }, Script.Tokens("stage 000801:Hc.esp 1,2,3 10"));
         Assert.Equal(new[] { "pose", "1,2,3", "10", "20" }, Script.Tokens("pose 1,2,3  10 20"));
+        // A drive-letter path holds a colon too, and is not a FormKey (stage 5: 'waitfile X:/.../DONE 1500' read the
+        // number as part of the path).
+        Assert.Equal(new[] { "waitfile", "X:/runs/wb-e2e/CLIENT-DONE", "1500" }, Script.Tokens("waitfile X:/runs/wb-e2e/CLIENT-DONE 1500"));
     }
 }

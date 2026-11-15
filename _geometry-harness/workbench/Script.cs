@@ -89,11 +89,13 @@ internal sealed class Script
         var o = new List<string>();
         foreach (var w in line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
         {
-            if (o.Count > 0 && o[^1].Contains(':') && !EndsLikePlugin(o[^1])) o[^1] += " " + w;
+            if (o.Count > 0 && LooksLikeFormKey(o[^1]) && !EndsLikePlugin(o[^1])) o[^1] += " " + w;
             else o.Add(w);
         }
         return o.ToArray();
     }
+    /// <summary>Six hex digits and a colon: a FormKey's start (a drive-letter path's colon is not one).</summary>
+    static bool LooksLikeFormKey(string w) => w.Length > 7 && w[6] == ':' && w.Take(6).All(char.IsAsciiHexDigit);
     static bool EndsLikePlugin(string w) => w.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) || w.EndsWith(".esm", StringComparison.OrdinalIgnoreCase) || w.EndsWith(".esl", StringComparison.OrdinalIgnoreCase);
 
     static Vector2 P2(string s) { var p = s.Split(','); return new(F(p[0]), F(p[1])); }
