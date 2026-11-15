@@ -51,14 +51,7 @@ public static class LedgeLinkFixture
     /// <summary>The three navmeshes, parented by <paramref name="parent"/> (a cell or a worldspace square).</summary>
     public static NavigationMesh[] Meshes(FormKey l, FormKey u, FormKey s, Func<ANavmeshParent> parent)
     {
-        NavigationMeshData Grid(FormKey k, float x0, float y0, float z)
-        {
-            var d = BlockFixture.Grid(k, FormKey.Null, N, N, Step, x0, y0).Data!;
-            d.Parent = parent();
-            for (int v = 0; v < d.Vertices.Count; v++) d.Vertices[v] = new P3Float(d.Vertices[v].X, d.Vertices[v].Y, z);
-            d.Min = new P3Float(d.Min.X, d.Min.Y, z); d.Max = new P3Float(d.Max.X, d.Max.Y, z);
-            return d;
-        }
+        NavigationMeshData Grid(FormKey k, float x0, float y0, float z) => FlatGrid(k, x0, y0, z, parent);
         var dl = Grid(l, -N * Step, -N * Step / 2, 0);
         var du = Grid(u, 0, -N * Step / 2, Rise);
         var ds = Grid(s, -N * Step, N * Step / 2, 0);
@@ -74,6 +67,46 @@ public static class LedgeLinkFixture
         }
         return new[] { new NavigationMesh(l, CaptureFixture.Rel) { Data = dl }, new NavigationMesh(u, CaptureFixture.Rel) { Data = du },
                        new NavigationMesh(s, CaptureFixture.Rel) { Data = ds } };
+    }
+
+    static NavigationMeshData FlatGrid(FormKey k, float x0, float y0, float z, Func<ANavmeshParent> parent, Func<float, float, bool>? deleted = null)
+    {
+        var d = BlockFixture.Grid(k, FormKey.Null, N, N, Step, x0, y0, deleted).Data!;
+        d.Parent = parent();
+        for (int v = 0; v < d.Vertices.Count; v++) d.Vertices[v] = new P3Float(d.Vertices[v].X, d.Vertices[v].Y, z);
+        d.Min = new P3Float(d.Min.X, d.Min.Y, z); d.Max = new P3Float(d.Max.X, d.Max.Y, z);
+        return d;
+    }
+
+    // THE LEDGE-GAP FIXTURE (cell CfLedgeGap, the C2250-C2254 known answers, tests/test_route_solve_ledge_drop.py). In game
+    // a ledge's two triangles do not meet in plan: the upper edge stands 17-70 u off the lower one at FortSnowhawk02 and
+    // 28-39 u at DLC2HighpointTower01 (runs/2026-11-11-ledge-island-arm/offline). Here the gap is 48 u:
+    //
+    //   L (lower)  x -256..0,   y -128..128, z 0    squares x -128..-64, y -64..64 deleted (a notch a path must bend round)
+    //   U (upper)  x 48..304,   y -128..128, z 200  U west -> L east Type 2 (Ledge Down), L east -> U west Type 1 (Ledge Up)
+    //   P (portal) x -256..0,   y 176..432,  z 0    L north <-> P south Type 0 (Portal) across a 48 u gap: a solved leg over
+    //                                               it really leaves the mesh, so it stays refused
+    public const float Gap = 48f;
+    public static bool Notch(float cx, float cy) => cx > -128 && cx < -64 && cy > -64 && cy < 64;
+
+    /// <summary>CfLedgeGap's three navmeshes, parented by <paramref name="parent"/>.</summary>
+    public static NavigationMesh[] GapMeshes(FormKey l, FormKey u, FormKey p, Func<ANavmeshParent> parent)
+    {
+        var dl = FlatGrid(l, -N * Step, -N * Step / 2, 0, parent, Notch);
+        var du = FlatGrid(u, Gap, -N * Step / 2, Rise, parent);
+        var dp = FlatGrid(p, -N * Step, N * Step / 2 + Gap, 0, parent);
+        for (int j = 0; j < N; j++)
+        {
+            Link(dl, East(j), 0x02, u, West(j), 1);
+            Link(du, West(j), 0x04, l, East(j), 2);
+        }
+        for (int i = 0; i < N; i++)
+        {
+            Link(dl, North(i), 0x02, p, South(i), 0);
+            Link(dp, South(i), 0x01, l, North(i), 0);
+        }
+        return new[] { new NavigationMesh(l, CaptureFixture.Rel) { Data = dl }, new NavigationMesh(u, CaptureFixture.Rel) { Data = du },
+                       new NavigationMesh(p, CaptureFixture.Rel) { Data = dp } };
     }
 
     // ---- the worldspace copy, for the navdump: LlWorld with one exterior cell at grid (0, 0) ----
