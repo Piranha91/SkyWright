@@ -454,6 +454,22 @@ public sealed class ManualModeBindingTests : IDisposable
     }
 
     // B12 and B12b (DESIGN R2.8) are superseded by R4.5: StateToolsTests.H5a and H5b start the server as the client does.
+
+    /// <summary>B12b under R4.5 (coordinator note on be533d2b): with no WB_HOUSECARL_LAUNCH and no housecarl entry in
+    /// ~/.claude.json, houseCARL mode is refused in one sentence naming the setting that fixes it.</summary>
+    [Fact]
+    public void H5c_with_no_server_found_houseCARL_mode_refuses_in_one_sentence_naming_WB_HOUSECARL_LAUNCH()
+    {
+        var claude = Path.Combine(_dir, "claude.json");
+        File.WriteAllText(claude, """{"projects":{"C:/elsewhere":{"mcpServers":{"housecarl":{"command":"x.exe"}}}},"mcpServers":{}}""");
+        foreach (var cj in new[] { Path.Combine(_dir, "no-claude.json"), claude })
+        {
+            var ex = Assert.ThrowsAny<InvalidOperationException>(() => Contract.Static("HousecarlMode", "Locate", "houseCARL mode's server launch (DESIGN R4.5)",
+                (string?)null, cj, _dir));
+            Assert.DoesNotContain("\n", ex.Message);
+            Assert.Contains("WB_HOUSECARL_LAUNCH", ex.Message);
+        }
+    }
 }
 
 /// <summary>B11: the window and its state server exist before any scene. workbench.exe started with no bundle answers

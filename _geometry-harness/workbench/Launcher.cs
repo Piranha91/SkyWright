@@ -39,7 +39,13 @@ internal sealed class Launcher : IAsyncDisposable
     {
         var m = (mode ?? "free").Trim().ToLowerInvariant();
         if (m != "free" && m != "housecarl") throw new InvalidOperationException($"'{mode}' is not a mode; use housecarl or free.");
-        if (m == "housecarl") throw new InvalidOperationException("houseCARL mode is not available in this build yet; use free mode with the instance's folder.");
+        if (m == "housecarl")
+        {
+            // the instance the client's own houseCARL server manages, read from that server started as the client starts it
+            var launch = HousecarlMode.Locate(Environment.GetEnvironmentVariable("WB_HOUSECARL_LAUNCH"),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude.json"), Environment.CurrentDirectory);
+            instance = await HousecarlMode.ReportedInstanceAsync(launch);
+        }
         if (string.IsNullOrWhiteSpace(instance) || !Path.IsPathFullyQualified(instance.Trim()))
             throw new InvalidOperationException("open_profile in free mode needs instance, the MO2 instance folder by its full path.");
         var inst = OutputFolderPolicy.Full(instance);
