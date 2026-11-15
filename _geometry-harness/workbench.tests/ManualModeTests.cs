@@ -204,6 +204,22 @@ public sealed class OutputWriteTests : IClassFixture<TiltedRefWorld>
         Assert.Equal("not ours", File.ReadAllText(Path.Combine(foreign, "Foreign.esp")));
     }
 
+    /// <summary>Coordinator finding on 4474f75d: one rule. The server lane, which an MCP client reaches directly, refuses
+    /// every folder rule 3.2 refuses: here the instance root, the profiles folder, a new folder in the instance, and the
+    /// game folder outside Data.</summary>
+    [Fact]
+    public async Task B3f_the_server_lane_refuses_the_instance_root_and_the_game_root_as_rule_3_2_does()
+    {
+        var game = Path.GetDirectoryName(_w.DataDir)!;
+        await using var c = await Server();
+        foreach (var bad in new[] { _w.Instance, Path.Combine(_w.Instance, "profiles"), Path.Combine(_w.Instance, "NewOut"), game, Path.Combine(game, "Other") })
+        {
+            var (err, text) = await Call(c, "housecarl_apply", new() { ["ops"] = Move(76f), ["patch"] = "WbRoot", ["out_path"] = bad });
+            Assert.True((err || text.TrimStart().StartsWith("error:")) && !text.Contains("unknown parameter"), $"out_path {bad} was not refused: {text}");
+        }
+        Assert.Empty(Directory.GetFiles(_w.Root, "WbRoot*.esp", SearchOption.AllDirectories));
+    }
+
     [Fact]
     public async Task B3e_an_out_path_in_the_games_Data_or_an_existing_mod_folder_is_refused_by_the_server()
     {
