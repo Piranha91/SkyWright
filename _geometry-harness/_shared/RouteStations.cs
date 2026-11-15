@@ -766,7 +766,8 @@ public static class RouteStations
         if (channel is null) return null;
         var corners = NavGraph.Funnel(area.Nodes, channel, start, end);
         NavGraph.InsetCorners(corners, startZ,
-            (ix, iy, iz) => NavCover.NearestCoverZ(area.MeshesNear(ix, iy, 1f), ix, iy, iz), NavCover.SameFloorZ);
+            (ix, iy, iz) => NavCover.NearestCoverZ(area.MeshesNear(ix, iy, 1f), ix, iy, iz), NavCover.SameFloorZ,
+            area.Nodes, channel);
         return corners;
     }
 

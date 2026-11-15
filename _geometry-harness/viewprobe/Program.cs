@@ -3910,7 +3910,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             const float SampleEvery = 32f;
             var legs = new List<IReadOnlyList<System.Numerics.Vector3>>();
             var strayed = new List<string>();
-            int sampleCount = 0, offSamples = 0;
+            int sampleCount = 0, offSamples = 0, airSamples = 0;
 
             // ---- --route-solve: the legs are FOUND, not asserted -----------------------------
             //
@@ -3974,10 +3974,10 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     var corners = NavGraph.Funnel(gnodes, channel,
                         new System.Numerics.Vector2(a.X, a.Y), new System.Numerics.Vector2(b.X, b.Y));
 
-                    // Sampled the same 32 u as a straight leg, but with the storey reference CHAINED
-                    // from sample to sample rather than interpolated between the endpoints. A solved
-                    // leg is allowed to climb — that is half the point of solving it — and a chord
-                    // between its ends is a poor guide to which floor its middle is on.
+                    // Sampled the same 32 u as a straight leg, but with the storey reference taken from
+                    // the channel triangle each sample lies in rather than interpolated between the
+                    // endpoints. A solved leg is allowed to climb or drop — that is half the point of
+                    // solving it — and a chord between its ends is a poor guide to which floor its middle is on.
                     // ---- the corner inset -------------------------------------------------
                     //
                     // A taut path HUGS THE WALL — that is what taut means — so its interior corners
@@ -4008,13 +4008,22 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     // so the station rule's route sampler insets its paths with the same code.
                     NavGraph.InsetCorners(corners, a.Z,
                         (ix, iy, iz) => ViewProbe.BatEmit.NearestCoverZ(winNav, ix, iy, iz),
-                        ViewProbe.BatEmit.SameFloorZ);
+                        ViewProbe.BatEmit.SameFloorZ, gnodes, channel);
                     if (Environment.GetEnvironmentVariable("VP_SOLVE_DEBUG") == "1")
                         Console.WriteLine("      [dbg] corners: " + string.Join("  ", corners.Select(cc => $"{cc.X:0.###},{cc.Y:0.###}")));
+                    // Each sample's storey is the channel triangle it lies in (NavGraph.ChannelTriangleAt): the channel is
+                    // the triangle sequence an actor walks, so a drop down a walked Ledge Down lands the samples on the
+                    // lower floor however tall it is. A sample in no channel triangle keeps the last height (an inset
+                    // corner can sit on a same-floor neighbour). One that is also off the ground where the channel's
+                    // step is a walked ledge link is IN THE AIR over the ledge's plan gap, which an actor crosses
+                    // falling; any other off-ground sample is a path leaving the mesh, and is refused below.
                     var leg = new List<System.Numerics.Vector3>();
                     float refZ2 = a.Z;
-                    int legOff = 0; float firstOffAt = 0f, walked = 0f;
+                    int legOff = 0, airborne = 0, cursor = 0; float firstOffAt = 0f, walked = 0f, longestAir = 0f;
                     var firstOffXY = System.Numerics.Vector2.Zero;
+                    bool InChannel(System.Numerics.Vector2 q, int from) => NavGraph.ChannelTriangleAt(gnodes, channel, q.X, q.Y, from) is not null;
+                    float airStartPlan = 0f, planWalked = 0f; bool inAir = false;
+                    var prevXY = new System.Numerics.Vector2(a.X, a.Y);
                     for (int ci = 0; ci + 1 < corners.Count; ci++)
                     {
                         var c0 = corners[ci]; var c1 = corners[ci + 1];
@@ -4024,17 +4033,49 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         {
                             float f = (float)si / steps;
                             float x = c0.X + (c1.X - c0.X) * f, y = c0.Y + (c1.Y - c0.Y) * f;
+                            var sxy = new System.Numerics.Vector2(x, y);
+                            float step2 = System.Numerics.Vector2.Distance(prevXY, sxy);
+                            int fromCursor = cursor;
+                            var hit = NavGraph.ChannelTriangleAt(gnodes, channel, x, y, cursor);
+                            if (hit is { } h) { cursor = h.Index; refZ2 = h.Z; }
                             float? gz = ViewProbe.BatEmit.NearestCoverZ(winNav, x, y, refZ2);
                             bool onFloor = gz is { } gg && MathF.Abs(gg - refZ2) <= ViewProbe.BatEmit.SameFloorZ;
-                            if (!onFloor) { if (legOff == 0) { firstOffAt = walked; firstOffXY = new System.Numerics.Vector2(x, y); } legOff++; }
+                            bool air = !onFloor && hit is null && NavGraph.LedgeStep(gnodes, channel, cursor);
+                            // The air run's length is measured where the path leaves and re-enters the channel, found by
+                            // bisection between the two samples either side, so it is the gap, not a multiple of 32 u.
+                            float Edge(System.Numerics.Vector2 inside, System.Numerics.Vector2 outside, int from)
+                            {
+                                float lo = 0f, hi = 1f;
+                                for (int it = 0; it < 24; it++)
+                                {
+                                    float mid = (lo + hi) / 2f;
+                                    if (InChannel(System.Numerics.Vector2.Lerp(inside, outside, mid), from)) lo = mid; else hi = mid;
+                                }
+                                return System.Numerics.Vector2.Distance(inside, outside) * lo;
+                            }
+                            if (air && !inAir) { inAir = true; airStartPlan = planWalked + Edge(prevXY, sxy, cursor); }
+                            if (!air && inAir)
+                            {
+                                inAir = false;
+                                float entry = planWalked + step2 - Edge(sxy, prevXY, cursor);
+                                longestAir = MathF.Max(longestAir, entry - airStartPlan);
+                            }
+                            planWalked += step2; prevXY = sxy;
+                            if (air) airborne++;
+                            else if (!onFloor) { if (legOff == 0) { firstOffAt = walked; firstOffXY = sxy; } legOff++; }
                             else refZ2 = gz!.Value;
                             var p = new System.Numerics.Vector3(x, y, onFloor ? gz!.Value : refZ2);
-                            if (leg.Count > 0) walked += System.Numerics.Vector3.Distance(leg[^1], p);
+                            // A step that drops over a walked ledge link is fallen, not walked: it adds its plan length only.
+                            bool fell = air || inAir;
+                            for (int k = fromCursor; !fell && k < cursor; k++) fell = NavGraph.LedgeStep(gnodes, channel, k);
+                            if (leg.Count > 0)
+                                walked += fell ? System.Numerics.Vector2.Distance(new(leg[^1].X, leg[^1].Y), sxy)
+                                               : System.Numerics.Vector3.Distance(leg[^1], p);
                             leg.Add(p);
                         }
                     }
                     if (leg.Count < 2) leg = new List<System.Numerics.Vector3> { a, b };
-                    sampleCount += leg.Count; offSamples += legOff;
+                    sampleCount += leg.Count; offSamples += legOff; airSamples += airborne;
                     if (legOff > 0)
                         strayed.Add($"leg {li + 1} (wpt {li + 1} -> {li + 2}, SOLVED): {legOff} of {leg.Count} samples are off "
                                   + $"walkable ground, first at {firstOffAt:0} u along it, at {firstOffXY.X:0},{firstOffXY.Y:0} "
@@ -4042,16 +4083,16 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                     // The measurement, not just the picture: how far an actor would actually have to
                     // walk, against how far apart the two ends are. A detector reporting a 1,800 u
                     // straight-line split is making a weaker claim than this number does.
-                    // The z SPAN is printed because a solved leg resolves its height by chaining
-                    // sample to sample, and a chain is exactly the thing that can walk off onto the
-                    // storey above without any single step looking wrong. A leg that says
-                    // "z 1424..1424" cannot have drifted; one that says "1424..1712" climbed, and
-                    // the reader gets to decide whether it was meant to.
+                    // The z SPAN is printed so a reader sees which storeys the leg walks: "z 1424..1424"
+                    // stayed on one; "0..200" dropped or climbed, and the reader gets to decide whether
+                    // it was meant to. Samples in the air over a ledge gap are counted, with the longest
+                    // run, so a long gap is visible without a bound having to guess one.
                     float lz0 = leg.Min(q => q.Z), lz1 = leg.Max(q => q.Z);
                     Console.WriteLine($"      leg {li + 1}: {channel.Count} triangle(s) crossed, {corners.Count} corner(s) after the funnel"
                                     + $" — {walked:0} u to walk vs {straight:0} u straight line"
                                     + (straight > 1f ? $"  (x{walked / straight:0.00})" : "")
-                                    + $", z {lz0:0}..{lz1:0}");
+                                    + $", z {lz0:0}..{lz1:0}"
+                                    + (airborne > 0 ? $", {airborne} sample(s) in the air over a walked ledge link, longest {longestAir:0} u" : ""));
                     legs.Add(leg);
                 }
                 if (unreachable.Count > 0)
@@ -4099,7 +4140,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 legs.Add(leg);
             }
             Console.WriteLine($"   route: {legs.Count} {(routeSolve ? "SOLVED leg(s)" : "leg(s)")} sampled every {SampleEvery:0} u onto the winning navmesh "
-                            + $"— {sampleCount:N0} point(s), {sampleCount - offSamples:N0} on walkable ground");
+                            + $"— {sampleCount:N0} point(s), {sampleCount - offSamples - airSamples:N0} on walkable ground"
+                            + (airSamples > 0 ? $", {airSamples:N0} in the air over a walked ledge link" : ""));
             // Same rule as an off-mesh waypoint, and for the same reason: a line drawn across
             // ground the game will not let anyone walk looks exactly as authoritative as one that
             // is right. The waypoints being fine is not the claim the picture makes.

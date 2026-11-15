@@ -2124,12 +2124,23 @@ kept only if the moved corner is itself on walkable ground at that leg's storey,
 stops it pushing a path through a thin wall in a doorway. Endpoints are never moved — those are
 the author's waypoints.
 
+**Which storey a sample is on.** Each sample, and each corner the inset judges, takes its height from
+the channel triangle it lies in (`NavGraph.ChannelTriangleAt`), not from a chain of nearby heights:
+the channel is the triangle sequence an actor walks, so a leg down a walked Ledge Down lands on the
+lower floor however tall the drop (in game an actor drops ledges of about 212 u and 222 u, taller
+than the 192 u same-floor band the chain used to be limited by). A ledge's two triangles do not meet
+in plan — the upper edge stands 17–70 u off the lower one in vanilla data — so samples over that gap,
+where the channel's step is a walked ledge link, are counted as **in the air**, not off the mesh:
+`, 2 sample(s) in the air over a walked ledge link, longest 48 u`, the length measured where the path
+leaves and re-enters the channel. There is no bound on it; the record's link type decides whether
+the step is walked. Any other sample over no triangle, such as one over a gap a Portal link spans, is
+still off walkable ground and the leg is refused.
+
 **The numbers it prints.** Per leg: triangles crossed, corners after the funnel, **u to walk vs u
 straight line and the ratio**, and the leg's z span. The ratio is the point — *"1,800 u apart"* and
 *"1,800 u to walk"* are different claims, and a leg that comes out ×1.00 is the solver returning
-the straight line because the straight line was already walkable. The z span is there because a
-solved leg resolves height by chaining sample to sample, and a chain is exactly the thing that can
-drift onto the storey above without any single step looking wrong.
+the straight line because the straight line was already walkable. The z span says which storeys the
+leg walks: one value stayed on one floor, a range dropped or climbed.
 
 **Refusals, all loud.**
 
