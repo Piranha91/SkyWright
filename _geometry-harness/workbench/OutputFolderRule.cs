@@ -30,38 +30,10 @@ internal sealed record InstanceLayout(string Instance, string Root, string Mods,
 /// the game folder. <see cref="Check"/> returns null when the folder may take output, else one sentence saying why not.</summary>
 internal static class OutputFolderRule
 {
-    internal static string? Check(string output, string instance, string profile, string game)
-    {
-        if (string.IsNullOrWhiteSpace(output) || !Path.IsPathFullyQualified(output.Trim()))
-            return $"'{output}' is not a full path; choose the Output Folder by its full path.";
-        string o;
-        try { o = InstanceLayout.Full(output.Trim()); }
-        catch (Exception ex) { return $"'{output}' is not a usable path ({ex.Message}); choose another Output Folder."; }
-        if (File.Exists(o)) return $"'{o}' is a file, not a folder; choose a folder as the Output Folder.";
-        var l = InstanceLayout.Of(instance, game);
-        if (InstanceLayout.AtOrUnder(o, l.Data))
-            return $"'{o}' is the game's Data folder or inside it; the workbench never writes into Data, so choose another Output Folder.";
-        if (InstanceLayout.Same(o, l.Mods)) return null;
-        if (InstanceLayout.AtOrUnder(o, l.Mods))
-        {
-            var first = Path.GetRelativePath(l.Mods, o).Split(Path.DirectorySeparatorChar)[0];
-            return Directory.Exists(Path.Combine(l.Mods, first))
-                ? $"'{o}' is an existing mod folder or inside one; choose the mods folder itself, where each patch gets a new houseCARL folder, or a folder outside the instance."
-                : $"'{o}' is a new folder inside the mods folder, where MO2 would list it as a mod with the patch a level down that never loads; choose the mods folder itself.";
-        }
-        var profileDir = Path.Combine(l.Profiles, profile);
-        if (InstanceLayout.AtOrUnder(o, profileDir))
-            return $"'{o}' is the profile folder or inside it, which MO2 rewrites; choose another Output Folder.";
-        if (InstanceLayout.AtOrUnder(o, l.Profiles))
-            return $"'{o}' is MO2's profiles folder or inside it, which MO2 rewrites; choose another Output Folder.";
-        if (InstanceLayout.AtOrUnder(o, l.Overwrite))
-            return $"'{o}' is the instance's overwrite folder or inside it, which MO2 always loads; choose another Output Folder.";
-        if (l.InsideInstance(o))
-            return $"'{o}' is inside the MO2 instance but is not its mods folder; choose the mods folder itself or a folder outside the instance.";
-        if (InstanceLayout.AtOrUnder(o, l.Game))
-            return $"'{o}' is inside the game folder, where a manual run writes nothing; choose a folder outside the game folder.";
-        return null;
-    }
+    /// <summary>The rule's one owner is housecarl-core's <see cref="OutputFolderPolicy"/>, which the server's out_path lane
+    /// also calls, so the workbench and the server cannot disagree.</summary>
+    internal static string? Check(string output, string instance, string profile, string game) =>
+        OutputFolderPolicy.Refusal(output, Mo2OutputLayout.Of(instance, profile, game));
 }
 
 /// <summary>Where a manual run keeps its own files (entry, candidates, plan, receipts, bundle, logs, re-checks): never
