@@ -93,6 +93,7 @@ internal static class Program
         var entry = typeof(InteractiveViewer).Assembly.EntryPoint
             ?? throw new InvalidOperationException("viewprobe has no entry point");
         var r = entry.Invoke(null, new object[] { a });
+        Shell.StopServer();
         if (Shell.ExpectFailures > 0) { Console.Error.WriteLine($"workbench: {Shell.ExpectFailures} expectation(s) failed"); return 4; }
         return r is int code ? code : 0;
     }

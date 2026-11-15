@@ -73,10 +73,36 @@ internal static class Shell
         Window = new Window { Title = title, Width = 1440, Height = 960, MinWidth = MinWidth, MinHeight = MinHeight, Content = root };
         Window.Closed += (_, _) => { Closed = true; Current?.StopFrame(); };
         FillConflicts();
+        StartServer(Window.Dispatcher);
         return Window;
     }
 
+    /// <summary>The MCP state tools' server, when <c>WB_MCP_PORT</c> asks for one (DESIGN.md section 7).</summary>
+    internal static StateServer? Server;
+
+    static void StartServer(Dispatcher ui)
+    {
+        if (Environment.GetEnvironmentVariable("WB_MCP_PORT") is not { Length: > 0 } ps) return;
+        if (!int.TryParse(ps, out var port) || port is < 1 or > 65535)
+        { WorkbenchHost.Say($"MCP state tools not started: WB_MCP_PORT '{ps}' is not a port number."); return; }
+        try
+        {
+            // Started off the UI thread so no continuation waits for the dispatcher this thread is about to run.
+            Server = Task.Run(() => StateServer.StartAsync(port, new StateHub(ui, new LiveSurface()))).GetAwaiter().GetResult();
+            WorkbenchHost.Say($"MCP state tools ({StateTools.StateName}, {StateTools.ActName}) served at {Server.Url}/ (Streamable HTTP)");
+        }
+        catch (Exception ex) { WorkbenchHost.Say($"MCP state tools not started on port {port}: {ex.GetBaseException().Message}"); }
+    }
+
+    internal static void StopServer()
+    {
+        if (Server is null) return;
+        Task.Run(async () => await Server.DisposeAsync()).GetAwaiter().GetResult();
+        Server = null;
+    }
+
     internal static void SetBanner(string text) { Banner.Text = text; WorkbenchHost.Say("banner: " + text); }
+    internal static string BannerText => Banner.Text;
 
     /// <summary>Put a scene's view and bar into the window (replacing the last scene's).</summary>
     internal static void Mount(UIElement view, UIElement bar) { ViewSlot.Content = view; BarSlot.Content = bar; }

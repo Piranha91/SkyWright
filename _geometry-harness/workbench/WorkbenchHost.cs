@@ -27,7 +27,7 @@ namespace Workbench;
 ///
 /// Headless: <c>WB_SCRIPT=file</c> runs the steps in <see cref="Script"/> (the same handlers the mouse uses), so every
 /// behaviour is testable without a hand on the mouse; <c>WB_OUT</c> is where captures and dumps go.</summary>
-internal sealed class WorkbenchHost
+internal sealed class WorkbenchHost : IWorkbenchScene
 {
     readonly InteractiveOptions _opt;
     readonly GlRenderer _renderer;
@@ -514,6 +514,22 @@ internal sealed class WorkbenchHost
 
     // ---- what the script and the bar call ---------------------------------------------------------------------------
     internal EditSession Session => _session;
+    internal string? CellOf(FormKey key) => _opt.RefCells is { } rc && rc.TryGetValue(key, out var c) ? c.ToString() : null;
+
+    // The MCP state tools reach the scene through these: the same members the bar and the script call.
+    EditSession IWorkbenchScene.Session => _session;
+    string? IWorkbenchScene.Cell => SceneCell;
+    string IWorkbenchScene.Status => _status.Text;
+    string? IWorkbenchScene.CellOf(FormKey key) => CellOf(key);
+    void IWorkbenchScene.Select(FormKey? key) => SelectKey(key);
+    void IWorkbenchScene.AfterStage() => AfterStage();
+    Task<string?> IWorkbenchScene.CommitAsync(bool dryRun, string patch) => CommitAsync(dryRun, patch, awaitRecheck: false);
+    string? IWorkbenchScene.CommitRefusal => CommitRefusal;
+    Task<string?> IWorkbenchScene.StartRecheck(string patch) => StartRecheck(patch);
+    Task? IWorkbenchScene.RecheckRunning => RecheckRunning;
+    RecheckResult? IWorkbenchScene.LastRecheck => LastRecheck;
+    string? IWorkbenchScene.RecheckRefusal => RecheckRefusal;
+    bool IWorkbenchScene.Rechecking => Rechecking;
     internal Gizmo Handles => _gizmo;
     internal Window MainWindow => _window;
     internal string OutDir => _outDir;
@@ -545,25 +561,54 @@ internal sealed class WorkbenchHost
         return _writer;
     }
 
-    internal async Task<string?> CommitAsync(bool dryRun, string patchName)
+    /// <summary>Dry-run or write the staged edits (the bar's buttons, the script's <c>commit</c>, the MCP <c>commit</c> verb).
+    /// A real write re-checks the open conflict row; <paramref name="awaitRecheck"/> false starts the re-check and returns
+    /// once the patch is written (<see cref="RecheckRunning"/> holds it). Returns the server's text, or null with
+    /// <see cref="CommitRefusal"/> saying why.</summary>
+    internal async Task<string?> CommitAsync(bool dryRun, string patchName, bool awaitRecheck = true)
     {
+        CommitRefusal = null;
         try
         {
             var w = await WriterAsync();
+            // The re-check finds the patch by its plugin name, so a real write goes to a name no mod folder holds yet
+            // (the server would otherwise write a second, renamed patch).
+            var plugin = PluginName(patchName);
+            if (!dryRun && Directory.Exists(w.Target.ModsDir)
+                && Directory.EnumerateDirectories(w.Target.ModsDir).FirstOrDefault(d => File.Exists(Path.Combine(d, plugin))) is { } holder)
+                throw new InvalidOperationException($"the mod folder '{Path.GetFileName(holder)}' already holds {plugin}; write to a new patch name.");
             var net = _session.Net();
             var cells = _opt.RefCells ?? new Dictionary<FormKey, FormKey>();
             var parents = PatchWriter.ParentRecordsSentence(net.Select(e => (e.Ref, cells.TryGetValue(e.Ref, out var c) ? c : (FormKey?)null)),
                                                             _opt.Interior ? null : _opt.Worldspace);
             var text = parents + "\n" + await w.CommitAsync(net, patchName, dryRun);
             Say((dryRun ? "dry run" : "write") + " answer:\n" + text);
-            // A written edit stays drawn where the patch puts it, labelled (stage-4 review M-1).
-            if (!dryRun && text.Contains("wrote ", StringComparison.Ordinal)) _session.MarkWritten(PluginName(patchName));
+            // A written edit stays drawn where the patch puts it, labelled (stage-4 review M-1), and the camera follows it.
+            if (!dryRun && text.Contains("wrote ", StringComparison.Ordinal))
+            {
+                _session.MarkWritten(PluginName(patchName));
+                if ((net.FirstOrDefault(e => e.Ref == _session.Selected) ?? net.FirstOrDefault()) is { } moved) Reframe(moved.Ref);
+            }
             // After a write, the detector re-runs on the patch's cell when a conflict row is open (stage 4).
-            if (!dryRun && Shell.Bundle is not null && Shell.CurrentRow is not null) await RecheckAsync(patchName);
+            if (!dryRun && Shell.Bundle is not null && Shell.CurrentRow is not null)
+            {
+                var t = RecheckAsync(patchName);
+                RecheckRunning = t;
+                if (awaitRecheck) await t;
+            }
             return text;
         }
-        catch (Exception ex) { Say("refused: " + ex.Message); return null; }
+        catch (Exception ex) { CommitRefusal = ex is AggregateException ae ? ae.GetBaseException().Message : ex.Message; Say("refused: " + CommitRefusal); return null; }
     }
+
+    /// <summary>Why the last commit was refused, in one sentence; null when it was not.</summary>
+    internal string? CommitRefusal { get; private set; }
+
+    /// <summary>The last re-check started, running or done (null before the first).</summary>
+    internal Task<string?>? RecheckRunning { get; private set; }
+
+    /// <summary>Start a re-check without waiting for it (the MCP <c>recheck</c> verb); <see cref="RecheckRunning"/> holds it.</summary>
+    internal Task<string?> StartRecheck(string patchName) => RecheckRunning = RecheckAsync(patchName);
 
     /// <summary>The last re-check: its result, or the sentence that refused it; and whether one is running.</summary>
     internal static string PluginName(string patchName) => patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";

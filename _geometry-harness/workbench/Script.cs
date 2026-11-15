@@ -43,6 +43,8 @@ namespace Workbench;
 /// expect partner FORMKEY|none    pass or fail on the marked partner
 /// marks on|off                   the bar's Marks toggle
 /// expect landed [FORMKEY]        pass or fail: that reference (default: the selected one) selected, the screen-centre ray crossing its shapes
+/// expect inview FORMKEY          pass or fail: the reference's box centre is drawn inside the view and the screen-centre ray crosses it
+/// waitfile PATH [MAXSEC]         wait (drawing nothing) until PATH exists, or MAXSEC seconds (default 900): an MCP client drives the window meanwhile
 /// idlecpu SECONDS                the process's CPU over SECONDS with nothing happening, by cycle counts, as a share of one busy core
 /// quit                           close the window
 /// </code>
@@ -261,6 +263,7 @@ internal sealed class Script
             case "expect": Expect(a); break;
             case "marks": _h.Marks.Enabled = a[1] == "on"; _h.Invalidate(); _wait = 2; break;
             case "idlecpu": IdleCpu(F(a[1])); break;
+            case "waitfile": WaitFile(a[1], a.Length > 2 ? F(a[2]) : 900f); break;
             case "quit": _h.MainWindow.Close(); break;
             default: WorkbenchHost.Say($"unknown step '{a[0]}'"); break;
         }
@@ -369,6 +372,23 @@ internal sealed class Script
                 + $"= {cores * 100:0.0} % of one core; loop {Environment.GetEnvironmentVariable("WB_LOOP") ?? "demand"}"));
             _busy = false; _quiet = false;
             _h.Invalidate();
+        };
+        timer.Start();
+    }
+
+    /// <summary>Hold the script (no frames asked for) until a file exists: the window stays live for an MCP client.</summary>
+    void WaitFile(string path, float maxSeconds)
+    {
+        _busy = true; _quiet = true;
+        var t0 = _h.Clock.Elapsed.TotalSeconds;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        timer.Tick += (_, _) =>
+        {
+            double el = _h.Clock.Elapsed.TotalSeconds - t0;
+            if (!File.Exists(path) && el < maxSeconds) return;
+            timer.Stop();
+            WorkbenchHost.Say(string.Create(CultureInfo.InvariantCulture, $"waitfile {path}: {(File.Exists(path) ? "found" : "NOT found")} after {el:0.0} s"));
+            _busy = false; _quiet = false; _h.Invalidate();
         };
         timer.Start();
     }

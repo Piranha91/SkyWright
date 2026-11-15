@@ -23,5 +23,8 @@
     <ProjectReference Include="..\viewprobe\viewprobe.csproj" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
+    <!-- The MCP state tools: a localhost Streamable HTTP server inside the app (DESIGN.md section 7). -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 </Project>
