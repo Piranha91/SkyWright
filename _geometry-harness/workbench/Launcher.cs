@@ -346,6 +346,8 @@ internal sealed class Launcher : IAsyncDisposable
     {
         var exe = ExeOf(check);
         if (exe is null || !RunChecks.Contains(check, StringComparer.OrdinalIgnoreCase) || RunFolder is null) return new("idle", null, "", null);
+        // once the run has ended, the tile says what the run's ledger concluded, not the probe's raw exits
+        if (RunTask is { IsCompleted: true } && !AbortedChecks.Contains(check) && ProbeRuns.Verdict(Path.Combine(RunFolder, "run", "evaluation"), check) is { } v) return v;
         return ProbeRuns.Of(RunStore, exe, AbortedChecks.Contains(check), RunTask is { IsCompleted: true }, DateTimeOffset.UtcNow, _first.GetValueOrDefault(exe));
     }
 

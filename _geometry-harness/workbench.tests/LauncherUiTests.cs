@@ -92,6 +92,30 @@ public sealed class LauncherUiTests : IDisposable
     }
 
     [Fact]
+    public void After_the_run_a_tile_says_the_ledgers_verdict_not_the_probes_raw_exit()
+    {
+        // the setup without the selected mods does not load their plugins: scopeprobe exits 1 there and the ledger accepts
+        // the order's answer with the plugins stated as not measured; the tile must neither say failed nor plain clean
+        var ev = Path.Combine(_root, "evaluation"); Directory.CreateDirectory(Path.Combine(ev, "receipts"));
+        File.WriteAllText(Path.Combine(ev, "ledger.json"), """
+            {"entries": {
+              "c.x__baseline": {"checkId": "c.x", "armId": "baseline", "status": "completed", "detector": "no-finding", "receiptPath": "receipts/b.json"},
+              "c.x__candidate-01": {"checkId": "c.x", "armId": "candidate-01", "status": "completed", "detector": "no-finding", "receiptPath": "receipts/c.json"},
+              "c.y__baseline": {"checkId": "c.y", "armId": "baseline", "status": "failed", "cause": "exit-nonzero", "detail": "exit code 1"}}}
+            """);
+        File.WriteAllText(Path.Combine(ev, "receipts", "b.json"), """{"result": {"coverage": [{"Judged": 0, "Unjudgeable": {"not-loaded-by-this-arm": 1}}]}}""");
+        File.WriteAllText(Path.Combine(ev, "receipts", "c.json"), """{"result": {"coverage": [{"Judged": 1, "Unjudgeable": {}}]}}""");
+        var x = ProbeRuns.Verdict(ev, "c.x")!;
+        Assert.Equal("done", x.State);
+        Assert.Contains("without the selected mods: loads; the selected plugins are not in it, so they were not checked there", x.Line);
+        Assert.Contains("with the selected mods: nothing found", x.Line);
+        var y = ProbeRuns.Verdict(ev, "c.y")!;
+        Assert.Equal("failed", y.State);
+        Assert.Contains("exit code 1", y.Line);
+        Assert.Null(ProbeRuns.Verdict(ev, "c.none"));
+    }
+
+    [Fact]
     public void The_settings_round_trip_and_an_unwritable_folder_is_said()
     {
         var path = Path.Combine(_root, LauncherSettings.FileName);

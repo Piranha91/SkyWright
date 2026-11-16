@@ -183,6 +183,55 @@ internal static class ProbeRuns
         _ => "a rough guess",
     };
 
+    /// <summary>What the run's ledger says about one check once the run has ended, or null when it has no row for it.
+    /// The ledger is the run's verdict: a probe's raw exit is not (scopeprobe exits 1 on a setup that does not load the
+    /// selected plugins, which the ledger accepts as that setup's answer and states as not measured there).</summary>
+    internal static ProbeProgress? Verdict(string evaluationDir, string checkId)
+    {
+        var path = Path.Combine(evaluationDir, "ledger.json");
+        if (!File.Exists(path)) return null;
+        JsonElement rows;
+        try { rows = JsonDocument.Parse(File.ReadAllText(path)).RootElement; }
+        catch (Exception ex) when (ex is IOException or JsonException) { return null; }
+        if (rows.TryGetProperty("entries", out var e)) rows = e;
+        if (rows.ValueKind != JsonValueKind.Object) return null;
+        static string? S(JsonElement o, string k) => o.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        var parts = new List<string>(); string? failed = null;
+        foreach (var row in rows.EnumerateObject().Select(p => p.Value).Where(v => v.ValueKind == JsonValueKind.Object && S(v, "checkId") == checkId)
+                                .OrderBy(v => S(v, "armId") == "baseline" ? 0 : 1))
+        {
+            var arm = S(row, "armId") == "baseline" ? "without the selected mods" : "with the selected mods";
+            var status = S(row, "status") ?? "";
+            if (status is not ("completed" or "reused"))
+            {
+                failed ??= $"failed {arm}: {status}" + (S(row, "cause") is { } c ? $" ({c})" : "") + (S(row, "detail") is { } d ? $": {d}" : "");
+                continue;
+            }
+            bool notLoaded = false;
+            if (S(row, "receiptPath") is { } rp && File.Exists(Path.Combine(evaluationDir, rp)))
+            {
+                try
+                {
+                    var res = JsonDocument.Parse(File.ReadAllText(Path.Combine(evaluationDir, rp))).RootElement;
+                    notLoaded = res.TryGetProperty("result", out var r) && r.TryGetProperty("coverage", out var cov) && cov.ValueKind == JsonValueKind.Array
+                                && cov.EnumerateArray().Any(l => l.TryGetProperty("Unjudgeable", out var u) && u.ValueKind == JsonValueKind.Object && u.TryGetProperty("not-loaded-by-this-arm", out _));
+                }
+                catch (Exception ex) when (ex is IOException or JsonException) { }
+            }
+            var said = S(row, "detector") switch
+            {
+                "finding" => "found something",
+                "no-finding" => notLoaded ? "loads; the selected plugins are not in it, so they were not checked there" : "nothing found",
+                "inconclusive" => "not settled",
+                "catalogue" => "listed",
+                _ => "done",
+            };
+            parts.Add($"{arm}: {said}");
+        }
+        if (failed is not null) return new("failed", 1, failed, null);
+        return parts.Count == 0 ? null : new("done", 1, "done. " + string.Join("; ", parts) + ".", null);
+    }
+
     /// <summary>The first guess for one pass of a probe, by the run-log estimator over earlier runs' histories.</summary>
     internal static RunEstimate First(IEnumerable<string> historyFiles, string op, DateTimeOffset now)
     {
