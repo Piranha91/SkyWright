@@ -82,6 +82,13 @@ public sealed class LauncherUiTests : IDisposable
         Assert.Equal("waiting", between.State);
         Assert.Contains("1 run finished", between.Line);
         Assert.Equal("done", ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: true, DateTimeOffset.UtcNow, first: null).State);
+        // a failed run followed by a good one: the tile names the failed run's reason, not the last run's outcome
+        var bad = new RunRecord { RunId = "aprobe-2", Op = "aprobe", Status = RunStatus.Completed, Outcome = RunOutcome.Refused, Error = "exit code 1", StartedUtc = DateTimeOffset.UtcNow.AddSeconds(-30), WallSeconds = 5 };
+        var good = new RunRecord { RunId = "aprobe-3", Op = "aprobe", Status = RunStatus.Completed, Outcome = RunOutcome.Ok, StartedUtc = DateTimeOffset.UtcNow.AddSeconds(-20), WallSeconds = 5 };
+        File.AppendAllLines(Path.Combine(store, "history.jsonl"), new[] { JsonSerializer.Serialize(bad, RunContract.Json), JsonSerializer.Serialize(good, RunContract.Json) });
+        var mixed = ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: true, DateTimeOffset.UtcNow, first: null);
+        Assert.Equal("failed", mixed.State);
+        Assert.Contains("1 of 3 runs did not finish (exit code 1)", mixed.Line);
     }
 
     [Fact]

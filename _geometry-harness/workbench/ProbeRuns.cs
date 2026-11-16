@@ -161,9 +161,11 @@ internal static class ProbeRuns
             return new("waiting", null, $"{Runs(done.Count)} finished, {Clock(done.Sum(r => r.WallSeconds))}; it runs again for each mod setup compared", null);
         if (done.Count > 0)
         {
-            var last = done.OrderBy(r => r.StartedUtc).Last();
-            bool ok = done.All(r => r.Outcome == RunOutcome.Ok);
-            return new(ok ? "done" : "failed", 1, (ok ? "done" : $"failed ({last.Error ?? last.Outcome.ToString()})") + $": {Runs(done.Count)}, {Clock(done.Sum(r => r.WallSeconds))}", null);
+            // the reason is the failed run's own, never the last run's when that one succeeded
+            var bad = done.Where(r => r.Outcome != RunOutcome.Ok).OrderBy(r => r.StartedUtc).ToList();
+            string time = $"{Runs(done.Count)}, {Clock(done.Sum(r => r.WallSeconds))}";
+            return bad.Count == 0 ? new("done", 1, $"done: {time}", null)
+                : new("failed", 1, $"failed: {bad.Count} of {Runs(done.Count)} did not finish ({bad[^1].Error ?? bad[^1].Outcome.ToString()}); {Clock(done.Sum(r => r.WallSeconds))}", null);
         }
         if (runEnded) return new("not run", null, "did not run this time", null);
         return new("waiting", null, "waiting its turn" + (first is { HasNumber: true } f ? $"; about {Clock(f.Seconds!.Value)} a run, judged from {Runs(f.Samples)} before" : ""), null);
