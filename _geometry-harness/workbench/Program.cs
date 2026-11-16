@@ -111,18 +111,26 @@ internal static class Program
     {
         InteractiveViewer.Host = WorkbenchHost.Run;
         // no bundle and no scene asked for: the launcher (manual mode) first, in the same window and state server
-        if (!args.Contains("--bundle") && !args.Contains("--instance"))
+        bool manual = !args.Contains("--bundle") && !args.Contains("--instance");
+        int code = 0; bool restored = false;
+        // manual mode: the launcher, a run, its scene; a scene the viewer could not build (it returns with the window still
+        // open) is said on the banner and the window goes back to the launcher, never closing the workbench
+        while (true)
+        {
+        if (manual)
         {
             var window = Shell.EnsureWindow("workbench — start");
             Shell.Launcher.RunBlocker = () => Shell.Current is not null ? "a scene is open in this window; restart the workbench to run another selection." : null;
             window.Show();
             // free mode remembers the instance, profile and Output Folder between sessions (workbench-settings.json beside the exe)
-            window.Dispatcher.BeginInvoke(async () =>
-            {
-                try { LauncherView.Say(await Shell.Launcher.RestoreAsync()); }
-                catch (Exception ex) { LauncherView.Say("the last session's settings could not be restored: " + ex.GetBaseException().Message); }
-                LauncherView.Fill();
-            });
+            if (!restored)
+                window.Dispatcher.BeginInvoke(async () =>
+                {
+                    try { LauncherView.Say(await Shell.Launcher.RestoreAsync()); }
+                    catch (Exception ex) { LauncherView.Say("the last session's settings could not be restored: " + ex.GetBaseException().Message); }
+                    LauncherView.Fill();
+                });
+            restored = true;
             while (true)
             {
                 string? ready = null;
@@ -168,8 +176,17 @@ internal static class Program
         var entry = typeof(InteractiveViewer).Assembly.EntryPoint
             ?? throw new InvalidOperationException("viewprobe has no entry point");
         var r = entry.Invoke(null, new object[] { a });
+        code = r is int c ? c : 0;
+        if (manual && !Shell.Closed)
+        {
+            Shell.SetBanner($"the viewer stopped (exit {code}) without a scene to show, so the window is back on the Start tab; its own sentence is in the workbench log.");
+            if (Shell.Window is not null) { Shell.FillConflicts(); Shell.FillFindings(); }
+            continue;
+        }
+        break;
+        }
         Shell.StopServer();
         if (Shell.ExpectFailures > 0) { Console.Error.WriteLine($"workbench: {Shell.ExpectFailures} expectation(s) failed"); return 4; }
-        return r is int code ? code : 0;
+        return code;
     }
 }
