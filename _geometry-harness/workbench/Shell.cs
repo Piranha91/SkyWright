@@ -63,6 +63,7 @@ internal static class Shell
     {
         if (Window is not null) return Window;
         _app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
+        Theme.Apply(_app);                                   // dark by default
         ScrollViewer.SetHorizontalScrollBarVisibility(ConflictList, ScrollBarVisibility.Auto);
         VirtualizingPanel.SetIsVirtualizing(Records, true);
         ConflictList.SelectionChanged += (_, _) =>
@@ -105,7 +106,8 @@ internal static class Shell
         root.Children.Add(Banner); root.Children.Add(BarSlot); root.Children.Add(tabs); root.Children.Add(ViewSlot);
         // The view keeps room of its own: below this the tabs would take the whole width (a 360x240 window drew the scene
         // into a 1x66 view, stage 3 receipts). A smaller size asked for opens at this minimum and says so.
-        Window = new Window { Title = title, Width = 1440, Height = 960, MinWidth = MinWidth, MinHeight = MinHeight, Content = root };
+        Window = new Window { Title = title, Width = 1440, Height = 960, MinWidth = MinWidth, MinHeight = MinHeight, Content = root,
+                              Background = Theme.Brush(Theme.Back), Foreground = Theme.Brush(Theme.Text) };
         Window.Closed += (_, _) => { Closed = true; Current?.StopFrame(); };
         FillConflicts();
         FillFindings();
@@ -182,11 +184,11 @@ internal static class Shell
             foreach (var it in ReviewList.Items(view, byRank, ReviewList.FindingsFoldAt, ExpandedScenes))
                 ConflictList.Items.Add(it.Kind switch
                 {
-                    "header" => new ListBoxItem { Content = it.Text, Tag = it.Tag, FontWeight = FontWeights.Bold, Foreground = Brushes.SteelBlue },
+                    "header" => new ListBoxItem { Content = it.Text, Tag = it.Tag, FontWeight = FontWeights.Bold, Foreground = Brushes.LightSkyBlue },
                     "row" => RowItem((ReviewEntry)it.Tag!),
-                    "finding" => new ListBoxItem { Content = it.Text, Tag = it.Tag, Foreground = Brushes.DimGray },
-                    "fold" => new ListBoxItem { Content = it.Text, Tag = it.Tag, FontStyle = FontStyles.Italic, Foreground = Brushes.SteelBlue },
-                    _ => new ListBoxItem { Content = it.Text, FontStyle = FontStyles.Italic, Foreground = Brushes.DimGray },
+                    "finding" => new ListBoxItem { Content = it.Text, Tag = it.Tag, Foreground = Brushes.DarkGray },
+                    "fold" => new ListBoxItem { Content = it.Text, Tag = it.Tag, FontStyle = FontStyles.Italic, Foreground = Brushes.LightSkyBlue },
+                    _ => new ListBoxItem { Content = it.Text, FontStyle = FontStyles.Italic, Foreground = Brushes.DarkGray },
                 });
             return;
         }
@@ -199,8 +201,8 @@ internal static class Shell
         string decided = e.Decision is { } d ? $"\n   {d.Verdict}: {d.Reason} — {e.Standing.Sentence}" : "";
         var item = new ListBoxItem { Content = RowText(r) + decided, Tag = r };
         if (r.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
-        if (e.Standing.Standing == Standing.Reconsider) item.Foreground = Brushes.Firebrick;
-        else if (e.Decision is not null) item.Foreground = Brushes.DimGray;
+        if (e.Standing.Standing == Standing.Reconsider) item.Foreground = Brushes.Salmon;
+        else if (e.Decision is not null) item.Foreground = Brushes.DarkGray;
         return item;
     }
 
@@ -211,7 +213,7 @@ internal static class Shell
         // each ticked check first: ran with its rows, or why not, so a check that failed never reads as one that found nothing
         foreach (var c in Bundle?.Checks ?? Array.Empty<CheckStatus>())
             FindingList.Items.Add(new ListBoxItem { Content = c.State == "ran" ? $"{c.CheckId}: ran, {c.Rows} row(s)" : $"{c.CheckId}: {c.State}: {c.Why}",
-                                                    Foreground = c.State == "ran" ? Brushes.DimGray : Brushes.Firebrick });
+                                                    Foreground = c.State == "ran" ? Brushes.DarkGray : Brushes.Salmon });
         foreach (var f in Findings)
         {
             var item = new ListBoxItem
@@ -233,7 +235,7 @@ internal static class Shell
         static TreeViewItem Item(TreeNode n)
         {
             var t = new TreeViewItem { Header = n.Label + (n.Conflict && n.Kind == "ref" ? "   (conflict)" : ""), Tag = n, IsExpanded = n.Kind == "worldspace" };
-            if (n.Conflict) { t.Foreground = Brushes.Firebrick; if (n.Kind == "ref") t.FontWeight = FontWeights.Bold; }
+            if (n.Conflict) { t.Foreground = Brushes.Salmon; if (n.Kind == "ref") t.FontWeight = FontWeights.Bold; }
             if (!n.Loaded) t.FontStyle = FontStyles.Italic;
             // A cell's references are made when the cell is first expanded: a city scene draws thousands.
             if (n.Kind == "cell" && n.Children.Count > 0)
