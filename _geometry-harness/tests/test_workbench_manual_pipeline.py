@@ -248,6 +248,20 @@ def case_s1_the_scope_line_names_the_cells_the_other_plugins_and_a_disabled_mod_
     assert "is not known" in said and "no other enabled plugin" not in said, said
 
 
+def case_c8_a_plugin_plugins_txt_does_not_list_is_force_loaded_and_an_unchecked_one_is_not():
+    """Mo2LoadOrder's rule, the probes' own: MO2 leaves force-loaded plugins (Creation Club content) out of plugins.txt
+    while listing them in loadorder.txt, so such a plugin is active; one listed without `*` is unchecked and is not."""
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        inst, game = world(t, SHADOW_MODS, SHADOW_ENABLED, SHADOW_PLUGINS, data=("Base.esm", "ccFish.esm"))
+        prof = Path(inst) / "profiles" / "P"
+        (prof / "plugins.txt").write_text("".join(x + chr(10) for x in ("*Base.esm", "*A.esp", "*Sel.esp", "Dup.esp")), encoding="utf-8")
+        ctx = EP.Context(in_place_entry(t, inst, game, ["Sel"], ["geometry.object-overlap"]), None, t / "out")
+        by = {a["id"]: a for a in ctx.resolve()["arms"]}
+        assert "ccFish.esm" in by["combined"]["plugins"] and "ccFish.esm" in by["without-selection"]["plugins"], by["combined"]["plugins"]
+        assert "Dup.esp" not in by["combined"]["plugins"], "an unchecked plugin was loaded"
+
+
 def case_b4a_prepare_writes_no_profile_into_the_instance():
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
@@ -520,9 +534,12 @@ def case_l4_an_inactive_plugin_stays_out_and_a_plugin_the_game_data_also_provide
         t = Path(t)
         mods = {"Sel": {"Sel.esp": ["Base.esm"], "Off.esp": ["Base.esm"], "Shared.esp": ["Base.esm"]}, "A": {"A.esp": ["Base.esm"]}}
         inst, game = world(t, mods, ["Sel", "A"], ["A.esp", "Sel.esp", "Shared.esp"], data=("Base.esm", "Shared.esp"))
-        # Off.esp is in loadorder.txt but not ticked in plugins.txt
+        # Off.esp is in loadorder.txt and unticked in plugins.txt: MO2 lists an unticked plugin there without `*` (one it
+        # leaves out of plugins.txt altogether is force-loaded, Mo2LoadOrder's rule; corrected 2026-11-16)
         lo = inst / "profiles" / "P" / "loadorder.txt"
         lo.write_text(lo.read_text(encoding="utf-8") + "Off.esp\n", encoding="utf-8")
+        pl = inst / "profiles" / "P" / "plugins.txt"
+        pl.write_text(pl.read_text(encoding="utf-8") + "Off.esp\n", encoding="utf-8")
         ctx = EP.Context(in_place_entry(t, inst, game, ["Sel"], ["geometry.object-overlap"]), None, t / "out")
         by = {a["id"]: a for a in ctx.resolve()["arms"]}
         assert "Off.esp" not in by["combined"]["plugins"], "an unticked plugin must not load"
