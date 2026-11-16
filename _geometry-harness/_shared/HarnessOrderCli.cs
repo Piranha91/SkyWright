@@ -242,7 +242,7 @@ public static class HarnessOrderCli
             var name = i < names.Count && orderFile is not null ? names[i] : Path.GetFileName(path);
             var (sha, bytes) = Hash(path);
             var hdr = Header(path);
-            var provider = ProviderOf(path, overwriteDir, modsDir, dataDir);
+            var provider = ProviderOf(path, overwriteDir, modsDir, dataDir, viewMods);
             if (hdr is null)
                 warnings.Add($"'{name}': the TES4 header would not read, so its master flag and master list are recorded "
                            + "EMPTY in the identity. That is an unreadable file, not a claim that it has no masters.");
@@ -433,10 +433,14 @@ public static class HarnessOrderCli
 
     /// <summary>Which layer a resolved path came from: "overwrite", the mod folder's own name, "Data", or — when it is
     /// under none of the three — the directory itself, said plainly rather than guessed at.</summary>
-    static string ProviderOf(string path, string overwriteDir, string modsDir, string dataDir)
+    static string ProviderOf(string path, string overwriteDir, string modsDir, string dataDir, IReadOnlyList<string>? viewMods = null)
     {
         string full = Path.GetFullPath(path);
         if (Under(full, overwriteDir)) return "overwrite";
+        // a view entry may name a mod folder by absolute path (a patch in the workbench's output folder): a file under it
+        // is provided by that entry, spelled as the view spells it, so the identity does not call it out of view
+        foreach (var m in viewMods ?? Array.Empty<string>())
+            if (Path.IsPathRooted(m) && Under(full, m)) return m;
         if (Under(full, modsDir))
         {
             var rel = Path.GetRelativePath(Path.GetFullPath(modsDir), full);

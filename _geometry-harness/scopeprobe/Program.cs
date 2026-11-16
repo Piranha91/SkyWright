@@ -52,6 +52,10 @@ using Mutagen.Bethesda.Skyrim;
 //                   load would be a footprint of a game that cannot start.
 //   --json FILE     where scope.json goes. Without it the summary is printed and nothing is written.
 //   --assets N      how many model paths to list (default 50; the count is always complete).
+//   --ring N        also name the plugins whose CELL records sit within N grid cells of an exterior footprint cell
+//                   (nearby.ring in scope.json; default 0, none). The loaded grid is 2.
+//   --also-scan F   a plugin file outside the configuration (a disabled mod's) to check, records only, for CELL records
+//                   in the footprint or its ring (nearby.alsoScanned); repeatable. It is never loaded into the order.
 //
 //   unreadableRecords
 //                 a target holding a record Mutagen cannot read is not measured: the record is named here (plugin,
@@ -71,6 +75,8 @@ string profileName = HarnessTarget.Profile;
 string? orderFile = null;
 string? jsonPath = null;
 int assetsListed = 50;
+int ring = 0;
+var alsoScan = new List<string>();
 var targetNames = new List<string>();
 var enablePlugins = new List<string>();
 var disablePlugins = new List<string>();
@@ -85,6 +91,12 @@ for (int i = 0; i < args.Length; i++)
     else if (args[i] == "--disable" && i + 1 < args.Length) disablePlugins.Add(args[++i]);
     else if (args[i] == "--target" && i + 1 < args.Length) targetNames.Add(args[++i]);
     else if (args[i] == "--json" && i + 1 < args.Length) jsonPath = args[++i];
+    else if (args[i] == "--ring" && i + 1 < args.Length)
+    {
+        if (!int.TryParse(args[++i], out ring) || ring < 0 || ring > 5)
+        { Console.Error.WriteLine($"--ring needs a whole number from 0 to 5; got '{args[i]}'."); return 2; }
+    }
+    else if (args[i] == "--also-scan" && i + 1 < args.Length) alsoScan.Add(args[++i]);
     else if (args[i] == "--assets" && i + 1 < args.Length)
     {
         if (!int.TryParse(args[++i], out assetsListed) || assetsListed < 0)
@@ -190,6 +202,17 @@ var wantedCells = targetPlacedReports.SelectMany(x => x.CellScopes).Where(x => x
 var wantedGrids = targetPlacedReports.SelectMany(x => x.CellScopes).Where(x => x.X is not null && x.Y is not null)
     .GroupBy(x => (x.WorldspaceKey ?? "", x.X!.Value, x.Y!.Value)).ToDictionary(x => x.Key, x => x.ToList());
 var contributors = wantedCells.Values.ToDictionary(x => x.Cell, _ => new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase));
+// --ring: the exterior grid points within `ring` cells of a footprint grid point, not in the footprint, and per plugin
+// the cells it carries there (a CELL record is how a plugin places, moves or edits anything in a cell)
+var ringGrids = new HashSet<(string, int, int)>();
+if (ring > 0)
+    foreach (var (ws0, x0, y0) in wantedGrids.Keys)
+        for (int dx = -ring; dx <= ring; dx++)
+            for (int dy = -ring; dy <= ring; dy++)
+                if (!wantedGrids.ContainsKey((ws0, x0 + dx, y0 + dy))) ringGrids.Add((ws0, x0 + dx, y0 + dy));
+var ringCarriers = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+bool InRing(FormKey worldspace, ICellGetter cell, bool persistent)
+    => ring > 0 && !persistent && !worldspace.IsNull && cell.Grid?.Point is { } rp && ringGrids.Contains((worldspace.ToString(), rp.X, rp.Y));
 var worldHeaders = new Dictionary<FormKey, RecordFields>();
 var localLargeReferences = new Dictionary<(FormKey Worldspace, int X, int Y), string>();
 var localMaxHeights = new Dictionary<(FormKey Worldspace, int X, int Y), string?>();
@@ -257,6 +280,11 @@ foreach (var plugin in cfg.Plugins)
             if (!persistent && !worldspace.IsNull && cell.Grid?.Point is { } gp
                 && wantedGrids.TryGetValue((worldspace.ToString(), gp.X, gp.Y), out var gridDestinations))
                 destinations.AddRange(gridDestinations);
+            if (InRing(worldspace, cell, persistent))
+            {
+                if (!ringCarriers.TryGetValue(plugin.Name, out var rc)) ringCarriers[plugin.Name] = rc = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                rc.Add(cellKey);
+            }
             foreach (var destination in destinations.DistinctBy(x => x.Cell))
             {
                 AddContributor(destination.Cell, plugin.Name, "CELL");
@@ -370,6 +398,44 @@ foreach (var plugin in cfg.Plugins)
 // target FOOTPRINT is whole (PLAN D2): evalrun reads walkFailures to recognise a legal target omission, and a
 // contributor hiccup in some unrelated plugin must not turn the footprint's triggers unknown. The console and the
 // JSON both state it; a consumer of the map reads locationContributors.complete.
+// --also-scan: plugin files outside the configuration, read for their CELL records alone, never loaded into the order
+var alsoScanned = new List<object>();
+foreach (var extra in alsoScan)
+{
+    var footprintHits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var ringHits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    string? failed = null;
+    ISkyrimModGetter? xm = null;
+    try
+    {
+        xm = LoadOrderResolver.OpenOverlay(extra, dataDir);
+        void Hit(ICellGetter cell, FormKey worldspace, bool persistent)
+        {
+            bool inFootprint = wantedCells.ContainsKey(cell.FormKey.ToString())
+                || (!persistent && !worldspace.IsNull && cell.Grid?.Point is { } gp && wantedGrids.ContainsKey((worldspace.ToString(), gp.X, gp.Y)));
+            if (inFootprint) footprintHits.Add(cell.FormKey.ToString());
+            else if (InRing(worldspace, cell, persistent)) ringHits.Add(cell.FormKey.ToString());
+        }
+        foreach (var ws in xm.Worldspaces.Records)
+        {
+            if (ws.TopCell is { } top) Hit(top, ws.FormKey, true);
+            foreach (var block in ws.SubCells) foreach (var sub in block.Items) foreach (var cell in sub.Items) Hit(cell, ws.FormKey, false);
+        }
+        foreach (var block in xm.Cells.Records) foreach (var sub in block.SubBlocks) foreach (var cell in sub.Cells) Hit(cell, FormKey.Null, false);
+    }
+    catch (Exception ex) { failed = TargetFootprint.Concise(ex); }
+    finally { (xm as IDisposable)?.Dispose(); }
+    alsoScanned.Add(new { name = Path.GetFileName(extra), path = extra, footprintCells = footprintHits.Order().ToList(), ringCells = ringHits.Order().ToList(), unreadable = failed });
+}
+var nearby = new
+{
+    ring,
+    plugins = ringCarriers.Select(kv => new { name = kv.Key, cells = kv.Value.Order().ToList() }).OrderBy(x => x.name, StringComparer.OrdinalIgnoreCase).ToList(),
+    alsoScanned,
+    note = "a plugin listed here carries a CELL record within the ring of an exterior footprint cell, outside the footprint itself; "
+         + "persistent references placed into the ring are not read, and alsoScanned plugins were read for CELL records only.",
+};
+
 bool contributorsComplete = complete && contributorFailures.Count == 0;
 var locationContributors = new
 {
@@ -410,6 +476,7 @@ var scope = new
     unreadableRecords,
     targets = targetJson,
     locationContributors,
+    nearby,
     expansion = new
     {
         perTarget = expansions,

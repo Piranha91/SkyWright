@@ -699,7 +699,16 @@ def enrich_names(d: Path, reader_cmd: str, mod_names: dict, reader_env: dict | N
     plan = _load(d / "plan.json") or {}
     scope = _load(d / (manifest.get("scope") or "scope/scope.json")) or {}
     targets = [t.get("name") for t in plan.get("targets") or [] if t.get("name")]
-    base_arm = next((a for a in plan.get("arms") or [] if a.get("kind") == "baseline"), (plan.get("arms") or [{}])[0])
+    # the arm under review: the plan's reviewArm when it names one (a manual-mode plan reviews the profile as it is,
+    # a candidate arm), else the baseline arm, which in the pipeline is the combined configuration the player runs
+    review = plan.get("reviewArm")
+    if review:
+        base_arm = next((a for a in plan.get("arms") or [] if a.get("armId") == review), None)
+        if base_arm is None:
+            raise Refused(f"the plan's reviewArm {review} names no arm of the plan, so there is no configuration to read "
+                          f"names in")
+    else:
+        base_arm = next((a for a in plan.get("arms") or [] if a.get("kind") == "baseline"), (plan.get("arms") or [{}])[0])
     plugins = [x for x in ((base_arm or {}).get("requested") or {}).get("plugins") or []]
     every = {}
     for a in plan.get("arms") or []:

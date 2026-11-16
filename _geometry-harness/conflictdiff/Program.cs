@@ -77,23 +77,12 @@ ConflictFile baseFile, changedFile;
 try { baseFile = ConflictIo.Read(basePath); changedFile = ConflictIo.Read(changedPath); }
 catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
 
-static List<Row> Rows(ConflictFile f)
-{
-    var rows = new List<Row>();
-    foreach (var c in f.Conflicts)
-    {
-        string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
-        int? part = c.Alternative is { Count: > 0 } alt2 ? alt2[0].Triangle : null;   // an EDGE-IDX row's target triangle
-        foreach (var r in c.Necessary)
-            rows.Add(new Row(ConflictIo.RowIdentity(c.Kind, r.FormKey, other, c.A, part), c.Kind, c.A, c.B, r.FormKey, other, r.Physical, r.PhysicalDetail));
-    }
-    return rows;
-}
-
-var before = Rows(baseFile).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
-var after = Rows(changedFile).GroupBy(r => r.Id).ToDictionary(g => g.Key, g => g.First());
-var predicates = (changedFile.Predicates ?? Array.Empty<Predicate>())
-    .GroupBy(p => ConflictIo.RowIdentity(p.Kind, p.FormKey, p.Other, p.A, p.OtherTriangle)).ToDictionary(g => g.Key, g => g.First());
+// Rows keyed and credited by the shared function (DifferentialRows: conflictdiff's own keying and DetectorModel.Credit), so a
+// second reader - the workbench's re-check - takes the per-row outcome from the same place.
+var credited = DifferentialRows.Credit(baseFile, changedFile);
+var before = credited.Before;
+var after = credited.After;
+var predicates = credited.Predicates;
 
 int basePredicated = before.Values.Count(r => r.Physical is not null);
 Console.WriteLine($"base    : {basePath}  ({baseFile.Conflicts.Count:N0} conflicts, {before.Count:N0} rows; predicates on {basePredicated:N0})");
@@ -143,13 +132,7 @@ if (predicates.Count == 0 && before.Keys.Any(k => !after.ContainsKey(k)))
 Console.WriteLine();
 
 // Credit every row of the union.
-var outcome = new Dictionary<string, CreditOutcome>();
-foreach (var id in before.Keys.Union(after.Keys))
-{
-    bool inB = before.TryGetValue(id, out var b), inA = after.TryGetValue(id, out var a);
-    PhysicalState? changedPhys = inA ? a!.Physical : predicates.TryGetValue(id, out var p) ? p.Physical : null;
-    outcome[id] = DetectorModel.Credit(inB, inB ? b!.Physical : null, inA, changedPhys);
-}
+var outcome = credited.Outcome;
 int N(CreditOutcome o) => outcome.Values.Count(v => v == o);
 
 // The group view (attribution), as before, each line with its credit breakdown.
@@ -241,7 +224,3 @@ Console.WriteLine("   A verdict here outranks --verify's CONFIRMED: coverage say
 Console.WriteLine("   only the differential says what happens to the conflict set — and only a row whose physical predicate");
 Console.WriteLine("   went away is credited as repaired. A row that changed hands with the defect intact is reclassified.");
 return 0;
-
-// One row per necessary record: its identity (what the predicate is about), its attribution (the plugin pair) and
-// its predicate under the emitting arm.
-sealed record Row(string Id, string Kind, string A, string B, string FormKey, string? Other, PhysicalState? Physical, string? Detail);

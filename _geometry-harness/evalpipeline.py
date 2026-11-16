@@ -508,6 +508,16 @@ class Context:
         self.entry = normalise_entry(read_json(entry_path), self.names)
         self.machine = read_json(machine_path) if machine_path else {}
         self.out = Path(out)
+        # an in-place entry (the workbench's manual mode): a chosen profile of any MO2 instance, read where it is; no lab,
+        # no generated profile, no mod copy
+        self.in_place = self.entry.get("inPlace")
+        if self.in_place:
+            ip = self.in_place
+            self.instance, self.game, self.template = Path(ip["instance"]), Path(ip["game"]), None
+            self.source_instance, self.source_profile, self.source_game = self.instance, ip["profile"], self.game
+            self.id = self.entry["id"]
+            self.profile = ip["profile"]
+            return
         lab = {**self.machine.get("lab", {}), **self.entry.get("lab", {})}
         self.instance = Path(lab["instance"])
         self.game = Path(lab["game"])
@@ -553,6 +563,8 @@ class Context:
 
     def resolve(self) -> dict:
         """Headers, baseline and every arm's ordered plugins, providers and mods."""
+        if self.in_place:
+            return resolve_in_place(self)
         e = self.entry
         subj = list(e["subject"].get("plugins") or [e["subject"]["plugin"]])
         keys = [k["plugin"] for k in e.get("keys", [])]
@@ -636,9 +648,145 @@ class Context:
 
 # ---------------------------------------------------------------- preparation
 
+#: the plugins the game loads whether or not plugins.txt lists them (Mo2LoadOrder's implicit masters)
+OFFICIAL_MASTERS = ("Skyrim.esm", "Update.esm", "Dawnguard.esm", "HearthFires.esm", "Dragonborn.esm")
+
+
+def _profile_lines(path: Path) -> list[str]:
+    try:
+        return [l.strip() for l in path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+                if l.strip() and not l.lstrip().startswith("#")]
+    except OSError:
+        return []
+
+
+def _mods_by_priority(mpath) -> list[str]:
+    """Every mod folder of a modlist.txt, enabled or not, strongest first (the file's own order); separators skipped."""
+    out = []
+    for line in _profile_lines(Path(mpath)):
+        if line[0] in "+-" and line[1:].strip() and not line[1:].strip().lower().endswith("_separator"):
+            out.append(line[1:].strip())
+    return out
+
+
+def resolve_in_place(ctx: Context) -> dict:
+    """An in-place entry's two arms, from the chosen profile as MO2 resolves it: `combined` = the profile with the
+    selected mod folders enabled at their MO2 priority, `without-selection` = the profile with them disabled (for a
+    selection of mods MO2 has disabled, that is the profile as it stands). A plugin only selected folders provide drops
+    from the baseline; one an unselected folder (or the game's Data) also provides stays, from there. A selected
+    disabled folder's plugins that the profile does not already load are loaded the way MO2 places a newly enabled
+    plugin: at the end of the load order, a master-flagged one at the end of the masters. The profile's files are never
+    changed; both arms are candidates over it. The plugin providers come from evalrun.plugin_layers, the one Python
+    spelling of the probes' layer map; the census stage cross-checks the result against scopeprobe's own resolution."""
+    import evalrun as ER
+    inst, prof, game = str(ctx.instance), ctx.profile, str(ctx.game)
+    pdir = ctx.instance / "profiles" / prof
+    enabled, disabled, read, mpath = ER._modlist(inst, prof)
+    if not read:
+        raise Refusal(f"the profile {prof} has no readable modlist.txt at {fwd(pdir)}; name a profile of this instance.")
+    sel = list((ctx.entry.get("selection") or {}).get("mods") or [])
+    if not sel:
+        raise Refusal("the selection names no mod folder; tick at least one of the profile's mods.")
+    known = {m.lower() for m in list(enabled) + list(disabled)}
+    for m in sel:
+        if m.lower() not in known:
+            raise Refusal(f"{m} is not a mod folder of profile {prof}; pick one of the mods its modlist.txt lists.")
+    sel_low = {m.lower() for m in sel}
+    enabled_low = {m.lower() for m in enabled}
+    switched_on = [m for m in disabled if m.lower() in sel_low]           # selected mods MO2 has disabled
+    for need in ("loadorder.txt", "plugins.txt"):
+        if not (pdir / need).is_file():
+            raise Refusal(f"the profile {prof} has no {need} at {fwd(pdir)}, so its load order cannot be read; open the "
+                          f"profile in MO2 once so it writes the file, or pick another profile.")
+    order = ctx.names.many(_profile_lines(pdir / "loadorder.txt"))
+    # Mo2LoadOrder.ReadComposition's rule exactly: a name plugins.txt lists without `*` is unchecked and does not load;
+    # every other name in loadorder.txt loads, starred or not listed at all (force-loaded: base game, Creation Club)
+    listed = _profile_lines(pdir / "plugins.txt")
+    unchecked = {l.strip().lower() for l in listed if not l.startswith("*")}
+    active = [p for p in order if p.lower() not in unchecked]
+    without_mods = [m for m in enabled if m.lower() not in sel_low]
+    candidate_mods = [m for m in _mods_by_priority(mpath) if m.lower() in enabled_low or m.lower() in sel_low]
+
+    def view(mods, names):
+        plugins, providers, headers = [], {}, {}
+        for p in names:
+            rows = ER.plugin_layers(p, mods, instance=inst, profile=prof, game=game, hash_rows=False)
+            in_view = [r for r, v in zip(rows["rows"], rows["views"]) if v == "in-view"]
+            if not in_view:
+                continue                                   # nothing in this view provides it: MO2 would not load it
+            layer, path = in_view[0]["layer"], in_view[0]["path"]
+            plugins.append(p)
+            providers[p] = None if layer in ("Data", "overwrite") else layer
+            headers[p] = plugin_header(path)
+            headers[p]["masters"] = ctx.names.many(headers[p]["masters"])
+        return plugins, providers, headers
+
+    # a switched-on folder's plugins MO2 does not already load, weakest folder first, in name order within a folder
+    active_low = {p.lower() for p in active}
+    added = []
+    for m in reversed([x for x in candidate_mods if x.lower() in {y.lower() for y in switched_on}]):
+        folder = ctx.instance / "mods" / m
+        files = sorted((f.name for f in folder.iterdir() if f.is_file() and f.suffix.lower() in (".esp", ".esm", ".esl")),
+                       key=str.lower) if folder.is_dir() else []
+        for f in ctx.names.many(files):
+            if f.lower() not in active_low and f.lower() not in {a.lower() for a in added}:
+                added.append(f)
+    c_plugins, c_providers, c_headers = view(candidate_mods, active + added)
+    if added:
+        # MO2 appends a newly enabled plugin; the engine loads every master-flagged plugin before any other, so a
+        # master-flagged one goes at the end of the masters
+        new = [p for p in c_plugins if p in added]
+        kept = [p for p in c_plugins if p not in added]
+        last = max((i for i, p in enumerate(kept) if is_master(p, c_headers)), default=-1)
+        c_plugins = (kept[:last + 1] + [p for p in new if is_master(p, c_headers)] + kept[last + 1:]
+                     + [p for p in new if not is_master(p, c_headers)])
+    w_plugins, w_providers, w_headers = view(without_mods, active)
+    subject = [p for p in c_plugins if (c_providers.get(p) or "").lower() in sel_low and p not in w_plugins]
+    arms = [{"id": "combined", "role": "the profile with the selected mods enabled" if switched_on else "the profile as it is",
+             "keys": [], "evaluated": subject, "plugins": c_plugins, "mods": candidate_mods,
+             "switchedOn": switched_on, "appendedPlugins": [p for p in added if p in c_plugins]},
+            {"id": "without-selection", "role": "the profile without the selected mods", "keys": [], "evaluated": [],
+             "plugins": w_plugins, "mods": without_mods}]
+    headers = {**w_headers, **c_headers}
+    providers = {**w_providers, **c_providers}
+    return {"headers": headers, "providers": providers, "baseline": w_plugins, "arms": arms, "subject": subject,
+            "partners": [], "keys": [], "selection": sel, "withoutProviders": w_providers}
+
+
+def in_place_select(ctx: Context) -> tuple[list[str], str]:
+    """The entry's ticked checks closed over the registry: every prerequisite of a ticked check, every derived check
+    whose prerequisites are all selected and which evalrun computes, and depth deep when a ticked check judges a state
+    other than the baseline. Returns (check ids, depth)."""
+    reg = {c["id"]: c for c in read_json(REGISTRY)["checks"]}
+    sel = set((ctx.entry.get("evaluation") or {}).get("select") or [])
+    unknown = sorted(c for c in sel if c not in reg)
+    if unknown:
+        raise Refusal(f"the selection names {', '.join(unknown)}, which the check registry does not have.")
+    todo = list(sel)
+    while todo:
+        c = todo.pop()
+        for pre in reg[c].get("prerequisites") or []:
+            if pre not in sel:
+                sel.add(pre)
+                todo.append(pre)
+    computed_derived = {"patch.order-evaluation", "patch.candidate-qualification"}   # evalrun's own derived set
+    changed = True
+    while changed:
+        changed = False
+        for cid, c in reg.items():
+            if ((c.get("adapter") or {}).get("kind") == "derived" and cid in computed_derived and cid not in sel
+                    and all(p in sel for p in c.get("prerequisites") or [])):
+                sel.add(cid)
+                changed = True
+    deep = any((reg[c].get("inputs") or {}).get("states") == "selected" for c in sel)
+    depth = "deep" if deep else ((ctx.entry.get("evaluation") or {}).get("depth") or "standard")
+    return sorted(sel), depth
+
+
 def candidate_files(ctx: Context, res: dict) -> list[dict]:
     """Candidate configurations: the combined arm is candidate-00-baseline.json (evalrun's baseline), the rest in order."""
-    arms = sorted(res["arms"], key=lambda a: 0 if a["id"] == "combined" else 1)
+    first = "without-selection" if getattr(ctx, "in_place", None) else "combined"
+    arms = sorted(res["arms"], key=lambda a: 0 if a["id"] == first else 1)
     out = []
     for i, a in enumerate(arms):
         name = "candidate-00-baseline.json" if i == 0 else f"candidate-{i:02d}.json"
@@ -757,8 +905,18 @@ def scopeprobe_exe() -> Path:
 def stage_census(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     """The subject's census on the source profile: cells and record types it touches, for the scope reconciliation."""
     out = sdir / "source-scope.json"
+    if getattr(ctx, "in_place", None) and not res["subject"]:
+        write_json(sdir / "census.json", {"source": None, "cells": {}, "recordTypes": {},
+                                          "note": "the selection provides no plugin, so there is no subject to census"})
+        print("census: the selection provides no plugin; skipped, and the plan runs without a scope")
+        return {"subject": []}, [sdir / "census.json"]
     argv = [scopeprobe_exe(), "--instance", fwd(ctx.source_instance), "--profile", ctx.source_profile,
             "--game", fwd(ctx.source_game), "--assets", "1000000", "--json", fwd(out)]
+    if getattr(ctx, "in_place", None) and any(a.get("switchedOn") for a in res["arms"]):
+        # a selected mod MO2 has disabled is not in the profile as it stands: the census reads the order with it enabled
+        name, _arm, doc = next(c for c in candidate_files(ctx, res) if c[1]["id"] == "combined")
+        write_json(sdir / "census-order.json", doc)
+        argv += ["--order", fwd(sdir / "census-order.json")]
     for p in res["subject"][:1]:
         argv += ["--target", p]
     r = child(ctx, sdir / "commands", "census-scope", argv)
@@ -788,8 +946,11 @@ def stage_prepare(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         rows.append({"file": name, "arm": arm["id"], "role": arm["role"], "variant": arm.get("variant"),
                      "keys": arm["keys"], "plugins": arm["plugins"], "mods": arm["mods"],
                      "sha256": sha256_file(cdir / name)})
-    files = profile_payload(ctx, res)
-    pdir = write_profile(ctx, files)
+    if getattr(ctx, "in_place", None):
+        files, pdir = {}, ctx.instance / "profiles" / ctx.profile          # the chosen profile, read in place, never written
+    else:
+        files = profile_payload(ctx, res)
+        pdir = write_profile(ctx, files)
     write_json(sdir / "preparation.json", {"profile": ctx.profile, "profileDir": fwd(pdir),
                                            "profileFiles": {n: hashlib.sha256(b).hexdigest() for n, b in files.items()},
                                            "baseline": res["baseline"], "arms": rows, "headers": res["headers"],
@@ -799,6 +960,12 @@ def stage_prepare(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
 
 def scope_targets(ctx: Context, res: dict, arm: dict) -> list[str]:
     ev = set(arm["plugins"])
+    if getattr(ctx, "in_place", None):
+        # the selection's plugins this arm loads; an arm that loads none (the without-selection arm, or an asset-only
+        # selection) scopes its last plugin only to prove the order loads: the plan's targets come from the combined
+        # arm's scope, and an asset-only selection plans without one
+        t = [p for p in res["subject"] if p in ev]
+        return t or ([arm["plugins"][-1]] if arm["plugins"] else [])
     if res["subject"][0] in ev:
         t = [res["subject"][0]]
     else:
@@ -807,6 +974,21 @@ def scope_targets(ctx: Context, res: dict, arm: dict) -> list[str]:
         if not t:
             t = [ctx.entry.get("baselineScopeTarget") or res["baseline"][-1]]
     return t + [k for k in res["keys"] if k in ev]
+
+
+def order_refusal(logs: Path) -> str | None:
+    """The order reader's own refusal (MISSING MASTER, CANNOT ENABLE, PROFILE MISMATCH) from a probe's job logs, as one
+    line, or None."""
+    for log in sorted(Path(logs).glob("*.txt")) if Path(logs).is_dir() else []:
+        try:
+            lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines):
+            if any(k in line for k in ("MISSING MASTER", "CANNOT ENABLE", "PROFILE MISMATCH")):
+                more = [x.strip() for x in lines[i + 1:i + 4] if x.strip().startswith(("-", "'")) or "master" in x.lower()]
+                return " ".join([" ".join(line.split())] + more).rstrip(".") + "."
+    return None
 
 
 def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
@@ -823,8 +1005,17 @@ def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
                 "--assets", "1000000", "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game)]
         for t in targets:
             argv += ["--target", t]
+        if getattr(ctx, "in_place", None) and arm["id"] == "combined":
+            # the scope line: who else touches the footprint or the loaded grid around it, and which disabled mods would
+            argv += ["--ring", "2"]
+            for path in disabled_plugin_files(ctx, res):
+                argv += ["--also-scan", fwd(path)]
         r = child(ctx, adir / "commands", "scope-" + row["file"].replace(".json", ""), argv)
         if r.get("exitCode") != 0 or not out.is_file():
+            why = order_refusal(adir / "commands")
+            if why and getattr(ctx, "in_place", None) and arm["id"] == "without-selection":
+                raise Refusal(f"the profile without the selected mods would not load: {why} Tick the mods that need the "
+                              f"selection too, or pick another mod.")
             raise Refusal(f"scope of arm {arm['id']} did not complete (exit {r.get('exitCode')}); read {fwd(adir)}.")
         expect = {"plugins": [{"name": p, "path": prep["headers"][p]["path"], "sha256": prep["headers"][p]["sha256"]}
                               for p in arm["plugins"]],
@@ -836,7 +1027,106 @@ def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
                                 **rec}
         outs.append(out)
     write_json(sdir / "scopes.json", accepted)
+    if getattr(ctx, "in_place", None) and "combined" in accepted:
+        write_json(sdir / "scope-line.json", {"line": scope_line(read_json(Path(accepted["combined"]["scope"])), res,
+                                                                 disabled_mod_of(ctx, res))})
+        outs.append(sdir / "scope-line.json")
     return {"preparation": sha256_file(ctx.out / "prepare" / "preparation.json")}, outs + [sdir / "scopes.json"]
+
+
+def disabled_mod_of(ctx: Context, res: dict) -> dict:
+    """{plugin file name (lower): mod folder} for the plugins of the profile's disabled mod folders nobody ticked."""
+    import evalrun as ER
+    _enabled, disabled, _read, _path = ER._modlist(str(ctx.instance), ctx.profile)
+    sel = {m.lower() for m in res.get("selection") or []}
+    out = {}
+    for m in disabled:
+        if m.lower() in sel:
+            continue
+        folder = ctx.instance / "mods" / m
+        if folder.is_dir():
+            for f in sorted(folder.iterdir(), key=lambda x: x.name.lower()):
+                if f.is_file() and f.suffix.lower() in (".esp", ".esm", ".esl"):
+                    out.setdefault(f.name.lower(), m)
+    return out
+
+
+def disabled_plugin_files(ctx: Context, res: dict) -> list:
+    """The plugin files of the profile's disabled, unticked mod folders (scopeprobe reads them for CELL records only)."""
+    out = []
+    for low, m in disabled_mod_of(ctx, res).items():
+        out += [f for f in (ctx.instance / "mods" / m).iterdir() if f.is_file() and f.name.lower() == low]
+    return out
+
+
+def _base_game(name: str) -> bool:
+    n = name.lower()
+    return name in OFFICIAL_MASTERS or (n.startswith("cc") and n.endswith((".esm", ".esp", ".esl")))
+
+
+def _names(items, most=6) -> str:
+    items = list(items)
+    return ", ".join(items[:most]) + (f" and {len(items) - most} more" if len(items) > most else "")
+
+
+def scope_line(scope: dict, res: dict, disabled_mods: dict) -> str:
+    """The tab's plain sentence on what the ticked mods touch, from the combined arm's scope.json: the cells their plugins
+    edit (worldspace and named cells, interiors), the other enabled plugins with records in those cells or within two
+    cells around them (the loaded grid), and the disabled, unticked mods whose plugins also edit them."""
+    ticked = list(res.get("selection") or [])
+    mine = {str(t.get("name")).lower() for t in scope.get("targets") or []}
+    cells = [c for t in scope.get("targets") or [] for c in (((t.get("footprint") or {}).get("placed") or {}).get("cells") or [])]
+    seen, ext, interiors = set(), {}, []
+    for c in cells:
+        if c.get("kind") == "persistent" or c.get("cell") in seen:
+            continue
+        seen.add(c.get("cell"))
+        if c.get("kind") == "interior":
+            interiors.append(c.get("name") or c.get("cell"))
+        else:
+            ext.setdefault(c.get("worldspace") or c.get("worldspaceKey") or "a worldspace", []).append(c.get("name"))
+    who = _names(ticked, 3) if ticked else "the selection"
+    parts = []
+    for ws, names in ext.items():
+        named = [n for n in names if n]
+        parts.append(f"{len(names)} cell{'s' if len(names) != 1 else ''} in {ws}" + (f" ({_names(named, 3)})" if named else ""))
+    if interiors:
+        parts.append(f"{len(interiors)} interior{'s' if len(interiors) != 1 else ''} ({_names(interiors, 3)})")
+    if not parts:
+        return f"{who} places nothing in any cell, so no other plugin shares its cells."
+    inside = {p["name"] for loc in ((scope.get("locationContributors") or {}).get("locations") or [])
+              for p in loc.get("plugins") or []}
+    near = {p["name"] for p in ((scope.get("nearby") or {}).get("plugins") or [])}
+    others = sorted({n for n in inside | near if n.lower() not in mine and not _base_game(n)}, key=str.lower)
+    ring = (scope.get("nearby") or {}).get("ring") or 0
+    lc = scope.get("locationContributors") or {}
+    if lc.get("complete") is False:
+        # never "no other plugin" from a walk that did not finish: say what could not be read
+        missing = lc.get("missing") or []
+        return (f"{who} edits " + " and ".join(parts) + "; which other plugins touch those cells is not known: "
+                + (f"{len(missing)} plugin(s) could not be read for it ({str(missing[0])[:160]})" if missing
+                   else "the probe's footprint walk was incomplete") + ".")
+    line = f"{who} edits " + " and ".join(parts) + "; "
+    line += (f"{len(others)} other enabled plugin{'s touch' if len(others) != 1 else ' touches'} those cells"
+             + (f" or the {ring} cells around them" if ring else "") + f": {_names(others, 6)}." if others
+             else "no other enabled plugin besides the base game touches those cells"
+             + (f" or the {ring} cells around them (persistent references placed into those cells are not read)" if ring else "") + ".")
+    hint_mods = []
+    for x in ((scope.get("nearby") or {}).get("alsoScanned") or []):
+        if x.get("footprintCells") or x.get("ringCells"):
+            m = disabled_mods.get(str(x.get("name")).lower())
+            if m and m not in hint_mods:
+                hint_mods.append(m)
+    for m in hint_mods[:3]:
+        line += f" {m} (disabled in MO2) also edits these cells; tick it to test them together."
+    if len(hint_mods) > 3:
+        line += f" {len(hint_mods) - 3} more disabled mods also edit them."
+    unread = [x for x in ((scope.get("nearby") or {}).get("alsoScanned") or []) if x.get("unreadable")]
+    if unread:
+        line += (f" {len(unread)} disabled plugin{'s' if len(unread) != 1 else ''} could not be read for this "
+                 f"({_names([str(x.get('name')) for x in unread], 3)}), so whether they edit these cells is not known.")
+    return line
+
 
 
 def planned_budget(out: Path):
@@ -863,14 +1153,32 @@ def stage_plan(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     if run.exists():
         raise Refusal(f"{fwd(run)} exists from an earlier plan; move it aside to replan, never plan over it.")
     ev = ctx.entry.get("evaluation", {})
-    argv = evalrun("plan", "--registry", fwd(REGISTRY), "--scope", scopes["combined"]["scope"],
-                   "--candidates", fwd(ctx.out / "prepare" / "candidates"),
-                   "--depth", ev.get("depth", "deep"), "--budget-minutes", ev.get("budgetMinutes", 90),
-                   "--max-candidates", len(scopes), "--out", fwd(run),
-                   "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game))
+    env = None
+    if getattr(ctx, "in_place", None):
+        select, depth = in_place_select(ctx)
+        # an asset-only selection plans without a scope: a scope needs a target, and any target would be a plugin
+        # outside the selection (receipts/h3-asset-only-plan.log: no scope gives targets [] and a population of the folders)
+        scope_args = ["--scope", scopes["combined"]["scope"]] if res["subject"] else []
+        argv = evalrun("plan", "--registry", fwd(REGISTRY), *scope_args,
+                       "--candidates", fwd(ctx.out / "prepare" / "candidates"),
+                       "--depth", depth, "--budget-minutes", ev.get("budgetMinutes", 90),
+                       "--max-candidates", len(scopes), "--out", fwd(run), "--select", ",".join(select),
+                       "--review-arm", "candidate-01",
+                       "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game))
+        if ev.get("primitiveSolidity"):
+            argv += ["--primitive-solidity", ev["primitiveSolidity"]]
+        else:
+            # never this machine's harness config: a manual run on another machine would get another table or none
+            env = {"HOUSECARL_HARNESS_CONFIG": "", "HOUSECARL_PRIMITIVE_SOLIDITY": ""}
+    else:
+        argv = evalrun("plan", "--registry", fwd(REGISTRY), "--scope", scopes["combined"]["scope"],
+                       "--candidates", fwd(ctx.out / "prepare" / "candidates"),
+                       "--depth", ev.get("depth", "deep"), "--budget-minutes", ev.get("budgetMinutes", 90),
+                       "--max-candidates", len(scopes), "--out", fwd(run),
+                       "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game))
     for o in ev.get("optIn", []):
         argv += ["--opt-in", o]
-    r = child(ctx, sdir / "commands", "plan", argv)
+    r = child(ctx, sdir / "commands", "plan", argv, env=env)
     if r.get("exitCode") != 0 or not (run / "plan.json").is_file():
         raise Refusal(f"evalrun plan refused or failed (exit {r.get('exitCode')}); its sentence is in {fwd(sdir / 'commands')}.")
     plan = read_json(run / "plan.json")
@@ -964,6 +1272,10 @@ def slot_wait_sentence(log: Path, ctx) -> str | None:
 
 def stage_records(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
     run = ctx.out / "evaluation"
+    if getattr(ctx, "in_place", None):
+        write_json(sdir / "records.json", {"note": "a manual run offers no model-driven record check; mcp-only rows stay "
+                                                   "open and the bundle says they were not assessed"})
+        return {"openArms": 0}, [sdir / "records.json"]
     led = read_json(run / "ledger.json").get("entries") or {}
     open_arms = sorted({k.split("__")[1] for k, v in led.items() if str(v.get("status")) == "mcp-only" and "__" in k})
     if not open_arms:
@@ -1694,12 +2006,27 @@ def cmd_run(a) -> int:
     out.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HOUSECARL_RUNLOG_DIR", fwd(out / "runlog"))
     ctx = Context(a.entry, a.machine, out)
+    if getattr(ctx, "in_place", None):
+        os.environ["HOUSECARL_RUNLOG_DIR"] = fwd(out / "runlog")     # a manual run's log stays in its work folder, set
     ledger = StageLedger(out)
     through = a.through or STAGES[-1]
     refusals = []      # non-blocking refusals: the run goes on, and its final status still names each one
     with Run("evalpipeline", mode=ctx.id, stage_source="counted") as run:
         res = ctx.resolve()
         write_json(out / "arms.json", [{k: v for k, v in arm.items()} for arm in res["arms"]])
+        seeded, reused_from = {}, None
+        if getattr(ctx, "in_place", None):
+            import evalprepreuse as PR
+            key = PR.key(ctx.instance, ctx.profile, ctx.game, res["selection"], res["arms"],
+                         PR.tools_digest(HERE, scopeprobe_exe()), also_scanned=disabled_plugin_files(ctx, res))
+            if getattr(a, "reuse_preparation_from", None):
+                found, why = PR.find(a.reuse_preparation_from, out, key, res["arms"])
+                if found is not None:
+                    seeded, reused_from = PR.seed(found, out), found
+                    print(f"preparation: reused from {found.parent.name} (same profile, selection, files and probe build)")
+                else:
+                    print(f"preparation: not reused: {why}")
+            write_json(out / PR.KEY_FILE, key)
         run.stage("stages", "pipeline stages", STAGES.index(through) + 1, "stages")
         for name in STAGES[:STAGES.index(through) + 1]:
             body = STAGE_BODIES.get(name)
@@ -1709,6 +2036,9 @@ def cmd_run(a) -> int:
                 return EXIT_REFUSED
             sdir = out / name
             sdir.mkdir(exist_ok=True)
+            # which stage is going, and since when, for a reader of the run record (the workbench's Start tab)
+            run.note(f"stage {name} started {utcnow()}")
+            run.liveness()
             # the entry, every earlier stage's binding and, after the bundle, the stage's own tools decide reuse; the
             # driver's own code is recorded, not bound, because the measurements' tool identities are bound inside
             # evalrun's plan
@@ -1728,6 +2058,17 @@ def cmd_run(a) -> int:
             tools = stage_tools(name, ctx.machine)
             if tools:
                 inputs["tools"] = tools
+            if name == "plan" and (out / "scope" / "scope-line.json").is_file():
+                print("scope: " + str(read_json(out / "scope" / "scope-line.json").get("line") or ""))
+            if name in seeded:
+                # an earlier run's preparation, taken over whole: recorded under this run's inputs, its own record kept
+                old = seeded[name]
+                ledger.record(name, inputs, list(old.get("outputs") or {}), exit_code=0,
+                              extra={"bound": old.get("bound"), "seconds": 0.0, "driverSha256": sha256_file(Path(__file__)),
+                                     "reusedFrom": fwd(reused_from), "reusedSeconds": old.get("seconds")})
+                print(f"{name}: reused from an earlier run")
+                run.advance()
+                continue
             if ledger.decide(name, inputs) == "reuse":
                 print(f"{name}: reused (inputs and outputs unchanged)")
                 run.advance()
@@ -1822,6 +2163,9 @@ def build_parser():
     p.add_argument("--out", type=abs_path, required=True, help="the run folder")
     p.add_argument("--machine", type=abs_path, help="the machine file: lab, game, heavy-stage prefix, run-local stage commands")
     p.add_argument("--through", choices=STAGES, help="stop after this stage")
+    p.add_argument("--reuse-preparation-from", type=abs_path, metavar="WORK_FOLDER",
+                   help="a manual run: take the census, setup and load-order checks over from an earlier run under this folder "
+                        "when every input they were built from is the same (evalprepreuse.py); otherwise run them")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("arms", help="print the arms the entry derives, before anything runs")
     p.add_argument("--entry", type=abs_path, required=True)

@@ -11,6 +11,7 @@
     <Compile Include="..\_shared\ConflictReport.cs" Link="ConflictReport.cs" />
     <Compile Include="..\_shared\Configuration.cs" Link="Configuration.cs" />
     <Compile Include="..\_shared\DetectorModel.cs" Link="DetectorModel.cs" />
+    <Compile Include="..\_shared\DifferentialRows.cs" Link="DifferentialRows.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- Q31 run contract (roadmap 4.16): this probe does not reference housecarl-core, so it LINKS the

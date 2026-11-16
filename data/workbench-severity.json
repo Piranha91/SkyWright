@@ -1,0 +1,29 @@
+{
+  "about": "Severity weights for the conflict review workbench's Conflicts tab (_geometry-harness/workbench/ConflictRanking.cs), ranking key 5. A row's weight is the highest weight among the base types of the placed references it names (its Necessary and Alternative records), looked up first under the row's Kind, then under '*'. Base types are the type names the evaluation bundle's names enrichment records for each base (enrichment/names/names.json, bases[].type). A reference whose base the enrichment did not read gets 'unread', and the UI says so. Higher is more severe. Severity is a judgement, so it lives here as data, not in code; it follows the world-edit-compatibility taste rule that things a player uses or a quest needs outrank decorations. The bundle does not say which references a quest uses, so quest membership is not a key yet.",
+  "status": "proposed 2026-11-14, accepted under the standing rule; Piranha may change. The values are a first ordering, not measured.",
+  "unread": 25,
+  "weights": {
+    "*": {
+      "Door": 90,
+      "Npc": 85,
+      "Furniture": 70,
+      "Container": 70,
+      "Activator": 70,
+      "Light": 55,
+      "Static": 50,
+      "MoveableStatic": 40,
+      "Tree": 30,
+      "Flora": 20,
+      "Weapon": 15,
+      "Armor": 15,
+      "Book": 15,
+      "MiscItem": 10,
+      "Ingestible": 10,
+      "Ingredient": 10,
+      "SoulGem": 10,
+      "Ammunition": 10,
+      "IdleMarker": 5
+    }
+  },
+  "default": 25
+}

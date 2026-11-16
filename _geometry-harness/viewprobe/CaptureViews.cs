@@ -129,12 +129,85 @@ public static class CaptureViews
     }
 
     public sealed record ContactAnswer(string Key, HashSet<string> Touches, HashSet<string> RestsOn, HashSet<string> Unassessed,
-                                       string? Refusal, Aabb Box);
+                                       string? Refusal, Aabb Box)
+    {
+        /// <summary>The touching refs whose surfaces cross this one's (the rest of <see cref="Touches"/> lie within the
+        /// touch tolerance without crossing).</summary>
+        public HashSet<string> Crossing { get; init; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>How far a ref can be lowered straight down onto what is below it, and onto what; or why it cannot.</summary>
+    public sealed record DropAnswer(string Key, float? Distance, string? Onto, string? OntoName, string? Refusal);
+
+    /// <summary>A live scene's drawn refs and terrain, from its pick shapes at their current placements.</summary>
+    internal static Geometry FromPickShapes(IEnumerable<PickShape> shapes)
+    {
+        var g = new Geometry();
+        foreach (var s in shapes)
+        {
+            if (s.Kind == PickKind.Ref && !s.Ref.RefKey.IsNull) g.Add(s.Ref.RefKey.ToString(), s.Ref.BaseEditorId ?? s.Ref.RefKey.ToString(), s.Verts, s.Tris);
+            else if (s.Kind == PickKind.Terrain) g.Add(TerrainKey, TerrainKey, s.Verts, s.Tris);
+        }
+        return g;
+    }
+
+    /// <summary>The key the terrain carries in a live geometry.</summary>
+    public const string TerrainKey = "terrain";
+
+    /// <summary>The support rays' answer as a distance: the nearest drawn surface below the ref's lowest band, which the
+    /// ref can be lowered onto. It lowers only: a ref another drawn surface already crosses (between its lowest band and
+    /// its top, at up to <see cref="SupportRays"/> sampled points) is refused, as is one with nothing within reach below.
+    /// The distance is measured from the lowest <see cref="SupportBand"/> units of the ref only, so a wider part higher up
+    /// that would touch first is not seen.</summary>
+    public static DropAnswer Drop(Geometry g, string key)
+    {
+        if (!g.Refs.TryGetValue(key, out var p) || p.I.Count == 0)
+            return new(key, null, null, null, $"{key} is not drawn in this scene, so it has nothing to drop.");
+        // sunk: cast from just under the top, over the lowest band's points; another surface above the band is one it is sunk into
+        // sampled like the support rays: up to SupportRays of the lowest band's points
+        float zmin = p.Box.Min.Z, zmax = p.Box.Max.Z;
+        var band = p.V.Where(v => v.Z <= zmin + SupportBand).ToList();
+        int stride = Math.Max(1, band.Count / SupportRays);
+        for (int i = 0; i < band.Count; i += stride)
+        {
+            var v = band[i];
+            var top = new Vector3(v.X, v.Y, zmax + 0.5f);
+            var (above, d) = FirstBelow(g, key, top, zmax - zmin);
+            if (above is not null && zmax + 0.5f - d > zmin + 0.5f)
+                return new(key, null, null, null, $"{Describe(g, above)} crosses {key} above its lowest {SupportBand:0} units, so it is already sunk into it; drop lowers only, so move it up first.");
+        }
+        var hits = SupportHits(g, key, p).Where(h => h.Hit is not null).ToList();
+        if (hits.Count == 0)
+            return new(key, null, null, null, $"nothing drawn lies within {SupportReach:0} units below {key}; drop lowers only, onto a drawn surface below it.");
+        var nearest = hits.MinBy(h => h.Distance);
+        return new(key, MathF.Max(nearest.Distance - 0.5f, 0f), nearest.Hit, g.Refs[nearest.Hit!].Name, null);
+    }
+
+    static string Describe(Geometry g, string k) => k == TerrainKey ? "the terrain" : $"{k} ({g.Refs[k].Name})";
 
     static float BoxGap(Aabb a, Aabb b) => SpatialOverlap.BoxDistance(a, b);
 
+    /// <summary>A count of the work a contact read does, owned by its caller and incremented here, where the work is done:
+    /// triangle grids built and rays cast. It crosses threads, as a thread-static count cannot.</summary>
+    internal sealed class WorkCounter { internal long Grids, Rays; }
+
+    /// <summary>Which of <paramref name="candidates"/> rest on <paramref name="host"/>: the support rays of each find the host
+    /// first below its lowest band. No grid is built.</summary>
+    internal static IReadOnlyList<string> RestingOn(Geometry g, string host, IEnumerable<string> candidates, WorkCounter? counter = null)
+    {
+        var on = new List<string>();
+        foreach (var c in candidates)
+        {
+            if (c == host || !g.Refs.TryGetValue(c, out var p) || p.I.Count == 0) continue;
+            if (SupportHits(g, c, p, counter).Any(h => h.Hit == host)) on.Add(c);
+        }
+        return on;
+    }
+
     /// <summary>What <paramref name="key"/> touches and rests on in this shot, or a refusal when that cannot be decided.</summary>
-    public static ContactAnswer Contacts(Geometry g, string key)
+    public static ContactAnswer Contacts(Geometry g, string key) => Contacts(g, key, null);
+
+    internal static ContactAnswer Contacts(Geometry g, string key, WorkCounter? counter)
     {
         var empty = new HashSet<string>(StringComparer.Ordinal);
         if (!g.Refs.TryGetValue(key, out var p) || p.I.Count == 0)
@@ -142,9 +215,11 @@ public static class CaptureViews
         if (p.Unassessed is { } why)
             return new ContactAnswer(key, empty, empty, empty, $"{key}'s own geometry is incomplete ({why}), so what it touches cannot be decided", p.Box);
         var touches = new HashSet<string>(StringComparer.Ordinal);
+        var crossing = new HashSet<string>(StringComparer.Ordinal);
         var rests = new HashSet<string>(StringComparer.Ordinal);
         var unassessed = new HashSet<string>(StringComparer.Ordinal);
         var grid = TriangleGrid.Build(p.Soup);
+        if (counter is not null) counter.Grids++;
         foreach (var r in g.Refs.Values)
         {
             if (r.Key == key) continue;
@@ -159,34 +234,58 @@ public static class CaptureViews
             if (r.Unassessed is not null) { unassessed.Add(r.Key); continue; }
             var c = SpatialOverlap.Contact(r.Soup, grid, TouchTolerance + 1f, 4f);
             if (c.Distance <= TouchTolerance || c.Crosses) touches.Add(r.Key);
+            if (c.Crosses) crossing.Add(r.Key);
         }
         // rests on: the first drawn geometry straight below the participant's lowest band of vertices
+        foreach (var (hit, _) in SupportHits(g, key, p, counter))
+        {
+            if (hit is not null)
+            {
+                if (g.Refs[hit].Unassessed is not null) unassessed.Add(hit); else rests.Add(hit);
+            }
+        }
+        return new ContactAnswer(key, touches, rests, unassessed, null, p.Box) { Crossing = crossing };
+    }
+
+    /// <summary>The support rays: from up to <see cref="SupportRays"/> of the ref's lowest band of vertices (0.5 above
+    /// each), straight down within <see cref="SupportReach"/>, the first other drawn ref hit and how far, or (null, reach).</summary>
+    static List<(string? Hit, float Distance)> SupportHits(Geometry g, string key, Geometry.Ref p, WorkCounter? counter = null)
+    {
+        var hits = new List<(string?, float)>();
         float zmin = p.Box.Min.Z;
         var low = new List<Vector3>();
         foreach (var v in p.V) if (v.Z <= zmin + SupportBand) low.Add(v);
         int step = Math.Max(1, low.Count / SupportRays);
         for (int i = 0; i < low.Count; i += step)
         {
-            var o = low[i] + new Vector3(0, 0, 0.5f);
-            string? hit = null; float best = SupportReach;
-            foreach (var r in g.Refs.Values)
+            var (hit, best) = FirstBelow(g, key, low[i] + new Vector3(0, 0, 0.5f), SupportReach);
+            if (counter is not null) counter.Rays++;
+            hits.Add((hit, best));
+        }
+        return hits;
+    }
+
+    /// <summary>Rays cast on this thread (each <see cref="FirstBelow"/> call), so a test can pin the sampling without a clock.</summary>
+    [ThreadStatic] internal static long RayCasts;
+
+    /// <summary>The first other drawn ref straight below <paramref name="o"/> within <paramref name="reach"/>, and how far.</summary>
+    static (string? Hit, float Distance) FirstBelow(Geometry g, string key, Vector3 o, float reach)
+    {
+        RayCasts++;
+        string? hit = null; float best = reach;
+        foreach (var r in g.Refs.Values)
+        {
+            if (r.Key == key || r.I.Count == 0) continue;
+            if (o.X < r.Box.Min.X || o.X > r.Box.Max.X || o.Y < r.Box.Min.Y || o.Y > r.Box.Max.Y) continue;
+            if (r.Box.Min.Z > o.Z || r.Box.Max.Z < o.Z - reach) continue;
+            var vs = r.V; var ix = r.I;
+            for (int t = 0; t + 2 < ix.Count; t += 3)
             {
-                if (r.Key == key || r.I.Count == 0) continue;
-                if (o.X < r.Box.Min.X || o.X > r.Box.Max.X || o.Y < r.Box.Min.Y || o.Y > r.Box.Max.Y) continue;
-                if (r.Box.Min.Z > o.Z || r.Box.Max.Z < o.Z - SupportReach) continue;
-                var vs = r.V; var ix = r.I;
-                for (int t = 0; t + 2 < ix.Count; t += 3)
-                {
-                    float d = DownHit(o, vs[ix[t]], vs[ix[t + 1]], vs[ix[t + 2]]);
-                    if (d >= 0f && d < best) { best = d; hit = r.Key; }
-                }
-            }
-            if (hit is not null)
-            {
-                if (g.Refs[hit].Unassessed is not null) unassessed.Add(hit); else rests.Add(hit);
+                float d = DownHit(o, vs[ix[t]], vs[ix[t + 1]], vs[ix[t + 2]]);
+                if (d >= 0f && d < best) { best = d; hit = r.Key; }
             }
         }
-        return new ContactAnswer(key, touches, rests, unassessed, null, p.Box);
+        return (hit, best);
     }
 
     /// <summary>Distance along -Z from <paramref name="o"/> to the triangle, or -1 (Möller-Trumbore, both faces).</summary>

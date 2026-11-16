@@ -284,6 +284,67 @@ def plugin_top_groups_from_bytes(data: bytes) -> dict[str, int] | None:
     return out
 
 
+def population_file(plugins: list[dict], mod_names: list, target_names: list, instance: str | None):
+    """The population file for a delta: plugins as {name, path, sha256}, mod folders by name under `instance`, the targets.
+    Returns (text, sha256, plugins, mods, race carriers), or one sentence saying why the delta cannot be scoped. The one
+    rule `plan` freezes a plan's population by and `population` writes a file for an ad-hoc delta by."""
+    out_plugins, race_carriers = [], []
+    for row in plugins:
+        name, path, sha = row["name"], row["path"], row["sha256"]
+        # The probes refuse a population whose delta reaches every reference by a route they do not model; deciding it
+        # here leaves the plan unscoped at plan time instead of failing every scoped probe hours into the run.
+        try:
+            groups = plugin_top_groups_from_bytes(Path(path).read_bytes())
+        except OSError:
+            groups = None
+        if groups and groups.get("COLL", 0) > 0:
+            return (f"{name} carries collision-layer records (COLL), which change how every reference collides; "
+                    "the scoped probes do not model that, so these checks run on the whole order")
+        if groups and groups.get("RACE", 0) > 0:
+            race_carriers.append(name)
+        out_plugins.append({"name": name, "path": path, "sha256": sha})
+    mods = []
+    for name in mod_names:
+        if not instance:
+            return f"the population needs mod folder {name} by path, and no --instance was given"
+        folder = Path(instance) / "mods" / name
+        if not folder.is_dir():
+            return f"the population needs mod folder {name}, and {folder} is not a folder"
+        swap = next((f for f in folder.rglob("*") if f.is_file() and f.name.lower().endswith("_swap.ini")), None)
+        if swap is not None:
+            return (f"mod folder {name} ships a Base Object Swapper ini ({swap.name}), whose swaps the population "
+                    "does not model")
+        mods.append({"name": name, "path": str(folder)})
+    text = json.dumps({"schema": 1, "plugins": out_plugins, "mods": mods, "targets": list(target_names)}, indent=1,
+                      sort_keys=True) + "\n"
+    return text, hashlib.sha256(text.encode("utf-8")).hexdigest(), out_plugins, mods, race_carriers
+
+
+def cmd_population(a) -> int:
+    """`population`: the population file for an ad-hoc delta (a patch plugin and its mod folder), by the rule `plan` uses,
+    so a re-check of one patch scopes its probes the way an evaluation does. Writes only --out."""
+    plugins = []
+    for raw in a.plugin:
+        path = Path(raw)
+        sha = sha256_file(path) if path.is_file() else None
+        if not sha:
+            print(f"population: plugin {raw} is not a readable file; name the patch plugin by its path.", file=sys.stderr)
+            return EXIT_REFUSED_INPUT
+        plugins.append({"name": path.name, "path": str(path), "sha256": sha})
+    targets = a.target or [r["name"] for r in plugins]
+    made = population_file(plugins, a.mod or [], targets, a.instance)
+    if isinstance(made, str):
+        print(f"population: {made}.", file=sys.stderr)
+        return EXIT_REFUSED_INPUT
+    text, sha, _, mods, _ = made
+    out = Path(a.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8", newline="\n")
+    print(f"population {out}: {len(plugins)} plugin(s), {len(mods)} mod folder(s); sha256 {sha}; "
+          f"identity {a.enable_population}+population:{sha[:12]}")
+    return EXIT_OK
+
+
 def plan_population(checks: list[dict], arms: list[dict], targets: list, base_population: str,
                     instance: str | None) -> tuple[dict, str | None]:
     """The population the scoped geometry checks run on: the plan's targets plus every plugin and asset provider the
@@ -319,8 +380,7 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
                             if str(v.get("kind") or "").lower() == "mod" and v.get("name")] for a in arms])
     if not plugin_names and not mod_names:
         return unscoped("the arms do not differ and the plan names no target, so there is no population to scope to")
-    plugins = []
-    race_carriers = []
+    stated_plugins = []
     for name in sorted(plugin_names, key=str.lower):
         rows = [r for a in arms for r in ((a.get("requested") or {}).get("plugins") or [])
                 if Path(str(r.get("name") or "")).name.lower() == name.lower()]
@@ -329,32 +389,11 @@ def plan_population(checks: list[dict], arms: list[dict], targets: list, base_po
             return unscoped(f"the population needs {name} by path and hash, and the arms' frozen requests state "
                             + ("no copy of it" if not stated else f"{len(stated)} different copies"))
         path, sha = stated.pop()
-        # The probes refuse a population whose delta reaches every reference by a route they do not model; deciding it
-        # here leaves the plan unscoped at plan time instead of failing every scoped probe hours into the run.
-        try:
-            groups = plugin_top_groups_from_bytes(Path(path).read_bytes())
-        except OSError:
-            groups = None
-        if groups and groups.get("COLL", 0) > 0:
-            return unscoped(f"{name} carries collision-layer records (COLL), which change how every reference collides; "
-                            "the scoped probes do not model that, so these checks run on the whole order")
-        if groups and groups.get("RACE", 0) > 0:
-            race_carriers.append(name)
-        plugins.append({"name": name, "path": path, "sha256": sha})
-    mods = []
-    for name in mod_names:
-        if not instance:
-            return unscoped(f"the population needs mod folder {name} by path, and no --instance was given")
-        folder = Path(instance) / "mods" / name
-        if not folder.is_dir():
-            return unscoped(f"the population needs mod folder {name}, and {folder} is not a folder")
-        swap = next((f for f in folder.rglob("*") if f.is_file() and f.name.lower().endswith("_swap.ini")), None)
-        if swap is not None:
-            return unscoped(f"mod folder {name} ships a Base Object Swapper ini ({swap.name}), whose swaps the population "
-                            "does not model")
-        mods.append({"name": name, "path": str(folder)})
-    text = json.dumps({"schema": 1, "plugins": plugins, "mods": mods, "targets": target_names}, indent=1, sort_keys=True) + "\n"
-    sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        stated_plugins.append({"name": name, "path": path, "sha256": sha})
+    made = population_file(stated_plugins, mod_names, target_names, instance)
+    if isinstance(made, str):
+        return unscoped(made)
+    text, sha, plugins, mods, race_carriers = made
     scoped_checks = sorted(c["checkId"] for c in planned if c["adapter"].get("populationFlag"))
     for c in emit_scoped:
         if c["adapter"].get("exe") == "stateprobe" and race_carriers:
@@ -1483,6 +1522,12 @@ def cmd_plan(a) -> int:
     for i, (declared, cand) in enumerate(supplied, start=1):
         add_arm("supplied-combination", cand, i, declared)
 
+    review_arm = getattr(a, "review_arm", None)
+    if review_arm and review_arm not in {x["armId"] for x in arms}:
+        return refuse(f"--review-arm {review_arm} names no arm of this plan (its arms are "
+                      f"{', '.join(x['armId'] for x in arms)}); name one of them or leave it out")
+    single_arm = review_arm or "baseline"
+
     manifest = load_json(cdir / "candidates.json") or {}
     budget_block = manifest.get("Budget") if isinstance(manifest, dict) else None
 
@@ -1599,7 +1644,7 @@ def cmd_plan(a) -> int:
             return refuse(f"registry check {cid}: applicability {applicability!r} is not yes/no/unknown")
 
         want = (check.get("inputs") or {}).get("arms", "all")
-        arm_ids = [x["armId"] for x in arms] if want == "all" else ["baseline"]
+        arm_ids = [x["armId"] for x in arms] if want == "all" else [single_arm]
 
         exe = adapter.get("exe")
         if exe and exe not in tools:
@@ -1622,7 +1667,7 @@ def cmd_plan(a) -> int:
             arm = next(x for x in arms if x["armId"] == aid)
             st = base_status
             if st is None:
-                if want == "baseline" and aid != "baseline":
+                if want == "baseline" and aid != single_arm:
                     st = "unsupported-for-arm"
                 elif arm.get("supplied", {}).get("payloadMissing"):
                     st = "blocked-payload-missing"
@@ -1745,6 +1790,7 @@ def cmd_plan(a) -> int:
                           "overlays": scope_overlays},
         "candidatesDir": str(cdir),
         "arms": arms,
+        **({"reviewArm": review_arm} if review_arm else {}),
         "states": {"selected": states, "depth": depth, "notExplored": states_not_explored,
                    **({"fromCensus": {"generator": "stategen.py", "sha256": sha256_file(HERE / "stategen.py"),
                                       "checks": census_checks,
@@ -2845,7 +2891,7 @@ class Executor:
             tool = self.plan["tools"].get(exe) if exe else None
         if identity is not None:
             cfg, source = dict(identity), "emit"
-        elif arm.get("kind") == "baseline":
+        elif arm.get("kind") == "baseline" and scope_measured_on(self.plan, arm):
             cfg, source = {
                 "fingerprint": self.plan["configuration"].get("fingerprint"),
                 "source": self.plan["configuration"].get("source"),
@@ -3516,11 +3562,62 @@ def target_pairs(ex: Executor, arm: dict):
     return pairs
 
 
+def scope_measured_on(plan: dict, arm: dict) -> bool:
+    """Whether the plan's scope (plan.configuration) was measured on this arm's candidate. The scope names its source as
+    `candidate:<file>`; a scope of the real profile or one that names no candidate is the baseline's, as before. In a
+    manual-mode plan the scope is the profile as it is, so it is not the baseline's configuration."""
+    src = str((plan.get("configuration") or {}).get("source") or "")
+    if not src.startswith("candidate:"):
+        return True
+    return src.split(":", 1)[1] == str(arm.get("candidateFile") or "")
+
+
+PAIR_SOURCE_NONE = ("no geometry check ran on the review arm, so there is no clash to take a plugin pair from; select "
+                    "overlap, contact or navmesh ownership with patch discovery.")
+
+
+def review_pairs(ex) -> list:
+    """A plan with a reviewArm: each target with each plugin it clashes with on that arm, read from the A and B fields of
+    the review arm's accepted conflict-file receipts. A row naming no target, a receipt not accepted and another arm's
+    receipts yield none."""
+    review = (ex.plan or {}).get("reviewArm")
+    if not review:
+        return []
+    targets = {str(t.get("name")).lower(): str(t.get("name")) for t in (ex.plan.get("targets") or [])
+               if isinstance(t, dict) and t.get("name")}
+    out, seen = [], set()
+    for f in sorted((Path(ex.run) / "receipts").glob(f"*__{review}__arm.json")) +             sorted((Path(ex.run) / "receipts").glob(f"*__{review}.json")):
+        r = load_json(f) or {}
+        if r.get("armId") != review or not (r.get("validation") or {}).get("accepted"):
+            continue
+        for o in r.get("outputs") or []:
+            doc = load_json(Path(ex.run) / str(o.get("path") or "")) if o.get("path") else None
+            for c in (doc or {}).get("Conflicts") or [] if isinstance(doc, dict) else []:
+                a_, b_ = str(c.get("A") or ""), str(c.get("B") or "")
+                for t, other in ((a_, b_), (b_, a_)):
+                    if t.lower() in targets and other and other.lower() not in targets:
+                        key = tuple(sorted([t, other], key=str.lower))
+                        if key not in seen:
+                            seen.add(key)
+                            out.append(list(key))
+    return out
+
+
+def pair_source_sentence(ex) -> str:
+    """Why a reviewArm plan has no pair: the sentence the launcher shows."""
+    return PAIR_SOURCE_NONE
+
+
 def all_plan_pairs(ex: Executor) -> list:
     """Every pair the WHOLE plan is about. A discovery check runs on the baseline arm, but what a
     patch would have to reconcile is what the candidate arms move: deriving the pairs from the
     baseline alone yields none, which is not the same as none existing."""
     out, seen = [], set()
+    for pair in review_pairs(ex):
+        key = tuple(sorted(pair, key=str.lower))
+        if key not in seen:
+            seen.add(key)
+            out.append(list(key))
     for arm in ex.plan["arms"]:
         for pair in target_pairs(ex, arm):
             key = tuple(sorted(pair, key=str.lower))
@@ -3654,11 +3751,13 @@ def run_generic(ex: Executor, check: dict, arm: dict) -> None:
             # The BASELINE arm is the reference: what a patch would have to reconcile is what every
             # OTHER arm moves, so the baseline runs once with the plan-wide set. A candidate or
             # supplied arm runs with its OWN pairs - the moves that arm actually makes.
-            pairs = all_plan_pairs(ex) if arm["kind"] == "baseline" else target_pairs(ex, arm)
-            if not pairs and arm["kind"] != "baseline":
+            reference = arm["armId"] == ex.plan.get("reviewArm") or (not ex.plan.get("reviewArm") and arm["kind"] == "baseline")
+            pairs = all_plan_pairs(ex) if reference else target_pairs(ex, arm)
+            if not pairs and not reference:
                 pairs = all_plan_pairs(ex)
             if not pairs:
                 ex.account(check, arm, "blocked(no-pair-source)", None,
+                           pair_source_sentence(ex) if ex.plan.get("reviewArm") else
                            "the candidate manifest records no move involving a target plugin, so "
                            "there is no plugin pair for this check to verify")
                 return
@@ -4632,6 +4731,49 @@ def relevant_plugins(ex) -> set[str]:
     return names
 
 
+NOT_RELEVANT_WHY = ("its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own "
+                    "masters only: a hit that masters just a dependent of a target is counted here)")
+
+
+def hit_names(h: dict) -> set[str]:
+    """The plugins a discovery hit names directly: its masters, its FOMOD condition plugins and the pair it was found for."""
+    detail = h.get("detail") or {}
+    names = {str(x).lower() for x in (h.get("masters") or [])}
+    names |= {str(x).lower() for x in (detail.get("conditions") or [])}
+    names |= {str(x).lower() for x in (detail.get("pair") or [])}
+    return names
+
+
+def discovery_relevance(ex, receipts: dict) -> dict:
+    """{checkId: {armId: {...}}} for every accepted discovery receipt, by discovery_hit_rows' own rule, whether or not
+    candidate-qualification runs: computed, the relevant hits' files and the not-relevant count with its
+    reason; or computed false with the sentence, when the plan names no target and no pair, or the hit list cannot
+    be read as the receipt recorded it."""
+    relevant = relevant_plugins(ex)
+    out: dict[str, dict] = {}
+    for r in sorted(receipts.values(), key=lambda x: str(x.get("receiptId"))):
+        exe = (r.get("adapter") or {}).get("exe")
+        if exe not in DISCOVERY_EXES or not (r.get("validation") or {}).get("accepted"):
+            continue
+        slot = out.setdefault(str(r.get("checkId")), {})
+        arm = str(r.get("armId"))
+        if not relevant:
+            slot[arm] = {"computed": False, "why": "the plan names no target and no pair, so no hit can be judged "
+                                                   "relevant to it (the rule reads the plan's targets and pairs)"}
+            continue
+        outs = r.get("outputs") or []
+        o = outs[0] if outs else {}
+        f = ex.run / o["path"] if o.get("path") else None
+        doc = load_json(f) if f is not None and f.exists() and sha256_file(f) == o.get("sha256") else None
+        if not isinstance(doc, dict) or not isinstance(doc.get("hits"), list):
+            slot[arm] = {"computed": False, "why": f"receipt {r.get('receiptId')}'s hit list cannot be read as it recorded it"}
+            continue
+        hits = [h for h in doc["hits"] if isinstance(h, dict) and h.get("file")]
+        rel = [str(h["file"]) for h in hits if hit_names(h) & relevant]
+        slot[arm] = {"computed": True, "relevant": rel, "notRelevant": {"count": len(hits) - len(rel), "why": NOT_RELEVANT_WHY}}
+    return out
+
+
 def discovery_hit_rows(ex, receipts: dict, consumed_by: dict, by_name: dict):
     """(rows, notRelevant, inconclusive sentences, not-searched sentences) from the accepted discovery receipts.
 
@@ -4669,13 +4811,8 @@ def discovery_hit_rows(ex, receipts: dict, consumed_by: dict, by_name: dict):
             if not isinstance(h, dict) or not h.get("file"):
                 continue
             detail = h.get("detail") or {}
-            names = {str(x).lower() for x in (h.get("masters") or [])}
-            names |= {str(x).lower() for x in (detail.get("conditions") or [])}
-            names |= {str(x).lower() for x in (detail.get("pair") or [])}
-            if not names & relevant:
-                nr = not_relevant.setdefault(exe, {"count": 0, "why": (
-                    "its masters, FOMOD conditions and pair name no plan target and no plugin of a plan pair (its own "
-                    "masters only: a hit that masters just a dependent of a target is counted here)")})
+            if not hit_names(h) & relevant:
+                nr = not_relevant.setdefault(exe, {"count": 0, "why": NOT_RELEVANT_WHY})
                 nr["count"] += 1
                 continue
             hsha = str(h.get("sha256") or "").lower()
@@ -6003,6 +6140,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
                     **advice_statements(run, r)}
                    for r in receipts.values() if (r.get("adapter") or {}).get("kind") == "adviceprobe"],
         "listings": [c for c in catalogues if c.get("kind") == "discovery"],
+        "relevance": discovery_relevance(SimpleNamespace(run=Path(run), plan=plan), receipts),
         "note": "a Nexus hit is a lead: a downloadable file stays unqualified until its actual payload was "
                 "in an evaluated arm",
     }
@@ -6025,6 +6163,7 @@ def build_disposition(run: Path, plan: dict, ledger: Ledger, receipts: dict, *,
                        "note": "the words pass, compatible and clean are not claims this finalizer makes; "
                                "a completed check that found a defect is a completed check with a finding"},
         "arms": arms,
+        **({"reviewArm": plan["reviewArm"]} if plan.get("reviewArm") else {}),
         "manualDecisions": decisions,
         "unassessed": unassessed,
         "explicitDecisions": plan["explicitDecisions"],
@@ -6411,6 +6550,13 @@ def media_item_refusal(item: dict, src: Path, fingerprints: dict,
     return None, None
 
 
+def receipt_evidence_rel(receipt_path: str) -> str:
+    """Where a bundle keeps a file a receipt names (an output, a base emit, a comparison input): bundle-relative, under
+    evidence/. The one rule `bundle` copies by and `verify-bundle` checks by; `verify-bundle --out` lists every receipt
+    output it resolved this way under `receiptOutputs`, so a reader of a bundle takes its paths from there."""
+    return f"evidence/{receipt_path}"
+
+
 def cmd_bundle(a) -> int:
     run = Path(a.run)
     set_run_store(run)
@@ -6488,7 +6634,7 @@ def cmd_bundle(a) -> int:
             accepted = bool((rec.get("validation") or {}).get("accepted"))
             for o in rec.get("outputs") or []:
                 src = run / o["path"]
-                copy_in(src, f"evidence/{o['path']}", check_id=rec["checkId"], arm_id=rec["armId"],
+                copy_in(src, receipt_evidence_rel(o["path"]), check_id=rec["checkId"], arm_id=rec["armId"],
                         strength=(rec.get("result") or {}).get("strength"), kind="emit",
                         provenance={"receiptId": rec["receiptId"], "runId": rec.get("runId")},
                         recorded_sha256=o.get("sha256") if accepted else None,
@@ -6593,7 +6739,7 @@ def cmd_bundle(a) -> int:
             for o in rec.get("outputs") or []:
                 if Path(o["path"]).suffix.lower() in BINARY_SUFFIXES:
                     continue  # never copied by policy (identity only), so never a required path
-                require(f"evidence/{o['path']}")
+                require(receipt_evidence_rel(o["path"]))
         for d in decisions:
             if d.get("accepted"):
                 for row in d.get("evidence") or []:
@@ -6675,6 +6821,7 @@ def cmd_verify_bundle(a) -> int:
     memo = HashMemo()
     identity_count = 0
     guarantee = None
+    receipt_outputs: list[dict] = []
 
     def defect(kind: str, path: str | None, detail: str) -> None:
         defects.append({"kind": kind, "path": path, "detail": detail})
@@ -6777,7 +6924,14 @@ def cmd_verify_bundle(a) -> int:
             for path, recorded, is_output in chain:
                 if not path:
                     continue
-                rel = f"evidence/{path}"
+                rel = receipt_evidence_rel(path)
+                if is_output:
+                    present = (d / rel).exists()
+                    receipt_outputs.append({
+                        "receipt": k, "receiptId": rec.get("receiptId"), "checkId": rec.get("checkId"),
+                        "armId": rec.get("armId"), "part": rec.get("part"), "recordedPath": path, "path": rel,
+                        "sha256": recorded, "present": present,
+                        "matches": bool(present and recorded is not None and memo.sha256(d / rel) == recorded)})
                 if not (d / rel).exists():
                     defect("evidence-missing", rel,
                            f"receipt {rec.get('receiptId')} records this file and the bundle omits it")
@@ -6844,6 +6998,9 @@ def cmd_verify_bundle(a) -> int:
               # package is intact, not whether the evaluation was finished.
               "evaluation": {"complete": ev.get("complete"), "claim": ev.get("claim"),
                              "missing": ev.get("missing", [])},
+              # every accepted terminal receipt's outputs as this verb resolved and checked them (bundle-relative):
+              # a reader takes a receipt's files from here, never by guessing a root
+              "receiptOutputs": receipt_outputs,
               "note": "every path is bundle-relative, so a relocated bundle validates identically; bundle "
                       "integrity and evaluation completion are two states and both are written here"}
     write_json(Path(getattr(a, "out", None) or d / "verify.json"), verify)
@@ -7066,6 +7223,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--settings", metavar="FILE",
                    help="the evaluation settings file (default: evalsettings.py's resolution order)")
     p.add_argument("--select", action="append", help="CHECK,... — narrows what RUNS, never what is PLANNED")
+    p.add_argument("--review-arm", metavar="ARM",
+                   help="the arm whose configuration is under review (the one the player runs); default the baseline. "
+                        "A manual-mode plan reviews the profile as it is (a candidate arm) against the profile without "
+                        "the selected mods (the baseline). Checks that run on one arm only run on it")
     p.add_argument("--exclude", action="append", metavar="CHECK=reason")
     p.add_argument("--opt-in", action="append", metavar="CHECK[,CHECK...]",
                    help="plan an opt-in check (registry optIn: true), such as the live runtime.state-switch-flip; "
@@ -7145,6 +7306,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default=None, metavar="FILE",
                    help="write the result to FILE instead of DIR/verify.json, so DIR is only read")
     p.set_defaults(fn=cmd_verify_bundle)
+
+    p = sub.add_parser("population", help="write the population file for an ad-hoc delta (a patch plugin and its mod folder)")
+    p.add_argument("--plugin", action="append", required=True, metavar="PATH", help="a delta plugin by its path (repeatable)")
+    p.add_argument("--mod", action="append", default=[], metavar="NAME", help="a delta mod folder under --instance (repeatable)")
+    p.add_argument("--instance", default=None, help="the MO2 instance the mod folders are in")
+    p.add_argument("--target", action="append", default=[], metavar="NAME", help="a target plugin (default: the delta plugins)")
+    p.add_argument("--enable-population", default="load-time", help="the enable population the identity is printed with")
+    p.add_argument("--out", required=True, metavar="FILE", help="the population file to write; nothing else is written")
+    p.set_defaults(fn=cmd_population)
 
     p = sub.add_parser("enrich", help="add evidence derived after measurement to a bundle (record rows, names)")
     p.add_argument("--bundle", required=True)

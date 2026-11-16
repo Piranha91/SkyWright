@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The conflict review workbench: viewprobe's built scene in a WPF window (GLWpfControl on viewprobe's own GL
+       context), select / move / rotate a placed reference, and the edit written as a placement override by the
+       houseCARL server this checkout builds. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>workbench</AssemblyName>
+    <RootNamespace>Workbench</RootNamespace>
+    <UseWPF>true</UseWPF>
+    <NoWarn>CA1416</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.IO" />
+    <InternalsVisibleTo Include="workbench.tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\_shared\DifferentialRows.cs" Link="DifferentialRows.cs" />
+    <ProjectReference Include="..\viewprobe\viewprobe.csproj" />
+    <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
+    <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
+    <!-- The MCP state tools: a localhost Streamable HTTP server inside the app (DESIGN.md section 7). -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>
