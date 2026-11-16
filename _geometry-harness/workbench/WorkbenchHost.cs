@@ -624,8 +624,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var g = GeometryWith(key, pose);
         var c = CaptureViews.Contacts(g, key.ToString());
         if (c.Refusal is { } why) return new[] { "contact not assessed: " + why };
-        return c.Touches.OrderBy(t => t, StringComparer.Ordinal)
-                        .Select(t => t == CaptureViews.TerrainKey ? "the terrain touches or crosses it" : $"{t} ({g.Refs[t].Name}) touches or crosses it").ToList();
+        return ContextRead.ContactWords(c, g);
     }
 
     /// <summary>One trial's re-check: the open row's probe on the trial patch, unpatched and patched (<see cref="Recheck.RunAll"/>),

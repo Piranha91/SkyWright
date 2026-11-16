@@ -63,6 +63,7 @@ internal static class ContextRead
         if (await src.MismatchAsync(fk).ConfigureAwait(false) is { } why) throw new InvalidOperationException(why);
         var sections = new Dictionary<string, string>(StringComparer.Ordinal);
         static string Msg(Exception ex) => ex.Message.TrimEnd('.');
+        static string More(int n) => n > 0 ? $"; {n} more not listed (one read lists at most {ServerContextSource.Cap})" : "";
 
         // the geometry half: one contact read of the reference, then the support rays of what touches it
         var (contacts, restingOn) = await Task.Run(() =>
@@ -78,7 +79,8 @@ internal static class ContextRead
         var doors = new List<DoorFact>();
         try
         {
-            foreach (var d in await src.DoorsNearAsync(fk, DoorRadius).ConfigureAwait(false))
+            var (near, doorsNotListed) = await src.DoorsNearCountedAsync(fk, DoorRadius).ConfigureAwait(false);
+            foreach (var d in near)
             {
                 if (string.Equals(d, key, StringComparison.OrdinalIgnoreCase)) continue;
                 string label = !Drawn(d) || contacts.Refusal is not null ? "near only (not drawn here, contact not assessed)"
@@ -86,16 +88,17 @@ internal static class ContextRead
                 var (far, farCell, arrival) = await src.DestinationAsync(d).ConfigureAwait(false);
                 doors.Add(new DoorFact(d, label, far, farCell, arrival));
             }
-            sections["doors"] = doors.Count == 0 ? $"no door within {DoorRadius:0} units"
-                : $"{doors.Count} door(s) within {DoorRadius:0} units; \"touches it\" is the contact read's, not the distance's";
+            sections["doors"] = (doors.Count == 0 ? $"no door within {DoorRadius:0} units"
+                : $"{doors.Count} door(s) within {DoorRadius:0} units; \"touches it\" is the contact read's, not the distance's") + More(doorsNotListed);
         }
         catch (Exception ex) { sections["doors"] = $"the doors within {DoorRadius:0} units could not be read: {Msg(ex)}"; }
 
         var names = new List<NameFact>();
         try
         {
-            names.AddRange((await src.NamesAsync(fk).ConfigureAwait(false)).Select(n => new NameFact(n.Key, n.Field)));
-            sections["names"] = names.Count == 0 ? "nothing names it" : $"{names.Count} record(s) name it";
+            var (named, namesNotListed) = await src.NamesCountedAsync(fk).ConfigureAwait(false);
+            names.AddRange(named.Select(n => new NameFact(n.Key, n.Field)));
+            sections["names"] = (names.Count == 0 ? "nothing names it" : $"{names.Count} record(s) name it") + More(namesNotListed);
         }
         catch (Exception ex) { sections["names"] = $"what names it could not be read: {Msg(ex)}"; }
 
@@ -142,7 +145,11 @@ internal static class ContextRead
 
     /// <summary>The contact read in words: "crosses it" for a crossing, "is within 8 units of it" for a near touch.</summary>
     internal static IReadOnlyList<string> ContactWords(CaptureViews.ContactAnswer c, CaptureViews.Geometry g)
-        => c.Touches.OrderBy(t => t, StringComparer.Ordinal).Select(t => $"{t} touches or crosses it").ToList();
+        => c.Touches.OrderBy(t => t, StringComparer.Ordinal).Select(t =>
+        {
+            string who = t == CaptureViews.TerrainKey ? "the terrain" : $"{t} ({(g.Refs.TryGetValue(t, out var r) ? r.Name : t)})";
+            return c.Crossing.Contains(t) ? $"{who} crosses it" : $"{who} is within {CaptureViews.TouchTolerance:0} units of it";
+        }).ToList();
 
     static string P(Vec3 v) => FormattableString.Invariant($"({v.X:0.##}, {v.Y:0.##}, {v.Z:0.##})");
 
@@ -201,8 +208,16 @@ internal static class ContextCache
         if (sc.ContextSource is not { } src) return null;
         var c = Table.GetOrCreateValue(sc);
         if (c.Reads.TryGetValue(key, out var t)) return t;
-        // the geometry is a copy of the shapes near the reference, taken here on the UI thread; the read runs on the pool
-        var g = CaptureViews.FromPickShapes(Near(sc.Shapes, key, 600f));
+        // the geometry is a copy of the shapes near the reference, taken here on the UI thread; the read runs on the pool.
+        // The reference stands at its load-order place (the build's own vertices), so what rests on or touches it is read
+        // where it is in the game, whatever move is staged.
+        var g = new CaptureViews.Geometry();
+        foreach (var s in Near(sc.Shapes, key, 600f))
+        {
+            if (s.Kind == PickKind.Terrain) g.Add(CaptureViews.TerrainKey, CaptureViews.TerrainKey, s.Verts, s.Tris);
+            else if (string.Equals(s.Ref.RefKey.ToString(), key, StringComparison.OrdinalIgnoreCase)) g.Add(key, s.Ref.BaseEditorId ?? key, RefPlacementEdit.BakedVerts(s), s.Tris);
+            else if (!s.Ref.RefKey.IsNull) g.Add(s.Ref.RefKey.ToString(), s.Ref.BaseEditorId ?? s.Ref.RefKey.ToString(), s.Verts, s.Tris);
+        }
         var nav = sc.NavTris.ToList();
         var rows = sc.DependencyRows(key);
         return c.Reads[key] = Task.Run(() => ContextRead.ReadAsync(src, g, key, nav, sc.BodiesOf, rows));
@@ -223,8 +238,9 @@ internal static class ContextCache
     {
         var own = shapes.Where(s => s.Kind == PickKind.Ref && string.Equals(s.Ref.RefKey.ToString(), key, StringComparison.OrdinalIgnoreCase)).ToList();
         if (own.Count == 0) return Array.Empty<PickShape>();
-        var min = own.Select(s => s.Min).Aggregate(Vector3.Min) - new Vector3(margin);
-        var max = own.Select(s => s.Max).Aggregate(Vector3.Max) + new Vector3(margin);
+        var at = own.SelectMany(s => RefPlacementEdit.BakedVerts(s)).ToList();             // around its load-order place
+        var min = at.Aggregate(Vector3.Min) - new Vector3(margin);
+        var max = at.Aggregate(Vector3.Max) + new Vector3(margin);
         return shapes.Where(s => (s.Kind == PickKind.Ref || s.Kind == PickKind.Terrain)
                                  && s.Max.X >= min.X && s.Min.X <= max.X && s.Max.Y >= min.Y && s.Min.Y <= max.Y && s.Max.Z >= min.Z && s.Min.Z <= max.Z);
     }

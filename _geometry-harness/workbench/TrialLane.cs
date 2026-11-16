@@ -50,7 +50,11 @@ internal sealed record TrialVerdict(string Word, string Sentence, IReadOnlyList<
 /// outranks an unresolved one, and both are named.</summary>
 internal static class ClearRule
 {
-    internal const string ClearLimit = "clear of every conflict the re-check measures between mods; the moved object is not measured against scenery no mod is responsible for";
+    internal const string ClearLimit = "clear of every conflict the re-check measures between mods; the moved object is not measured against scenery no mod is responsible for, and a crossing already there before the move is not counted";
+
+    /// <summary>When a clear candidate's contact read or drop names crossings: one sentence saying the re-check counts none of them, and why.</summary>
+    internal static string CrossingNote(IReadOnlyCollection<string> crossings) =>
+        $" Its contact read or drop names a crossing with {string.Join(", ", crossings)}; the re-check counts none of these as a conflict: each is either scenery no mod is responsible for, or a crossing that was already there before the move.";
 
     /// <summary>What each word means, said once per answer.</summary>
     internal static readonly IReadOnlyDictionary<string, string> Meanings = new Dictionary<string, string>
@@ -202,9 +206,11 @@ internal sealed class TrialLane
                 Directory.CreateDirectory(outPath);
                 await _write(new PendingEdit(key, loadOrder, p.Pose), patch, outPath).ConfigureAwait(false);
                 var rc = await _recheck(patch, outPath, outPath + "-recheck").ConfigureAwait(false);
+                var verdict = ClearRule.Judge(rc.Result.Row, rc.OthersOfRef, rc.Result.New, rc.StillHolding);
+                if (verdict.Word == "clear" && Crossings(p) is { Count: > 0 } crossed) verdict = verdict with { Sentence = verdict.Sentence + ClearRule.CrossingNote(crossed) };
                 done = p with
                 {
-                    Verdict = ClearRule.Judge(rc.Result.Row, rc.OthersOfRef, rc.Result.New, rc.StillHolding), Seconds = clock.Elapsed.TotalSeconds,
+                    Verdict = verdict, Seconds = clock.Elapsed.TotalSeconds,
                     Checked = new[] { $"{probe}: the open row's own check, re-run on the trial patch's cell ({rc.Result.BuildSentence})" },
                     NotChecked = NotCheckedFor(probe, rc.Population),
                 };
@@ -216,6 +222,20 @@ internal sealed class TrialLane
             }
             lock (_lock) _placements = _placements.Select(x => x.N == p.N ? done : x).ToList();
         }
+    }
+
+    /// <summary>The references a candidate crosses, by its contact read ("X crosses it") and its refused drop ("X crosses …").</summary>
+    static IReadOnlyCollection<string> Crossings(TrialPlacement p)
+    {
+        var keys = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var line in p.Contacts.Append(p.Drop))
+        {
+            var i = line.IndexOf(" crosses ", StringComparison.Ordinal);
+            if (i <= 0) continue;
+            var who = line[..i].Split(' ')[0];
+            if (FormKey.TryFactory(who, out _)) keys.Add(who);
+        }
+        return keys;
     }
 
     /// <summary>The pose to stage for candidate <paramref name="n"/>, or why not.</summary>
@@ -251,6 +271,7 @@ internal sealed class TrialLane
         probe == "overlapprobe" ? "the other placed-object checks: geometry.placement-contact and geometry.fixture-empty-space" : "the other placed-object check: geometry.object-overlap",
         "navmesh (geometry.navmesh-ownership): the context panel shows the navmesh under it, not judged",
         "doors and what names it: the context panel shows them, not judged",
+        "what rests on it stays where it is when it moves (choose and the commit say which; move_with carries them)",
         "collision: drop and the overlap check read render triangles",
         "scenery no mod is responsible for: the re-check pairs the moved object only with references a mod is responsible for",
         $"anything outside the trial patch's population ({population})",
