@@ -215,6 +215,7 @@ public static class CaptureViews
         if (p.Unassessed is { } why)
             return new ContactAnswer(key, empty, empty, empty, $"{key}'s own geometry is incomplete ({why}), so what it touches cannot be decided", p.Box);
         var touches = new HashSet<string>(StringComparer.Ordinal);
+        var crossing = new HashSet<string>(StringComparer.Ordinal);
         var rests = new HashSet<string>(StringComparer.Ordinal);
         var unassessed = new HashSet<string>(StringComparer.Ordinal);
         var grid = TriangleGrid.Build(p.Soup);
@@ -233,6 +234,7 @@ public static class CaptureViews
             if (r.Unassessed is not null) { unassessed.Add(r.Key); continue; }
             var c = SpatialOverlap.Contact(r.Soup, grid, TouchTolerance + 1f, 4f);
             if (c.Distance <= TouchTolerance || c.Crosses) touches.Add(r.Key);
+            if (c.Crosses) crossing.Add(r.Key);
         }
         // rests on: the first drawn geometry straight below the participant's lowest band of vertices
         foreach (var (hit, _) in SupportHits(g, key, p, counter))
@@ -242,7 +244,7 @@ public static class CaptureViews
                 if (g.Refs[hit].Unassessed is not null) unassessed.Add(hit); else rests.Add(hit);
             }
         }
-        return new ContactAnswer(key, touches, rests, unassessed, null, p.Box);
+        return new ContactAnswer(key, touches, rests, unassessed, null, p.Box) { Crossing = crossing };
     }
 
     /// <summary>The support rays: from up to <see cref="SupportRays"/> of the ref's lowest band of vertices (0.5 above
