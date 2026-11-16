@@ -284,11 +284,19 @@ internal static class ProbeRuns
         if (rows.ValueKind != JsonValueKind.Object) return null;
         static string? S(JsonElement o, string k) => o.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
         var parts = new List<string>(); string? failed = null;
+        var saidFor = new Dictionary<string, (string Said, bool Main)>();
         foreach (var row in rows.EnumerateObject().Select(p => p.Value).Where(v => v.ValueKind == JsonValueKind.Object && S(v, "checkId") == checkId)
                                 .OrderBy(v => S(v, "armId") == "baseline" ? 0 : 1))
         {
             var arm = S(row, "armId") == "baseline" ? "without the selected mods" : "with the selected mods";
             var status = S(row, "status") ?? "";
+            if (status == "not-applicable")
+            {
+                // the check has nothing to measure on this setup (route-cut on the setup without the selected mods): not a failure
+                if (!saidFor.ContainsKey(arm)) saidFor[arm] = ("not applicable", false);
+                continue;
+            }
+            if (status is "skipped-user" or "not-opted-in") continue;
             if (status is not ("completed" or "reused"))
             {
                 failed ??= $"failed {arm}: {status}" + (S(row, "cause") is { } c ? $" ({c})" : "") + (S(row, "detail") is { } d ? $": {d}" : "");
@@ -313,8 +321,12 @@ internal static class ProbeRuns
                 "catalogue" => "listed",
                 _ => "done",
             };
-            parts.Add($"{arm}: {said}");
+            // one phrase per setup: a check's measurement row speaks for it; its reverse and comparison rows (an
+            // ordersweep check's other parts) only when the setup has no measurement row of its own
+            bool main = S(row, "part") is null or "arm";
+            if (!saidFor.TryGetValue(arm, out var prev) || (main && !prev.Main)) saidFor[arm] = (said, main);
         }
+        foreach (var (arm, v) in saidFor.OrderBy(kv => kv.Key == "without the selected mods" ? 0 : 1)) parts.Add($"{arm}: {v.Said}");
         if (failed is not null) return new("failed", 1, failed, null);
         return parts.Count == 0 ? null : new("done", 1, "done. " + string.Join("; ", parts) + ".", null);
     }
