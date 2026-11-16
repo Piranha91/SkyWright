@@ -179,7 +179,7 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     const uint Building = 0x900, DoorTouching = 0x901, DoorNear = 0x902, Crate = 0x903, Plank = 0x904, Statue = 0x905;
     static string K(uint id) => Boxes.Key(id).ToString();
 
-    /// <summary>A 400 x 400 x 300 building at the origin; a door against its east face; a door 90 units off it; a misc item, a
+    /// <summary>A 400 x 400 x 300 building at the origin; a door 1 unit off its east face; a door 90 units off it; a misc item, a
     /// static and a moveable static standing on its roof.</summary>
     static CaptureViews.Geometry Town()
     {
@@ -187,7 +187,7 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         foreach (var ro in new[]
         {
             Boxes.Box(Building, new Vec3(0, 0, 0), new Vector3(200, 200, 150), name: "House"),
-            Boxes.Box(DoorTouching, new Vec3(210, 0, 0), new Vector3(10, 40, 100), name: "DoorA"),
+            Boxes.Box(DoorTouching, new Vec3(211, 0, 0), new Vector3(10, 40, 100), name: "DoorA"),   // 1 unit off the east face: in contact, not on its base edge
             Boxes.Box(DoorNear, new Vec3(300, 0, 0), new Vector3(10, 40, 100), name: "DoorB"),
             Boxes.Box(Crate, new Vec3(0, 0, 300.2f), new Vector3(10, 10, 10), name: "Basket"),
             Boxes.Box(Plank, new Vec3(80, 80, 300.2f), new Vector3(10, 10, 10), name: "Plank"),
@@ -728,10 +728,13 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         lane.Start(Subject, C1, Home, Three(), "overlapprobe", 0, false, grid: 32f);
         await Done(lane);
         Assert.Equal(3, f.Writes.Count);
+        // snapping rounds the axes the candidate moved (part 1's rule), not the ones it left alone
         Assert.All(f.Writes, w =>
         {
-            Assert.Equal(0f, w.Edit.After.Position.X % 32f, 3);
-            Assert.Equal(0f, w.Edit.After.Position.Y % 32f, 3);
+            bool mx = w.Edit.After.Position.X != Home.Position.X, my = w.Edit.After.Position.Y != Home.Position.Y;
+            Assert.True(mx || my, "a candidate that did not move");
+            if (mx) Assert.Equal(0f, w.Edit.After.Position.X % 32f, 3);
+            if (my) Assert.Equal(0f, w.Edit.After.Position.Y % 32f, 3);
         });
     }
 
