@@ -58,6 +58,16 @@ internal sealed class Launcher : IAsyncDisposable
     /// its output folder (<c>run/runlog</c>).</summary>
     internal string? RunStore => RunFolder is null ? null : Path.Combine(RunFolder, "run", "runlog");
     readonly Dictionary<string, HousecarlCore.Progress.RunEstimate> _first = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Run every probe that can run on this profile and selection, switched on or not; the rest are named.</summary>
+    internal string RunAll()
+    {
+        var reg = Registry().Where(c => ProbeKinds.Contains(c.Kind)).ToList();
+        var can = reg.Where(c => WhyNotHere(c) is null).Select(c => c.Id).ToList();
+        var cannot = reg.Where(c => WhyNotHere(c) is not null).Select(c => ProbeNames.Of(c.Id)).ToList();
+        if (can.Count == 0) throw new InvalidOperationException("no probe can run on this profile and selection.");
+        return Run(can) + (cannot.Count > 0 ? $"; left out because they cannot run here: {string.Join(", ", cannot)}." : "");
+    }
     System.Diagnostics.Process? _pipeline;
     System.Threading.Timer? _enforce;
     bool _groupAborted;

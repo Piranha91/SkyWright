@@ -29,6 +29,7 @@ internal static class LauncherView
     static readonly TextBlock NotProbes = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 8, 4, 4), Foreground = Theme.Brush(Theme.Dim) };
     static readonly Button RunAll = new() { Content = "Run selected", Margin = new Thickness(4), FontWeight = FontWeights.SemiBold };
     static readonly Button AbortAll = new() { Content = "Abort run", Margin = new Thickness(4) };
+    static readonly Button RunEvery = new() { Content = "Run all", Margin = new Thickness(4), ToolTip = "run every probe that can run here, switched on or not" };
     static readonly Dictionary<string, Tile> Tiles = new(StringComparer.OrdinalIgnoreCase);
     static bool _filling;
 
@@ -66,6 +67,7 @@ internal static class LauncherView
         var setWork = new Button { Content = "Set", Margin = new Thickness(4, 0, 0, 0) };
         setWork.Click += (_, _) => Try(() => L.SetWorkFolder(Work.Text));
         RunAll.Click += (_, _) => Try(() => L.Run());
+        RunEvery.Click += (_, _) => Try(() => L.RunAll());
         AbortAll.Click += (_, _) => Try(() => L.AbortRun());
         StackPanel Row(string label, params UIElement[] els)
         {
@@ -93,7 +95,7 @@ internal static class LauncherView
         panel.Children.Add(new Border { BorderBrush = Theme.Brush(Theme.Line), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Margin = new Thickness(4, 0, 4, 0), Child = ModScroll });
         var head = new DockPanel { Margin = new Thickness(4, 10, 4, 0) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(RunAll); buttons.Children.Add(AbortAll);
+        buttons.Children.Add(RunEvery); buttons.Children.Add(RunAll); buttons.Children.Add(AbortAll);
         DockPanel.SetDock(buttons, Dock.Right);
         head.Children.Add(buttons);
         head.Children.Add(new TextBlock { Text = "Probes", FontWeight = FontWeights.SemiBold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
@@ -244,6 +246,7 @@ internal static class LauncherView
             Settings.Visibility = L.SettingsNote is null ? Visibility.Collapsed : Visibility.Visible;
             bool running = L.RunTask is { IsCompleted: false };
             RunAll.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
+            RunEvery.Visibility = RunAll.Visibility;
             AbortAll.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
             RunLine.Text = L.RunState switch
             {
