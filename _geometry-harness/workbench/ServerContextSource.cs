@@ -46,21 +46,33 @@ internal sealed class ServerContextSource : IContextSource
         return d;
     }
 
-    public async Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within)
+    /// <summary>The most rows one read lists; more are counted from the answer's total, never cut silently.</summary>
+    internal const int Cap = 200;
+
+    static int Total(JsonElement root, int listed) => root.TryGetProperty("total", out var t)
+        ? t.ValueKind == JsonValueKind.Number ? t.GetInt32() : int.TryParse(t.GetString(), out var n) ? n : listed
+        : listed;
+
+    public async Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) => (await DoorsNearCountedAsync(key, within)).Doors;
+
+    public async Task<(IReadOnlyList<string> Doors, int NotListed)> DoorsNearCountedAsync(FormKey key, double within)
     {
         var root = await Records(new()
         {
             ["near"] = new Dictionary<string, object?> { ["of"] = new[] { key.ToString() }, ["within"] = within },
-            ["types"] = new[] { "REFR" }, ["where"] = new[] { "TeleportDestination exists" }, ["limit"] = 200,
+            ["types"] = new[] { "REFR" }, ["where"] = new[] { "TeleportDestination exists" }, ["limit"] = Cap,
         }).ConfigureAwait(false);
-        return Rows(root, "matches").Select(m => S(m, "formid")).OfType<string>().ToList();
+        var doors = Rows(root, "matches").Select(m => S(m, "formid")).OfType<string>().ToList();
+        return (doors, Math.Max(0, Total(root, doors.Count) - doors.Count));
     }
 
     static readonly string[] NamingFields = { "EnableParent", "LinkedReferences", "ActivateParents", "TeleportDestination" };
 
-    public async Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key)
+    public async Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => (await NamesCountedAsync(key)).Names;
+
+    public async Task<(IReadOnlyList<(string Key, string Field)> Names, int NotListed)> NamesCountedAsync(FormKey key)
     {
-        var root = await Records(new() { ["references"] = new[] { key.ToString() }, ["limit"] = 200 }).ConfigureAwait(false);
+        var root = await Records(new() { ["references"] = new[] { key.ToString() }, ["limit"] = Cap }).ConfigureAwait(false);
         var list = new List<(string, string)>();
         foreach (var m in Rows(root, "matches"))
         {
@@ -70,12 +82,14 @@ internal sealed class ServerContextSource : IContextSource
             {
                 // the field of the referencer that holds the key, as the server reads it
                 var f = await Fields(id, NamingFields).ConfigureAwait(false);
-                var hit = f.Where(kv => kv.Value.Contains(key.ToString(), StringComparison.OrdinalIgnoreCase)).Select(kv => kv.Key.Split('.')[0]).Distinct().ToList();
+                // the field's name without its element index (LinkedReferences[0].Reference names it as LinkedReferences)
+                var hit = f.Where(kv => kv.Value.Contains(key.ToString(), StringComparison.OrdinalIgnoreCase))
+                           .Select(kv => kv.Key.Split('.')[0].Split('[')[0]).Distinct().ToList();
                 list.Add((id, hit.Count > 0 ? string.Join(", ", hit) : $"{type} (a field outside {string.Join(", ", NamingFields)})"));
             }
             else list.Add((id, ed.Length > 0 ? $"{type} {ed}" : type));
         }
-        return list;
+        return (list, Math.Max(0, Total(root, Rows(root, "matches").Count()) - Rows(root, "matches").Count()));
     }
 
     public async Task<(string? FarDoor, string? FarCell, Vec3? Arrival)> DestinationAsync(string door)
