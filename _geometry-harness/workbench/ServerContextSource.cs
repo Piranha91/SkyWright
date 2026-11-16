@@ -82,8 +82,10 @@ internal sealed class ServerContextSource : IContextSource
     {
         var f = await Fields(door, "TeleportDestination").ConfigureAwait(false);
         if (!f.TryGetValue("TeleportDestination.Door", out var far)) return (null, null, null);
-        Vec3? at = f.TryGetValue("TeleportDestination.Position", out var p) ? Parse(p) : null;
-        var c = await Fields(far, "*parent.FormKey").ConfigureAwait(false);
+        // the doorstep a player arrives at coming out through this door is the FAR door's destination, not this door's own
+        // (this door's TeleportDestination is the arrival point on the far side)
+        var c = await Fields(far, "*parent.FormKey", "TeleportDestination").ConfigureAwait(false);
+        Vec3? at = c.TryGetValue("TeleportDestination.Position", out var p) ? Parse(p) : null;
         return (far, c.TryGetValue("*parent.FormKey", out var cell) ? cell : null, at);
     }
 

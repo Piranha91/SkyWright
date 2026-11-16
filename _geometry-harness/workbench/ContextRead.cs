@@ -15,7 +15,8 @@ internal interface IContextSource
     Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within);
     /// <summary>Every record that names the reference, with the field that names it.</summary>
     Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key);
-    /// <summary>A door's other side: the far door, its cell, and the arrival point there.</summary>
+    /// <summary>A door's other side: the far door and its cell, and the doorstep a player coming out through this door arrives at
+    /// (the far door's own destination, which stays where it is when this door moves).</summary>
     Task<(string? FarDoor, string? FarCell, Vec3? Arrival)> DestinationAsync(string door);
     /// <summary>A reference's base record type, as the server's summary names it.</summary>
     Task<string?> BaseTypeAsync(string key);
