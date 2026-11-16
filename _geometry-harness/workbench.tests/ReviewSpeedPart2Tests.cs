@@ -145,7 +145,7 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     public void G7j_clickable_findings_are_listed_in_their_cells_scene_and_unplaceable_ones_are_counted()
     {
         var s = Scenes.Build(new[] { Row(1, "000801:HcWbTest.esp", null, C1) },
-                             new[] { Finding(1, "000811:HcWbTest.esp", C1), Finding(2, null, null), Finding(3, "000812:HcWbTest.esp", C2) }, Policy());
+                             new[] { Finding(1, "000811:HcWbTest.esp", C1), Finding(2, null, null), Finding(3, "000812:HcWbTest.esp", C2) }, Policy(), includeFindingsOnly: true);
         var first = Assert.Single(s.Scenes, x => x.Cell == C1);
         Assert.Equal(new[] { 1 }, first.FindingRanks);
         Assert.Equal(1, s.UnplacedFindings);
@@ -573,6 +573,7 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
             Assert.Contains(p.NotChecked, c => c.Contains("collision"));
             Assert.Contains(p.NotChecked, c => c.Contains("doors and what names it"));
             Assert.Contains(p.NotChecked, c => c.Contains("scenery no mod is responsible for"));
+            Assert.Contains(p.NotChecked, c => c.Contains("what rests on it stays where it is"));
         });
         Assert.Contains(TrialLane.NotCheckedFor("contactprobe", "pop"), c => c.Contains("geometry.object-overlap"));
     }
@@ -811,6 +812,38 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         Assert.True(a.Sections.TryGetValue("navmesh", out var nav), "the navmesh section said nothing");
         Assert.Contains("under its axis-aligned bounds, any height", nav);
         Assert.Contains("shown, not judged", nav);
+    }
+
+    // ---------------------------------------------------------------- Gate C round 2: C2
+
+    [Fact]
+    public async Task C2c_a_clear_candidate_with_a_crossing_says_the_re_check_counts_none_of_them()
+    {
+        var f = new Lane
+        {
+            ContactsAt = _ => new[] { "000D01:HcWbTest.esp (Drift) crosses it", "000D02:HcWbTest.esp (Thicket) is within 8 units of it" },
+            Settle = p => (p, "000D03:HcWbTest.esp (Rock) crosses 000800:HcWbTest.esp above its lowest 16 units, so it is already sunk into it; drop lowers only, so move it up first."),
+        };
+        var lane = f.Make(_root);
+        lane.Start(Subject, C1, Home, Three(), "overlapprobe", 0, false);
+        await Done(lane);
+        var p = Assert.Single(lane.Placements, x => x.N == 1);
+        Assert.Equal("clear", p.Verdict?.Word);
+        Assert.Contains(ClearRule.ClearLimit, p.Verdict!.Sentence);
+        Assert.Contains("counts none of these as a conflict", p.Verdict.Sentence);
+        Assert.Contains("000D01", p.Verdict.Sentence);
+        Assert.Contains("000D03", p.Verdict.Sentence);
+        Assert.DoesNotContain("000D02", p.Verdict.Sentence);                   // a near touch is not a crossing
+    }
+
+    [Fact]
+    public async Task C2d_a_clear_candidate_with_no_crossing_carries_only_its_limit()
+    {
+        var f = new Lane();
+        var lane = f.Make(_root);
+        lane.Start(Subject, C1, Home, Three(), "overlapprobe", 0, false);
+        await Done(lane);
+        Assert.All(lane.Placements, p => Assert.Equal($"clear: {ClearRule.ClearLimit}.", p.Verdict?.Sentence));
     }
 }
 

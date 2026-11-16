@@ -6,6 +6,12 @@ internal sealed record ReviewEntry(RankedRow Row, Decision? Decision, DecisionMa
 /// <summary>One scene as the tab and the scenes part draw it: its rows in list order, how many are hidden, its header.</summary>
 internal sealed record SceneView(Scene Scene, IReadOnlyList<ReviewEntry> Rows, int Hidden, string Header);
 
+/// <summary>The scenes as drawn, and what is left out: cells holding only Findings rows (behind a toggle) and rows no scene placed.</summary>
+internal sealed record ScenesView(IReadOnlyList<SceneView> Scenes, int FindingsOnlyCells, int FindingsOnlyRows, int Unplaced);
+
+/// <summary>One line of the Conflicts tab: a scene header, a Conflicts row, a Findings row, a fold ("show K more") or a count.</summary>
+internal sealed record ListItem(string Kind, string Text, object? Tag);
+
 /// <summary>The Conflicts list with decisions, the one model the tab and the <c>conflicts</c> state part both render.</summary>
 internal static class ReviewList
 {
@@ -61,6 +67,19 @@ internal static class ReviewList
             return new SceneView(sc, shown, hidden, Header(sc, sceneRows.Count, hidden));
         }).ToList();
     }
+
+    /// <summary>Past this many Findings rows a scene's run folds to a "show" row.</summary>
+    internal const int FindingsFoldAt = 20;
+
+    /// <summary>The scenes with what is left out counted: findings-only cells unless asked for, and rows no scene placed.</summary>
+    internal static ScenesView BuildScenesView(IReadOnlyList<RankedRow> rows, IReadOnlyList<RankedFinding> findings, SceneKeyPolicy policy,
+        Func<RankedRow, (Decision? Decision, DecisionMatch Standing)> standing, bool includeDecided, bool includeFindingsOnly)
+        => new(BuildScenes(rows, findings, policy, standing, includeDecided), 0, 0, 0);
+
+    /// <summary>The Conflicts tab's lines for these scenes: each header, its rows, its Findings rows up to
+    /// <paramref name="foldAt"/> and a fold for the rest unless the scene is expanded, then the count of what is left out.</summary>
+    internal static IReadOnlyList<ListItem> Items(ScenesView v, IReadOnlyDictionary<int, RankedFinding> findings, int foldAt, IReadOnlySet<int> expanded)
+        => Array.Empty<ListItem>();
 
     /// <summary>A scene's header: its cell, its rows, clusters and groups, the Findings rows listed with it, and how many are hidden.</summary>
     internal static string Header(Scene sc, int rows, int hidden)

@@ -129,7 +129,12 @@ public static class CaptureViews
     }
 
     public sealed record ContactAnswer(string Key, HashSet<string> Touches, HashSet<string> RestsOn, HashSet<string> Unassessed,
-                                       string? Refusal, Aabb Box);
+                                       string? Refusal, Aabb Box)
+    {
+        /// <summary>The touching refs whose surfaces cross this one's (the rest of <see cref="Touches"/> lie within the
+        /// touch tolerance without crossing).</summary>
+        public HashSet<string> Crossing { get; init; } = new(StringComparer.Ordinal);
+    }
 
     /// <summary>How far a ref can be lowered straight down onto what is below it, and onto what; or why it cannot.</summary>
     public sealed record DropAnswer(string Key, float? Distance, string? Onto, string? OntoName, string? Refusal);

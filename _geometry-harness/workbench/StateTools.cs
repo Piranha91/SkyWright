@@ -54,6 +54,7 @@ internal sealed class StateTools
         [Description("conflicts or findings: list only rows whose kind, plugins, references or base EditorIDs (findings: summary) contain this text (any case).")] string? filter = null,
         [Description("findings: list only the rows of this check id.")] string? check = null,
         [Description("conflicts: also list rows decided intentional (hidden by default, as in the window).")] bool include_decided = false,
+        [Description("scenes: also list cells that hold only Findings rows (left out and counted by default).")] bool include_findings_only = false,
         [Description("If a re-check is running, wait up to this many seconds (at most 600) for it to finish before answering. Default 0.")]
             int wait_seconds = 0)
     {

@@ -15,6 +15,10 @@ internal interface IContextSource
     Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within);
     /// <summary>Every record that names the reference, with the field that names it.</summary>
     Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key);
+    /// <summary>The doors near it and how many more the server matched than it listed.</summary>
+    async Task<(IReadOnlyList<string> Doors, int NotListed)> DoorsNearCountedAsync(FormKey key, double within) => (await DoorsNearAsync(key, within), 0);
+    /// <summary>What names it and how many more the server matched than it listed.</summary>
+    async Task<(IReadOnlyList<(string Key, string Field)> Names, int NotListed)> NamesCountedAsync(FormKey key) => (await NamesAsync(key), 0);
     /// <summary>A door's other side: the far door and its cell, and the doorstep a player coming out through this door arrives at
     /// (the far door's own destination, which stays where it is when this door moves).</summary>
     Task<(string? FarDoor, string? FarCell, Vec3? Arrival)> DestinationAsync(string door);
@@ -135,6 +139,10 @@ internal static class ContextRead
     internal static IEnumerable<(FormKey Key, int Tri, Vector3 A, Vector3 B, Vector3 C)> TrianglesUnder(IEnumerable<(FormKey Key, int Tri, Vector3 A, Vector3 B, Vector3 C)> navTris, Aabb box)
         => navTris.Where(t => MathF.Max(t.A.X, MathF.Max(t.B.X, t.C.X)) >= box.Min.X && MathF.Min(t.A.X, MathF.Min(t.B.X, t.C.X)) <= box.Max.X
                            && MathF.Max(t.A.Y, MathF.Max(t.B.Y, t.C.Y)) >= box.Min.Y && MathF.Min(t.A.Y, MathF.Min(t.B.Y, t.C.Y)) <= box.Max.Y);
+
+    /// <summary>The contact read in words: "crosses it" for a crossing, "is within 8 units of it" for a near touch.</summary>
+    internal static IReadOnlyList<string> ContactWords(CaptureViews.ContactAnswer c, CaptureViews.Geometry g)
+        => c.Touches.OrderBy(t => t, StringComparer.Ordinal).Select(t => $"{t} touches or crosses it").ToList();
 
     static string P(Vec3 v) => FormattableString.Invariant($"({v.X:0.##}, {v.Y:0.##}, {v.Z:0.##})");
 

@@ -55,13 +55,13 @@ internal sealed record SceneCluster(IReadOnlyList<int> Ranks, IReadOnlyList<Scen
 internal sealed record Scene(int Number, string Cell, int? BestRank, IReadOnlyList<SceneCluster> Clusters, IReadOnlyList<int> FindingRanks);
 
 /// <summary>The scenes, and the Findings rows no scene could place (no reference or no cell).</summary>
-internal sealed record SceneList(IReadOnlyList<Scene> Scenes, int UnplacedFindings);
+internal sealed record SceneList(IReadOnlyList<Scene> Scenes, int UnplacedFindings, int FindingsOnlyCells = 0, int FindingsOnlyRows = 0);
 
 /// <summary>Item 7: the scene is the cell; inside it, rows naming a common reference are one cluster, and inside a cluster
 /// rows with equal group-key values are one group. No distance threshold.</summary>
 internal static class Scenes
 {
-    internal static SceneList Build(IReadOnlyList<RankedRow> rows, IReadOnlyList<RankedFinding> findings, SceneKeyPolicy policy)
+    internal static SceneList Build(IReadOnlyList<RankedRow> rows, IReadOnlyList<RankedFinding> findings, SceneKeyPolicy policy, bool includeFindingsOnly = false)
     {
         static string Norm(string? k) => (k ?? "").ToLowerInvariant();
         var byCell = rows.GroupBy(r => r.Row.Cell ?? "", StringComparer.OrdinalIgnoreCase).ToList();

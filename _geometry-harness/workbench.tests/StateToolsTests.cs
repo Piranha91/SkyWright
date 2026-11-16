@@ -99,6 +99,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         public string? Loading { get; set; }
         public IWorkbenchScene? Scene => SceneShown;
         public SceneKeyPolicy? ScenePolicy { get; set; }
+        public IReadOnlyList<RankedFinding> Findings { get; set; } = Array.Empty<RankedFinding>();
         public string OpenConflict(RankedRow row)
         {
             Opened.Add(row.Rank); OpenRow = row;
@@ -1328,6 +1329,64 @@ public sealed class StateToolsTests : IAsyncLifetime
         var st = await Ok("workbench_state", A(("project", new[] { "conflicts" })));
         foreach (var row in P(st, "conflicts", "rows").EnumerateArray())
             Assert.True(At(row, out var sc, "scene") && sc.ValueKind == JsonValueKind.Number && sc.GetInt32() == 1, "a row without its scene: " + row);
+    }
+
+    sealed class QuietSource : IContextSource
+    {
+        public Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        public Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => Task.FromResult<IReadOnlyList<(string, string)>>(Array.Empty<(string, string)>());
+        public Task<(string? FarDoor, string? FarCell, HousecarlCore.Vec3? Arrival)> DestinationAsync(string door) => Task.FromResult(((string?)null, (string?)null, (HousecarlCore.Vec3?)null));
+        public Task<string?> BaseTypeAsync(string key) => Task.FromResult<string?>("MiscItem");
+        public Task<string?> EnableParentAsync(FormKey key) => Task.FromResult<string?>(null);
+        public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
+    }
+
+    // C3: choose says what the candidate leaves behind, with the move_with hint
+    [Fact]
+    public async Task C3a_choose_names_the_two_objects_resting_on_the_reference_and_the_move_with_hint()
+    {
+        var subject = Boxes.Box(0x800, new HousecarlCore.Vec3(1000, 0, 0), new System.Numerics.Vector3(20, 20, 20), name: "Barrel");
+        var plank = Boxes.Box(0x801, new HousecarlCore.Vec3(1000, 0, 40.2f), new System.Numerics.Vector3(5, 5, 2), name: "Plank");
+        var bowl = Boxes.Box(0x802, new HousecarlCore.Vec3(1010, 10, 40.2f), new System.Numerics.Vector3(3, 3, 3), name: "Bowl");
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        _surface.SceneShown = _scene = new FakeScene(new EditSession(new[] { subject, plank, bowl }))
+        {
+            ContextSource = new QuietSource(),
+            Shapes = subject.Shapes.Concat(plank.Shapes).Concat(bowl.Shapes).ToList(),
+        };
+        _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
+        _scene.Trials = new TrialLane(work, (e, patch, outPath) => Task.FromResult("wrote " + patch),
+            (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
+        _scene.PairBoxesValue = (new HousecarlCore.Aabb(new HousecarlCore.Vec3(980, -20, 0), new HousecarlCore.Vec3(1020, 20, 40), false),
+                                 new HousecarlCore.Aabb(new HousecarlCore.Vec3(1000, -10, 0), new HousecarlCore.Vec3(1060, 30, 60), false));
+        await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
+        await Ok("workbench_act", A(("verb", "find_clear")));
+        await Ok("workbench_state", A(("project", new[] { "placements" }), ("wait_seconds", 30)));
+        var chose = await Ok("workbench_act", A(("verb", "choose"), ("n", 1)));
+        Assert.True(At(chose, out var said, "said"), "no sentence: " + chose);
+        var text = said.GetString() ?? "";
+        Assert.Contains("000801:HcWbTest.esp", text);
+        Assert.Contains("000802:HcWbTest.esp", text);
+        Assert.Contains("move_with", text);
+    }
+
+    // C4: the scenes part leaves findings-only cells out unless asked, and says how many
+    [Fact]
+    public async Task C4d_the_scenes_part_counts_findings_only_cells_and_lists_them_when_asked()
+    {
+        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.SkillPolicy());
+        _surface.Findings = new[]
+        {
+            new RankedFinding(1, new FindingRow("geometry.navmesh-ownership", "NAVMESH", "Subject.esp", "Other.esp", "f1", "000E01:HcWbTest.esp", "000200:HcWbTest.esp", null, "finding", "f1"), false, "", 0),
+            new RankedFinding(2, new FindingRow("geometry.navmesh-ownership", "NAVMESH", "Subject.esp", "Other.esp", "f2", "000E02:HcWbTest.esp", "000200:HcWbTest.esp", null, "finding", "f2"), false, "", 0),
+        };
+        var st = await Ok("workbench_state", A(("project", new[] { "scenes" })));
+        Assert.True(At(st, out var list, "scenes", "scenes") && list.GetArrayLength() == 1, "one scene expected by default: " + st);
+        Assert.True(At(st, out var cells, "scenes", "findingsOnlyCells") && cells.GetInt32() == 1, "the left-out cells are not counted: " + st);
+        Assert.True(At(st, out var rows, "scenes", "findingsOnlyRows") && rows.GetInt32() == 2, "the left-out rows are not counted: " + st);
+        var all = await Ok("workbench_state", A(("project", new[] { "scenes" }), ("include_findings_only", true)));
+        Assert.True(At(all, out var list2, "scenes", "scenes") && list2.GetArrayLength() == 2, "the findings-only cell is not listed when asked: " + all);
     }
 
     [Fact]
