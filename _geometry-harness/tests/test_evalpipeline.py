@@ -1231,6 +1231,48 @@ def case_2327_the_disk_forecast_uses_measured_figures_names_them_and_keeps_the_f
     assert "a test figure" in status.get("sentence", ""), f"the refusal does not name its figure: {status}"
 
 
+# ---- C2324: patch-search pairs recorded before a subject runs (item 39 follow-up 5) ----
+
+TOOLS2 = ["housecarl_nexus_mod", "housecarl_nexus_file_search"]
+
+
+def _search_doc(t: Path, pairs: dict) -> str:
+    """A patch-search file: {(a, b): [tools]} -> pairs with one query per tool."""
+    f = Path(t) / "patch-search.json"
+    f.write_text(json.dumps({"schemaVersion": 1, "pairs": [
+        {"pair": list(k), "queries": [{"tool": x} for x in v], "hits": []} for k, v in pairs.items()]}), encoding="utf-8")
+    return str(f)
+
+
+def case_2324_a_run_through_report_plan_needs_every_partner_pair_searched_before_census():
+    """C2324 (item 5): before census, a run that goes through report-plan refuses when the entry's patchSearch is
+    absent or does not cover the subject with every partner unit's plugins (with every required tool), naming every
+    missing pair at once; a covered entry runs, and a run that stops before report-plan is not checked. Wrong answer
+    (Hroggar round 2): no check, so report-plan stopped hours later on a pair the entry already named."""
+    import types
+    res = {"arms": [], "subject": ["S.esp"], "keys": [], "partners": [["PA.esp"], ["PB.esp", "PBm.esp"]]}
+    with tempfile.TemporaryDirectory() as t:
+        ctx = types.SimpleNamespace(entry={}, out=Path(t), machine={})
+        why = EP.patch_search_refusal(ctx, res, "deliver")
+        assert why and all(x in why for x in ("PA.esp and S.esp", "PB.esp and S.esp", "PBm.esp and S.esp")), \
+            f"no patchSearch must refuse naming every partner pair: {why}"
+        ctx.entry = {"patchSearch": _search_doc(t, {("PA.esp", "S.esp"): TOOLS2, ("S.esp", "PB.esp"): TOOLS2[:1],
+                                                     ("PBm.esp", "S.esp"): TOOLS2})}
+        why = EP.patch_search_refusal(ctx, res, "deliver")
+        assert why and "PB.esp and S.esp" in why and "PA.esp" not in why and "PBm.esp" not in why, \
+            f"a pair searched without every required tool is a gap, and only the gaps are named: {why}"
+        ctx.entry = {"patchSearch": _search_doc(t, {("PA.esp", "S.esp"): TOOLS2, ("PB.esp", "s.esp"): TOOLS2,
+                                                     ("PBm.esp", "S.esp"): TOOLS2})}
+        assert EP.patch_search_refusal(ctx, res, "deliver") is None, "a covered entry (any case) must pass"
+        ctx.entry = {}
+        assert EP.patch_search_refusal(ctx, res, "records") is None, "a run that stops before report-plan is not checked"
+        calls = []
+        out, got = _run_pipeline(t, {}, calls, [{"evaluation": {}}], res=res)
+        status = json.loads((out / "status.json").read_text(encoding="utf-8"))
+    assert got[0] == (EP.EXIT_REFUSED, []), f"the run must stop before census, got {got}"
+    assert "PB.esp and S.esp" in status.get("sentence", ""), f"the stop does not name the pairs: {status}"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):

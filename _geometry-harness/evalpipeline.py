@@ -2268,6 +2268,51 @@ def disk_forecast(ctx, records: int | None, stages: list[str]) -> tuple[str, str
     return line, None
 
 
+# ---------------------------------------------------------------- patch-search pairs before a run
+
+SCENE_POLICY = ROOT / ".claude/skills/evaluation-reporting/references/scene-policy.json"
+
+
+def patch_search_pairs(res: dict) -> list[tuple[str, str]]:
+    """The pairs a vignette can be known to name before a run: each plugin of each partner unit with the subject."""
+    subject = (res.get("subject") or [None])[0]
+    out = []
+    for unit in res.get("partners") or []:
+        for p in unit:
+            if subject and p != subject and (p, subject) not in out:
+                out.append((p, subject))
+    return out
+
+
+def patch_search_refusal(ctx, res: dict, through: str) -> str | None:
+    """Before census: a run that goes through report-plan needs the entry's patchSearch to cover every partner pair
+    (reel_plan.pair_search_gap, the reel plan's own rule), or report-plan stops on it hours later. One sentence naming
+    every missing pair, or None."""
+    if STAGES.index(through) < STAGES.index("report-plan"):
+        return None
+    pairs = patch_search_pairs(res)
+    if not pairs:
+        return None
+    import reel_plan
+    policy = (read_json(SCENE_POLICY) or {}).get("vignettes") or {}
+    said = "; ".join(" and ".join(p) for p in pairs)
+    how = ("record them with patch_search.py and name the file in the entry's patchSearch, or run with --through "
+           "a stage before report-plan")
+    sp = ctx.entry.get("patchSearch")
+    if not sp:
+        return f"the run goes through report-plan and the entry names no patchSearch for the pairs {said}; {how}."
+    try:
+        doc = read_json(sp)
+    except (OSError, ValueError) as ex:
+        return f"the entry's patchSearch {sp} cannot be read ({ex}); {how}."
+    if not isinstance(doc, dict) or not isinstance(doc.get("pairs"), list):
+        return f"the entry's patchSearch {sp} is not a patch-search document with a `pairs` list; {how}."
+    gaps = [g for pair in pairs if (g := reel_plan.pair_search_gap(doc, pair, policy))]
+    if not gaps:
+        return None
+    return reel_plan.pair_search_refusal(gaps, policy, what=f"the entry's patchSearch {sp}") + f" ({how})."
+
+
 # ---------------------------------------------------------------- driver
 
 def cmd_arms(a) -> int:
@@ -2297,6 +2342,13 @@ def cmd_run(a) -> int:
     with Run("evalpipeline", mode=ctx.id, stage_source="counted") as run:
         res = ctx.resolve()
         write_json(out / "arms.json", [{k: v for k, v in arm.items()} for arm in res["arms"]])
+        # the pairs a vignette can name are searched before anything runs, not found missing at report-plan
+        why = patch_search_refusal(ctx, res, through)
+        if why:
+            write_json(out / "status.json", {"status": "incomplete", "stoppedAt": STAGES[0], "sentence": why,
+                                             "at": utcnow()})
+            print(f"REFUSED: {why}", file=sys.stderr)
+            return EXIT_REFUSED
         seeded, reused_from = {}, None
         if getattr(ctx, "in_place", None):
             import evalprepreuse as PR

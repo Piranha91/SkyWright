@@ -41,6 +41,29 @@ class Refused(ValueError):
     pass
 
 
+def pair_search_gap(search: dict | None, pair, policy: dict) -> str | None:
+    """The pair as said in a refusal ("A and B") when the recorded patch search does not cover it: no entry for the pair
+    (names matched without case), or its queries lack a tool the skill requires (scene-policy.json
+    vignettes.patchSearch.requiredTools). None when it is covered. The one coverage rule: the reel plan and evalpipeline's
+    check before a run both ask it."""
+    need = set((policy.get("patchSearch") or {}).get("requiredTools") or [])
+    want = frozenset(str(m).lower() for m in pair)
+    entry = None
+    for e in (search or {}).get("pairs") or []:
+        if frozenset(str(x).lower() for x in e.get("pair") or []) == want:
+            entry = e                                  # the last entry for a pair stands, as the plan's lookup reads it
+    tools = {q.get("tool") for q in (entry or {}).get("queries") or []}
+    return None if entry is not None and need <= tools else " and ".join(pair)
+
+
+def pair_search_refusal(gaps: list[str], policy: dict, what: str = "the patch-search file") -> str:
+    """One sentence naming every uncovered pair and the tools each needs."""
+    need = ", ".join(sorted(set((policy.get("patchSearch") or {}).get("requiredTools") or [])))
+    if len(gaps) == 1:
+        return f"{what} does not cover the pair {gaps[0]} with {need}; search it and record the queries"
+    return f"{what} does not cover the pairs {'; '.join(gaps)} with {need}; search them and record the queries"
+
+
 def possessive(name) -> str:
     """A name's possessive: an apostrophe alone after a final s ("Interesting NPCs'"), else "'s" ("Lux's")."""
     s = str(name)
@@ -993,14 +1016,9 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     if selected and patch_search is None:
         raise Refused("the reel's patch sentences need the recorded Nexus patch search: pass evalreport plan "
                       "--patch-search FILE (the skill's scene-policy.json vignettes.patchSearch says what it covers)")
-    need_tools = set((policy.get("patchSearch") or {}).get("requiredTools") or [])
-    for c in selected:
-        key = frozenset(m.lower() for m in c["pair"])
-        entry = searched.get(key)
-        tools = {q.get("tool") for q in (entry or {}).get("queries") or []}
-        if entry is None or not need_tools <= tools:
-            raise Refused(f"the patch-search file does not cover the pair {' and '.join(c['pair'])} with "
-                          f"{', '.join(sorted(need_tools))}; search it and record the queries")
+    gaps = list(dict.fromkeys(g for c in selected if (g := pair_search_gap(patch_search, c["pair"], policy))))
+    if gaps:
+        raise Refused(pair_search_refusal(gaps, policy))
 
     supplied = list(reader.get("suppliedPatches") or [])
     # the search's known answer is derived here from its recorded hits, never taken from a flag the file states:

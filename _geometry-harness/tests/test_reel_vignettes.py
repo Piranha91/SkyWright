@@ -1206,6 +1206,15 @@ def case_planner():
     reel = gn.get("reel") or {}
     check("Q1-patch-search", reel.get("status") == "refused" and "patch-search" in str(reel.get("reason")) and not reel.get("chapters"),
           f"without a recorded patch search the reel plan refuses as a whole, naming the file (status {reel.get('status')!r})")
+    # C2325 (item 39 follow-up 5): every uncovered pair is named in one refusal, not the first only
+    cp_, cn, cm, cs, cmods = synthetic()
+    cs = copy.deepcopy(cs)
+    cs["pairs"] = []
+    gc = planned(cp_, cn, cm, cs, cmods)
+    why = str((gc.get("reel") or {}).get("reason"))
+    check("C2325-every-uncovered-pair", (gc.get("reel") or {}).get("status") == "refused"
+          and "Alpha.esp and Target.esp" in why and "Beta.esp and Target.esp" in why,
+          f"a search covering no pair refuses once, naming every uncovered pair ({why!r})")
     # Gate B review, decision 3: a spoken mod with no recorded or declared name refuses the reel, naming the plugin
     mp_, mn, mm, ms, mmods = synthetic()
     mmods.pop("Beta.esp")
