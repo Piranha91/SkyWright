@@ -16,12 +16,37 @@ internal static class ProbeNames
     /// <summary>Why a check of this registry kind is not a probe the launcher runs, in plain words.</summary>
     internal static string NotAProbe(string kind) => kind switch
     {
-        "mcp-only" => "reads records through the houseCARL server",
+        "mcp-only" => "is checked by Claude reading the records directly",
         "derived" => "is worked out from the other checks' results",
         "manual" => "is a step done by hand",
-        "media" => "reads screenshots and video you supply",
+        "media" => "is read from screenshots and video you supply",
         "live-import" => "needs the game running",
         _ => "is not built yet",
+    };
+
+    /// <summary>What a probe looks for, in game terms, for the Start tab's tiles; empty when none is written.</summary>
+    internal static string Says(string id) => id switch
+    {
+        "loadability.masters-and-order" => "Every master is present and the load order is one the game will load.",
+        "geometry.navmesh-ownership" => "Navmesh edits a later plugin throws away, and broken links in the navmesh that wins.",
+        "geometry.object-overlap" => "Objects one mod placed or moved into another mod's objects.",
+        "geometry.placement-contact" => "Objects left floating, or sunk, after a later plugin moved what they sat on.",
+        "geometry.fixture-empty-space" => "Fixtures left hanging in empty air after another mod removed the room around them.",
+        "geometry.declared-dependencies" => "Objects tied to another object (enable parent, linked reference, activate parent) that a later plugin moved apart.",
+        "geometry.bos-overlay" => "Which objects the game really shows once Base Object Swapper's _SWAP.ini files apply.",
+        "geometry.route-cut" => "Objects placed across a path NPCs walk.",
+        "functional.quest-alias-split" => "Quest characters and objects meant to be together that the winning load order puts apart.",
+        "functional.linked-dependencies" => "Where the mod leads outside its own cells: door destinations, neighbouring cells and links out.",
+        "geometry.terrain-support" => "Objects left floating or buried after another mod reshaped the ground under them.",
+        "state.switch-census" => "Enable markers that switch groups of objects on and off: what they switch and what flips them.",
+        "state.conditional-geometry" => "Overlaps and gaps that appear only once an enable marker switches its objects on.",
+        "environment.water-boundaries" => "Neighbouring cells whose water heights or types disagree.",
+        "environment.land-seams" => "Neighbouring cells whose landscape edges no longer meet.",
+        "patch.discovery-installed" => "Patches already installed in this instance that cover these mods.",
+        "patch.discovery-fomod" => "Installer (FOMOD) options that fit this load order but were not chosen.",
+        "patch.discovery-pool" => "Downloaded mods, not installed, that would patch these mods.",
+        "patch.author-advice" => "What the mod author's Nexus page says about needed patches and load order.",
+        _ => "",
     };
 
     internal static string Of(string id)
@@ -116,7 +141,7 @@ internal static class ProbeRuns
         if (store is null) return new("idle", null, "", null);
         var live = Active(store, op).FirstOrDefault();
         var done = Finished(store, op);
-        string passes = done.Count == 0 ? "" : $"; {done.Count} pass(es) finished";
+        string passes = done.Count == 0 ? "" : $"; {Runs(done.Count)} finished";
         if (aborted) return new("aborted", null, (live is null || !Alive(live) ? "aborted" : "aborting…") + passes, null);
         if (live is not null)
         {
@@ -126,23 +151,35 @@ internal static class ProbeRuns
             {
                 double frac = Math.Clamp((double)st.Processed / st.Total.Value, 0, 1);
                 var rem = live.Remaining is { HasNumber: true } r ? r : Estimator.Remaining(live, live.ActiveSeconds > 0 ? live.ActiveSeconds : elapsed, now);
-                string eta = rem.HasNumber ? $"about {Clock(rem.Seconds!.Value)} left ({rem.Basis})" : $"no estimate yet ({rem.Basis})";
+                string eta = rem.HasNumber ? $"about {Clock(rem.Seconds!.Value)} left ({Basis(rem.Basis)})" : "no time estimate yet";
                 return new("running", frac, $"{st.Title ?? st.Id} {st.Processed}/{st.Total} {st.Unit}; {Clock(elapsed)} elapsed{passes}", eta);
             }
-            return new("running", null, $"{stage?.Title ?? stage?.Id ?? "running"}: no progress reported; {Clock(elapsed)} elapsed{passes}", null);
+            return new("running", null, $"{stage?.Title ?? stage?.Id ?? "running"}: this probe does not report how far it is; {Clock(elapsed)} elapsed{passes}", null);
         }
-        // between passes: a probe runs once per arm, so finished passes are not the end until the run ends
+        // between runs: a probe runs once per mod setup compared, so finished runs are not the end until the whole run ends
         if (done.Count > 0 && !runEnded)
-            return new("waiting", null, $"{done.Count} pass(es) finished, {Clock(done.Sum(r => r.WallSeconds))}; more may follow until the run ends", null);
+            return new("waiting", null, $"{Runs(done.Count)} finished, {Clock(done.Sum(r => r.WallSeconds))}; it runs again for each mod setup compared", null);
         if (done.Count > 0)
         {
             var last = done.OrderBy(r => r.StartedUtc).Last();
             bool ok = done.All(r => r.Outcome == RunOutcome.Ok);
-            return new(ok ? "done" : "failed", 1, (ok ? "done" : $"failed ({last.Error ?? last.Outcome.ToString()})") + $": {done.Count} pass(es), {Clock(done.Sum(r => r.WallSeconds))}", null);
+            return new(ok ? "done" : "failed", 1, (ok ? "done" : $"failed ({last.Error ?? last.Outcome.ToString()})") + $": {Runs(done.Count)}, {Clock(done.Sum(r => r.WallSeconds))}", null);
         }
-        if (runEnded) return new("not run", null, "did not run in this run", null);
-        return new("waiting", null, "waiting for the pipeline to reach it" + (first is { HasNumber: true } f ? $"; about {Clock(f.Seconds!.Value)} a pass ({f.Basis}, {f.Samples} run(s))" : ""), null);
+        if (runEnded) return new("not run", null, "did not run this time", null);
+        return new("waiting", null, "waiting its turn" + (first is { HasNumber: true } f ? $"; about {Clock(f.Seconds!.Value)} a run, judged from {Runs(f.Samples)} before" : ""), null);
     }
+
+    static string Runs(int n) => n == 1 ? "1 run" : $"{n} runs";
+
+    /// <summary>How an estimate was made, in words.</summary>
+    static string Basis(string basis) => basis switch
+    {
+        "measured-rate" => "from its speed so far",
+        "median" or "fitted" => "from earlier runs",
+        "provisional" => "a rough guess from few earlier runs",
+        "reference" => "from one earlier run",
+        _ => "a rough guess",
+    };
 
     /// <summary>The first guess for one pass of a probe, by the run-log estimator over earlier runs' histories.</summary>
     internal static RunEstimate First(IEnumerable<string> historyFiles, string op, DateTimeOffset now)

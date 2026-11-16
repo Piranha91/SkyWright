@@ -69,7 +69,7 @@ public sealed class LauncherUiTests : IDisposable
         var p = ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: false, DateTimeOffset.UtcNow, first: null);
         Assert.Equal("running", p.State);
         Assert.Null(p.Fraction);
-        Assert.Contains("no progress reported", p.Line);
+        Assert.Contains("does not report how far it is", p.Line);
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public sealed class LauncherUiTests : IDisposable
         File.WriteAllText(Path.Combine(store, "history.jsonl"), JsonSerializer.Serialize(r, RunContract.Json) + "\n");
         var between = ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: false, DateTimeOffset.UtcNow, first: null);
         Assert.Equal("waiting", between.State);
-        Assert.Contains("1 pass(es) finished", between.Line);
+        Assert.Contains("1 run finished", between.Line);
         Assert.Equal("done", ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: true, DateTimeOffset.UtcNow, first: null).State);
     }
 
@@ -106,6 +106,21 @@ public sealed class LauncherUiTests : IDisposable
         Assert.Equal("Loadability: Masters and Order", ProbeNames.Of("loadability.masters-and-order"));
         Assert.Equal("Geometry: BOS Overlay", ProbeNames.Of("geometry.bos-overlay"));
         Assert.Equal("State: Switch Census", ProbeNames.Of("state.switch-census"));
+    }
+
+    [Fact]
+    public void Every_probe_is_described_in_game_terms()
+    {
+        // the tile's line is for a modder: no subrecord signatures or tool-internal words
+        var banned = new[] { "dependent", "host", "census", "XESP", "XLKR", "XAPR", "pass", " arm", "emit", "predicate", "provenance", "houseCARL", "Mutagen" };
+        foreach (var c in Launcher.Registry().Where(c => Launcher.ProbeKinds.Contains(c.Kind)))
+        {
+            var says = ProbeNames.Says(c.Id);
+            Assert.False(says.Length == 0, $"{c.Id} has no plain description");
+            foreach (var b in banned) Assert.DoesNotContain(b, says, StringComparison.OrdinalIgnoreCase);
+        }
+        foreach (var k in new[] { "mcp-only", "derived", "manual", "media", "live-import", "unsupported" })
+            foreach (var b in banned) Assert.DoesNotContain(b, ProbeNames.NotAProbe(k), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

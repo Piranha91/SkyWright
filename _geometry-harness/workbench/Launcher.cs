@@ -146,14 +146,14 @@ internal sealed class Launcher : IAsyncDisposable
         return v.Length > 0 ? OutputFolderPolicy.Full(v) : null;
     }
 
-    void NeedProfile(string verb)
+    void NeedProfile()
     {
-        if (Instance is null) throw new InvalidOperationException($"{verb} needs a profile: open a profile first (workbench_act verb open_profile).");
+        if (Instance is null) throw new InvalidOperationException("open a profile first.");
     }
 
     internal string SelectMods(IReadOnlyList<string>? names, string? how)
     {
-        NeedProfile("select_mods");
+        NeedProfile();
         var h = (how ?? "set").Trim().ToLowerInvariant();
         if (h is not ("set" or "add" or "remove")) throw new InvalidOperationException($"'{how}' is not a way to select; use set, add or remove.");
         var want = (names ?? Array.Empty<string>()).Select(n => n.Trim()).ToList();
@@ -209,7 +209,7 @@ internal sealed class Launcher : IAsyncDisposable
             foreach (var c in hits)
             {
                 if (!ProbeKinds.Contains(c.Kind))
-                    throw new InvalidOperationException($"{ProbeNames.Of(c.Id)} is not a probe (it {ProbeNames.NotAProbe(c.Kind)}), so the launcher does not run it.");
+                    throw new InvalidOperationException($"{ProbeNames.Of(c.Id)} is not a probe (it {ProbeNames.NotAProbe(c.Kind)}), so it is not run from here.");
                 if (WhyNotHere(c) is { } why) throw new InvalidOperationException($"'{c.Id}' cannot run here: {why}.");
                 picked.Add(c.Id);
             }
@@ -220,17 +220,17 @@ internal sealed class Launcher : IAsyncDisposable
             Probes.Clear(); Probes.AddRange(picked.Distinct()); AddedFor.Clear();
             // conditional geometry reads the switch census's receipt ({switchMap}), and runs only at depth deep
             if (Probes.Contains("state.conditional-geometry") && !Probes.Contains("state.switch-census"))
-            { Probes.Add("state.switch-census"); AddedFor["state.switch-census"] = "state.conditional-geometry reads its switch map"; }
+            { Probes.Add("state.switch-census"); AddedFor["state.switch-census"] = $"{ProbeNames.Of("state.conditional-geometry")} needs its list of enable markers"; }
             if (Probes.Contains("state.conditional-geometry"))
-                extra = "; state.conditional-geometry runs only at depth deep, so the whole run is deep" + (AddedFor.Count > 0 ? ", and state.switch-census was added for it" : "");
+                extra = $"; {ProbeNames.Of("state.conditional-geometry")} runs only in a thorough run, so the whole run is thorough" + (AddedFor.Count > 0 ? $", and {ProbeNames.Of("state.switch-census")} was added for it" : "");
         }
-        return $"{Probes.Count} probe check(s) selected" + extra;
+        return $"{Probes.Count} probe(s) selected" + extra;
     }
 
     /// <summary>The Output Folder, with the rule's verdict; the Work Folder defaults from it unless one was chosen.</summary>
     internal string SetOutput(string? path)
     {
-        NeedProfile("set_output");
+        NeedProfile();
         if (OutputFolderRule.Check(path ?? "", Instance!, Profile!, Game!) is { } why) throw new InvalidOperationException(why);
         var o = OutputFolderPolicy.Full(path!);
         string said;
@@ -250,7 +250,7 @@ internal sealed class Launcher : IAsyncDisposable
 
     internal string SetWorkFolder(string? path)
     {
-        NeedProfile("set_work_folder");
+        NeedProfile();
         if (WorkFolderRule.Check(path ?? "", Instance!, Profile!, Game!) is { } why) throw new InvalidOperationException(why);
         lock (_gate) { WorkFolder = OutputFolderPolicy.Full(path!); WorkFolderChosen = true; }
         Remember();
@@ -262,24 +262,24 @@ internal sealed class Launcher : IAsyncDisposable
     /// <summary>Why a check cannot run on this profile and selection, or null (the per-check table's greyed lines).</summary>
     internal string? WhyNotHere(RegistryCheck c)
     {
-        if (!ProbeKinds.Contains(c.Kind)) return $"a check of kind {c.Kind} runs no probe";
+        if (!ProbeKinds.Contains(c.Kind)) return $"it is not a probe; it {ProbeNames.NotAProbe(c.Kind)}";
         if (Instance is null) return null;
         var mods = Path.Combine(Mo2Instance.LayoutRoot(Instance), "mods");
         if (c.Id == "geometry.bos-overlay")
         {
             var roots = Mods.Where(m => m.Enabled && !m.Separator).Select(m => Path.Combine(mods, m.Name)).Append(Path.Combine(Game!, "Data"));
             if (!roots.Any(r => Directory.Exists(r) && Directory.EnumerateFiles(r, "*_SWAP.ini").Any()))
-                return "no enabled mod folder and not the game's Data holds a *_SWAP.ini, so the profile loads no Base Object Swapper overlay to read";
+                return "no enabled mod and not the game's Data folder has a _SWAP.ini file, so Base Object Swapper changes nothing in this profile";
         }
         if (c.Id is "patch.discovery-installed" && HarnessTarget.SearchRoots.Length == 0)
-            return "this machine names no search roots for MO2 instances (HOUSECARL_SEARCH_ROOTS or the harness config's searchRoots), which the installed-patch search needs";
+            return "this computer has no search roots set for finding MO2 instances (HOUSECARL_SEARCH_ROOTS or the harness config's searchRoots), so installed patches cannot be looked for";
         if (c.Id is "patch.discovery-installed" or "patch.discovery-pool" or "patch.discovery-fomod" && HarnessTarget.DownloadPool.Length == 0)
-            return "this machine names no download pool (HOUSECARL_DOWNLOAD_POOL or the harness config's downloadPool), which the patch search reads";
+            return "this computer has no downloads folder set (HOUSECARL_DOWNLOAD_POOL or the harness config's downloadPool), so patches cannot be looked for";
         if (c.Id == "patch.author-advice")
         {
             var sel = Mods.Where(m => m.Selected).ToList();
             if (sel.Count > 0 && !sel.Any(m => NexusId(Path.Combine(mods, m.Name)) is > 0))
-                return "no selected mod folder's meta.ini carries a Nexus mod id, so there is no author page to read (blocked: no-nexus-id)";
+                return "none of the selected mods has a Nexus mod id in MO2 (its meta.ini), so there is no author page to read";
         }
         return null;
     }
@@ -322,8 +322,8 @@ internal sealed class Launcher : IAsyncDisposable
         if (RunTask is not { IsCompleted: false } || _pipeline is null) throw new InvalidOperationException("no run is going, so there is nothing to abort.");
         _groupAborted = true;
         try { _pipeline.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
-        lock (_gate) { RunState = "aborted"; RunRefusal = "the run was aborted; no bundle was made."; }
-        return "aborted the whole run: the pipeline and every probe it started were stopped.";
+        lock (_gate) { RunState = "aborted"; RunRefusal = "the run was aborted; no results were made."; }
+        return "aborted the whole run: every probe it started was stopped.";
     }
 
     /// <summary>Stop one probe of the running run and nothing else: its live process now, and any later pass of it in this run.
@@ -337,8 +337,8 @@ internal sealed class Launcher : IAsyncDisposable
         var sharing = RunChecks.Where(c => c != id && string.Equals(ExeOf(c), exe, StringComparison.OrdinalIgnoreCase)).ToList();
         lock (_gate) { AbortedChecks.Add(id); foreach (var c in sharing) AbortedChecks.Add(c); }
         var stopped = ProbeRuns.Abort(store, exe);
-        return (stopped.Count > 0 ? $"aborted {ProbeNames.Of(id)}: stopped {exe} (process {string.Join(", ", stopped)})" : $"{ProbeNames.Of(id)} will be stopped when its {exe} starts")
-               + (sharing.Count > 0 ? $"; {string.Join(", ", sharing.Select(ProbeNames.Of))} shares that probe and stops with it" : "")
+        return (stopped.Count > 0 ? $"aborted {ProbeNames.Of(id)}" : $"{ProbeNames.Of(id)} will be stopped as soon as it starts")
+               + (sharing.Count > 0 ? $"; {string.Join(", ", sharing.Select(ProbeNames.Of))} is part of the same probe and stops with it" : "")
                + "; the rest of the run goes on.";
     }
 
@@ -353,16 +353,16 @@ internal sealed class Launcher : IAsyncDisposable
     /// <summary>Start a run of <paramref name="only"/>, or of the ticked probes when it is null.</summary>
     internal string Run(IReadOnlyList<string>? only)
     {
-        if (Instance is null) throw new InvalidOperationException("there is nothing to run: open a profile first (workbench_act verb open_profile).");
+        if (Instance is null) throw new InvalidOperationException("there is nothing to run: open a profile first.");
         if (RunBlocker?.Invoke() is { } blocked) throw new InvalidOperationException(blocked);
-        if (RunTask is { IsCompleted: false }) throw new InvalidOperationException("a run is already going; read workbench_state with project [\"launcher\"] and wait_seconds for it.");
+        if (RunTask is { IsCompleted: false }) throw new InvalidOperationException("a run is already going; wait for it to end or abort it.");
         var sel = Mods.Where(m => m.Selected).Select(m => m.Name).ToList();
-        if (sel.Count == 0) throw new InvalidOperationException("no mod folder is selected; select the mods to evaluate (workbench_act verb select_mods).");
-        if (only is null && Probes.Count == 0) throw new InvalidOperationException("no probe is selected; select probes (workbench_act verb select_probes).");
+        if (sel.Count == 0) throw new InvalidOperationException("no mod is ticked; tick the mods to check.");
+        if (only is null && Probes.Count == 0) throw new InvalidOperationException("no probe is switched on; switch on the probes to run.");
         var (checks, depth) = only is null ? (Probes.ToList(), Depth) : Expand(only);
         if (checks.Count == 0) throw new InvalidOperationException("run needs at least one probe.");
-        if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output).");
-        if (WorkFolder is null) throw new InvalidOperationException("with the Output Folder at the instance's mods folder there is no default Work Folder; choose one outside the instance and the game folder (workbench_act verb set_work_folder).");
+        if (Output is null) throw new InvalidOperationException("choose an Output Folder first.");
+        if (WorkFolder is null) throw new InvalidOperationException("with the Output Folder at the instance's mods folder there is no default Work Folder; choose one outside the instance and the game folder.");
         if (WorkFolderRule.Check(WorkFolder, Instance, Profile!, Game!) is { } bad) throw new InvalidOperationException(bad);
         var stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'");
         var dir = Path.Combine(WorkFolder, stamp);
@@ -428,11 +428,11 @@ internal sealed class Launcher : IAsyncDisposable
                     lock (_gate) { RunState = "done"; RunBundle = bundle; }
                     BundleReady?.Invoke(bundle);
                 }
-                else lock (_gate) { RunState = "refused"; RunRefusal = $"the pipeline exited {p.ExitCode} without a bundle: {RunLine?.Trim()} (its log: {log})"; }
+                else lock (_gate) { RunState = "refused"; RunRefusal = $"the run stopped (exit code {p.ExitCode}) without making results: {RunLine?.Trim()} (its log: {log})"; }
             }
-            catch (Exception ex) { lock (_gate) { RunState = "refused"; RunRefusal = $"the pipeline could not be started: {ex.Message}"; } }
+            catch (Exception ex) { lock (_gate) { RunState = "refused"; RunRefusal = $"the run could not be started: {ex.Message}"; } }
         });
-        return $"running {(checks.Count == 1 ? ProbeNames.Of(checks[0]) : $"{checks.Count} probes")} ({sel.Count} mod folder(s), depth {depth}) in place on profile '{Profile}'; its files go under '{dir}'";
+        return $"running {(checks.Count == 1 ? ProbeNames.Of(checks[0]) : $"{checks.Count} probes")} on {sel.Count} mod(s){(depth == "deep" ? ", thorough" : "")} in profile '{Profile}'; its files go under '{dir}'";
     }
 
     static string StateServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
@@ -445,7 +445,7 @@ internal sealed class Launcher : IAsyncDisposable
         {
             if (_bound is not null) return Task.FromResult(_bound);
             if (_starting is not null) return _starting;
-            NeedProfile("a houseCARL tool");
+            NeedProfile();
             if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output): in manual mode every houseCARL write goes under it.");
             if (WorkFolder is null) throw new InvalidOperationException("choose a Work Folder outside the instance and the game folder first (workbench_act verb set_work_folder): the houseCARL server keeps its data there.");
             var exe = Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe();
@@ -471,7 +471,7 @@ internal sealed class Launcher : IAsyncDisposable
         string output; Mo2OutputLayout layout; string? work;
         lock (_gate)
         {
-            NeedProfile(tool);
+            NeedProfile();
             if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output): in manual mode every houseCARL write goes under it.");
             output = Output; layout = Layout(); work = WorkFolder;
         }

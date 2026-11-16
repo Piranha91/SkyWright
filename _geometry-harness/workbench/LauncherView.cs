@@ -113,15 +113,15 @@ internal static class LauncherView
             ProbeGroups.Children.Add(new GroupBox { Header = new TextBlock { Text = family.Key, FontWeight = FontWeights.SemiBold }, Content = stack });
         }
         var others = reg.Where(c => !Launcher.ProbeKinds.Contains(c.Kind)).ToList();
-        NotProbes.Text = others.Count == 0 ? "" : "Not run from here, because they are not probes: " +
-            string.Join("; ", others.GroupBy(c => ProbeNames.NotAProbe(c.Kind)).Select(g => $"{string.Join(", ", g.Select(c => ProbeNames.Of(c.Id)))} ({g.Key})")) + ".";
+        NotProbes.Text = others.Count == 0 ? "" : "Not run from this tab: " +
+            string.Join("; ", others.GroupBy(c => ProbeNames.NotAProbe(c.Kind)).Select(g => $"{string.Join(", ", g.Select(c => ProbeNames.Of(c.Id)))} ({(g.Key.StartsWith("is ") ? g.Key[3..] : g.Key)})")) + ".";
     }
 
     static Border MakeTile(Launcher.RegistryCheck c)
     {
         var id = c.Id;
         var dot = new Ellipse { Width = 10, Height = 10, Fill = Theme.Brush("#666666"), Margin = new Thickness(2, 6, 10, 0), VerticalAlignment = VerticalAlignment.Top };
-        var name = new TextBlock { Text = ProbeNames.Of(id), FontWeight = FontWeights.SemiBold, ToolTip = c.Title, TextWrapping = TextWrapping.Wrap };
+        var name = new TextBlock { Text = ProbeNames.Of(id), FontWeight = FontWeights.SemiBold, ToolTip = id, TextWrapping = TextWrapping.Wrap };
         var line = new TextBlock { Foreground = Theme.Brush(Theme.Dim), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
         var bar = new ProgressBar { Height = 6, Minimum = 0, Maximum = 100, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 4, 8, 0) };
         var eta = new TextBlock { Foreground = Theme.Brush(Theme.Dim), FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
@@ -203,7 +203,7 @@ internal static class LauncherView
                 "running" => "running: " + (L.RunLine ?? "started"),
                 "refused" => L.RunRefusal ?? "",
                 "aborted" => L.RunRefusal ?? "aborted",
-                "done" => "done: the bundle is open in the Conflicts tab" + (L.RunBundle is { } b ? $" ({b})" : ""),
+                "done" => "done: the results are open in the Conflicts tab" + (L.RunBundle is { } b ? $" ({b})" : ""),
                 _ => L.Instance is null ? "open a profile to choose mods and probes" : $"{L.Probes.Count} probe(s) selected",
             };
             foreach (var c in Launcher.Registry().Where(c => Launcher.ProbeKinds.Contains(c.Kind)))
@@ -218,7 +218,7 @@ internal static class LauncherView
                 t.Run.Visibility = !running && why is null && L.Instance is not null ? Visibility.Visible : Visibility.Collapsed;
                 t.Abort.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
                 t.Line.Text = p.State == "idle"
-                    ? (why ?? (L.AddedFor.TryGetValue(c.Id, out var f) ? $"added: {f}" : c.Title))
+                    ? (why ?? (L.AddedFor.TryGetValue(c.Id, out var f) ? $"added: {f}" : ProbeNames.Says(c.Id) is { Length: > 0 } says ? says : c.Title))
                     : p.Line;
                 t.Bar.Visibility = p.Fraction is not null && p.State is "running" or "done" ? Visibility.Visible : Visibility.Collapsed;
                 t.Bar.Value = (p.Fraction ?? 0) * 100;

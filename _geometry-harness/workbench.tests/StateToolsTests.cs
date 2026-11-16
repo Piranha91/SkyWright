@@ -361,7 +361,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         // Piranha's note: a registry kind name ("mcp-only") means nothing to the modder; the refusal says it in words
         var why = await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "loadability.dangling-references" })));
         Assert.Contains("Loadability: Dangling References is not a probe", why);
-        Assert.Contains("reads records through the houseCARL server", why);
+        Assert.Contains("checked by Claude reading the records directly", why);
         Assert.DoesNotContain("mcp-only", why);
     }
 
@@ -730,9 +730,9 @@ public sealed class StateToolsTests : IAsyncLifetime
         var probes = P(r, "launcher", "probes").EnumerateArray().ToList();
         var census = probes.Single(p => P(p, "checkId").GetString() == "state.switch-census");
         Assert.True(P(census, "selected").GetBoolean(), "the switch census was not added");
-        Assert.Contains("conditional-geometry", P(census, "addedFor").GetString());
+        Assert.Contains("Conditional Geometry", P(census, "addedFor").GetString());
         Assert.Equal("deep", P(r, "launcher", "depth").GetString());
-        Assert.Contains("deep", P(r, "said").GetString());
+        Assert.Contains("thorough", P(r, "said").GetString());
     }
 
     [Fact]
