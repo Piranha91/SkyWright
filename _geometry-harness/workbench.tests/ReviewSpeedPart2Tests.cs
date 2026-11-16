@@ -529,6 +529,18 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         Assert.Contains("written edit", said);
     }
 
+    // every candidate separates the boxes by construction; the word is the re-check's alone
+    [Fact]
+    public async Task P8b_a_candidate_whose_boxes_separate_but_whose_re_check_finds_the_row_reads_still_there()
+    {
+        var f = new Lane { Answer = _ => Recheck("still there") };
+        var lane = f.Make(_root);
+        lane.Start(Subject, C1, Home, Three(), "overlapprobe", 0, false);
+        await Done(lane);
+        Assert.Equal(3, lane.Placements.Count);
+        Assert.All(lane.Placements, p => Assert.Equal("still there", p.Verdict?.Word));
+    }
+
     [Fact]
     public async Task P8g_each_candidate_runs_its_own_re_check()
     {
