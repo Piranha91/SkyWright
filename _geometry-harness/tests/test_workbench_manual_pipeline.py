@@ -167,12 +167,21 @@ def case_r1_an_earlier_preparation_is_reused_only_when_every_input_matches():
         t = Path(t)
         inst, game = world(t, SHADOW_MODS, SHADOW_ENABLED, SHADOW_PLUGINS)
         work = t / "work"
-        tools = {"evalpipeline.py": "x"}
+        # a stand-in harness and probe package, and a disabled mod's plugin the scope stage would also read
+        harness = t / "harness"; harness.mkdir()
+        (harness / "evalpipeline.py").write_text("x", encoding="utf-8")
+        pkg = t / "pkg"; pkg.mkdir()
+        (pkg / "scopeprobe.exe").write_bytes(b"exe")
+        (pkg / "housecarl-core.dll").write_bytes(b"core")
+        corpus = t / "corpus.json"; corpus.write_text("{}", encoding="utf-8")
+        offplug = t / "offmod" / "Off.esp"
+        write_plugin(offplug, ["Base.esm"])
 
         def keyed(sel):
             ctx = EP.Context(in_place_entry(t, inst, game, sel, ["geometry.object-overlap"]), None, t / "o")
             res = ctx.resolve()
-            return PR.key(ctx.instance, ctx.profile, ctx.game, res["selection"], res["arms"], tools), res["arms"]
+            tools = PR.tools_digest(harness, pkg / "scopeprobe.exe", corpus)
+            return PR.key(ctx.instance, ctx.profile, ctx.game, res["selection"], res["arms"], tools, also_scanned=[offplug]), res["arms"]
 
         def earlier(name, sel):
             run = work / name / "run"
@@ -210,6 +219,26 @@ def case_r1_an_earlier_preparation_is_reused_only_when_every_input_matches():
         assert found is None and "mod folder" in why, why
         os.utime(plug, ns=(plug.stat().st_atime_ns, plug.stat().st_mtime_ns - 10_000_000_000))
         assert PR.find(work, new, *keyed(["Sel"]))[0] is not None, "restoring the plugin's time did not match again"
+
+        # a disabled mod's plugin the scope stage reads changed: refused
+        offplug.write_bytes(offplug.read_bytes() + bytes(1))
+        found, why = PR.find(work, new, *keyed(["Sel"]))
+        assert found is None and "disabled mod" in why, why
+        write_plugin(offplug, ["Base.esm"])
+        assert PR.find(work, new, *keyed(["Sel"]))[0] is not None, "restoring the disabled mod's plugin did not match again"
+
+        # another file of the probe's package changed (not the exe): refused
+        (pkg / "housecarl-core.dll").write_bytes(b"core2")
+        found, why = PR.find(work, new, *keyed(["Sel"]))
+        assert found is None and "scopeprobe build" in why, why
+        (pkg / "housecarl-core.dll").write_bytes(b"core")
+
+        # a plugin replaced keeping its size and mtime: refused (plugins are hashed)
+        st = plug.stat()
+        data = bytearray(plug.read_bytes()); data[-1] ^= 0xFF; plug.write_bytes(bytes(data))
+        os.utime(plug, ns=(st.st_atime_ns, st.st_mtime_ns))
+        found, why = PR.find(work, new, *keyed(["Sel"]))
+        assert found is None and "mod folder" in why, why
 
         # a changed profile file: refused
         lo = Path(inst) / "profiles" / "P" / "loadorder.txt"

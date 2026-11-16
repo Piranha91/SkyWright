@@ -2,10 +2,15 @@
 
 A manual run (an in-place entry: one profile of an MO2 instance, a selection of its mod folders) spends most of a short
 run preparing. A later run in the same Work Folder may take that preparation over only when everything it was built
-from is the same: the instance, profile, game and selection; every file of the profile's own folder; every file of
-each mod folder either arm loads, the overwrite folder and the game's Data folder (relative path, size and mtime); and
-the code that built it (the pipeline's own scripts and the scopeprobe build). Anything else, or any doubt, runs fresh.
-The plan stage and everything after it always run.
+from is the same: the instance, profile, game and selection; every file of the profile's own folder (sha256); every
+file of each mod folder either arm loads and of the overwrite folder (relative path, size and mtime, and sha256 for
+the plugin files at a folder's top), the game's Data folder (path, size and mtime); the plugin files of the disabled,
+unticked mods the scope stage also reads (sha256); and the code that built it (the pipeline's own scripts, the
+scopeprobe package by toolidentity's digest, and the field schema generated/corpus.json). Anything else, or any doubt,
+runs fresh. The plan stage and everything after it always run.
+
+Not in the key, and so not a reason to run fresh: ini files outside the profile folder (the game's own, MO2's), and
+the harness config.
 
 The key is written into every manual run folder (`preparation-key.json`); the reusing run copies the earlier run's
 stage folders into its own, with the earlier folder's path rewritten to its own, and says which run it reused or why it
@@ -30,8 +35,12 @@ def _sha_file(p: Path) -> str:
     return h.hexdigest()
 
 
-def _listing(folder: Path) -> str | None:
-    """sha256 of a folder's whole tree, by relative path, size and mtime; None when the folder is absent."""
+PLUGIN_SUFFIXES = (".esp", ".esm", ".esl")
+
+
+def _listing(folder: Path, hash_plugins: bool = False) -> str | None:
+    """sha256 of a folder's whole tree, by relative path, size and mtime (and, with hash_plugins, the content sha256 of
+    the plugin files at its top, which a tool can replace keeping size and mtime); None when the folder is absent."""
     if not folder.is_dir():
         return None
     rows = []
@@ -44,49 +53,58 @@ def _listing(folder: Path) -> str | None:
             except OSError:
                 rows.append([os.path.relpath(p, folder).replace("\\", "/").lower(), None, None])
                 continue
-            rows.append([os.path.relpath(p, folder).replace("\\", "/").lower(), st.st_size, st.st_mtime_ns])
+            row = [os.path.relpath(p, folder).replace("\\", "/").lower(), st.st_size, st.st_mtime_ns]
+            if hash_plugins and os.path.normcase(root) == os.path.normcase(str(folder)) and f.lower().endswith(PLUGIN_SUFFIXES):
+                row.append(_sha_file(Path(p)))
+            rows.append(row)
     return hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def key(instance: Path, profile: str, game: Path, selection, arms, tools: dict) -> dict:
-    """The preparation key: four parts compared separately, so a refusal can name the part that differs."""
+def key(instance: Path, profile: str, game: Path, selection, arms, tools: dict, also_scanned=()) -> dict:
+    """The preparation key: five parts compared separately, so a refusal can name the part that differs."""
     pdir = Path(instance) / "profiles" / profile
     profile_files = {f.name.lower(): _sha_file(f) for f in sorted(pdir.iterdir()) if f.is_file()} if pdir.is_dir() else {}
     mods = sorted({str(m) for a in arms for m in a.get("mods") or []}, key=str.lower)
     folders = {}
     for m in mods:
         folder = Path(m) if os.path.isabs(m) else Path(instance) / "mods" / m
-        folders["mod:" + m.lower()] = _listing(folder)
-    folders["overwrite"] = _listing(Path(instance) / "overwrite")
+        folders["mod:" + m.lower()] = _listing(folder, hash_plugins=True)
+    folders["overwrite"] = _listing(Path(instance) / "overwrite", hash_plugins=True)
     folders["data"] = _listing(Path(game) / "Data")
     return {"schema": 1,
             "identity": {"instance": str(instance).replace("\\", "/").lower(), "profile": profile.lower(),
                          "game": str(game).replace("\\", "/").lower(),
                          "selection": sorted(str(s).lower() for s in selection)},
-            "profileFiles": profile_files, "folders": folders, "tools": tools}
+            "profileFiles": profile_files, "folders": folders,
+            "alsoScanned": {str(p).replace("\\", "/").lower(): (_sha_file(Path(p)) if Path(p).is_file() else None)
+                            for p in sorted(also_scanned, key=lambda x: str(x).lower())},
+            "tools": tools}
 
 
-def tools_digest(harness: Path, scopeprobe_exe: Path) -> dict:
-    """The code the preparation runs: the pipeline and controller scripts and the scopeprobe build next to its exe."""
+def tools_digest(harness: Path, scopeprobe_exe: Path, corpus: Path | None = None) -> dict:
+    """The code the preparation runs: the pipeline and controller scripts, the scopeprobe package (every file of its
+    Release folder, by toolidentity.package's digest, the owner the workbench's re-check also uses) and the field schema
+    the probe's contributor walk reads (generated/corpus.json)."""
+    import toolidentity
     out = {}
     for name in ("evalpipeline.py", "evalrun.py", "evalprepreuse.py"):
         p = harness / name
         out[name] = _sha_file(p) if p.is_file() else None
-    folder = scopeprobe_exe.parent
-    for name in ("scopeprobe.dll", "scopeprobe.exe"):
-        p = folder / name
-        out["scopeprobe/" + name] = _sha_file(p) if p.is_file() else None
+    out["scopeprobe-package"] = toolidentity.package(scopeprobe_exe.parent)["digest"]
+    corpus = corpus if corpus is not None else harness.parent / "generated" / "corpus.json"
+    out["corpus.json"] = _sha_file(corpus) if corpus.is_file() else None
     return out
 
 
 PARTS = {"identity": "a different instance, profile, game or selection",
          "profileFiles": "a profile file changed (modlist.txt, plugins.txt, loadorder.txt or another file in the profile folder)",
          "folders": "a file in a mod folder the run loads, the overwrite folder or the game's Data folder changed",
-         "tools": "the pipeline or the scopeprobe build changed"}
+         "alsoScanned": "a plugin of a disabled mod the scope stage also reads changed",
+         "tools": "the pipeline, the scopeprobe build or the field schema changed"}
 
 
 def _differs(a: dict, b: dict) -> str | None:
-    for part in ("identity", "profileFiles", "folders", "tools"):
+    for part in ("identity", "profileFiles", "folders", "alsoScanned", "tools"):
         if a.get(part) != b.get(part):
             return part
     return None

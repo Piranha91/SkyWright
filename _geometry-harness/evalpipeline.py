@@ -2015,7 +2015,7 @@ def cmd_run(a) -> int:
         if getattr(ctx, "in_place", None):
             import evalprepreuse as PR
             key = PR.key(ctx.instance, ctx.profile, ctx.game, res["selection"], res["arms"],
-                         PR.tools_digest(HERE, scopeprobe_exe()))
+                         PR.tools_digest(HERE, scopeprobe_exe()), also_scanned=disabled_plugin_files(ctx, res))
             if getattr(a, "reuse_preparation_from", None):
                 found, why = PR.find(a.reuse_preparation_from, out, key, res["arms"])
                 if found is not None:
