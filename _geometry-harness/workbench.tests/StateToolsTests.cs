@@ -1219,17 +1219,21 @@ public sealed class StateToolsTests : IAsyncLifetime
         var src = new GateSource();
         _scene.ContextSource = src;
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
-        var first = await Ok("workbench_state", A(("project", new[] { "context" })));
-        Assert.True(At(first, out var doors, "context", "sections", "doors") && (doors.GetString() ?? "").Contains("reading"), "no 'reading' while the read runs: " + first);
-        src.Gate.SetResult();
-        JsonElement last = first;
-        for (int i = 0; i < 50; i++)
+        try
         {
-            last = await Ok("workbench_state", A(("project", new[] { "context" })));
-            if (At(last, out var d, "context", "doors") && d.ValueKind == JsonValueKind.Array && d.GetArrayLength() == 1) return;
-            await Task.Delay(100);
+            var first = await Ok("workbench_state", A(("project", new[] { "context" })));
+            Assert.True(At(first, out var doors, "context", "sections", "doors") && (doors.GetString() ?? "").Contains("reading"), "no 'reading' while the read runs: " + first);
+            src.Gate.SetResult();
+            JsonElement last = first;
+            for (int i = 0; i < 50; i++)
+            {
+                last = await Ok("workbench_state", A(("project", new[] { "context" })));
+                if (At(last, out var d, "context", "doors") && d.ValueKind == JsonValueKind.Array && d.GetArrayLength() == 1) return;
+                await Task.Delay(100);
+            }
+            Assert.Fail("the context read never landed: " + last);
         }
-        Assert.Fail("the context read never landed: " + last);
+        finally { src.Gate.TrySetResult(); }                                    // a read blocking the UI thread is released, so the test fails, not hangs
     }
 
     // P8w: find_clear says the cost, runs the trials without touching the edit session, and choose stages one
