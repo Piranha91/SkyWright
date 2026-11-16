@@ -1907,6 +1907,19 @@ def cmd_run(a) -> int:
     with Run("evalpipeline", mode=ctx.id, stage_source="counted") as run:
         res = ctx.resolve()
         write_json(out / "arms.json", [{k: v for k, v in arm.items()} for arm in res["arms"]])
+        seeded, reused_from = {}, None
+        if getattr(ctx, "in_place", None):
+            import evalprepreuse as PR
+            key = PR.key(ctx.instance, ctx.profile, ctx.game, res["selection"], res["arms"],
+                         PR.tools_digest(HERE, scopeprobe_exe()))
+            if getattr(a, "reuse_preparation_from", None):
+                found, why = PR.find(a.reuse_preparation_from, out, key, res["arms"])
+                if found is not None:
+                    seeded, reused_from = PR.seed(found, out), found
+                    print(f"preparation: reused from {found.parent.name} (same profile, selection, files and probe build)")
+                else:
+                    print(f"preparation: not reused: {why}")
+            write_json(out / PR.KEY_FILE, key)
         run.stage("stages", "pipeline stages", STAGES.index(through) + 1, "stages")
         for name in STAGES[:STAGES.index(through) + 1]:
             body = STAGE_BODIES.get(name)
@@ -1938,6 +1951,15 @@ def cmd_run(a) -> int:
             tools = stage_tools(name, ctx.machine)
             if tools:
                 inputs["tools"] = tools
+            if name in seeded:
+                # an earlier run's preparation, taken over whole: recorded under this run's inputs, its own record kept
+                old = seeded[name]
+                ledger.record(name, inputs, list(old.get("outputs") or {}), exit_code=0,
+                              extra={"bound": old.get("bound"), "seconds": 0.0, "driverSha256": sha256_file(Path(__file__)),
+                                     "reusedFrom": fwd(reused_from), "reusedSeconds": old.get("seconds")})
+                print(f"{name}: reused from an earlier run")
+                run.advance()
+                continue
             if ledger.decide(name, inputs) == "reuse":
                 print(f"{name}: reused (inputs and outputs unchanged)")
                 run.advance()
@@ -2032,6 +2054,9 @@ def build_parser():
     p.add_argument("--out", type=abs_path, required=True, help="the run folder")
     p.add_argument("--machine", type=abs_path, help="the machine file: lab, game, heavy-stage prefix, run-local stage commands")
     p.add_argument("--through", choices=STAGES, help="stop after this stage")
+    p.add_argument("--reuse-preparation-from", type=abs_path, metavar="WORK_FOLDER",
+                   help="a manual run: take the census, setup and load-order checks over from an earlier run under this folder "
+                        "when every input they were built from is the same (evalprepreuse.py); otherwise run them")
     p.set_defaults(fn=cmd_run)
     p = sub.add_parser("arms", help="print the arms the entry derives, before anything runs")
     p.add_argument("--entry", type=abs_path, required=True)

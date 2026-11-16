@@ -36,6 +36,8 @@ internal sealed class Launcher : IAsyncDisposable
     internal string Depth => Probes.Contains("state.conditional-geometry") ? "deep" : "standard";
     internal string? RunBundle { get; private set; }
     internal string? RunLine { get; private set; }
+    /// <summary>The pipeline's own sentence on the preparation: reused from an earlier run, or why not.</summary>
+    internal string? PrepNote { get; private set; }
     internal string? RunFolder { get; private set; }
     internal Task? RunTask { get; private set; }
     /// <summary>Raised on the run's thread with the verified bundle's folder when a run is done (the window opens it).</summary>
@@ -70,6 +72,12 @@ internal sealed class Launcher : IAsyncDisposable
             line += _prepGuess is { } g ? $"; preparing took about {TimeSpan.FromSeconds(Math.Round(g.Seconds)).ToString(@"m\:ss")} in {(g.Runs == 1 ? "1 earlier run" : $"{g.Runs} earlier runs")}" : "; no earlier run here to estimate the preparation from";
         return line;
     }
+
+    /// <summary>The pipeline's preparation line in the tab's words: "reused from X (…)" or "not reused: why".</summary>
+    internal static string PrepWords(string said) =>
+        said.StartsWith("reused from ", StringComparison.Ordinal) ? "reused the preparation from run " + said["reused from ".Length..]
+        : said.StartsWith("not reused: ", StringComparison.Ordinal) ? "prepared afresh: " + said["not reused: ".Length..]
+        : said;
 
     /// <summary>Run every probe that can run on this profile and selection, switched on or not; the rest are named.</summary>
     internal string RunAll()
@@ -412,7 +420,7 @@ internal sealed class Launcher : IAsyncDisposable
         var run = Path.Combine(dir, "run");
         lock (_gate)
         {
-            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; RunFolder = dir;
+            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; RunFolder = dir;
             RunChecks.Clear(); RunChecks.AddRange(checks); AbortedChecks.Clear(); _groupAborted = false;
             // the first guess per probe: the run-log estimator over earlier runs' histories (this Work Folder's runs and the default store)
             _first.Clear();
@@ -432,7 +440,7 @@ internal sealed class Launcher : IAsyncDisposable
         RunTask = Task.Run(() =>
         {
             var psi = new System.Diagnostics.ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var a in new[] { "-I", pipeline, "run", "--entry", entry, "--machine", machine, "--out", run, "--through", "bundle" }) psi.ArgumentList.Add(a);
+            foreach (var a in new[] { "-I", pipeline, "run", "--entry", entry, "--machine", machine, "--out", run, "--through", "bundle", "--reuse-preparation-from", WorkFolder }) psi.ArgumentList.Add(a);
             psi.Environment["PYTHONIOENCODING"] = "utf-8";
             psi.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dir, "runlog");      // set, not left to a default
             var log = Path.Combine(dir, "pipeline.log");
@@ -441,7 +449,13 @@ internal sealed class Launcher : IAsyncDisposable
                 using var p = System.Diagnostics.Process.Start(psi)!;
                 _pipeline = p;
                 using var w = new StreamWriter(log) { AutoFlush = true };
-                p.OutputDataReceived += (_, e) => { if (e.Data is null) return; lock (w) w.WriteLine(e.Data); RunLine = e.Data; };
+                p.OutputDataReceived += (_, e) =>
+                {
+                    if (e.Data is null) return;
+                    lock (w) w.WriteLine(e.Data);
+                    RunLine = e.Data;
+                    if (e.Data.StartsWith("preparation: ", StringComparison.Ordinal)) PrepNote = PrepWords(e.Data["preparation: ".Length..]);
+                };
                 p.ErrorDataReceived += (_, e) => { if (e.Data is null) return; lock (w) w.WriteLine(e.Data); if (e.Data.Trim().Length > 0) RunLine = e.Data; };
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 p.WaitForExit();
@@ -540,7 +554,7 @@ internal sealed class Launcher : IAsyncDisposable
                 settings = new { path = SettingsPath, note = SettingsNote },
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
                 depth = Depth,
-                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle },
+                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote },
             };
         }
     }

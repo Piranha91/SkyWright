@@ -158,6 +158,66 @@ def case_d1_a_selected_disabled_mod_is_enabled_in_the_candidate_only_with_its_pl
         assert listing(prof) == before, "the profile's files changed"
 
 
+def case_r1_an_earlier_preparation_is_reused_only_when_every_input_matches():
+    """A manual run takes the census, setup and load-order checks over from an earlier run in the Work Folder only when
+    the instance, profile, selection, profile files, every loaded folder's files and the code are the same; a touched
+    plugin, a changed profile file or another selection each runs fresh and says which part differed."""
+    import evalprepreuse as PR
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        inst, game = world(t, SHADOW_MODS, SHADOW_ENABLED, SHADOW_PLUGINS)
+        work = t / "work"
+        tools = {"evalpipeline.py": "x"}
+
+        def keyed(sel):
+            ctx = EP.Context(in_place_entry(t, inst, game, sel, ["geometry.object-overlap"]), None, t / "o")
+            res = ctx.resolve()
+            return PR.key(ctx.instance, ctx.profile, ctx.game, res["selection"], res["arms"], tools), res["arms"]
+
+        def earlier(name, sel):
+            run = work / name / "run"
+            k, arms = keyed(sel)
+            for st in PR.STAGES:
+                (run / st).mkdir(parents=True)
+                (run / st / "out.json").write_text(json.dumps({"path": str(run / st / "out.json")}), encoding="utf-8")
+            (run / "stages.json").write_text(json.dumps({"stages": {st: {"accepted": True, "outputs": {str(run / st / "out.json"): "x"},
+                                                                         "bound": {"at": str(run)}} for st in PR.STAGES}}), encoding="utf-8")
+            (run / "arms.json").write_text(json.dumps(arms), encoding="utf-8")
+            (run / PR.KEY_FILE).write_text(json.dumps(k), encoding="utf-8")
+            return run
+
+        old = earlier("20260101T000000Z", ["Sel"])
+        new = work / "20260101T000100Z" / "run"
+        new.mkdir(parents=True)
+        k, arms = keyed(["Sel"])
+        found, why = PR.find(work, new, k, arms)
+        assert found is not None and found.resolve() == old.resolve(), f"a matching run was not reused: {why}"
+        seeded = PR.seed(found, new)
+        copied = json.loads((new / "census" / "out.json").read_text(encoding="utf-8"))["path"]
+        assert str(new.resolve()) in copied and str(old.resolve()) not in copied, f"the earlier folder's path stayed: {copied}"
+        assert all(str(new.resolve()) in p for p in seeded["scope"]["outputs"]), seeded["scope"]["outputs"]
+
+        # another selection: refused, naming it
+        k2, arms2 = keyed(["A"])
+        found, why = PR.find(work, new, k2, arms2)
+        assert found is None and "profile and selection" in why, why
+
+        # a touched plugin in a loaded folder: refused
+        plug = Path(inst) / "mods" / "Sel" / "Sel.esp"
+        os.utime(plug, ns=(plug.stat().st_atime_ns, plug.stat().st_mtime_ns + 10_000_000_000))
+        k3, arms3 = keyed(["Sel"])
+        found, why = PR.find(work, new, k3, arms3)
+        assert found is None and "mod folder" in why, why
+        os.utime(plug, ns=(plug.stat().st_atime_ns, plug.stat().st_mtime_ns - 10_000_000_000))
+        assert PR.find(work, new, *keyed(["Sel"]))[0] is not None, "restoring the plugin's time did not match again"
+
+        # a changed profile file: refused
+        lo = Path(inst) / "profiles" / "P" / "loadorder.txt"
+        lo.write_text(lo.read_text(encoding="utf-8") + chr(10), encoding="utf-8")
+        found, why = PR.find(work, new, *keyed(["Sel"]))
+        assert found is None and "profile file" in why, why
+
+
 def case_b4a_prepare_writes_no_profile_into_the_instance():
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
