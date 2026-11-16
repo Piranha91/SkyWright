@@ -58,6 +58,18 @@ internal sealed class Launcher : IAsyncDisposable
     /// its output folder (<c>run/runlog</c>).</summary>
     internal string? RunStore => RunFolder is null ? null : Path.Combine(RunFolder, "run", "runlog");
     readonly Dictionary<string, HousecarlCore.Progress.RunEstimate> _first = new(StringComparer.OrdinalIgnoreCase);
+    (double Seconds, int Runs)? _prepGuess;
+
+    /// <summary>The whole run's line while it goes: the pipeline's step from its own run record, and while it prepares,
+    /// how long earlier runs in this Work Folder took to prepare; null when no pipeline record is live.</summary>
+    internal string? PipelineLine()
+    {
+        if (RunStore is not { } st || RunTask is not { IsCompleted: false } || ProbeRuns.Pipeline(st) is not { } p) return null;
+        var line = p.Line(DateTimeOffset.UtcNow);
+        if (p.ChecksStarted is null)
+            line += _prepGuess is { } g ? $"; preparing took about {TimeSpan.FromSeconds(Math.Round(g.Seconds)).ToString(@"m\:ss")} in {(g.Runs == 1 ? "1 earlier run" : $"{g.Runs} earlier runs")}" : "; no earlier run here to estimate the preparation from";
+        return line;
+    }
 
     /// <summary>Run every probe that can run on this profile and selection, switched on or not; the rest are named.</summary>
     internal string RunAll()
@@ -358,7 +370,8 @@ internal sealed class Launcher : IAsyncDisposable
         if (exe is null || !RunChecks.Contains(check, StringComparer.OrdinalIgnoreCase) || RunFolder is null) return new("idle", null, "", null);
         // once the run has ended, the tile says what the run's ledger concluded, not the probe's raw exits
         if (RunTask is { IsCompleted: true } && !AbortedChecks.Contains(check) && ProbeRuns.Verdict(Path.Combine(RunFolder, "run", "evaluation"), check) is { } v) return v;
-        return ProbeRuns.Of(RunStore, exe, AbortedChecks.Contains(check), RunTask is { IsCompleted: true }, DateTimeOffset.UtcNow, _first.GetValueOrDefault(exe));
+        return ProbeRuns.Of(RunStore, exe, AbortedChecks.Contains(check), RunTask is { IsCompleted: true }, DateTimeOffset.UtcNow, _first.GetValueOrDefault(exe), pipelined: true,
+            nameOf: e => Registry().FirstOrDefault(c => string.Equals(c.Exe, e, StringComparison.OrdinalIgnoreCase)) is { } c ? ProbeNames.Of(c.Id) : e);
     }
 
     /// <summary>Start a run of <paramref name="only"/>, or of the ticked probes when it is null.</summary>
@@ -407,6 +420,7 @@ internal sealed class Launcher : IAsyncDisposable
             var histories = Directory.EnumerateDirectories(WorkFolder).Select(d => Path.Combine(d, "run", "runlog", "history.jsonl")).ToList();
             foreach (var exe in checks.Select(ExeOf).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
                 _first[exe] = ProbeRuns.First(histories, exe, DateTimeOffset.UtcNow);
+            _prepGuess = ProbeRuns.PreparationGuess(histories);
         }
         // an aborted probe stays stopped: any later pass of it in this run is stopped as it starts
         _enforce?.Dispose();

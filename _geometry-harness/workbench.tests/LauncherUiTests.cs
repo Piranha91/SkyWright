@@ -116,6 +116,33 @@ public sealed class LauncherUiTests : IDisposable
     }
 
     [Fact]
+    public void While_the_run_prepares_a_tile_says_so_and_never_waiting_its_turn()
+    {
+        // a single-probe run spends its first minute preparing; that is not a queue, and the plan's preflight run of the
+        // same probe is neither this check's run nor a basis for its estimate
+        var store = Path.Combine(_root, "runlog"); var active = Path.Combine(store, "active"); Directory.CreateDirectory(active);
+        var t0 = DateTimeOffset.UtcNow.AddSeconds(-50);
+        void Put(RunRecord r) => File.WriteAllText(Path.Combine(active, r.RunId + ".json"), JsonSerializer.Serialize(r, RunContract.Json));
+        var pipe = new RunRecord { RunId = "evalpipeline-1", Op = "evalpipeline", Status = RunStatus.Running, StartedUtc = t0, Pid = Environment.ProcessId,
+                                   Stage = "stages", Notes = { "stage census started " + t0.ToString("o"), "stage scope started " + t0.AddSeconds(30).ToString("o") } };
+        pipe.Stages.Add(new RunStage { Id = "stages", Title = "pipeline stages", Total = 8, Processed = 2, Unit = "stages", StartedUtc = t0 });
+        Put(pipe);
+        var preflight = new RunRecord { RunId = "aprobe-pre", Op = "aprobe", Status = RunStatus.Completed, Outcome = RunOutcome.Ok, StartedUtc = t0.AddSeconds(5), WallSeconds = 1 };
+        File.WriteAllText(Path.Combine(store, "history.jsonl"), JsonSerializer.Serialize(preflight, RunContract.Json) + Environment.NewLine);
+        var prep = ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: false, DateTimeOffset.UtcNow, first: null, pipelined: true);
+        Assert.Equal("waiting", prep.State);
+        Assert.Contains("preparing the run: checking that each load order loads (step 3 of 8)", prep.Line);
+        Assert.DoesNotContain("waiting its turn", prep.Line);
+        // the checks begin and another probe runs: now it really is waiting its turn, and the preflight run is not counted
+        File.AppendAllLines(Path.Combine(store, "history.jsonl"), new[] { JsonSerializer.Serialize(new RunRecord { RunId = "eval-1", Op = "evalpipeline-evaluate-01", Status = RunStatus.Completed, Outcome = RunOutcome.Ok, StartedUtc = t0.AddSeconds(45) }, RunContract.Json) });
+        Put(new RunRecord { RunId = "other-1", Op = "otherprobe", Status = RunStatus.Running, StartedUtc = t0.AddSeconds(46), Pid = Environment.ProcessId });
+        var turn = ProbeRuns.Of(store, "aprobe", aborted: false, runEnded: false, DateTimeOffset.UtcNow, first: null, pipelined: true);
+        Assert.Contains("waiting its turn: otherprobe is running", turn.Line);
+        Assert.DoesNotContain("1 run finished", turn.Line);
+        Assert.Equal("learning", ProbeRuns.First(new[] { Path.Combine(store, "history.jsonl") }, "aprobe", DateTimeOffset.UtcNow).Basis);
+    }
+
+    [Fact]
     public void The_settings_round_trip_and_an_unwritable_folder_is_said()
     {
         var path = Path.Combine(_root, LauncherSettings.FileName);

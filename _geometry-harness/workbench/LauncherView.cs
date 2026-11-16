@@ -250,7 +250,7 @@ internal static class LauncherView
             AbortAll.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
             RunLine.Text = L.RunState switch
             {
-                "running" => "running: " + (L.RunLine ?? "started"),
+                "running" => L.PipelineLine() ?? "running: " + (L.RunLine ?? "started"),
                 "refused" => L.RunRefusal ?? "",
                 "aborted" => L.RunRefusal ?? "aborted",
                 "done" => "done: the results are open in the Conflicts tab" + (L.RunBundle is { } b ? $" ({b})" : ""),

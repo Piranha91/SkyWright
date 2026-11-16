@@ -73,6 +73,36 @@ internal static class ProbeNames
 /// <summary>One probe's state in the current run, as its own run records report it.</summary>
 internal sealed record ProbeProgress(string State, double? Fraction, string Line, string? Eta);
 
+/// <summary>Where the pipeline is, from its own run record: the stage going now (null before the first), its step, the
+/// step count, when that stage started, and when the probes' own checks began (null while the run still prepares).</summary>
+internal sealed record PipelineAt(string? Stage, int Step, int Steps, DateTimeOffset? StageStarted, DateTimeOffset Started, DateTimeOffset? ChecksStarted)
+{
+    /// <summary>The stages before the checks: the run is preparing while one of these is going.</summary>
+    internal static readonly string[] Preparation = { "census", "prepare", "scope", "plan" };
+
+    internal static string Words(string? stage) => stage switch
+    {
+        "census" => "reading what the selected mods change",
+        "prepare" => "setting up the load orders to compare",
+        "scope" => "checking that each load order loads",
+        "plan" => "planning the checks",
+        "evaluate" => "running the probes",
+        "records" or "scenes" => "gathering what the probes found",
+        "bundle" => "collecting the results",
+        null => "starting",
+        _ => stage,
+    };
+
+    internal string Line(DateTimeOffset now)
+    {
+        string prep = ChecksStarted is null ? "preparing the run: " : "";
+        string since = StageStarted is { } t ? $", {Clock((now - t).TotalSeconds)}" : "";
+        return $"{prep}{Words(Stage)} (step {Step} of {Steps}){since}";
+    }
+
+    static string Clock(double seconds) => TimeSpan.FromSeconds(Math.Max(0, Math.Round(seconds))).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
+}
+
 /// <summary>Probe runs read from a pipeline run's own run-log store (<c>HOUSECARL_RUNLOG_DIR</c>): each probe opens a run
 /// record there with its pid, its stage counters and a remaining estimate (the run-events contract). The workbench reads
 /// those records; it never invents a fraction, and a probe that reports no counters is said to report none.</summary>
@@ -134,13 +164,64 @@ internal static class ProbeRuns
 
     static string Clock(double seconds) => TimeSpan.FromSeconds(Math.Max(0, Math.Round(seconds))).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss", CultureInfo.InvariantCulture);
 
+    /// <summary>The pipeline's place in this store's run, or null when no pipeline record is live.</summary>
+    internal static PipelineAt? Pipeline(string store)
+    {
+        var p = Active(store, "evalpipeline").FirstOrDefault();
+        if (p is null) return null;
+        string? stage = null; DateTimeOffset? at = null;
+        var last = p.Notes.LastOrDefault(n => n.StartsWith("stage ", StringComparison.Ordinal));
+        if (last is not null)
+        {
+            var parts = last.Split(' ');
+            stage = parts.Length > 1 ? parts[1] : null;
+            if (parts.Length > 3 && DateTimeOffset.TryParse(parts[3], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t)) at = t;
+        }
+        var st = p.Stages.FirstOrDefault(s => s.Id == "stages");
+        int steps = (int)(st?.Total ?? 0), step = (int)Math.Min((st?.Processed ?? 0) + 1, Math.Max(1, steps));
+        return new PipelineAt(stage, step, steps, at, p.StartedUtc, ChecksStart(store));
+    }
+
+    /// <summary>When the probes' own checks began in this store: the pipeline's evaluate step (its runner's start); null before.
+    /// A probe run before it (the census, the load-order checks, the plan's preflight) is preparation, not a check.</summary>
+    internal static DateTimeOffset? ChecksStart(string store) => ChecksStart(Read(Path.Combine(store, "active")).Concat(History(Path.Combine(store, "history.jsonl"))));
+
+    static DateTimeOffset? ChecksStart(IEnumerable<RunRecord> records)
+    {
+        var starts = records.Where(r => r.Op.StartsWith("evalpipeline-evaluate", StringComparison.OrdinalIgnoreCase)).Select(r => r.StartedUtc).ToList();
+        return starts.Count == 0 ? null : starts.Min();
+    }
+
+    /// <summary>How long earlier runs in these stores took to prepare (from the pipeline's start to its evaluate step), by
+    /// their median, and how many runs that is; null when none is recorded.</summary>
+    internal static (double Seconds, int Runs)? PreparationGuess(IEnumerable<string> historyFiles)
+    {
+        var took = new List<double>();
+        foreach (var f in historyFiles)
+        {
+            var all = History(f).ToList();
+            var pipe = all.Where(r => r.Op == "evalpipeline").OrderBy(r => r.StartedUtc).FirstOrDefault();
+            if (pipe is null || ChecksStart(all) is not { } c) continue;
+            took.Add((c - pipe.StartedUtc).TotalSeconds);
+        }
+        if (took.Count == 0) return null;
+        took.Sort();
+        return (took[took.Count / 2], took.Count);
+    }
+
     /// <summary>What the tile shows for a probe: waiting, running with its stage counters and ETA (or "no progress reported"
     /// and the elapsed time), done, failed or aborted.</summary>
-    internal static ProbeProgress Of(string? store, string op, bool aborted, bool runEnded, DateTimeOffset now, RunEstimate? first)
+    internal static ProbeProgress Of(string? store, string op, bool aborted, bool runEnded, DateTimeOffset now, RunEstimate? first, bool pipelined = false, Func<string, string>? nameOf = null)
     {
         if (store is null) return new("idle", null, "", null);
-        var live = Active(store, op).FirstOrDefault();
-        var done = Finished(store, op);
+        // in a pipeline run only the probe's runs from the checks on are this check's; earlier ones were the preparation
+        DateTimeOffset? since = pipelined ? ChecksStart(store) : null;
+        var pipe = pipelined ? Pipeline(store) : null;
+        if (pipelined && since is null && !runEnded && !aborted)
+            return new("waiting", null, pipe is null ? "waiting for the run to start" : pipe.Line(now), null);
+        bool Ours(RunRecord r) => since is null || r.StartedUtc >= since.Value;
+        var live = Active(store, op).Where(Ours).FirstOrDefault();
+        var done = Finished(store, op).Where(Ours).ToList();
         string passes = done.Count == 0 ? "" : $"; {Runs(done.Count)} finished";
         if (aborted) return new("aborted", null, (live is null || !Alive(live) ? "aborted" : "aborting…") + passes, null);
         if (live is not null)
@@ -168,7 +249,13 @@ internal static class ProbeRuns
                 : new("failed", 1, $"failed: {bad.Count} of {Runs(done.Count)} did not finish ({bad[^1].Error ?? bad[^1].Outcome.ToString()}); {Clock(done.Sum(r => r.WallSeconds))}", null);
         }
         if (runEnded) return new("not run", null, "did not run this time", null);
-        return new("waiting", null, "waiting its turn" + (first is { HasNumber: true } f ? $"; about {Clock(f.Seconds!.Value)} a run, judged from {Runs(f.Samples)} before" : ""), null);
+        // "waiting its turn" only when another probe really is running ahead of it
+        var ahead = since is null ? null : Read(Path.Combine(store, "active"))
+            .Where(r => r.EndedUtc is null && r.StartedUtc >= since.Value && !string.Equals(r.Op, op, StringComparison.OrdinalIgnoreCase) && r.Pid > 0 && r.ParentRunId is null && r.Mode != "mcp" && !r.Op.StartsWith("evalrun", StringComparison.OrdinalIgnoreCase) && !r.Op.StartsWith("evalpipeline", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(r => r.StartedUtc).FirstOrDefault();
+        string guess = first is { HasNumber: true } f ? $"; about {Clock(f.Seconds!.Value)} a run once it starts, judged from {Runs(f.Samples)} before" : "";
+        if (!pipelined) return new("waiting", null, "waiting its turn" + guess, null);
+        return new("waiting", null, (ahead is not null ? $"waiting its turn: {nameOf?.Invoke(ahead.Op) ?? ahead.Op} is running" : pipe is not null ? pipe.Line(now) : "waiting for the run to reach it") + guess, null);
     }
 
     static string Runs(int n) => n == 1 ? "1 run" : $"{n} runs";
@@ -235,7 +322,14 @@ internal static class ProbeRuns
     /// <summary>The first guess for one pass of a probe, by the run-log estimator over earlier runs' histories.</summary>
     internal static RunEstimate First(IEnumerable<string> historyFiles, string op, DateTimeOffset now)
     {
-        var all = historyFiles.SelectMany(History).Where(r => string.Equals(r.Op, op, StringComparison.OrdinalIgnoreCase)).ToList();
+        // a check's own runs only: a run of the same probe during preparation (the plan's preflight) is far shorter
+        var all = new List<RunRecord>();
+        foreach (var f in historyFiles)
+        {
+            var recs = History(f).ToList();
+            var since = ChecksStart(recs);
+            all.AddRange(recs.Where(r => string.Equals(r.Op, op, StringComparison.OrdinalIgnoreCase) && (since is null || r.StartedUtc >= since.Value)));
+        }
         if (all.Count == 0) return RunEstimate.None("learning", $"no earlier run of {op} is recorded", now);
         var template = all.OrderBy(r => r.StartedUtc).Last();
         return Estimator.Predict(all, template, now);
