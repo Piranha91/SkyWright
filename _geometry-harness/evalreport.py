@@ -92,9 +92,19 @@ def view_kind_caption(provenance: dict, words: dict, first: bool = True) -> str:
                                                                them="it" if n == 1 else "them") if n else ""))
     # the alpha-card rule's station view: the picker's own witness camera, not a composed shot (round 2 rerun, C1894)
     # said once per figure, on the frame it shows first, as the render line is (C1899)
+    said_ = ""
     if ((provenance or {}).get("camera") or {}).get("cameraSource") == "witness-station":
-        return str(words.get("stationView") or "") if first else ""
-    return ""
+        said_ = str(words.get("stationView") or "") if first else ""
+    return said_ + (terrain_caption(provenance, words) if first else "")
+
+
+def terrain_caption(provenance: dict, words: dict) -> str:
+    """A camera standing on the terrain where no navmesh is (capture_points / shotplan terrain stations) says so with its
+    station's own label ("terrain, slope 40.0°, measured limit 43.7°"); a navmesh station says nothing."""
+    st_ = ((provenance or {}).get("camera") or {}).get("standing") or {}
+    if st_.get("kind") != "terrain" or not st_.get("label") or not words.get("terrainStation"):
+        return ""
+    return fill(str(words["terrainStation"]), label=str(st_["label"]))
 
 
 def patch_words(patches: list, words: dict, joiner=None) -> dict:

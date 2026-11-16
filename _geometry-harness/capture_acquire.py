@@ -645,6 +645,8 @@ def build_result(request: dict, parts: list[dict], points: dict, source: dict, p
               "fov": pose.get("fov"), "aspect": pose.get("aspect"),
               "probeFov": pose.get("probeFov"), "probeSize": pose.get("probeSize"),
               "feet": plan.get("feet"), "floorZ": plan.get("floorZ"), "aim": plan.get("aim"),
+              # what the camera stands on (shotplan's chosen candidate: a navmesh, or the terrain with its label)
+              "standing": chosen.get("standing"),
               "viewprobe": (f"--eye {chosen['eye'][0]:.1f},{chosen['eye'][1]:.1f},"
                             f"{chosen['eye'][2]:.1f} --yaw {chosen['yaw']:.1f} "
                             f"--pitch {chosen['pitch']:.1f} --fov {pose.get('fov')}"
@@ -864,7 +866,7 @@ def witness_camera(points_doc: dict, shotplan_mod) -> dict:
     fov = float(st["fov"])
     return {"cell": points_doc.get("cell"), "eye": eye, "yaw": yaw, "pitch": pitch, "fov": fov, "aspect": aspect,
             "floorZ": points_doc.get("floorZ"), "viewKind": "eye-level", "viewFlags": [],
-            "cameraSource": "witness-station", "witnessStation": st.get("id"),
+            "cameraSource": "witness-station", "witnessStation": st.get("id"), "standing": st.get("standing"),
             "viewprobe": (f"--eye {eye[0]:.1f},{eye[1]:.1f},{eye[2]:.1f} --yaw {yaw:.1f} --pitch {pitch:.1f} --fov {fov:g}"
                           + shotplan_mod.aspect_flag(aspect))}
 
@@ -1152,6 +1154,18 @@ def top_down_hide(a, td: dict, parts: list[dict], cam: list[str], flags: list[st
                        "nothing whose contact is undecided"),
               "before": counts}
     return {"status": "ok", "counts": got, "record": record, "flags": view_flags}
+
+
+def keep_refused_points(receipts_dir: Path, request: dict, exc) -> Path | None:
+    """A refused pick's own per-station verdicts (terrain reasons included), kept beside the receipts as
+    points-refused.json, so no one recomputes them from the consoles (terrain-stations RESULT section 5.2)."""
+    if (exc.extra or {}).get("stations") is None:
+        return None
+    path = receipts_dir / "points-refused.json"
+    write_json(path, {"schemaVersion": 1, "kind": "capture-points-refused", "requestId": request.get("id"),
+                      "code": exc.code, "detail": exc.detail, "stations": exc.extra.get("stations"),
+                      "chain": exc.extra.get("chain")})
+    return path
 
 
 def refusal_doc(request_id: str, exc: Refused, extra: dict) -> dict:
@@ -1632,6 +1646,7 @@ def cmd_acquire(a) -> int:
                                          synthetic=a.synthetic_points,
                                          size=a.points_size, grid=a.points_grid, shotplan=shotplan_mod)
                 except CP.Unpickable as exc:
+                    keep_refused_points(receipts_dir, request, exc)
                     if exc.extra.get("topDown") is None:
                         raise Refused("points-unpickable", exc.detail, pickerCode=exc.code, **exc.extra)
                     # every eye-level picture refused, the cutaway too (or no station stood): the labelled top-down

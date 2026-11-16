@@ -109,6 +109,10 @@ def view_kind_line(provenance: dict) -> str:
         n = len((provenance or {}).get("hidden") or [])
         return ("Sliced top-down view from above" + (f", everything above z {float(cut):.0f} removed" if cut is not None else "")
                 + (f", {n} object{'' if n == 1 else 's'} over the pair hidden" if n else "") + "; not the player's view.")
+    # a camera standing on the terrain where no navmesh is says so with its station's label; a navmesh station says nothing
+    st_ = ((provenance or {}).get("camera") or {}).get("standing") or {}
+    if st_.get("kind") == "terrain" and st_.get("label"):
+        return f"Camera on open ground with no navmesh: {st_['label']}."
     return ""
 
 def humanize(eid: str | None) -> str | None:
