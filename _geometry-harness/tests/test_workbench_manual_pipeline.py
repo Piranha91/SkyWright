@@ -218,6 +218,36 @@ def case_r1_an_earlier_preparation_is_reused_only_when_every_input_matches():
         assert found is None and "profile file" in why, why
 
 
+def case_s1_the_scope_line_names_the_cells_the_other_plugins_and_a_disabled_mod_to_tick():
+    """The tab's scope line, from the combined arm's scope.json: the cells the ticked mod edits (worldspace with its
+    named cells, interiors), the other enabled plugins touching them or the two cells around them (the base game and
+    the mod's own plugins left out), and a disabled, unticked mod that also edits them as a hint to tick."""
+    scope = {
+        "targets": [{"name": "X.esp", "footprint": {"placed": {"cells": [
+            {"cell": "000D74:Skyrim.esm", "kind": "persistent", "worldspace": "Tamriel"},
+            {"cell": "009634:Skyrim.esm", "kind": "exterior", "name": "WatchExterior02", "worldspace": "Tamriel"},
+            {"cell": "009616:Skyrim.esm", "kind": "exterior", "name": None, "worldspace": "Tamriel"},
+            {"cell": "0151F9:Skyrim.esm", "kind": "interior", "name": "Watch01", "worldspace": None}]}}}],
+        "locationContributors": {"locations": [
+            {"cell": "009634:Skyrim.esm", "plugins": [{"name": "Skyrim.esm"}, {"name": "X.esp"}, {"name": "Y.esp"}]},
+            {"cell": "0151F9:Skyrim.esm", "plugins": [{"name": "Skyrim.esm"}, {"name": "ccbgssse001-fish.esm"}]}]},
+        "nearby": {"ring": 2, "plugins": [{"name": "Z.esp", "cells": ["009700:Skyrim.esm"]}, {"name": "Update.esm", "cells": []}],
+                   "alsoScanned": [{"name": "Keys.esp", "footprintCells": ["009634:Skyrim.esm"], "ringCells": []},
+                                   {"name": "Far.esp", "footprintCells": [], "ringCells": []}]}}
+    line = EP.scope_line(scope, {"selection": ["Mod X"]}, {"keys.esp": "Mod Keys", "far.esp": "Mod Far"})
+    assert line.startswith("Mod X edits 2 cells in Tamriel (WatchExterior02) and 1 interior (Watch01); "), line
+    assert "2 other enabled plugins touch those cells or the 2 cells around them: Y.esp, Z.esp." in line, line
+    assert "Skyrim.esm" not in line and "Update.esm" not in line and "ccbgssse001" not in line and "X.esp" not in line, line
+    assert "Mod Keys (disabled in MO2) also edits these cells; tick it to test them together." in line, line
+    assert "Mod Far" not in line, line
+    empty = EP.scope_line({"targets": [{"footprint": {"placed": {"cells": []}}}]}, {"selection": ["Mod X"]}, {})
+    assert "places nothing in any cell" in empty, empty
+    # a contributor walk that did not finish never reads as "no other plugin"
+    broken = dict(scope, locationContributors={"complete": False, "missing": ["'Skyrim.esm' could not be walked"], "locations": []})
+    said = EP.scope_line(broken, {"selection": ["Mod X"]}, {})
+    assert "is not known" in said and "no other enabled plugin" not in said, said
+
+
 def case_b4a_prepare_writes_no_profile_into_the_instance():
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)

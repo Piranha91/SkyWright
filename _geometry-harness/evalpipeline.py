@@ -1002,6 +1002,11 @@ def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
                 "--assets", "1000000", "--instance", fwd(ctx.instance), "--profile", ctx.profile, "--game", fwd(ctx.game)]
         for t in targets:
             argv += ["--target", t]
+        if getattr(ctx, "in_place", None) and arm["id"] == "combined":
+            # the scope line: who else touches the footprint or the loaded grid around it, and which disabled mods would
+            argv += ["--ring", "2"]
+            for path in disabled_plugin_files(ctx, res):
+                argv += ["--also-scan", fwd(path)]
         r = child(ctx, adir / "commands", "scope-" + row["file"].replace(".json", ""), argv)
         if r.get("exitCode") != 0 or not out.is_file():
             why = order_refusal(adir / "commands")
@@ -1019,7 +1024,102 @@ def stage_scope(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
                                 **rec}
         outs.append(out)
     write_json(sdir / "scopes.json", accepted)
+    if getattr(ctx, "in_place", None) and "combined" in accepted:
+        write_json(sdir / "scope-line.json", {"line": scope_line(read_json(Path(accepted["combined"]["scope"])), res,
+                                                                 disabled_mod_of(ctx, res))})
+        outs.append(sdir / "scope-line.json")
     return {"preparation": sha256_file(ctx.out / "prepare" / "preparation.json")}, outs + [sdir / "scopes.json"]
+
+
+def disabled_mod_of(ctx: Context, res: dict) -> dict:
+    """{plugin file name (lower): mod folder} for the plugins of the profile's disabled mod folders nobody ticked."""
+    import evalrun as ER
+    _enabled, disabled, _read, _path = ER._modlist(str(ctx.instance), ctx.profile)
+    sel = {m.lower() for m in res.get("selection") or []}
+    out = {}
+    for m in disabled:
+        if m.lower() in sel:
+            continue
+        folder = ctx.instance / "mods" / m
+        if folder.is_dir():
+            for f in sorted(folder.iterdir(), key=lambda x: x.name.lower()):
+                if f.is_file() and f.suffix.lower() in (".esp", ".esm", ".esl"):
+                    out.setdefault(f.name.lower(), m)
+    return out
+
+
+def disabled_plugin_files(ctx: Context, res: dict) -> list:
+    """The plugin files of the profile's disabled, unticked mod folders (scopeprobe reads them for CELL records only)."""
+    out = []
+    for low, m in disabled_mod_of(ctx, res).items():
+        out += [f for f in (ctx.instance / "mods" / m).iterdir() if f.is_file() and f.name.lower() == low]
+    return out
+
+
+def _base_game(name: str) -> bool:
+    n = name.lower()
+    return name in OFFICIAL_MASTERS or (n.startswith("cc") and n.endswith((".esm", ".esp", ".esl")))
+
+
+def _names(items, most=6) -> str:
+    items = list(items)
+    return ", ".join(items[:most]) + (f" and {len(items) - most} more" if len(items) > most else "")
+
+
+def scope_line(scope: dict, res: dict, disabled_mods: dict) -> str:
+    """The tab's plain sentence on what the ticked mods touch, from the combined arm's scope.json: the cells their plugins
+    edit (worldspace and named cells, interiors), the other enabled plugins with records in those cells or within two
+    cells around them (the loaded grid), and the disabled, unticked mods whose plugins also edit them."""
+    ticked = list(res.get("selection") or [])
+    mine = {str(t.get("name")).lower() for t in scope.get("targets") or []}
+    cells = [c for t in scope.get("targets") or [] for c in (((t.get("footprint") or {}).get("placed") or {}).get("cells") or [])]
+    seen, ext, interiors = set(), {}, []
+    for c in cells:
+        if c.get("kind") == "persistent" or c.get("cell") in seen:
+            continue
+        seen.add(c.get("cell"))
+        if c.get("kind") == "interior":
+            interiors.append(c.get("name") or c.get("cell"))
+        else:
+            ext.setdefault(c.get("worldspace") or c.get("worldspaceKey") or "a worldspace", []).append(c.get("name"))
+    who = _names(ticked, 3) if ticked else "the selection"
+    parts = []
+    for ws, names in ext.items():
+        named = [n for n in names if n]
+        parts.append(f"{len(names)} cell{'s' if len(names) != 1 else ''} in {ws}" + (f" ({_names(named, 3)})" if named else ""))
+    if interiors:
+        parts.append(f"{len(interiors)} interior{'s' if len(interiors) != 1 else ''} ({_names(interiors, 3)})")
+    if not parts:
+        return f"{who} places nothing in any cell, so no other plugin shares its cells."
+    inside = {p["name"] for loc in ((scope.get("locationContributors") or {}).get("locations") or [])
+              for p in loc.get("plugins") or []}
+    near = {p["name"] for p in ((scope.get("nearby") or {}).get("plugins") or [])}
+    others = sorted({n for n in inside | near if n.lower() not in mine and not _base_game(n)}, key=str.lower)
+    ring = (scope.get("nearby") or {}).get("ring") or 0
+    lc = scope.get("locationContributors") or {}
+    if lc.get("complete") is False:
+        # never "no other plugin" from a walk that did not finish: say what could not be read
+        missing = lc.get("missing") or []
+        return (f"{who} edits " + " and ".join(parts) + "; which other plugins touch those cells is not known: "
+                + (f"{len(missing)} plugin(s) could not be read for it ({str(missing[0])[:160]})" if missing
+                   else "the probe's footprint walk was incomplete") + ".")
+    line = f"{who} edits " + " and ".join(parts) + "; "
+    line += (f"{len(others)} other enabled plugin{'s touch' if len(others) != 1 else ' touches'} those cells"
+             + (f" or the {ring} cells around them" if ring else "") + f": {_names(others, 6)}." if others
+             else "no other enabled plugin besides the base game touches those cells"
+             + (f" or the {ring} cells around them" if ring else "") + ".")
+    hint_mods = []
+    for x in ((scope.get("nearby") or {}).get("alsoScanned") or []):
+        if x.get("footprintCells") or x.get("ringCells"):
+            m = disabled_mods.get(str(x.get("name")).lower())
+            if m and m not in hint_mods:
+                hint_mods.append(m)
+    for m in hint_mods[:3]:
+        line += f" {m} (disabled in MO2) also edits these cells; tick it to test them together."
+    if len(hint_mods) > 3:
+        line += f" {len(hint_mods) - 3} more disabled mods also edit them."
+    return line
+
 
 
 def planned_budget(out: Path):
@@ -1951,6 +2051,8 @@ def cmd_run(a) -> int:
             tools = stage_tools(name, ctx.machine)
             if tools:
                 inputs["tools"] = tools
+            if name == "plan" and (out / "scope" / "scope-line.json").is_file():
+                print("scope: " + str(read_json(out / "scope" / "scope-line.json").get("line") or ""))
             if name in seeded:
                 # an earlier run's preparation, taken over whole: recorded under this run's inputs, its own record kept
                 old = seeded[name]

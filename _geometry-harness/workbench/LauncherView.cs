@@ -250,10 +250,10 @@ internal static class LauncherView
             AbortAll.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
             RunLine.Text = L.RunState switch
             {
-                "running" => (L.PipelineLine() ?? "running: " + (L.RunLine ?? "started")) + (L.PrepNote is { } pn ? Environment.NewLine + pn : ""),
+                "running" => (L.PipelineLine() ?? "running: " + (L.RunLine ?? "started")) + (L.PrepNote is { } pn ? Environment.NewLine + pn : "") + (L.ScopeNote is { } sn ? Environment.NewLine + sn : ""),
                 "refused" => L.RunRefusal ?? "",
                 "aborted" => L.RunRefusal ?? "aborted",
-                "done" => "done: the results are open in the Conflicts tab" + (L.RunBundle is { } b ? $" ({b})" : "") + (L.PrepNote is { } pd ? Environment.NewLine + pd : ""),
+                "done" => "done: the results are open in the Conflicts tab" + (L.RunBundle is { } b ? $" ({b})" : "") + (L.PrepNote is { } pd ? Environment.NewLine + pd : "") + (L.ScopeNote is { } sd ? Environment.NewLine + sd : ""),
                 _ => L.Instance is null ? "open a profile to choose mods and probes" : $"{L.Probes.Count} probe(s) selected",
             };
             foreach (var c in Launcher.Registry().Where(c => Launcher.ProbeKinds.Contains(c.Kind)))

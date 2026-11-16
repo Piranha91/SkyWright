@@ -38,6 +38,8 @@ internal sealed class Launcher : IAsyncDisposable
     internal string? RunLine { get; private set; }
     /// <summary>The pipeline's own sentence on the preparation: reused from an earlier run, or why not.</summary>
     internal string? PrepNote { get; private set; }
+    /// <summary>The pipeline's scope line: the cells the ticked mods edit, who else touches them, disabled mods to tick.</summary>
+    internal string? ScopeNote { get; private set; }
     internal string? RunFolder { get; private set; }
     internal Task? RunTask { get; private set; }
     /// <summary>Raised on the run's thread with the verified bundle's folder when a run is done (the window opens it).</summary>
@@ -420,7 +422,7 @@ internal sealed class Launcher : IAsyncDisposable
         var run = Path.Combine(dir, "run");
         lock (_gate)
         {
-            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; RunFolder = dir;
+            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; ScopeNote = null; RunFolder = dir;
             RunChecks.Clear(); RunChecks.AddRange(checks); AbortedChecks.Clear(); _groupAborted = false;
             // the first guess per probe: the run-log estimator over earlier runs' histories (this Work Folder's runs and the default store)
             _first.Clear();
@@ -455,6 +457,7 @@ internal sealed class Launcher : IAsyncDisposable
                     lock (w) w.WriteLine(e.Data);
                     RunLine = e.Data;
                     if (e.Data.StartsWith("preparation: ", StringComparison.Ordinal)) PrepNote = PrepWords(e.Data["preparation: ".Length..]);
+                    if (e.Data.StartsWith("scope: ", StringComparison.Ordinal)) ScopeNote = e.Data["scope: ".Length..];
                 };
                 p.ErrorDataReceived += (_, e) => { if (e.Data is null) return; lock (w) w.WriteLine(e.Data); if (e.Data.Trim().Length > 0) RunLine = e.Data; };
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
@@ -554,7 +557,7 @@ internal sealed class Launcher : IAsyncDisposable
                 settings = new { path = SettingsPath, note = SettingsNote },
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
                 depth = Depth,
-                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote },
+                run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote, scope = ScopeNote },
             };
         }
     }
