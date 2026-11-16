@@ -133,6 +133,31 @@ def case_b5_in_place_arms_are_the_profile_and_the_profile_without_the_selected_f
         assert all(doc["BaseProfile"] == "P" for _, doc in cands.values()), "candidates must name the chosen profile"
 
 
+def case_d1_a_selected_disabled_mod_is_enabled_in_the_candidate_only_with_its_plugins_last():
+    """Piranha leaves a mod disabled until it is judged safe: selecting it tests the profile with it enabled at its MO2
+    priority (its plugins at the end of the load order, a master-flagged one at the end of the masters) against the
+    profile as it stands. The profile's files are not changed."""
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        mods = {"Top": {"Top.esp": ["Base.esm"]}, "Off": {"Off.esp": ["Base.esm"], "OffLib.esm": ["Base.esm"]},
+                "Low": {"Low.esp": ["Base.esm"]}}
+        inst, game = world(t, mods, ["Top", "Low"], ["Low.esp", "Top.esp"])
+        prof = Path(inst) / "profiles" / "P"
+        # MO2's own priority: Top strongest, then the disabled Off, then Low
+        (prof / "modlist.txt").write_text("".join(x + chr(10) for x in ("+Top", "-Off", "+Low")), encoding="utf-8")
+        before = listing(prof)
+        ctx = EP.Context(in_place_entry(t, inst, game, ["Off"], ["geometry.object-overlap"]), None, t / "out")
+        res = ctx.resolve()
+        by = {a["id"]: a for a in res["arms"]}
+        assert by["combined"]["mods"] == ["Top", "Off", "Low"], by["combined"]["mods"]
+        assert by["combined"]["plugins"] == ["Base.esm", "OffLib.esm", "Low.esp", "Top.esp", "Off.esp"], by["combined"]["plugins"]
+        assert by["combined"]["switchedOn"] == ["Off"]
+        assert "Off" not in by["without-selection"]["mods"], by["without-selection"]["mods"]
+        assert by["without-selection"]["plugins"] == ["Base.esm", "Low.esp", "Top.esp"], by["without-selection"]["plugins"]
+        assert sorted(res["subject"]) == ["Off.esp", "OffLib.esm"], res["subject"]
+        assert listing(prof) == before, "the profile's files changed"
+
+
 def case_b4a_prepare_writes_no_profile_into_the_instance():
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)

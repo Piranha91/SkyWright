@@ -660,27 +660,40 @@ def _profile_lines(path: Path) -> list[str]:
         return []
 
 
+def _mods_by_priority(mpath) -> list[str]:
+    """Every mod folder of a modlist.txt, enabled or not, strongest first (the file's own order); separators skipped."""
+    out = []
+    for line in _profile_lines(Path(mpath)):
+        if line[0] in "+-" and line[1:].strip() and not line[1:].strip().lower().endswith("_separator"):
+            out.append(line[1:].strip())
+    return out
+
+
 def resolve_in_place(ctx: Context) -> dict:
-    """An in-place entry's two arms, from the chosen profile as MO2 resolves it: `combined` = the profile as it is,
-    `without-selection` = the profile with the selected mod folders disabled. A plugin only selected folders provide
-    drops; one an unselected folder (or the game's Data) also provides stays, from there. The plugin providers come from
-    evalrun.plugin_layers, the one Python spelling of the probes' layer map; the census stage cross-checks the result
-    against scopeprobe's own resolution."""
+    """An in-place entry's two arms, from the chosen profile as MO2 resolves it: `combined` = the profile with the
+    selected mod folders enabled at their MO2 priority, `without-selection` = the profile with them disabled (for a
+    selection of mods MO2 has disabled, that is the profile as it stands). A plugin only selected folders provide drops
+    from the baseline; one an unselected folder (or the game's Data) also provides stays, from there. A selected
+    disabled folder's plugins that the profile does not already load are loaded the way MO2 places a newly enabled
+    plugin: at the end of the load order, a master-flagged one at the end of the masters. The profile's files are never
+    changed; both arms are candidates over it. The plugin providers come from evalrun.plugin_layers, the one Python
+    spelling of the probes' layer map; the census stage cross-checks the result against scopeprobe's own resolution."""
     import evalrun as ER
     inst, prof, game = str(ctx.instance), ctx.profile, str(ctx.game)
     pdir = ctx.instance / "profiles" / prof
-    enabled, _disabled, read, mpath = ER._modlist(inst, prof)
+    enabled, disabled, read, mpath = ER._modlist(inst, prof)
     if not read:
         raise Refusal(f"the profile {prof} has no readable modlist.txt at {fwd(pdir)}; name a profile of this instance.")
     sel = list((ctx.entry.get("selection") or {}).get("mods") or [])
     if not sel:
-        raise Refusal("the selection names no mod folder; tick at least one of the profile's enabled mods.")
-    low_enabled = {m.lower(): m for m in enabled}
+        raise Refusal("the selection names no mod folder; tick at least one of the profile's mods.")
+    known = {m.lower() for m in list(enabled) + list(disabled)}
     for m in sel:
-        if m.lower() not in low_enabled:
-            raise Refusal(f"{m} is not an enabled mod folder of profile {prof}; a disabled mod is not part of this "
-                          f"profile, so enable it in MO2 or pick a profile that loads it.")
+        if m.lower() not in known:
+            raise Refusal(f"{m} is not a mod folder of profile {prof}; pick one of the mods its modlist.txt lists.")
     sel_low = {m.lower() for m in sel}
+    enabled_low = {m.lower() for m in enabled}
+    switched_on = [m for m in disabled if m.lower() in sel_low]           # selected mods MO2 has disabled
     for need in ("loadorder.txt", "plugins.txt"):
         if not (pdir / need).is_file():
             raise Refusal(f"the profile {prof} has no {need} at {fwd(pdir)}, so its load order cannot be read; open the "
@@ -689,10 +702,11 @@ def resolve_in_place(ctx: Context) -> dict:
     starred = {l[1:].strip().lower() for l in _profile_lines(pdir / "plugins.txt") if l.startswith("*")}
     active = [p for p in order if p.lower() in starred or p in OFFICIAL_MASTERS]
     without_mods = [m for m in enabled if m.lower() not in sel_low]
+    candidate_mods = [m for m in _mods_by_priority(mpath) if m.lower() in enabled_low or m.lower() in sel_low]
 
-    def view(mods):
+    def view(mods, names):
         plugins, providers, headers = [], {}, {}
-        for p in active:
+        for p in names:
             rows = ER.plugin_layers(p, mods, instance=inst, profile=prof, game=game, hash_rows=False)
             in_view = [r for r, v in zip(rows["rows"], rows["views"]) if v == "in-view"]
             if not in_view:
@@ -704,11 +718,30 @@ def resolve_in_place(ctx: Context) -> dict:
             headers[p]["masters"] = ctx.names.many(headers[p]["masters"])
         return plugins, providers, headers
 
-    c_plugins, c_providers, c_headers = view(enabled)
-    w_plugins, w_providers, w_headers = view(without_mods)
+    # a switched-on folder's plugins MO2 does not already load, weakest folder first, in name order within a folder
+    active_low = {p.lower() for p in active}
+    added = []
+    for m in reversed([x for x in candidate_mods if x.lower() in {y.lower() for y in switched_on}]):
+        folder = ctx.instance / "mods" / m
+        files = sorted((f.name for f in folder.iterdir() if f.is_file() and f.suffix.lower() in (".esp", ".esm", ".esl")),
+                       key=str.lower) if folder.is_dir() else []
+        for f in ctx.names.many(files):
+            if f.lower() not in active_low and f.lower() not in {a.lower() for a in added}:
+                added.append(f)
+    c_plugins, c_providers, c_headers = view(candidate_mods, active + added)
+    if added:
+        # MO2 appends a newly enabled plugin; the engine loads every master-flagged plugin before any other, so a
+        # master-flagged one goes at the end of the masters
+        new = [p for p in c_plugins if p in added]
+        kept = [p for p in c_plugins if p not in added]
+        last = max((i for i, p in enumerate(kept) if is_master(p, c_headers)), default=-1)
+        c_plugins = (kept[:last + 1] + [p for p in new if is_master(p, c_headers)] + kept[last + 1:]
+                     + [p for p in new if not is_master(p, c_headers)])
+    w_plugins, w_providers, w_headers = view(without_mods, active)
     subject = [p for p in c_plugins if (c_providers.get(p) or "").lower() in sel_low and p not in w_plugins]
-    arms = [{"id": "combined", "role": "the profile as it is", "keys": [], "evaluated": subject, "plugins": c_plugins,
-             "mods": list(enabled)},
+    arms = [{"id": "combined", "role": "the profile with the selected mods enabled" if switched_on else "the profile as it is",
+             "keys": [], "evaluated": subject, "plugins": c_plugins, "mods": candidate_mods,
+             "switchedOn": switched_on, "appendedPlugins": [p for p in added if p in c_plugins]},
             {"id": "without-selection", "role": "the profile without the selected mods", "keys": [], "evaluated": [],
              "plugins": w_plugins, "mods": without_mods}]
     headers = {**w_headers, **c_headers}
@@ -876,6 +909,11 @@ def stage_census(ctx: Context, res: dict, sdir: Path) -> tuple[dict, list]:
         return {"subject": []}, [sdir / "census.json"]
     argv = [scopeprobe_exe(), "--instance", fwd(ctx.source_instance), "--profile", ctx.source_profile,
             "--game", fwd(ctx.source_game), "--assets", "1000000", "--json", fwd(out)]
+    if getattr(ctx, "in_place", None) and any(a.get("switchedOn") for a in res["arms"]):
+        # a selected mod MO2 has disabled is not in the profile as it stands: the census reads the order with it enabled
+        name, _arm, doc = next(c for c in candidate_files(ctx, res) if c[1]["id"] == "combined")
+        write_json(sdir / "census-order.json", doc)
+        argv += ["--order", fwd(sdir / "census-order.json")]
     for p in res["subject"][:1]:
         argv += ["--target", p]
     r = child(ctx, sdir / "commands", "census-scope", argv)
