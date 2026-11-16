@@ -1221,7 +1221,14 @@ public sealed class StateToolsTests : IAsyncLifetime
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
         try
         {
-            var first = await Ok("workbench_state", A(("project", new[] { "context" })));
+            // a read that blocks the UI thread would hold this call; ten seconds is ample for a part that only reports "reading"
+            var asked = Ok("workbench_state", A(("project", new[] { "context" })));
+            if (await Task.WhenAny(asked, Task.Delay(TimeSpan.FromSeconds(10))) != asked)
+            {
+                src.Gate.TrySetResult();
+                Assert.Fail("the context part did not answer within 10 s while the read ran: the read holds the UI thread");
+            }
+            var first = await asked;
             Assert.True(At(first, out var doors, "context", "sections", "doors") && (doors.GetString() ?? "").Contains("reading"), "no 'reading' while the read runs: " + first);
             src.Gate.SetResult();
             JsonElement last = first;
