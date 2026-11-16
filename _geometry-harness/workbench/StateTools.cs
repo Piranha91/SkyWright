@@ -111,7 +111,8 @@ internal sealed class StateTools
                  "choose (`n`: stage that candidate like any edit). " +
                  "Manual mode (the launcher): open_profile (`mode` free with `instance`, `profile`, optional `game`), select_mods (`mods`, `how` " +
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
-                 "write goes under), set_work_folder (`path`, where a run keeps its files), run. " +
+                 "write goes under), set_work_folder (`path`, where a run keeps its files), run (the ticked probes, or only `checks`), " +
+                 "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
         StateHub hub,
@@ -519,8 +520,18 @@ internal sealed class StateTools
         return Answer(new { said = $"{view.Header}; {said}", state = Project(s, DefaultParts, 20, 0, null) });
     }
 
-    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run" };
+    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run", "abort", "capture_window" };
     static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
+
+    /// <summary>Save the whole window as a PNG at <paramref name="path"/> (an absolute .png path), as the script's capturewindow does.</summary>
+    static string CaptureWindow(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || !path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("capture_window needs path, an absolute .png path.");
+        if (Shell.Window is not { } w) throw new InvalidOperationException("no window is shown, so there is nothing to capture.");
+        var (cw, ch) = WindowCapture.SaveWindow(w, path);
+        return $"window captured ({cw}x{ch}) to {path}";
+    }
 
     static async Task<CallToolResult> LauncherOnUi(StateHub hub, string verb, string? mode, string? instance, string? profile, string? game,
                                                    string[]? mods, string? how, string[]? checks, string? path)
@@ -536,7 +547,9 @@ internal sealed class StateTools
                 "select_probes" => l.SelectProbes(checks),
                 "set_output" => l.SetOutput(path),
                 "set_work_folder" => l.SetWorkFolder(path),
-                _ => l.Run(),
+                "abort" => checks is { Length: > 0 } ? l.AbortProbe(checks[0]) : l.AbortRun(),
+                "capture_window" => CaptureWindow(path),
+                _ => checks is { Length: > 0 } ? l.Run(checks) : l.Run(),
             };
         }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }

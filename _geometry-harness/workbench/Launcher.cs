@@ -45,6 +45,23 @@ internal sealed class Launcher : IAsyncDisposable
     internal string RunState { get; private set; } = "idle";
     internal string? RunRefusal { get; private set; }
 
+    // ---- the settings file (free mode), the probes of the current run, and what was aborted
+    /// <summary>Where free mode remembers the instance, profile and Output Folder; beside the exe unless a test says otherwise.</summary>
+    internal string SettingsPath { get; set; } = LauncherSettings.DefaultPath;
+    /// <summary>Why the settings were not written or read, in one sentence; null when they were.</summary>
+    internal string? SettingsNote { get; private set; }
+    /// <summary>The checks the current (or last) run was started with.</summary>
+    internal List<string> RunChecks { get; } = new();
+    /// <summary>The checks aborted in the current run; their probe is stopped whenever a pass of it starts.</summary>
+    internal HashSet<string> AbortedChecks { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>The current run's own run-log store, where its probes record their progress: the pipeline keeps it under
+    /// its output folder (<c>run/runlog</c>).</summary>
+    internal string? RunStore => RunFolder is null ? null : Path.Combine(RunFolder, "run", "runlog");
+    readonly Dictionary<string, HousecarlCore.Progress.RunEstimate> _first = new(StringComparer.OrdinalIgnoreCase);
+    System.Diagnostics.Process? _pipeline;
+    System.Threading.Timer? _enforce;
+    bool _groupAborted;
+
     internal Mo2OutputLayout Layout() => Mo2OutputLayout.Of(Instance!, Profile!, Game!);
 
     /// <summary>Free mode: any MO2 instance in place. The game folder is the instance's gamePath unless given.</summary>
@@ -90,7 +107,31 @@ internal sealed class Launcher : IAsyncDisposable
             }
             Output = null; WorkFolder = null; WorkFolderChosen = false; RunState = "idle"; RunRefusal = null;
         }
+        Remember();
         return $"opened profile '{prof}' of '{inst}' (game '{g}'): {Mods.Count(x => !x.Separator)} mod folder(s), {Mods.Count(x => x.Enabled && !x.Separator)} enabled";
+    }
+
+    /// <summary>Free mode writes what it opened to the settings file; a folder it cannot write is said, not ignored.</summary>
+    void Remember()
+    {
+        if (Mode != "free" || Instance is null) return;
+        SettingsNote = LauncherSettings.Save(SettingsPath, new LauncherSettings(Instance, Profile, Game, Output, WorkFolderChosen ? WorkFolder : null));
+    }
+
+    /// <summary>Open what the settings file remembers: the instance and profile, then the Output Folder and a chosen Work
+    /// Folder. Each refusal is said; nothing is restored silently in part.</summary>
+    internal async Task<string> RestoreAsync()
+    {
+        SettingsNote = LauncherSettings.CannotWrite(SettingsPath);
+        var (s, why) = LauncherSettings.Load(SettingsPath);
+        if (why is not null) { SettingsNote = why; return why; }
+        if (s?.Instance is null) return "no saved instance to restore.";
+        var said = new List<string>();
+        try { said.Add(await OpenProfileAsync("free", s.Instance, s.Profile, s.Game)); }
+        catch (InvalidOperationException ex) { return "the saved instance could not be opened: " + ex.Message; }
+        if (s.Output is not null) { try { said.Add(SetOutput(s.Output)); } catch (InvalidOperationException ex) { said.Add("the saved Output Folder was not set: " + ex.Message.TrimEnd('.')); } }
+        if (s.WorkFolder is not null) { try { said.Add(SetWorkFolder(s.WorkFolder)); } catch (InvalidOperationException ex) { said.Add("the saved Work Folder was not set: " + ex.Message.TrimEnd('.')); } }
+        return "restored from the last session: " + string.Join("; ", said);
     }
 
     static string? GamePathFromIni(string inst)
@@ -168,7 +209,7 @@ internal sealed class Launcher : IAsyncDisposable
             foreach (var c in hits)
             {
                 if (!ProbeKinds.Contains(c.Kind))
-                    throw new InvalidOperationException($"'{c.Id}' is a check of kind {c.Kind}, which runs no probe, so the launcher does not run it.");
+                    throw new InvalidOperationException($"{ProbeNames.Of(c.Id)} is not a probe (it {ProbeNames.NotAProbe(c.Kind)}), so the launcher does not run it.");
                 if (WhyNotHere(c) is { } why) throw new InvalidOperationException($"'{c.Id}' cannot run here: {why}.");
                 picked.Add(c.Id);
             }
@@ -203,6 +244,7 @@ internal sealed class Launcher : IAsyncDisposable
             }
             else said = $"the Output Folder is '{o}'; the Work Folder stays '{WorkFolder}'";
         }
+        Remember();
         return said;
     }
 
@@ -211,6 +253,7 @@ internal sealed class Launcher : IAsyncDisposable
         NeedProfile("set_work_folder");
         if (WorkFolderRule.Check(path ?? "", Instance!, Profile!, Game!) is { } why) throw new InvalidOperationException(why);
         lock (_gate) { WorkFolder = OutputFolderPolicy.Full(path!); WorkFolderChosen = true; }
+        Remember();
         return $"the Work Folder is '{WorkFolder}'";
     }
 
@@ -251,14 +294,73 @@ internal sealed class Launcher : IAsyncDisposable
 
     /// <summary>Start a run of the selection through the existing pipeline: an in-place entry under
     /// the Work Folder, <c>evalpipeline.py run --through bundle</c>, and the bundle it verifies. Returns at once.</summary>
-    internal string Run()
+    internal string Run() => Run(null);
+
+    /// <summary>The checks a run of <paramref name="only"/> needs: each must be a probe that can run here; the switch census
+    /// is added for conditional geometry, which also makes the run deep.</summary>
+    (List<string> Checks, string Depth) Expand(IReadOnlyList<string> only)
+    {
+        var reg = Registry();
+        var list = new List<string>();
+        foreach (var id in only)
+        {
+            var c = reg.FirstOrDefault(x => string.Equals(x.Id, id, StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException($"'{id}' is not a check of the registry; read workbench_state project launcher for the probes.");
+            if (WhyNotHere(c) is { } why) throw new InvalidOperationException($"{ProbeNames.Of(c.Id)} cannot run here: {why}.");
+            list.Add(c.Id);
+        }
+        if (list.Contains("state.conditional-geometry") && !list.Contains("state.switch-census")) list.Add("state.switch-census");
+        return (list.Distinct().ToList(), list.Contains("state.conditional-geometry") ? "deep" : "standard");
+    }
+
+    /// <summary>The probe a check runs (the registry's exe).</summary>
+    internal static string? ExeOf(string check) => Registry().FirstOrDefault(c => string.Equals(c.Id, check, StringComparison.OrdinalIgnoreCase))?.Exe;
+
+    /// <summary>Stop the whole run: the pipeline and every probe it started.</summary>
+    internal string AbortRun()
+    {
+        if (RunTask is not { IsCompleted: false } || _pipeline is null) throw new InvalidOperationException("no run is going, so there is nothing to abort.");
+        _groupAborted = true;
+        try { _pipeline.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
+        lock (_gate) { RunState = "aborted"; RunRefusal = "the run was aborted; no bundle was made."; }
+        return "aborted the whole run: the pipeline and every probe it started were stopped.";
+    }
+
+    /// <summary>Stop one probe of the running run and nothing else: its live process now, and any later pass of it in this run.
+    /// A probe shared by two checks stops for both, and says so.</summary>
+    internal string AbortProbe(string? check)
+    {
+        if (RunTask is not { IsCompleted: false } || RunStore is not { } store) throw new InvalidOperationException("no run is going, so there is no probe to abort.");
+        var id = RunChecks.FirstOrDefault(c => string.Equals(c, check?.Trim(), StringComparison.OrdinalIgnoreCase))
+                 ?? throw new InvalidOperationException($"'{check}' is not a probe of the running run; abort takes one of {string.Join(", ", RunChecks)}.");
+        var exe = ExeOf(id) ?? throw new InvalidOperationException($"{ProbeNames.Of(id)} names no probe exe in the registry.");
+        var sharing = RunChecks.Where(c => c != id && string.Equals(ExeOf(c), exe, StringComparison.OrdinalIgnoreCase)).ToList();
+        lock (_gate) { AbortedChecks.Add(id); foreach (var c in sharing) AbortedChecks.Add(c); }
+        var stopped = ProbeRuns.Abort(store, exe);
+        return (stopped.Count > 0 ? $"aborted {ProbeNames.Of(id)}: stopped {exe} (process {string.Join(", ", stopped)})" : $"{ProbeNames.Of(id)} will be stopped when its {exe} starts")
+               + (sharing.Count > 0 ? $"; {string.Join(", ", sharing.Select(ProbeNames.Of))} shares that probe and stops with it" : "")
+               + "; the rest of the run goes on.";
+    }
+
+    /// <summary>What a probe's tile shows now.</summary>
+    internal ProbeProgress ProgressOf(string check)
+    {
+        var exe = ExeOf(check);
+        if (exe is null || !RunChecks.Contains(check, StringComparer.OrdinalIgnoreCase) || RunFolder is null) return new("idle", null, "", null);
+        return ProbeRuns.Of(RunStore, exe, AbortedChecks.Contains(check), RunTask is { IsCompleted: true }, DateTimeOffset.UtcNow, _first.GetValueOrDefault(exe));
+    }
+
+    /// <summary>Start a run of <paramref name="only"/>, or of the ticked probes when it is null.</summary>
+    internal string Run(IReadOnlyList<string>? only)
     {
         if (Instance is null) throw new InvalidOperationException("there is nothing to run: open a profile first (workbench_act verb open_profile).");
         if (RunBlocker?.Invoke() is { } blocked) throw new InvalidOperationException(blocked);
         if (RunTask is { IsCompleted: false }) throw new InvalidOperationException("a run is already going; read workbench_state with project [\"launcher\"] and wait_seconds for it.");
         var sel = Mods.Where(m => m.Selected).Select(m => m.Name).ToList();
         if (sel.Count == 0) throw new InvalidOperationException("no mod folder is selected; select the mods to evaluate (workbench_act verb select_mods).");
-        if (Probes.Count == 0) throw new InvalidOperationException("no probe is selected; select probes (workbench_act verb select_probes).");
+        if (only is null && Probes.Count == 0) throw new InvalidOperationException("no probe is selected; select probes (workbench_act verb select_probes).");
+        var (checks, depth) = only is null ? (Probes.ToList(), Depth) : Expand(only);
+        if (checks.Count == 0) throw new InvalidOperationException("run needs at least one probe.");
         if (Output is null) throw new InvalidOperationException("choose an Output Folder first (workbench_act verb set_output).");
         if (WorkFolder is null) throw new InvalidOperationException("with the Output Folder at the instance's mods folder there is no default Work Folder; choose one outside the instance and the game folder (workbench_act verb set_work_folder).");
         if (WorkFolderRule.Check(WorkFolder, Instance, Profile!, Game!) is { } bad) throw new InvalidOperationException(bad);
@@ -269,7 +371,7 @@ internal sealed class Launcher : IAsyncDisposable
         File.WriteAllText(entry, JsonSerializer.Serialize(new
         {
             schema = 1, id = "wb-" + stamp, inPlace = new { instance = Instance, profile = Profile, game = Game },
-            selection = new { mods = sel }, evaluation = new { select = Probes.ToArray(), depth = Depth },
+            selection = new { mods = sel }, evaluation = new { select = checks.ToArray(), depth },
         }, new JsonSerializerOptions { WriteIndented = true }));
         // the machine file: WB_MACHINE's (heavy-stage prefix and the rest), with the names read through this checkout's server
         var machine = Path.Combine(dir, "machine.json");
@@ -284,7 +386,24 @@ internal sealed class Launcher : IAsyncDisposable
         var pipeline = Environment.GetEnvironmentVariable("WB_PIPELINE_CMD") is { Length: > 0 } pc ? pc
             : Program.FromCheckoutPublic("WB_PIPELINE", "evaluation pipeline evalpipeline.py", "_geometry-harness", "evalpipeline.py");
         var run = Path.Combine(dir, "run");
-        lock (_gate) { RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; RunFolder = dir; }
+        lock (_gate)
+        {
+            RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; RunFolder = dir;
+            RunChecks.Clear(); RunChecks.AddRange(checks); AbortedChecks.Clear(); _groupAborted = false;
+            // the first guess per probe: the run-log estimator over earlier runs' histories (this Work Folder's runs and the default store)
+            _first.Clear();
+            // earlier workbench runs only: the default store also holds self-tests and probes of other sizes, which are not this work
+            var histories = Directory.EnumerateDirectories(WorkFolder).Select(d => Path.Combine(d, "run", "runlog", "history.jsonl")).ToList();
+            foreach (var exe in checks.Select(ExeOf).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+                _first[exe] = ProbeRuns.First(histories, exe, DateTimeOffset.UtcNow);
+        }
+        // an aborted probe stays stopped: any later pass of it in this run is stopped as it starts
+        _enforce?.Dispose();
+        _enforce = new System.Threading.Timer(_ =>
+        {
+            string[] aborted; lock (_gate) aborted = AbortedChecks.ToArray();
+            if (RunStore is { } st) foreach (var exe in aborted.Select(ExeOf).OfType<string>().Distinct()) ProbeRuns.Abort(st, exe);
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         RunTask = Task.Run(() =>
         {
             var psi = new System.Diagnostics.ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -295,13 +414,16 @@ internal sealed class Launcher : IAsyncDisposable
             try
             {
                 using var p = System.Diagnostics.Process.Start(psi)!;
+                _pipeline = p;
                 using var w = new StreamWriter(log) { AutoFlush = true };
                 p.OutputDataReceived += (_, e) => { if (e.Data is null) return; lock (w) w.WriteLine(e.Data); RunLine = e.Data; };
                 p.ErrorDataReceived += (_, e) => { if (e.Data is null) return; lock (w) w.WriteLine(e.Data); if (e.Data.Trim().Length > 0) RunLine = e.Data; };
                 p.BeginOutputReadLine(); p.BeginErrorReadLine();
                 p.WaitForExit();
+                _enforce?.Dispose(); _pipeline = null;
                 var bundle = Path.Combine(run, "bundle", "evidence");
-                if (p.ExitCode == 0 && File.Exists(Path.Combine(bundle, "manifest.json")))
+                if (_groupAborted) { }                                                     // AbortRun said so already
+                else if (p.ExitCode == 0 && File.Exists(Path.Combine(bundle, "manifest.json")))
                 {
                     lock (_gate) { RunState = "done"; RunBundle = bundle; }
                     BundleReady?.Invoke(bundle);
@@ -310,7 +432,7 @@ internal sealed class Launcher : IAsyncDisposable
             }
             catch (Exception ex) { lock (_gate) { RunState = "refused"; RunRefusal = $"the pipeline could not be started: {ex.Message}"; } }
         });
-        return $"running the selection ({sel.Count} mod folder(s), {Probes.Count} probe check(s), depth {Depth}) in place on profile '{Profile}'; its files go under '{dir}'";
+        return $"running {(checks.Count == 1 ? ProbeNames.Of(checks[0]) : $"{checks.Count} probes")} ({sel.Count} mod folder(s), depth {depth}) in place on profile '{Profile}'; its files go under '{dir}'";
     }
 
     static string StateServerExe() { try { return Program.DefaultServerExe(); } catch (InvalidOperationException) { return "housecarl-mcp.exe"; } }
@@ -383,11 +505,14 @@ internal sealed class Launcher : IAsyncDisposable
                 mode = Mode, instance = Instance, game = Game, profile = Profile,
                 profiles = Instance is null ? Array.Empty<string>() : ProfilesOf(Instance),
                 mods = Mods.Select(m => new { name = m.Name, priority = m.Priority, enabled = m.Enabled, separator = m.Separator, unmanaged = m.Unmanaged, selected = m.Selected }).ToList(),
-                probes = Registry().Select(c => new
+                probes = Registry().Where(c => ProbeKinds.Contains(c.Kind)).Select(c => new
                 {
-                    checkId = c.Id, kind = c.Kind, title = c.Title, selectable = WhyNotHere(c) is null, selected = Probes.Contains(c.Id),
+                    checkId = c.Id, name = ProbeNames.Of(c.Id), group = ProbeNames.Family(c.Id), title = c.Title, selectable = WhyNotHere(c) is null, selected = Probes.Contains(c.Id),
                     whyNot = WhyNotHere(c), addedFor = AddedFor.GetValueOrDefault(c.Id),
+                    progress = RunChecks.Contains(c.Id) && ProgressOf(c.Id) is { } pr ? new { state = pr.State, fraction = pr.Fraction, line = pr.Line, eta = pr.Eta } : null,
                 }).ToList(),
+                notProbes = Registry().Where(c => !ProbeKinds.Contains(c.Kind)).Select(c => new { checkId = c.Id, name = ProbeNames.Of(c.Id), why = ProbeNames.NotAProbe(c.Kind) }).ToList(),
+                settings = new { path = SettingsPath, note = SettingsNote },
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
                 depth = Depth,
                 run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle },

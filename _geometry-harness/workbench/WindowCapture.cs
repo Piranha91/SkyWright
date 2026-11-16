@@ -9,6 +9,27 @@ namespace Workbench;
 /// PrintWindow returned a blank window here (stage 4, run 1), so the picture is a composite, and is called one.</summary>
 internal static class WindowCapture
 {
+    /// <summary>Save the window's content alone (no scene view: the launcher before a run) as PNG; returns its size in device pixels.</summary>
+    internal static (int W, int H) SaveWindow(Window window, string path)
+    {
+        if (window.Content is not FrameworkElement content || content.ActualWidth <= 0)
+            throw new InvalidOperationException("the workbench window has no laid-out content yet, so it cannot be captured.");
+        var dpi = VisualTreeHelper.GetDpi(window);
+        int w = (int)Math.Ceiling(content.ActualWidth * dpi.DpiScaleX), h = (int)Math.Ceiling(content.ActualHeight * dpi.DpiScaleY);
+        var ui = new RenderTargetBitmap(w, h, dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+        var dv = new DrawingVisual();
+        using (var dc = dv.RenderOpen())
+            dc.DrawRectangle(window.Background ?? Brushes.White, null, new Rect(0, 0, content.ActualWidth, content.ActualHeight));
+        ui.Render(dv);                                    // the window's background first, then its content at its own size
+        ui.Render(content);
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        using var f = File.Create(path);
+        var enc = new PngBitmapEncoder();
+        enc.Frames.Add(BitmapFrame.Create(ui));
+        enc.Save(f);
+        return (w, h);
+    }
+
     /// <summary>Save the composite as PNG; returns its size in device pixels.</summary>
     internal static (int W, int H) SaveComposite(Window window, FrameworkElement viewSlot, string viewPng, string path)
     {

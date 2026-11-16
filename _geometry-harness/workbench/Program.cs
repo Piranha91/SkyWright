@@ -116,6 +116,13 @@ internal static class Program
             var window = Shell.EnsureWindow("workbench — start");
             Shell.Launcher.RunBlocker = () => Shell.Current is not null ? "a scene is open in this window; restart the workbench to run another selection." : null;
             window.Show();
+            // free mode remembers the instance, profile and Output Folder between sessions (workbench-settings.json beside the exe)
+            window.Dispatcher.BeginInvoke(async () =>
+            {
+                try { LauncherView.Say(await Shell.Launcher.RestoreAsync()); }
+                catch (Exception ex) { LauncherView.Say("the last session's settings could not be restored: " + ex.GetBaseException().Message); }
+                LauncherView.Fill();
+            });
             while (true)
             {
                 string? ready = null;
