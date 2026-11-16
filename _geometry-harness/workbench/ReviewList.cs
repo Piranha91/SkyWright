@@ -26,10 +26,17 @@ internal static class ReviewList
     /// <summary>The list for a surface: each row's stored decision, compared on its detector row (no scene, no server),
     /// or the full comparison already made for it in <paramref name="cache"/> when the row half still holds.</summary>
     internal static IReadOnlyList<ReviewEntry> For(IWorkbenchSurface s, IReadOnlyList<RankedRow> rows, Dictionary<string, DecisionMatch> cache, bool includeDecided)
+        => Build(rows, StandingOf(s, cache), includeDecided);
+
+    /// <summary>The scenes for a surface, on the same standings as <see cref="For"/>; null when the skill's policy is not found.</summary>
+    internal static IReadOnlyList<SceneView>? ScenesFor(IWorkbenchSurface s, Dictionary<string, DecisionMatch> cache, bool includeDecided)
+        => s.ScenePolicy is { } p ? BuildScenes(s.Listed, s.Findings, p, StandingOf(s, cache), includeDecided) : null;
+
+    static Func<RankedRow, (Decision?, DecisionMatch)> StandingOf(IWorkbenchSurface s, Dictionary<string, DecisionMatch> cache)
     {
         var store = DecisionStore.For(s.WorkFolder);
         var binding = s.Binding;
-        return Build(rows, r =>
+        return r =>
         {
             if (store is null || binding is not { } b) return (null, new DecisionMatch(Standing.Undecided, "undecided"));
             var key = Decisions.RowKey(r.Row);
@@ -37,13 +44,38 @@ internal static class ReviewList
             var m = Decisions.CompareRow(d, s.RowStateOf(r));
             if (m.Standing != Standing.Reconsider && cache.TryGetValue(key, out var full)) m = full;
             return (d, m);
-        }, includeDecided);
+        };
     }
 
     /// <summary>The scenes the Conflicts tab and the scenes part draw: each scene's rows in the list's order, intentional
     /// rows that still apply hidden unless asked for, and the count hidden.</summary>
     internal static IReadOnlyList<SceneView> BuildScenes(IReadOnlyList<RankedRow> rows, IReadOnlyList<RankedFinding> findings, SceneKeyPolicy policy,
-        Func<RankedRow, (Decision? Decision, DecisionMatch Standing)> standing, bool includeDecided) => Array.Empty<SceneView>();
+        Func<RankedRow, (Decision? Decision, DecisionMatch Standing)> standing, bool includeDecided)
+    {
+        var byRank = rows.GroupBy(r => r.Rank).ToDictionary(g => g.Key, g => g.First());
+        return Scenes.Build(rows, findings, policy).Scenes.Select(sc =>
+        {
+            var sceneRows = sc.Clusters.SelectMany(c => c.Ranks).OrderBy(r => r).Select(r => byRank[r]).ToList();
+            var shown = Build(sceneRows, standing, includeDecided);
+            int hidden = sceneRows.Count - shown.Count;
+            return new SceneView(sc, shown, hidden, Header(sc, sceneRows.Count, hidden));
+        }).ToList();
+    }
+
+    /// <summary>A scene's header: its cell, its rows, clusters and groups, the Findings rows listed with it, and how many are hidden.</summary>
+    internal static string Header(Scene sc, int rows, int hidden)
+    {
+        var bits = new List<string>();
+        if (rows > 0)
+        {
+            int groups = sc.Clusters.Sum(c => c.Groups.Count);
+            bits.Add($"{rows} conflict{(rows == 1 ? "" : "s")}" + (sc.Clusters.Count > 1 ? $" in {sc.Clusters.Count} clusters" : "")
+                     + (groups < rows ? $", {groups} group{(groups == 1 ? "" : "s")} of one problem" : ""));
+        }
+        if (sc.FindingRanks.Count > 0) bits.Add($"{sc.FindingRanks.Count} finding{(sc.FindingRanks.Count == 1 ? "" : "s")}");
+        if (hidden > 0) bits.Add($"{hidden} hidden (decided intentional)");
+        return $"scene {sc.Number}, cell {sc.Cell}: {string.Join(", ", bits)}";
+    }
 
     /// <summary>The row a "next undecided" opens after <paramref name="currentRank"/>: a reconsider row first, then an
     /// undecided one, each in rank order after the current row and then from the top.</summary>

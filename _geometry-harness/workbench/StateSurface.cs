@@ -103,6 +103,7 @@ internal sealed class LiveSurface : IWorkbenchSurface
     public BundleConflicts? Open => Shell.Bundle;
     public SeverityTable? Severity => Shell.Severity;
     public IReadOnlyList<RankedFinding> Findings => Shell.Findings;
+    public SceneKeyPolicy? ScenePolicy => Shell.ScenePolicy;
     public string? WorkFolder => Shell.Launcher.WorkFolder
         ?? (Environment.GetEnvironmentVariable("WB_WORK") is { Length: > 0 } w ? w : Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : null);
     public (string Instance, string Profile)? Binding => WorkbenchHost.TargetFromEnv() is { } t ? (t.Instance, t.Profile) : null;

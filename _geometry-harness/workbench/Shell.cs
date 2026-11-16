@@ -62,7 +62,15 @@ internal static class Shell
         _app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
         ScrollViewer.SetHorizontalScrollBarVisibility(ConflictList, ScrollBarVisibility.Auto);
         VirtualizingPanel.SetIsVirtualizing(Records, true);
-        ConflictList.SelectionChanged += (_, _) => { if (ConflictList.SelectedItem is ListBoxItem { Tag: RankedRow r }) OpenRow(r); };
+        ConflictList.SelectionChanged += (_, _) =>
+        {
+            switch (ConflictList.SelectedItem)
+            {
+                case ListBoxItem { Tag: RankedRow r }: OpenRow(r); break;
+                case ListBoxItem { Tag: Scene sc } when sc.BestRank is { } best && Visible.FirstOrDefault(x => x.Rank == best) is { } row: OpenRow(row); break;
+                case ListBoxItem { Tag: RankedFinding f }: SetBanner(new LiveSurface().OpenFinding(f)); break;
+            }
+        };
         Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) { CurrentRow = null; OpenRef(n.Key, CellOfRef(n.Key)); } };
         ScrollViewer.SetHorizontalScrollBarVisibility(FindingList, ScrollBarVisibility.Auto);
         FindingList.SelectionChanged += (_, _) =>
@@ -141,20 +149,50 @@ internal static class Shell
         Dispatcher.PushFrame(f);
     }
 
+    /// <summary>The reporting skill's grouping data the scenes are built from, or why it is not there.</summary>
+    internal static SceneKeyPolicy? ScenePolicy => _scenePolicy.Value.Policy;
+    internal static string? ScenePolicyRefusal => _scenePolicy.Value.Refusal;
+    static readonly Lazy<(SceneKeyPolicy? Policy, string? Refusal)> _scenePolicy = new(() =>
+    {
+        var path = Environment.GetEnvironmentVariable("WB_SCENE_POLICY");
+        if (string.IsNullOrWhiteSpace(path))
+            for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+                if (File.Exists(Path.Combine(dir.FullName, SceneKeyPolicy.RelativePath))) { path = Path.Combine(dir.FullName, SceneKeyPolicy.RelativePath); break; }
+        if (string.IsNullOrWhiteSpace(path)) return (null, "the reporting skill's scene policy was not found beside the workbench, so rows are listed without scenes.");
+        try { return (SceneKeyPolicy.Load(path), null); }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or System.Text.Json.JsonException) { return (null, ex.Message); }
+    });
+
     internal static void FillConflicts()
     {
         ConflictList.Items.Clear();
-        // the one list model the conflicts state part renders: decision order, intentional rows behind the toggle
-        foreach (var e in ReviewList.For(new LiveSurface(), Visible, Standings, ShowDecided))
+        var live = new LiveSurface();
+        // the one list model the conflicts and scenes state parts render: scenes by cell, decision order inside each,
+        // intentional rows behind the toggle
+        if (ReviewList.ScenesFor(live, Standings, ShowDecided) is { } scenes)
         {
-            var r = e.Row;
-            string decided = e.Decision is { } d ? $"\n   {d.Verdict}: {d.Reason} — {e.Standing.Sentence}" : "";
-            var item = new ListBoxItem { Content = RowText(r) + decided, Tag = r };
-            if (r.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
-            if (e.Standing.Standing == Standing.Reconsider) item.Foreground = Brushes.Firebrick;
-            else if (e.Decision is not null) item.Foreground = Brushes.DimGray;
-            ConflictList.Items.Add(item);
+            foreach (var v in scenes)
+            {
+                ConflictList.Items.Add(new ListBoxItem { Content = v.Header, Tag = v.Scene, FontWeight = FontWeights.Bold, Foreground = Brushes.SteelBlue });
+                foreach (var e in v.Rows) ConflictList.Items.Add(RowItem(e));
+                foreach (var fr in v.Scene.FindingRanks)
+                    if (Findings.FirstOrDefault(f => f.Rank == fr) is { } f)
+                        ConflictList.Items.Add(new ListBoxItem { Content = $"   finding {f.Rank}. [{f.Row.CheckId}] {f.Row.Summary}   (not decided here)", Tag = f, Foreground = Brushes.DimGray });
+            }
+            return;
         }
+        foreach (var e in ReviewList.For(live, Visible, Standings, ShowDecided)) ConflictList.Items.Add(RowItem(e));
+    }
+
+    static ListBoxItem RowItem(ReviewEntry e)
+    {
+        var r = e.Row;
+        string decided = e.Decision is { } d ? $"\n   {d.Verdict}: {d.Reason} — {e.Standing.Sentence}" : "";
+        var item = new ListBoxItem { Content = RowText(r) + decided, Tag = r };
+        if (r.InvolvesTarget) item.FontWeight = FontWeights.SemiBold;
+        if (e.Standing.Standing == Standing.Reconsider) item.Foreground = Brushes.Firebrick;
+        else if (e.Decision is not null) item.Foreground = Brushes.DimGray;
+        return item;
     }
 
     /// <summary>The Findings tab: read-only, ranked; a clickable row opens the viewer, any other says why in the banner.</summary>

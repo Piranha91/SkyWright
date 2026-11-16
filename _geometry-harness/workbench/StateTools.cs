@@ -77,7 +77,7 @@ internal sealed class StateTools
             if (decisions is not null) d["decisions"] = decisions;
             if (parts.Contains("findings")) d["findings"] = FindingsPart(hub.Surface, limit, offset, filter, check);
             if (parts.Contains("launcher")) d["launcher"] = hub.Launcher.Project();
-            if (parts.Contains("scenes")) d["scenes"] = new { };
+            if (parts.Contains("scenes")) d["scenes"] = ScenesJson(hub.Surface, hub.Standings, include_decided);
             if (parts.Contains("context")) d["context"] = new { };
             if (parts.Contains("placements")) d["placements"] = new { };
             return Answer(d);
@@ -140,7 +140,8 @@ internal sealed class StateTools
             var v = (verb ?? "").Trim().ToLowerInvariant();
             if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
-            if (v is "move_with" or "find_clear" or "choose" || scene is not null) return Answer(new { said = "" });
+            if (v == "select" && scene is { } sn) return SelectScene(hub, sn);
+            if (v is "move_with" or "find_clear" or "choose") return Answer(new { said = "" });
             if (finding is { } fr) return await SelectFinding(hub.Surface, verb, fr);
             var r = v switch
             {
@@ -371,6 +372,25 @@ internal sealed class StateTools
         return new { checks, total = all.Count, matched = rows.Count, offset, limit, rows = rows.Skip(offset).Take(limit).Select(FindingRowJson).ToList() };
     }
 
+    /// <summary>Item 7: open a scene's best row (a findings-only scene: its first Findings row).</summary>
+    static CallToolResult SelectScene(StateHub hub, int number)
+    {
+        var s = hub.Surface;
+        if (ReviewList.ScenesFor(s, hub.Standings, true) is not { } views) return Refuse("the reporting skill's scene policy was not found, so there are no scenes to open.");
+        if (views.FirstOrDefault(v => v.Scene.Number == number) is not { } view)
+            return Refuse($"no scene is numbered {number}; read workbench_state with project [\"scenes\"] to see them.");
+        string said;
+        try
+        {
+            if (view.Scene.BestRank is { } best && s.Listed.FirstOrDefault(r => r.Rank == best) is { } row) said = s.OpenConflict(row);
+            else if (view.Scene.FindingRanks.Count > 0 && s.Findings.FirstOrDefault(f => f.Rank == view.Scene.FindingRanks[0]) is { } fr) said = s.OpenFinding(fr);
+            else return Refuse($"scene {number} has no row that opens.");
+        }
+        catch (InvalidOperationException ex) { return Refuse(ex.Message); }
+        SaveSession(s);
+        return Answer(new { said = $"{view.Header}; {said}", state = Project(s, DefaultParts, 20, 0, null) });
+    }
+
     static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run" };
     static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
 
@@ -539,12 +559,44 @@ internal sealed class StateTools
         physical = r.PhysicalLabel, evidence = r.EvidenceLabel, isNew = r.NewLabel, severity = r.Severity,
     };
 
+    /// <summary>Each Conflicts row's scene number; empty when the skill's policy is not found.</summary>
+    static IReadOnlyDictionary<int, int> SceneNumbers(IWorkbenchSurface s)
+    {
+        var map = new Dictionary<int, int>();
+        if (s.ScenePolicy is not { } p) return map;
+        foreach (var sc in Scenes.Build(s.Listed, s.Findings, p).Scenes)
+            foreach (var r in sc.Clusters.SelectMany(c => c.Ranks)) map[r] = sc.Number;
+        return map;
+    }
+
+    /// <summary>Item 7's scenes as the tab draws them, from the one list model.</summary>
+    static object ScenesJson(IWorkbenchSurface s, Dictionary<string, DecisionMatch> standings, bool includeDecided)
+    {
+        if (ReviewList.ScenesFor(s, standings, includeDecided) is not { } views)
+            return new { refused = "the reporting skill's scene policy was not found, so rows are not grouped into scenes." };
+        var list = Scenes.Build(s.Listed, s.Findings, s.ScenePolicy!);
+        return new
+        {
+            rule = "a scene is one cell; inside it, rows naming a common reference are one cluster, and rows with equal group-key values (" +
+                   string.Join(", ", s.ScenePolicy!.Keys) + ") are one group",
+            unplacedFindings = list.UnplacedFindings,
+            scenes = views.Select(v => new
+            {
+                number = v.Scene.Number, cell = v.Scene.Cell, bestRank = v.Scene.BestRank, header = v.Header, hidden = v.Hidden,
+                rows = v.Rows.Select(e => new { rank = e.Row.Rank, standing = e.Standing.Standing.ToString().ToLowerInvariant(), verdict = e.Decision?.Verdict }),
+                clusters = v.Scene.Clusters.Select(c => new { ranks = c.Ranks, groups = c.Groups.Select(g => new { key = g.Key, ranks = g.Ranks }) }),
+                findings = v.Scene.FindingRanks,
+            }).ToList(),
+        };
+    }
+
     /// <summary>The state as <c>workbench_state</c> answers it, built from the live objects each time.</summary>
-    static object ReviewJson(ReviewEntry e, RankedRow? open)
+    static object ReviewJson(ReviewEntry e, RankedRow? open, IReadOnlyDictionary<int, int>? sceneOf = null)
     {
         var r = e.Row;
         return new
         {
+            scene = sceneOf is not null && sceneOf.TryGetValue(r.Rank, out var sn) ? sn : (int?)null,
             rank = r.Rank, open = ReferenceEquals(r, open) || (open is not null && open.Row.Identity == r.Row.Identity),
             kind = r.Row.Kind, a = r.Row.A, b = r.Row.B, @ref = r.Row.RefKey, refBase = r.Row.RefBaseEditorId, refType = r.Row.RefBaseType,
             other = r.Row.OtherKey, otherBase = r.Row.OtherBaseEditorId, cell = r.Row.Cell, summary = r.Row.Summary,
@@ -566,12 +618,13 @@ internal sealed class StateTools
         {
             bool Has(string? v) => v is not null && filter is not null && v.Contains(filter, StringComparison.OrdinalIgnoreCase);
             var review = ReviewList.For(s, s.Listed, standings ?? new(StringComparer.OrdinalIgnoreCase), includeDecided);
+            var sceneOf = SceneNumbers(s);
             var rows = review.Where(e => filter is null || Has(e.Row.Row.Kind) || Has(e.Row.Row.A) || Has(e.Row.Row.B) || Has(e.Row.Row.RefKey) || Has(e.Row.Row.OtherKey)
                                            || Has(e.Row.Row.RefBaseEditorId) || Has(e.Row.Row.OtherBaseEditorId)).ToList();
             d["conflicts"] = new
             {
                 total = s.Total, listed = review.Count, hiddenDecided = s.Listed.Count - review.Count, matched = rows.Count, offset, limit,
-                rows = rows.Skip(offset).Take(limit).Select(e => ReviewJson(e, s.OpenRow)),
+                rows = rows.Skip(offset).Take(limit).Select(e => ReviewJson(e, s.OpenRow, sceneOf)),
             };
         }
         if (parts.Contains("selection"))
