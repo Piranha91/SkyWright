@@ -616,14 +616,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     /// <summary>A candidate raised 20 units and dropped onto what is below it; a refused drop keeps it at its own height and says why.</summary>
     (RefPlacementEdit.Pose Pose, string Drop) Settle(FormKey key, RefPlacementEdit.Pose target)
-    {
-        var raised = target with { Position = new Vec3(target.Position.X, target.Position.Y, target.Position.Z + 20f) };
-        var d = CaptureViews.Drop(GeometryWith(key, raised), key.ToString());
-        if (d.Refusal is not null || d.Distance is not { } dist) return (target, d.Refusal ?? "the drop gave no distance");
-        var onto = d.Onto == CaptureViews.TerrainKey ? "the terrain" : $"{d.Onto} ({d.OntoName})";
-        return (raised with { Position = new Vec3(raised.Position.X, raised.Position.Y, raised.Position.Z - dist) },
-                FormattableString.Invariant($"raised 20 units and lowered {dist:0.##} units onto {onto}; drop lowers onto drawn surfaces (render triangles), not collision"));
-    }
+        => TrialLane.SettleBy(target, p => CaptureViews.Drop(GeometryWith(key, p), key.ToString()));
 
     /// <summary>What the contact owner says the reference touches or crosses at a candidate pose: a fact beside the drop sentence.</summary>
     IReadOnlyList<string> ContactsAt(FormKey key, RefPlacementEdit.Pose pose)

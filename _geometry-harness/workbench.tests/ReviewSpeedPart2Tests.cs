@@ -311,7 +311,10 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     public async Task C5i_a_failed_read_is_its_sections_sentence_and_the_other_sections_still_answer()
     {
         var src = TownSource(); src.NamesFail = new IOException("the server closed the pipe");
-        var a = await ContextRead.ReadAsync(src, Town(), K(Building), NoNav, _ => null);
+        ContextAnswer? got = null;
+        var thrown = await Record.ExceptionAsync(async () => got = await ContextRead.ReadAsync(src, Town(), K(Building), NoNav, _ => null));
+        Assert.True(thrown is null, "one failed read failed the whole panel: " + thrown?.Message);
+        var a = got!;
         Assert.True(a.Sections.TryGetValue("names", out var why), "the names section said nothing about its failure");
         Assert.Contains("the server closed the pipe", why);
         Assert.Equal(2, a.Doors.Count);
@@ -598,6 +601,19 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         var p = Assert.Single(lane.Placements, x => x.N == 1);
         Assert.Contains("already sunk", p.Drop);
         Assert.Equal(Home.Position.Z, p.Pose.Position.Z, 3);
+    }
+
+    // B8: the settle rule itself: a refused drop keeps the reference's own height, a landed one lowers from 20 up
+    [Fact]
+    public void P8r_a_refused_drop_keeps_the_own_height_and_a_landed_one_lowers_from_twenty_up()
+    {
+        var target = Home;
+        var (kept, said) = TrialLane.SettleBy(target, p => new CaptureViews.DropAnswer("k", null, null, null, "it is already sunk"));
+        Assert.Equal(target.Position.Z, kept.Position.Z, 3);
+        Assert.Equal("it is already sunk", said);
+        var (landed, said2) = TrialLane.SettleBy(target, p => new CaptureViews.DropAnswer("k", 7f, CaptureViews.TerrainKey, CaptureViews.TerrainKey, null));
+        Assert.Equal(target.Position.Z + 13f, landed.Position.Z, 3);
+        Assert.Contains("onto the terrain", said2);
     }
 
     [Fact]

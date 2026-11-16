@@ -230,6 +230,18 @@ internal sealed class TrialLane
         return (p.Pose, $"staged candidate {n} ({p.Verdict?.Word ?? "not judged yet"}): {p.Move}; nothing is written until commit");
     }
 
+    /// <summary>The candidate's settle rule: raised 20 units and lowered by the drop onto what is below; a refused drop keeps
+    /// the candidate at the reference's own height, and the refusal is its drop sentence.</summary>
+    internal static (RefPlacementEdit.Pose Pose, string Drop) SettleBy(RefPlacementEdit.Pose target, Func<RefPlacementEdit.Pose, CaptureViews.DropAnswer> drop)
+    {
+        var raised = target with { Position = new Vec3(target.Position.X, target.Position.Y, target.Position.Z + 20f) };
+        var d = drop(raised);
+        if (d.Refusal is not null || d.Distance is not { } dist) return (target, d.Refusal ?? "the drop gave no distance");
+        var onto = d.Onto == CaptureViews.TerrainKey ? "the terrain" : $"{d.Onto} ({d.OntoName})";
+        return (raised with { Position = new Vec3(raised.Position.X, raised.Position.Y, raised.Position.Z - dist) },
+                FormattableString.Invariant($"raised 20 units and lowered {dist:0.##} units onto {onto}; drop lowers onto drawn surfaces (render triangles), not collision"));
+    }
+
     internal static string CostSentence(int candidates) => FormattableString.Invariant(
         $"checking {candidates} positions, about {candidates * SecondsLow / 60:0.0} to {candidates * SecondsHigh / 60:0.0} minutes in all ({SecondsLow:0}-{SecondsHigh:0} s each: the open row's own probe runs twice per candidate); the view stays usable, and each candidate is reported as it lands.");
 
