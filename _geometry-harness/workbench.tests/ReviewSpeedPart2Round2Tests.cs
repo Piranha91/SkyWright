@@ -185,7 +185,7 @@ public sealed class ReviewSpeedPart2Round2Tests
     public void C2a_the_contact_words_say_crosses_or_within_8_units()
     {
         var g = G(Boxes.Box(0x800, new Vec3(0, 0, 0), new Vector3(10, 10, 10), name: "Barrel"),
-                  Boxes.Box(0x801, new Vec3(5, 0, 0), new Vector3(10, 10, 10), name: "Drift"),
+                  Boxes.Box(0x801, new Vec3(5, 4, 3), new Vector3(10, 10, 10), name: "Drift"),        // offset on every axis: its faces cross, none coplanar
                   Boxes.Box(0x802, new Vec3(23, 0, 0), new Vector3(10, 10, 10), name: "Thicket"));
         var words = ContextRead.ContactWords(CaptureViews.Contacts(g, Boxes.Key(0x800).ToString()), g);
         Assert.Contains(words, w => w.Contains("000801") && w.Contains("crosses it"));

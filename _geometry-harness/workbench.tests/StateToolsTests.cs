@@ -1347,7 +1347,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         var subject = Boxes.Box(0x800, new HousecarlCore.Vec3(1000, 0, 0), new System.Numerics.Vector3(20, 20, 20), name: "Barrel");
         var plank = Boxes.Box(0x801, new HousecarlCore.Vec3(1000, 0, 40.2f), new System.Numerics.Vector3(5, 5, 2), name: "Plank");
-        var bowl = Boxes.Box(0x802, new HousecarlCore.Vec3(1010, 10, 40.2f), new System.Numerics.Vector3(3, 3, 3), name: "Bowl");
+        var bowl = Boxes.Box(0x802, new HousecarlCore.Vec3(1010, 12, 40.2f), new System.Numerics.Vector3(5, 5, 3), name: "Bowl");
         var work = NewWorkFolder();
         _surface.WorkFolder = work;
         _surface.SceneShown = _scene = new FakeScene(new EditSession(new[] { subject, plank, bowl }))
@@ -1366,9 +1366,8 @@ public sealed class StateToolsTests : IAsyncLifetime
         var chose = await Ok("workbench_act", A(("verb", "choose"), ("n", 1)));
         Assert.True(At(chose, out var said, "said"), "no sentence: " + chose);
         var text = said.GetString() ?? "";
-        Assert.Contains("000801:HcWbTest.esp", text);
-        Assert.Contains("000802:HcWbTest.esp", text);
-        Assert.Contains("move_with", text);
+        Assert.True(text.Contains("000801:HcWbTest.esp") && text.Contains("000802:HcWbTest.esp") && text.Contains("move_with"),
+                    "choose did not name both resting objects and the move_with hint: " + text);
     }
 
     // C4: the scenes part leaves findings-only cells out unless asked, and says how many

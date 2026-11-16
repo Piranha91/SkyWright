@@ -90,10 +90,12 @@ internal static class Scenes
             placed.Remove(cell.Key);
             made.Add((cell.Key, list[0].Rank, f.Count > 0 ? f[0] : int.MaxValue, clusters, f));
         }
-        // a cell holding only Findings rows is a scene of its own, after those holding Conflicts rows
-        foreach (var (cell, f) in placed) made.Add((cell, null, f[0], new List<SceneCluster>(), f));
+        // a cell holding only Findings rows is a scene of its own, after those holding Conflicts rows, when asked for;
+        // otherwise it is counted (no conflict is judged there)
+        if (includeFindingsOnly) foreach (var (cell, f) in placed) made.Add((cell, null, f[0], new List<SceneCluster>(), f));
         var ordered = made.OrderBy(m => m.Best is null ? 1 : 0).ThenBy(m => m.Best ?? m.BestFinding).ToList();
         var scenes = ordered.Select((m, i) => new Scene(i + 1, m.Cell, m.Best, m.Clusters, m.Findings)).ToList();
-        return new SceneList(scenes, findings.Count(f => !f.Row.Clickable));
+        return new SceneList(scenes, findings.Count(f => !f.Row.Clickable),
+                             includeFindingsOnly ? 0 : placed.Count, includeFindingsOnly ? 0 : placed.Values.Sum(v => v.Count));
     }
 }

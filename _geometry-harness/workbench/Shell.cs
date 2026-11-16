@@ -27,6 +27,9 @@ internal static class Shell
     /// <summary>The "show decided" toggle: rows decided intentional that still apply are hidden unless it is on.</summary>
     internal static bool ShowDecided;
     static readonly CheckBox DecidedRows = new() { Content = "show rows decided intentional", Margin = new Thickness(6, 2, 6, 2) };
+    internal static bool ShowFindingsOnly;
+    static readonly CheckBox FindingsOnlyRows = new() { Content = "show cells with only Findings rows", Margin = new Thickness(6, 2, 6, 2) };
+    static readonly HashSet<int> ExpandedScenes = new();
     internal static string? PendingLand;            // a reference to land on when the next scene arrives
     internal static Stopwatch? SwitchClock;         // runs from a cell switch's request to the next scene's arrival
     internal static string? SwitchCell;
@@ -69,6 +72,7 @@ internal static class Shell
                 case ListBoxItem { Tag: RankedRow r }: OpenRow(r); break;
                 case ListBoxItem { Tag: Scene sc } when sc.BestRank is { } best && Visible.FirstOrDefault(x => x.Rank == best) is { } row: OpenRow(row); break;
                 case ListBoxItem { Tag: RankedFinding f }: SetBanner(new LiveSurface().OpenFinding(f)); break;
+                case ListBoxItem { Tag: FoldTag fold }: ExpandedScenes.Add(fold.Scene); FillConflicts(); break;
             }
         };
         Records.SelectedItemChanged += (_, e) => { if (e.NewValue is TreeViewItem { Tag: TreeNode { Kind: "ref" } n }) { CurrentRow = null; OpenRef(n.Key, CellOfRef(n.Key)); } };
@@ -81,12 +85,14 @@ internal static class Shell
         };
         DecidedRows.Checked += (_, _) => { ShowDecided = true; FillConflicts(); };
         DecidedRows.Unchecked += (_, _) => { ShowDecided = false; FillConflicts(); };
+        FindingsOnlyRows.Checked += (_, _) => { ShowFindingsOnly = true; FillConflicts(); };
+        FindingsOnlyRows.Unchecked += (_, _) => { ShowFindingsOnly = false; FillConflicts(); };
         ReviewList.Changed += () => Window?.Dispatcher.BeginInvoke(FillConflicts);
         AllRows.Checked += (_, _) => { ShowAll = true; FillConflicts(); };
         AllRows.Unchecked += (_, _) => { ShowAll = false; FillConflicts(); };
         var conflictsTab = new DockPanel();
-        DockPanel.SetDock(AllRows, Dock.Top); DockPanel.SetDock(DecidedRows, Dock.Top);
-        conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(DecidedRows); conflictsTab.Children.Add(ConflictList);
+        DockPanel.SetDock(AllRows, Dock.Top); DockPanel.SetDock(DecidedRows, Dock.Top); DockPanel.SetDock(FindingsOnlyRows, Dock.Top);
+        conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(DecidedRows); conflictsTab.Children.Add(FindingsOnlyRows); conflictsTab.Children.Add(ConflictList);
         var tabs = new TabControl { Width = 560 };
         var start = new TabItem { Header = "Start", Content = LauncherView.Build() };
         tabs.Items.Add(start);
@@ -169,16 +175,19 @@ internal static class Shell
         var live = new LiveSurface();
         // the one list model the conflicts and scenes state parts render: scenes by cell, decision order inside each,
         // intentional rows behind the toggle
-        if (ReviewList.ScenesFor(live, Standings, ShowDecided) is { } scenes)
+        if (ReviewList.ScenesViewFor(live, Standings, ShowDecided, ShowFindingsOnly) is { } view)
         {
-            foreach (var v in scenes)
-            {
-                ConflictList.Items.Add(new ListBoxItem { Content = v.Header, Tag = v.Scene, FontWeight = FontWeights.Bold, Foreground = Brushes.SteelBlue });
-                foreach (var e in v.Rows) ConflictList.Items.Add(RowItem(e));
-                foreach (var fr in v.Scene.FindingRanks)
-                    if (Findings.FirstOrDefault(f => f.Rank == fr) is { } f)
-                        ConflictList.Items.Add(new ListBoxItem { Content = $"   finding {f.Rank}. [{f.Row.CheckId}] {f.Row.Summary}   (not decided here)", Tag = f, Foreground = Brushes.DimGray });
-            }
+            // Findings indexed by rank once; long runs folded; findings-only cells counted unless the toggle lists them
+            var byRank = Findings.GroupBy(f => f.Rank).ToDictionary(g => g.Key, g => g.First());
+            foreach (var it in ReviewList.Items(view, byRank, ReviewList.FindingsFoldAt, ExpandedScenes))
+                ConflictList.Items.Add(it.Kind switch
+                {
+                    "header" => new ListBoxItem { Content = it.Text, Tag = it.Tag, FontWeight = FontWeights.Bold, Foreground = Brushes.SteelBlue },
+                    "row" => RowItem((ReviewEntry)it.Tag!),
+                    "finding" => new ListBoxItem { Content = it.Text, Tag = it.Tag, Foreground = Brushes.DimGray },
+                    "fold" => new ListBoxItem { Content = it.Text, Tag = it.Tag, FontStyle = FontStyles.Italic, Foreground = Brushes.SteelBlue },
+                    _ => new ListBoxItem { Content = it.Text, FontStyle = FontStyles.Italic, Foreground = Brushes.DimGray },
+                });
             return;
         }
         foreach (var e in ReviewList.For(live, Visible, Standings, ShowDecided)) ConflictList.Items.Add(RowItem(e));

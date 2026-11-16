@@ -87,7 +87,7 @@ internal sealed class StateTools
             if (decisions is not null) d["decisions"] = decisions;
             if (parts.Contains("findings")) d["findings"] = FindingsPart(hub.Surface, limit, offset, filter, check);
             if (parts.Contains("launcher")) d["launcher"] = hub.Launcher.Project();
-            if (parts.Contains("scenes")) d["scenes"] = ScenesJson(hub.Surface, hub.Standings, include_decided);
+            if (parts.Contains("scenes")) d["scenes"] = ScenesJson(hub.Surface, hub.Standings, include_decided, include_findings_only);
             if (parts.Contains("context")) d["context"] = ContextJson(hub.Surface);
             if (parts.Contains("placements")) d["placements"] = PlacementsJson(hub.Surface);
             return Answer(d);
@@ -156,7 +156,7 @@ internal sealed class StateTools
             if (v == "select" && scene is { } sn) return SelectScene(hub, sn);
             if (v == "move_with") { var mw = MoveWith(hub.Surface, refs); if (mw.IsError != true) SaveSession(hub.Surface); return mw; }
             if (v == "find_clear") return FindClear(hub.Surface, max, snap);
-            if (v == "choose") { var ch = Choose(hub.Surface, n); if (ch.IsError != true) SaveSession(hub.Surface); return ch; }
+            if (v == "choose") { var ch = await Choose(hub.Surface, n); if (ch.IsError != true) SaveSession(hub.Surface); return ch; }
             if (finding is { } fr) return await SelectFinding(hub.Surface, verb, fr);
             var r = v switch
             {
@@ -461,7 +461,7 @@ internal sealed class StateTools
                             rule = "candidates: from the two boxes, the smallest move along +x, -x, +y and -y that separates them, at 1x and 1.5x, nearest first, snapped to the grid on the axes moved, then dropped onto the surface below; judged only by the open row's re-check" });
     }
 
-    static CallToolResult Choose(IWorkbenchSurface s, int? n)
+    static async Task<CallToolResult> Choose(IWorkbenchSurface s, int? n)
     {
         var sc = SceneOr(s, out var none); if (sc is null) return none!;
         if (sc.Trials is not { } lane || lane.Placements.Count == 0) return Refuse("there are no candidates; ask for them with find_clear first.");
@@ -472,6 +472,12 @@ internal sealed class StateTools
         sc.Session.Stage(key, pose.Value);
         sc.View?.ClearCandidates();
         sc.AfterStage();
+        // what the candidate leaves behind, said as the commit says it, from the same function
+        if (ContextCache.Read(sc, key.ToString()) is { } read)
+        {
+            try { said += " " + ContextRead.StaysBehind(await read, ContextCache.MovedWith(sc, key.ToString())) + " To take any of them along, tick them in the context panel or use move_with with refs."; }
+            catch (Exception ex) { said += " What stays behind could not be read: " + ex.GetBaseException().Message; }
+        }
         return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) });
     }
 
@@ -694,16 +700,19 @@ internal sealed class StateTools
     }
 
     /// <summary>Item 7's scenes as the tab draws them, from the one list model.</summary>
-    static object ScenesJson(IWorkbenchSurface s, Dictionary<string, DecisionMatch> standings, bool includeDecided)
+    static object ScenesJson(IWorkbenchSurface s, Dictionary<string, DecisionMatch> standings, bool includeDecided, bool includeFindingsOnly = false)
     {
-        if (ReviewList.ScenesFor(s, standings, includeDecided) is not { } views)
+        if (ReviewList.ScenesViewFor(s, standings, includeDecided, includeFindingsOnly) is not { } view)
             return new { refused = "the reporting skill's scene policy was not found, so rows are not grouped into scenes." };
-        var list = Scenes.Build(s.Listed, s.Findings, s.ScenePolicy!);
+        var views = view.Scenes;
         return new
         {
             rule = "a scene is one cell; inside it, rows naming a common reference are one cluster, and rows with equal group-key values (" +
                    string.Join(", ", s.ScenePolicy!.Keys) + ") are one group",
-            unplacedFindings = list.UnplacedFindings,
+            unplacedFindings = view.Unplaced,
+            findingsOnlyCells = view.FindingsOnlyCells, findingsOnlyRows = view.FindingsOnlyRows,
+            findingsOnly = includeFindingsOnly ? "listed" : view.FindingsOnlyCells > 0
+                ? $"{view.FindingsOnlyCells} more cell(s) hold only Findings rows ({view.FindingsOnlyRows} rows); pass include_findings_only to list them" : "none",
             scenes = views.Select(v => new
             {
                 number = v.Scene.Number, cell = v.Scene.Cell, bestRank = v.Scene.BestRank, header = v.Header, hidden = v.Hidden,
