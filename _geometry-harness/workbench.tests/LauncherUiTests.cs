@@ -107,4 +107,12 @@ public sealed class LauncherUiTests : IDisposable
         Assert.Equal("Geometry: BOS Overlay", ProbeNames.Of("geometry.bos-overlay"));
         Assert.Equal("State: Switch Census", ProbeNames.Of("state.switch-census"));
     }
+
+    [Fact]
+    public void The_mods_are_listed_as_MO2_lists_them_with_the_winner_last()
+    {
+        // modlist.txt order, strongest first; priority counts up from the weakest
+        var mods = new[] { new LauncherMod("Winner", 3, true, false), new LauncherMod("Mid", 2, true, false), new LauncherMod("Group_separator", 1, true, true), new LauncherMod("Weakest", 0, true, false) };
+        Assert.Equal(new[] { "Weakest", "Group_separator", "Mid", "Winner" }, LauncherView.InMo2Order(mods).Select(m => m.Name));
+    }
 }

@@ -77,7 +77,8 @@ internal static class LauncherView
         panel.Children.Add(Row("Profile", Profile, open));
         panel.Children.Add(Row("Output", Output, Browse(Output), setOut));
         panel.Children.Add(Row("Work folder", Work, Browse(Work), setWork));
-        panel.Children.Add(new TextBlock { Text = "Mods (MO2 priority order, strongest first)", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 2) });
+        panel.Children.Add(new TextBlock { Text = "Mods (priority order)", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 0) });
+        panel.Children.Add(new TextBlock { Text = "As in MO2: the mod at the bottom wins.", Foreground = Theme.Brush(Theme.Dim), FontSize = 11, Margin = new Thickness(4, 0, 4, 2) });
         panel.Children.Add(ModList);
         var head = new DockPanel { Margin = new Thickness(4, 10, 4, 0) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
@@ -160,6 +161,9 @@ internal static class LauncherView
     /// <summary>What the text fields and the mods list show; a change made through the state tools refills them.</summary>
     static string Signature() => string.Join("|", L.Instance, L.Profile, L.Output, L.WorkFolder, string.Join(",", L.Mods.Where(m => m.Selected).Select(m => m.Name)), L.Mods.Count);
 
+    /// <summary>The mods as MO2 lists them: lowest priority at the top, the winning mod at the bottom, each separator above its mods.</summary>
+    internal static IEnumerable<LauncherMod> InMo2Order(IEnumerable<LauncherMod> mods) => mods.OrderBy(m => m.Priority);
+
     internal static void Fill()
     {
         _seen = Signature();
@@ -169,7 +173,8 @@ internal static class LauncherView
             if (L.Instance is not null) { Instance.Text = L.Instance; FillProfiles(); Profile.Text = L.Profile ?? ""; }
             Output.Text = L.Output ?? Output.Text; Work.Text = L.WorkFolder ?? Work.Text;
             ModList.Children.Clear();
-            foreach (var m in L.Mods)
+            // shown as MO2 shows it, lowest priority first and the winning mod last; each box selects by name, not position
+            foreach (var m in InMo2Order(L.Mods))
             {
                 if (m.Separator) { ModList.Children.Add(new TextBlock { Text = "— " + m.Name[..^"_separator".Length] + " —", Margin = new Thickness(4, 4, 4, 0), Foreground = Theme.Brush(Theme.Dim) }); continue; }
                 var cb = new CheckBox { Content = new TextBlock { Text = m.Name + (m.Unmanaged ? "  (unmanaged)" : m.Enabled ? "" : "  (disabled)") }, IsChecked = m.Selected, IsEnabled = m.Enabled && !m.Unmanaged, Margin = new Thickness(8, 1, 4, 1) };
