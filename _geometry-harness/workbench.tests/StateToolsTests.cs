@@ -76,6 +76,10 @@ public sealed class StateToolsTests : IAsyncLifetime
                 new[] { new ObjectState(row.Row.RefKey, "Subject.esp", new[] { new FieldValue("Placement.Position", "1,2,3") }, null, Array.Empty<FieldValue>(), null, null, null) },
                 ServerBuild));
         public float[]? Camera { get; set; } = { 1f, 2f, 3f, 90f, 10f };
+        public IContextSource? ContextSource { get; set; }
+        public TrialLane? Trials { get; set; }
+        internal (HousecarlCore.Aabb Subject, HousecarlCore.Aabb Other)? PairBoxesValue;
+        public (HousecarlCore.Aabb Subject, HousecarlCore.Aabb Other)? PairBoxes(FormKey key) => PairBoxesValue;
     }
 
     sealed class FakeSurface : IWorkbenchSurface
@@ -94,6 +98,7 @@ public sealed class StateToolsTests : IAsyncLifetime
         public string Banner => "banner text";
         public string? Loading { get; set; }
         public IWorkbenchScene? Scene => SceneShown;
+        public SceneKeyPolicy? ScenePolicy { get; set; }
         public string OpenConflict(RankedRow row)
         {
             Opened.Add(row.Rank); OpenRow = row;
@@ -1170,6 +1175,95 @@ public sealed class StateToolsTests : IAsyncLifetime
         await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
         var r = await Ok("workbench_act", A(("verb", "stage"), ("rotation_degrees", new[] { 10f, -5f, 22f }), ("angle_snap", 15f)));
         Assert.Contains("angle_snap is not applied", P(r, "said").GetString());
+    }
+
+    // ---- part 2 (items 7, 5, 8) on the wire
+
+    static bool At(JsonElement e, out JsonElement v, params string[] path)
+    {
+        v = e;
+        foreach (var p in path) { if (v.ValueKind != JsonValueKind.Object || !v.TryGetProperty(p, out v)) return false; }
+        return true;
+    }
+
+    // G7h: the scenes part lists the cell once with its two clusters; select scene opens its best row
+    [Fact]
+    public async Task G7h_the_scenes_part_lists_the_cell_and_select_scene_opens_its_best_row()
+    {
+        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.SkillPolicy());
+        var st = await Ok("workbench_state", A(("project", new[] { "scenes" })));
+        Assert.True(At(st, out var list, "scenes", "scenes") && list.ValueKind == JsonValueKind.Array, "no scenes list: " + st);
+        var one = Assert.Single(list.EnumerateArray());
+        Assert.True(At(one, out var cell, "cell") && cell.GetString() == "00B4BA:Skyrim.esm", "the scene's cell: " + one);
+        Assert.True(At(one, out var clusters, "clusters") && clusters.GetArrayLength() == 2, "two clusters expected: " + one);
+        _surface.Opened.Clear();
+        await Ok("workbench_act", A(("verb", "select"), ("scene", 1)));
+        Assert.Equal(new[] { 1 }, _surface.Opened);
+    }
+
+    sealed class GateSource : IContextSource
+    {
+        internal readonly TaskCompletionSource Gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) { await Gate.Task; return new[] { "000901:HcWbTest.esp" }; }
+        public Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => Task.FromResult<IReadOnlyList<(string, string)>>(Array.Empty<(string, string)>());
+        public Task<(string? FarDoor, string? FarCell, HousecarlCore.Vec3? Arrival)> DestinationAsync(string door) => Task.FromResult(((string?)null, (string?)null, (HousecarlCore.Vec3?)null));
+        public Task<string?> BaseTypeAsync(string key) => Task.FromResult<string?>(null);
+        public Task<string?> EnableParentAsync(FormKey key) => Task.FromResult<string?>(null);
+        public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
+    }
+
+    // C5k (P7): the context read runs off the UI thread; the part says "reading" per section until it lands
+    [Fact]
+    public async Task C5k_the_context_part_says_reading_while_the_read_runs_and_then_answers()
+    {
+        var src = new GateSource();
+        _scene.ContextSource = src;
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        var first = await Ok("workbench_state", A(("project", new[] { "context" })));
+        Assert.True(At(first, out var doors, "context", "sections", "doors") && (doors.GetString() ?? "").Contains("reading"), "no 'reading' while the read runs: " + first);
+        src.Gate.SetResult();
+        JsonElement last = first;
+        for (int i = 0; i < 50; i++)
+        {
+            last = await Ok("workbench_state", A(("project", new[] { "context" })));
+            if (At(last, out var d, "context", "doors") && d.ValueKind == JsonValueKind.Array && d.GetArrayLength() == 1) return;
+            await Task.Delay(100);
+        }
+        Assert.Fail("the context read never landed: " + last);
+    }
+
+    // P8w: find_clear says the cost, runs the trials without touching the edit session, and choose stages one
+    [Fact]
+    public async Task P8w_find_clear_runs_the_trials_outside_the_edit_session_and_choose_stages_the_pick()
+    {
+        var work = NewWorkFolder();
+        _surface.WorkFolder = work;
+        var writes = new List<string>();
+        _scene.Trials = new TrialLane(work, (e, patch, outPath) => { writes.Add(outPath); return Task.FromResult("wrote " + patch); },
+            (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
+        _scene.PairBoxesValue = (new HousecarlCore.Aabb(new HousecarlCore.Vec3(990, 10, 0), new HousecarlCore.Vec3(1010, 30, 20), false),
+                                 new HousecarlCore.Aabb(new HousecarlCore.Vec3(1000, 0, 0), new HousecarlCore.Vec3(1040, 40, 40), false));
+        await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
+        var asked = await Ok("workbench_act", A(("verb", "find_clear")));
+        Assert.True(At(asked, out var said, "said") && (said.GetString() ?? "").Contains("3 positions"), "no cost sentence: " + asked);
+        var st = await Ok("workbench_state", A(("project", new[] { "placements" }), ("wait_seconds", 30)));
+        Assert.True(At(st, out var cands, "placements", "candidates") && cands.GetArrayLength() == 3, "three candidates expected: " + st);
+        Assert.Equal(3, writes.Count);
+        Assert.Empty(_scene.Session.Pending);                                    // P8: trials never go through the edit session
+        Assert.Empty(_scene.Session.Written);
+        await Ok("workbench_act", A(("verb", "choose"), ("n", 1)));
+        Assert.Single(_scene.Session.Pending);
+    }
+
+    [Fact]
+    public async Task P8x_find_clear_with_no_work_folder_is_refused_naming_set_work_folder()
+    {
+        _scene.Trials = new TrialLane(null, (e, p, o) => Task.FromResult(""), (p, f, d) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")),
+                                      p => (p, ""), _ => Array.Empty<string>());
+        _scene.PairBoxesValue = (new HousecarlCore.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(1, 1, 1), false),
+                                 new HousecarlCore.Aabb(new HousecarlCore.Vec3(0, 0, 0), new HousecarlCore.Vec3(2, 2, 2), false));
+        await Ok("workbench_act", A(("verb", "select"), ("conflict", 1)));
+        Assert.Contains("set_work_folder", await Refused("workbench_act", A(("verb", "find_clear"))));
     }
 
     // B7: the running workbench keeps the session file up to date

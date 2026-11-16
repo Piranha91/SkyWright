@@ -33,6 +33,8 @@ internal interface IWorkbenchSurface
     RowState RowStateOf(RankedRow r) => new(r.Row.Physical?.ToString(), r.Row.Summary, "");
     /// <summary>Why the last session save failed, said in the window; null when it did not.</summary>
     string? SaveRefusal { get => null; set { } }
+    /// <summary>Item 7: the reporting skill's grouping data; null when it was not found.</summary>
+    SceneKeyPolicy? ScenePolicy => null;
     /// <summary>The Findings tab, ranked.</summary>
     IReadOnlyList<RankedFinding> Findings => Open is { } b ? FindingRanking.Rank(b.Findings, b.Targets, Severity) : Array.Empty<RankedFinding>();
     /// <summary>What a click on a clickable Findings row does: the Records tree's path to its reference and cell.</summary>
@@ -72,6 +74,14 @@ internal interface IWorkbenchScene
     Task<string> RevertWrittenAsync(FormKey key) => throw new InvalidOperationException("this scene has no houseCARL server to remove a written edit with.");
     /// <summary>The folder of a patch this session wrote, by its plugin name; null when not known.</summary>
     string? PatchFolderOf(string patch) => null;
+    /// <summary>Item 5: the server's answers the context read composes; null where the scene has no server.</summary>
+    IContextSource? ContextSource => null;
+    /// <summary>Item 5: the live geometry and the navmesh triangles the context read uses.</summary>
+    IEnumerable<(FormKey Key, int Tri, System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C)> NavTris => Array.Empty<(FormKey, int, System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+    /// <summary>Item 8: the trial lane; null where the scene cannot run trials.</summary>
+    TrialLane? Trials => null;
+    /// <summary>Item 8: the boxes of a reference and the open row's other reference, Skyrim space; null when not drawn.</summary>
+    (HousecarlCore.Aabb Subject, HousecarlCore.Aabb Other)? PairBoxes(FormKey key) => null;
     /// <summary>The camera as [x, y, z, yaw, pitch]; null where there is none.</summary>
     float[]? Camera { get => null; set { } }
 }

@@ -154,7 +154,7 @@ internal sealed class PatchWriter : IAsyncDisposable
     /// <summary>Write (or dry-run) the net edits into one new patch, after checking each edit's <c>Before</c> is the
     /// winner the server reads. Returns the tool's own text.</summary>
     internal async Task<string> CommitAsync(IReadOnlyList<PendingEdit> net, string patchName, bool dryRun, string? into = null,
-                                            float tolerance = 0.01f, CancellationToken ct = default)
+                                            float tolerance = 0.01f, CancellationToken ct = default, string? outPath = null)
     {
         if (net.Count == 0) throw new InvalidOperationException("there are no staged edits to write; move or rotate a reference first.");
         foreach (var e in net)

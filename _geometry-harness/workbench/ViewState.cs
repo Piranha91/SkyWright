@@ -215,6 +215,12 @@ internal sealed class ViewState
         return said;
     }
 
+    /// <summary>Item 8: draw a reference at each candidate pose as a numbered tint, view only.</summary>
+    internal void ShowCandidates(FormKey key, IReadOnlyList<RefPlacementEdit.Pose> poses) { }
+    internal void ClearCandidates() { }
+    /// <summary>The candidate tints: per candidate (1-based), its triangles at that pose, 6 floats a vertex (Y-up).</summary>
+    internal IReadOnlyList<(int N, List<float> Triangles)> CandidateTriangles() => Array.Empty<(int, List<float>)>();
+
     internal IReadOnlyCollection<FormKey> Hidden => _hidden;
     internal IReadOnlyCollection<FormKey> SeeThroughRefs => _seeThrough;
     internal int HiddenParts => _hiddenParts.Count;

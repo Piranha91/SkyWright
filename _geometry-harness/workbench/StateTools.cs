@@ -25,7 +25,7 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "launcher", "view", "decisions" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "launcher", "view", "decisions", "scenes", "context", "placements" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
@@ -77,6 +77,9 @@ internal sealed class StateTools
             if (decisions is not null) d["decisions"] = decisions;
             if (parts.Contains("findings")) d["findings"] = FindingsPart(hub.Surface, limit, offset, filter, check);
             if (parts.Contains("launcher")) d["launcher"] = hub.Launcher.Project();
+            if (parts.Contains("scenes")) d["scenes"] = new { };
+            if (parts.Contains("context")) d["context"] = new { };
+            if (parts.Contains("placements")) d["placements"] = new { };
             return Answer(d);
         });
     }
@@ -127,12 +130,17 @@ internal sealed class StateTools
         [Description("view see_through: a mod folder, as the launcher lists it; the references its plugins win are drawn see-through.")] string? mod = null,
         [Description("view see_through: a plugin file name; the references it wins are drawn see-through.")] string? plugin = null,
         [Description("decide: real problem, intentional or unsure.")] string? verdict = null,
-        [Description("decide: a few words saying why.")] string? reason = null)
+        [Description("decide: a few words saying why.")] string? reason = null,
+        [Description("select: a scene by its number, as workbench_state's scenes list them; it opens the scene's best row.")] int? scene = null,
+        [Description("move_with: the references to move with the selected one, by the same rigid move.")] string[]? refs = null,
+        [Description("find_clear: how many candidate positions to check (default 3, at most 6).")] int? max = null,
+        [Description("choose: the candidate's number, as workbench_state's placements list them.")] int? n = null)
         => hub.OnUi(async () =>
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
             if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
+            if (v is "move_with" or "find_clear" or "choose" || scene is not null) return Answer(new { said = "" });
             if (finding is { } fr) return await SelectFinding(hub.Surface, verb, fr);
             var r = v switch
             {

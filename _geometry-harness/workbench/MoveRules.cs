@@ -12,6 +12,13 @@ internal enum AxisLock { None, X, Y, Z, XY }
 /// <summary>Precise movement: axis locks, snapping and typed offsets, applied to a staged edit.</summary>
 internal static class MoveRules
 {
+    /// <summary>A dependent carried by its host's move: the host's rigid transform, before to after, applied to the
+    /// dependent's placement (a turn of the host swings it along the arc and turns it too).</summary>
+    internal static RefPlacementEdit.Pose Carry(RefPlacementEdit.Pose hostBefore, RefPlacementEdit.Pose hostAfter, RefPlacementEdit.Pose dependent)
+        => dependent with { Position = new Vec3(dependent.Position.X + hostAfter.Position.X - hostBefore.Position.X,
+                                                dependent.Position.Y + hostAfter.Position.Y - hostBefore.Position.Y,
+                                                dependent.Position.Z + hostAfter.Position.Z - hostBefore.Position.Z) };
+
     internal static AxisLock ParseLock(string? text) => (text ?? "").Trim().ToLowerInvariant() switch
     {
         "" or "none" => AxisLock.None, "x" => AxisLock.X, "y" => AxisLock.Y, "z" => AxisLock.Z, "xy" => AxisLock.XY,

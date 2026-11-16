@@ -182,6 +182,13 @@ public static class CaptureViews
 
     static float BoxGap(Aabb a, Aabb b) => SpatialOverlap.BoxDistance(a, b);
 
+    /// <summary>Triangle grids built on this thread (one per <see cref="Contacts"/> call), so a test can pin a read's cost by count.</summary>
+    [ThreadStatic] internal static long GridBuilds;
+
+    /// <summary>Which of <paramref name="candidates"/> rest on <paramref name="host"/>: the support rays of each find the host
+    /// first below its lowest band. No grid is built.</summary>
+    internal static IReadOnlyList<string> RestingOn(Geometry g, string host, IEnumerable<string> candidates) => Array.Empty<string>();
+
     /// <summary>What <paramref name="key"/> touches and rests on in this shot, or a refusal when that cannot be decided.</summary>
     public static ContactAnswer Contacts(Geometry g, string key)
     {
