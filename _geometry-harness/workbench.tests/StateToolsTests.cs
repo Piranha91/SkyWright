@@ -356,10 +356,13 @@ public sealed class StateToolsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task B10b_select_probes_refuses_a_check_that_is_not_a_probe_naming_its_kind()
+    public async Task B10b_select_probes_refuses_a_check_that_is_not_a_probe_saying_why_in_words()
     {
+        // Piranha's note: a registry kind name ("mcp-only") means nothing to the modder; the refusal says it in words
         var why = await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "loadability.dangling-references" })));
-        Assert.Contains("mcp-only", why);
+        Assert.Contains("Loadability: Dangling References is not a probe", why);
+        Assert.Contains("reads records through the houseCARL server", why);
+        Assert.DoesNotContain("mcp-only", why);
     }
 
     [Fact]
@@ -705,15 +708,18 @@ public sealed class StateToolsTests : IAsyncLifetime
     public async Task M7c_select_probes_all_takes_every_probe_check_and_each_other_kind_is_refused_naming_it()
     {
         var all = await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "all" })));
+        // the probe list holds probes only (Piranha's note 3); every one is taken, and each check that is not a probe is
+        // listed apart, refused in words saying why
         var probes = P(all, "launcher", "probes").EnumerateArray().ToList();
-        var kinds = new[] { "scopeprobe", "ordersweep-probe", "probe-emit", "probe-json", "probe-target", "patchprobe", "adviceprobe" };
-        Assert.All(probes.Where(p => kinds.Contains(P(p, "kind").GetString())), p => Assert.True(P(p, "selected").GetBoolean(), P(p, "checkId").GetString()));
-        Assert.Equal(probes.Count(p => kinds.Contains(P(p, "kind").GetString())), probes.Count(p => P(p, "selected").GetBoolean()));
-        foreach (var kind in new[] { "mcp-only", "unsupported", "derived", "manual", "media", "live-import" })
+        Assert.All(probes, p => Assert.True(P(p, "selected").GetBoolean(), P(p, "checkId").GetString()));
+        var others = P(all, "launcher", "notProbes").EnumerateArray().ToList();
+        Assert.Equal(6, others.Select(o => P(o, "why").GetString()).Distinct().Count());       // one plain reason per kind of non-probe check
+        foreach (var o in others.GroupBy(o => P(o, "why").GetString()).Select(g => g.First()))
         {
-            var one = probes.First(p => P(p, "kind").GetString() == kind);
-            Assert.False(P(one, "selectable").GetBoolean());
-            Assert.Contains(kind, await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { P(one, "checkId").GetString() }))));
+            Assert.DoesNotContain(probes, p => P(p, "checkId").GetString() == P(o, "checkId").GetString());
+            var refused = await Refused("workbench_act", A(("verb", "select_probes"), ("checks", new[] { P(o, "checkId").GetString() })));
+            Assert.Contains("is not a probe", refused);
+            Assert.Contains(P(o, "why").GetString()!, refused);
         }
     }
 
