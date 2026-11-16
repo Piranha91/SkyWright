@@ -287,8 +287,11 @@ def said_record(fk, names: dict, labels: dict, words: dict, reader) -> str:
 
 
 # data a later step parses (form keys, a row's summary, paths, ids) keeps its own spelling; only sentences are said
+# a row's kind is the probe's own identifier (a world state's names its switch by form key: reel_plan.STATE_KIND reads
+# it), never a sentence; the sentences that quote it are other keys
 SAY_SKIP_KEYS = frozenset({"sha256", "id", "formkey", "other", "record", "records", "object", "summary", "members", "fk",
-                           "recordkeys", "keys", "refs", "partners", "pair", "placelabels", "label", "door", "navmesh"})
+                           "recordkeys", "keys", "refs", "partners", "pair", "placelabels", "label", "door", "navmesh",
+                           "kind", "groupkind"})
 
 
 OBJECT_PAREN = re.compile(r" \(((?:a|an|the) [^,()]*?) ([A-Za-z][A-Za-z0-9_]*)(?=[,)])")
