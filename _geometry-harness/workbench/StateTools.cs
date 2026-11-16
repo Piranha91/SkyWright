@@ -112,7 +112,7 @@ internal sealed class StateTools
                  "Manual mode (the launcher): open_profile (`mode` free with `instance`, `profile`, optional `game`), select_mods (`mods`, `how` " +
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
                  "write goes under), set_work_folder (`path`, where a run keeps its files), run (the ticked probes, or only `checks`), " +
-                 "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header). " +
+                 "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
         StateHub hub,
@@ -136,6 +136,7 @@ internal sealed class StateTools
         [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
         [Description("set_output or set_work_folder: the folder, by its full path.")] string? path = null,
         [Description("show_tab: the tab to bring to the front, by its header (Start, Conflicts, Findings or Records).")] string? tab = null,
+        [Description("search_mods: the text the Start tab's mod list is filtered by (any case; empty shows every mod).")] string? search = null,
         [Description("stage: a typed offset, such as \"+120 x\", \"-30 z\" or \"15°\" (a turn about the vertical).")] string? offset = null,
         [Description("stage: lock the move to x, y, z or xy.")] string? axis = null,
         [Description("stage: round the axes the edit moved to this grid, in units (0 or absent: off).")] float? snap = null,
@@ -153,7 +154,7 @@ internal sealed class StateTools
         => hub.OnUi(async () =>
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
-            if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path, tab);
+            if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path, tab, search);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
             if (v == "select" && scene is { } sn) return SelectScene(hub, sn);
             if (v == "move_with") { var mw = MoveWith(hub.Surface, refs); if (mw.IsError != true) SaveSession(hub.Surface); return mw; }
@@ -521,7 +522,7 @@ internal sealed class StateTools
         return Answer(new { said = $"{view.Header}; {said}", state = Project(s, DefaultParts, 20, 0, null) });
     }
 
-    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run", "abort", "capture_window", "show_tab" };
+    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run", "abort", "capture_window", "show_tab", "search_mods" };
     static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
 
     /// <summary>Save the whole window as a PNG at <paramref name="path"/> (an absolute .png path), as the script's capturewindow does.</summary>
@@ -535,7 +536,7 @@ internal sealed class StateTools
     }
 
     static async Task<CallToolResult> LauncherOnUi(StateHub hub, string verb, string? mode, string? instance, string? profile, string? game,
-                                                   string[]? mods, string? how, string[]? checks, string? path, string? tab)
+                                                   string[]? mods, string? how, string[]? checks, string? path, string? tab, string? search)
     {
         var l = hub.Launcher;
         string said;
@@ -551,6 +552,7 @@ internal sealed class StateTools
                 "abort" => checks is { Length: > 0 } ? l.AbortProbe(checks[0]) : l.AbortRun(),
                 "capture_window" => CaptureWindow(path),
                 "show_tab" => Shell.ShowTab(tab),
+                "search_mods" => LauncherView.Search(search),
                 _ => checks is { Length: > 0 } ? l.Run(checks) : l.Run(),
             };
         }

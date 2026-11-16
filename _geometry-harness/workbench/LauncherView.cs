@@ -18,6 +18,11 @@ internal static class LauncherView
     static readonly TextBox Instance = new() { Width = 300 }, Output = new() { Width = 300 }, Work = new() { Width = 300 };
     static readonly ComboBox Profile = new() { MinWidth = 160, IsEditable = true };
     static readonly StackPanel ModList = new(), ProbeGroups = new();
+    static readonly TextBox ModSearch = new() { MinWidth = 220, Margin = new Thickness(0, 0, 8, 0), ToolTip = "filter the mods by name" };
+    static readonly TextBlock ModCount = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim) };
+    static readonly ScrollViewer ModScroll = new() { Content = ModList, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, MaxHeight = 320, Margin = new Thickness(4, 2, 4, 2) };
+    static readonly Dictionary<string, CheckBox> ModBoxes = new(StringComparer.OrdinalIgnoreCase);
+    static string? _modsShown;
     static readonly TextBlock Status = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4) };
     static readonly TextBlock Settings = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4), Foreground = Brushes.Salmon };
     static readonly TextBlock RunLine = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 4), Foreground = Theme.Brush(Theme.Dim) };
@@ -78,8 +83,14 @@ internal static class LauncherView
         panel.Children.Add(Row("Output", Output, Browse(Output), setOut));
         panel.Children.Add(Row("Work folder", Work, Browse(Work), setWork));
         panel.Children.Add(new TextBlock { Text = "Mods (priority order)", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 0) });
-        panel.Children.Add(new TextBlock { Text = "As in MO2: the mod at the bottom wins.", Foreground = Theme.Brush(Theme.Dim), FontSize = 11, Margin = new Thickness(4, 0, 4, 2) });
-        panel.Children.Add(ModList);
+        panel.Children.Add(new TextBlock { Text = "As in MO2: the mod at the bottom wins. Disabled mods you select are tested as if enabled; their plugins load last, as MO2 places a newly enabled plugin.",
+                                           Foreground = Theme.Brush(Theme.Dim), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 4) });
+        var find = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0, 4, 2) };
+        find.Children.Add(new TextBlock { Text = "Search", Width = 90, VerticalAlignment = VerticalAlignment.Center });
+        find.Children.Add(ModSearch); find.Children.Add(ModCount);
+        ModSearch.TextChanged += (_, _) => FilterMods();
+        panel.Children.Add(find);
+        panel.Children.Add(new Border { BorderBrush = Theme.Brush(Theme.Line), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4), Margin = new Thickness(4, 0, 4, 0), Child = ModScroll });
         var head = new DockPanel { Margin = new Thickness(4, 10, 4, 0) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(RunAll); buttons.Children.Add(AbortAll);
@@ -96,7 +107,10 @@ internal static class LauncherView
         var tick = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         tick.Tick += (_, _) => { if (Signature() != _seen) Fill(); else Refresh(); };
         tick.Start();
-        return new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = Theme.Brush(Theme.Panel) };
+        var outer = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = Theme.Brush(Theme.Panel) };
+        // the mod list scrolls on its own, at most about 40% of the tab, so the probes stay in view below it
+        outer.SizeChanged += (_, _) => ModScroll.MaxHeight = Math.Max(160, outer.ActualHeight * 0.4);
+        return outer;
     }
 
     /// <summary>One tile per probe, in a group box per family; checks that are not probes are said below in plain words.</summary>
@@ -172,19 +186,52 @@ internal static class LauncherView
         {
             if (L.Instance is not null) { Instance.Text = L.Instance; FillProfiles(); Profile.Text = L.Profile ?? ""; }
             Output.Text = L.Output ?? Output.Text; Work.Text = L.WorkFolder ?? Work.Text;
-            ModList.Children.Clear();
-            // shown as MO2 shows it, lowest priority first and the winning mod last; each box selects by name, not position
-            foreach (var m in InMo2Order(L.Mods))
+            // the boxes are built once per opened profile (a large list is slow to rebuild); a tick only updates them
+            var shown = $"{L.Instance}|{L.Profile}|{string.Join(",", L.Mods.Select(m => m.Name))}";
+            if (shown != _modsShown)
             {
-                if (m.Separator) { ModList.Children.Add(new TextBlock { Text = "— " + m.Name[..^"_separator".Length] + " —", Margin = new Thickness(4, 4, 4, 0), Foreground = Theme.Brush(Theme.Dim) }); continue; }
-                var cb = new CheckBox { Content = new TextBlock { Text = m.Name + (m.Unmanaged ? "  (unmanaged)" : m.Enabled ? "" : "  (disabled)") }, IsChecked = m.Selected, IsEnabled = m.Enabled && !m.Unmanaged, Margin = new Thickness(8, 1, 4, 1) };
-                var name = m.Name;
-                cb.Click += (_, _) => { if (_filling) return; Try(() => L.SelectMods(new[] { name }, cb.IsChecked == true ? "add" : "remove")); };
-                ModList.Children.Add(cb);
+                _modsShown = shown;
+                ModList.Children.Clear(); ModBoxes.Clear();
+                // shown as MO2 shows it, lowest priority first and the winning mod last; each box selects by name, not position
+                foreach (var m in InMo2Order(L.Mods))
+                {
+                    if (m.Separator) { ModList.Children.Add(new TextBlock { Text = "— " + m.Name[..^"_separator".Length] + " —", Tag = "separator", Margin = new Thickness(4, 4, 4, 0), Foreground = Theme.Brush(Theme.Dim) }); continue; }
+                    var label = new TextBlock { Text = m.Name + (m.Unmanaged ? "  (unmanaged)" : m.Enabled ? "" : "  (disabled in MO2)") };
+                    if (!m.Enabled && !m.Unmanaged) label.Foreground = Theme.Brush(Theme.Dim);
+                    var cb = new CheckBox { Content = label, Tag = m.Name, IsEnabled = !m.Unmanaged, Margin = new Thickness(8, 1, 4, 1) };
+                    var name = m.Name;
+                    cb.Click += (_, _) => { if (_filling) return; Try(() => L.SelectMods(new[] { name }, cb.IsChecked == true ? "add" : "remove")); };
+                    ModList.Children.Add(cb);
+                    ModBoxes[m.Name] = cb;
+                }
+                FilterMods();
             }
+            foreach (var m in L.Mods) if (ModBoxes.TryGetValue(m.Name, out var box)) box.IsChecked = m.Selected;
+            int sel = L.Mods.Count(m => m.Selected), off = L.Mods.Count(m => m.Selected && !m.Enabled);
+            ModCount.Text = $"{sel} selected" + (off > 0 ? $", {off} disabled in MO2" : "");
             Refresh();
         }
         finally { _filling = false; }
+    }
+
+    /// <summary>Show only the mods whose name holds the search text (any case); a tick is kept on a hidden mod, and the
+    /// selected count beside the box still counts it. Separators show only while no filter is typed.</summary>
+    internal static string Search(string? text)
+    {
+        ModSearch.Text = text ?? "";
+        FilterMods();
+        int shown = ModBoxes.Values.Count(b => b.Visibility == Visibility.Visible);
+        return ModSearch.Text.Length == 0 ? "the mod list shows every mod" : $"{shown} mod(s) match '{ModSearch.Text}'";
+    }
+
+    static void FilterMods()
+    {
+        var q = ModSearch.Text.Trim();
+        foreach (var e in ModList.Children.OfType<FrameworkElement>())
+        {
+            bool show = q.Length == 0 || (e.Tag is string n && n != "separator" && n.Contains(q, StringComparison.OrdinalIgnoreCase));
+            e.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     /// <summary>Each tile's switch, reason, dot, progress, ETA and buttons, from the launcher's state now.</summary>
