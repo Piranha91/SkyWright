@@ -91,7 +91,9 @@ internal static class Program
                 "placeholder pose: the workbench frames the camera on the asked-for reference once the cell is built", new[] { 0f, 0f, 0f }) })).ToList());
         var wlPath = Path.Combine(work, "workbench-worklist.json");
         HarnessShared.WorklistIo.Write(wlPath, wl);
-        WorkbenchHost.Say($"{Shell.Ranked.Count} rows ranked ({Shell.Ranked.Count(r => r.InvolvesTarget)} name a target), {Shell.Findings.Count} Findings rows; {cells.Count} cell(s) in {wlPath}; opening on "
+        WorkbenchHost.Say($"{Shell.Ranked.Count} rows ranked ({Shell.Ranked.Count(r => r.InvolvesTarget)} name a target), {Shell.Findings.Count} Findings rows"
+                          + (Shell.Bundle.Manual ? $" ({Shell.Bundle.RowsBefore + Shell.Bundle.FindingsBefore} more were there before the selected mods and are not listed)" : "")
+                          + $"; {cells.Count} cell(s) in {wlPath}; opening on "
                           + (first is not null ? $"conflict {first.Rank}'s cell {first.Row.Cell}" : $"finding {firstFinding!.Rank}'s cell {firstFinding.Row.Cell}"));
         if (Shell.Window is not null) { Shell.FillConflicts(); Shell.FillFindings(); }   // a window the launcher opened first
         return new[] { "--worklist", wlPath }.Concat(rest).ToArray();

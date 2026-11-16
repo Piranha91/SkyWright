@@ -224,7 +224,7 @@ internal static class Shell
         FindingList.Items.Clear();
         // each ticked check first: ran with its rows, or why not, so a check that failed never reads as one that found nothing
         foreach (var c in Bundle?.Checks ?? Array.Empty<CheckStatus>())
-            FindingList.Items.Add(new ListBoxItem { Content = c.State == "ran" ? $"{c.CheckId}: ran, {c.Rows} row(s)" : $"{c.CheckId}: {c.State}: {c.Why}",
+            FindingList.Items.Add(new ListBoxItem { Content = c.State == "ran" ? $"{c.CheckId}: ran, {CheckStatusWords.Rows(c)}" : $"{c.CheckId}: {c.State}: {c.Why}",
                                                     Foreground = c.State == "ran" ? Brushes.DarkGray : Brushes.Salmon });
         foreach (var f in Findings)
         {
