@@ -7171,7 +7171,8 @@ def build_prediction(ctx: dict) -> dict:
             per = collections.OrderedDict()
             for rk_ in xs:
                 ident_ = ident_of.get(rk_, tuple(rk_[:5]))
-                c_ = per.setdefault((rk_[0], rk_[1] if rk_[0] not in by_object else ""), [0, 0, 0, 0])
+                # a world-state kind names its state: one check's rows under several switches are one part (KWF)
+                c_ = per.setdefault((rk_[0], state_split(rk_[1])[0] if rk_[0] not in by_object else ""), [0, 0, 0, 0])
                 rows1_ = problem_rows.get(ident_, 1)
                 if rk_[0] in by_object and owner_.get(str(rk_[4]), rk_[0]) != rk_[0]:
                     c_[2] += 1
