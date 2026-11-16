@@ -7,7 +7,8 @@ namespace Workbench;
 
 /// <summary>Which cell a row opens in. A reference filed in a worldspace's persistent cell (the names enrichment marks it
 /// <c>!persistent</c>) is drawn in the grid cell its position falls in, never in the persistent container, so a pair opens
-/// in its other reference's cell when that one has a cell of its own (capture_acquire's physical-cell rule); otherwise the
+/// in its other reference's cell when that one has a cell of its own (the rule of capture_acquire.physical_cell, in
+/// _geometry-harness/capture_acquire.py: keep the two together); otherwise the
 /// row has no cell to open, and says why.</summary>
 internal static class CellRule
 {

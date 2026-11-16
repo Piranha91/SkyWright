@@ -1110,7 +1110,7 @@ def scope_line(scope: dict, res: dict, disabled_mods: dict) -> str:
     line += (f"{len(others)} other enabled plugin{'s touch' if len(others) != 1 else ' touches'} those cells"
              + (f" or the {ring} cells around them" if ring else "") + f": {_names(others, 6)}." if others
              else "no other enabled plugin besides the base game touches those cells"
-             + (f" or the {ring} cells around them" if ring else "") + ".")
+             + (f" or the {ring} cells around them (persistent references placed into those cells are not read)" if ring else "") + ".")
     hint_mods = []
     for x in ((scope.get("nearby") or {}).get("alsoScanned") or []):
         if x.get("footprintCells") or x.get("ringCells"):
@@ -1121,6 +1121,10 @@ def scope_line(scope: dict, res: dict, disabled_mods: dict) -> str:
         line += f" {m} (disabled in MO2) also edits these cells; tick it to test them together."
     if len(hint_mods) > 3:
         line += f" {len(hint_mods) - 3} more disabled mods also edit them."
+    unread = [x for x in ((scope.get("nearby") or {}).get("alsoScanned") or []) if x.get("unreadable")]
+    if unread:
+        line += (f" {len(unread)} disabled plugin{'s' if len(unread) != 1 else ''} could not be read for this "
+                 f"({_names([str(x.get('name')) for x in unread], 3)}), so whether they edit these cells is not known.")
     return line
 
 
