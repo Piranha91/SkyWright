@@ -61,7 +61,9 @@ public sealed class FindingsBundle : IDisposable
 
     /// <param name="variant">full; findingsOnly (no overlap rows); unclickable (navmesh and water rows only, and no
     /// names, so no row opens the viewer); clean (every receipt accepted, no row anywhere).</param>
-    public FindingsBundle(bool findingsOnly = false, string variant = "full")
+    /// <param name="manual">a manual run's plan (its review arm named), whose bundle leaves out the rows the baseline has too;
+    /// false: an evaluation plan with no review arm, every row listed.</param>
+    public FindingsBundle(bool findingsOnly = false, string variant = "full", bool manual = true)
     {
         Directory.CreateDirectory(Path.Combine(Dir, "receipts"));
         var checks = new JsonArray(
@@ -71,7 +73,7 @@ public sealed class FindingsBundle : IDisposable
             new JsonObject { ["checkId"] = "state.switch-census", ["evidence"] = new JsonObject { ["strength"] = "record-fact" } });
         File.WriteAllText(Path.Combine(Dir, "plan.json"), new JsonObject
         {
-            ["planId"] = "findings-fixture", ["reviewArm"] = "candidate-01",
+            ["planId"] = "findings-fixture", ["reviewArm"] = manual ? "candidate-01" : null,
             ["arms"] = new JsonArray(new JsonObject { ["armId"] = "baseline", ["kind"] = "baseline" }, new JsonObject { ["armId"] = "candidate-01", ["kind"] = "candidate" }),
             ["targets"] = new JsonArray(new JsonObject { ["name"] = Sel }), ["checks"] = checks,
         }.ToJsonString());
@@ -230,9 +232,30 @@ public sealed class FindingsTests
     }
 
     [Fact]
+    public void P2_a_manual_runs_bundle_leaves_out_the_rows_the_profile_without_the_selection_has_too_and_counts_them()
+    {
+        // Piranha: conflicts A and B have among themselves, the selection not involved, are not the selection's. The
+        // fixture's navmesh N0, N4, N6, N7, N8, N9 and its water row are on both arms; N1, N2, N3 are new on the review arm
+        using var f = new FindingsBundle();
+        var b = BundleConflicts.Read(f.Dir, "candidate-01", f.Verify, "verify: fixture verdict");
+        Assert.True(b.Manual, "a plan whose review arm is the opened arm is a manual run's bundle");
+        var nav = b.Findings.Where(x => x.CheckId == "geometry.navmesh-ownership").Select(x => x.RefKey!.Split(':')[0]).OrderBy(x => x).ToList();
+        Assert.Equal(new[] { "000B01", "000B02", "000B03" }, nav);
+        Assert.DoesNotContain(b.Findings, x => x.CheckId == "environment.water-boundaries");
+        Assert.DoesNotContain(b.Findings, x => x.NewOnArm == false);
+        var navStatus = b.Checks.Single(c => c.CheckId == "geometry.navmesh-ownership");
+        Assert.Equal(3, navStatus.Rows); Assert.Equal(6, navStatus.Before);
+        Assert.Equal("3 new row(s) with the selected mods; 6 were there before and are not listed", CheckStatusWords.Rows(navStatus));
+        var water = b.Checks.Single(c => c.CheckId == "environment.water-boundaries");
+        Assert.Equal(0, water.Rows); Assert.Equal(1, water.Before);
+        // rows the arms were not compared on (no baseline output) stay listed: nothing says they were there before
+        Assert.Equal(2, b.Findings.Count(x => x.CheckId == "state.switch-census"));
+    }
+
+    [Fact]
     public async Task H3a_Findings_take_every_check_but_the_three_placed_ones_and_Conflicts_take_only_those()
     {
-        using var f = new FindingsBundle();
+        using var f = new FindingsBundle(manual: false);
         var (s, _, stop) = await Serve(f, new() { ["project"] = new[] { "conflicts", "findings" }, ["limit"] = 100 });
         await using var _s = stop;
         Assert.All(P(s, "conflicts", "rows").EnumerateArray(), r => Assert.Equal("OVERLAP", P(r, "kind").GetString()));
@@ -244,7 +267,7 @@ public sealed class FindingsTests
     [Fact]
     public async Task H3b_Findings_are_ranked_by_the_six_keys_one_pair_per_key()
     {
-        using var f = new FindingsBundle();
+        using var f = new FindingsBundle(manual: false);
         var (s, _, stop) = await Serve(f, new() { ["project"] = new[] { "findings" }, ["limit"] = 100 });
         await using var _s = stop;
         var rows = FindingRows(s);
@@ -260,7 +283,7 @@ public sealed class FindingsTests
     [Fact]
     public async Task H3c_the_findings_projection_pages_and_filters_by_check()
     {
-        using var f = new FindingsBundle();
+        using var f = new FindingsBundle(manual: false);
         var (s, _, stop) = await Serve(f, new() { ["project"] = new[] { "findings" }, ["limit"] = 2, ["offset"] = 1, ["check"] = "geometry.navmesh-ownership" });
         await using var _s = stop;
         Assert.Equal(9, P(s, "findings", "matched").GetInt32());
@@ -319,7 +342,7 @@ public sealed class FindingsTests
     [InlineData("unclickable")]
     public void H3g_a_bundle_with_no_row_to_open_is_opened_with_no_scene_and_its_rows_listed(string variant)
     {
-        using var f = new FindingsBundle(variant: variant);
+        using var f = new FindingsBundle(variant: variant, manual: false);
         var (args, failed) = OpenOnSta(f);
         Assert.True(failed is null, $"the {variant} bundle was not opened: {failed?.Message}");
         Assert.Null(args);                                                   // no scene to build

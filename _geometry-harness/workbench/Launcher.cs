@@ -379,7 +379,14 @@ internal sealed class Launcher : IAsyncDisposable
         var exe = ExeOf(check);
         if (exe is null || !RunChecks.Contains(check, StringComparer.OrdinalIgnoreCase) || RunFolder is null) return new("idle", null, "", null);
         // once the run has ended, the tile says what the run's ledger concluded, not the probe's raw exits
-        if (RunTask is { IsCompleted: true } && !AbortedChecks.Contains(check) && ProbeRuns.Verdict(Path.Combine(RunFolder, "run", "evaluation"), check) is { } v) return v;
+        if (RunTask is { IsCompleted: true } && !AbortedChecks.Contains(check) && ProbeRuns.Verdict(Path.Combine(RunFolder, "run", "evaluation"), check) is { } v)
+        {
+            // the bundle's own count, when this run's bundle is open: rows new with the selection, and rows that were there before
+            if (RunBundle is { } rb && Shell.Bundle is { } ob && string.Equals(Path.GetFullPath(ob.Dir), Path.GetFullPath(rb), StringComparison.OrdinalIgnoreCase)
+                && ob.Checks.FirstOrDefault(c => c.CheckId == check) is { State: "ran" } cs)
+                return v with { Line = v.Line + " " + char.ToUpperInvariant(CheckStatusWords.Rows(cs)[0]) + CheckStatusWords.Rows(cs)[1..] + "." };
+            return v;
+        }
         return ProbeRuns.Of(RunStore, exe, AbortedChecks.Contains(check), RunTask is { IsCompleted: true }, DateTimeOffset.UtcNow, _first.GetValueOrDefault(exe), pipelined: true,
             nameOf: e => Registry().FirstOrDefault(c => string.Equals(c.Exe, e, StringComparison.OrdinalIgnoreCase)) is { } c ? ProbeNames.Of(c.Id) : e);
     }

@@ -116,6 +116,32 @@ public sealed class LauncherUiTests : IDisposable
     }
 
     [Fact]
+    public void A_checks_measurement_reverse_and_comparison_rows_on_one_setup_read_as_one_phrase()
+    {
+        // an ordersweep check records three rows on the setup with the selected mods (its measurement, the reverse
+        // measurement and the comparison); the tile says that setup once, from the measurement row
+        var ev = Path.Combine(_root, "evaluation-parts"); Directory.CreateDirectory(ev);
+        File.WriteAllText(Path.Combine(ev, "ledger.json"), """
+            {"entries": {
+              "c.n__baseline__arm": {"checkId": "c.n", "armId": "baseline", "part": "arm", "status": "completed", "detector": "finding"},
+              "c.n__candidate-01__diff": {"checkId": "c.n", "armId": "candidate-01", "part": "diff", "status": "completed", "detector": "inconclusive"},
+              "c.n__candidate-01__arm": {"checkId": "c.n", "armId": "candidate-01", "part": "arm", "status": "completed", "detector": "no-finding"},
+              "c.n__candidate-01__reverse": {"checkId": "c.n", "armId": "candidate-01", "part": "reverse", "status": "completed", "detector": "finding"}}}
+            """);
+        var v = ProbeRuns.Verdict(ev, "c.n")!;
+        Assert.Equal("done. without the selected mods: found something; with the selected mods: nothing found.", v.Line);
+        // a check with nothing to measure on one setup is not a failure (the lab's route-cut tile read "failed")
+        File.WriteAllText(Path.Combine(ev, "ledger.json"), """
+            {"entries": {
+              "c.r__baseline": {"checkId": "c.r", "armId": "baseline", "status": "not-applicable"},
+              "c.r__candidate-01": {"checkId": "c.r", "armId": "candidate-01", "status": "completed", "detector": "finding"}}}
+            """);
+        var r = ProbeRuns.Verdict(ev, "c.r")!;
+        Assert.Equal("done", r.State);
+        Assert.Equal("done. without the selected mods: not applicable; with the selected mods: found something.", r.Line);
+    }
+
+    [Fact]
     public void While_the_run_prepares_a_tile_says_so_and_never_waiting_its_turn()
     {
         // a single-probe run spends its first minute preparing; that is not a queue, and the plan's preflight run of the
@@ -140,6 +166,24 @@ public sealed class LauncherUiTests : IDisposable
         Assert.Contains("waiting its turn: otherprobe is running", turn.Line);
         Assert.DoesNotContain("1 run finished", turn.Line);
         Assert.Equal("learning", ProbeRuns.First(new[] { Path.Combine(store, "history.jsonl") }, "aprobe", DateTimeOffset.UtcNow).Basis);
+    }
+
+    [Fact]
+    public void Every_probe_adapter_shape_gets_a_bar_from_its_stage_counts()
+    {
+        // one probe of each adapter shape the launcher runs: a live run record with a counted stage gives the tile a real bar
+        foreach (var kind in Launcher.ProbeKinds)
+        {
+            var c = Launcher.Registry().First(x => x.Kind == kind && x.Exe is not null);
+            var store = Path.Combine(_root, "shape-" + kind); var active = Path.Combine(store, "active"); Directory.CreateDirectory(active);
+            var r = new RunRecord { RunId = c.Exe + "-1", Op = c.Exe!, Status = RunStatus.Running, StartedUtc = DateTimeOffset.UtcNow.AddSeconds(-10),
+                                    Pid = Environment.ProcessId, Stage = "work" };
+            r.Stages.Add(new RunStage { Id = "work", Title = "reading plugins", Total = 4, Processed = 1, Unit = "plugins", StartedUtc = r.StartedUtc });
+            File.WriteAllText(Path.Combine(active, r.RunId + ".json"), JsonSerializer.Serialize(r, RunContract.Json));
+            var p = ProbeRuns.Of(store, c.Exe!, aborted: false, runEnded: false, DateTimeOffset.UtcNow, first: null);
+            Assert.True(p.State == "running" && p.Fraction == 0.25, $"{kind} ({c.Exe}): {p.State} {p.Fraction} {p.Line}");
+            Assert.Contains("1/4 plugins", p.Line);
+        }
     }
 
     [Fact]

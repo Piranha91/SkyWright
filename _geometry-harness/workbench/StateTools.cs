@@ -386,7 +386,7 @@ internal sealed class StateTools
         bool Has(string? v) => v is not null && filter is not null && v.Contains(filter, StringComparison.OrdinalIgnoreCase);
         var rows = all.Where(r => (check is null || string.Equals(r.Row.CheckId, check, StringComparison.OrdinalIgnoreCase))
                                   && (filter is null || Has(r.Row.Kind) || Has(r.Row.A) || Has(r.Row.B) || Has(r.Row.RefKey) || Has(r.Row.Summary))).ToList();
-        var checks = (s.Open?.Checks ?? Array.Empty<CheckStatus>()).Select(c => new { checkId = c.CheckId, state = c.State, rows = c.Rows, why = c.Why }).ToList();
+        var checks = (s.Open?.Checks ?? Array.Empty<CheckStatus>()).Select(c => new { checkId = c.CheckId, state = c.State, rows = c.Rows, before = c.Before, why = c.Why }).ToList();
         return new { checks, total = all.Count, matched = rows.Count, offset, limit, rows = rows.Skip(offset).Take(limit).Select(FindingRowJson).ToList() };
     }
 

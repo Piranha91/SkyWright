@@ -200,8 +200,11 @@ var noExtractExamples = new List<string>();
 static void Bump(Dictionary<string, int> d, string k) => d[k] = d.GetValueOrDefault(k) + 1;
 var padlock = new object();
 
+// counted as each archive is taken up (the body has several ways out)
+__run.Feature("archives", never.Count, "archives").Stage("archives", "listing the downloaded archives", never.Count, "archives");
 Parallel.ForEach(never, new ParallelOptions { MaxDegreeOfParallelism = jobs }, arc =>
 {
+    __run.Advance();
     var listing = Run7z($"l -slt -ba -sccUTF-8 \"{arc}\"", null, out var ok);
     if (!ok) { lock (padlock) { unreadable++; unlistableArchives.Add(Path.GetFileName(arc)); done++; } return; }
 

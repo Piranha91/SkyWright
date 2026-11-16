@@ -29,8 +29,18 @@ internal sealed record ConflictRow(
 /// the controller's own verb (<c>evalrun.py verify-bundle DIR --out FILE</c>) and every file a receipt names is read
 /// from the path that verb resolved and checked (<c>receiptOutputs</c> in its verdict), never from a guessed root.
 /// Anything the app cannot read that way is refused in one sentence.</summary>
-/// <summary>A ticked check's state on the arm: ran (with its rows), rejected, blocked, not-applicable, and why.</summary>
-internal sealed record CheckStatus(string CheckId, string State, int? Rows, string? Why);
+/// <summary>A ticked check's state on the arm: ran (with its rows), rejected, blocked, not-applicable, and why. In a manual
+/// run's bundle <paramref name="Rows"/> counts the rows reported (new on the arm, or not compared) and
+/// <paramref name="Before"/> the rows the setup without the selected mods has too, which are not reported.</summary>
+internal sealed record CheckStatus(string CheckId, string State, int? Rows, string? Why, int? Before = null);
+
+/// <summary>A check's rows in words: in a manual run, how many are new with the selected mods and how many were there before.</summary>
+internal static class CheckStatusWords
+{
+    internal static string Rows(CheckStatus c) => c.Before is { } b
+        ? $"{c.Rows} new row(s) with the selected mods; {b} were there before and are not listed"
+        : $"{c.Rows} row(s)";
+}
 
 internal sealed class BundleConflicts
 {
@@ -47,6 +57,12 @@ internal sealed class BundleConflicts
     internal IReadOnlyList<FindingRow> Findings { get; init; } = Array.Empty<FindingRow>();
     /// <summary>Each ticked check on the arm: ran with its row count, or why it did not (rejected, blocked, not applicable).</summary>
     internal IReadOnlyList<CheckStatus> Checks { get; init; } = Array.Empty<CheckStatus>();
+    /// <summary>A manual run's bundle opened on its review arm: rows the setup without the selected mods has too are
+    /// conflicts of the rest of the load order, not of the selection, so they are counted and not reported.</summary>
+    internal bool Manual { get; init; }
+    /// <summary>Rows left out because the setup without the selected mods has them too (manual runs only).</summary>
+    internal int RowsBefore { get; init; }
+    internal int FindingsBefore { get; init; }
 
     /// <summary>The arm's candidate order file the bundle carries (its plugins and mod folders), or one sentence why not.</summary>
     internal static string CandidateFile(string bundleDir, string arm)
@@ -134,6 +150,9 @@ internal sealed class BundleConflicts
         if (!plan.GetProperty("arms").EnumerateArray().Any(a => a.GetProperty("armId").GetString() == arm))
             throw new InvalidOperationException($"the bundle's plan has no arm '{arm}'; name one of {string.Join(", ", plan.GetProperty("arms").EnumerateArray().Select(a => a.GetProperty("armId").GetString()))}.");
         var targets = plan.GetProperty("targets").EnumerateArray().Select(t => t.GetProperty("name").GetString()!).ToList();
+        // a manual run's plan names its review arm (the profile with the selected mods); opened on that arm, the bundle
+        // reports only what the selection brings
+        bool manual = plan.TryGetProperty("reviewArm", out var revArm) && revArm.ValueKind == JsonValueKind.String && revArm.GetString() == arm;
         var strength = new Dictionary<string, string>();
         foreach (var c in plan.GetProperty("checks").EnumerateArray())
             if (c.TryGetProperty("evidence", out var ev) && ev.TryGetProperty("strength", out var st) && st.ValueKind == JsonValueKind.String)
@@ -290,14 +309,26 @@ internal sealed class BundleConflicts
                 why = new[] { "why", "reason", "sentence", "note" }.Select(k => res.TryGetProperty(k, out var w) && w.ValueKind == JsonValueKind.String ? w.GetString() : null).FirstOrDefault(x => x is { Length: > 0 }) ?? exec;
             string state = accepted && exec == "completed" ? "ran" : exec.StartsWith("rejected") || (!accepted && exec == "completed") ? "rejected"
                          : exec.StartsWith("blocked") ? "blocked" : exec.Length == 0 ? "no result" : exec;
-            int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check);
-            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why));
+            int before = manual ? rows.Count(x => x.CheckId == check && x.NewOnArm == false) + findings.Count(x => x.CheckId == check && x.NewOnArm == false) : 0;
+            int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check) - before;
+            checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why, state == "ran" && manual ? before : null));
         }
         // a reference filed in its worldspace's persistent cell has no cell of its own to build; a Findings row names one
         // reference, so it says so instead of handing the viewer a cell it cannot open
         findings = findings.Select(f => CellRule.Persistent(f.Cell) ? f with { Cell = null, WhyNot = CellRule.PersistentWhy } : f).ToList();
+        // a manual run compares the profile with the selected mods against the profile without them: a row both have is the
+        // rest of the load order's own conflict (A vs B, the selection not involved), so it is counted and left out
+        int rowsBefore = 0, findingsBefore = 0;
+        if (manual)
+        {
+            rowsBefore = rows.Count(x => x.NewOnArm == false); findingsBefore = findings.Count(x => x.NewOnArm == false);
+            rows = rows.Where(x => x.NewOnArm != false).ToList(); findings = findings.Where(x => x.NewOnArm != false).ToList();
+            if (rowsBefore + findingsBefore > 0)
+                notes.Add($"{rowsBefore + findingsBefore} row(s) the profile without the selected mods has too are the rest of the load order's own conflicts, so they are counted and not listed");
+        }
         return new BundleConflicts
         {
+            Manual = manual, RowsBefore = rowsBefore, FindingsBefore = findingsBefore,
             Dir = dir, PlanId = planId, Arm = arm, Targets = targets, VerifyPath = verifyPath, VerifySummary = verifySummary,
             Rows = rows, Notes = notes, EmitsRead = read, Findings = findings, Checks = checks,
         };

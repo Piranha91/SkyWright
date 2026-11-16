@@ -29,6 +29,12 @@ internal static class LauncherView
     static readonly TextBlock NotProbes = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 8, 4, 4), Foreground = Theme.Brush(Theme.Dim) };
     static readonly Button RunAll = new() { Content = "Run selected", Margin = new Thickness(4), FontWeight = FontWeights.SemiBold };
     static readonly Button AbortAll = new() { Content = "Abort run", Margin = new Thickness(4) };
+    static readonly Button FullCheck = new()
+    {
+        Content = "Check Compatibility with Full Load Order", FontWeight = FontWeights.SemiBold, FontSize = 14, Padding = new Thickness(12, 6, 12, 6),
+        Margin = new Thickness(4, 8, 4, 2), Background = Theme.Brush(Theme.Accent), Foreground = Brushes.White, Visibility = Visibility.Collapsed,
+    };
+    static readonly TextBlock FullCheckWhat = new() { TextWrapping = TextWrapping.Wrap, FontSize = 11, Margin = new Thickness(4, 0, 4, 6), Visibility = Visibility.Collapsed };
     static readonly Button RunEvery = new() { Content = "Run all", Margin = new Thickness(4), ToolTip = "run every probe that can run here, switched on or not" };
     static readonly Dictionary<string, Tile> Tiles = new(StringComparer.OrdinalIgnoreCase);
     static bool _filling;
@@ -68,6 +74,7 @@ internal static class LauncherView
         setWork.Click += (_, _) => Try(() => L.SetWorkFolder(Work.Text));
         RunAll.Click += (_, _) => Try(() => L.Run());
         RunEvery.Click += (_, _) => Try(() => L.RunAll());
+        FullCheck.Click += (_, _) => Try(() => L.RunAll());
         AbortAll.Click += (_, _) => Try(() => L.AbortRun());
         StackPanel Row(string label, params UIElement[] els)
         {
@@ -99,6 +106,10 @@ internal static class LauncherView
         DockPanel.SetDock(buttons, Dock.Right);
         head.Children.Add(buttons);
         head.Children.Add(new TextBlock { Text = "Probes", FontWeight = FontWeights.SemiBold, FontSize = 14, VerticalAlignment = VerticalAlignment.Center });
+        // one ticked mod: the run that answers "is this mod compatible with my load order", every probe that can run here
+        panel.Children.Add(FullCheck);
+        FullCheckWhat.Foreground = Theme.Brush(Theme.Dim);
+        panel.Children.Add(FullCheckWhat);
         panel.Children.Add(head);
         panel.Children.Add(RunLine);
         panel.Children.Add(ProbeGroups);
@@ -247,6 +258,10 @@ internal static class LauncherView
             bool running = L.RunTask is { IsCompleted: false };
             RunAll.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
             RunEvery.Visibility = RunAll.Visibility;
+            var ticked = L.Mods.Where(m => m.Selected).ToList();
+            bool one = ticked.Count == 1 && !running && L.Instance is not null;
+            FullCheck.Visibility = FullCheckWhat.Visibility = one ? Visibility.Visible : Visibility.Collapsed;
+            if (one) FullCheckWhat.Text = $"Tests {ticked[0].Name}{(ticked[0].Enabled ? "" : " (disabled in MO2, tested as if enabled)")} against everything enabled in this profile, with every probe that can run here.";
             AbortAll.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
             RunLine.Text = L.RunState switch
             {
