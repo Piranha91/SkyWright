@@ -22,6 +22,18 @@ internal static class Shell
     internal static IReadOnlyList<RankedFinding> Findings = Array.Empty<RankedFinding>();
     /// <summary>The launcher (manual mode): the Start tab and the state tools drive this one instance.</summary>
     internal static readonly Launcher Launcher = new();
+    internal static TabControl? Tabs;
+
+    /// <summary>Bring the tab with this header to the front.</summary>
+    internal static string ShowTab(string? header)
+    {
+        if (Tabs is null) throw new InvalidOperationException("no window is shown, so there is no tab to show.");
+        var items = Tabs.Items.OfType<TabItem>().ToList();
+        var item = items.FirstOrDefault(t => string.Equals(t.Header as string, header?.Trim(), StringComparison.OrdinalIgnoreCase))
+                   ?? throw new InvalidOperationException($"'{header}' is not a tab; show_tab takes one of {string.Join(", ", items.Select(t => t.Header))}.");
+        Tabs.SelectedItem = item;
+        return $"the {item.Header} tab is in front";
+    }
     internal static IReadOnlyList<string> WorklistCells = Array.Empty<string>();
     internal static bool ShowAll;
     /// <summary>The "show decided" toggle: rows decided intentional that still apply are hidden unless it is on.</summary>
@@ -94,7 +106,7 @@ internal static class Shell
         var conflictsTab = new DockPanel();
         DockPanel.SetDock(AllRows, Dock.Top); DockPanel.SetDock(DecidedRows, Dock.Top); DockPanel.SetDock(FindingsOnlyRows, Dock.Top);
         conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(DecidedRows); conflictsTab.Children.Add(FindingsOnlyRows); conflictsTab.Children.Add(ConflictList);
-        var tabs = new TabControl { Width = 560 };
+        var tabs = Tabs = new TabControl { Width = 560 };
         var start = new TabItem { Header = "Start", Content = LauncherView.Build() };
         tabs.Items.Add(start);
         tabs.Items.Add(new TabItem { Header = "Conflicts", Content = conflictsTab });
