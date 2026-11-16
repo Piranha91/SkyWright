@@ -182,15 +182,18 @@ public static class CaptureViews
 
     static float BoxGap(Aabb a, Aabb b) => SpatialOverlap.BoxDistance(a, b);
 
-    /// <summary>Triangle grids built on this thread (one per <see cref="Contacts"/> call), so a test can pin a read's cost by count.</summary>
-    [ThreadStatic] internal static long GridBuilds;
+    /// <summary>A count of the work a contact read does, owned by its caller and incremented here, where the work is done:
+    /// triangle grids built and rays cast. It crosses threads, as a thread-static count cannot.</summary>
+    internal sealed class WorkCounter { internal long Grids, Rays; }
 
     /// <summary>Which of <paramref name="candidates"/> rest on <paramref name="host"/>: the support rays of each find the host
     /// first below its lowest band. No grid is built.</summary>
-    internal static IReadOnlyList<string> RestingOn(Geometry g, string host, IEnumerable<string> candidates) => Array.Empty<string>();
+    internal static IReadOnlyList<string> RestingOn(Geometry g, string host, IEnumerable<string> candidates, WorkCounter? counter = null) => Array.Empty<string>();
 
     /// <summary>What <paramref name="key"/> touches and rests on in this shot, or a refusal when that cannot be decided.</summary>
-    public static ContactAnswer Contacts(Geometry g, string key)
+    public static ContactAnswer Contacts(Geometry g, string key) => Contacts(g, key, null);
+
+    internal static ContactAnswer Contacts(Geometry g, string key, WorkCounter? counter)
     {
         var empty = new HashSet<string>(StringComparer.Ordinal);
         if (!g.Refs.TryGetValue(key, out var p) || p.I.Count == 0)

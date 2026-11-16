@@ -30,11 +30,10 @@ internal sealed record RestFact(string Key, DependentMotion Motion, string Sente
 internal sealed record NavFact(string Navmesh, int Triangles);
 
 /// <summary>What item 5 shows for one reference. A section that could not be read, or found nothing, says so in
-/// <see cref="Sections"/>. <see cref="Grids"/> and <see cref="Rays"/> count what the geometry half cost, so a test pins it.</summary>
+/// <see cref="Sections"/>.</summary>
 internal sealed record ContextAnswer(string Key, IReadOnlyList<DoorFact> Doors, IReadOnlyList<NameFact> Names, string? EnableParent,
                                      IReadOnlyList<string> Touches, IReadOnlyList<RestFact> Resting, IReadOnlyList<NavFact> Navmesh,
-                                     IReadOnlyDictionary<string, string> Sections, string Statement,
-                                     long Grids = 0, long Rays = 0);
+                                     IReadOnlyDictionary<string, string> Sections, string Statement);
 
 /// <summary>Item 5: the context of a selected reference, composed from the server, the live scene's contact owner, the motion
 /// rule and the scene's navmesh triangles. Read off the UI thread; shown, never judged.</summary>
@@ -45,7 +44,8 @@ internal static class ContextRead
 
     internal static Task<ContextAnswer> ReadAsync(IContextSource src, CaptureViews.Geometry g, string key,
         IEnumerable<(FormKey Key, int Tri, Vector3 A, Vector3 B, Vector3 C)> navTris,
-        Func<string, IEnumerable<(string Layer, string MotionSystem)>?> bodiesOf, CancellationToken ct = default)
+        Func<string, IEnumerable<(string Layer, string MotionSystem)>?> bodiesOf, IReadOnlyList<string>? dependencyRows = null,
+        CaptureViews.WorkCounter? counter = null, CancellationToken ct = default)
         => Task.FromResult(new ContextAnswer(key, Array.Empty<DoorFact>(), Array.Empty<NameFact>(), null, Array.Empty<string>(),
             Array.Empty<RestFact>(), Array.Empty<NavFact>(), new Dictionary<string, string>(), ""));
 

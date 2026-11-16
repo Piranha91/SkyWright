@@ -1238,6 +1238,7 @@ public sealed class StateToolsTests : IAsyncLifetime
     {
         var work = NewWorkFolder();
         _surface.WorkFolder = work;
+        _scene.View = new ViewState(_scene.Session, () => Array.Empty<ViewProbe.RefOcclusion>());
         var writes = new List<string>();
         _scene.Trials = new TrialLane(work, (e, patch, outPath) => { writes.Add(outPath); return Task.FromResult("wrote " + patch); },
             (patch, folder, dir) => Task.FromResult(ReviewSpeedPart2Tests.Recheck("resolved")), p => (p, "lowered it 1 unit onto the terrain"), _ => Array.Empty<string>());
@@ -1251,8 +1252,71 @@ public sealed class StateToolsTests : IAsyncLifetime
         Assert.Equal(3, writes.Count);
         Assert.Empty(_scene.Session.Pending);                                    // P8: trials never go through the edit session
         Assert.Empty(_scene.Session.Written);
+        Assert.True(At(st, out var shown, "placements", "shown") && shown.GetArrayLength() == 3, "the placements part does not say which are shown: " + st);
+        Assert.Equal(new[] { 1, 2, 3 }, _scene.View!.CandidateTriangles().Select(t => t.N));
         await Ok("workbench_act", A(("verb", "choose"), ("n", 1)));
         Assert.Single(_scene.Session.Pending);
+        Assert.Empty(_scene.View!.CandidateTriangles());
+    }
+
+    // B1: move_with stages the host's rigid move for the named references only; an undrawn one is refused
+    [Fact]
+    public async Task C5s_move_with_stages_the_hosts_rigid_move_for_each_named_reference()
+    {
+        var ro = PlacementTests.OneRef(out var host);
+        var dep = Boxes.Box(0x801, new HousecarlCore.Vec3(1100, 20, 0), new System.Numerics.Vector3(10, 10, 10));
+        var other = Boxes.Box(0x802, new HousecarlCore.Vec3(1200, 20, 0), new System.Numerics.Vector3(10, 10, 10));
+        _surface.SceneShown = _scene = new FakeScene(new EditSession(new[] { ro, dep, other }));
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 50f, 0f, 0f }), ("turn_degrees", 90f)));
+        var hb = RefPlacementEdit.BakedPose(ro.Ref); var ha = _scene.Session.Current(host);
+        var r = await Ok("workbench_act", A(("verb", "move_with"), ("refs", new[] { "000801:HcWbTest.esp" })));
+        var want = MoveRules.Carry(hb, ha, RefPlacementEdit.BakedPose(dep.Ref));
+        var got = _scene.Session.Current(dep.Ref.RefKey);
+        Assert.Equal(want.Position.X, got.Position.X, 2); Assert.Equal(want.Position.Y, got.Position.Y, 2);
+        Assert.Equal(want.Rotation.Z, got.Rotation.Z, 3);
+        Assert.Equal(RefPlacementEdit.BakedPose(other.Ref), _scene.Session.Current(other.Ref.RefKey));   // not named: not moved
+        Assert.Contains("000999:HcWbTest.esp", await Refused("workbench_act", A(("verb", "move_with"), ("refs", new[] { "000999:HcWbTest.esp" }))));
+    }
+
+    sealed class DoorSource : IContextSource
+    {
+        public Task<IReadOnlyList<string>> DoorsNearAsync(FormKey key, double within) => Task.FromResult<IReadOnlyList<string>>(new[] { "000801:HcWbTest.esp" });
+        public Task<IReadOnlyList<(string Key, string Field)>> NamesAsync(FormKey key) => Task.FromResult<IReadOnlyList<(string, string)>>(Array.Empty<(string, string)>());
+        public Task<(string? FarDoor, string? FarCell, HousecarlCore.Vec3? Arrival)> DestinationAsync(string door) =>
+            Task.FromResult(((string?)"000AAA:HcWbTest.esp", (string?)"00BBBB:HcWbTest.esp", (HousecarlCore.Vec3?)new HousecarlCore.Vec3(1, 2, 3)));
+        public Task<string?> BaseTypeAsync(string key) => Task.FromResult<string?>("Door");
+        public Task<string?> EnableParentAsync(FormKey key) => Task.FromResult<string?>(null);
+        public Task<string?> MismatchAsync(FormKey key) => Task.FromResult<string?>(null);
+    }
+
+    // B1: before committing, the answer says what stays behind; with the door ticked, its far side
+    [Fact]
+    public async Task C5t_a_dry_run_and_a_real_commit_say_what_stays_behind_and_a_ticked_doors_far_side()
+    {
+        var ro = PlacementTests.OneRef(out _);
+        var door = Boxes.Box(0x801, new HousecarlCore.Vec3(1100, 20, 0), new System.Numerics.Vector3(10, 10, 10));
+        _surface.SceneShown = _scene = new FakeScene(new EditSession(new[] { ro, door })) { ContextSource = new DoorSource() };
+        await Ok("workbench_act", A(("verb", "select"), ("ref", RefKey)));
+        await Ok("workbench_act", A(("verb", "stage"), ("delta", new[] { 50f, 0f, 0f })));
+        var dry = await Ok("workbench_act", A(("verb", "commit"), ("patch", "WbStay"), ("dry_run", true)));
+        Assert.True(At(dry, out var s1, "said") && (s1.GetString() ?? "").Contains("Nothing moves with it on its own"), "no stays-behind sentence: " + dry);
+        await Ok("workbench_act", A(("verb", "move_with"), ("refs", new[] { "000801:HcWbTest.esp" })));
+        var dry2 = await Ok("workbench_act", A(("verb", "commit"), ("patch", "WbStay"), ("dry_run", true)));
+        Assert.True(At(dry2, out var s2, "said") && (s2.GetString() ?? "").Contains("000AAA:HcWbTest.esp") && s2.GetString()!.Contains("arrives at the old doorstep"),
+                    "the ticked door's far side is not said: " + dry2);
+        var real = await Ok("workbench_act", A(("verb", "commit"), ("patch", "WbStay"), ("dry_run", false)));
+        Assert.True(At(real, out var s3, "said") && (s3.GetString() ?? "").Contains("000AAA:HcWbTest.esp"), "the real commit does not say it: " + real);
+    }
+
+    // B5: the conflicts part's rows carry their scene
+    [Fact]
+    public async Task G7l_the_conflicts_parts_rows_carry_their_scene()
+    {
+        _surface.ScenePolicy = SceneKeyPolicy.Load(ReviewSpeedPart2Tests.SkillPolicy());
+        var st = await Ok("workbench_state", A(("project", new[] { "conflicts" })));
+        foreach (var row in P(st, "conflicts", "rows").EnumerateArray())
+            Assert.True(At(row, out var sc, "scene") && sc.ValueKind == JsonValueKind.Number && sc.GetInt32() == 1, "a row without its scene: " + row);
     }
 
     [Fact]

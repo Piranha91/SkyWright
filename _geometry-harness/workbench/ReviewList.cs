@@ -3,6 +3,9 @@ namespace Workbench;
 /// <summary>One Conflicts row with its decision: the verdict and reason when one is stored, and its standing now.</summary>
 internal sealed record ReviewEntry(RankedRow Row, Decision? Decision, DecisionMatch Standing);
 
+/// <summary>One scene as the tab and the scenes part draw it: its rows in list order, how many are hidden, its header.</summary>
+internal sealed record SceneView(Scene Scene, IReadOnlyList<ReviewEntry> Rows, int Hidden, string Header);
+
 /// <summary>The Conflicts list with decisions, the one model the tab and the <c>conflicts</c> state part both render.</summary>
 internal static class ReviewList
 {
@@ -36,6 +39,11 @@ internal static class ReviewList
             return (d, m);
         }, includeDecided);
     }
+
+    /// <summary>The scenes the Conflicts tab and the scenes part draw: each scene's rows in the list's order, intentional
+    /// rows that still apply hidden unless asked for, and the count hidden.</summary>
+    internal static IReadOnlyList<SceneView> BuildScenes(IReadOnlyList<RankedRow> rows, IReadOnlyList<RankedFinding> findings, SceneKeyPolicy policy,
+        Func<RankedRow, (Decision? Decision, DecisionMatch Standing)> standing, bool includeDecided) => Array.Empty<SceneView>();
 
     /// <summary>The row a "next undecided" opens after <paramref name="currentRank"/>: a reconsider row first, then an
     /// undecided one, each in rank order after the current row and then from the top.</summary>

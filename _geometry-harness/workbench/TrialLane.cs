@@ -30,6 +30,10 @@ internal static class ClearRule
     internal static TrialVerdict Judge(RowVerdict open, IReadOnlyList<RowVerdict> othersOfRef, IReadOnlyList<RowVerdict> created,
                                        IReadOnlyList<string> stillHolding) => new("", "", Array.Empty<string>());
 
+    /// <summary>Every unpatched row naming the moved reference (either side, any case) other than the open row, with its
+    /// frozen word from the two emits.</summary>
+    internal static IReadOnlyList<RowVerdict> OthersOfRef(string unpatchedEmit, string patchedEmit, string openRowId, string refKey) => Array.Empty<RowVerdict>();
+
     /// <summary>The carried predicates of the patched emit that still hold for the moved reference, in words.</summary>
     internal static IReadOnlyList<string> StillHolding(string patchedEmitPath, string refKey) => Array.Empty<string>();
 }
@@ -63,7 +67,7 @@ internal sealed class TrialLane
 
     /// <summary>Start the trials of <paramref name="key"/> from its load-order pose; returns the cost sentence at once.</summary>
     internal string Start(FormKey key, string? cell, RefPlacementEdit.Pose loadOrder, IReadOnlyList<Candidate> candidates, string probe,
-                          int otherStaged, bool writtenSame) => "";
+                          int otherStaged, bool writtenSame, float grid = 0f) => "";
 
     /// <summary>The pose to stage for candidate <paramref name="n"/>, or why not.</summary>
     internal (RefPlacementEdit.Pose? Pose, string Said) Choose(int n, string? cell, RefPlacementEdit.Pose current) => (null, "");

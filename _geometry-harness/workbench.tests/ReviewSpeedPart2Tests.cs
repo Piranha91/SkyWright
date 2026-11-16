@@ -366,12 +366,13 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     public async Task C5n_the_context_read_of_a_building_is_bounded_by_count_not_by_the_clock()
     {
         var (g, key) = BigTown(30);
-        var a = await ContextRead.ReadAsync(new Source(), g, key, NoNav, _ => null);
-        _out.WriteLine($"grids {a.Grids}, rays {a.Rays}");
+        var counter = new CaptureViews.WorkCounter();
+        var a = await ContextRead.ReadAsync(new Source(), g, key, NoNav, _ => null, counter: counter);
+        _out.WriteLine($"grids {counter.Grids}, rays {counter.Rays}");
         Assert.Equal(30, a.Touches.Count);
         Assert.Equal(30, a.Resting.Count);
-        Assert.True(a.Grids is >= 1 and <= 1, $"the read built {a.Grids} triangle grids; one (the building's) is allowed");
-        Assert.True(a.Rays > 0 && a.Rays <= (30 + 1) * (CaptureViews.SupportRays + 1), $"the read cast {a.Rays} rays");
+        Assert.True(counter.Grids == 1, $"the read built {counter.Grids} triangle grids; one (the building's) is allowed");
+        Assert.True(counter.Rays > 0 && counter.Rays <= (30 + 1) * (CaptureViews.SupportRays + 1), $"the read cast {counter.Rays} rays");
     }
 
     // ---------------------------------------------------------------- item 8
@@ -465,12 +466,12 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     {
         internal readonly List<(PendingEdit Edit, string Patch, string OutPath)> Writes = new();
         internal readonly List<string> WorkDirs = new();
-        internal TaskCompletionSource? Gate;
+        internal TaskCompletionSource? Gate, WriteGate;
         internal Func<int, TrialRecheck> Answer = n => Recheck("resolved");
         internal Func<RefPlacementEdit.Pose, (RefPlacementEdit.Pose, string)> Settle = p => (p, "lowered it 2 units onto the terrain");
         internal Func<RefPlacementEdit.Pose, IReadOnlyList<string>> ContactsAt = _ => Array.Empty<string>();
         internal TrialLane Make(string? work) => new(work,
-            (e, patch, outPath) => { Writes.Add((e, patch, outPath)); return Task.FromResult("wrote " + patch); },
+            async (e, patch, outPath) => { if (WriteGate is { } wg) await wg.Task; Writes.Add((e, patch, outPath)); return "wrote " + patch; },
             async (patch, folder, workDir) => { WorkDirs.Add(workDir); if (Gate is { } g) await g.Task; return Answer(WorkDirs.Count); },
             p => Settle(p), p => ContactsAt(p));
     }
@@ -489,13 +490,14 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
     [Fact]
     public void P8e_the_cost_is_said_before_any_run()
     {
-        var f = new Lane { Gate = new TaskCompletionSource() };
+        var f = new Lane { WriteGate = new TaskCompletionSource() };
         var lane = f.Make(_root);
         var said = lane.Start(Subject, C1, Home, Three(), "overlapprobe", 0, false);
         Assert.Contains("3 positions", said);
         Assert.Contains("minutes", said);
+        Assert.Empty(f.Writes);                                               // the writer is the first thing a trial does
         Assert.Empty(f.WorkDirs);
-        f.Gate.SetResult();
+        f.WriteGate.SetResult();
         Assert.Contains("minutes", TrialLane.CostSentence(3));
     }
 
@@ -566,6 +568,8 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
             Assert.Contains(p.NotChecked, c => c.Contains("geometry.placement-contact"));
             Assert.Contains(p.NotChecked, c => c.Contains("navmesh"));
             Assert.Contains(p.NotChecked, c => c.Contains("collision"));
+            Assert.Contains(p.NotChecked, c => c.Contains("doors and what names it"));
+            Assert.Contains(p.NotChecked, c => c.Contains("scenery no mod is responsible for"));
         });
         Assert.Contains(TrialLane.NotCheckedFor("contactprobe", "pop"), c => c.Contains("geometry.object-overlap"));
     }
@@ -653,6 +657,141 @@ public sealed class ReviewSpeedPart2Tests : IDisposable
         Assert.Empty(view.CandidateTriangles());
         view.ShowCandidates(key, poses); view.ClearCandidates();
         Assert.Empty(view.CandidateTriangles());
+    }
+
+    // ---------------------------------------------------------------- Gate B review: B2, B5, B6, B7
+
+    const string RuleProbe = "overlapprobe", RulePolicy = "synthetic-policy", RulePop = "load-time+population:000000000000", RuleState = "baseline";
+
+    static Conflict Ov(int a, int b, PhysicalState ph) =>
+        new("OVERLAP", "Base.esm", "Subject.esp", "synthetic",
+            new[] { new ConflictRecord($"{a:X6}:Base.esm", "placed-ref", null, ph) },
+            new[] { new ConflictRecord($"{b:X6}:Base.esm", "placed-ref", null) });
+
+    static string RowId(int a, int b) => ConflictIo.RowIdentity("OVERLAP", $"{a:X6}:Base.esm", $"{b:X6}:Base.esm", "Base.esm", null);
+
+    static ConfigurationIdentity Cfg(params string[] plugins) =>
+        ConfigurationIdentity.Compute("synthetic:test",
+            plugins.Select((p, i) => new ConfigPlugin(p, "C:/synthetic/" + p, new string((char)('a' + i), 64), 100, "data", i == 0, false, Array.Empty<string>())).ToList(),
+            new[] { new ConfigProvider("data", "data") }, Array.Empty<ConfigOverlay>(), RulePop, RuleState);
+
+    // B2: the other rows of the moved reference, on either side and in any case, each with its frozen word
+    [Fact]
+    public void P4f_the_other_rows_of_the_moved_reference_are_found_on_either_side_with_their_words()
+    {
+        var cov = new[] { new CoverageLine("placed references", 10) };
+        var un = new ConflictFile(RuleProbe, "synthetic", "2026-11-15T00:00:00Z",
+            new[] { Ov(0x801, 0x901, PhysicalState.Holds), Ov(0x902, 0x801, PhysicalState.Holds), Ov(0x803, 0x903, PhysicalState.Holds), Ov(0x801, 0x904, PhysicalState.Holds) },
+            cov, Population: RulePop, State: RuleState, Configuration: Cfg("Base.esm", "Subject.esp"), MeasurementPolicy: RulePolicy);
+        var pa = new ConflictFile(RuleProbe, "synthetic", "2026-11-15T00:00:01Z",
+            new[] { Ov(0x803, 0x903, PhysicalState.Holds) }, cov,
+            Predicates: new[]
+            {
+                new Predicate("OVERLAP", "Base.esm", "Subject.esp", "000801:Base.esm", "000901:Base.esm", PhysicalState.Gone, null),
+                new Predicate("OVERLAP", "Base.esm", "Subject.esp", "000902:Base.esm", "000801:Base.esm", PhysicalState.Unmeasured, null),
+                new Predicate("OVERLAP", "Base.esm", "Subject.esp", "000801:Base.esm", "000904:Base.esm", PhysicalState.Gone, null),
+            },
+            BaseEmit: Path.Combine(_root, "un.json"), Population: RulePop, State: RuleState, Configuration: Cfg("Base.esm", "Subject.esp", "Patch.esp"), MeasurementPolicy: RulePolicy);
+        ConflictIo.Write(Path.Combine(_root, "un.json"), un);
+        ConflictIo.Write(Path.Combine(_root, "pa.json"), pa);
+        var others = ClearRule.OthersOfRef(Path.Combine(_root, "un.json"), Path.Combine(_root, "pa.json"), RowId(0x801, 0x901), "000801:base.esm");
+        Assert.Equal(2, others.Count);
+        Assert.Equal("unmeasured", others.Single(o => o.Id == RowId(0x902, 0x801)).Word);
+        Assert.Equal("resolved", others.Single(o => o.Id == RowId(0x801, 0x904)).Word);
+        Assert.DoesNotContain(others, o => o.Id == RowId(0x801, 0x901) || o.Id == RowId(0x803, 0x903));
+    }
+
+    [Fact]
+    public void P4g_another_row_of_the_reference_reading_unmeasured_gives_resolved_here_but()
+    {
+        var v = ClearRule.Judge(V("open", "resolved"), new[] { V("overlap|902|801", "unmeasured") }, Array.Empty<RowVerdict>(), Array.Empty<string>());
+        Assert.Equal("resolved here, but", v.Word);
+        Assert.Contains("overlap|902|801", v.Rows);
+    }
+
+    // B7: a created row outranks another row that did not resolve; both are named
+    [Fact]
+    public void P8q_a_created_row_and_an_unresolved_other_row_read_new_conflict_naming_both()
+    {
+        var v = ClearRule.Judge(V("open", "resolved"), new[] { V("other", "reclassified") }, new[] { V("made", "new") }, Array.Empty<string>());
+        Assert.Equal("new conflict", v.Word);
+        Assert.Contains("made", v.Rows);
+        Assert.Contains("other", v.Rows);
+    }
+
+    // B7: the candidate is snapped to the current grid on the axes it moved
+    [Fact]
+    public async Task P8p_a_candidate_is_snapped_to_the_current_grid()
+    {
+        var f = new Lane();
+        var lane = f.Make(_root);
+        lane.Start(Subject, C1, Home, Three(), "overlapprobe", 0, false, grid: 32f);
+        await Done(lane);
+        Assert.Equal(3, f.Writes.Count);
+        Assert.All(f.Writes, w =>
+        {
+            Assert.Equal(0f, w.Edit.After.Position.X % 32f, 3);
+            Assert.Equal(0f, w.Edit.After.Position.Y % 32f, 3);
+        });
+    }
+
+    // B5: scenes on the one list model, with decisions
+    [Fact]
+    public void G7k_a_scene_orders_its_rows_by_decision_hides_intentional_ones_and_says_how_many()
+    {
+        var rows = new[] { Row(1, "000801:HcWbTest.esp", null), Row(2, "000802:HcWbTest.esp", null), Row(3, "000803:HcWbTest.esp", null) };
+        Decision D(string key, string verdict) => new("C:/I", "P", "geometry.object-overlap", key, verdict, "why", DateTimeOffset.UtcNow,
+                                                      new RowState("Holds", "", ""), Array.Empty<ObjectState>(), "srv");
+        (Decision?, DecisionMatch) Of(RankedRow r) => r.Rank switch
+        {
+            1 => (D("row-1", "intentional"), new DecisionMatch(Standing.Applies, "applies")),
+            2 => (D("row-2", "real problem"), new DecisionMatch(Standing.Reconsider, "reconsider: Placement.Position changed")),
+            _ => (null, new DecisionMatch(Standing.Undecided, "undecided")),
+        };
+        var view = Assert.Single(ReviewList.BuildScenes(rows, Array.Empty<RankedFinding>(), Policy(), Of, includeDecided: false));
+        Assert.Equal(new[] { 2, 3 }, view.Rows.Select(e => e.Row.Rank));
+        Assert.Equal(1, view.Hidden);
+        Assert.Contains("1 hidden", view.Header);
+        var all = Assert.Single(ReviewList.BuildScenes(rows, Array.Empty<RankedFinding>(), Policy(), Of, includeDecided: true));
+        Assert.Equal(new[] { 2, 3, 1 }, all.Rows.Select(e => e.Row.Rank));
+        Assert.Equal(0, all.Hidden);
+    }
+
+    // B6: the declared-dependencies sentence, both ways
+    [Fact]
+    public async Task C5o_the_dependency_statement_says_the_check_was_not_run_or_names_the_bundles_rows()
+    {
+        var none = await ContextRead.ReadAsync(TownSource(), Town(), K(Building), NoNav, _ => null);
+        Assert.Contains("the declared-dependencies check was not run on this bundle", none.Statement);
+        var some = await ContextRead.ReadAsync(TownSource(), Town(), K(Building), NoNav, _ => null,
+                                               dependencyRows: new[] { "LeftBehind: 000C01:HcWbTest.esp names it as its enable parent" });
+        Assert.Contains("000C01:HcWbTest.esp", some.Statement);
+        Assert.DoesNotContain("was not run", some.Statement);
+    }
+
+    [Fact]
+    public async Task C5p_its_own_enable_parent_is_named()
+    {
+        var src = TownSource(); src.Parent = "000C09:HcWbTest.esp";
+        var a = await ContextRead.ReadAsync(src, Town(), K(Building), NoNav, _ => null);
+        Assert.Equal("000C09:HcWbTest.esp", a.EnableParent);
+    }
+
+    [Fact]
+    public async Task C5q_a_door_the_scene_does_not_draw_reads_near_only_not_drawn_here()
+    {
+        var src = TownSource(); src.Doors.Add("000D01:HcWbTest.esp");
+        var a = await ContextRead.ReadAsync(src, Town(), K(Building), NoNav, _ => null);
+        Assert.Equal("near only (not drawn here, contact not assessed)", Assert.Single(a.Doors, d => d.Key == "000D01:HcWbTest.esp").Label);
+    }
+
+    [Fact]
+    public async Task C5r_the_navmesh_section_says_its_rule()
+    {
+        var a = await ContextRead.ReadAsync(TownSource(), Town(), K(Building), NoNav, _ => null);
+        Assert.True(a.Sections.TryGetValue("navmesh", out var nav), "the navmesh section said nothing");
+        Assert.Contains("under its axis-aligned bounds, any height", nav);
+        Assert.Contains("shown, not judged", nav);
     }
 }
 
