@@ -213,9 +213,11 @@ var results = new List<ModResult>();
 var padlock = new object();
 int done = 0;
 
+__run.Feature("archives", targets.Count, "archives").Stage("installers", "reading the installers' options", targets.Count, "archives");
 Parallel.ForEach(targets, new ParallelOptions { MaxDegreeOfParallelism = jobs }, t =>
 {
     var r = Examine(t.Mod, t.ModDir, t.Archive);
+    __run.Advance();
     lock (padlock)
     {
         results.Add(r);

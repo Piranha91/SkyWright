@@ -265,8 +265,10 @@ void AddContributor(string cell, string plugin, string kind)
     if (!byPlugin.TryGetValue(plugin, out var kindsAtPlace)) byPlugin[plugin] = kindsAtPlace = new HashSet<string>(StringComparer.Ordinal);
     kindsAtPlace.Add(kind);
 }
+__run.Stage("contributors", "reading which plugins edit the footprint's cells", cfg.Plugins.Count + alsoScan.Count, "plugins");
 foreach (var plugin in cfg.Plugins)
 {
+    __run.Advance();
     ISkyrimModGetter mod;
     try { mod = LoadOrderResolver.OpenOverlay(plugin.Path, dataDir); }
     catch (Exception ex) { contributorFailures.Add($"'{plugin.Name}' could not be opened for the location-contributor walk — {TargetFootprint.Concise(ex)}"); continue; }
@@ -402,6 +404,7 @@ foreach (var plugin in cfg.Plugins)
 var alsoScanned = new List<object>();
 foreach (var extra in alsoScan)
 {
+    __run.Advance();
     var footprintHits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     var ringHits = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     string? failed = null;

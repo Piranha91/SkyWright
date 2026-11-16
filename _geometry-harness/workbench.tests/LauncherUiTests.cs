@@ -143,6 +143,24 @@ public sealed class LauncherUiTests : IDisposable
     }
 
     [Fact]
+    public void Every_probe_adapter_shape_gets_a_bar_from_its_stage_counts()
+    {
+        // one probe of each adapter shape the launcher runs: a live run record with a counted stage gives the tile a real bar
+        foreach (var kind in Launcher.ProbeKinds)
+        {
+            var c = Launcher.Registry().First(x => x.Kind == kind && x.Exe is not null);
+            var store = Path.Combine(_root, "shape-" + kind); var active = Path.Combine(store, "active"); Directory.CreateDirectory(active);
+            var r = new RunRecord { RunId = c.Exe + "-1", Op = c.Exe!, Status = RunStatus.Running, StartedUtc = DateTimeOffset.UtcNow.AddSeconds(-10),
+                                    Pid = Environment.ProcessId, Stage = "work" };
+            r.Stages.Add(new RunStage { Id = "work", Title = "reading plugins", Total = 4, Processed = 1, Unit = "plugins", StartedUtc = r.StartedUtc });
+            File.WriteAllText(Path.Combine(active, r.RunId + ".json"), JsonSerializer.Serialize(r, RunContract.Json));
+            var p = ProbeRuns.Of(store, c.Exe!, aborted: false, runEnded: false, DateTimeOffset.UtcNow, first: null);
+            Assert.True(p.State == "running" && p.Fraction == 0.25, $"{kind} ({c.Exe}): {p.State} {p.Fraction} {p.Line}");
+            Assert.Contains("1/4 plugins", p.Line);
+        }
+    }
+
+    [Fact]
     public void The_settings_round_trip_and_an_unwritable_folder_is_said()
     {
         var path = Path.Combine(_root, LauncherSettings.FileName);
