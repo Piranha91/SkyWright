@@ -1916,6 +1916,9 @@ def cmd_run(a) -> int:
                 return EXIT_REFUSED
             sdir = out / name
             sdir.mkdir(exist_ok=True)
+            # which stage is going, and since when, for a reader of the run record (the workbench's Start tab)
+            run.note(f"stage {name} started {utcnow()}")
+            run.liveness()
             # the entry, every earlier stage's binding and, after the bundle, the stage's own tools decide reuse; the
             # driver's own code is recorded, not bound, because the measurements' tool identities are bound inside
             # evalrun's plan
