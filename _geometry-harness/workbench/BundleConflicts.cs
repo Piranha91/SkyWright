@@ -5,6 +5,17 @@ using HarnessShared;
 
 namespace Workbench;
 
+/// <summary>Which cell a row opens in. A reference filed in a worldspace's persistent cell (the names enrichment marks it
+/// <c>!persistent</c>) is drawn in the grid cell its position falls in, never in the persistent container, so a pair opens
+/// in its other reference's cell when that one has a cell of its own (capture_acquire's physical-cell rule); otherwise the
+/// row has no cell to open, and says why.</summary>
+internal static class CellRule
+{
+    internal const string PersistentWhy = "its reference is filed in its worldspace's persistent cell, which is not built as one cell";
+    internal static bool Persistent(string? cell) => cell is not null && cell.EndsWith("!persistent", StringComparison.OrdinalIgnoreCase);
+    internal static string? Drawable(string? cell, string? other) => !Persistent(cell) ? cell : other is not null && !Persistent(other) ? other : null;
+}
+
 /// <summary>One row of the Conflicts tab: one row identity of a placed-object check's emit, as conflictdiff keys it
 /// (<see cref="ConflictIo.RowIdentity"/>: one per Necessary record), with what the bundle says about its two references.</summary>
 internal sealed record ConflictRow(
@@ -203,7 +214,7 @@ internal sealed class BundleConflicts
                         if (!seen.Add(id)) continue;
                         var rn = names?.Ref(r.FormKey); var on = other is null ? null : names?.Ref(other);
                         rows.Add(new ConflictRow(id, check, c.Kind, c.A, c.B, c.Summary, r.FormKey, other, r.Physical,
-                            rn?.Cell, rn?.BaseType, rn?.BaseEditorId, on?.BaseType, on?.BaseEditorId,
+                            CellRule.Drawable(rn?.Cell, on?.Cell), rn?.BaseType, rn?.BaseEditorId, on?.BaseType, on?.BaseEditorId,
                             strength.GetValueOrDefault(check, "unknown"), newOnArm is null ? null : newOnArm.Contains(id)));
                     }
                 }
@@ -281,6 +292,9 @@ internal sealed class BundleConflicts
             int count = rows.Count(x => x.CheckId == check) + findings.Count(x => x.CheckId == check);
             checks.Add(new CheckStatus(check, state, state == "ran" ? count : null, state == "ran" ? null : why));
         }
+        // a reference filed in its worldspace's persistent cell has no cell of its own to build; a Findings row names one
+        // reference, so it says so instead of handing the viewer a cell it cannot open
+        findings = findings.Select(f => CellRule.Persistent(f.Cell) ? f with { Cell = null, WhyNot = CellRule.PersistentWhy } : f).ToList();
         return new BundleConflicts
         {
             Dir = dir, PlanId = planId, Arm = arm, Targets = targets, VerifyPath = verifyPath, VerifySummary = verifySummary,

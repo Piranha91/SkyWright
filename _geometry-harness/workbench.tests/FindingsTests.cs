@@ -118,6 +118,15 @@ public sealed class FindingsBundle : IDisposable
         foreach (var fk in new[] { "000B00:" + Other, "000B01:" + Sel, "000B02:" + Other, "000B03:" + Other, "000B04:" + Other, "000B06:" + Other, "000B07:" + Other, "000B08:" + Other, "000B09:" + Other, "000C01:" + Other })
             refs[fk] = new JsonObject { ["base"] = fk.EndsWith("B08:" + Other) ? "000E01:" + Base : null, ["carriedBy"] = new JsonArray(fk.Split(':')[1]), ["cells"] = new JsonObject { [fk.Split(':')[1]] = CellA } };
         if (unclickable) refs = new JsonObject();               // the names read reached none of these references
+        if (variant == "persistent")
+        {
+            // the first overlap row's reference is filed in its worldspace's persistent cell and its partner in CellA; navmesh
+            // N1's reference is persistent with no partner cell (the shape that made the workbench exit, 2026-11-16)
+            foreach (var i in Enumerable.Range(0, 7))
+                refs[$"0008{i:X2}:{Sel}"] = new JsonObject { ["carriedBy"] = new JsonArray(Sel), ["cells"] = new JsonObject { [Sel] = "000D74:HcBase.esm!persistent" } };
+            refs["000900:" + Base] = new JsonObject { ["carriedBy"] = new JsonArray(Base), ["cells"] = new JsonObject { [Base] = CellA } };
+            refs["000B01:" + Sel] = new JsonObject { ["carriedBy"] = new JsonArray(Sel), ["cells"] = new JsonObject { [Sel] = "000D74:HcBase.esm!persistent" } };
+        }
         Directory.CreateDirectory(Path.Combine(Dir, "enrichment", "names"));
         File.WriteAllText(Path.Combine(Dir, "enrichment", "names", "names.json"), new JsonObject
         {
@@ -203,6 +212,22 @@ public sealed class FindingsTests
 
     static List<JsonElement> FindingRows(JsonElement s) => P(s, "findings", "rows").EnumerateArray().ToList();
     static int RankOf(List<JsonElement> rows, string refKey) => P(rows.Single(r => r.TryGetProperty("ref", out var x) && x.GetString() == refKey), "rank").GetInt32();
+
+    [Fact]
+    public void P1_a_row_in_a_persistent_cell_opens_in_its_partners_cell_or_says_it_cannot_and_no_worklist_cell_is_persistent()
+    {
+        using var f = new FindingsBundle(variant: "persistent");
+        var b = BundleConflicts.Read(f.Dir, "candidate-01", f.Verify, "verify: fixture verdict");
+        var overlap = b.Rows.Where(r => r.CheckId == "geometry.object-overlap").ToList();
+        Assert.NotEmpty(overlap);
+        Assert.All(overlap, r => Assert.Equal(FindingsBundle.CellA, r.Cell));
+        var n1 = b.Findings.Single(x => x.RefKey == "000B01:" + FindingsBundle.Sel);
+        Assert.Null(n1.Cell);
+        Assert.False(n1.Clickable);
+        Assert.Contains("persistent cell", n1.WhyNot);
+        var cells = SessionCells.From(b.Rows.Select(r => r.Cell), b.Findings.Where(x => x.Clickable).Select(x => x.Cell));
+        Assert.DoesNotContain(cells, c => c.EndsWith("!persistent", StringComparison.OrdinalIgnoreCase));
+    }
 
     [Fact]
     public async Task H3a_Findings_take_every_check_but_the_three_placed_ones_and_Conflicts_take_only_those()
