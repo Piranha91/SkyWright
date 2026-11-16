@@ -165,13 +165,12 @@ internal sealed class Launcher : IAsyncDisposable
                         ?? throw new InvalidOperationException($"'{n}' is not a mod folder of profile '{Profile}'.");
                 if (m.Unmanaged) throw new InvalidOperationException($"'{n}' is an unmanaged entry (a DLC or a file MO2 does not manage), not a mod folder, so it cannot be selected.");
                 if (m.Separator) throw new InvalidOperationException($"'{n}' is a separator, not a mod folder; tick the mods under it.");
-                if (!m.Enabled && h != "remove")
-                    throw new InvalidOperationException($"'{n}' is disabled: a disabled mod is not part of this profile; enable it in MO2 or pick a profile that loads it.");
             }
             if (h == "set") foreach (var m in Mods) m.Selected = false;
             foreach (var m in Mods.Where(x => want.Contains(x.Name, StringComparer.OrdinalIgnoreCase))) m.Selected = h != "remove";
         }
-        return $"{Mods.Count(x => x.Selected)} mod folder(s) selected";
+        int off = Mods.Count(x => x.Selected && !x.Enabled);
+        return $"{Mods.Count(x => x.Selected)} mod(s) selected" + (off > 0 ? $"; {off} of them disabled in MO2, tested as if enabled" : "");
     }
 
     /// <summary>The registry's checks whose adapter runs a probe; every other kind is not a probe.</summary>
@@ -267,7 +266,7 @@ internal sealed class Launcher : IAsyncDisposable
         var mods = Path.Combine(Mo2Instance.LayoutRoot(Instance), "mods");
         if (c.Id == "geometry.bos-overlay")
         {
-            var roots = Mods.Where(m => m.Enabled && !m.Separator).Select(m => Path.Combine(mods, m.Name)).Append(Path.Combine(Game!, "Data"));
+            var roots = Mods.Where(m => (m.Enabled || m.Selected) && !m.Separator).Select(m => Path.Combine(mods, m.Name)).Append(Path.Combine(Game!, "Data"));
             if (!roots.Any(r => Directory.Exists(r) && Directory.EnumerateFiles(r, "*_SWAP.ini").Any()))
                 return "no enabled mod and not the game's Data folder has a _SWAP.ini file, so Base Object Swapper changes nothing in this profile";
         }

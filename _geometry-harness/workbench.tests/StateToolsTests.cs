@@ -366,13 +366,16 @@ public sealed class StateToolsTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task B10c_a_free_mode_profile_opens_and_ticking_a_disabled_mod_is_refused()
+    public async Task B10c_a_free_mode_profile_opens_and_a_disabled_mod_can_be_ticked()
     {
         var inst = LauncherInstance();
         var opened = await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P")));
         var mods = P(opened, "launcher", "mods").EnumerateArray().ToList();
         Assert.Contains(mods, m => P(m, "name").GetString() == "OnMod" && P(m, "enabled").GetBoolean());
-        Assert.Contains("disabled", await Refused("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OffMod" }))));
+        // Piranha leaves a mod disabled until it is judged safe, so a disabled mod is selectable and tested as if enabled
+        var off = await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OffMod" })));
+        Assert.Contains("tested as if enabled", P(off, "said").GetString());
+        Assert.Contains(P(off, "launcher", "mods").EnumerateArray(), m => P(m, "name").GetString() == "OffMod" && P(m, "selected").GetBoolean());
         var set = await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
         Assert.Contains(P(set, "launcher", "mods").EnumerateArray(), m => P(m, "name").GetString() == "OnMod" && P(m, "selected").GetBoolean());
     }
