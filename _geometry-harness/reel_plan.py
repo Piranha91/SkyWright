@@ -1151,6 +1151,8 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         lw = words.get("vignetteLabels") or {}
         if not lw.get(state):
             return None
+        if c.get("patchNew") and state in ("without", "with") and lw.get(state + "Patches"):
+            return fill(lw[state + "Patches"], patches=c["patchNew"]["said"])
         if c["type"] == "navmesh":
             # the earlier version's plugin is the frame's own --nav-version, never the plan's history (C2241)
             drawn = navmesh_earlier_plugin([m]) if state == "historical-navmesh-context" else None
@@ -1172,6 +1174,10 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         r_ = c["rows"][0]
         parts += [fill(lw["unmarked"], object=spoken_ref(fk_)) for fk_ in [r_["formKey"], *(r_.get("other") or [])]
                   if parts and lw.get("unmarked") and str(fk_).casefold() not in marked_]
+        if c.get("patchNew") and lw.get("highlightPatches"):
+            return (fill(lw["highlightPatches"], patches=c["patchNew"]["said"], marks="; ".join(parts)) if parts
+                    else fill(lw.get("highlightNoMarksPatches") or lw.get("highlightNoMarks") or "",
+                              patches=c["patchNew"]["said"]))
         return fill(lw["highlight"], marks="; ".join(parts)) if parts else lw.get("highlightNoMarks")
 
     def thing(fk, owner_mod):
@@ -1339,13 +1345,15 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
     def frame_media(c, state):
         """A clash's frame in one state, from ONE capture request: the captured request about the clash, else the
         request of its first matching frame. Two requests can picture one object (WRW: the tower in two pairs), and
-        frames from both would mix two poses in one vignette."""
+        frames from both would mix two poses in one vignette. A clash new with the supplied patches has its own setups
+        (c["arms"]): its frames are the with-patch setup's and the setup's without them."""
         fks = {c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])}
+        arms_ = c.get("arms") or arm_of
 
         def matches(m, st):
             prov = m.get("provenance") or {}
             return (m.get("assessed") and prov.get("vignetteState") == st and (m.get("subject") or {}).get("formKey") in fks
-                    and (m.get("subject") or {}).get("armId") == arm_of[st])
+                    and (m.get("subject") or {}).get("armId") == arms_.get(st))
         req = captured_request([c["rows"][0]["formKey"], *(c["rows"][0].get("other") or [])], capture_results)
         if req is None:
             first = next((m for st in states_of(c) for m in pres.get("media") or [] if matches(m, st)), None)
@@ -1359,6 +1367,94 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
         if c["type"] == "navmesh":
             return list(policy.get("navmeshSequence") or [])
         return ["left", "right"] if c["type"] == "record" else list(policy["sequence"])
+
+    def patch_new_chapters():
+        """The vignettes of clashes new with every supplied patch loaded (reader.validation.newByCheck): for each check
+        a capture can request (vignettes.captureChecks) whose kind a picture shows, up to patchNewPerCheck examples, the
+        strongest first, inside maxVignettes. Frames come from the with-patch setup and the setup without the patches,
+        never the prediction's setups. With capture closed, an example never captured has no chapter; it is listed in
+        `unpictured` with its reason, and the report's What to do already names it."""
+        val_ = reader.get("validation") or {}
+        out_ = {"chapters": [], "pictured": [], "unpictured": []}
+        per_ = int(policy.get("patchNewPerCheck") or 0)
+        with_p, without_p = val_.get("withPatchArm"), val_.get("withoutPatchArm")
+        if not per_ or not with_p or not without_p or not val_.get("newByCheck"):
+            return out_
+        can_ = set(policy.get("captureChecks") or [])
+        room_ = int(policy["maxVignettes"]) - len(selected)
+        by_id_ = {f_.get("id"): f_ for f_ in pres.get("findings") or []}
+        patches_ = [str(p_) for p_ in val_.get("patches") or reader.get("suppliedPatches") or []]
+        try:
+            said_ = joined([patch_name(p_) for p_ in patches_])
+        except Refused:
+            said_ = joined([re.sub(r"\.(esp|esm|esl)$", "", p_, flags=re.I) for p_ in patches_])
+        one_ = len(patches_) == 1
+        slots_ = {"patches": said_, "verb": "is" if one_ else "are", "them": "it" if one_ else "them"}
+        arms_ = {"without": without_p, "with": with_p, "highlight": with_p}
+        for n_ in val_.get("newByCheck") or []:
+            cs_ = []
+            for fid_ in n_.get("findingIds") or []:
+                f_ = by_id_.get(fid_) or {}
+                if f_.get("armId") != with_p:
+                    continue
+                t_ = types.get(f_.get("checkId"))
+                if t_ not in (policy.get("pictureTypes") or []) or f_.get("checkId") not in can_:
+                    continue
+                cnt_ = f_.get("counts") or {}
+                for r_ in f_.get("allRows") or f_.get("rows") or []:
+                    if not r_.get("formKey"):
+                        continue
+                    row_ = {"checkId": f_["checkId"], "kind": cnt_.get("groupKind"), "A": cnt_.get("A"), "B": cnt_.get("B"),
+                            "formKey": r_["formKey"], "other": list(r_.get("other") or []), "summary": r_.get("summary"),
+                            "findingId": fid_, "physical": r_.get("physical")}
+                    c_ = {"type": t_, "rows": [row_], "pair": tuple(x for x in (cnt_.get("A"), cnt_.get("B")) if x),
+                          "arms": arms_, "patchNew": {"patches": patches_, "said": said_, "findingIds": list(n_.get("findingIds") or [])}}
+                    if unpictured_reason(c_) is None:
+                        cs_.append(c_)
+            cs_.sort(key=lambda c_: (strength(c_) is None, -(strength(c_) or 0), str(c_["rows"][0]["formKey"])))
+            taken_ = 0
+            for c_ in cs_:
+                if taken_ >= per_ or room_ <= 0:
+                    break
+                r_ = c_["rows"][0]
+                fks_ = [r_["formKey"], *(r_.get("other") or [])]
+                if clash_refused(fks_, capture_results) or set(map(str, fks_)) & unmarkable:
+                    out_["unpictured"].append({"findingId": r_["findingId"], "formKey": r_["formKey"], "reason": "captureRefused"})
+                    continue
+                if captures_final and captured_request(fks_, capture_results) is None:
+                    out_["unpictured"].append({"findingId": r_["findingId"], "formKey": r_["formKey"], "reason": "notCaptured"})
+                    continue
+                try:
+                    # the clash first, then what makes it this kind of picture: "This clash" points back at it
+                    text_ = sentence(c_) + " " + fill(words["patchNewLead"], **slots_)
+                    place_ = geometry_slots(c_)["place"] if c_["type"] != "navmesh" else place_of(r_.get("summary"), [r_["formKey"]])
+                    frames_ = []
+                    for st_ in states_of(c_):
+                        m_ = frame_media(c_, st_)
+                        lab_ = frame_label(c_, st_, m_)
+                        frames_.append({"state": st_, "armId": str(arms_.get(st_) or "").split(":", 1)[-1] or None,
+                                        "mediaId": (m_ or {}).get("id"),
+                                        "viewNote": view_kind_line((m_ or {}).get("provenance") or {}) or None,
+                                        **({"label": lab_} if lab_ else {})})
+                except Refused as e_:
+                    out_["unpictured"].append({"findingId": r_["findingId"], "formKey": r_["formKey"], "reason": "names",
+                                               "detail": str(e_)})
+                    continue
+                clash_ = {"type": c_["type"], "checkId": r_["checkId"], "formKey": r_["formKey"], "other": list(r_.get("other") or []),
+                          "pair": list(c_["pair"]), "armId": str(with_p).split(":", 1)[-1],
+                          "withoutArmId": str(without_p).split(":", 1)[-1], "findingId": r_["findingId"],
+                          "highlight": highlight(c_), "place": place_,
+                          "patchNew": {"patches": patches_, "findingIds": c_["patchNew"]["findingIds"]}}
+                if c_["type"] == "state":
+                    m_ = STATE_KIND.match(str(r_.get("kind") or ""))
+                    clash_.update(kind=r_.get("kind"), state=m_.group(1) if m_ else None)
+                text_, _cut = strip_caveats(text_, words)
+                out_["chapters"].append({"kind": "vignette", "narration": text_, "clash": clash_, "frames": frames_,
+                                         "patch": {"case": "patch-new", "patches": patches_}})
+                out_["pictured"].append({"findingId": r_["findingId"], "formKey": r_["formKey"]})
+                taken_ += 1
+                room_ -= 1
+        return out_
 
     # one name for each kind of clash, wherever it is said: a kind whose clashes all come from one check is called by
     # that check's title (the report's, and the closing's), never by a second name
@@ -1634,6 +1730,11 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             tpage["seconds"] = page_seconds(tpage, rate, policy)
         chapters.append({"id": f"R-{len(chapters) + 1:02d}", "kind": "verdict", "narration": " ".join(todo),
                          "still": {"pages": [tpage]}})
+    # a clash that appears only with the supplied patches loaded is pictured with them loaded, after the advice to check
+    # it (rule: GATE-A of the patch-clash-pictures lane); one example per check (skill data patchNewPerCheck)
+    patch_new = patch_new_chapters()
+    for ch_ in patch_new["chapters"]:
+        chapters.append({**ch_, "id": f"R-{len(chapters) + 1:02d}"})
     # the gaps the closing used to list, each in the report: computed as before, kept in `movedToReport`, never shown;
     # the closing itself is one sentence, said only when some check has no result
     # 1. the opening's own count and the checks behind it, each under its own reason (the same list, by construction)
@@ -1751,6 +1852,7 @@ def _plan(pres, names, masters, policy, words, patch_search, mod_names, capture_
             "modNames": {k: v for k, v in mod_names.items()}, "markers": sorted(markers),
             "sequence": list(policy["sequence"]), "holdSeconds": dict(policy.get("holdSeconds") or {}),
             "captureCandidates": candidates, "accounting": accounting, "capturesFinal": bool(captures_final),
+            "patchNew": {"pictured": patch_new["pictured"], "unpictured": patch_new["unpictured"]},
             "noneCaptured": [{"type": t_, "count": n_, "why": w_} for t_, n_, w_ in none_captured],
             "movedToReport": moved, "reportLines": report_lines,
             "chapters": chapters}

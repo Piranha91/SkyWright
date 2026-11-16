@@ -94,7 +94,12 @@
 
 {% for s in val.sentences %}- {{ s }}{% if s == val.get("placedSentence") and val.get("placedAnchor") %} [Evidence](evidence-index.md#{{ val.placedAnchor }}){% endif %}{% if s == val.get("undoneSentence") %}{% for fid in val.undoneFindingIds[:1] %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% endif %}{% if s == val.get("replacedSentence") and (s != val.get("undoneSentence") or (val.replacedFindingIds or [])[:1] != (val.undoneFindingIds or [])[:1]) %}{% for fid in val.replacedFindingIds[:1] %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% endif %}{{ "" }}
 {% endfor %}{% if val.get("newByCheck") %}- {{ val.newByCheckHeading }}: {% for n in val.newByCheck %}{{ n.title }} {{ n.count|n }}{% if n.get("masterNote") %} ({{ n.masterNote }}){% endif %}{% if n.get("objectsNote") %}: {{ n.objectsNote }}{% endif %}{% for fid in n.findingIds %} [{{ fid }}](evidence-index.md#{{ fid }}){% endfor %}{% if not loop.last %}; {% endif %}{% endfor %}.
-{% endif %}
+{% for n in val.newByCheck %}{% for fid in n.findingIds %}{% for m in (p.get("figuresByFinding") or {}).get(fid) or [] %}{% if m.reportPath and m.id not in figshown.ids %}{% set figshown.ids = figshown.ids + [m.id] %}{{ "
+" }}
+![{{ m.caption or (m.subject or {}).description or "Evidence image" }}]({{ m.reportPath }})
+
+*{{ m.caption or "Evidence image." }}* [Image provenance](evidence-index.md#{{ m.id }}).
+{% endif %}{% endfor %}{% endfor %}{% endfor %}{% endif %}
 {% for s in val.get("itemLines") or [] %}{% if loop.first %}
 {% endif %}- {{ s }}
 {% endfor %}

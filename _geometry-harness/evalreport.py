@@ -97,6 +97,46 @@ def view_kind_caption(provenance: dict, words: dict, first: bool = True) -> str:
     return ""
 
 
+def patch_words(patches: list, words: dict, joiner=None) -> dict:
+    """The slots a sentence about the supplied patches fills, agreeing with how many there are: {patches} {verb} loaded,
+    shown with {them}."""
+    names_ = [str(p_) for p_ in patches or [] if p_]
+    said_ = (joiner or (lambda xs: xs[0] if len(xs) == 1 else ", ".join(xs[:-1]) + " and " + xs[-1]))(names_) if names_ else ""
+    one_ = len(names_) == 1
+    return {"patches": said_, "verb": "is" if one_ else "are", "them": "it" if one_ else "them"}
+
+
+def patch_captions(findings: list, media: list, validation: dict, setups: dict, words: dict, first_frames: dict) -> None:
+    """A clash new with the supplied patches is pictured with them loaded: its frames say "With / Without <patches>" in
+    place of the evaluated mod, and the figure's first frame says why it is pictured (skill data figureCaptions
+    setupWithPatches, setupWithoutPatches, patchNewWhy). Frames of any other finding are left as they are."""
+    val_ = validation or {}
+    ids_ = {fid_ for n_ in val_.get("newByCheck") or [] for fid_ in n_.get("findingIds") or []}
+    with_, without_ = val_.get("withPatchArm"), val_.get("withoutPatchArm")
+    if not ids_ or not with_ or not words.get("setupWithPatches"):
+        return
+    slots_ = patch_words(list(val_.get("patchLabels") or val_.get("patches") or []), words)
+    by_id_ = {m_.get("id"): m_ for m_ in media}
+    for f_ in findings:
+        if f_.get("id") not in ids_ or f_.get("armId") != with_:
+            continue
+        for mid_ in f_.get("mediaIds") or []:
+            m_ = by_id_.get(mid_)
+            arm_ = ((m_ or {}).get("subject") or {}).get("armId")
+            old_ = setups.get(mid_)
+            if not m_ or not isinstance(m_.get("caption"), str) or old_ is None or arm_ not in (with_, without_):
+                continue
+            new_ = fill(str(words["setupWithPatches" if arm_ == with_ else "setupWithoutPatches"]), **slots_)
+            cap_ = m_["caption"]
+            if old_ and cap_.startswith(old_):
+                cap_ = new_ + cap_[len(old_):]
+            prov_ = m_.get("provenance") or {}
+            if first_frames.get(prov_.get("captureRequest") or mid_) == mid_ and words.get("patchNewWhy"):
+                cap_ += fill(str(words["patchNewWhy"]), **slots_)
+            m_["caption"] = cap_
+            m_["patchNew"] = True
+
+
 def highlight_caption(marks: dict, fig_object, fig_mod, participants=None) -> tuple[str, dict]:
     """(the figureCaptions key, its slots) for a marked view: both participants marked (`highlight`), or one alone
     (`highlightOne`: a world-state vignette marks only its focus), never a missing one named "None" (C1899). With the
@@ -10288,6 +10328,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         return (n_mods.get(str(plugin_)) or {}).get("name") or re.sub(r"\.(esp|esm|esl)$", "", str(plugin_), flags=re.I)
 
     target_plugin = next((t.get("name") for t in targets if t.get("name")), None)
+    caption_setup_ = {}      # each captioned frame's setup words, re-said for a clash new with the patches (patch_captions)
     for f_ in findings:
         row_ = (f_.get("rows") or f_.get("allRows") or [{}])[0] if (f_.get("rows") or f_.get("allRows")) else {}
         for mid_ in f_.get("mediaIds") or []:
@@ -10305,6 +10346,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
             arm_ = (m_.get("subject") or {}).get("armId")
             setup_ = (caption_words.get("setupWith") if arm_ == f_.get("armId") else caption_words.get("setupWithout") or "")
             setup_ = fill(str(setup_ or ""), mod=fig_mod(target_plugin))
+            caption_setup_[mid_] = setup_
             fk_ = (m_.get("subject") or {}).get("formKey") or row_.get("formKey")
             slots_ = {"setup": setup_, "object": fig_object(fk_)}
             key_ = state_
@@ -11132,6 +11174,7 @@ def compile_plan(bundle_dir: Path, verify: dict, settings: dict, pr: dict, bundl
         if len(rest) < len(reader_missing):
             reader["missingCoveredLine"] = (reader_data.get("prediction") or {}).get("missingCoveredLine")
     reader["validation"] = lead["validation"]
+    patch_captions(findings, media, lead["validation"], caption_setup_, caption_words, first_frame_)
     # (eighth review, Snazzy 150) a refused comparison whose predicted clashes were re-measured gone says both: the rows
     # measured gone, and that it refused a verdict on the rest
     gone_ = (lead["validation"] or {}).get("measuredGoneRefused") or {}
