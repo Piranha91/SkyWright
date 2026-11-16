@@ -15,9 +15,15 @@ internal static class MoveRules
     /// <summary>A dependent carried by its host's move: the host's rigid transform, before to after, applied to the
     /// dependent's placement (a turn of the host swings it along the arc and turns it too).</summary>
     internal static RefPlacementEdit.Pose Carry(RefPlacementEdit.Pose hostBefore, RefPlacementEdit.Pose hostAfter, RefPlacementEdit.Pose dependent)
-        => dependent with { Position = new Vec3(dependent.Position.X + hostAfter.Position.X - hostBefore.Position.X,
-                                                dependent.Position.Y + hostAfter.Position.Y - hostBefore.Position.Y,
-                                                dependent.Position.Z + hostAfter.Position.Z - hostBefore.Position.Z) };
+    {
+        if (!Matrix4x4.Invert(RefPlacementEdit.World(hostBefore), out var inv))
+            throw new InvalidOperationException("the host's placement cannot be inverted (zero scale), so nothing can be moved with it.");
+        var m = RefPlacementEdit.World(dependent) * inv * RefPlacementEdit.World(hostAfter);
+        if (!Matrix4x4.Invert(SpatialOverlap.RefrRotation(hostBefore.Rotation), out var rinv))
+            throw new InvalidOperationException("the host's rotation cannot be inverted.");
+        var rot = SpatialOverlap.RefrRotation(dependent.Rotation) * rinv * SpatialOverlap.RefrRotation(hostAfter.Rotation);
+        return dependent with { Position = new Vec3(m.M41, m.M42, m.M43), Rotation = SpatialOverlap.RefrAngles(rot) };
+    }
 
     internal static AxisLock ParseLock(string? text) => (text ?? "").Trim().ToLowerInvariant() switch
     {

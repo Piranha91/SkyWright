@@ -78,6 +78,10 @@ internal interface IWorkbenchScene
     IContextSource? ContextSource => null;
     /// <summary>Item 5: the live geometry and the navmesh triangles the context read uses.</summary>
     IEnumerable<(FormKey Key, int Tri, System.Numerics.Vector3 A, System.Numerics.Vector3 B, System.Numerics.Vector3 C)> NavTris => Array.Empty<(FormKey, int, System.Numerics.Vector3, System.Numerics.Vector3, System.Numerics.Vector3)>();
+    /// <summary>Item 5: the bundle's own declared-dependencies rows naming the reference; null when the check was not run.</summary>
+    IReadOnlyList<string>? DependencyRows(string key) => null;
+    /// <summary>Item 5: the solid bodies of a reference's model (layer, motion system), as the scene read them; null when not read.</summary>
+    IEnumerable<(string Layer, string MotionSystem)>? BodiesOf(string key) => null;
     /// <summary>Item 8: the trial lane; null where the scene cannot run trials.</summary>
     TrialLane? Trials => null;
     /// <summary>Item 8: the boxes of a reference and the open row's other reference, Skyrim space; null when not drawn.</summary>

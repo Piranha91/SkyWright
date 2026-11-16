@@ -167,7 +167,8 @@ internal sealed class PatchWriter : IAsyncDisposable
         else
         {
             args["patch"] = patchName;
-            if (Target.Output is not null) args["out_path"] = Target.Output;           // manual mode: under the Output Folder
+            // a trial patch goes to its own folder (item 8); otherwise manual mode writes under the Output Folder
+            if ((outPath ?? Target.Output) is { } o) args["out_path"] = o;
         }
         Log($"{(dryRun ? "dry run" : "WRITE")} of {net.Count} placement edit(s) to {Target}, {(into is not null ? $"into '{into}'" : $"new patch '{patchName}'")}");
         return await CallAsync("housecarl_apply", args, ct);

@@ -61,7 +61,13 @@ internal sealed class StateTools
         if (wait_seconds > 0)
         {
             Task? running = null;
-            var r0 = await hub.OnUi(() => { running = hub.Surface.Scene is { Rechecking: true } s ? s.RecheckRunning : hub.Launcher.RunTask is { IsCompleted: false } lr ? lr : null; return Task.FromResult(Answer(new { })); });
+            var r0 = await hub.OnUi(() =>
+            {
+                running = hub.Surface.Scene is { Rechecking: true } s ? s.RecheckRunning
+                        : hub.Surface.Scene?.Trials?.Running is { IsCompleted: false } tr ? tr
+                        : hub.Launcher.RunTask is { IsCompleted: false } lr ? lr : null;
+                return Task.FromResult(Answer(new { }));
+            });
             if (r0.IsError == true) return r0;
             if (running is not null) await Task.WhenAny(running, Task.Delay(TimeSpan.FromSeconds(Math.Min(wait_seconds, 600))));
         }
@@ -78,8 +84,8 @@ internal sealed class StateTools
             if (parts.Contains("findings")) d["findings"] = FindingsPart(hub.Surface, limit, offset, filter, check);
             if (parts.Contains("launcher")) d["launcher"] = hub.Launcher.Project();
             if (parts.Contains("scenes")) d["scenes"] = ScenesJson(hub.Surface, hub.Standings, include_decided);
-            if (parts.Contains("context")) d["context"] = new { };
-            if (parts.Contains("placements")) d["placements"] = new { };
+            if (parts.Contains("context")) d["context"] = ContextJson(hub.Surface);
+            if (parts.Contains("placements")) d["placements"] = PlacementsJson(hub.Surface);
             return Answer(d);
         });
     }
@@ -141,7 +147,9 @@ internal sealed class StateTools
             if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
             if (v == "select" && scene is { } sn) return SelectScene(hub, sn);
-            if (v is "move_with" or "find_clear" or "choose") return Answer(new { said = "" });
+            if (v == "move_with") { var mw = MoveWith(hub.Surface, refs); if (mw.IsError != true) SaveSession(hub.Surface); return mw; }
+            if (v == "find_clear") return FindClear(hub.Surface, max, snap);
+            if (v == "choose") { var ch = Choose(hub.Surface, n); if (ch.IsError != true) SaveSession(hub.Surface); return ch; }
             if (finding is { } fr) return await SelectFinding(hub.Surface, verb, fr);
             var r = v switch
             {
@@ -372,6 +380,113 @@ internal sealed class StateTools
         return new { checks, total = all.Count, matched = rows.Count, offset, limit, rows = rows.Skip(offset).Take(limit).Select(FindingRowJson).ToList() };
     }
 
+    /// <summary>Item 5: the selected reference's context, read once per scene off the UI thread; "reading…" per section until it lands.</summary>
+    static object? ContextJson(IWorkbenchSurface s)
+    {
+        if (s.Scene is not { } sc) return new { refused = "no scene is shown." };
+        if (sc.Session.Selected is not { } k) return new { refused = "nothing is selected; select a reference first." };
+        var key = k.ToString();
+        if (ContextCache.Read(sc, key) is not { } read) return new { @ref = key, refused = "this scene has no houseCARL server to read the reference's context from." };
+        if (!read.IsCompleted) return new { @ref = key, sections = ContextRead.SectionNames.ToDictionary(n => n, _ => "reading…") };
+        if (read.IsFaulted) return new { @ref = key, refused = read.Exception!.GetBaseException().Message };
+        var a = read.Result;
+        var moving = ContextCache.MovedWith(sc, key);
+        return new
+        {
+            @ref = key,
+            doors = a.Doors.Select(d => new { key = d.Key, label = d.Label, farDoor = d.FarDoor, farCell = d.FarCell,
+                                              arrival = d.Arrival is { } p ? new[] { p.X, p.Y, p.Z } : null }).ToList(),
+            names = a.Names.Select(n => new { key = n.Key, field = n.Field }).ToList(),
+            enableParent = a.EnableParent, touches = a.Touches,
+            resting = a.Resting.Select(r => new { key = r.Key, motion = r.Motion.ToString().ToLowerInvariant(), sentence = r.Sentence }).ToList(),
+            navmesh = a.Navmesh.Select(n => new { navmesh = n.Navmesh, triangles = n.Triangles }).ToList(),
+            sections = a.Sections, statement = a.Statement, movingWith = moving, staysBehind = ContextRead.StaysBehind(a, moving),
+        };
+    }
+
+    /// <summary>Item 5: stage the selected reference's rigid move, from its load-order place to its staged pose, for each named reference.</summary>
+    static CallToolResult MoveWith(IWorkbenchSurface s, string[]? refs)
+    {
+        var sc = SceneOr(s, out var none); if (sc is null) return none!;
+        if (sc.Session.Selected is not { } host) return Refuse("nothing is selected; select the reference the others move with first.");
+        if (refs is not { Length: > 0 }) return Refuse("move_with needs refs, the references to move with the selected one.");
+        var keys = new List<FormKey>();
+        foreach (var r in refs) { var key = Key(r, out var bad); if (key is null) return bad!; keys.Add(key.Value); }
+        string said;
+        try { said = MoveWithRule.Apply(sc, host, keys); } catch (InvalidOperationException ex) { return Refuse(ex.Message); }
+        return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) });
+    }
+
+    /// <summary>Item 5: before a commit, what follows each moved host and what stays behind; one sentence per host read.</summary>
+    static async Task<string> StaysBehindAsync(IWorkbenchScene sc)
+    {
+        var followers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var hosts = sc.Session.Edited().Select(k => k.ToString()).ToList();
+        foreach (var h in hosts) foreach (var f in ContextCache.MovedWith(sc, h)) followers.Add(f);
+        var said = new List<string>();
+        foreach (var h in hosts.Where(h => !followers.Contains(h)))
+        {
+            if (ContextCache.Read(sc, h) is not { } read) continue;
+            try { said.Add($"{h}: " + ContextRead.StaysBehind(await read, ContextCache.MovedWith(sc, h))); }
+            catch (Exception ex) { said.Add($"{h}: what stays behind could not be read: {ex.GetBaseException().Message}"); }
+        }
+        return said.Count == 0 ? "" : " " + string.Join(" ", said);
+    }
+
+    /// <summary>Item 8: candidate positions for the selected reference of the open row, judged by its re-check in the background.</summary>
+    static CallToolResult FindClear(IWorkbenchSurface s, int? max, float? grid)
+    {
+        var sc = SceneOr(s, out var none); if (sc is null) return none!;
+        if (sc.Session.Selected is not { } key) return Refuse("nothing is selected; select the reference to find a clear position for.");
+        if (sc.Trials is not { } lane) return Refuse("this scene cannot run trials: it has no houseCARL server or no bundle to re-check with.");
+        if (s.OpenRow is not { } row) return Refuse("find_clear needs an open conflict, whose re-check judges each candidate; open one first.");
+        if (!Recheck.ProbeOfCheck.TryGetValue(row.Row.CheckId, out var probe)) return Refuse($"a {row.Row.CheckId} row has no probe re-run here, so its candidates cannot be judged.");
+        if (sc.PairBoxes(key) is not { } boxes) return Refuse($"{key} or the open row's other reference is not drawn in this scene, so no candidate can be made.");
+        if (max is < 1 or > Candidates.Max) return Refuse($"max must be 1 to {Candidates.Max}.");
+        var cands = Candidates.Generate(boxes.Subject, boxes.Other, max ?? Candidates.Default);
+        var loadOrder = RefPlacementEdit.BakedPose(sc.Session.RefOf(key).Ref);
+        int others = sc.Session.Pending.Where(e => e.Ref != key).Select(e => e.Ref).Distinct().Count();
+        string said;
+        try { said = lane.Start(key, sc.Cell, loadOrder, cands, probe, others, sc.Session.Written.ContainsKey(key), grid ?? 0f); }
+        catch (InvalidOperationException ex) { return Refuse(ex.Message); }
+        sc.View?.ShowCandidates(key, lane.Placements.Select(p => p.Pose).ToList());
+        return Answer(new { said = said + " The candidates are drawn as numbered tints (1 magenta, 2 orange, 3 cyan); none is staged until choose.",
+                            rule = "candidates: from the two boxes, the smallest move along +x, -x, +y and -y that separates them, at 1x and 1.5x, nearest first, snapped to the grid on the axes moved, then dropped onto the surface below; judged only by the open row's re-check" });
+    }
+
+    static CallToolResult Choose(IWorkbenchSurface s, int? n)
+    {
+        var sc = SceneOr(s, out var none); if (sc is null) return none!;
+        if (sc.Trials is not { } lane || lane.Placements.Count == 0) return Refuse("there are no candidates; ask for them with find_clear first.");
+        if (n is not { } num) return Refuse("choose needs n, the candidate's number.");
+        if (sc.Session.Selected is not { } key) return Refuse("nothing is selected; select the reference the candidates were made for.");
+        var (pose, said) = lane.Choose(num, sc.Cell, sc.Session.Current(key));
+        if (pose is null) return Refuse(said);
+        sc.Session.Stage(key, pose.Value);
+        sc.View?.ClearCandidates();
+        sc.AfterStage();
+        return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) });
+    }
+
+    static object? PlacementsJson(IWorkbenchSurface s)
+    {
+        if (s.Scene?.Trials is not { } lane) return new { refused = "this scene cannot run trials." };
+        static float[] V(Vec3 v) => new[] { v.X, v.Y, v.Z };
+        return new
+        {
+            running = lane.Running is { IsCompleted: false },
+            shown = s.Scene?.View?.CandidateTriangles().Select(t => t.N).ToList() ?? new List<int>(),
+            workFolder = lane.WorkFolder,
+            words = ClearRule.Meanings,
+            candidates = lane.Placements.Select(p => new
+            {
+                n = p.N, move = p.Move, position = V(p.Pose.Position), rotationDeg = V(new Vec3(p.Pose.Rotation.X * 180 / MathF.PI, p.Pose.Rotation.Y * 180 / MathF.PI, p.Pose.Rotation.Z * 180 / MathF.PI)),
+                drop = p.Drop, contacts = p.Contacts, word = p.Verdict?.Word ?? "checking", sentence = p.Verdict?.Sentence, rows = p.Verdict?.Rows,
+                seconds = p.Seconds, @checked = p.Checked, notChecked = p.NotChecked, patchFolder = p.PatchFolder,
+            }).ToList(),
+        };
+    }
+
     /// <summary>Item 7: open a scene's best row (a findings-only scene: its first Findings row).</summary>
     static CallToolResult SelectScene(StateHub hub, int number)
     {
@@ -503,8 +618,10 @@ internal sealed class StateTools
                 {
                     var sc = SceneOr(s, out var none); if (sc is null) return none!;
                     if (string.IsNullOrWhiteSpace(patch)) return Refuse("commit needs patch, the new plugin's name (for example WbFixBarrel).");
+                    var behind = await StaysBehindAsync(sc);                    // said before the write, from the scene as staged
                     var text = await sc.CommitAsync(dryRun, patch.Trim());
                     if (text is null) return Refuse(sc.CommitRefusal ?? "the commit was refused without a reason; read the window's log.");
+                    text += behind;
                     said = dryRun ? "dry run, nothing written: " + text
                         : "written: " + text + (sc.Rechecking
                             ? $" The re-check of conflict {s.OpenRow?.Rank} is running (about 70-80 s); read workbench_state with wait_seconds 150 for its result."

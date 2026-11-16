@@ -221,7 +221,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         DockPanel.SetDock(buttons, Dock.Right);
         var tools = ToolsRow();
         DockPanel.SetDock(tools, Dock.Bottom);
-        var pendingPanel = PendingPanel();
+        // the edits list and, beside it, the selected reference's context (item 5)
+        var pendingPanel = new Grid();
+        pendingPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        pendingPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        var edits = PendingPanel(); var context = ContextPanel();
+        Grid.SetColumn(context, 1);
+        pendingPanel.Children.Add(edits); pendingPanel.Children.Add(context);
         DockPanel.SetDock(pendingPanel, Dock.Bottom);
         bar.Children.Add(tools); bar.Children.Add(pendingPanel);
         bar.Children.Add(buttons); bar.Children.Add(_status);
@@ -557,6 +563,110 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     EditSession IWorkbenchScene.Session => _session;
     ViewState? IWorkbenchScene.View => _viewState;
     IReadOnlyList<PickShape> IWorkbenchScene.Shapes => _opt.PickShapes;
+    // item 5: the server's answers, the scene's navmesh triangles and the bundle's own declared-dependencies rows
+    ServerContextSource? _context;
+    IContextSource? IWorkbenchScene.ContextSource => _context ??= new ServerContextSource(WriterAsync(),
+        k => _session.IsDrawn(k) ? RefPlacementEdit.BakedPose(_session.RefOf(k).Ref) : null);
+    IEnumerable<(FormKey Key, int Tri, Vector3 A, Vector3 B, Vector3 C)> IWorkbenchScene.NavTris => _opt.NavTris;
+    // ---- item 8: the trial lane, writing each candidate as its own patch under the Work Folder and re-checking it
+    TrialLane? _trials;
+    string? _trialsWork;
+    TrialLane? IWorkbenchScene.Trials
+    {
+        get
+        {
+            var work = new LiveSurface().WorkFolder;
+            if (_trials is not null && _trialsWork == work) return _trials;
+            if (Shell.Bundle is null || _session.Selected is not { } key) return _trials;
+            var writer = WriterAsync();                                   // started here, on the UI thread; the lane awaits it
+            _trialsWork = work;
+            return _trials = new TrialLane(work,
+                async (edit, patch, outPath) => await (await writer).CommitAsync(new[] { edit }, patch, dryRun: false, outPath: outPath),
+                (patch, folder, dir) => RecheckTrialAsync(writer, patch, folder, dir),
+                pose => Settle(_trials?.Key ?? _session.Selected ?? key, pose), pose => ContactsAt(_trials?.Key ?? _session.Selected ?? key, pose));
+        }
+    }
+
+    (Aabb Subject, Aabb Other)? IWorkbenchScene.PairBoxes(FormKey key)
+    {
+        var row = Shell.CurrentRow?.Row;
+        var otherKey = row is null ? null : string.Equals(row.RefKey, key.ToString(), StringComparison.OrdinalIgnoreCase) ? row.OtherKey : row.RefKey;
+        if (otherKey is null || !FormKey.TryFactory(otherKey, out var ok)) return null;
+        var g = CaptureViews.FromPickShapes(_opt.PickShapes.Where(s => s.Kind == PickKind.Ref && (s.Ref.RefKey == key || s.Ref.RefKey == ok)));
+        return g.Refs.TryGetValue(key.ToString(), out var a) && g.Refs.TryGetValue(ok.ToString(), out var b) && a.I.Count > 0 && b.I.Count > 0 ? (a.Box, b.Box) : null;
+    }
+
+    /// <summary>The live geometry near <paramref name="pose"/> with <paramref name="key"/> placed at it (its baked vertices carried there).</summary>
+    CaptureViews.Geometry GeometryWith(FormKey key, RefPlacementEdit.Pose pose, float margin = 600f)
+    {
+        var at = TexturedScene.YUp(ToV(pose.Position));
+        var lo = at - new Vector3(margin); var hi = at + new Vector3(margin);
+        var g = new CaptureViews.Geometry();
+        var baked = RefPlacementEdit.BakedPose(_session.RefOf(key).Ref);
+        var m = RefPlacementEdit.DeltaYUp(baked, pose);
+        foreach (var s in _opt.PickShapes)
+        {
+            if (s.Kind == PickKind.Ref && s.Ref.RefKey == key)
+                g.Add(key.ToString(), s.Ref.BaseEditorId ?? key.ToString(), RefPlacementEdit.BakedVerts(s).Select(v => Vector3.Transform(v, m)).ToArray(), s.Tris);
+            else if ((s.Kind == PickKind.Ref || s.Kind == PickKind.Terrain) && s.Max.X >= lo.X && s.Min.X <= hi.X && s.Max.Y >= lo.Y && s.Min.Y <= hi.Y && s.Max.Z >= lo.Z && s.Min.Z <= hi.Z)
+                g.Add(s.Kind == PickKind.Terrain ? CaptureViews.TerrainKey : s.Ref.RefKey.ToString(), s.Kind == PickKind.Terrain ? CaptureViews.TerrainKey : s.Ref.BaseEditorId ?? s.Ref.RefKey.ToString(), s.Verts, s.Tris);
+        }
+        return g;
+    }
+
+    /// <summary>A candidate raised 20 units and dropped onto what is below it; a refused drop keeps it at its own height and says why.</summary>
+    (RefPlacementEdit.Pose Pose, string Drop) Settle(FormKey key, RefPlacementEdit.Pose target)
+    {
+        var raised = target with { Position = new Vec3(target.Position.X, target.Position.Y, target.Position.Z + 20f) };
+        var d = CaptureViews.Drop(GeometryWith(key, raised), key.ToString());
+        if (d.Refusal is not null || d.Distance is not { } dist) return (target, d.Refusal ?? "the drop gave no distance");
+        var onto = d.Onto == CaptureViews.TerrainKey ? "the terrain" : $"{d.Onto} ({d.OntoName})";
+        return (raised with { Position = new Vec3(raised.Position.X, raised.Position.Y, raised.Position.Z - dist) },
+                FormattableString.Invariant($"raised 20 units and lowered {dist:0.##} units onto {onto}; drop lowers onto drawn surfaces (render triangles), not collision"));
+    }
+
+    /// <summary>What the contact owner says the reference touches or crosses at a candidate pose: a fact beside the drop sentence.</summary>
+    IReadOnlyList<string> ContactsAt(FormKey key, RefPlacementEdit.Pose pose)
+    {
+        var g = GeometryWith(key, pose);
+        var c = CaptureViews.Contacts(g, key.ToString());
+        if (c.Refusal is { } why) return new[] { "contact not assessed: " + why };
+        return c.Touches.OrderBy(t => t, StringComparer.Ordinal)
+                        .Select(t => t == CaptureViews.TerrainKey ? "the terrain touches or crosses it" : $"{t} ({g.Refs[t].Name}) touches or crosses it").ToList();
+    }
+
+    /// <summary>One trial's re-check: the open row's probe on the trial patch, unpatched and patched (<see cref="Recheck.RunAll"/>),
+    /// then the other rows of the moved reference and its carried predicates still holding.</summary>
+    async Task<TrialRecheck> RecheckTrialAsync(Task<PatchWriter> writer, string patch, string outPath, string work)
+    {
+        var w = await writer;
+        var open = Shell.CurrentRow ?? throw new InvalidOperationException("no conflict row is open, so the trial cannot be re-checked.");
+        var b = Shell.Bundle ?? throw new InvalidOperationException("no bundle is open, so the re-check has no detector command to run.");
+        var t = w.Target;
+        var plugin = PluginName(patch);
+        var mod = Recheck.PatchFolder(outPath, plugin);
+        var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
+        var harness = Path.GetDirectoryName(Path.GetFullPath(evalrun))!;
+        var conflictdiff = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF") is { Length: > 0 } cd ? cd
+            : Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
+        var buildDirs = (Environment.GetEnvironmentVariable("WB_PROBE_DIRS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
+        var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
+        string population = "not read";
+        var r = await Task.Run(() => Recheck.RunAll(b.Dir, b.Arm, open.Row, plugin, mod, t.Instance, t.Profile, game, work, evalrun, conflictdiff,
+            buildDirs, harness, s => { if (population == "not read" && s.Contains("population", StringComparison.OrdinalIgnoreCase)) population = s.Split('\n')[0].Trim();
+                                       _window?.Dispatcher.BeginInvoke(() => Say("trial re-check: " + s)); }));
+        var un = Path.Combine(work, "unpatched.json"); var pa = Path.Combine(work, "patched.json");
+        var key = _trials?.Key?.ToString() ?? open.Row.RefKey;
+        return new TrialRecheck(r, ClearRule.OthersOfRef(un, pa, r.Row.Id, key), ClearRule.StillHolding(pa, key), population);
+    }
+
+    IReadOnlyList<string>? IWorkbenchScene.DependencyRows(string key)
+    {
+        const string check = "geometry.declared-dependencies";
+        if (Shell.Bundle?.Checks.FirstOrDefault(c => c.CheckId == check) is not { State: "ran" }) return null;
+        return Shell.Findings.Where(f => f.Row.CheckId == check && string.Equals(f.Row.RefKey, key, StringComparison.OrdinalIgnoreCase))
+                             .Select(f => f.Row.Summary).ToList();
+    }
     PickHit? IWorkbenchScene.PickCentre() => PickAt(new Vector2(W / 2f, H / 2f));
     float[]? IWorkbenchScene.Camera { get => new[] { _eye.X, _eye.Y, _eye.Z, _yaw, _pitch }; set { if (value is { Length: 5 } c) SetPose(new Vector3(c[0], c[1], c[2]), c[3], c[4]); } }
     string? IWorkbenchScene.PatchFolderOf(string patch) => PatchFolderOf(patch);
@@ -679,6 +789,63 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 if (res.IsError != true) { _reason.Text = ""; Shell.FillConflicts(); }
             }));
         return row;
+    }
+
+    // ---- item 5: the selected reference's context, read off the UI thread when it is selected
+    readonly StackPanel _contextRows = new();
+    string? _contextShown;
+
+    UIElement ContextPanel()
+    {
+        _session.Changed += _ => FillContext();
+        FillContext();
+        return new Expander { Header = "Context: what follows a move and what stays", IsExpanded = true,
+                              Content = new ScrollViewer { Height = 90, Content = _contextRows, VerticalScrollBarVisibility = ScrollBarVisibility.Auto } };
+    }
+
+    void Line(string text, System.Windows.Media.Brush? colour = null) =>
+        _contextRows.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 0), Foreground = colour ?? System.Windows.Media.Brushes.Black });
+
+    void FillContext()
+    {
+        var scene = (IWorkbenchScene)this;
+        _contextRows.Children.Clear();
+        if (_session.Selected is not { } k) { Line("Select a reference to see its doors, what names it, what rests on it and the navmesh under it."); _viewState.HighlightNav(Array.Empty<(Vector3, Vector3, Vector3)>()); return; }
+        var key = k.ToString();
+        if (ContextCache.Read(scene, key) is not { } read) { Line("This scene has no houseCARL server to read the context from."); return; }
+        if (!read.IsCompleted)
+        {
+            Line($"{key}: reading its doors, what names it, what rests on it and the navmesh under it…", System.Windows.Media.Brushes.DimGray);
+            if (_contextShown != key) { _contextShown = key; read.ContinueWith(_ => _window?.Dispatcher.BeginInvoke(FillContext), TaskScheduler.Default); }
+            return;
+        }
+        if (read.IsFaulted) { Line($"{key}: " + read.Exception!.GetBaseException().Message, System.Windows.Media.Brushes.Firebrick); return; }
+        var a = read.Result;
+        var ticks = new List<(CheckBox Box, FormKey Key)>();
+        void Tickable(string k2, string text)
+        {
+            if (FormKey.TryFactory(k2, out var fk) && _session.IsDrawn(fk))
+            {
+                var cb = new CheckBox { Content = text, Margin = new Thickness(6, 0, 6, 0), IsChecked = ContextCache.MovedWith(scene, key).Contains(k2) };
+                ticks.Add((cb, fk)); _contextRows.Children.Add(cb);
+            }
+            else Line(text + "   (not drawn here)");
+        }
+        foreach (var d in a.Doors)
+            Tickable(d.Key, $"door {d.Key}: {d.Label}" + (d.FarDoor is { } far ? $"; leads to {far} in cell {d.FarCell ?? "?"}" : ""));
+        foreach (var n in a.Names) Tickable(n.Key, $"{n.Key} names it ({n.Field})");
+        foreach (var r in a.Resting) Tickable(r.Key, r.Sentence);
+        foreach (var (name, text) in a.Sections) if (name != "navmesh") Line($"{name}: {text}", System.Windows.Media.Brushes.DimGray);
+        Line(string.Join("; ", a.Navmesh.Select(n => $"{n.Navmesh}: {n.Triangles} triangle(s)")) is { Length: > 0 } nv ? $"navmesh under it (green): {nv}" : "no navmesh under it", System.Windows.Media.Brushes.DarkGreen);
+        Line(a.Sections.TryGetValue("navmesh", out var rule) ? rule : ContextRead.NavRule, System.Windows.Media.Brushes.DimGray);
+        Line(a.Statement, System.Windows.Media.Brushes.DimGray);
+        if (ticks.Count > 0)
+            _contextRows.Children.Add(B("Move ticked with it", "stage the selected reference's move for each ticked reference", () =>
+                Do(() => MoveWithRule.Apply(scene, k, ticks.Where(t => t.Box.IsChecked == true).Select(t => t.Key).ToList()))));
+        Line("Before a commit: " + ContextRead.StaysBehind(a, ContextCache.MovedWith(scene, key)));
+        if (a.Box is { } box)
+            _viewState.HighlightNav(ContextRead.TrianglesUnder(_opt.NavTris, box).Select(t => (t.A, t.B, t.C)));
+        Invalidate();
     }
 
     UIElement PendingPanel()

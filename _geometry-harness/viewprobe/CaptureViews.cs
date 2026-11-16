@@ -188,7 +188,16 @@ public static class CaptureViews
 
     /// <summary>Which of <paramref name="candidates"/> rest on <paramref name="host"/>: the support rays of each find the host
     /// first below its lowest band. No grid is built.</summary>
-    internal static IReadOnlyList<string> RestingOn(Geometry g, string host, IEnumerable<string> candidates, WorkCounter? counter = null) => Array.Empty<string>();
+    internal static IReadOnlyList<string> RestingOn(Geometry g, string host, IEnumerable<string> candidates, WorkCounter? counter = null)
+    {
+        var on = new List<string>();
+        foreach (var c in candidates)
+        {
+            if (c == host || !g.Refs.TryGetValue(c, out var p) || p.I.Count == 0) continue;
+            if (SupportHits(g, c, p, counter).Any(h => h.Hit == host)) on.Add(c);
+        }
+        return on;
+    }
 
     /// <summary>What <paramref name="key"/> touches and rests on in this shot, or a refusal when that cannot be decided.</summary>
     public static ContactAnswer Contacts(Geometry g, string key) => Contacts(g, key, null);
@@ -204,6 +213,7 @@ public static class CaptureViews
         var rests = new HashSet<string>(StringComparer.Ordinal);
         var unassessed = new HashSet<string>(StringComparer.Ordinal);
         var grid = TriangleGrid.Build(p.Soup);
+        if (counter is not null) counter.Grids++;
         foreach (var r in g.Refs.Values)
         {
             if (r.Key == key) continue;
@@ -220,7 +230,7 @@ public static class CaptureViews
             if (c.Distance <= TouchTolerance || c.Crosses) touches.Add(r.Key);
         }
         // rests on: the first drawn geometry straight below the participant's lowest band of vertices
-        foreach (var (hit, _) in SupportHits(g, key, p))
+        foreach (var (hit, _) in SupportHits(g, key, p, counter))
         {
             if (hit is not null)
             {
@@ -232,7 +242,7 @@ public static class CaptureViews
 
     /// <summary>The support rays: from up to <see cref="SupportRays"/> of the ref's lowest band of vertices (0.5 above
     /// each), straight down within <see cref="SupportReach"/>, the first other drawn ref hit and how far, or (null, reach).</summary>
-    static List<(string? Hit, float Distance)> SupportHits(Geometry g, string key, Geometry.Ref p)
+    static List<(string? Hit, float Distance)> SupportHits(Geometry g, string key, Geometry.Ref p, WorkCounter? counter = null)
     {
         var hits = new List<(string?, float)>();
         float zmin = p.Box.Min.Z;
@@ -242,6 +252,7 @@ public static class CaptureViews
         for (int i = 0; i < low.Count; i += step)
         {
             var (hit, best) = FirstBelow(g, key, low[i] + new Vector3(0, 0, 0.5f), SupportReach);
+            if (counter is not null) counter.Rays++;
             hits.Add((hit, best));
         }
         return hits;

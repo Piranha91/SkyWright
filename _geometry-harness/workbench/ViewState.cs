@@ -209,17 +209,44 @@ internal sealed class ViewState
     {
         foreach (var m in _meshesHidden) m.IsHiddenByHost = false;
         int n = _hidden.Count + _seeThrough.Count + _hiddenParts.Count;
-        _meshesHidden.Clear(); _hidden.Clear(); _hiddenParts.Clear(); _seeThrough.Clear(); _tint = null;
+        _meshesHidden.Clear(); _hidden.Clear(); _hiddenParts.Clear(); _seeThrough.Clear(); _tint = null; _candidates.Clear();
         var said = n == 0 ? "nothing was hidden or see-through" : "visibility restored: everything is drawn as the scene built it";
         Say(said);
         return said;
     }
 
+    List<float> _nav = new();
+    /// <summary>Item 5: the navmesh triangles under the selected reference, highlighted; Skyrim space in, Y-up out.</summary>
+    internal void HighlightNav(IEnumerable<(Vector3 A, Vector3 B, Vector3 C)> tris)
+    {
+        var list = new List<float>();
+        foreach (var (a, b, c) in tris)
+            AddTriangles(list, new[] { Lift(a), Lift(b), Lift(c) }, new[] { 0, 1, 2 });
+        _nav = list; Version++;
+        static Vector3 Lift(Vector3 s) => TexturedScene.YUp(new Vector3(s.X, s.Y, s.Z + 2f));
+    }
+    internal List<float> NavTriangles() => _nav;
+
     /// <summary>Item 8: draw a reference at each candidate pose as a numbered tint, view only.</summary>
-    internal void ShowCandidates(FormKey key, IReadOnlyList<RefPlacementEdit.Pose> poses) { }
-    internal void ClearCandidates() { }
+    internal void ShowCandidates(FormKey key, IReadOnlyList<RefPlacementEdit.Pose> poses)
+    {
+        var ro = Drawn(key);
+        var baked = RefPlacementEdit.BakedPose(ro.Ref);
+        _candidates.Clear();
+        for (int i = 0; i < poses.Count; i++)
+        {
+            var m = RefPlacementEdit.DeltaYUp(baked, poses[i]);
+            var list = new List<float>();
+            foreach (var s in ro.Shapes)
+                AddTriangles(list, RefPlacementEdit.BakedVerts(s).Select(v => Vector3.Transform(v, m)).ToArray(), s.Tris);
+            _candidates.Add((i + 1, list));
+        }
+        Say($"{poses.Count} candidate position(s) of {key} drawn as numbered tints, view only");
+    }
+    internal void ClearCandidates() { if (_candidates.Count == 0) return; _candidates.Clear(); Version++; }
+    readonly List<(int N, List<float> Triangles)> _candidates = new();
     /// <summary>The candidate tints: per candidate (1-based), its triangles at that pose, 6 floats a vertex (Y-up).</summary>
-    internal IReadOnlyList<(int N, List<float> Triangles)> CandidateTriangles() => Array.Empty<(int, List<float>)>();
+    internal IReadOnlyList<(int N, List<float> Triangles)> CandidateTriangles() => _candidates;
 
     internal IReadOnlyCollection<FormKey> Hidden => _hidden;
     internal IReadOnlyCollection<FormKey> SeeThroughRefs => _seeThrough;
@@ -249,18 +276,24 @@ internal sealed class ViewTints : IRenderOverlay
 {
     internal ViewState? State;
     int _version = -1;
-    List<float> _ghost = new(), _tint = new();
-    static readonly OpenTK.Mathematics.Vector3 GhostColour = new(1f, 0.85f, 0.2f), TintColour = new(0.35f, 0.7f, 1f);
+    List<float> _ghost = new(), _tint = new(), _nav = new();
+    IReadOnlyList<(int N, List<float> Triangles)> _candidates = Array.Empty<(int, List<float>)>();
+    static readonly OpenTK.Mathematics.Vector3 GhostColour = new(1f, 0.85f, 0.2f), TintColour = new(0.35f, 0.7f, 1f), NavColour = new(0.2f, 0.9f, 0.3f);
+    // item 8's numbered candidates, one colour each (1 magenta, 2 orange, 3 cyan, then repeating)
+    static readonly OpenTK.Mathematics.Vector3[] CandidateColours = { new(0.95f, 0.2f, 0.85f), new(1f, 0.5f, 0.1f), new(0.1f, 0.9f, 0.95f) };
 
     public void Draw(GlRenderer renderer, in OverlayContext context)
     {
         if (State is not { } s) return;
-        if (s.Version != _version) { _ghost = s.GhostTriangles(); _tint = s.TintTriangles(); _version = s.Version; }
-        if (_ghost.Count < 18 && _tint.Count < 18) return;
+        if (s.Version != _version) { _ghost = s.GhostTriangles(); _tint = s.TintTriangles(); _nav = s.NavTriangles(); _candidates = s.CandidateTriangles().ToList(); _version = s.Version; }
+        if (_ghost.Count < 18 && _tint.Count < 18 && _nav.Count < 18 && _candidates.Count == 0) return;
         if (!renderer.BeginOverlaySurfacePass(context, out var st)) return;
         var none = Array.Empty<(int, int, OpenTK.Mathematics.Vector3)>();
+        if (_nav.Count >= 18) renderer.DrawOverlayTranslucentTint(_nav, NavColour, 0.35f, none);
         if (_tint.Count >= 18) renderer.DrawOverlayTranslucentTint(_tint, TintColour, 0.3f, none);
         if (_ghost.Count >= 18) renderer.DrawOverlayTranslucentTint(_ghost, GhostColour, 0.35f, none);
+        foreach (var (n, tris) in _candidates)
+            if (tris.Count >= 18) renderer.DrawOverlayTranslucentTint(tris, CandidateColours[(n - 1) % CandidateColours.Length], 0.45f, none);
         renderer.EndOverlaySurfacePass(st);
     }
 }
