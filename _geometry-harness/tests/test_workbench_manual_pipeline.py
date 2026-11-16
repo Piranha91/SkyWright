@@ -282,13 +282,16 @@ def case_c8_a_plugin_plugins_txt_does_not_list_is_force_loaded_and_an_unchecked_
     while listing them in loadorder.txt, so such a plugin is active; one listed without `*` is unchecked and is not."""
     with tempfile.TemporaryDirectory() as t:
         t = Path(t)
-        inst, game = world(t, SHADOW_MODS, SHADOW_ENABLED, SHADOW_PLUGINS, data=("Base.esm", "ccFish.esm"))
+        inst, game = world(t, SHADOW_MODS, SHADOW_ENABLED, SHADOW_PLUGINS, data=("Base.esm", "ccFish.esm", "Update.esm"))
         prof = Path(inst) / "profiles" / "P"
-        (prof / "plugins.txt").write_text("".join(x + chr(10) for x in ("*Base.esm", "*A.esp", "*Sel.esp", "Dup.esp")), encoding="utf-8")
+        # A.esp is listed both ticked and unticked, Update.esm (an official master) unticked: the C# reader drops both
+        (prof / "plugins.txt").write_text("".join(x + chr(10) for x in ("*Base.esm", "*A.esp", "A.esp", "*Sel.esp", "Dup.esp", "Update.esm")), encoding="utf-8")
         ctx = EP.Context(in_place_entry(t, inst, game, ["Sel"], ["geometry.object-overlap"]), None, t / "out")
         by = {a["id"]: a for a in ctx.resolve()["arms"]}
         assert "ccFish.esm" in by["combined"]["plugins"] and "ccFish.esm" in by["without-selection"]["plugins"], by["combined"]["plugins"]
         assert "Dup.esp" not in by["combined"]["plugins"], "an unchecked plugin was loaded"
+        assert "A.esp" not in by["combined"]["plugins"], "a plugin listed both ticked and unticked was loaded (Mo2LoadOrder drops it)"
+        assert "Update.esm" not in by["combined"]["plugins"], "an unticked official master was loaded (Mo2LoadOrder drops it)"
 
 
 def case_b4a_prepare_writes_no_profile_into_the_instance():
