@@ -44,6 +44,9 @@ internal sealed class StateTools
                      "launcher (manual mode: the mode, instance, profile and game, the profile's mod folders, the probes, the Output and Work Folders, the run), " +
                      "view (view-only state: originals shown, the ghost, hidden and see-through references, the Restore visibility label), " +
                      "decisions (each Conflicts row's decision: real problem, intentional or unsure, its reason, and whether it still applies or is flagged to reconsider; and decisions whose row is not in this run). " +
+                     "scenes (the Conflicts rows by cell: inside a cell, rows naming a common reference are one cluster, and rows with equal values of the reporting skill's group key are one group; with each cell's clickable Findings rows), " +
+                     "context (the selected reference: doors within 256 units, each 'touches it' or 'near only', with the far side; what names it; its enable parent; what rests on it and what physics does with it at load; the navmesh under its bounds; what stays behind a move; 'reading…' while the read runs), " +
+                     "placements (find_clear's candidate positions: each one's move, drop, what it touches there, its word from the open row's re-check, what was and was not checked; wait_seconds waits for them). " +
                      "Default: selection, pending, recheck.")]
             string[]? project = null,
         [Description("conflicts: how many rows to list (default 20).")] int limit = 20,
@@ -102,6 +105,9 @@ internal sealed class StateTools
                  "revert (drop one reference's staged edits; a written one is removed from its patch); drop (lower a reference straight down onto the drawn surface or terrain below it, measured from the reference's lowest 16 units, so a wider part higher up that would touch first is not seen; it lowers only, and is refused when another surface already crosses the reference; render triangles, not collision); " +
                  "view (`op`: show_original, show_edited, ghost_on, ghost_off, hide, hide_part with `part`, hide_in_front, see_through with `ref`, `mod` or `plugin`, isolate, restore; view only, never written); " +
                  "decide (a Conflicts row by `conflict`: `verdict` real problem, intentional or unsure, and a short `reason`; it opens the next row to decide, a flagged one first; Findings rows are not decided yet). " +
+                 "select also takes `scene` (a scene's number: opens its best row). move_with (`refs`: stage the selected reference's move, as one rigid move, for each named reference). " +
+                 "find_clear (candidate positions for the selected reference of the open conflict, `max` default 3, at most 6, `snap` a grid: each is written as its own trial patch under the Work Folder and judged only by the open row's re-check, about 67-76 s each, in the background; read with workbench_state placements). " +
+                 "choose (`n`: stage that candidate like any edit). " +
                  "Manual mode (the launcher): open_profile (`mode` free with `instance`, `profile`, optional `game`), select_mods (`mods`, `how` " +
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
                  "write goes under), set_work_folder (`path`, where a run keeps its files), run. " +
