@@ -218,12 +218,6 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var bar = new DockPanel { LastChildFill = true, Height = 240 };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(marksBtn); buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write);
-        // a navmesh row's repair (NavRepairLane): previewed, then written to a new patch, read back and re-checked
-        var repairPreview = new Button { Content = "Preview repair", Margin = new Thickness(4), ToolTip = "plan the open navmesh row's repair: relink a border, or follow moved ground" };
-        var repairWrite = new Button { Content = "Write repair", Margin = new Thickness(4), ToolTip = "write the previewed repair to a new patch under the Output Folder, read it back and re-check it" };
-        repairPreview.Click += async (_, _) => { try { await RepairPreviewAsync(); } catch (Exception ex) { Shell.SetBanner("repair preview refused: " + ex.Message); } };
-        repairWrite.Click += async (_, _) => { try { await RepairWriteAsync("WbNavRepair"); } catch (Exception ex) { Shell.SetBanner("repair write refused: " + ex.Message); } };
-        buttons.Children.Add(repairPreview); buttons.Children.Add(repairWrite);
         DockPanel.SetDock(buttons, Dock.Right);
         var tools = ToolsRow();
         DockPanel.SetDock(tools, Dock.Bottom);
@@ -1048,55 +1042,6 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     /// <summary>Start a re-check without waiting for it (the MCP <c>recheck</c> verb); <see cref="RecheckRunning"/> holds it.</summary>
     internal Task<string?> StartRecheck(string patchName) => RecheckRunning = RecheckAsync(patchName);
-
-    internal RepairPreview? LastRepairPreview { get; private set; }
-    internal RepairWritten? LastRepairWritten { get; private set; }
-    RepairPreview? IWorkbenchScene.LastRepairPreview => LastRepairPreview;
-    RepairWritten? IWorkbenchScene.LastRepairWritten => LastRepairWritten;
-    Task<RepairPreview> IWorkbenchScene.RepairPreviewAsync() => RepairPreviewAsync();
-    Task<RepairWritten> IWorkbenchScene.RepairWriteAsync(string patch) => RepairWriteAsync(patch);
-
-    (RankedRow Open, string Candidate, WriteTarget T, string Game, string Probe) RepairInputs()
-    {
-        var open = Shell.CurrentRow ?? throw new InvalidOperationException("no conflict row is open; open a navmesh row from the Conflicts tab.");
-        var b = Shell.Bundle ?? throw new InvalidOperationException("no bundle is open, so the repair has no order to plan on.");
-        var t = _writer?.Target ?? TargetFromEnv() ?? throw new InvalidOperationException("no write target is set, so the order cannot be read.");
-        var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
-        var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
-        return (open, BundleConflicts.CandidateFile(b.Dir, b.Arm), t, game, NavRepairLane.ProbeExe(Path.GetDirectoryName(Path.GetFullPath(evalrun))!));
-    }
-
-    /// <summary>Plan the open navmesh row's repair and show it (the banner and the log); nothing is written.</summary>
-    internal async Task<RepairPreview> RepairPreviewAsync()
-    {
-        var (open, cand, t, game, probe) = RepairInputs();
-        var work = Path.Combine(_outDir, "repair-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss"));
-        Shell.SetBanner($"planning the repair of {open.Row.RefKey} ({open.Row.Kind}) on the arm's order; nothing is written.");
-        var p = await Task.Run(() => NavRepairLane.Preview(probe, cand, open.Row.Identity, open.Row.Kind, open.Row.RefKey, t.Instance, t.Profile, game, work));
-        LastRepairPreview = p; LastRepairWritten = null;
-        Shell.SetBanner("repair preview: " + p.Sentence);
-        Say("repair preview: " + p.Sentence);
-        foreach (var e in p.Plans) foreach (var i in e.Invariants) Say($"repair preview: {e.Navmesh}: {i}");
-        foreach (var u in p.Unproven) Say("repair preview: unproven in game, no repair offered: " + u);
-        return p;
-    }
-
-    /// <summary>Write the previewed repair to the new patch <paramref name="patch"/>, read it back and re-check it.</summary>
-    internal async Task<RepairWritten> RepairWriteAsync(string patch)
-    {
-        var (open, _, t, game, probe) = RepairInputs();
-        var p = LastRepairPreview is { } lp && lp.RowId == open.Row.Identity ? lp
-              : throw new InvalidOperationException("preview the open row's repair first; the write sends exactly what the preview showed.");
-        var w = await WriterAsync();
-        var work = Path.Combine(_outDir, "repair-write-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss"));
-        Shell.SetBanner($"writing the repair of {p.Navmesh} to {PluginName(patch)}, then reading it back and re-checking it.");
-        var r = await NavRepairLane.WriteAsync(w, p, patch, probe, t.Instance, t.Profile, game, work);
-        LastRepairWritten = r;
-        Shell.SetBanner("repair: " + r.Sentence);
-        Say("repair: " + r.Sentence);
-        foreach (var (row, kind, verdict) in r.Verdicts) Say($"repair re-check: {kind} {row}: {verdict}");
-        return r;
-    }
 
     /// <summary>The last re-check: its result, or the sentence that refused it; and whether one is running.</summary>
     internal static string PluginName(string patchName) => patchName.EndsWith(".esp", StringComparison.OrdinalIgnoreCase) ? patchName : patchName + ".esp";

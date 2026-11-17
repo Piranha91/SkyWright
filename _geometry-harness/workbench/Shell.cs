@@ -23,6 +23,17 @@ internal static class Shell
     /// <summary>The launcher (manual mode): the Start tab and the state tools drive this one instance.</summary>
     internal static readonly Launcher Launcher = new();
     internal static TabControl? Tabs;
+    /// <summary>The navmesh repair of a Findings row: the open bundle's arm order, the write target, this checkout's navownprobe.</summary>
+    internal static readonly RepairDesk Repair = new(() =>
+    {
+        var b = Bundle ?? throw new InvalidOperationException("no bundle is open, so the repair has no order to plan on.");
+        var t = WorkbenchHost.TargetFromEnv() ?? throw new InvalidOperationException("no write target is set (the launcher's profile, or WB_INSTANCE, WB_PROFILE and WB_GAME_DATA), so the order cannot be read.");
+        var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
+        return (BundleConflicts.CandidateFile(b.Dir, b.Arm), t, NavRepairLane.ProbeExe(Path.GetDirectoryName(Path.GetFullPath(evalrun))!), RepairWork());
+    }, t => PatchWriter.StartAsync(Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe(), t,
+                                   Path.Combine(RepairWork(), "housecarl-data-repair"),
+                                   Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus(), WorkbenchHost.Say));
+    static string RepairWork() => Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : Path.Combine(Path.GetTempPath(), "workbench");
 
     /// <summary>Bring the tab with this header to the front.</summary>
     internal static string ShowTab(string? header)
@@ -111,7 +122,28 @@ internal static class Shell
         tabs.Items.Add(start);
         tabs.Items.Add(new TabItem { Header = "Conflicts", Content = conflictsTab });
         tabs.SelectedIndex = Bundle is null ? 0 : 1;           // the Start tab until a bundle is open
-        tabs.Items.Add(new TabItem { Header = "Findings", Content = FindingList });
+        // a navmesh Findings row's repair (RepairDesk): previewed, then written to a new patch, read back and re-checked
+        var repairPreview = new Button { Content = "Preview repair", Margin = new Thickness(4), ToolTip = "plan the selected navmesh row's repair: relink a border, or follow moved ground; nothing is written" };
+        var repairWrite = new Button { Content = "Write repair", Margin = new Thickness(4), ToolTip = "write the previewed repair to a new patch under the Output Folder, read it back and re-check it" };
+        RankedFinding? Selected() => FindingList.SelectedItem is ListBoxItem { Tag: RankedFinding f } ? f : null;
+        repairPreview.Click += async (_, _) =>
+        {
+            if (Selected() is not { } f) { SetBanner("select a navmesh row in the Findings tab first."); return; }
+            try { var p = await Repair.PreviewAsync(f); SetBanner("repair preview: " + p.Sentence); foreach (var e in p.Plans) foreach (var i in e.Invariants) WorkbenchHost.Say($"repair preview: {e.Navmesh}: {i}"); }
+            catch (Exception ex) { SetBanner("repair preview refused: " + ex.Message); }
+        };
+        repairWrite.Click += async (_, _) =>
+        {
+            if (Selected() is not { } f) { SetBanner("select a navmesh row in the Findings tab first."); return; }
+            try { var r = await Repair.WriteAsync(f, "WbNavRepair"); SetBanner("repair: " + r.Sentence); foreach (var (row, kind, verdict) in r.Verdicts) WorkbenchHost.Say($"repair re-check: {kind} {row}: {verdict}"); }
+            catch (Exception ex) { SetBanner("repair write refused: " + ex.Message); }
+        };
+        var repairBar = new StackPanel { Orientation = Orientation.Horizontal };
+        repairBar.Children.Add(repairPreview); repairBar.Children.Add(repairWrite);
+        var findingsTab = new DockPanel();
+        DockPanel.SetDock(repairBar, Dock.Top);
+        findingsTab.Children.Add(repairBar); findingsTab.Children.Add(FindingList);
+        tabs.Items.Add(new TabItem { Header = "Findings", Content = findingsTab });
         tabs.Items.Add(new TabItem { Header = "Records", Content = Records });
         var root = new DockPanel();
         DockPanel.SetDock(Banner, Dock.Top); DockPanel.SetDock(BarSlot, Dock.Bottom); DockPanel.SetDock(tabs, Dock.Left);
@@ -155,6 +187,13 @@ internal static class Shell
     }
 
     internal static void SetBanner(string text) { Banner.Text = text; WorkbenchHost.Say("banner: " + text); }
+
+    /// <summary>Select a Findings row in its tab, as a click does (the script's repair steps).</summary>
+    internal static void SelectFinding(RankedFinding f)
+    {
+        foreach (var it in FindingList.Items)
+            if (it is ListBoxItem { Tag: RankedFinding g } li && g.Rank == f.Rank) { FindingList.SelectedItem = li; li.BringIntoView(); return; }
+    }
     internal static string BannerText => Banner.Text;
 
     /// <summary>Put a scene's view and bar into the window (replacing the last scene's).</summary>

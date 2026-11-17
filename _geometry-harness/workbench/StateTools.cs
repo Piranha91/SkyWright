@@ -40,7 +40,7 @@ internal sealed class StateTools
         [Description("Which parts to add, any of: bundle (the evaluation bundle open), conflicts (the ranked conflicts the Conflicts tab lists), " +
                      "selection (the open conflict and the selected reference: its placement as drawn, as the load order has it, and as written to a patch), " +
                      "pending (the edits staged and not written, and the edits written), recheck (the last re-check's result), " +
-                     "repair (the open navmesh row's previewed repair: its plan per navmesh, invariants and refusals, the links unproven in game, and the written patch with its read-back and re-check), " +
+                     "repair (the last previewed navmesh repair: its plan per navmesh, invariants and refusals, the links unproven in game, and the written patch with its read-back and re-check), " +
                      "findings (the Findings tab: every other selected check's rows, ranked; each says whether it opens the viewer and why not), " +
                      "launcher (manual mode: the mode, instance, profile and game, the profile's mod folders, the probes, the Output and Work Folders, the run), " +
                      "view (view-only state: originals shown, the ghost, hidden and see-through references, the Restore visibility label), " +
@@ -103,8 +103,8 @@ internal sealed class StateTools
                  "undo (the last staged edit); commit (write the staged edits to the new patch plugin `patch`: `dry_run` true, the default, " +
                  "previews the values and masters and writes nothing; false writes, and then re-checks the open conflict in the background, " +
                  "about 70-80 s, read with workbench_state wait_seconds); recheck (re-check the open conflict against the written patch `patch`). " +
-                 "repair_preview (plan the open navmesh row's repair: relink a broken border, or move vertices to follow ground a later plugin moved; nothing is written) and " +
-                 "repair_write (write that previewed plan to the new patch `patch` under the Output Folder, read every planned navmesh back against its winner, and re-check the order with the patch added: each link repaired, cut or refused). " +
+                 "repair_preview (plan the repair of the navmesh Findings row `finding`: relink a broken border, or move vertices to follow ground a later plugin moved; nothing is written) and " +
+                 "repair_write (write that row's previewed plan to the new patch `patch` under the Output Folder, read every planned navmesh back against its winner, and re-check the order with the patch added: each link repaired, cut or refused). " +
                  "stage also takes `offset` (typed, such as \"+120 x\" or \"15°\"), `axis` (lock the move to x, y, z or xy), `snap` (round the moved axes to a grid, units) and `angle_snap` (degrees). " +
                  "revert (drop one reference's staged edits; a written one is removed from its patch); drop (lower a reference straight down onto the drawn surface or terrain below it, measured from the reference's lowest 16 units, so a wider part higher up that would touch first is not seen; it lowers only, and is refused when another surface already crosses the reference; render triangles, not collision); " +
                  "view (`op`: show_original, show_edited, ghost_on, ghost_off, hide, hide_part with `part`, hide_in_front, see_through with `ref`, `mod` or `plugin`, isolate, restore; view only, never written); " +
@@ -163,6 +163,7 @@ internal sealed class StateTools
             if (v == "move_with") { var mw = MoveWith(hub.Surface, refs); if (mw.IsError != true) SaveSession(hub.Surface); return mw; }
             if (v == "find_clear") return FindClear(hub.Surface, max, snap);
             if (v == "choose") { var ch = await Choose(hub.Surface, n); if (ch.IsError != true) SaveSession(hub.Surface); return ch; }
+            if (v is "repair_preview" or "repair_write") return await Repair(hub.Surface, v, finding, patch);
             if (finding is { } fr) return await SelectFinding(hub.Surface, verb, fr);
             var r = v switch
             {
@@ -363,6 +364,24 @@ internal sealed class StateTools
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }
         catch (IOException ex) { return Refuse($"the decisions file could not be written ({ex.Message})."); }
         return Answer(new { said, state = Project(s, DefaultParts, 20, 0, null) });
+    }
+
+    /// <summary>repair_preview and repair_write on a navmesh Findings row (<see cref="RepairDesk"/>): the row names a navmesh,
+    /// not a placed reference, so neither needs a scene.</summary>
+    static async Task<CallToolResult> Repair(IWorkbenchSurface s, string v, int? finding, string? patch)
+    {
+        if (finding is not { } rank) return Refuse($"{v} needs finding, the rank of a navmesh Findings row (EDGE-IDX, EDGE-NAV, EDGE-NOMATCH, EDGE-ONEWAY or NAV-GROUND) as workbench_state's findings list it.");
+        var row = s.Findings.FirstOrDefault(r => r.Rank == rank);
+        if (row is null) return Refuse($"no Findings row ranked {rank} is listed; read workbench_state with project [\"findings\"] to see the ranks.");
+        if (v == "repair_write" && string.IsNullOrWhiteSpace(patch)) return Refuse("repair_write needs patch, the new plugin's name (for example WbNavRepair).");
+        string said;
+        try
+        {
+            said = v == "repair_preview" ? "repair preview, nothing written: " + (await s.RepairPreviewAsync(row)).Sentence
+                                         : "repair written: " + (await s.RepairWriteAsync(row, patch!.Trim())).Sentence;
+        }
+        catch (InvalidOperationException ex) { return Refuse(ex.Message); }
+        return Answer(new { said, state = Project(s, new[] { "repair" }, 20, 0, null) });
     }
 
     static Task<CallToolResult> SelectFinding(IWorkbenchSurface s, string verb, int rank)
@@ -663,21 +682,6 @@ internal sealed class StateTools
                             : s.OpenRow is null ? " No conflict is open, so nothing was re-checked." : "");
                     break;
                 }
-                case "repair_preview":
-                {
-                    var sc = SceneOr(s, out var none); if (sc is null) return none!;
-                    var rp = await sc.RepairPreviewAsync();
-                    said = "repair preview, nothing written: " + rp.Sentence;
-                    break;
-                }
-                case "repair_write":
-                {
-                    var sc = SceneOr(s, out var none); if (sc is null) return none!;
-                    if (string.IsNullOrWhiteSpace(patch)) return Refuse("repair_write needs patch, the new plugin's name (for example WbNavRepair).");
-                    var rw = await sc.RepairWriteAsync(patch.Trim());
-                    said = "repair written: " + rw.Sentence;
-                    break;
-                }
                 case "recheck":
                 {
                     var sc = SceneOr(s, out var none); if (sc is null) return none!;
@@ -843,7 +847,7 @@ internal sealed class StateTools
         }
         if (parts.Contains("repair"))
         {
-            var rp = sc?.LastRepairPreview; var rw = sc?.LastRepairWritten;
+            var rp = s.LastRepairPreview; var rw = s.LastRepairWritten;
             d["repair"] = rp is null ? null : new
             {
                 row = rp.RowId, navmesh = rp.Navmesh, sentence = rp.Sentence, plan = rp.Plan, edits = rp.Ops.Count,
@@ -852,6 +856,7 @@ internal sealed class StateTools
                 written = rw is null ? null : new
                 {
                     patch = rw.Patch, readBackHolds = rw.ReadBackHolds, readBack = rw.ReadBack, sentence = rw.Sentence,
+                    readBackChecked = rw.Checked.Select(c => new { record = c.Record, holds = c.Holds }).ToList(), forwarded = rw.Forwarded,
                     verdicts = rw.Verdicts.Select(v => new { row = v.Row, kind = v.Kind, verdict = v.Verdict }).ToList(), created = rw.Created,
                 },
             };

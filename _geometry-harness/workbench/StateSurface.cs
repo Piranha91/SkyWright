@@ -39,6 +39,12 @@ internal interface IWorkbenchSurface
     IReadOnlyList<RankedFinding> Findings => Open is { } b ? FindingRanking.Rank(b.Findings, b.Targets, Severity) : Array.Empty<RankedFinding>();
     /// <summary>What a click on a clickable Findings row does: the Records tree's path to its reference and cell.</summary>
     string OpenFinding(RankedFinding row) => $"finding {row.Rank} names {row.Row.RefKey} in cell {row.Row.Cell}, but no window is shown to open it in.";
+    /// <summary>Plan a navmesh Findings row's repair (<see cref="RepairDesk"/>); nothing is written.</summary>
+    Task<RepairPreview> RepairPreviewAsync(RankedFinding row) => Task.FromException<RepairPreview>(new InvalidOperationException("this window cannot plan a navmesh repair."));
+    /// <summary>Write that row's previewed repair to the new patch, read it back and re-check it.</summary>
+    Task<RepairWritten> RepairWriteAsync(RankedFinding row, string patch) => Task.FromException<RepairWritten>(new InvalidOperationException("this window cannot write a navmesh repair."));
+    RepairPreview? LastRepairPreview => null;
+    RepairWritten? LastRepairWritten => null;
 }
 
 /// <summary>The scene's side: the edit session and the members the bar and the script call.</summary>
@@ -60,12 +66,6 @@ internal interface IWorkbenchScene
     bool Rechecking { get; }
     /// <summary>The view-only state; null where the scene has none.</summary>
     ViewState? View => null;
-    /// <summary>Plan the open navmesh row's repair (NavRepairLane); a scene without the lane refuses.</summary>
-    Task<RepairPreview> RepairPreviewAsync() => Task.FromException<RepairPreview>(new InvalidOperationException("this scene cannot plan a navmesh repair."));
-    /// <summary>Write the previewed repair to the new patch, read it back and re-check it.</summary>
-    Task<RepairWritten> RepairWriteAsync(string patch) => Task.FromException<RepairWritten>(new InvalidOperationException("this scene cannot write a navmesh repair."));
-    RepairPreview? LastRepairPreview => null;
-    RepairWritten? LastRepairWritten => null;
     /// <summary>The scene's pick shapes (drawn references and terrain) at their current placements.</summary>
     IReadOnlyList<PickShape> Shapes => Array.Empty<PickShape>();
     /// <summary>The drawn references whose winning record a plugin of this mod folder provides, in the arm's view, or why not.</summary>
@@ -120,6 +120,11 @@ internal sealed class LiveSurface : IWorkbenchSurface
     public string? SaveRefusal { get; set; }
     public RowState RowStateOf(RankedRow r) => new(r.Row.Physical?.ToString(), r.Row.Summary,
         Shell.Bundle is { } b && Recheck.ProbeOfCheck.TryGetValue(r.Row.CheckId, out var probe) ? Recheck.BundleDigest(b.Dir, probe) ?? "" : "");
+
+    public Task<RepairPreview> RepairPreviewAsync(RankedFinding row) => Shell.Repair.PreviewAsync(row);
+    public Task<RepairWritten> RepairWriteAsync(RankedFinding row, string patch) => Shell.Repair.WriteAsync(row, patch);
+    public RepairPreview? LastRepairPreview => Shell.Repair.Preview;
+    public RepairWritten? LastRepairWritten => Shell.Repair.Written;
 
     public string OpenFinding(RankedFinding row)
     {

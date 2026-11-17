@@ -26,8 +26,8 @@ namespace Workbench;
 /// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
 /// commit dry|real PATCHNAME      dry-run or write the staged edits (a real write re-checks the open conflict row)
 /// recheck PATCHNAME              re-check the open conflict row against that written patch
-/// repairpreview                  plan the open navmesh row's repair (NavRepairLane), nothing written
-/// repairwrite PATCHNAME          write the previewed repair to that new patch, read it back and re-check it
+/// repairpreview N|FORMKEY        plan the repair of the navmesh Findings row ranked N, or naming that navmesh (RepairDesk); nothing written
+/// repairwrite N|FORMKEY PATCH    write that row's previewed repair to that new patch, read it back and re-check it
 /// expect recheck WORD            pass or fail on the last re-check's word for the open row (resolved, new, ...)
 /// expect created FORMKEY         pass or fail: the last re-check lists a new row naming that reference
 /// readback FORMKEY PLUGIN        read that plugin's Placement of the reference through the server
@@ -64,6 +64,17 @@ internal sealed class Script
     bool _busy;
 
     Script(WorkbenchHost h, IEnumerable<string> steps) { _h = h; _steps = new(steps); }
+
+    /// <summary>The Findings row ranked N, or the first navmesh row naming that navmesh (XXXXXX:Plugin); shown selected in
+    /// the Findings tab, as a click leaves it.</summary>
+    static RankedFinding Finding(string key)
+    {
+        var f = (key.Contains(':') ? Shell.Findings.FirstOrDefault(x => string.Equals(x.Row.RefKey, key, StringComparison.OrdinalIgnoreCase) && NavRepairLane.Kinds.Contains(x.Row.Kind))
+                                   : Shell.Findings.FirstOrDefault(x => x.Rank == int.Parse(key, CultureInfo.InvariantCulture)))
+            ?? throw new InvalidOperationException($"no Findings row {key} is listed.");
+        Shell.ShowTab("Findings"); Shell.SelectFinding(f);
+        return f;
+    }
 
     /// <summary>The run's one script, attached to the scene now shown: a cell switch hands the remaining steps to the
     /// next scene, which settles a few frames before the next step.</summary>
@@ -196,8 +207,8 @@ internal sealed class Script
             case "ticks": Ticks(int.Parse(a[1])); break;
             case "commit": Async(() => _h.CommitAsync(a[1] == "dry", a[2])); break;
             case "recheck": Async(() => _h.RecheckAsync(a[1])); break;
-            case "repairpreview": Async(async () => (await _h.RepairPreviewAsync()).Sentence); break;
-            case "repairwrite": Async(async () => (await _h.RepairWriteAsync(a[1])).Sentence); break;
+            case "repairpreview": Async(async () => (await Shell.Repair.PreviewAsync(Finding(a[1]))).Sentence); break;
+            case "repairwrite": Async(async () => (await Shell.Repair.WriteAsync(Finding(a[1]), a[2])).Sentence); break;
             case "expectwritten":
                 // M-1: the reference is drawn where the patch puts it (read back through the server), and the status bar says so.
                 Async(async () =>

@@ -12,14 +12,18 @@ internal sealed record RepairEntry(string Navmesh, string Class, string Status, 
 internal sealed record RepairPreview(string RowId, string Navmesh, string Plan, string UnpatchedEmit, string Candidate,
                                      IReadOnlyList<RepairEntry> Plans, IReadOnlyList<string> Unproven, JsonArray Ops, string Sentence);
 
-/// <summary>A written repair: the patch, its read-back, and the re-check's verdict per link.</summary>
-internal sealed record RepairWritten(string Patch, bool ReadBackHolds, string ReadBack, IReadOnlyList<(string Row, string Kind, string Verdict)> Verdicts,
+/// <summary>A written repair: the patch, its read-back (each record it checked, navmeshes and carried containers, and the
+/// containers forwarded from their winners), and the re-check's verdict per link.</summary>
+internal sealed record RepairWritten(string Patch, bool ReadBackHolds, string ReadBack, IReadOnlyList<(string Record, bool Holds)> Checked,
+                                     IReadOnlyList<string> Forwarded, IReadOnlyList<(string Row, string Kind, string Verdict)> Verdicts,
                                      IReadOnlyList<string> Created, string Sentence);
 
-/// <summary>THE NAVMESH REPAIR LANE (task 2026-11-16-navmesh-repair): preview, write, read back and re-check a navmesh row's
-/// repair. Nothing here decides a repair: navownprobe owns the rows and runs NavRepair's plan (<c>--repair-plan</c>), the
+/// <summary>THE NAVMESH REPAIR LANE (task 2026-11-16-navmesh-repair): preview, write, read back and re-check a navmesh
+/// Findings row's repair (<see cref="RepairDesk"/> holds the app's). Nothing here decides a repair: navownprobe owns the rows and runs NavRepair's plan (<c>--repair-plan</c>), the
 /// houseCARL server writes it (<c>housecarl_apply</c> under the Output Folder), navownprobe reads it back
-/// (<c>--repair-readback</c>) and re-checks it by the same rule on the order with the patch added (<c>--recheck-plan</c>).
+/// (<c>--repair-readback</c>), the server forwards each carried container the read-back finds is not its winner's from that
+/// winner (<c>housecarl_forward</c> into the patch) and navownprobe reads it back again, then re-checks it by the same rule
+/// on the order with the patch added (<c>--recheck-plan</c>).
 /// One build of navownprobe makes the preview's run and the re-check's, so the comparison is that build with itself.</summary>
 internal static class NavRepairLane
 {
@@ -76,16 +80,39 @@ internal static class NavRepairLane
         var plugin = WorkbenchHost.PluginName(patchName);
         var ops = JsonSerializer.Deserialize<List<Dictionary<string, object?>>>(p.Ops.ToJsonString())!;
         await writer.CallAsync("housecarl_apply", new Dictionary<string, object?> { ["ops"] = ops, ["patch"] = Path.GetFileNameWithoutExtension(plugin), ["out_path"] = outDir }, ct);
-        var folder = Recheck.PatchFolder(writer.Target.PatchRoot, plugin);
+        var folder = Path.GetFullPath(Recheck.PatchFolder(writer.Target.PatchRoot, plugin));
         var esp = Path.Combine(folder, plugin);
         Directory.CreateDirectory(work);
-        var rbPath = Path.Combine(work, "readback.json");
-        var (rbExit, rbText) = Probe(probe, new[] { "--repair-readback", p.Plan, esp, rbPath }, Path.Combine(work, "readback.log"));
-        if (rbExit == 2 || !File.Exists(rbPath)) throw new InvalidOperationException($"the read-back could not run (exit {rbExit}): {Last(rbText)}");
-        var rb = JsonNode.Parse(File.ReadAllText(rbPath))!;
+        (int Exit, JsonNode Doc) ReadBack(string tag)
+        {
+            var path = Path.Combine(work, $"readback{tag}.json");
+            var (exit, text) = Probe(probe, new[] { "--repair-readback", p.Plan, esp, path }, Path.Combine(work, $"readback{tag}.log"));
+            if (exit == 2 || !File.Exists(path)) throw new InvalidOperationException($"the read-back could not run (exit {exit}): {Last(text)}");
+            return (exit, JsonNode.Parse(File.ReadAllText(path))!);
+        }
+        var (rbExit, rb) = ReadBack("-applied");
+        // the write path copies a navmesh's CELL and WRLD from the navmesh's own plugin; each the read-back finds is not its
+        // winner's is forwarded from that winner into the patch (the navmeshes under it kept), then read back again
+        var forwarded = new List<string>();
+        var navHolds = rb["records"]!.AsArray().All(r => (bool)r!["holds"]!) && rb["unplannedNavmeshes"]!.AsArray().Count == 0;
+        if (rbExit != 0 && navHolds && rb["carriedFixes"]!.AsArray().Count > 0)
+        {
+            foreach (var f in rb["carriedFixes"]!.AsArray())
+            {
+                var ids = f!["formids"]!.AsArray().Select(x => (string)x!).ToList();
+                await writer.CallAsync("housecarl_forward", new Dictionary<string, object?> { ["formids"] = ids, ["source"] = (string)f["source"]!, ["into"] = folder }, ct);
+                forwarded.AddRange(ids.Select(i => $"{i} from {(string)f["source"]!}"));
+            }
+            (rbExit, rb) = ReadBack("");
+        }
         bool holds = rbExit == 0 && (bool)rb["holds"]!;
-        string rbSentence = holds ? "every navmesh in the patch is its winner with exactly the planned change"
-            : "the read-back FAILS: " + string.Join("; ", rb["records"]!.AsArray().Where(r => !(bool)r!["holds"]!).Select(r => $"{(string)r!["navmesh"]!}: {string.Join(", ", r["differences"]!.AsArray().Select(d => (string)d!))}"))
+        var carried = rb["carried"]!.AsArray();
+        var checkedRecords = rb["records"]!.AsArray().Select(r => ((string)r!["navmesh"]!, (bool)r["holds"]!))
+            .Concat(carried.Select(c => ($"{(string)c!["type"]!} {(string)c["record"]!}", (bool)c["holds"]!))).ToList();
+        string rbSentence = holds ? $"every navmesh in the patch is its winner with exactly the planned change, and the {carried.Count} record(s) it carries are their winners'"
+                                    + (forwarded.Count > 0 ? $" ({forwarded.Count} forwarded from their winner: {string.Join(", ", forwarded)})" : "")
+            : "the read-back FAILS: " + string.Join("; ", rb["records"]!.AsArray().Where(r => !(bool)r!["holds"]!).Select(r => $"{(string)r!["navmesh"]!}: {string.Join(", ", r["differences"]!.AsArray().Select(d => (string)d!))}")
+                                                 .Concat(carried.Where(c => !(bool)c!["holds"]!).Select(c => $"carried {(string)c!["type"]!} {(string)c["record"]!} is not its winner {(string?)c["winner"]}'s: {string.Join(", ", c["differences"]!.AsArray().Select(d => (string)d!))}")))
               + (rb["unplannedNavmeshes"]!.AsArray().Count > 0 ? "; navmeshes in the patch the plan does not name: " + string.Join(", ", rb["unplannedNavmeshes"]!.AsArray().Select(x => (string)x!)) : "");
         var (_, patched) = Recheck.Orders(p.Candidate, profile, plugin, folder, work);
         string emit = Path.Combine(work, "nr-patched.json"), rc = Path.Combine(work, "recheck.json");
@@ -99,8 +126,57 @@ internal static class NavRepairLane
             + string.Join(", ", verdicts.GroupBy(v => v.Item3).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count()}"))
             + (created.Count == 0 ? "; no row is new with the patch" : $"; {created.Count} row(s) are new with the patch: " + string.Join("; ", created.Take(5)))
             + ". Nothing is enabled: the patch loads only when you enable it in Mod Organizer 2.";
-        return new RepairWritten(esp, holds, rbSentence, verdicts, created, sentence);
+        return new RepairWritten(esp, holds, rbSentence, checkedRecords, forwarded, verdicts, created, sentence);
+    }
+
+    /// <summary>The scene's last preview and write: a write sends exactly the open row's last preview.</summary>
+    internal sealed class State
+    {
+        internal RepairPreview? Preview { get; private set; }
+        internal RepairWritten? Written { get; private set; }
+        internal RepairPreview Previewed(RepairPreview p) { Preview = p; Written = null; return p; }
+        internal RepairPreview ForWrite(string rowId) => Preview is { } lp && lp.RowId == rowId ? lp
+            : throw new InvalidOperationException("preview the open row's repair first; the write sends exactly what the preview showed.");
+        internal RepairWritten Wrote(RepairWritten w) { Written = w; return w; }
     }
 
     static string Last(string text) => string.Join(" ", text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).TakeLast(3));
+}
+
+/// <summary>A navmesh Findings row's repair (the window's Findings tab buttons, the state tools' repair_preview and
+/// repair_write): a navmesh row names a navmesh, not a placed reference, so it opens no viewer and needs no scene. The
+/// inputs (the arm's candidate order, the write target, navownprobe, the work folder) and the houseCARL server come from
+/// the caller: the app's own in <see cref="Shell"/>, a fixture's in the tests.</summary>
+internal sealed class RepairDesk(Func<(string Candidate, WriteTarget Target, string Probe, string Work)> inputs, Func<WriteTarget, Task<PatchWriter>> startWriter)
+{
+    readonly NavRepairLane.State _state = new();
+    PatchWriter? _writer;
+    internal RepairPreview? Preview => _state.Preview;
+    internal RepairWritten? Written => _state.Written;
+
+    static void Check(RankedFinding f)
+    {
+        if (f.Row.RefKey is null || !NavRepairLane.Kinds.Contains(f.Row.Kind))
+            throw new InvalidOperationException($"finding {f.Rank} ({f.Row.CheckId}, {f.Row.Kind}) is not a navmesh row; a repair is planned only for an EDGE-IDX, EDGE-NAV, EDGE-NOMATCH, EDGE-ONEWAY or NAV-GROUND row.");
+    }
+
+    internal async Task<RepairPreview> PreviewAsync(RankedFinding f)
+    {
+        Check(f);
+        var (cand, t, probe, work) = inputs();
+        var dir = Path.Combine(work, "repair-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff"));
+        return _state.Previewed(await Task.Run(() => NavRepairLane.Preview(probe, cand, f.Row.Identity, f.Row.Kind, f.Row.RefKey!, t.Instance, t.Profile, t.Game, dir)));
+    }
+
+    internal async Task<RepairWritten> WriteAsync(RankedFinding f, string patch)
+    {
+        Check(f);
+        var p = _state.ForWrite(f.Row.Identity);
+        var (_, t, probe, work) = inputs();
+        _writer ??= await startWriter(t);
+        var dir = Path.Combine(work, "repair-write-" + DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmssfff"));
+        return _state.Wrote(await NavRepairLane.WriteAsync(_writer, p, patch, probe, t.Instance, t.Profile, t.Game, dir));
+    }
+
+    internal async ValueTask DisposeWriterAsync() { if (_writer is not null) await _writer.DisposeAsync(); }
 }
