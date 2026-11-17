@@ -73,7 +73,7 @@ public static class NavBorderMatch
 
     /// <summary>The far triangle's edge that lies best along the source edge: of the edges whose projection overlaps at least
     /// half the shorter edge, the one nearest in plan (a slanted edge can overlap fully and lie far off: the first vanilla
-    /// floor run, 2026-11-16, took the largest overlap and left 24,324 vanilla links unmatched at a median 86 u); else the
+    /// floor run, 2026-11-16, took the largest overlap and left about a tenth of the base game's links unmatched); else the
     /// largest overlap. -1 when none overlaps.</summary>
     public static (int Edge, EdgeGap Gap) BestEdge(Vec3 a, Vec3 b, NavmeshGeometry far, int tri)
     {

@@ -260,7 +260,7 @@ def t2464():
 
 
 def t2465():
-    """Rejects: a candidate search that looks only in the navmesh the link names (COTN moved 0F5103's ground into 0CB24E)."""
+    """Rejects: a candidate search that looks only in the navmesh the link names (RpA moved R6's border into R6n)."""
     c = one("plain", "EDGE-IDX", "L6", "R6", 2)
     assert f"{N['R6n']} triangle 0" in c["Summary"] and "another navmesh" in c["Summary"], c["Summary"]
 
