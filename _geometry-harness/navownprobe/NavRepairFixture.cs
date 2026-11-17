@@ -19,7 +19,7 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 //   TE  2 triangles; RpA writes it with no triangles.                               EMPTIED TE (2 -> 0)
 //   TV  1 triangle; SV links TV at 0.                              Dawnguard deletes TV.  floor: no row, counted
 // Borders (x = 4096 between (0,0) and (1,0)); pair k's border edge runs (4096, 500k) to (4096, 500k + 300):
-//   L1/R1  linked both ways, never changed                                          control: no row
+//   L1/R1  linked both ways; RpA forwards R1 unchanged (so a false row is a finding) control: no row
 //   L2/R2  R2 = [border, away]; RpA swaps them to [away, border]                    EDGE-NOMATCH L2->R2 0 (candidate R2 1);
 //                                                                                   EDGE-ONEWAY R2->L2 0
 //   L3/R3  RpA removes R3's link back                                               EDGE-ONEWAY L3->R3 0
@@ -202,6 +202,7 @@ static class NavRepairFixture
         aic.NavigationMeshes.Add(new NavigationMesh(TE, Rel) { Data = new NavigationMeshData { NavmeshVersion = 12, CrcHash = 0xA5E9A03C, Parent = InIC } });
         File(a, aic);
         var a1 = GridCell(1, null);
+        a1.NavigationMeshes.Add(Nav(R(1), InGrid(1), RightV(1), RightBorder((L(1), 0))));   // forwarded unchanged: a mod touches pair 1
         a1.NavigationMeshes.Add(Nav(R(2), InGrid(1), RightV(2), Away, RightBorder((L(2), 0))));
         a1.NavigationMeshes.Add(Nav(R(3), InGrid(1), RightV(3), RightBorder(null)));
         a1.NavigationMeshes.Add(Nav(R(4), InGrid(1), RightV(4), Away));
