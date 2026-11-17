@@ -223,7 +223,7 @@ static class NavownSelfTest
                 var l = new DanglingLinks();
                 for (int i = 0; i < n; i++)
                     foreach (var rec in nvMods[i].EnumerateMajorRecords())
-                        if (rec is Mutagen.Bethesda.Skyrim.INavigationMeshGetter nm) l.NoteNavmesh(nm);
+                        if (rec is Mutagen.Bethesda.Skyrim.INavigationMeshGetter nm) l.NoteNavmesh(nm, i);
                         else if (rec is Mutagen.Bethesda.Skyrim.IPlacedObjectGetter po) l.NotePlaced(po, i);
                 return l;
             }

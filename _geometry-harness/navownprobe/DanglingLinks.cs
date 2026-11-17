@@ -11,6 +11,10 @@ sealed class DanglingLinks
     public readonly Dictionary<FormKey, int> TriCount = new();
     public readonly Dictionary<FormKey, (int Tri, FormKey Door)[]> DoorTris = new();
     public readonly Dictionary<FormKey, (FormKey Mesh, int Tri)[]> EdgeLinks = new();
+    // A navmesh whose last word in load order takes it out (flagged deleted, or a record with no geometry): the plugin that
+    // did it. Such a navmesh is not in the winning state, so a link into it names nothing, and its own earlier links are
+    // gone with it (2026-11-16: before this, the earlier version's triangle count and links stood).
+    public readonly Dictionary<FormKey, int> Deleter = new();
     // Winner-takes-all like the rest, but the PLUGIN is kept too: a dangling door link is a
     // disagreement between whoever last wrote the link and whoever last wrote the navmesh, and naming
     // both is what lets the patch verifier look the pair up.
@@ -20,9 +24,17 @@ sealed class DanglingLinks
     public readonly HashSet<FormKey> RefGone = new();
     public long PermanentlyDisabledDoors;
 
-    /// <summary>A navmesh record as plugin order reaches it: its triangle count, door triangles and edge links.</summary>
-    public void NoteNavmesh(INavigationMeshGetter nm)
+    /// <summary>A navmesh record of plugin <paramref name="p"/> as plugin order reaches it: its triangle count, door triangles
+    /// and edge links, or, deleted or without geometry, its removal from the winning state.</summary>
+    public void NoteNavmesh(INavigationMeshGetter nm, int p)
     {
+        if (nm.IsDeleted || nm.Data is null)
+        {
+            TriCount.Remove(nm.FormKey); DoorTris.Remove(nm.FormKey); EdgeLinks.Remove(nm.FormKey);
+            Deleter[nm.FormKey] = p;
+            return;
+        }
+        Deleter.Remove(nm.FormKey);
         if (nm.Data is { } nd)
         {
             TriCount[nm.FormKey] = nd.Triangles.Count;
@@ -101,9 +113,10 @@ sealed class DanglingLinks
             doorLinkChecked++;
             if (!TriCount.TryGetValue(link.Nav, out var count))
             {
-                dangling.Add($"   DOOR-NAV   door {door} links navmesh {link.Nav}, which is not in the winning state");
-                dangleStruct.Add(("DOOR-NAV", door, "door", link.Nav, "navmesh", link.Plugin, -1,
-                                  $"door {door} links navmesh {link.Nav}, which is not in the winning state", null));
+                string gone = Deleter.ContainsKey(link.Nav) ? "which is deleted in the winning state" : "which is not in the winning state";
+                dangling.Add($"   DOOR-NAV   door {door} links navmesh {link.Nav}, {gone}");
+                dangleStruct.Add(("DOOR-NAV", door, "door", link.Nav, "navmesh", link.Plugin, Deleter.GetValueOrDefault(link.Nav, -1),
+                                  $"door {door} links navmesh {link.Nav}, {gone}", null));
             }
             else if (link.Tri >= count)
             {
@@ -142,9 +155,10 @@ sealed class DanglingLinks
                 edgeChecked++;
                 if (!TriCount.TryGetValue(mesh, out var count))
                 {
-                    dangling.Add($"   EDGE-NAV   navmesh {nav} in {cellOf(nav)} edge-links {mesh}, which is not in the winning state");
-                    dangleStruct.Add(("EDGE-NAV", nav, "navmesh", mesh, "navmesh", navOwner(nav), -1,
-                                      $"navmesh {nav} in {cellOf(nav)} edge-links {mesh}, which is not in the winning state", null));
+                    string gone = Deleter.ContainsKey(mesh) ? "which is deleted in the winning state" : "which is not in the winning state";
+                    dangling.Add($"   EDGE-NAV   navmesh {nav} in {cellOf(nav)} edge-links {mesh}, {gone}");
+                    dangleStruct.Add(("EDGE-NAV", nav, "navmesh", mesh, "navmesh", navOwner(nav), Deleter.GetValueOrDefault(mesh, -1),
+                                      $"navmesh {nav} in {cellOf(nav)} edge-links {mesh}, {gone}", null));
                 }
                 else if (tri >= count)
                 {

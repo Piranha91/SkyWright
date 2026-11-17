@@ -194,7 +194,7 @@ for (int p = 0; p < paths.Count; p++)
             if (rec is INavigationMeshGetter nm)
             {
                 if (nm.IsDeleted) deletedHere.Add(nm.FormKey);
-                links.NoteNavmesh(nm);
+                links.NoteNavmesh(nm, p);
             }
             else if (rec is IPlacedObjectGetter po)
             {
@@ -774,6 +774,8 @@ foreach (var d in dangling.Take(listN)) Console.WriteLine(d);
 bool ModTouched(FormKey rec, string role)
 {
     var l = role == "navmesh" ? navProviders.GetValueOrDefault(rec) : refOverriders.GetValueOrDefault(rec);
+    // the plugin that deleted a navmesh touched it too: a mod's deletion of a vanilla navmesh is not Bethesda's floor
+    if (role == "navmesh" && links.Deleter.TryGetValue(rec, out var deleter) && !Vanilla.Contains(pluginKey[deleter].FileName.String)) return true;
     return DanglingLinks.ModTouched(l, i => Vanilla.Contains(pluginKey[i].FileName.String));
 }
 
@@ -926,6 +928,19 @@ if (emitPath is not null)
             d.Summary + $"   [record provided by: {chain}]", necessary, other));
     }
 
+    // DELETED / EMPTIED rows (2026-11-16): the section's findings, one row each, with the deleting (or emptying) plugin as A
+    // and the last earlier plugin whose version had triangles as B. The shipped game's deletions stay out, counted.
+    var (delFindings, delShipped) = NavDeletions.Find(navVersions, Wanted, p => Vanilla.Contains(pluginKey[p].FileName.String));
+    foreach (var r in delFindings)
+    {
+        var (st, why) = NavDeletions.Predicate(r.Kind, r.Nav, navVersions);
+        string by = pluginKey[r.By].FileName.String, good = r.LastGood >= 0 ? pluginKey[r.LastGood].FileName.String : "";
+        string what = r.Kind == "EMPTIED" ? $"navmesh {r.Nav} in {Cell(r.Cell)} has no triangles in {by}'s version ({r.FirstT} before)"
+                    : $"navmesh {r.Nav} in {Cell(r.Cell)} is deleted by {by}" + (good.Length > 0 ? $"; the last version with geometry is {good}'s" : "; no version in the order has geometry");
+        conflicts.Add(new Conflict(r.Kind, by, good, what,
+            new List<ConflictRecord> { new(r.Nav.ToString(), "navmesh", Cell(r.Cell), st, why) }));
+    }
+
     // --base: every record of the base emit, re-measured under THIS arm. The loser of a clobber row is the base row's;
     // the winner is whoever wins the record here. A dangling link is re-asked of this arm's winning state.
     List<Predicate>? predicates = null;
@@ -950,6 +965,14 @@ if (emitPath is not null)
                     else if (winner < 0) predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "no plugin in this order provides the record"));
                     else if (!provs!.Contains(loser)) predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "the loser does not provide this record in this order"));
                     else { PlanInto(basePlan, loser, nav); PlanInto(basePlan, winner, nav); pending.Add((c, r, nav, loser, winner)); }
+                }
+            }
+            else if (c.Kind is "DELETED" or "EMPTIED")
+            {
+                foreach (var r in c.Necessary)
+                {
+                    var (st, why) = NavDeletions.Predicate(c.Kind, FormKey.Factory(r.FormKey), navVersions);
+                    predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, st, why));
                 }
             }
             else
@@ -984,6 +1007,9 @@ if (emitPath is not null)
         new("clobber predicates (findings)", predicateTally.GetValueOrDefault(PhysicalState.Holds) + predicateTally.GetValueOrDefault(PhysicalState.Gone),
             new Dictionary<string, long> { ["GeometryUnreadable"] = predicateTally.GetValueOrDefault(PhysicalState.Unmeasured) }, null,
             $"Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds):N0}, Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone):N0} (a Gone row: a declared-dependency clobber with no coverage loss beyond {ReachClearance:0}u)"),
+        new("navmesh deletions", delFindings.Count, new Dictionary<string, long>(),
+            new Dictionary<string, long> { ["ShippedGame"] = delShipped.Count },
+            $"{delFindings.Count(r => r.Kind == "DELETED"):N0} deleted and {delFindings.Count(r => r.Kind == "EMPTIED"):N0} emptied by a mod; the shipped game's deletions are counted, not rows"),
         new("dangling-link checks", doorTriChecked + doorLinkChecked + edgeChecked, new Dictionary<string, long>(),
             new Dictionary<string, long> { ["PermanentlyDisabledDoor"] = links.PermanentlyDisabledDoors, ["DoorIdxRetired"] = doorIdxSuppressed, ["FloorDangles"] = floorDangles }),
         // The physical population this run judged, with the chains it could not read to the end counted as
