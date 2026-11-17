@@ -26,6 +26,8 @@ namespace Workbench;
 /// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
 /// commit dry|real PATCHNAME      dry-run or write the staged edits (a real write re-checks the open conflict row)
 /// recheck PATCHNAME              re-check the open conflict row against that written patch
+/// repairpreview                  plan the open navmesh row's repair (NavRepairLane), nothing written
+/// repairwrite PATCHNAME          write the previewed repair to that new patch, read it back and re-check it
 /// expect recheck WORD            pass or fail on the last re-check's word for the open row (resolved, new, ...)
 /// expect created FORMKEY         pass or fail: the last re-check lists a new row naming that reference
 /// readback FORMKEY PLUGIN        read that plugin's Placement of the reference through the server
@@ -194,6 +196,8 @@ internal sealed class Script
             case "ticks": Ticks(int.Parse(a[1])); break;
             case "commit": Async(() => _h.CommitAsync(a[1] == "dry", a[2])); break;
             case "recheck": Async(() => _h.RecheckAsync(a[1])); break;
+            case "repairpreview": Async(async () => (await _h.RepairPreviewAsync()).Sentence); break;
+            case "repairwrite": Async(async () => (await _h.RepairWriteAsync(a[1])).Sentence); break;
             case "expectwritten":
                 // M-1: the reference is drawn where the patch puts it (read back through the server), and the status bar says so.
                 Async(async () =>
