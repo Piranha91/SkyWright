@@ -33,9 +33,10 @@ public sealed record GroundVertex(int Index, float Authored, float Winning, bool
 /// <summary>A NAV-GROUND row: the navmesh and its used vertices' ground facts, as the detector measured them.</summary>
 public sealed record GroundRow(FormKey Nav, IReadOnlyList<GroundVertex> Vertices);
 
-/// <summary>One housecarl_apply op. <see cref="Compose"/> is an EdgeLink element for an Add.</summary>
+/// <summary>One housecarl_apply op. <see cref="Compose"/> is an EdgeLink element for an Add; <see cref="ComposeNode"/> a whole
+/// compose (a NAVI entry with its nested sets).</summary>
 public sealed record RepairOp(string FormId, string FieldPath, string Op, string? Key = null, string? Value = null,
-                              IReadOnlyDictionary<string, string>? Compose = null);
+                              IReadOnlyDictionary<string, string>? Compose = null, System.Text.Json.Nodes.JsonNode? ComposeNode = null);
 
 /// <summary>What happened to one link. Status: relinked, cut, refused, linked-back, resolved. <paramref name="Src"/>,
 /// <paramref name="SrcTri"/> and <paramref name="Edge"/> are the edge the plan edits (or would); the detector row it answers is
@@ -493,6 +494,25 @@ public static class NavRepair
             else if (p.Class == "relink" && p.Links.All(l => l.Status is "cut" or "refused" or "resolved")) p.Status = "cut";
             else p.Status = "planned";
             if (p.Class == "relink") p.Why.InsertRange(0, p.Links.Select(l => l.Why));
+        }
+    }
+
+    /// <summary>Refuse each named navmesh's plan for its reason, and with it every planned edit that links to a refused one.</summary>
+    public static void Refuse(NavRepairPlan plan, IReadOnlyDictionary<FormKey, string> why)
+    {
+        var failed = new Dictionary<FormKey, string>(why);
+        bool grew = true;
+        while (grew)
+        {
+            grew = false;
+            foreach (var p in plan.Plans.Where(p => p.Status != "refused" && !failed.ContainsKey(p.Nav)))
+                if (p.Links.Any(l => l.Status is "relinked" or "linked-back" && l.To is { } m && failed.ContainsKey(m)))
+                { failed[p.Nav] = "a navmesh its repair links to is refused"; grew = true; }
+        }
+        foreach (var p in plan.Plans.Where(p => p.Status != "refused" && failed.ContainsKey(p.Nav)))
+        {
+            p.Status = "refused"; p.Edits = new List<RepairOp>(); p.Change = new NavChange(); p.AdjacencyChange = false;
+            p.Why.Add($"refused: {failed[p.Nav]}");
         }
     }
 

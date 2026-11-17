@@ -1117,13 +1117,19 @@ if (emitPath is not null)
             .Concat(borderFindings.Select(r => new BrokenLink(r.Kind, r.Src, r.Target, r.TargetTri, r.SrcTri, r.Edge))).ToList();
         var relinkPlan = NavRepair.Relink(winGeom, brokenRows, edgeTol, wideTol, scope);
         var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>())).ToList(), ground.Band, edgeTol, scope);
+        // the coarse map: every relink that joins a new pair of navmeshes adds it to both NAVI entries (NavRepairNavi.cs)
+        var (naviView, naviOpen) = NaviView.Read(paths);
+        NaviPlan naviPlan;
+        try { naviPlan = NavRepairNavi.Plan(relinkPlan, winGeom, naviView); }
+        finally { foreach (var m in naviOpen) m.Dispose(); }
         NavRepairRun.Write(planPath, relinkPlan, groundPlan, borderUnproven,
-            k => winNav.TryGetValue(k, out var x) ? (pluginKey[x.Owner].FileName.String, paths[x.Owner]) : null, edgeTol, wideTol, paths);
+            k => winNav.TryGetValue(k, out var x) ? (pluginKey[x.Owner].FileName.String, paths[x.Owner]) : null, edgeTol, wideTol, paths, naviPlan);
         var all = relinkPlan.Plans.Concat(groundPlan.Plans).ToList();
         Console.WriteLine($"\n==== REPAIR PLAN -> {planPath} ====");
         Console.WriteLine($"   {all.Count:N0} navmeshes: " + string.Join(", ", all.GroupBy(p => p.Status).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
                         + $"; links " + string.Join(", ", all.SelectMany(p => p.Links).GroupBy(l => l.Status).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
-                        + $"; {relinkPlan.Ops.Count() + groundPlan.Ops.Count():N0} ops; {borderUnproven.Count:N0} unproven links offered no repair");
+                        + $"; {relinkPlan.Ops.Count() + naviPlan.Ops.Count + groundPlan.Ops.Count():N0} ops; {borderUnproven.Count:N0} unproven links offered no repair");
+        Console.WriteLine($"   NAVI ({naviPlan.Record?.ToString() ?? "none"}, winner {naviPlan.WinnerPlugin ?? "none"}): {string.Join("; ", naviPlan.Why)}");
         foreach (var p in all.Take(listN)) Console.WriteLine($"   {p.Status,-8} {p.Class,-6} {p.Nav}: {string.Join("; ", p.Why)}");
     }
     if (cli.RecheckPlanPath is { } rp && cli.RecheckOutPath is { } ro && basePath is not null)

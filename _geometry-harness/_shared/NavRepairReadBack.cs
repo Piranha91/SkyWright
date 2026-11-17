@@ -160,10 +160,11 @@ public static class NavRepairReadBack
     /// the plan's order. Each entry: the record, its type, its winner, holds, the differences and the fields compared. The
     /// fixes are what the write path must forward to make each failing one the winner's: grouped by winner plugin, the
     /// worldspaces first.</summary>
-    public static (JsonArray Records, JsonArray Fixes, int Failed) Carried(ISkyrimModGetter patch, IReadOnlyList<string> order)
+    public static (JsonArray Records, JsonArray Fixes, int Failed) Carried(ISkyrimModGetter patch, IReadOnlyList<string> order, bool naviPlanned = false)
     {
         var records = new JsonArray(); var fix = new List<(string Plugin, string Type, FormKey Key)>(); int failed = 0;
-        var carried = patch.EnumerateMajorRecords().Where(r => r is not INavigationMeshGetter).ToList();
+        // a NAVI the plan changes is held by NaviCheck (its winner with exactly the plan's entries changed), not to its winner whole
+        var carried = patch.EnumerateMajorRecords().Where(r => r is not INavigationMeshGetter && !(naviPlanned && r is INavigationMeshInfoMapGetter)).ToList();
         if (carried.Count == 0) return (records, new JsonArray(), 0);
         using var resolver = LoadOrderResolver.Build(order);
         var view = resolver.Capture();
@@ -192,6 +193,65 @@ public static class NavRepairReadBack
                 ["formids"] = new JsonArray(g.OrderBy(f => f.Type == "Worldspace" ? 0 : 1).Select(f => (JsonNode)FormIdToken.Of(f.Key)).ToArray()),
             }).ToArray());
         return (records, fixes, failed);
+    }
+
+    /// <summary>The patch's NAVI against the plan's: the winner's NAVI (the plan's winner file) with exactly the plan's entries
+    /// changed: an entry the winner states gains its neighbours in place, one it does not is appended whole from the plugin that
+    /// states it, with its neighbours. Every other entry, and the record's own fields, must equal the winner's. Returns the
+    /// differences and the number of entries compared.</summary>
+    public static (List<string> Diff, int Compared) NaviCheck(JsonNode navi, ISkyrimModGetter patch)
+    {
+        var diff = new List<string>();
+        var key = FormKey.Factory((string)navi["record"]!);
+        string? wpath = (string?)navi["winner"]?["path"];
+        var got = patch.NavigationMeshInfoMaps.FirstOrDefault(m => m.FormKey == key);
+        if (got is null) return (new() { $"the plan changes NAVI {key}, and the patch does not carry it" }, 0);
+        if (wpath is null || !File.Exists(wpath)) return (new() { $"the NAVI winner's plugin '{wpath}' is not on disk, so {key} cannot be compared" }, 0);
+        var opened = new Dictionary<string, ISkyrimModDisposableGetter>(StringComparer.OrdinalIgnoreCase);
+        ISkyrimModGetter Open(string path) => opened.TryGetValue(path, out var m) ? m : opened[path] = SkyrimMod.CreateFromBinaryOverlay(path, SkyrimRelease.SkyrimSE);
+        try
+        {
+            var win = Open(wpath).NavigationMeshInfoMaps.FirstOrDefault(m => m.FormKey == key);
+            if (win is null) return (new() { $"{key} is not in its winner {Path.GetFileName(wpath)}" }, 0);
+            var want = win.DeepCopy();
+            foreach (var e in navi["entries"]!.AsArray())
+            {
+                var nav = FormKey.Factory((string)e!["navmesh"]!);
+                var add = e["add"]!.AsArray().Select(x => FormKey.Factory((string)x!)).ToList();
+                if (e["winnerIndex"] is { } wi)
+                {
+                    int i = (int)wi;
+                    if (i >= want.MapInfos.Count || want.MapInfos[i].NavigationMesh.FormKey != nav) { diff.Add($"the winner's entry {i} is not {nav}'s; the plan is stale"); continue; }
+                    foreach (var m in add) want.MapInfos[i].MergedTo.Add(new FormLink<INavigationMeshGetter>(m));
+                }
+                else
+                {
+                    string fpath = (string)e["from"]!["path"]!; int fi = (int)e["from"]!["index"]!;
+                    var src = File.Exists(fpath) ? Open(fpath).NavigationMeshInfoMaps.FirstOrDefault(m => m.FormKey == key) : null;
+                    if (src is null || fi >= src.MapInfos.Count || src.MapInfos[fi].NavigationMesh.FormKey != nav) { diff.Add($"{nav}'s entry is not at {Path.GetFileName(fpath)}'s index {fi}; the plan is stale"); continue; }
+                    var copy = src.MapInfos[fi].DeepCopy();
+                    foreach (var m in add) copy.MergedTo.Add(new FormLink<INavigationMeshGetter>(m));
+                    want.MapInfos.Add(copy);
+                }
+            }
+            void Eq<T>(string what, T a, T b) { if (!EqualityComparer<T>.Default.Equals(a, b)) diff.Add($"NAVI {what}: written {b}, planned {a}"); }
+            Eq("FormVersion", want.FormVersion, got.FormVersion);
+            Eq("VersionControl", want.VersionControl, got.VersionControl);
+            Eq("Version2", want.Version2, got.Version2);
+            Eq("record flags", want.MajorRecordFlagsRaw, got.MajorRecordFlagsRaw);
+            Eq("NavMeshVersion", want.NavMeshVersion, got.NavMeshVersion);
+            byte[]? nw = want.NVSI is { } x ? x.Span.ToArray() : null, ng = got.NVSI is { } y ? y.Span.ToArray() : null;
+            if ((nw is null) != (ng is null) || (nw is not null && !nw.SequenceEqual(ng!))) diff.Add("NAVI NVSI bytes differ from the winner's");
+            if (!Equals(want.PreferredPathing, got.PreferredPathing)) diff.Add("NAVI PreferredPathing differs from the winner's");
+            Eq("entry count", want.MapInfos.Count, got.MapInfos.Count);
+            for (int i = 0; i < Math.Min(want.MapInfos.Count, got.MapInfos.Count); i++)
+                if (!want.MapInfos[i].Equals(got.MapInfos[i]))
+                    diff.Add($"NAVI entry {i} ({got.MapInfos[i].NavigationMesh.FormKey}) differs from the planned {want.MapInfos[i].NavigationMesh.FormKey}'s: MergedTo written "
+                             + $"[{string.Join(",", got.MapInfos[i].MergedTo.Select(x => x.FormKey))}], planned [{string.Join(",", want.MapInfos[i].MergedTo.Select(x => x.FormKey))}]");
+            if (diff.Count == 0 && !want.Equals(got)) diff.Add("the NAVI records differ in a field outside the named set (Mutagen's whole-record equality)");
+            return (diff, want.MapInfos.Count);
+        }
+        finally { foreach (var m in opened.Values) m.Dispose(); }
     }
 
     /// <summary><c>navownprobe --repair-readback PLAN.json PATCH.esp OUT.json</c>: every planned navmesh in the patch against
@@ -238,9 +298,21 @@ public static class NavRepairReadBack
         var order = plan["order"]?.AsArray().Select(x => (string)x!).ToList() ?? new List<string>();
         JsonArray carried, fixes; int carriedFailed;
         if (order.Count == 0) { carried = new JsonArray(); fixes = new JsonArray(); carriedFailed = 0; Console.Error.WriteLine("the plan names no order, so the carried records cannot be held to their winners; re-write it with navownprobe --repair-plan."); return 2; }
-        try { (carried, fixes, carriedFailed) = Carried(patch, order); }
+        var navi = plan["navi"];
+        bool naviPlanned = navi?["entries"] is JsonArray ne && ne.Count > 0;
+        try { (carried, fixes, carriedFailed) = Carried(patch, order, naviPlanned); }
         catch (Exception ex) { Console.Error.WriteLine($"the plan's order could not be read to find the carried records' winners ({ex.Message}); check the plugins it names are on disk."); return 2; }
         failed += carriedFailed;
+        if (naviPlanned)
+        {
+            var (naviDiff, compared) = NaviCheck(navi!, patch);
+            if (naviDiff.Count > 0) failed++;
+            carried.Add(new JsonObject
+            {
+                ["record"] = (string?)navi!["record"], ["type"] = "NavigationMeshInfoMap", ["winner"] = (string?)navi["winner"]?["plugin"], ["holds"] = naviDiff.Count == 0,
+                ["differences"] = new JsonArray(naviDiff.Select(x => (JsonNode)x).ToArray()), ["compared"] = compared, ["planned"] = true,
+            });
+        }
         var doc = new JsonObject
         {
             ["patch"] = patchPath, ["plan"] = planPath, ["holds"] = failed == 0, ["records"] = results,

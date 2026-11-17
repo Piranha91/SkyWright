@@ -56,6 +56,13 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
           (0,0) from Skyrim.esm, the navmeshes' winner, while RpD.esp wins that cell (review of Gate C part 1, finding 1).
     2499  the forward the read-back names to fix it is exactly that cell from RpD.esp; after it, the cell is RpD's.
     2496  the read-back's arm: a patch written with one unplanned edit (L5's vertex 1 moved 1 u) fails it, naming the field.
+    2503  plan, NAVI: L6's relink into R6n adds R6n to L6's NAVI entry and L6 to R6n's, both ways. L6's entry is stated only
+          by Skyrim.esm, so the patch adds it whole from there (its door, island data and old neighbour kept); R6n's is in
+          RpA.esp's list, the NAVI winner, and gains L6 in place. Relinks within one navmesh change no entry.
+    2504  the read-back holds the patch's NAVI to RpA.esp's with exactly those two entries changed, and holds.
+    2505  the read-back's NAVI arm: a patch whose NAVI also changes an entry the plan leaves (R5's) fails, naming that entry.
+    2506  self-test: a relink whose new neighbour no plugin's NAVI states is refused by name with its link back; with both
+          entries stated it names each navmesh in the other's entry.
     2497  the re-check, by the same rule on the order with the patch added: relinked links and the ground rows go
           Holds -> Gone (repaired), L7's and SL's cut links are reported as cut, L4's as refused, and no border, link or
           ground row is created.
@@ -90,7 +97,7 @@ def sk(hexid):
 
 
 N = {"TD": sk("000960"), "SL": sk("000961"), "SD": sk("000962"), "TT": sk("000963"), "TE": sk("000964"), "TV": sk("000965"),
-     "SV": sk("000966"), "R4a": "000801:RpA.esp", "R4b": "000802:RpA.esp", "R6n": "000803:RpA.esp",
+     "SV": sk("000966"), "NV": sk("000C00"), "DR": sk("000C10"), "R4a": "000801:RpA.esp", "R4b": "000802:RpA.esp", "R6n": "000803:RpA.esp",
      "G1": sk("000B01"), "G2": sk("000B02"), "G3": sk("000B03"), "G4": sk("000B04"), "G5": sk("000B05"), "G6": sk("000B06")}
 for k in range(1, 14):
     N[f"L{k}"] = sk(f"000A{k:02X}")
@@ -519,6 +526,51 @@ def selftest(name):
     assert lines and lines[0].startswith("ok "), lines or f"no line for {name} (exit {SELF.returncode}): {SELF.stdout[-400:]} {SELF.stderr[-300:]}"
 
 
+def t2503():
+    """Rejects: a relink into another navmesh with no NAVI change, a change one way only, L6's entry taken from the winner
+    (which does not state it) or rebuilt without its door, island and old neighbour, and NAVI touched by a same-mesh relink."""
+    p = lab().plan
+    assert p is not None, f"no repair plan{lab().why('plan')}"
+    nv = p.get("navi") or {}
+    assert nv.get("record") == N["NV"] and (nv.get("winner") or {}).get("plugin") == "RpA.esp", nv
+    got = {nm(e["navmesh"]): (e["from"]["plugin"], e["winnerIndex"], [nm(x) for x in e["add"]]) for e in nv.get("entries") or []}
+    want = {"L6": ("Skyrim.esm", None, ["R6n"]), "R6n": ("RpA.esp", 1, ["L6"])}
+    assert got == want, f"NAVI entries {got}, want {want}; why {nv.get('why')}"
+    ops = [o for o in p["ops"] if o["formid"] == N["NV"]]
+    inplace = [(o["field_path"], o["op"], nm(o.get("value"))) for o in ops if "compose" not in o]
+    assert inplace == [("MapInfos[1].MergedTo", "Add", "L6")], inplace
+    whole = [o for o in ops if "compose" in o]
+    assert len(whole) == 1 and whole[0]["field_path"] == "MapInfos" and whole[0]["op"] == "Add", whole
+    c = whole[0]["compose"]
+    sets = [(x["path"], x["verb"], nm(x.get("value")) if x.get("value") else (x.get("compose") or {}).get("type")) for x in c["sets"]]
+    assert c["type"] == "NavigationMapInfo" and nm(c["fields"]["NavigationMesh"]) == "L6" and c["fields"]["Unknown2"] == str(0x1234), c["fields"]
+    assert sets == [("MergedTo", "Add", "R6"), ("MergedTo", "Add", "R6n"), ("LinkedDoors", "Add", "LinkedDoor"),
+                    ("Parent", "Set", "NavigationMapInfoWorldParent"), ("Island", "Set", "IslandData")], sets
+
+
+def t2504():
+    """Rejects: a read-back that does not check the patch's NAVI, or a written NAVI other than the winner's plus the plan."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    doc = f["NavRepair.readback.doc"] or {}
+    nv = [c for c in doc.get("carried") or [] if c["type"] == "NavigationMeshInfoMap"]
+    assert len(nv) == 1 and nv[0]["holds"] is True and nv[0].get("planned") is True and nv[0]["winner"] == "RpA.esp" and nv[0]["compared"] == 4,         f"the NAVI read-back: {nv}; apply said {f['NavRepair.answer'][:800]}"
+
+
+def t2505():
+    """Rejects: a NAVI read-back that misses a change to an entry the plan leaves alone (R5's, entry 0 of RpA's list)."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    rb, doc = f["NavRepairNaviArm.readback"], f["NavRepairNaviArm.readback.doc"] or {}
+    nv = [c for c in doc.get("carried") or [] if c["type"] == "NavigationMeshInfoMap"]
+    assert rb.returncode == 1 and len(nv) == 1 and nv[0]["holds"] is False and any(d.startswith("NAVI entry 0 (" + N["R5"]) for d in nv[0]["differences"]),         f"the NAVI arm's read-back exit {rb.returncode}: {nv}; apply said {f['NavRepairNaviArm.answer'][:500]}"
+
+
+def t2506():
+    """Rejects: a relink written although the coarse map cannot be told of its new neighbour, or NAVI ops one way only."""
+    selftest("2506")
+
+
 def t2490():
     """Rejects: a cut that leaves its table entry, or leaves a later entry's edge field naming the old index."""
     selftest("2490")
@@ -565,11 +617,12 @@ def flow():
     env = {"HOUSECARL_DATA_DIR": str(L.tmp / "hcdata"), "HOUSECARL_RUNLOG_DIR": str(L.tmp / "hcdata" / "runs")}
     v1 = (4097, 2500, 0)                                  # L5's vertex 1 is (4096, 2500, 0); the arm moves it 1 u
     arm_ops = L.plan["ops"] + [{"formid": N["L5"], "field_path": "Data.Vertices", "op": "SetAtIndex", "key": "1", "value": "%d,%d,%d" % v1}]
+    navi_arm_ops = L.plan["ops"] + [{"formid": N["NV"], "field_path": "MapInfos[0].MergedTo", "op": "Add", "value": N["R6"]}]
     def readback(name, patch, tag):
         rb = L.tmp / f"readback-{name}{tag}.json"
         f[name + tag + ".readback"] = run([exe("navownprobe"), "--repair-readback", L.tmp / "plan.json", patch, rb])
         f[name + tag + ".readback.doc"] = json.loads(rb.read_text(encoding="utf-8")) if rb.exists() else None
-    for name, ops in (("NavRepair", L.plan["ops"]), ("NavRepairArm", arm_ops)):
+    for name, ops in (("NavRepair", L.plan["ops"]), ("NavRepairArm", arm_ops), ("NavRepairNaviArm", navi_arm_ops)):
         s = evalrecords.Session(" ".join(str(a) for a in args), env, "navmesh-repair-test")
         try:
             f[name + ".answer"] = s.tool("housecarl_apply", {"ops": ops, "patch": name, "out_path": str(out)}, want_json=False)
@@ -717,6 +770,10 @@ CASES = [
     ("2495 the read-back holds", t2495),
     ("2496 the read-back's arm: one unplanned edit fails it", t2496),
     ("2497 the re-check: repaired, cut and refused", t2497),
+    ("2503 plan, NAVI: L6 and R6n name each other, L6's entry whole from Skyrim.esm", t2503),
+    ("2504 the read-back holds the patch's NAVI to the winner plus the plan", t2504),
+    ("2505 the read-back's NAVI arm: an unplanned entry change fails it", t2505),
+    ("2506 self-test: a relink with no NAVI entry to write is refused", t2506),
     ("2498 the read-back refuses a carried cell that is not the winner's", t2498),
     ("2499 the fix forwards that cell from its winner, and it holds", t2499),
 ]

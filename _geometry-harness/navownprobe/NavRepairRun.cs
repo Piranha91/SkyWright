@@ -11,7 +11,8 @@ using Mutagen.Bethesda.Plugins;
 static class NavRepairRun
 {
     public static JsonObject Write(string path, NavRepairPlan relink, NavRepairPlan ground, IEnumerable<NavBorderLinks.Row> unproven,
-                                   Func<FormKey, (string Plugin, string Path)?> winner, EdgeTolerance tol, EdgeTolerance wide, IReadOnlyList<string> order)
+                                   Func<FormKey, (string Plugin, string Path)?> winner, EdgeTolerance tol, EdgeTolerance wide, IReadOnlyList<string> order,
+                                   NaviPlan navi)
     {
         var plans = new JsonArray();
         foreach (var p in relink.Plans.Concat(ground.Plans).OrderBy(p => p.Nav.ToString(), StringComparer.Ordinal))
@@ -43,7 +44,8 @@ static class NavRepairRun
                 ["kind"] = r.Kind, ["source"] = r.Src.ToString(), ["tri"] = r.SrcTri, ["edge"] = r.Edge, ["target"] = r.Target.ToString(), ["targetTri"] = r.TargetTri,
                 ["plan"] = r.Gap.Plan, ["height"] = r.Gap.Height, ["why"] = r.Why,
             }).ToArray()),
-            ["ops"] = Ops(relink.Ops.Concat(ground.Ops)),
+            ["navi"] = NaviJson(navi),
+            ["ops"] = Ops(relink.Ops.Concat(navi.Ops).Concat(ground.Ops)),
         };
         File.WriteAllText(path, doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         return doc;
@@ -56,8 +58,24 @@ static class NavRepairRun
         if (o.Value is not null) j["value"] = o.Value;
         if (o.Compose is not null)
             j["compose"] = new JsonObject { ["type"] = "EdgeLink", ["fields"] = new JsonObject(o.Compose.Select(kv => KeyValuePair.Create(kv.Key, (JsonNode?)kv.Value))) };
+        if (o.ComposeNode is not null) j["compose"] = o.ComposeNode.DeepClone();
         return (JsonNode)j;
     }).ToArray());
+
+    /// <summary>The plan's NAVI change: the record, its winner, and each entry changed (what the read-back holds the patch's NAVI to).</summary>
+    public static JsonObject NaviJson(NaviPlan n) => new()
+    {
+        ["record"] = n.Record?.ToString(),
+        ["winner"] = n.WinnerPlugin is null ? null : new JsonObject { ["plugin"] = n.WinnerPlugin, ["path"] = n.WinnerPath },
+        ["why"] = new JsonArray(n.Why.Select(w => (JsonNode)w).ToArray()),
+        ["entries"] = new JsonArray(n.Entries.Select(e => (JsonNode)new JsonObject
+        {
+            ["navmesh"] = e.Nav.ToString(), ["from"] = new JsonObject { ["plugin"] = e.FromPlugin, ["path"] = e.FromPath, ["index"] = e.FromIndex },
+            ["winnerIndex"] = e.WinnerIndex, ["add"] = new JsonArray(e.Add.Select(m => (JsonNode)m.ToString()).ToArray()),
+            ["mergedToBefore"] = new JsonArray(e.MergedToBefore.Select(m => (JsonNode)m.ToString()).ToArray()),
+            ["preferredMerges"] = new JsonArray(e.PreferredMerges.Select(m => (JsonNode)m.ToString()).ToArray()),
+        }).ToArray()),
+    };
 
     static JsonObject V(Vec3 v) => new() { ["x"] = v.X, ["y"] = v.Y, ["z"] = v.Z };
 

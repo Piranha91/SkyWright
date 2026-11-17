@@ -53,6 +53,10 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 // Containers:
 //   RpD overrides the border cell (0,0), renaming it. A patch of L-navmeshes carries that   the read-back refuses the patch's
 //   CELL from Skyrim.esm, the navmeshes' winner, unless the winner's CELL is forwarded     cell until RpD's is forwarded
+// NAVI (NV): Skyrim.esm states every navmesh of its worldspace, each naming the navmeshes its links name; L6's entry also carries a linked door (the
+//   placed ref DR in (0,0)) and island data. RpA, the last plugin carrying NAVI (its winner), states R5 unchanged, R6 with
+//   no neighbour and its new R6n with none either (a stale entry, as Moon and Star's). The plan's relink of L6 into R6n adds
+//   R6n to L6's entry, which only Skyrim.esm states (so the patch adds it whole), and L6 to R6n's, in RpA's list in place.
 static class NavRepairFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -67,6 +71,7 @@ static class NavRepairFixture
     public static FormKey L(int k) => S((uint)(0xA00 + k));
     public static FormKey R(int k) => S((uint)(0xA10 + k));
     public static readonly FormKey R4a = new(AKey, 0x801), R4b = new(AKey, 0x802), R6n = new(AKey, 0x803);
+    public static readonly FormKey NV = S(0xC00), DR = S(0xC10);
     public static readonly FormKey G1 = S(0xB01), G2 = S(0xB02), G3 = S(0xB03), G4 = S(0xB04), G5 = S(0xB05), G6 = S(0xB06);
     static FormKey CellK(int gx) => S((uint)(0x900 + gx));
     static FormKey LandK(int gx) => S((uint)(0x910 + gx));
@@ -170,6 +175,24 @@ static class NavRepairFixture
     }
     static NavigationMesh Gone(FormKey key) => new(key, Rel) { IsDeleted = true };
 
+    /// <summary>A NAVI entry for <paramref name="nav"/> in grid cell (<paramref name="gx"/>, 0), naming <paramref name="merged"/>.</summary>
+    static NavigationMapInfo Info(FormKey nav, int gx, float x, float y, params FormKey[] merged)
+    {
+        var i = new NavigationMapInfo
+        {
+            NavigationMesh = new FormLink<INavigationMeshGetter>(nav), Point = new P3Float(x, y, 0), Unknown2 = 0x1234,
+            Parent = new NavigationMapInfoWorldParent { ParentWorldspace = new FormLink<IWorldspaceGetter>(W), ParentWorldspaceCoord = new P2Int16((short)gx, 0) },
+        };
+        foreach (var m in merged) i.MergedTo.Add(new FormLink<INavigationMeshGetter>(m));
+        return i;
+    }
+    static NavigationMeshInfoMap Navi(params NavigationMapInfo[] infos)
+    {
+        var n = new NavigationMeshInfoMap(NV, Rel) { NavMeshVersion = 12 };
+        n.MapInfos.AddRange(infos);
+        return n;
+    }
+
     /// <summary>Write the five plugins into <paramref name="dir"/> (created) and return their paths in <see cref="Order"/>.</summary>
     public static IReadOnlyList<string> Write(string dir)
     {
@@ -216,7 +239,23 @@ static class NavRepairFixture
         c4.NavigationMeshes.Add(Fan(G3, 4, 16800, 500, 0));
         c4.NavigationMeshes.Add(Fan(G4, 4, 17600, 500, 0));
         c5.NavigationMeshes.Add(Fan(G5, 5, 20800, 500, 0));
+        c0.Temporary.Add(new PlacedObject(DR, Rel) { EditorID = "RpNavDoor", Placement = new Placement { Position = new P3Float(3900, 3100, 0) } });
         sky.Worldspaces.Add(World(c0, c1, c3, c4, c5));
+        var l6 = Info(L(6), 0, 3996, 3100, R(6));
+        l6.LinkedDoors.Add(new LinkedDoor { Unknown = 7, Door = new FormLink<IPlacedObjectGetter>(DR) });
+        var isl = new IslandData { Min = new P3Float(3896, 3000, 0), Max = new P3Float(4096, 3300, 0) };
+        isl.Vertices.AddRange(new[] { new P3Float(3896, 3000, 0), new P3Float(4096, 3000, 0), new P3Float(4096, 3300, 0) });
+        isl.Triangles.Add(new P3Int16(0, 1, 2));
+        l6.Island = isl;
+        var infos = new List<NavigationMapInfo>();
+        foreach (var (cell, gx) in new[] { (c0, 0), (c1, 1), (c3, 3), (c4, 4), (c5, 5) })
+            foreach (var n in cell.NavigationMeshes)
+            {
+                if (n.FormKey == L(6)) { infos.Add(l6); continue; }
+                var d = n.Data!;
+                infos.Add(Info(n.FormKey, gx, d.Min.X, d.Min.Y, d.EdgeLinks.Select(e => e.Mesh.FormKey).Distinct().ToArray()));
+            }
+        sky.NavigationMeshInfoMaps.Add(Navi(infos.ToArray()));
         Save(sky);
 
         // ---- Dawnguard.esm: the shipped game deletes TV ----
@@ -253,6 +292,7 @@ static class NavRepairFixture
         var a5 = GridCell(5, Flat(LandK(5), 200));
         a5.NavigationMeshes.Add(Fan(G5, 5, 20800, 500, 200));
         a.Worldspaces.Add(World(a1, a3, a4, a5));
+        a.NavigationMeshInfoMaps.Add(Navi(Info(R(5), 1, 4196, 2600, L(5)), Info(R6n, 1, 4196, 3100), Info(R(6), 1, 4496, 3100)));
         Save(a, SkyKey, DgKey);
 
         // ---- RpB.esp: deletes TD and SD ----

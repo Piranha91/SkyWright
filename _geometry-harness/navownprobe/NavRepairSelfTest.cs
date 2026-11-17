@@ -94,6 +94,35 @@ static class NavRepairSelfTest
             return p.Status == "refused" && p.Why.Any(w => w.Contains("cannot be told")) ? null : $"status {p.Status}: {string.Join("; ", p.Why)}";
         });
 
+        // C2506: a relink into another navmesh whose NAVI entry no plugin states is refused by name, and so is its link back;
+        // with both entries stated, the same relink is planned and names each navmesh in the other's entry.
+        Case("2506 navi-entry-missing", () =>
+        {
+            var a = K(0xC01); var c = K(0xC02); var gone = K(0xC09);
+            var nav = new Dictionary<FormKey, WinningNav>
+            {
+                [a] = Nav(a, new[] { new Vec3(0, 0, 0), new Vec3(100, 0, 0), new Vec3(100, 100, 0) }, new[] { new NavTri(0, 1, 2, 2, -1, 0, -1) }, new[] { new NavEdgeLink(gone, 0) }),
+                [c] = Nav(c, new[] { new Vec3(100, 0, 0), new Vec3(200, 0, 0), new Vec3(100, 100, 0) }, new[] { new NavTri(0, 1, 2, 0, -1, -1, -1) }, Array.Empty<NavEdgeLink>()),
+            };
+            static Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap Map(params FormKey[] navs)
+            {
+                var m = new Mutagen.Bethesda.Skyrim.NavigationMeshInfoMap(K(0xC00), Mutagen.Bethesda.Skyrim.SkyrimRelease.SkyrimSE);
+                foreach (var n in navs) m.MapInfos.Add(new Mutagen.Bethesda.Skyrim.NavigationMapInfo { NavigationMesh = new Mutagen.Bethesda.Plugins.FormLink<Mutagen.Bethesda.Skyrim.INavigationMeshGetter>(n) });
+                return m;
+            }
+            var broken = new[] { new BrokenLink("EDGE-NAV", a, gone, 0) };
+            var plan = NavRepair.Relink(nav, broken, Tol, Wide);
+            if (plan.Plans.Count(p => p.Status == "planned") != 2) return "the relink itself is not planned: " + string.Join(" | ", plan.Plans.Select(p => $"{p.Nav} {p.Status}"));
+            var n1 = NavRepairNavi.Plan(plan, nav, NaviView.Of(new[] { new NaviSource("SelfTest.esm", "", Map(a)) }));
+            var bad = plan.Plans.Where(p => p.Status != "refused" || !p.Why.Any(w => w.Contains("NAVI") && (p.Nav == c ? w.Contains(c.ToString()) : true))).ToList();
+            if (bad.Count > 0 || n1.Ops.Count > 0) return "with C's entry missing: " + string.Join(" | ", plan.Plans.Select(p => $"{p.Nav} {p.Status}: {string.Join("; ", p.Why)}")) + $"; NAVI ops {n1.Ops.Count}";
+            plan = NavRepair.Relink(nav, broken, Tol, Wide);
+            var n2 = NavRepairNavi.Plan(plan, nav, NaviView.Of(new[] { new NaviSource("SelfTest.esm", "", Map(a, c)) }));
+            var got = n2.Ops.Select(o => $"{o.FieldPath} {o.Op} {o.Value}").OrderBy(x => x, StringComparer.Ordinal).ToList();
+            string[] want = { $"MapInfos[0].MergedTo Add {c}", $"MapInfos[1].MergedTo Add {a}" };
+            return plan.Plans.All(p => p.Status == "planned") && want.SequenceEqual(got) ? null : "with both entries: " + string.Join(" | ", got);
+        });
+
         Console.WriteLine($"{(fail == 0 ? "all" : $"{fail} failed of")} navrepair self-test cases");
         return fail == 0 ? 0 : 1;
     }
