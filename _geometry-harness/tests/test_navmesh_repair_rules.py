@@ -24,6 +24,7 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2467  control: a pair linked both ways and never changed (L1/R1) is no row of any kind.
     2468  a far edge in the same plan but 200 u higher (R8, lifted by RpA) is EDGE-NOMATCH both ways.
     2469  control: a far triangle whose slanted edge overlaps L9's edge fully but lies off, beside its true edge, is matched.
+    2475  control: a ledge link pair (L10/R10, Types 2 and 1, 100 u apart in plan) is counted and not judged: no row.
     2470  a navmesh on its author's ground that a later LAND moved is NAV-GROUND (G1: Skyrim.esm x RpA.esp).
     2471  control: a deck above the ground (G2) is no row.
     2472  control: a navmesh whose owner saw the new ground (G3, moved with it) is no row.
@@ -66,9 +67,9 @@ def sk(hexid):
 N = {"TD": sk("000960"), "SL": sk("000961"), "SD": sk("000962"), "TT": sk("000963"), "TE": sk("000964"), "TV": sk("000965"),
      "SV": sk("000966"), "R4a": "000801:RpA.esp", "R4b": "000802:RpA.esp", "R6n": "000803:RpA.esp",
      "G1": sk("000B01"), "G2": sk("000B02"), "G3": sk("000B03"), "G4": sk("000B04"), "G5": sk("000B05")}
-for k in range(1, 10):
-    N[f"L{k}"] = sk(f"000A0{k}")
-    N[f"R{k}"] = sk(f"000A1{k}")
+for k in range(1, 11):
+    N[f"L{k}"] = sk(f"000A{k:02X}")
+    N[f"R{k}"] = sk(f"000A{0x10 + k:02X}")
 NAME = {v.lower(): k for k, v in N.items()}
 
 
@@ -292,6 +293,17 @@ def t2469():
     assert not cs, show(cs)
 
 
+def t2475():
+    """Rejects: a ledge link judged by its edge (in plan or in full), which calls the ledge EDGE-NOMATCH both ways."""
+    for arm in ("plain", "tol"):
+        d = lab().doc[arm]
+        assert d is not None, f"no emit{lab().why(arm)}"
+        cs = [c for c in lab().rows(arm) if {src(c), nm(alt(c).get("FormKey"))} & {"L10", "R10"}]
+        assert not cs, f"{arm}: {show(cs)}"
+        cov = [x for x in lab().coverage(arm) if x.get("Population") == "border links (geometry)"]
+        assert cov and (cov[0].get("SetAside") or {}).get("LedgeLinks") == 2, f"{arm}: ledge links not counted as 2: {cov}"
+
+
 def ground(s):
     return [c for c in lab().rows("plain", "NAV-GROUND") if src(c) == s]
 
@@ -407,6 +419,7 @@ CASES = [
     ("2467 control: an unchanged two-way border is no row", t2467),
     ("2468 EDGE-NOMATCH both ways where heights differ (L8/R8)", t2468),
     ("2469 control: a slanted far edge does not hide the true one (L9/R9)", t2469),
+    ("2475 control: a ledge link is counted, not judged (L10/R10)", t2475),
     ("2470 NAV-GROUND G1", t2470),
     ("2471 control: a deck is no row", t2471),
     ("2472 control: the owner saw the ground", t2472),

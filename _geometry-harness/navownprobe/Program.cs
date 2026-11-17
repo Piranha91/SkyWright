@@ -894,7 +894,7 @@ var borderFindings = border.Rows.Where(BorderFinding).ToList();
 var groundFindings = ground.Rows.Where(GroundFinding).ToList();
 Console.WriteLine("\n==== BORDER LINKS BY THEIR GEOMETRY (tolerance " + edgeTol + ") ====");
 Console.WriteLine($"   judged: {border.Judged.Count:N0} cross-navmesh links to an existing triangle; {border.Judged.Count(j => j.Matched):N0} matched, "
-                + $"{border.Judged.Count(j => j.Matched && j.Reciprocal):N0} two-way; {border.LinkFieldPastTable:N0} link fields past their table (not judged)");
+                + $"{border.Judged.Count(j => j.Matched && j.Reciprocal):N0} two-way; {border.LinkFieldPastTable:N0} link fields past their table and {border.LedgeLinks:N0} ledge links (not judged)");
 Console.WriteLine($"   findings: {borderFindings.Count:N0} ({borderFindings.Count(r => r.Kind == "EDGE-NOMATCH"):N0} EDGE-NOMATCH, "
                 + $"{borderFindings.Count(r => r.Kind == "EDGE-ONEWAY"):N0} EDGE-ONEWAY); floor (both ends vanilla): {border.Rows.Count - borderFindings.Count:N0}");
 foreach (var r in borderFindings.Take(listN)) Console.WriteLine($"   {r.Kind,-12} navmesh {r.Src} in {Cell(navCell.GetValueOrDefault(r.Src))} {r.Why}");
@@ -913,6 +913,7 @@ if (cli.FloorCensusPath is { } censusPath)
                                                overlap = float.IsFinite(j.Gap.Plan) ? j.Gap.Overlap : 0, plan = float.IsFinite(j.Gap.Plan) ? j.Gap.Plan : (float?)null,
                                                height = float.IsFinite(j.Gap.Height) ? j.Gap.Height : (float?)null, matched = j.Matched, reciprocal = j.Reciprocal, type = j.Type,
                                                floor = !ModTouched(j.Src, "navmesh") && !ModTouched(j.Target, "navmesh") }),
+        ledgeLinks = border.LedgeLinks,
         groundHeights = ground.OnOwnGround,
         groundRows = ground.Rows.Select(r => new { nav = r.Nav.ToString(), owner = pluginKey[r.Owner].FileName.String, land = pluginKey[r.LandWinner].FileName.String,
                                                    counted = r.Counted, vertices = r.Vertices, maxMove = r.MaxMove }),
@@ -1103,7 +1104,7 @@ if (emitPath is not null)
             new Dictionary<string, long> { ["GeometryUnreadable"] = predicateTally.GetValueOrDefault(PhysicalState.Unmeasured) }, null,
             $"Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds):N0}, Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone):N0} (a Gone row: a declared-dependency clobber with no coverage loss beyond {ReachClearance:0}u)"),
         new("border links (geometry)", border.Judged.Count, new Dictionary<string, long> { ["LinkFieldPastTable"] = border.LinkFieldPastTable },
-            new Dictionary<string, long> { ["FloorRows"] = border.Rows.Count - borderFindings.Count },
+            new Dictionary<string, long> { ["FloorRows"] = border.Rows.Count - borderFindings.Count, ["LedgeLinks"] = border.LedgeLinks },
             $"tolerance {edgeTol}; {border.Judged.Count(j => j.Matched):N0} matched, {border.Judged.Count(j => j.Matched && j.Reciprocal):N0} two-way"),
         new("navmesh vertices on LAND (ground)", ground.VerticesJudged,
             new Dictionary<string, long> { ["CannotTell"] = ground.CannotTell, ["NoAuthoredGround"] = ground.NoAuthoredGround, ["NoLand"] = ground.NoLand },

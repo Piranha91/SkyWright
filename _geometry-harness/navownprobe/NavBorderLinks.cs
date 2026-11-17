@@ -14,7 +14,9 @@ using Mutagen.Bethesda.Plugins;
 // Every broken link (these two, and DanglingLinks' EDGE-IDX and EDGE-NAV) also gets its CANDIDATES: the triangles of other
 // navmeshes with an open edge along the source edge. One is the match a relink can take; two or more are ambiguous and none
 // is taken; none means nothing on the far side meets the edge. A link whose flag bit is set but whose field is past the
-// edge-link table is counted, never judged.
+// edge-link table is counted, never judged. A LEDGE link (edge-link Type 1 or 2, xEdit's Ledge Up / Ledge Down) is counted and
+// not judged either: on the base game's own records nearly every ledge link has no far edge along the source edge even in plan
+// (the vanilla floor, 2026-11-16), so edge geometry is not how a ledge link is made and cannot say one is broken.
 sealed class NavBorderLinks
 {
     public sealed record Row(string Kind, FormKey Src, int SrcTri, int Edge, FormKey Target, int TargetTri, EdgeGap Gap, string Why);
@@ -38,7 +40,7 @@ sealed class NavBorderLinks
     /// <summary>(source, target, target triangle) -> the candidates for every broken link the table names, by the first
     /// triangle edge that uses it.</summary>
     public readonly Dictionary<(FormKey Src, FormKey Target, int Tri), CandidateResult> Candidates = new();
-    public long LinkFieldPastTable, OpenEdges;
+    public long LinkFieldPastTable, LedgeLinks, OpenEdges;
 
     public static NavBorderLinks Find(IReadOnlyDictionary<FormKey, WinningNav> nav, EdgeTolerance tol)
     {
@@ -62,7 +64,7 @@ sealed class NavBorderLinks
                     if (vi < 0 || vj < 0 || vi >= g.Vertices.Count || vj >= g.Vertices.Count) continue;
                     Vec3 a = g.Vertices[vi], b = g.Vertices[vj];
                     var (m, j) = (links[k].Mesh, (int)links[k].TriangleIndex);
-                    bool ledge = links[k].Type is 1 or 2;   // xEdit's Ledge Up / Ledge Down (NavEdgeLink.Type): heights differ by design
+                    if (links[k].Type is 1 or 2) { r.LedgeLinks++; continue; }   // a ledge link: counted, not judged (header)
                     if (!nav.TryGetValue(m, out var far) || j < 0 || j >= far.Geom.Triangles.Count)
                     {
                         // EDGE-NAV / EDGE-IDX (DanglingLinks): only the candidates are this class's to say
@@ -70,7 +72,7 @@ sealed class NavBorderLinks
                         continue;
                     }
                     var (fe, gap) = NavBorderMatch.BestEdge(a, b, far.Geom, j);
-                    bool matched = fe >= 0 && (ledge ? gap.WithinPlan(tol) : gap.Within(tol));
+                    bool matched = fe >= 0 && gap.Within(tol);
                     bool recip = false;
                     if (matched)
                     {

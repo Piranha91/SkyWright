@@ -36,8 +36,6 @@ public readonly record struct EdgeGap(float Overlap, float Plan, float Height)
 {
     public static readonly EdgeGap None = new(0, float.PositiveInfinity, float.PositiveInfinity);
     public bool Within(EdgeTolerance t) => Overlap >= 0.5f && Plan <= t.Plan && Height <= t.Height;
-    /// <summary>A ledge link (edge-link type 1 or 2) joins edges at different heights by design: plan only.</summary>
-    public bool WithinPlan(EdgeTolerance t) => Overlap >= 0.5f && Plan <= t.Plan;
 }
 
 public static class NavBorderMatch
