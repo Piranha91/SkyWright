@@ -3,7 +3,9 @@ using System.Text.Json.Nodes;
 using HousecarlCore;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Plugins;
+using Mutagen.Bethesda.Plugins.Records;
 using Mutagen.Bethesda.Skyrim;
+using Mutagen.Bethesda.Strings;
 using Noggog;
 
 namespace HarnessShared;
@@ -94,9 +96,109 @@ public static class NavRepairReadBack
         }
     }
 
+    // A container's child groups and their group-header stamps: the records under it, not its own fields (each child the
+    // patch carries is compared on its own).
+    static readonly HashSet<string> ChildGroups = new(StringComparer.Ordinal)
+    {
+        "Persistent", "Temporary", "NavigationMeshes", "Landscape", "PersistentTimestamp", "PersistentUnknownGroupData",
+        "TemporaryTimestamp", "TemporaryUnknownGroupData", "Timestamp", "UnknownGroupData",
+        "SubCells", "SubCellsTimestamp", "SubCellsUnknown", "TopCell",
+    };
+
+    /// <summary>The fields of a carried record (a CELL or WRLD the write path copies as a navmesh's container) that differ
+    /// between the patch's copy and the load-order winner's: every property of the record's getter interfaces except its
+    /// child groups, by value (links by FormKey, byte fields by bytes, lists element by element). Also returns the names
+    /// compared.</summary>
+    public static (List<string> Diff, List<string> Compared) ContainerDifferences(IMajorRecordGetter winner, IMajorRecordGetter written)
+    {
+        var diff = new List<string>(); var compared = new List<string>();
+        var iface = winner.GetType().GetInterfaces().FirstOrDefault(i => i.Name == "I" + RecordNaming.StripOverlay(winner.GetType().Name) + "Getter");
+        if (iface is null || !iface.IsInstanceOfType(written)) { diff.Add($"the written record is not a {RecordNaming.StripOverlay(winner.GetType().Name)}"); return (diff, compared); }
+        var props = iface.GetInterfaces().Append(iface)
+            .Where(i => i.Namespace?.StartsWith("Mutagen.Bethesda", StringComparison.Ordinal) == true)
+            .SelectMany(i => i.GetProperties()).Where(p => p.GetIndexParameters().Length == 0 && !ChildGroups.Contains(p.Name))
+            .GroupBy(p => p.Name).Select(g => g.First()).OrderBy(p => p.Name, StringComparer.Ordinal);
+        foreach (var p in props)
+        {
+            if (p.PropertyType.Namespace?.StartsWith("Loqui", StringComparison.Ordinal) == true) continue;   // registration metadata
+            compared.Add(p.Name);
+            object? a, b;
+            try { a = p.GetValue(winner); b = p.GetValue(written); }
+            catch (Exception ex) { diff.Add($"{p.Name}: could not be read ({(ex.InnerException ?? ex).Message})"); continue; }
+            if (!Same(a, b)) diff.Add($"{p.Name}: written {Show(b)}, winner {Show(a)}");
+        }
+        return (diff, compared);
+    }
+
+    static bool Same(object? a, object? b)
+    {
+        if (a is null || b is null) return a is null && b is null;
+        if (a is IFormLinkGetter fa && b is IFormLinkGetter fb) return fa.FormKey == fb.FormKey;
+        if (a is ReadOnlyMemorySlice<byte> ma && b is ReadOnlyMemorySlice<byte> mb) return ma.Span.SequenceEqual(mb.Span);
+        if (a is string sa && b is string sb) return sa == sb;
+        if (a is ITranslatedStringGetter ta && b is ITranslatedStringGetter tb) return ta.String == tb.String;   // the text, however stored
+        if (a is System.Collections.IEnumerable ea && b is System.Collections.IEnumerable eb)
+        {
+            var la = ea.Cast<object?>().ToList(); var lb = eb.Cast<object?>().ToList();
+            return la.Count == lb.Count && la.Zip(lb).All(x => Same(x.First, x.Second));
+        }
+        return a.Equals(b);
+    }
+
+    static string Show(object? v) => v switch
+    {
+        null => "none",
+        IFormLinkGetter f => f.FormKey.ToString(),
+        ReadOnlyMemorySlice<byte> m => $"{m.Length} bytes",
+        string s => $"'{s}'",
+        ITranslatedStringGetter t => $"'{t.String}'",
+        System.Collections.IEnumerable e => $"{e.Cast<object?>().Count()} entries",
+        _ => v.ToString() ?? "?",
+    };
+
+    /// <summary>Every record in the patch that is not a navmesh (the containers the write path carried) against its winner on
+    /// the plan's order. Each entry: the record, its type, its winner, holds, the differences and the fields compared. The
+    /// fixes are what the write path must forward to make each failing one the winner's: grouped by winner plugin, the
+    /// worldspaces first.</summary>
+    public static (JsonArray Records, JsonArray Fixes, int Failed) Carried(ISkyrimModGetter patch, IReadOnlyList<string> order)
+    {
+        var records = new JsonArray(); var fix = new List<(string Plugin, string Type, FormKey Key)>(); int failed = 0;
+        var carried = patch.EnumerateMajorRecords().Where(r => r is not INavigationMeshGetter).ToList();
+        if (carried.Count == 0) return (records, new JsonArray(), 0);
+        using var resolver = LoadOrderResolver.Build(order);
+        var view = resolver.Capture();
+        using var session = view.OpenSession();
+        foreach (var r in carried)
+        {
+            string type = RecordNaming.StripOverlay(r.GetType().Name);
+            var w = view.ResolveWinner(r.FormKey);
+            List<string> diff; List<string> compared = new();
+            if (w is null) diff = new() { $"{r.FormKey} is in no plugin of the order, so the patch's copy has no winner to equal" };
+            else if (view.GetRecord(session, w.Value.WinnerPlugin, r.FormKey, r.GetType().GetInterfaces().FirstOrDefault(i => i.Name == "I" + type + "Getter")) is not { } body)
+                diff = new() { $"the winner {w.Value.WinnerPlugin} did not yield {r.FormKey}" };
+            else (diff, compared) = ContainerDifferences(body, r);
+            if (diff.Count > 0) { failed++; if (w is not null) fix.Add((w.Value.WinnerPlugin, type, r.FormKey)); }
+            records.Add(new JsonObject
+            {
+                ["record"] = r.FormKey.ToString(), ["type"] = type, ["winner"] = w?.WinnerPlugin, ["holds"] = diff.Count == 0,
+                ["differences"] = new JsonArray(diff.Select(x => (JsonNode)x).ToArray()), ["compared"] = compared.Count,
+            });
+        }
+        var fixes = new JsonArray(fix.GroupBy(f => f.Plugin, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Any(f => f.Type == "Worldspace") ? 0 : 1).ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (JsonNode)new JsonObject
+            {
+                ["source"] = g.Key,
+                ["formids"] = new JsonArray(g.OrderBy(f => f.Type == "Worldspace" ? 0 : 1).Select(f => (JsonNode)FormIdToken.Of(f.Key)).ToArray()),
+            }).ToArray());
+        return (records, fixes, failed);
+    }
+
     /// <summary><c>navownprobe --repair-readback PLAN.json PATCH.esp OUT.json</c>: every planned navmesh in the patch against
-    /// its winner with the plan applied, and every NAVM in the patch a planned one. Exit 0 when every check holds, 1 when one
-    /// fails (each said in one sentence), 2 when the inputs cannot be read.</summary>
+    /// its winner with the plan applied, every NAVM in the patch a planned one, and every other record the patch carries (the
+    /// CELL and WRLD containers) equal to its winner on the plan's order. Exit 0 when every check holds, 1 when one fails (each
+    /// said in one sentence; a failing container names the forward that makes it the winner's), 2 when the inputs cannot be
+    /// read.</summary>
     public static int Run(string planPath, string patchPath, string outPath)
     {
         JsonNode plan;
@@ -133,18 +235,28 @@ public static class NavRepairReadBack
         finally { foreach (var m in opened.Values) m.Dispose(); }
         var extra = written.Keys.Where(k => !planned.Contains(k)).ToList();
         failed += extra.Count;
+        var order = plan["order"]?.AsArray().Select(x => (string)x!).ToList() ?? new List<string>();
+        JsonArray carried, fixes; int carriedFailed;
+        if (order.Count == 0) { carried = new JsonArray(); fixes = new JsonArray(); carriedFailed = 0; Console.Error.WriteLine("the plan names no order, so the carried records cannot be held to their winners; re-write it with navownprobe --repair-plan."); return 2; }
+        try { (carried, fixes, carriedFailed) = Carried(patch, order); }
+        catch (Exception ex) { Console.Error.WriteLine($"the plan's order could not be read to find the carried records' winners ({ex.Message}); check the plugins it names are on disk."); return 2; }
+        failed += carriedFailed;
         var doc = new JsonObject
         {
             ["patch"] = patchPath, ["plan"] = planPath, ["holds"] = failed == 0, ["records"] = results,
             ["unplannedNavmeshes"] = new JsonArray(extra.Select(k => (JsonNode)k.ToString()).ToArray()),
-            ["otherRecords"] = new JsonArray(patch.EnumerateMajorRecords().Where(r => r is not INavigationMeshGetter)
-                                                 .Select(r => (JsonNode)$"{r.GetType().Name.Replace("BinaryOverlay", "")} {r.FormKey}").ToArray()),
+            ["carried"] = carried, ["carriedFixes"] = fixes,
         };
         File.WriteAllText(outPath, doc.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         foreach (var r in results)
             Console.WriteLine($"   {((bool)r!["holds"]! ? "holds" : "FAILS")}  {r["navmesh"]}" + ((bool)r["holds"]! ? "" : ": " + string.Join("; ", r["differences"]!.AsArray().Select(x => (string)x!))));
         foreach (var k in extra) Console.WriteLine($"   FAILS  {k}: in the patch but not in the plan");
-        Console.WriteLine($"read-back: {(failed == 0 ? "every planned navmesh is the winner with exactly the plan applied" : $"{failed} check(s) fail")} -> {outPath}");
+        foreach (var c in carried)
+            Console.WriteLine($"   {((bool)c!["holds"]! ? "holds" : "FAILS")}  carried {c["type"]} {c["record"]} (winner {c["winner"]}, {c["compared"]} fields)"
+                              + ((bool)c["holds"]! ? "" : ": " + string.Join("; ", c["differences"]!.AsArray().Select(x => (string)x!))));
+        foreach (var f in fixes)
+            Console.WriteLine($"   to make the carried records the winner's: housecarl_forward source={f!["source"]} formids={string.Join(",", f["formids"]!.AsArray().Select(x => (string)x!))} into the patch");
+        Console.WriteLine($"read-back: {(failed == 0 ? "every planned navmesh is the winner with exactly the plan applied, and every carried record is its winner's" : $"{failed} check(s) fail")} -> {outPath}");
         return failed == 0 ? 0 : 1;
     }
 }

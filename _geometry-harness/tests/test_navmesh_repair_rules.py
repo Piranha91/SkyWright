@@ -50,7 +50,11 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
           is planned; a vertex that cannot be told refuses its navmesh.
     2494  the write: the plan's ops through housecarl_apply (this checkout's server, out_path) make one new patch holding
           exactly the planned navmeshes.
-    2495  the read-back: every planned navmesh in the patch is its winner with exactly the plan applied.
+    2495  the read-back: every planned navmesh in the patch is its winner with exactly the plan applied, and every record
+          the patch carries (its CELL and WRLD containers) is its winner's.
+    2498  the read-back refuses a carried container that is not the winner's: the plan's ops alone carry the border cell
+          (0,0) from Skyrim.esm, the navmeshes' winner, while RpD.esp wins that cell (review of Gate C part 1, finding 1).
+    2499  the forward the read-back names to fix it is exactly that cell from RpD.esp; after it, the cell is RpD's.
     2496  the read-back's arm: a patch written with one unplanned edit (L5's vertex 1 moved 1 u) fails it, naming the field.
     2497  the re-check, by the same rule on the order with the patch added: relinked links and the ground rows go
           Holds -> Gone (repaired), L7's and SL's cut links are reported as cut, L4's as refused, and no border, link or
@@ -561,19 +565,29 @@ def flow():
     env = {"HOUSECARL_DATA_DIR": str(L.tmp / "hcdata"), "HOUSECARL_RUNLOG_DIR": str(L.tmp / "hcdata" / "runs")}
     v1 = (4097, 2500, 0)                                  # L5's vertex 1 is (4096, 2500, 0); the arm moves it 1 u
     arm_ops = L.plan["ops"] + [{"formid": N["L5"], "field_path": "Data.Vertices", "op": "SetAtIndex", "key": "1", "value": "%d,%d,%d" % v1}]
+    def readback(name, patch, tag):
+        rb = L.tmp / f"readback-{name}{tag}.json"
+        f[name + tag + ".readback"] = run([exe("navownprobe"), "--repair-readback", L.tmp / "plan.json", patch, rb])
+        f[name + tag + ".readback.doc"] = json.loads(rb.read_text(encoding="utf-8")) if rb.exists() else None
     for name, ops in (("NavRepair", L.plan["ops"]), ("NavRepairArm", arm_ops)):
         s = evalrecords.Session(" ".join(str(a) for a in args), env, "navmesh-repair-test")
         try:
             f[name + ".answer"] = s.tool("housecarl_apply", {"ops": ops, "patch": name, "out_path": str(out)}, want_json=False)
+            patch = out / f"houseCARL - {name}" / f"{name}.esp"
+            f[name] = patch
+            if name == "NavRepair":
+                # the write as the lane makes it: the plan's ops, then each carried container the read-back names forwarded
+                # from its winner into the same patch, then the read-back again
+                readback(name, patch, ".applied")
+                f["fixes"] = (f[name + ".applied.readback.doc"] or {}).get("carriedFixes") or []
+                f["forward.answers"] = [s.tool("housecarl_forward", {"formids": x["formids"], "source": x["source"], "into": str(patch.parent)}, want_json=False)
+                                        for x in f["fixes"]]
         except Exception as ex:
             f[name + ".answer"] = f"refused: {ex}"
         finally:
             s.close()
-        patch = out / f"houseCARL - {name}" / f"{name}.esp"
-        f[name] = patch
-        rb = L.tmp / f"readback-{name}.json"
-        f[name + ".readback"] = run([exe("navownprobe"), "--repair-readback", L.tmp / "plan.json", patch, rb])
-        f[name + ".readback.doc"] = json.loads(rb.read_text(encoding="utf-8")) if rb.exists() else None
+        f.setdefault(name, out / f"houseCARL - {name}" / f"{name}.esp")
+        readback(name, f[name], "")
     # the order with the patch added: its plugin last, its folder at the top of the asset view (as the workbench's re-check)
     c = json.loads(L.cand.read_text(encoding="utf-8"))
     c["Plugins"] = c["Plugins"] + ["NavRepair.esp"]
@@ -616,6 +630,25 @@ def t2496():
     bad = [r for r in doc.get("records") or [] if not r["holds"]]
     assert rb.returncode == 1 and [nm(r["navmesh"]) for r in bad] == ["L5"] and any("Vertices[1]" in d for d in bad[0]["differences"]), \
         f"the arm's read-back exit {rb.returncode}, failing {[(nm(r['navmesh']), r['differences']) for r in bad]}: {rb.stdout[-800:]}"
+
+
+def t2498():
+    """Rejects: a read-back that passes a patch reverting another plugin's container (the cell's name back to Skyrim.esm's)."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    rb, doc = f["NavRepair.applied.readback"], f["NavRepair.applied.readback.doc"] or {}
+    bad = [c for c in doc.get("carried") or [] if not c["holds"]]
+    nav_bad = [r for r in doc.get("records") or [] if not r["holds"]]
+    assert rb.returncode == 1 and doc.get("holds") is False and not nav_bad         and [(c["type"], c["record"], c["winner"]) for c in bad] == [("Cell", "000900:Skyrim.esm", "RpD.esp")]         and any(d.startswith("EditorID") for d in bad[0]["differences"]),         f"read-back of the plan's ops alone: exit {rb.returncode}, holds {doc.get('holds')}, failing navmeshes {nav_bad}, carried {doc.get('carried')}: {rb.stdout[-800:]}"
+
+
+def t2499():
+    """Rejects: a fix that forwards the wrong record or from another plugin than the winner, or leaves the cell reverted."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    assert f.get("fixes") == [{"source": "RpD.esp", "formids": ["000900:Skyrim.esm"]}], f"the read-back's fixes: {f.get('fixes')}"
+    cells = [c for c in (f["NavRepair.readback.doc"] or {}).get("carried") or [] if c["record"] == "000900:Skyrim.esm"]
+    assert len(cells) == 1 and cells[0]["holds"] and cells[0]["winner"] == "RpD.esp" and cells[0]["compared"] > 10,         f"after the forward ({f.get('forward.answers')}): {cells}"
 
 
 def t2497():
@@ -684,6 +717,8 @@ CASES = [
     ("2495 the read-back holds", t2495),
     ("2496 the read-back's arm: one unplanned edit fails it", t2496),
     ("2497 the re-check: repaired, cut and refused", t2497),
+    ("2498 the read-back refuses a carried cell that is not the winner's", t2498),
+    ("2499 the fix forwards that cell from its winner, and it holds", t2499),
 ]
 
 if __name__ == "__main__":

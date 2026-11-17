@@ -50,6 +50,9 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 //       (5,0) to 400                                                                     ground is the owner's view, not the first LAND
 //   G6  Skyrim, in (3,0): four vertices at z 0 and one up on a rock at z 300; RpA's    NAV-GROUND G6; the plan moves the four,
 //       raise to 200 moves the ground under all five                                   not the one off the ground
+// Containers:
+//   RpD overrides the border cell (0,0), renaming it. A patch of L-navmeshes carries that   the read-back refuses the patch's
+//   CELL from Skyrim.esm, the navmeshes' winner, unless the winner's CELL is forwarded     cell until RpD's is forwarded
 static class NavRepairFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -263,7 +266,9 @@ static class NavRepairFixture
         d4.NavigationMeshes.Add(Nav(G4, InGrid(4), new[] { (17600f, 500f, 0f), (17900f, 500f, 0f), (17900f, 800f, 0f), (17600f, 800f, 0f),
                                                             (17400f, 650f, 0f), (17750f, 950f, 0f) },
                                     new T3(0, 1, 2), new T3(0, 2, 3), new T3(0, 3, 4), new T3(2, 5, 3)));
-        dmod.Worldspaces.Add(World(d4, GridCell(5, Flat(LandK(5), 400))));
+        // RpD renames the border cell (0,0): a patch carrying that cell from the navmeshes' own plugin reverts the name
+        var d0 = GridCell(0, null); d0.EditorID = "RpBorderCell";
+        dmod.Worldspaces.Add(World(d0, d4, GridCell(5, Flat(LandK(5), 400))));
         Save(dmod, SkyKey);
 
         foreach (var o in overlays.Values) (o as IDisposable)?.Dispose();
