@@ -60,6 +60,12 @@ internal interface IWorkbenchScene
     bool Rechecking { get; }
     /// <summary>The view-only state; null where the scene has none.</summary>
     ViewState? View => null;
+    /// <summary>Plan the open navmesh row's repair (NavRepairLane); a scene without the lane refuses.</summary>
+    Task<RepairPreview> RepairPreviewAsync() => Task.FromException<RepairPreview>(new InvalidOperationException("this scene cannot plan a navmesh repair."));
+    /// <summary>Write the previewed repair to the new patch, read it back and re-check it.</summary>
+    Task<RepairWritten> RepairWriteAsync(string patch) => Task.FromException<RepairWritten>(new InvalidOperationException("this scene cannot write a navmesh repair."));
+    RepairPreview? LastRepairPreview => null;
+    RepairWritten? LastRepairWritten => null;
     /// <summary>The scene's pick shapes (drawn references and terrain) at their current placements.</summary>
     IReadOnlyList<PickShape> Shapes => Array.Empty<PickShape>();
     /// <summary>The drawn references whose winning record a plugin of this mod folder provides, in the arm's view, or why not.</summary>

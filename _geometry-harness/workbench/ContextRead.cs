@@ -48,7 +48,9 @@ internal static class ContextRead
     /// <summary>The search radius for doors; contact decides the label.</summary>
     internal const double DoorRadius = 256;
 
-    internal const string NavRule = "navmesh triangles under its axis-aligned bounds, any height: shown, not judged; navmesh is read and shown only, never moved or re-cut";
+    internal const string NavRule = "navmesh triangles under its axis-aligned bounds, any height: shown, not judged here; a navmesh row's repair "
+                                    + "(relink a broken border, or move vertices in height to follow ground a later plugin moved) is previewed and written "
+                                    + "to a new patch from the row; navmesh is never moved sideways, re-cut or generated";
 
     /// <summary>The sections a read fills, said "reading…" while it runs.</summary>
     internal static readonly string[] SectionNames = { "doors", "names", "enableParent", "touches", "resting", "navmesh" };
