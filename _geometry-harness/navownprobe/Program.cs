@@ -76,11 +76,15 @@ if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return NavownSelfTest
 // The edge-link identity fixture: written for tests/test_navown_edge_identity.py, which runs the real probe on it.
 if (args.Length >= 2 && args[0] == "--write-edge-link-fixture") { Console.WriteLine(string.Join(Environment.NewLine, EdgeLinkFixture.Write(args[1]))); return 0; }
 if (args.Length >= 3 && args[0] == "--nav-invariants") return NavInvariants.Run(args[1], args[2..]);
+if (args.Length >= 4 && args[0] == "--repair-readback") return NavRepairReadBack.Run(args[1], args[2], args[3]);
+if (args.Length >= 1 && args[0] == "--navrepair-selftest") return NavRepairSelfTest.Run();
 if (args.Length >= 2 && args[0] == "--write-navrepair-fixture") { Console.WriteLine(string.Join(Environment.NewLine, NavRepairFixture.Write(args[1]))); return 0; }
 
 // The command line (NavownArgs.cs): an argument it does not know is refused by name, before anything is read.
 var cli = NavownArgs.Parse(args);
 if (cli.Error is not null) { Console.Error.WriteLine(cli.Error); return 2; }
+if ((cli.RecheckPlanPath is null) != (cli.RecheckOutPath is null) || (cli.RecheckPlanPath is not null && (cli.BasePath is null || cli.EmitPath is null)))
+{ Console.Error.WriteLine("navownprobe: --recheck-plan PLAN and --recheck-out OUT go together, with --base (the unpatched run's emit) and --emit."); return 2; }
 string Instance = cli.Instance ?? HarnessTarget.Instance;
 string GamePath = cli.Game ?? HarnessTarget.Game;
 string profileName = cli.Profile ?? HarnessTarget.Profile;
@@ -885,20 +889,26 @@ foreach (var u in uncut.OrderByDescending(u => u.Refs).Take(listN))
 // BORDER LINKS BY THEIR GEOMETRY and NAVMESH LEFT ON MOVED GROUND (NavBorderLinks.cs, NavGround.cs; 2026-11-16).
 // ---------------------------------------------------------------------------------------
 var edgeTol = cli.EdgeTolerance is { } et ? EdgeTolerance.Parse(et) : NavRuleDefaults.Edge;
-var border = NavBorderLinks.Find(winNav.ToDictionary(kv => kv.Key, kv => kv.Value.W), edgeTol);
+// the band beyond the tolerance that is unproven in game (Gate B review finding 2): rows there are shown apart, not findings
+var wideTol = new EdgeTolerance(Math.Max(edgeTol.Plan, NavRuleDefaults.Unproven.Plan), Math.Max(edgeTol.Height, NavRuleDefaults.Unproven.Height));
+var winGeom = winNav.ToDictionary(kv => kv.Key, kv => kv.Value.W);
+var border = NavBorderLinks.Find(winGeom, edgeTol, wideTol);
 var (groundBand, groundMove) = cli.GroundTolerance is { } gt ? NavGround.Parse(gt) : (NavRuleDefaults.GroundBand, NavRuleDefaults.GroundMove);
 var ground = NavGround.Find(winNav, landIndex, masterClosure, groundBand, groundMove,
                             NavRuleDefaults.GroundMinVertices, census: cli.FloorCensusPath is not null);
 bool BorderFinding(NavBorderLinks.Row r) => ModTouched(r.Src, "navmesh") || ModTouched(r.Target, "navmesh");
 bool GroundFinding(NavGround.Row r) => !Vanilla.Contains(pluginKey[r.Owner].FileName.String) || !Vanilla.Contains(pluginKey[r.LandWinner].FileName.String);
-var borderFindings = border.Rows.Where(BorderFinding).ToList();
+var borderFindings = border.Rows.Where(r => r.Tier == "finding" && BorderFinding(r)).ToList();
+var borderUnproven = border.Rows.Where(r => r.Tier == "unproven" && BorderFinding(r)).ToList();
 var groundFindings = ground.Rows.Where(GroundFinding).ToList();
 Console.WriteLine("\n==== BORDER LINKS BY THEIR GEOMETRY (tolerance " + edgeTol + ") ====");
 Console.WriteLine($"   judged: {border.Judged.Count:N0} cross-navmesh links to an existing triangle; {border.Judged.Count(j => j.Matched):N0} matched, "
                 + $"{border.Judged.Count(j => j.Matched && j.Reciprocal):N0} two-way; {border.LinkFieldPastTable:N0} link fields past their table and {border.LedgeLinks:N0} ledge links (not judged)");
 Console.WriteLine($"   findings: {borderFindings.Count:N0} ({borderFindings.Count(r => r.Kind == "EDGE-NOMATCH"):N0} EDGE-NOMATCH, "
-                + $"{borderFindings.Count(r => r.Kind == "EDGE-ONEWAY"):N0} EDGE-ONEWAY); floor (both ends vanilla): {border.Rows.Count - borderFindings.Count:N0}");
+                + $"{borderFindings.Count(r => r.Kind == "EDGE-ONEWAY"):N0} EDGE-ONEWAY); floor (both ends vanilla): {border.Rows.Count(r => !BorderFinding(r)):N0}");
 foreach (var r in borderFindings.Take(listN)) Console.WriteLine($"   {r.Kind,-12} navmesh {r.Src} in {Cell(navCell.GetValueOrDefault(r.Src))} {r.Why}");
+Console.WriteLine($"   unproven in game (not findings, no repair offered): {borderUnproven.Count:N0} links within {wideTol} but not {edgeTol}");
+foreach (var r in borderUnproven.Take(listN)) Console.WriteLine($"   UNPROVEN     navmesh {r.Src} in {Cell(navCell.GetValueOrDefault(r.Src))} {r.Why}");
 Console.WriteLine($"\n==== NAVMESH LEFT ON GROUND ANOTHER PLUGIN MOVED (band {ground.Band:0} u, move {ground.Move:0} u, at least {ground.MinVertices} vertices) ====");
 Console.WriteLine($"   judged: {ground.VerticesJudged:N0} exterior vertices; cannot tell (terrain diagonal) {ground.CannotTell:N0}; "
                 + $"no LAND {ground.NoLand:N0}; no authored ground {ground.NoAuthoredGround:N0}");
@@ -921,7 +931,7 @@ if (cli.FloorCensusPath is { } censusPath)
         groundRows = ground.Rows.Select(r => new { nav = r.Nav.ToString(), owner = pluginKey[r.Owner].FileName.String, land = pluginKey[r.LandWinner].FileName.String,
                                                    counted = r.Counted, vertices = r.Vertices, maxMove = r.MaxMove }),
         borderRows = border.Rows.Select(r => new { kind = r.Kind, src = r.Src.ToString(), tri = r.SrcTri, target = r.Target.ToString(), targetTri = r.TargetTri,
-                                                   plan = float.IsFinite(r.Gap.Plan) ? r.Gap.Plan : (float?)null, why = r.Why, floor = !BorderFinding(r) }),
+                                                   plan = float.IsFinite(r.Gap.Plan) ? r.Gap.Plan : (float?)null, why = r.Why, floor = !BorderFinding(r), tier = r.Tier }),
         candidates = border.Candidates.Select(kv => new { src = kv.Key.Src.ToString(), target = kv.Key.Target.ToString(), tri = kv.Key.Tri,
                                                          found = kv.Value.All.Select(c => new { nav = c.Nav.ToString(), tri = c.Tri, plan = c.Gap.Plan }) }),
     };
@@ -973,16 +983,16 @@ if (emitPath is not null)
         // A fix has to override the record carrying the bad index. The other end is context: a
         // patch that only re-states the target navmesh has not repaired the pointer into it.
         var (st, why) = DanglePredicate(d.Kind, d.Rec, d.Other, d.Tri);
-        var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec)), st, why) };
+        // an EDGE-NAV row's linking navmesh names its source triangle (Gate B review finding 5)
+        var necessary = new List<ConflictRecord> { new(d.Rec.ToString(), d.RecRole, Cell(navCell.GetValueOrDefault(d.Rec)), st, why, Triangle: d.SrcTri) };
         // For an unpaired finding this chain IS the deliverable: it names every plugin that already
         // touches the broken record, which is where a fix would have to go.
         var chain = Overriders(d.Rec, d.RecRole);
-        // An EDGE-IDX row's other end names the target triangle: the row is that one link (ConflictIo.RowIdentity's part).
+        // An EDGE-IDX or EDGE-NAV row's other end names the target triangle: the row is that one link (ConflictIo.RowIdentity's part).
         var other = new List<ConflictRecord> { new(d.Other.ToString(), d.OtherRole, null, Triangle: d.Tri) };
         string cand = "";
         NavBorderLinks.CandidateResult? cr = null;
-        if (d.Kind == "EDGE-IDX") border.Candidates.TryGetValue((d.Rec, d.Other, d.Tri ?? -1), out cr);
-        else if (d.Kind == "EDGE-NAV") cr = border.Candidates.Where(kv => kv.Key.Src == d.Rec && kv.Key.Target == d.Other).Select(kv => kv.Value).FirstOrDefault();
+        if (d.Kind is "EDGE-IDX" or "EDGE-NAV") border.Candidates.TryGetValue((d.Rec, d.Other, d.Tri ?? -1), out cr);
         if (cr is not null)
         {
             cand = "; " + cr.Sentence(d.Other);
@@ -1098,6 +1108,39 @@ if (emitPath is not null)
                         + (baseUnreadable > 0 ? $"; {baseUnreadable} wanted extraction(s) unreadable" : ""));
     }
 
+    // THE REPAIR PLAN (NavRepair.cs) for this run's findings, and the re-check of a plan on the order with its patch added.
+    if (cli.RepairPlanPath is { } planPath)
+    {
+        var scope = cli.RepairScope is { } sc ? sc.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(x => FormKey.Factory(x)).ToHashSet() : null;
+        var brokenRows = dangleStruct.Where(d => d.Kind is "EDGE-IDX" or "EDGE-NAV" && DanglingLinks.IsFinding(ModTouched(d.Rec, d.RecRole), ModTouched(d.Other, d.OtherRole)))
+            .Select(d => new BrokenLink(d.Kind, d.Rec, d.Other, d.Tri ?? -1))
+            .Concat(borderFindings.Select(r => new BrokenLink(r.Kind, r.Src, r.Target, r.TargetTri, r.SrcTri, r.Edge))).ToList();
+        var relinkPlan = NavRepair.Relink(winGeom, brokenRows, edgeTol, wideTol, scope);
+        var groundPlan = NavRepair.Ground(winGeom, groundFindings.Select(r => new GroundRow(r.Nav, r.Facts ?? Array.Empty<GroundVertex>())).ToList(), ground.Band, edgeTol, scope);
+        NavRepairRun.Write(planPath, relinkPlan, groundPlan, borderUnproven,
+            k => winNav.TryGetValue(k, out var x) ? (pluginKey[x.Owner].FileName.String, paths[x.Owner]) : null, edgeTol, wideTol, paths);
+        var all = relinkPlan.Plans.Concat(groundPlan.Plans).ToList();
+        Console.WriteLine($"\n==== REPAIR PLAN -> {planPath} ====");
+        Console.WriteLine($"   {all.Count:N0} navmeshes: " + string.Join(", ", all.GroupBy(p => p.Status).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
+                        + $"; links " + string.Join(", ", all.SelectMany(p => p.Links).GroupBy(l => l.Status).OrderBy(g => g.Key).Select(g => $"{g.Key} {g.Count():N0}"))
+                        + $"; {relinkPlan.Ops.Count() + groundPlan.Ops.Count():N0} ops; {borderUnproven.Count:N0} unproven links offered no repair");
+        foreach (var p in all.Take(listN)) Console.WriteLine($"   {p.Status,-8} {p.Class,-6} {p.Nav}: {string.Join("; ", p.Why)}");
+    }
+    if (cli.RecheckPlanPath is { } rp && cli.RecheckOutPath is { } ro && basePath is not null)
+    {
+        static IEnumerable<(string Id, string Kind, string Summary)> Ids(IEnumerable<Conflict> cs) => cs.SelectMany(c => c.Necessary.Select(r =>
+            (ConflictIo.RowIdentity(c.Kind, r.FormKey, c.Alternative is { Count: > 0 } a ? a[0].FormKey : null, c.A, c.Alternative is { Count: > 0 } a2 ? a2[0].Triangle : null), c.Kind, c.Summary)));
+        var baseIds = Ids(ConflictIo.Read(basePath).Conflicts).Select(x => x.Id).ToHashSet();
+        bool StillHolds(string kind, FormKey src, FormKey tgt, int tri) => kind switch
+        {
+            "EDGE-IDX" or "EDGE-NAV" => DanglePredicate(kind, src, tgt, tri).State == PhysicalState.Holds,
+            "EDGE-NOMATCH" or "EDGE-ONEWAY" => border.Predicate(kind, src, tgt, tri) == PhysicalState.Holds,
+            "NAV-GROUND" => ground.Predicate(src) == PhysicalState.Holds,
+            _ => true,
+        };
+        NavRepairRun.Recheck(rp, ro, StillHolds, baseIds, Ids(conflicts));
+    }
+
     var coverage = new List<CoverageLine>
     {
         new("plugins", paths.Count - unreadablePlugins.Count, new Dictionary<string, long> { ["UnreadablePlugin"] = unreadablePlugins.Count }),
@@ -1107,7 +1150,7 @@ if (emitPath is not null)
             new Dictionary<string, long> { ["GeometryUnreadable"] = predicateTally.GetValueOrDefault(PhysicalState.Unmeasured) }, null,
             $"Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds):N0}, Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone):N0} (a Gone row: a declared-dependency clobber with no coverage loss beyond {ReachClearance:0}u)"),
         new("border links (geometry)", border.Judged.Count, new Dictionary<string, long> { ["LinkFieldPastTable"] = border.LinkFieldPastTable },
-            new Dictionary<string, long> { ["FloorRows"] = border.Rows.Count - borderFindings.Count, ["LedgeLinks"] = border.LedgeLinks },
+            new Dictionary<string, long> { ["FloorRows"] = border.Rows.Count(r => !BorderFinding(r)), ["LedgeLinks"] = border.LedgeLinks, ["UnprovenInGame"] = borderUnproven.Count },
             $"tolerance {edgeTol}; {border.Judged.Count(j => j.Matched):N0} matched, {border.Judged.Count(j => j.Matched && j.Reciprocal):N0} two-way"),
         new("navmesh vertices on LAND (ground)", ground.VerticesJudged,
             new Dictionary<string, long> { ["CannotTell"] = ground.CannotTell, ["NoAuthoredGround"] = ground.NoAuthoredGround, ["NoLand"] = ground.NoLand },

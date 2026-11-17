@@ -28,6 +28,8 @@
     <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <Compile Include="..\_shared\PackFacts.cs" Link="PackFacts.cs" />
     <Compile Include="..\_shared\NavBorderMatch.cs" Link="NavBorderMatch.cs" />
+    <Compile Include="..\_shared\NavRepair.cs" Link="NavRepair.cs" />
+    <Compile Include="..\_shared\NavRepairReadBack.cs" Link="NavRepairReadBack.cs" />
     <Compile Include="..\_shared\CellBoundaryIndex.cs" Link="CellBoundaryIndex.cs" />
   </ItemGroup>
 </Project>

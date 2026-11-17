@@ -14,7 +14,8 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 // Skyrim). Interior cell IC; worldspace W with cells (0,0), (1,0), (3,0), (4,0), each with a flat LAND at z 0 in Skyrim.esm.
 //
 // Deletions (IC):
-//   TD  2 triangles; SL (1 triangle) edge-links TD at 0.          RpB deletes TD.   EDGE-NAV SL->TD naming RpB; DELETED TD
+//   TD  2 triangles; SL (2 triangles) edge-links TD at 0 and 1.   RpB deletes TD.   EDGE-NAV SL->TD 0 and SL->TD 1, each
+//                                                                                   naming its source triangle; DELETED TD
 //   SD  1 triangle; RpA gives it a link into TT at 7 (TT has 2).  RpB deletes SD.   no EDGE-IDX from SD; DELETED SD
 //   TE  2 triangles; RpA writes it with no triangles.                               EMPTIED TE (2 -> 0)
 //   TV  1 triangle; SV links TV at 0.                              Dawnguard deletes TV.  floor: no row, counted
@@ -33,6 +34,10 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 //   L9/R9  R9's one triangle: its true border edge runs 20 u past L9's (overlap      control: matched both ways, no row
 //          0.93), and its slanted edge projects over all of L9's edge (overlap 1.0)  (a largest-overlap pick reads the slanted
 //          but lies up to 274 u off. RpA forwards R9 unchanged.                      edge and calls the link EDGE-NOMATCH)
+//   L11/R11 R11 = 2 away + border at 2; RpA re-cuts it to [away, border] with no     EDGE-IDX L11->R11 2 (candidate R11 1);
+//          link back                                                               the relink writes R11's link back
+//   L12/R12 RpA moves R12's border edge 12 u inside (1,0), links kept both ways     unproven in game (plan band), no row
+//   L13/R13 RpA lifts R13 100 u, links kept both ways                               unproven in game (height band), no row
 //   L10/R10 a ledge: L10 links R10 by a Ledge Down (Type 2), R10 links back by a      control: no row; the emit counts 2 ledge
 //          Ledge Up (Type 1); R10's edge lies 100 u inside (1,0) and 150 u lower.   links (judging a ledge by its edge in plan
 //          RpA forwards R10 unchanged.                                              calls both EDGE-NOMATCH)
@@ -43,6 +48,8 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 //   G4  Skyrim, z 0 in (4,0); RpD (masters Skyrim only) re-cuts it at z 0             NAV-GROUND G4 (RpD x RpA)
 //   G5  Skyrim, z 0 in (5,0); RpA raises (5,0) to 200 and moves G5 to 200; RpD raises    NAV-GROUND G5 (RpA x RpD): the author's
 //       (5,0) to 400                                                                     ground is the owner's view, not the first LAND
+//   G6  Skyrim, in (3,0): four vertices at z 0 and one up on a rock at z 300; RpA's    NAV-GROUND G6; the plan moves the four,
+//       raise to 200 moves the ground under all five                                   not the one off the ground
 static class NavRepairFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -57,7 +64,7 @@ static class NavRepairFixture
     public static FormKey L(int k) => S((uint)(0xA00 + k));
     public static FormKey R(int k) => S((uint)(0xA10 + k));
     public static readonly FormKey R4a = new(AKey, 0x801), R4b = new(AKey, 0x802), R6n = new(AKey, 0x803);
-    public static readonly FormKey G1 = S(0xB01), G2 = S(0xB02), G3 = S(0xB03), G4 = S(0xB04), G5 = S(0xB05);
+    public static readonly FormKey G1 = S(0xB01), G2 = S(0xB02), G3 = S(0xB03), G4 = S(0xB04), G5 = S(0xB05), G6 = S(0xB06);
     static FormKey CellK(int gx) => S((uint)(0x900 + gx));
     static FormKey LandK(int gx) => S((uint)(0x910 + gx));
 
@@ -178,7 +185,7 @@ static class NavRepairFixture
         var sky = new SkyrimMod(SkyKey, Rel);
         var ic = Int();
         ic.NavigationMeshes.Add(Nav(TD, InIC, Quad(0), new T3(0, 1, 2), new T3(1, 3, 2)));
-        ic.NavigationMeshes.Add(Nav(SL, InIC, Tri1(1000), new T3(0, 1, 2, E01: (TD, 0))));
+        ic.NavigationMeshes.Add(Nav(SL, InIC, Quad(1000), new T3(0, 1, 2, E01: (TD, 0)), new T3(1, 3, 2, E12: (TD, 1))));
         ic.NavigationMeshes.Add(Nav(SD, InIC, Tri1(2000), new T3(0, 1, 2)));
         ic.NavigationMeshes.Add(Nav(TT, InIC, Quad(3000), new T3(0, 1, 2), new T3(1, 3, 2)));
         ic.NavigationMeshes.Add(Nav(TE, InIC, Quad(4000), new T3(0, 1, 2), new T3(1, 3, 2)));
@@ -189,9 +196,9 @@ static class NavRepairFixture
         var c3 = GridCell(3, Flat(LandK(3), 0)); var c4 = GridCell(4, Flat(LandK(4), 0)); var c5 = GridCell(5, Flat(LandK(5), 0));
         c0.NavigationMeshes.Add(L10());
         c1.NavigationMeshes.Add(R10());
-        for (int k = 1; k <= 9; k++)
+        foreach (int k in new[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13 })
         {
-            short borderAt = k switch { 5 => 3, 6 => 2, 7 => 1, _ => 0 };
+            short borderAt = k switch { 5 => 3, 6 => 2, 7 => 1, 11 => 2, _ => 0 };
             c0.NavigationMeshes.Add(Left(k, R(k), borderAt));
             var tris = new List<T3>();
             for (int i = 0; i < borderAt; i++) tris.Add(Away);
@@ -201,6 +208,8 @@ static class NavRepairFixture
         }
         c3.NavigationMeshes.Add(Fan(G1, 3, 12800, 500, 0));
         c3.NavigationMeshes.Add(Fan(G2, 3, 13600, 500, 600));
+        c3.NavigationMeshes.Add(Nav(G6, InGrid(3), new[] { (14600f, 500f, 0f), (14900f, 500f, 0f), (14900f, 800f, 0f), (14600f, 800f, 0f), (14400f, 650f, 300f) },
+                                    new T3(0, 1, 2), new T3(0, 2, 3), new T3(0, 3, 4)));
         c4.NavigationMeshes.Add(Fan(G3, 4, 16800, 500, 0));
         c4.NavigationMeshes.Add(Fan(G4, 4, 17600, 500, 0));
         c5.NavigationMeshes.Add(Fan(G5, 5, 20800, 500, 0));
@@ -232,6 +241,9 @@ static class NavRepairFixture
         a1.NavigationMeshes.Add(Nav(R(8), InGrid(1), RightV(8).Select(v => (v.Item1, v.Item2, v.Item3 + 200)).ToArray(), RightBorder((L(8), 0))));
         a1.NavigationMeshes.Add(R9());
         a1.NavigationMeshes.Add(R10());                                                      // forwarded unchanged: a mod touches pair 10
+        a1.NavigationMeshes.Add(Nav(R(11), InGrid(1), RightV(11), Away, RightBorder(null)));
+        a1.NavigationMeshes.Add(Nav(R(12), InGrid(1), RightV(12, 12), RightBorder((L(12), 0))));
+        a1.NavigationMeshes.Add(Nav(R(13), InGrid(1), RightV(13).Select(v => (v.Item1, v.Item2, v.Item3 + 100)).ToArray(), RightBorder((L(13), 0))));
         var a3 = GridCell(3, Flat(LandK(3), 200));
         var a4 = GridCell(4, Flat(LandK(4), 200));
         a4.NavigationMeshes.Add(Fan(G3, 4, 16800, 500, 200));

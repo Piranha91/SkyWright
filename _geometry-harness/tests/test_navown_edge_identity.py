@@ -26,7 +26,9 @@ ordersweep's emit readers and evalreport's row identity on it:
     1399  evalreport's row identity divides the EDGE-IDX rows exactly as ConflictIo.RowIdentity does.
     1400  control: a patch that renumbers the source (same links, new order, new triangles) is IDENTICAL to conflictdiff.
     1401  control: under that patch every base EDGE-IDX predicate Holds.
-    1402  control: another kind's rows (EDGE-NAV, DOOR-TRI) are written and keyed exactly as today.
+    1402  control: another kind's rows (DOOR-TRI) are written and keyed exactly as today; an EDGE-NAV row, since 2026-11-16
+          (the navmesh repair's Gate B review, finding 5), names the triangle its link names and is keyed by it as an
+          EDGE-IDX row is.
     1403  control: another probe's emit (stateprobe on its row-identity fixture) is byte-identical in its rows to today's.
     1404  control: an in-range link is no row, and two sources into one target triangle are two rows.
     1405  conflictdiff refuses (exit 3, one sentence) an emit whose EDGE-IDX rows name no triangle (written before the change)
@@ -295,17 +297,17 @@ def t1401():
 
 
 def t1402():
-    """Rejects: a change to another kind's row: its fields, or its identity."""
+    """Rejects: a change to another kind's row: its fields, or its identity (EDGE-NAV's per-link identity is the one change)."""
     import ordersweep
     L = lab()
     nav, door = L.conflicts("base", "EDGE-NAV"), L.conflicts("base", "DOOR-TRI")
     assert len(nav) == 1 and len(door) == 1, f"EDGE-NAV {len(nav)}, DOOR-TRI {len(door)}"
     want_nav = {"Kind": "EDGE-NAV", "A": "ElBase.esm", "B": "",
-                "Summary": f"navmesh {N['NX']} in 000840:ElBase.esm (int) edge-links {N['ABSENT']}, which is not in the winning "
-                           "state   [record provided by: ElBase.esm]",
+                "Summary": f"navmesh {N['NX']} in 000840:ElBase.esm (int) edge-links {N['ABSENT']} triangle 0, which is not in the "
+                           "winning state   [record provided by: ElBase.esm]",
                 "Necessary": [{"FormKey": N["NX"], "Role": "navmesh", "Label": "000840:ElBase.esm (int)", "Physical": "Holds",
                                "PhysicalDetail": "the edge link still points into a navmesh the winning state lacks"}],
-                "Alternative": [{"FormKey": N["ABSENT"], "Role": "navmesh"}]}
+                "Alternative": [{"FormKey": N["ABSENT"], "Role": "navmesh", "Triangle": 0}]}
     want_door = {"Kind": "DOOR-TRI", "A": "ElBase.esm", "B": "",
                  "Summary": f"navmesh {N['ND']} in 000840:ElBase.esm (int) points at triangle 1 of 1   [record provided by: ElBase.esm]",
                  "Necessary": [{"FormKey": N["ND"], "Role": "navmesh", "Label": "000840:ElBase.esm (int)", "Physical": "Holds",
@@ -314,9 +316,9 @@ def t1402():
     assert nav[0] == want_nav, json.dumps(nav[0], ensure_ascii=False)
     assert door[0] == want_door, json.dumps(door[0], ensure_ascii=False)
     keys = set(ordersweep.emit_rows(L.emit["base"]))
-    for c, other in ((nav[0], N["ABSENT"]), (door[0], N["DR"])):
-        old = identity(c["Kind"], c["Necessary"][0]["FormKey"], other, c["A"])
-        assert old in keys, f"{old} not among ordersweep's keys"
+    for c, other, part in ((nav[0], N["ABSENT"], 0), (door[0], N["DR"], None)):
+        key = identity(c["Kind"], c["Necessary"][0]["FormKey"], other, c["A"], part)
+        assert key in keys, f"{key} not among ordersweep's keys"
 
 
 # The canonical sha256 of stateprobe's row-identity fixture emit (Conflicts, Predicates, Coverage, sorted keys). Was

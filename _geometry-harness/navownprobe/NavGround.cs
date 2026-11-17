@@ -13,7 +13,10 @@ using Mutagen.Bethesda.Plugins;
 // possible diagonals) exceeds Band the vertex cannot be told and is counted apart, never judged.
 sealed class NavGround
 {
-    public sealed record Row(FormKey Nav, int Owner, int LandWinner, int Counted, int Vertices, float MaxMove, FormKey Cell);
+    /// <summary>A row; <paramref name="Facts"/> are its used vertices' author's and winning ground, as judged (the repair
+    /// plan's input, NavRepair.Ground).</summary>
+    public sealed record Row(FormKey Nav, int Owner, int LandWinner, int Counted, int Vertices, float MaxMove, FormKey Cell,
+                             IReadOnlyList<GroundVertex>? Facts = null);
     public float Band { get; init; } = 16f;
     public float Move { get; init; } = 32f;
     public int MinVertices { get; init; } = 3;
@@ -47,6 +50,7 @@ sealed class NavGround
             var used = w.Geom.Triangles.SelectMany(t => new[] { (int)t.A, t.B, t.C }).Where(i => i >= 0 && i < w.Geom.Vertices.Count).Distinct();
             int counted = 0, n = 0, unclear = 0; float maxMove = 0;
             var winners = new Dictionary<int, int>();
+            var facts = new List<GroundVertex>();
             foreach (var i in used)
             {
                 var v = w.Geom.Vertices[i];
@@ -59,7 +63,8 @@ sealed class NavGround
                 var ha = NavmeshFloor.LandHeightAt(authored.Heights, gx, gy, v.X, v.Y, out var sa);
                 var hw = NavmeshFloor.LandHeightAt(winning.Heights, gx, gy, v.X, v.Y, out var sw);
                 if (ha is null || hw is null) { r.NoLand++; continue; }
-                if (sa > band || sw > band) { r.CannotTell++; unclear++; continue; }
+                if (sa > band || sw > band) { r.CannotTell++; unclear++; facts.Add(new GroundVertex(i, float.NaN, float.NaN, true)); continue; }
+                facts.Add(new GroundVertex(i, ha.Value, hw.Value, false));
                 n++; r.VerticesJudged++;
                 bool same = ReferenceEquals(authored, winning) || authored.SameHeightsAs(winning);
                 if (census && same) r.OnOwnGround.Add((key, v.Z - ha.Value));
@@ -73,7 +78,7 @@ sealed class NavGround
             }
             if (census && n + unclear > 0) r.PerNav[key] = (n, unclear);
             if (counted >= minVertices)
-                r.Rows.Add(new Row(key, owner, winners.OrderByDescending(kv => kv.Value).First().Key, counted, n, maxMove, w.Cell));
+                r.Rows.Add(new Row(key, owner, winners.OrderByDescending(kv => kv.Value).First().Key, counted, n, maxMove, w.Cell, facts));
         }
         return r;
     }

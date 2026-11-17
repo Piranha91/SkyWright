@@ -41,8 +41,9 @@ namespace HarnessShared;
 /// <param name="PhysicalDetail">The number the predicate was read from, in words. Never load-bearing.</param>
 /// <param name="Wind">The record's render geometry includes shapes with the Tree_Anim (wind) shader flag: the shapes and
 /// their vertex-alpha facts (<c>NifWind</c>). Null otherwise, and then omitted. Never load-bearing.</param>
-/// <param name="Triangle">On an EDGE-IDX row's other end: the target triangle the broken link names, part of the row's
-/// identity (2026-10-24: one row per broken link). Null on every other record, and then omitted.</param>
+/// <param name="Triangle">On an EDGE-IDX or EDGE-NAV row's other end: the target triangle the broken link names, part of the
+/// row's identity (2026-10-24 for EDGE-IDX, 2026-11-16 for EDGE-NAV: one row per broken link); on an EDGE-NAV row's linking
+/// navmesh, its source triangle. Null on every other record, and then omitted.</param>
 public sealed record ConflictRecord(string FormKey, string Role, string? Label, PhysicalState? Physical = null, string? PhysicalDetail = null,
                                     string? Wind = null, int? Triangle = null);
 

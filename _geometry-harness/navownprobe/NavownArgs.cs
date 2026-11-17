@@ -15,6 +15,9 @@ sealed class NavownArgs
     public string? EdgeTolerance;         // --edge-tolerance PLAN,HEIGHT for the border rules (default: the vanilla floor's)
     public string? FloorCensusPath;       // --floor-census OUT.json: the border gaps and ground heights the vanilla floor reads
     public string? GroundTolerance;       // --ground-tolerance BAND,MOVE for NAV-GROUND (default: the vanilla floor's)
+    public string? RepairPlanPath;        // --repair-plan OUT.json: NavRepair's plan for this run's border and ground findings
+    public string? RepairScope;           // --repair-scope FK[,FK...]: plan only the rows whose source navmesh is named
+    public string? RecheckPlanPath, RecheckOutPath;   // --recheck-plan PLAN.json --recheck-out OUT.json (with --base)
     public string? Error;
 
     public static NavownArgs Parse(string[] args)
@@ -60,6 +63,10 @@ sealed class NavownArgs
                 case "--edge-tolerance": a.EdgeTolerance = Value(); break;
                 case "--floor-census": a.FloorCensusPath = Value(); break;
                 case "--ground-tolerance": a.GroundTolerance = Value(); break;
+                case "--repair-plan": a.RepairPlanPath = Value(); break;
+                case "--repair-scope": a.RepairScope = Value(); break;
+                case "--recheck-plan": a.RecheckPlanPath = Value(); break;
+                case "--recheck-out": a.RecheckOutPath = Value(); break;
                 default:
                     a.Error = $"navownprobe: unknown argument '{arg}' - refused rather than ignored (see the usage at the top of Program.cs)";
                     break;

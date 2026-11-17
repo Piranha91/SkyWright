@@ -7,6 +7,10 @@ static class NavRuleDefaults
     /// <summary>The edge-match tolerance (plan, height): each the 0.999 quantile of the gaps of ordinary links between
     /// navmeshes the first master defines, rounded up to a whole unit.</summary>
     public static readonly EdgeTolerance Edge = new(8f, 63f);
+    /// <summary>The wider tolerance whose band beyond <see cref="Edge"/> is unproven in game: Gate B's provisional values,
+    /// between which and the fitted ones the fit added rows no actor has yet been seen to fail (Gate B review finding 2). A row
+    /// whose only failing gap lies in the band is reported apart, not as a finding, until the lab sets the line.</summary>
+    public static readonly EdgeTolerance Unproven = new(16f, 128f);
     /// <summary>How close to the author's ground a vertex lies to count as on it, and how far off the winning ground it must
     /// then be: the 0.9 quantile of vertex heights above the author's ground within 64 u of it, over one fixed half of the
     /// base game's navmeshes, rounded up.</summary>

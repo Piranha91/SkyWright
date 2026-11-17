@@ -19,7 +19,10 @@ using Mutagen.Bethesda.Plugins;
 // (the vanilla floor, 2026-11-16), so edge geometry is not how a ledge link is made and cannot say one is broken.
 sealed class NavBorderLinks
 {
-    public sealed record Row(string Kind, FormKey Src, int SrcTri, int Edge, FormKey Target, int TargetTri, EdgeGap Gap, string Why);
+    /// <summary>A judged row. <paramref name="Tier"/> is "finding", or "unproven" for an EDGE-NOMATCH whose far edge meets the
+    /// source edge within the wider tolerance the lab has not yet walked (Gate B review finding 2): shown apart, never a
+    /// finding, never offered a repair.</summary>
+    public sealed record Row(string Kind, FormKey Src, int SrcTri, int Edge, FormKey Target, int TargetTri, EdgeGap Gap, string Why, string Tier = "finding");
     /// <summary>A broken link's candidate search: unique (Nav, Tri), ambiguous (all of them), or none.</summary>
     public sealed record CandidateResult(IReadOnlyList<(FormKey Nav, int Tri, EdgeGap Gap)> All)
     {
@@ -42,8 +45,9 @@ sealed class NavBorderLinks
     public readonly Dictionary<(FormKey Src, FormKey Target, int Tri), CandidateResult> Candidates = new();
     public long LinkFieldPastTable, LedgeLinks, OpenEdges;
 
-    public static NavBorderLinks Find(IReadOnlyDictionary<FormKey, WinningNav> nav, EdgeTolerance tol)
+    public static NavBorderLinks Find(IReadOnlyDictionary<FormKey, WinningNav> nav, EdgeTolerance tol, EdgeTolerance? unproven = null)
     {
+        var wide = unproven ?? tol;
         var r = new NavBorderLinks();
         var idx = new OpenEdgeIndex(nav);
         r.OpenEdges = idx.Count;
@@ -86,8 +90,11 @@ sealed class NavBorderLinks
                     {
                         var c = Cands(w, s, a, b);
                         r.Candidates.TryAdd((s, m, j), c);
+                        bool band = fe >= 0 && gap.Within(wide);
                         r.Rows.Add(new Row("EDGE-NOMATCH", s, t, e, m, j, gap,
-                            $"triangle {t} links {m} triangle {j}, whose edges do not lie along it within the tolerance; {c.Sentence(m)}"));
+                            band ? FormattableString.Invariant($"triangle {t} links {m} triangle {j}, whose edge lies {gap.Plan:0.#} u off in plan and {gap.Height:0.#} u in height: within {wide} but not {tol}, a band not yet walked in game, so it is unproven, not a finding")
+                                 : $"triangle {t} links {m} triangle {j}, whose edges do not lie along it within the tolerance; {c.Sentence(m)}",
+                            band ? "unproven" : "finding"));
                     }
                     else if (!recip)
                     {

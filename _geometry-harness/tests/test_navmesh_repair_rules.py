@@ -8,6 +8,8 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
 
     2450  control: the fixture's five plugins are written in order.
     2451  a link into a navmesh a later plugin deleted is EDGE-NAV, naming the deleter.
+    2476  two links of one navmesh into a deletion are two EDGE-NAV rows, each naming its source and target triangle, with
+          distinct row identities (Gate B review finding 5).
     2452  a navmesh's own links stop counting once a later plugin deletes it (no EDGE-IDX from SD).
     2453  a mod's deletion is a DELETED row, naming the deleter and the last version with geometry: TD and SD.
     2454  a mod's emptied navmesh is an EMPTIED row (TE, 2 -> 0).
@@ -24,6 +26,9 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2467  control: a pair linked both ways and never changed (L1/R1) is no row of any kind.
     2468  a far edge in the same plan but 200 u higher (R8, lifted by RpA) is EDGE-NOMATCH both ways.
     2469  control: a far triangle whose slanted edge overlaps L9's edge fully but lies off, beside its true edge, is matched.
+    2477  a far edge 12 u off in plan (L12/R12, the 8-16 u band) is reported apart as unproven in game: no row, counted, listed
+          in the plan and offered no repair (Gate B review finding 2).
+    2478  the same for a far edge 100 u off in height (L13/R13, the 63-128 u band); 200 u (L8/R8) stays a finding.
     2475  control: a ledge link pair (L10/R10, Types 2 and 1, 100 u apart in plan) is counted and not judged: no row.
     2470  a navmesh on its author's ground that a later LAND moved is NAV-GROUND (G1: Skyrim.esm x RpA.esp).
     2471  control: a deck above the ground (G2) is no row.
@@ -36,9 +41,23 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2483  plan: L4's link is refused by name as ambiguous (R4a and R4b), with no edit for it.
     2484  plan: L2's link is re-pointed at R2 triangle 1.
     2485  plan: R3 gains its link back to L3 triangle 0.
+    2486  plan: L11 is re-pointed at R11 triangle 1, and R11 triangle 1 gains its link back (the relink writes both ways).
+    2487  ground plan: G1's five vertices follow the ground up 200 u, and the box's z becomes 200 to 200; x and y stay.
+    2488  ground plan: G6's four vertices on the ground move; the one up on a rock, off its author's ground, does not.
+    2489  ground plan: G4 (RpD's re-cut, blind to RpA's LAND) moves to 200 and G5 to 400; G2 (a deck) and G3 have no plan.
+    2490-2493  the plan on in-memory navmeshes (navownprobe --navrepair-selftest): a cut renumbers a later table entry; a
+          height move that would leave a matched link 200 u apart is refused; the same move with the neighbour moving too
+          is planned; a vertex that cannot be told refuses its navmesh.
+    2494  the write: the plan's ops through housecarl_apply (this checkout's server, out_path) make one new patch holding
+          exactly the planned navmeshes.
+    2495  the read-back: every planned navmesh in the patch is its winner with exactly the plan applied.
+    2496  the read-back's arm: a patch written with one unplanned edit (L5's vertex 1 moved 1 u) fails it, naming the field.
+    2497  the re-check, by the same rule on the order with the patch added: relinked links and the ground rows go
+          Holds -> Gone (repaired), L7's and SL's cut links are reported as cut, L4's as refused, and no border, link or
+          ground row is created.
 
-Probes come from this checkout's Release builds unless HC_NR_HARNESS names another harness folder. HC_NR_CASES (e.g.
-"2463,2483") runs those cases only.
+Probes come from this checkout's Release builds unless HC_NR_HARNESS names another harness folder; the houseCARL server
+and generator from this checkout's src (HC_NR_SRC another). HC_NR_CASES (e.g. "2463,2483") runs those cases only.
 """
 
 import json
@@ -54,6 +73,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 HARNESS = HERE.parent
 PROBES = Path(os.environ.get("HC_NR_HARNESS") or HARNESS)
+SRC = Path(os.environ.get("HC_NR_SRC") or HARNESS.parent / "src")
+sys.path.insert(0, str(HARNESS))
 ONLY = {s.strip() for s in (os.environ.get("HC_NR_CASES") or "").split(",") if s.strip()}
 FAILURES, PASSED = [], []
 PLUGINS = ["Skyrim.esm", "Dawnguard.esm", "RpA.esp", "RpB.esp", "RpD.esp"]
@@ -66,8 +87,8 @@ def sk(hexid):
 
 N = {"TD": sk("000960"), "SL": sk("000961"), "SD": sk("000962"), "TT": sk("000963"), "TE": sk("000964"), "TV": sk("000965"),
      "SV": sk("000966"), "R4a": "000801:RpA.esp", "R4b": "000802:RpA.esp", "R6n": "000803:RpA.esp",
-     "G1": sk("000B01"), "G2": sk("000B02"), "G3": sk("000B03"), "G4": sk("000B04"), "G5": sk("000B05")}
-for k in range(1, 11):
+     "G1": sk("000B01"), "G2": sk("000B02"), "G3": sk("000B03"), "G4": sk("000B04"), "G5": sk("000B05"), "G6": sk("000B06")}
+for k in range(1, 14):
     N[f"L{k}"] = sk(f"000A{k:02X}")
     N[f"R{k}"] = sk(f"000A{0x10 + k:02X}")
 NAME = {v.lower(): k for k, v in N.items()}
@@ -119,6 +140,7 @@ class Lab:
         cand.write_text(json.dumps({"SchemaVersion": 1, "Name": "nr", "BaseProfile": "P", "Plugins": PLUGINS,
                                     "Mods": [Path(n).stem for n in reversed(PLUGINS)], "Changes": []}), encoding="utf-8")
         common = ["--order", cand, "--instance", inst, "--game", game, "--profile", "P"]
+        self.tmp, self.inst, self.game, self.cand, self.common = tmp, inst, game, cand, common
         self.doc, self.log = {}, {}
         for arm, extra in (("plain", []), ("tol", ["--edge-tolerance", TOL]), ("plan", ["--edge-tolerance", TOL, "--repair-plan", tmp / "plan.json"])):
             emit = tmp / f"nr-{arm}.json"
@@ -183,7 +205,7 @@ def t2450():
 
 def t2451():
     """Rejects: a deleted navmesh keeping its earlier triangle count, so a link into it reads valid (the blind spot)."""
-    c = one("plain", "EDGE-NAV", "SL", "TD")
+    c = one("plain", "EDGE-NAV", "SL", "TD", 0)
     assert c["B"] == "RpB.esp", f"the row should name the deleter RpB.esp as its second party: {show([c])}"
     assert "delete" in c["Summary"].lower(), c["Summary"]
 
@@ -304,6 +326,47 @@ def t2475():
         assert cov and (cov[0].get("SetAside") or {}).get("LedgeLinks") == 2, f"{arm}: ledge links not counted as 2: {cov}"
 
 
+def t2476():
+    """Rejects: EDGE-NAV rows keyed on their two navmeshes only, so SL's two links into TD read as one row identity, and a
+    row that cannot say which source triangle a relink would edit."""
+    import ordersweep
+    sl = [c for c in lab().rows("plain", "EDGE-NAV") if src(c) == "SL" and nm(alt(c).get("FormKey")) == "TD"]
+    got = sorted((c["Necessary"][0].get("Triangle"), alt(c).get("Triangle")) for c in sl)
+    assert got == [(0, 0), (1, 1)], f"SL's EDGE-NAV rows as (source, target triangle): {got}; {show(sl)}{lab().why('plain')}"
+    ids = {ordersweep.row_identity(c["Kind"], c["Necessary"][0]["FormKey"], alt(c)["FormKey"], c["A"], alt(c).get("Triangle")) for c in sl}
+    assert len(ids) == 2, f"two links, {len(ids)} row identities: {ids}"
+
+
+def unproven(*names):
+    p = lab().plan
+    assert p is not None, f"no repair plan{lab().why('plan')}"
+    return {(nm(u["source"]), nm(u["target"])) for u in p.get("unproven") or [] if nm(u["source"]) in names}
+
+
+def no_rows(names):
+    for arm in ("plain", "tol"):
+        assert lab().doc[arm] is not None, f"no emit{lab().why(arm)}"
+        cs = [c for c in lab().rows(arm) if {src(c), nm(alt(c).get("FormKey"))} & set(names)]
+        assert not cs, f"{arm}: {show(cs)}"
+    assert not [p for p in lab().plan.get("plans") or [] if nm(p.get("source")) in names], "a repair is offered for an unproven link"
+
+
+def t2477():
+    """Rejects: a link 12 u off in plan (inside the band the fit added, unwalked in game) counted as broken or offered a
+    repair, and one dropped unseen."""
+    no_rows({"L12", "R12"})
+    cov = [x for x in lab().coverage("tol") if x.get("Population") == "border links (geometry)"]
+    assert cov and (cov[0].get("SetAside") or {}).get("UnprovenInGame") == 4, f"unproven links not counted as 4 (L12, R12, L13, R13): {cov}"
+    assert unproven("L12", "R12") == {("L12", "R12"), ("R12", "L12")}, unproven("L12", "R12")
+
+
+def t2478():
+    """Rejects: a link 100 u off in height (the 63-128 u band) counted as broken; and a band with no upper edge (200 u is a finding)."""
+    no_rows({"L13", "R13"})
+    assert unproven("L13", "R13") == {("L13", "R13"), ("R13", "L13")}, unproven("L13", "R13")
+    one("tol", "EDGE-NOMATCH", "L8", "R8", 0)
+
+
 def ground(s):
     return [c for c in lab().rows("plain", "NAV-GROUND") if src(c) == s]
 
@@ -400,9 +463,185 @@ def t2485():
     assert any(e[0] == "R3" and e[1] == "Data.EdgeLinks" and e[2] == "Add" for e in got), got
 
 
+
+def t2486():
+    """Rejects: a relink written one way only (R11 triangle 1 left linking nothing back)."""
+    pl = plan_for("L11")
+    assert pl.get("status") == "planned" and link_edits(pl, "L11") == [("L11", "Data.EdgeLinks[0].TriangleIndex", "Set", None, "1")], pl
+    r = plan_for("R11")
+    got = edits(r)
+    assert ("R11", "Data.Triangles[1].EdgeLink_2_0", "Set", None, "0") in got and ("R11", "Data.Triangles[1].Flags", "Add", None, "EdgeLink_2_0") in got, got
+    add = [e for e in r.get("edits") or [] if e["field_path"] == "Data.EdgeLinks" and e.get("op") == "Add"]
+    f = (add[0].get("compose") or {}).get("fields") or {} if len(add) == 1 else {}
+    assert f.get("Mesh", "").lower() == N["L11"].lower() and f.get("TriangleIndex") == "0", f"R11's new table entry: {add}"
+
+
+def vertex_edits(pl):
+    return sorted((e[3], e[4]) for e in edits(pl) if e[1] == "Data.Vertices" and e[2] == "SetAtIndex")
+
+
+def t2487():
+    """Rejects: vertices moved with the box's z left at the old ground (the grid and the game read the box)."""
+    pl = plan_for("G1")
+    assert pl.get("status") == "planned" and pl.get("class") == "ground", pl
+    assert vertex_edits(pl) == [("0", "12800,500,200"), ("1", "13100,500,200"), ("2", "13100,800,200"), ("3", "12800,800,200"), ("4", "12600,650,200")], vertex_edits(pl)
+    got = edits(pl)
+    assert ("G1", "Data.Min", "Set", None, "12600,500,200") in got and ("G1", "Data.Max", "Set", None, "13100,800,200") in got, got
+
+
+def t2488():
+    """Rejects: every vertex of the navmesh moved, including one that never sat on its author's ground (a rock 300 u up)."""
+    pl = plan_for("G6")
+    assert pl.get("status") == "planned", pl
+    assert vertex_edits(pl) == [("0", "14600,500,200"), ("1", "14900,500,200"), ("2", "14900,800,200"), ("3", "14600,800,200")], vertex_edits(pl)
+    assert ("G6", "Data.Min", "Set", None, "14400,500,200") in edits(pl), edits(pl)
+
+
+def t2489():
+    """Rejects: the move taken from the first LAND or the author's own, and a plan for a navmesh that is no row."""
+    assert {v for _, v in vertex_edits(plan_for("G4"))} == {"17600,500,200", "17900,500,200", "17900,800,200", "17600,800,200", "17400,650,200", "17750,950,200"}, vertex_edits(plan_for("G4"))
+    assert all(v.endswith(",400") for _, v in vertex_edits(plan_for("G5"))) and len(vertex_edits(plan_for("G5"))) == 5, vertex_edits(plan_for("G5"))
+    assert not [p for p in lab().plan.get("plans") or [] if nm(p.get("source")) in ("G2", "G3")], "a plan for G2 or G3"
+
+
+SELF = None
+
+
+def selftest(name):
+    global SELF
+    if SELF is None:
+        SELF = run([exe("navownprobe"), "--navrepair-selftest"])
+    lines = [l for l in SELF.stdout.splitlines() if l.startswith((f"ok {name} ", f"FAIL {name} "))]
+    assert lines and lines[0].startswith("ok "), lines or f"no line for {name} (exit {SELF.returncode}): {SELF.stdout[-400:]} {SELF.stderr[-300:]}"
+
+
+def t2490():
+    """Rejects: a cut that leaves its table entry, or leaves a later entry's edge field naming the old index."""
+    selftest("2490")
+
+
+def t2491():
+    """Rejects: a height move written although it leaves a matched border link 200 u apart."""
+    selftest("2491")
+
+
+def t2492():
+    """Rejects: a link check that refuses a move whose neighbour moves with it."""
+    selftest("2492")
+
+
+def t2493():
+    """Rejects: a move written around a vertex whose ground cannot be told."""
+    selftest("2493")
+
+
+# ---- the write, read-back and re-check, through this checkout's houseCARL server ----
+
+def flow():
+    """The plan's ops written by housecarl_apply into a new patch under an out folder; the arm's patch with one unplanned edit;
+    each read back; the order with the patch re-checked. Done once, shared by 2494-2497."""
+    L = lab()
+    if getattr(L, "flow", None) is not None:
+        return L.flow
+    f = L.flow = {}
+    assert L.plan is not None, f"no repair plan{L.why('plan')}"
+    gen = SRC / "housecarl-generator" / "bin" / "Release" / "net9.0" / "housecarl-generator.exe"
+    mcp = SRC / "housecarl-mcp" / "bin" / "Release" / "net9.0" / "housecarl-mcp.exe"
+    corpus = L.tmp / "corpus" / "gen" / "corpus.json"
+    g = run([gen, L.tmp / "corpus" / "gen", L.tmp / "corpus" / "ref"])
+    if not corpus.exists():
+        f["error"] = f"the rulebook was not generated by {gen} (exit {g.returncode}): {(g.stdout + g.stderr)[-300:]}"
+        return f
+    import evalrecords
+    out = L.tmp / "out"
+    out.mkdir()
+    args = [mcp, f"--HouseCarl:DataDir={L.game / 'Data'}", f"--HouseCarl:ModsDir={L.inst / 'mods'}",
+            f"--HouseCarl:ProfileDir={L.inst / 'profiles' / 'P'}", f"--HouseCarl:CorpusPath={corpus}"]
+    assert not any(" " in str(a) for a in args), f"a path holds a space, which this test's command line does not quote: {args}"
+    env = {"HOUSECARL_DATA_DIR": str(L.tmp / "hcdata"), "HOUSECARL_RUNLOG_DIR": str(L.tmp / "hcdata" / "runs")}
+    v1 = (4097, 2500, 0)                                  # L5's vertex 1 is (4096, 2500, 0); the arm moves it 1 u
+    arm_ops = L.plan["ops"] + [{"formid": N["L5"], "field_path": "Data.Vertices", "op": "SetAtIndex", "key": "1", "value": "%d,%d,%d" % v1}]
+    for name, ops in (("NavRepair", L.plan["ops"]), ("NavRepairArm", arm_ops)):
+        s = evalrecords.Session(" ".join(str(a) for a in args), env, "navmesh-repair-test")
+        try:
+            f[name + ".answer"] = s.tool("housecarl_apply", {"ops": ops, "patch": name, "out_path": str(out)}, want_json=False)
+        except Exception as ex:
+            f[name + ".answer"] = f"refused: {ex}"
+        finally:
+            s.close()
+        patch = out / f"houseCARL - {name}" / f"{name}.esp"
+        f[name] = patch
+        rb = L.tmp / f"readback-{name}.json"
+        f[name + ".readback"] = run([exe("navownprobe"), "--repair-readback", L.tmp / "plan.json", patch, rb])
+        f[name + ".readback.doc"] = json.loads(rb.read_text(encoding="utf-8")) if rb.exists() else None
+    # the order with the patch added: its plugin last, its folder at the top of the asset view (as the workbench's re-check)
+    c = json.loads(L.cand.read_text(encoding="utf-8"))
+    c["Plugins"] = c["Plugins"] + ["NavRepair.esp"]
+    c["Mods"] = [str(f["NavRepair"].parent)] + c["Mods"]
+    c["Name"] = "nr with the patch"
+    pc = L.tmp / "candidate-patched.json"
+    pc.write_text(json.dumps(c), encoding="utf-8")
+    common = ["--order", pc, "--instance", L.inst, "--game", L.game, "--profile", "P"]
+    emit, rc = L.tmp / "nr-patched.json", L.tmp / "recheck.json"
+    f["recheck.log"] = run([exe("navownprobe"), *common, "--edge-tolerance", TOL, "--emit", emit, "--base", L.tmp / "nr-plan.json",
+                            "--recheck-plan", L.tmp / "plan.json", "--recheck-out", rc])
+    f["recheck"] = json.loads(rc.read_text(encoding="utf-8")) if rc.exists() else None
+    return f
+
+
+def t2494():
+    """Rejects: a plan the write path cannot carry, or a patch holding other navmeshes than the planned ones."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    assert f["NavRepair"].exists(), f"no patch at {f['NavRepair']}: {f['NavRepair.answer'][:600]}"
+    planned = sorted(nm(p["source"]) for p in lab().plan["plans"] if p["status"] != "refused")
+    doc = f["NavRepair.readback.doc"] or {}
+    got = sorted(nm(r["navmesh"]) for r in doc.get("records") or [])
+    assert got == planned and not doc.get("unplannedNavmeshes"), f"patch navmeshes {got}, planned {planned}, unplanned {doc.get('unplannedNavmeshes')}"
+
+
+def t2495():
+    """Rejects: a written patch whose records differ from the winner plus the plan anywhere (Gate A review finding 4)."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    rb = f["NavRepair.readback"]
+    assert rb.returncode == 0 and (f["NavRepair.readback.doc"] or {}).get("holds") is True, f"read-back exit {rb.returncode}: {rb.stdout[-1500:]} {rb.stderr[-300:]}"
+
+
+def t2496():
+    """Rejects: a read-back that misses one unplanned edit (L5's vertex 1 moved 1 u by the arm's extra op)."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    rb, doc = f["NavRepairArm.readback"], f["NavRepairArm.readback.doc"] or {}
+    bad = [r for r in doc.get("records") or [] if not r["holds"]]
+    assert rb.returncode == 1 and [nm(r["navmesh"]) for r in bad] == ["L5"] and any("Vertices[1]" in d for d in bad[0]["differences"]), \
+        f"the arm's read-back exit {rb.returncode}, failing {[(nm(r['navmesh']), r['differences']) for r in bad]}: {rb.stdout[-800:]}"
+
+
+def t2497():
+    """Rejects: a re-check that credits a cut or refused link as repaired, misses a repaired one, or hides a row the patch made."""
+    f = flow()
+    assert "error" not in f, f["error"]
+    r = f["recheck"]
+    assert r is not None, f"no re-check (exit {f['recheck.log'].returncode}): {f['recheck.log'].stdout[-800:]} {f['recheck.log'].stderr[-300:]}"
+    v = {}
+    for l in r["links"]:
+        v.setdefault((l["kind"], nm(l["row"])), set()).add(l["verdict"])
+    want = {("EDGE-IDX", "L5"): {"repaired"}, ("EDGE-IDX", "L6"): {"repaired"}, ("EDGE-IDX", "L11"): {"repaired"},
+            ("EDGE-NOMATCH", "L2"): {"repaired"}, ("EDGE-ONEWAY", "L3"): {"repaired"}, ("EDGE-ONEWAY", "R2"): {"repaired"},
+            ("EDGE-IDX", "L7"): {"cut"}, ("EDGE-NAV", "SL"): {"cut"}, ("EDGE-NOMATCH", "L8"): {"cut"}, ("EDGE-NOMATCH", "R8"): {"cut"},
+            ("EDGE-NOMATCH", "L4"): {"refused"}, ("EDGE-ONEWAY", "R4a"): {"refused"}, ("EDGE-ONEWAY", "R4b"): {"refused"},
+            ("NAV-GROUND", "G1"): {"repaired"}, ("NAV-GROUND", "G4"): {"repaired"}, ("NAV-GROUND", "G5"): {"repaired"}, ("NAV-GROUND", "G6"): {"repaired"}}
+    wrong = {k: (v.get(k), w) for k, w in want.items() if v.get(k) != w}
+    assert not wrong, f"verdicts (got, want): {wrong}; all: {sorted((k, sorted(x)) for k, x in v.items())}"
+    made = [c for c in r["created"] if c["kind"].startswith(("EDGE", "NAV-GROUND"))]
+    assert not made, f"rows the patch made: {made}"
+
+
 CASES = [
     ("2450 the fixture's five plugins in order", t2450),
     ("2451 a link into a deleted navmesh is EDGE-NAV naming the deleter", t2451),
+    ("2476 EDGE-NAV rows name their source triangle, one identity per link", t2476),
     ("2452 a deleted navmesh's own links stop counting", t2452),
     ("2453 a mod's deletion is a DELETED row (TD, SD)", t2453),
     ("2454 a mod's emptied navmesh is an EMPTIED row (TE)", t2454),
@@ -419,6 +658,8 @@ CASES = [
     ("2467 control: an unchanged two-way border is no row", t2467),
     ("2468 EDGE-NOMATCH both ways where heights differ (L8/R8)", t2468),
     ("2469 control: a slanted far edge does not hide the true one (L9/R9)", t2469),
+    ("2477 unproven in game: the 8-16 u plan band (L12/R12)", t2477),
+    ("2478 unproven in game: the 63-128 u height band (L13/R13)", t2478),
     ("2475 control: a ledge link is counted, not judged (L10/R10)", t2475),
     ("2470 NAV-GROUND G1", t2470),
     ("2471 control: a deck is no row", t2471),
@@ -431,6 +672,18 @@ CASES = [
     ("2483 plan: L4 refused as ambiguous", t2483),
     ("2484 plan: L2 re-pointed at R2 1", t2484),
     ("2485 plan: R3 gains its link back", t2485),
+    ("2486 plan: L11 relinked and R11 links back", t2486),
+    ("2487 ground plan: G1 up 200 u, box z recomputed", t2487),
+    ("2488 ground plan: G6's rock vertex stays", t2488),
+    ("2489 ground plan: G4 and G5 by the owner's view", t2489),
+    ("2490 self-test: a cut renumbers a later entry", t2490),
+    ("2491 self-test: a move that breaks a link is refused", t2491),
+    ("2492 self-test: a move with its neighbour is planned", t2492),
+    ("2493 self-test: a vertex that cannot be told refuses", t2493),
+    ("2494 the write: one patch of the planned navmeshes", t2494),
+    ("2495 the read-back holds", t2495),
+    ("2496 the read-back's arm: one unplanned edit fails it", t2496),
+    ("2497 the re-check: repaired, cut and refused", t2497),
 ]
 
 if __name__ == "__main__":
