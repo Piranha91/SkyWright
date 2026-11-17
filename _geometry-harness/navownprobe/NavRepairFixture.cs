@@ -29,11 +29,14 @@ using SkCell = Mutagen.Bethesda.Skyrim.Cell;
 //   L6/R6  R6 = 2 away + border at 2; RpA leaves R6 one away triangle and adds R6n  EDGE-IDX L6->R6 2 (candidate R6n 0,
 //          (the border, linking L6 back)                                            another navmesh)
 //   L7/R7  R7 = away + border at 1; RpA leaves one away triangle                    EDGE-IDX L7->R7 1 (no candidate)
+//   L8/R8  RpA lifts R8 200 u, links kept both ways (same plan, other height)       EDGE-NOMATCH L8->R8 0 and R8->L8 0
 // Ground ((3,0) and (4,0)):
 //   G1  Skyrim, z 0 in (3,0); RpA raises (3,0)'s LAND to z 200                       NAV-GROUND G1 (Skyrim x RpA)
 //   G2  Skyrim, z 600 in (3,0) (a deck, not on the ground)                           control: no row
 //   G3  Skyrim, z 0 in (4,0); RpA raises (4,0)'s LAND to 200 and moves G3 to 200     control: the owner saw the ground
 //   G4  Skyrim, z 0 in (4,0); RpD (masters Skyrim only) re-cuts it at z 0             NAV-GROUND G4 (RpD x RpA)
+//   G5  Skyrim, z 0 in (5,0); RpA raises (5,0) to 200 and moves G5 to 200; RpD raises    NAV-GROUND G5 (RpA x RpD): the author's
+//       (5,0) to 400                                                                     ground is the owner's view, not the first LAND
 static class NavRepairFixture
 {
     public const SkyrimRelease Rel = SkyrimRelease.SkyrimSE;
@@ -48,10 +51,9 @@ static class NavRepairFixture
     public static FormKey L(int k) => S((uint)(0xA00 + k));
     public static FormKey R(int k) => S((uint)(0xA10 + k));
     public static readonly FormKey R4a = new(AKey, 0x801), R4b = new(AKey, 0x802), R6n = new(AKey, 0x803);
-    public static readonly FormKey G1 = S(0xB01), G2 = S(0xB02), G3 = S(0xB03), G4 = S(0xB04);
+    public static readonly FormKey G1 = S(0xB01), G2 = S(0xB02), G3 = S(0xB03), G4 = S(0xB04), G5 = S(0xB05);
     static FormKey CellK(int gx) => S((uint)(0x900 + gx));
     static FormKey LandK(int gx) => S((uint)(0x910 + gx));
-    static readonly int[] Grids = { 0, 1, 3, 4 };
 
     /// <summary>A triangle: three vertex indices and, per edge, the navmesh and triangle it links across (null: none).</summary>
     public sealed record T3(short A, short B, short C, (FormKey Mesh, short Tri)? E01 = null, (FormKey Mesh, short Tri)? E12 = null,
@@ -169,8 +171,8 @@ static class NavRepairFixture
         ic.NavigationMeshes.Add(Nav(SV, InIC, Tri1(6000), new T3(0, 1, 2, E01: (TV, 0))));
         File(sky, ic);
         var c0 = GridCell(0, Flat(LandK(0), 0)); var c1 = GridCell(1, Flat(LandK(1), 0));
-        var c3 = GridCell(3, Flat(LandK(3), 0)); var c4 = GridCell(4, Flat(LandK(4), 0));
-        for (int k = 1; k <= 7; k++)
+        var c3 = GridCell(3, Flat(LandK(3), 0)); var c4 = GridCell(4, Flat(LandK(4), 0)); var c5 = GridCell(5, Flat(LandK(5), 0));
+        for (int k = 1; k <= 8; k++)
         {
             short borderAt = k switch { 5 => 3, 6 => 2, 7 => 1, _ => 0 };
             c0.NavigationMeshes.Add(Left(k, R(k), borderAt));
@@ -184,7 +186,8 @@ static class NavRepairFixture
         c3.NavigationMeshes.Add(Fan(G2, 3, 13600, 500, 600));
         c4.NavigationMeshes.Add(Fan(G3, 4, 16800, 500, 0));
         c4.NavigationMeshes.Add(Fan(G4, 4, 17600, 500, 0));
-        sky.Worldspaces.Add(World(c0, c1, c3, c4));
+        c5.NavigationMeshes.Add(Fan(G5, 5, 20800, 500, 0));
+        sky.Worldspaces.Add(World(c0, c1, c3, c4, c5));
         Save(sky);
 
         // ---- Dawnguard.esm: the shipped game deletes TV ----
@@ -208,10 +211,13 @@ static class NavRepairFixture
         a1.NavigationMeshes.Add(Nav(R(6), InGrid(1), RightV(6), Away));
         a1.NavigationMeshes.Add(Nav(R6n, InGrid(1), RightV(6), RightBorder((L(6), 0))));
         a1.NavigationMeshes.Add(Nav(R(7), InGrid(1), RightV(7), Away));
+        a1.NavigationMeshes.Add(Nav(R(8), InGrid(1), RightV(8).Select(v => (v.Item1, v.Item2, v.Item3 + 200)).ToArray(), RightBorder((L(8), 0))));
         var a3 = GridCell(3, Flat(LandK(3), 200));
         var a4 = GridCell(4, Flat(LandK(4), 200));
         a4.NavigationMeshes.Add(Fan(G3, 4, 16800, 500, 200));
-        a.Worldspaces.Add(World(a1, a3, a4));
+        var a5 = GridCell(5, Flat(LandK(5), 200));
+        a5.NavigationMeshes.Add(Fan(G5, 5, 20800, 500, 200));
+        a.Worldspaces.Add(World(a1, a3, a4, a5));
         Save(a, SkyKey, DgKey);
 
         // ---- RpB.esp: deletes TD and SD ----
@@ -225,7 +231,7 @@ static class NavRepairFixture
         d4.NavigationMeshes.Add(Nav(G4, InGrid(4), new[] { (17600f, 500f, 0f), (17900f, 500f, 0f), (17900f, 800f, 0f), (17600f, 800f, 0f),
                                                             (17400f, 650f, 0f), (17750f, 950f, 0f) },
                                     new T3(0, 1, 2), new T3(0, 2, 3), new T3(0, 3, 4), new T3(2, 5, 3)));
-        dmod.Worldspaces.Add(World(d4));
+        dmod.Worldspaces.Add(World(d4, GridCell(5, Flat(LandK(5), 400))));
         Save(dmod, SkyKey);
 
         foreach (var o in overlays.Values) (o as IDisposable)?.Dispose();

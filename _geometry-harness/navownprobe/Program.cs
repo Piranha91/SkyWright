@@ -131,6 +131,9 @@ var Obstructing = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 
 var pluginKey = new ModKey[paths.Count];
 var masterIdx = new HashSet<int>[paths.Count];
+// The winning navmeshes with geometry and their owners, and every plugin's LAND, for the border and ground rules.
+var winNav = new Dictionary<FormKey, (WinningNav W, int Owner)>();
+var landIndex = new CellBoundaryIndex();
 var navVersions = new NavVersions();                                      // NavVersions.cs
 var navProviders = navVersions.Providers;
 var navCell = navVersions.Cell;
@@ -165,6 +168,7 @@ var refGone = links.RefGone;
 // must be COUNTED, not swallowed. The review found both detectors dropping unreadable plugins with
 // a bare catch{continue} and no output saying so.
 var unreadablePlugins = new List<string>();
+var landUnreadable = new List<string>();
 __run.Feature("plugins", paths.Count, "plugins").Stage("scan", "reading plugins", paths.Count, "plugins");
 
 
@@ -211,12 +215,17 @@ for (int p = 0; p < paths.Count; p++)
             }
         }
 
+        try { landIndex.Ingest(p, mod); } catch { landUnreadable.Add(Path.GetFileName(paths[p])); }
         foreach (var cp in UncutPopulation.Cells(mod))
         {
             cellName[cp.Cell] = (cp.CellEditorId, cp.Interior);
             cellSpace[cp.Cell] = (cp.Worldspace, cp.Grid?.X ?? int.MinValue, cp.Grid?.Y ?? int.MinValue, cp.Interior);
 
             navVersions.Note(cp, p, deletedHere, ClobberFindings.GeomHash);
+            foreach (var nv in cp.Navmeshes)
+                if (nv.Deleted || deletedHere.Contains(nv.FormKey)) winNav.Remove(nv.FormKey);
+                else winNav[nv.FormKey] = (new WinningNav(nv, cp.SpaceKey, cp.Grid, cp.Cell), p);
+            foreach (var dn in cp.DeletedNavmeshes ?? Array.Empty<DeletedNavmesh>()) winNav.Remove(dn.FormKey);
 
             foreach (var r in cp.Refs) enableFacts.Note(r);
             uncutPop.Note(cp, p, mod.ModKey);
@@ -872,6 +881,50 @@ foreach (var u in uncut.OrderByDescending(u => u.Refs).Take(listN))
     Console.WriteLine($"   {u.Refs,5} refs  {pluginKey[u.Plugin].FileName,-46} into {Cell(u.Cell),-34} navmesh owned by {u.NavOwners}");
 
 // ---------------------------------------------------------------------------------------
+// BORDER LINKS BY THEIR GEOMETRY and NAVMESH LEFT ON MOVED GROUND (NavBorderLinks.cs, NavGround.cs; 2026-11-16).
+// ---------------------------------------------------------------------------------------
+var edgeTol = cli.EdgeTolerance is { } et ? EdgeTolerance.Parse(et) : NavRuleDefaults.Edge;
+var border = NavBorderLinks.Find(winNav.ToDictionary(kv => kv.Key, kv => kv.Value.W), edgeTol);
+var ground = NavGround.Find(winNav, landIndex, masterClosure, NavRuleDefaults.GroundBand, NavRuleDefaults.GroundMove,
+                            NavRuleDefaults.GroundMinVertices, census: cli.FloorCensusPath is not null);
+bool BorderFinding(NavBorderLinks.Row r) => ModTouched(r.Src, "navmesh") || ModTouched(r.Target, "navmesh");
+bool GroundFinding(NavGround.Row r) => !Vanilla.Contains(pluginKey[r.Owner].FileName.String) || !Vanilla.Contains(pluginKey[r.LandWinner].FileName.String);
+var borderFindings = border.Rows.Where(BorderFinding).ToList();
+var groundFindings = ground.Rows.Where(GroundFinding).ToList();
+Console.WriteLine("\n==== BORDER LINKS BY THEIR GEOMETRY (tolerance " + edgeTol + ") ====");
+Console.WriteLine($"   judged: {border.Judged.Count:N0} cross-navmesh links to an existing triangle; {border.Judged.Count(j => j.Matched):N0} matched, "
+                + $"{border.Judged.Count(j => j.Matched && j.Reciprocal):N0} two-way; {border.LinkFieldPastTable:N0} link fields past their table (not judged)");
+Console.WriteLine($"   findings: {borderFindings.Count:N0} ({borderFindings.Count(r => r.Kind == "EDGE-NOMATCH"):N0} EDGE-NOMATCH, "
+                + $"{borderFindings.Count(r => r.Kind == "EDGE-ONEWAY"):N0} EDGE-ONEWAY); floor (both ends vanilla): {border.Rows.Count - borderFindings.Count:N0}");
+foreach (var r in borderFindings.Take(listN)) Console.WriteLine($"   {r.Kind,-12} navmesh {r.Src} in {Cell(navCell.GetValueOrDefault(r.Src))} {r.Why}");
+Console.WriteLine($"\n==== NAVMESH LEFT ON GROUND ANOTHER PLUGIN MOVED (band {ground.Band:0} u, move {ground.Move:0} u, at least {ground.MinVertices} vertices) ====");
+Console.WriteLine($"   judged: {ground.VerticesJudged:N0} exterior vertices; cannot tell (terrain diagonal) {ground.CannotTell:N0}; "
+                + $"no LAND {ground.NoLand:N0}; no authored ground {ground.NoAuthoredGround:N0}");
+Console.WriteLine($"   findings: {groundFindings.Count:N0}; floor (vanilla owner and vanilla ground): {ground.Rows.Count - groundFindings.Count:N0}");
+foreach (var r in groundFindings.Take(listN))
+    Console.WriteLine($"   NAV-GROUND   navmesh {r.Nav} in {Cell(r.Cell)} by {pluginKey[r.Owner].FileName}: {r.Counted} of {r.Vertices} vertices on ground {pluginKey[r.LandWinner].FileName} moved up to {r.MaxMove:0} u");
+if (cli.FloorCensusPath is { } censusPath)
+{
+    var census = new
+    {
+        tolerance = new { plan = edgeTol.Plan, height = edgeTol.Height },
+        links = border.Judged.Select(j => new { src = j.Src.ToString(), tri = j.Tri, edge = j.Edge, target = j.Target.ToString(), targetTri = j.TargetTri,
+                                               overlap = float.IsFinite(j.Gap.Plan) ? j.Gap.Overlap : 0, plan = float.IsFinite(j.Gap.Plan) ? j.Gap.Plan : (float?)null,
+                                               height = float.IsFinite(j.Gap.Height) ? j.Gap.Height : (float?)null, matched = j.Matched, reciprocal = j.Reciprocal,
+                                               floor = !ModTouched(j.Src, "navmesh") && !ModTouched(j.Target, "navmesh") }),
+        groundHeights = ground.OnOwnGround,
+        groundRows = ground.Rows.Select(r => new { nav = r.Nav.ToString(), owner = pluginKey[r.Owner].FileName.String, land = pluginKey[r.LandWinner].FileName.String,
+                                                   counted = r.Counted, vertices = r.Vertices, maxMove = r.MaxMove }),
+        borderRows = border.Rows.Select(r => new { kind = r.Kind, src = r.Src.ToString(), tri = r.SrcTri, target = r.Target.ToString(), targetTri = r.TargetTri,
+                                                   plan = float.IsFinite(r.Gap.Plan) ? r.Gap.Plan : (float?)null, why = r.Why, floor = !BorderFinding(r) }),
+        candidates = border.Candidates.Select(kv => new { src = kv.Key.Src.ToString(), target = kv.Key.Target.ToString(), tri = kv.Key.Tri,
+                                                         found = kv.Value.All.Select(c => new { nav = c.Nav.ToString(), tri = c.Tri, plan = c.Gap.Plan }) }),
+    };
+    File.WriteAllText(censusPath, System.Text.Json.JsonSerializer.Serialize(census));
+    Console.WriteLine($"   floor census -> {censusPath}");
+}
+
+// ---------------------------------------------------------------------------------------
 // --emit — hand the exact broken records to the patch verifier.
 // ---------------------------------------------------------------------------------------
 // Only the two EXACT checks are emitted. UNCUT is deliberately excluded: it is baseline-limited
@@ -921,12 +974,41 @@ if (emitPath is not null)
         var chain = Overriders(d.Rec, d.RecRole);
         // An EDGE-IDX row's other end names the target triangle: the row is that one link (ConflictIo.RowIdentity's part).
         var other = new List<ConflictRecord> { new(d.Other.ToString(), d.OtherRole, null, Triangle: d.Tri) };
+        string cand = "";
+        NavBorderLinks.CandidateResult? cr = null;
+        if (d.Kind == "EDGE-IDX") border.Candidates.TryGetValue((d.Rec, d.Other, d.Tri ?? -1), out cr);
+        else if (d.Kind == "EDGE-NAV") cr = border.Candidates.Where(kv => kv.Key.Src == d.Rec && kv.Key.Target == d.Other).Select(kv => kv.Value).FirstOrDefault();
+        if (cr is not null)
+        {
+            cand = "; " + cr.Sentence(d.Other);
+            if (cr.Unique) other.Add(new ConflictRecord(cr.All[0].Nav.ToString(), "candidate", null, Triangle: cr.All[0].Tri));
+        }
         conflicts.Add(new Conflict(
             d.Kind,
             d.PluginA >= 0 ? pluginKey[d.PluginA].FileName.String : "",
             d.PluginB >= 0 ? pluginKey[d.PluginB].FileName.String : "",
-            d.Summary + $"   [record provided by: {chain}]", necessary, other));
+            d.Summary + cand + $"   [record provided by: {chain}]", necessary, other));
     }
+
+    // EDGE-NOMATCH / EDGE-ONEWAY rows: A owns the linking navmesh, B the far one; the far end names the triangle (the
+    // row's part, as EDGE-IDX's), and a NOMATCH row's unique candidate rides as a second record.
+    foreach (var r in borderFindings)
+    {
+        var why = r.Kind == "EDGE-NOMATCH" ? $"no edge of the far triangle lies along this one within {edgeTol}" : "the far triangle does not link back";
+        var other = new List<ConflictRecord> { new(r.Target.ToString(), "navmesh", null, Triangle: r.TargetTri) };
+        if (r.Kind == "EDGE-NOMATCH" && border.Candidates.TryGetValue((r.Src, r.Target, r.TargetTri), out var cr) && cr.Unique)
+            other.Add(new ConflictRecord(cr.All[0].Nav.ToString(), "candidate", null, Triangle: cr.All[0].Tri));
+        int oa = NavOwner(r.Src), ob = NavOwner(r.Target);
+        conflicts.Add(new Conflict(r.Kind, oa >= 0 ? pluginKey[oa].FileName.String : "", ob >= 0 ? pluginKey[ob].FileName.String : "",
+            $"navmesh {r.Src} in {Cell(navCell.GetValueOrDefault(r.Src))} {r.Why}",
+            new List<ConflictRecord> { new(r.Src.ToString(), "navmesh", Cell(navCell.GetValueOrDefault(r.Src)), PhysicalState.Holds, why) }, other));
+    }
+    // NAV-GROUND rows: A owns the navmesh, B wins the ground under it.
+    foreach (var r in groundFindings)
+        conflicts.Add(new Conflict("NAV-GROUND", pluginKey[r.Owner].FileName.String, pluginKey[r.LandWinner].FileName.String,
+            $"navmesh {r.Nav} in {Cell(r.Cell)}: {r.Counted} of {r.Vertices} vertices sat on the ground its author saw, which {pluginKey[r.LandWinner].FileName} moved up to {r.MaxMove:0} u",
+            new List<ConflictRecord> { new(r.Nav.ToString(), "navmesh", Cell(r.Cell), PhysicalState.Holds,
+                $"{r.Counted} vertices within {ground.Band:0} u of the author's ground and more than {ground.Band:0} u off the winning ground") }));
 
     // DELETED / EMPTIED rows (2026-11-16): the section's findings, one row each, with the deleting (or emptying) plugin as A
     // and the last earlier plugin whose version had triangles as B. The shipped game's deletions stay out, counted.
@@ -965,6 +1047,18 @@ if (emitPath is not null)
                     else if (winner < 0) predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "no plugin in this order provides the record"));
                     else if (!provs!.Contains(loser)) predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, null, PhysicalState.Unmeasured, "the loser does not provide this record in this order"));
                     else { PlanInto(basePlan, loser, nav); PlanInto(basePlan, winner, nav); pending.Add((c, r, nav, loser, winner)); }
+                }
+            }
+            else if (c.Kind is "EDGE-NOMATCH" or "EDGE-ONEWAY" or "NAV-GROUND")
+            {
+                string? other = c.Alternative is { Count: > 0 } alt ? alt[0].FormKey : null;
+                int? otherTri = c.Alternative is { Count: > 0 } alt2 ? alt2[0].Triangle : null;
+                foreach (var r in c.Necessary)
+                {
+                    var st = c.Kind == "NAV-GROUND" ? ground.Predicate(FormKey.Factory(r.FormKey))
+                           : other is null ? PhysicalState.Unmeasured : border.Predicate(c.Kind, FormKey.Factory(r.FormKey), FormKey.Factory(other), otherTri);
+                    predicates.Add(new Predicate(c.Kind, c.A, c.B, r.FormKey, other, st,
+                        st == PhysicalState.Holds ? "the class still holds under this order" : "the class no longer holds under this order", otherTri));
                 }
             }
             else if (c.Kind is "DELETED" or "EMPTIED")
@@ -1007,6 +1101,13 @@ if (emitPath is not null)
         new("clobber predicates (findings)", predicateTally.GetValueOrDefault(PhysicalState.Holds) + predicateTally.GetValueOrDefault(PhysicalState.Gone),
             new Dictionary<string, long> { ["GeometryUnreadable"] = predicateTally.GetValueOrDefault(PhysicalState.Unmeasured) }, null,
             $"Holds {predicateTally.GetValueOrDefault(PhysicalState.Holds):N0}, Gone {predicateTally.GetValueOrDefault(PhysicalState.Gone):N0} (a Gone row: a declared-dependency clobber with no coverage loss beyond {ReachClearance:0}u)"),
+        new("border links (geometry)", border.Judged.Count, new Dictionary<string, long> { ["LinkFieldPastTable"] = border.LinkFieldPastTable },
+            new Dictionary<string, long> { ["FloorRows"] = border.Rows.Count - borderFindings.Count },
+            $"tolerance {edgeTol}; {border.Judged.Count(j => j.Matched):N0} matched, {border.Judged.Count(j => j.Matched && j.Reciprocal):N0} two-way"),
+        new("navmesh vertices on LAND (ground)", ground.VerticesJudged,
+            new Dictionary<string, long> { ["CannotTell"] = ground.CannotTell, ["NoAuthoredGround"] = ground.NoAuthoredGround, ["NoLand"] = ground.NoLand },
+            new Dictionary<string, long> { ["FloorRows"] = ground.Rows.Count - groundFindings.Count, ["LandUnreadablePlugins"] = landUnreadable.Count },
+            $"band {ground.Band:0} u, move {ground.Move:0} u, at least {ground.MinVertices} vertices"),
         new("navmesh deletions", delFindings.Count, new Dictionary<string, long>(),
             new Dictionary<string, long> { ["ShippedGame"] = delShipped.Count },
             $"{delFindings.Count(r => r.Kind == "DELETED"):N0} deleted and {delFindings.Count(r => r.Kind == "EMPTIED"):N0} emptied by a mod; the shipped game's deletions are counted, not rows"),

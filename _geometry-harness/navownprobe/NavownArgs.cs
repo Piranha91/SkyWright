@@ -12,6 +12,8 @@ sealed class NavownArgs
     public bool DoorIdx;                  // DOOR-IDX is retired; --door-idx brings it back
     public bool ReachCandidates, ReachWitness;
     public bool ListMasterDeletions;      // list the shipped game's navmesh deletions (default: a count only)
+    public string? EdgeTolerance;         // --edge-tolerance PLAN,HEIGHT for the border rules (default: the vanilla floor's)
+    public string? FloorCensusPath;       // --floor-census OUT.json: the border gaps and ground heights the vanilla floor reads
     public string? Error;
 
     public static NavownArgs Parse(string[] args)
@@ -54,6 +56,8 @@ sealed class NavownArgs
                 case "--reach-top": a.ReachTopN = Int() ?? a.ReachTopN; break;
                 case "--reach-witness": a.ReachCandidates = true; a.ReachWitness = true; break;
                 case "--list-master-deletions": a.ListMasterDeletions = true; break;
+                case "--edge-tolerance": a.EdgeTolerance = Value(); break;
+                case "--floor-census": a.FloorCensusPath = Value(); break;
                 default:
                     a.Error = $"navownprobe: unknown argument '{arg}' - refused rather than ignored (see the usage at the top of Program.cs)";
                     break;

@@ -22,10 +22,12 @@ once plainly, once with --edge-tolerance 8,64 (the border rules, independent of 
     2465  an EDGE-IDX row names a candidate in another navmesh (R6n 0) and says the link moves to another navmesh.
     2466  an EDGE-IDX row with no candidate says so (L7).
     2467  control: a pair linked both ways and never changed (L1/R1) is no row of any kind.
+    2468  a far edge in the same plan but 200 u higher (R8, lifted by RpA) is EDGE-NOMATCH both ways.
     2470  a navmesh on its author's ground that a later LAND moved is NAV-GROUND (G1: Skyrim.esm x RpA.esp).
     2471  control: a deck above the ground (G2) is no row.
     2472  control: a navmesh whose owner saw the new ground (G3, moved with it) is no row.
     2473  a re-cut by a plugin that never saw another's LAND is NAV-GROUND (G4: RpD.esp x RpA.esp).
+    2474  the author's ground is the owner's view, not the first LAND (G5: RpA.esp x RpD.esp).
     2480  plan: L5's link is re-pointed at R5 triangle 1, one edit.
     2481  plan: L6's link moves to R6n triangle 0, and the plan says the navmeshes adjacent to L6 change.
     2482  plan: L7's link is cut, and the plan says so.
@@ -62,8 +64,8 @@ def sk(hexid):
 
 N = {"TD": sk("000960"), "SL": sk("000961"), "SD": sk("000962"), "TT": sk("000963"), "TE": sk("000964"), "TV": sk("000965"),
      "SV": sk("000966"), "R4a": "000801:RpA.esp", "R4b": "000802:RpA.esp", "R6n": "000803:RpA.esp",
-     "G1": sk("000B01"), "G2": sk("000B02"), "G3": sk("000B03"), "G4": sk("000B04")}
-for k in range(1, 8):
+     "G1": sk("000B01"), "G2": sk("000B02"), "G3": sk("000B03"), "G4": sk("000B04"), "G5": sk("000B05")}
+for k in range(1, 9):
     N[f"L{k}"] = sk(f"000A0{k}")
     N[f"R{k}"] = sk(f"000A1{k}")
 NAME = {v.lower(): k for k, v in N.items()}
@@ -275,6 +277,12 @@ def t2467():
     assert not cs, show(cs)
 
 
+def t2468():
+    """Rejects: an edge match measured in plan only (R8's border edge is 200 u above L8's)."""
+    one("tol", "EDGE-NOMATCH", "L8", "R8", 0)
+    one("tol", "EDGE-NOMATCH", "R8", "L8", 0)
+
+
 def ground(s):
     return [c for c in lab().rows("plain", "NAV-GROUND") if src(c) == s]
 
@@ -301,6 +309,12 @@ def t2473():
     """Rejects: the authoring view taken from the LAND winner rather than the navmesh owner's masters."""
     cs = ground("G4")
     assert len(cs) == 1 and (cs[0]["A"], cs[0]["B"]) == ("RpD.esp", "RpA.esp"), f"G4: {show(cs)}{lab().why('plain')}"
+
+
+def t2474():
+    """Rejects: the author's ground taken as the first LAND (Skyrim's z 0) rather than the owner's view (RpA's 200)."""
+    cs = ground("G5")
+    assert len(cs) == 1 and (cs[0]["A"], cs[0]["B"]) == ("RpA.esp", "RpD.esp"), f"G5: {show(cs)}{lab().why('plain')}"
 
 
 def plan_for(s):
@@ -382,10 +396,12 @@ CASES = [
     ("2465 EDGE-IDX L6 names a candidate in another navmesh", t2465),
     ("2466 EDGE-IDX L7 says no matching edge", t2466),
     ("2467 control: an unchanged two-way border is no row", t2467),
+    ("2468 EDGE-NOMATCH both ways where heights differ (L8/R8)", t2468),
     ("2470 NAV-GROUND G1", t2470),
     ("2471 control: a deck is no row", t2471),
     ("2472 control: the owner saw the ground", t2472),
     ("2473 NAV-GROUND G4 (RpD x RpA)", t2473),
+    ("2474 NAV-GROUND G5: the owner's view, not the first LAND", t2474),
     ("2480 plan: L5 re-pointed at R5 1", t2480),
     ("2481 plan: L6 moves to R6n 0, adjacency change said", t2481),
     ("2482 plan: L7 cut and said", t2482),

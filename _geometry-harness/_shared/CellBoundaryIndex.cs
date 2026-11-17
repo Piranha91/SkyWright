@@ -252,7 +252,7 @@ public sealed class CellBoundaryIndex
         if (waterKey is { } wk && !wk.IsNull && wk.ModKey == mod.ModKey)
             _ownWatrCells[p] = (_ownWatrCells.TryGetValue(p, out var o) ? o : 0) + 1;
         var tuple = new DetectorModel.WaterTuple(
-            c.Flags.HasFlag(Cell.Flag.HasWater), c.Flags.HasFlag(Cell.Flag.NoLodWater),
+            c.Flags.HasFlag(Mutagen.Bethesda.Skyrim.Cell.Flag.HasWater), c.Flags.HasFlag(Mutagen.Bethesda.Skyrim.Cell.Flag.NoLodWater),
             Key(waterKey), c.WaterHeight,
             c.WaterVelocity is { } wv ? new Vector3(wv.Angle.X, wv.Angle.Y, wv.Angle.Z) : null,
             c.WaterVelocity is { } wv2 ? new Vector3(wv2.Offset.X, wv2.Offset.Y, wv2.Offset.Z) : null,
