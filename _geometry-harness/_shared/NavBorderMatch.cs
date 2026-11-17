@@ -36,6 +36,8 @@ public readonly record struct EdgeGap(float Overlap, float Plan, float Height)
 {
     public static readonly EdgeGap None = new(0, float.PositiveInfinity, float.PositiveInfinity);
     public bool Within(EdgeTolerance t) => Overlap >= 0.5f && Plan <= t.Plan && Height <= t.Height;
+    /// <summary>A ledge link (edge-link type 1 or 2) joins edges at different heights by design: plan only.</summary>
+    public bool WithinPlan(EdgeTolerance t) => Overlap >= 0.5f && Plan <= t.Plan;
 }
 
 public static class NavBorderMatch
@@ -71,8 +73,10 @@ public static class NavBorderMatch
         return new EdgeGap((hi - lo) / shorter, plan, height);
     }
 
-    /// <summary>The far triangle's edge that lies best along the source edge (largest overlap, then smallest plan gap), or
-    /// -1 when none overlaps.</summary>
+    /// <summary>The far triangle's edge that lies best along the source edge: of the edges whose projection overlaps at least
+    /// half the shorter edge, the one nearest in plan (a slanted edge can overlap fully and lie far off: the first vanilla
+    /// floor run, 2026-11-16, took the largest overlap and left 24,324 vanilla links unmatched at a median 86 u); else the
+    /// largest overlap. -1 when none overlaps.</summary>
     public static (int Edge, EdgeGap Gap) BestEdge(Vec3 a, Vec3 b, NavmeshGeometry far, int tri)
     {
         var t = far.Triangles[tri];
@@ -83,7 +87,8 @@ public static class NavBorderMatch
             if (i < 0 || j < 0 || i >= far.Vertices.Count || j >= far.Vertices.Count) continue;
             var g = Gap(a, b, far.Vertices[i], far.Vertices[j]);
             if (g.Overlap <= 0) continue;
-            if (best < 0 || g.Overlap > bg.Overlap + 1e-4f || (Math.Abs(g.Overlap - bg.Overlap) <= 1e-4f && g.Plan < bg.Plan)) { best = e; bg = g; }
+            bool half = g.Overlap >= 0.5f, bestHalf = bg.Overlap >= 0.5f;
+            if (best < 0 || (half && !bestHalf) || (half == bestHalf && (half ? g.Plan < bg.Plan : g.Overlap > bg.Overlap))) { best = e; bg = g; }
         }
         return (best, bg);
     }

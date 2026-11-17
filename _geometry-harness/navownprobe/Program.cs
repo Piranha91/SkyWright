@@ -911,7 +911,7 @@ if (cli.FloorCensusPath is { } censusPath)
         tolerance = new { plan = edgeTol.Plan, height = edgeTol.Height },
         links = border.Judged.Select(j => new { src = j.Src.ToString(), tri = j.Tri, edge = j.Edge, target = j.Target.ToString(), targetTri = j.TargetTri,
                                                overlap = float.IsFinite(j.Gap.Plan) ? j.Gap.Overlap : 0, plan = float.IsFinite(j.Gap.Plan) ? j.Gap.Plan : (float?)null,
-                                               height = float.IsFinite(j.Gap.Height) ? j.Gap.Height : (float?)null, matched = j.Matched, reciprocal = j.Reciprocal,
+                                               height = float.IsFinite(j.Gap.Height) ? j.Gap.Height : (float?)null, matched = j.Matched, reciprocal = j.Reciprocal, type = j.Type,
                                                floor = !ModTouched(j.Src, "navmesh") && !ModTouched(j.Target, "navmesh") }),
         groundHeights = ground.OnOwnGround,
         groundRows = ground.Rows.Select(r => new { nav = r.Nav.ToString(), owner = pluginKey[r.Owner].FileName.String, land = pluginKey[r.LandWinner].FileName.String,

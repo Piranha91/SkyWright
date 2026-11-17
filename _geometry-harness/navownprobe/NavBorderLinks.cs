@@ -31,7 +31,7 @@ sealed class NavBorderLinks
         };
     }
     /// <summary>One judged link, for the vanilla floor's gap census.</summary>
-    public readonly record struct Census(FormKey Src, int Tri, int Edge, FormKey Target, int TargetTri, EdgeGap Gap, bool Matched, bool Reciprocal);
+    public readonly record struct Census(FormKey Src, int Tri, int Edge, FormKey Target, int TargetTri, EdgeGap Gap, bool Matched, bool Reciprocal, int Type);
 
     public readonly List<Row> Rows = new();
     public readonly List<Census> Judged = new();
@@ -62,6 +62,7 @@ sealed class NavBorderLinks
                     if (vi < 0 || vj < 0 || vi >= g.Vertices.Count || vj >= g.Vertices.Count) continue;
                     Vec3 a = g.Vertices[vi], b = g.Vertices[vj];
                     var (m, j) = (links[k].Mesh, (int)links[k].TriangleIndex);
+                    bool ledge = links[k].Type is 1 or 2;   // xEdit's Ledge Up / Ledge Down (NavEdgeLink.Type): heights differ by design
                     if (!nav.TryGetValue(m, out var far) || j < 0 || j >= far.Geom.Triangles.Count)
                     {
                         // EDGE-NAV / EDGE-IDX (DanglingLinks): only the candidates are this class's to say
@@ -69,7 +70,7 @@ sealed class NavBorderLinks
                         continue;
                     }
                     var (fe, gap) = NavBorderMatch.BestEdge(a, b, far.Geom, j);
-                    bool matched = fe >= 0 && gap.Within(tol);
+                    bool matched = fe >= 0 && (ledge ? gap.WithinPlan(tol) : gap.Within(tol));
                     bool recip = false;
                     if (matched)
                     {
@@ -78,7 +79,7 @@ sealed class NavBorderLinks
                         int fk = NavBorderMatch.EdgeLink(ft, fe);
                         recip = NavBorderMatch.EdgeIsLink(ft, fe) && fk >= 0 && fk < flinks.Count && flinks[fk].Mesh == s && flinks[fk].TriangleIndex == t;
                     }
-                    r.Judged.Add(new Census(s, t, e, m, j, gap, matched, recip));
+                    r.Judged.Add(new Census(s, t, e, m, j, gap, matched, recip, links[k].Type));
                     if (!matched)
                     {
                         var c = Cands(w, s, a, b);
