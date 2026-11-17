@@ -75,6 +75,7 @@ using var __run = RunLog.BeginProcess("navownprobe", args);
 if (args.Length >= 1 && args[0] == "--moved-ref-selftest") return NavownSelfTest.Run();
 // The edge-link identity fixture: written for tests/test_navown_edge_identity.py, which runs the real probe on it.
 if (args.Length >= 2 && args[0] == "--write-edge-link-fixture") { Console.WriteLine(string.Join(Environment.NewLine, EdgeLinkFixture.Write(args[1]))); return 0; }
+if (args.Length >= 2 && args[0] == "--write-navrepair-fixture") { Console.WriteLine(string.Join(Environment.NewLine, NavRepairFixture.Write(args[1]))); return 0; }
 
 // The command line (NavownArgs.cs): an argument it does not know is refused by name, before anything is read.
 var cli = NavownArgs.Parse(args);
