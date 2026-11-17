@@ -19,8 +19,21 @@ sealed class NavGround
     public int MinVertices { get; init; } = 3;
     public readonly List<Row> Rows = new();
     public long VerticesJudged, CannotTell, NoAuthoredGround, NoLand;
-    /// <summary>For the vanilla floor: per judged vertex on an unchanged cell, its height above the author's ground.</summary>
-    public readonly List<float> OnOwnGround = new();
+    /// <summary>For the vanilla floor: per judged vertex on an unchanged cell, its navmesh and its height above the author's
+    /// ground; and per navmesh, its vertices judged and those that could not be told (so the floor can be split by navmesh).</summary>
+    public readonly List<(FormKey Nav, float Height)> OnOwnGround = new();
+    public readonly Dictionary<FormKey, (int Judged, int CannotTell)> PerNav = new();
+
+    /// <summary>--ground-tolerance BAND,MOVE in game units.</summary>
+    public static (float Band, float Move) Parse(string s)
+    {
+        var p = s.Split(',');
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (p.Length != 2 || !float.TryParse(p[0], System.Globalization.NumberStyles.Float, inv, out var a)
+            || !float.TryParse(p[1], System.Globalization.NumberStyles.Float, inv, out var b) || a < 0 || b < 0)
+            throw new ArgumentException($"--ground-tolerance '{s}' is not BAND,MOVE in game units (two numbers, for example 16,32).");
+        return (a, b);
+    }
 
     public static NavGround Find(IReadOnlyDictionary<FormKey, (WinningNav W, int Owner)> nav, CellBoundaryIndex land,
                                  IReadOnlyList<HashSet<int>> closure, float band, float move, int minVertices, bool census)
@@ -32,7 +45,7 @@ sealed class NavGround
             var ws = w.Geom.Triangles.Count == 0 ? default : WorldOf(w);
             if (ws.IsNull) continue;
             var used = w.Geom.Triangles.SelectMany(t => new[] { (int)t.A, t.B, t.C }).Where(i => i >= 0 && i < w.Geom.Vertices.Count).Distinct();
-            int counted = 0, n = 0; float maxMove = 0;
+            int counted = 0, n = 0, unclear = 0; float maxMove = 0;
             var winners = new Dictionary<int, int>();
             foreach (var i in used)
             {
@@ -46,10 +59,10 @@ sealed class NavGround
                 var ha = NavmeshFloor.LandHeightAt(authored.Heights, gx, gy, v.X, v.Y, out var sa);
                 var hw = NavmeshFloor.LandHeightAt(winning.Heights, gx, gy, v.X, v.Y, out var sw);
                 if (ha is null || hw is null) { r.NoLand++; continue; }
-                if (sa > band || sw > band) { r.CannotTell++; continue; }
+                if (sa > band || sw > band) { r.CannotTell++; unclear++; continue; }
                 n++; r.VerticesJudged++;
                 bool same = ReferenceEquals(authored, winning) || authored.SameHeightsAs(winning);
-                if (census && same) r.OnOwnGround.Add(v.Z - ha.Value);
+                if (census && same) r.OnOwnGround.Add((key, v.Z - ha.Value));
                 if (same) continue;
                 float moved = MathF.Abs(hw.Value - ha.Value);
                 if (MathF.Abs(v.Z - ha.Value) <= band && moved > move && MathF.Abs(v.Z - hw.Value) > band)
@@ -58,6 +71,7 @@ sealed class NavGround
                     winners[winning.Plugin] = winners.GetValueOrDefault(winning.Plugin) + 1;
                 }
             }
+            if (census && n + unclear > 0) r.PerNav[key] = (n, unclear);
             if (counted >= minVertices)
                 r.Rows.Add(new Row(key, owner, winners.OrderByDescending(kv => kv.Value).First().Key, counted, n, maxMove, w.Cell));
         }

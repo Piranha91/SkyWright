@@ -14,6 +14,7 @@ sealed class NavownArgs
     public bool ListMasterDeletions;      // list the shipped game's navmesh deletions (default: a count only)
     public string? EdgeTolerance;         // --edge-tolerance PLAN,HEIGHT for the border rules (default: the vanilla floor's)
     public string? FloorCensusPath;       // --floor-census OUT.json: the border gaps and ground heights the vanilla floor reads
+    public string? GroundTolerance;       // --ground-tolerance BAND,MOVE for NAV-GROUND (default: the vanilla floor's)
     public string? Error;
 
     public static NavownArgs Parse(string[] args)
@@ -58,6 +59,7 @@ sealed class NavownArgs
                 case "--list-master-deletions": a.ListMasterDeletions = true; break;
                 case "--edge-tolerance": a.EdgeTolerance = Value(); break;
                 case "--floor-census": a.FloorCensusPath = Value(); break;
+                case "--ground-tolerance": a.GroundTolerance = Value(); break;
                 default:
                     a.Error = $"navownprobe: unknown argument '{arg}' - refused rather than ignored (see the usage at the top of Program.cs)";
                     break;

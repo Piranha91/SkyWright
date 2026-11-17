@@ -886,7 +886,8 @@ foreach (var u in uncut.OrderByDescending(u => u.Refs).Take(listN))
 // ---------------------------------------------------------------------------------------
 var edgeTol = cli.EdgeTolerance is { } et ? EdgeTolerance.Parse(et) : NavRuleDefaults.Edge;
 var border = NavBorderLinks.Find(winNav.ToDictionary(kv => kv.Key, kv => kv.Value.W), edgeTol);
-var ground = NavGround.Find(winNav, landIndex, masterClosure, NavRuleDefaults.GroundBand, NavRuleDefaults.GroundMove,
+var (groundBand, groundMove) = cli.GroundTolerance is { } gt ? NavGround.Parse(gt) : (NavRuleDefaults.GroundBand, NavRuleDefaults.GroundMove);
+var ground = NavGround.Find(winNav, landIndex, masterClosure, groundBand, groundMove,
                             NavRuleDefaults.GroundMinVertices, census: cli.FloorCensusPath is not null);
 bool BorderFinding(NavBorderLinks.Row r) => ModTouched(r.Src, "navmesh") || ModTouched(r.Target, "navmesh");
 bool GroundFinding(NavGround.Row r) => !Vanilla.Contains(pluginKey[r.Owner].FileName.String) || !Vanilla.Contains(pluginKey[r.LandWinner].FileName.String);
@@ -914,7 +915,9 @@ if (cli.FloorCensusPath is { } censusPath)
                                                height = float.IsFinite(j.Gap.Height) ? j.Gap.Height : (float?)null, matched = j.Matched, reciprocal = j.Reciprocal, type = j.Type,
                                                floor = !ModTouched(j.Src, "navmesh") && !ModTouched(j.Target, "navmesh") }),
         ledgeLinks = border.LedgeLinks,
-        groundHeights = ground.OnOwnGround,
+        groundTolerance = new { band = ground.Band, move = ground.Move },
+        groundHeights = ground.OnOwnGround.Select(g => new object[] { g.Nav.ToString(), g.Height }),
+        groundPerNav = ground.PerNav.Select(kv => new { nav = kv.Key.ToString(), judged = kv.Value.Judged, cannotTell = kv.Value.CannotTell }),
         groundRows = ground.Rows.Select(r => new { nav = r.Nav.ToString(), owner = pluginKey[r.Owner].FileName.String, land = pluginKey[r.LandWinner].FileName.String,
                                                    counted = r.Counted, vertices = r.Vertices, maxMove = r.MaxMove }),
         borderRows = border.Rows.Select(r => new { kind = r.Kind, src = r.Src.ToString(), tri = r.SrcTri, target = r.Target.ToString(), targetTri = r.TargetTri,
