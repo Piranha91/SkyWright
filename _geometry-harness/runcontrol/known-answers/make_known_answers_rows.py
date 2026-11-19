@@ -63,6 +63,12 @@ def plan_of(root: Path, checks: list, *, arms=None, **over) -> dict:
     plan = V.eval_plan(root, checks, **over)
     for c in plan["checks"]:
         c.setdefault("status", "planned")
+    prepared = root / "prepared"
+    (root / "candidates").rename(prepared)
+    plan["candidatesDir"] = str(prepared)
+    for a in plan["arms"]:
+        a["candidatePath"] = str(prepared / a["candidateFile"])
+    V.put(root, "prepared/candidates.json", json.dumps({"Candidates": [{"File": "candidate-01-flip.json"}]}))
     plan["explicitDecisions"]["exclude"] = {"p.order-evaluation": "left out by the caller"}
     for a in plan["arms"]:
         for p in a["requested"]["plugins"]:
@@ -73,9 +79,9 @@ def plan_of(root: Path, checks: list, *, arms=None, **over) -> dict:
         arm = copy.deepcopy(plan["arms"][1])
         arm["armId"] = f"candidate-{i:02d}"
         arm["candidateFile"] = f"candidate-{i:02d}-x.json"
-        arm["candidatePath"] = str(root / "candidates" / arm["candidateFile"])
-        V.put(root, f"candidates/{arm['candidateFile']}", json.dumps({"Plugins": V.NAMES["candidate-01"], "n": i}))
-        arm["candidateSha256"] = F.sha((root / "candidates" / arm["candidateFile"]).read_bytes())
+        arm["candidatePath"] = str(root / "prepared" / arm["candidateFile"])
+        V.put(root, f"prepared/{arm['candidateFile']}", json.dumps({"Plugins": V.NAMES["candidate-01"], "n": i}))
+        arm["candidateSha256"] = F.sha((root / "prepared" / arm["candidateFile"]).read_bytes())
         arm.update(extra)
         plan["arms"].append(arm)
     return plan
@@ -105,7 +111,7 @@ class Launch:
         job = f"{probe}-" + ("baseline" if stem is None else stem + ("-reverse" if reverse else ""))
         emit = self.inv / probe / f"{name}.json"
         source = Path(reused_from).parent / probe / f"{name}.json" if reused_from else emit
-        if written and outcome != "stopped":
+        if written and outcome != "stopped" and not (reused_from and source.exists()):   # a cached emit stays as its launch wrote it
             forward = stem is not None and not reverse
             F.write(self.root, str(source.relative_to(self.root)), text if text is not None else
                     emit_text(self.root, probe, "candidate-01" if forward else "baseline", conflicts,
@@ -303,6 +309,21 @@ def execute_cases(tmp: Path) -> list:
         F.write(root, str((inv / "cache-log.txt").relative_to(root)), "cache: HIT\n")
         launch.close()
 
+    def third(root, inv):
+        # every emit served from the second launch's cache, the dropped diff run again
+        launch = Launch(root, inv)
+        second = str(root / "sweep" / "inv-0002" / "cache.json")
+        for probe in ("overlapprobe", "contactprobe"):
+            launch.probe(probe, outcome="reused", reused_from=str(root / "sweep" / ("inv-0001" if probe == "overlapprobe" else "inv-0002") / "cache.json"))
+            launch.probe(probe, STEM, outcome="reused", reused_from=str(root / "sweep" / ("inv-0001" if probe == "overlapprobe" else "inv-0002") / "cache.json"))
+            launch.probe(probe, STEM, reverse=True, outcome="reused",
+                         reused_from=str(root / "sweep" / ("inv-0001" if probe == "overlapprobe" else "inv-0002") / "cache.json"))
+        launch.diff("overlapprobe", STEM)
+        launch.diff("contactprobe", STEM, verdict="DIFFERENTIAL", counts={"repaired": 0, "reclassified": 0, "created": 2, "unmeasured": 0})
+        F.write(root, str((inv / "cache-log.txt").relative_to(root)), "cache: HIT\n")
+        launch.close()
+        assert Path(second).exists()
+
     def drop_diff(root):
         # an accepted diff whose receipt is gone is measured again by the next launch
         led = json.loads((root / "ledger.json").read_text(encoding="utf-8"))
@@ -313,7 +334,9 @@ def execute_cases(tmp: Path) -> list:
     case(tmp, "two probes measured and accepted; run again; then two parts repaired from the cache", two,
          [("a fresh sweep: every part accepted, the order evaluation finds a new defect", fresh, {}),
           ("nothing to settle: every arm reused, no child", None, {}),
-          ("two parts no longer accepted: a launch serves the cache, keeps what stands and measures the rest", again, {"before": drop_diff})],
+          ("two parts no longer accepted: a launch serves the cache, keeps what stands and measures the rest", again, {"before": drop_diff}),
+          ("one part dropped again: the third launch is handed both earlier launches' caches, the newest first", third,
+           {"before": lambda root: _unsettle(root, "g.overlap__candidate-01__diff")})],
          settle=masters_ok)
 
     # every way one candidate's parts can end, one candidate arm per way, one probe
@@ -441,8 +464,8 @@ def execute_cases(tmp: Path) -> list:
             if r["armId"] not in ("candidate-07",):
                 b.settle("l.masters", r["armId"], None, "completed", detector="no-finding")
         b.settle("l.masters", "candidate-07", None, "rejected(exit-nonzero)", cause="exit-nonzero", accepted=False)
-        (root / "candidates" / "candidate-08-x.json").write_text("{}", encoding="utf-8")   # no longer the plan's order
-        (root / "candidates" / "candidate-09-x.json").unlink()
+        (root / "prepared" / "candidate-08-x.json").write_text("{}", encoding="utf-8")   # no longer the plan's order
+        (root / "prepared" / "candidate-09-x.json").unlink()
 
     def kept_fake(root, inv):
         launch = Launch(root, inv)
@@ -461,7 +484,7 @@ def execute_cases(tmp: Path) -> list:
     case(tmp, "a baseline whose prerequisite failed keeps every arm out", two[:2] + [ORDER],
          [("nothing is launched; a part settled earlier is blocked too", None, {})], settle=base_blocked)
     case(tmp, "a baseline candidate file that changed", two[:2],
-         [("nothing is launched", None, {"before": lambda root: (root / "candidates" / "candidate-00-baseline.json").write_text("{}", encoding="utf-8")})],
+         [("nothing is launched", None, {"before": lambda root: (root / "prepared" / "candidate-00-baseline.json").write_text("{}", encoding="utf-8")})],
          settle=masters_ok)
 
     # stops
@@ -511,7 +534,8 @@ def execute_cases(tmp: Path) -> list:
         F.write(root, "outputs/d.fomod/baseline.json", json.dumps({"schemaVersion": 2, "hits": []}))
         F.write(root, "outputs/d.fomod/candidate-01.json", "changed after the receipt")
         consumed = {"configuration": {"plugins": [{"name": "mods/X/A.esp", "sha256": a_sha}, {"name": "Target.esp", "sha256": t_sha},
-                                                  {"name": "B.esp", "sha256": "not a hash"}, {"sha256": "9" * 64}]}}
+                                                  {"name": "B.esp", "sha256": "not a hash"}, {"sha256": "9" * 64},
+                                                  {"name": "data/C.esp", "sha256": "1" * 64}]}}
         pool = {"kind": "probe-json", "exe": "poolprobe"}
         b.settle("d.pool", "baseline", None, "completed", detector="catalogue", outputs=["outputs/d.pool/baseline.json"], adapter=pool, consumed=consumed)
         b.settle("d.pool", "candidate-01", None, "completed", detector="catalogue", outputs=["outputs/d.pool/candidate-01.json"], adapter=pool)
@@ -525,9 +549,9 @@ def execute_cases(tmp: Path) -> list:
 
     def supplied(plan):
         arm = plan["arms"][1]
-        arm["supplied"] = {"declaredFiles": ["mods/P/A.esp", "Target.esp", "Other.esp", "Named.esp"]}
+        arm["supplied"] = {"declaredFiles": ["mods/P/A.esp", "Target.esp", "Other.esp", "Named.esp", "sub/C.esp"]}
         arm["requested"]["plugins"] += [{"name": "Named.esp", "sha256": None, "unstatedReason": "the payload was not unpacked"},
-                                        {"name": "x/Other.esp", "sha256": "0" * 64}]
+                                        {"name": "x/Other.esp", "sha256": "0" * 64}, {"name": "C.esp", "sha256": "2" * 64}]
     def unsupported(row, **more):
         return dict(row, arms=[{"armId": a, "status": "unsupported"} for a in ("baseline", "candidate-01")], **more)
     disc = [FIXED, F.check_row("d.pool", "probe-json", exe="poolprobe"), F.check_row("d.fomod", "probe-json", exe="fomodprobe"),
@@ -597,7 +621,7 @@ def small_cases(tmp: Path) -> dict:
     row("one reverse missing", lambda b: (masters_ok(b, None), done(b, skip=[("g.overlap", "reverse")])))
     row("one reverse missing under --no-reverse", lambda b: (masters_ok(b, None), done(b, skip=[("g.overlap", "reverse")])), no_reverse=True)
     row("a part missing on an arm whose candidate file changed", lambda b: (masters_ok(b, None), done(b, skip=[("g.overlap", "diff"), ("g.contact", "diff")])),
-        edit=lambda root: (root / "candidates" / "candidate-01-flip.json").write_text("{}", encoding="utf-8"))
+        edit=lambda root: (root / "prepared" / "candidate-01-flip.json").write_text("{}", encoding="utf-8"))
     row("a part reused, the rest completed", lambda b: (masters_ok(b, None), done(b), b.settle("g.overlap", "baseline", "arm", "reused", detector="no-finding")))
     return {"rows": rows}
 
