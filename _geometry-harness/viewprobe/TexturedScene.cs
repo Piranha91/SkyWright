@@ -3468,6 +3468,15 @@ static class TexturedScene
                 graphicsCell is null ? textures.MissingTexturePaths.ToArray() : retainedMissingTexturePaths.ToArray(),
                 noGeometry, geometryInputIssues, noGeometryAt);
 
+        if (MapTiles.Requested is { } mapTiles)
+        {
+            PrintBuildCensus();
+            MapTiles.Render(renderer, mapTiles);
+            shotResources.Dispose();
+            graphicsCell?.EndShot();
+            return shapes;
+        }
+
         if (interactive is not null)
         {
             // BEFORE the window opens, not after it closes: the console is what a person reads

@@ -814,6 +814,15 @@ for (int i = argStart; i < args.Length; i++)
         textured = true;
     }
     else if (args[i] == "--interactive") { interactiveMode = true; textured = true; }
+    // --map-tiles FILE.json: draw the built scene from straight above over each listed rectangle (MapTiles.cs)
+    else if (args[i] == "--map-tiles" && i + 1 < args.Length)
+    {
+        if (ViewProbe.MapTiles.CannotDraw is { } why) { Console.Error.WriteLine(why); return 2; }
+        try { ViewProbe.MapTiles.Requested = ViewProbe.MapTiles.Read(args[++i]); }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or System.Text.Json.JsonException or UnauthorizedAccessException)
+        { Console.Error.WriteLine(ex is InvalidDataException ? ex.Message : $"the map tile file could not be read: {ex.Message}"); return 2; }
+        textured = true;
+    }
     else if (args[i] == "--report-mode") { reportMode = true; textured = true; }
     else if (args[i] == "--ref-surface") { refSurface = true; textured = true; }
     // the capture fallbacks (CaptureViews.cs): hide, protect, contacts, occluders, coverage
