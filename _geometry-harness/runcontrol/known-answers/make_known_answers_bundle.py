@@ -474,6 +474,8 @@ def command_cases(tmp: Path) -> dict:
     case("names: a line that is not a message", mode="garbage=2", runtime_text=True)
     case("names: a reader command with an unclosed quote", reader_cmd='"python fake.py')
     case("names: a reader that does not exist", reader_cmd='"no-such-record-reader.exe" --stdio')
+    case("names: a reader command of spaces", reader_cmd="   ")
+    case("names: a reader command of two quotes", reader_cmd='""')
     case("names: the bundle does not verify first", lambda v: v.edit("disposition.json", lambda d: d["evaluation"]["findings"].append(
         {"checkId": "no.such", "armId": "baseline", "part": None})))
     # the order step

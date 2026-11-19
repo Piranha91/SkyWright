@@ -183,6 +183,7 @@ public static class OrderEnrichment
                     why = "";
                 }
                 catch (EnrichRefused ex) { why = ex.Message; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { why = ex.Message; }   // Python's OSError, said the same way
                 st = new PyDict
                 {
                     ["status"] = "refused", ["pair"] = names, ["rule"] = ch.Rule,

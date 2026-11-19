@@ -26,7 +26,8 @@ public sealed class ProcessWire : IReaderWire
     public ProcessWire(string commandLine, PyDict env)
     {
         var argv = PyShell.ReaderArgv(commandLine);
-        if (argv.Count == 0) throw new PyError("the reader command line names no program");
+        // a command line naming no program: Windows' own refusal of the empty command, in Python's words
+        if (argv.Count == 0 || argv[0].Length == 0) throw new IOException("[WinError 87] The parameter is incorrect");
         var psi = new ProcessStartInfo(argv[0])
         {
             UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true,
