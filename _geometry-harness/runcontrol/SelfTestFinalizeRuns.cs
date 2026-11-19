@@ -4,7 +4,7 @@ using System.Text;
 namespace RunControl;
 
 // The known answers that need a run folder or a bundle on disk: ordersweep's classification word, the disposition and
-// STATUS.md of synthetic run folders, and the finalize command.
+// STATUS.md of synthetic run folders, the finalize command, and verify-bundle on synthetic bundles.
 public static partial class SelfTestFinalize
 {
     // A long text the answers keep deflated ({"z": base64}), or the text itself.
@@ -106,6 +106,8 @@ public static partial class SelfTestFinalize
         DispositionCases(D(ka["dispositions"]));
         var bases = D(D(ka["dispositions"])["bases"]);
         foreach (var c in L(ka["finalize"]).Select(D)) FinalizeCase(c, bases);
+        var verify = D(ka["verify"]);
+        foreach (var c in L(verify["cases"]).Select(D)) VerifyCase(c, verify["base"]);
     }
 
     static void ClassificationCases(PyDict ka)
@@ -172,5 +174,21 @@ public static partial class SelfTestFinalize
                 ?? Same("stdout", t.Mask(stdout), S(c["stdout"])) ?? Same("stderr", t.Mask(stderr), S(c["stderr"]))
                 ?? Same("disposition.json", t.Mask(FileText(t.At("disposition.json"))), Unpack(files["disposition.json"]))
                 ?? Same("STATUS.md", t.Mask(FileText(t.At("STATUS.md"))), Unpack(files["STATUS.md"]));
+        });
+
+    static void VerifyCase(PyDict c, object? baseTree) =>
+        Case($"verify-bundle: '{S(c["name"])}'", () =>
+        {
+            using var t = new Temp("b");
+            BuildTree(t, baseTree);
+            ApplyOps(t, c["ops"]);
+            string? target = c["out"] is true ? PyPath.Join(t.Base, "verify-out.json") : null;
+            var (exit, stdout, stderr) = Clocked(() => Captured(() => VerifyBundle.Run(t.Root, target)));
+            return Same("exit", exit.ToString(), ((long)c["exit"]!).ToString())
+                ?? Same("stdout", t.Mask(stdout), S(c["stdout"])) ?? Same("stderr", t.Mask(stderr), S(c["stderr"]))
+                ?? Same("verify.json", t.Mask(FileText(target ?? t.At("verify.json"))), Unpack(c["verify"]))
+                ?? Same("wrote inside", File.Exists(t.At("verify.json")).ToString(), ((bool)c["wroteInside"]!).ToString())
+                ?? (Captured(() => VerifyBundle.Run(t.Root, PyPath.Join(t.Base, "quiet.json"), quiet: true)) is var q
+                    && q.exit == exit && q.stdout.Length == 0 && q.stderr.Length == 0 ? null : "the quiet form printed or gave another exit code");
         });
 }
