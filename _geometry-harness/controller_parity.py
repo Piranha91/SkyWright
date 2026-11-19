@@ -66,6 +66,8 @@ class Refusal(Exception):
 #           drop-line         a text line the regex matches is left out on both sides; every other line is compared
 #   to      for a regex: the replacement (text, or a function of the match for a part of a longer sentence)
 #   when    "different-checkout": the row applies only when the two runs came from different checkouts
+#   only_in (field, values): a JSON row applies only inside an object whose field holds one of the values
+#   also_text  for an id named by a dictionary key: a line of these files that names a job and an id with no entry
 #   reason  one sentence
 
 def _forecast_bytes(m):
@@ -78,6 +80,19 @@ def _timer_seconds(m):
     return re.sub(r"\d+\.\d+s", "<SECONDS>s", m.group(0))
 
 
+def _command_log_seconds(m):
+    """The second line of a child's log with its seconds taken out: `(exit N, S.Ss)` or the stopped form."""
+    if m.group(1) is not None:
+        return f"({m.group(1)}, <SECONDS>s)"
+    return f"({m.group(2)}<SECONDS>{m.group(3)}"
+
+
+def _memory_readings(m):
+    """contactprobe's memory line with this machine's readings taken out; the route, the margin and the cache size are kept."""
+    return _MEMORY_GB.sub(r"\1 <GB> GB", m.group(0))
+
+
+_MEMORY_GB = re.compile(r"\b(live|this process|free now|of|need fast|lean|available to this process|limit) \d+(?:\.\d+)? GB")
 _FORECAST_BYTES = re.compile(r"(?<=about )\d+(?:\.\d+)? (?:GiB|MiB|KiB)(?= more on )|(?<= at )\d+(?:\.\d+)? KiB(?= each)"
                              r"|(?<=\()\d+(?:\.\d+)? GiB(?= over \d+ records\))|(?<= has )\d+(?:\.\d+)? GiB(?= free )")
 
@@ -112,8 +127,11 @@ EXCLUSIONS = [
          reason="Run log ids hold a start time and a random part; each is numbered by first appearance."),
     dict(id="id-sweep-cache-key", files="*sweep/*/cache.json", where="json:*", action="normalise-id",
          to="<CACHEKEY:label>", named_by="label", prefix=12,
+         also_text=("*sweep/*/cache-log.txt | *logs/ordersweep.txt",
+                    r"\bMISS (\S+): no entry for request key ([0-9a-f]{12})$"),
          reason="A sweep cache key is a hash over the candidate file's path in the run folder; each key, and its "
-                "12-character form in logs, is rewritten to the label of the job it stores."),
+                "12-character form in logs, is rewritten to the label of the job it stores, or, for a job stopped "
+                "before it was stored, to the job its cache log line names."),
     dict(id="hash-of-run-file", files="*", where="string:(built in)", action="normalise-id", to="<SHA:file>",
          reason="A sha256 equal to the hash of a file in the same run is rewritten to that file's name; the file's "
                 "content is compared instead, since it may embed a time, an id or a path."),
@@ -128,8 +146,11 @@ EXCLUSIONS = [
     # ---- durations
     dict(id="seconds-fields", files="*", where="json:**/seconds | json:**/wallSeconds | json:**/reusedSeconds",
          action="present-only", reason="A measured duration."),
-    dict(id="seconds-command-log", files="*", where=r"text:^\((exit -?\d+), \d+(?:\.\d+)?s\)$", action="ignore",
-         to=r"(\1, <SECONDS>s)", reason="The duration in the second line of a child's log; the exit code is kept."),
+    dict(id="seconds-command-log", files="*",
+         where=r"text:^\((?:(exit -?\d+), \d+(?:\.\d+)?s\)|(stopped at the deadline after )\d+(?:\.\d+)?(s: .*\)))$",
+         action="ignore", to=_command_log_seconds,
+         reason="The duration in the second line of a child's log, ended or stopped at the deadline; the exit code, or "
+                "the rest of the stop sentence, is kept."),
     dict(id="seconds-stage-line", files="<stdout>", where=r"text:^([\w-]+: (?:accepted|reused)\b.*? in )\d+(?:\.\d+)? s\b",
          action="ignore", to=r"\1<SECONDS> s", reason="The duration in a stage's stdout line; the decision is kept."),
 
@@ -162,6 +183,15 @@ EXCLUSIONS = [
                 "(stage-disk) and the free space at that moment; the stages, records, drive and floor are kept."),
     dict(id="probe-generated", files="*outputs/*.json", where="json:generated", action="present-only",
          reason="A probe output's own time of writing (depprobe, switchprobe)."),
+    dict(id="probe-memory-readings", files="*contactprobe/*.memory.json",
+         where="json:readings/* | json:others | json:needFastBytes | json:needLeanBytes", action="present-only",
+         reason="contactprobe's readings of this machine's memory beside each emit: free and total memory, its own size, "
+                "the other large processes and the need it estimates from them; the route it took and its settings are compared."),
+    dict(id="probe-memory-lines", files="*logs/contactprobe-*.txt | *contactprobe/*.memory.json",
+         where=r"text:^\s*memory (?:before the host loop|route): .*$ | string:^memory route: .*$", action="ignore",
+         to=_memory_readings,
+         reason="The same readings inside contactprobe's two memory lines, in its log and in the file beside each emit; "
+                "the route, the margin and every other word are kept."),
     dict(id="slot-command-lines", files="*commands/*.txt",
          where=r'text:^\{"step": ".*\}$ | text:^waiting for idle \(.* from \d{4}-\d\d-\d\d .*$ | '
                r"text:^idle on \d+ checks at \d{4}-\d\d-\d\d .*\(free \d+ MB\)$",
@@ -208,6 +238,11 @@ EXCLUSIONS = [
          to=r"\1<CONTROLLER> \2",
          reason="The first line of a controller step's log names the controller program, at its start or after the "
                 "machine slot command's `--`; the slot command, the step and its arguments are kept."),
+    dict(id="controller-enrichment-tool", files="*enrichment/*/enrichment.json",
+         where="json:tool/#/file | json:tool/#/sha256", only_in=("file", ("bundleenrich.py", "runcontrol.dll")),
+         action="present-only",
+         reason="The enrichment's tool list names the controller file that wrote it and that file's hash; every other "
+                "entry of the list is compared."),
     dict(id="options-hash", files="*receipts/*.json", where="json:consumed/optionsSha256", action="present-only",
          reason="A hash over the plan's options, which hold absolute paths."),
 
@@ -348,7 +383,8 @@ class Side:
         self.files: dict[str, tuple[str, object]] = {}     # relative path -> (kind, content)
         self.ignored: dict[str, str] = {}                  # relative path -> row id
         self.present_only: dict[str, str] = {}
-        self.hash_of: dict[str, str] = {}                  # sha256 -> the first file with it
+        self.hash_of: dict[str, str] = {}                  # sha256 -> the file it is named after
+        self.hash_files: dict[str, list[str]] = {}         # sha256 -> every file with those bytes
         self.ids: dict[str, str] = {}                      # id value -> marker
         self.id_rows: dict[str, str] = {}                  # id value -> row id
         self._read_files()
@@ -377,9 +413,10 @@ class Side:
             if row is not None:
                 self.present_only[rel] = row["id"]
                 continue
-            hashes.setdefault(_sha256(path), rel)
+            hashes.setdefault(_sha256(path), []).append(rel)
             self.files[rel] = self._load(rel, path.read_bytes())
-        self.hash_of = hashes
+        self.hash_files = hashes
+        self.hash_of = {h: min(rels) for h, rels in hashes.items()}
 
     @staticmethod
     def _load(rel: str, data: bytes):
@@ -507,6 +544,16 @@ class Side:
                         self._name(key, marker, r["id"])
                         if r.get("prefix"):
                             self._name(key[:r["prefix"]], marker, r["id"])
+            # an id no dictionary holds, named by the job on the log line that reports it missing
+            if r.get("also_text"):
+                files, rx = r["also_text"][0], re.compile(r["also_text"][1])
+                for rel in sorted(self.files):
+                    kind, lines = self.files[rel]
+                    if kind == "text" and _file_matches(files, rel):
+                        for line in lines:
+                            m = rx.search(line)
+                            if m:
+                                self._name(m.group(2), r["to"].replace(r["named_by"] + ">", m.group(1) + ">"), r["id"])
         # the ledger first, so run ids are numbered in the order the runs happened
         order = sorted(self.files, key=lambda r: (not r.endswith("evaluation/ledger.json"), r))
         for rel in order:
@@ -591,8 +638,12 @@ class Normaliser:
                 rules += [(r, tuple(sel.split("/")) if sel else ()) for sel in _where(r, "json")]
         keyed = [(tuple(p.split("/")) if p else (), field) for files, p, field in KEYED_LISTS if _file_matches(files, rel)]
 
-        def walk(node, path):
-            row = next((r for r, pat in rules if _path_matches(pat, path)), None)
+        def applies(r, parent):
+            only = r.get("only_in")
+            return only is None or (isinstance(parent, dict) and parent.get(only[0]) in only[1])
+
+        def walk(node, path, parent=None):
+            row = next((r for r, pat in rules if _path_matches(pat, path) and applies(r, parent)), None)
             if row is not None and row["action"] == "ignore":
                 self._hit(row["id"])
                 return MISSING
@@ -606,7 +657,7 @@ class Normaliser:
             if isinstance(node, dict):
                 out = {}
                 for k, v in node.items():
-                    value = walk(v, path + (k,))
+                    value = walk(v, path + (k,), node)
                     if value is not MISSING:
                         out[self.string(k, rel)] = value
                 return out
@@ -686,8 +737,30 @@ def _section_of(rel: str) -> str:
     return next(name for name, spec in SECTIONS if _file_matches(spec, rel))
 
 
+def _name_hashes(a: Side, b: Side):
+    """Names each file hash the same way on both sides: after the smallest path among the files that hold the same bytes
+    on either side. Files with equal bytes on one side only (two outputs written in the same second) would otherwise be
+    named after different files."""
+    group: dict[str, str] = {}
+
+    def find(rel):
+        while group.setdefault(rel, rel) != rel:
+            group[rel] = group[group[rel]]
+            rel = group[rel]
+        return rel
+
+    for side in (a, b):
+        for rels in side.hash_files.values():
+            roots = sorted({find(r) for r in rels})
+            for other in roots[1:]:
+                group[other] = roots[0]          # the smallest path stays the root
+    for side in (a, b):
+        side.hash_of = {h: find(rels[0]) for h, rels in side.hash_files.items()}
+
+
 def compare(a: Side, b: Side) -> dict:
     """The full comparison of two sides: differences by section, and what each exclusion row matched."""
+    _name_hashes(a, b)
     a.collect_ids()
     b.collect_ids()
     different_checkout = (a.repo or "").lower() != (b.repo or "").lower()

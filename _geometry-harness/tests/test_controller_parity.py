@@ -13,7 +13,13 @@ formed and printed in full; P12 the command's exit codes; P13 each measured time
 compared line, sentence or field is set aside, and a change to the rest of that line, sentence or field is still caught;
 P14 the machine slot command's own lines in a heavy step's log are left out and every other line is compared; P15 the
 controller program is set aside after the slot command's `--` and the slot command, the step and its arguments are
-compared. No probe, no controller and no game is started.
+compared; P16 the controller's own entry in an enrichment's tool list is set aside and every other entry is compared;
+P17 contactprobe's readings of this machine's memory are set aside, in the file beside an emit and in its log, and the
+route, the settings and the other words are compared; P18 a hash is named the same way on both sides when two files
+hold the same bytes on one side only, and a hash that names another file is still caught; P19 the seconds in the second
+line of a stopped child's log are set aside and the rest of the stop sentence is compared; P20 the cache key of a job
+stopped before it was stored is named after the job on its cache log line, and another job on that line is caught.
+No probe, no controller and no game is started.
 """
 from __future__ import annotations
 
@@ -540,12 +546,178 @@ def p15(tmp):
     check(names(pair.lines(), "evaluate/commands/evaluate-01.txt", "line 1"), "P15: a program that is not a controller is compared by name")
 
 
+def matched(report, row):
+    return {r["id"]: r["matched"] for r in report["exclusions"]}[row]
+
+
+def p16(tmp):
+    rel = "bundle/evidence/enrichment/names/enrichment.json"
+
+    def enrichment(run, controller, reader="reader build", with_hash=True):
+        own = {"file": controller}
+        if with_hash:
+            own["sha256"] = sha(controller)
+        put(run / rel, {"schemaVersion": 1, "kind": "names", "tool": [own, {"file": "housecarl-mcp.exe", "sha256": sha(reader)}]})
+    pair = Pair(tmp, "p16")
+    enrichment(pair.a, "bundleenrich.py")
+    enrichment(pair.b, "runcontrol.dll")
+    report = pair.compare()
+    check(report["equal"] and matched(report, "controller-enrichment-tool") == 4,
+          f"P16: the controller's own name and hash in an enrichment's tool list are set aside ({pair.lines()})")
+    enrichment(pair.b, "runcontrol.dll", reader="another reader build")
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, rel, "tool[1]/sha256"), f"P16: another tool's hash in the same list is caught ({lines})")
+    enrichment(pair.b, "runcontrol.dll", with_hash=False)
+    check(names(pair.lines(), rel, "tool[0]/sha256"), "P16: a controller entry with no hash on one side is caught")
+    enrichment(pair.a, "othertool.py")
+    enrichment(pair.b, "thirdtool.dll")
+    lines = pair.lines()
+    check(names(lines, rel, "tool[0]/file") and names(lines, rel, "tool[0]/sha256"), f"P16: an entry that is not the controller's is compared ({lines})")
+
+
+MEMORY_ROUTE = ("memory route: {route} (memory free) - the memory is there; estimated need fast 9.{n} GB (with 25% margin), "
+                "lean 1.{n} GB; available to this process 23.{n} GB, limit 66.{n} GB (physical memory)")
+MEMORY_BEFORE = "   memory before the host loop: live 0.0{n} GB, this process 0.1{n} GB, free now 22.8{n} GB of 66.1{n} GB; readings from this machine"
+
+
+def p17(tmp):
+    beside = "evaluation/sweep/inv-0001/contactprobe/baseline.json.memory.json"
+    log = "evaluation/sweep/inv-0001/logs/contactprobe-baseline.txt"
+
+    def memory(run, n, route="fast", threads=8, cache="2.15", margin="25%"):
+        put(run / beside, {"probe": "contactprobe", "route": route, "threads": threads, "cacheBudget": 2147483648,
+                           "line": MEMORY_ROUTE.format(route=route, n=n).replace("25%", margin),
+                           "needFastBytes": 9489304825 + n, "needLeanBytes": 1468695468 + n, "readingsFrom": "this machine",
+                           "readings": {"TotalPhysical": 66095271936, "AvailablePhysical": 22880067584 + n, "OwnPrivate": 123072512 + n,
+                                        "ProcessLimit": None, "LimitSource": "none"},
+                           "others": [{"Name": "one", "Pid": 100 * n, "Bytes": 5 * n}] * n, "outcome": "completed"})
+        put(run / log, MEMORY_BEFORE.format(n=n) + "\n   " + MEMORY_ROUTE.format(route=route, n=n).replace("25%", margin)
+            + f"; contact cache {cache} GB  (0.{n}s)\n")
+    pair = timed_pair(tmp, "p17", memory)
+    report = pair.compare()
+    check(report["equal"] and matched(report, "probe-memory-readings") == 16 and matched(report, "probe-memory-lines") >= 6,
+          f"P17: contactprobe's memory readings are set aside in the file beside an emit and in its log ({pair.lines()})")
+    for label, change, where in (("the route", dict(route="lean"), "route"), ("a setting", dict(threads=4), "threads")):
+        pair = Pair(tmp, "p17-" + where)
+        memory(pair.a, 1)
+        memory(pair.b, 1, **change)
+        check(names(pair.lines(), beside, where), f"P17: {label} in the file beside an emit is caught ({pair.lines()})")
+    pair = Pair(tmp, "p17-route-line")
+    memory(pair.a, 1)
+    memory(pair.b, 2, route="lean")
+    lines = pair.lines()
+    check(names(lines, beside, "line") and names(lines, log, "line 2"), f"P17: the route word inside the memory line is caught in both places ({lines})")
+    pair = Pair(tmp, "p17-margin")
+    memory(pair.a, 1)
+    memory(pair.b, 2, margin="30%")
+    lines = pair.lines()
+    check(len(lines) == 2 and names(lines, beside, "line") and names(lines, log, "line 2"), f"P17: the margin inside the memory line is caught ({lines})")
+    pair = Pair(tmp, "p17-cache")
+    memory(pair.a, 1)
+    memory(pair.b, 2, cache="4.30")
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, log, "line 2"), f"P17: the cache size on the log's memory line, a setting, is caught ({lines})")
+    pair = timed_pair(tmp, "p17-elsewhere", lambda run, n: (
+        put(run / "evaluation/logs/check.one__baseline.txt", MEMORY_BEFORE.format(n=n) + "\n"),
+        put(run / "evaluation/outputs/check.two/baseline.json.memory.json", {"readings": {"AvailablePhysical": n}})))
+    lines = pair.lines()
+    check(names(lines, "evaluation/logs/check.one__baseline.txt") and names(lines, "evaluation/outputs/check.two/baseline.json.memory.json"),
+          f"P17: the same line and the same file from another probe are compared (the rows name contactprobe only) ({lines})")
+
+
+def p18(tmp):
+    receipt = f"evaluation/receipts/{KEYS[2]}.json"
+
+    def outputs(run, same_second, names_file="candidate-01"):
+        # two outputs that differ only in their time of writing: the same bytes when both were written in one second
+        hashes = {}
+        for i, arm in enumerate(("baseline", "candidate-01")):
+            stamp = "2026-11-19T02:50:40Z" if same_second else f"2026-11-19T02:50:4{i}Z"
+            hashes[arm] = put(run / f"evaluation/outputs/check.two/{arm}.json", {"probe": "twoprobe", "generatedUtc": stamp, "hits": []})
+        edit(run / receipt, lambda d: d.update(outputs=[{"path": "outputs/check.two/candidate-01.json", "sha256": hashes[names_file]
+                                                         if names_file in hashes else names_file, "bytes": 70}]))
+    for label, a_same, b_same in (("on side A only", True, False), ("on side B only", False, True), ("on both sides", True, True)):
+        pair = Pair(tmp, "p18-" + label.replace(" ", "-"))
+        outputs(pair.a, a_same)
+        outputs(pair.b, b_same)
+        check(pair.compare()["equal"], f"P18: two outputs with the same bytes {label}: the hash is named the same way ({pair.lines()})")
+    pair = Pair(tmp, "p18-wrong")
+    outputs(pair.a, True)
+    outputs(pair.b, False, names_file="baseline")
+    check(pair.compare()["equal"], "P18: where one side cannot tell the two files apart, a hash of either is the same name")
+    pair = Pair(tmp, "p18-wrong-file")
+    outputs(pair.a, False)
+    outputs(pair.b, False, names_file="baseline")
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, receipt, "outputs[0]/sha256"), f"P18: a hash that names the other file, both sides telling them apart, is caught ({lines})")
+    pair = Pair(tmp, "p18-third-file")
+    outputs(pair.a, True)
+    third = sha((pair.b / "evaluation/outputs/check.one/baseline.json").read_bytes())
+    outputs(pair.b, False, names_file=third)
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, receipt, "outputs[0]/sha256") and "check.one/baseline.json" in lines[0],
+          f"P18: a hash that names a third file is caught ({lines})")
+
+
+STOPPED = ("$ runner ordersweep --candidates C\n(stopped at the deadline after 1.{n}s: launched process tree terminated and confirmed gone "
+           "(job object terminated; {left} active processes); no completion)\n\n")
+
+
+def p19(tmp):
+    rel = "evaluation/logs/ordersweep.txt"
+    pair = timed_pair(tmp, "p19", lambda run, n: put(run / rel, STOPPED.format(n=n, left=0)))
+    before = matched(Pair(tmp, "p19-base").compare(), "seconds-command-log")
+    report = pair.compare()
+    check(report["equal"] and matched(report, "seconds-command-log") == before + 2,
+          f"P19: the seconds in the second line of a stopped child's log are set aside ({pair.lines()})")
+    pair = Pair(tmp, "p19-rest")
+    put(pair.a / rel, STOPPED.format(n=1, left=0))
+    put(pair.b / rel, STOPPED.format(n=2, left=1))
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, rel, "line 2"), f"P19: another word of the stop sentence is caught ({lines})")
+    put(pair.b / rel, "$ runner ordersweep --candidates C\n(exit 0, 1.2s)\n\n")
+    check(names(pair.lines(), rel, "line 2"), "P19: a child that ended against one that was stopped is caught")
+    pair = timed_pair(tmp, "p19-elsewhere", lambda run, n: put(run / rel, "$ runner\n(exit 0, 1.0s)\n\n   note: stopped at the deadline after 1.%ds: x)\n" % n))
+    check(names(pair.lines(), rel, "line 4"), "P19: the same words inside another line are compared (the row names the whole second-line form)")
+
+
+def p20(tmp):
+    cache_log, sweep_log = "evaluation/sweep/inv-0001/cache-log.txt", "evaluation/logs/ordersweep.txt"
+
+    def stopped_job(run, n, job="oneprobe-candidate-01", stored=True):
+        key = sha(f"stored{n}")
+        put(run / "evaluation/sweep/inv-0001/cache.json", {key: {"label": "oneprobe-baseline", "fingerprint": "27d21fdbdcef"}} if stored else {})
+        missing = sha(f"{job}{n}")[:12]
+        put(run / cache_log, f"MISS oneprobe-baseline: no entry for request key {key[:12]}\nRECORDED oneprobe-baseline\n"
+            f"MISS {job}: no entry for request key {missing}\n")
+        put(run / sweep_log, f"$ runner ordersweep\n(exit 0, 1.0s)\n\n   cache: MISS {job}: no entry for request key {missing}\n")
+    pair = timed_pair(tmp, "p20", stopped_job)
+    report = pair.compare()
+    check(report["equal"] and matched(report, "id-sweep-cache-key") >= 8,
+          f"P20: the key of a job stopped before it was stored is named after the job on its cache log line ({pair.lines()})")
+    pair = Pair(tmp, "p20-job")
+    stopped_job(pair.a, 1)
+    stopped_job(pair.b, 2, job="oneprobe-candidate-02")
+    lines = pair.lines()
+    check(len(lines) == 2 and names(lines, cache_log, "line 3") and names(lines, sweep_log, "line 4"), f"P20: another job on that line is caught ({lines})")
+    pair = Pair(tmp, "p20-other-line")
+    stopped_job(pair.a, 1)
+    stopped_job(pair.b, 2)
+    append(pair.a / cache_log, "HIT oneprobe-candidate-02: request key 0123456789ab\n")
+    append(pair.b / cache_log, "HIT oneprobe-candidate-02: request key ba9876543210\n")
+    check(names(pair.lines(), cache_log, "line 4"), "P20: a key on a line of another shape, with no entry and no job to name it, is compared")
+    pair = Pair(tmp, "p20-elsewhere")
+    for run, n in ((pair.a, 1), (pair.b, 2)):
+        put(run / "evaluation/logs/check.one__baseline.txt", f"MISS oneprobe-candidate-01: no entry for request key {sha(str(n))[:12]}\n")
+    check(names(pair.lines(), "evaluation/logs/check.one__baseline.txt"), "P20: the same line in another log is compared (the row names the cache log and the sweep's log)")
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="controller-parity-"))
     try:
         for label, fn in (("P1", p1), ("P2", p2), ("P3", p3), ("P4", p4), ("P5", p5), ("P6", p6), ("P7", p7), ("P8", p8),
                           ("P9", p9), ("P10", p10), ("P11", p11), ("P12", p12), ("P13", p13), ("P14", p14),
-                          ("P15", p15)):
+                          ("P15", p15), ("P16", p16), ("P17", p17), ("P18", p18), ("P19", p19), ("P20", p20)):
             guarded(label, lambda fn=fn: fn(tmp))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
