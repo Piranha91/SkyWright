@@ -1978,7 +1978,8 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         {
         using (m as IDisposable)
         {
-            foreach (var cp in PlacementExtract.FromMod(m))
+            // every cell, a terrain-only one included: a cell is found because it exists, not because something is placed in it
+            foreach (var cp in PlacementExtract.FromMod(m, includeEmpty: true))
             {
                 if (!TargetMatches(cp)) continue;
                 cellKey = cp.Cell;
@@ -5402,6 +5403,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 CellKey = cellKey,
                 Worldspace = targetWorldspace,
                 Interior = interior,
+                Grid = interior ? null : targetGrid,
                 RefCells = refCellOf,
                 RefOutcomes = refOutcome,
                 OutDir = shotOutDir,

@@ -475,11 +475,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     /// <summary>A three-quarter view of the scene's own cell, for a scene opened with no reference to land on: the camera
     /// looks at the middle of the cell's drawn references from outside their span (the outer tenth on each axis is left
-    /// out, so one far object does not set the frame).</summary>
+    /// out, so one far object does not set the frame). An exterior cell that draws no reference of its own is framed on
+    /// its square of terrain.</summary>
     internal void FrameScene()
     {
         var boxed = DrawnAll().Where(r => r.Min.X <= r.Max.X).ToList();
         var own = boxed.Where(r => CellOf(r.Ref.RefKey) is not { } c || string.Equals(c, SceneCell, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (own.Count == 0 && FrameTerrain()) return;
         if (own.Count == 0) own = boxed;
         if (own.Count == 0) return;
         static (float Lo, float Hi) Span(IEnumerable<float> v) { var s = v.OrderBy(x => x).ToList(); return (s[s.Count / 10], s[Math.Min(s.Count - 1, s.Count * 9 / 10)]); }
@@ -499,6 +501,30 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         SyncCamera();
         Shell.LastLanding = FormattableString.Invariant($"cell {SceneCell}: {(_opt.Interior ? "a view from inside" : "an overview")} of {own.Count} drawn reference(s), eye {_eye.X:0},{_eye.Y:0},{_eye.Z:0}");
         Say("framing: " + Shell.LastLanding);
+    }
+
+    /// <summary>An overview of the scene's own cell square, at the height of the terrain drawn in it; false for an
+    /// interior, or when no terrain is drawn in the square.</summary>
+    bool FrameTerrain()
+    {
+        if (_opt.Interior || _opt.Grid is not { } g) return false;
+        const float Cell = 4096f;
+        float x0 = g.X * Cell, y0 = g.Y * Cell;
+        float lo = float.MaxValue, hi = float.MinValue;
+        // terrain vertices are Y-up (TexturedScene.YUp): Skyrim X is X, Skyrim Y is -Z, height is Y
+        foreach (var s in _opt.PickShapes)
+        {
+            if (s.Kind != PickKind.Terrain || s.Max.X < x0 || s.Min.X > x0 + Cell || -s.Min.Z < y0 || -s.Max.Z > y0 + Cell) continue;
+            foreach (var v in s.Verts)
+                if (v.X >= x0 && v.X <= x0 + Cell && -v.Z >= y0 && -v.Z <= y0 + Cell) { lo = MathF.Min(lo, v.Y); hi = MathF.Max(hi, v.Y); }
+        }
+        if (lo > hi) return false;
+        var centre = new Vector3(x0 + Cell * 0.5f, y0 + Cell * 0.5f, (lo + hi) * 0.5f);
+        _yaw = 20f; _pitch = 40f; _eye = centre - Forward() * (Cell * 0.5f * 2.2f);
+        SyncCamera();
+        Shell.LastLanding = FormattableString.Invariant($"cell {SceneCell}: an overview of its terrain (no reference of its own is drawn), heights {lo:0} to {hi:0}, eye {_eye.X:0},{_eye.Y:0},{_eye.Z:0}");
+        Say("framing: " + Shell.LastLanding);
+        return true;
     }
 
     internal IReadOnlyList<TreeNode> BuildTree()

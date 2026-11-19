@@ -116,6 +116,7 @@ sealed class InteractiveOptions
     public FormKey? CellKey;
     public FormKey Worldspace;
     public bool Interior;
+    public (int X, int Y)? Grid;                           // an exterior scene's own cell on the worldspace grid
     public IReadOnlyDictionary<FormKey, FormKey>? RefCells;
     public IReadOnlyDictionary<FormKey, (string Outcome, string? BaseEditorId)>? RefOutcomes;   // every walked ref: drawn, or why not
     public required string OutDir;

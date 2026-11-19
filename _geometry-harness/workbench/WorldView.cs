@@ -254,21 +254,19 @@ internal static class WorldView
         _ => Shell.BannerText,
     };
 
-    /// <summary>Ask for a cell's scene on the browsed load order; a cell with nothing but terrain is refused.</summary>
+    /// <summary>Ask for a cell's scene on the browsed load order.</summary>
     internal static string OpenCell(string cellKey, string? landOn)
     {
         var (x, order) = Need();
         int gen = ++_pickGeneration;
         var ui = Dispatcher.CurrentDispatcher;
-        // whether the cell holds anything the viewer can find is read from its records (a moment), off the window's thread
+        // that the cell reads on this load order is checked from its records (a moment), off the window's thread
         x.ObjectsOfAsync(cellKey, CancellationToken.None).ContinueWith(r => ui.BeginInvoke(() =>
         {
             if (gen != _pickGeneration) return;
             Say(() =>
             {
                 if (r.IsFaulted) throw new InvalidOperationException($"cell {cellKey} could not be read: {r.Exception!.GetBaseException().Message}");
-                if (!r.Result.HasPlacedOrNavmesh)
-                    throw new InvalidOperationException($"cell {cellKey} holds only terrain, with no placed object or navmesh in any plugin; the viewer does not open such a cell on its own.");
                 Shell.PartnerFor = null; Shell.SceneCaption = null;
                 return SceneDirector.Request(new SceneRequest(order, cellKey, landOn, landOn is null ? "the World tab's cell" : $"to show {landOn}"));
             });
