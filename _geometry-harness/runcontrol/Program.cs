@@ -31,6 +31,8 @@ bool pipeline = command is "run" or "arms" or "status";
 // `plan` records as evalrun.py's plan does (op evalrun-plan), opened where the plan is written (Plan.Run).
 using var __run = command is "run" or "plan" ? null
     : pipeline ? RunLog.BeginProcess("evalpipeline", args, new RunOptions { Mode = command }) : RunLog.BeginProcess("runcontrol", args);
+if (args.Length >= 1 && EvalCommands.Handles(args[0])) return EvalCommands.Run(args);   // finalize, verify-bundle, eval-status: before the process run below, so their run-log records are evalrun.py's (finalize opens evalrun-finalize; the other two open none)
+using var __run = RunLog.BeginProcess("runcontrol", args);
 try
 {
     if (args.Length >= 1 && args[0] == "--self-test") return SelfTest.Run();

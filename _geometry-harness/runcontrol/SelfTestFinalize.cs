@@ -51,11 +51,15 @@ public static partial class SelfTestFinalize
     sealed class Temp : IDisposable
     {
         public string Root { get; }
-        public Temp()
+        public string Base { get; }
+        // sub: the root is a folder inside the temporary one, so a file can sit beside it.
+        public Temp(string? sub = null)
         {
             string made = Path.Combine(Path.GetTempPath(), "hc-runcontrol-finalize-" + Guid.NewGuid().ToString("N")[..12]);
             Directory.CreateDirectory(made);
-            Root = PyPath.Resolve(made);
+            Base = PyPath.Resolve(made);
+            Root = sub == null ? Base : PyPath.Join(Base, sub);
+            Directory.CreateDirectory(Root);
         }
         public string At(string rel) => rel == "." ? Root : PyPath.Join(Root, rel);
         public string Unmask(string s) => s.Replace(@"<ROOT\\>", Root.Replace(@"\", @"\\")).Replace(@"<ROOT\>", Root).Replace("<ROOT/>", PyOrder.Fwd(Root));
@@ -84,13 +88,12 @@ public static partial class SelfTestFinalize
         // The answers' folder rebuilt: each file's bytes, or its text with the placeholder replaced by this root.
         public void Build(object? tree, object? dirs = null)
         {
-            foreach (var f in L(tree).Select(D))
-                Write(S(f["path"]), f.ContainsKey("text") ? PyJson.Utf8(Unmask(S(f["text"]))) : Convert.FromBase64String(S(f["bytes"])));
+            foreach (var f in L(tree).Select(D)) Write(S(f["path"]), RowBytes(f, this));
             foreach (string d in dirs == null ? [] : Strings(dirs)) Directory.CreateDirectory(At(d));
         }
         public void Dispose()
         {
-            try { Directory.Delete(Root, recursive: true); }
+            try { Directory.Delete(Base, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
@@ -218,7 +221,7 @@ public static partial class SelfTestFinalize
                 if (bad != null) return bad;
                 foreach (var f in L(script["tree"]).Select(D))
                 {
-                    string? why = SameBytes(S(f["path"]), File.ReadAllBytes(t.At(S(f["path"]))), Convert.FromBase64String(S(f["bytes"])));
+                    string? why = SameBytes(S(f["path"]), File.ReadAllBytes(t.At(S(f["path"]))), RowBytes(f, t));
                     if (why != null) return why;
                 }
                 return null;

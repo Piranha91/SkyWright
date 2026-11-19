@@ -1,0 +1,176 @@
+using System.IO.Compression;
+using System.Text;
+
+namespace RunControl;
+
+// The known answers that need a run folder or a bundle on disk: ordersweep's classification word, the disposition and
+// STATUS.md of synthetic run folders, and the finalize command.
+public static partial class SelfTestFinalize
+{
+    // A long text the answers keep deflated ({"z": base64}), or the text itself.
+    static string? Unpack(object? v) => v is PyDict d ? Encoding.UTF8.GetString(Inflate(S(d["z"]))) : (string?)v;
+
+    static byte[] Inflate(string b64)
+    {
+        using var z = new ZLibStream(new MemoryStream(Convert.FromBase64String(b64)), CompressionMode.Decompress);
+        using var plain = new MemoryStream();
+        z.CopyTo(plain);
+        return plain.ToArray();
+    }
+
+    // One row of a recorded tree as the bytes to write under this root.
+    static byte[] RowBytes(PyDict row, Temp t) =>
+        row.ContainsKey("text") ? PyJson.Utf8(t.Unmask(Unpack(row["text"])!))
+        : row["bytes"] is PyDict z ? Inflate(S(z["z"])) : Convert.FromBase64String(S(row["bytes"]));
+
+    static void WritePlanSha(Temp t) =>
+        File.WriteAllBytes(t.At("plan.sha256"), PyJson.Utf8(Hashing.Sha256File(t.At("plan.json")) + "\n"));
+
+    // The recorded folder rebuilt under this root; a planSha row is the hash of the plan as written here.
+    static void BuildTree(Temp t, object? tree)
+    {
+        foreach (var row in L(tree).Select(D).Where(r => !r.ContainsKey("planSha"))) t.Write(S(row["path"]), RowBytes(row, t));
+        if (L(tree).Select(D).Any(r => r.ContainsKey("planSha"))) WritePlanSha(t);
+    }
+
+    // The generator's recorded changes to a copy of a base folder, made again here.
+    static void ApplyOps(Temp t, object? ops)
+    {
+        foreach (var op in L(ops).Select(D))
+        {
+            string path = op.ContainsKey("path") ? t.At(S(op["path"])) : "";
+            switch (S(op["op"]))
+            {
+                case "delete": File.Delete(path); break;
+                case "rmtree": Directory.Delete(path, recursive: true); break;
+                case "write": t.Write(S(op["path"]), PyJson.Utf8(t.Unmask(Unpack(op["text"])!))); break;
+                case "planSha": WritePlanSha(t); break;
+                case "json":
+                    object? doc = PyJson.LoadEvalFile(path);
+                    foreach (var e in L(t.Unmask(op["edits"])).Select(L))
+                    {
+                        var steps = L(e[1]);
+                        object? at = doc;
+                        for (int i = 0; i < (S(e[0]) == "append" ? steps.Count : steps.Count - 1); i++)
+                            at = steps[i] is string k ? ((PyDict)at!)[k] : ((List<object?>)at!)[(int)(long)steps[i]!];
+                        if (S(e[0]) == "append") ((List<object?>)at!).Add(e[2]);
+                        else if (S(e[0]) == "pop") ((PyDict)at!).Pop(S(steps[^1]));
+                        else if (steps[^1] is string key) ((PyDict)at!)[key] = e[2];
+                        else ((List<object?>)at!)[(int)(long)steps[^1]!] = e[2];
+                    }
+                    PyJson.WriteEvalFile(path, doc);
+                    break;
+                default: throw new ArgumentException($"no recorded change '{S(op["op"])}'");
+            }
+        }
+    }
+
+    // What a step printed to standard output and standard error, with "\n" line ends, and its exit code.
+    static (int exit, string stdout, string stderr) Captured(Func<int> step)
+    {
+        var (o, e) = (Console.Out, Console.Error);
+        var (so, se) = (new StringWriter(), new StringWriter());
+        Console.SetOut(so);
+        Console.SetError(se);
+        try { return (step(), so.ToString().Replace("\r\n", "\n"), se.ToString().Replace("\r\n", "\n")); }
+        finally
+        {
+            Console.SetOut(o);
+            Console.SetError(e);
+        }
+    }
+
+    // One step with the run-log store named, so a run folder under test does not become the store.
+    static T StoreKept<T>(string store, Func<T> step)
+    {
+        string? before = Environment.GetEnvironmentVariable("HOUSECARL_RUNLOG_DIR");
+        Environment.SetEnvironmentVariable("HOUSECARL_RUNLOG_DIR", string.IsNullOrWhiteSpace(before) ? store : before);
+        try { return step(); }
+        finally { Environment.SetEnvironmentVariable("HOUSECARL_RUNLOG_DIR", before); }
+    }
+
+    static List<object?> Pairs(PyDict d) => d.Select(kv => (object?)new List<object?> { kv.Key, kv.Value }).ToList();
+
+    // historicalClassifications in one fixed order: Python leaves equal sort keys in set order.
+    static object? TieSorted(object? word)
+    {
+        if (word is not PyDict d || d.Get("historicalClassifications") is not List<object?> h) return word;
+        var copy = new PyDict(d);
+        copy["historicalClassifications"] = h.OrderBy(PyJson.Canonical, PyOrder.CodePoint).ToList();
+        return copy;
+    }
+
+    static partial void Later(PyDict ka)
+    {
+        ClassificationCases(D(ka["classification"]));
+        DispositionCases(D(ka["dispositions"]));
+        var bases = D(D(ka["dispositions"])["bases"]);
+        foreach (var c in L(ka["finalize"]).Select(D)) FinalizeCase(c, bases);
+    }
+
+    static void ClassificationCases(PyDict ka)
+    {
+        Case("finalize: order_classification", () =>
+        {
+            using var t = new Temp();
+            BuildTree(t, ka["tree"]);
+            return Rows(L(ka["cases"]), row =>
+            {
+                var rows = L(row["rows"]).Select(D).ToList();
+                object? got = t.Mask(SweepReading.OrderClassification(t.Root, D(ka["arm"]), rows));
+                return SameJson("word", TieSorted(got), TieSorted(row["want"]));
+            });
+        });
+        Case("finalize: read_sweep_jobs", () =>
+        {
+            using var t = new Temp();
+            BuildTree(t, ka["tree"]);
+            return Rows(L(ka["jobs"]), row =>
+                SameJson(S(row["folder"]), t.Mask(Pairs(SweepReading.ReadSweepJobs(t.At("sweep/" + S(row["folder"]))))), row["want"]));
+        });
+        Case("finalize: the launch folder name", () => Rows(L(ka["folders"]), row =>
+            Same(S(row["name"]), SweepReading.SweepFolderRe.IsMatch(S(row["name"])).ToString(), ((bool)row["want"]!).ToString())));
+    }
+
+    static void DispositionCases(PyDict ka)
+    {
+        var bases = D(ka["bases"]);
+        foreach (var c in L(ka["cases"]).Select(D))
+            Case($"finalize: disposition and STATUS.md of '{S(c["name"])}'", () =>
+            {
+                using var t = new Temp("b");
+                BuildTree(t, bases[S(c["base"])]);
+                ApplyOps(t, c["ops"]);
+                var plan = D(PyJson.LoadEvalFile(t.At("plan.json")));
+                return Clocked(() =>
+                {
+                    var ledger = new Ledger(t.Root, plan);
+                    var receipts = Receipts.ReadReceipts(t.Root);
+                    var (integrity, bad) = EvidenceIntegrity.Check(t.Root, plan, ledger, receipts);
+                    var disp = Disposition.Build(t.Root, plan, ledger, receipts, integrity, bad);
+                    return Same("integrity", t.Mask(PyJson.Dumps(integrity, indent: 1, ensureAscii: false)), Unpack(c["integrity"]))
+                        ?? SameJson("bad keys", Pairs(bad), c["bad"])
+                        ?? Same("disposition", t.Mask(PyJson.Dumps(disp, indent: 1, ensureAscii: false)), Unpack(c["disposition"]))
+                        ?? Same("STATUS.md", t.Mask(StatusMd.Build(plan, disp)), Unpack(c["status"]));
+                });
+            });
+    }
+
+    static string? FileText(string path) => File.Exists(path) ? Encoding.UTF8.GetString(File.ReadAllBytes(path)) : null;
+
+    static void FinalizeCase(PyDict c, PyDict bases) =>
+        Case($"finalize: the command on '{S(c["name"])}'", () =>
+        {
+            using var t = new Temp("b");
+            BuildTree(t, bases[S(c["base"])]);
+            ApplyOps(t, c["ops"]);
+            foreach (string n in new[] { "disposition.json", "STATUS.md" }) File.Delete(t.At(n));
+            var (exit, stdout, stderr) = StoreKept(PyPath.Join(t.Base, "runlog"),
+                () => Clocked(() => In(t.Root, () => Captured(() => Finalizer.Run(t.Root)))));
+            var files = D(c["files"]);
+            return Same("exit", exit.ToString(), ((long)c["exit"]!).ToString())
+                ?? Same("stdout", t.Mask(stdout), S(c["stdout"])) ?? Same("stderr", t.Mask(stderr), S(c["stderr"]))
+                ?? Same("disposition.json", t.Mask(FileText(t.At("disposition.json"))), Unpack(files["disposition.json"]))
+                ?? Same("STATUS.md", t.Mask(FileText(t.At("STATUS.md"))), Unpack(files["STATUS.md"]));
+        });
+}

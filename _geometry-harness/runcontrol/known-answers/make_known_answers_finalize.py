@@ -21,9 +21,11 @@ import io
 import json
 import os
 import platform
+import re
 import shutil
 import sys
 import tempfile
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -40,6 +42,18 @@ BACK, FWD, DOUBLED = "<ROOT\\>", "<ROOT/>", "<ROOT\\\\>"
 
 def b64(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
+
+
+def pack(text):
+    """A long text kept deflated ({"z": base64}); a short one, or None, as it is."""
+    if text is None or len(text) < 600:
+        return text
+    return {"z": b64(zlib.compress(text.encode("utf-8"), 9))}
+
+
+def packb(data: bytes):
+    """A file's bytes as base64, deflated first when long."""
+    return b64(data) if len(data) < 600 else {"z": b64(zlib.compress(data, 9))}
 
 
 def sha(data: bytes) -> str:
@@ -79,9 +93,9 @@ def tree(root: Path, masked: tuple = ()) -> list:
             continue
         rel = p.relative_to(root).as_posix()
         if p.name in masked:
-            rows.append({"path": rel, "text": mask(p.read_bytes().decode("utf-8"), root)})
+            rows.append({"path": rel, "text": pack(mask(p.read_bytes().decode("utf-8"), root))})
         else:
-            rows.append({"path": rel, "bytes": b64(p.read_bytes())})
+            rows.append({"path": rel, "bytes": packb(p.read_bytes())})
     return rows
 
 
@@ -492,7 +506,817 @@ def identity_cases() -> dict:
             "guarantee": {name: E.identity_guarantee(p) for name, p in (("contract", plan), ("legacy", legacy), ("empty", {}))}}
 
 
-SECTIONS = [("plans", plan_cases), ("ledger", ledger_cases), ("receipts", receipt_cases), ("identity", lambda tmp: identity_cases())]
+# ------------------------------------------------------------------------------- synthetic run folders
+
+GOOD = "folder:" + "a" * 64
+CTL = "scripts:" + "c" * 64
+
+
+def check_row(cid, kind, *, exe=None, family="geometry", required=True, applicability="yes",
+              arms=("baseline", "candidate-01"), result=None, **more) -> dict:
+    adapter = {"kind": kind}
+    if exe:
+        adapter["exe"] = exe
+    if result:
+        adapter["result"] = result
+    row = {"checkId": cid, "family": family, "required": required, "applicability": applicability,
+           "applicabilityEvidence": "the scope lists a changed cell", "adapter": adapter,
+           "arms": [{"armId": a, "status": "planned"} for a in arms], "prerequisites": []}
+    row.update(more)
+    return row
+
+
+def run_plan(root: Path, checks: list, *, arms=None, **over) -> dict:
+    """A plan for a synthetic run folder: its premises are files inside the folder, named by absolute path."""
+    reg = write(root, "premises/registry.json", '{"registryVersion": 7}')
+    scope = write(root, "premises/scope.json", '{"complete": true}')
+    arms = arms or [
+        {"armId": "baseline", "kind": "baseline", "candidateFile": "candidate-00-baseline.json", "loadedInGameNote": "not loaded",
+         "payload": {"espOnly": False}, "plugins": ["Skyrim.esm", "A.esp", "B.esp", "Target.esp"],
+         "candidatePath": str(root / "candidates" / "candidate-00-baseline.json")},
+        {"armId": "candidate-01", "kind": "candidate", "candidateFile": "candidate-01-flip.json", "loadedInGameNote": "not loaded",
+         "payload": {"espOnly": False}, "plugins": ["Skyrim.esm", "B.esp", "A.esp", "Target.esp"],
+         "candidatePath": str(root / "candidates" / "candidate-01-flip.json")}]
+    plan = {"schemaVersion": 2, "planId": "plan00000001", "requestProviders": "arm-view", "createdUtc": "2026-01-01T00:00:00Z",
+            "registry": {"path": str(reg), "registryVersion": 7, "sha256": sha(reg.read_bytes())},
+            "toolIdentity": {"contract": 1, "rule": "x", "programs": {
+                "controller": {"kind": "scripts", "state": "present", "digest": CTL},
+                **{f"probe:{n}": {"kind": "package", "state": "present", "digest": GOOD}
+                   for n in ("scopeprobe", "overlapprobe", "contactprobe", "depprobe", "patchprobe", "adviceprobe", "stateprobe")},
+                "helper:conflictdiff": {"kind": "package", "state": "present", "digest": GOOD}}},
+            "targets": [{"name": "Target.esp", "nexusId": 1234}, "odd", {"provider": "no name"}],
+            "scope": {"path": str(scope), "sha256": sha(scope.read_bytes()), "complete": True, "unmeasured": ["LAND extents"]},
+            "candidatesDir": str(root / "candidates"),
+            "arms": arms,
+            "states": {"selected": ["baseline"], "depth": "standard", "notExplored": [{"state": "quest-done", "why": "not selected"}]},
+            "checks": checks,
+            "budgets": {"minutes": 90.0, "maxCandidates": 4, "candidatesHeldBack": []},
+            "explicitDecisions": {"select": None, "exclude": [], "note": "nothing narrowed"}}
+    plan.update(over)
+    return plan
+
+
+class Builder:
+    """A run folder written by the real Ledger and write_receipt, one settled entry at a time."""
+
+    def __init__(self, root: Path, plan: dict):
+        self.root, self.plan = root, plan
+        body = jtext(plan)
+        write(root, "plan.json", body)
+        write(root, "plan.sha256", sha(body.encode("utf-8")) + "\n")
+        write(root, "ledger.json", jtext({"schemaVersion": 2, "planId": plan["planId"], "registrySha256": plan["registry"]["sha256"],
+                                          "runIds": [], "entries": {}}))
+        write(root, "journal.jsonl", "")
+        self.led = E.Ledger(root, plan)
+        self.led.open_invocation("run", "evalrun-checks-1", None)
+        self.checks = {c["checkId"]: c for c in plan["checks"]}
+
+    def bound(self, adapter: dict, part) -> dict:
+        roles = E.receipt_roles({"adapter": adapter, "part": part})
+        progs = (self.plan.get("toolIdentity") or {}).get("programs") or {}
+        return {role: {"program": pid, "kind": "package", "digest": (progs.get(pid) or {}).get("digest"), "checked": ["launch", "acceptance"]}
+                for role, pid in roles.items()}
+
+    def settle(self, cid, aid, part, status, *, detector=None, cause=None, accepted=True, outputs=(), result=None,
+               consumed=None, extra=None, rejections=None, ledger_extra=None, receipt=True, detail=None, adapter=None,
+               ledger_detector="same"):
+        check = self.checks.get(cid) or {"checkId": cid, "adapter": {"kind": "derived"}}
+        adapter = adapter or check["adapter"]
+        rid = None
+        if receipt:
+            c = {"candidateSha256": "c" * 64, "programs": self.bound(adapter, part)}
+            c.update(consumed or {})
+            res = {"execution": status, "detector": detector, "findings": None, "coverage": [], "strength": "measured", "verdict": None}
+            res.update(result or {})
+            r = E.write_receipt(self.root, plan=self.plan, check={"checkId": cid}, arm={"armId": aid}, part=part, adapter=adapter,
+                                argv=None, run_id=self.led.run_id, parent_run_id=None, started="2026-01-01T00:00:00Z",
+                                ended="2026-01-01T00:00:05Z", exit_code=0, outputs=[self.root / o for o in outputs], log=None,
+                                consumed=c, validation={"accepted": accepted, "rejections": rejections or []}, result=res, extra=extra)
+            rid = r["receiptId"]
+        self.led.transition(cid, aid, part, status, cause=cause, receipt_id=rid,
+                            detector=detector if ledger_detector == "same" else ledger_detector,
+                            rejections=rejections, extra=ledger_extra, detail=detail)
+
+
+def emit(root: Path, rel: str, doc) -> str:
+    write(root, rel, json.dumps(doc, indent=1))
+    return rel
+
+
+def diff_extra(folder, word, probe, *, new_defect=0, created=1, unmeasured=0, repaired=2) -> dict:
+    block = {"orderEvaluation": {"classification": word, "probes": [probe],
+                                 "diff": {"verdict": "DIFFERENTIAL", "counts": {"repaired": repaired, "reclassified": 1, "unmeasured": unmeasured}},
+                                 "created": {"created": created, "newDefect": new_defect, "attributed": created - new_defect, "unmeasured": 0},
+                                 "note": "kept verbatim"}}
+    if folder:
+        block["sweep"] = {"folder": folder, "job": f"diff-{probe}-x", "outcome": "ran", "reusedFrom": None}
+    return block
+
+
+def sweep_launch(root: Path, inv: str, stem: str, word, probes: dict) -> None:
+    """One launch folder: per probe, the arm and reverse emits, its diff job record and its summary row."""
+    jobs, rows = [], []
+    for probe, spec in probes.items():
+        arm = write(root, f"sweep/{inv}/{probe}/{stem}.json", spec.get("arm", f'{{"Probe": "{probe}", "launch": "{inv}"}}'))
+        rev = write(root, f"sweep/{inv}/{probe}/{stem}.reverse.json", spec.get("reverse", f'{{"Probe": "{probe}", "reverse": true}}'))
+        rec = {"job": f"diff-{probe}-{stem}", "kind": "diff", "outcome": spec.get("outcome", "ran"), "exitCode": spec.get("exit", 0),
+               "emitWritten": spec.get("written", True), "inputs": {"arm": str(arm), "reverse": str(rev), "base": "ignored"}}
+        if not spec.get("no_job"):
+            jobs.append(json.dumps(rec))
+        if not spec.get("no_row"):
+            rows.append({"probe": probe, "diff": spec.get("diff"), "created": spec.get("created")})
+    write(root, f"sweep/{inv}/jobs.jsonl", "\n".join(jobs + ["", "{broken", "[1]", '{"kind": "no job id"}']) + "\n")
+    write(root, f"sweep/{inv}/summary.json", json.dumps({"candidates": {stem: {"classification": word, "rows": rows}}}))
+
+
+def inputs_of(root: Path, inv: str, probe: str, stem: str) -> list:
+    out = []
+    for part, name in (("arm", f"{stem}.json"), ("reverse", f"{stem}.reverse.json")):
+        rel = f"sweep/{inv}/{probe}/{name}"
+        out.append({"part": part, "path": rel, "sha256": sha((root / rel).read_bytes())})
+    return out
+
+
+# ----------------------------------------------------------------------------------- order classification
+
+def classification_cases(tmp: Path) -> dict:
+    root = tmp / "classify"
+    stem = "candidate-01-flip"
+    arm = {"armId": "candidate-01", "candidateFile": stem + ".json"}
+    d1 = {"verdict": "DIFFERENTIAL", "counts": {"repaired": 2, "reclassified": 1, "unmeasured": 0}}
+    c1 = {"created": 1, "newDefect": 0, "attributed": 1, "unmeasured": 0}
+    sweep_launch(root, "inv-0001", stem, "REPAIRS", {"overlapprobe": {"diff": d1, "created": c1}, "contactprobe": {"diff": d1, "created": c1}})
+    sweep_launch(root, "inv-0002", stem, "UNRESOLVED", {
+        "overlapprobe": {"diff": d1, "created": c1}, "contactprobe": {"diff": d1, "created": c1},
+        "navownprobe": {"diff": d1, "created": c1, "exit": 3}, "waterprobe": {"diff": d1, "created": c1, "no_job": True},
+        "seamprobe": {"diff": d1, "created": c1, "no_row": True}, "stateprobe": {"diff": d1, "created": c1, "written": False},
+        "depprobe": {"diff": d1, "created": c1, "outcome": "reused"}})
+    sweep_launch(root, "inv-0003", stem, None, {"overlapprobe": {"diff": d1, "created": c1}})
+    sweep_launch(root, "inv-10000", stem, "LATE", {"overlapprobe": {"diff": d1, "created": c1}})
+    sweep_launch(root, "inv-9999", stem, "EARLY", {"overlapprobe": {"diff": d1, "created": c1}})
+
+    def row(inv, probe, word, *, folder="auto", diff=d1, created=c1, inputs="auto", probes=None):
+        r = {"orderEvaluation": {"classification": word, "probes": probes if probes is not None else [probe], "diff": diff, "created": created}}
+        f = f"sweep/{inv}" if folder == "auto" else folder
+        if f is not None:
+            r["sweep"] = {"folder": f}
+        r["consumed"] = {"inputs": inputs_of(root, inv, probe, stem) if inputs == "auto" else inputs}
+        return r
+
+    cases = [
+        ("no rows", []),
+        ("rows without an order evaluation", [{"result": {}}, {"orderEvaluation": None}, {"orderEvaluation": {}}]),
+        ("older layout, one word", [row("inv-0001", "overlapprobe", "REPAIRS", folder=None), row("inv-0001", "contactprobe", "REPAIRS", folder=None)]),
+        ("older layout, two words (a tie)", [row("inv-0001", "overlapprobe", "REPAIRS", folder=None),
+                                             row("inv-0001", "contactprobe", "UNRESOLVED", folder=None),
+                                             row("inv-0001", "navownprobe", None, folder=None, inputs=[])]),
+        ("a folder that is not a launch folder", [row("inv-0001", "overlapprobe", "A", folder="sweep/old"), row("inv-0001", "contactprobe", "B", folder="sweep")]),
+        ("one launch, confirmed", [row("inv-0001", "overlapprobe", "REPAIRS"), row("inv-0001", "contactprobe", "REPAIRS")]),
+        ("two launches, the newest measured both", [row("inv-0001", "overlapprobe", "REPAIRS"), row("inv-0002", "contactprobe", "UNRESOLVED",
+                                                                                               inputs=inputs_of(root, "inv-0002", "contactprobe", stem)),
+                                                    {"orderEvaluation": {"classification": "REPAIRS", "probes": ["overlapprobe"], "diff": d1, "created": c1},
+                                                     "sweep": {"folder": "sweep/inv-0001"},
+                                                     "consumed": {"inputs": inputs_of(root, "inv-0002", "overlapprobe", stem)}}]),
+        ("the newest launch's emit differs", [row("inv-0001", "overlapprobe", "REPAIRS"),
+                                              {"orderEvaluation": {"classification": "UNRESOLVED", "probes": ["contactprobe"], "diff": d1, "created": c1},
+                                               "sweep": {"folder": "sweep/inv-0002"},
+                                               "consumed": {"inputs": [{"part": "arm", "sha256": "0" * 64}, {"part": "reverse", "sha256": "1" * 64}]}}]),
+        ("exit, no job, no row, not written, reused", [row("inv-0002", p, "UNRESOLVED") for p in
+                                                       ("navownprobe", "waterprobe", "seamprobe", "stateprobe", "depprobe", "overlapprobe")]),
+        ("rows differ", [row("inv-0002", "overlapprobe", "UNRESOLVED", diff={"verdict": "OTHER"}),
+                         row("inv-0002", "contactprobe", "UNRESOLVED", created={"created": 9})]),
+        ("no classification in the summary", [row("inv-0003", "overlapprobe", "X")]),
+        ("numeric launch order", [row("inv-9999", "overlapprobe", "EARLY"), row("inv-10000", "overlapprobe", "LATE")]),
+        ("equal numbers compare as numbers", [row("inv-0001", "overlapprobe", "REPAIRS", diff={"verdict": "DIFFERENTIAL", "counts": {"repaired": 2.0, "reclassified": True, "unmeasured": 0}})]),
+        ("a launch folder that is gone", [row("inv-0001", "overlapprobe", "REPAIRS", folder="sweep/inv-0777")]),
+        ("no probes listed", [row("inv-0001", "overlapprobe", "REPAIRS", probes=[])]),
+    ]
+    out = []
+    for name, rows in cases:
+        out.append({"name": name, "rows": mask(rows, root), "want": mask(E.order_classification(root, arm, copy.deepcopy(rows)), root)})
+    jobs = [{"folder": inv, "want": [[k, v] for k, v in mask(E.read_sweep_jobs(root / "sweep" / inv), root).items()]}
+            for inv in ("inv-0002", "inv-none")]
+    folders = [{"name": n, "want": bool(E.SWEEP_FOLDER_RE.match(n))} for n in
+               ("inv-0001", "inv-001", "inv-00001", "INV-0001", "inv-0001 ", "xinv-0001", "inv-12a4", "inv-١٢٣٤")]
+    return {"tree": tree(root, masked=("jobs.jsonl",)), "arm": arm, "cases": out, "jobs": jobs, "folders": folders}
+
+
+# ------------------------------------------------------------------------------------ the rich run folder
+
+def rich_checks() -> list:
+    return [
+        check_row("l.masters", "scopeprobe", exe="scopeprobe", family="loadability"),
+        check_row("g.overlap", "ordersweep-probe", exe="overlapprobe", prerequisites=["l.masters"],
+                  arms=("baseline", "candidate-01", "supplied-01")),
+        check_row("g.contact", "ordersweep-probe", exe="contactprobe", prerequisites=["l.masters"]),
+        check_row("g.deps", "probe-json", exe="depprobe", result={"kind": "catalogue"}),
+        check_row("p.discovery", "patchprobe", exe="patchprobe", family="patch", arms=("baseline",), result={"kind": "discovery"}),
+        check_row("p.advice", "adviceprobe", exe="adviceprobe", family="patch", arms=("candidate-01",), required=False),
+        check_row("p.qualification", "derived", family="patch", arms=("baseline",), required=False),
+        check_row("p.order", "derived", family="patch"),
+        check_row("r.contested", "mcp-only", family="records"),
+        check_row("e.regen", "manual", family="environment", manualDecisionAllowed=True,
+                  evidence={"regeneration": "regenerate LOD after the order changes"}),
+        check_row("g.terrain", "unsupported", family="terrain", required=False),
+        check_row("rt.media", "media", family="runtime", required=False, arms=("baseline",)),
+        check_row("rt.live", "live-import", family="runtime", required=False, status="not-opted-in", applicability="unknown"),
+        check_row("s.state", "probe-emit", exe="stateprobe", family="state"),
+        check_row("u.unknown", "probe-json", exe="depprobe", applicability="unknown", applicabilityEvidence="the scope could not say", required=False),
+        check_row("n.na", "probe-json", exe="depprobe", applicability="no", required=True),
+        check_row("z.pending", "probe-json", exe="depprobe"),
+    ]
+
+
+def build_rich(root: Path, **plan_over) -> Builder:
+    """A run folder holding one of nearly everything a disposition reports."""
+    stem = "candidate-01-flip"
+    arms = None
+    plan = run_plan(root, rich_checks(), arms=arms, **plan_over)
+    plan["arms"].append({"armId": "supplied-01", "kind": "supplied-combination", "candidateFile": "candidate-02-supplied.json",
+                         "loadedInGameNote": "the supplied plugin is an ESP only", "payload": {"espOnly": True, "note": "its assets were not installed"},
+                         "plugins": ["Skyrim.esm", "A.esp", "B.esp", "Target.esp", "Patch.esp"],
+                         "supplied": {"declaredFiles": ["mods/P/Patch.esp", "Target.esp"]},
+                         "candidatePath": str(root / "candidates" / "candidate-02-supplied.json")})
+    plan["states"] = {"selected": ["baseline", "deep"], "depth": "deep", "notExplored": [{"state": "named", "why": "not selected"}],
+                      "fromCensus": {"checks": ["s.state"], "sha256": "s" * 64}}
+    plan["budgets"]["candidatesHeldBack"] = [{"file": "candidate-09.json", "why": "max candidates"}]
+    plan["explicitDecisions"] = {"select": ["g.overlap", "l.masters"], "exclude": {"g.terrain": "it's unsupported"}, "note": "narrowed"}
+    b = Builder(root, plan)
+    d1 = {"verdict": "DIFFERENTIAL", "counts": {"repaired": 2, "reclassified": 1, "unmeasured": 0}}
+    c1 = {"created": 1, "newDefect": 0, "attributed": 1, "unmeasured": 0}
+    c2 = {"created": 3, "newDefect": 2, "attributed": 1, "unmeasured": 4}
+    sweep_launch(root, "inv-0001", stem, "REPAIRS", {"overlapprobe": {"diff": d1, "created": c1}, "contactprobe": {"diff": d1, "created": c1}})
+    sweep_launch(root, "inv-0002", "candidate-02-supplied", "REGRESSES", {"overlapprobe": {"diff": d1, "created": c2}})
+
+    for aid in ("baseline", "candidate-01"):
+        out = emit(root, f"outputs/l.masters/{aid}.json", {"complete": True, "arm": aid})
+        b.settle("l.masters", aid, None, "completed", detector="no-finding", outputs=[out],
+                 result={"findings": 0, "coverage": [{"Population": "plugins", "Judged": 4, "Unjudgeable": {}}]})
+    # the swept checks: baseline arm, then the candidate's arm, reverse and diff
+    for cid, probe in (("g.overlap", "overlapprobe"), ("g.contact", "contactprobe")):
+        base = emit(root, f"sweep/inv-0001/{probe}/baseline.json", {"Probe": probe, "Conflicts": [
+            {"A": "Target.esp", "B": "Other.esp"}, {"A": "third.esp", "B": "TARGET.ESP"}, {"A": "Target.esp", "B": "target.esp"}, {"A": "X.esp", "B": "Y.esp"}]})
+        b.settle(cid, "baseline", "arm", "completed", detector="finding", outputs=[base],
+                 result={"findings": 3, "verdict": "CONFLICTS", "coverage": [{"Population": "refs", "Judged": 10, "Unjudgeable": {"no-mesh": 2, "other": 0}}]})
+        ins = inputs_of(root, "inv-0001", probe, stem)
+        base_sha = sha((root / base).read_bytes())
+        b.settle(cid, "candidate-01", "arm", "completed", detector="finding", outputs=[ins[0]["path"]],
+                 consumed={"baseEmitPath": base, "baseEmitSha256": base_sha}, result={"findings": 1, "verdict": "CONFLICTS", "strength": None})
+        b.settle(cid, "candidate-01", "reverse", "completed", detector="no-finding", outputs=[ins[1]["path"]],
+                 consumed={"baseEmitPath": base, "baseEmitSha256": base_sha},
+                 result={"findings": 0, "coverage": [{"population": "refs", "judged": 0, "unjudgeable": {"skipped": "3"}}, {"Population": "x", "Judged": 1}]})
+        log = write(root, f"sweep/inv-0001/logs/diff-{probe}-{stem}.txt", f"$ conflictdiff\n(exit 0, 0.1s)\n\nDIFFERENTIAL {probe}\n")
+        b.settle(cid, "candidate-01", "diff", "completed", detector="finding" if probe == "overlapprobe" else "no-finding",
+                 outputs=[log.relative_to(root).as_posix()], consumed={"inputs": ins},
+                 result={"findings": 1, "verdict": "DIFFERENTIAL", "strength": "differential"},
+                 extra=diff_extra("sweep/inv-0001", "REPAIRS", probe))
+    sins = inputs_of(root, "inv-0002", "overlapprobe", "candidate-02-supplied")
+    b.settle("g.overlap", "supplied-01", "arm", "completed", detector="no-finding", outputs=[sins[0]["path"]], result={"findings": 0})
+    b.settle("g.overlap", "supplied-01", "reverse", "completed", detector="no-finding", outputs=[sins[1]["path"]], result={"findings": 0})
+    b.settle("g.overlap", "supplied-01", "diff", "completed", detector="finding", consumed={"inputs": sins},
+             result={"findings": 2, "verdict": "DIFFERENTIAL-REGRESSION"},
+             extra=diff_extra("sweep/inv-0002", "REGRESSES", "overlapprobe", new_defect=2, created=3, unmeasured=4))
+    # catalogues
+    for aid in ("baseline", "candidate-01"):
+        out = emit(root, f"outputs/g.deps/{aid}.json", {"rows": [1, 2, 3]})
+        b.settle("g.deps", aid, None, "completed" if aid == "baseline" else "reused", detector="catalogue", outputs=[out],
+                 result={"coverage": [{"Population": "dependencies", "Judged": 3}]} if aid == "baseline" else {"findings": 5, "coverage": []},
+                 ledger_extra={"reusedFromRunId": "evalrun-checks-0"} if aid != "baseline" else None)
+    hits = emit(root, "outputs/p.discovery/baseline.json", {"schema": 1, "hits": [
+        {"file": "A-B patch.esp", "masters": ["a.ESP", "B.esp"]}, {"file": "Unrelated.esp", "masters": ["Skyrim.esm"]},
+        {"file": "Fomod option", "detail": {"conditions": ["target.esp"]}}, {"file": "Pair hit", "detail": {"pair": ["PATCH.esp", "Other.esp"]}},
+        {"file": "", "masters": ["Target.esp"]}, "not a hit", {"file": "Other-only.esp", "masters": ["Other.esp"]}]})
+    b.settle("p.discovery", "baseline", None, "completed", detector="catalogue", outputs=[hits], result={"findings": 6, "coverage": [{"Judged": 6}]})
+    report = emit(root, "outputs/p.advice/report-1234.json", {"rules": [{"r": 1}, {"r": 2}], "clashes": [
+        {"namedModId": 77, "namedModName": "Other Mod", "pageModId": 1234, "page": "description", "readDate": "2026-10-01", "line": "conflicts with Other Mod",
+         "symptom": None, "extra": "dropped"}, "not a clash", {"namedModId": 78}]})
+    b.settle("p.advice", "candidate-01", None, "completed", detector="catalogue", outputs=[report],
+             consumed={"configuration": {"source": "catalogue-snapshot:2026-10-01"}}, result={"findings": 2})
+    b.settle("p.qualification", "baseline", None, "completed", detector="catalogue", result={"findings": 1, "coverage": [{"Population": "candidates", "Judged": 1}]},
+             extra={"derived": {"candidates": [{"file": "A-B patch.esp", "qualified": False}], "notSearched": ["a pool nobody configured"],
+                                "notRelevant": {"count": 2, "why": "names no target"}}, "derivedFrom": []})
+    # the derived order evaluation: follows the diffs it consumed
+    diffs = [E.load_json(root / "receipts" / f"{c}__candidate-01__diff.json")["receiptId"] for c in ("g.overlap", "g.contact")]
+    b.settle("p.order", "candidate-01", None, "completed", detector="no-finding", result={"findings": 0}, extra={"derivedFrom": diffs},
+             ledger_extra={"derivedFrom": diffs})
+    b.settle("p.order", "baseline", None, "not-applicable", detail="the baseline has no order evaluation of itself")
+    # imports: fresh on the baseline, reused on the candidate with the identity limit rule (f) writes
+    for aid, imp, limits in (
+            ("baseline", {"origin": "fresh", "capturedUtc": "2026-01-02T00:00:00Z"}, []),
+            ("candidate-01", {"origin": "reused", "capturedUtc": "2026-01-02T00:00:01Z", "reusedFromVerified": 1, "reusedWithin": "this-evaluation",
+                              "reusedFrom": {"planId": "plan00000001", "armId": "baseline", "resultSha256": "d" * 64}},
+             [{"plugin": "x"}, {"armCandidate": "candidate-01-flip.json", "capturedAgainst": "candidate-00-baseline.json"}])):
+        res = write(root, f"imports/r.contested__{aid}/result.json", json.dumps({"schemaVersion": 1, "arm": aid}))
+        b.settle("r.contested", aid, None, "completed", detector="no-finding", outputs=[res.relative_to(root).as_posix()],
+                 result={"findings": 0, "coverage": [{"Population": "records", "Judged": 9}]},
+                 extra={"imported": imp, "validation": {"accepted": True, "rejections": [], "identityLimits": limits}},
+                 ledger_extra={"imported": True, "importOrigin": imp["origin"]})
+    for aid in ("baseline", "candidate-01"):
+        b.settle("e.regen", aid, None, "manual", detail="a person decides this one")
+        b.settle("g.terrain", aid, None, "unsupported")
+    b.settle("rt.media", "baseline", None, "blocked(no-identified-media)", cause=None)
+    # deep states: the generated not-explored rows, one arm's check not applicable, the other with unjudged rows
+    write(root, "outputs/s.state/baseline.states.json", json.dumps({"states": [], "notExplored": [{"switch": "0001:A.esp", "why": "no flip"}]}))
+    write(root, "outputs/s.state/candidate-01.states.json", json.dumps({"states": ["s1"], "notExplored": [
+        {"switch": "0002:B.esp", "why": "budget", "armId": "overridden"}]}))
+    b.settle("s.state", "baseline", None, "not-applicable(no switch)", detail="the census found no switch")
+    out = emit(root, "outputs/s.state/candidate-01.json", {"Probe": "stateprobe"})
+    b.settle("s.state", "candidate-01", None, "completed", detector=None, outputs=[out],
+             result={"detectorUndetermined": True, "coverage": [{"Population": "state rows", "Judged": 2, "Unjudgeable": {"primitive": 5}}]})
+    for aid in ("baseline", "candidate-01"):
+        out = emit(root, f"outputs/u.unknown/{aid}.json", {"rows": []})
+        b.settle("u.unknown", aid, None, "completed", detector="no-finding", outputs=[out], result={"findings": 0})
+    b.settle("n.na", "baseline", None, "not-applicable")
+    b.settle("n.na", "candidate-01", None, "rejected(exit-nonzero)", cause="exit-nonzero", accepted=False,
+             rejections=[{"cause": "exit-nonzero", "detail": "exit 3"}])
+    # decisions: one accepted, the refused kinds, one unreadable file
+    note = write(root, "decisions/evidence/regen-note.txt", "LOD regenerated on 2026-01-03\n")
+    ok = {"checkId": "e.regen", "armId": "baseline", "decidedBy": "Reviewer", "decidedUtc": "2026-01-03T00:00:00Z",
+          "decision": "completed-no-finding", "note": "regenerated", "evidence": ["decisions/evidence/regen-note.txt"]}
+    for name, doc in (("01-accepted.json", ok), ("02-no-check.json", dict(ok, checkId="no.such")),
+                      ("03-not-allowed.json", dict(ok, checkId="g.deps")), ("04-bad-word.json", dict(ok, decision="fine")),
+                      ("05-no-author.json", dict(ok, decidedBy="")), ("06-no-evidence.json", dict(ok, armId="candidate-01", evidence=["gone.txt", "also-gone.txt"])),
+                      ("07-mcp-only.json", dict(ok, checkId="r.contested")), ("08-null-id.json", dict(ok, checkId=None)),
+                      ("09-no-evidence-key.json", {k: v for k, v in ok.items() if k != "evidence"} | {"armId": "candidate-01", "decision": "not-applicable"})):
+        write(root, "decisions/" + name, json.dumps(doc))
+    b.led.open_invocation("resume", "evalrun-checks-2", "evalpipeline-1", budget_minutes=30)
+    b.led.open_invocation("resume", "evalrun-checks-3", None, budget_minutes=12.5)
+    return b
+
+
+def judge(root: Path) -> dict:
+    """What finalize derives from a run folder: integrity, the bad keys, the disposition's bytes and STATUS.md."""
+    plan = E.load_json(root / "plan.json")
+    with fake_clock():
+        ledger = E.Ledger(root, plan)
+        receipts = E.read_receipts(root)
+        integrity, bad = E.evidence_integrity(root, plan, ledger, receipts)
+        disp = E.build_disposition(root, plan, ledger, receipts, integrity=integrity, bad_keys=bad)
+        status = E.status_md(plan, disp)
+    return {"integrity": json.dumps(integrity, indent=1, ensure_ascii=False), "bad": [[k, v] for k, v in bad.items()],
+            "disposition": json.dumps(disp, indent=1, ensure_ascii=False), "status": status}
+
+
+def packed(d: dict, *keys) -> dict:
+    return {k: (pack(v) if k in keys else v) for k, v in d.items()}
+
+
+def json_diff(old, new, path: list, edits: list) -> None:
+    """The set, pop and append steps that turn old into new, a new key landing last as dict.update puts it."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        for k in old:
+            if k not in new:
+                edits.append(["pop", path + [k]])
+        for k in new:
+            if k not in old:
+                edits.append(["set", path + [k], new[k]])
+            else:
+                json_diff(old[k], new[k], path + [k], edits)
+    elif isinstance(old, list) and isinstance(new, list) and len(new) >= len(old):
+        for i, (a, b) in enumerate(zip(old, new)):
+            json_diff(a, b, path + [i], edits)
+        for x in new[len(old):]:
+            edits.append(["append", path, x])
+    elif type(old) is not type(new) or old != new:
+        edits.append(["set", path, new])
+
+
+def json_apply(doc, edits: list) -> None:
+    for kind, path, *value in edits:
+        at = doc
+        for step in path[:-1] if kind != "append" else path:
+            at = at[step]
+        if kind == "append":
+            at.append(copy.deepcopy(value[0]))
+        elif kind == "pop":
+            del at[path[-1]]
+        else:
+            at[path[-1]] = copy.deepcopy(value[0])
+
+
+class Variant:
+    """A copy of a base folder with recorded changes, so the C# side can make the same ones."""
+
+    def __init__(self, tmp: Path, base: Path, name: str):
+        self.root = tmp / "variants" / re.sub(r"[^A-Za-z0-9]+", "-", name) / "b"
+        shutil.copytree(base, self.root)
+        self.base, self.ops = base, []
+        # the copy's plan and sweep job records name the copy's own files, as the folder rebuilt in C# does
+        was, now = (str(r).replace("\\", "\\\\") for r in (base, self.root))
+        for p in self.root.rglob("*"):
+            if p.name in ("plan.json", "jobs.jsonl") and was in p.read_bytes().decode("utf-8"):
+                p.write_bytes(p.read_bytes().decode("utf-8").replace(was, now).encode("utf-8"))
+                if p.name == "plan.json":
+                    write(self.root, "plan.sha256", sha(p.read_bytes()) + "\n")
+
+    def delete(self, rel):
+        (self.root / rel).unlink()
+        self.ops.append({"op": "delete", "path": rel})
+
+    def rmtree(self, rel):
+        shutil.rmtree(self.root / rel)
+        self.ops.append({"op": "rmtree", "path": rel})
+
+    def put(self, rel, text):
+        write(self.root, rel, text)
+        self.ops.append({"op": "write", "path": rel, "text": pack(mask(mask(text, self.root), self.base))})
+
+    def edit(self, rel, fn):
+        """Change a JSON file; recorded as the edits that make the same change, not as the whole new file."""
+        old = json.loads((self.root / rel).read_text(encoding="utf-8"))
+        new = copy.deepcopy(old)
+        fn(new)
+        edits = []
+        json_diff(old, new, [], edits)
+        again = copy.deepcopy(old)
+        json_apply(again, edits)
+        assert jtext(again) == jtext(new), f"the recorded edits of {rel} do not rebuild it"
+        write(self.root, rel, jtext(new))
+        self.ops.append({"op": "json", "path": rel, "edits": mask(mask(edits, self.root), self.base)})
+        if rel == "plan.json":
+            self.resha()
+
+    def resha(self):
+        write(self.root, "plan.sha256", sha((self.root / "plan.json").read_bytes()) + "\n")
+        self.ops.append({"op": "planSha"})
+
+
+def run_tree(root: Path) -> list:
+    """A run folder's tree: plan.json and the sweep job records as text with the root masked, plan.sha256 recomputed."""
+    rows = [r for r in tree(root, masked=("plan.json", "jobs.jsonl")) if r["path"] != "plan.sha256"]
+    return rows + [{"path": "plan.sha256", "planSha": True}]
+
+
+def disposition_cases(tmp: Path) -> dict:
+    bases, cases = {}, []
+
+    def base(name, build):
+        root = tmp / "bases" / name
+        root.mkdir(parents=True)
+        with fake_clock():
+            build(root)
+        bases[name] = (root, run_tree(root))
+        return root
+
+    def case(name, base_name, change=None):
+        v = Variant(tmp, bases[base_name][0], name)
+        if change:
+            change(v)
+        # masked through the BASE root too: a variant is a copy, and its plan still names the base folder's premises
+        cases.append({"name": name, "base": base_name, "ops": v.ops,
+                      **packed(mask(mask(judge(v.root), v.root), bases[base_name][0]), "integrity", "disposition", "status")})
+
+    def simple(root, findings):
+        b = Builder(root, run_plan(root, [check_row("l.masters", "scopeprobe", exe="scopeprobe", family="loadability"),
+                                          check_row("g.deps", "probe-json", exe="depprobe")]))
+        for cid in ("l.masters", "g.deps"):
+            for aid in ("baseline", "candidate-01"):
+                out = emit(root, f"outputs/{cid}/{aid}.json", {"ok": True})
+                found = findings and cid == "g.deps" and aid == "candidate-01"
+                b.settle(cid, aid, None, "completed", detector="finding" if found else "no-finding", outputs=[out],
+                         result={"findings": 4 if found else 0, "verdict": "DEFECTS" if found else None, "coverage": [{"Population": "p", "Judged": 1}]})
+
+    base("complete", lambda r: simple(r, False))
+    base("findings", lambda r: simple(r, True))
+    base("rich", build_rich)
+    base("legacy", lambda r: build_rich(r, toolIdentity=None, reviewArm="baseline"))
+
+    case("complete, no findings", "complete")
+    case("complete, with findings", "findings")
+    case("rich", "rich")
+    case("legacy plan with a review arm", "legacy")
+
+    # missing required rows, each cause
+    def causes(v):
+        def ledger(doc):
+            e = doc["entries"]
+            e["l.masters__baseline"].update(status="rejected(exit-nonzero)", cause="exit-nonzero", detector=None)
+            e["l.masters__candidate-01"].update(status="skipped-budget", cause="budget-exhausted", detector=None)
+            e["g.deps__baseline"].update(detector=None)
+            e["g.deps__candidate-01"].update(status="failed", cause=None)
+        v.edit("ledger.json", ledger)
+    case("missing rows: rejected, skipped, undetermined, failed", "complete", causes)
+
+    def more_causes(v):
+        def ledger(doc):
+            e = doc["entries"]
+            e["l.masters__baseline"].update(status="blocked(prerequisite:x.y)", cause="blocked-prerequisite")
+            e["l.masters__candidate-01"].update(status="interrupted", cause="the process did not write a terminal transition")
+            del e["g.deps__baseline"]
+            e["g.deps__candidate-01"].update(status=None, cause="")
+        v.edit("ledger.json", ledger)
+    case("missing rows: blocked, interrupted, pending, no status", "complete", more_causes)
+
+    def unknown(v):
+        def plan(doc):
+            doc["checks"][1].update(applicability="unknown", applicabilityEvidence=None)
+            doc["checks"][0].update(applicability="unknown", applicabilityEvidence="the scope is incomplete", required=False)
+        v.edit("plan.json", plan)
+    case("unknown applicability", "complete", unknown)
+
+    def decided(v):
+        def plan(doc):
+            doc["checks"][1]["manualDecisionAllowed"] = True
+        v.edit("plan.json", plan)
+        v.edit("ledger.json", lambda doc: doc["entries"]["g.deps__candidate-01"].update(status="rejected(refused)", cause="refused", detector=None))
+        v.put("decisions/a.json", json.dumps({"checkId": "g.deps", "armId": "candidate-01", "decidedBy": "P", "decidedUtc": "t",
+                                              "decision": "completed-with-finding", "note": None, "evidence": []}))
+    case("an accepted manual decision completes a row", "complete", decided)
+
+    def budgets_only(v):
+        v.edit("ledger.json", lambda doc: doc["runIds"].append({"runId": "r9", "parentRunId": None, "command": "resume", "startedUtc": "t", "budgetMinutes": 0}))
+        v.edit("plan.json", lambda doc: doc["budgets"].pop("minutes"))
+    case("a zero budget in force and no plan minutes", "findings", budgets_only)
+
+    # evidence integrity, each defect kind
+    def integrity_case(name, change):
+        case("integrity: " + name, "rich", change)
+
+    integrity_case("a receipt that cannot be read", lambda v: v.put("receipts/l.masters__baseline.json", "{oops"))
+    integrity_case("a receipt with another id", lambda v: v.edit("receipts/l.masters__baseline.json", lambda d: d.update(receiptId="another")))
+    integrity_case("a receipt not accepted", lambda v: v.edit("receipts/g.deps__baseline.json", lambda d: d["validation"].update(accepted=False)))
+    integrity_case("an emitter with no digest", lambda v: v.edit("receipts/g.deps__baseline.json", lambda d: d["consumed"]["programs"]["emitter"].pop("digest")))
+    integrity_case("a controller of another build", lambda v: v.edit("receipts/g.deps__baseline.json",
+                                                                    lambda d: d["consumed"]["programs"]["controller"].update(digest="scripts:" + "e" * 64)))
+    integrity_case("an output that is gone", lambda v: v.delete("outputs/g.deps/baseline.json"))
+    integrity_case("an output with no recorded hash", lambda v: v.edit("receipts/g.deps__baseline.json", lambda d: d["outputs"][0].update(sha256=None)))
+    integrity_case("an output that changed", lambda v: v.put("outputs/l.masters/baseline.json", "changed"))
+    integrity_case("a baseline emit that changed spreads", lambda v: v.put("sweep/inv-0001/overlapprobe/baseline.json", "changed"))
+    integrity_case("a reverse emit that is gone", lambda v: v.delete("sweep/inv-0001/contactprobe/candidate-01-flip.reverse.json"))
+    integrity_case("a comparison input with another hash", lambda v: v.edit("receipts/g.overlap__supplied-01__diff.json",
+                                                                           lambda d: d["consumed"]["inputs"][1].update(sha256="0" * 64, part=None)))
+    integrity_case("an import result that changed", lambda v: v.put("imports/r.contested__candidate-01/result.json", "{}"))
+    integrity_case("a discovery hit list that is not a list", lambda v: (
+        v.put("outputs/p.discovery/baseline.json", '{"hits": {}}'),
+        v.edit("receipts/p.discovery__baseline.json", lambda d: d["outputs"][0].update(
+            sha256=sha(b'{"hits": {}}')))))
+    integrity_case("an advice report that cannot be read", lambda v: (
+        v.put("outputs/p.advice/report-1234.json", "[]"),
+        v.edit("receipts/p.advice__candidate-01.json", lambda d: d["outputs"][0].update(sha256=sha(b"[]")))))
+    def imports(v):
+        v.edit("receipts/r.contested__baseline.json", lambda d: d["imported"].update(origin="older"))
+        def reused(d):
+            d["imported"].pop("reusedWithin")
+            d["imported"]["reusedFrom"] = None
+            d["validation"]["identityLimits"] = [{"armCandidate": "candidate-01-flip.json", "capturedAgainst": None}]
+        v.edit("receipts/r.contested__candidate-01.json", reused)
+    case("imports: an unknown origin and an unstated reuse", "rich", imports)
+    case("imports: reuse from another evaluation, no limit", "rich", lambda v: v.edit(
+        "receipts/r.contested__candidate-01.json",
+        lambda d: (d["imported"].update(reusedWithin="another-evaluation", reusedFromVerified=0), d["validation"].update(identityLimits=None))))
+    return {"bases": {k: t for k, (_, t) in bases.items()}, "cases": cases}
+
+
+# ------------------------------------------------------------------------------------- the finalize command
+
+def finalize_cases(tmp: Path, bases: dict) -> list:
+    out = []
+
+    def case(name, base_name, change=None):
+        v = Variant(tmp, tmp / "bases" / base_name, "cmd " + name)
+        if change:
+            change(v)
+        for n in ("disposition.json", "STATUS.md"):
+            (v.root / n).unlink(missing_ok=True)
+        with fake_clock(), captured() as (o, e), cwd(v.root):
+            code = E.cmd_finalize(SimpleNamespace(run=str(v.root)))
+        files = {n: (pack(mask((v.root / n).read_bytes().decode("utf-8"), v.root)) if (v.root / n).exists() else None)
+                 for n in ("disposition.json", "STATUS.md")}
+        out.append({"name": name, "base": base_name, "ops": v.ops, "exit": code, "stdout": mask(o.getvalue(), v.root),
+                    "stderr": mask(e.getvalue(), v.root), "files": files})
+
+    case("complete", "complete")
+    case("findings", "findings")
+    case("rich", "rich")
+    case("integrity refused, one entry", "rich", lambda v: v.put("outputs/l.masters/baseline.json", "changed"))
+    case("integrity refused, many entries", "rich", lambda v: v.put("sweep/inv-0001/overlapprobe/baseline.json", "changed"))
+    case("no plan", "complete", lambda v: v.delete("plan.json"))
+    case("no plan hash", "complete", lambda v: v.delete("plan.sha256"))
+    case("plan changed", "complete", lambda v: v.put("plan.json", "{}"))
+    case("plan schema 1", "complete", lambda v: v.edit("plan.json", lambda d: d.update(schemaVersion=1)))
+    case("ledger gone", "complete", lambda v: v.delete("ledger.json"))
+    case("ledger of another plan", "complete", lambda v: v.edit("ledger.json", lambda d: d.update(planId="other")))
+    case("registry changed", "complete", lambda v: v.put("premises/registry.json", "changed"))
+    case("registry gone", "complete", lambda v: v.delete("premises/registry.json"))
+    case("scope changed", "complete", lambda v: v.put("premises/scope.json", "changed"))
+    case("scope gone", "complete", lambda v: v.delete("premises/scope.json"))
+    case("a relative registry path", "complete", lambda v: v.edit("plan.json", lambda d: d["registry"].update(path="nowhere/registry.json")))
+    case("a settled entry's receipt is gone", "complete", lambda v: v.delete("receipts/g.deps__baseline.json"))
+    case("a rejected entry's receipt is gone", "rich", lambda v: v.delete("receipts/n.na__candidate-01.json"))
+    case("a running entry needs no receipt", "complete", lambda v: (
+        v.edit("ledger.json", lambda d: d["entries"]["g.deps__baseline"].update(status="running")), v.delete("receipts/g.deps__baseline.json")))
+    case("a receipt of another plan", "complete", lambda v: v.edit("receipts/g.deps__baseline.json", lambda d: d.update(planId="foreign")))
+    case("no journal and no receipts folder", "complete", lambda v: (
+        v.delete("journal.jsonl"), v.rmtree("receipts"), v.edit("ledger.json", lambda d: d.update(entries={}))))
+    return out
+
+
+# -------------------------------------------------------------------------------------------- verify-bundle
+
+def make_bundle(run: Path, out: Path) -> None:
+    """A bundle laid out as evalrun's bundle verb lays one out, from a finalized synthetic run folder: control files,
+    receipts, decisions, receipt outputs and inputs under evidence/, the premise copies and a manifest."""
+    plan = E.load_json(run / "plan.json")
+    evidence, required = [], []
+
+    def copy_in(src: Path, rel: str, kind: str, recorded=None, **more):
+        if any(r["path"] == rel for r in evidence) or not src.is_file():
+            return
+        dst = out / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        evidence.append({"id": E.sha256_text(rel)[:16], "kind": kind, "path": rel, "sha256": recorded or E.sha256_file(src),
+                         "bytes": dst.stat().st_size, **more})
+
+    stage = out.parent / (out.name + "-stage")
+    neutral = (run / "plan.json").read_bytes().decode("utf-8").replace(str(run).replace("\\", "\\\\"), "C:/fixture-run")
+    write(stage, "plan.json", neutral)
+    write(stage, "plan.sha256", sha(neutral.encode("utf-8")) + "\n")
+    for name in E.CONTROL_FILES:
+        copy_in((stage if name.startswith("plan.") else run) / name, name, "control")
+        required.append(name)
+    for sub in ("receipts", "decisions"):
+        for p in sorted((run / sub).glob("**/*")):
+            copy_in(p, f"{sub}/{p.relative_to(run / sub).as_posix()}", sub.rstrip("s"))
+    ledger = E.load_json(run / "ledger.json")
+    for k, rec in E.read_receipts(run).items():
+        ok = (ledger["entries"].get(k) or {}).get("status") in E.TERMINAL_OK
+        for o in rec.get("outputs") or []:
+            copy_in(run / o["path"], E.receipt_evidence_rel(o["path"]), "emit", recorded=o.get("sha256"), checkId=rec["checkId"], armId=rec["armId"])
+            if ok:
+                required.append(E.receipt_evidence_rel(o["path"]))
+        c = rec.get("consumed") or {}
+        for path in [c.get("baseEmitPath")] + [x.get("path") for x in c.get("inputs") or []]:
+            if path:
+                copy_in(run / path, E.receipt_evidence_rel(path), "emit")
+        if ok:
+            required.append(f"receipts/{k}.json")
+    for d in E.load_decisions(run, plan):
+        for row in d.get("evidence") or []:
+            if d.get("accepted"):
+                copy_in(run / row["path"], f"evidence/{row['path']}", "decision-evidence")
+    copy_in(Path(plan["registry"]["path"]), "registry/check-registry.json", "registry")
+    copy_in(Path(plan["scope"]["path"]), "scope/scope.json", "scope")
+    required += ["registry/check-registry.json", "scope/scope.json"]
+    manifest = {"bundleSchema": 2, "planId": plan["planId"], "createdUtc": "2026-01-05T00:00:00Z", "runIds": ledger["runIds"],
+                "required": required, "evidence": evidence, "plan": "plan.json", "ledger": "ledger.json", "journal": "journal.jsonl",
+                "disposition": "disposition.json", "status": "STATUS.md", "registry": "registry/check-registry.json",
+                "search": None, "searchAbsent": "the plan records no candidate search", "scope": "scope/scope.json",
+                "enrichmentStatus": {"names": {"status": "skipped", "sentence": "names were not asked for"}}}
+    write(out, "manifest.json", jtext(manifest))
+
+
+def add_enrichment(v: "Variant", rel: str, doc, **row) -> None:
+    """One enrichment file and its manifest row."""
+    text = doc if isinstance(doc, str) else json.dumps(doc, indent=1)
+    v.put(rel, text)
+    v.edit("manifest.json", lambda m: m["evidence"].append(
+        {"id": E.sha256_text(rel)[:16], "kind": "enrichment", "path": rel, "sha256": sha(text.encode("utf-8")), "bytes": len(text.encode("utf-8")), **row}))
+
+
+def verify_cases(tmp: Path) -> dict:
+    run = tmp / "bundle-run"
+    with fake_clock():
+        build_rich(run, search={"path": None, "sha256": None, "absent": "no search"})
+        with captured():
+            code = E.cmd_finalize(SimpleNamespace(run=str(run)))
+    assert code == 0, code
+    base = tmp / "bundle-base"
+    make_bundle(run, base)
+    cases = []
+
+    def case(name, change=None, out_file=False):
+        v = Variant(tmp, base, "verify " + name)
+        if change:
+            change(v)
+        target = v.root.parent / "verify-out.json"
+        with fake_clock(), captured() as (o, e):
+            code = E.cmd_verify_bundle(SimpleNamespace(dir=str(v.root), out=str(target) if out_file else None))
+        where = target if out_file else v.root / "verify.json"
+        cases.append({"name": name, "ops": v.ops, "out": out_file, "exit": code, "stdout": mask(o.getvalue(), v.root),
+                      "stderr": mask(e.getvalue(), v.root), "verify": pack(mask(where.read_bytes().decode("utf-8"), v.root)),
+                      "wroteInside": (v.root / "verify.json").exists()})
+
+    def manifest(fn):
+        return lambda v: v.edit("manifest.json", fn)
+
+    def drop_row(m, path):
+        m["evidence"] = [r for r in m["evidence"] if r["path"] != path]
+
+    case("intact")
+    case("intact, with --out", out_file=True)
+    case("no manifest", lambda v: v.delete("manifest.json"))
+    case("manifest not json", lambda v: v.put("manifest.json", "[1]"))
+    case("schema 1", manifest(lambda m: m.update(bundleSchema=1)))
+    case("schema absent and keys missing", manifest(lambda m: [m.pop(k) for k in ("bundleSchema", "journal", "status")]))
+    case("manifest keys missing", manifest(lambda m: [m.pop(k) for k in ("required", "registry")]))
+    case("a required file deleted", lambda v: v.delete("STATUS.md"))
+    case("an evidence byte changed", lambda v: v.put("evidence/outputs/l.masters/baseline.json", "changed"))
+    case("an unreferenced evidence file deleted", lambda v: v.delete("decisions/02-no-check.json"))
+    case("plan changed", lambda v: v.put("plan.json", jtext(dict(E.load_json(base / "plan.json"), note="edited"))))
+    case("plan hash file gone", lambda v: v.delete("plan.sha256"))
+    case("plan gone", lambda v: v.delete("plan.json"))
+    case("planId differs in the ledger", lambda v: v.edit("ledger.json", lambda d: d.update(planId="other")))
+    case("planId differs in the manifest and disposition", lambda v: (manifest(lambda m: m.update(planId=None))(v),
+                                                                     v.edit("disposition.json", lambda d: d.update(planId=7))))
+    case("registry copy gone", lambda v: v.delete("registry/check-registry.json"))
+    case("registry copy changed", lambda v: v.put("registry/check-registry.json", "{}"))
+    case("scope copy changed", lambda v: v.put("scope/scope.json", "{}"))
+    case("scope named elsewhere and absent", manifest(lambda m: m.update(scope="scope/other.json")))
+    case("a search hash with no copy", lambda v: v.edit("plan.json", lambda d: d.update(search={"sha256": "5" * 64})))
+    case("a receipt removed", lambda v: v.delete("receipts/g.deps__baseline.json"))
+    case("a receipt with another id", lambda v: v.edit("receipts/g.deps__baseline.json", lambda d: d.update(receiptId="another")))
+    case("a receipt not accepted", lambda v: v.edit("receipts/g.deps__baseline.json", lambda d: d["validation"].update(accepted=False)))
+    case("a receipt's bound digest changed", lambda v: v.edit("receipts/g.deps__baseline.json", lambda d: (
+        d["consumed"]["programs"]["emitter"].update(digest="folder:" + "9" * 64), d["consumed"]["programs"].pop("controller"))))
+    case("an output omitted", lambda v: v.delete("evidence/outputs/g.deps/baseline.json"))
+    case("an output with no recorded hash, omitted", lambda v: (
+        v.edit("receipts/g.deps__baseline.json", lambda d: d["outputs"][0].update(sha256=None)), v.delete("evidence/outputs/g.deps/baseline.json")))
+    case("a base emit changed", lambda v: v.put("evidence/sweep/inv-0001/overlapprobe/baseline.json", "changed"))
+    case("a comparison input omitted", lambda v: v.delete("evidence/sweep/inv-0001/contactprobe/candidate-01-flip.reverse.json"))
+    case("a manifest row dropped", manifest(lambda m: drop_row(m, "evidence/outputs/g.deps/baseline.json")))
+    case("decision evidence omitted", lambda v: v.delete("evidence/decisions/evidence/regen-note.txt"))
+    case("the disposition claims a finding the ledger lacks", lambda v: v.edit("disposition.json", lambda d: (
+        d["evaluation"]["findings"].append({"checkId": "g.deps", "armId": "baseline", "part": None}),
+        d["evaluation"]["completedNullChecks"].append({"checkId": "no.such", "armId": "x", "part": "arm"}),
+        d["evaluation"]["completedCatalogues"].append({"checkId": "n.na", "armId": "candidate-01"}))))
+    case("complete with missing rows", lambda v: v.edit("disposition.json", lambda d: d["evaluation"].update(complete=True)))
+    case("a stale derivedFrom", lambda v: v.edit("disposition.json", lambda d: d["derivedFrom"].update(journalLines=1)))
+    case("no derivedFrom", lambda v: v.edit("disposition.json", lambda d: d.pop("derivedFrom")))
+    case("a journal line added", lambda v: v.put("journal.jsonl", (base / "journal.jsonl").read_bytes().decode("utf-8") + "{}\r\n"))
+    case("the ledger edited", lambda v: v.edit("ledger.json", lambda d: d["entries"]["g.terrain__baseline"].update(detail="edited")))
+    case("no disposition", lambda v: v.delete("disposition.json"))
+    case("no ledger", lambda v: v.delete("ledger.json"))
+    case("a legacy plan", lambda v: (v.edit("plan.json", lambda d: d.pop("toolIdentity")), ))
+
+    # enrichment
+    disp_sha = sha((base / "disposition.json").read_bytes())
+    plugin_sha = "ab" * 32
+    src = [{"path": "evidence/outputs/l.masters/baseline.json", "sha256": sha((base / "evidence/outputs/l.masters/baseline.json").read_bytes())}]
+
+    def with_plugins(v):
+        v.edit("plan.json", lambda d: d["arms"][0].update(requested={"plugins": [{"name": "A.esp", "sha256": plugin_sha.upper()}, {"name": "B.esp"}]}))
+
+    case("enrichment: a record beside this disposition", lambda v: add_enrichment(
+        v, "enrichment/record.json", {"dispositionSha256": disp_sha}, role="record"))
+    case("enrichment: a record beside another disposition", lambda v: (
+        add_enrichment(v, "enrichment/record.json", {"dispositionSha256": "0" * 64}, role="record"),
+        add_enrichment(v, "enrichment/record2.json", "[]", role="record"),
+        add_enrichment(v, "enrichment/capture.jsonl", "anything", role="capture", enrichment="names")))
+    case("enrichment: record rows citing their sources", lambda v: add_enrichment(
+        v, "enrichment/rows.json", {"derivedFrom": src, "Conflicts": [{"Necessary": [{"Reads": ["r1"]}]}, {}]}, enrichment="record-rows"))
+    case("enrichment: record rows with no source, a changed one and bare rows", lambda v: (
+        add_enrichment(v, "enrichment/rows1.json", {"Conflicts": []}, enrichment="record-rows"),
+        add_enrichment(v, "enrichment/rows2.json", {"derivedFrom": src + [{"path": "gone.json", "sha256": "x"}, {"sha256": "y"},
+                                                                         {"path": "evidence", "sha256": "z"}, dict(src[0], sha256="0" * 64)],
+                                                    "Conflicts": [{"Necessary": [{"Reads": []}, {"Reads": ["a"]}, {}]}]}, enrichment="record-rows"),
+        add_enrichment(v, "enrichment/rows3.json", "not json", enrichment="order-variant"),
+        add_enrichment(v, "enrichment/variant-tree.json", {"derivedFrom": src, "readForm": "tree", "Conflicts": [{"Necessary": [{}]}]}, enrichment="order-variant"),
+        add_enrichment(v, "enrichment/rows-tree.json", {"derivedFrom": src, "readForm": "tree", "Conflicts": [{"Necessary": [{}]}]}, enrichment="record-rows")))
+    case("enrichment: order geometry", lambda v: (
+        add_enrichment(v, "enrichment/geo1.json", {"derivedFrom": src}, enrichment="order-geometry"),
+        add_enrichment(v, "enrichment/geo2.json", {"derivedFrom": []}, enrichment="order-geometry"),
+        add_enrichment(v, "enrichment/geo3.json", {"derivedFrom": [{"path": "nowhere.json", "sha256": "q"}, None]}, enrichment="order-geometry"),
+        add_enrichment(v, "enrichment/geo4.json", "[]", enrichment="order-geometry")))
+    case("enrichment: names from the plan's bytes and from others", lambda v: (
+        with_plugins(v),
+        add_enrichment(v, "enrichment/names.json", {"derivedFrom": [{"plugin": "A.esp", "sha256": plugin_sha}, {"plugin": "C.esp", "sha256": "cd" * 32},
+                                                                    {"plugin": "D.esp"}], "unread": {"objects": [], "bases": []}}, enrichment="names"),
+        manifest(lambda m: m.update(enrichmentStatus={"names": {"status": "enriched", "sentence": "names were read", "counts": {"objectsUnread": 0, "basesUnread": 0}}}))(v)))
+    case("enrichment: a listed file that is absent is skipped", lambda v: (
+        add_enrichment(v, "enrichment/rows.json", {"Conflicts": []}, enrichment="record-rows"), v.delete("enrichment/rows.json")))
+
+    def names_status(st, names=None):
+        def change(v):
+            if names is not None:
+                add_enrichment(v, "enrichment/names.json", names, enrichment="names")
+            manifest(lambda m: m.update(enrichmentStatus=st))(v)
+        return change
+
+    case("names status: no statement", names_status({}))
+    case("names status: not a statement", names_status({"names": "enriched"}))
+    case("names status: an unknown word", names_status({"names": {"status": "done", "sentence": "x"}}))
+    case("names status: no sentence", names_status({"names": {"status": "skipped", "sentence": "  "}}))
+    case("names status: two lines", names_status({"names": {"status": "skipped", "sentence": "a\nb"}}))
+    case("names status: enriched without files", names_status({"names": {"status": "enriched", "sentence": "read"}}))
+    case("names status: skipped with files", names_status({"names": {"status": "skipped", "sentence": "not asked"}},
+                                                           {"derivedFrom": [], "unread": {"objects": [], "bases": []}}))
+    case("names status: no unread lists", names_status({"names": {"status": "enriched", "sentence": "read"}}, {"derivedFrom": []}))
+    case("names status: names file not json", names_status({"names": {"status": "enriched", "sentence": "read"}}, "nope"))
+    case("names status: partial said enriched", names_status(
+        {"names": {"status": "enriched", "sentence": "read", "counts": {"objectsUnread": 0, "basesUnread": 0}}},
+        {"derivedFrom": [], "unread": {"objects": ["0001:A.esp"], "bases": None}}))
+    case("names status: partial with matching counts", names_status(
+        {"names": {"status": "partial", "sentence": "some unread", "counts": {"objectsUnread": 1, "basesUnread": 2.0}}},
+        {"derivedFrom": [], "unread": {"objects": ["0001:A.esp"], "bases": ["a", "b"]}}))
+    case("names status: counts absent", names_status({"names": {"status": "enriched", "sentence": "read"}},
+                                                      {"derivedFrom": [], "unread": {"objects": [], "bases": []}}))
+    return {"base": tree(base), "cases": cases}
+
+
+SECTIONS = [("plans", plan_cases), ("ledger", ledger_cases), ("receipts", receipt_cases), ("identity", lambda tmp: identity_cases()),
+            ("classification", classification_cases), ("dispositions", disposition_cases),
+            ("finalize", lambda tmp: finalize_cases(tmp, None)), ("verify", verify_cases)]
 
 
 def main() -> int:
@@ -505,13 +1329,17 @@ def main() -> int:
 
 def write_answers() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="hc-known-finalize-")).resolve()
+    os.environ["HOUSECARL_RUNLOG_DIR"] = str(tmp / "runlog")   # so no run folder here becomes the run-log store
     try:
         doc = {"python": platform.python_version(), "placeholders": {"backslash": BACK, "forward": FWD, "doubled": DOUBLED}}
         for name, build in SECTIONS:
             doc[name] = build(tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    OUT.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8", newline="\n")
+    text = json.dumps(doc, indent=1) + "\n"
+    for leak in (tmp.name, Path.home().name):
+        assert leak not in text, f"the answers would keep a local path ({leak})"
+    OUT.write_text(text, encoding="utf-8", newline="\n")
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
     return 0
 
