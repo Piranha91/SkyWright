@@ -144,11 +144,14 @@ internal static class LauncherView
             string.Join("; ", others.GroupBy(c => ProbeNames.NotAProbe(c.Kind)).Select(g => $"{string.Join(", ", g.Select(c => ProbeNames.Of(c.Id)))} ({(g.Key.StartsWith("is ") ? g.Key[3..] : g.Key)})")) + ".";
     }
 
-    static Border MakeTile(Launcher.RegistryCheck c)
+    internal static Border MakeTile(Launcher.RegistryCheck c)
     {
         var id = c.Id;
         var dot = new Ellipse { Width = 10, Height = 10, Fill = Theme.Brush("#666666"), Margin = new Thickness(2, 6, 10, 0), VerticalAlignment = VerticalAlignment.Top };
-        var name = new TextBlock { Text = ProbeNames.Of(id), FontWeight = FontWeights.SemiBold, ToolTip = id, TextWrapping = TextWrapping.Wrap };
+        var name = new TextBlock { FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+        // the name, then its "?" help button on the same line (it wraps with the name on a narrow window)
+        name.Inlines.Add(new Run(ProbeNames.Of(id)) { ToolTip = id });
+        name.Inlines.Add(new InlineUIContainer(ProbeHelpPopup.Button(id)) { BaselineAlignment = BaselineAlignment.Center });
         var line = new TextBlock { Foreground = Theme.Brush(Theme.Dim), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
         var bar = new ProgressBar { Height = 6, Minimum = 0, Maximum = 100, Visibility = Visibility.Collapsed, Margin = new Thickness(0, 4, 8, 0) };
         var eta = new TextBlock { Foreground = Theme.Brush(Theme.Dim), FontSize = 11, Margin = new Thickness(0, 2, 0, 0) };
