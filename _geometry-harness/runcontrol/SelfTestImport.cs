@@ -319,7 +319,8 @@ public static partial class SelfTestFinalize
                         string name = S(step["name"]);
                         foreach (var f in L(step["files"]).Select(D))
                             File.SetLastWriteTimeUtc(t.Write(S(f["path"]), RowBytes(f, t)), DateTime.UnixEpoch.AddSeconds(ImportT0));
-                        if (step["edits"] != null) ApplyState(t, step["edits"]);
+                        if (step["edits"] != null)
+                            foreach (var f in L(step["edits"]).Select(D)) t.Write(S(f["path"]), RowBytes(f, t));
                         string journal = t.At("journal.jsonl");
                         int lines = File.Exists(journal) ? PyText.SplitLines(Lines(journal)!).Count : 0;
                         int run = n;

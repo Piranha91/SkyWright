@@ -3,6 +3,21 @@
 One row per case of `tests/test_evalpipeline.py` (56), `tests/test_workbench_manual_pipeline.py` (26) and
 `tests/test_evalrun.py` (85).
 
+## Final totals (slice 5)
+
+Every case has a final status: none waits.
+
+| Suite | Cases | ported | black-box | dropped |
+|---|---|---|---|---|
+| test_evalpipeline.py | 56 | 36 | 0 | 20 |
+| test_workbench_manual_pipeline.py | 26 | 19 | 4 | 3 |
+| test_evalrun.py | 85 | 14 | 50 | 21 |
+| All | 167 | 69 | 54 | 44 |
+
+A `black-box` case passes whole on runcontrol, but for `test_evalrun.py` 16, whose four failing checks are an owner
+difference (its row); a `ported` or `dropped` row that names a count passes that many of its checks there and says why
+the rest cannot. The whole of `test_evalrun.py` on runcontrol: 85 cases, 60 pass whole, 1,847 checks pass, 273 fail.
+
 Status:
 
 - `ported`: a case of `runcontrol --self-test`, named in the last column. Where the Python case replaced a Python
@@ -10,8 +25,6 @@ Status:
   `RunContext.ResolveWith`, `Driver.Bodies`.
 - `black-box`: the case runs the built program as a child process. For `test_evalrun.py` that is the Python suite
   itself, started with `EVALRUN_CONTROLLER_CMD` naming `runcontrol.exe`, so one case text judges both controllers.
-- `waits for slice N`: its subject is not built yet. N is the slice of the port plan: 3 plan, 4 evaluate, 5 records,
-  6 bundle (with scenes and finalize), 7 resume and reuse.
 - `dropped`: not ported, with the reason.
 
 The "kind" column is the Python case's: U a pure function, M a replaced internal, S a child process, P a real probe.
@@ -57,8 +70,8 @@ The "kind" column is the Python case's: U a pure function, M a replaced internal
 | 55 | a place after a plugin the source does not load is refused | U (files) | ported | `case 55 a place after a plugin the source does not load is refused` |
 | 56 | a place for a plugin the source loads is refused | U (files) | ported | `case 56 a place for a plugin the source loads is refused` |
 | 57 | the report stage plans with the capture closed | U | dropped | as 33 |
-| 58 | the records stage keeps finished arms and scales its deadline | U (source text) | waits for slice 5 | reads the Python function's source text; to be re-expressed over the C# stage's child launch |
-| 59 | the records stage takes the machine slot for its backstop | M | waits for slice 5 | |
+| 58 | the records stage keeps finished arms and scales its deadline | U (source text) | ported | `case 58 the records stage keeps finished arms and scales its deadline`: the same facts read from the capture child the stage starts (its command line and its deadline for one and for three open arms), not from source text |
+| 59 | the records stage takes the machine slot for its backstop | M | ported | `case 59 the records stage takes the machine slot for its backstop`; also the 28 `records stage: ...` cases (evalpipeline.py's stage_records with its children stood in for) |
 | 60 | a heavy child holds the slot for its own hold minutes | M | ported | `case 60 a heavy child holds the slot for its own hold minutes` (the child launch is built now) |
 | 61 | evaluate stops itself at its budget with the slot held that long | M | ported | `case 61 evaluate stops itself at its budget with the slot held that long` |
 | 62 | a heavy child stopped from outside leaves no lock | S | ported | `case 62 a heavy child stopped from outside leaves no lock when its tree is confirmed gone, and its lock when it is not`, with the runner stood in; a real process tree stopped at its deadline is the child runner's own case in run-log-guard |
@@ -138,8 +151,8 @@ inside one case.
 | 14 evidence-chain | finalize and verify-bundle over a broken chain | full + verify-bundle | black-box | passes on runcontrol (56 of 56 checks) |
 | 15 portable-incomplete | an incomplete bundle verifies after every source path is deleted | full + verify-bundle | black-box | passes on runcontrol (24 of 24 checks) |
 | 16 supplied-identity | hash of a supplied plugin at plan time, wrong copy, changed bytes | plan, run, resume | black-box | 99 of 103 of its checks pass on runcontrol; the four that do not judge the rows Python lists for mod folders `modlist.txt` did not rank (`(not in modlist.txt)`): slice 3b's owner differences 1 and 2, red on runcontrol by design |
-| 17 | a generic MCP import is identity-bound, evidence-backed, relocatable | + import-results | waits for slice 5 | needs `import-results`; 16 of 23 of its checks pass on runcontrol now |
-| 18 | an arm's providers are its own; a plan under the old meaning is refused | + import-results | waits for slice 5 | needs `import-results`; 29 of 34 of its checks pass on runcontrol now |
+| 17 | a generic MCP import is identity-bound, evidence-backed, relocatable | + import-results | black-box | passes on runcontrol (27 of 27 checks) |
+| 18 | an arm's providers are its own; a plan under the old meaning is refused | + import-results | black-box | passes on runcontrol (34 of 34 checks) |
 | 19 | a derived check derives only over settled prerequisites | plan, run, finalize | black-box | passes on runcontrol (42 of 42 checks) |
 | 21 | a sweep running at the deadline is stopped whole, nothing credited | full, resume | black-box | passes on runcontrol (47 of 47 checks) |
 | 22 | a descendant that outlives its probe keeps the job unfinished | plan, finalize | black-box | passes on runcontrol (21 of 21 checks) |
@@ -163,15 +176,15 @@ inside one case.
 | 39 | an uncontained sweep job reads blocked(uncontained), not stopped(deadline) | S | dropped | makes Python's Runner refuse containment through a `sitecustomize.py` on PYTHONPATH, a hook runcontrol does not load; 9 of 14 of its checks pass on runcontrol. Its subject is judged by `sweep and derived rows: every way one candidate's parts end, one candidate per way` (reverse-uncontained) |
 | 40 | a conflictdiff refusal before a verdict is rejected by its exit code | run | dropped | plans through the seam, then runs evalrun.py inside the test process with a wrapped Python Runner; on a plan runcontrol froze that is crossing controllers, refused by design (tool-changed), so 5 of 45 of its checks pass on runcontrol. Its subject is judged by `sweep: conflictdiff_refusal, conflictdiff's own reason read from its job log` and `sweep and derived rows: every way one candidate's parts end, one candidate per way` (diff-refused, diff-usage) |
 | 41 | after a repair, the classification word is the current one | run, resume, finalize | dropped | plans through the seam, then runs evalrun.py inside the test process with a wrapped Python Runner; on a plan runcontrol froze that is crossing controllers, refused by design (tool-changed), so 5 of 19 of its checks pass on runcontrol. Its subject is judged by `finalize: order_classification` and `sweep and derived rows: two probes measured and accepted; run again; then two parts repaired from the cache` |
-| 42 | an import declares its origin; `fresh` must name this plan's arm | full + import-results, resume, verify-bundle | waits for slice 5 | needs `import-results`; 12 of 17 of its checks pass on runcontrol now |
-| 43 | import-results consults the prerequisite gate | same | waits for slice 5 | needs `import-results`; 52 of 86 of its checks pass on runcontrol now |
-| 44 | the candidate filename is provenance, not identity | same | waits for slice 5 | needs `import-results`; 18 of 20 of its checks pass on runcontrol now |
+| 42 | an import declares its origin; `fresh` must name this plan's arm | full + import-results, resume, verify-bundle | black-box | passes on runcontrol (147 of 147 checks) |
+| 43 | import-results consults the prerequisite gate | same | ported | 74 of 86 of its checks pass on runcontrol: everything up to its `fallback` section, which runs evalrun.py inside the test process with a wrapped accounting function on a plan runcontrol froze (crossing controllers, refused by design), and what follows from that run. Its subjects are judged by the nine `import-results: the prerequisite gate: ...` cases (settled on the arm, on the baseline only, not applicable, rejected or blocked on the arm, not attempted on the arm with the baseline accepted) and `sweep and derived rows: an accepted import whose prerequisite fails later, and one that is no longer credited` (blocked, the record of the import handed on, the re-import beside the old folder: `import-results: the validation table`, steps `imported again ...`) |
+| 44 | the candidate filename is provenance, not identity | same | black-box | passes on runcontrol (133 of 133 checks) |
 | 45 | conflictdiff refuses credit across emits without one measurement policy | run | dropped | plans through the seam, then runs evalrun.py inside the test process with a wrapped Python Runner; on a plan runcontrol froze that is crossing controllers, refused by design (tool-changed), so 1 of 10 of its checks pass on runcontrol. Its subject is judged by `sweep and derived rows: every way one candidate's parts end, one candidate per way` (diff-refused); the refusal itself is conflictdiff's own |
 | 46 | the suite never tests a conflictdiff older than its source | the test file itself, in a copied checkout | dropped | judges the Python suite's own rule for building conflictdiff, in a copied checkout; no controller is started |
 | 47 | a supplied plugin is `qualified` only by hash | in-process `run_derived`; U | ported | `sweep and derived rows: candidate qualification over supplied files and discovery hits`. The Python case calls `run_derived` in the test process |
-| 61 | `enrich --kind record-rows` cites its bytes and changes no count | full + import-results, enrich, verify-bundle | waits for slice 5 | needs `import-results`; 8 of 13 of its checks pass on runcontrol now |
-| 63 | `enrich --kind names` reads only files at the recorded hash | same | waits for slice 5 | needs `import-results`; 10 of 19 of its checks pass on runcontrol now |
-| 65 | an import may carry a `rows` output; rows naming a plugin outside the arm are refused | full + import-results | waits for slice 5 | needs `import-results`; 6 of 10 of its checks pass on runcontrol now |
+| 61 | `enrich --kind record-rows` cites its bytes and changes no count | full + import-results, enrich, verify-bundle | dropped | calls `evalrun.py enrich`, a command the port leaves in Python (DESIGN section 1: `enrich` is not on the run path); 9 of 13 of its checks pass on runcontrol, every one before its first `enrich`. `enrich --kind record-rows` rests on `recordrows.derive`, which is not ported either |
+| 63 | `enrich --kind names` reads only files at the recorded hash | same | dropped | calls `evalrun.py enrich`, a command the port leaves in Python (DESIGN section 1: `enrich` is not on the run path); 11 of 19 of its checks pass on runcontrol, every one before its first `enrich`. The names enrichment itself is judged through `bundle` (`bundle: ...` cases, black-box 560 to 565) |
+| 65 | an import may carry a `rows` output; rows naming a plugin outside the arm are refused | full + import-results | black-box | passes on runcontrol (10 of 10 checks) |
 | 81 | a real scopeprobe refuses a corrupt LAND instead of crashing | P | dropped | a test of scopeprobe itself (a corrupt LAND is refused, not a crash), not of a controller |
 | 82 | further corruption kinds refuse the same way | P | dropped | as 81 |
 | 83 | on that scope the shipped registry answers unknown, never no | P + in-process `Validator` | ported | the rule (an incomplete scope answers unknown, never no) is `registry: applicability of every check on 25 scopes` (slice 3a); the probe half is scopeprobe's own test, as 81 |
@@ -188,19 +201,19 @@ inside one case.
 | 428 | a scoped probe-emit check alone receives the frozen file | plan, run | black-box | passes on runcontrol (9 of 9 checks): plan and run, a scoped probe-emit check alone receives the frozen file |
 | 429 | a scoped probe-emit emit of another population is rejected | plan, run | black-box | passes on runcontrol (1 of 1 checks): plan and run, an emit of another population is rejected |
 | 430 | registry and plan rules for a scoped probe-emit check | in-process; U | ported | `case 430 a race-carrying delta leaves the state check on the whole order, the others scoped`; the registry half is `registry: validate names every problem of 92 broken registries` (slice 3a) |
-| 560 | bundle runs the names step by default and says so | full + import-results, verify-bundle | waits for slice 5 | needs `import-results`; 13 of 14 of its checks pass on runcontrol now |
-| 561 | `--no-names` skips and says so; `enrich --kind names` adds it later | + enrich | waits for slice 5 | needs `import-results`; 13 of 16 of its checks pass on runcontrol now |
-| 562 | a reader that cannot start: bundle still made, refusal stated | same | waits for slice 5 | needs `import-results`; 13 of 14 of its checks pass on runcontrol now |
-| 563 | changed plugin bytes: names refused by name, bundle verifies | same | waits for slice 5 | needs `import-results`; 13 of 14 of its checks pass on runcontrol now |
-| 564 | a partial read: status partial with counts | same | waits for slice 5 | needs `import-results`; 14 of 15 of its checks pass on runcontrol now |
-| 565 | verify-bundle checks the statement against the files | same | waits for slice 5 | needs `import-results`; 13 of 14 of its checks pass on runcontrol now |
+| 560 | bundle runs the names step by default and says so | full + import-results, verify-bundle | black-box | passes on runcontrol (14 of 14 checks) |
+| 561 | `--no-names` skips and says so; `enrich --kind names` adds it later | + enrich | dropped | calls `evalrun.py enrich`, a command the port leaves in Python (DESIGN section 1: `enrich` is not on the run path); 14 of 16 of its checks pass on runcontrol, every one before its first `enrich`. Its `--no-names` half passes; the hand enrichment afterwards is the `enrich` command |
+| 562 | a reader that cannot start: bundle still made, refusal stated | same | black-box | passes on runcontrol (14 of 14 checks) |
+| 563 | changed plugin bytes: names refused by name, bundle verifies | same | black-box | passes on runcontrol (14 of 14 checks) |
+| 564 | a partial read: status partial with counts | same | black-box | passes on runcontrol (15 of 15 checks) |
+| 565 | verify-bundle checks the statement against the files | same | black-box | passes on runcontrol (14 of 14 checks) |
 | 566 | reader default order: flag, env, checkout build | in-process `default_reader_cmd`; U | ported | `case 566 the reader's default order: the flag, the environment, the checkout's build` |
 | 590 | a rebundle after the registry changed is refused before writing | full + verify-bundle | black-box | passes on runcontrol (3 of 3 checks) |
 | 591 | naming the frozen registry rebundles from another folder | same | black-box | passes on runcontrol (4 of 4 checks) |
 | 592 | a named file that is not what the plan froze is refused | full | black-box | passes on runcontrol (9 of 9 checks) |
 | 593 | an older plan with relative registry and scope paths | full + verify-bundle | black-box | passes on runcontrol (7 of 7 checks) |
-| 800 | `enrich --kind order-variant` derives or refuses by rule | full + import-results, enrich, verify-bundle | waits for slice 5 | needs `import-results`; 7 of 9 of its checks pass on runcontrol now |
-| 801 | every bundle states the pair's order status | full + import-results | waits for slice 5 | needs `import-results`; 6 of 7 of its checks pass on runcontrol now |
+| 800 | `enrich --kind order-variant` derives or refuses by rule | full + import-results, enrich, verify-bundle | dropped | calls `evalrun.py enrich`, a command the port leaves in Python (DESIGN section 1: `enrich` is not on the run path); 8 of 9 of its checks pass on runcontrol, every one before its first `enrich`. The order status every bundle states is black-box case 801 and the `bundle: ...` order cases |
+| 801 | every bundle states the pair's order status | full + import-results | black-box | passes on runcontrol (7 of 7 checks) |
 | 1730 | the harness config's table is frozen with its sha256 and passed | plan | black-box | passes on runcontrol (3 of 3 checks), its last check the stateprobe launch by `run`; the plan half is also `plan command: case 1730 the harness config's table is frozen with its sha256 and passed` |
 | 1731 | no table: said in the plan; the check runs without the flag | plan | black-box | passes on runcontrol (4 of 4 checks); the plan half is also `plan command: case 1731 a harness config that names no table: said in the plan` |
 | 1732 | a named table that is absent refuses the plan | plan | black-box | passes on runcontrol (1 of 1 checks); also `plan command: case 1732 a named table that is absent refuses the plan` |
@@ -210,12 +223,12 @@ inside one case.
 
 ## Totals
 
-| Suite | Cases | ported | black-box | waits | dropped |
-|---|---|---|---|---|---|
-| test_evalpipeline.py | 56 | 34 | 0 | 2 | 20 |
-| test_workbench_manual_pipeline.py | 26 | 19 | 4 | 0 | 3 |
-| test_evalrun.py | 85 | 13 | 39 | 16 | 17 |
-| All | 167 | 66 | 43 | 18 | 40 |
+| Suite | Cases | ported | black-box | dropped |
+|---|---|---|---|---|
+| test_evalpipeline.py | 56 | 36 | 0 | 20 |
+| test_workbench_manual_pipeline.py | 26 | 19 | 4 | 3 |
+| test_evalrun.py | 85 | 14 | 50 | 21 |
+| All | 167 | 69 | 54 | 44 |
 
 Cases of the self-test with no Python case behind them: the generated tables (`pipeline: ...`, `plan: ...`), the
 `plan command: ...` cases without a case number (`runcontrol plan` as a child process against what `evalrun.py plan`

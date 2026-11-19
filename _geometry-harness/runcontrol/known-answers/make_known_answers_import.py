@@ -269,8 +269,11 @@ class Folder:
             written.append({"path": doc_rel, "bytes": F.packb(body)} if isinstance(body, bytes) else {"path": doc_rel, "text": F.pack(F.mask(body, root))})
         edits = None
         if before:
+            # only what the change itself rewrote: a receipt of an earlier import names hashes that are this folder's own
+            was = {f: f.read_bytes() for f in root.rglob("*") if f.is_file()}
             before(root)
-            edits = V.snapshot(root)
+            edits = [{"path": f.relative_to(root).as_posix(), "text": F.pack(F.mask(f.read_bytes().decode("utf-8"), root))}
+                     for f in sorted(root.rglob("*")) if f.is_file() and was.get(f) != f.read_bytes()]
         journal = root / "journal.jsonl"
         lines_before = len(journal.read_text(encoding="utf-8").splitlines()) if journal.is_file() else 0
         log = SimpleNamespace(run_id=f"import-run-{self.n}", feature=lambda *a, **k: None, artifact=lambda *a, **k: None,

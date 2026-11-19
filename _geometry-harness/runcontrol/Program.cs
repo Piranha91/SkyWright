@@ -4,13 +4,13 @@ using RunControl;
 
 // RUNCONTROL: the evaluation run controller in C#, replacing evalpipeline.py and evalrun.py stage by stage.
 //
-// Built so far: the pipeline driver and its stages census, prepare, scope, plan, evaluate, records (in-place entries)
-// and scenes, and evalrun.py's commands plan, run, resume, status, finalize, verify-bundle, population and the order
-// sweep, over the foundations (Python's JSON bytes, hashes, orderings and text forms, the program identity rule, the
-// stage ledger). `run` and `resume` refuse a plan with swept or derived rows to settle until those are built. A run
-// folder it writes through scope is one the Python pipeline continues, and the reverse; a plan is bound to the
-// controller that froze it. The bundle stage stops the run with one line until it is built; the stages from
-// report-plan on stay in the Python pipeline.
+// Built so far: the pipeline driver and its stages census, prepare, scope, plan, evaluate, records, scenes and bundle,
+// and evalrun.py's commands plan, run, resume, status, import-results, finalize, bundle, verify-bundle, population and
+// the order sweep, over the foundations (Python's JSON bytes, hashes, orderings and text forms, the program identity
+// rule, the stage ledger). For a lab entry the records stage starts the record capture, which stays the Python tool
+// evalrecords.py, and then this program's own import-results. A run folder is one the Python pipeline continues at a
+// stage boundary, and the reverse; a plan is bound to the controller that froze it. The stages from report-plan on
+// stay in the Python pipeline.
 //
 // usage: runcontrol run    --entry ENTRY.json --out RUN [--machine MACHINE.json] [--through STAGE]
 //                          [--reuse-preparation-from WORK_FOLDER]
