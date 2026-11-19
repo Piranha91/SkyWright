@@ -130,7 +130,7 @@ public static class SelfTestSweep
         CandidateCases(L(ka["candidateFiles"]).Select(D).ToList());
         ProgramKeyCases(D(ka["programKey"]));
         CacheCases(D(ka["cache"]));
-        Case("sweep: REFUSED_RE over the harness's refusal and count lines", () => Rows(L(ka["refused"]).Select(D), row =>
+        Case("sweep: the refusal marker over the harness's refusal and count lines", () => Rows(L(ka["refused"]).Select(D), row =>
             OrderSweep.RefusedRe.IsMatch(S(row["text"])) == (bool)row["want"]! ? null : $"{Show(S(row["text"]))} read {!(bool)row["want"]!}, Python has {row["want"]}"));
         ArgumentCases(L(ka["arguments"]).Select(D).ToList());
         Case("sweep: the request key of every job of one Python sweep", () => Rows(L(ka["requestKeys"]).Select(D), row =>
