@@ -50,6 +50,10 @@ internal static class Shell
     internal static LoadOrderSpec? BundleOrder;
     /// <summary>The scene being built or shown takes no edits (opened from the Results or World tab).</summary>
     internal static bool ReadOnlyScene;
+    /// <summary>For a scene opened from a list with no conflict row open: the other reference to mark beside the selected one.</summary>
+    internal static Func<string, string?>? PartnerFor;
+    /// <summary>A few words the status line leads with while a read-only scene is shown (which setup it is), or null.</summary>
+    internal static string? SceneCaption;
     internal static bool ShowAll;
     /// <summary>The "show decided" toggle: rows decided intentional that still apply are hidden unless it is on.</summary>
     internal static bool ShowDecided;
@@ -121,7 +125,7 @@ internal static class Shell
         var conflictsTab = new DockPanel();
         DockPanel.SetDock(AllRows, Dock.Top); DockPanel.SetDock(DecidedRows, Dock.Top); DockPanel.SetDock(FindingsOnlyRows, Dock.Top);
         conflictsTab.Children.Add(AllRows); conflictsTab.Children.Add(DecidedRows); conflictsTab.Children.Add(FindingsOnlyRows); conflictsTab.Children.Add(ConflictList);
-        var tabs = Tabs = new TabControl { Width = 560 };
+        var tabs = Tabs = new TabControl { MinWidth = 380 };
         var start = new TabItem { Header = "Start", Content = LauncherView.Build() };
         tabs.Items.Add(start);
         tabs.Items.Add(new TabItem { Header = "Conflicts", Content = conflictsTab });
@@ -149,14 +153,29 @@ internal static class Shell
         findingsTab.Children.Add(repairBar); findingsTab.Children.Add(FindingList);
         tabs.Items.Add(new TabItem { Header = "Findings", Content = findingsTab });
         tabs.Items.Add(new TabItem { Header = "Records", Content = Records });
+        tabs.Items.Add(new TabItem { Header = "Results", Content = ResultsView.Build() });
+        tabs.Items.Add(new TabItem { Header = "World", Content = WorldView.Build() });
         var root = new DockPanel();
         // one Open control for anything the window opens; each kind is a reader (InputReaders)
+        InputReaders.Register(new ResultsInputReader());
         InputReaders.Register(new BundleReader());
+        InputReaders.Register(new ProfileReader());
+        InputReaders.Register(new DataFolderReader());
+        OpenBar.StartInput = DataFolderOrder.StartGame;
         var openBar = OpenBar.Build();
         DockPanel.SetDock(openBar, Dock.Top);
-        DockPanel.SetDock(Banner, Dock.Top); DockPanel.SetDock(BarSlot, Dock.Bottom); DockPanel.SetDock(tabs, Dock.Left);
+        DockPanel.SetDock(Banner, Dock.Top); DockPanel.SetDock(BarSlot, Dock.Bottom);
+        // the tabs and the 3D view side by side, with a splitter to drag: a long list can be given room, the view keeps its minimum
+        var body = new Grid();
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(560), MinWidth = 380 });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 360 });
+        var splitter = new GridSplitter { Width = 5, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Stretch,
+                                          Background = Theme.Brush(Theme.Line), ToolTip = "drag to give the lists or the view more room" };
+        Grid.SetColumn(tabs, 0); Grid.SetColumn(splitter, 1); Grid.SetColumn(ViewSlot, 2);
+        body.Children.Add(tabs); body.Children.Add(splitter); body.Children.Add(ViewSlot);
         root.Children.Add(openBar);
-        root.Children.Add(Banner); root.Children.Add(BarSlot); root.Children.Add(tabs); root.Children.Add(ViewSlot);
+        root.Children.Add(Banner); root.Children.Add(BarSlot); root.Children.Add(body);
         // The view keeps room of its own: below this the tabs would take the whole width (a 360x240 window drew the scene
         // into a 1x66 view, stage 3 receipts). A smaller size asked for opens at this minimum and says so.
         Window = new Window { Title = title, Width = 1440, Height = 960, MinWidth = MinWidth, MinHeight = MinHeight, Content = root,

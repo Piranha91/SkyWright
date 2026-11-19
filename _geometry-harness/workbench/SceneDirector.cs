@@ -8,8 +8,10 @@ namespace Workbench;
 /// optionally a candidate order file (<c>--order</c>). <see cref="Label"/> is what the window calls it.</summary>
 internal sealed record LoadOrderSpec(string Instance, string Profile, string Game, string? OrderFile, string Label)
 {
+    /// <summary>Draw the navmesh in scenes built on this order (viewprobe decides it once per run, so it is part of the key).</summary>
+    internal bool Navmesh { get; init; } = true;
     /// <summary>Two specs with one key build the same scene for a cell.</summary>
-    internal string Key => string.Join("|", Full(Instance), Profile, Full(Game), OrderFile is null ? "" : Full(OrderFile)).ToLowerInvariant();
+    internal string Key => string.Join("|", Full(Instance), Profile, Full(Game), OrderFile is null ? "" : Full(OrderFile), Navmesh ? "nav" : "no-nav").ToLowerInvariant();
     static string Full(string p) => Path.GetFullPath(p).TrimEnd('\\', '/');
 
     internal IEnumerable<string> Args()
@@ -18,13 +20,15 @@ internal sealed record LoadOrderSpec(string Instance, string Profile, string Gam
         yield return "--profile"; yield return Profile;
         yield return "--game"; yield return Game;
         if (OrderFile is not null) { yield return "--order"; yield return OrderFile; }
+        if (!Navmesh) { yield return "--nav"; yield return "off"; }
     }
 
     /// <summary>The spec viewprobe's own arguments name, or null when they leave a part to the environment.</summary>
     internal static LoadOrderSpec? FromArgs(IReadOnlyList<string> args, string label)
     {
         string? V(string n) { for (int i = 0; i + 1 < args.Count; i++) if (args[i] == n) return args[i + 1]; return null; }
-        return V("--instance") is { } i && V("--profile") is { } p && V("--game") is { } g ? new LoadOrderSpec(i, p, g, V("--order"), label) : null;
+        return V("--instance") is { } i && V("--profile") is { } p && V("--game") is { } g
+            ? new LoadOrderSpec(i, p, g, V("--order"), label) { Navmesh = V("--nav") != "off" } : null;
     }
 }
 

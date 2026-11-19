@@ -1,0 +1,469 @@
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Threading;
+using Mutagen.Bethesda.Plugins;
+
+namespace Workbench;
+
+/// <summary>The Results tab's rules that need no window: the groups' names, shapes and marks, a row's line, and which rows the choices list.</summary>
+internal static class ResultRules
+{
+    internal const string AddressedMeans = "Addressed means the patch edits that record or object. It does not show the clash is gone.";
+    internal const string NotScoredMeans = "Predicted object overlap: the scorecard does not score overlap, so these rows are neither addressed nor missed.";
+
+    /// <summary>A group as the tab names it: the tag's shape and words, and the scene mark.</summary>
+    internal static readonly IReadOnlyDictionary<ResultGroup, (string Shape, string Words, MarkStyle Mark)> Groups =
+        new Dictionary<ResultGroup, (string, string, MarkStyle)>
+        {
+            [ResultGroup.Addressed] = ("■", "addressed", MarkStyle.Solid),
+            [ResultGroup.NotAddressed] = ("□", "not addressed", MarkStyle.Dashed),
+            [ResultGroup.PatchChange] = ("◆", "patch change, nothing predicted", MarkStyle.Corners),
+            [ResultGroup.NotScored] = ("○", "overlap, not scored", MarkStyle.Crossed),
+        };
+
+    internal static readonly string[] Setups = { "each row's own setup", "before the patch", "after the patch" };
+
+    /// <summary>One row's line in the list: the group's tag in a shape and words, then the reader's own summary, then why there is no view.</summary>
+    internal static string Line(ResultRow r, bool withPair = true)
+    {
+        var g = Groups[r.Group];
+        string tag = r.Group == ResultGroup.PatchChange ? $"{g.Shape} patch change ({CategoryWords(r.Category)})" : $"{g.Shape} {g.Words}";
+        string text = r.Summary.Length > 260 ? r.Summary[..260] + "…" : r.Summary;
+        return $"{tag}  ·  {(withPair ? r.Pair + "  ·  " : "")}{text}" + (r.Place.Cell is null ? $"   (no view from the results alone: {r.Place.WhyNot})" : "");
+    }
+
+    internal static string CategoryWords(int? category) => category switch
+    {
+        3 => "3: a new value",
+        4 => "4: forwards a value",
+        5 => "5: not measured",
+        _ => "category " + category,
+    };
+
+    /// <summary>The rows the choices list now, in the reader's order: pair, then group, then position.</summary>
+    internal static List<ResultRow> Select(IEnumerable<ResultRow> rows, string? pair, IReadOnlySet<ResultGroup> groups, IReadOnlySet<int> categories, string text) =>
+        rows.Where(r => (pair is null || string.Equals(r.Pair, pair, StringComparison.OrdinalIgnoreCase))
+                        && groups.Contains(r.Group)
+                        && (r.Group != ResultGroup.PatchChange || (r.Category is { } c && categories.Contains(c)))
+                        && (text.Length == 0 || Line(r).Contains(text, StringComparison.OrdinalIgnoreCase) || r.FormKey.Contains(text, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+}
+
+/// <summary>The Results tab: a finished evaluation (<see cref="EvaluationResults"/>) by pair, filtered into what the
+/// probes predicted and the patch addressed, what they predicted and it did not, what the patch changed that nothing
+/// predicted, and the predicted overlaps the scorecard does not score. A row shows its values; a row with a place opens
+/// its cell in the setup before or after the patch, lands on its object, and marks every listed row the scene draws.
+/// The counts and categories are the scorecard's own, read and never recomputed.</summary>
+internal static class ResultsView
+{
+    internal const string AddressedMeans = ResultRules.AddressedMeans, NotScoredMeans = ResultRules.NotScoredMeans;
+    internal static IReadOnlyDictionary<ResultGroup, (string Shape, string Words, MarkStyle Mark)> Groups => ResultRules.Groups;
+    internal static string[] Setups => ResultRules.Setups;
+    internal static string CategoryWords(int? category) => ResultRules.CategoryWords(category);
+    internal static string Line(ResultRow r) => ResultRules.Line(r, withPair: Pair is null);
+    internal static List<ResultRow> Select(IEnumerable<ResultRow> rows, string? pair, IReadOnlySet<ResultGroup> groups, IReadOnlySet<int> categories, string text) =>
+        ResultRules.Select(rows, pair, groups, categories, text);
+
+    static readonly TextBlock Header = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 4, 6, 2) };
+    static readonly TextBlock Means = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Text = AddressedMeans, FontWeight = FontWeights.SemiBold };
+    static readonly TextBlock NotesLine = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Foreground = Theme.Brush(Theme.Dim), FontSize = 11 };
+    static readonly ComboBox PairBox = new() { Margin = new Thickness(6, 2, 6, 2) };
+    static readonly Dictionary<ResultGroup, CheckBox> GroupBoxes = new();
+    static readonly Dictionary<int, CheckBox> CategoryBoxes = new();
+    static readonly ComboBox SetupBox = new() { ItemsSource = ResultRules.Setups, SelectedIndex = 0, Width = 190, Margin = new Thickness(0, 0, 8, 0) };
+    static readonly TextBox FilterBox = new() { MinWidth = 180, ToolTip = "list only rows whose text holds this (any case)" };
+    static readonly TextBlock CountLine = new() { Margin = new Thickness(6, 2, 6, 2), Foreground = Theme.Brush(Theme.Dim) };
+    static readonly TextBlock Legend = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 0, 6, 2), Foreground = Theme.Brush(Theme.Dim), FontSize = 11 };
+    static readonly ListBox Rows = new();
+    static readonly TextBox Detail = new() { IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Height = 210, Margin = new Thickness(6, 2, 6, 4), FontSize = 12 };
+
+    static EvaluationResults? _results;
+    static readonly Dictionary<string, IReadOnlyList<ResultRow>> Loaded = new(StringComparer.OrdinalIgnoreCase);
+    static List<ResultRow> _listed = new();
+    static bool _filling;
+    static DispatcherTimer? _filterTimer;
+    static int _generation, _openGeneration;
+
+    internal static EvaluationResults? Results => _results;
+    /// <summary>The pair chosen, or null for all pairs.</summary>
+    internal static string? Pair { get; private set; }
+    internal static HashSet<ResultGroup> Shown { get; } = new() { ResultGroup.Addressed, ResultGroup.NotAddressed, ResultGroup.PatchChange, ResultGroup.NotScored };
+    internal static HashSet<int> Categories { get; } = new() { 3, 4, 5 };
+    internal static string Setup { get; private set; } = ResultRules.Setups[0];
+    internal static string TextFilter { get; private set; } = "";
+    internal static IReadOnlyList<ResultRow> Listed => _listed;
+    internal static ResultRow? Open { get; private set; }
+    /// <summary>The setup the open row's scene was asked on ("before" or "after"), and what was said about it.</summary>
+    internal static string? OpenSetup { get; private set; }
+    internal static string? OpenSaid { get; private set; }
+    internal static string? OpenCell { get; private set; }
+    internal static int Marked { get; private set; }
+
+    sealed record RowItem(ResultRow Row, string Text) { public override string ToString() => Text; }
+
+    internal static UIElement Build()
+    {
+        VirtualizingPanel.SetIsVirtualizing(Rows, true);
+        VirtualizingPanel.SetVirtualizationMode(Rows, VirtualizationMode.Recycling);
+        ScrollViewer.SetHorizontalScrollBarVisibility(Rows, ScrollBarVisibility.Auto);
+        Header.Text = "no evaluation is open: use Open above with a finished evaluation's results folder.";
+        var filters = new WrapPanel { Margin = new Thickness(6, 2, 6, 2) };
+        foreach (var (group, g) in Groups)
+        {
+            var cb = new CheckBox { IsChecked = true, Margin = new Thickness(0, 0, 14, 2), Tag = group, Content = $"{g.Shape} {g.Words}" };
+            cb.Click += (_, _) => { if (_filling) return; if (cb.IsChecked == true) Shown.Add(group); else Shown.Remove(group); Refill(); };
+            GroupBoxes[group] = cb; filters.Children.Add(cb);
+        }
+        var cats = new WrapPanel { Margin = new Thickness(26, 0, 6, 2) };
+        cats.Children.Add(new TextBlock { Text = "patch changes by the scorecard's category:  ", VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim) });
+        foreach (int c in new[] { 3, 4, 5 })
+        {
+            var cb = new CheckBox { IsChecked = true, Margin = new Thickness(0, 0, 12, 2), Content = CategoryWords(c) };
+            int cat = c;
+            cb.Click += (_, _) => { if (_filling) return; if (cb.IsChecked == true) Categories.Add(cat); else Categories.Remove(cat); Refill(); };
+            CategoryBoxes[c] = cb; cats.Children.Add(cb);
+        }
+        var controls = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6, 2, 6, 2) };
+        controls.Children.Add(new TextBlock { Text = "Show ", VerticalAlignment = VerticalAlignment.Center });
+        controls.Children.Add(SetupBox);
+        controls.Children.Add(new TextBlock { Text = "Find ", VerticalAlignment = VerticalAlignment.Center });
+        controls.Children.Add(FilterBox);
+        SetupBox.ToolTip = "which setup a row's scene is built on: before the patch (the two mods together) or after it (with the patch added)";
+        SetupBox.SelectionChanged += (_, _) => { if (_filling || SetupBox.SelectedItem is not string s) return; Setup = s; if (Open is { } r) Say(() => OpenRow(r)); };
+        PairBox.SelectionChanged += (_, _) => { if (_filling || PairBox.SelectedItem is not ComboBoxItem { Tag: var tag }) return; Pair = tag as string; Refill(); };
+        FilterBox.TextChanged += (_, _) =>
+        {
+            _filterTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
+            _filterTimer.Tick -= FilterTick; _filterTimer.Tick += FilterTick;
+            _filterTimer.Stop(); _filterTimer.Start();
+        };
+        Rows.SelectionChanged += (_, _) => { if (_filling || Rows.SelectedItem is not RowItem item) return; Say(() => OpenRow(item.Row)); };
+        Legend.Text = "In the scene: " + ResultMarks.Legend(Groups.Select(g => (g.Value.Mark, g.Value.Words)))
+                    + "; cyan: the row's object, magenta: its other object. " + NotScoredMeans;
+        // the notes and the marks' legend fold away, so the rows keep the height
+        var about = new StackPanel();
+        about.Children.Add(NotesLine); about.Children.Add(Legend);
+        var aboutBox = new Expander { Header = "Notes and the scene marks' legend", IsExpanded = false, Content = about, Margin = new Thickness(6, 0, 6, 2) };
+        var panel = new DockPanel();
+        foreach (var top in new UIElement[] { Header, Means, PairBox, filters, cats, controls, aboutBox, CountLine }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
+        // the list above, the open row's values below, with a splitter to drag between them
+        var body = new Grid();
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 90 });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 70 });
+        var split = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Center, Background = Theme.Brush(Theme.Line) };
+        Detail.Height = double.NaN;
+        Grid.SetRow(Rows, 0); Grid.SetRow(split, 1); Grid.SetRow(Detail, 2);
+        body.Children.Add(Rows); body.Children.Add(split); body.Children.Add(Detail);
+        panel.Children.Add(body);
+        return panel;
+    }
+
+    static void FilterTick(object? s, EventArgs e) { _filterTimer!.Stop(); TextFilter = FilterBox.Text.Trim(); Refill(); }
+
+    static void Say(Func<string> act)
+    {
+        try { Shell.SetBanner(act()); }
+        catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); }
+    }
+
+    /// <summary>Show an opened evaluation: its pairs and counts at once, its rows as each pair's files are read.</summary>
+    internal static string Show(EvaluationResults results)
+    {
+        int gen = ++_generation;
+        _results = results; Loaded.Clear(); _listed = new(); Open = null; OpenSetup = null; OpenSaid = null; OpenCell = null; Marked = 0;
+        Pair = null; Shell.PartnerFor = null; Shell.SceneCaption = null;
+        Rows.ItemsSource = null; Detail.Text = "";
+        FillHeader(); FillPairs();
+        if (Shell.Tabs is not null) Shell.ShowTab("Results");
+        var ui = Dispatcher.CurrentDispatcher;
+        // each pair's rows are read off the window's thread (the overlap lists are tens of megabytes); the list fills as they arrive
+        Task.Run(() =>
+        {
+            foreach (var p in results.Pairs)
+            {
+                IReadOnlyList<ResultRow> rows; string? why = null;
+                try { rows = p.LoadRows(); }
+                catch (Exception ex) when (ex is InvalidOperationException or IOException or System.Text.Json.JsonException) { rows = Array.Empty<ResultRow>(); why = ex.Message; }
+                ui.BeginInvoke(() =>
+                {
+                    if (gen != _generation) return;
+                    Loaded[p.Id] = rows;
+                    if (why is not null) Shell.SetBanner($"the rows of {p.Id} could not be read: {why}");
+                    FillHeader(); FillPairs(); Refill();
+                });
+            }
+        });
+        var t = results.Totals;
+        return $"opened the evaluation at '{results.Folder}': {results.Pairs.Count} pairs, {t.Addressed:N0} predicted clashes the patches addressed, {t.NotAddressed:N0} they did not, "
+             + $"{t.PatchChange:N0} patch changes nothing predicted; {results.Checked.Count} file(s) match the receipt.";
+    }
+
+    static string CountsText(ResultCounts c) =>
+        $"{c.Addressed:N0} addressed · {c.NotAddressed:N0} not addressed · {c.PatchChange:N0} patch changes nothing predicted ({c.Category3:N0} / {c.Category4:N0} / {c.Category5:N0}) · "
+        + (c.NotScored is { } n ? $"{n:N0} overlap not scored" : "overlap not scored: reading…");
+
+    static void FillHeader()
+    {
+        if (_results is not { } r) return;
+        Header.Text = $"Evaluation results: {r.Folder}  —  {r.Pairs.Count} pairs; {r.Checked.Count} file(s) match the receipt.  All pairs: {CountsText(r.Totals)}";
+        var notes = r.Notes.Concat(Pair is null ? Enumerable.Empty<string>() : r.Pairs.Where(p => p.Id == Pair).SelectMany(p => p.Notes)).Distinct().ToList();
+        NotesLine.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
+        NotesLine.Visibility = notes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    static void FillPairs()
+    {
+        if (_results is not { } r) return;
+        bool was = _filling; _filling = true;
+        try
+        {
+            PairBox.Items.Clear();
+            PairBox.Items.Add(new ComboBoxItem { Content = $"All pairs  —  {CountsText(r.Totals)}", Tag = null });
+            foreach (var p in r.Pairs)
+                PairBox.Items.Add(new ComboBoxItem { Content = $"{p.Id}  ({p.PatchPlugin})  —  {CountsText(p.Counts)}", Tag = p.Id });
+            PairBox.SelectedIndex = Pair is null ? 0 : 1 + r.Pairs.ToList().FindIndex(p => p.Id == Pair);
+        }
+        finally { _filling = was; }
+    }
+
+    static void Refill()
+    {
+        if (_results is not { } r) return;
+        bool was = _filling; _filling = true;
+        try
+        {
+            var all = r.Pairs.Where(p => Loaded.ContainsKey(p.Id)).SelectMany(p => Loaded[p.Id]);
+            _listed = Select(all, Pair, Shown, Categories, TextFilter);
+            Rows.ItemsSource = _listed.Select(x => new RowItem(x, Line(x))).ToList();
+            var counts = Pair is null ? r.Totals : r.Pairs.First(p => p.Id == Pair).Counts;
+            foreach (var (g, cb) in GroupBoxes)
+                {
+                int? n = g switch { ResultGroup.Addressed => counts.Addressed, ResultGroup.NotAddressed => counts.NotAddressed, ResultGroup.PatchChange => counts.PatchChange, _ => counts.NotScored };
+                cb.Content = $"{Groups[g].Shape} {Groups[g].Words}  ({n?.ToString("N0") ?? "reading…"})";
+            }
+            foreach (var (c, cb) in CategoryBoxes)
+                cb.Content = $"{CategoryWords(c)}  ({(c == 3 ? counts.Category3 : c == 4 ? counts.Category4 : counts.Category5):N0})";
+            int reading = r.Pairs.Count(p => !Loaded.ContainsKey(p.Id));
+            int noView = _listed.Count(x => x.Place.Cell is null);
+            CountLine.Text = $"{_listed.Count:N0} row(s) listed" + (noView > 0 ? $"; {noView:N0} have no view from the results alone and say why" : "")
+                           + (reading > 0 ? $"; {reading} pair(s) still being read" : "");
+            FillHeader();
+            ApplyMarks();
+        }
+        finally { _filling = was; }
+    }
+
+    // ---- choices, as the controls and the state tools make them ---------------------------------------------------------
+    internal static string Choose(string? pair, string[]? groups, int[]? categories, string? setup, string? text)
+    {
+        if (_results is not { } r) throw new InvalidOperationException("no evaluation is open; open a finished evaluation's results folder first.");
+        if (pair is not null)
+        {
+            if (pair.Equals("all", StringComparison.OrdinalIgnoreCase)) Pair = null;
+            else Pair = r.Pairs.FirstOrDefault(p => p.Id.Equals(pair, StringComparison.OrdinalIgnoreCase))?.Id
+                        ?? throw new InvalidOperationException($"'{pair}' is not a pair of this evaluation; name one of {string.Join(", ", r.Pairs.Select(p => p.Id))}, or all.");
+        }
+        if (groups is not null)
+        {
+            var want = new HashSet<ResultGroup>();
+            foreach (var g in groups)
+                want.Add(g.Trim().ToLowerInvariant().Replace("-", "_").Replace(" ", "_") switch
+                {
+                    "addressed" => ResultGroup.Addressed,
+                    "not_addressed" => ResultGroup.NotAddressed,
+                    "patch_change" => ResultGroup.PatchChange,
+                    "not_scored" => ResultGroup.NotScored,
+                    _ => throw new InvalidOperationException($"'{g}' is not a group; use addressed, not_addressed, patch_change or not_scored."),
+                });
+            Shown.Clear(); foreach (var g in want) Shown.Add(g);
+        }
+        if (categories is not null)
+        {
+            if (categories.FirstOrDefault(c => c is not (3 or 4 or 5)) is var bad && bad != 0) throw new InvalidOperationException($"{bad} is not a category of a patch change nothing predicted; use 3, 4 or 5.");
+            Categories.Clear(); foreach (var c in categories) Categories.Add(c);
+        }
+        if (setup is not null)
+            Setup = Setups.FirstOrDefault(s => s.StartsWith(setup.Trim(), StringComparison.OrdinalIgnoreCase) || s.Contains(setup.Trim(), StringComparison.OrdinalIgnoreCase))
+                    ?? throw new InvalidOperationException($"'{setup}' is not a setup choice; use own, before or after.");
+        if (text is not null) TextFilter = text.Trim();
+        bool was = _filling; _filling = true;
+        try
+        {
+            foreach (var (g, cb) in GroupBoxes) cb.IsChecked = Shown.Contains(g);
+            foreach (var (c, cb) in CategoryBoxes) cb.IsChecked = Categories.Contains(c);
+            SetupBox.SelectedItem = Setup; FilterBox.Text = TextFilter;
+        }
+        finally { _filling = was; }
+        FillPairs(); Refill();
+        return $"{_listed.Count:N0} row(s) listed for {(Pair ?? "all pairs")}: {string.Join(", ", Shown.OrderBy(g => g).Select(g => Groups[g].Words))}; scenes show {Setup}.";
+    }
+
+    /// <summary>A row by its key (<c>pair|f3</c>, <c>pair|e12</c>, <c>pair|o7</c>), among the rows read so far.</summary>
+    internal static ResultRow RowOf(string key) =>
+        Loaded.Values.SelectMany(v => v).FirstOrDefault(r => string.Equals(r.Key, key, StringComparison.OrdinalIgnoreCase))
+        ?? throw new InvalidOperationException($"'{key}' is not a row of the open evaluation; read workbench_state project results for the keys listed.");
+
+    // ---- one row ------------------------------------------------------------------------------------------------------
+    static string DetailText(ResultRow r)
+    {
+        var g = Groups[r.Group];
+        var lines = new List<string>
+        {
+            r.Summary,
+            "",
+            $"{g.Shape} {(r.Group == ResultGroup.PatchChange ? $"patch change nothing predicted, the scorecard's category {CategoryWords(r.Category)} ({r.Rule})" : g.Words)}"
+                + (r.Group is ResultGroup.Addressed or ResultGroup.NotAddressed ? $"  —  {AddressedMeans}" : r.Group == ResultGroup.NotScored ? $"  —  {NotScoredMeans}" : ""),
+            $"pair {r.Pair}; {r.RecordType} {r.FormKey}" + (r.EditorId is { } e ? $" '{e}'" : "") + (r.BaseEditorId is { } b ? $"; base {b}" + (r.BaseType is { } bt ? $" ({bt})" : "") : "")
+                + (r.Field is { } f ? $"; field {f}" : "") + (r.Attribution is { } a ? $"; attribution: {a}" : ""),
+        };
+        if (r.Values.Count > 0) { lines.Add(""); foreach (var v in r.Values) lines.Add($"{v.Label}{(v.Plugin is { } p ? $" ({p})" : "")}: {v.Text}"); }
+        if (r.JoinedEdits.Count > 0) { lines.Add(""); lines.Add("the patch's edits here:"); foreach (var j in r.JoinedEdits) lines.Add("  " + j); }
+        if (r.Note is { } n) { lines.Add(""); lines.Add("note: " + n); }
+        lines.Add("");
+        lines.Add(r.Place.Cell is { } c ? $"place: cell {c}" + (r.Place.RefKey is { } k ? $", object {k}" : "") + (r.Place.OtherKey is { } o ? $", other object {o}" : "")
+                  : $"no view from the results alone: {r.Place.WhyNot}");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    /// <summary>The setup a row's scene is built on now: the choice above the list, or the row's own.</summary>
+    internal static string SetupOf(ResultRow r) => Setup == Setups[1] ? "before" : Setup == Setups[2] ? "after" : r.DefaultSetup;
+
+    static LoadOrderSpec OrderOf(ResultPair p, string setup)
+    {
+        var s = (setup == "after" ? p.After : p.Before)
+                ?? throw new InvalidOperationException($"the setup {(setup == "after" ? "after" : "before")} the patch is not available for {p.Id}: {string.Join(" ", p.Notes)}");
+        return new LoadOrderSpec(s.Instance, s.Profile, s.Game, s.OrderFile, $"{p.Id} {(setup == "after" ? "AFTER the patch (with " + p.PatchPlugin + ")" : "BEFORE the patch (the two mods together)")}");
+    }
+
+    /// <summary>A click on a row: show its values, and when it has a place, ask for its cell's scene on its setup and land
+    /// on its object. Where the object stands in that setup is read from that setup's own load order (its index), which is
+    /// read once per setup; the results' own cell is the fallback.</summary>
+    internal static string OpenRow(ResultRow r)
+    {
+        if (_results is not { } res) throw new InvalidOperationException("no evaluation is open.");
+        Open = r; Detail.Text = DetailText(r); OpenCell = null; OpenSaid = null;
+        var item = (Rows.ItemsSource as List<RowItem>)?.FirstOrDefault(i => ReferenceEquals(i.Row, r));
+        if (item is not null && !ReferenceEquals(Rows.SelectedItem, item)) { bool was = _filling; _filling = true; try { Rows.SelectedItem = item; Rows.ScrollIntoView(item); } finally { _filling = was; } }
+        var pair = res.Pairs.First(p => p.Id == r.Pair);
+        string setup = SetupOf(r); OpenSetup = setup;
+        bool placedRef = r.Place.RefKey is not null && r.RecordType is not ("NAVM" or "LAND" or "CELL");
+        if (r.Place.Cell is null && !placedRef && r.RecordType is not ("NAVM" or "LAND"))
+            return OpenSaid = $"{r.RecordType} {r.FormKey} has no view: {r.Place.WhyNot}.";
+        // the navmesh is drawn for a navmesh row and left out otherwise, where its wire only hides the objects
+        var order = OrderOf(pair, setup) with { Navmesh = r.Lane == "navmesh" || r.RecordType == "NAVM" };
+        int gen = ++_openGeneration;
+        var ui = Dispatcher.CurrentDispatcher;
+        var index = LoadOrderIndexes.For(order);
+        bool waited = !index.IsCompleted;
+        index.ContinueWith(t => ui.BeginInvoke(() =>
+        {
+            if (gen != _openGeneration) return;
+            Say(() =>
+            {
+                if (t.IsFaulted) throw new InvalidOperationException($"the load order of {order.Label} could not be read, so the row's place is not known: {t.Exception!.GetBaseException().Message}");
+                var x = t.Result;
+                string? cell = null, land = null, extra = null;
+                if (placedRef)
+                {
+                    land = r.Place.RefKey;
+                    cell = x.OpenableCellOf(land!) ?? (r.Place.OtherKey is { } ok ? x.OpenableCellOf(ok) : null);
+                    if (cell is null && x.Locate(land!) is null)
+                    {
+                        extra = setup == "before" && r.Lane == "edit" && r.Kind == "ADD"
+                            ? $"the patch adds {land}, so the scene before the patch does not have it"
+                            : $"{land} is not a record of this setup's load order";
+                        cell = r.Place.Cell;
+                    }
+                    cell ??= r.Place.Cell;
+                }
+                else if (r.RecordType is "NAVM" or "LAND") cell = r.Place.Cell ?? x.Locate(r.FormKey)?.Cell;
+                else cell = r.Place.Cell;
+                if (cell is null)
+                    throw new InvalidOperationException(OpenSaid = $"{r.RecordType} {r.FormKey} has no view: {(placedRef ? "its position falls in no cell of its worldspace in this setup" : "this setup's load order files it under no cell")}.");
+                OpenCell = cell;
+                Shell.PartnerFor = sel => string.Equals(sel, r.Place.RefKey, StringComparison.OrdinalIgnoreCase) ? r.Place.OtherKey
+                                        : string.Equals(sel, r.Place.OtherKey, StringComparison.OrdinalIgnoreCase) ? r.Place.RefKey : null;
+                Shell.SceneCaption = setup == "after" ? $"AFTER the patch ({pair.PatchPlugin})" : "BEFORE the patch";
+                var said = SceneDirector.Request(new SceneRequest(order, cell, land, $"{Groups[r.Group].Words}: {r.RecordType} {r.FormKey}") { Shown = ApplyMarks });
+                return OpenSaid = said + (extra is null ? "" : $" Note: {extra}.");
+            });
+        }), TaskScheduler.Default);
+        return waited ? $"reading the load order of {order.Label} to place {r.FormKey} (once per setup, a few seconds)…" : $"opening {r.RecordType} {r.FormKey} on {order.Label}…";
+    }
+
+    /// <summary>Mark, in the scene shown, every listed row of the open row's pair that the scene draws, each in its group's shape.</summary>
+    static void ApplyMarks()
+    {
+        if (Shell.Current is not { } h) { Marked = 0; return; }
+        if (Open is null || !Loaded.TryGetValue(Open.Pair, out var rows) || SceneDirector.Showing is null) { Marked = h.MarkResults(Array.Empty<(FormKey, MarkStyle)>()); return; }
+        var marks = new Dictionary<FormKey, MarkStyle>();
+        // a later group does not replace an earlier one's mark: addressed, then not addressed, then patch change, then not scored
+        foreach (var r in Select(rows, Open.Pair, Shown, Categories, "").OrderBy(r => r.Group))
+            foreach (var k in new[] { r.Place.RefKey, r.Group == ResultGroup.NotScored || r.Lane == "contact" ? r.Place.OtherKey : null })
+                if (k is not null && FormKey.TryFactory(k, out var fk)) marks.TryAdd(fk, Groups[r.Group].Mark);
+        Marked = h.MarkResults(marks.Select(m => (m.Key, m.Value)));
+    }
+
+    // ---- what the state tools read ------------------------------------------------------------------------------------
+    internal static object State(int limit, int offset)
+    {
+        if (_results is not { } r) return new { open = false };
+        object Counts(ResultCounts c) => new
+        {
+            addressed = c.Addressed, notAddressed = c.NotAddressed, patchChange = c.PatchChange, category3 = c.Category3, category4 = c.Category4, category5 = c.Category5, notScored = c.NotScored,
+        };
+        return new
+        {
+            open = true, folder = r.Folder, receiptFilesMatched = r.Checked.Count, notes = r.Notes, means = AddressedMeans, notScoredMeans = NotScoredMeans,
+            totals = Counts(r.Totals),
+            pairs = r.Pairs.Select(p => new
+            {
+                id = p.Id, patch = p.PatchPlugin, subject = p.Subject, partner = p.Partner, counts = Counts(p.Counts), rowsRead = Loaded.ContainsKey(p.Id),
+                sealedRun = p.SealedRun, patchedRun = p.PatchedRun, before = p.Before?.OrderFile, after = p.After?.OrderFile, profile = p.Before?.Profile, notes = p.Notes,
+            }).ToList(),
+            pair = Pair ?? "all", groups = Shown.OrderBy(g => g).Select(g => g.ToString()).ToList(), categories = Categories.OrderBy(c => c).ToList(), setup = Setup, text = TextFilter,
+            legend = Legend.Text,
+            listed = _listed.Count, listedWithNoView = _listed.Count(x => x.Place.Cell is null),
+            listedByGroup = _listed.GroupBy(x => x.Group).ToDictionary(g => g.Key.ToString(), g => g.Count()),
+            rows = _listed.Skip(offset).Take(limit).Select(RowJson).ToList(),
+            openRow = Open is null ? null : new
+            {
+                row = RowJson(Open), setup = OpenSetup, cell = OpenCell, said = OpenSaid, detail = DetailText(Open), marked = Marked,
+                sceneCaption = Shell.SceneCaption,
+            },
+        };
+    }
+
+    static object RowJson(ResultRow x) => new
+    {
+        key = x.Key, group = x.Group.ToString(), pair = x.Pair, lane = x.Lane, kind = x.Kind, recordType = x.RecordType, formKey = x.FormKey, field = x.Field,
+        editorId = x.EditorId, baseEditorId = x.BaseEditorId, category = x.Category, rule = x.Rule, attribution = x.Attribution, line = Line(x),
+        values = x.Values.Select(v => new { label = v.Label, plugin = v.Plugin, text = v.Text.Length > 400 ? v.Text[..400] + "…" : v.Text }).ToList(),
+        place = new { cell = x.Place.Cell, @ref = x.Place.RefKey, other = x.Place.OtherKey, inPersistentCell = x.Place.InPersistentCell, whyNot = x.Place.WhyNot },
+        ownSetup = x.DefaultSetup, note = x.Note,
+    };
+}
+
+/// <summary>A finished evaluation's results folder (it holds <c>SCORING-RECEIPT.txt</c> and <c>scoring/result/</c>), or
+/// that receipt: opens into the Results tab once every file the receipt pins has been checked.</summary>
+internal sealed class ResultsInputReader : IInputReader
+{
+    public string Kind => "evaluation results";
+    public string Accepts => "an evaluation results folder";
+
+    public InputMatch? Recognise(string path) =>
+        EvaluationResults.LooksLike(path) ? new InputMatch(this, path, "a finished evaluation's results") : null;
+
+    public string Open(InputMatch match)
+    {
+        var work = Path.GetFullPath(Program.RequestWork());
+        var results = EvaluationResults.Open(match.Path);
+        // the window writes its own files (worklists, captures) under the Work Folder: never inside the evidence it reads
+        foreach (var root in new[] { results.Folder }.Concat(results.Pairs.SelectMany(p => new[] { p.SealedRun, p.PatchedRun })).OfType<string>())
+            if (work.StartsWith(Path.GetFullPath(root).TrimEnd('\\', '/') + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(work.TrimEnd('\\', '/'), Path.GetFullPath(root).TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"the Work Folder '{work}' is inside the evaluation's own folder '{root}', and opening results must change nothing there; choose a Work Folder elsewhere (or unset WB_OUT).");
+        return ResultsView.Show(results);
+    }
+}

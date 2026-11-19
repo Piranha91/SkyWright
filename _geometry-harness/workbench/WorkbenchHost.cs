@@ -87,7 +87,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         Directory.CreateDirectory(_outDir);
         renderer.Overlays.Add(_resultMarks);
         renderer.Overlays.Add(_marks);
-        renderer.Overlays.Add(_gizmo);
+        if (!ReadOnly) renderer.Overlays.Add(_gizmo);     // a read-only scene has no move handles
         renderer.Overlays.Insert(0, _tints);
         _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye))
         {
@@ -166,8 +166,10 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     {
         _marks.Selected = _session.Selected is { } k ? _session.RefOf(k) : null;
         _marks.Partner = null; PartnerNote = null;
-        if (_session.Selected is { } s && Shell.CurrentRow is { } r && string.Equals(r.Row.RefKey, s.ToString(), StringComparison.OrdinalIgnoreCase)
-            && r.Row.OtherKey is { } o && FormKey.TryFactory(o, out var ok))
+        // the open conflict row's other reference, else the other reference of the Results row this scene was opened for
+        string? other = _session.Selected is { } s0 && Shell.CurrentRow is { } r && string.Equals(r.Row.RefKey, s0.ToString(), StringComparison.OrdinalIgnoreCase)
+            ? r.Row.OtherKey : _session.Selected is { } s1 && Shell.CurrentRow is null ? Shell.PartnerFor?.Invoke(s1.ToString()) : null;
+        if (_session.Selected is { } s && other is { } o && FormKey.TryFactory(o, out var ok))
         {
             if (_session.IsDrawn(ok)) _marks.Partner = _session.RefOf(ok);
             else
@@ -195,6 +197,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         string written = _session.Selected is { } wk && _session.Written.TryGetValue(wk, out var wv) ? "\n" + EditSession.WrittenLabel(wk, wv.Patch)
                        : _session.Selected is { } bk ? "\nthe view shows " + bk + " where the load order places it" : "";
         string recheck = Rechecking ? "re-checking..." : LastRecheck is { } lr ? $"last re-check: {lr.Row.Word}, {lr.New.Count} new" : RecheckRefusal is { } rr ? "re-check refused: " + rr : "";
+        if (ReadOnly)
+        {
+            _status.Text = (Shell.SceneCaption is { } cap ? cap + "  |  " : "") + $"{sel}  |  read-only scene on {SceneDirector.Order?.Label ?? "its load order"}" + (marks.Length > 0 ? "\n" + marks : "");
+            return;
+        }
         _status.Text = $"{sel}  |  {_session.Pending.Count} staged edit(s)  |  writes go to {target}" + (recheck.Length > 0 ? "  |  " + recheck : "") + written + (marks.Length > 0 ? "\n" + marks : "");
     }
 
@@ -233,7 +240,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         dry.Click += async (_, _) => await CommitAsync(dryRun: true, "Workbench");
         write.Click += async (_, _) => await CommitAsync(dryRun: false, "Workbench");
         // a fixed height, so the 3D view keeps its size whatever the edits list, the status line or the buttons hold
-        var bar = new DockPanel { LastChildFill = true, Height = 240 };
+        var bar = new DockPanel { LastChildFill = true, Height = ReadOnly ? 104 : 240 };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(marksBtn);
         if (!ReadOnly) { buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write); }
@@ -248,7 +255,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         Grid.SetColumn(context, 1);
         pendingPanel.Children.Add(edits); pendingPanel.Children.Add(context);
         DockPanel.SetDock(pendingPanel, Dock.Bottom);
-        bar.Children.Add(tools); bar.Children.Add(pendingPanel);
+        bar.Children.Add(tools);
+        if (!ReadOnly) bar.Children.Add(pendingPanel);
         bar.Children.Add(buttons); bar.Children.Add(_status);
 
         // The view: a Win32 child window drawn with the scene's own context (NativeGlHost says why not GLWpfControl).
@@ -410,6 +418,16 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal readonly List<double> SwapMs = new();
 
     internal bool Paused;
+    (string Path, TaskCompletionSource<string> Done)? _captureAsk;
+
+    /// <summary>Save the whole window, with this scene's next frame in the view's place, as a PNG.</summary>
+    internal Task<string> CaptureWindowAsync(string path)
+    {
+        var done = new TaskCompletionSource<string>();
+        _captureAsk = (path, done);
+        Invalidate();
+        return done.Task;
+    }
 
     void Frame()
     {
@@ -431,6 +449,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _frame++;
         RenderCallMs.Add(Clock.Elapsed.TotalMilliseconds - t0);
         _script?.Tick();                    // a capture step reads the back buffer before the swap
+        if (_captureAsk is { } ask)
+        {
+            _captureAsk = null;
+            try
+            {
+                var viewPng = Capture(Path.GetFileNameWithoutExtension(ask.Path) + "-view");
+                var (cw, ch) = WindowCapture.SaveComposite(Shell.Window!, Shell.ViewSlot, viewPng, ask.Path);
+                ask.Done.SetResult($"window captured with its scene ({cw}x{ch}) to {ask.Path}");
+            }
+            catch (Exception ex) { ask.Done.SetException(new InvalidOperationException("the window could not be captured: " + ex.Message)); }
+        }
         var t1 = Clock.Elapsed.TotalMilliseconds;
         _view.Swap();
         SwapMs.Add(Clock.Elapsed.TotalMilliseconds - t1);
@@ -498,7 +527,16 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     /// reference (other geometry can stand in front). Says which pose it kept and whether the centre pick named it.</summary>
     internal bool Land(FormKey key)
     {
-        if (!_session.IsDrawn(key)) { Shell.SetBanner($"{key} is not drawn in this scene; nothing to land on."); Shell.LastLanding = $"{key}: not drawn"; return false; }
+        if (!_session.IsDrawn(key))
+        {
+            // why, in the walk's own word when it read the reference: no model (a light, a marker), disabled, deleted; else it is not in this cell's scene
+            string why = _opt.RefOutcomes is { } ro && ro.TryGetValue(key, out var w) ? (w.Outcome == "drawn" ? "its model could not be read" : NotDrawnWords(w.Outcome))
+                       : "the scene's walk did not meet it in this cell or the cells around it";
+            Select(null);                                   // the last object landed on is not this one: nothing stays selected in its place
+            Shell.SetBanner($"{key} is not drawn in this scene ({why}); nothing to land on.");
+            Shell.LastLanding = $"{key}: not drawn ({why})";
+            return false;
+        }
         Select(key);
         var (kept, clear, crossing, coveredBy) = FrameOn(key);
         Shell.LastLanding = kept;
@@ -506,6 +544,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         Say("landing: " + Shell.LastLanding);
         return clear || crossing;
     }
+
+    /// <summary>The walk's one-word outcome for a reference it did not draw, in a few plain words.</summary>
+    internal static string NotDrawnWords(string outcome) => outcome switch
+    {
+        "no-model" => "its base object has no model, as a light or a marker has none",
+        "marker" => "it is a marker, which the game does not draw",
+        "disabled" => "it is disabled in this load order",
+        "deleted" => "it is deleted in this load order",
+        "unresolved-mesh" => "its model could not be read",
+        _ => outcome,
+    };
 
     /// <summary>After a write or a re-check moved a reference on screen, point the camera at where it is drawn now
     /// (the selection and the banner stay as they are).</summary>
@@ -769,7 +818,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var ghost = new System.Windows.Controls.Primitives.ToggleButton { Content = "Ghost", Margin = new Thickness(4), ToolTip = "a see-through copy of each edited object at its load-order place" };
         ghost.Checked += (_, _) => Do(() => { _viewState.Ghost = true; return "ghost shown"; });
         ghost.Unchecked += (_, _) => Do(() => { _viewState.Ghost = false; return "ghost hidden"; });
-        row.Children.Add(original); row.Children.Add(ghost);
+        if (!ReadOnly) { row.Children.Add(original); row.Children.Add(ghost); }   // both are about edits, which a read-only scene has none of
         row.Children.Add(B("Hide in front", "hide whatever stands between the camera and the selected object (Alt+click hides one object, Alt+Shift+click one part)",
             () => Do(() => _session.Selected is { } k ? _viewState.HideInFront(k, () => PickAt(new Vector2(W / 2f, H / 2f))) : "select an object first")));
         row.Children.Add(B("See-through", "draw the selected object as a flat see-through tint", () => Do(() => _session.Selected is { } k ? _viewState.SeeThrough(k) : "select an object first")));

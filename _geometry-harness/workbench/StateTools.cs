@@ -25,7 +25,7 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
     static readonly string[] EditVerbs = { "stage", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
@@ -51,6 +51,8 @@ internal sealed class StateTools
                      "context (the selected reference: doors within 256 units, each 'touches it' or 'near only', with the far side; what names it; its enable parent; what rests on it and what physics does with it at load; the navmesh under its bounds; what stays behind a move; 'reading…' while the read runs), " +
                      "placements (find_clear's candidate positions: each one's move, drop, what it touches there, its word from the open row's re-check, what was and was not checked; wait_seconds waits for them). " +
                      "scene (what the 3D view shows or is loading: the cell, the load order it is built on, read-only or not, and the last build's time and the longest the window waited during it). " +
+                     "results (the Results tab: the open evaluation's pairs with their counts, the choices made, and the rows listed, each with its group, values and place; limit and offset page the rows; the open row with its setup, cell and what was said). " +
+                     "world (the World tab: the browsed load order, its worldspaces, the search's cells, and with `cell` that cell's persistent and temporary records, each with type, EditorID, base, FormKey and winning plugin). " +
                      "Default: selection, pending, recheck.")]
             string[]? project = null,
         [Description("conflicts: how many rows to list (default 20).")] int limit = 20,
@@ -60,7 +62,8 @@ internal sealed class StateTools
         [Description("conflicts: also list rows decided intentional (hidden by default, as in the window).")] bool include_decided = false,
         [Description("scenes: also list cells that hold only Findings rows (left out and counted by default).")] bool include_findings_only = false,
         [Description("If a re-check is running, wait up to this many seconds (at most 600) for it to finish before answering. Default 0.")]
-            int wait_seconds = 0)
+            int wait_seconds = 0,
+        [Description("world: a cell's FormKey; its records are listed (limit and offset page each list).")] string? cell = null)
     {
         var parts = project is { Length: > 0 } ? project.Select(p => p.Trim().ToLowerInvariant()).ToArray() : DefaultParts;
         if (parts.FirstOrDefault(p => !Parts.Contains(p)) is { } bad)
@@ -95,6 +98,8 @@ internal sealed class StateTools
             if (parts.Contains("context")) d["context"] = ContextJson(hub.Surface);
             if (parts.Contains("placements")) d["placements"] = PlacementsJson(hub.Surface);
             if (parts.Contains("scene")) d["scene"] = SceneDirector.State();
+            if (parts.Contains("results")) d["results"] = ResultsView.State(limit, offset);
+            if (parts.Contains("world")) d["world"] = WorldView.State(cell, limit, offset);
             return Answer(d);
         });
     }
@@ -120,6 +125,8 @@ internal sealed class StateTools
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
                  "write goes under), set_work_folder (`path`, where a run keeps its files), run (the ticked probes, only `checks`, or [\"all\"]: every probe that can run here), " +
                  "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
+                 "results (the Results tab of an opened evaluation: `pair`, `groups`, `categories`, `setup` and `search` choose what is listed; `row` opens a row: its values, and its cell in the setup before or after the patch with the camera on its object). " +
+                 "world (the World tab of an opened load order: `search` filters its cells; `cell` opens a cell; `ref` opens the cell a record is in and lands on it; read-only). " +
                  "open (`path`: open a folder or file in the window, as its Open control does; what it is is detected from the names on disk, and anything the window does not open is refused in one sentence). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
@@ -143,8 +150,8 @@ internal sealed class StateTools
         [Description("select_mods: set (default), add or remove.")] string? how = null,
         [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
         [Description("set_output or set_work_folder: the folder, by its full path. open: the folder or file to open. capture_window: the .png to write.")] string? path = null,
-        [Description("show_tab: the tab to bring to the front, by its header (Start, Conflicts, Findings or Records).")] string? tab = null,
-        [Description("search_mods: the text the Start tab's mod list is filtered by (any case; empty shows every mod).")] string? search = null,
+        [Description("show_tab: the tab to bring to the front, by its header (Start, Conflicts, Findings, Records, Results or World).")] string? tab = null,
+        [Description("search_mods: the text the Start tab's mod list is filtered by (any case; empty shows every mod). results: list only rows holding this text. world: part of a cell's EditorID or name, a FormKey, or a grid x,y.")] string? search = null,
         [Description("stage: a typed offset, such as \"+120 x\", \"-30 z\" or \"15°\" (a turn about the vertical).")] string? offset = null,
         [Description("stage: lock the move to x, y, z or xy.")] string? axis = null,
         [Description("stage: round the axes the edit moved to this grid, in units (0 or absent: off).")] float? snap = null,
@@ -158,10 +165,17 @@ internal sealed class StateTools
         [Description("select: a scene by its number, as workbench_state's scenes list them; it opens the scene's best row.")] int? scene = null,
         [Description("move_with: the references to move with the selected one, by the same rigid move.")] string[]? refs = null,
         [Description("find_clear: how many candidate positions to check (default 3, at most 6).")] int? max = null,
-        [Description("choose: the candidate's number, as workbench_state's placements list them.")] int? n = null)
+        [Description("choose: the candidate's number, as workbench_state's placements list them.")] int? n = null,
+        [Description("results: a pair's id, or all.")] string? pair = null,
+        [Description("results: the groups to list, any of addressed, not_addressed, patch_change, not_scored.")] string[]? groups = null,
+        [Description("results: which categories of patch change to list, any of 3, 4, 5.")] int[]? categories = null,
+        [Description("results: which setup a row's scene is built on: own (each row's own), before or after the patch.")] string? setup = null,
+        [Description("results: the key of the row to open, as workbench_state's results list it (pair|f3, pair|e12, pair|o7).")] string? row = null,
+        [Description("world: the FormKey of the cell to open.")] string? cell = null)
         => hub.OnUi(async () =>
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
+            if (v is "results" or "world") return OpenInputsTools.Act(v, pair, groups, categories, setup, search, row, cell, @ref);
             if (hub.Surface.Scene is { ReadOnly: true } && EditVerbs.Contains(v)) return Refuse(WorkbenchHost.ReadOnlyWhy);
             if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path, tab, search);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
@@ -554,10 +568,13 @@ internal sealed class StateTools
     static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
 
     /// <summary>Save the whole window as a PNG at <paramref name="path"/> (an absolute .png path), as the script's capturewindow does.</summary>
+    static bool CaptureCheck(string? path) =>
+        !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path) && path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+            ? true : throw new InvalidOperationException("capture_window needs path, an absolute .png path.");
+
     static string CaptureWindow(string? path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path) || !path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("capture_window needs path, an absolute .png path.");
+        CaptureCheck(path);
         if (Shell.Window is not { } w) throw new InvalidOperationException("no window is shown, so there is nothing to capture.");
         var (cw, ch) = WindowCapture.SaveWindow(w, path);
         return $"window captured ({cw}x{ch}) to {path}";
@@ -578,7 +595,7 @@ internal sealed class StateTools
                 "set_output" => l.SetOutput(path),
                 "set_work_folder" => l.SetWorkFolder(path),
                 "abort" => checks is { Length: > 0 } ? l.AbortProbe(checks[0]) : l.AbortRun(),
-                "capture_window" => CaptureWindow(path),
+                "capture_window" => Shell.Current is { } scene && CaptureCheck(path) ? await scene.CaptureWindowAsync(path!) : CaptureWindow(path),
                 "show_tab" => Shell.ShowTab(tab),
                 "search_mods" => LauncherView.Search(search),
                 "open" => OpenBar.Open(path),
