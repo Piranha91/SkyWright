@@ -22,6 +22,49 @@ public static partial class SelfTestFinalize
             Same("refusal", SweepRows.ConflictdiffRefusal((string?)row["text"]), (string?)row["want"])));
         foreach (var c in L(ka["execute"]).Select(D)) ExecuteCase(c);
         BundleStageCases(L(ka["bundleStage"]));
+        SuiteCases();
+    }
+
+    // Two cases of tests/test_evalrun.py that call a Python function directly, with the suite's own expected values.
+    static void SuiteCases()
+    {
+        Case("case 55 the headline claim on a complete evaluation", () =>
+        {
+            using var t = new Temp();
+            var plan = D(PyJson.Loads("{\"planId\": \"p55\", \"registry\": {\"registryVersion\": \"t\"}, \"explicitDecisions\": [], "
+                + "\"states\": {\"notExplored\": []}, \"budgets\": {\"candidatesHeldBack\": []}, \"scope\": {\"unmeasured\": []}, "
+                + "\"checks\": [{\"checkId\": \"geometry.x\", \"applicability\": \"yes\", \"applicabilityEvidence\": \"\", \"required\": true, "
+                + "\"family\": \"geometry\", \"arms\": [{\"armId\": \"baseline\"}], \"adapter\": {\"kind\": \"probe-json\"}}], "
+                + "\"arms\": [{\"armId\": \"baseline\", \"kind\": \"baseline\", \"candidateFile\": null, \"loadedInGameNote\": \"\"}]}"));
+            var receipts = D(PyJson.Loads("{\"geometry.x__baseline\": {\"result\": {\"findings\": 1}, \"validation\": {\"accepted\": true}}}"));
+            return Rows(new[] { ("finding", "findings"), ("no-finding", "no-findings-in-completed-checks") }.Select(x => (object?)new PyDict { ["name"] = x.Item1, ["claim"] = x.Item2 }), row =>
+            {
+                t.Write("ledger.json", PyJson.Utf8("{\"planId\": \"p55\", \"entries\": {\"geometry.x__baseline\": {\"checkId\": \"geometry.x\", \"armId\": \"baseline\", "
+                    + "\"part\": null, \"status\": \"completed\", \"detector\": \"" + S(row["name"]) + "\"}}}"));
+                var ev = D(Disposition.Build(t.Root, plan, new Ledger(t.Root, plan), receipts, new PyDict(), new PyDict())["evaluation"]);
+                return Same("complete", Ev.Str(ev["complete"]), "True") ?? Same("claim", S(ev["claim"]), S(row["claim"]));
+            });
+        });
+        Case("case 566 the reader's default order: the flag, the environment, the checkout's build", () =>
+        {
+            string? before = Environment.GetEnvironmentVariable(BundleSteps.ReaderVariable);
+            try
+            {
+                Environment.SetEnvironmentVariable(BundleSteps.ReaderVariable, "  E:/env-reader.exe --stdio  ");
+                var flag = BundleSteps.DefaultReaderCmd("F:/flag-reader.exe");
+                var env = BundleSteps.DefaultReaderCmd(null);
+                Environment.SetEnvironmentVariable(BundleSteps.ReaderVariable, "   ");
+                var built = BundleSteps.DefaultReaderCmd("");
+                string exe = BundleSteps.CheckoutReader();
+                string want = File.Exists(exe) ? $"\"{exe}\" checkout"
+                    : $" no record reader was given (--reader-cmd or {BundleSteps.ReaderVariable}) and this checkout's houseCARL server is not built at {exe}.";
+                return Same("the flag first", $"{flag.command} {flag.source}", "F:/flag-reader.exe --reader-cmd")
+                       ?? Same("then the environment, stripped", $"{env.command} {env.source}", $"E:/env-reader.exe --stdio {BundleSteps.ReaderVariable}")
+                       ?? Same("then the checkout's build, or one sentence", $"{built.command} {built.source}", want)
+                       ?? (exe.EndsWith(PyPath.Join("src", "housecarl-mcp", "bin", "Release", "net9.0", "housecarl-mcp.exe"), StringComparison.Ordinal) ? null : $"the checkout's reader is {exe}");
+            }
+            finally { Environment.SetEnvironmentVariable(BundleSteps.ReaderVariable, before); }
+        });
     }
 
     static readonly Regex MtimeText = new("\"mtimeUtc\": \"[^\"]+\"");
