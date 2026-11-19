@@ -527,7 +527,8 @@ def write_view(folder: Path, arm: dict, ini_dir: Path | None):
     plugins = arm["plugins"]
     (folder / "plugins.txt").write_text("".join("*" + p + "\n" for p in plugins), encoding="utf-8")
     (folder / "loadorder.txt").write_text("".join(p + "\n" for p in plugins), encoding="utf-8")
-    (folder / "modlist.txt").write_text("".join("+" + m + "\n" for m in arm["mods"]), encoding="utf-8")
+    # a setup whose plugins all come from the game's Data folder has no mod folder: its mod list is empty
+    (folder / "modlist.txt").write_text("".join("+" + m + "\n" for m in arm.get("mods") or []), encoding="utf-8")
     if ini_dir:
         for f in ini_dir.glob("*.ini"):
             (folder / f.name).write_bytes(f.read_bytes())

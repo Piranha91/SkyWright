@@ -563,6 +563,24 @@ def case_63_the_per_type_view_alone_is_read_only_as_numbers():
     assert [r["Field"] for r in rows] == ["MajorFlags"], f"a per-type name is not read, so the row stays, got {rows}"
 
 
+def case_65_a_setup_with_no_mod_folder_gets_an_empty_modlist():
+    """A setup whose plugins all come from the game's Data folder has no mod folder: its arm's `mods` is null. The
+    reader's view of it is the plugins in order and an empty mod list (2026-11-16: write_view raised TypeError here, so
+    that setup's capture process ended with exit 1 and its record rows stayed open)."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, arm in enumerate(({"plugins": ["Skyrim.esm", "Update.esm"], "mods": None}, {"plugins": ["Skyrim.esm"]},
+                                 {"plugins": ["Skyrim.esm"], "mods": []})):
+            view = Path(tmp) / f"view{i}"
+            ER.write_view(view, arm, None)
+            assert (view / "modlist.txt").read_text(encoding="utf-8") == "", f"a setup with no mod folder, arm {i}: modlist.txt is not empty"
+            assert (view / "plugins.txt").read_text(encoding="utf-8") == "".join("*" + p + "\n" for p in arm["plugins"]), f"arm {i}: plugins.txt"
+            assert (view / "loadorder.txt").read_text(encoding="utf-8") == "".join(p + "\n" for p in arm["plugins"]), f"arm {i}: loadorder.txt"
+        view = Path(tmp) / "mods"
+        ER.write_view(view, {"plugins": ["Skyrim.esm", "A.esp"], "mods": ["Mod A", "Mod B"]}, None)
+        assert (view / "modlist.txt").read_text(encoding="utf-8") == "+Mod A\n+Mod B\n", "a setup with mod folders keeps its mod list"
+
+
 def main():
     for name, fn in sorted(((k, v) for k, v in globals().items() if k.startswith("case_")),
                            key=lambda kv: int(kv[0].split("_")[1])):
