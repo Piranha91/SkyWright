@@ -22,6 +22,7 @@ using RunControl;
 //
 // EXIT CODES: 0 done, 2 refused (one sentence on standard error), 3 a result that awaits judgement.
 
+if (args.Length >= 1 && args[0] == "ordersweep") return OrderSweep.Run(args[1..]);   // before the lines below: the sweep keeps the console code page its probes inherit, and its run-log records are ordersweep.py's
 Console.OutputEncoding = Encoding.UTF8;
 string command = args.Length >= 1 ? args[0] : "";
 bool pipeline = command is "run" or "arms" or "status";
