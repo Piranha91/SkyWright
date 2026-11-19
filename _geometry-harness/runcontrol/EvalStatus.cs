@@ -1,7 +1,6 @@
 namespace RunControl;
 
-/// <summary>`runcontrol eval-status --run RUN` (evalrun.py's status): the ledger as a table. Under its own name
-/// here because `status` is the pipeline's.</summary>
+/// <summary>`runcontrol status --run RUN` (evalrun.py's status): the ledger as a table.</summary>
 public static class EvalStatus
 {
     public static int Run(string runFolder)

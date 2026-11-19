@@ -1,4 +1,3 @@
-using System.Text;
 using HousecarlCore;
 using HousecarlCore.Progress;
 using RunControl;
@@ -21,13 +20,16 @@ using RunControl;
 //        runcontrol canon                read JSON on standard input; print the hash of its two canonical forms
 //        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
 //        runcontrol verify-bundle DIR [--out FILE]   check a bundle from its own files only (evalrun verify-bundle)
-//        runcontrol eval-status --run RUN   print the ledger as a table (evalrun status)
+//        runcontrol run    --run RUN [--budget-minutes N]   run the plan's checks (evalrun run); `run --entry` is the pipeline's
+//        runcontrol resume --run RUN [--budget-minutes N] [--rebuild-ledger]   re-check what is kept, redo the rest (evalrun resume)
+//        runcontrol status --run RUN     print the ledger as a table (evalrun status); `status --out` is the pipeline's
+//        runcontrol population --plugin PATH... [--mod NAME...] [--instance DIR] [--target NAME...] --out FILE   (evalrun population)
 //
 // EXIT CODES: 0 done, 2 refused (one sentence on standard error), 3 a result that awaits judgement.
 
 if (args.Length >= 1 && args[0] == "ordersweep") return OrderSweep.Run(args[1..]);   // before the lines below: the sweep keeps the console code page its probes inherit, and its run-log records are ordersweep.py's
-Console.OutputEncoding = Encoding.UTF8;
-if (args.Length >= 1 && EvalCommands.Handles(args[0])) return EvalCommands.Run(args);   // finalize, verify-bundle, eval-status: before the process run below, so their run-log records are evalrun.py's (finalize opens evalrun-finalize; the other two open none)
+ConsoleText.WriteUtf8();   // this program's own two streams; the console's code page is left as it is, because the probes inherit it
+if (EvalCommands.Handles(args)) return EvalCommands.Run(args);   // evalrun's commands: before the process run below, so their run-log records are evalrun.py's
 string command = args.Length >= 1 ? args[0] : "";
 bool pipeline = command is "run" or "arms" or "status";
 // The pipeline commands record under the Python pipeline's run-log name, which the workbench reads. `run` opens its
