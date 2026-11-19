@@ -5,7 +5,7 @@ manifest, the names step with a scripted record reader, the order step, --media)
 state_media_fingerprints, bundle_premise_sources, private_instance, the raw plugin walk (filed_cells, _records,
 _position, cell_overrides), the reader command line's split and float(). The run folders hold no absolute path (the
 commands run from inside them), the clock is a counter and the names step's stopwatch is fixed, so every byte of a
-bundle is repeatable. The record reader is a small script started for real; each conversation is recorded line by
+bundle follows from the recorded run folder (which holds the file times of the day it was written). The record reader is a small script started for real; each conversation is recorded line by
 line, and the C# self-test replays it and checks it sends the same bytes in the same order.
 
     python _geometry-harness/runcontrol/known-answers/make_known_answers_bundle.py
@@ -751,21 +751,26 @@ def main() -> int:
     if os.name != "nt":
         print("make_known_answers_bundle.py records Windows path rules; run it on Windows.", file=sys.stderr)
         return 2
-    with F.Run("make-known-answers-bundle", stage_source="single-stage"):
-        tmp = Path(tempfile.mkdtemp(prefix="hc-known-bundle-")).resolve()
-        os.environ["HOUSECARL_RUNLOG_DIR"] = str(tmp / "runlog")   # so no run folder here becomes the run-log store
-        try:
-            doc = {"python": platform.python_version(), "placeholders": {"backslash": F.BACK, "forward": F.FWD, "doubled": F.DOUBLED}}
-            for name, build in SECTIONS:
-                doc[name] = build(tmp)
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-        text = json.dumps(doc, indent=1) + "\n"
-        for leak in (tmp.name, Path.home().name):
-            assert leak not in text, f"the answers would keep a local path ({leak})"
-        OUT.write_text(text, encoding="utf-8", newline="\n")
-        print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
-        return 0
+    tmp = Path(tempfile.mkdtemp(prefix="hc-known-bundle-")).resolve()
+    store = os.environ.get("HOUSECARL_RUNLOG_DIR")
+    try:
+        with F.Run("make-known-answers-bundle", stage_source="single-stage"):
+            os.environ["HOUSECARL_RUNLOG_DIR"] = str(tmp / "runlog")   # so no run folder here becomes the run-log store
+            try:
+                doc = {"python": platform.python_version(), "placeholders": {"backslash": F.BACK, "forward": F.FWD, "doubled": F.DOUBLED}}
+                for name, build in SECTIONS:
+                    doc[name] = build(tmp)
+            finally:
+                # this script's own record ends in the store it began in, not in the folder removed below
+                os.environ.pop("HOUSECARL_RUNLOG_DIR", None) if store is None else os.environ.update(HOUSECARL_RUNLOG_DIR=store)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    text = json.dumps(doc, indent=1) + "\n"
+    for leak in (tmp.name, Path.home().name):
+        assert leak not in text, f"the answers would keep a local path ({leak})"
+    OUT.write_text(text, encoding="utf-8", newline="\n")
+    print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
+    return 0
 
 
 if __name__ == "__main__":
