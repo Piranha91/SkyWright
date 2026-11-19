@@ -96,10 +96,12 @@ public class ViewLayersTests : IDisposable
         var order = new LoadOrderSpec("i", "p", "g", null, "l") { Navmesh = false };
         Assert.Null(ViewLayers.NavFor(order));
         ViewLayers.WantsNavmesh = true;
-        Assert.Equal("filled", ViewLayers.NavFor(order));
+        Assert.Equal("both", ViewLayers.NavFor(order));
         Assert.Null(ViewLayers.NavFor(order with { Navmesh = true }));
         ViewLayers.Choose(Layer.Navmesh, false);
         Assert.False(ViewLayers.WantsNavmesh, "hiding the navmesh kept asking for it in later cells");
+        ViewLayers.Choose(Layer.Navmesh, true);
+        Assert.True(ViewLayers.WantsNavmesh, "showing the navmesh by hand did not ask for it in later cells");
     }
 
     [Fact]
@@ -189,9 +191,9 @@ public class ViewLayersTests : IDisposable
     {
         static Vector3 Tip(float zRadians) => MarkerGizmos.MarkerLines(Vector3.Zero, new Vec3(0, 0, zRadians)).ElementAt(3).B;
         var north = Tip(0f);
-        Assert.True(north.Y > 40 && MathF.Abs(north.X) < 1, $"unturned marker's arrow ends at {north}");
+        Assert.True(north.Y > 60 && MathF.Abs(north.X) < 1, $"unturned marker's arrow ends at {north}");
         var turned = Tip(MathF.PI / 2);
-        Assert.True(turned.X > 40 && MathF.Abs(turned.Y) < 1, $"a marker turned to face east (90 degrees)'s arrow ends at {turned}");
+        Assert.True(turned.X > 60 && MathF.Abs(turned.Y) < 1, $"a marker turned to face east (90 degrees)'s arrow ends at {turned}");
         Assert.Equal(12, MarkerGizmos.DiamondLines(Vector3.Zero, 10f).Count());
         var g = new MarkerGizmos(new[] { (Boxes.Key(1), new Vec3(0, 0, 0), new Vec3(0, 0, 0), true), (Boxes.Key(2), new Vec3(9, 9, 9), new Vec3(0, 0, 0), false) });
         Assert.Equal(1, g.Markers); Assert.Equal(1, g.NoModel);

@@ -20,7 +20,7 @@ internal static class ViewLayers
     /// <summary>Every layer, in the toolbar's order, with the name a script or a state tool uses.</summary>
     internal static readonly IReadOnlyList<Info> All = new Info[]
     {
-        new(Layer.Navmesh, "navmesh", "Navmesh", "the navmesh, as a translucent sheet: green where it is healthy, red where a finding names it", true),
+        new(Layer.Navmesh, "navmesh", "Navmesh", "the navmesh, as a translucent sheet with its triangle edges; red where a finding names it", true),
         new(Layer.Borders, "borders", "Cell borders", "the exterior cell grid: a gold curtain around this scene's cell (with its white dashed outline), pale blue around the cells loaded beside it", true),
         new(Layer.Markers, "markers", "Markers", "objects the game does not draw: editor markers as violet stems with an arrow the way they face, and objects with no model, such as most lights and sound markers, as yellow diamonds", false),
         new(Layer.Planes, "planes", "Occlusion", "occlusion planes: grey vanilla, gold inherited, magenta added, teal moved", false),
@@ -37,14 +37,16 @@ internal static class ViewLayers
 
     internal static Info Of(Layer l) => All.First(i => i.Layer == l);
     internal static bool IsOn(Layer l) => On[l];
-    internal static void Choose(Layer l, bool on) { On[l] = on; if (l == Layer.Navmesh && !on) WantsNavmesh = false; }
+    internal static void Choose(Layer l, bool on) { On[l] = on; if (l == Layer.Navmesh) WantsNavmesh = on; }
 
-    /// <summary>The navmesh was asked for in a scene built without it: later cells are asked for with it too.</summary>
+    /// <summary>The navmesh was switched on by hand: later cells whose load order leaves it out are asked for with it.</summary>
     internal static bool WantsNavmesh { get; set; }
 
     /// <summary>The navmesh mode a cell request carries for viewprobe: "filled" when the navmesh was asked for and the
     /// load order's own scenes leave it out; null keeps the run's.</summary>
-    internal static string? NavFor(LoadOrderSpec order) => WantsNavmesh && !order.Navmesh ? "filled" : null;
+    internal static string? NavFor(LoadOrderSpec order) => WantsNavmesh && !order.Navmesh ? NavAskedMode : null;
+    /// <summary>The mode a cell asked for with its navmesh shows it in: the sheet and the wire.</summary>
+    internal const string NavAskedMode = "both";
 
     /// <summary>Back to the defaults (a new window; the tests).</summary>
     internal static void Reset() { foreach (var i in All) On[i.Layer] = i.Default; WantsNavmesh = false; _pose = null; }

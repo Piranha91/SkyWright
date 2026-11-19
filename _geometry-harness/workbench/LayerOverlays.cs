@@ -104,7 +104,7 @@ internal sealed class MarkerGizmos : IRenderOverlay
         {
             var at = new Vector3(p.X, p.Y, p.Z);
             if (marker) { Markers++; foreach (var (a, b) in MarkerLines(at, r)) Add(a, b, MarkerColour); }
-            else { NoModel++; foreach (var (a, b) in DiamondLines(at, 14f)) Add(a, b, NoModelColour); }
+            else { NoModel++; foreach (var (a, b) in DiamondLines(at, 20f)) Add(a, b, NoModelColour); }
         }
     }
 
@@ -114,7 +114,7 @@ internal sealed class MarkerGizmos : IRenderOverlay
         _lines.Add(new OverlayLineSegment { A = new GlVec3(ya.X, ya.Y, ya.Z), B = new GlVec3(yb.X, yb.Y, yb.Z), Color = colour });
     }
 
-    /// <summary>A marker: a stem 64 units up, a cross at its foot, and an arrow 48 units long the way the marker faces (its local +Y).</summary>
+    /// <summary>A marker: a stem 96 units up, a cross at its foot, and an arrow 72 units long the way the marker faces (its local +Y).</summary>
     internal static IEnumerable<(Vector3 A, Vector3 B)> MarkerLines(Vector3 at, Vec3 rotation)
     {
         var face = Vector3.TransformNormal(Vector3.UnitY, SpatialOverlap.RefrRotation(rotation));
@@ -122,13 +122,13 @@ internal sealed class MarkerGizmos : IRenderOverlay
         face = face.LengthSquared() > 1e-6f ? Vector3.Normalize(face) : Vector3.UnitY;
         var side = new Vector3(face.Y, -face.X, 0f);
         var lift = new Vector3(0, 0, 8f);
-        yield return (at, at + new Vector3(0, 0, 64f));
-        yield return (at - Vector3.UnitX * 12f, at + Vector3.UnitX * 12f);
-        yield return (at - Vector3.UnitY * 12f, at + Vector3.UnitY * 12f);
-        var tip = at + lift + face * 48f;
+        yield return (at, at + new Vector3(0, 0, 96f));
+        yield return (at - Vector3.UnitX * 18f, at + Vector3.UnitX * 18f);
+        yield return (at - Vector3.UnitY * 18f, at + Vector3.UnitY * 18f);
+        var tip = at + lift + face * 72f;
         yield return (at + lift, tip);
-        yield return (tip, tip - face * 14f + side * 9f);
-        yield return (tip, tip - face * 14f - side * 9f);
+        yield return (tip, tip - face * 20f + side * 13f);
+        yield return (tip, tip - face * 20f - side * 13f);
     }
 
     /// <summary>A diamond (an octahedron's 12 edges) of radius <paramref name="r"/> around the point.</summary>
