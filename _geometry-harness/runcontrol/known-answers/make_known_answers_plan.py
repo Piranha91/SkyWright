@@ -1016,6 +1016,8 @@ def plan_world(root: Path) -> dict:
         cand(folder, "candidate-00-baseline.json", Plugins=[world], Mods=["WorldMod"], Changes=["the profile without the selection"],
              Provenance={"arm": "without-selection", "keys": []})
         cand(folder, "candidate-01.json", Plugins=[world, sel], Mods=["SelMod", "WorldMod"], Changes=[], Provenance={"arm": "combined"})
+    cand("same", "candidate-00-baseline.json", Plugins=[world, sel], Mods=["WorldMod"])
+    cand("same", "candidate-01.json", Plugins=[world, sel], Mods=["SelMod", "WorldMod"])
     cand("three", "candidate-02.json", plugins=[sel, world], changes=["swapped"], provenance={"arm": "swapped"})
     cand("three", "Candidate-03.JSON", Plugins=[world, sel], mods=[], Mods=None)
     cand("sup", "candidate-09-sup.json", Plugins=[world, sel, "Sup.esp", "Extra.esp", "Nowhere.esp", "Over.esp", "Data.esm"], Mods=["SelMod", "WorldMod"])
@@ -1061,13 +1063,14 @@ def plan_case_table() -> list:
         ("no instance: the scene preflight is not run and the population needs its folder", base(), {}, {}),
         ("an instance, a profile and a game: a scoped population", base() + here, {}, {}),
         ("no scope: applicability is unknown and nothing is targeted", base(scope=None), {}, {}),
+        ("a target the arms do not differ by is still in the population", base("same") + here, {}, {}),
         ("a scope in the other key spelling, with a hash that is not one", base(scope=f"{BACK}\\bare-scope.json") + here, {}, {}),
         ("flags joined with =, paths with forward slashes and a dot",
          [f"--registry={FWD}/reg/./check-registry.json", f"--candidates={FWD}/cands/two/", f"--out={FWD}/run", f"--harness={FWD}/harness",
           "--probe-args=--threads 4", "--diff-tolerance=0.5"], {}, {}),
         # one start each: with several, which check is named as implying a shared prerequisite follows Python's set order
-        ("select by exe name, with its implied prerequisite", base() + ["--select", " overlapprobe,", "--select", ","], {}, {}),
-        ("select by id, with the chain of prerequisites it implies", base() + ["--select", "patch.order-evaluation"], {}, {}),
+        ("select by exe name, with the prerequisite it implies and the one that one implies", base() + ["--select", " stateprobe,", "--select", ","], {}, {}),
+        ("select by id, with the chain of prerequisites it implies", base() + ["--select", "patch.candidate-qualification"], {}, {}),
         ("select every check an exe runs and one more that implies nothing new",
          base() + ["--select", "contactprobe", "--select", "loadability.masters-and-order,geometry.placement-contact"], {}, {}),
         ("select names nothing the registry has", base() + ["--select", "nope,overlapprobe", "--select", "also-nope"], {}, {}),
