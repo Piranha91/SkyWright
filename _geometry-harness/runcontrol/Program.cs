@@ -21,6 +21,8 @@ using RunControl;
 //        runcontrol identity FOLDER      print the package identity of a build folder as JSON
 //        runcontrol canon                read JSON on standard input; print the hash of its two canonical forms
 //        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
+//        runcontrol bundle --run RUN [--out DIR] [--reader-cmd CMD] [--reader-env K=V]... [--mod-name PLUGIN=NAME]... [--no-names]
+//                          [--media FILE] [--registry FILE] [--scope FILE] [--search FILE]   assemble one evidence bundle (evalrun bundle)
 //        runcontrol verify-bundle DIR [--out FILE]   check a bundle from its own files only (evalrun verify-bundle)
 //        runcontrol run    --run RUN [--budget-minutes N]   run the plan's checks (evalrun run); `run --entry` is the pipeline's
 //        runcontrol resume --run RUN [--budget-minutes N] [--rebuild-ledger]   re-check what is kept, redo the rest (evalrun resume)
@@ -39,6 +41,9 @@ bool pipeline = command is "run" or "arms" or "status";
 // `plan` records as evalrun.py's plan does (op evalrun-plan), opened where the plan is written (Plan.Run).
 using var __run = command is "run" or "plan" ? null
     : pipeline ? RunLog.BeginProcess("evalpipeline", args, new RunOptions { Mode = command }) : RunLog.BeginProcess("runcontrol", args);
+Console.OutputEncoding = Encoding.UTF8;
+if (args.Length >= 1 && EvalCommands.Handles(args[0])) return EvalCommands.Run(args);   // finalize, bundle, verify-bundle, eval-status: before the process run below, so their run-log records are evalrun.py's (finalize opens evalrun-finalize, bundle evalrun-bundle; the other two open none)
+using var __run = RunLog.BeginProcess("runcontrol", args);
 try
 {
     if (args.Length >= 1 && args[0] == "--self-test") return SelfTest.Run();

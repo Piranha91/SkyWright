@@ -39,6 +39,19 @@ public static class EvalCommands
     {
         var a = new EvalArgs();
         bool has(params string[] commands) => commands.Contains(command);
+/// <summary>The command lines of evalrun.py's reading subcommands as runcontrol takes them: `finalize --run RUN`,
+/// `bundle --run RUN [--out DIR] …`, `verify-bundle DIR [--out FILE]` and `eval-status --run RUN` (evalrun's
+/// `status`). Exit 0 done, 2 a refused command line or input, 3 a refused result, 1 an input of a shape the rules
+/// cannot read (where Python stops with a traceback); bundle refuses that input with exit 2 instead.</summary>
+public static class EvalCommands
+{
+    public static bool Handles(string command) => command is "finalize" or "bundle" or "verify-bundle" or "eval-status";
+
+    // bundle's own command line: every flag evalrun.py's `bundle` takes.
+    static int RunBundle(string[] args)
+    {
+        var a = new BundleArgs();
+        bool run = false;
         for (int i = 1; i < args.Length; i++)
         {
             string flag = args[i];
@@ -66,6 +79,32 @@ public static class EvalCommands
             else throw new Refusal($"{command} does not take {flag}.");
         }
         return a;
+            string Value() => joined ?? (i + 1 < args.Length ? args[++i] : throw new Refusal($"bundle: {flag} needs a value after it."));
+            switch (flag)
+            {
+                case "--run": a.Run = Value(); run = true; break;
+                case "--out": a.Out = Value(); break;
+                case "--media": a.Media = Value(); break;
+                case "--registry": a.Registry = Value(); break;
+                case "--scope": a.Scope = Value(); break;
+                case "--search": a.Search = Value(); break;
+                case "--reader-cmd": a.ReaderCmd = Value(); break;
+                case "--reader-env": a.ReaderEnv.Add(Value()); break;
+                case "--mod-name": a.ModName.Add(Value()); break;
+                case "--no-names" when joined == null: a.NoNames = true; break;
+                default: throw new Refusal($"bundle does not take {flag}.");
+            }
+        }
+        if (!run) throw new Refusal("bundle needs --run, the evaluation's RUN folder.");
+        try { return Bundle.Run(a); }
+        catch (Exception ex) when (ex is PyError or KeyNotFoundException or InvalidCastException or FormatException or ArgumentException
+            or IndexOutOfRangeException or IOException or UnauthorizedAccessException)
+        {
+            // where Python stops with a traceback: one sentence, and the folder is not a bundle
+            Console.Error.WriteLine($"REFUSED: bundle stopped on a file of a shape its rule cannot read ({ex.GetType().Name}: {ex.Message}); "
+                + "what it wrote so far is not a bundle, so correct the file and run bundle again into an empty folder.");
+            return Exit.Refused;
+        }
     }
 
     public static int Run(string[] args)
@@ -74,6 +113,23 @@ public static class EvalCommands
         try
         {
             var a = Parse(command, args);
+            if (command == "bundle") return RunBundle(args);
+            string? run = null, dir = null, outFile = null;
+            for (int i = 1; i < args.Length; i++)
+            {
+                string flag = args[i];
+                string? joined = null;   // the value of `--flag=value`
+                if (flag.StartsWith("--", StringComparison.Ordinal) && flag.Contains('='))
+                {
+                    joined = flag[(flag.IndexOf('=') + 1)..];
+                    flag = flag[..flag.IndexOf('=')];
+                }
+                string Value() => joined ?? (i + 1 < args.Length ? args[++i] : throw new Refusal($"{command}: {flag} needs a value after it."));
+                if (flag == "--run" && command != "verify-bundle") run = Value();
+                else if (flag == "--out" && command == "verify-bundle") outFile = Value();
+                else if (command == "verify-bundle" && dir == null && !flag.StartsWith('-')) dir = flag;
+                else throw new Refusal($"{command} does not take {flag}.");
+            }
             if (command == "verify-bundle")
                 return VerifyBundle.Run(a.Dir ?? throw new Refusal("verify-bundle needs the bundle folder: runcontrol verify-bundle DIR [--out FILE]."), a.Out);
             if (command == "population") return Population.Run(a);
