@@ -28,6 +28,9 @@ internal static class WorldView
     static readonly WorldMap Map = new();
     static readonly ComboBox MapWorld = new() { MinWidth = 220, Margin = new Thickness(0, 0, 8, 0), ToolTip = "the worldspace the map shows" };
     static readonly TextBlock MapSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextTrimming = TextTrimming.CharacterEllipsis };
+    static readonly CheckBox MapTextured = new() { Content = "Textured", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0),
+        ToolTip = "zoomed in, draw the cells as the game draws them from straight above (the renderer's pictures, kept on disk per load order); off shows the shaded shapes" };
+    static readonly TextBlock TileSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 1, 0, 0) };
     static string _mapStatus = "";
     static string? _mapWorld;                             // the worldspace the map shows or is reading
     static bool _mapSetting;                              // the worldspace list is being set from code
@@ -74,8 +77,15 @@ internal static class WorldView
         };
         var mapBar = new DockPanel { Margin = new Thickness(6, 2, 6, 2) };
         var mapLabel = new TextBlock { Text = "Map", Width = 60, VerticalAlignment = VerticalAlignment.Center };
-        DockPanel.SetDock(mapLabel, Dock.Left); DockPanel.SetDock(MapWorld, Dock.Left);
-        mapBar.Children.Add(mapLabel); mapBar.Children.Add(MapWorld); mapBar.Children.Add(MapSays);
+        DockPanel.SetDock(mapLabel, Dock.Left); DockPanel.SetDock(MapWorld, Dock.Left); DockPanel.SetDock(MapTextured, Dock.Left);
+        mapBar.Children.Add(mapLabel); mapBar.Children.Add(MapWorld); mapBar.Children.Add(MapTextured); mapBar.Children.Add(MapSays);
+        // the tiles' own line under the bar, so the pointer's cell name does not hide it
+        TileSays.Margin = new Thickness(66, 0, 6, 2);
+        MapTextured.IsChecked = MapSettings.Textured;
+        Map.Tiles.SetEnabled(MapTextured.IsChecked == true);
+        MapTextured.Click += (_, _) => { MapSettings.Textured = MapTextured.IsChecked == true; SetTextured(MapTextured.IsChecked == true); };
+        Map.Tiles.Changed += () => { TileSays.Text = Map.Tiles.Status; TileSays.Visibility = Map.Tiles.Status.Length > 0 ? Visibility.Visible : Visibility.Collapsed; };
+        TileSays.Visibility = Visibility.Collapsed;
         MapWorld.SelectionChanged += (_, _) => { if (!_mapSetting && MapWorld.SelectedItem is ComboBoxItem { Tag: string key }) ShowMap(key, null); };
         Map.ShapesShown += () =>
         {
@@ -95,7 +105,8 @@ internal static class WorldView
         body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 80 });
         var bar = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, Background = Theme.Brush("#2C3036") };
         var mapPanel = new DockPanel();
-        DockPanel.SetDock(mapBar, Dock.Top); mapPanel.Children.Add(mapBar); mapPanel.Children.Add(Map.View);
+        DockPanel.SetDock(mapBar, Dock.Top); DockPanel.SetDock(TileSays, Dock.Top);
+        mapPanel.Children.Add(mapBar); mapPanel.Children.Add(TileSays); mapPanel.Children.Add(Map.View);
         Grid.SetRow(mapPanel, 0); Grid.SetRow(bar, 1); Grid.SetRow(Tree, 2);
         body.Children.Add(mapPanel); body.Children.Add(bar); body.Children.Add(Tree);
         var panel = new DockPanel();
@@ -106,6 +117,42 @@ internal static class WorldView
 
     // ---- the map ------------------------------------------------------------------------------------------------------
     static void SetMapStatus(string s) { _mapStatus = s; MapSays.Text = s; }
+
+    /// <summary>Switch the map's textured tiles on or off, as the bar's checkbox does.</summary>
+    static string SetTextured(bool on)
+    {
+        if (MapTextured.IsChecked != on) MapTextured.IsChecked = on;
+        Map.Tiles.SetEnabled(on);
+        Map.UpdateTiles();
+        return on ? "the map draws textured tiles when zoomed in." : "the map draws the shaded shapes; textured tiles are off.";
+    }
+
+    /// <summary>Set the map as a state tool asks: its worldspace (EditorID or FormKey), its centre (Skyrim units), its
+    /// zoom (screen pixels across one cell) and whether tiles are drawn. The view is set once the worldspace's terrain is read.</summary>
+    internal static string SetMapView(string? world, double[]? centre, double? pixelsPerCell, bool? textured)
+    {
+        var (x, _) = Need();
+        if (textured is { } on) SetTextured(on);
+        string? key = _mapWorld;
+        if (world is { Length: > 0 })
+            key = x.Worldspaces.FirstOrDefault(w => string.Equals(w.Key, world, StringComparison.OrdinalIgnoreCase) || string.Equals(w.EditorId, world, StringComparison.OrdinalIgnoreCase))?.Key
+                  ?? throw new InvalidOperationException($"'{world}' is not a worldspace of this load order; name one by its EditorID or FormKey.");
+        if (key is null) throw new InvalidOperationException("the map shows no worldspace yet; name one with the worldspace.");
+        if (centre is { Length: not 2 }) throw new InvalidOperationException("the map's centre is two numbers, [x, y] in Skyrim units.");
+        _pendingView = (centre?[0], centre?[1], pixelsPerCell);
+        if (!string.Equals(_mapWorld, key, StringComparison.OrdinalIgnoreCase)) { ShowMap(key, null); return $"reading the terrain of {key}; the view is set when it is shown."; }
+        ApplyPendingView();
+        return FormattableString.Invariant($"the map shows {key}") + (centre is { } c ? FormattableString.Invariant($" around ({c[0]:0}, {c[1]:0})") : "") + (pixelsPerCell is { } p ? FormattableString.Invariant($" at {p:0} pixels a cell") : "") + ".";
+    }
+    static (double? X, double? Y, double? PixelsPerCell)? _pendingView;
+
+    static void ApplyPendingView()
+    {
+        if (_pendingView is not { } v || Map.Terrain is not { } t) return;
+        _pendingView = null;
+        double cx = v.X ?? (t.MinX + t.Width / 2.0) * 4096, cy = v.Y ?? (t.MinY + t.Height / 2.0) * 4096;
+        Map.SetView(cx, cy, v.PixelsPerCell ?? Math.Max(Map.PixelsPerCell, 1));
+    }
 
     static string MapSquareLabel(int gx, int gy) =>
         _index is { } x && _mapWorld is { } w && x.CellAt(w, gx, gy) is { } c ? CellLabel(c) : $"({gx}, {gy})  no cell here";
@@ -142,6 +189,7 @@ internal static class WorldView
         try { MapWorld.SelectedItem = MapWorld.Items.OfType<ComboBoxItem>().FirstOrDefault(i => string.Equals(i.Tag as string, worldKey, StringComparison.OrdinalIgnoreCase)); }
         finally { _mapSetting = false; }
         Map.Show(null, null);
+        Map.Tiles.SetWorld(null, null, null);
         SetMapStatus("reading the terrain…");
         int gen = _generation;
         var ui = Dispatcher.CurrentDispatcher;
@@ -153,6 +201,8 @@ internal static class WorldView
             if (r.IsFaulted) { SetMapStatus("the terrain could not be read: " + r.Exception!.GetBaseException().Message); return; }
             var t = r.Result;
             Map.Show(t, done.Result.Picture);
+            Map.Tiles.SetWorld(worldKey, t, (gx, gy) => x.CellAt(worldKey, gx, gy)?.Key);
+            ApplyPendingView();
             MapSeconds = t.Seconds;
             string lent = t.BorrowedCells == 0 ? "" : $", and {t.BorrowedCells:N0} squares of its parent {x.Worldspaces.FirstOrDefault(w => w.Key == t.Parent)?.EditorId ?? t.Parent}'s ground (dim)";
             SetMapStatus(FormattableString.Invariant($"{t.LandCells:N0} cells of terrain{lent}, read in {t.Seconds:0.0} s")
@@ -216,6 +266,16 @@ internal static class WorldView
         Map.Meshes = null;
         // the load order's meshes, for the buildings' real shapes; without them the map draws boxes
         Task.Run(() => BuildingMeshes.For(order)).ContinueWith(t => { if (gen == _generation && t.IsCompletedSuccessfully) Map.Meshes = t.Result; }, TaskScheduler.FromCurrentSynchronizationContext());
+        // the load order's tile folder: its name is a digest of every plugin's size and time, read off the window's thread
+        Map.Tiles.SetOrder(null, null, null);
+        Task.Run(() => MapTileCache.FolderFor(order)).ContinueWith(t =>
+        {
+            if (gen != _generation) return;
+            Map.Tiles.SetOrder(order, t.IsCompletedSuccessfully ? t.Result : null,
+                t.IsCompletedSuccessfully ? null : $"the tile folder could not be made ({t.Exception!.GetBaseException().Message.TrimEnd('.')}).");
+            if (Map.Terrain is { } terrain && _mapWorld is { } w && _index is { } ix) Map.Tiles.SetWorld(w, terrain, (gx, gy) => ix.CellAt(w, gx, gy)?.Key);
+            Map.UpdateTiles();
+        }, TaskScheduler.FromCurrentSynchronizationContext());
         Tree.Items.Clear(); Hits.Items.Clear(); Hits.Visibility = Visibility.Collapsed; SearchCount.Text = ""; LastHits = Array.Empty<CellRow>();
         Notes.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
         SetStatus($"reading the load order of {order.Label}…");
@@ -551,7 +611,8 @@ internal static class WorldView
                         chosen = Map.Chosen is { } c ? new[] { c.X, c.Y } : null,
                         featuresReady = Map.Features is not null, featureSeconds = Map.Features?.Seconds, buildings = Map.Features?.Outlines.Count, places = Map.Features?.Places.Count,
                         placedRead = Map.Features?.PlacedRead, pixelsPerCell = Map.PixelsPerCell, buildingsShown = Map.BuildingsShown, captionsShown = Map.CaptionsShown,
-                        shapes = Map.ShapesPainted is { } sp ? new { buildings = sp.Buildings, asBoxes = sp.AsBoxes, seconds = sp.Seconds, unitsPerPixel = sp.UnitsPerPixel } : null },
+                        shapes = Map.ShapesPainted is { } sp ? new { buildings = sp.Buildings, asBoxes = sp.AsBoxes, seconds = sp.Seconds, unitsPerPixel = sp.UnitsPerPixel } : null,
+                        tiles = Map.Tiles.State() },
         };
     }
 }

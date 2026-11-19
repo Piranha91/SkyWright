@@ -37,6 +37,8 @@ internal sealed class WorldMap
     internal event Action<int, int>? Clicked;
 
     internal UIElement View => _frame;
+    /// <summary>The textured tiles laid over the shaded shapes when zoomed in (<see cref="MapTileLayer"/>).</summary>
+    internal MapTileLayer Tiles { get; } = new();
     internal WorldTerrain? Terrain => _terrain;
     internal (int X, int Y)? Chosen { get; private set; }
     internal WorldFeatures? Features => _features;
@@ -59,8 +61,9 @@ internal sealed class WorldMap
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.Linear);
         _sheet.RenderTransform = _view;
         RenderOptions.SetBitmapScalingMode(_shapes, BitmapScalingMode.Linear);
-        _shapeTimer.Tick += (_, _) => { _shapeTimer.Stop(); PaintShapes(); };
-        _sheet.Children.Add(_image); _sheet.Children.Add(_buildings); _sheet.Children.Add(_shapes); _sheet.Children.Add(_chosen); _sheet.Children.Add(_hover);
+        _shapeTimer.Tick += (_, _) => { _shapeTimer.Stop(); PaintShapes(); UpdateTiles(); };
+        // the tiles over the shapes, which show wherever a tile is not drawn yet; the grid marks over both
+        _sheet.Children.Add(_image); _sheet.Children.Add(_buildings); _sheet.Children.Add(_shapes); _sheet.Children.Add(Tiles.Canvas); _sheet.Children.Add(_chosen); _sheet.Children.Add(_hover);
         var layers = new Grid();
         layers.Children.Add(_sheet); layers.Children.Add(_captions);
         _frame.Child = layers;
@@ -213,7 +216,8 @@ internal sealed class WorldMap
         bool shapes = _features is not null && perCell >= ShapesAppear;
         // close in, the real shapes are painted a moment after the view comes to rest; the boxes stand in until the first painting
         _shapeTimer.Stop();
-        if (shapes) _shapeTimer.Start(); else { _shapeAsk++; _shapes.Visibility = Visibility.Collapsed; }
+        if (!shapes) { _shapeAsk++; _shapes.Visibility = Visibility.Collapsed; }
+        if (shapes || Tiles.Enabled) _shapeTimer.Start();
         _buildings.Visibility = _features is not null && perCell >= BuildingsAppear && _shapes.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         _buildings.StrokeThickness = perCell >= 48 ? 0.8 / scale : 0;
         double k = t.Samples / 4096.0, x0 = t.MinX * 4096.0, yTop = (t.MaxY + 1) * 4096.0;
@@ -257,6 +261,28 @@ internal sealed class WorldMap
         CaptionsShown = shown;
     }
 
+
+    /// <summary>Ask the tile layer for the cells in view, at the screen's own pixels per cell.</summary>
+    internal void UpdateTiles()
+    {
+        if (_terrain is not { } t || !_view.Matrix.HasInverse || _frame.ActualWidth < 1) { Tiles.Update(0, 0, 0, 0, 0, 0); return; }
+        double dpi = VisualTreeHelper.GetDpi(_frame).DpiScaleX;
+        var back = _view.Matrix; back.Invert();
+        var nw = back.Transform(new Point(0, 0));
+        var se = back.Transform(new Point(_frame.ActualWidth, _frame.ActualHeight));
+        double k = t.Samples / 4096.0, x0 = t.MinX * 4096.0, yTop = (t.MaxY + 1) * 4096.0;
+        Tiles.Update(x0 + nw.X / k, yTop - se.Y / k, x0 + se.X / k, yTop - nw.Y / k, PixelsPerCell, PixelsPerCell * dpi);
+    }
+
+    /// <summary>Centre the map on a world point (Skyrim units) at a zoom given in screen pixels across one cell.</summary>
+    internal void SetView(double x, double y, double pixelsPerCell)
+    {
+        if (_terrain is not { } t || _frame.ActualWidth < 1) return;
+        double s = Math.Clamp(pixelsPerCell / t.Samples, 0.02, 64);
+        double k = t.Samples / 4096.0, sx = (x - t.MinX * 4096.0) * k, sy = ((t.MaxY + 1) * 4096.0 - y) * k;
+        _view.Matrix = new Matrix(s, 0, 0, s, _frame.ActualWidth / 2 - sx * s, _frame.ActualHeight / 2 - sy * s);
+        Viewed();
+    }
 
     void Fit()
     {
