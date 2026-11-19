@@ -28,7 +28,7 @@ bool pipeline = command is "run" or "arms" or "status";
 using var __run = !pipeline ? RunLog.BeginProcess("runcontrol", args) : command == "run" ? null : RunLog.BeginProcess("evalpipeline", args);
 try
 {
-    if (command == "--self-test") return SelfTest.Run();
+    if (args.Length >= 1 && args[0] == "--self-test") return SelfTest.Run();
     if (args.Length == 2 && command == "identity")
     {
         Console.WriteLine(PyJson.Dumps(ToolIdentity.Package(args[1]), indent: 1, ensureAscii: false));

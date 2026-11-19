@@ -213,6 +213,42 @@ public static partial class SelfTest
             return exit2 == Exit.Refused && stderr.Contains("evalpipeline.py") && stderr.Contains("deliver") && status.Get("stoppedAt") as string == "census"
                 ? null : $"exit {exit2}: {stderr}";
         });
+        Case("driver: a non-blocking refusal lets the run go on and keeps it incomplete; an awaited judgement stops it", () =>
+        {
+            using var t = new Temp();
+            var entry = Json("{\"evaluation\": {}}");
+            var ran = new List<string>();
+            StageBody Writes(string name) => (_, _, sdir) =>
+            {
+                ran.Add(name);
+                File.WriteAllText(PyPath.Join(sdir, "o.json"), "{}");
+                return (null, [PyPath.Join(sdir, "o.json")]);
+            };
+            Driver With(StageBody prepare) => new()
+            {
+                Bodies = new() { ["census"] = Writes("census"), ["prepare"] = prepare, ["scope"] = Writes("scope") },
+                OpenRun = QuietRun, SetsRunLogFolder = false,
+                MakeContext = a => new RunContext(entry, new PyDict(), a.Out!, "m") { ResolveWith = () => Json("{\"arms\": [], \"subject\": [], \"keys\": []}") },
+            };
+            var args = new PipelineArgs(Entry: "e.json", Out: t.At("run"), Through: "scope");
+            var (exit, stdout, _) = Drive(With((_, _, _) => throw new NonBlockingRefusal("nothing to prepare here.")), args);
+            var status = D(PyJson.ReadPipelineFile(t.At("run/status.json")));
+            if (exit != Exit.Ok || Ran(ran) != "census scope" || !stdout.Contains("prepare: refused, not blocking: nothing to prepare here."))
+                return $"exit {exit}, ran {Ran(ran)}: {stdout}";
+            string? why = Same("status", PyJson.Dumps(WithoutAt(status, [])),
+                               "{\"status\": \"incomplete\", \"through\": \"scope\", \"sentence\": \"nothing to prepare here.\", "
+                               + "\"refusals\": [{\"stage\": \"prepare\", \"sentence\": \"nothing to prepare here.\"}], "
+                               + "\"diskForecast\": \"disk not forecast for census..scope: no measured per-record figure exists (no earlier receipt of these "
+                               + "stages carries one, and the machine file names no diskPerRecord).\"}");
+            if (why != null) return why;
+            ran.Clear();
+            (exit, stdout, _) = Drive(With((_, _, _) => throw new Awaiting("waiting for judgement.json.")), args);
+            status = D(PyJson.ReadPipelineFile(t.At("run/status.json")));
+            var last = D(L(new StageLedger(t.At("run")).Doc["history"])[^1]);
+            return exit == Exit.Judgement && ran.Count == 0 && stdout.Contains("prepare: AWAITING: waiting for judgement.json.")
+                   && status["status"] as string == "awaiting-judgement" && last["reason"] as string == "awaiting: waiting for judgement.json."
+                ? null : $"exit {exit}, ran {Ran(ran)}: {stdout} {PyJson.Dumps(status)}";
+        });
         Case("driver: a run folder path too long for the probes is refused before anything is written", () =>
         {
             using var t = new Temp();
