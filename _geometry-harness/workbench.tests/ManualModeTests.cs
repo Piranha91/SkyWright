@@ -741,10 +741,9 @@ public sealed class InPlaceRunTests
         roots.SelectMany(r => Directory.EnumerateFileSystemEntries(r, "*", SearchOption.AllDirectories))
              .ToDictionary(p => p, p => File.Exists(p) ? (new FileInfo(p).Length, File.GetLastWriteTimeUtc(p)) : (-1L, Directory.GetLastWriteTimeUtc(p)));
 
-    [Fact]
-    public void B4_an_in_place_run_through_the_bundle_writes_only_under_its_work_folder()
+    /// <summary>The synthetic world with a selection: mod folder SelMod, whose plugin places one reference in the master's cell.</summary>
+    static ModKey SelWorld(TiltedRefWorld w)
     {
-        using var w = new TiltedRefWorld();
         var sel = new ModKey("HcWbSel", ModType.Plugin);
         var m = new SkyrimMod(sel, SkyrimRelease.SkyrimSE);
         using (var master = SkyrimMod.CreateFromBinaryOverlay(Path.Combine(w.Instance, "mods", "WorldMod", TiltedRefWorld.Master.FileName), SkyrimRelease.SkyrimSE))
@@ -770,6 +769,14 @@ public sealed class InPlaceRunTests
         File.WriteAllText(Path.Combine(prof, "modlist.txt"), "+SelMod\r\n+WorldMod\r\n");
         File.WriteAllText(Path.Combine(w.Instance, "ModOrganizer.ini"), "[General]\r\ngameName=Skyrim Special Edition\r\nselected_profile=@ByteArray(Default)\r\n");
         Directory.CreateDirectory(Path.Combine(w.Instance, "overwrite"));
+        return sel;
+    }
+
+    [Fact]
+    public void B4_an_in_place_run_through_the_bundle_writes_only_under_its_work_folder()
+    {
+        using var w = new TiltedRefWorld();
+        var sel = SelWorld(w);
         var game = Path.GetDirectoryName(w.DataDir)!;
         var work = Path.Combine(w.Root, "work");
         var entry = Path.Combine(w.Root, "entry.json");
@@ -811,6 +818,151 @@ public sealed class InPlaceRunTests
         Assert.DoesNotContain(baseArm.GetProperty("plugins").EnumerateArray(), x => x.GetString() == sel.FileName.String);
         var names = Directory.GetFiles(bundle, "names.json", SearchOption.AllDirectories).Single();
         Assert.DoesNotContain("000800:HcWbSel.esp", File.ReadAllText(names).Split("\"unread\"")[1], StringComparison.OrdinalIgnoreCase);
+    }
+
+    static int FreePort() { var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); int p = ((IPEndPoint)l.LocalEndpoint).Port; l.Stop(); return p; }
+
+    /// <summary>B5: the workbench itself, started with no Python anywhere on its PATH and the built-in run engine chosen
+    /// through its own tool, runs the selection. While the built-in engine stops at a stage it does not have yet, the run
+    /// must get as far as that stage and stop on the engine's own sentence; once the engine builds the bundle, the same
+    /// test asserts the run is done and its bundle was checked and opened, still with no Python. The engine is this
+    /// checkout's runcontrol.exe (or WB_RUNCONTROL); set WB_TEST_SHOTS to a folder to keep pictures of the window.</summary>
+    [Fact]
+    public async Task B5_with_the_built_in_engine_the_workbench_runs_with_no_python_on_its_path()
+    {
+        using var w = new TiltedRefWorld();
+        SelWorld(w);
+        var game = Path.GetDirectoryName(w.DataDir)!;
+        var gh = Path.Combine(R3Bundle.Checkout(), "_geometry-harness");
+        var exe = Environment.GetEnvironmentVariable("WB_TEST_WORKBENCH") is { Length: > 0 } we ? we
+            : Directory.GetFiles(Path.Combine(gh, "workbench", "bin", "Release"), "workbench.exe", SearchOption.AllDirectories).Single();
+        var engine = Environment.GetEnvironmentVariable("WB_RUNCONTROL") is { Length: > 0 } rc ? rc
+            : Path.Combine(gh, "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+        Assert.True(File.Exists(engine), $"the built-in run engine is not built at {engine}");
+
+        // a PATH with every folder that holds a python*.exe taken out, and proof that it starts no Python
+        var path = string.Join(';', (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Where(d => !(Directory.Exists(d) && Directory.EnumerateFiles(d, "python*.exe").Any())));
+        var ask = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe")) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = w.Root };
+        foreach (var a in new[] { "/d", "/c", "python --version" }) ask.ArgumentList.Add(a);
+        ask.Environment["PATH"] = path;
+        using (var q = Process.Start(ask)!)
+        {
+            var said = q.StandardOutput.ReadToEnd() + q.StandardError.ReadToEnd(); q.WaitForExit();
+            Assert.True(q.ExitCode != 0 && said.Contains("not recognized"), $"python still starts on the stripped PATH (exit {q.ExitCode}): {said}");
+        }
+
+        int port = FreePort();
+        var settings = Path.Combine(w.Root, "settings", LauncherSettings.FileName); Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
+        var decoy = Path.Combine(w.Root, "decoy-runlog"); Directory.CreateDirectory(decoy);
+        var outDir = Path.Combine(w.Root, "out");
+        var psi = new ProcessStartInfo(exe) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = w.Root };
+        psi.Environment["PATH"] = path;
+        psi.Environment["WB_MCP_PORT"] = port.ToString();
+        psi.Environment["WB_SETTINGS"] = settings;
+        psi.Environment["WB_RUNCONTROL"] = engine;
+        psi.Environment["HOUSECARL_RUNLOG_DIR"] = decoy;                 // the run must keep its own run log, not this one
+        foreach (var k in new[] { "WB_CONTROLLER", "WB_PIPELINE_CMD", "WB_PIPELINE", "WB_EVALRUN", "WB_HARNESS", "WB_OUT", "WB_SCRIPT", "WB_MACHINE" }) psi.Environment.Remove(k);
+        var before = Listing(w.Instance, game);
+        using var wb = Process.Start(psi)!;
+        var console = new System.Text.StringBuilder();
+        wb.OutputDataReceived += (_, e) => { if (e.Data is not null) lock (console) console.AppendLine(e.Data); };
+        wb.ErrorDataReceived += (_, e) => { if (e.Data is not null) lock (console) console.AppendLine(e.Data); };
+        wb.BeginOutputReadLine(); wb.BeginErrorReadLine();
+        string Console() { lock (console) return console.ToString(); }
+        try
+        {
+            McpClient? client = null;
+            for (var until = DateTime.UtcNow.AddSeconds(90); client is null; )
+            {
+                Assert.False(wb.HasExited, $"the workbench exited before its tools answered: {Console()}");
+                try { client = await McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions { Endpoint = new Uri($"http://127.0.0.1:{port}/"), TransportMode = HttpTransportMode.StreamableHttp })); }
+                catch (Exception) when (DateTime.UtcNow < until) { await Task.Delay(500); }
+            }
+            await using var _ = client;
+            async Task<JsonElement> Ok(string tool, params (string K, object? V)[] kv)
+            {
+                var r = await client.CallToolAsync(tool, kv.ToDictionary(x => x.K, x => x.V));
+                var text = string.Join("\n", r.Content.OfType<TextContentBlock>().Select(c => c.Text));
+                Assert.False(r.IsError == true, $"{tool} {kv.FirstOrDefault().V} refused: {text}");
+                using var d = JsonDocument.Parse(text);
+                return d.RootElement.Clone();
+            }
+            var shots = Environment.GetEnvironmentVariable("WB_TEST_SHOTS") is { Length: > 0 } sd ? Directory.CreateDirectory(sd).FullName : null;
+            async Task Shot(string name) { if (shots is not null) { await Task.Delay(1500); await Ok("workbench_act", ("verb", "capture_window"), ("path", Path.Combine(shots, name + ".png"))); } }
+
+            await Ok("workbench_act", ("verb", "open_profile"), ("mode", "free"), ("instance", w.Instance), ("profile", "Default"), ("game", game));
+            await Ok("workbench_act", ("verb", "select_mods"), ("mods", new[] { "SelMod" }));
+            await Ok("workbench_act", ("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" }));
+            var set = await Ok("workbench_act", ("verb", "set_output"), ("path", outDir));
+            Assert.Equal("python", set.GetProperty("launcher").GetProperty("controller").GetString());   // nothing chosen yet
+            await Shot("start-tab-run-engine-python");
+            var chosen = await Ok("workbench_act", ("verb", "set_controller"), ("controller", "csharp"));
+            Assert.Equal("csharp", chosen.GetProperty("launcher").GetProperty("controller").GetString());
+            Assert.Equal("csharp", LauncherSettings.Load(settings).Settings!.Controller);
+            await Shot("start-tab-run-engine-built-in");
+
+            var started = await Ok("workbench_act", ("verb", "run"));
+            Assert.Equal("running", started.GetProperty("launcher").GetProperty("run").GetProperty("state").GetString());
+            var folder = started.GetProperty("launcher").GetProperty("run").GetProperty("folder").GetString()!;
+            JsonElement run = default; int pictures = 0;
+            for (var until = DateTime.UtcNow.AddMinutes(20); DateTime.UtcNow < until; )
+            {
+                // with pictures asked for, the window is captured about once a second while the run goes (its line refreshes each second)
+                if (shots is not null && pictures < 12) { await Task.Delay(1100); await Ok("workbench_act", ("verb", "capture_window"), ("path", Path.Combine(shots, $"run-in-progress-built-in-{++pictures}.png"))); }
+                run = (await Ok("workbench_state", ("project", new[] { "launcher" }), ("wait_seconds", shots is not null && pictures < 12 ? 0 : 20))).GetProperty("launcher").GetProperty("run");
+                if (run.GetProperty("state").GetString() != "running") break;
+            }
+            await Shot("run-ended-built-in");
+            string state = run.GetProperty("state").GetString()!, refusal = run.GetProperty("refusal").GetString() ?? "";
+            var log = File.ReadAllText(Path.Combine(folder, "pipeline.log"));
+
+            // what the engine itself says of the run: every stage's standing, by its own status command
+            var st = new ProcessStartInfo(engine) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (var a in new[] { "status", "--out", Path.Combine(folder, "run") }) st.ArgumentList.Add(a);
+            st.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(folder, "status-runlog");
+            using var sp = Process.Start(st)!;
+            var stages = sp.StandardOutput.ReadToEnd().Split('\n').Select(l => l.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                           .Where(x => x.Length == 2 && !x[0].StartsWith('{')).ToList();
+            sp.WaitForExit();
+            var accepted = stages.TakeWhile(x => x[1].StartsWith("accepted")).Select(x => x[0]).ToList();
+            Assert.True(accepted.Count >= 4 && accepted.Take(4).SequenceEqual(new[] { "census", "prepare", "scope", "plan" }),
+                $"the run did not get through plan ({state}; {refusal}); stages: {string.Join(", ", stages.Select(x => x[0] + " " + x[1]))}; log: {log}");
+
+            // no Python anywhere in what the run said, and the run's own run log holds the pipeline's record
+            Assert.DoesNotContain("python", log, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("python", refusal, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("\"op\":\"evalpipeline\"", File.ReadAllText(Path.Combine(folder, "run", "runlog", "history.jsonl")).Replace(" ", ""));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(decoy));
+            Assert.StartsWith(Path.Combine(outDir, "workbench-runs"), folder);
+
+            if (accepted.Contains("bundle"))
+            {
+                // the engine built the bundle: the run is done, and the workbench checked and opened it with the same engine
+                Assert.True(state == "done", $"the engine's bundle stage is accepted but the run is '{state}': {refusal}");
+                var bundle = run.GetProperty("bundle").GetString()!;
+                Assert.True(File.Exists(Path.Combine(bundle, "manifest.json")), "no bundle under the work folder");
+                var verdict = Path.Combine(folder, "workbench", "bundle-verify.json");
+                for (var until = DateTime.UtcNow.AddSeconds(120); !File.Exists(verdict) && DateTime.UtcNow < until; ) await Task.Delay(500);
+                Assert.True(File.Exists(verdict), $"the finished bundle was not checked: {Console()}");
+                using var v = JsonDocument.Parse(File.ReadAllText(verdict));
+                Assert.True(v.RootElement.GetProperty("bundle").GetProperty("complete").GetBoolean());
+                Assert.DoesNotContain("could not be opened", Console());
+                System.Console.WriteLine("B5 branch: DONE (the built-in engine built the bundle; the workbench verified it)");
+            }
+            else
+            {
+                // the engine stops at the first stage it does not have yet, on its own sentence; nothing else failed
+                var next = stages[accepted.Count][0];
+                Assert.Equal("refused", state);
+                Assert.Equal($"the run stopped (exit code 2) without making results: {next}: not built in this version; the run stops here. (its log: {Path.Combine(folder, "pipeline.log")})", refusal);
+                System.Console.WriteLine($"B5 branch: NOT BUILT YET (stages accepted: {string.Join(", ", accepted)}; the engine stopped at '{next}' on its own sentence)");
+            }
+            var after = Listing(w.Instance, game);
+            var changed = before.Keys.Union(after.Keys).Where(k => !before.TryGetValue(k, out var b) || !after.TryGetValue(k, out var a) || b != a).ToList();
+            Assert.True(changed.Count == 0, $"the run changed the instance or the game folder: {string.Join("; ", changed.Take(5))}");
+        }
+        finally { try { if (!wb.HasExited) wb.Kill(entireProcessTree: true); wb.WaitForExit(10_000); } catch (InvalidOperationException) { } }
     }
 }
 

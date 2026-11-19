@@ -207,8 +207,6 @@ internal static class LauncherView
             if (L.Instance is not null) { Instance.Text = L.Instance; FillProfiles(); Profile.Text = L.Profile ?? ""; }
             Output.Text = L.Output ?? Output.Text; Work.Text = L.WorkFolder ?? Work.Text;
             Engine.SelectedIndex = L.Controller == RunEngine.CSharp ? 1 : 0;
-            // WB_CONTROLLER decides while it is set, so the choice here cannot change this session's engine
-            Engine.IsEnabled = L.ControllerFrom != "WB_CONTROLLER" && L.RunTask is not { IsCompleted: false };
             // the boxes are built once per opened profile (a large list is slow to rebuild); a tick only updates them
             var shown = $"{L.Instance}|{L.Profile}|{string.Join(",", L.Mods.Select(m => m.Name))}";
             if (shown != _modsShown)
@@ -266,6 +264,8 @@ internal static class LauncherView
             Settings.Text = L.SettingsNote ?? "";
             Settings.Visibility = L.SettingsNote is null ? Visibility.Collapsed : Visibility.Visible;
             bool running = L.RunTask is { IsCompleted: false };
+            // WB_CONTROLLER decides while it is set, and a run keeps the engine it started with
+            Engine.IsEnabled = L.ControllerFrom != "WB_CONTROLLER" && !running;
             RunAll.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
             RunEvery.Visibility = RunAll.Visibility;
             var ticked = L.Mods.Where(m => m.Selected).ToList();
