@@ -9,7 +9,11 @@ points at another receipt's id is caught; P4 a field the tool has never heard of
 is compared between runs of one checkout and not between two checkouts; P6 only a list the table names is compared as
 a bag; P7 a time that exists on one side only is caught; P8 a whole number against a decimal is caught; P9 a recorded
 hash that names the wrong run file is caught; P10 a file only one side wrote is caught; P11 the exclusion table is well
-formed and printed in full; P12 the command's exit codes. No probe, no controller and no game is started.
+formed and printed in full; P12 the command's exit codes; P13 each measured time or byte figure that sits inside a
+compared line, sentence or field is set aside, and a change to the rest of that line, sentence or field is still caught;
+P14 the machine slot command's own lines in a heavy step's log are left out and every other line is compared; P15 the
+controller program is set aside after the slot command's `--` and the slot command, the step and its arguments are
+compared. No probe, no controller and no game is started.
 """
 from __future__ import annotations
 
@@ -327,7 +331,7 @@ def p10(tmp):
 
 def p11(_tmp):
     rows = CP.EXCLUSIONS
-    actions = {"ignore", "present-only", "normalise-path", "normalise-id", "unordered"}
+    actions = {"ignore", "present-only", "normalise-path", "normalise-id", "unordered", "drop-line"}
     check(all(r.get("id") and r.get("files") and r.get("where") and r.get("action") in actions
               and len(r.get("reason", "")) > 10 for r in rows), "P11: every exclusion row has an id, files, a place, a known action and a reason")
     check(len({r["id"] for r in rows}) == len(rows), "P11: the row ids are unique")
@@ -358,11 +362,190 @@ def p12(tmp):
     check(r.returncode == 2, f"P12: an unknown planted kind is a usage error, exit 2 ({r.returncode})")
 
 
+def append(path: Path, text: str):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+
+
+STOP = ("this run's budget of 0.03 minute(s) was reached while check check.two [baseline] was running: its process tree "
+        "was stopped at the deadline after {t}s (confirmed gone); nothing it wrote is accepted")
+BUDGET = "this run's budget of 0.03 minute(s) was reached {t} minutes into this run, before this check launched"
+FORECAST = ("disk forecast for evaluate..scenes: about 24{n}.8 KiB more on C: (7 evaluated records at 3{n}.3 KiB each, "
+            "measured at: {run} evaluate (0.0{n} GiB over 7 records)); no figure for scenes; C: has 61{n}.0 GiB free and "
+            "keeps a 22 GiB floor.")
+
+# row id, the file, a line or value holding a measured figure ({n} is 1 on side A and 2 on side B), and the same line
+# with something else changed, which must still be caught
+TIMED_LINES = [
+    ("seconds-probe-log-ms", "evaluation/logs/check.one__baseline.txt", "load order: 2 plugins (2{n} ms)", "load order: 3 plugins (21 ms)"),
+    ("seconds-probe-log-paren", "evaluation/logs/check.one__baseline.txt", "indexed 1 placements over 1 refs  (0.{n}s)",
+     "indexed 2 placements over 1 refs  (0.1s)"),
+    ("seconds-probe-log-paren", "evaluation/logs/check.one__baseline.txt", "configuration: 1 plugins, 0 archives (hashed in 0.{n}s)",
+     "configuration: 1 plugins, 1 archives (hashed in 0.1s)"),
+    ("seconds-probe-log-paren", "evaluation/logs/check.one__baseline.txt", "   validation memo: 0 hits after eviction (0.{n}s, 0 meshes prepared again)",
+     "   validation memo: 0 hits after eviction (0.1s, 1 meshes prepared again)"),
+    ("seconds-probe-log-elapsed", "evaluation/logs/check.one__baseline.txt", "elapsed 2.{n}s", "elapsed 2.1s more"),
+    ("seconds-probe-log-elapsed", "evaluation/sweep/inv-0001/logs/oneprobe-baseline.txt", "elapsed           : 0.{n}s", "elapsed total     : 0.1s"),
+    ("seconds-probe-log-in", "evaluation/logs/check.one__baseline.txt", "pair cache: read 0 result(s) from 2 file(s) in 0.{n}s",
+     "pair cache: read 1 result(s) from 2 file(s) in 0.1s"),
+    ("seconds-probe-log-timers", "evaluation/logs/check.one__baseline.txt",
+     "   pair-loop timers same: 0 pairs (0 mesh queries), 0.{n}s; pairframe 0.{n}s, surface 0.{n}s (0 u), unaccounted 0.{n}s; time-outs 0",
+     "   pair-loop timers same: 1 pairs (0 mesh queries), 0.1s; pairframe 0.1s, surface 0.1s (0 u), unaccounted 0.1s; time-outs 0"),
+    ("seconds-probe-log-timers", "evaluation/logs/check.one__baseline.txt", "   pair-loop stage: 0.{n}s for 0 pairs; same + cross pair wall 0.{n}s; BVH nodes 0",
+     "   pair-loop stage: 0.1s for 0 pairs; same + cross pair wall 0.1s; BVH nodes 4"),
+    ("seconds-runner-stop-echo", "evaluate/commands/evaluate-01.txt", "   check.two__baseline                          STOPPED at deadline     0.{n}s",
+     "   check.one__baseline                          STOPPED at deadline     0.1s"),
+    ("bytes-disk-forecast", "<stdout>", FORECAST, FORECAST.replace("7 evaluated records", "8 evaluated records")),
+    ("bytes-disk-forecast", "<stdout>", FORECAST, FORECAST.replace("a 22 GiB floor", "a 23 GiB floor")),
+]
+
+
+def timed_pair(tmp, name, change):
+    """A pair whose sides each get `change(run folder, n)` applied, n being 1 for A and 2 for B."""
+    pair = Pair(tmp, name)
+    change(pair.a, 1)
+    change(pair.b, 2)
+    return pair
+
+
+def p13(tmp):
+    for i, (row, rel, line, other) in enumerate(TIMED_LINES):
+        def write(run, n, text=None):
+            target = run.parent / "stdout.txt" if rel == "<stdout>" else run / rel
+            append(target, (text or line).format(n=n, run=run.as_posix()) + "\n")
+        pair = timed_pair(tmp, f"p13-{i}", write)
+        report = pair.compare()
+        matched = {r["id"]: r["matched"] for r in report["exclusions"]}
+        check(report["equal"] and matched[row] >= 2, f"P13: {row}: {line.format(n='N', run='RUN')[:70]!r} compares equal across a different figure "
+              f"({[d['line'] for s in report['sections'] for d in s['differences']]})")
+        pair = Pair(tmp, f"p13-{i}-rest")
+        write(pair.a, 1)
+        write(pair.b, 1, other)
+        lines = pair.lines()
+        check(len(lines) == 1 and names(lines, rel), f"P13: {row}: a change to the rest of that line is caught ({lines})")
+
+    # a sentence inside a JSON field: the ledger entry's detail, the journal line's detail, the receipt's note and rejection
+    for row, sentence, other in (("seconds-stopped-sentence", STOP, STOP.replace("(confirmed gone)", "(NOT confirmed gone)")),
+                                 ("minutes-budget-sentence", BUDGET, BUDGET.replace("0.03 minute(s)", "0.04 minute(s)"))):
+        def write(run, n, text=None):
+            said = (text or sentence).format(t=f"0.{n}")
+            edit(run / "evaluation/ledger.json", lambda d: d["entries"][KEYS[2]].update(detail=said))
+            edit(run / f"evaluation/receipts/{KEYS[2]}.json", lambda d: (d["result"].update(note=said),
+                 d["validation"].update(rejections=[{"cause": "budget-exhausted", "detail": said}])))
+        pair = timed_pair(tmp, f"p13-{row}", write)
+        report = pair.compare()
+        matched = {r["id"]: r["matched"] for r in report["exclusions"]}
+        check(report["equal"] and matched[row] >= 6, f"P13: {row}: the sentence compares equal across a different figure "
+              f"({[d['line'] for s in report['sections'] for d in s['differences']]})")
+        pair = Pair(tmp, f"p13-{row}-rest")
+        write(pair.a, 1)
+        write(pair.b, 1, other)
+        lines = pair.lines()
+        check(len(lines) == 3 and names(lines, "evaluation/ledger.json", f"entries/{KEYS[2]}/detail")
+              and names(lines, f"evaluation/receipts/{KEYS[2]}.json", "result/note"), f"P13: {row}: another word of the sentence is caught ({lines})")
+        # the same sentence in a file the row does not name is compared whole
+        pair = timed_pair(tmp, f"p13-{row}-elsewhere", lambda run, n: edit(run / "evaluation/disposition.json",
+                                                                         lambda d: d.update(said=sentence.format(t=f"0.{n}"))))
+        check(names(pair.lines(), "evaluation/disposition.json", "said"), f"P13: {row}: the row reaches only the ledger, the journal and the receipts")
+
+    # the forecast in the two files that keep it
+    def forecast(run, n, text=None):
+        said = (text or FORECAST).format(n=n, run=run.as_posix())
+        edit(run / "status.json", lambda d: d.update(diskForecast=said))
+        put(run / "disk-forecast.json", {"line": said, "refused": None, "stages": ["evaluate", "scenes"]})
+    pair = timed_pair(tmp, "p13-forecast", forecast)
+    check(pair.compare()["equal"], f"P13: bytes-disk-forecast: status.json and disk-forecast.json compare equal across different byte figures ({pair.lines()})")
+    pair = Pair(tmp, "p13-forecast-rest")
+    forecast(pair.a, 1)
+    forecast(pair.b, 1, FORECAST.replace("no figure for scenes", "no figure for records, scenes"))
+    lines = pair.lines()
+    check(len(lines) == 2 and names(lines, "status.json", "diskForecast") and names(lines, "disk-forecast.json", "line"),
+          f"P13: bytes-disk-forecast: another word of the sentence is caught in both files ({lines})")
+    pair = timed_pair(tmp, "p13-forecast-refused", lambda run, n: put(run / "disk-forecast.json", {
+        "line": None, "refused": f"the run needs about 24{n}.8 KiB more on C: for evaluate", "stages": ["evaluate"]}))
+    check(names(pair.lines(), "disk-forecast.json", "refused"), "P13: bytes-disk-forecast: a refusal's figures are compared (the row names the forecast sentence only)")
+
+    # a probe output's own time of writing
+    def generated(run, n, edges=0, stamp=True):
+        doc = {"schemaVersion": 1, "edges": [1] * edges}
+        if stamp:
+            doc["generated"] = f"2026-11-19 02:50:4{n}Z"
+        put(run / "evaluation/outputs/check.two/baseline.json", doc)
+    pair = timed_pair(tmp, "p13-generated", generated)
+    report = pair.compare()
+    check(report["equal"] and {r["id"]: r["matched"] for r in report["exclusions"]}["probe-generated"] == 2,
+          f"P13: probe-generated: a probe output's own time of writing is not compared ({pair.lines()})")
+    pair = Pair(tmp, "p13-generated-rest")
+    generated(pair.a, 1)
+    generated(pair.b, 1, edges=1)
+    check(names(pair.lines(), "evaluation/outputs/check.two/baseline.json", "edges[0]"), "P13: probe-generated: the rest of that output is compared")
+    pair = Pair(tmp, "p13-generated-missing")
+    generated(pair.a, 1)
+    generated(pair.b, 1, stamp=False)
+    check(names(pair.lines(), "evaluation/outputs/check.two/baseline.json", "generated"), "P13: probe-generated: a time only one side wrote is caught")
+
+
+SLOT_LINES = ('{{"step": "slot_taken", "slot": "C:\\\\slots\\\\HEAVY-SLOT", "pid": {pid}, "t": "2026-11-18 20:01:2{n} Pacific Standard Time"}}\n'
+              "{waits}"
+              "idle on 1 checks at 2026-11-18 20:01:3{n} Pacific Standard Time (free 2195{n} MB)\n"
+              '{{"step": "taken", "pid": {pid}, "maxMinutes": 100.0, "disk": [{{"volume": "C:", "freeGiB": 616.0{n}}}]}}\n'
+              "   check.one__baseline          exit 0      0.{n}s\n"
+              '{{"step": "released", "pid": {pid}, "heldMinutes": 0.0{n}}}\n')
+WAIT = "waiting for idle (up to 5 min, 1 consecutive checks) from 2026-11-18 20:01:2{n} Pacific Standard Time\n"
+
+
+def p14(tmp):
+    def slot(run, n, extra=""):
+        append(run / "evaluate/commands/evaluate-01.txt",
+               SLOT_LINES.format(pid=1000 * n, n=n, waits=WAIT.format(n=n) * n) + extra)   # side B waited twice
+    pair = timed_pair(tmp, "p14", slot)
+    report = pair.compare()
+    check(report["equal"] and {r["id"]: r["matched"] for r in report["exclusions"]}["slot-command-lines"] == 11,
+          f"P14: the slot command's own lines in a heavy step's log are left out, however many each side has ({pair.lines()})")
+    pair = Pair(tmp, "p14-rest")
+    slot(pair.a, 1)
+    slot(pair.b, 1, "   check.two__baseline          exit 3      0.1s\n")
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, "evaluate/commands/evaluate-01.txt"), f"P14: a line of the step itself that only one side has is caught ({lines})")
+    pair = Pair(tmp, "p14-elsewhere")
+    append(pair.a / "evaluation/logs/check.one__baseline.txt", '{"step": "taken", "pid": 1}\n')
+    append(pair.b / "evaluation/logs/check.one__baseline.txt", '{"step": "taken", "pid": 2}\n')
+    check(names(pair.lines(), "evaluation/logs/check.one__baseline.txt"), "P14: the same line in a probe's log is compared (the row names a stage's command logs only)")
+    pair = Pair(tmp, "p14-other-line")
+    append(pair.a / "evaluate/commands/evaluate-01.txt", "idle check refused: memory low at 2026-11-18 20:01:21\n")
+    append(pair.b / "evaluate/commands/evaluate-01.txt", "idle check refused: memory low at 2026-11-18 20:01:22\n")
+    check(names(pair.lines(), "evaluate/commands/evaluate-01.txt"), "P14: a line of another shape that mentions idle is compared")
+
+
+def p15(tmp):
+    slot = "$ python S:/tools/idle_lock.py hold --lock L:/locks/HEAVY-LOCK-x --max-min {hold} -- "
+
+    def first_line(run, program, sub="run", hold=100):
+        put(run / "evaluate/commands/evaluate-01.txt", slot.format(hold=hold) + f"{program} {sub} --run R --budget-minutes 5\n(exit 0, 1.0s)\n\n")
+    pair = Pair(tmp, "p15")
+    first_line(pair.a, f"python {pair.root}\\side-a\\checkout-1\\_geometry-harness\\evalrun.py")
+    first_line(pair.b, f"{pair.root}\\a-longer-side-b\\checkout-2\\_geometry-harness\\runcontrol\\bin\\runcontrol.exe")
+    report = pair.compare()
+    matched = {r["id"]: r["matched"] for r in report["exclusions"]}
+    check(report["equal"] and matched["controller-command-python"] >= 2 and matched["controller-command-exe"] >= 1,
+          f"P15: the controller program after the slot command's `--` is set aside ({pair.lines()})")
+    first_line(pair.b, f"{pair.root}\\a-longer-side-b\\checkout-2\\_geometry-harness\\runcontrol\\bin\\runcontrol.exe", sub="resume")
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, "evaluate/commands/evaluate-01.txt", "line 1"), f"P15: another subcommand after the `--` is caught ({lines})")
+    first_line(pair.b, f"{pair.root}\\a-longer-side-b\\checkout-2\\_geometry-harness\\runcontrol\\bin\\runcontrol.exe", hold=30)
+    lines = pair.lines()
+    check(len(lines) == 1 and names(lines, "evaluate/commands/evaluate-01.txt", "line 1"), f"P15: another slot command before the `--` is caught ({lines})")
+    first_line(pair.b, "L:/other/tool.exe")
+    check(names(pair.lines(), "evaluate/commands/evaluate-01.txt", "line 1"), "P15: a program that is not a controller is compared by name")
+
+
 def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="controller-parity-"))
     try:
         for label, fn in (("P1", p1), ("P2", p2), ("P3", p3), ("P4", p4), ("P5", p5), ("P6", p6), ("P7", p7), ("P8", p8),
-                          ("P9", p9), ("P10", p10), ("P11", p11), ("P12", p12)):
+                          ("P9", p9), ("P10", p10), ("P11", p11), ("P12", p12), ("P13", p13), ("P14", p14),
+                          ("P15", p15)):
             guarded(label, lambda fn=fn: fn(tmp))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

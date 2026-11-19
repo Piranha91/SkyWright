@@ -63,9 +63,23 @@ class Refusal(Exception):
 #           normalise-path    the absolute root is rewritten to a marker; the rest of the path is compared
 #           normalise-id      each side's id is rewritten to the same marker; the reference is still compared
 #           unordered         the list is compared as a bag
-#   to      for a regex: the replacement
+#           drop-line         a text line the regex matches is left out on both sides; every other line is compared
+#   to      for a regex: the replacement (text, or a function of the match for a part of a longer sentence)
 #   when    "different-checkout": the row applies only when the two runs came from different checkouts
 #   reason  one sentence
+
+def _forecast_bytes(m):
+    """The disk forecast sentence with its measured byte figures taken out; every other word and number is kept."""
+    return _FORECAST_BYTES.sub("<BYTES>", m.group(0))
+
+
+def _timer_seconds(m):
+    """A probe's pair-loop timer line with its measured seconds taken out; the counts are kept."""
+    return re.sub(r"\d+\.\d+s", "<SECONDS>s", m.group(0))
+
+
+_FORECAST_BYTES = re.compile(r"(?<=about )\d+(?:\.\d+)? (?:GiB|MiB|KiB)(?= more on )|(?<= at )\d+(?:\.\d+)? KiB(?= each)"
+                             r"|(?<=\()\d+(?:\.\d+)? GiB(?= over \d+ records\))|(?<= has )\d+(?:\.\d+)? GiB(?= free )")
 
 EXCLUSIONS = [
     # ---- whole files and folders
@@ -123,6 +137,37 @@ EXCLUSIONS = [
          to=r"\1<SECONDS>s", reason="The duration in the shared runner's one line per child; the exit code is kept."),
     dict(id="seconds-probe-line", files="*.txt", where=r"text:^\s+\d+\.\d+ s$", action="ignore", to="  <SECONDS> s",
          reason="A probe's own closing line: how long it ran."),
+    dict(id="seconds-probe-log-ms", files="*logs/*.txt", where=r"text:\(\d+ ms\)", action="ignore", to="(<MS> ms)",
+         reason="A probe log's `(21 ms)`: how long the probe took to read the load order."),
+    dict(id="seconds-probe-log-paren", files="*logs/*.txt", where=r"text:\((hashed in )?\d+\.\d+s(?=[,)])", action="ignore",
+         to=r"(\1<SECONDS>s", reason="A probe log's `(0.7s)`, `(hashed in 0.0s)` and `(0.0s, ...`: how long one step of the probe took."),
+    dict(id="seconds-probe-log-elapsed", files="*logs/*.txt", where=r"text:^(elapsed\s*:? )\d+\.\d+s$", action="ignore",
+         to=r"\1<SECONDS>s", reason="A probe log's `elapsed 2.6s` and `elapsed   : 0.0s` line: how long the probe ran."),
+    dict(id="seconds-probe-log-in", files="*logs/*.txt", where=r"text:( in )\d+\.\d+s$", action="ignore", to=r"\1<SECONDS>s",
+         reason="A probe log line that ends `in 0.0s` (archives read, pair cache read or written): how long that took."),
+    dict(id="seconds-probe-log-timers", files="*logs/*.txt", where=r"text:^\s+pair-loop (?:timers \w+|stage): .*$", action="ignore",
+         to=_timer_seconds, reason="A probe log's pair-loop timer lines: the seconds each part of the pair loop took; the counts are kept."),
+    dict(id="seconds-runner-stop-echo", files="*.txt", where=r"text:^(\s+\S+\s+STOPPED at deadline\s+)\d+(?:\.\d+)?s\b",
+         action="ignore", to=r"\1<SECONDS>s",
+         reason="The duration in the shared runner's one line for a child it stopped at the deadline; the job and the stop are kept."),
+    dict(id="seconds-stopped-sentence", files="*ledger.json | *journal.jsonl | *receipts/*.json",
+         where=r"string:(stopped at the deadline after )\d+(?:\.\d+)?(s )", action="ignore", to=r"\1<SECONDS>\2",
+         reason="How long a child had run when the deadline stopped it, inside a stopped row's sentence; the sentence is kept."),
+    dict(id="minutes-budget-sentence", files="*ledger.json | *journal.jsonl | *receipts/*.json",
+         where=r"string:(was reached )\d+(?:\.\d+)?( minutes into this run)", action="ignore", to=r"\1<MINUTES>\2",
+         reason="How far into the run its budget was reached, inside a stopped or skipped row's sentence; the sentence is kept."),
+    dict(id="bytes-disk-forecast", files="status.json | disk-forecast.json | <stdout>", where=r"string:^disk forecast for .*$",
+         action="ignore", to=_forecast_bytes,
+         reason="The byte figures in the disk forecast sentence come from the bytes each controller's own stages added "
+                "(stage-disk) and the free space at that moment; the stages, records, drive and floor are kept."),
+    dict(id="probe-generated", files="*outputs/*.json", where="json:generated", action="present-only",
+         reason="A probe output's own time of writing (depprobe, switchprobe)."),
+    dict(id="slot-command-lines", files="*commands/*.txt",
+         where=r'text:^\{"step": ".*\}$ | text:^waiting for idle \(.* from \d{4}-\d\d-\d\d .*$ | '
+               r"text:^idle on \d+ checks at \d{4}-\d\d-\d\d .*\(free \d+ MB\)$",
+         action="drop-line",
+         reason="The machine slot command's own lines inside a heavy step's log hold process ids, local times and free "
+                "memory, as idle_lock.log does."),
     dict(id="seconds-server-log", files="*.txt", where=r"text:(request handler completed in )\d+(?:\.\d+)?ms", action="ignore",
          to=r"\1<MS>ms", reason="The record reader's server log: how long a request took."),
     dict(id="deadline-argument", files="*.txt | *jobs.jsonl", where=r"string:(--deadline-seconds[ =])\d+(?:\.\d+)?",
@@ -150,17 +195,19 @@ EXCLUSIONS = [
          action="present-only",
          reason="The name and hash of the program that generates the states to check, which is the controller itself."),
     dict(id="controller-command-python", files="*.txt",
-         where=r'text:^\$ (?:"[^"]*python[^"]*"|\S*python\S*) \S*[\\/]evalrun\.py (\S+)', action="ignore",
-         to=r"$ <CONTROLLER> \1",
-         reason="The first line of a controller step's log names the controller program; the step and its arguments are kept."),
+         where=r'text:^(\$ (?:.* -- )?)(?:"[^"]*python[^"]*"|\S*python\S*) \S*[\\/]evalrun\.py (\S+)', action="ignore",
+         to=r"\1<CONTROLLER> \2",
+         reason="The first line of a controller step's log names the controller program, at its start or after the "
+                "machine slot command's `--`; the slot command, the step and its arguments are kept."),
     dict(id="controller-command-python-sweep", files="*.txt",
          where=r'text:^\$ (?:"[^"]*python[^"]*"|\S*python\S*) \S*[\\/]ordersweep\.py', action="ignore",
          to="$ <CONTROLLER> ordersweep",
          reason="The first line of the sweep's log names the controller program; its arguments are kept."),
     dict(id="controller-command-exe", files="*.txt",
-         where=r'text:^\$ (?:"[^"]*runcontrol\.exe"|\S*runcontrol\.exe) (\S+)', action="ignore",
-         to=r"$ <CONTROLLER> \1",
-         reason="The first line of a controller step's log names the controller program; the step and its arguments are kept."),
+         where=r'text:^(\$ (?:.* -- )?)(?:"[^"]*runcontrol\.exe"|\S*runcontrol\.exe) (\S+)', action="ignore",
+         to=r"\1<CONTROLLER> \2",
+         reason="The first line of a controller step's log names the controller program, at its start or after the "
+                "machine slot command's `--`; the slot command, the step and its arguments are kept."),
     dict(id="options-hash", files="*receipts/*.json", where="json:consumed/optionsSha256", action="present-only",
          reason="A hash over the plan's options, which hold absolute paths."),
 
@@ -526,9 +573,14 @@ class Normaliser:
         rules = [(r, re.compile(sel)) for r in self.rows if _file_matches(r["files"], rel) for sel in _where(r, "text")]
         out = []
         for line in lines:
+            dropped = next((row for row, rx in rules if row["action"] == "drop-line" and rx.search(line)), None)
+            if dropped is not None:
+                self._hit(dropped["id"])
+                continue
             for row, rx in rules:
-                line, n = rx.subn(row["to"], line)
-                self._hit(row["id"], n)
+                if row["action"] != "drop-line":
+                    line, n = rx.subn(row["to"], line)
+                    self._hit(row["id"], n)
             out.append(self.string(line, rel))
         return out
 
