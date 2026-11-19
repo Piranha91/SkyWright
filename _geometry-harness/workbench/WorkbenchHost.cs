@@ -36,6 +36,17 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     readonly EditSession _session;
     readonly Gizmo _gizmo = new();
     readonly ConflictMarks _marks = new();
+    readonly ResultMarks _resultMarks = new();
+
+    /// <summary>Mark the drawn references named, each in its group's shape (the Results tab's filter); returns how many
+    /// of them this scene draws. An empty list clears the marks.</summary>
+    internal int MarkResults(IEnumerable<(FormKey Key, MarkStyle Style)> refs)
+    {
+        _resultMarks.Set(refs.Where(r => _session.IsDrawn(r.Key)).Select(r => { var ro = _session.RefOf(r.Key); return (ro.Min, ro.Max, r.Style); }));
+        Invalidate();
+        return _resultMarks.Marked;
+    }
+    internal int ResultsMarked => _resultMarks.Marked;
     readonly TextBlock _status = new() { Margin = new Thickness(6, 2, 6, 2), TextWrapping = TextWrapping.Wrap };
     readonly string _outDir;
     Window _window = null!;
@@ -74,6 +85,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _tints.State = _viewState;
         _outDir = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : opt.OutDir;
         Directory.CreateDirectory(_outDir);
+        renderer.Overlays.Add(_resultMarks);
         renderer.Overlays.Add(_marks);
         renderer.Overlays.Add(_gizmo);
         renderer.Overlays.Insert(0, _tints);
