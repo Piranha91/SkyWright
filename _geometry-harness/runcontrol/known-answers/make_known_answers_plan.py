@@ -1,8 +1,10 @@
-"""Write plan-modules.json: the known answers for the modules runcontrol's `plan` and `run` commands need.
+"""Write plan-modules.json and plan-command.json: the known answers for runcontrol's `plan` command and for the
+modules its `plan` and `run` commands need.
 
 Every expected value comes from the real Python modules: evalregistry.py (validate, families, applicability),
 evalsettings.py (load, value, record, sentences), stategen.py, switchflip_scope.py, modnames.meta_ini_mod_id, and the
-`re` module for the pattern table. Run it again only when one of those rules, or the check registry, changes on
+`re` module for the pattern table; and, for plan-command.json, evalrun.py's plan functions and `evalrun.py plan` itself,
+run as a child process over a small instance written here. Run it again only when one of those rules, or the check registry, changes on
 purpose, and commit the result with the change:
 
     python _geometry-harness/runcontrol/known-answers/make_known_answers_plan.py
@@ -14,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import gzip
 import hashlib
 import json
 import os
@@ -35,6 +38,7 @@ import switchflip_scope as SFS        # noqa: E402
 from modnames import meta_ini_mod_id  # noqa: E402
 
 OUT = HERE / "plan-modules.json"
+OUT_PLAN = HERE / "plan-command.json"
 REGISTRY = Path(REG.DEFAULT_REGISTRY)
 BACK, FWD = "<ROOT\\>", "<ROOT/>"
 
@@ -835,6 +839,456 @@ def value_cases() -> dict:
             "add": adds}
 
 
+# ------------------------------------------------------------------ the plan command
+
+def plugin_bytes(**groups) -> bytes:
+    """A plugin of a TES4 header and one top-level group per name, each holding that many empty records."""
+    def record(sig: bytes, body: bytes = b"") -> bytes:
+        return sig + len(body).to_bytes(4, "little") + bytes(16) + body
+    data = record(b"TES4", b"HEDR" + (12).to_bytes(2, "little") + bytes(12))
+    for label, count in groups.items():
+        body = b"".join(record(label.encode("ascii")) for _ in range(count))
+        data += b"GRUP" + (24 + len(body)).to_bytes(4, "little") + label.encode("ascii") + bytes(12) + body
+    return data
+
+
+def nested_plugin() -> bytes:
+    """A CELL group of one record and a nested group holding two more; then a group cut short and bytes that are no group."""
+    rec = b"CELL" + (0).to_bytes(4, "little") + bytes(16)
+    inner = b"GRUP" + (24 + 2 * 24).to_bytes(4, "little") + bytes(16) + b"REFR" + bytes(20) + b"REFR" + bytes(20)
+    body = rec + inner
+    top = b"GRUP" + (24 + len(body)).to_bytes(4, "little") + b"CELL" + bytes(12) + body
+    short = b"GRUP" + (8).to_bytes(4, "little") + b"W\xffTR" + bytes(12)   # a size below a header's own, and a label that is not ASCII
+    return plugin_bytes() + top + short + b"JUNKJUNKJUNKJUNKJUNKJUNKJUNK"
+
+
+ARM_DELTAS = [
+    [],
+    [["A.esp", "B.esp"]],
+    [["A.esp", "B.esp"], ["A.esp", "B.esp"]],
+    [["A.esp", "B.esp"], ["a.ESP", "C.esp"]],
+    [["A.esp", "B.esp", "C.esp"], ["C.esp", "A.esp", "B.esp"]],
+    [["A.esp", "B.esp", "C.esp", "D.esp"], ["A.esp", "C.esp", "B.esp", "D.esp"], ["d.esp", "A.esp"]],
+    [["Z.esp", "b.esp", "A.esp"], ["b.esp", "Z.esp", "E.esp"], []],
+    [["A.esp", "A.esp", "B.esp"], ["B.esp", "A.esp"]],
+    [["\u00c9.esp", "e.esp"], ["e.esp", "\u00e9.esp", "Zz.esp"]],
+    [[], ["A.esp"]],
+]
+
+TOPO = [
+    [],
+    [{"id": "a"}, {"id": "b", "prerequisites": ["a"]}],
+    [{"id": "b", "prerequisites": ["a"]}, {"id": "a"}],
+    [{"id": "d", "prerequisites": ["c", "b"]}, {"id": "c", "prerequisites": ["a"]}, {"id": "b", "prerequisites": ["a", "ghost"]}, {"id": "a"}, {"id": "e"}],
+    [{"id": "a", "prerequisites": None}, {"id": "a"}, {"id": "b", "prerequisites": ["a", "a"]}],
+]
+
+FINGERPRINTS = [
+    {"plugins": [{"name": "Skyrim.esm", "sha256": "ab" * 32}, {"name": "CAF\u00c9.esp", "sha256": "cd" * 32}],
+     "providers": [{"name": "overwrite", "kind": "overwrite"}, {"name": "Some Mod", "kind": "mod"}, {"name": "Data", "kind": "data"}],
+     "overlays": [{"kind": "bos-ini", "sha256": "ef" * 32}], "population": "load-time", "state": "baseline"},
+    {"plugins": [], "providers": [], "overlays": [], "population": "load-time+population:0123456789ab", "state": "STATE-x"},
+    {"plugins": [{"name": "A.esp", "sha256": "01" * 32}], "providers": [], "overlays": [], "population": None, "state": None},
+]
+
+
+def tree_of(root: Path) -> dict:
+    """Every file under root as {relative path: base64}, and the folders that hold none."""
+    files, dirs = {}, []
+    for p in sorted(root.rglob("*")):
+        rel = p.relative_to(root).as_posix()
+        if p.is_file():
+            files[rel] = b64(p.read_bytes())
+        elif not any(p.iterdir()):
+            dirs.append(rel)
+    return {"files": files, "dirs": dirs}
+
+
+def plan_unit_cases(tmp: Path) -> dict:
+    import evalrun as ER
+    root = tmp / "units"
+    plugins = {"plain.esp": plugin_bytes(), "coll.esp": plugin_bytes(STAT=2, COLL=1), "race.esp": plugin_bytes(RACE=3, STAT=1),
+               "emptycoll.esp": plugin_bytes(COLL=0), "nested.esp": nested_plugin(), "nothing.esp": b"", "text.esp": b"not a plugin at all, just text",
+               "twice.esp": plugin_bytes(RACE=1) + b"GRUP" + (48).to_bytes(4, "little") + b"RACE" + bytes(12) + b"RACE" + bytes(20)}
+    for name, data in plugins.items():
+        (root / "p").mkdir(parents=True, exist_ok=True)
+        (root / "p" / name).write_bytes(data)
+    inst = root / "inst"
+    for rel in ("mods/Plain/a.txt", "mods/Swap/meshes/x.nif", "mods/Swap/z/Thing_SWAP.ini", "mods/Swap/a/b/other_swap.INI", "mods/TopSwap/sub/deep_swap.ini",
+                "mods/TopSwap/top_swap.ini", "mods/NotSwap/swap.ini", "mods/NotSwap/x_swap.ini.bak"):
+        (inst / rel).parent.mkdir(parents=True, exist_ok=True)
+        (inst / rel).write_bytes(b"x")
+    outside = root / "elsewhere" / "Patch Folder"
+    outside.mkdir(parents=True)
+    (outside / "keep.txt").write_bytes(b"x")
+
+    def row(name):
+        return {"name": name, "path": str(root / "p" / name), "sha256": hashlib.sha256(plugins[name]).hexdigest()}
+    table = [
+        ("one plain plugin, no folder", [row("plain.esp")], [], ["plain.esp"], None),
+        ("a missing plugin file is read as no groups", [{"name": "gone.esp", "path": str(root / "p" / "gone.esp"), "sha256": "0" * 64}], [], [], None),
+        ("fixed paths, nothing on disk", [{"name": "Caf\u00e9 \U0001F600.esp", "path": "Q:\\nowhere\\Caf\u00e9 \U0001F600.esp", "sha256": "ab" * 32}], [], ["T.esp", "Caf\u00e9.esp"], None),
+        ("a plugin with collision layers", [row("plain.esp"), row("coll.esp"), row("race.esp")], ["Plain"], [], str(inst)),
+        ("an empty collision-layer group is not a carrier", [row("emptycoll.esp")], [], [], None),
+        ("race carriers, a nested group, bytes that are not a plugin", [row("race.esp"), row("nested.esp"), row("nothing.esp"), row("text.esp"), row("twice.esp")], ["Plain"], ["race.esp"], str(inst)),
+        ("a folder with no instance", [row("plain.esp")], ["Plain"], [], None),
+        ("a folder that is not there", [row("plain.esp")], ["Plain", "Ghost"], [], str(inst)),
+        ("a swap ini below the top", [], ["Plain", "Swap"], [], str(inst)),
+        ("a swap ini at the top is named first", [], ["TopSwap"], [], str(inst)),
+        ("names that only look like a swap ini", [], ["NotSwap", "Plain"], ["x.esp"], str(inst)),
+        ("case l1b a population takes a mod folder named by absolute path", [row("plain.esp")], [str(outside), "Plain"], [], str(inst)),
+    ]
+    files = []
+    for name, rows, mods, targets, instance in table:
+        made = ER.population_file(rows, mods, targets, instance)
+        rooted = not isinstance(made, str) and str(root).replace("\\", "\\\\") in made[0]
+        files.append({"name": name, "plugins": mask(rows, root), "mods": mask(mods, root), "targets": targets, "instance": mask(instance, root),
+                      "refusal": mask(made, root) if isinstance(made, str) else None,
+                      "document": None if isinstance(made, str) else mask(json.loads(made[0]), root),
+                      "rawSha256": None if isinstance(made, str) or rooted else made[1],
+                      "raceCarriers": None if isinstance(made, str) else made[4]})
+    fingerprints = [{**f, "python": ER.configuration_fingerprint(f["plugins"], f["providers"], f["overlays"], f["population"], f["state"])} for f in FINGERPRINTS]
+    return {
+        "tree": tree_of(root),
+        "armDelta": [{"lists": lists, "delta": ER.arm_delta(lists)} for lists in ARM_DELTAS],
+        "topGroups": [{"name": name, "groups": ER.plugin_top_groups_from_bytes(data)} for name, data in plugins.items()],
+        "populationFiles": files, "fingerprints": fingerprints,
+        "topoOrder": [{"checks": checks, "order": [c["id"] for c in ER.topo_order(checks)]} for checks in TOPO],
+    }
+
+
+FAKE_PREFLIGHT = ('@echo off\r\n'
+                  'if exist "%~3.verdict" (type "%~3.verdict" > "%~5") else '
+                  '(echo {"verdict":"passed","providers":["overwrite","Data"],"omittedProviderCount":0,"reorderedProviders":[]}> "%~5")\r\n')
+SILENT_PREFLIGHT = '@echo off\r\necho first line\r\necho the probe could not start today\r\necho.\r\nexit /b 3\r\n'
+
+
+def plan_world(root: Path) -> dict:
+    """The fixture every plan case starts from: an instance, a game, an empty harness, the registry, a scope whose
+    plugins are the instance's files, candidate sets and a stand-in for overlapprobe's scene preflight."""
+    files = {
+        "instance/mods/WorldMod/HcWbWorld.esm": plugin_bytes(CELL=1),
+        "instance/mods/SelMod/HcWbSel.esp": plugin_bytes(CELL=1, REFR=1),
+        "instance/mods/SelMod/meshes/sel.nif": b"nif",
+        "instance/mods/OffMod/Extra.esp": plugin_bytes(STAT=1),
+        "instance/mods/OffMod/Sup.esp": plugin_bytes(STAT=2),
+        "instance/mods/DisMod/Sup.esp": plugin_bytes(STAT=3),
+        "instance/mods/AltMod/HcWbWorld.esm": plugin_bytes(CELL=2),
+        "instance/mods/CopyMod/HcWbWorld.esm": plugin_bytes(CELL=1),
+        "instance/mods/Stray/Stray.esp": plugin_bytes(STAT=4),
+        "instance/overwrite/Over.esp": plugin_bytes(STAT=5),
+        "instance/profiles/P/modlist.txt": b"# This file was automatically generated by Mod Organizer.\r\n+SelMod\r\n+Looks_separator\r\n+WorldMod\r\n+OffMod\r\n-DisMod\r\n-AltMod\r\n-CopyMod\r\n*Unmanaged\r\n",
+        "instance/profiles/NoList/note.txt": b"a profile folder with no modlist.txt",
+        "instance/profiles/Bom/modlist.txt": b"\xef\xbb\xbf+OffMod\r\n+SelMod\r\n+WorldMod\r\n",
+        "game/Data/Data.esm": plugin_bytes(STAT=6),
+        "game/Data/Sup.esp": plugin_bytes(STAT=7),
+        "harness/readme.txt": b"no probe is built here",
+        "fake.cmd": FAKE_PREFLIGHT.encode("ascii"),
+        "silent.cmd": SILENT_PREFLIGHT.encode("ascii"),
+        "reg/check-registry.json": REGISTRY.read_bytes(),
+        "settings/standard.json": js({"schemaVersion": 1, "evaluation": {"depth": "standard"}}),
+        "table.json": js([{"base": "0001:Skyrim.esm", "layer": 5, "solid": True, "evidence": "station Q run 7"}, {"evidence": " frame 12 "}], indent=1),
+        "table2.json": js([{"evidence": "another table"}]),
+        "bad-scope.json": b"{ not json",
+    }
+    for rel, data in files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(data)
+    sha = {rel: hashlib.sha256(data).hexdigest() for rel, data in files.items()}
+    scope = json.loads((HERE / "scopes" / "candidate-01.json").read_text(encoding="utf-8"))
+    for p in scope["configuration"]["plugins"]:
+        rel = f"instance/mods/{p['Provider']}/{p['Name']}"
+        p["Path"], p["Sha256"] = f"{BACK}\\" + rel.replace("/", "\\"), sha[rel]
+    for t in scope["targets"]:
+        t["sha256"] = sha["instance/mods/SelMod/HcWbSel.esp"]
+    bare = {"complete": True, "targets": [{"name": "HcWbSel.esp"}, "x", {"name": ""}],
+            "Configuration": {"Plugins": [{"Name": "HcWbWorld.esm", "Path": f"{BACK}\\instance\\mods\\WorldMod\\HcWbWorld.esm", "Sha256": "not a hash", "Provider": "WorldMod"},
+                                          {"Name": "HcWbSel.esp", "Path": f"{BACK}\\instance\\mods\\SelMod\\HcWbSel.esp", "Sha256": sha["instance/mods/SelMod/HcWbSel.esp"].upper()}],
+                              "Providers": [{"Name": "WorldMod", "Kind": "Mod"}], "Population": "", "Fingerprint": "F", "Source": "S"}}
+    # the two scopes name the case's own folder: they are kept with the placeholder and written out per case
+    templates = {"scope.json": json.dumps(scope, indent=1), "bare-scope.json": json.dumps(bare)}
+
+    def cand(folder, name, **doc):
+        (root / "cands" / folder).mkdir(parents=True, exist_ok=True)
+        (root / "cands" / folder / name).write_text(json.dumps(doc, indent=1), encoding="utf-8", newline="\n")
+    world, sel = "HcWbWorld.esm", "HcWbSel.esp"
+    for folder in ("two", "three", "sup", "dup", "search"):
+        cand(folder, "candidate-00-baseline.json", Plugins=[world], Mods=["WorldMod"], Changes=["the profile without the selection"],
+             Provenance={"arm": "without-selection", "keys": []})
+        cand(folder, "candidate-01.json", Plugins=[world, sel], Mods=["SelMod", "WorldMod"], Changes=[], Provenance={"arm": "combined"})
+    cand("three", "candidate-02.json", plugins=[sel, world], changes=["swapped"], provenance={"arm": "swapped"})
+    cand("three", "Candidate-03.JSON", Plugins=[world, sel], mods=[], Mods=None)
+    cand("sup", "candidate-09-sup.json", Plugins=[world, sel, "Sup.esp", "Extra.esp", "Nowhere.esp", "Over.esp", "Data.esm"], Mods=["SelMod", "WorldMod"])
+    cand("dup", "candidate-02.json", Plugins=[world, sel], Mods=["AltMod", "SelMod", "WorldMod"])
+    cand("dup", "candidate-03.json", Plugins=[world, sel], Mods=["CopyMod", "SelMod", "WorldMod"])
+    cand("dup", "candidate-04.json", Plugins=[world, sel], Mods=["SelMod", "GhostMod", "WorldMod", " "])
+    (root / "cands" / "search" / "candidates.json").write_text(json.dumps({"Budget": {"Asked": 8, "Kept": 2}, "Candidates": []}), encoding="utf-8")
+    (root / "cands" / "empty").mkdir(parents=True)
+    (root / "cands" / "nobase").mkdir(parents=True)
+    (root / "cands" / "nobase" / "candidate-01.json").write_text("{}", encoding="utf-8")
+    (root / "cands" / "twobase").mkdir(parents=True)
+    for n in ("candidate-00-baseline.json", "candidate-01-baseline.json"):
+        (root / "cands" / "twobase" / n).write_text("{}", encoding="utf-8")
+    (root / "cands" / "afile").write_text("not a folder", encoding="utf-8")
+    return {**tree_of(root), "templates": templates}
+
+
+class Template(str):
+    """A file's text that names the case's folder by the placeholder, as JSON spells it; written out per case."""
+
+
+def J(doc, **kw) -> Template:
+    return Template(json.dumps(doc, **kw))
+
+
+def materialise(text: str, root: Path) -> bytes:
+    return text.replace(json.dumps(BACK)[1:-1], json.dumps(str(root))[1:-1]).replace(FWD, str(root).replace("\\", "/")).encode("utf-8")
+
+
+def plan_case_table() -> list:
+    """(name, argv after `plan`, extra files {relative path: bytes or Template}, environment with placeholders)."""
+    R, S, H, OUT = f"{BACK}\\reg\\check-registry.json", f"{BACK}\\scope.json", f"{BACK}\\harness", f"{BACK}\\run"
+    INST, GAME, FAKE = f"{BACK}\\instance", f"{BACK}\\game", f"{BACK}\\fake.cmd"
+
+    def base(cands="two", scope=S, registry=R):
+        return ["--registry", registry, *(["--scope", scope] if scope else []), "--candidates", f"{BACK}\\cands\\{cands}", "--out", OUT, "--harness", H]
+    here = ["--instance", INST, "--profile", "P", "--game", GAME, "--probe-cmd", f"overlapprobe={FAKE}"]
+    mesh = {"verdict": "refused", "code": "view-lacks-installed-meshes", "reason": "the view lacks 3 installed meshes", "remedy": "add the folders"}
+    live = ["--opt-in", "runtime.state-switch-flip"]
+    one = "cands/two/candidate-01.json.verdict"
+    ask = {"settings/ask.json": with_values(evaluation={"liveSwitchCheck": "ask"})}
+    return [
+        ("no instance: the scene preflight is not run and the population needs its folder", base(), {}, {}),
+        ("an instance, a profile and a game: a scoped population", base() + here, {}, {}),
+        ("no scope: applicability is unknown and nothing is targeted", base(scope=None), {}, {}),
+        ("a scope in the other key spelling, with a hash that is not one", base(scope=f"{BACK}\\bare-scope.json") + here, {}, {}),
+        ("flags joined with =, paths with forward slashes and a dot",
+         [f"--registry={FWD}/reg/./check-registry.json", f"--candidates={FWD}/cands/two/", f"--out={FWD}/run", f"--harness={FWD}/harness",
+          "--probe-args=--threads 4", "--diff-tolerance=0.5"], {}, {}),
+        # one start each: with several, which check is named as implying a shared prerequisite follows Python's set order
+        ("select by exe name, with its implied prerequisite", base() + ["--select", " overlapprobe,", "--select", ","], {}, {}),
+        ("select by id, with the chain of prerequisites it implies", base() + ["--select", "patch.order-evaluation"], {}, {}),
+        ("select every check an exe runs and one more that implies nothing new",
+         base() + ["--select", "contactprobe", "--select", "loadability.masters-and-order,geometry.placement-contact"], {}, {}),
+        ("select names nothing the registry has", base() + ["--select", "nope,overlapprobe", "--select", "also-nope"], {}, {}),
+        ("exclude with reasons, one for a check that could not run",
+         base() + ["--exclude", "geometry.object-overlap=too slow today", "--exclude", " records.contested-fields = no reader = here "], {}, {}),
+        ("exclude without a reason", base() + ["--exclude", "geometry.object-overlap"], {}, {}),
+        ("exclude with no check", base() + ["--exclude", " =because"], {}, {}),
+        ("exclude names checks the registry does not define", base() + ["--exclude", "zz.check=why", "--exclude", "aa.check=why"], {}, {}),
+        ("opt in to the live check", base() + ["--opt-in", "runtime.state-switch-flip, "], {}, {}),
+        ("opt in to a check the registry does not have", base() + ["--opt-in", "it's.not-there"], {}, {}),
+        ("opt in to a check that is not opt-in", base() + ["--opt-in", "geometry.object-overlap"], {}, {}),
+        ("max candidates 0 holds every arm back", base("three") + ["--max-candidates", "0"], {}, {}),
+        ("max candidates 1 holds the later arms back", base("three") + ["--max-candidates", "1"], {}, {}),
+        ("max candidates -1 holds the last arm back", base("three") + ["--max-candidates", "-1"], {}, {}),
+        ("max candidates above the arms", base("three") + ["--max-candidates", "12"], {}, {}),
+        ("alt keeps the named arms", base("three") + ["--alt", "candidate-02.json", "--alt", "somewhere/else/Candidate-03.JSON"], {}, {}),
+        ("alt names files that are not there", base("three") + ["--alt", "z.json", "--alt", "candidate-02.json", "--alt", "a.json"], {}, {}),
+        ("a supplied arm: out of the view, missing, in the view",
+         base("sup") + here + ["--alt", "candidate-01.json", "--supplied", "Sup.esp, Extra.esp ,sub/Nowhere.esp,HcWbSel.esp,Over.esp,Data.esm=candidate-09-sup.json"], {}, {}),
+        ("a supplied arm with no instance", base("sup") + ["--alt", "candidate-01.json", "--supplied", "Sup.esp,HcWbSel.esp:candidate-09-sup.json"], {}, {}),
+        ("a supplied arm with no game",
+         base("sup") + ["--instance", INST, "--profile", "P", "--probe-cmd", f"overlapprobe={FAKE}", "--alt", "candidate-01.json", "--supplied", "Sup.esp=candidate-09-sup.json"], {}, {}),
+        ("supplied without a separator", base("sup") + ["--supplied", "Sup.esp"], {}, {}),
+        ("supplied with a file that is not json", base("sup") + ["--supplied", "Sup.esp=candidate-09-sup.txt"], {}, {}),
+        ("supplied with a candidate that is not there", base("sup") + ["--supplied", "Sup.esp=sub/candidate-77.JSON"], {}, {}),
+        ("supplied with no plugin", base("sup") + ["--supplied", "=candidate-09-sup.json"], {}, {}),
+        ("case m3a plan --review-arm is frozen and moves the baseline-only checks", base() + ["--review-arm", "candidate-01"], {}, {}),
+        ("case m3c a review arm the plan does not have is refused in one sentence", base("three") + ["--review-arm", "candidate-9"], {}, {}),
+        ("states named by hand", base() + ["--states", " a, b,,baseline "], {}, {}),
+        ("states named as nothing", base() + ["--states", ""], {}, {}),
+        ("depth deep", base() + ["--depth", "deep"], {}, {}),
+        ("no saved settings: the built-in depth", base(), {}, {"HOUSECARL_EVAL_SETTINGS": f"{BACK}\\settings\\none.json"}),
+        ("settings by flag: a time limit, the live check always", base() + ["--settings", f"{FWD}/settings/live.json"],
+         {"settings/live.json": with_values(evaluation={"liveSwitchCheck": "always", "budgetMinutes": 45},
+                                            liveSwitchCheck={"instance": "D:/lab", "shortcut": "D:/lab/go.lnk", "gameExe": "D:/g/Skyrim.exe", "devbenchPort": 8921, "minFreeGb": 8.5})}, {}),
+        ("settings: the live check asks, and nothing opted in", base(), ask, {"HOUSECARL_EVAL_SETTINGS": f"{BACK}\\settings\\ask.json"}),
+        ("settings: the live check asks, and the flag opts in", base() + live, ask, {"HOUSECARL_EVAL_SETTINGS": f"{BACK}\\settings\\ask.json"}),
+        ("settings: a file that is not valid is refused", base(), {"settings/bad.json": js({"schemaVersion": 1, "evaluation": {"depth": "shallow"}})},
+         {"HOUSECARL_EVAL_SETTINGS": f"{BACK}\\settings\\bad.json"}),
+        ("a time limit of 90 by flag is 90.0", base() + ["--budget-minutes", "90"], {}, {}),
+        ("a time limit of 12.5 and no reverse comparison", base() + ["--budget-minutes", "12.5", "--no-reverse"], {}, {}),
+        ("a time limit of 0", base() + ["--budget-minutes", "0"], {}, {}),
+        ("the primitive table by flag", base() + ["--primitive-solidity", f"{FWD}/table.json"], {}, {"HOUSECARL_PRIMITIVE_SOLIDITY": f"{BACK}\\table2.json"}),
+        ("the primitive table by its variable, over the harness config", base(), {"cfg.json": J({"primitiveSolidity": f"{BACK}\\table.json"})},
+         {"HOUSECARL_PRIMITIVE_SOLIDITY": f"  {BACK}\\table2.json ", "HOUSECARL_HARNESS_CONFIG": f"{BACK}\\cfg.json"}),
+        ("case 1730 the harness config's table is frozen with its sha256", base(), {"cfg.json": J({"primitiveSolidity": f" {BACK}\\table.json "})},
+         {"HOUSECARL_HARNESS_CONFIG": f" {BACK}\\cfg.json "}),
+        ("case 1731 a harness config that names no table: said in the plan", base(), {"cfg.json": js({"primitiveSolidity": "  ", "other": 1})},
+         {"HOUSECARL_HARNESS_CONFIG": f"{BACK}\\cfg.json"}),
+        ("case 1732 a named table that is absent refuses the plan", base() + ["--primitive-solidity", f"{BACK}\\no-table.json"], {}, {}),
+        ("a primitive table that is not JSON", base() + ["--primitive-solidity", f"{BACK}\\bad-scope.json"], {}, {}),
+        ("a primitive table that is not a list of measured entries", base() + ["--primitive-solidity", f"{BACK}\\t.json"], {"t.json": js([{"evidence": "x"}, {"evidence": "  "}])}, {}),
+        ("a primitive table that is an empty list", base(), {"t.json": b"[]"}, {"HOUSECARL_PRIMITIVE_SOLIDITY": f"{BACK}\\t.json"}),
+        ("a harness config that is not there", base(), {}, {"HOUSECARL_HARNESS_CONFIG": f"{BACK}\\no-cfg.json"}),
+        ("a harness config that is not JSON", base(), {"cfg.json": b"[1, 2"}, {"HOUSECARL_HARNESS_CONFIG": f"{BACK}\\cfg.json"}),
+        ("a harness config that is a list", base(), {"cfg.json": b"[1, 2]"}, {"HOUSECARL_HARNESS_CONFIG": f"{BACK}\\cfg.json"}),
+        ("a delta plugin with collision layers leaves the plan unscoped", base() + here, {"instance/mods/SelMod/HcWbSel.esp": plugin_bytes(CELL=1, COLL=2)}, {}),
+        ("a delta plugin with races keeps the state check on the whole order", base() + here, {"instance/mods/SelMod/HcWbSel.esp": plugin_bytes(CELL=1, RACE=2)}, {}),
+        ("a delta mod folder with a swap ini leaves the plan unscoped", base() + here,
+         {"instance/mods/SelMod/z/Later_SWAP.ini": b"x", "instance/mods/SelMod/Sub/first_swap.ini": b"x", "instance/mods/SelMod/meshes/zz_swap.ini": b"x"}, {}),
+        ("arms with their own mod lists: another copy first, the same bytes first, a folder that is not there", base("dup") + here, {}, {}),
+        ("arms with their own mod lists and no profile", base("dup") + ["--instance", INST, "--game", GAME, "--probe-cmd", f"overlapprobe={FAKE}"], {}, {}),
+        ("the candidate search is frozen with its budget", base("search"), {}, {}),
+        ("candidates that is not a folder", base("afile"), {}, {}),
+        ("candidates with no candidate file", base("empty"), {}, {}),
+        ("candidates with no baseline", base("nobase"), {}, {}),
+        ("candidates with two baselines", base("twobase"), {}, {}),
+        ("a scope that is not JSON", base(scope=f"{BACK}\\bad-scope.json"), {}, {}),
+        ("a registry that is not valid", base(registry=f"{BACK}\\reg\\invalid.json"),
+         {"reg/invalid.json": ("registry", [[["checks", 0, "family"], "set", "no-such-family"], [["registryVersion"], "set", "four"]])}, {}),
+        ("a registry that is not there", base(registry=f"{BACK}\\reg\\missing.json"), {}, {}),
+        ("a registry placeholder the controller cannot fill", base(registry=f"{BACK}\\reg\\placeholder.json"), {"reg/placeholder.json": ("registry-args", "{order} {no_such}")}, {}),
+        ("no overlapprobe build", base() + ["--instance", INST, "--profile", "P", "--game", GAME], {}, {}),
+        ("the scene preflight refuses an arm", base() + here, {one: js({"verdict": "refused", "code": "bad-view", "reason": "the view is wrong", "remedy": "fix the view"})}, {}),
+        ("the scene preflight writes no verdict", base() + ["--instance", INST, "--profile", "P", "--game", GAME, "--probe-cmd", f"overlapprobe={BACK}\\silent.cmd"], {}, {}),
+        ("the scene preflight writes a verdict that is not one", base() + here, {"cands/two/candidate-00-baseline.json.verdict": js({"verdict": "maybe"})}, {}),
+        ("a mesh gap on an arm no planned check captures scenes on", base() + here + ["--select", "geometry.route-cut"], {one: js(mesh)}, {}),
+        ("a mesh gap on an arm overlapprobe runs on", base() + here, {one: js(mesh)}, {}),
+        ("a mesh gap with the live check opted in and no folders named", base() + here + live, {one: js(mesh)}, {}),
+        ("a mesh gap with the live check opted in: the profile lacks a folder", base() + here + live, {one: js({**mesh, "addFolders": ["DisMod"]})}, {}),
+        ("a mesh gap with the live check opted in: the profile orders them the other way", base() + here + live,
+         {one: js({**mesh, "addFolders": ["OffMod"]}), "cands/two/candidate-01.json": js({"Plugins": ["HcWbWorld.esm", "HcWbSel.esp"], "Mods": ["WorldMod", "SelMod"]})}, {}),
+        ("a mesh gap with the live check opted in: the profile holds the order", base() + here + live, {one: js({**mesh, "addFolders": ["OffMod"]})}, {}),
+        ("an arm with no asset view, and one that states its own priority", base() + here,
+         {"cands/two/candidate-00-baseline.json.verdict": js({"verdict": "refused", "code": "no-explicit-mods", "reason": "the candidate names no Mods"}),
+          one: js({"verdict": "passed", "providers": None, "omittedProviderCount": 2, "reorderedProviders": ["SelMod", "WorldMod"]})}, {}),
+        ("the instance from the environment", base() + ["--probe-cmd", f"overlapprobe={FAKE}"], {}, {"HOUSECARL_MO2_INSTANCE": INST}),
+    ]
+
+
+def owner_plan_cases() -> list:
+    """Plans where the probes' own readers answer otherwise than evalrun.py's copies; Python's answer is recorded."""
+    R, S, H, OUT = f"{BACK}\\reg\\check-registry.json", f"{BACK}\\scope.json", f"{BACK}\\harness", f"{BACK}\\run"
+    common = ["--registry", R, "--scope", S, "--candidates", f"{BACK}\\cands\\sup", "--out", OUT, "--harness", H, "--game", f"{BACK}\\game",
+              "--instance", f"{BACK}\\instance", "--probe-cmd", f"overlapprobe={BACK}\\fake.cmd", "--alt", "candidate-01.json"]
+
+    def sup(plugin):
+        return {"cands/sup/candidate-09-sup.json": js({"Plugins": ["HcWbWorld.esm", plugin], "Mods": ["SelMod", "WorldMod"]})}
+    return [
+        ("owner: with no profile named, a mod folder outside the view is not a layer", common + ["--supplied", "Stray.esp=candidate-09-sup.json"], sup("Stray.esp"), {}),
+        ("owner: a profile with no modlist.txt has no mod folders outside the view",
+         common + ["--profile", "NoList", "--supplied", "Stray.esp=candidate-09-sup.json"], sup("Stray.esp"), {}),
+        ("owner: a modlist.txt with a byte-order mark keeps its first mod", common + ["--profile", "Bom", "--supplied", "Extra.esp=candidate-09-sup.json"], sup("Extra.esp"), {}),
+    ]
+
+
+def norm_plan(plan: dict, root: Path) -> str:
+    """The plan as two controllers must agree on it: what names the controller, a moment or this machine's folder is
+    replaced, key order kept."""
+    plan["planId"], plan["createdUtc"], plan["runner"] = "<id>", "<utc>", "<runner>"
+    if plan["scope"]["sha256"]:
+        plan["scope"]["sha256"] = "<sha>"   # the scope file names this folder
+    for pid, rec in plan["toolIdentity"]["programs"].items():
+        if pid == "controller":
+            plan["toolIdentity"]["programs"][pid] = "<controller>"
+        elif rec.get("digest"):
+            rec["digest"] = "<digest>"
+    census = plan["states"].get("fromCensus")
+    if census:
+        census["generator"], census["sha256"] = "<generator>", "<sha>"
+    pop = plan["population"]
+    if pop.get("scoped"):
+        pop["sha256"], pop["identity"] = "<sha>", pop["identity"][:-12] + "<sha12>"
+    for c in plan["checks"]:
+        if "population" in c["adapter"]:
+            c["adapter"]["population"] = c["adapter"]["population"][:-12] + "<sha12>"
+    return json.dumps(mask(plan, root), indent=1, ensure_ascii=False)
+
+
+def run_plan_case(world: Path, templates: dict, root: Path, name: str, argv: list, files: dict, env: dict) -> dict:
+    """One `evalrun.py plan` as a child process over a fresh copy of the world; what it printed and wrote."""
+    import subprocess
+    shutil.copytree(world, root)
+    reg = json.loads(REGISTRY.read_text(encoding="utf-8"))
+    recorded = {}
+    for rel, data in {**templates, **files}.items():
+        if isinstance(data, tuple) and data[0] == "registry":
+            data = js(apply(reg, data[1]), indent=1)
+        elif isinstance(data, tuple):
+            doc = copy.deepcopy(reg)
+            next(c for c in doc["checks"] if (c.get("adapter") or {}).get("args"))["adapter"]["args"] = data[1].split()
+            data = js(doc, indent=1)
+        if isinstance(data, str):
+            if rel not in templates:
+                recorded[rel] = {"template": str(data)}
+            data = materialise(data, root)
+        else:
+            recorded[rel] = {"b64": b64(data)}
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(data)
+    child = {k: v for k, v in os.environ.items() if not k.upper().startswith("HOUSECARL_")}
+    child.update({"HOUSECARL_RUNLOG_DIR": str(root / "runlog"), "HOUSECARL_EVAL_SETTINGS": str(root / "settings" / "standard.json"),
+                  "PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"})
+    child.update({k: unmask(v, root) for k, v in env.items()})
+    r = subprocess.run([sys.executable, str(HERE.parents[1] / "evalrun.py"), "plan", *[unmask(a, root) for a in argv]],
+                       capture_output=True, text=True, encoding="utf-8", env=child, cwd=str(root), timeout=120)
+    run = root / "run"
+    out = {"name": name, "argv": argv, "env": env, "files": recorded, "exit": r.returncode,
+           "stdout": re.sub(r"(?m)^plan [0-9a-f]{12}:", "plan <id>:", mask(r.stdout, root)), "stderr": mask(r.stderr, root),
+           "written": sorted(p.relative_to(run).as_posix() for p in run.rglob("*") if p.is_file() and "runlog" not in p.parts) if run.is_dir() else []}
+    if "Traceback (most recent call last)" in r.stderr:
+        raise SystemExit(f"plan case {name!r} crashed evalrun.py:\n{r.stderr}")
+    for marker in ("is not JSON (", "could not be read as JSON (", "No such file or directory: "):
+        if marker in out["stderr"]:
+            # what follows is the Python runtime's own wording, which another controller cannot print
+            out["stderrHead"] = out["stderr"] = out["stderr"][:out["stderr"].index(marker) + len(marker)]
+    if (run / "plan.json").is_file():
+        # the plan's text is long and mostly the registry, so it is kept gzipped (the same bytes on every run)
+        out["planGz"] = b64(gzip.compress(norm_plan(json.loads((run / "plan.json").read_text(encoding="utf-8")), root).encode("utf-8"), mtime=0))
+        ledger = json.loads((run / "ledger.json").read_text(encoding="utf-8"))
+        ledger["planId"] = "<id>"
+        out["ledger"] = json.dumps(ledger, indent=1, ensure_ascii=False)
+        out["population"] = None
+        if (run / "population.json").is_file():
+            out["population"] = json.dumps(mask(json.loads((run / "population.json").read_text(encoding="utf-8")), root), indent=1, sort_keys=True) + "\n"
+        table = run / "inputs" / "primitive-solidity.json"
+        out["table"] = hashlib.sha256(table.read_bytes()).hexdigest() if table.is_file() else None
+    return out
+
+
+def plan_command_cases(tmp: Path) -> dict:
+    world = tmp / "world"
+    tree = plan_world(world)
+    templates = {rel: Template(text) for rel, text in tree["templates"].items()}
+    cases = []
+
+    def add(rows, into):
+        for name, argv, files, env in rows:
+            into.append(run_plan_case(world, templates, tmp / f"c{len(cases):03d}-{len(into):03d}", name, argv, files, env))
+    add(plan_case_table(), cases)
+    # a population handed over from another plan: the file is the second case's own
+    given = json.loads(next(c for c in cases if c["name"].startswith("an instance, a profile and a game"))["population"])
+    base = ["--registry", f"{BACK}\\reg\\check-registry.json", "--scope", f"{BACK}\\scope.json", "--candidates", f"{BACK}\\cands\\two", "--out", f"{BACK}\\run",
+            "--harness", f"{BACK}\\harness"]
+    here = base + ["--instance", f"{BACK}\\instance", "--profile", "P", "--game", f"{BACK}\\game", "--probe-cmd", f"overlapprobe={BACK}\\fake.cmd",
+                   "--population-from", f"{BACK}\\given.json"]
+
+    def changed(fn) -> Template:
+        doc = copy.deepcopy(given)
+        fn(doc)
+        return Template(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+
+    def more(d):
+        d.update(targets=["Other.esp"], plugins=d["plugins"] + [{"name": "More.esp", "path": "Q:\\More.esp", "sha256": "ab" * 32}], mods=d["mods"] + [{"name": "More", "path": "Q:\\More"}])
+    add([
+        ("a population from another plan is used byte for byte", here, {"given.json": changed(more)}, {}),
+        ("a population file that is not there", here, {}, {}),
+        ("a population handed to a plan that cannot state its own", base + ["--population-from", f"{BACK}\\given.json"], {"given.json": changed(lambda d: None)}, {}),
+        ("a population file that is not JSON", here, {"given.json": b"{ nope"}, {}),
+        ("a population file of another schema", here, {"given.json": changed(lambda d: d.update(schema=2))}, {}),
+        ("a population file whose schema is 1.0 and whose folder is spelled in capitals", here,
+         {"given.json": changed(lambda d: d.update(schema=1.0, mods=[{"name": "SELMOD"}]))}, {}),
+        ("a population file that lacks a plugin", here, {"given.json": changed(lambda d: d.update(plugins=[]))}, {}),
+        ("a population file with another copy", here, {"given.json": changed(lambda d: d["plugins"][0].update(sha256="ab" * 32))}, {}),
+        ("a population file that lacks a mod folder", here, {"given.json": changed(lambda d: d.update(mods=[]))}, {}),
+    ], cases)
+    owner = []
+    add(owner_plan_cases(), owner)
+    return {"tree": {"files": tree["files"], "dirs": tree["dirs"]}, "templates": tree["templates"], "cases": cases, "owner": owner}
+
+
 # ------------------------------------------------------------------ writing
 
 def main() -> int:
@@ -860,10 +1314,14 @@ def write_answers() -> int:
             "populations": population_cases(),
             "metaIni": meta_cases(tmp),
         }
+        plan = {"python": platform.python_version(), "placeholders": {"backslash": BACK, "forward": FWD},
+                "units": plan_unit_cases(tmp), "command": plan_command_cases(tmp)}
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     OUT.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
+    OUT_PLAN.write_text(json.dumps(plan, indent=1) + "\n", encoding="utf-8", newline="\n")
+    print(f"wrote {OUT_PLAN} ({OUT_PLAN.stat().st_size} bytes)")
     return 0
 
 

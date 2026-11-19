@@ -16,8 +16,10 @@
     <Compile Include="..\_shared\SyntheticOrder.cs" Link="SyntheticOrder.cs" />
     <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
     <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
+    <Compile Include="..\_shared\PopulationRules.cs" Link="PopulationRules.cs" />
     <EmbeddedResource Include="known-answers\foundations.json" LogicalName="foundations.json" />
     <EmbeddedResource Include="known-answers\pipeline.json" LogicalName="pipeline.json" />
     <EmbeddedResource Include="known-answers\plan-modules.json" LogicalName="plan-modules.json" />
+    <EmbeddedResource Include="known-answers\plan-command.json" LogicalName="plan-command.json" />
   </ItemGroup>
 </Project>

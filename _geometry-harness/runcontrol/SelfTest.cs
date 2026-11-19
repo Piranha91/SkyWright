@@ -147,6 +147,7 @@ public static partial class SelfTest
         StageCases();
         BlackBoxCases();
         SelfTestPlanModules.Run(Case, Skip);
+        PlanCases();
         LiveCases();
         PipelineLiveCases();
 
