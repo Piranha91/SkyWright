@@ -131,6 +131,7 @@ internal sealed class StateTools
                  "world (the World tab of an opened load order: `search` filters its cells; `cell` opens a cell; `ref` opens the cell a record is in and lands on it; read-only). " +
                  "layer (`layer`: one of the 3D view's layers, navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics or marks; `show` true or false: as the toolbar's button does; a layer this scene cannot draw is refused with the reason, and navmesh in a cell opened without it opens the cell again with it). " +
                  "frame_log (`path`: write one CSV row per frame of the 3D view to that file; with no path, stop the log and say its summary: frames, median, 1% low and worst frame time). " +
+                 "map (the World tab's map: `worldspace` by EditorID or FormKey, `map_centre` [x, y] in Skyrim units, `pixels_per_cell` the zoom in screen pixels across one cell, `textured` the Textured checkbox; read the tiles' progress with workbench_state world). " +
                  "open (`path`: open a folder or file in the window, as its Open control does; what it is is detected from the names on disk, and anything the window does not open is refused in one sentence). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
@@ -177,11 +178,16 @@ internal sealed class StateTools
         [Description("results: the key of the row to open, as workbench_state's results list it (pair|f3, pair|e12, pair|o7).")] string? row = null,
         [Description("world: the FormKey of the cell to open.")] string? cell = null,
         [Description("layer: the layer to switch, by its name (navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks).")] string? layer = null,
-        [Description("layer: true shows the layer, false hides it.")] bool? show = null)
+        [Description("layer: true shows the layer, false hides it.")] bool? show = null,
+        [Description("map: the worldspace to show, by EditorID or FormKey.")] string? worldspace = null,
+        [Description("map: the point to centre on, [x, y] in Skyrim units (+X east, +Y north).")] double[]? map_centre = null,
+        [Description("map: the zoom, in screen pixels across one cell (textured tiles show from 128).")] double? pixels_per_cell = null,
+        [Description("map: true draws textured tiles when zoomed in, false the shaded shapes.")] bool? textured = null)
         => hub.OnUi(async () =>
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
             if (v is "results" or "world") return OpenInputsTools.Act(v, pair, groups, categories, setup, search, row, cell, @ref);
+            if (v == "map") return OpenInputsTools.Map(worldspace, map_centre, pixels_per_cell, textured);
             if (hub.Surface.Scene is { ReadOnly: true } && EditVerbs.Contains(v)) return Refuse(WorkbenchHost.ReadOnlyWhy);
             if (v == "layer") return LayerOnUi(layer, show);
             if (v == "frame_log")

@@ -30,4 +30,17 @@ internal static class OpenInputsTools
         }
         catch (InvalidOperationException ex) { return StateTools.Refuse(ex.Message); }
     }
+
+    /// <summary>The map verb: set the World tab map's worldspace, centre, zoom and Textured checkbox.</summary>
+    internal static CallToolResult Map(string? worldspace, double[]? centre, double? pixelsPerCell, bool? textured)
+    {
+        try
+        {
+            if (worldspace is null && centre is null && pixelsPerCell is null && textured is null)
+                return StateTools.Refuse("map needs worldspace, map_centre, pixels_per_cell or textured.");
+            var said = WorldView.SetMapView(worldspace, centre, pixelsPerCell, textured);
+            return Answer(new { said, world = WorldView.State(null, 0, 0) });
+        }
+        catch (InvalidOperationException ex) { return StateTools.Refuse(ex.Message); }
+    }
 }
