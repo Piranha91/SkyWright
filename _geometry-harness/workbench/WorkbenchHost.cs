@@ -44,6 +44,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     int _frame;
 
     internal static readonly List<string> Log = new();
+    /// <summary>Why a read-only scene takes no edits.</summary>
+    internal const string ReadOnlyWhy = "this scene is read-only (it was opened from the Results or World tab): nothing is moved or written here.";
+    /// <summary>This scene takes no edits: no handles, no staging, no writes.</summary>
+    internal bool ReadOnly { get; } = Shell.ReadOnlyScene;
+    bool IWorkbenchScene.ReadOnly => ReadOnly;
     /// <summary>The decided rows this scene draws, compared when it arrives so the window's list needs no client; a failure is said.</summary>
     static async Task CompareDecidedAsync()
     {
@@ -63,7 +68,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _fov = cam.FovDeg;
         _camera.FieldOfView = _fov;
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
-        _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate(); SaveSession(); };
+        _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate(); if (!ReadOnly) SaveSession(); };
         _viewState = new ViewState(_session, () => DrawnRefs(), _gizmo);
         _viewState.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate(); };
         _tints.State = _viewState;
@@ -75,6 +80,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye))
         {
             Holding = () => _viewState.ShowingOriginal,
+            Locked = () => ReadOnly ? ReadOnlyWhy : null,
             Refused = s => { Say(s); Shell.SetBanner(s); },
         };
     }
@@ -217,7 +223,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         // a fixed height, so the 3D view keeps its size whatever the edits list, the status line or the buttons hold
         var bar = new DockPanel { LastChildFill = true, Height = 240 };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
-        buttons.Children.Add(marksBtn); buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write);
+        buttons.Children.Add(marksBtn);
+        if (!ReadOnly) { buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write); }
         DockPanel.SetDock(buttons, Dock.Right);
         var tools = ToolsRow();
         DockPanel.SetDock(tools, Dock.Bottom);
@@ -246,8 +253,12 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             _window.Width = Math.Max(w, Shell.MinWidth); _window.Height = Math.Max(h, Shell.MinHeight);
         }
         Shell.Current = this;
-        try { RestoreSession(); } catch (InvalidOperationException ex) { Say(ex.Message); Shell.SetBanner(ex.Message); }
-        _ = CompareDecidedAsync();
+        SceneDirector.SceneShown();
+        if (!ReadOnly)
+        {
+            try { RestoreSession(); } catch (InvalidOperationException ex) { Say(ex.Message); Shell.SetBanner(ex.Message); }
+            _ = CompareDecidedAsync();
+        }
         Shell.Mount(_view, bar);
         Shell.FillTree(BuildTree());
         if (Shell.SwitchClock is { } sw)
@@ -268,6 +279,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                     + $"swap interval {(_vsync ? 1 : 0)} set: {_view.SetSwapInterval(_vsync ? 1 : 0)}");
             if (_freeLoop) _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background);
             if (Shell.PendingLand is { } land) { Shell.PendingLand = null; _landOnFirstFrame = land; }
+            else if (SceneDirector.Showing is not null) FrameScene();   // a cell asked for with no reference to land on
         }
         SyncCamera();
         UpdateStatus();
@@ -282,6 +294,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         System.Windows.Media.CompositionTarget.Rendering -= tick;
         if (_writer is not null) _writer.DisposeAsync().AsTask().GetAwaiter().GetResult();
         Shell.Current = null;
+        SceneDirector.SceneClosed();
         Shell.Unmount();
         _view.Dispose();
         // Hand the context back to its own (hidden) window: viewprobe's teardown clears it through GLFW, which fails
@@ -359,7 +372,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 int vk = (int)wParam.ToInt64();
                 if (_viewState.OnKey(vk, down: true, repeat: (y & 0x4000) != 0)) break;
                 bool ctrl = (GetKeyState(0x11) & 0x8000) != 0, shift = (GetKeyState(0x10) & 0x8000) != 0;
-                if (ctrl && vk == 'Z') { _session.Undo(); AfterStage(); break; }
+                if (ctrl && vk == 'Z') { if (!ReadOnly) { _session.Undo(); AfterStage(); } break; }
                 float step = shift ? 300f : 60f;
                 var right = Vector3.Normalize(Vector3.Cross(Forward(), Vector3.UnitZ));
                 if (vk == 'W') _eye += Forward() * step;
@@ -392,7 +405,12 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _dirty = false;
         var t0 = Clock.Elapsed.TotalMilliseconds;
         (_fbW, _fbH) = _view.ClientSize();
-        if (_landOnFirstFrame is { } land) { _landOnFirstFrame = null; Land(FormKey.Factory(land)); }
+        if (_landOnFirstFrame is { } land)
+        {
+            _landOnFirstFrame = null;
+            // a reference this scene does not draw has nothing to land on: say so, and show the cell instead of the placeholder pose
+            if (!Land(FormKey.Factory(land)) && !_session.IsDrawn(FormKey.Factory(land)) && SceneDirector.Showing is not null) FrameScene();
+        }
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.Viewport(0, 0, W, H);
         _renderer.Render(_camera, W, H);
@@ -412,6 +430,35 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     /// <summary>The cell this scene was built for, as the bundle names cells (a FormKey string).</summary>
     internal string? SceneCell => _opt.CellKey?.ToString();
+    internal string SceneLabel => _opt.CellLabel;
+
+    /// <summary>A three-quarter view of the scene's own cell, for a scene opened with no reference to land on: the camera
+    /// looks at the middle of the cell's drawn references from outside their span (the outer tenth on each axis is left
+    /// out, so one far object does not set the frame).</summary>
+    internal void FrameScene()
+    {
+        var boxed = DrawnAll().Where(r => r.Min.X <= r.Max.X).ToList();
+        var own = boxed.Where(r => CellOf(r.Ref.RefKey) is not { } c || string.Equals(c, SceneCell, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (own.Count == 0) own = boxed;
+        if (own.Count == 0) return;
+        static (float Lo, float Hi) Span(IEnumerable<float> v) { var s = v.OrderBy(x => x).ToList(); return (s[s.Count / 10], s[Math.Min(s.Count - 1, s.Count * 9 / 10)]); }
+        var (x0, x1) = Span(own.Select(r => (r.Min.X + r.Max.X) * 0.5f));
+        var (y0, y1) = Span(own.Select(r => (r.Min.Y + r.Max.Y) * 0.5f));
+        var (z0, z1) = Span(own.Select(r => (r.Min.Z + r.Max.Z) * 0.5f));
+        var centre = new Vector3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, (z0 + z1) * 0.5f);
+        float radius = MathF.Max(MathF.Max(x1 - x0, y1 - y0) * 0.5f, 400f);
+        if (_opt.Interior)
+        {
+            // inside the rooms, not outside their shell: at one end of the span, eye height above the middle, looking down its long side
+            bool alongX = x1 - x0 >= y1 - y0;
+            _yaw = alongX ? 90f : 0f; _pitch = 12f;
+            _eye = new Vector3(alongX ? x0 : centre.X, alongX ? centre.Y : y0, centre.Z + 120f);
+        }
+        else { _yaw = 20f; _pitch = 40f; _eye = centre - Forward() * (radius * 2.2f); }
+        SyncCamera();
+        Shell.LastLanding = FormattableString.Invariant($"cell {SceneCell}: {(_opt.Interior ? "a view from inside" : "an overview")} of {own.Count} drawn reference(s), eye {_eye.X:0},{_eye.Y:0},{_eye.Z:0}");
+        Say("framing: " + Shell.LastLanding);
+    }
 
     internal IReadOnlyList<TreeNode> BuildTree()
     {
@@ -735,6 +782,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _viewState.Changed += _ => { _restore.Content = _viewState.Label.Length > 0 ? _viewState.Label : "Restore visibility"; _restore.Visibility = _viewState.Active ? Visibility.Visible : Visibility.Hidden; };
         row.Children.Add(_restore);
 
+        if (ReadOnly)
+        {
+            row.Children.Add(new TextBlock { Text = "  Read-only scene: view tools only.", VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim) });
+            return row;
+        }
         var offset = new TextBox { Width = 90, Margin = new Thickness(4), ToolTip = "a typed move, such as +120 x, -30 z or 15°" };
         row.Children.Add(offset);
         row.Children.Add(B("Move", "stage the typed move on the selected object", () => Do(() =>

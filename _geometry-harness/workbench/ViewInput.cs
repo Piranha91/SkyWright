@@ -28,6 +28,8 @@ internal sealed class ViewInput
     /// <summary>True while the view shows originals: a drag is refused then, and says so.</summary>
     internal Func<bool> Holding = () => false;
     internal Action<string>? Refused;
+    /// <summary>Why this scene takes no edits, or null when it does.</summary>
+    internal Func<string?> Locked = () => null;
 
     internal ViewInput(EditSession session, Gizmo gizmo, Func<Vector3, Vector2?> project, Func<Vector2, (Vector3 O, Vector3 D)> ray,
                        Func<Vector2, PickHit?> pick, Action afterSelect)
@@ -37,6 +39,7 @@ internal sealed class ViewInput
     {
         _press = px; _moved = false;
         _dragHandle = _session.Selected is not null ? _gizmo.HitTest(px, _project) : Handle.None;
+        if (_dragHandle != Handle.None && Locked() is { } why) { Refused?.Invoke(why); _dragHandle = Handle.None; }
         if (_dragHandle != Handle.None && Holding()) { Refused?.Invoke("release Space (or the Original button) to edit; the view is showing originals"); _dragHandle = Handle.None; }
         if (_dragHandle != Handle.None) _dragStart = _session.Current(_session.Selected!.Value);
         _gizmo.Hot = _dragHandle;

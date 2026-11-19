@@ -92,6 +92,8 @@ internal interface IWorkbenchScene
     TrialLane? Trials => null;
     /// <summary>Item 8: the boxes of a reference and the open row's other reference, Skyrim space; null when not drawn.</summary>
     (HousecarlCore.Aabb Subject, HousecarlCore.Aabb Other)? PairBoxes(FormKey key) => null;
+    /// <summary>The scene takes no edits (opened from the Results or World tab).</summary>
+    bool ReadOnly => false;
     /// <summary>The camera as [x, y, z, yaw, pitch]; null where there is none.</summary>
     float[]? Camera { get => null; set { } }
 }
@@ -139,7 +141,7 @@ internal sealed class LiveSurface : IWorkbenchSurface
     {
         Shell.OpenRow(row);
         return Shell.SwitchClock is not null
-            ? $"conflict {row.Rank} is in cell {row.Row.Cell}, which is not loaded: the window is rebuilding the scene for it (it does not answer until the scene is built); read the state again in a minute."
+            ? $"conflict {row.Rank} is in cell {row.Row.Cell}, which is not loaded: the window is rebuilding the scene for it; read the state again in a minute."
             : $"opened conflict {row.Rank} ({row.Row.Kind}, {row.Row.A} / {row.Row.B}): " + (Shell.LastLanding ?? Shell.BannerText);
     }
 }

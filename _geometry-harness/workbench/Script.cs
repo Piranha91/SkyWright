@@ -48,6 +48,9 @@ namespace Workbench;
 /// expect inview FORMKEY          pass or fail: the reference's box centre is drawn inside the view and the screen-centre ray crosses it
 /// waitfile PATH [MAXSEC]         wait (drawing nothing) until PATH exists, or MAXSEC seconds (default 900): an MCP client drives the window meanwhile
 /// idlecpu SECONDS                the process's CPU over SECONDS with nothing happening, by cycle counts, as a share of one busy core
+/// cell CELL [FORMKEY]            ask for a cell (a FormKey or EditorID) on this scene's load order, read-only, as the World tab does; land on FORMKEY
+/// cellon PROFILE CELL [FORMKEY]  the same on another profile of this instance: the scene is rebuilt on that load order
+/// expect cell CELL               pass or fail: the scene shown is that cell (its FormKey, or its label)
 /// quit                           close the window
 /// </code>
 /// Every result line is printed with the prefix <c>[wb]</c>.</summary>
@@ -281,6 +284,18 @@ internal sealed class Script
             case "marks": _h.Marks.Enabled = a[1] == "on"; _h.Invalidate(); _wait = 2; break;
             case "idlecpu": IdleCpu(F(a[1])); break;
             case "waitfile": WaitFile(a[1], a.Length > 2 ? F(a[2]) : 900f); break;
+            case "cell":
+            {
+                var order = SceneDirector.Order ?? throw new InvalidOperationException("this scene's load order was not named in full (instance, profile, game), so another cell cannot be asked for.");
+                WorkbenchHost.Say(SceneDirector.Request(new SceneRequest(order, a[1], a.Length > 2 ? a[2] : null, "the script's cell step")));
+                _wait = 3; break;
+            }
+            case "cellon":
+            {
+                var order = SceneDirector.Order ?? throw new InvalidOperationException("this scene's load order was not named in full (instance, profile, game), so another profile cannot be asked for.");
+                WorkbenchHost.Say(SceneDirector.Request(new SceneRequest(order with { Profile = a[1], OrderFile = null, Label = $"profile '{a[1]}'" }, a[2], a.Length > 3 ? a[3] : null, "the script's cellon step")));
+                _wait = 3; break;
+            }
             case "quit": _h.MainWindow.Close(); break;
             default: WorkbenchHost.Say($"unknown step '{a[0]}'"); break;
         }
@@ -346,6 +361,10 @@ internal sealed class Script
                 var (inView, account) = _h.InView(FormKey.Factory(a[2]));
                 ok = inView; got = account; break;
             }
+            case "cell":
+                got = $"{_h.SceneCell} ({_h.SceneLabel})";
+                ok = string.Equals(_h.SceneCell, a[2], StringComparison.OrdinalIgnoreCase) || string.Equals(_h.SceneLabel, a[2], StringComparison.OrdinalIgnoreCase);
+                break;
             case "partner":
                 got = _h.Marks.Partner?.Ref.RefKey.ToString() ?? "none"; ok = string.Equals(got, a[2], StringComparison.OrdinalIgnoreCase);
                 if (_h.PartnerNote is { } pn) got += "; " + pn;

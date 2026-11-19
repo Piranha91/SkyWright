@@ -25,8 +25,10 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
+    /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
+    static readonly string[] EditVerbs = { "stage", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
     internal static CallToolResult Refuse(string sentence) => new() { IsError = true, Content = [new TextContentBlock { Text = sentence }] };
@@ -48,6 +50,7 @@ internal sealed class StateTools
                      "scenes (the Conflicts rows by cell: inside a cell, rows naming a common reference are one cluster, and rows with equal values of the reporting skill's group key are one group; with each cell's clickable Findings rows), " +
                      "context (the selected reference: doors within 256 units, each 'touches it' or 'near only', with the far side; what names it; its enable parent; what rests on it and what physics does with it at load; the navmesh under its bounds; what stays behind a move; 'reading…' while the read runs), " +
                      "placements (find_clear's candidate positions: each one's move, drop, what it touches there, its word from the open row's re-check, what was and was not checked; wait_seconds waits for them). " +
+                     "scene (what the 3D view shows or is loading: the cell, the load order it is built on, read-only or not, and the last build's time and the longest the window waited during it). " +
                      "Default: selection, pending, recheck.")]
             string[]? project = null,
         [Description("conflicts: how many rows to list (default 20).")] int limit = 20,
@@ -91,6 +94,7 @@ internal sealed class StateTools
             if (parts.Contains("scenes")) d["scenes"] = ScenesJson(hub.Surface, hub.Standings, include_decided, include_findings_only);
             if (parts.Contains("context")) d["context"] = ContextJson(hub.Surface);
             if (parts.Contains("placements")) d["placements"] = PlacementsJson(hub.Surface);
+            if (parts.Contains("scene")) d["scene"] = SceneDirector.State();
             return Answer(d);
         });
     }
@@ -116,6 +120,7 @@ internal sealed class StateTools
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
                  "write goes under), set_work_folder (`path`, where a run keeps its files), run (the ticked probes, only `checks`, or [\"all\"]: every probe that can run here), " +
                  "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
+                 "open (`path`: open a folder or file in the window, as its Open control does; what it is is detected from the names on disk, and anything the window does not open is refused in one sentence). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
         StateHub hub,
@@ -137,7 +142,7 @@ internal sealed class StateTools
         [Description("select_mods: mod folder names, as the launcher lists them.")] string[]? mods = null,
         [Description("select_mods: set (default), add or remove.")] string? how = null,
         [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
-        [Description("set_output or set_work_folder: the folder, by its full path.")] string? path = null,
+        [Description("set_output or set_work_folder: the folder, by its full path. open: the folder or file to open. capture_window: the .png to write.")] string? path = null,
         [Description("show_tab: the tab to bring to the front, by its header (Start, Conflicts, Findings or Records).")] string? tab = null,
         [Description("search_mods: the text the Start tab's mod list is filtered by (any case; empty shows every mod).")] string? search = null,
         [Description("stage: a typed offset, such as \"+120 x\", \"-30 z\" or \"15°\" (a turn about the vertical).")] string? offset = null,
@@ -157,6 +162,7 @@ internal sealed class StateTools
         => hub.OnUi(async () =>
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
+            if (hub.Surface.Scene is { ReadOnly: true } && EditVerbs.Contains(v)) return Refuse(WorkbenchHost.ReadOnlyWhy);
             if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path, tab, search);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
             if (v == "select" && scene is { } sn) return SelectScene(hub, sn);
@@ -544,7 +550,7 @@ internal sealed class StateTools
         return Answer(new { said = $"{view.Header}; {said}", state = Project(s, DefaultParts, 20, 0, null) });
     }
 
-    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run", "abort", "capture_window", "show_tab", "search_mods" };
+    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run", "abort", "capture_window", "show_tab", "search_mods", "open" };
     static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
 
     /// <summary>Save the whole window as a PNG at <paramref name="path"/> (an absolute .png path), as the script's capturewindow does.</summary>
@@ -575,6 +581,7 @@ internal sealed class StateTools
                 "capture_window" => CaptureWindow(path),
                 "show_tab" => Shell.ShowTab(tab),
                 "search_mods" => LauncherView.Search(search),
+                "open" => OpenBar.Open(path),
                 _ => checks is [var only] && string.Equals(only, "all", StringComparison.OrdinalIgnoreCase) ? l.RunAll()
                      : checks is { Length: > 0 } ? l.Run(checks) : l.Run(),
             };

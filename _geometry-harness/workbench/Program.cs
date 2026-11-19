@@ -45,6 +45,7 @@ internal static class Program
             else { if (args[i] == "--out" && i + 1 < args.Length) outDir = args[i + 1]; rest.Add(args[i]); }
         }
         if (dir is null) return args;
+        Shell.BundleOrder = LoadOrderSpec.FromArgs(rest, "the bundle's profile");
         arm ??= BundleConflicts.DefaultArm(dir);               // the plan's review arm in manual mode, else baseline
         var work = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : outDir ?? Path.Combine(Path.GetTempPath(), "workbench");
         Directory.CreateDirectory(work);
@@ -108,87 +109,119 @@ internal static class Program
         return File.Exists(beside) ? beside : Path.Combine(Path.GetDirectoryName(exe)!, "..", "..", "..", "..", "..", "generated", "corpus.json");
     }
 
+    /// <summary>Open a bundle folder in the window that is already shown (the Open control): its rows fill the tabs and,
+    /// when a row names a placed reference, its first cell is asked for as a scene. Needs the launcher's profile, or
+    /// WB_INSTANCE, WB_PROFILE and WB_GAME_DATA, to know the load order the bundle was measured on.</summary>
+    internal static string OpenBundleInWindow(string dir)
+    {
+        var l = Shell.Launcher;
+        string? inst = l.Instance ?? Env("WB_INSTANCE"), prof = l.Profile ?? Env("WB_PROFILE");
+        string? game = l.Game ?? (Env("WB_GAME_DATA") is { } gd ? Path.GetDirectoryName(Path.GetFullPath(gd.TrimEnd('\\', '/'))) : null);
+        if (inst is null || prof is null || game is null)
+            throw new InvalidOperationException("a bundle's rows are shown on the load order they were measured on: open that profile on the Start tab first, then open the bundle.");
+        if (Shell.Current is { } h && h.Session.Pending.Count > 0)
+            throw new InvalidOperationException($"opening another bundle would drop {h.Session.Pending.Count} staged edit(s); write or undo them first.");
+        var opened = OpenBundle(new[] { "--bundle", dir, "--instance", inst, "--profile", prof, "--game", game });
+        Shell.ShowTab("Conflicts");
+        if (opened is null) return Shell.BannerText;
+        var order = LoadOrderSpec.FromArgs(opened, $"profile '{prof}'")!;
+        var first = Shell.WorklistCells.FirstOrDefault() ?? throw new InvalidOperationException("the bundle names no cell to open.");
+        return SceneDirector.Request(new SceneRequest(order, first, Shell.PendingLand, "the bundle's first row", ReadOnly: false));
+    }
+    static string? Env(string n) => Environment.GetEnvironmentVariable(n) is { Length: > 0 } v ? v : null;
+
     [STAThread]
     static int Main(string[] args)
     {
         InteractiveViewer.Host = WorkbenchHost.Run;
-        // no bundle and no scene asked for: the launcher (manual mode) first, in the same window and state server
+        RenderStages.Tick = SceneDirector.Tick;                // the window is answered while a scene builds
+        // no bundle and no scene asked for: the window first (the launcher, or the world of the profile MO2 started the workbench in)
         bool manual = !args.Contains("--bundle") && !args.Contains("--instance");
-        int code = 0; bool restored = false;
-        // manual mode: the launcher, a run, its scene; a scene the viewer could not build (it returns with the window still
-        // open) is said on the banner and the window goes back to the launcher, never closing the workbench
-        while (true)
+        int code = 0;
+        string[]? first = null;
+        if (!manual)
         {
-        if (manual)
-        {
-            var window = Shell.EnsureWindow("workbench — start");
-            Shell.Launcher.RunBlocker = () => Shell.Current is not null ? "a scene is open in this window; restart the workbench to run another selection." : null;
-            window.Show();
-            // free mode remembers the instance, profile and Output Folder between sessions (workbench-settings.json beside the exe)
-            if (!restored)
-                window.Dispatcher.BeginInvoke(async () =>
-                {
-                    try { LauncherView.Say(await Shell.Launcher.RestoreAsync()); }
-                    catch (Exception ex) { LauncherView.Say("the last session's settings could not be restored: " + ex.GetBaseException().Message); }
-                    LauncherView.Fill();
-                });
-            restored = true;
-            while (true)
+            try { first = OpenBundle(args); }
+            catch (InvalidOperationException ex) { Console.Error.WriteLine("workbench: " + ex.Message); return 2; }
+            if (first is null)
             {
-                string? ready = null;
-                var frame = new System.Windows.Threading.DispatcherFrame();
-                Action<string> onReady = b => window.Dispatcher.BeginInvoke(() => { ready = b; frame.Continue = false; });
-                EventHandler onClosed = (_, _) => frame.Continue = false;
-                Shell.Launcher.BundleReady += onReady; window.Closed += onClosed;
-                if (!Shell.Closed) System.Windows.Threading.Dispatcher.PushFrame(frame);
-                Shell.Launcher.BundleReady -= onReady; window.Closed -= onClosed;
-                if (ready is null) { Shell.StopServer(); return 0; }
-                var l = Shell.Launcher;
-                // the session's writes go under the launcher's Output Folder; its re-checks and files under the Work Folder
-                WorkbenchHost.ManualTarget = new WriteTarget(l.Instance!, l.Profile!, Path.Combine(l.Game!, "Data"), l.Output);
-                Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(l.RunFolder!, "workbench"));
-                string[]? opened;
-                try { opened = OpenBundle(new[] { "--bundle", ready, "--instance", l.Instance!, "--profile", l.Profile!, "--game", l.Game! }); }
-                catch (InvalidOperationException ex) { Shell.SetBanner("the run's bundle could not be opened: " + ex.Message); continue; }
-                if (opened is null) continue;                 // listed with no scene; another run can open the next
-                args = opened;
-                break;
+                // a bundle with nothing to open: shown in the window with no scene; the Open control and the tabs still work
+                var w0 = Shell.EnsureWindow("workbench — results");
+                w0.Show();
+                Shell.FillConflicts(); Shell.FillFindings();
             }
         }
         else
         {
-            string[]? opened;
-            try { opened = OpenBundle(args); }
-            catch (InvalidOperationException ex) { Console.Error.WriteLine("workbench: " + ex.Message); return 2; }
-            if (opened is null)
+            var window = Shell.EnsureWindow("workbench — start");
+            window.Show();
+            // free mode remembers the instance, profile and Output Folder between sessions (workbench-settings.json beside the exe)
+            window.Dispatcher.BeginInvoke(async () =>
             {
-                // a bundle with nothing to open: shown in the window with no scene until it is closed
-                var window = Shell.EnsureWindow("workbench — results");
-                var frame = new System.Windows.Threading.DispatcherFrame();
-                window.Closed += (_, _) => frame.Continue = false;
-                window.Show();
-                Shell.FillConflicts(); Shell.FillFindings();
-                System.Windows.Threading.Dispatcher.PushFrame(frame);
-                Shell.StopServer();
-                return 0;
-            }
-            args = opened;
+                try { LauncherView.Say(await Shell.Launcher.RestoreAsync()); }
+                catch (Exception ex) { LauncherView.Say("the last session's settings could not be restored: " + ex.GetBaseException().Message); }
+                LauncherView.Fill();
+                OpenBar.OpenAtStart();                           // the Data folder MO2 started the workbench in, when it did
+            });
         }
-        var a = args.Contains("--interactive") ? args : args.Append("--interactive").ToArray();
-        var entry = typeof(InteractiveViewer).Assembly.EntryPoint
-            ?? throw new InvalidOperationException("viewprobe has no entry point");
-        var r = entry.Invoke(null, new object[] { a });
-        code = r is int c ? c : 0;
-        if (manual && !Shell.Closed)
+        Shell.Launcher.RunBlocker = () => Shell.Current is not null || SceneDirector.Running
+            ? "a scene is open in this window; restart the workbench to run another selection." : null;
+        string? ready = null;
+        Shell.Launcher.BundleReady += b => Shell.Window?.Dispatcher.BeginInvoke(() => { ready = b; SceneDirector.Wake(); });
+        // One loop for the life of the window: wait for something to show (a finished launcher run, a row or a cell asked
+        // for), run viewprobe on it, and come back when its scene closes. A scene viewprobe could not build is said on the
+        // banner and the window stays.
+        while (true)
         {
-            Shell.SetBanner($"the viewer stopped (exit {code}) without a scene to show, so the window is back on the Start tab; its own sentence is in the workbench log.");
+            string[] run; LoadOrderSpec? order; SceneRequest? request = null;
+            if (first is not null) { run = first; first = null; order = LoadOrderSpec.FromArgs(run, "the bundle's profile"); }
+            else
+            {
+                if (ready is null && !SceneDirector.HasPending) SceneDirector.WaitIdle();
+                if (Shell.Closed) break;
+                if (SceneDirector.Take() is { } req)
+                {
+                    request = req;
+                    run = SceneDirector.ArgsFor(req, RequestWork());
+                    order = req.Order;
+                }
+                else if (ready is { } bundle)
+                {
+                    ready = null;
+                    var l = Shell.Launcher;
+                    // the session's writes go under the launcher's Output Folder; its re-checks and files under the Work Folder
+                    WorkbenchHost.ManualTarget = new WriteTarget(l.Instance!, l.Profile!, Path.Combine(l.Game!, "Data"), l.Output);
+                    Environment.SetEnvironmentVariable("WB_OUT", Path.Combine(l.RunFolder!, "workbench"));
+                    string[]? opened;
+                    try { opened = OpenBundle(new[] { "--bundle", bundle, "--instance", l.Instance!, "--profile", l.Profile!, "--game", l.Game! }); }
+                    catch (InvalidOperationException ex) { Shell.SetBanner("the run's bundle could not be opened: " + ex.Message); continue; }
+                    if (opened is null) continue;                 // listed with no scene; another run can open the next
+                    run = opened; order = LoadOrderSpec.FromArgs(run, $"profile '{l.Profile}'");
+                }
+                else continue;
+            }
+            var a = run.Contains("--interactive") ? run : run.Append("--interactive").ToArray();
+            var entry = typeof(InteractiveViewer).Assembly.EntryPoint
+                ?? throw new InvalidOperationException("viewprobe has no entry point");
+            SceneDirector.Began(order, request);
+            object? r;
+            try { r = entry.Invoke(null, new object[] { a }); }
+            finally { SceneDirector.Ended(); }
+            code = r is int c ? c : 0;
+            if (Shell.Closed) break;
+            if (SceneDirector.HasPending) continue;              // the scene closed for a request on another load order
+            if (!manual && Shell.Window is null) break;          // the viewer stopped before any window: its exit code is the answer
+            Shell.SwitchClock = null;
+            Shell.SetBanner($"the viewer stopped (exit {code}) without a scene to show{(request is null ? "" : $" for cell {request.Cell}")}; its own sentence is in the workbench log.");
             if (Shell.Window is not null) { Shell.FillConflicts(); Shell.FillFindings(); }
-            continue;
-        }
-        break;
+            if (!manual && Environment.GetEnvironmentVariable("WB_SCRIPT") is { Length: > 0 }) break;   // a scripted run ends with its scene
         }
         Shell.StopServer();
         if (Shell.ExpectFailures > 0) { Console.Error.WriteLine($"workbench: {Shell.ExpectFailures} expectation(s) failed"); return 4; }
         return code;
     }
+
+    /// <summary>Where a requested scene's worklist and captures go: WB_OUT, else the launcher's Work Folder, else the temp folder.</summary>
+    internal static string RequestWork() =>
+        Env("WB_OUT") ?? (Shell.Launcher.WorkFolder is { } w ? Path.Combine(w, "workbench") : Path.Combine(Path.GetTempPath(), "workbench"));
 }

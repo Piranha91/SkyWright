@@ -46,6 +46,10 @@ internal static class Shell
         return $"the {item.Header} tab is in front";
     }
     internal static IReadOnlyList<string> WorklistCells = Array.Empty<string>();
+    /// <summary>The load order the open bundle's rows are shown on, when the session named it in full; null otherwise.</summary>
+    internal static LoadOrderSpec? BundleOrder;
+    /// <summary>The scene being built or shown takes no edits (opened from the Results or World tab).</summary>
+    internal static bool ReadOnlyScene;
     internal static bool ShowAll;
     /// <summary>The "show decided" toggle: rows decided intentional that still apply are hidden unless it is on.</summary>
     internal static bool ShowDecided;
@@ -146,7 +150,12 @@ internal static class Shell
         tabs.Items.Add(new TabItem { Header = "Findings", Content = findingsTab });
         tabs.Items.Add(new TabItem { Header = "Records", Content = Records });
         var root = new DockPanel();
+        // one Open control for anything the window opens; each kind is a reader (InputReaders)
+        InputReaders.Register(new BundleReader());
+        var openBar = OpenBar.Build();
+        DockPanel.SetDock(openBar, Dock.Top);
         DockPanel.SetDock(Banner, Dock.Top); DockPanel.SetDock(BarSlot, Dock.Bottom); DockPanel.SetDock(tabs, Dock.Left);
+        root.Children.Add(openBar);
         root.Children.Add(Banner); root.Children.Add(BarSlot); root.Children.Add(tabs); root.Children.Add(ViewSlot);
         // The view keeps room of its own: below this the tabs would take the whole width (a 360x240 window drew the scene
         // into a 1x66 view, stage 3 receipts). A smaller size asked for opens at this minimum and says so.
@@ -310,7 +319,26 @@ internal static class Shell
     internal static void OpenRef(string refKey, string? cell)
     {
         var h = Current;
+        // the bundle's load order is known: any of its cells can be asked for, whatever the window shows now
+        if (BundleOrder is { } bo)
+        {
+            bool here = h is not null && !h.ReadOnly && SceneDirector.Order?.Key == bo.Key;
+            var p = ClickThrough.Plan(refKey, cell, here ? h!.SceneCell : null, cell is null ? Array.Empty<string>() : new[] { cell },
+                                      here ? h!.Session.Pending.Count : 0, k => here && h!.Session.IsDrawn(k));
+            switch (p)
+            {
+                case ClickPlan.Land l: h!.Land(l.Ref); break;
+                case ClickPlan.Refuse f: SetBanner(f.Sentence); LastLanding = "refused: " + f.Sentence; break;
+                case ClickPlan.Switch s:
+                    try { SceneDirector.Request(new SceneRequest(bo, s.Cell, s.Ref.ToString(), $"to show {s.Ref}", ReadOnly: false)); }
+                    catch (InvalidOperationException ex) { SetBanner(ex.Message); LastLanding = "refused: " + ex.Message; }
+                    break;
+            }
+            return;
+        }
         if (h is null) return;
+        if (SceneDirector.Order is not null)
+        { SetBanner("this window has moved to another load order, and the bundle's own was not named in full; restart the workbench with the bundle to open its rows."); return; }
         var plan = ClickThrough.Plan(refKey, cell, h.SceneCell, WorklistCells, h.Session.Pending.Count, k => h.Session.IsDrawn(k));
         switch (plan)
         {
@@ -318,7 +346,7 @@ internal static class Shell
             case ClickPlan.Refuse f: SetBanner(f.Sentence); LastLanding = "refused: " + f.Sentence; break;
             case ClickPlan.Switch s:
                 PendingLand = s.Ref.ToString(); SwitchCell = s.Cell; SwitchClock = Stopwatch.StartNew();
-                SetBanner($"loading cell {s.Cell} to show {s.Ref}: viewprobe is rebuilding the scene; the window does not respond until it is built.");
+                SetBanner($"loading cell {s.Cell} to show {s.Ref}: the scene is being rebuilt.");
                 h.RequestCell(s.CellIndex);
                 break;
         }
@@ -348,6 +376,7 @@ internal static class Shell
             }),
         },
         worklistCells = WorklistCells,
+        director = SceneDirector.State(),
         scene = h?.SceneState(),
         tree = Tree,
         lastLanding = LastLanding,

@@ -1,0 +1,217 @@
+using System.Diagnostics;
+using System.Windows.Threading;
+using ViewProbe;
+
+namespace Workbench;
+
+/// <summary>The load order a scene is built on, as viewprobe takes it: an MO2 instance, profile and game folder, and
+/// optionally a candidate order file (<c>--order</c>). <see cref="Label"/> is what the window calls it.</summary>
+internal sealed record LoadOrderSpec(string Instance, string Profile, string Game, string? OrderFile, string Label)
+{
+    /// <summary>Two specs with one key build the same scene for a cell.</summary>
+    internal string Key => string.Join("|", Full(Instance), Profile, Full(Game), OrderFile is null ? "" : Full(OrderFile)).ToLowerInvariant();
+    static string Full(string p) => Path.GetFullPath(p).TrimEnd('\\', '/');
+
+    internal IEnumerable<string> Args()
+    {
+        yield return "--instance"; yield return Instance;
+        yield return "--profile"; yield return Profile;
+        yield return "--game"; yield return Game;
+        if (OrderFile is not null) { yield return "--order"; yield return OrderFile; }
+    }
+
+    /// <summary>The spec viewprobe's own arguments name, or null when they leave a part to the environment.</summary>
+    internal static LoadOrderSpec? FromArgs(IReadOnlyList<string> args, string label)
+    {
+        string? V(string n) { for (int i = 0; i + 1 < args.Count; i++) if (args[i] == n) return args[i + 1]; return null; }
+        return V("--instance") is { } i && V("--profile") is { } p && V("--game") is { } g ? new LoadOrderSpec(i, p, g, V("--order"), label) : null;
+    }
+}
+
+/// <summary>One cell to show: its load order, the cell as viewprobe names it (a FormKey), the reference to land on, and
+/// the words the banner uses. A read-only scene has no move handles and writes nothing.</summary>
+internal sealed record SceneRequest(LoadOrderSpec Order, string Cell, string? LandOn, string Why, bool ReadOnly = true)
+{
+    /// <summary>Called on the UI thread once the scene for this request is shown.</summary>
+    internal Action? Shown { get; init; }
+}
+
+/// <summary>The one place a scene is asked for. A request reaches viewprobe in one of three ways: the idle loop in
+/// <see cref="Program"/> starts viewprobe on it; a scene on the same load order hands viewprobe the cell and closes its
+/// frame; a scene on another load order closes and viewprobe is started again. A request made while a scene is being
+/// built abandons that build at its next tick.</summary>
+internal static class SceneDirector
+{
+    static SceneRequest? _pending;
+    static bool _abandon;
+    static long _lastPump = Stopwatch.GetTimestamp();
+    static DispatcherFrame? _idle;
+
+    /// <summary>The load order and request of the viewprobe run in progress; null when viewprobe is not running.</summary>
+    internal static LoadOrderSpec? Order { get; private set; }
+    internal static SceneRequest? Showing { get; private set; }
+    /// <summary>True from the start of a viewprobe run to its return.</summary>
+    internal static bool Running { get; private set; }
+    /// <summary>True while viewprobe builds a scene: it is running and no scene is shown.</summary>
+    internal static bool Building => Running && Shell.Current is null;
+    /// <summary>The cell a build in progress is for, or null.</summary>
+    internal static string? BuildingCell { get; private set; }
+
+    // ---- what the build's ticks measured (the window's answer time while a scene loads)
+    internal static double LongestGapMs { get; private set; }
+    internal static int Pumps { get; private set; }
+    internal static double LastBuildSeconds { get; private set; }
+    internal static double LastBuildLongestGapMs { get; private set; }
+    static readonly Stopwatch BuildClock = new();
+
+    /// <summary>The pump interval: the window is answered at most this often while a scene builds.</summary>
+    internal const double PumpEveryMs = 30;
+
+    internal static bool HasPending => _pending is not null;
+
+    /// <summary>Take the request waiting for a new viewprobe run.</summary>
+    internal static SceneRequest? Take() { var r = _pending; _pending = null; return r; }
+
+    /// <summary>Ask for a scene. Returns one sentence saying what happens; a refusal is an <see cref="InvalidOperationException"/>.</summary>
+    internal static string Request(SceneRequest req)
+    {
+        if (Shell.Current is { } h)
+        {
+            if (h.Session.Pending.Count > 0)
+                throw new InvalidOperationException($"opening cell {req.Cell} would drop {h.Session.Pending.Count} staged edit(s); write or undo them first.");
+            bool same = Order is not null && Order.Key == req.Order.Key;
+            if (same && h.ReadOnly == req.ReadOnly && (string.Equals(h.SceneCell, req.Cell, StringComparison.OrdinalIgnoreCase)
+                                                    || string.Equals(h.SceneLabel, req.Cell, StringComparison.OrdinalIgnoreCase)))
+            {
+                Showing = req;
+                if (req.LandOn is { } k && Mutagen.Bethesda.Plugins.FormKey.TryFactory(k, out var key)) h.Land(key);
+                req.Shown?.Invoke();
+                return $"cell {req.Cell} is the scene shown" + (req.LandOn is null ? "" : $"; {Shell.BannerText}");
+            }
+            Shell.PendingLand = req.LandOn; Shell.SwitchCell = req.Cell; Shell.SwitchClock = Stopwatch.StartNew();
+            Shell.CurrentRow = null; Shell.ReadOnlyScene = req.ReadOnly;
+            string said;
+            if (same)
+            {
+                InteractiveViewer.CellRequest = req.Cell; _next = req;
+                said = $"loading cell {req.Cell} ({req.Why}); picking another cell stops this load.";
+            }
+            else
+            {
+                _pending = req;
+                said = $"loading cell {req.Cell} on {req.Order.Label} ({req.Why}): the scene is rebuilt on that load order; picking another cell stops this load.";
+            }
+            Shell.SetBanner(said);
+            Shell.Flush();
+            h.StopFrame();
+            return said;
+        }
+        if (Running)
+        {
+            // a build is running: it is abandoned at its next tick, for this request
+            bool same = Order is not null && Order.Key == req.Order.Key;
+            if (same) { InteractiveViewer.CellRequest = req.Cell; _next = req; _pending = null; }
+            else { InteractiveViewer.CellRequest = null; _next = null; _pending = req; }
+            _abandon = true; Shell.ReadOnlyScene = req.ReadOnly;
+            Shell.PendingLand = req.LandOn; Shell.SwitchCell = req.Cell; Shell.SwitchClock = Stopwatch.StartNew();
+            var said = $"stopping the load of cell {BuildingCell} to open cell {req.Cell} ({req.Why}).";
+            Shell.SetBanner(said);
+            return said;
+        }
+        _pending = req;
+        Shell.PendingLand = req.LandOn; Shell.SwitchCell = req.Cell; Shell.SwitchClock = Stopwatch.StartNew();
+        var s = $"loading cell {req.Cell} on {req.Order.Label} ({req.Why}); picking another cell stops this load.";
+        Shell.SetBanner(s);
+        Wake();
+        return s;
+    }
+    static SceneRequest? _next;      // the request the running viewprobe continues with (same load order)
+
+    /// <summary>End the idle wait in <see cref="Program"/> (a request or a finished launcher run is ready).</summary>
+    internal static void Wake() { if (_idle is { } f) f.Continue = false; }
+
+    /// <summary>Wait, answering the window, until something asks for a scene or the window closes.</summary>
+    internal static void WaitIdle()
+    {
+        if (HasPending || Shell.Closed) return;
+        _idle = new DispatcherFrame();
+        Dispatcher.PushFrame(_idle);
+        _idle = null;
+    }
+
+    /// <summary>viewprobe's arguments for a request: a one-cell worklist under the work folder and the request's load order.</summary>
+    internal static string[] ArgsFor(SceneRequest req, string work)
+    {
+        Directory.CreateDirectory(work);
+        var wl = new HarnessShared.WorklistFile("workbench: the cell asked for",
+            new[] { new HarnessShared.WorklistCell(req.Cell, new[] { new HarnessShared.WorklistShot(
+                "placeholder pose: the workbench frames the camera once the cell is built", new[] { 0f, 0f, 0f }) }) }.ToList());
+        var path = Path.Combine(work, "workbench-request-worklist.json");
+        HarnessShared.WorklistIo.Write(path, wl);
+        return new[] { "--worklist", path }.Concat(req.Order.Args()).Concat(new[] { "--out", work }).ToArray();
+    }
+
+    /// <summary>A viewprobe run starts on this load order (null: one the command line or the launcher named in full).</summary>
+    internal static void Began(LoadOrderSpec? order, SceneRequest? first)
+    {
+        Running = true; Order = order; Showing = first; _next = null; _abandon = false;
+        BuildingCell = first?.Cell; Shell.ReadOnlyScene = first?.ReadOnly ?? false;
+        BuildStarted();
+    }
+
+    internal static void Ended() { Running = false; Order = null; Showing = null; BuildingCell = null; _abandon = false; }
+
+    static void BuildStarted() { BuildClock.Restart(); LongestGapMs = 0; Pumps = 0; _lastPump = Stopwatch.GetTimestamp(); }
+
+    /// <summary>A scene arrived (the host calls this before its frame loop): the request it answers is the one shown.</summary>
+    internal static void SceneShown()
+    {
+        if (_next is { } n) { Showing = n; _next = null; }
+        LastBuildSeconds = BuildClock.Elapsed.TotalSeconds; LastBuildLongestGapMs = LongestGapMs;
+        BuildClock.Stop();
+        BuildingCell = null;
+        WorkbenchHost.Say(FormattableString.Invariant(
+            $"scene build: {LastBuildSeconds:0.0} s; the window was answered {Pumps} time(s) meanwhile, longest wait {LastBuildLongestGapMs:0} ms"));
+        Showing?.Shown?.Invoke();
+    }
+
+    /// <summary>A scene closed for another cell of the same run: the next build's clock starts.</summary>
+    internal static void SceneClosed()
+    {
+        if (!Running || Shell.Closed) return;
+        BuildingCell = _next?.Cell ?? Shell.SwitchCell;
+        BuildStarted();
+    }
+
+    /// <summary>viewprobe's tick while it builds (<see cref="RenderStages.Tick"/>): answer the window every
+    /// <see cref="PumpEveryMs"/>, and abandon the build when another request, or the window's close, asks.</summary>
+    internal static void Tick()
+    {
+        if (!Running || Shell.Current is not null || Shell.Window is null) return;
+        long now = Stopwatch.GetTimestamp();
+        double since = (now - _lastPump) * 1000.0 / Stopwatch.Frequency;
+        if (since < PumpEveryMs) return;
+        if (since > LongestGapMs) LongestGapMs = since;
+        Pumps++;
+        Shell.Flush();
+        _lastPump = Stopwatch.GetTimestamp();
+        if (_abandon || Shell.Closed)
+        {
+            _abandon = false;
+            if (Shell.Closed) { InteractiveViewer.CellRequest = null; _next = null; }
+            if (_next is { } n) { BuildingCell = n.Cell; BuildStarted(); }
+            throw new BuildAbandoned();
+        }
+    }
+
+    /// <summary>The <c>scene</c> part of the state: what is shown or loading, on which load order, and the last build's times.</summary>
+    internal static object State() => new
+    {
+        running = Running, building = Building, buildingCell = BuildingCell,
+        loadOrder = Order?.Label, orderFile = Order?.OrderFile, profile = Order?.Profile,
+        showing = Showing is null ? null : new { cell = Showing.Cell, landOn = Showing.LandOn, why = Showing.Why, readOnly = Showing.ReadOnly },
+        pending = _pending?.Cell ?? _next?.Cell,
+        lastBuildSeconds = LastBuildSeconds, lastBuildLongestWaitMs = LastBuildLongestGapMs, lastBuildPumps = Pumps,
+        pumpEveryMs = PumpEveryMs,
+    };
+}
