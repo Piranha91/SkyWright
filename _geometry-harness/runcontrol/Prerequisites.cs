@@ -22,28 +22,37 @@ public static class Prerequisites
     }
 
     // str((ledger entry or {}).get("status") or "").
-    static string StatusOf(Executor ex, object? checkId, object? armId)
+    static string StatusOf(Executor ex, object? checkId, object? armId) => StatusOf(ex.Ledger, checkId, armId);
+
+    static string StatusOf(Ledger ledger, object? checkId, object? armId)
     {
-        object? status = ex.Ledger.Entry(checkId, armId, null)?.Get("status");
+        object? status = ledger.Entry(checkId, armId, null)?.Get("status");
         return PyValue.Truthy(status) ? Ev.Str(status) : "";
     }
 
     /// <summary>The arm's own status for a prerequisite when that status decides for this arm alone: measured and
     /// failed here (rejected, failed), or blocked here by such a failure. Anything else leaves the baseline's answer counting.</summary>
-    public static string? DecidedOnArm(Executor ex, object? pre, object? armId)
+    public static string? DecidedOnArm(Executor ex, object? pre, object? armId) => DecidedOnArm(ex.Ledger, pre, armId);
+
+    /// <summary>The same, read from a ledger alone (an import has no executor).</summary>
+    public static string? DecidedOnArm(Ledger ledger, object? pre, object? armId)
     {
-        string own = StatusOf(ex, pre, armId);
+        string own = StatusOf(ledger, pre, armId);
         return own.StartsWith("rejected", StringComparison.Ordinal) || own == "failed"
                || own.StartsWith("blocked(prerequisite:", StringComparison.Ordinal) ? own : null;
     }
 
     /// <summary>The arms whose ledger entry answers a prerequisite for an arm.</summary>
-    public static List<object?> AnswerArms(Executor ex, object? pre, object? armId) =>
-        DecidedOnArm(ex, pre, armId) != null ? [armId] : [armId, "baseline"];
+    public static List<object?> AnswerArms(Executor ex, object? pre, object? armId) => AnswerArms(ex.Ledger, pre, armId);
 
-    public static string BlockDetail(Executor ex, object? pre, object? armId)
+    public static List<object?> AnswerArms(Ledger ledger, object? pre, object? armId) =>
+        DecidedOnArm(ledger, pre, armId) != null ? [armId] : [armId, "baseline"];
+
+    public static string BlockDetail(Executor ex, object? pre, object? armId) => BlockDetail(ex.Ledger, pre, armId);
+
+    public static string BlockDetail(Ledger ledger, object? pre, object? armId)
     {
-        string? own = DecidedOnArm(ex, pre, armId);
+        string? own = DecidedOnArm(ledger, pre, armId);
         if (own != null)
             return $"the prerequisite {Ev.Str(pre)} is {own} on this arm, which decides for this arm: the baseline's answer does not settle it";
         return $"the prerequisite {Ev.Str(pre)} has no accepted receipt on this arm"
@@ -52,14 +61,16 @@ public static class Prerequisites
 
     /// <summary>Null when every prerequisite of the check is settled on the arm, else the first that is not. A
     /// not-applicable prerequisite is an answer, not an absence.</summary>
-    public static string? Satisfied(Executor ex, PyDict check, object? armId)
+    public static string? Satisfied(Executor ex, PyDict check, object? armId) => Satisfied(ex.Ledger, check, armId);
+
+    public static string? Satisfied(Ledger ledger, PyDict check, object? armId)
     {
         foreach (var pre in Ev.Items(check.Get("prerequisites")))
         {
             bool ok = false;
-            foreach (var aid in AnswerArms(ex, pre, armId))
+            foreach (var aid in AnswerArms(ledger, pre, armId))
             {
-                var e = ex.Ledger.Entry(pre, aid, null);
+                var e = ledger.Entry(pre, aid, null);
                 if (PyValue.Truthy(e) && (EvalStore.IsTerminalOk(e!.Get("status"))
                                           || (PyValue.Truthy(e.Get("status")) ? Ev.Str(e["status"]) : "").StartsWith("not-applicable", StringComparison.Ordinal)))
                 {

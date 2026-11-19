@@ -561,6 +561,43 @@ def execute_cases(tmp: Path) -> list:
     case(tmp, "candidate qualification over supplied files and discovery hits", disc,
          [("qualified by bytes, unqualified, catalogued, not relevant, unreadable hit lists", None, {}), ("again: reused", None, {})],
          settle=discovery, tweak=supplied, relevance=True)
+
+    # an accepted import, and what becomes of it when its prerequisite fails later or its entry is no longer credited
+    imp = dict(F.check_row("r.dangling", "mcp-only", prerequisites=["l.masters"]), unsupportedReason="a record reader's judgement, imported")
+    imp["arms"] = [{"armId": a, "status": "mcp-only"} for a in ("baseline", "candidate-01")]
+
+    def imported(b, root):
+        masters_ok(b, root)
+        for aid, origin in (("baseline", {"origin": "fresh"}),
+                            ("candidate-01", {"origin": "", "reusedFrom": {"planId": "plan-older", "armId": "baseline", "resultSha256": "9" * 64}})):
+            # the folder of the import, a re-import beside it, and another arm's folder whose name starts the same way
+            for folder in (f"r.dangling__{aid}", f"r.dangling__{aid}~2", f"r.dangling__{aid}0"):
+                F.write(root, f"imports/{folder}/result.json", "{}")
+            b.settle("r.dangling", aid, None, "completed", detector="no-finding", outputs=[f"imports/r.dangling__{aid}~2/result.json"],
+                     adapter={"kind": "mcp-import", "sourceKind": "mcp-only"},
+                     extra={"imported": dict({"sourceSha256": "5" * 64, "capturedUtc": "2026-01-01T00:10:00Z", "tool": {"name": "reader"}}, **origin)},
+                     ledger_extra={"imported": True, "importOrigin": origin["origin"] or "unknown"})
+
+    def set_status(key, status):
+        def edit(root):
+            led = json.loads((root / "ledger.json").read_text(encoding="utf-8"))
+            led["entries"][key]["status"] = status
+            (root / "ledger.json").write_text(json.dumps(led, indent=1), encoding="utf-8")
+        return edit
+
+    def both_edits(*edits):
+        return lambda root: [e(root) for e in edits] and None
+    case(tmp, "an accepted import whose prerequisite fails later, and one that is no longer credited", [FIXED, imp],
+         [("the prerequisite is rejected on one arm: its import is blocked and recorded, the other is reused", None,
+           {"before": set_status("l.masters__candidate-01", "rejected(illegal-configuration)")}),
+          ("again: still blocked, the record of the import handed on", None, {}),
+          ("the prerequisite holds again: the row waits for a new import", None, {"before": set_status("l.masters__candidate-01", "completed")}),
+          ("an import that was invalidated, and one refused reuse while its prerequisite fails", None,
+           {"before": both_edits(set_status("r.dangling__baseline", "invalidated(stale-inputs)"),
+                                 set_status("r.dangling__candidate-01", "refused-reuse(tool-changed)"),
+                                 set_status("l.masters__candidate-01", "failed"))}),
+          ("again: the same causes", None, {})],
+         settle=imported)
     return CASES
 
 

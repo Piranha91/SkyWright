@@ -3,7 +3,7 @@ namespace RunControl;
 /// <summary>What one of evalrun.py's commands was asked, flag for flag as its parser reads them.</summary>
 public sealed class EvalArgs
 {
-    public string? Run, Dir, Out, Instance;
+    public string? Run, Dir, Out, Instance, File;
     public string EnablePopulation = "load-time";
     public double? BudgetMinutes;
     public bool RebuildLedger;
@@ -11,7 +11,7 @@ public sealed class EvalArgs
 }
 
 /// <summary>The command lines of evalrun.py's commands as runcontrol takes them: `run --run RUN`, `resume --run RUN`,
-/// `status --run RUN`, `finalize --run RUN`, `bundle --run RUN [--out DIR] …`, `verify-bundle DIR [--out FILE]` and `population`. `run` and `status`
+/// `status --run RUN`, `import-results --run RUN --file DOC`, `finalize --run RUN`, `bundle --run RUN [--out DIR] …`, `verify-bundle DIR [--out FILE]` and `population`. `run` and `status`
 /// are also pipeline commands; the flag `--run` says which is meant. Exit 0 done, 2 a refused command line or input
 /// (an input of a shape the rules cannot read included), 3 a refused result.</summary>
 public static class EvalCommands
@@ -21,7 +21,7 @@ public static class EvalCommands
 
     public static bool Handles(string[] args) => args.Length >= 1 && args[0] switch
     {
-        "finalize" or "bundle" or "verify-bundle" or "resume" or "population" => true,
+        "finalize" or "bundle" or "verify-bundle" or "resume" or "population" or "import-results" => true,
         "run" or "status" => NamesRun(args),
         _ => false,
     };
@@ -55,6 +55,7 @@ public static class EvalCommands
                 string text = Value();
                 a.BudgetMinutes = PlanArgs.PyFloat(text) ?? throw new Refusal($"{command}: --budget-minutes {PyText.Repr(text)} is not a number.");
             }
+            else if (flag == "--file" && command == "import-results") a.File = Value();
             else if (flag == "--rebuild-ledger" && command == "resume" && joined == null) a.RebuildLedger = true;
             else if (flag == "--out" && has("verify-bundle", "population")) a.Out = Value();
             else if (flag == "--plugin" && command == "population") a.Plugins.Add(Value());
@@ -124,6 +125,7 @@ public static class EvalCommands
             return command switch
             {
                 "finalize" => Finalizer.Run(a.Run),
+                "import-results" => ImportResults.Run(a.Run, a.File ?? throw new Refusal("import-results needs --file, the import document to bind.")),
                 "status" => EvalStatus.Run(a.Run),
                 "resume" => EvaluateRun.Run(a, resuming: true),
                 _ => EvaluateRun.Run(a, resuming: false),

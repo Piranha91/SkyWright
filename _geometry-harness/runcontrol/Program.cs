@@ -27,6 +27,7 @@ using RunControl;
 //        runcontrol run    --run RUN [--budget-minutes N]   run the plan's checks (evalrun run); `run --entry` is the pipeline's
 //        runcontrol resume --run RUN [--budget-minutes N] [--rebuild-ledger]   re-check what is kept, redo the rest (evalrun resume)
 //        runcontrol status --run RUN     print the ledger as a table (evalrun status); `status --out` is the pipeline's
+//        runcontrol import-results --run RUN --file DOC   bind a record reader's evidence to one arm the plan left open (evalrun import-results)
 //        runcontrol population --plugin PATH... [--mod NAME...] [--instance DIR] [--target NAME...] --out FILE   (evalrun population)
 //
 // EXIT CODES: 0 done, 2 refused (one sentence on standard error), 3 a result that awaits judgement.

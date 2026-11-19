@@ -209,6 +209,13 @@ static class NativeFile
         return (i.VolumeSerialNumber, ((ulong)i.FileIndexHigh << 32) | i.FileIndexLow, ((long)i.FileSizeHigh << 32) | i.FileSizeLow);
     }
 
+    /// <summary>How many names an existing file has, or 0 when it cannot be opened.</summary>
+    public static uint LinkCount(string path)
+    {
+        using var h = Open(path);
+        return h.IsInvalid || !GetFileInformationByHandle(h, out var i) ? 0 : i.NumberOfLinks;
+    }
+
     /// <summary>Makes newName a second name of an existing file.</summary>
     public static void HardLink(string newName, string existingName)
     {

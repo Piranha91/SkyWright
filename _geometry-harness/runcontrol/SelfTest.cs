@@ -154,6 +154,7 @@ public static partial class SelfTest
         EvaluateStageCases();
         SelfTestFinalize.RunBundle(Case);
         SelfTestFinalize.RunRows(Case);
+        SelfTestFinalize.RunImport(Case);
         LiveCases();
         PipelineLiveCases();
 
