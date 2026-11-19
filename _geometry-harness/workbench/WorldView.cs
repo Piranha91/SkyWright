@@ -150,7 +150,8 @@ internal static class WorldView
             var t = r.Result;
             Map.Show(t, done.Result.Picture);
             MapSeconds = t.Seconds;
-            SetMapStatus(FormattableString.Invariant($"{t.LandCells:N0} cells of terrain, read in {t.Seconds:0.0} s")
+            string lent = t.BorrowedCells == 0 ? "" : $", and {t.BorrowedCells:N0} squares of its parent {x.Worldspaces.FirstOrDefault(w => w.Key == t.Parent)?.EditorId ?? t.Parent}'s ground (dim)";
+            SetMapStatus(FormattableString.Invariant($"{t.LandCells:N0} cells of terrain{lent}, read in {t.Seconds:0.0} s")
                          + (t.Unreadable > 0 ? $"; {t.Unreadable:N0} could not be read and are not drawn" : "") + ". Wheel zooms, drag pans, click opens a cell.");
             if (_pendingMark is { } m) { _pendingMark = null; Map.Choose(m.X, m.Y); }
         }), TaskScheduler.Default);
@@ -528,7 +529,7 @@ internal static class WorldView
                 block = new[] { c.BlockA, c.BlockB }, subBlock = new[] { c.SubBlockA, c.SubBlockB }, label = CellLabel(c),
             }).ToList(),
             objects,
-            map = new { worldspace = _mapWorld, ready = Map.Terrain is not null, status = _mapStatus, seconds = MapSeconds, landCells = Map.Terrain?.LandCells,
+            map = new { worldspace = _mapWorld, ready = Map.Terrain is not null, status = _mapStatus, seconds = MapSeconds, landCells = Map.Terrain?.LandCells, samples = Map.Terrain?.Samples, parent = Map.Terrain?.Parent, borrowedCells = Map.Terrain?.BorrowedCells,
                         unreadable = Map.Terrain?.Unreadable, grid = Map.Terrain is { } t ? new[] { t.MinX, t.MinY, t.Width, t.Height } : null,
                         chosen = Map.Chosen is { } c ? new[] { c.X, c.Y } : null },
         };

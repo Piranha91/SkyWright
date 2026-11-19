@@ -35,11 +35,16 @@ internal sealed record CellObjects(IReadOnlyList<ObjectRow> Persistent, IReadOnl
 /// <summary>One worldspace's terrain at its winners, sampled for a map: <paramref name="Samples"/> heights a side per
 /// cell, west to east then north to south over the grid squares from <paramref name="MinX"/>, <paramref name="MinY"/>;
 /// NaN where no cell gives heights. <paramref name="Cells"/> marks the squares a cell record stands on.
-/// <paramref name="WaterHeight"/> is the worldspace's default water level, or null when it sets none; a cell's own
-/// water level is not read.</summary>
+/// <paramref name="WaterHeight"/> is the worldspace's default water level (its parent's when it sets none), or null; a
+/// cell's own water level is not read. A worldspace whose record says it uses its parent's land
+/// (<paramref name="Parent"/>) has the parent's heights on the squares where it has none of its own, and
+/// <paramref name="Borrowed"/> marks those squares.</summary>
 internal sealed record WorldTerrain(string Worldspace, int MinX, int MinY, int Width, int Height, int Samples,
     float[] Heights, bool[] Cells, float? WaterHeight, int LandCells, int Unreadable, double Seconds)
 {
+    public string? Parent { get; init; }
+    public bool[] Borrowed { get; init; } = Array.Empty<bool>();
+    public int BorrowedCells => Borrowed.Count(b => b);
     public int MaxY => MinY + Height - 1;
 }
 
@@ -331,9 +336,9 @@ internal sealed class WorldIndex : IDisposable
         int minX = gridded.Min(c => c.GridX!.Value), maxX = gridded.Max(c => c.GridX!.Value);
         int minY = gridded.Min(c => c.GridY!.Value), maxY = gridded.Max(c => c.GridY!.Value);
         int w = maxX - minX + 1, h = maxY - minY + 1;
-        // 8 heights a side per cell (every fourth vertex), fewer when the worldspace is wide enough to pass 4096 pixels
-        int n = 8;
-        while (n > 1 && Math.Max(w, h) * n > 4096) n /= 2;
+        // every height of a cell (32 a side) for a small worldspace, fewer as it widens: the picture stays within 2048 pixels
+        int n = 32;
+        while (n > 1 && Math.Max(w, h) * n > 2048) n /= 2;
         int step = (LandHeight.Side - 1) / n;
         var heights = new float[w * n * h * n];
         Array.Fill(heights, float.NaN);
@@ -341,33 +346,63 @@ internal sealed class WorldIndex : IDisposable
         foreach (var c in gridded) has[(maxY - c.GridY!.Value) * w + (c.GridX!.Value - minX)] = true;
 
         var view = held.Resolver.Capture(null);
+        // the worldspace's winning record: its default water level (float.MaxValue there means "not set"), and the
+        // parent whose land it says it uses
+        float? water = null;
+        FormKey? parent = null;
+        using (var session = view.OpenSession())
+        {
+            float? WaterOf(IWorldspaceGetter ws) =>
+                ws.LandDefaults?.DefaultWaterHeight is { } dwh && float.IsFinite(dwh) && MathF.Abs(dwh) < 1e30f ? dwh : null;
+            IWorldspaceGetter? Winner(FormKey k) =>
+                view.ResolveWinner(k) is { } win ? view.GetRecord(session, win.WinnerPlugin, k, typeof(IWorldspaceGetter)) as IWorldspaceGetter : null;
+            if (Winner(wk) is { } own)
+            {
+                water = WaterOf(own);
+                if (own.Parent is { } p && p.Worldspace.FormKeyNullable is { IsNull: false } pk)
+                {
+                    if (p.Flags.HasFlag(WorldspaceParent.Flag.UseLandData)) parent = pk;
+                    if (water is null && Winner(pk) is { } up) water = WaterOf(up);
+                }
+            }
+        }
+        float[]? lent = parent is null ? null : new float[heights.Length];
+        if (lent is not null) Array.Fill(lent, float.NaN);
+
         int land = 0, unreadable = 0;
         foreach (var (fk, _, body, source) in view.RecordsIn(Array.Empty<string>(), LandType))
         {
             ct.ThrowIfCancellationRequested();
             if (view.ParentOf(fk) is not { } ck || !held.Cells.TryGetValue(ck, out var row) || row.GridX is not { } gx || row.GridY is not { } gy) continue;
-            if (view.ParentOf(ck) != wk) continue;
+            var inWorld = view.ParentOf(ck);
+            bool ownLand = inWorld == wk;
+            if (!ownLand && (parent is null || inWorld != parent || gx < minX || gx > maxX || gy < minY || gy > maxY)) continue;
             if (view.ResolveWinner(fk) is not { } win || !string.Equals(win.WinnerPlugin, source, StringComparison.OrdinalIgnoreCase)) continue;
             if (body is not ILandscapeGetter ls) continue;
             var lc = LandHeight.Classify(ls);
             if (lc.Kind == LandHeight.LandKind.DeclaresNone) continue;
-            if (lc.Kind != LandHeight.LandKind.Heights) { unreadable++; continue; }
+            if (lc.Kind != LandHeight.LandKind.Heights) { if (ownLand) unreadable++; continue; }
             var decoded = LandHeight.Decode(lc.Offset, lc.Gradients!);
-            land++;
+            if (ownLand) land++;
+            var into = ownLand ? heights : lent!;
             int px = (gx - minX) * n, py = (maxY - gy) * n;      // the square's top-left sample; north is up
             for (int j = 0; j < n; j++)
                 for (int i = 0; i < n; i++)
-                    heights[(py + (n - 1 - j)) * (w * n) + px + i] = decoded[i * step, j * step];
+                    into[(py + (n - 1 - j)) * (w * n) + px + i] = decoded[i * step, j * step];
         }
-        // the worldspace's default water level, from its winning record; float.MaxValue there means "not set"
-        float? water = null;
-        if (view.ResolveWinner(wk) is { } wsWin)
-        {
-            using var session = view.OpenSession();
-            if (view.GetRecord(session, wsWin.WinnerPlugin, wk, typeof(IWorldspaceGetter)) is IWorldspaceGetter ws
-                && ws.LandDefaults?.DefaultWaterHeight is { } dwh && float.IsFinite(dwh) && MathF.Abs(dwh) < 1e30f) water = dwh;
-        }
-        return new WorldTerrain(FormIdToken.Of(wk), minX, minY, w, h, n, heights, has, water, land, unreadable, clock.Elapsed.TotalSeconds);
+        // the parent's ground on the squares this worldspace gives no heights for
+        var borrowed = new bool[w * h];
+        if (lent is not null)
+            for (int cy = 0; cy < h; cy++)
+                for (int cx = 0; cx < w; cx++)
+                {
+                    int at = cy * n * (w * n) + cx * n;
+                    if (!float.IsNaN(heights[at]) || float.IsNaN(lent[at])) continue;
+                    borrowed[cy * w + cx] = true;
+                    for (int j = 0; j < n; j++) Array.Copy(lent, at + j * (w * n), heights, at + j * (w * n), n);
+                }
+        return new WorldTerrain(FormIdToken.Of(wk), minX, minY, w, h, n, heights, has, water, land, unreadable, clock.Elapsed.TotalSeconds)
+        { Parent = parent is { } pw ? FormIdToken.Of(pw) : null, Borrowed = borrowed };
     }
 
     /// <summary>How many records the index files under a cell; 0 for a key that is not a cell.</summary>

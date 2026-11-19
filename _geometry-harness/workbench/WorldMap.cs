@@ -130,7 +130,7 @@ internal sealed class WorldMap
 
     /// <summary>The terrain as a picture, one pixel per sample: height sets the colour (low green-grey to high white)
     /// and a light from the north-west shades the slopes; ground below the worldspace's default water level is blue,
-    /// darker with depth. A square with a cell and no heights is dark grey; a square
+    /// darker with depth; ground lent by the parent worldspace is dimmed. A square with a cell and no heights is dark grey; a square
     /// with no cell is left black. Safe on a background thread; the picture is frozen.</summary>
     internal static BitmapSource Paint(WorldTerrain t)
     {
@@ -163,6 +163,12 @@ internal sealed class WorldMap
                     float deep = Math.Clamp((water - v) / 3000f, 0f, 1f);
                     (r, g2, b) = (58 - 26 * deep, 96 - 40 * deep, 134 - 44 * deep);
                     shade = 1f + (shade - 0.72f) * 0.35f;       // the sea floor's relief shows faintly
+                }
+                if (t.Borrowed.Length > 0 && t.Borrowed[y / t.Samples * t.Width + x / t.Samples])
+                {
+                    float grey = (r + g2 + b) / 3f;             // the parent's ground: paler in colour and darker
+                    (r, g2, b) = ((r + grey) * 0.5f, (g2 + grey) * 0.5f, (b + grey) * 0.5f);
+                    shade *= 0.68f;
                 }
                 px[o] = (byte)Math.Clamp(b * shade, 0, 255); px[o + 1] = (byte)Math.Clamp(g2 * shade, 0, 255); px[o + 2] = (byte)Math.Clamp(r * shade, 0, 255); px[o + 3] = 255;
             }
