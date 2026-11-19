@@ -295,11 +295,11 @@ internal sealed class Script
                 _h.PostMouse(0x202, q1); _wait = 3; break;
             }
             case "expect": Expect(a); break;
-            case "marks": WorkbenchHost.Say(_h.SetLayer(Layer.Marks, a[1] == "on")); _wait = 2; break;
+            case "marks": _h.SetLayer(Layer.Marks, a[1] == "on"); _wait = 2; break;
             case "layer":
             {
                 var (step, why) = ViewLayers.ParseStep(a);
-                WorkbenchHost.Say(step is { } st ? _h.SetLayer(st.Layer, st.On) : "step refused: " + why);
+                if (step is { } st) _h.SetLayer(st.Layer, st.On); else WorkbenchHost.Say("step refused: " + why);
                 _wait = 3; break;
             }
             case "idlecpu": IdleCpu(F(a[1])); break;
