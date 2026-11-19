@@ -41,6 +41,7 @@ public static partial class SelfTestFinalize
         foreach (var folder in L(ka["imports"]).Select(D)) ImportFolder(folder);
         foreach (var stage in L(ka["recordsStage"]).Select(D)) RecordsStageCase(stage);
         RecordsPythonCases();
+        RecordsSuiteCases();
     }
 
     // The capture's stand-in: the canned summary with the capture folder written into its paths.
@@ -136,6 +137,75 @@ public static partial class SelfTestFinalize
                    ?? SameJson("folders", folders, PyOrder.SortedByCodePoint(Strings(c["folders"])).Cast<object?>().ToList())
                    ?? (refusal != null ? null
                        : SameJson("bound", got.bound, c["bound"]) ?? SameJson("outputs", t.Mask(got.outputs.Cast<object?>().ToList()), c["outputs"]));
+        });
+    }
+
+    // The records stage over `arms` open arms, its capture stood in for: the capture's command line after any slot
+    // command, the slot command before it, and the minutes of its deadline.
+    static (List<string> argv, List<string> slot, double minutes) CaptureLaunch(int arms, PyDict? machineMore = null)
+    {
+        using var t = new Temp();
+        var entries = new PyDict();
+        for (int i = 0; i < arms; i++) entries[$"row{i}__{(i == 0 ? "baseline" : $"candidate-{i:00}")}"] = new PyDict { ["status"] = "mcp-only" };
+        t.Write("run/evaluation/ledger.json", PyJson.Utf8(PyJson.Dumps(new PyDict { ["entries"] = entries })));
+        Directory.CreateDirectory(t.At("run/records"));
+        var machine = new PyDict { ["readerCmd"] = "reader", ["python"] = t.Write("python.exe", []) };
+        if (machineMore != null) machine.Update(machineMore);
+        var entry = D(PyJson.Loads("{\"schema\": 1, \"id\": \"m\", \"subject\": {\"plugin\": \"S.esp\", \"mod\": \"MS\"}, "
+            + "\"source\": {\"instance\": \"S:/src\", \"profile\": \"P\"}, \"lab\": {\"instance\": \"L:/lab\", \"game\": \"G:/game\"}}"));
+        var ctx = new RunContext(entry, machine, t.At("run"));
+        List<string> argv = [], slot = [];
+        double minutes = double.NaN;
+        var saved = ChildLaunch.RunJob;
+        ChildLaunch.RunJob = (op, dir, deadline, job) =>
+        {
+            if (job.Id == "records-capture")
+            {
+                var all = job.Argv.ToList();
+                int cut = machine.ContainsKey("heavyPrefix") ? all.IndexOf("--") : -1;
+                slot = all.Take(Math.Max(cut, 0)).ToList();
+                argv = all.Skip(cut + 1).ToList();
+                minutes = deadline is { } d ? Math.Round((d - ChildRunner.Now()) / 60) : double.NaN;
+            }
+            return new ChildResult(job.Id, 0, 0.1, null, 1);
+        };
+        try { StageRecords.Records(ctx, new PyDict(), t.At("run/records")); }
+        catch (Refusal) { }   // the stand-in writes no summary, as the suite's does
+        finally { ChildLaunch.RunJob = saved; }
+        return (argv, slot, minutes);
+    }
+
+    // Two cases of tests/test_evalpipeline.py about the records stage, with the suite's own expected values. Case 58
+    // reads the Python function's text; here the same facts are read from the child the stage starts.
+    static void RecordsSuiteCases()
+    {
+        Case("case 58 the records stage keeps finished arms and scales its deadline", () =>
+        {
+            if (StageRecords.ArmMinutes is < 60 or > 600) return $"a per-arm record deadline is set, got {StageRecords.ArmMinutes}";
+            var (one, _, oneMinutes) = CaptureLaunch(1);
+            var (three, _, threeMinutes) = CaptureLaunch(3);
+            int at = three.IndexOf("--arm-deadline-min");
+            if (!three.Contains("--checkpoints") || at < 0 || three[at + 1] != StageRecords.ArmMinutes.ToString())
+                return "the records stage keeps finished arms and stops a hung arm: " + string.Join(" ", three);
+            return Same("the backstop for one open arm", oneMinutes.ToString(), (StageRecords.ArmMinutes * 1 + 10).ToString())
+                   ?? Same("the backstop scales with the open arms", threeMinutes.ToString(), (StageRecords.ArmMinutes * 3 + 10).ToString())
+                   ?? (threeMinutes == 240 ? "a fixed stage deadline" : null)
+                   ?? Same("one --arm for each open arm", three.Count(x => x == "--arm").ToString(), "3")
+                   ?? Same("and one for one", one.Count(x => x == "--arm").ToString(), "1");
+        });
+        Case("case 59 the records stage takes the machine slot for its backstop", () =>
+        {
+            long want = StageRecords.ArmMinutes * 3 + 10;
+            var (plain, _, plainMinutes) = CaptureLaunch(3);
+            if (plain.Count < 3 || plain[2] != "capture") return "the records stage reads its arms through one child: " + string.Join(" ", plain);
+            var prefix = new PyDict { ["heavyPrefix"] = new List<object?> { "slot.exe", "hold", "--lock", "{lock}", "--purpose", "{purpose}", "--max-min", "5" } };
+            var (_, slot, slotMinutes) = CaptureLaunch(3, prefix);
+            int hold = slot.IndexOf("--max-min");
+            return (slot.Count > 0 && slot[0] == "slot.exe" ? null : "the records stage takes the machine slot: its capture was not started through the slot command")
+                   ?? Same("the slot is held for the stage's backstop", hold < 0 ? null : slot[hold + 1], want.ToString())
+                   ?? Same("the slot is asked for by the stage's purpose", slot[slot.IndexOf("--purpose") + 1], "evalpipeline m records")
+                   ?? Same("the stage's backstop", plainMinutes.ToString(), want.ToString())
+                   ?? Same("under the slot the deadline sits past its waits and its hold", slotMinutes.ToString(), (240 + want + ChildLaunch.HoldMarginMin).ToString());
         });
     }
 
