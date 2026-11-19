@@ -8,7 +8,7 @@ namespace Workbench;
 /// <summary>One drawn frame: when it was presented, how long since the previous present, and where the time went.</summary>
 internal readonly record struct FrameSample(
     long Frame, double TMs, double IntervalMs, double RenderMs, double SwapMs, double GpuMs, string Loop, bool Resumed,
-    string Dirty, double DirtyAgeMs, int Messages, int Gc0, int Gc1, int Gc2, float Yaw, float Pitch, float EyeX, float EyeY, float EyeZ, int W, int H);
+    string Dirty, double DirtyAgeMs, double QueuedMs, int Messages, int Gc0, int Gc1, int Gc2, float Yaw, float Pitch, float EyeX, float EyeY, float EyeZ, int W, int H);
 
 /// <summary>Frame intervals summed up: the median, the 1% low (the mean of the slowest 1% of intervals, at least one),
 /// the worst, and how many were longer than 25 ms and 50 ms.</summary>
@@ -32,7 +32,7 @@ internal readonly record struct IntervalSummary(int Count, double TotalMs, doubl
 /// (<c>WB_FPS_LOG</c>, the script's <c>fpslog</c> step, the state tools' <c>frame_log</c> verb).</summary>
 internal sealed class FrameStats
 {
-    internal const string CsvHeader = "frame,t_ms,interval_ms,render_ms,swap_ms,gpu_ms,loop,resumed,dirty,dirty_age_ms,messages,gc0,gc1,gc2,yaw,pitch,eye_x,eye_y,eye_z,fb_w,fb_h";
+    internal const string CsvHeader = "frame,t_ms,interval_ms,render_ms,swap_ms,gpu_ms,loop,resumed,dirty,dirty_age_ms,queued_ms,messages,gc0,gc1,gc2,yaw,pitch,eye_x,eye_y,eye_z,fb_w,fb_h";
     const double WindowMs = 2000;
 
     readonly Queue<FrameSample> _recent = new();
@@ -71,7 +71,7 @@ internal sealed class FrameStats
     }
 
     internal static string Csv(FrameSample s, double t) => string.Create(CultureInfo.InvariantCulture,
-        $"{s.Frame},{t:0.000},{s.IntervalMs:0.000},{s.RenderMs:0.000},{s.SwapMs:0.000},{(double.IsNaN(s.GpuMs) ? "" : s.GpuMs.ToString("0.000", CultureInfo.InvariantCulture))},{s.Loop},{(s.Resumed ? 1 : 0)},{s.Dirty},{s.DirtyAgeMs:0.000},{s.Messages},{s.Gc0},{s.Gc1},{s.Gc2},{s.Yaw:0.###},{s.Pitch:0.###},{s.EyeX:0.#},{s.EyeY:0.#},{s.EyeZ:0.#},{s.W},{s.H}");
+        $"{s.Frame},{t:0.000},{s.IntervalMs:0.000},{s.RenderMs:0.000},{s.SwapMs:0.000},{(double.IsNaN(s.GpuMs) ? "" : s.GpuMs.ToString("0.000", CultureInfo.InvariantCulture))},{s.Loop},{(s.Resumed ? 1 : 0)},{s.Dirty},{s.DirtyAgeMs:0.000},{(double.IsNaN(s.QueuedMs) ? "" : s.QueuedMs.ToString("0.000", CultureInfo.InvariantCulture))},{s.Messages},{s.Gc0},{s.Gc1},{s.Gc2},{s.Yaw:0.###},{s.Pitch:0.###},{s.EyeX:0.#},{s.EyeY:0.#},{s.EyeZ:0.#},{s.W},{s.H}");
 
     /// <summary>The readout's words over the last two seconds, or "idle" when no frame was drawn in the last half second.</summary>
     internal string Readout(double nowMs, string loop, bool vsync)

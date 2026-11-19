@@ -208,10 +208,10 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     // ---- the window ---------------------------------------------------------------------------------------------------
     NativeGlHost _view = null!;
     bool _vsync = Environment.GetEnvironmentVariable("WB_VSYNC") != "off";
-    // The frame loop. Default "demand": up to 60 frames a second, paced by a clock (on this machine WPF's own frame tick
-    // ran at 31 ms with the view hosted and the child window's swap interval did not block, stage 2 receipts), and only
-    // while something changed: input, the camera, the edit session, the script, the view's size or a repaint. "cap60":
-    // the same pacing, drawing every frame whether or not anything changed (stage 2's loop). "free": as fast as it can
+    // The frame loop. Default "demand": one frame per desktop composition (FramePacer: the child window's swap interval
+    // does not block, and WPF's own frame tick ran at about 30 ms with the view hosted), and only while something
+    // changed: input, the camera, a held fly key, the edit session, the script, the view's size or a repaint. "cap60":
+    // the same pacing, drawing at every composition whether or not anything changed. "free": as fast as it can
     // (measurement). "wpf-tick": once per WPF frame tick.
     readonly string _loop = Environment.GetEnvironmentVariable("WB_LOOP") is { Length: > 0 } lp ? lp : "demand";
     bool _dirty = true, _parked;
@@ -223,11 +223,12 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     {
         _dirty = true;
         if (_dirtyWhy is null) { _dirtyWhy = why; _dirtyAt = Clock.Elapsed.TotalMilliseconds; }
-        if (_parked && _alive) { _parked = false; _resumed = true; _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background); }
+        if (!_alive) return;
+        if (_parked) { _parked = false; _resumed = true; }
+        _pacer?.Request();
     }
     string? _dirtyWhy; double _dirtyAt; bool _resumed, _drewOnce; int _messages;
-    bool _freeLoop => _loop != "wpf-tick";
-    double _nextFrame;
+    FramePacer? _pacer;
 
     DispatcherFrame? _frameLoop;
     static bool _launchLogStarted;
@@ -294,7 +295,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             Shell.SwitchClock = null;
         }
 
-        EventHandler tick = (_, _) => { TickStamps?.Add(Clock.Elapsed.TotalMilliseconds); if (!_freeLoop && _alive) Frame(); };
+        EventHandler tick = (_, _) => { TickStamps?.Add(Clock.Elapsed.TotalMilliseconds); if (_loop == "wpf-tick" && _alive) Frame(); };
         System.Windows.Media.CompositionTarget.Rendering += tick;
         _alive = true;
         void Start()
@@ -303,7 +304,10 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             if (_view.MakeCurrent())
                 Say($"GL: {GL.GetString(StringName.Vendor)} | {GL.GetString(StringName.Renderer)} | {GL.GetString(StringName.Version)}; "
                     + $"swap interval {(_vsync ? 1 : 0)} set: {_view.SetSwapInterval(_vsync ? 1 : 0)}");
-            if (_freeLoop) _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background);
+            if (_loop == "free") _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background);
+            else if (_loop != "wpf-tick") { _pacer = new FramePacer(_window.Dispatcher, PacedFrame); _pacer.Request(); }
+            _sizeWatch ??= new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
+                (_, _) => { if (_view.ClientSize() != (_fbW, _fbH)) Invalidate("resize"); }, _window.Dispatcher);
             ShowFps(_showFps);
             if (!Frames.Logging && !_launchLogStarted && Environment.GetEnvironmentVariable("WB_FPS_LOG") is { Length: > 0 } fl)
             { _launchLogStarted = true; Say(Frames.StartLog(fl, Now)); }
@@ -320,6 +324,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _alive = false;
         _sizeWatch?.Stop();
         _fpsTimer?.Stop();
+        _pacer?.Dispose();
+        if (_pacer?.Fallback is { } fb) Say(fb);
         if (Shell.Closed && Frames.Logging) Say(Frames.StopLog());
         if (Shell.Closed && Environment.GetEnvironmentVariable("WB_DUMP") is { Length: > 0 } dump) Shell.Dump(this, dump);
         System.Windows.Media.CompositionTarget.Rendering -= tick;
@@ -349,24 +355,22 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     static unsafe NativeGlHost NewView(OpenTK.Windowing.Desktop.NativeWindow gw) =>
         new((IntPtr)GLFW.GetWin32Window(gw.WindowPtr), GLFW.GetWGLContext(gw.WindowPtr));
 
+    /// <summary>The paced loop's frame: drawn when something changed (or every composition under cap60); after it,
+    /// another is asked for only while something still wants frames, else the loop parks until <see cref="Invalidate"/>.</summary>
+    void PacedFrame()
+    {
+        if (!_alive) return;
+        if (_loop == "demand" && !WantsFrame()) { _parked = true; return; }
+        Frame();
+        if (_loop == "cap60" || WantsFrame()) _pacer?.Request(); else _parked = true;
+    }
+    bool WantsFrame() => _dirty || _held.Count > 0 || (_script?.WantsFrames ?? false) || _view.ClientSize() != (_fbW, _fbH);
+
+    /// <summary>The "free" loop: a frame as soon as the dispatcher is free, always (a measurement of the draw alone).</summary>
     void FreeFrame()
     {
         if (!_alive) return;
-        if (_loop == "demand" && !_dirty && !(_script?.WantsFrames ?? false) && _view.ClientSize() == (_fbW, _fbH))
-        {
-            // Nothing to draw: park until Invalidate, with a slow timer that only watches for a resize.
-            _parked = true;
-            _sizeWatch ??= new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
-                (_, _) => { if (_parked && _view.ClientSize() != (_fbW, _fbH)) Invalidate("resize"); }, _window.Dispatcher);
-            return;
-        }
-        if (_loop is "cap60" or "demand")
-        {
-            double now = Clock.Elapsed.TotalMilliseconds;
-            if (now < _nextFrame - 1.5) { System.Threading.Thread.Sleep(1); }
-            else { _nextFrame = Math.Max(_nextFrame + 1000.0 / 60.0, now - 5); Frame(); }
-        }
-        else Frame();
+        Frame();
         if (_alive) _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background);
     }
 
@@ -395,8 +399,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 { _yaw = (_yaw + (p.X - l.X) * 0.15f + 360f) % 360f; _pitch = Math.Clamp(_pitch + (p.Y - l.Y) * 0.15f, -89f, 89f); _look = p; SyncCamera(); }
                 else OnMove(p);
                 break;
-            case 0x0008: _viewState.OnFocusLost(); break;                         // WM_KILLFOCUS: a held key's release will not come
+            case 0x0008: _viewState.OnFocusLost(); _held.Clear(); break;          // WM_KILLFOCUS: a held key's release will not come
             case 0x101:                                                      // WM_KEYUP
+                _held.Remove((int)wParam.ToInt64());
                 _viewState.OnKey((int)wParam.ToInt64(), down: false, repeat: false);
                 break;
             case 0x100:                                                      // WM_KEYDOWN
@@ -405,15 +410,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 if (_viewState.OnKey(vk, down: true, repeat: (y & 0x4000) != 0)) break;
                 bool ctrl = (GetKeyState(0x11) & 0x8000) != 0, shift = (GetKeyState(0x10) & 0x8000) != 0;
                 if (ctrl && vk == 'Z') { if (!ReadOnly) { _session.Undo(); AfterStage(); } break; }
-                float step = shift ? 300f : 60f;
-                var right = Vector3.Normalize(Vector3.Cross(Forward(), Vector3.UnitZ));
-                if (vk == 'W') _eye += Forward() * step;
-                if (vk == 'S') _eye -= Forward() * step;
-                if (vk == 'A') _eye -= right * step;
-                if (vk == 'D') _eye += right * step;
-                if (vk == 'E') _eye += Vector3.UnitZ * step;
-                if (vk == 'Q') _eye -= Vector3.UnitZ * step;
-                SyncCamera();
+                // a fly key is held, not stepped: the eye moves by the clock in each frame while it is down (Fly)
+                if (FlyKeys.Contains((char)vk) && _held.Add(vk) && _held.Count == 1) _flyAt = Now;
                 break;
             }
         }
@@ -427,6 +425,37 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     Vector2? _look;
 
+    // ---- fly: W A S D along the view, E Q up and down, by the clock while held (Shift: five times as fast) ----------
+    const string FlyKeys = "WASDQE";
+    internal const float FlySpeed = 1800f;                           // units a second; the old key-repeat steps made about this
+    readonly HashSet<int> _held = new();
+    double _flyAt;
+
+    /// <summary>Move the eye for the time since the last fly move, for each fly key held down; at most a tenth of a second at once.</summary>
+    void Fly()
+    {
+        if (_held.Count == 0) return;
+        double now = Now;
+        float dt = (float)Math.Min(0.1, (now - _flyAt) / 1000.0); _flyAt = now;
+        bool shift = (GetKeyState(0x10) & 0x8000) != 0;
+        _eye += FlyMove(_held, Forward(), (shift ? 5f : 1f) * FlySpeed * dt);
+        SyncCamera();
+    }
+
+    /// <summary>The eye's move for the keys held: along the view, sideways level with the ground, and up or down.</summary>
+    internal static Vector3 FlyMove(IReadOnlySet<int> held, Vector3 forward, float distance)
+    {
+        var right = Vector3.Normalize(Vector3.Cross(forward, Vector3.UnitZ));
+        var m = Vector3.Zero;
+        if (held.Contains('W')) m += forward;
+        if (held.Contains('S')) m -= forward;
+        if (held.Contains('D')) m += right;
+        if (held.Contains('A')) m -= right;
+        if (held.Contains('E')) m += Vector3.UnitZ;
+        if (held.Contains('Q')) m -= Vector3.UnitZ;
+        return m.LengthSquared() < 1e-6f ? Vector3.Zero : Vector3.Normalize(m) * distance;
+    }
+
     Script? _script;
     internal Stopwatch Clock => ProcessClock;
     internal Action? AfterFrame;
@@ -436,7 +465,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal static double Now => ProcessClock.Elapsed.TotalMilliseconds;
     static readonly Stopwatch ProcessClock = Stopwatch.StartNew();
     static bool _showFps = FrameStats.ShowByDefault;
-    readonly TextBlock _fpsText = new() { Margin = new Thickness(8, 6, 8, 2), MinWidth = 330, FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+    readonly TextBlock _fpsText = new() { Margin = new Thickness(8, 6, 8, 2), Width = 480, TextTrimming = TextTrimming.CharacterEllipsis, FontFamily = new System.Windows.Media.FontFamily("Consolas"),
                                           ToolTip = "frame rate of the 3D view over the last two seconds: frames a second, the median frame time, the mean of the slowest 1%, the worst" };
     DispatcherTimer? _fpsTimer;
 
@@ -482,6 +511,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         bool resumed = _resumed || !_drewOnce;
         _dirtyWhy = null; _messages = 0; _resumed = false; _drewOnce = true;
         (_fbW, _fbH) = _view.ClientSize();
+        Fly();
         if (_landOnFirstFrame is { } land)
         {
             _landOnFirstFrame = null;
@@ -514,7 +544,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var t2 = Clock.Elapsed.TotalMilliseconds;
         double prev = Frames.LastPresentMs;
         Frames.Add(new FrameSample(_frame, t2, prev < 0 ? 0 : t2 - prev, renderMs, t2 - t1, gpuMs,
-            _loop + (_script?.WantsFrames == true ? "+script" : ""), resumed || prev < 0, dirtyWhy, dirtyAge, messages,
+            _loop + (_script?.WantsFrames == true ? "+script" : ""), resumed || prev < 0, dirtyWhy, dirtyAge, _pacer is { } pc ? t0 - pc.PostedAt : double.NaN, messages,
             GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), _yaw, _pitch, _eye.X, _eye.Y, _eye.Z, W, H));
         AfterFrame?.Invoke();
     }

@@ -83,7 +83,7 @@ public class FrameStatsTests
     }
 
     static FrameSample Sample(long n, double t, double iv, bool resumed) =>
-        new(n, t, iv, 2, 1, double.NaN, "demand", resumed, "camera", 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100);
+        new(n, t, iv, 2, 1, double.NaN, "demand", resumed, "camera", 0, double.NaN, 1, 0, 0, 0, 0, 0, 0, 0, 0, 100, 100);
 
     [Fact]
     public void Motion_steps_parse_their_words_and_refuse_bad_ones_in_a_sentence()
@@ -127,5 +127,19 @@ public class FrameStatsTests
         Assert.Equal(1 + 23, downs.Count);                    // 250 ms then every 33.3 ms until 1000 ms: 23 repeats
         Assert.Equal(0x101, m[^1].Msg);
         Assert.Equal('W', (int)m[^1].WParam);
+    }
+
+    [Fact]
+    public void A_held_fly_key_moves_the_eye_by_its_speed_times_the_time_and_two_keys_do_not_move_faster()
+    {
+        var fwd = System.Numerics.Vector3.Normalize(new System.Numerics.Vector3(0, 1, -1));
+        var w = WorkbenchHost.FlyMove(new HashSet<int> { 'W' }, fwd, 30f);
+        Assert.Equal(30f, w.Length(), 3);
+        Assert.True(w.Z < 0);                                                        // along the view, which looks down
+        var d = WorkbenchHost.FlyMove(new HashSet<int> { 'D' }, fwd, 30f);
+        Assert.Equal(new System.Numerics.Vector3(30, 0, 0), d);                     // sideways stays level
+        Assert.Equal(30f, WorkbenchHost.FlyMove(new HashSet<int> { 'W', 'D' }, fwd, 30f).Length(), 3);
+        Assert.Equal(System.Numerics.Vector3.Zero, WorkbenchHost.FlyMove(new HashSet<int> { 'W', 'S' }, fwd, 30f));
+        Assert.Equal(new System.Numerics.Vector3(0, 0, 30), WorkbenchHost.FlyMove(new HashSet<int> { 'E' }, fwd, 30f));
     }
 }
