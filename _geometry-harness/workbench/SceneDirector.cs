@@ -38,6 +38,8 @@ internal sealed record SceneRequest(LoadOrderSpec Order, string Cell, string? La
 {
     /// <summary>Called on the UI thread once the scene for this request is shown.</summary>
     internal Action? Shown { get; init; }
+    /// <summary>Build the cell again even when it is the scene shown (a layer it was built without was asked for).</summary>
+    internal bool Reload { get; init; }
 }
 
 /// <summary>The one place a scene is asked for. A request reaches viewprobe in one of three ways: the idle loop in
@@ -84,7 +86,7 @@ internal static class SceneDirector
             if (h.Session.Pending.Count > 0)
                 throw new InvalidOperationException($"opening cell {req.Cell} would drop {h.Session.Pending.Count} staged edit(s); write or undo them first.");
             bool same = Order is not null && Order.Key == req.Order.Key;
-            if (same && h.ReadOnly == req.ReadOnly && (string.Equals(h.SceneCell, req.Cell, StringComparison.OrdinalIgnoreCase)
+            if (same && !req.Reload && h.ReadOnly == req.ReadOnly && (string.Equals(h.SceneCell, req.Cell, StringComparison.OrdinalIgnoreCase)
                                                     || string.Equals(h.SceneLabel, req.Cell, StringComparison.OrdinalIgnoreCase)))
             {
                 Showing = req;
@@ -97,7 +99,7 @@ internal static class SceneDirector
             string said;
             if (same)
             {
-                InteractiveViewer.CellRequest = req.Cell; _next = req;
+                InteractiveViewer.CellRequest = req.Cell; InteractiveViewer.CellRequestNav = ViewLayers.NavFor(req.Order); _next = req;
                 said = $"loading cell {req.Cell} ({req.Why}); picking another cell stops this load.";
             }
             else
@@ -114,8 +116,8 @@ internal static class SceneDirector
         {
             // a build is running: it is abandoned at its next tick, for this request
             bool same = Order is not null && Order.Key == req.Order.Key;
-            if (same) { InteractiveViewer.CellRequest = req.Cell; _next = req; _pending = null; }
-            else { InteractiveViewer.CellRequest = null; _next = null; _pending = req; }
+            if (same) { InteractiveViewer.CellRequest = req.Cell; InteractiveViewer.CellRequestNav = ViewLayers.NavFor(req.Order); _next = req; _pending = null; }
+            else { InteractiveViewer.CellRequest = null; InteractiveViewer.CellRequestNav = null; _next = null; _pending = req; }
             _abandon = true; Shell.ReadOnlyScene = req.ReadOnly;
             Shell.PendingLand = req.LandOn; Shell.SwitchCell = req.Cell; Shell.SwitchClock = Stopwatch.StartNew();
             var said = $"stopping the load of cell {BuildingCell} to open cell {req.Cell} ({req.Why}).";
@@ -149,7 +151,7 @@ internal static class SceneDirector
         Directory.CreateDirectory(work);
         var wl = new HarnessShared.WorklistFile("workbench: the cell asked for",
             new[] { new HarnessShared.WorklistCell(req.Cell, new[] { new HarnessShared.WorklistShot(
-                "placeholder pose: the workbench frames the camera once the cell is built", new[] { 0f, 0f, 0f }) }) }.ToList());
+                "placeholder pose: the workbench frames the camera once the cell is built", new[] { 0f, 0f, 0f }) { Nav = ViewLayers.NavFor(req.Order) } }) }.ToList());
         var path = Path.Combine(work, "workbench-request-worklist.json");
         HarnessShared.WorklistIo.Write(path, wl);
         return new[] { "--worklist", path }.Concat(req.Order.Args()).Concat(new[] { "--out", work }).ToArray();
@@ -202,7 +204,7 @@ internal static class SceneDirector
         if (_abandon || Shell.Closed)
         {
             _abandon = false;
-            if (Shell.Closed) { InteractiveViewer.CellRequest = null; _next = null; }
+            if (Shell.Closed) { InteractiveViewer.CellRequest = null; InteractiveViewer.CellRequestNav = null; _next = null; }
             if (_next is { } n) { BuildingCell = n.Cell; BuildStarted(); }
             throw new BuildAbandoned();
         }

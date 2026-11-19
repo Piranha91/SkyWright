@@ -25,7 +25,7 @@ internal sealed class StateTools
         "runs again on the patch's cell and says whether the open conflict is resolved and whether a new one appeared. " +
         "Positions are Skyrim units (about 70 units to a metre); +X is east, +Y is north, +Z is up.";
 
-    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world" };
+    static readonly string[] Parts = { "bundle", "conflicts", "findings", "selection", "pending", "recheck", "repair", "launcher", "view", "decisions", "scenes", "context", "placements", "scene", "results", "world", "layers" };
     static readonly string[] DefaultParts = { "selection", "pending", "recheck" };
     /// <summary>The verbs that stage or write an edit: refused on a read-only scene.</summary>
     static readonly string[] EditVerbs = { "stage", "undo", "commit", "recheck", "revert", "drop", "move_with", "find_clear", "choose" };
@@ -53,6 +53,7 @@ internal sealed class StateTools
                      "scene (what the 3D view shows or is loading: the cell, the load order it is built on, read-only or not, and the last build's time and the longest the window waited during it). " +
                      "results (the Results tab: the open evaluation's pairs with their counts, the choices made, and the rows listed, each with its group, values and place; limit and offset page the rows; the open row with its setup, cell and what was said). " +
                      "world (the World tab: the browsed load order, its worldspaces, the search's cells, and with `cell` that cell's persistent and temporary records, each with type, EditorID, base, FormKey and winning plugin). " +
+                     "layers (the 3D view's toolbar: each layer, whether this scene can draw it and why not, whether the window has it on, and whether it is drawn now). " +
                      "Default: selection, pending, recheck.")]
             string[]? project = null,
         [Description("conflicts: how many rows to list (default 20).")] int limit = 20,
@@ -100,6 +101,7 @@ internal sealed class StateTools
             if (parts.Contains("scene")) d["scene"] = SceneDirector.State();
             if (parts.Contains("results")) d["results"] = ResultsView.State(limit, offset);
             if (parts.Contains("world")) d["world"] = WorldView.State(cell, limit, offset);
+            if (parts.Contains("layers")) d["layers"] = Shell.Current is { } lh ? lh.Layers.State() : new { available = false, why = "no scene is open" };
             return Answer(d);
         });
     }
@@ -127,6 +129,7 @@ internal sealed class StateTools
                  "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
                  "results (the Results tab of an opened evaluation: `pair`, `groups`, `categories`, `setup` and `search` choose what is listed; `row` opens a row: its values, and its cell in the setup before or after the patch with the camera on its object). " +
                  "world (the World tab of an opened load order: `search` filters its cells; `cell` opens a cell; `ref` opens the cell a record is in and lands on it; read-only). " +
+                 "layer (`layer`: one of the 3D view's layers, navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics or marks; `show` true or false: as the toolbar's button does; a layer this scene cannot draw is refused with the reason, and navmesh in a cell opened without it opens the cell again with it). " +
                  "frame_log (`path`: write one CSV row per frame of the 3D view to that file; with no path, stop the log and say its summary: frames, median, 1% low and worst frame time). " +
                  "open (`path`: open a folder or file in the window, as its Open control does; what it is is detected from the names on disk, and anything the window does not open is refused in one sentence). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
@@ -172,12 +175,15 @@ internal sealed class StateTools
         [Description("results: which categories of patch change to list, any of 3, 4, 5.")] int[]? categories = null,
         [Description("results: which setup a row's scene is built on: own (each row's own), before or after the patch.")] string? setup = null,
         [Description("results: the key of the row to open, as workbench_state's results list it (pair|f3, pair|e12, pair|o7).")] string? row = null,
-        [Description("world: the FormKey of the cell to open.")] string? cell = null)
+        [Description("world: the FormKey of the cell to open.")] string? cell = null,
+        [Description("layer: the layer to switch, by its name (navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks).")] string? layer = null,
+        [Description("layer: true shows the layer, false hides it.")] bool? show = null)
         => hub.OnUi(async () =>
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
             if (v is "results" or "world") return OpenInputsTools.Act(v, pair, groups, categories, setup, search, row, cell, @ref);
             if (hub.Surface.Scene is { ReadOnly: true } && EditVerbs.Contains(v)) return Refuse(WorkbenchHost.ReadOnlyWhy);
+            if (v == "layer") return LayerOnUi(layer, show);
             if (v == "frame_log")
                 return Answer(new { said = path is { Length: > 0 } ? WorkbenchHost.Frames.StartLog(path, WorkbenchHost.Now) : WorkbenchHost.Frames.StopLog(),
                                     readout = Shell.Current?.FpsReadout ?? "no scene is open" });
@@ -205,6 +211,17 @@ internal sealed class StateTools
     {
         try { SessionFile.Save(s); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { s.SaveRefusal = $"the session file could not be written ({ex.Message})."; }
+    }
+
+    /// <summary>The <c>layer</c> verb: the toolbar's button, by name.</summary>
+    static CallToolResult LayerOnUi(string? name, bool? show)
+    {
+        if (Shell.Current is not { } h) return Refuse("no scene is open, so there is no view to switch a layer of.");
+        var (l, why) = ViewLayers.Parse(name);
+        if (l is null) return Refuse(why!);
+        if (show is not { } on) return Refuse("layer needs show: true to show the layer or false to hide it.");
+        try { var said = h.SetLayer(l.Value, on); Shell.SetBanner(said); return Answer(new { said, layers = h.Layers.State() }); }
+        catch (InvalidOperationException ex) { return Refuse(ex.Message); }
     }
 
     static object ViewJson(ViewState? v) => v is null ? new { available = false } : new

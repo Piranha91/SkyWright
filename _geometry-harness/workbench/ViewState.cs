@@ -20,6 +20,7 @@ internal sealed class ViewState
     readonly HashSet<GlMesh> _hiddenParts = new();
     readonly List<FormKey> _seeThrough = new();
     readonly HashSet<GlMesh> _meshesHidden = new();          // every mesh this state switched off, so restore switches back only those
+    readonly HashSet<GlMesh> _layerHidden = new();           // meshes the toolbar's layer switches hold off, whatever restore does
     List<float>? _tint;
 
     /// <summary>Bumped on every change the overlays draw from, so a drawer rebuilds only when it changed.</summary>
@@ -94,7 +95,21 @@ internal sealed class ViewState
         return list;
     }
 
-    void HideMeshes(IEnumerable<GlMesh> meshes) { foreach (var m in meshes) { if (!m.IsHiddenByHost) { m.IsHiddenByHost = true; _meshesHidden.Add(m); } } }
+    void HideMeshes(IEnumerable<GlMesh> meshes) { foreach (var m in meshes) if (_meshesHidden.Add(m)) m.IsHiddenByHost = true; }
+
+    /// <summary>Show a mesh again unless the other owner of the host switch (a hide here, or a layer switched off) still holds it.</summary>
+    void Unhide(GlMesh m) => m.IsHiddenByHost = _meshesHidden.Contains(m) || _layerHidden.Contains(m);
+
+    /// <summary>The toolbar's layer switch: these meshes stay hidden while their layer is off, and restore does not show them.</summary>
+    internal void SetLayerHidden(IEnumerable<GlMesh> meshes, bool hidden)
+    {
+        foreach (var m in meshes)
+        {
+            if (hidden) { _layerHidden.Add(m); m.IsHiddenByHost = true; }
+            else if (_layerHidden.Remove(m)) Unhide(m);
+        }
+        Version++;
+    }
 
     RefOcclusion Drawn(FormKey key) => _session.IsDrawn(key) ? _session.RefOf(key)
         : _drawn().FirstOrDefault(r => r.Ref.RefKey == key && r.Meshes.Count > 0) ?? throw new InvalidOperationException($"{key} is not a drawn reference in this scene, so there is nothing of it to hide.");
@@ -132,7 +147,7 @@ internal sealed class ViewState
             if (hit is null)
             {
                 // only the meshes this call hid: a part hidden before stays hidden
-                foreach (var m in _meshesHidden.Where(m => !hiddenBefore.Contains(m)).ToList()) { m.IsHiddenByHost = false; _meshesHidden.Remove(m); }
+                foreach (var m in _meshesHidden.Where(m => !hiddenBefore.Contains(m)).ToList()) { _meshesHidden.Remove(m); Unhide(m); }
                 foreach (var k in hidNow) _hidden.Remove(k);
                 var miss = $"the centre ray does not reach {subject}, so nothing was hidden; point the view at it first";
                 Say(miss);
@@ -207,7 +222,9 @@ internal sealed class ViewState
 
     internal string Restore()
     {
-        foreach (var m in _meshesHidden) m.IsHiddenByHost = false;
+        var shown = _meshesHidden.ToList();
+        _meshesHidden.Clear();
+        foreach (var m in shown) Unhide(m);
         int n = _hidden.Count + _seeThrough.Count + _hiddenParts.Count;
         _meshesHidden.Clear(); _hidden.Clear(); _hiddenParts.Clear(); _seeThrough.Clear(); _tint = null; _candidates.Clear();
         var said = n == 0 ? "nothing was hidden or see-through" : "visibility restored: everything is drawn as the scene built it";

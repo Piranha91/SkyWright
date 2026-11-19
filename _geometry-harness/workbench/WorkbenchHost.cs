@@ -89,6 +89,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         renderer.Overlays.Add(_marks);
         if (!ReadOnly) renderer.Overlays.Add(_gizmo);     // a read-only scene has no move handles
         renderer.Overlays.Insert(0, _tints);
+        BuildLayers(renderer);
         _input = new ViewInput(_session, _gizmo, Project, RayAt, PickAt, () => _gizmo.FitTo(_eye))
         {
             Holding = () => _viewState.ShowingOriginal,
@@ -149,7 +150,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     }
 
     /// <summary>What a click can hit: a drawn reference or the terrain, not one the view has hidden.</summary>
-    internal static bool Pickable(PickShape s) => !(s.Mesh is { IsRendering: false } or { IsHiddenByHost: true }) && s.Kind is PickKind.Ref or PickKind.Terrain;
+    internal static bool Pickable(PickShape s) => Pickable(s, ViewLayers.IsOn(Layer.Terrain));
+    internal static bool Pickable(PickShape s, bool terrainShown) => !(s.Mesh is { IsRendering: false } or { IsHiddenByHost: true })
+        && (s.Kind is PickKind.Ref || s.Kind is PickKind.Terrain && terrainShown);
 
     // ---- input: a plain click selects; a drag on the handle edits (ViewInput) ------------------------------------
     ViewInput _input = null!;
@@ -237,19 +240,16 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     void RunWindow()
     {
         var undo = new Button { Content = "Undo (Ctrl+Z)", Margin = new Thickness(4) };
-        var marksBtn = new Button { Content = "Marks", Margin = new Thickness(4), ToolTip = ConflictMarks.Legend };
-        marksBtn.Click += (_, _) => { _marks.Enabled = !_marks.Enabled; UpdateStatus(); Invalidate("marks"); };
         var dry = new Button { Content = "Dry run", Margin = new Thickness(4) };
         var write = new Button { Content = "Write patch", Margin = new Thickness(4) };
         undo.Click += (_, _) => { _session.Undo(); AfterStage(); };
         dry.Click += async (_, _) => await CommitAsync(dryRun: true, "Workbench");
         write.Click += async (_, _) => await CommitAsync(dryRun: false, "Workbench");
         // a fixed height, so the 3D view keeps its size whatever the edits list, the status line or the buttons hold
-        var bar = new DockPanel { LastChildFill = true, Height = ReadOnly ? 104 : 240 };
+        var bar = new DockPanel { LastChildFill = true, Height = ReadOnly ? 134 : 270 };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
         buttons.Children.Add(_fpsText);
         buttons.Children.Add(FpsToggle());
-        buttons.Children.Add(marksBtn);
         if (!ReadOnly) { buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write); }
         DockPanel.SetDock(buttons, Dock.Right);
         var tools = ToolsRow();
@@ -262,6 +262,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         Grid.SetColumn(context, 1);
         pendingPanel.Children.Add(edits); pendingPanel.Children.Add(context);
         DockPanel.SetDock(pendingPanel, Dock.Bottom);
+        _layerBar = new LayerBar(() => _layers, (l, on) => { try { Shell.SetBanner(SetLayer(l, on)); } catch (InvalidOperationException ex) { Shell.SetBanner(ex.Message); _layerBar?.Refresh(); } });
+        DockPanel.SetDock(_layerBar.Element, Dock.Top);
+        bar.Children.Add(_layerBar.Element);
         bar.Children.Add(tools);
         if (!ReadOnly) bar.Children.Add(pendingPanel);
         bar.Children.Add(buttons); bar.Children.Add(_status);
@@ -312,6 +315,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             if (!Frames.Logging && !_launchLogStarted && Environment.GetEnvironmentVariable("WB_FPS_LOG") is { Length: > 0 } fl)
             { _launchLogStarted = true; Say(Frames.StartLog(fl, Now)); }
             if (Shell.PendingLand is { } land) { Shell.PendingLand = null; _landOnFirstFrame = land; }
+            else if (ViewLayers.TakePose(SceneDirector.Showing?.Cell) is { } kept) SetPose(kept.Eye, kept.Yaw, kept.Pitch);   // the same cell again, for a layer
             else if (SceneDirector.Showing is not null) FrameScene();   // a cell asked for with no reference to land on
         }
         SyncCamera();
@@ -748,6 +752,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             worklistCell = _opt.WorklistCell, drawnRefs = DrawnAll().Count(),
             walkedRefs = _opt.RefOutcomes?.Count,
             walkOutcomes = _opt.RefOutcomes?.GroupBy(x => x.Value.Outcome).ToDictionary(g => g.Key, g => g.Count()),
+            layers = _layers.State(),
             marks = new { enabled = _marks.Enabled, selected = _marks.Selected?.Ref.RefKey.ToString(), partner = _marks.Partner?.Ref.RefKey.ToString(), partnerNote = PartnerNote, legend = ConflictMarks.Legend },
             drawnRefKeys = DrawnAll().Select(r => r.Ref.RefKey.ToString()).OrderBy(k => k, StringComparer.Ordinal),
             selected = _session.Selected?.ToString(), staged = _session.Pending.Count,
@@ -774,6 +779,69 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     {
         var c = PickAt(new Vector2(W * 0.5f, H * 0.5f));
         return c?.Shape is { Kind: PickKind.Ref } sh ? sh.Ref.RefKey.ToString() : c is null ? null : c.Shape.Kind.ToString();
+    }
+
+    // ---- the view's layers (ViewLayers.cs): what this scene can draw, set to the window's choice ---------------------
+    SceneLayers _layers = null!;
+    LayerBar? _layerBar;
+    CellBorders? _borders;
+    MarkerGizmos? _markerGizmos;
+    internal SceneLayers Layers => _layers;
+    internal CellBorders? Borders => _borders;
+    internal MarkerGizmos? MarkerPlaces => _markerGizmos;
+
+    /// <summary>Read what this scene was built with, add the layers' own overlays, and set each layer to the window's choice.</summary>
+    void BuildLayers(GlRenderer renderer)
+    {
+        string navEntry = _opt.NavMode;                  // the mode the scene was built to show its navmesh in
+        if (!_opt.Interior && _opt.TerrainHeightAt is { } height && _opt.LandCells.Count > 0)
+        {
+            _borders = new CellBorders(_opt.LandCells, _opt.Grid, height);
+            renderer.Overlays.Insert(1, _borders);
+        }
+        // a plane is a marker too, and the planes layer draws it as what it is
+        var planes = _opt.PickShapes.Where(s => s.Kind == PickKind.Plane && s.Plane is not null).Select(s => s.Plane!.Key).ToHashSet();
+        var places = (_opt.UndrawnAt ?? new Dictionary<FormKey, (Vec3, Vec3)>()).Where(kv => !planes.Contains(kv.Key))
+            .Select(kv => (kv.Key, kv.Value.Position, kv.Value.Rotation, _opt.RefOutcomes is { } ro && ro.TryGetValue(kv.Key, out var o) && o.Outcome == "marker")).ToList();
+        _markerGizmos = new MarkerGizmos(places);
+        renderer.Overlays.Add(_markerGizmos);
+        var facts = new LayerFacts(_opt.Interior, NavBuilt: navEntry != "off", NavLeftOut: SceneDirector.Order is { Navmesh: false },
+            CanAskAgain: SceneDirector.Showing is not null && SceneDirector.Order is not null, _opt.PlaneCount, _borders is null ? 0 : _opt.LandCells.Count,
+            places.Count, _opt.LayerMeshes, DrawnAll().ToList(), _opt.BaseTypes);
+        _layers = SceneLayers.From(facts, new LayerSwitches(
+            Navmesh: on => InteractiveViewer.ApplyNavMode(_opt, on ? navEntry : "off"),
+            Planes: on => _opt.ShowPlanes = on,
+            Borders: on => { _opt.ShowCellOutline = on; if (_borders is not null) _borders.Enabled = on; },
+            Markers: on => _markerGizmos.Enabled = on,
+            Marks: on => { _marks.Enabled = on; _resultMarks.Enabled = on; },
+            Hide: (meshes, hidden) => _viewState.SetLayerHidden(meshes, hidden)));
+        _layers.ApplyAll();
+    }
+
+    /// <summary>Switch a layer for the window (the toolbar, the script's layer step, the state tool's layer verb). One
+    /// sentence back; a layer this scene cannot draw is refused with the reason, and pressing Navmesh in a cell opened
+    /// without it asks for the cell again with it (the camera stays where it is).</summary>
+    internal string SetLayer(Layer l, bool on)
+    {
+        if (l == Layer.Navmesh && on && _layers.NavLoadable) return ReloadWithNavmesh();
+        var said = _layers.Set(l, on);
+        Say(said); UpdateStatus(); _layerBar?.Refresh(); Invalidate("layer");
+        return said;
+    }
+
+    string ReloadWithNavmesh()
+    {
+        var show = SceneDirector.Showing ?? throw new InvalidOperationException("this scene was not opened from a tab that can ask for it again, so its navmesh cannot be loaded here.");
+        ViewLayers.WantsNavmesh = true;
+        ViewLayers.Choose(Layer.Navmesh, true);
+        ViewLayers.KeepPose(show.Cell, _eye, _yaw, _pitch);
+        try
+        {
+            var said = SceneDirector.Request(show with { Reload = true, LandOn = null, Why = "its navmesh was asked for" });
+            _layerBar?.Refresh(loading: said);
+            return said;
+        }
+        catch (InvalidOperationException) { ViewLayers.WantsNavmesh = false; ViewLayers.TakePose(null); throw; }
     }
 
     // ---- what the script and the bar call ---------------------------------------------------------------------------

@@ -48,7 +48,8 @@ namespace Workbench;
 /// expect moved FORMKEY DX,DY,DZ T   pass or fail on the selected reference's staged move from its built position, within T units
 /// expect marked                 pass or fail: cyan pixels in the selected reference's projected box (and magenta in the partner's)
 /// expect partner FORMKEY|none    pass or fail on the marked partner
-/// marks on|off                   the bar's Marks toggle
+/// marks on|off                   the toolbar's Marks layer (the same as layer marks on|off)
+/// layer NAME on|off              a layer of the view (ViewLayers): navmesh, borders, markers, planes, terrain, water, grass, trees, clutter, statics, marks
 /// expect landed [FORMKEY]        pass or fail: that reference (default: the selected one) selected, the screen-centre ray crossing its shapes
 /// expect inview FORMKEY          pass or fail: the reference's box centre is drawn inside the view and the screen-centre ray crosses it
 /// waitfile PATH [MAXSEC]         wait (drawing nothing) until PATH exists, or MAXSEC seconds (default 900): an MCP client drives the window meanwhile
@@ -294,7 +295,13 @@ internal sealed class Script
                 _h.PostMouse(0x202, q1); _wait = 3; break;
             }
             case "expect": Expect(a); break;
-            case "marks": _h.Marks.Enabled = a[1] == "on"; _h.Invalidate(); _wait = 2; break;
+            case "marks": WorkbenchHost.Say(_h.SetLayer(Layer.Marks, a[1] == "on")); _wait = 2; break;
+            case "layer":
+            {
+                var (step, why) = ViewLayers.ParseStep(a);
+                WorkbenchHost.Say(step is { } st ? _h.SetLayer(st.Layer, st.On) : "step refused: " + why);
+                _wait = 3; break;
+            }
             case "idlecpu": IdleCpu(F(a[1])); break;
             case "waitfile": WaitFile(a[1], a.Length > 2 ? F(a[2]) : 900f); break;
             case "cell":
