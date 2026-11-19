@@ -24,6 +24,13 @@ internal class ReadRefusal : Exception
     internal ReadRefusal(string message, Exception? inner) : base(message, inner) { }
 }
 
+/// <summary>A host abandoned the scene build for another request (thrown from <see cref="RenderStages.Tick"/>). A refusal,
+/// so the walks' catch filters pass it through unwrapped; the interactive loop catches it.</summary>
+internal sealed class BuildAbandoned : ReadRefusal
+{
+    internal BuildAbandoned() : base("the scene build was abandoned for another request.", null) { }
+}
+
 internal sealed class PluginUnreadable : ReadRefusal
 {
     internal PluginUnreadable(string path, int index, int count, string walk, Exception inner)

@@ -1969,6 +1969,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
     foreach (var path in order.OrderedPaths)
     {
         __run.Advance();
+        ViewProbe.RenderStages.Tick?.Invoke();
         scannedForCell++;
         // A plugin that cannot be read is refused, not skipped (PluginRead.cs): the target's identity would otherwise
         // come from whichever later plugin happened to be readable.
@@ -2074,6 +2075,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             if (bosFill) bosLight.Add((m.ModKey, m.IsSmallMaster || m.ModKey.Type == ModType.Light));
             foreach (var rec in m.EnumerateMajorRecords())
             {
+                ViewProbe.RenderStages.Tick?.Invoke();
                 if (bosFill) bosIdx!.Note(rec);
                 ViewProbe.CellLighting.Note(rec);   // --cell-lighting: LIGH, LGTM, IMGS and interior XCLL (CellLighting.cs)
                 stationFloor?.NoteBase(rec);   // the station floor reach's base boxes (FloorFeed)
@@ -2186,6 +2188,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             // it saw before (a cell with neither references, navmeshes nor deletions goes to the floor alone).
             foreach (var cp in HarnessShared.LastSighting.Cells(m))
             {
+                ViewProbe.RenderStages.Tick?.Invoke();
                 // The --stations floor neighbourhood (WalkSideTables.cs).
                 stationFloor?.Observe(cp, plgName);
                 // The navmesh selection sees every cell: a later sighting anywhere, a deletion-only copy included, can take
@@ -3142,6 +3145,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             int terrIndex = -1;
             foreach (var path in order.OrderedPaths)
             {
+                ViewProbe.RenderStages.Tick?.Invoke();
                 terrIndex++;
                 // Refused, not skipped (PluginRead.cs): a later plugin's LAND and water would silently lose to an earlier one.
                 ISkyrimModGetter m2 = ViewProbe.PluginRead.Open(path, terrIndex, order.OrderedPaths.Count, "the terrain walk");
@@ -4463,6 +4467,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             {
                 // Refused, not skipped (PluginRead.cs): a skipped plugin resolved NPCs from an earlier plugin's records.
                 npcIndex++;
+                ViewProbe.RenderStages.Tick?.Invoke();
                 npcLcMods.Add(ViewProbe.PluginRead.Open(pp2, npcIndex, order.OrderedPaths.Count, "the NPC link cache"));
             }
             var npcLinkCache = npcLcMods.ToImmutableLinkCache<ISkyrimMod, ISkyrimModGetter>();
@@ -5485,11 +5490,34 @@ if (worklist is not null)
         while (true)
         {
             pendingSwitch = null;
-            int rc;
+            int rc; bool abandoned = false;
             try { rc = RunCellTextured(worklist.Cells[wlc].Cell, wlc, wls, null, out _); }
+            catch (ViewProbe.BuildAbandoned)
+            {
+                // A host dropped this build for another request. A first walk cut short leaves the BOS form index partial,
+                // and it fills on the first walk only, so it starts again.
+                abandoned = true; rc = 0;
+                if (bosIdx is not null && bosLayer is null) { bosIdx = new BosFormIndex(); bosLight.Clear(); }
+            }
             catch (ViewProbe.GlAllocationRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }   // F-G4-1
             catch (ViewProbe.CaptureRefusal ex) { Console.Error.WriteLine(ex.Message); return 2; }        // CaptureViews.cs
             catch (ViewProbe.ReadRefusal ex) { ViewProbe.PluginRead.Report(ex); return 2; }   // PluginRead.cs
+            // A host's request for a cell this worklist may not hold (InteractiveViewer.CellRequest): it joins the list.
+            if (ViewProbe.InteractiveViewer.TakeCellRequest() is { } asked)
+            {
+                int at = -1;
+                for (int ci = 0; ci < worklist.Cells.Count; ci++)
+                    if (string.Equals(worklist.Cells[ci].Cell, asked, StringComparison.OrdinalIgnoreCase)) { at = ci; break; }
+                if (at < 0)
+                {
+                    worklist = worklist with { Cells = worklist.Cells.Append(new HarnessShared.WorklistCell(asked, new[] { new HarnessShared.WorklistShot(
+                        "placeholder pose: the host frames the camera once the cell is built", new[] { 0f, 0f, 0f }) })).ToList() };
+                    at = worklist.Cells.Count - 1;
+                }
+                (wlc, wls) = (at, 0);
+                continue;
+            }
+            if (abandoned) return 0;
             if (pendingSwitch is not { } next) return rc < 0 ? 0 : rc;
             (wlc, wls) = next;
         }

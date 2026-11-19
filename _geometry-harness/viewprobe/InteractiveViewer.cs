@@ -196,6 +196,10 @@ sealed class InteractiveOptions
 
 static class InteractiveViewer
 {
+    /// <summary>A host's request for the next cell, by the text viewprobe takes for a cell (a FormKey): set before the
+    /// host returns or abandons a build; the interactive worklist loop builds it next. Null for viewprobe itself.</summary>
+    internal static string? CellRequest;
+    internal static string? TakeCellRequest() { var c = CellRequest; CellRequest = null; return c; }
     /// <summary>A host that takes the built scene instead of this window loop (the conflict review workbench). Null
     /// for viewprobe itself, which then runs <see cref="Run"/> exactly as before.</summary>
     internal static Action<InteractiveOptions, GlRenderer, (Vector3 Eye, Vector3 Look, float FovDeg), Action<GlMatrix4, GlMatrix4>?>? Host;

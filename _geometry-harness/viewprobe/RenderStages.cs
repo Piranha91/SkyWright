@@ -38,10 +38,14 @@ public static class RenderStages
     /// <summary>Enter a stage. <paramref name="total"/> null is an explicitly UNKNOWN total, which
     /// the contract allows and a made-up total does not.</summary>
     public static void Open(string id, string title, long? total, string unit)
-        => RunLog.Current?.Stage(id, title, total, unit);
+    { RunLog.Current?.Stage(id, title, total, unit); Tick?.Invoke(); }
+
+    /// <summary>A host's hook, called on the building thread at each stage step and inside the long walks: the conflict
+    /// review workbench answers its window here, and may throw <see cref="BuildAbandoned"/>. Null outside a host.</summary>
+    public static Action? Tick;
 
     /// <summary>One more unit of the current stage's work.</summary>
-    public static void Advance(long delta = 1) => RunLog.Current?.Advance(delta);
+    public static void Advance(long delta = 1) { RunLog.Current?.Advance(delta); Tick?.Invoke(); }
 
     /// <summary>Set the measured processing of the current stage.</summary>
     public static void Progress(long processed) => RunLog.Current?.Progress(processed);
