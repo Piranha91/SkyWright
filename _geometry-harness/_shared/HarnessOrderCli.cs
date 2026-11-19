@@ -404,31 +404,70 @@ public static class HarnessOrderCli
         Mo2Composition comp, IReadOnlyList<string> viewMods, string modsDir, string dataDir, string overwriteDir)
     {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        void Layer(string dir)
-        {
-            if (string.IsNullOrWhiteSpace(dir)) return;
-            string[] files;
-            try { files = Directory.GetFiles(dir); }
-            catch { return; }
-            foreach (var f in files)
+        foreach (var layer in Layers(comp, viewMods, modsDir, dataDir, overwriteDir))
+            foreach (var f in LayerPlugins(layer.Dir))
             {
-                var e = Path.GetExtension(f);
-                if (!e.Equals(".esp", StringComparison.OrdinalIgnoreCase)
-                 && !e.Equals(".esm", StringComparison.OrdinalIgnoreCase)
-                 && !e.Equals(".esl", StringComparison.OrdinalIgnoreCase)) continue;
                 var fn = Path.GetFileName(f);
                 if (!map.ContainsKey(fn)) map[fn] = f;      // first seen wins == highest precedence
             }
-        }
-
-        Layer(overwriteDir);
-        var inView = new HashSet<string>(viewMods, StringComparer.OrdinalIgnoreCase);
-        foreach (var m in viewMods) Layer(Path.Combine(modsDir, m));
-        Layer(dataDir);                             // the game's own copy beats any out-of-view folder's
-        foreach (var m in comp.EnabledMods) if (!inView.Contains(m)) Layer(Path.Combine(modsDir, m));
-        foreach (var m in comp.DisabledMods) if (!inView.Contains(m)) Layer(Path.Combine(modsDir, m));
         return map;
+    }
+
+    /// <summary>One folder of the precedence: its name ("overwrite", the mod folder as the view or the profile spells it,
+    /// "Data"), its path, and whether the view contains it.</summary>
+    public sealed record PluginLayer(string Name, string Dir, bool InView);
+
+    /// <summary>One layer's copy of a plugin file.</summary>
+    public sealed record PluginLayerCopy(string Layer, string Path, bool InView);
+
+    // The folders a plugin file is looked for in, highest precedence first. A null profile has no folders outside the view.
+    static IEnumerable<PluginLayer> Layers(
+        Mo2Composition? comp, IReadOnlyList<string> viewMods, string modsDir, string dataDir, string overwriteDir)
+    {
+        yield return new PluginLayer("overwrite", overwriteDir, true);
+        var inView = new HashSet<string>(viewMods, StringComparer.OrdinalIgnoreCase);
+        foreach (var m in viewMods) yield return new PluginLayer(m, Path.Combine(modsDir, m), true);
+        yield return new PluginLayer("Data", dataDir, true);   // the game's own copy beats any out-of-view folder's
+        if (comp is null) yield break;
+        foreach (var m in comp.EnabledMods) if (!inView.Contains(m)) yield return new PluginLayer(m, Path.Combine(modsDir, m), false);
+        foreach (var m in comp.DisabledMods) if (!inView.Contains(m)) yield return new PluginLayer(m, Path.Combine(modsDir, m), false);
+    }
+
+    // The plugin files at a folder's top level; a blank, absent or unreadable folder has none.
+    static IEnumerable<string> LayerPlugins(string dir)
+    {
+        if (string.IsNullOrWhiteSpace(dir)) yield break;
+        string[] files;
+        try { files = Directory.GetFiles(dir); }
+        catch { yield break; }
+        foreach (var f in files)
+        {
+            var e = Path.GetExtension(f);
+            if (e.Equals(".esp", StringComparison.OrdinalIgnoreCase)
+             || e.Equals(".esm", StringComparison.OrdinalIgnoreCase)
+             || e.Equals(".esl", StringComparison.OrdinalIgnoreCase)) yield return f;
+        }
+    }
+
+    /// <summary>Plugin file name to every layer's copy of it, in <see cref="BuildLayerMap"/>'s precedence, so the first of
+    /// each is the copy the probes load. A folder named twice gives its copy once. A null <paramref name="profileDir"/>
+    /// (no profile named) and a blank <paramref name="dataDir"/> (no game named) leave those layers out; a profile
+    /// whose modlist.txt is absent has no folders outside the view, as for the map.</summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<PluginLayerCopy>> PluginLayerCopies(
+        string? profileDir, IReadOnlyList<string> viewMods, string modsDir, string dataDir, string overwriteDir)
+    {
+        var comp = profileDir is null ? null : Mo2LoadOrder.ReadComposition(profileDir);
+        var copies = new Dictionary<string, IReadOnlyList<PluginLayerCopy>>(StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var layer in Layers(comp, viewMods, modsDir, dataDir, overwriteDir))
+            foreach (var f in LayerPlugins(layer.Dir))
+            {
+                if (!seen.Add(f)) continue;
+                var fn = Path.GetFileName(f);
+                if (!copies.TryGetValue(fn, out var list)) copies[fn] = list = new List<PluginLayerCopy>();
+                ((List<PluginLayerCopy>)list).Add(new PluginLayerCopy(layer.Name, f, layer.InView));
+            }
+        return copies;
     }
 
     /// <summary>Which layer a resolved path came from: "overwrite", the mod folder's own name, "Data", or — when it is
