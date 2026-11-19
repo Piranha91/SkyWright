@@ -133,6 +133,7 @@ internal static class Program
     [STAThread]
     static int Main(string[] args)
     {
+        args = FrameSwitches(args);
         InteractiveViewer.Host = WorkbenchHost.Run;
         RenderStages.Tick = SceneDirector.Tick;                // the window is answered while a scene builds
         // no bundle and no scene asked for: the window first (the launcher, or the world of the profile MO2 started the workbench in)
@@ -219,6 +220,20 @@ internal static class Program
         Shell.StopServer();
         if (Shell.ExpectFailures > 0) { Console.Error.WriteLine($"workbench: {Shell.ExpectFailures} expectation(s) failed"); return 4; }
         return code;
+    }
+
+    /// <summary>The frame-rate switches, taken off the command line before viewprobe reads it: <c>--fps</c> shows the
+    /// readout (as <c>WB_FPS=on</c>), <c>--fps-log PATH</c> writes the frame log from the first scene on (as <c>WB_FPS_LOG</c>).</summary>
+    internal static string[] FrameSwitches(string[] args)
+    {
+        var rest = new List<string>();
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--fps") Environment.SetEnvironmentVariable("WB_FPS", "on");
+            else if (args[i] == "--fps-log" && i + 1 < args.Length) Environment.SetEnvironmentVariable("WB_FPS_LOG", args[++i]);
+            else rest.Add(args[i]);
+        }
+        return rest.ToArray();
     }
 
     /// <summary>Where a requested scene's worklist and captures go: WB_OUT, else the launcher's Work Folder, else the temp folder.</summary>

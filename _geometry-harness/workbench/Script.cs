@@ -24,6 +24,11 @@ namespace Workbench;
 /// dump FORMKEY NAME              save the reference's drawn vertices as NAME.json
 /// tilted [N]                     list drawn references tilted about X and Y, nearest first
 /// fps N                          time N frames; print mean fps, p50/p95/max frame ms, foreground, refresh rate
+/// fpslog start PATH | stop       write one CSV row per frame to PATH (FrameStats); stop prints the summary line
+/// fpsshow on|off                 the frame-rate readout beside the bar's buttons
+/// hold SECONDS                   wait without asking for frames (the view draws only what changes)
+/// yawsweep SECONDS [DEG/S] [HZ]  hold the right button and move the mouse sideways (default 45 degrees a second, 250 messages a second), as posted messages to the view
+/// fly SECONDS [KEY]              hold W (or A, S, D, Q, E) down for SECONDS with the keyboard's own repeat delay and rate, as posted messages to the view
 /// commit dry|real PATCHNAME      dry-run or write the staged edits (a real write re-checks the open conflict row)
 /// recheck PATCHNAME              re-check the open conflict row against that written patch
 /// repairpreview N|FORMKEY        plan the repair of the navmesh Findings row ranked N, or naming that navmesh (RepairDesk); nothing written
@@ -196,6 +201,14 @@ internal sealed class Script
             }
             case "dump": _h.DumpRef(FormKey.Factory(a[1]), a[2]); break;
             case "fps": Fps(int.Parse(a[1])); break;
+            case "fpslog":
+                if (a.Length > 2 && a[1] == "start") WorkbenchHost.Say(WorkbenchHost.Frames.StartLog(a[2], WorkbenchHost.Now));
+                else if (a.Length > 1 && a[1] == "stop") WorkbenchHost.Say(WorkbenchHost.Frames.StopLog());
+                else WorkbenchHost.Say("fpslog needs 'start PATH' or 'stop'.");
+                break;
+            case "fpsshow": _h.ShowFps(a.Length > 1 && a[1] == "on"); break;
+            case "hold": Hold(F(a[1])); break;
+            case "yawsweep" or "fly": Motion(MotionStep.Parse(a)); break;
             case "tilted":
             {
                 // Drawn references with X and Y rotation both non-zero, nearest the eye first: candidates for a
@@ -412,6 +425,27 @@ internal sealed class Script
         timer.Start();
     }
 
+    /// <summary>Wait without asking for frames: what the view draws meanwhile is what the loop draws on its own.</summary>
+    void Hold(float seconds)
+    {
+        _busy = true; _quiet = true;
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(seconds) };
+        timer.Tick += (_, _) => { timer.Stop(); _busy = false; _quiet = false; WorkbenchHost.Say(FormattableString.Invariant($"held {seconds:0.#} s")); _h.Invalidate("script"); };
+        timer.Start();
+    }
+
+    /// <summary>A motion step's messages, posted to the view's own window; the script asks for no frames meanwhile, so
+    /// the frames drawn are the ones the input causes.</summary>
+    void Motion(MotionStep m)
+    {
+        _busy = true; _quiet = true;
+        var (delay, hz) = MotionStep.Typematic();
+        var msgs = m.Messages(_h.W / 2, _h.H / 2, delay, hz);
+        WorkbenchHost.Say(FormattableString.Invariant($"{m.Kind} {m.Seconds:0.#} s: {msgs.Count} messages") + (m.Kind == "fly" ? FormattableString.Invariant($", key {m.Key}, repeat delay {delay:0} ms, rate {hz:0.#} a second") : FormattableString.Invariant($", {m.DegPerSecond:0.#} degrees a second at {m.Hz:0} messages a second")));
+        var d = System.Windows.Threading.Dispatcher.CurrentDispatcher;
+        MotionStep.Post(_h.ViewHandle, msgs, said => d.BeginInvoke(() => { WorkbenchHost.Say(m.Kind + ": " + said); _busy = false; _quiet = false; _h.Invalidate("script"); }));
+    }
+
     /// <summary>Hold the script (no frames asked for) until a file exists: the window stays live for an MCP client.</summary>
     void WaitFile(string path, float maxSeconds)
     {
@@ -450,9 +484,10 @@ internal sealed class Script
         var gpu = new List<double>(n);
         bool fg = _h.IsForeground;
         _h.TickStamps = new List<double>();
-        int callStart = _h.RenderCallMs.Count, swapStart = _h.SwapMs.Count;
+        var calls = new List<double>(n + 1); var swaps = new List<double>(n + 1);
         _h.AfterFrame = () =>
         {
+            calls.Add(WorkbenchHost.Frames.LastRenderMs); swaps.Add(WorkbenchHost.Frames.LastSwapMs);
             var t0 = _h.Clock.Elapsed.TotalMilliseconds;
             OpenTK.Graphics.OpenGL4.GL.Finish();
             gpu.Add(_h.Clock.Elapsed.TotalMilliseconds - t0);
@@ -461,8 +496,6 @@ internal sealed class Script
             _h.AfterFrame = null;
             var ticks = _h.TickStamps!; _h.TickStamps = null;
             var tick = new List<double>(); for (int i = 1; i < ticks.Count; i++) tick.Add(ticks[i] - ticks[i - 1]);
-            var calls = _h.RenderCallMs.Skip(callStart).ToList();
-            var swaps = _h.SwapMs.Skip(swapStart).ToList();
             var per = new List<double>();
             for (int i = 1; i < stamps.Count; i++) per.Add(stamps[i] - stamps[i - 1]);
             per.Sort();

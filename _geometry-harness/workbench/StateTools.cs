@@ -127,6 +127,7 @@ internal sealed class StateTools
                  "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
                  "results (the Results tab of an opened evaluation: `pair`, `groups`, `categories`, `setup` and `search` choose what is listed; `row` opens a row: its values, and its cell in the setup before or after the patch with the camera on its object). " +
                  "world (the World tab of an opened load order: `search` filters its cells; `cell` opens a cell; `ref` opens the cell a record is in and lands on it; read-only). " +
+                 "frame_log (`path`: write one CSV row per frame of the 3D view to that file; with no path, stop the log and say its summary: frames, median, 1% low and worst frame time). " +
                  "open (`path`: open a folder or file in the window, as its Open control does; what it is is detected from the names on disk, and anything the window does not open is refused in one sentence). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
@@ -149,7 +150,7 @@ internal sealed class StateTools
         [Description("select_mods: mod folder names, as the launcher lists them.")] string[]? mods = null,
         [Description("select_mods: set (default), add or remove.")] string? how = null,
         [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
-        [Description("set_output or set_work_folder: the folder, by its full path. open: the folder or file to open. capture_window: the .png to write.")] string? path = null,
+        [Description("set_output or set_work_folder: the folder, by its full path. open: the folder or file to open. capture_window: the .png to write. frame_log: the .csv to write (absent: stop the log).")] string? path = null,
         [Description("show_tab: the tab to bring to the front, by its header (Start, Conflicts, Findings, Records, Results or World).")] string? tab = null,
         [Description("search_mods: the text the Start tab's mod list is filtered by (any case; empty shows every mod). results: list only rows holding this text. world: part of a cell's EditorID or name, a FormKey, or a grid x,y.")] string? search = null,
         [Description("stage: a typed offset, such as \"+120 x\", \"-30 z\" or \"15°\" (a turn about the vertical).")] string? offset = null,
@@ -177,6 +178,9 @@ internal sealed class StateTools
             var v = (verb ?? "").Trim().ToLowerInvariant();
             if (v is "results" or "world") return OpenInputsTools.Act(v, pair, groups, categories, setup, search, row, cell, @ref);
             if (hub.Surface.Scene is { ReadOnly: true } && EditVerbs.Contains(v)) return Refuse(WorkbenchHost.ReadOnlyWhy);
+            if (v == "frame_log")
+                return Answer(new { said = path is { Length: > 0 } ? WorkbenchHost.Frames.StartLog(path, WorkbenchHost.Now) : WorkbenchHost.Frames.StopLog(),
+                                    readout = Shell.Current?.FpsReadout ?? "no scene is open" });
             if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path, tab, search);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
             if (v == "select" && scene is { } sn) return SelectScene(hub, sn);

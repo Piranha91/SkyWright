@@ -43,7 +43,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     internal int MarkResults(IEnumerable<(FormKey Key, MarkStyle Style)> refs)
     {
         _resultMarks.Set(refs.Where(r => _session.IsDrawn(r.Key)).Select(r => { var ro = _session.RefOf(r.Key); return (ro.Min, ro.Max, r.Style); }));
-        Invalidate();
+        Invalidate("marks");
         return _resultMarks.Marked;
     }
     internal int ResultsMarked => _resultMarks.Marked;
@@ -79,9 +79,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _fov = cam.FovDeg;
         _camera.FieldOfView = _fov;
         _session = new EditSession(opt.Occlusion?.Refs ?? (IEnumerable<RefOcclusion>)Array.Empty<RefOcclusion>());
-        _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate(); if (!ReadOnly) SaveSession(); };
+        _session.Changed += s => { Say(s); UpdateMarks(); UpdateStatus(); if (_window is not null) Invalidate("edit"); if (!ReadOnly) SaveSession(); };
         _viewState = new ViewState(_session, () => DrawnRefs(), _gizmo);
-        _viewState.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate(); };
+        _viewState.Changed += s => { Say(s); UpdateStatus(); if (_window is not null) Invalidate("view"); };
         _tints.State = _viewState;
         _outDir = Environment.GetEnvironmentVariable("WB_OUT") is { Length: > 0 } o ? o : opt.OutDir;
         Directory.CreateDirectory(_outDir);
@@ -118,7 +118,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _camera.Elevation = Math.Clamp(float.RadiansToDegrees(MathF.Asin(off.Y / dist)), -89.5f, 89.5f);
         _camera.Azimuth = float.RadiansToDegrees(MathF.Atan2(off.X, off.Z));
         _gizmo.FitTo(_eye);
-        if (_window is not null) Invalidate();
+        if (_window is not null) Invalidate("camera");
     }
 
     // The view's client size in pixels, read each frame.
@@ -217,23 +217,27 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     bool _dirty = true, _parked;
     DispatcherTimer? _sizeWatch;
 
-    /// <summary>Something on screen changed: draw the next frame (wakes a parked demand loop).</summary>
-    internal void Invalidate()
+    /// <summary>Something on screen changed: draw the next frame (wakes a parked demand loop). <paramref name="why"/>
+    /// names the first change since the last frame in the frame log.</summary>
+    internal void Invalidate(string why = "other")
     {
         _dirty = true;
-        if (_parked && _alive) { _parked = false; _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background); }
+        if (_dirtyWhy is null) { _dirtyWhy = why; _dirtyAt = Clock.Elapsed.TotalMilliseconds; }
+        if (_parked && _alive) { _parked = false; _resumed = true; _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background); }
     }
+    string? _dirtyWhy; double _dirtyAt; bool _resumed, _drewOnce; int _messages;
     bool _freeLoop => _loop != "wpf-tick";
     double _nextFrame;
 
     DispatcherFrame? _frameLoop;
+    static bool _launchLogStarted;
     bool _alive;
 
     void RunWindow()
     {
         var undo = new Button { Content = "Undo (Ctrl+Z)", Margin = new Thickness(4) };
         var marksBtn = new Button { Content = "Marks", Margin = new Thickness(4), ToolTip = ConflictMarks.Legend };
-        marksBtn.Click += (_, _) => { _marks.Enabled = !_marks.Enabled; UpdateStatus(); Invalidate(); };
+        marksBtn.Click += (_, _) => { _marks.Enabled = !_marks.Enabled; UpdateStatus(); Invalidate("marks"); };
         var dry = new Button { Content = "Dry run", Margin = new Thickness(4) };
         var write = new Button { Content = "Write patch", Margin = new Thickness(4) };
         undo.Click += (_, _) => { _session.Undo(); AfterStage(); };
@@ -242,6 +246,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         // a fixed height, so the 3D view keeps its size whatever the edits list, the status line or the buttons hold
         var bar = new DockPanel { LastChildFill = true, Height = ReadOnly ? 104 : 240 };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal };
+        buttons.Children.Add(_fpsText);
+        buttons.Children.Add(FpsToggle());
         buttons.Children.Add(marksBtn);
         if (!ReadOnly) { buttons.Children.Add(undo); buttons.Children.Add(dry); buttons.Children.Add(write); }
         DockPanel.SetDock(buttons, Dock.Right);
@@ -298,6 +304,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 Say($"GL: {GL.GetString(StringName.Vendor)} | {GL.GetString(StringName.Renderer)} | {GL.GetString(StringName.Version)}; "
                     + $"swap interval {(_vsync ? 1 : 0)} set: {_view.SetSwapInterval(_vsync ? 1 : 0)}");
             if (_freeLoop) _window.Dispatcher.BeginInvoke(FreeFrame, DispatcherPriority.Background);
+            ShowFps(_showFps);
+            if (!Frames.Logging && !_launchLogStarted && Environment.GetEnvironmentVariable("WB_FPS_LOG") is { Length: > 0 } fl)
+            { _launchLogStarted = true; Say(Frames.StartLog(fl, Now)); }
             if (Shell.PendingLand is { } land) { Shell.PendingLand = null; _landOnFirstFrame = land; }
             else if (SceneDirector.Showing is not null) FrameScene();   // a cell asked for with no reference to land on
         }
@@ -310,6 +319,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (!Shell.Closed) Dispatcher.PushFrame(_frameLoop);
         _alive = false;
         _sizeWatch?.Stop();
+        _fpsTimer?.Stop();
+        if (Shell.Closed && Frames.Logging) Say(Frames.StopLog());
         if (Shell.Closed && Environment.GetEnvironmentVariable("WB_DUMP") is { Length: > 0 } dump) Shell.Dump(this, dump);
         System.Windows.Media.CompositionTarget.Rendering -= tick;
         if (_writer is not null) _writer.DisposeAsync().AsTask().GetAwaiter().GetResult();
@@ -346,7 +357,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             // Nothing to draw: park until Invalidate, with a slow timer that only watches for a resize.
             _parked = true;
             _sizeWatch ??= new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background,
-                (_, _) => { if (_parked && _view.ClientSize() != (_fbW, _fbH)) Invalidate(); }, _window.Dispatcher);
+                (_, _) => { if (_parked && _view.ClientSize() != (_fbW, _fbH)) Invalidate("resize"); }, _window.Dispatcher);
             return;
         }
         if (_loop is "cap60" or "demand")
@@ -363,7 +374,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
 
     void OnViewMessage(int msg, int x, int y, IntPtr wParam)
     {
-        Invalidate();
+        _messages++;
+        Invalidate(MessageName(msg));
         var p = new Vector2(x, y);
         switch (msg)
         {
@@ -407,15 +419,47 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
     }
     [DllImport("user32.dll")] static extern short GetKeyState(int vk);
+    static string MessageName(int msg) => msg switch
+    {
+        0x200 => "mousemove", 0x201 or 0x202 => "lbutton", 0x204 or 0x205 => "rbutton", 0x100 => "keydown", 0x101 => "keyup",
+        0x000F => "paint", 0x0005 => "size", 0x0008 => "focus", 0x20A => "wheel", _ => "message",
+    };
 
     Vector2? _look;
 
     Script? _script;
-    internal readonly Stopwatch Clock = Stopwatch.StartNew();
+    internal Stopwatch Clock => ProcessClock;
     internal Action? AfterFrame;
     internal List<double>? TickStamps;
-    internal readonly List<double> RenderCallMs = new();
-    internal readonly List<double> SwapMs = new();
+    /// <summary>The view's frame times: the readout and the frame log, one for the process so a log runs across cell switches.</summary>
+    internal static readonly FrameStats Frames = new();
+    internal static double Now => ProcessClock.Elapsed.TotalMilliseconds;
+    static readonly Stopwatch ProcessClock = Stopwatch.StartNew();
+    static bool _showFps = FrameStats.ShowByDefault;
+    readonly TextBlock _fpsText = new() { Margin = new Thickness(8, 6, 8, 2), MinWidth = 330, FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+                                          ToolTip = "frame rate of the 3D view over the last two seconds: frames a second, the median frame time, the mean of the slowest 1%, the worst" };
+    DispatcherTimer? _fpsTimer;
+
+    System.Windows.Controls.Primitives.ToggleButton FpsToggle()
+    {
+        var t = new System.Windows.Controls.Primitives.ToggleButton { Content = "Frame rate", Margin = new Thickness(4), IsChecked = _showFps,
+                                                                       ToolTip = "show the 3D view's frame rate beside these buttons" };
+        t.Checked += (_, _) => ShowFps(true); t.Unchecked += (_, _) => ShowFps(false);
+        return t;
+    }
+
+    /// <summary>Show or hide the readout; it is refreshed four times a second and never asks for a frame.</summary>
+    internal void ShowFps(bool on)
+    {
+        _showFps = on;
+        _fpsText.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        if (!on) { _fpsTimer?.Stop(); return; }
+        _fpsTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal,
+            (_, _) => _fpsText.Text = Frames.Readout(Now, _loop, _vsync), _window.Dispatcher);
+        _fpsTimer.Start();
+    }
+    internal string FpsReadout => Frames.Readout(Now, _loop, _vsync);
+    readonly GpuTimer _gpu = new();
 
     internal bool Paused;
     (string Path, TaskCompletionSource<string> Done)? _captureAsk;
@@ -425,7 +469,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     {
         var done = new TaskCompletionSource<string>();
         _captureAsk = (path, done);
-        Invalidate();
+        Invalidate("capture");
         return done.Task;
     }
 
@@ -434,6 +478,9 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         if (Paused || !_view.MakeCurrent()) return;
         _dirty = false;
         var t0 = Clock.Elapsed.TotalMilliseconds;
+        string dirtyWhy = _dirtyWhy ?? "none"; double dirtyAge = _dirtyWhy is null ? 0 : t0 - _dirtyAt; int messages = _messages;
+        bool resumed = _resumed || !_drewOnce;
+        _dirtyWhy = null; _messages = 0; _resumed = false; _drewOnce = true;
         (_fbW, _fbH) = _view.ClientSize();
         if (_landOnFirstFrame is { } land)
         {
@@ -443,11 +490,13 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         GL.Viewport(0, 0, W, H);
+        _gpu.Begin();
         _renderer.Render(_camera, W, H);
         GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _overlay?.Invoke(_camera.GetViewMatrix(), _camera.GetProjectionMatrix((float)W / H));
+        double gpuMs = _gpu.End();
         _frame++;
-        RenderCallMs.Add(Clock.Elapsed.TotalMilliseconds - t0);
+        double renderMs = Clock.Elapsed.TotalMilliseconds - t0;
         _script?.Tick();                    // a capture step reads the back buffer before the swap
         if (_captureAsk is { } ask)
         {
@@ -462,7 +511,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         }
         var t1 = Clock.Elapsed.TotalMilliseconds;
         _view.Swap();
-        SwapMs.Add(Clock.Elapsed.TotalMilliseconds - t1);
+        var t2 = Clock.Elapsed.TotalMilliseconds;
+        double prev = Frames.LastPresentMs;
+        Frames.Add(new FrameSample(_frame, t2, prev < 0 ? 0 : t2 - prev, renderMs, t2 - t1, gpuMs,
+            _loop + (_script?.WantsFrames == true ? "+script" : ""), resumed || prev < 0, dirtyWhy, dirtyAge, messages,
+            GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), _yaw, _pitch, _eye.X, _eye.Y, _eye.Z, W, H));
         AfterFrame?.Invoke();
     }
 
@@ -683,6 +736,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
     [DllImport("user32.dll", SetLastError = true)] static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
     internal int FrameCount => _frame;
+    internal IntPtr ViewHandle => _view.Handle;
     internal string? SceneStateCentre()
     {
         var c = PickAt(new Vector2(W * 0.5f, H * 0.5f));
