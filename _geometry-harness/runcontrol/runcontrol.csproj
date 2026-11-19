@@ -25,5 +25,6 @@
     <EmbeddedResource Include="known-answers\finalize.json" LogicalName="finalize.json" />
     <EmbeddedResource Include="known-answers\evaluate.json" LogicalName="evaluate.json" />
     <EmbeddedResource Include="known-answers\bundle.json" LogicalName="bundle.json" />
+    <EmbeddedResource Include="known-answers\rows.json" LogicalName="rows.json" />
   </ItemGroup>
 </Project>
