@@ -38,7 +38,13 @@ public sealed class ResultsViewTests
         Assert.StartsWith("□ not addressed", ResultRules.Line(Rows[1]));
         Assert.StartsWith("◆ patch change (3: a new value)", ResultRules.Line(Rows[2]));
         Assert.StartsWith("○ overlap, not scored", ResultRules.Line(Rows[4]));
-        Assert.EndsWith("(no view from the results alone: a NAVI record belongs to no cell, so there is nothing to show)", ResultRules.Line(Row(7, ResultGroup.PatchChange, category: 3, cell: null)));
+        var navi = Row(7, ResultGroup.PatchChange, category: 3, cell: null) with { RecordType = "NAVI" };
+        Assert.EndsWith("(no view: a NAVI record belongs to no cell, so there is nothing to show)", ResultRules.Line(navi));
+        // a reference filed in a persistent cell, or a navmesh, is placed through the load order when opened, and says so instead
+        var filed = Row(8, ResultGroup.Addressed, cell: null) with { Place = new ResultPlace(null, "000008:M.esp", null, true, "filed in a persistent cell") };
+        Assert.EndsWith("(its cell is found in the load order when the row is opened)", ResultRules.Line(filed));
+        Assert.True(ResultRules.PlacedOnOpen(Row(9, ResultGroup.Addressed, cell: null) with { RecordType = "NAVM" }));
+        Assert.False(ResultRules.PlacedOnOpen(navi));
         // the four groups have four different shapes and four different scene marks, and no line says fixed or resolved
         Assert.Equal(4, ResultRules.Groups.Values.Select(g => g.Shape).Distinct().Count());
         Assert.Equal(4, ResultRules.Groups.Values.Select(g => g.Mark).Distinct().Count());

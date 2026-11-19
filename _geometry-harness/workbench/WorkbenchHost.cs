@@ -490,10 +490,10 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         float radius = MathF.Max(MathF.Max(x1 - x0, y1 - y0) * 0.5f, 400f);
         if (_opt.Interior)
         {
-            // inside the rooms, not outside their shell: at one end of the span, eye height above the middle, looking down its long side
+            // inside the rooms, not outside their shell: at the middle of the cell's references, eye height above them, looking down the long side
             bool alongX = x1 - x0 >= y1 - y0;
             _yaw = alongX ? 90f : 0f; _pitch = 12f;
-            _eye = new Vector3(alongX ? x0 : centre.X, alongX ? centre.Y : y0, centre.Z + 120f);
+            _eye = new Vector3(centre.X, centre.Y, centre.Z + 120f);
         }
         else { _yaw = 20f; _pitch = 40f; _eye = centre - Forward() * (radius * 2.2f); }
         SyncCamera();

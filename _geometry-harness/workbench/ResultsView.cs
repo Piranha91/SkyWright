@@ -29,8 +29,13 @@ internal static class ResultRules
         var g = Groups[r.Group];
         string tag = r.Group == ResultGroup.PatchChange ? $"{g.Shape} patch change ({CategoryWords(r.Category)})" : $"{g.Shape} {g.Words}";
         string text = r.Summary.Length > 260 ? r.Summary[..260] + "…" : r.Summary;
-        return $"{tag}  ·  {(withPair ? r.Pair + "  ·  " : "")}{text}" + (r.Place.Cell is null ? $"   (no view from the results alone: {r.Place.WhyNot})" : "");
+        return $"{tag}  ·  {(withPair ? r.Pair + "  ·  " : "")}{text}" + (r.Place.Cell is not null ? "" : PlacedOnOpen(r) ? "   (its cell is found in the load order when the row is opened)" : $"   (no view: {r.Place.WhyNot})");
     }
+
+    /// <summary>A row the results give no cell for, but whose cell the setup's own load order gives when it is opened: a
+    /// reference filed in a worldspace's persistent cell (the grid cell it stands in), a navmesh or a landscape record (its cell).</summary>
+    internal static bool PlacedOnOpen(ResultRow r) =>
+        r.Place.Cell is null && (r.Place.InPersistentCell && r.Place.RefKey is not null || r.RecordType is "NAVM" or "LAND");
 
     internal static string CategoryWords(int? category) => category switch
     {
@@ -245,8 +250,10 @@ internal static class ResultsView
             foreach (var (c, cb) in CategoryBoxes)
                 cb.Content = $"{CategoryWords(c)}  ({(c == 3 ? counts.Category3 : c == 4 ? counts.Category4 : counts.Category5):N0})";
             int reading = r.Pairs.Count(p => !Loaded.ContainsKey(p.Id));
-            int noView = _listed.Count(x => x.Place.Cell is null);
-            CountLine.Text = $"{_listed.Count:N0} row(s) listed" + (noView > 0 ? $"; {noView:N0} have no view from the results alone and say why" : "")
+            int noView = _listed.Count(x => x.Place.Cell is null && !ResultRules.PlacedOnOpen(x));
+            int onOpen = _listed.Count(ResultRules.PlacedOnOpen);
+            CountLine.Text = $"{_listed.Count:N0} row(s) listed" + (noView > 0 ? $"; {noView:N0} have no view and say why" : "")
+                           + (onOpen > 0 ? $"; {onOpen:N0} are placed through the load order when opened" : "")
                            + (reading > 0 ? $"; {reading} pair(s) still being read" : "");
             FillHeader();
             ApplyMarks();
@@ -322,7 +329,8 @@ internal static class ResultsView
         if (r.Note is { } n) { lines.Add(""); lines.Add("note: " + n); }
         lines.Add("");
         lines.Add(r.Place.Cell is { } c ? $"place: cell {c}" + (r.Place.RefKey is { } k ? $", object {k}" : "") + (r.Place.OtherKey is { } o ? $", other object {o}" : "")
-                  : $"no view from the results alone: {r.Place.WhyNot}");
+                  : ResultRules.PlacedOnOpen(r) ? $"place: {r.Place.WhyNot}; its cell is found in the setup's own load order when the row is opened"
+                  : $"no view: {r.Place.WhyNot}");
         return string.Join(Environment.NewLine, lines);
     }
 
@@ -424,7 +432,7 @@ internal static class ResultsView
             }).ToList(),
             pair = Pair ?? "all", groups = Shown.OrderBy(g => g).Select(g => g.ToString()).ToList(), categories = Categories.OrderBy(c => c).ToList(), setup = Setup, text = TextFilter,
             legend = Legend.Text,
-            listed = _listed.Count, listedWithNoView = _listed.Count(x => x.Place.Cell is null),
+            listed = _listed.Count, listedWithNoView = _listed.Count(x => x.Place.Cell is null && !ResultRules.PlacedOnOpen(x)), listedPlacedOnOpen = _listed.Count(ResultRules.PlacedOnOpen),
             listedByGroup = _listed.GroupBy(x => x.Group).ToDictionary(g => g.Key.ToString(), g => g.Count()),
             rows = _listed.Skip(offset).Take(limit).Select(RowJson).ToList(),
             openRow = Open is null ? null : new

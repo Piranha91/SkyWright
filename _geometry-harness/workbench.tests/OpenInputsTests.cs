@@ -102,3 +102,72 @@ public sealed class OpenInputsTests : IDisposable
         Assert.Null(LoadOrderSpec.FromArgs(new[] { "--instance", @"C:\i", "--game", @"C:\g" }, "l"));   // the profile is left to the environment
     }
 }
+
+/// <summary>A game's Data folder and an MO2 profile as inputs: what a path names, and the load order a Data folder is staged as.</summary>
+[Trait("tier", "unit")]
+public sealed class DataFolderInputTests : IDisposable
+{
+    readonly string _root = Path.Combine(Path.GetTempPath(), "hc-wb-data-" + Guid.NewGuid().ToString("N"));
+    public DataFolderInputTests() => Directory.CreateDirectory(_root);
+    public void Dispose() { try { Directory.Delete(_root, true); } catch { } }
+
+    string Game()
+    {
+        var data = Directory.CreateDirectory(Path.Combine(_root, "game", "Data")).FullName;
+        File.WriteAllText(Path.Combine(data, "Skyrim.esm"), "");
+        return Path.GetDirectoryName(data)!;
+    }
+
+    [Fact]
+    public void A_game_folder_its_data_folder_and_a_file_in_either_name_the_game()
+    {
+        var game = Game();
+        Assert.Equal(game, DataFolderOrder.GameOf(game));
+        Assert.Equal(game, DataFolderOrder.GameOf(Path.Combine(game, "Data")));
+        Assert.Equal(game, DataFolderOrder.GameOf(Path.Combine(game, "Data", "Skyrim.esm")));
+        Assert.Null(DataFolderOrder.GameOf(_root));
+        // a folder named Data without the base game's master is not one
+        Directory.CreateDirectory(Path.Combine(_root, "other", "Data"));
+        Assert.Null(DataFolderOrder.GameOf(Path.Combine(_root, "other", "Data")));
+    }
+
+    [Fact]
+    public void A_data_folder_is_staged_from_the_mod_managers_two_lists_when_both_are_there()
+    {
+        var game = Game();
+        var lists = Directory.CreateDirectory(Path.Combine(_root, "lists")).FullName;
+        File.WriteAllLines(Path.Combine(lists, "plugins.txt"), new[] { "# a comment", "*ModA.esp", "ModB.esp" });
+        File.WriteAllLines(Path.Combine(lists, "loadorder.txt"), new[] { "# a comment", "Skyrim.esm", "ModA.esp", "ModB.esp" });
+        File.WriteAllText(Path.Combine(lists, "Skyrim.ini"), "[Archive]\nsResourceArchiveList=Skyrim - Misc.bsa\n");
+        var staged = DataFolderOrder.Stage(game, Path.Combine(_root, "work"), lists, lists);
+        var prof = Path.Combine(staged.Root, "profiles", DataFolderOrder.StagedProfile);
+        Assert.Equal(File.ReadAllBytes(Path.Combine(lists, "plugins.txt")), File.ReadAllBytes(Path.Combine(prof, "plugins.txt")));
+        Assert.Equal(File.ReadAllBytes(Path.Combine(lists, "loadorder.txt")), File.ReadAllBytes(Path.Combine(prof, "loadorder.txt")));
+        Assert.Equal(File.ReadAllBytes(Path.Combine(lists, "Skyrim.ini")), File.ReadAllBytes(Path.Combine(prof, "Skyrim.ini")));
+        Assert.True(Directory.Exists(Path.Combine(staged.Root, "mods")) && !Directory.EnumerateFileSystemEntries(Path.Combine(staged.Root, "mods")).Any());
+        Assert.Equal(3, staged.Plugins);
+        Assert.Equal((staged.Root, DataFolderOrder.StagedProfile, game, (string?)null), (staged.Order.Instance, staged.Order.Profile, staged.Order.Game, staged.Order.OrderFile));
+        // staged under the work folder: nothing is written into the game folder or beside the lists
+        Assert.Equal(new[] { "Data" }, Directory.EnumerateFileSystemEntries(game).Select(Path.GetFileName));
+        Assert.Equal(3, Directory.EnumerateFiles(lists).Count());
+    }
+
+    [Fact]
+    public void A_folder_that_is_not_a_game_is_refused_in_one_sentence()
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => DataFolderOrder.Stage(_root, Path.Combine(_root, "work")));
+        Assert.Equal($"'{_root}' is not a Skyrim game folder: its Data folder holds no Skyrim.esm; choose the game folder or its Data folder.", ex.Message);
+    }
+
+    [Fact]
+    public void An_instance_folder_and_a_profile_folder_name_the_instance_and_the_profile()
+    {
+        var inst = Directory.CreateDirectory(Path.Combine(_root, "inst")).FullName;
+        var prof = Directory.CreateDirectory(Path.Combine(inst, "profiles", "Mine")).FullName;
+        File.WriteAllText(Path.Combine(prof, "modlist.txt"), "");
+        Assert.Equal((inst, (string?)null), ProfileReader.Parse(inst));
+        Assert.Equal((inst, "Mine"), ProfileReader.Parse(prof));
+        Assert.Equal((inst, "Mine"), ProfileReader.Parse(Path.Combine(prof, "modlist.txt")));
+        Assert.Null(ProfileReader.Parse(_root));
+    }
+}
