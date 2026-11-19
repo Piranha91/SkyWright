@@ -41,6 +41,15 @@ MTIME = re.compile(r'"mtimeUtc": "[^"]+"')
 PLUGINS = "P:/plugins/"   # the same on every machine, so an emit's bytes do not depend on the temporary folder
 
 
+def snapshot(root: Path) -> list:
+    """V.snapshot, with a receipt's record of when an output was written masked: that time is this run's own."""
+    rows = V.snapshot(root)
+    for row in rows:
+        if row["path"].startswith("receipts/"):
+            row["text"] = F.pack(MTIME.sub('"mtimeUtc": "<mtime>"', F.mask((root / row["path"]).read_bytes().decode("utf-8"), root)))
+    return rows
+
+
 class Stop(Exception):
     """The stand-in was asked for a sweep the case did not expect."""
 
@@ -190,7 +199,7 @@ def run_step(root: Path, plan: dict, n: int, name: str, fake, *, budget=None, dr
     """One invocation of execute over the folder, the sweep child stood in for by `fake` (None: none may start)."""
     if before:
         before(root)
-    step = {"name": name, "budget": budget, "drift": drift, "edits": V.snapshot(root) if before else None}
+    step = {"name": name, "budget": budget, "drift": drift, "edits": snapshot(root) if before else None}
     real = E.measure_program
     with F.fake_clock(), F.captured() as (out, _err):
         led = E.Ledger(root, plan)
@@ -228,7 +237,7 @@ def run_step(root: Path, plan: dict, n: int, name: str, fake, *, budget=None, dr
 CASES = []
 
 
-def case(tmp: Path, name: str, checks, steps, *, settle=None, tweak=None, **plan_over):
+def case(tmp: Path, name: str, checks, steps, *, settle=None, tweak=None, relevance=False, **plan_over):
     """A run folder, then the steps over it one after the other: (name, stand-in, options)."""
     root = tmp / f"x{len(CASES)}"
     root.mkdir()
@@ -239,9 +248,16 @@ def case(tmp: Path, name: str, checks, steps, *, settle=None, tweak=None, **plan
         b = F.Builder(root, plan)
         if settle:
             settle(b, root)
-    row = {"name": name, "tree": V.snapshot(root), "steps": []}
+    row = {"name": name, "tree": snapshot(root), "steps": []}
     for n, (step_name, fake, opts) in enumerate(steps, start=2):
         row["steps"].append(run_step(root, plan, n, step_name, fake, **opts))
+    if relevance:
+        # what finalize records of the same receipts: which hits of each accepted discovery receipt are relevant
+        ex = E.Executor(root, plan, E.Ledger(root, plan), resume=False)
+        bare = copy.deepcopy(plan)
+        bare["targets"], bare["arms"] = [], bare["arms"][:1]
+        row["relevance"] = E.discovery_relevance(ex, E.read_receipts(root))
+        row["relevanceNoTargets"] = E.discovery_relevance(E.Executor(root, bare, E.Ledger(root, bare), resume=False), E.read_receipts(root))
     CASES.append(row)
 
 
@@ -520,7 +536,7 @@ def execute_cases(tmp: Path) -> list:
             dict(F.check_row("p.blocked-qualification", "derived", prerequisites=["l.none"]), adapter={"kind": "derived", "derives": "candidate-qualification"})]
     case(tmp, "candidate qualification over supplied files and discovery hits", disc,
          [("qualified by bytes, unqualified, catalogued, not relevant, unreadable hit lists", None, {}), ("again: reused", None, {})],
-         settle=discovery, tweak=supplied)
+         settle=discovery, tweak=supplied, relevance=True)
     return CASES
 
 
@@ -556,7 +572,7 @@ def small_cases(tmp: Path) -> dict:
         ex = E.Executor(root, plan, E.Ledger(root, plan), resume=False)
         sweep = [c for c in plan["checks"] if c["adapter"]["kind"] == "ordersweep-probe"]
         allowed = E.sweep_arms_allowed(ex, sweep)
-        rows.append({"name": name, "tree": V.snapshot(root), "allowed": allowed, "neededAll": E.sweep_needed(ex, sweep, {}),
+        rows.append({"name": name, "tree": snapshot(root), "allowed": allowed, "neededAll": E.sweep_needed(ex, sweep, {}),
                      "needed": E.sweep_needed(ex, sweep, allowed),
                      "parts": {a["armId"]: list(E.sweep_parts(ex, a)) for a in plan["arms"]}})
 

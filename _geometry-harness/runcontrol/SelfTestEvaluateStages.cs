@@ -20,7 +20,8 @@ public static partial class SelfTest
 
     // The pipeline through scenes over an in-place world, with `evaluate` standing in for each evaluation child:
     // (the evaluation children started, what the run printed).
-    static (List<ChildJob> jobs, string outcome) EvaluateStages(Temp t, PyDict entry, Func<ChildJob, int, ChildResult> evaluate, PyDict? machine = null)
+    static (List<ChildJob> jobs, string outcome) EvaluateStages(Temp t, PyDict entry, Func<ChildJob, int, ChildResult> evaluate, PyDict? machine = null,
+        string through = "scenes", Func<ChildJob, ChildResult?>? later = null)
     {
         var saved = ChildLaunch.RunJob;
         var jobs = new List<ChildJob>();
@@ -31,12 +32,13 @@ public static partial class SelfTest
             ChildLaunch.RunJob = (_, _, _, job) =>
             {
                 if (job.Id == "plan") return StandInPlan(job);
+                if (later?.Invoke(job) is { } stood) return stood;
                 if (!job.Id.StartsWith("evaluate-", StringComparison.Ordinal)) return StandInScopeprobe(res, job, launched);
                 jobs.Add(job);
                 return evaluate(job, jobs.Count);
             };
             var driver = new Driver { OpenRun = QuietRun, SetsRunLogFolder = false, MakeContext = a => new RunContext(entry, machine ?? new PyDict(), a.Out!) };
-            var (exit, stdout, stderr) = Drive(driver, new PipelineArgs(Entry: "e.json", Out: t.At("run"), Through: "scenes"));
+            var (exit, stdout, stderr) = Drive(driver, new PipelineArgs(Entry: "e.json", Out: t.At("run"), Through: through));
             return (jobs, $"exit {exit}: {stderr}{stdout}");
         }
         finally { ChildLaunch.RunJob = saved; }
@@ -193,6 +195,56 @@ public static partial class SelfTest
             var (again, second) = EvaluateStages(t, renamed, (job, n) => Done(job));
             return again.Count == 0 && second.Contains("evaluate: reused (inputs and outputs unchanged)") && second.Contains("records: reused (inputs and outputs unchanged)")
                 ? null : "a presentation change ran a stage again: " + second;
+        });
+        Case("stages: bundle runs over an entry carrying every presentation key, reads modNames only, and is bound to it", () =>
+        {
+            using var t = new Temp();
+            var (inst, game) = World(t, ShadowMods, ShadowEnabled, ShadowPlugins);
+            var entry = InPlaceEntry(inst, game, ["Sel"], ["geometry.object-overlap"]);
+            entry["modNames"] = Json("{\"Sel.esp\": \"The Selection\"}");
+            entry["nexusNames"] = Json("{\"Sel.esp\": \"Sel on Nexus\"}");
+            entry["patchSearch"] = "X:/patch-search.json";
+            entry["report"] = Json("{\"mode\": \"full\", \"maxPages\": 30}");
+            entry["captureSize"] = L(PyJson.Loads("[1920, 1080]"));
+            string run = t.At("run/evaluation");
+            var machine = new PyDict { ["readerCmd"] = "R:/reader.exe" };
+            var steps = new List<ChildJob>();
+            // finalize, bundle and verify-bundle stood in for: what each leaves for the stage to read
+            ChildResult? Later(ChildJob job)
+            {
+                if (job.Id is not ("finalize" or "bundle" or "verify-bundle")) return null;
+                steps.Add(job);
+                if (job.Id == "finalize") File.WriteAllText(PyPath.Join(run, "disposition.json"), "{\"evaluation\": {\"claim\": \"incomplete\", \"complete\": false}, \"ledgerCounts\": {}}");
+                if (job.Id == "bundle")
+                {
+                    string dir = job.Argv[job.Argv.ToList().IndexOf("--out") + 1];
+                    Directory.CreateDirectory(dir);
+                    File.WriteAllText(PyPath.Join(dir, "manifest.json"), "{}");
+                }
+                return Done(job);
+            }
+            ChildResult Evaluated(ChildJob job, int n) { StandInLedger(run, "completed", "skipped-user"); return Done(job); }
+            var (_, first) = EvaluateStages(t, entry, Evaluated, machine, "bundle", Later);
+            if (!first.StartsWith("exit 0") || !first.Contains("bundle: accepted in ")) return "the first run: " + first;
+            var bundle = steps.FirstOrDefault(j => j.Id == "bundle")?.Argv.ToList() ?? [];
+            string? why = Same("the stage's children", string.Join(" ", steps.Select(j => j.Id)), "finalize bundle verify-bundle")
+                          ?? Same("the name the bundle is told", bundle.IndexOf("--mod-name") is var at and >= 0 ? bundle[at + 1] : "(no --mod-name)", "Sel.esp=The Selection")
+                          ?? Same("the reader", bundle[bundle.IndexOf("--reader-cmd") + 1], "R:/reader.exe");
+            if (why != null) return why;
+            var ctx = new RunContext(entry, machine, t.At("run"));
+            why = Rows(new[] { "nexusNames", "patchSearch", "report", "captureSize" }, key => Refuses(() => ctx.Entry.Presentation("bundle", key), key));
+            if (why != null) return why;
+            if (!PyValue.Eq(ctx.Entry.Presentation("bundle", "modNames"), entry["modNames"])) return "bundle could not read modNames";
+            // a presentation key the stage does not read: the stage is not bound to it and is reused
+            steps.Clear();
+            var other = new PyDict(entry) { ["report"] = Json("{\"mode\": \"short\"}"), ["patchSearch"] = "X:/other.json" };
+            var (_, second) = EvaluateStages(t, other, (job, n) => Done(job), machine, "bundle", Later);
+            if (steps.Count > 0 || !second.Contains("bundle: reused (inputs and outputs unchanged)")) return "another presentation key ran the bundle stage again: " + second;
+            // the key it reads: the stage runs again, and finds the bundle it made earlier
+            var renamed = new PyDict(entry) { ["modNames"] = Json("{\"Sel.esp\": \"Renamed\"}") };
+            var (_, third) = EvaluateStages(t, renamed, (job, n) => Done(job), machine, "bundle", Later);
+            return third.Contains("exists from an earlier bundle; move it aside rather than overwrite it.") && third.Contains("evaluate: reused (inputs and outputs unchanged)")
+                ? null : "a changed modNames did not run the bundle stage again: " + third;
         });
     }
 }
