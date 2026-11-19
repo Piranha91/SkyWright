@@ -37,6 +37,14 @@ public sealed class Executor
     /// <summary>Test seam: runs one child job in place of the runner.</summary>
     public Func<ChildJob, ChildResult>? RunJob { get; set; }
 
+    /// <summary>Test seam: a program's identity now, in place of measuring its files.</summary>
+    public Func<string, PyDict>? MeasureProgram { get; set; }
+
+    PyDict MeasureNow(string pid) => MeasureProgram != null ? MeasureProgram(pid) : PlanIdentity.Measure(Opts, Harness, pid);
+
+    /// <summary>One child through the runner, under this invocation's deadline, its log in logs/ID.txt.</summary>
+    public ChildResult Launch(ChildJob job) => RunJob != null ? RunJob(job) : new ChildRunner("evalrun-check", Logs, Deadline).Run(job, echo: true);
+
     public Executor(string run, PyDict plan, Ledger ledger, bool resume, object? budgetMinutes = null)
     {
         Run = PyPath.Str(run);
@@ -68,7 +76,7 @@ public sealed class Executor
         foreach (string pid in pids)
         {
             PyDict now;
-            try { now = PlanIdentity.Measure(Opts, Harness, pid); }
+            try { now = MeasureNow(pid); }
             catch (Unreadable ex)
             {
                 throw new ToolChanged($"{ToolPreflight.UnreadableSentence(pid, ex)}, before {what} was launched. {ToolPreflight.IdentityAction}");
@@ -86,7 +94,7 @@ public sealed class Executor
         foreach (string pid in pids)
         {
             PyDict now;
-            try { now = PlanIdentity.Measure(Opts, Harness, pid); }
+            try { now = MeasureNow(pid); }
             catch (Unreadable ex)
             {
                 Changed[pid] = $"{ToolPreflight.UnreadableSentence(pid, ex)}, after {what} ran";
@@ -295,7 +303,7 @@ public sealed class Executor
         string startedIso = EvalStore.UtcNow();
         double started = (DateTime.UtcNow - DateTime.UnixEpoch).TotalSeconds;
         var job = new ChildJob(jobId, argv, Env: ScenePreflight.ChildEnv(Opts));
-        var res = RunJob != null ? RunJob(job) : new ChildRunner("evalrun-check", Logs, Deadline).Run(job, echo: true);
+        var res = Launch(job);
         string log = PyPath.Join(Logs, $"{jobId}.txt");
         if (!string.IsNullOrEmpty(res.Stopped))
         {

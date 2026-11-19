@@ -21,8 +21,6 @@ public static class EvaluateRun
         if (changed != null) throw new Refusal(changed);
         // the plan's premises are read before anything is written: a ledger rebuild writes the ledger
         if (EvalStore.PremiseRefusal(plan) is { } premise) throw new Refusal(premise);
-        if (SweepRows.NotBuilt(plan) is { } noSweep) throw new Refusal(noSweep);
-        if (DerivedRows.NotBuilt(plan) is { } noDerived) throw new Refusal(noDerived);
         var ledger = new Ledger(run, plan);
         if (a.RebuildLedger) ledger.Rebuild();
         if (ledger.Refusal() is { } bad) throw new Refusal(bad);
@@ -112,7 +110,10 @@ public static class EvaluateRun
 
     /// <summary>Every row of the plan settled: reused, accounted by its plan status, or measured. The swept checks are
     /// settled once, at the position of the first; the derived checks after the loop.</summary>
-    public static void Execute(Executor ex, Run parent)
+    public static void Execute(Executor ex, Run parent) => Execute(ex, () => { parent.Advance(); });
+
+    /// <summary>The same, counting each settled row through `advance`.</summary>
+    public static void Execute(Executor ex, Action advance)
     {
         var plan = ex.Plan;
         var ledger = ex.Ledger;
@@ -135,7 +136,7 @@ public static class EvaluateRun
             string cid = Ev.Str(check["checkId"]);
             if (Ev.Eq(kind, "ordersweep-probe") && sweepChecks.Any(c => ReferenceEquals(c, check)))
             {
-                if (!sweepDone) SweepRows.Settle(ex, sweepChecks, parent);
+                if (!sweepDone) SweepRows.Settle(ex, sweepChecks, advance);
                 sweepDone = true;
                 continue;
             }
@@ -154,7 +155,7 @@ public static class EvaluateRun
                         ex.Account(check, arm, $"blocked(prerequisite:{pre})", "blocked-prerequisite",
                             Prerequisites.BlockDetail(ex, pre, aid) + ImportNote(st), extra: Prerequisites.SupersededImport(ex, check, arm));
                     else MarkReused(cid, aid);
-                    parent.Advance();
+                    advance();
                     continue;
                 }
                 if (Ev.Eq(st, "not-applicable"))
@@ -236,7 +237,7 @@ public static class EvaluateRun
                                     ? $"{Ev.Str(p)} ({Ev.Str(ledger.Entry(p, aid, null)?.Get("status"))} on this arm)" : Ev.Str(p))));
                     else GenericRows.Run(ex, check, arm);
                 }
-                parent.Advance();
+                advance();
             }
         }
 
