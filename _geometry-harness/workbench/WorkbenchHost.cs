@@ -469,18 +469,21 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                                           ToolTip = "frame rate of the 3D view over the last two seconds: frames a second, the median frame time, the mean of the slowest 1%, the worst" };
     DispatcherTimer? _fpsTimer;
 
-    System.Windows.Controls.Primitives.ToggleButton FpsToggle()
+    Button? _fpsButton;
+    Button FpsToggle()
     {
-        var t = new System.Windows.Controls.Primitives.ToggleButton { Content = "Frame rate", Margin = new Thickness(4), IsChecked = _showFps,
-                                                                       ToolTip = "show the 3D view's frame rate beside these buttons" };
-        t.Checked += (_, _) => ShowFps(true); t.Unchecked += (_, _) => ShowFps(false);
-        return t;
+        // a plain button that names what it will do: the theme draws a checked toggle's text unreadably
+        _fpsButton = new Button { Margin = new Thickness(4), ToolTip = "show or hide the 3D view's frame rate beside these buttons" };
+        _fpsButton.Click += (_, _) => ShowFps(!_showFps);
+        _fpsButton.Content = _showFps ? "Hide frame rate" : "Show frame rate";
+        return _fpsButton;
     }
 
     /// <summary>Show or hide the readout; it is refreshed four times a second and never asks for a frame.</summary>
     internal void ShowFps(bool on)
     {
         _showFps = on;
+        if (_fpsButton is not null) _fpsButton.Content = on ? "Hide frame rate" : "Show frame rate";
         _fpsText.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         if (!on) { _fpsTimer?.Stop(); return; }
         _fpsTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal,
