@@ -92,6 +92,40 @@ public static partial class SelfTest
                    ?? (row["rawSha256"] is string sha ? Same(name + ": sha256 of the text", made.sha256, sha) : null)
                    ?? Same(name + ": the hash is the text's", made.sha256, Hashing.Sha256Text(made.text));
         }));
+        Case("case 430 a race-carrying delta leaves the state check on the whole order, the others scoped", () =>
+        {
+            PyDict Check(string id, string kind, string exe) => new()
+            {
+                ["checkId"] = id, ["adapter"] = new PyDict { ["kind"] = kind, ["exe"] = exe, ["populationFlag"] = "--population" },
+                ["arms"] = new List<object?> { new PyDict { ["armId"] = "baseline", ["status"] = "planned" } },
+            };
+            var checks = new List<PyDict>
+            {
+                Check("geometry.object-overlap", "ordersweep-probe", "overlapprobe"), Check("state.conditional-geometry", "probe-emit", "stateprobe"),
+                Check("geometry.fixture-empty-space", "probe-emit", "contactprobe"),
+            };
+            List<PyDict> Arms(string file) =>
+            [
+                new PyDict { ["plugins"] = Py.Objs(["A.esp"]), ["requested"] = new PyDict { ["plugins"] = new List<object?>(), ["providers"] = new List<object?>() } },
+                new PyDict
+                {
+                    ["plugins"] = Py.Objs(["A.esp", file]),
+                    ["requested"] = new PyDict
+                    {
+                        ["plugins"] = new List<object?> { new PyDict { ["name"] = file, ["path"] = t.At("p/" + file), ["sha256"] = Hashing.Sha256File(t.At("p/" + file)) } },
+                        ["providers"] = new List<object?>(),
+                    },
+                },
+            ];
+            var (race, text) = PlanPopulation.Plan(checks, Arms("race.esp"), new List<object?>(), "load-time", null);
+            var (plain, _) = PlanPopulation.Plan(checks, Arms("plain.esp"), new List<object?>(), "load-time", null);
+            return Same("scoped with a race carrier", PyJson.Dumps(race.Get("scopedChecks")), "[\"geometry.fixture-empty-space\", \"geometry.object-overlap\"]")
+                   ?? Same("the state check's reason", PyText.Str(Py.DictOrEmpty(race.Get("wholeOrderChecks")).Get("state.conditional-geometry")),
+                           "race.esp carries RACE records, which change every actor band the state route check reads, so it runs on the whole order")
+                   ?? (text != null && race["scoped"] is true ? null : "a race carrier must still leave a population for the other checks")
+                   ?? Same("scoped without one", PyJson.Dumps(plain.Get("scopedChecks")),
+                           "[\"geometry.fixture-empty-space\", \"geometry.object-overlap\", \"state.conditional-geometry\"]");
+        });
         Case("owner: the configuration fingerprint is ConfigurationIdentity's (Python hashes a null population or state as the text None)", () =>
             Rows(L(units["fingerprints"]).Select(D), row =>
             {
