@@ -1620,6 +1620,19 @@ layers) alike. Re-verified when the control bar landed (2026-08-30): same cell, 
 pre-change and post-change binaries, `cmp`-identical PNGs — the bar is an overlay on a window that
 the static path never opens.
 
+**A host's layer switches.** A host that takes the built scene instead of this window
+(`InteractiveViewer.Host`, the conflict-review workbench) gets the same visibility state to switch,
+not a second copy of the rules. `InteractiveViewer.ApplyNavMode(opt, mode)` is the `N` key's
+effect (sheet visibility and alpha, wire flags), shared. `InteractiveOptions` also carries what a
+host's toolbar needs: `LayerMeshes` (the build's terrain, water and grass meshes, by name),
+`ShowCellOutline` (the target cell's white dashed outline, overlay tag 5, read per frame like the
+planes' tag 4), `TerrainHeightAt` and `LandCells` (the drawn ground and the grid cells whose land
+the scene read), `BaseTypes` (each modeled base's record type) and `UndrawnAt` (where each
+reference the walk left out as an editor marker or for having no model stands). A host's cell
+request can carry a navmesh display mode for that cell's shots (`InteractiveViewer.CellRequestNav`):
+the cell is built again in the same run with its navmesh, without re-reading the load order. None
+of this changes a static render or this window's own behaviour.
+
 ---
 
 ## Worklists (`--worklist`, `--emit-bats`)

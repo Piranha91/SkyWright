@@ -1737,6 +1737,7 @@ static class TexturedScene
                         var ps = new PickShape { Kind = PickKind.Terrain, Verts = data.Positions, Tris = data.Indices, TerrainTex = basePath };
                         ps.ComputeBounds();
                         interactive.PickShapes.Add(ps);
+                        interactive.AddLayerMesh("terrain", mesh);
                     }
                 }
             if (layerMeshes > 0) Console.WriteLine($"   terrain paint: {layerMeshes} painted layer(s) blended natively over their quadrants");
@@ -1802,6 +1803,7 @@ static class TexturedScene
             renderer.AddMesh(nwater);
             graphicsShot?.MeshAdded("dynamic-water", nwater);
             meshes.Add(nwater);
+            interactive?.AddLayerMesh("water", nwater);
             waterMeshes++; waterTris += wdata.Indices.Length / 3;
             waterSubmerged += wdata.SubmergedVertexCount; waterSamples += wdata.Positions.Length;
         }
@@ -1890,6 +1892,7 @@ static class TexturedScene
                 {
                     renderer.AddMesh(m);
                     meshes.Add(m);
+                    interactive?.AddLayerMesh("grass", m);
                 }
                 Console.WriteLine($"   grass: {placement.InstanceCount:N0} instance(s) of {placement.Types.Count(t => t.Instances.Count > 0)} type(s) "
                                 + $"({glGrass.Meshes.Count} instanced mesh(es)) on {placement.CellsPlaced} cell(s), {placement.PatchesPlaced:N0} patch(es); "
@@ -3000,7 +3003,7 @@ static class TexturedScene
             Edge(cb.X0, cb.Y1, cb.X0, cb.Y0);
             if (outline.Count > 0)
             {
-                AddLayer("cell-outline", (outline.ToArray(), false, false, 0, 1f));
+                AddLayer("cell-outline", (outline.ToArray(), false, false, 5, 1f));   // tag 5: a host can hide it
                 Console.WriteLine($"   cell outline: white dashes around {cb.X0:0},{cb.Y0:0} .. {cb.X1:0},{cb.Y1:0}");
             }
         }
@@ -3316,6 +3319,7 @@ static class TexturedScene
                     if (nav == 2 && interactive is { ShowNavRedWire: false }) continue;
                     if (nav == 3 && interactive is { ShowRoute: false }) continue;
                     if (nav == 4 && interactive is { ShowPlanes: false }) continue;
+                    if (nav == 5 && interactive is { ShowCellOutline: false }) continue;
                     // At alpha 1 this is what the loop always did; below it, ordinary source-alpha
                     // blending, which is the whole mechanism behind a translucent overlay layer.
                     if (layerAlpha < 1f)

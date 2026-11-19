@@ -193,6 +193,20 @@ sealed class InteractiveOptions
     public bool CanSwitchCell;                             // false when the host cannot rebuild (says so on the key)
     public bool ReportMode;                               // scene-only window and captures; suppress all text/UI overlays
     public (int Cell, int Shot)? CellSwitch;               // set by Ctrl+PageUp/Down, read by the host after Run returns
+
+    // ---- what a host's layer switches read (the workbench's view toolbar); the fly-through does not use them -----
+    public Dictionary<string, List<GlMesh>> LayerMeshes = new();   // "terrain", "water", "grass": the build's meshes of each
+    public bool ShowCellOutline = true;                    // the target cell's white dashed outline, read per frame by the overlay draw
+    public Func<float, float, float?>? TerrainHeightAt;    // ground height at Skyrim X,Y on the drawn terrain; null off the land
+    public IReadOnlyCollection<(int X, int Y)> LandCells = Array.Empty<(int, int)>();   // grid cells whose land the scene read
+    public IReadOnlyDictionary<FormKey, string>? BaseTypes; // a modeled base's record type (Static, Tree, Light, ...)
+    public IReadOnlyDictionary<FormKey, (HousecarlCore.Vec3 Position, HousecarlCore.Vec3 Rotation)>? UndrawnAt;   // refs left out as markers or for having no model
+
+    public void AddLayerMesh(string layer, GlMesh mesh)
+    {
+        if (!LayerMeshes.TryGetValue(layer, out var list)) LayerMeshes[layer] = list = new();
+        list.Add(mesh);
+    }
 }
 
 static class InteractiveViewer
@@ -201,6 +215,30 @@ static class InteractiveViewer
     /// host returns or abandons a build; the interactive worklist loop builds it next. Null for viewprobe itself.</summary>
     internal static string? CellRequest;
     internal static string? TakeCellRequest() { var c = CellRequest; CellRequest = null; return c; }
+    /// <summary>With <see cref="CellRequest"/>: the navmesh display mode (off, filled, wire or both) the host asks that
+    /// cell's shots in; null keeps what the run and the shot already say.</summary>
+    internal static string? CellRequestNav;
+    internal static string? TakeCellRequestNav() { var n = CellRequestNav; CellRequestNav = null; return n; }
+
+    // The sheet is baked once at the "filled" alpha, and the shader multiplies the baked vertex alpha by MaterialAlpha,
+    // so target²/baked reproduces another mode's pixels exactly.
+    static float FillAlpha(float target, float baked) => target * target / baked;
+
+    /// <summary>Show the resident navmesh in a display mode: off, filled, wire or both. The sheet's visibility and alpha
+    /// and the wire's per-frame draw flags; nothing is rebuilt. N calls it here, and a host's switch calls it too.</summary>
+    internal static void ApplyNavMode(InteractiveOptions opt, string navMode)
+    {
+        bool fill = navMode is "filled" or "both";
+        bool wire = navMode is "wire" or "both";
+        float healthy = fill ? FillAlpha(navMode == "both" ? 0.16f : 0.35f, 0.35f) : 0f;
+        float finding = fill ? FillAlpha(navMode == "both" ? 0.36f : 0.55f, 0.55f) : 0f;
+        foreach (var m in opt.NavFill) { m.IsRendering = fill; m.MaterialAlpha = healthy; }
+        foreach (var m in opt.NavFillRed) { m.IsRendering = fill; m.MaterialAlpha = finding; }
+        opt.ShowNavWire = wire;
+        // The finding is outlined in EVERY mode that draws navmesh at all — the static
+        // path's rule, kept here so a mode switch cannot lose the thing being examined.
+        opt.ShowNavRedWire = navMode != "off";
+    }
     /// <summary>A host that takes the built scene instead of this window loop (the conflict review workbench). Null
     /// for viewprobe itself, which then runs <see cref="Run"/> exactly as before.</summary>
     internal static Action<InteractiveOptions, GlRenderer, (Vector3 Eye, Vector3 Look, float FovDeg), Action<GlMatrix4, GlMatrix4>?>? Host;
@@ -282,22 +320,10 @@ static class InteractiveViewer
         // so a mode's on-screen alpha is its value SQUARED. The sheet here is baked once, at the
         // "filled" value, which makes MaterialAlpha = target²/baked the setting that reproduces
         // another mode's pixels exactly rather than merely approximately.
-        static float FillAlpha(float target, float baked) => target * target / baked;
+        // (FillAlpha and the mode's effects live in ApplyNavMode, which a host's switch shares.)
         bool hasNav = opt.NavMode != "off";
         string navMode = opt.NavMode;
-        void ApplyNav()
-        {
-            bool fill = navMode is "filled" or "both";
-            bool wire = navMode is "wire" or "both";
-            float healthy = fill ? FillAlpha(navMode == "both" ? 0.16f : 0.35f, 0.35f) : 0f;
-            float finding = fill ? FillAlpha(navMode == "both" ? 0.36f : 0.55f, 0.55f) : 0f;
-            foreach (var m in opt.NavFill) { m.IsRendering = fill; m.MaterialAlpha = healthy; }
-            foreach (var m in opt.NavFillRed) { m.IsRendering = fill; m.MaterialAlpha = finding; }
-            opt.ShowNavWire = wire;
-            // The finding is outlined in EVERY mode that draws navmesh at all — the static
-            // path's rule, kept here so a mode switch cannot lose the thing being examined.
-            opt.ShowNavRedWire = navMode != "off";
-        }
+        void ApplyNav() => ApplyNavMode(opt, navMode);
         ApplyNav();
 
         // Set when something OTHER than the mouse changed what is under the cursor, so a hover

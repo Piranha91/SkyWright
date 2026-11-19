@@ -1414,6 +1414,8 @@ var bosIdx = bosMode != "off" ? new BosFormIndex() : null;
 var bosLight = new List<(ModKey Key, bool Light)>();
 var refCellOf = new Dictionary<FormKey, FormKey>();
 var refOutcome = new Dictionary<FormKey, (string Outcome, string? BaseEditorId)>();
+// Where each ref left out as a marker or for having no model stands, for a host that draws them as gizmos.
+var refUndrawnAt = new Dictionary<FormKey, (Vec3 Position, Vec3 Rotation)>();
 var winWalk = new ViewProbe.WinningRefWalk(winRef, persistentWin, refCellOf);
 // The ring edge (WinningRefs.cs): references the game loads two cells out whose bounds enter the 3x3, per shot.
 int edgeAdmittedCount = 0, edgePlanesAdmittedCount = 0;
@@ -2697,7 +2699,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
         int stateArrived = 0, stateDeparted = 0;
         // Every walked ref's outcome in one word, for a host that lists the cells' placed refs (the workbench's
         // Records tree): drawn, or why not. Read nowhere else.
-        refOutcome.Clear();
+        refOutcome.Clear(); refUndrawnAt.Clear();
         string? BaseEd(PlacedRef wr) => wr.Base is { } b && baseEditorId.TryGetValue(b, out var e) ? e : null;
         foreach (var r in winRef.Values)
         {
@@ -2755,7 +2757,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             }
             // --cell-lighting: every drawn LIGH reference is a point light (CellLighting.cs), model or not.
             if (ViewProbe.CellLighting.Requested && ViewProbe.CellLighting.Bases.ContainsKey(bk)) ViewProbe.CellLighting.Placed.Add((rPos, bk, r.FormKey));
-            if (!baseMesh.TryGetValue(bk, out var rel)) { noModel++; refOutcome[r.FormKey] = ("no-model", BaseEd(r)); continue; }
+            if (!baseMesh.TryGetValue(bk, out var rel)) { noModel++; refOutcome[r.FormKey] = ("no-model", BaseEd(r)); refUndrawnAt[r.FormKey] = (rPos, rRot); continue; }
             // Effect meshes (beams, mists, glows) are translucent volumes that drown a first-person
             // shot; the game draws them subtly, this flat-lit pass cannot. Skipped by default,
             // counted, and --fx puts them back. This is the WHOLE-FILE rule only — a solid mesh that
@@ -2773,7 +2775,7 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
             if (!keepFx && !fxStatic && isFx) { fxSkipped++; refOutcome[r.FormKey] = ("effect", BaseEd(r)); continue; }
             // Editor markers are not world geometry; the game never draws them. --markers keeps them
             // as a translucent extra layer instead of dropping them.
-            if (isMarker && !showMarkers) { markerSkipped++; refOutcome[r.FormKey] = ("marker", BaseEd(r)); continue; }
+            if (isMarker && !showMarkers) { markerSkipped++; refOutcome[r.FormKey] = ("marker", BaseEd(r)); refUndrawnAt[r.FormKey] = (rPos, rRot); continue; }
             var explicitlyHighlighted = highlightColors.TryGetValue(r.FormKey, out var highlightColor);
             if (!explicitlyHighlighted && conflictDoors.Contains(r.FormKey)) highlightColor = new(1f,.35f,.10f);
             scene.Add(new ViewProbe.SceneRef(rel, rPos, rRot, rScale,
@@ -5433,6 +5435,11 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                 ShowPlanes = showPlanes,
                 PlaneLegend = planeLegend,
                 ReportMode = reportMode,
+                // read by a host's layer switches (the workbench's view toolbar)
+                TerrainHeightAt = terrainHeightAt,
+                LandCells = landHeights.Keys.ToList(),
+                BaseTypes = baseType,
+                UndrawnAt = refUndrawnAt,
             };
             if (navMode != "off")
                 foreach (var nav in navSrc.Values)
@@ -5507,14 +5514,23 @@ if (worklist is not null)
             // A host's request for a cell this worklist may not hold (InteractiveViewer.CellRequest): it joins the list.
             if (ViewProbe.InteractiveViewer.TakeCellRequest() is { } asked)
             {
+                var askedNav = ViewProbe.InteractiveViewer.TakeCellRequestNav();
                 int at = -1;
                 for (int ci = 0; ci < worklist.Cells.Count; ci++)
                     if (string.Equals(worklist.Cells[ci].Cell, asked, StringComparison.OrdinalIgnoreCase)) { at = ci; break; }
                 if (at < 0)
                 {
                     worklist = worklist with { Cells = worklist.Cells.Append(new HarnessShared.WorklistCell(asked, new[] { new HarnessShared.WorklistShot(
-                        "placeholder pose: the host frames the camera once the cell is built", new[] { 0f, 0f, 0f }) })).ToList() };
+                        "placeholder pose: the host frames the camera once the cell is built", new[] { 0f, 0f, 0f }) { Nav = askedNav } })).ToList() };
                     at = worklist.Cells.Count - 1;
+                }
+                else if (askedNav is not null)
+                {
+                    // the host asks this cell again with another navmesh mode: its shots carry it
+                    var cellAt = worklist.Cells[at];
+                    var cells = worklist.Cells.ToList();
+                    cells[at] = cellAt with { Shots = cellAt.Shots.Select(sh => sh with { Nav = askedNav }).ToList() };
+                    worklist = worklist with { Cells = cells };
                 }
                 (wlc, wls) = (at, 0);
                 continue;
