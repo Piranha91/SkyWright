@@ -71,7 +71,7 @@ public sealed class PopulationScope
     PopulationScope(string path, string sha, IReadOnlyList<string> plugins, IReadOnlyList<string> mods)
     { FilePath = path; Sha256 = sha; Plugins = plugins; Mods = mods; }
 
-    public static string IdentityOf(string basePopulation, string sha256) => $"{basePopulation}+population:{sha256[..12].ToLowerInvariant()}";
+    public static string IdentityOf(string basePopulation, string sha256) => PopulationRules.Identity(basePopulation, sha256);
     public string Identity(string basePopulation) => IdentityOf(basePopulation, Sha256);
 
     static string FileSha(string path)
@@ -175,7 +175,7 @@ public sealed class PopulationScope
         foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
         {
             var rel = NormalAsset(Path.GetRelativePath(dir, f));
-            if (rel.EndsWith("_swap.ini", StringComparison.Ordinal))
+            if (PopulationRules.IsSwapIni(rel))
                 throw new PopulationRefused($"mod folder {name} ships a Base Object Swapper ini ({rel}), whose swaps this population does not model; run this probe on the whole order (no --population).");
             ModFiles.Add(rel);
             if (!rel.Contains('\\') && (rel.EndsWith(".bsa", StringComparison.Ordinal) || rel.EndsWith(".ba2", StringComparison.Ordinal)))

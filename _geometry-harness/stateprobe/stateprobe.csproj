@@ -29,6 +29,7 @@
     <Compile Include="..\_shared\RingReach.cs" Link="RingReach.cs" />
     <Compile Include="..\_shared\LargeReferenceLists.cs" Link="LargeReferenceLists.cs" />
     <Compile Include="..\_shared\PopulationScope.cs" Link="PopulationScope.cs" />
+    <Compile Include="..\_shared\PopulationRules.cs" Link="PopulationRules.cs" />
     <Compile Include="..\_shared\WinStateDump.cs" Link="WinStateDump.cs" />
     <ProjectReference Include="..\..\src\housecarl-core\housecarl-core.csproj" />
     <Compile Include="..\_shared\EnablePopulation.cs" Link="EnablePopulation.cs" />
