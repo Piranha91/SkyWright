@@ -105,6 +105,7 @@ public static partial class SelfTestFinalize
         ClassificationCases(D(ka["classification"]));
         DispositionCases(D(ka["dispositions"]));
         var bases = D(D(ka["dispositions"])["bases"]);
+        PairCases(D(ka["pairs"]), bases["legacy"]);
         foreach (var c in L(ka["finalize"]).Select(D)) FinalizeCase(c, bases);
         var verify = D(ka["verify"]);
         foreach (var c in L(verify["cases"]).Select(D)) VerifyCase(c, verify["base"]);
@@ -120,7 +121,9 @@ public static partial class SelfTestFinalize
             {
                 var rows = L(row["rows"]).Select(D).ToList();
                 object? got = t.Mask(SweepReading.OrderClassification(t.Root, D(ka["arm"]), rows));
-                return SameJson("word", TieSorted(got), TieSorted(row["want"]));
+                // only the tie case is compared as a set: every other history has one order
+                bool tie = S(row["name"]).Contains("(a tie)");
+                return SameJson("word", tie ? TieSorted(got) : got, tie ? TieSorted(row["want"]) : row["want"]);
             });
         });
         Case("finalize: read_sweep_jobs", () =>
@@ -132,6 +135,29 @@ public static partial class SelfTestFinalize
         });
         Case("finalize: the launch folder name", () => Rows(L(ka["folders"]), row =>
             Same(S(row["name"]), SweepReading.SweepFolderRe.IsMatch(S(row["name"])).ToString(), ((bool)row["want"]!).ToString())));
+    }
+
+    static List<object?> PairRows(IEnumerable<(string, string)> pairs) =>
+        pairs.Select(p => (object?)new List<object?> { p.Item1, p.Item2 }).ToList();
+
+    static void PairCases(PyDict ka, object? reviewTree)
+    {
+        var plans = D(ka["plans"]);
+        Case("finalize: target_pairs", () => Rows(L(ka["target"]), row =>
+        {
+            var plan = D(plans[S(row["plan"])]);
+            var arm = L(plan["arms"]).Select(D).First(a => S(a["armId"]) == S(row["arm"]));
+            return SameJson($"{S(row["plan"])} / {S(row["arm"])}", PairRows(Discovery.TargetPairs(plan, arm)), row["want"]);
+        }));
+        Case("finalize: review_pairs, all_plan_pairs, relevant_plugins", () =>
+        {
+            using var t = new Temp("b");
+            BuildTree(t, reviewTree);
+            var plan = D(PyJson.LoadEvalFile(t.At("plan.json")));
+            return SameJson("review", PairRows(Discovery.ReviewPairs(t.Root, plan)), ka["review"])
+                ?? SameJson("all", PairRows(Discovery.AllPlanPairs(t.Root, plan)), ka["all"])
+                ?? SameJson("relevant", PyOrder.SortedByCodePoint(Discovery.RelevantPlugins(t.Root, plan)).Cast<object?>().ToList(), ka["relevant"]);
+        });
     }
 
     static void DispositionCases(PyDict ka)

@@ -46,10 +46,18 @@ public static class Finalizer
         using (var record = RunLog.Begin("evalrun-finalize", new RunOptions { StageSource = StageSource.Counted }))
         {
             record.Stage("finalize", total: 1, unit: "dispositions");
-            (integrity, var badKeys) = EvidenceIntegrity.Check(run, plan, ledger, receipts);
-            disp = Disposition.Build(run, plan, ledger, receipts, integrity, badKeys);
-            PyJson.WriteEvalFile(PyPath.Join(run, "disposition.json"), disp);
-            Ev.WriteText(PyPath.Join(run, "STATUS.md"), StatusMd.Build(plan, disp));
+            try
+            {
+                (integrity, var badKeys) = EvidenceIntegrity.Check(run, plan, ledger, receipts);
+                disp = Disposition.Build(run, plan, ledger, receipts, integrity, badKeys);
+                PyJson.WriteEvalFile(PyPath.Join(run, "disposition.json"), disp);
+                Ev.WriteText(PyPath.Join(run, "STATUS.md"), StatusMd.Build(plan, disp));
+            }
+            catch (Exception ex)
+            {
+                record.Fail($"{ex.GetType().Name}: {ex.Message}");   // as Python's Run records an exception
+                throw;
+            }
             record.Advance();
         }
         var evaluation = PyValue.Dict(disp["evaluation"]);

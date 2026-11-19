@@ -1014,6 +1014,13 @@ def disposition_cases(tmp: Path) -> dict:
         v.edit("plan.json", plan)
     case("unknown applicability", "complete", unknown)
 
+    def unknown_without_arms(v):
+        v.edit("plan.json", lambda doc: doc["checks"].append(check_row("x.none", "probe-json", exe="depprobe", applicability="unknown",
+                                                                      arms=(), required=False)))
+    case("unknown applicability on a check with no arm", "complete", unknown_without_arms)
+    case("a journal with blank lines and a line separator", "complete", lambda v: v.put(
+        "journal.jsonl", (v.root / "journal.jsonl").read_bytes().decode("utf-8") + "\r\n   \r\n{\"detail\":\"a\u2028b\"}\r\n\n"))
+
     def decided(v):
         def plan(doc):
             doc["checks"][1]["manualDecisionAllowed"] = True
@@ -1065,6 +1072,31 @@ def disposition_cases(tmp: Path) -> dict:
         "receipts/r.contested__candidate-01.json",
         lambda d: (d["imported"].update(reusedWithin="another-evaluation", reusedFromVerified=0), d["validation"].update(identityLimits=None))))
     return {"bases": {k: t for k, (_, t) in bases.items()}, "cases": cases}
+
+
+# ------------------------------------------------------------------------------------------ the plan's pairs
+
+def pair_cases(tmp: Path) -> dict:
+    """target_pairs per arm, and the review pairs, all pairs and relevant plugins of the review-arm run folder."""
+    arms = [{"armId": "b", "kind": "baseline", "plugins": ["Skyrim.esm", "b.esp", "A.esp", "Z.esp", "a.esp", "Target.esp"]},
+            {"armId": "c1", "kind": "candidate", "plugins": ["Skyrim.esm", "A.esp", "B.esp", "Target.esp", "New.esp", "Z.esp"]},
+            {"armId": "c2", "kind": "candidate", "plugins": ["z.esp", "target.esp", "skyrim.esm"]},
+            {"armId": "s1", "kind": "supplied-combination", "plugins": ["Skyrim.esm"],
+             "supplied": {"declaredFiles": ["mods/P/patch.esp", "TARGET.esp", "mods\\Q\\Other Patch.esp"]}},
+            {"armId": "s2", "kind": "supplied-combination", "supplied": None}, {"armId": "s3", "kind": "candidate", "plugins": None}]
+    plans = {"targets and a baseline": {"arms": arms, "targets": [{"name": "Target.esp"}, {"name": "alpha.esp"}, {"name": ""}, "odd", {"x": 1}]},
+             "no baseline": {"arms": arms[1:], "targets": [{"name": "Target.esp"}]},
+             "no targets": {"arms": arms}}
+    target = []
+    for name, plan in plans.items():
+        for arm in plan["arms"]:
+            target.append({"plan": name, "arm": arm["armId"],
+                           "want": E.target_pairs(SimpleNamespace(plan=plan, run=tmp), arm)})
+    run = tmp / "bases" / "legacy"
+    plan = E.load_json(run / "plan.json")
+    ex = SimpleNamespace(plan=plan, run=run)
+    return {"plans": plans, "target": target, "review": E.review_pairs(ex), "all": E.all_plan_pairs(ex),
+            "relevant": sorted(E.relevant_plugins(ex))}
 
 
 # ------------------------------------------------------------------------------------- the finalize command
@@ -1309,6 +1341,9 @@ def verify_cases(tmp: Path) -> dict:
     case("names status: partial with matching counts", names_status(
         {"names": {"status": "partial", "sentence": "some unread", "counts": {"objectsUnread": 1, "basesUnread": 2.0}}},
         {"derivedFrom": [], "unread": {"objects": ["0001:A.esp"], "bases": ["a", "b"]}}))
+    case("names status: partial, objects only", names_status(
+        {"names": {"status": "partial", "sentence": "some unread", "counts": {"objectsUnread": 1, "basesUnread": 0}}},
+        {"derivedFrom": [], "unread": {"objects": ["0001:A.esp"], "bases": []}}))
     case("names status: counts absent", names_status({"names": {"status": "enriched", "sentence": "read"}},
                                                       {"derivedFrom": [], "unread": {"objects": [], "bases": []}}))
     return {"base": tree(base), "cases": cases}
@@ -1316,7 +1351,7 @@ def verify_cases(tmp: Path) -> dict:
 
 SECTIONS = [("plans", plan_cases), ("ledger", ledger_cases), ("receipts", receipt_cases), ("identity", lambda tmp: identity_cases()),
             ("classification", classification_cases), ("dispositions", disposition_cases),
-            ("finalize", lambda tmp: finalize_cases(tmp, None)), ("verify", verify_cases)]
+            ("pairs", pair_cases), ("finalize", lambda tmp: finalize_cases(tmp, None)), ("verify", verify_cases)]
 
 
 def main() -> int:

@@ -19,6 +19,9 @@ using RunControl;
 //        runcontrol --self-test          run every known answer; exit 0 when all pass, 1 otherwise
 //        runcontrol identity FOLDER      print the package identity of a build folder as JSON
 //        runcontrol canon                read JSON on standard input; print the hash of its two canonical forms
+//        runcontrol finalize --run RUN   derive disposition.json and STATUS.md from the ledger and receipts (evalrun finalize)
+//        runcontrol verify-bundle DIR [--out FILE]   check a bundle from its own files only (evalrun verify-bundle)
+//        runcontrol eval-status --run RUN   print the ledger as a table (evalrun status)
 //
 // EXIT CODES: 0 done, 2 refused (one sentence on standard error), 3 a result that awaits judgement.
 
