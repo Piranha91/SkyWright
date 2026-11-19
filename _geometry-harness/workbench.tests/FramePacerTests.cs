@@ -89,6 +89,16 @@ public class FramePacerTests
         Assert.False(c.OnClock);
     }
 
+    [Fact]
+    public void The_readout_names_the_clock_and_the_composition_interval()
+    {
+        Assert.Equal("own clock, desktop composes every 46.6 ms", FrameStats.Pacing("clock", 46.58));
+        Assert.Equal("compositor, desktop composes every 16.7 ms", FrameStats.Pacing("compositor", 16.66));
+        Assert.Equal("compositor", FrameStats.Pacing("compositor", double.NaN));
+        Assert.EndsWith("own clock, desktop composes every 46.6 ms", new FrameStats().Readout(0, "demand", true, FrameStats.Pacing("clock", 46.6)));
+        Assert.EndsWith(",pacer,compose_ms", FrameStats.CsvHeader);
+    }
+
     // functional checks through the test hook: a stand-in compositor, not the desktop's real slow state
     [Theory]
     [InlineData(46.8, "clock")]

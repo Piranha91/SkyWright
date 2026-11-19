@@ -491,10 +491,11 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         _fpsText.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
         if (!on) { _fpsTimer?.Stop(); return; }
         _fpsTimer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal,
-            (_, _) => _fpsText.Text = Frames.Readout(Now, _loop, _vsync), _window.Dispatcher);
+            (_, _) => _fpsText.Text = Frames.Readout(Now, _loop, _vsync, PacingWords), _window.Dispatcher);
         _fpsTimer.Start();
     }
-    internal string FpsReadout => Frames.Readout(Now, _loop, _vsync);
+    internal string FpsReadout => Frames.Readout(Now, _loop, _vsync, PacingWords);
+    string? PacingWords => _pacer is { } p ? FrameStats.Pacing(p.PostedBy, p.ComposeMs) : null;
     readonly GpuTimer _gpu = new();
 
     internal bool Paused;
@@ -552,7 +553,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         double prev = Frames.LastPresentMs;
         Frames.Add(new FrameSample(_frame, t2, prev < 0 ? 0 : t2 - prev, renderMs, t2 - t1, gpuMs,
             _loop + (_script?.WantsFrames == true ? "+script" : ""), resumed || prev < 0, dirtyWhy, dirtyAge, _pacer is { } pc ? t0 - pc.PostedAt : double.NaN, messages,
-            GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), _yaw, _pitch, _eye.X, _eye.Y, _eye.Z, W, H));
+            GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2), _yaw, _pitch, _eye.X, _eye.Y, _eye.Z, W, H,
+            _pacer?.PostedBy ?? "", _pacer?.ComposeMs ?? double.NaN));
         AfterFrame?.Invoke();
     }
 
