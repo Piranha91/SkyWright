@@ -197,3 +197,47 @@ public class ViewLayersTests : IDisposable
         Assert.Equal(1, g.Markers); Assert.Equal(1, g.NoModel);
     }
 }
+
+/// <summary>The theme's toggle buttons drawn offscreen: a checked one is a dark blue with white text, an unchecked one the
+/// button grey, both readable (before the theme styled them, a checked toggle was light grey-blue under white text).</summary>
+[Collection("Shell"), Trait("tier", "render")]
+public sealed class ThemeToggleTests
+{
+    static (double R, double G, double B) Px(byte[] px, int w, int x, int y) { int i = (y * w + x) * 4; return (px[i + 2], px[i + 1], px[i]); }
+    static double Lum((double R, double G, double B) c)
+    {
+        static double L(double v) { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.Pow((v + 0.055) / 1.055, 2.4); }
+        return 0.2126 * L(c.R) + 0.7152 * L(c.G) + 0.0722 * L(c.B);
+    }
+
+    [Fact]
+    public void A_checked_and_an_unchecked_toggle_both_read_white_text_on_a_dark_face()
+    {
+        Exception? failed = null; var found = new List<(bool Checked, double Contrast, (double, double, double) Face)>();
+        ShellCollection.Ui.Value.Invoke(() =>
+        {
+            try
+            {
+                foreach (var on in new[] { true, false })
+                {
+                    var b = new System.Windows.Controls.Primitives.ToggleButton { Content = "Navmesh", IsChecked = on, Width = 120, Height = 30, FontSize = 14 };
+                    var host = new System.Windows.Controls.Border { Width = 120, Height = 30, Child = b };
+                    host.Resources.MergedDictionaries.Add(Theme.Dark);
+                    host.Measure(new System.Windows.Size(120, 30)); host.Arrange(new System.Windows.Rect(0, 0, 120, 30)); host.UpdateLayout();
+                    var bmp = new System.Windows.Media.Imaging.RenderTargetBitmap(120, 30, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                    bmp.Render(host);
+                    var px = new byte[120 * 30 * 4]; bmp.CopyPixels(px, 120 * 4, 0);
+                    var face = Px(px, 120, 6, 15);                       // inside the border, left of the text
+                    double brightest = 0;
+                    for (int y = 6; y < 24; y++) for (int x = 20; x < 100; x++) brightest = Math.Max(brightest, Lum(Px(px, 120, x, y)));
+                    found.Add((on, (brightest + 0.05) / (Lum(face) + 0.05), face));
+                }
+            }
+            catch (Exception ex) { failed = ex; }
+        });
+        Assert.True(failed is null, "the toggle did not draw: " + failed);
+        foreach (var (on, contrast, face) in found)
+            Assert.True(contrast >= 4.5, $"a {(on ? "checked" : "unchecked")} toggle's text has contrast {contrast:0.0} on its face {face}");
+        Assert.NotEqual(found[0].Face, found[1].Face);
+    }
+}

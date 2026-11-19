@@ -3,7 +3,7 @@ using System.Windows.Markup;
 
 namespace Workbench;
 
-/// <summary>The window's dark theme (the default) and the pill switch the Start tab's probe tiles use.</summary>
+/// <summary>The window's dark theme (the default): its buttons and toggle buttons, and the pill switch the Start tab's probe tiles use.</summary>
 internal static class Theme
 {
     internal const string Back = "#1E1E1E", Panel = "#252526", Tile = "#2D2D33", Line = "#3F3F46", Text = "#E6E6E6", Dim = "#9A9A9A", Accent = "#3D8BFD";
@@ -159,6 +159,28 @@ internal static class Theme
             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#4A4A52"/><Setter TargetName="Bd" Property="BorderBrush" Value="#3D8BFD"/></Trigger>
             <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#264F78"/></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="#6A6A6A"/><Setter TargetName="Bd" Property="Background" Value="#2D2D30"/></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+  <Style TargetType="ToggleButton">
+    <Setter Property="Background" Value="#3A3A40"/><Setter Property="Foreground" Value="#E6E6E6"/><Setter Property="BorderBrush" Value="#55555C"/><Setter Property="Padding" Value="8,2"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToggleButton">
+          <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="3" Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#4A4A52"/><Setter TargetName="Bd" Property="BorderBrush" Value="#3D8BFD"/></Trigger>
+            <Trigger Property="IsChecked" Value="True"><Setter TargetName="Bd" Property="Background" Value="#264F78"/><Setter TargetName="Bd" Property="BorderBrush" Value="#3D8BFD"/><Setter Property="Foreground" Value="#FFFFFF"/></Trigger>
+            <MultiTrigger>
+              <MultiTrigger.Conditions><Condition Property="IsChecked" Value="True"/><Condition Property="IsMouseOver" Value="True"/></MultiTrigger.Conditions>
+              <Setter TargetName="Bd" Property="Background" Value="#31629A"/>
+            </MultiTrigger>
+            <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#1D3D5E"/></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Foreground" Value="#6A6A6A"/><Setter TargetName="Bd" Property="Background" Value="#2D2D30"/><Setter TargetName="Bd" Property="BorderBrush" Value="#3F3F46"/></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
