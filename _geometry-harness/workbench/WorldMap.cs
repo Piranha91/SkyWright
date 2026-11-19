@@ -19,6 +19,10 @@ internal sealed class WorldMap
     readonly Image _image = new();
     readonly Rectangle _hover = Box("#FFFFFF"), _chosen = Box("#00E5FF");
     readonly System.Windows.Shapes.Path _buildings = new() { Fill = Theme.Brush("#D8E6DCCB"), Stroke = Theme.Brush("#2A2622"), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    readonly Image _shapes = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };   // the buildings' real shapes, painted for the part of the map in view
+    readonly System.Windows.Threading.DispatcherTimer _shapeTimer = new() { Interval = TimeSpan.FromMilliseconds(160) };
+    int _shapeAsk;                                          // a newer view makes an older painting stale
+    Rect[] _bounds = Array.Empty<Rect>();                   // each building's outline box, in world units (Y up)
     readonly Canvas _captions = new() { IsHitTestVisible = false };   // screen pixels, over the sheet: text keeps its size at any zoom
     readonly MatrixTransform _view = new();
     readonly List<(MapPlace Place, int Tier, Border Box, TextBlock Text, System.Windows.Shapes.Ellipse Dot)> _places = new();
@@ -38,7 +42,13 @@ internal sealed class WorldMap
     internal WorldFeatures? Features => _features;
     /// <summary>The captions drawn now, most important first.</summary>
     internal IReadOnlyList<string> CaptionsShown { get; private set; } = Array.Empty<string>();
-    internal bool BuildingsShown => _buildings.Visibility == Visibility.Visible;
+    internal bool BuildingsShown => _buildings.Visibility == Visibility.Visible || _shapes.Visibility == Visibility.Visible;
+    /// <summary>The meshes of the load order shown; null draws every building as its box.</summary>
+    internal BuildingMeshes? Meshes { get; set; }
+    /// <summary>The last painting of real shapes: buildings in view, how many were drawn as boxes, and how long it took.</summary>
+    internal (int Buildings, int AsBoxes, double Seconds, double UnitsPerPixel)? ShapesPainted { get; private set; }
+    /// <summary>Raised when a painting of real shapes is shown.</summary>
+    internal event Action? ShapesShown;
     /// <summary>Screen pixels across one cell at the current zoom.</summary>
     internal double PixelsPerCell => _terrain is { } t ? _view.Matrix.M11 * t.Samples : 0;
 
@@ -48,7 +58,9 @@ internal sealed class WorldMap
     {
         RenderOptions.SetBitmapScalingMode(_image, BitmapScalingMode.Linear);
         _sheet.RenderTransform = _view;
-        _sheet.Children.Add(_image); _sheet.Children.Add(_buildings); _sheet.Children.Add(_chosen); _sheet.Children.Add(_hover);
+        RenderOptions.SetBitmapScalingMode(_shapes, BitmapScalingMode.Linear);
+        _shapeTimer.Tick += (_, _) => { _shapeTimer.Stop(); PaintShapes(); };
+        _sheet.Children.Add(_image); _sheet.Children.Add(_buildings); _sheet.Children.Add(_shapes); _sheet.Children.Add(_chosen); _sheet.Children.Add(_hover);
         var layers = new Grid();
         layers.Children.Add(_sheet); layers.Children.Add(_captions);
         _frame.Child = layers;
@@ -94,6 +106,8 @@ internal sealed class WorldMap
     internal void ShowFeatures(WorldFeatures? f)
     {
         _features = f; _places.Clear(); _captions.Children.Clear(); _buildings.Data = null; CaptionsShown = Array.Empty<string>();
+        _shapeAsk++; _shapes.Source = null; _shapes.Visibility = Visibility.Collapsed; ShapesPainted = null;
+        _bounds = f is null ? Array.Empty<Rect>() : f.Outlines.Select(BoundsOf).ToArray();
         if (f is null || _terrain is not { } t) { _buildings.Visibility = Visibility.Collapsed; return; }
         // world units to sheet pixels: one cell is 4096 units and Samples pixels; north is up
         double k = t.Samples / 4096.0, x0 = t.MinX * 4096.0, yTop = (t.MaxY + 1) * 4096.0;
@@ -129,6 +143,64 @@ internal sealed class WorldMap
     /// <summary>Screen pixels across one cell at which each tier's captions appear, and at which buildings do.</summary>
     internal static readonly double[] TierAppears = { 0, 9, 26 };
     internal const double BuildingsAppear = 12;
+    /// <summary>Screen pixels across one cell from which buildings are painted in their real shapes; further out a
+    /// building is a few pixels and is drawn as its box.</summary>
+    internal const double ShapesAppear = 40;
+
+    static Rect BoundsOf(float[] ring)
+    {
+        double x0 = double.MaxValue, x1 = double.MinValue, y0 = double.MaxValue, y1 = double.MinValue;
+        for (int i = 0; i + 1 < ring.Length; i += 2) { x0 = Math.Min(x0, ring[i]); x1 = Math.Max(x1, ring[i]); y0 = Math.Min(y0, ring[i + 1]); y1 = Math.Max(y1, ring[i + 1]); }
+        return x0 > x1 ? Rect.Empty : new Rect(x0, y0, x1 - x0, y1 - y0);
+    }
+
+    /// <summary>Paint the buildings in view in their real shapes, off the window's thread, at the screen's own pixels;
+    /// the painting replaces the boxes when it is done, if the view has not moved on.</summary>
+    void PaintShapes()
+    {
+        if (_terrain is not { } t || _features is not { } f || PixelsPerCell < ShapesAppear || !_view.Matrix.HasInverse) return;
+        double dpi = VisualTreeHelper.GetDpi(_frame).DpiScaleX;
+        int w = (int)Math.Ceiling(_frame.ActualWidth * dpi), h = (int)Math.Ceiling(_frame.ActualHeight * dpi);
+        if (w < 2 || h < 2) return;
+        // the panel's corner in sheet pixels, then in world units
+        var back = _view.Matrix; back.Invert();
+        var corner = back.Transform(new Point(0, 0));
+        double k = t.Samples / 4096.0, x0 = t.MinX * 4096.0, yTop = (t.MaxY + 1) * 4096.0;
+        double west = x0 + corner.X / k, north = yTop - corner.Y / k;
+        double upp = 4096.0 / (PixelsPerCell * dpi);
+        var seen = new Rect(west, north - h * upp, w * upp, h * upp);
+        var inView = Enumerable.Range(0, Math.Min(_bounds.Length, f.Buildings.Count)).Where(i => !_bounds[i].IsEmpty && _bounds[i].IntersectsWith(seen)).ToList();
+        int ask = ++_shapeAsk;
+        var meshes = Meshes;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Task.Run<(BitmapSource Picture, int Boxes)?>(() =>
+        {
+            var solids = new List<HousecarlCore.TriangleSoup>();
+            var boxes = new List<float[]>();
+            foreach (int i in inView)
+            {
+                if (ask != _shapeAsk) return null;
+                var b = f.Buildings[i];
+                if (meshes?.SoupOf(b.Mesh) is { } soup) solids.Add(HousecarlCore.SpatialOverlap.TransformSoup(soup, b.Position, b.Rotation, b.Scale));
+                else boxes.Add(f.Outlines[i]);
+            }
+            var px = BuildingRaster.Paint(w, h, west, north, upp, solids, boxes);
+            var bmp = BitmapSource.Create(w, h, 96, 96, PixelFormats.Pbgra32, null, px, w * 4);
+            bmp.Freeze();
+            return (bmp, boxes.Count);
+        }).ContinueWith(done => _frame.Dispatcher.BeginInvoke(() =>
+        {
+            if (ask != _shapeAsk || done.IsFaulted || done.Result is not { } r) return;
+            _shapes.Source = r.Picture;
+            // placed on the sheet where it was painted, so it moves and zooms with the map until the next painting
+            Canvas.SetLeft(_shapes, corner.X); Canvas.SetTop(_shapes, corner.Y);
+            _shapes.Width = w * upp * k; _shapes.Height = h * upp * k;
+            _shapes.Visibility = Visibility.Visible;
+            _buildings.Visibility = Visibility.Collapsed;
+            ShapesPainted = (inView.Count, r.Boxes, clock.Elapsed.TotalSeconds, upp);
+            ShapesShown?.Invoke();
+        }), TaskScheduler.Default);
+    }
 
     /// <summary>The view moved or zoomed: outlines keep their screen width, buildings show when close enough, and the
     /// captions are placed again, the more important first; one that would cover a caption already placed is left out.</summary>
@@ -138,7 +210,11 @@ internal sealed class WorldMap
         _hover.StrokeThickness = _chosen.StrokeThickness = 1.5 / scale;
         if (_terrain is not { } t) return;
         double perCell = PixelsPerCell;
-        _buildings.Visibility = _features is not null && perCell >= BuildingsAppear ? Visibility.Visible : Visibility.Collapsed;
+        bool shapes = _features is not null && perCell >= ShapesAppear;
+        // close in, the real shapes are painted a moment after the view comes to rest; the boxes stand in until the first painting
+        _shapeTimer.Stop();
+        if (shapes) _shapeTimer.Start(); else { _shapeAsk++; _shapes.Visibility = Visibility.Collapsed; }
+        _buildings.Visibility = _features is not null && perCell >= BuildingsAppear && _shapes.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
         _buildings.StrokeThickness = perCell >= 48 ? 0.8 / scale : 0;
         double k = t.Samples / 4096.0, x0 = t.MinX * 4096.0, yTop = (t.MaxY + 1) * 4096.0;
         double w = _frame.ActualWidth, h = _frame.ActualHeight;
@@ -180,6 +256,7 @@ internal sealed class WorldMap
         }
         CaptionsShown = shown;
     }
+
 
     void Fit()
     {

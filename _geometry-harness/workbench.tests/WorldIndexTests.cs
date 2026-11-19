@@ -321,6 +321,30 @@ public class WorldIndexTests : IClassFixture<WorldTreeIndex>
         Assert.Equal((990, 1010, 1800, 2000), Span(turned));
     }
 
+    [Fact]
+    public void Buildings_painted_from_above_keep_the_highest_surface_and_line_their_edges()
+    {
+        // an 8 by 8 picture, 10 units a pixel, its north-west corner at (0, 80): a flat roof 100 up over x and y 20..60,
+        // and a wider floor under it at height 0 over 10..70
+        static TriangleSoup Slab(float lo, float hi, float z) => new(
+            new[] { new System.Numerics.Vector3(lo, lo, z), new System.Numerics.Vector3(hi, lo, z), new System.Numerics.Vector3(hi, hi, z), new System.Numerics.Vector3(lo, hi, z) },
+            new[] { 0, 1, 2, 0, 2, 3 });
+        var px = BuildingRaster.Paint(8, 8, 0, 80, 10, new[] { Slab(10, 70, 0), Slab(20, 60, 100) }, Array.Empty<float[]>());
+        int Alpha(int x, int y) => px[(y * 8 + x) * 4 + 3];
+        int Red(int x, int y) => px[(y * 8 + x) * 4 + 2];
+        Assert.Equal(36, Enumerable.Range(0, 64).Count(i => px[i * 4 + 3] == 255));      // the floor's 6 by 6 pixels, nothing else
+        Assert.Equal(0, Alpha(0, 0));
+        Assert.Equal(255, Alpha(1, 1));
+        // the roof's inner pixels are plain; its rim is lined where the height steps down to the floor, and the floor's rim where it ends
+        Assert.True(Red(3, 3) > Red(2, 2), $"{Red(3, 3)} {Red(2, 2)}");
+        Assert.True(Red(3, 3) > Red(1, 1), $"{Red(3, 3)} {Red(1, 1)}");
+        Assert.Equal(Red(3, 3), Red(4, 4));
+
+        // a building whose mesh could not be read is painted flat inside its outline
+        var boxed = BuildingRaster.Paint(8, 8, 0, 80, 10, Array.Empty<TriangleSoup>(), new[] { new float[] { 20, 20, 60, 20, 60, 60, 20, 60 } });
+        Assert.Equal(16, Enumerable.Range(0, 64).Count(i => boxed[i * 4 + 3] == 255));
+    }
+
     [Theory]
     [InlineData("WhiterunCapitol", 0)]
     [InlineData("City", 0)]

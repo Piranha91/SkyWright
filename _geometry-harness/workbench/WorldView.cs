@@ -77,6 +77,10 @@ internal static class WorldView
         DockPanel.SetDock(mapLabel, Dock.Left); DockPanel.SetDock(MapWorld, Dock.Left);
         mapBar.Children.Add(mapLabel); mapBar.Children.Add(MapWorld); mapBar.Children.Add(MapSays);
         MapWorld.SelectionChanged += (_, _) => { if (!_mapSetting && MapWorld.SelectedItem is ComboBoxItem { Tag: string key }) ShowMap(key, null); };
+        Map.ShapesShown += () =>
+        {
+            if (Map.ShapesPainted is { } p && p.AsBoxes > 0) Shell.SetBanner($"map: {p.Buildings - p.AsBoxes:N0} building(s) in view drawn in their real shape; {p.AsBoxes:N0} whose mesh could not be read are drawn as boxes.");
+        };
         Map.Hovered += at => MapSays.Text = at is { } sq ? MapSquareLabel(sq.X, sq.Y) : _mapStatus;
         Map.Clicked += (gx, gy) => Say(() => PickSquare(gx, gy));
         Tree.SelectedItemChanged += (_, e) =>
@@ -209,6 +213,9 @@ internal static class WorldView
         int gen = ++_generation;
         _order = order; _index = null; IndexSeconds = null;
         _mapWorld = null; _pendingMark = null; MapSeconds = null; MapWorld.Items.Clear(); Map.Show(null, null); SetMapStatus("");
+        Map.Meshes = null;
+        // the load order's meshes, for the buildings' real shapes; without them the map draws boxes
+        Task.Run(() => BuildingMeshes.For(order)).ContinueWith(t => { if (gen == _generation && t.IsCompletedSuccessfully) Map.Meshes = t.Result; }, TaskScheduler.FromCurrentSynchronizationContext());
         Tree.Items.Clear(); Hits.Items.Clear(); Hits.Visibility = Visibility.Collapsed; SearchCount.Text = ""; LastHits = Array.Empty<CellRow>();
         Notes.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
         SetStatus($"reading the load order of {order.Label}…");
@@ -543,7 +550,8 @@ internal static class WorldView
                         unreadable = Map.Terrain?.Unreadable, grid = Map.Terrain is { } t ? new[] { t.MinX, t.MinY, t.Width, t.Height } : null,
                         chosen = Map.Chosen is { } c ? new[] { c.X, c.Y } : null,
                         featuresReady = Map.Features is not null, featureSeconds = Map.Features?.Seconds, buildings = Map.Features?.Outlines.Count, places = Map.Features?.Places.Count,
-                        placedRead = Map.Features?.PlacedRead, pixelsPerCell = Map.PixelsPerCell, buildingsShown = Map.BuildingsShown, captionsShown = Map.CaptionsShown },
+                        placedRead = Map.Features?.PlacedRead, pixelsPerCell = Map.PixelsPerCell, buildingsShown = Map.BuildingsShown, captionsShown = Map.CaptionsShown,
+                        shapes = Map.ShapesPainted is { } sp ? new { buildings = sp.Buildings, asBoxes = sp.AsBoxes, seconds = sp.Seconds, unitsPerPixel = sp.UnitsPerPixel } : null },
         };
     }
 }

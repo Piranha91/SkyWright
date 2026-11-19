@@ -53,7 +53,14 @@ internal sealed record MapPlace(string Key, string Name, string Type, float X, f
 
 /// <summary>What a worldspace's map draws over its terrain: its named map markers, and the outline from above of each
 /// placed building (<paramref name="Outlines"/>: one closed ring of X,Y pairs per building, in world units).</summary>
-internal sealed record WorldFeatures(string Worldspace, IReadOnlyList<MapPlace> Places, IReadOnlyList<float[]> Outlines, int PlacedRead, double Seconds);
+internal sealed record WorldFeatures(string Worldspace, IReadOnlyList<MapPlace> Places, IReadOnlyList<float[]> Outlines, int PlacedRead, double Seconds)
+{
+    /// <summary>The placed building behind each outline, in the same order: its mesh and where the reference puts it.</summary>
+    public IReadOnlyList<MapBuilding> Buildings { get; init; } = Array.Empty<MapBuilding>();
+}
+
+/// <summary>One placed building: its base's mesh path as the record gives it, and the reference's placement.</summary>
+internal sealed record MapBuilding(string Mesh, Vec3 Position, Vec3 Rotation, float Scale);
 
 /// <summary>Where a record is: its cell and worldspace, and its winning position when it is a placed object.</summary>
 internal sealed record Located(string Key, string RecordType, string? Cell, string? Worldspace, bool IsCell, float[]? Position);
@@ -437,7 +444,7 @@ internal sealed class WorldIndex : IDisposable
         var view = held.Resolver.Capture(null);
 
         // the buildings among the statics, at their winners: the box each states
-        var boxes = new Dictionary<FormKey, (Vec3 Min, Vec3 Max)>();
+        var boxes = new Dictionary<FormKey, (Vec3 Min, Vec3 Max, string Mesh)>();
         foreach (var (fk, _, body) in view.WinnerRecordsOfType(StaticType))
         {
             ct.ThrowIfCancellationRequested();
@@ -446,7 +453,7 @@ internal sealed class WorldIndex : IDisposable
                 || file.GivenPath.Contains("terrain", StringComparison.OrdinalIgnoreCase)) continue;
             var min = new Vec3(Math.Min(b.First.X, b.Second.X), Math.Min(b.First.Y, b.Second.Y), Math.Min(b.First.Z, b.Second.Z));
             var max = new Vec3(Math.Max(b.First.X, b.Second.X), Math.Max(b.First.Y, b.Second.Y), Math.Max(b.First.Z, b.Second.Z));
-            if (Math.Max(max.X - min.X, Math.Max(max.Y - min.Y, max.Z - min.Z)) >= 256f && Math.Max(max.X - min.X, max.Y - min.Y) <= 8192f) boxes[fk] = (min, max);
+            if (Math.Max(max.X - min.X, Math.Max(max.Y - min.Y, max.Z - min.Z)) >= 256f && Math.Max(max.X - min.X, max.Y - min.Y) <= 8192f) boxes[fk] = (min, max, file.GivenPath);
         }
 
         // the worldspaces on this one's coordinates: its children, and its parent (kept to this worldspace's own squares)
@@ -472,6 +479,7 @@ internal sealed class WorldIndex : IDisposable
 
         var places = new List<MapPlace>();
         var outlines = new List<float[]>();
+        var buildings = new List<MapBuilding>();
         int read = 0;
         foreach (var (fk, _, body, source) in view.RecordsIn(Array.Empty<string>(), PlacedType))
         {
@@ -489,8 +497,9 @@ internal sealed class WorldIndex : IDisposable
             }
             if (!how.Buildings || r.InitiallyDisabled || r.Base is not { } bk || !boxes.TryGetValue(bk, out var box)) continue;
             outlines.Add(OutlineOf(box.Min, box.Max, r));
+            buildings.Add(new MapBuilding(box.Mesh, r.Position, r.Rotation, r.Scale));
         }
-        return new WorldFeatures(FormIdToken.Of(wk), places, outlines, read, clock.Elapsed.TotalSeconds);
+        return new WorldFeatures(FormIdToken.Of(wk), places, outlines, read, clock.Elapsed.TotalSeconds) { Buildings = buildings };
     }
 
     /// <summary>A placed box seen from above: the convex outline of its eight corners at the reference's scale,
