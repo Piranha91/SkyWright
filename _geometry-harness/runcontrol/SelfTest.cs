@@ -150,6 +150,7 @@ public static partial class SelfTest
         PlanCases();
         SelfTestSweep.Run(Case);
         SelfTestFinalize.Run(Case);
+        SelfTestFinalize.RunEvaluate(Case);
         LiveCases();
         PipelineLiveCases();
 
