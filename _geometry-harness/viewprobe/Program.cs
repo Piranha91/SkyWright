@@ -5455,9 +5455,18 @@ int RunCellTextured(string cellTarget, int wlCell, int wlShot,
                         iopt.NavTris.Add((nav.FormKey, ti, V(nav.Vertices[tri.A]), V(nav.Vertices[tri.B]), V(nav.Vertices[tri.C])));
                     }
 
+            // A host frames its own camera once the scene is built (InteractiveViewer.Host). Its placeholder pose at the
+            // origin would size the overlays built for the entry camera (navmesh wire dashes, camera-facing ribbons) from
+            // tens of thousands of units away in an exterior, so the entry camera stands over the target cell instead.
+            var entryEye = eyePos.Value; var entryLook = lookPos.Value;
+            if (ViewProbe.InteractiveViewer.Host is not null && entryEye == System.Numerics.Vector3.Zero && !interior && targetGrid is { } hostGrid)
+            {
+                float hcx = hostGrid.X * 4096f + 2048f, hcy = hostGrid.Y * 4096f + 2048f, hgz = terrainHeightAt?.Invoke(hcx, hcy) ?? 0f;
+                entryLook = new(hcx, hcy, hgz); entryEye = new(hcx - 1100f, hcy - 3000f, hgz + 2700f);
+            }
             int iShapes = ViewProbe.TexturedScene.RenderToPng(
                 scene, assets, dataDir, modFolders, overwriteDir,
-                (eyePos.Value, lookPos.Value, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
+                (entryEye, entryLook, fov), navTris, redTris, terrainPatches, terrainLayers, navMode, navColor,
                 skyColor, terrainHeightAt, dashUnderground, dashUnderStatics, msaa, cullAbove, cellBounds,
                 noDiff, diffColor, picks, fpCap, colourCaptions, npcActors, npcPucksOn, routeRenders, gridRender, overlayLines, keepFx, fxStatic, listMeshes,
                 waterPlanes, coverings, planes, showPlanes, occlusionMode, size, fpOut,

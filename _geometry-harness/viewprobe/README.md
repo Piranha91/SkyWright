@@ -1630,8 +1630,11 @@ planes' tag 4), `TerrainHeightAt` and `LandCells` (the drawn ground and the grid
 the scene read), `BaseTypes` (each modeled base's record type) and `UndrawnAt` (where each
 reference the walk left out as an editor marker or for having no model stands). A host's cell
 request can carry a navmesh display mode for that cell's shots (`InteractiveViewer.CellRequestNav`):
-the cell is built again in the same run with its navmesh, without re-reading the load order. None
-of this changes a static render or this window's own behaviour.
+the cell is built again in the same run with its navmesh, without re-reading the load order. A host
+frames its own camera after the build and asks with a placeholder pose at the origin; in an exterior
+that pose is replaced, for the build only, by one over the target cell, so the overlays sized for the
+entry camera (the navmesh wire's dashes, camera-facing ribbons) are sized for where the host looks.
+None of this changes a static render or this window's own behaviour.
 
 ---
 
