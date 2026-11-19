@@ -23,6 +23,10 @@ public static class ChildLaunch
         return double.TryParse(prefix[at + 1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out double v) ? v : fallback;
     }
 
+    /// <summary>The command line of one of this program's own commands (plan, run, resume, finalize, bundle, ...), where
+    /// the Python pipeline starts `python evalrun.py <sub>`.</summary>
+    public static List<string> Controller(string sub, IEnumerable<string> args) => [Environment.ProcessPath!, sub, .. args];
+
     /// <summary>Runs `argv` as the job `op`, its log under `ledgerDir`. A heavy child is held for `holdMin` minutes
     /// when given (the slot command's --max-min), else for the stage's `deadlineMin`, else for the machine's own hold.
     /// The slot command stops its own job at that hold and releases; the runner's deadline sits past the slot

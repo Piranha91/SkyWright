@@ -3,12 +3,12 @@ namespace RunControl;
 /// <summary>A stage's work: what it bound, and the outputs its receipt fingerprints.</summary>
 public delegate (PyDict? bound, List<string> outputs) StageBody(RunContext ctx, PyDict res, string stageDir);
 
-/// <summary>The stage bodies this controller has: census, prepare and scope. A stage with no body here stops the run.</summary>
+/// <summary>The stage bodies this controller has: census, prepare, scope and plan. A stage with no body here stops the run.</summary>
 public static class StageBodies
 {
     public static Dictionary<string, StageBody> Built() => new(StringComparer.Ordinal)
     {
-        ["census"] = Census, ["prepare"] = Prepare, ["scope"] = Scope,
+        ["census"] = Census, ["prepare"] = Prepare, ["scope"] = Scope, ["plan"] = Plan,
     };
 
     static bool Incomplete(PyDict scope) =>
@@ -173,5 +173,54 @@ public static class StageBodies
         }
         outs.Add(scopes);
         return (new PyDict { ["preparation"] = Hashing.Sha256File(preparation) }, outs);
+    }
+    /// <summary>The frozen check plan, made by this program's own `plan` command as a child, then held to every prepared arm
+    /// and the whole registry.</summary>
+    public static (PyDict?, List<string>) Plan(RunContext ctx, PyDict res, string sdir)
+    {
+        string scopesFile = PyPath.Join(ctx.Out, "scope", "scopes.json");
+        var scopes = Py.D(PyJson.ReadPipelineFile(scopesFile));
+        string run = PyPath.Join(ctx.Out, "evaluation");
+        if (Directory.Exists(run) || File.Exists(run))
+            throw new Refusal($"{PyOrder.Fwd(run)} exists from an earlier plan; move it aside to replan, never plan over it.");
+        var ev = Py.DictOrEmpty(ctx.Entry.Get("evaluation"));
+        string budget = PyText.Str(ev.ContainsKey("budgetMinutes") ? ev["budgetMinutes"] : 90L);
+        string candidates = PyOrder.Fwd(PyPath.Join(ctx.Out, "prepare", "candidates"));
+        string[] where = ["--instance", PyOrder.Fwd(ctx.Instance), "--profile", ctx.Profile, "--game", PyOrder.Fwd(ctx.Game)];
+        List<string> argv;
+        Dictionary<string, string>? env = null;
+        if (ctx.InPlace != null)
+        {
+            var (select, depth) = InPlaceResolve.Select(ctx);
+            // an asset-only selection plans without a scope: a scope needs a target, and any target would be a plugin outside the selection
+            string[] scope = Py.Truthy(res["subject"]) ? ["--scope", Py.S(Py.D(scopes["combined"])["scope"])] : [];
+            argv = ChildLaunch.Controller("plan", ["--registry", PyOrder.Fwd(Checkout.Registry), .. scope, "--candidates", candidates,
+                "--depth", depth, "--budget-minutes", budget, "--max-candidates", PyText.Str((long)scopes.Count), "--out", PyOrder.Fwd(run),
+                "--select", string.Join(",", select), "--review-arm", "candidate-01", .. where]);
+            if (Py.Truthy(ev.Get("primitiveSolidity"))) argv.AddRange(["--primitive-solidity", PyText.Str(ev["primitiveSolidity"])]);
+            // never this machine's harness config: a manual run on another machine would get another table or none
+            else env = new() { ["HOUSECARL_HARNESS_CONFIG"] = "", ["HOUSECARL_PRIMITIVE_SOLIDITY"] = "" };
+        }
+        else
+            argv = ChildLaunch.Controller("plan", ["--registry", PyOrder.Fwd(Checkout.Registry), "--scope", Py.S(Py.D(scopes["combined"])["scope"]),
+                "--candidates", candidates, "--depth", PyText.Str(ev.ContainsKey("depth") ? ev["depth"] : "deep"), "--budget-minutes", budget,
+                "--max-candidates", PyText.Str((long)scopes.Count), "--out", PyOrder.Fwd(run), .. where]);
+        foreach (object? o in Py.ListOrEmpty(ev.Get("optIn"))) argv.AddRange(["--opt-in", PyText.Str(o)]);
+        var r = ChildLaunch.Run(ctx, PyPath.Join(sdir, "commands"), "plan", argv, env: env);
+        string planFile = PyPath.Join(run, "plan.json");
+        if (r.ExitCode != 0 || !File.Exists(planFile))
+            throw new Refusal($"evalrun plan refused or failed (exit {ChildLaunch.ExitText(r)}); its sentence is in {PyOrder.Fwd(PyPath.Join(sdir, "commands"))}.");
+        var plan = Py.D(PyJson.ReadPipelineFile(planFile));
+        var prep = Py.D(PyJson.ReadPipelineFile(PyPath.Join(ctx.Out, "prepare", "preparation.json")));
+        var prepared = Py.L(prep["arms"]).Select(row => Py.S(Py.D(row)["file"])).ToHashSet(StringComparer.Ordinal);
+        var planned = Py.ListOrEmpty(plan.Get("arms")).Select(a => PyPath.Name(PyText.Str(Py.D(a).Get("candidateFile")))).ToHashSet(StringComparer.Ordinal);
+        var held = Py.DictOrEmpty(Py.DictOrEmpty(plan.Get("budgets")).Get("candidatesHeldBack"));
+        if (!planned.SetEquals(prepared) || Py.Truthy(held.Get("count")))
+            throw new Refusal("the frozen plan does not hold every prepared arm (some were held back or missing); "
+                              + "raise --max-candidates or fix the candidates.");
+        var registry = Py.D(PyJson.ReadPipelineFile(Checkout.Registry));
+        if (Py.ListOrEmpty(plan.Get("checks")).Count != Py.L(registry["checks"]).Count)
+            throw new Refusal("the frozen plan does not carry the full check registry.");
+        return (new PyDict { ["scopes"] = Hashing.Sha256File(scopesFile) }, [planFile]);
     }
 }

@@ -5,15 +5,17 @@ using RunControl;
 
 // RUNCONTROL: the evaluation run controller in C#, replacing evalpipeline.py and evalrun.py stage by stage.
 //
-// Built so far: the pipeline driver and its first three stages (census, prepare, scope) for both entry kinds, over
-// the foundations (Python's JSON bytes, hashes, orderings and text forms, the program identity rule, the stage
-// ledger). A run folder it writes is one the Python pipeline continues, and the reverse. The stages from plan on
-// stop the run with one line until they are built; the stages from report-plan on stay in the Python pipeline.
+// Built so far: the pipeline driver and its first four stages (census, prepare, scope, plan) for both entry kinds,
+// and evalrun.py's `plan` command, over the foundations (Python's JSON bytes, hashes, orderings and text forms, the
+// program identity rule, the stage ledger). A run folder it writes through scope is one the Python pipeline
+// continues, and the reverse; a plan is bound to the controller that froze it. The stages from evaluate on stop the
+// run with one line until they are built; the stages from report-plan on stay in the Python pipeline.
 //
 // usage: runcontrol run    --entry ENTRY.json --out RUN [--machine MACHINE.json] [--through STAGE]
 //                          [--reuse-preparation-from WORK_FOLDER]
 //        runcontrol arms   --entry ENTRY.json [--machine MACHINE.json] [--out RUN]
 //        runcontrol status --out RUN
+//        runcontrol plan   --registry R --candidates DIR --out RUN [--scope scope.json] [evalrun.py plan's other flags]
 //        runcontrol --self-test          run every known answer; exit 0 when all pass, 1 otherwise
 //        runcontrol identity FOLDER      print the package identity of a build folder as JSON
 //        runcontrol canon                read JSON on standard input; print the hash of its two canonical forms
@@ -25,8 +27,9 @@ string command = args.Length >= 1 ? args[0] : "";
 bool pipeline = command is "run" or "arms" or "status";
 // The pipeline commands record under the Python pipeline's run-log name, which the workbench reads. `run` opens its
 // record itself (Driver.OpenRun below), once the entry has said where the run log goes.
-using var __run = !pipeline ? RunLog.BeginProcess("runcontrol", args)
-    : command == "run" ? null : RunLog.BeginProcess("evalpipeline", args, new RunOptions { Mode = command });
+// `plan` records as evalrun.py's plan does (op evalrun-plan), opened where the plan is written (Plan.Run).
+using var __run = command is "run" or "plan" ? null
+    : pipeline ? RunLog.BeginProcess("evalpipeline", args, new RunOptions { Mode = command }) : RunLog.BeginProcess("runcontrol", args);
 try
 {
     if (args.Length >= 1 && args[0] == "--self-test") return SelfTest.Run();
@@ -45,10 +48,11 @@ try
         Console.WriteLine($"canonical   {Hashing.Sha256Text(PyJson.Canonical(doc))}");
         return Exit.Ok;
     }
+    if (command == "plan") return Plan.Run(PlanArgs.Parse(args[1..]));
     if (!pipeline)
         throw new Refusal(args.Length == 0
-            ? "runcontrol needs a command: run, arms, status, --self-test, identity FOLDER or canon."
-            : $"runcontrol has no command '{command}' (or it was given the wrong arguments); the commands are run, arms, status, --self-test, identity FOLDER and canon.");
+            ? "runcontrol needs a command: run, arms, status, plan, --self-test, identity FOLDER or canon."
+            : $"runcontrol has no command '{command}' (or it was given the wrong arguments); the commands are run, arms, status, plan, --self-test, identity FOLDER and canon.");
 
     // `--flag=value` is read as `--flag value`
     args = args.SelectMany(a => a.StartsWith("--") && a.Contains('=') ? new[] { a[..a.IndexOf('=')], a[(a.IndexOf('=') + 1)..] } : [a]).ToArray();
@@ -94,6 +98,11 @@ catch (ProfileUnreadableException locked)
 catch (KeyNotFoundException missing)
 {
     Console.Error.WriteLine($"REFUSED: the entry, the machine file or a run file lacks a key the run needs ({missing.Message}); add it and run again.");
+    return Exit.Refused;
+}
+catch (PyError wrong)
+{
+    Console.Error.WriteLine($"REFUSED: an input file holds a value of the wrong kind ({wrong.Message}); fix the file and run again.");
     return Exit.Refused;
 }
 catch (Unreadable u)
