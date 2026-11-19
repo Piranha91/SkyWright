@@ -117,21 +117,8 @@ public static class EvaluateRun
         var plan = ex.Plan;
         var ledger = ex.Ledger;
 
-        bool AlreadyDone(object? cid, object? aid)
-        {
-            var e = ledger.Entry(cid, aid, null);
-            // an accepted import that found nothing to judge answers its row as a completed one does
-            return PyValue.Truthy(e) && (EvalStore.IsTerminalOk(e!.Get("status"))
-                                        || (Ev.Eq(e.Get("status"), "not-applicable") && PyValue.Truthy(e.Get("imported"))));
-        }
-
-        void MarkReused(object? cid, object? aid)
-        {
-            var e = ledger.Entry(cid, aid, null);
-            if (PyValue.Truthy(e) && Ev.Eq(e!.Get("status"), "completed"))
-                ledger.Transition(Ev.Str(cid), Ev.Str(aid), null, "reused", receiptId: e.Get("receiptId") as string,
-                    detector: e.Get("detector") as string, extra: new PyDict { ["reusedFromRunId"] = e.Get("runId") });
-        }
+        bool AlreadyDone(object? cid, object? aid) => EvaluateRun.AlreadyDone(ledger, cid, aid, null);
+        void MarkReused(object? cid, object? aid) => EvaluateRun.MarkReused(ledger, cid, aid, null);
 
         string ImportNote(object? st) => !Import(st) ? ""
             : ". The imported evidence stays under imports/ but is no longer credited; import it again once the prerequisite is settled on this arm";
@@ -270,6 +257,24 @@ public static class EvaluateRun
                 DerivedRows.Run(ex, check, arm);
             }
         }
+    }
+
+    /// <summary>Whether an earlier invocation settled this (check, arm, part): completed or reused, or an accepted
+    /// import that found nothing to judge.</summary>
+    public static bool AlreadyDone(Ledger ledger, object? cid, object? aid, string? part)
+    {
+        var e = ledger.Entry(cid, aid, part);
+        return PyValue.Truthy(e) && (EvalStore.IsTerminalOk(e!.Get("status"))
+                                    || (Ev.Eq(e.Get("status"), "not-applicable") && PyValue.Truthy(e.Get("imported"))));
+    }
+
+    /// <summary>A completed entry kept by this invocation reads reused, naming the invocation that measured it.</summary>
+    public static void MarkReused(Ledger ledger, object? cid, object? aid, string? part)
+    {
+        var e = ledger.Entry(cid, aid, part);
+        if (PyValue.Truthy(e) && Ev.Eq(e!.Get("status"), "completed"))
+            ledger.Transition(Ev.Str(cid), Ev.Str(aid), part, "reused", receiptId: e.Get("receiptId") as string,
+                detector: e.Get("detector") as string, extra: new PyDict { ["reusedFromRunId"] = e.Get("runId") });
     }
 
     // st in IMPORT_ROW_STATUSES.
