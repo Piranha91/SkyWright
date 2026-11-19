@@ -18,5 +18,6 @@
     <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <EmbeddedResource Include="known-answers\foundations.json" LogicalName="foundations.json" />
     <EmbeddedResource Include="known-answers\pipeline.json" LogicalName="pipeline.json" />
+    <EmbeddedResource Include="known-answers\plan-modules.json" LogicalName="plan-modules.json" />
   </ItemGroup>
 </Project>

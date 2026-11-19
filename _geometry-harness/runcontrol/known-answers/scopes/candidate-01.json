@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "probe": "scopeprobe",
+  "generatedUtc": "2026-11-18T23:40:17.0701795Z",
+  "complete": true,
+  "walkFailures": [],
+  "unreadableRecords": [],
+  "targets": [
+    {
+      "name": "HcWbSel.esp",
+      "sha256": "dc3af92747c5a675238749611ad5297e741680c35e3074fad820dc390f4c06ab",
+      "bytes": 317,
+      "provider": "SelMod",
+      "providerKind": "mod",
+      "masterFlag": false,
+      "lightFlag": false,
+      "footprint": {
+        "records": 2,
+        "recordTypes": {
+          "CELL": {
+            "new": 0,
+            "override": 1,
+            "className": "Cell"
+          },
+          "REFR": {
+            "new": 1,
+            "override": 0,
+            "className": "PlacedObject"
+          }
+        },
+        "signatureUnresolved": 0,
+        "placed": {
+          "total": 1,
+          "interior": 1,
+          "exterior": 0,
+          "persistent": 0,
+          "navm": 0,
+          "land": 0,
+          "landscapeUnreadable": 0,
+          "persistentRefs": 0,
+          "persistentRefsMapped": 0,
+          "persistentRefsWithoutPlacement": 0,
+          "cells": [
+            {
+              "cell": "000802:HcWbWorld.esm",
+              "kind": "interior",
+              "name": "HcWbCell",
+              "worldspace": null,
+              "worldspaceKey": null,
+              "x": null,
+              "y": null,
+              "refs": 1,
+              "navmesh": 0,
+              "land": 0
+            }
+          ],
+          "exteriorCells": [],
+          "worldspaces": []
+        },
+        "linksByMaster": {
+          "HcWbWorld.esm": 2
+        },
+        "masters": [
+          "HcWbWorld.esm"
+        ],
+        "scripts": {
+          "carriers": 0
+        },
+        "assets": {
+          "modelPaths": 0,
+          "listed": []
+        },
+        "nexusId": null,
+        "nexusIdNote": "the provider mod folder has no readable meta.ini"
+      }
+    }
+  ],
+  "locationContributors": {
+    "complete": true,
+    "locations": [
+      {
+        "cell": "000802:HcWbWorld.esm",
+        "kind": "interior",
+        "name": "HcWbCell",
+        "worldspace": null,
+        "worldspaceKey": null,
+        "x": null,
+        "y": null,
+        "plugins": [
+          {
+            "name": "HcWbWorld.esm",
+            "recordKinds": [
+              "CELL",
+              "placed-record"
+            ]
+          },
+          {
+            "name": "HcWbSel.esp",
+            "recordKinds": [
+              "CELL",
+              "placed-record"
+            ]
+          }
+        ]
+      }
+    ],
+    "limits": [
+      "Local world-record contributors only; asset-only replacers and runtime-created placements are outside this map.",
+      "A location lists only evidence indexed to that cell or grid coordinate. A WRLD parent-field change (climate, water, flags, ...) applies to the whole worldspace and is listed under worldspaceWide, not at each location. Rebuildable OFST data, WorldChildren group metadata, record-header version bookkeeping (VCS1, VCS2, form version) and unchanged containers are excluded.",
+      "Large-reference rows and MaxHeight entries are compared only at measured grid coordinates; a change to the same table elsewhere adds no local contributor, and a MaxHeight table added or removed as a whole is worldspace-wide."
+    ],
+    "missing": [],
+    "worldspaceWide": [],
+    "worldspaceHeaderAudit": []
+  },
+  "nearby": {
+    "ring": 2,
+    "plugins": [],
+    "alsoScanned": [],
+    "note": "a plugin listed here carries a CELL record within the ring of an exterior footprint cell, outside the footprint itself; persistent references placed into the ring are not read, and alsoScanned plugins were read for CELL records only."
+  },
+  "expansion": {
+    "perTarget": [
+      {
+        "target": "HcWbSel.esp",
+        "doors": 0,
+        "doorDestinations": [],
+        "unresolved": 0
+      }
+    ],
+    "doorsResolved": 0,
+    "doorsUnresolved": 0,
+    "neighbourCells": [],
+    "note": "outbound form links are counted per target under its footprint\u0027s linksByMaster; a link into the target\u0027s own ModKey is internal and counted there too."
+  },
+  "unmeasured": [
+    {
+      "extent": "script-placement",
+      "why": "a Papyrus script can place, move or delete references at runtime; this probe reads records only, so the placement footprint omits anything a script puts there."
+    },
+    {
+      "extent": "alias-fill",
+      "why": "a quest alias resolves to a reference chosen at runtime, so the actor or object a quest actually moves is not in this footprint."
+    },
+    {
+      "extent": "bos-swaps",
+      "why": "a *_SWAP.ini replaces a reference\u0027s base object at load; the record types and model paths counted here are the RECORD\u0027s, not the swapped base\u0027s."
+    },
+    {
+      "extent": "asset-replacers",
+      "why": "a mod that only ships meshes or textures has no records to enumerate and so no footprint here, though it changes what the game draws; model paths are read off records and never resolved against the VFS."
+    },
+    {
+      "extent": "generated-output",
+      "why": "LOD, occlusion and patcher output generated from an earlier placement is not read, so whether any of it is now stale is outside this measurement."
+    }
+  ],
+  "limits": [
+    "model paths are read off records and never resolved against the asset view, so a path inside a BSA and a path that exists nowhere read alike here.",
+    "nexusId is MO2\u0027s cached meta.ini value; a hand-installed, merged or FOMOD-built mod folder has none, and its absence is not evidence that the mod is not on Nexus.",
+    "the record enumeration is Mutagen\u0027s, so a record type Mutagen does not model is absent from recordTypes rather than reported as unknown; signatureUnresolved counts the types whose signature would not resolve."
+  ],
+  "configuration": {
+    "fingerprint": "314bb52fce004a87da151f8e91550fbc53f8a73b09e06f3c3717953394ba2e86",
+    "source": "candidate:candidate-01.json",
+    "population": "load-time",
+    "state": "baseline",
+    "plugins": [
+      {
+        "Name": "HcWbWorld.esm",
+        "Path": "C:/fixture/world/instance\\mods\\WorldMod\\HcWbWorld.esm",
+        "Sha256": "3aa8e0f032ac386684982131333e28c2379fb5669942436893c2205b1dbc7588",
+        "Bytes": 398,
+        "Provider": "WorldMod"
+      },
+      {
+        "Name": "HcWbSel.esp",
+        "Path": "C:/fixture/world/instance\\mods\\SelMod\\HcWbSel.esp",
+        "Sha256": "dc3af92747c5a675238749611ad5297e741680c35e3074fad820dc390f4c06ab",
+        "Bytes": 317,
+        "Provider": "SelMod"
+      }
+    ],
+    "providers": [
+      {
+        "Name": "overwrite",
+        "Kind": "overwrite"
+      },
+      {
+        "Name": "SelMod",
+        "Kind": "mod"
+      },
+      {
+        "Name": "WorldMod",
+        "Kind": "mod"
+      },
+      {
+        "Name": "Data",
+        "Kind": "data"
+      }
+    ],
+    "overlays": [],
+    "limits": [],
+    "unknown": {
+      "installerChoices": "not modelled: MO2 keeps no per-mod record of the FOMOD options taken; the installed files are the evidence",
+      "gameBuild": "not read: the executable version and SKSE/plugin set are not part of a records run",
+      "distributors": "not read: SPID / KID / SkyPatcher layers are not scanned; only BOS ini files are listed as overlays",
+      "saveState": "not applicable: a records run judges a fresh load, never a save"
+    }
+  },
+  "wallSeconds": 0.65
+}
