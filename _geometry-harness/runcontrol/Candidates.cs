@@ -38,7 +38,7 @@ public static class Candidates
         try { CandidateFile.Read(path); }
         catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException)
         {
-            throw new Refusal($"the candidate {PyOrder.Fwd(path)} is not one a probe can read ({ex.Message}); fix the entry so the arm loads at least one plugin.");
+            throw new Refusal($"a candidate is not one a probe can read ({ex.Message}); fix the entry or the selection so the arm loads at least one plugin.");
         }
     }
 
