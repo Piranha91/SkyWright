@@ -287,6 +287,22 @@ public class WorldIndexTests : IClassFixture<WorldTreeIndex>
     }
 
     [Fact]
+    public async Task A_worldspace_map_spans_its_grid_cells_with_north_up_and_names_the_cell_on_a_square()
+    {
+        var t = await _i.TerrainOfAsync(K(WorldTreeWorld.Land), CancellationToken.None);
+        Assert.Equal((-2, -9, 36, 12), (t.MinX, t.MinY, t.Width, t.Height));
+        // row 0 is the northmost grid row (y = 2); wild01 stands at its west end, wild02 at the south-east corner
+        Assert.True(t.Cells[0]);
+        Assert.True(t.Cells[11 * 36 + 35]);
+        Assert.Equal(2, t.Cells.Count(c => c));
+        Assert.Equal(0, t.LandCells);                        // wild02's LAND declares no heights: nothing is drawn for it
+        Assert.All(t.Heights, h => Assert.True(float.IsNaN(h)));
+        Assert.Equal("HcWiWild02", _i.CellAt(K(WorldTreeWorld.Land), 33, -9)!.EditorId);
+        Assert.Null(_i.CellAt(K(WorldTreeWorld.Land), 0, 0));
+        await Assert.ThrowsAsync<ArgumentException>(() => _i.TerrainOfAsync(K(WorldTreeWorld.EmptyLand), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task A_persistent_reference_of_a_worldspace_opens_the_grid_cell_it_stands_in()
     {
         var persistent = await Objects(WorldTreeWorld.LandPersistent);

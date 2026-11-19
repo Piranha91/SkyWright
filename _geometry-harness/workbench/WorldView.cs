@@ -12,7 +12,9 @@ internal sealed record WorldNode(string Kind, string? Key, string Label);
 /// <summary>The World tab: a load order's worldspaces and interior cells in xEdit's shape (worldspace or "Interior
 /// cells", block, sub-block, cell, then Persistent and Temporary with one row per record), read from
 /// <see cref="WorldIndex"/>. Each level is filled when first opened; a cell's records are read on a background task.
-/// Picking a cell asks for its scene, picking an object asks for its cell and lands on it. Nothing here edits.</summary>
+/// Picking a cell asks for its scene, picking an object asks for its cell and lands on it. Above the tree a map of one
+/// worldspace's terrain (<see cref="WorldMap"/>) picks a cell by where it is; the tree and the map follow each other.
+/// Nothing here edits.</summary>
 internal static class WorldView
 {
     static readonly TextBlock Header = new() { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(6, 4, 6, 2) };
@@ -22,6 +24,13 @@ internal static class WorldView
     static readonly ListBox Hits = new() { MaxHeight = 200, Margin = new Thickness(6, 2, 6, 2), Visibility = Visibility.Collapsed };
     static readonly TreeView Tree = new();
     static readonly Button BrowseProfile = new() { Content = "Browse the Start tab's profile", Margin = new Thickness(6, 2, 6, 2), Padding = new Thickness(8, 2, 8, 2), HorizontalAlignment = HorizontalAlignment.Left };
+
+    static readonly WorldMap Map = new();
+    static readonly ComboBox MapWorld = new() { MinWidth = 220, Margin = new Thickness(0, 0, 8, 0), ToolTip = "the worldspace the map shows" };
+    static readonly TextBlock MapSays = new() { VerticalAlignment = VerticalAlignment.Center, Foreground = Theme.Brush(Theme.Dim), TextTrimming = TextTrimming.CharacterEllipsis };
+    static string _mapStatus = "";
+    static string? _mapWorld;                             // the worldspace the map shows or is reading
+    static bool _mapSetting;                              // the worldspace list is being set from code
 
     static WorldIndex? _index;
     static LoadOrderSpec? _order;
@@ -63,10 +72,100 @@ internal static class WorldView
             _pickTimer ??= NewTimer(350, () => { if (_picked is { } t) Say(() => Pick(t)); });
             _pickTimer.Stop(); _pickTimer.Start();
         };
+        var mapBar = new DockPanel { Margin = new Thickness(6, 2, 6, 2) };
+        var mapLabel = new TextBlock { Text = "Map", Width = 60, VerticalAlignment = VerticalAlignment.Center };
+        DockPanel.SetDock(mapLabel, Dock.Left); DockPanel.SetDock(MapWorld, Dock.Left);
+        mapBar.Children.Add(mapLabel); mapBar.Children.Add(MapWorld); mapBar.Children.Add(MapSays);
+        MapWorld.SelectionChanged += (_, _) => { if (!_mapSetting && MapWorld.SelectedItem is ComboBoxItem { Tag: string key }) ShowMap(key, null); };
+        Map.Hovered += at => MapSays.Text = at is { } sq ? MapSquareLabel(sq.X, sq.Y) : _mapStatus;
+        Map.Clicked += (gx, gy) => Say(() => PickSquare(gx, gy));
+        Tree.SelectedItemChanged += (_, e) =>
+        {
+            // the map follows the tree at once; the scene waits for the pause above
+            if (e.NewValue is TreeViewItem { Tag: CellRow { Worldspace: { } world, GridX: { } gx, GridY: { } gy } }) ShowMap(world, (gx, gy));
+        };
+        // the map over the tree, with a bar between them to drag
+        var body = new Grid();
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(2, GridUnitType.Star), MinHeight = 80 });
+        body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        body.RowDefinitions.Add(new RowDefinition { Height = new GridLength(3, GridUnitType.Star), MinHeight = 80 });
+        var bar = new GridSplitter { Height = 5, HorizontalAlignment = HorizontalAlignment.Stretch, Background = Theme.Brush("#2C3036") };
+        var mapPanel = new DockPanel();
+        DockPanel.SetDock(mapBar, Dock.Top); mapPanel.Children.Add(mapBar); mapPanel.Children.Add(Map.View);
+        Grid.SetRow(mapPanel, 0); Grid.SetRow(bar, 1); Grid.SetRow(Tree, 2);
+        body.Children.Add(mapPanel); body.Children.Add(bar); body.Children.Add(Tree);
         var panel = new DockPanel();
         foreach (var top in new UIElement[] { Header, Notes, BrowseProfile, find, Hits }) { DockPanel.SetDock(top, Dock.Top); panel.Children.Add(top); }
-        panel.Children.Add(Tree);
+        panel.Children.Add(body);
         return panel;
+    }
+
+    // ---- the map ------------------------------------------------------------------------------------------------------
+    static void SetMapStatus(string s) { _mapStatus = s; MapSays.Text = s; }
+
+    static string MapSquareLabel(int gx, int gy) =>
+        _index is { } x && _mapWorld is { } w && x.CellAt(w, gx, gy) is { } c ? CellLabel(c) : $"({gx}, {gy})  no cell here";
+
+    /// <summary>Fill the map's worldspace list and show the main worldspace: Tamriel when the load order has it, or the one with the most cells.</summary>
+    static void FillMapWorlds()
+    {
+        _mapSetting = true;
+        try
+        {
+            MapWorld.Items.Clear();
+            if (_index is not { } x) return;
+            foreach (var w in x.Worldspaces.Where(w => w.CellCount > 0))
+                MapWorld.Items.Add(new ComboBoxItem { Content = $"{w.EditorId ?? w.Key}" + (w.Name is { Length: > 0 } n ? $"  \"{n}\"" : "") + $"  ({w.CellCount:N0})", Tag = w.Key });
+        }
+        finally { _mapSetting = false; }
+        var first = _index.Worldspaces.FirstOrDefault(w => string.Equals(w.EditorId, "Tamriel", StringComparison.OrdinalIgnoreCase) && w.CellCount > 0)
+                    ?? _index.Worldspaces.FirstOrDefault(w => w.CellCount > 0);
+        if (first is null) { Map.Show(null, null); SetMapStatus("this load order has no worldspace with cells."); return; }
+        ShowMap(first.Key, null);
+    }
+
+    /// <summary>Show a worldspace on the map, reading its terrain when it is not the one shown, and mark a grid square on it.</summary>
+    static void ShowMap(string worldKey, (int X, int Y)? mark)
+    {
+        if (_index is not { } x) return;
+        if (string.Equals(_mapWorld, worldKey, StringComparison.OrdinalIgnoreCase))
+        {
+            if (mark is { } m) { _pendingMark = Map.Terrain is null ? m : null; Map.Choose(m.X, m.Y); }
+            return;
+        }
+        _mapWorld = worldKey; _pendingMark = mark;
+        _mapSetting = true;
+        try { MapWorld.SelectedItem = MapWorld.Items.OfType<ComboBoxItem>().FirstOrDefault(i => string.Equals(i.Tag as string, worldKey, StringComparison.OrdinalIgnoreCase)); }
+        finally { _mapSetting = false; }
+        Map.Show(null, null);
+        SetMapStatus("reading the terrain…");
+        int gen = _generation;
+        var ui = Dispatcher.CurrentDispatcher;
+        x.TerrainOfAsync(worldKey, CancellationToken.None).ContinueWith(r => (Terrain: r, Picture: r.IsCompletedSuccessfully ? WorldMap.Paint(r.Result) : null), TaskScheduler.Default)
+         .ContinueWith(done => ui.BeginInvoke(() =>
+        {
+            if (gen != _generation || !string.Equals(_mapWorld, worldKey, StringComparison.OrdinalIgnoreCase)) return;
+            var r = done.Result.Terrain;
+            if (r.IsFaulted) { SetMapStatus("the terrain could not be read: " + r.Exception!.GetBaseException().Message); return; }
+            var t = r.Result;
+            Map.Show(t, done.Result.Picture);
+            MapSeconds = t.Seconds;
+            SetMapStatus(FormattableString.Invariant($"{t.LandCells:N0} cells of terrain, read in {t.Seconds:0.0} s")
+                         + (t.Unreadable > 0 ? $"; {t.Unreadable:N0} could not be read and are not drawn" : "") + ". Wheel zooms, drag pans, click opens a cell.");
+            if (_pendingMark is { } m) { _pendingMark = null; Map.Choose(m.X, m.Y); }
+        }), TaskScheduler.Default);
+    }
+    static (int X, int Y)? _pendingMark;
+    internal static double? MapSeconds { get; private set; }
+
+    /// <summary>Open the cell on a square of the map's worldspace, as picking it in the tree does.</summary>
+    internal static string PickSquare(int gx, int gy)
+    {
+        var (x, _) = Need();
+        if (_mapWorld is not { } w) throw new InvalidOperationException("the map shows no worldspace yet.");
+        var cell = x.CellAt(w, gx, gy) ?? throw new InvalidOperationException($"no cell stands on ({gx}, {gy}) of this worldspace in this load order.");
+        Map.Choose(gx, gy);
+        return PickKey(cell.Key);
     }
 
     static DispatcherTimer NewTimer(int ms, Action act)
@@ -98,6 +197,7 @@ internal static class WorldView
     {
         int gen = ++_generation;
         _order = order; _index = null; IndexSeconds = null;
+        _mapWorld = null; _pendingMark = null; MapSeconds = null; MapWorld.Items.Clear(); Map.Show(null, null); SetMapStatus("");
         Tree.Items.Clear(); Hits.Items.Clear(); Hits.Visibility = Visibility.Collapsed; SearchCount.Text = ""; LastHits = Array.Empty<CellRow>();
         Notes.Text = string.Join(" ", notes.Select(n => n.TrimEnd('.') + "."));
         SetStatus($"reading the load order of {order.Label}…");
@@ -117,6 +217,7 @@ internal static class WorldView
             }
             _index = t.Result; IndexSeconds = sw.Elapsed.TotalSeconds;
             Fill();
+            FillMapWorlds();
             var x = _index;
             int exterior = x.Cells.Count(c => !c.IsPersistentCell && c.Worldspace is not null);
             SetStatus(FormattableString.Invariant(
@@ -258,6 +359,9 @@ internal static class WorldView
     internal static string OpenCell(string cellKey, string? landOn)
     {
         var (x, order) = Need();
+        // the map marks the cell however it was asked for (the tree, a search, the map, a state tool)
+        if (x.Cells.FirstOrDefault(c => string.Equals(c.Key, cellKey, StringComparison.OrdinalIgnoreCase)) is { Worldspace: { } world, GridX: { } gx, GridY: { } gy })
+            ShowMap(world, (gx, gy));
         int gen = ++_pickGeneration;
         var ui = Dispatcher.CurrentDispatcher;
         // that the cell reads on this load order is checked from its records (a moment), off the window's thread
@@ -424,6 +528,9 @@ internal static class WorldView
                 block = new[] { c.BlockA, c.BlockB }, subBlock = new[] { c.SubBlockA, c.SubBlockB }, label = CellLabel(c),
             }).ToList(),
             objects,
+            map = new { worldspace = _mapWorld, ready = Map.Terrain is not null, status = _mapStatus, seconds = MapSeconds, landCells = Map.Terrain?.LandCells,
+                        unreadable = Map.Terrain?.Unreadable, grid = Map.Terrain is { } t ? new[] { t.MinX, t.MinY, t.Width, t.Height } : null,
+                        chosen = Map.Chosen is { } c ? new[] { c.X, c.Y } : null },
         };
     }
 }

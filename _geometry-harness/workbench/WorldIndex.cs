@@ -32,6 +32,17 @@ internal sealed record CellObjects(IReadOnlyList<ObjectRow> Persistent, IReadOnl
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
 }
 
+/// <summary>One worldspace's terrain at its winners, sampled for a map: <paramref name="Samples"/> heights a side per
+/// cell, west to east then north to south over the grid squares from <paramref name="MinX"/>, <paramref name="MinY"/>;
+/// NaN where no cell gives heights. <paramref name="Cells"/> marks the squares a cell record stands on.
+/// <paramref name="WaterHeight"/> is the worldspace's default water level, or null when it sets none; a cell's own
+/// water level is not read.</summary>
+internal sealed record WorldTerrain(string Worldspace, int MinX, int MinY, int Width, int Height, int Samples,
+    float[] Heights, bool[] Cells, float? WaterHeight, int LandCells, int Unreadable, double Seconds)
+{
+    public int MaxY => MinY + Height - 1;
+}
+
 /// <summary>Where a record is: its cell and worldspace, and its winning position when it is a placed object.</summary>
 internal sealed record Located(string Key, string RecordType, string? Cell, string? Worldspace, bool IsCell, float[]? Position);
 
@@ -295,6 +306,68 @@ internal sealed class WorldIndex : IDisposable
     public IReadOnlyList<CellRow> CellsOf(string worldspaceKey)
     {
         return ParseKey(worldspaceKey) is { } wk && Live().CellsOfWorld.TryGetValue(wk, out var list) ? list : Array.Empty<CellRow>();
+    }
+
+    /// <summary>The cell record on a worldspace's grid square, or null.</summary>
+    public CellRow? CellAt(string worldspaceKey, int x, int y)
+    {
+        var held = Live();
+        return ParseKey(worldspaceKey) is { } wk && held.Grid.TryGetValue((wk, x, y), out var ck) && held.Cells.TryGetValue(ck, out var row) ? row : null;
+    }
+
+    static readonly Type[] LandType = { typeof(ILandscapeGetter) };
+
+    /// <summary>A worldspace's terrain for a map, on a background thread: each grid cell's winning LAND, classified by
+    /// the shared rule (<see cref="LandHeight.Classify"/>) and sampled. A LAND that cannot be read is counted, not drawn.</summary>
+    public Task<WorldTerrain> TerrainOfAsync(string worldspaceKey, CancellationToken ct) => Task.Run(() => TerrainOf(worldspaceKey, ct), ct);
+
+    WorldTerrain TerrainOf(string worldspaceKey, CancellationToken ct)
+    {
+        var clock = Stopwatch.StartNew();
+        var held = Live();
+        if (ParseKey(worldspaceKey) is not { } wk || !held.CellsOfWorld.TryGetValue(wk, out var cells) || !cells.Any(c => c.GridX is not null))
+            throw new ArgumentException($"'{worldspaceKey}' is not a worldspace with grid cells in this load order.");
+        var gridded = cells.Where(c => c.GridX is not null && c.GridY is not null).ToList();
+        int minX = gridded.Min(c => c.GridX!.Value), maxX = gridded.Max(c => c.GridX!.Value);
+        int minY = gridded.Min(c => c.GridY!.Value), maxY = gridded.Max(c => c.GridY!.Value);
+        int w = maxX - minX + 1, h = maxY - minY + 1;
+        // 8 heights a side per cell (every fourth vertex), fewer when the worldspace is wide enough to pass 4096 pixels
+        int n = 8;
+        while (n > 1 && Math.Max(w, h) * n > 4096) n /= 2;
+        int step = (LandHeight.Side - 1) / n;
+        var heights = new float[w * n * h * n];
+        Array.Fill(heights, float.NaN);
+        var has = new bool[w * h];
+        foreach (var c in gridded) has[(maxY - c.GridY!.Value) * w + (c.GridX!.Value - minX)] = true;
+
+        var view = held.Resolver.Capture(null);
+        int land = 0, unreadable = 0;
+        foreach (var (fk, _, body, source) in view.RecordsIn(Array.Empty<string>(), LandType))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (view.ParentOf(fk) is not { } ck || !held.Cells.TryGetValue(ck, out var row) || row.GridX is not { } gx || row.GridY is not { } gy) continue;
+            if (view.ParentOf(ck) != wk) continue;
+            if (view.ResolveWinner(fk) is not { } win || !string.Equals(win.WinnerPlugin, source, StringComparison.OrdinalIgnoreCase)) continue;
+            if (body is not ILandscapeGetter ls) continue;
+            var lc = LandHeight.Classify(ls);
+            if (lc.Kind == LandHeight.LandKind.DeclaresNone) continue;
+            if (lc.Kind != LandHeight.LandKind.Heights) { unreadable++; continue; }
+            var decoded = LandHeight.Decode(lc.Offset, lc.Gradients!);
+            land++;
+            int px = (gx - minX) * n, py = (maxY - gy) * n;      // the square's top-left sample; north is up
+            for (int j = 0; j < n; j++)
+                for (int i = 0; i < n; i++)
+                    heights[(py + (n - 1 - j)) * (w * n) + px + i] = decoded[i * step, j * step];
+        }
+        // the worldspace's default water level, from its winning record; float.MaxValue there means "not set"
+        float? water = null;
+        if (view.ResolveWinner(wk) is { } wsWin)
+        {
+            using var session = view.OpenSession();
+            if (view.GetRecord(session, wsWin.WinnerPlugin, wk, typeof(IWorldspaceGetter)) is IWorldspaceGetter ws
+                && ws.LandDefaults?.DefaultWaterHeight is { } dwh && float.IsFinite(dwh) && MathF.Abs(dwh) < 1e30f) water = dwh;
+        }
+        return new WorldTerrain(FormIdToken.Of(wk), minX, minY, w, h, n, heights, has, water, land, unreadable, clock.Elapsed.TotalSeconds);
     }
 
     /// <summary>How many records the index files under a cell; 0 for a key that is not a cell.</summary>
