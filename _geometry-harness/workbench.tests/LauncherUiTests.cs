@@ -186,6 +186,107 @@ public sealed class LauncherUiTests : IDisposable
         }
     }
 
+    // ---- the run engine setting and each engine's commands ----
+
+    [Fact]
+    public void An_old_settings_file_loads_unchanged_and_means_python()
+    {
+        var path = Path.Combine(_root, LauncherSettings.FileName);
+        var old = "{\n  \"instance\": \"X:/Lab\",\n  \"profile\": \"Default\",\n  \"game\": \"C:/Game\",\n  \"output\": \"X:/Out\",\n  \"workFolder\": null\n}";
+        File.WriteAllText(path, old);
+        var s = LauncherSettings.Load(path).Settings!;
+        Assert.Equal(new LauncherSettings("X:/Lab", "Default", "C:/Game", "X:/Out", null), s);
+        Assert.Null(s.Controller);
+        // written back with nothing chosen, the file is the old file: no new member appears
+        Assert.Null(LauncherSettings.Save(path, s));
+        Assert.Equal(old.ReplaceLineEndings(), File.ReadAllText(path).ReplaceLineEndings());
+        var l = new Launcher { SettingsPath = path };
+        Assert.Equal(("python", "default"), (l.Controller, l.ControllerFrom));
+        Assert.False(l.Engine.BuiltIn);
+    }
+
+    [Fact]
+    public void The_chosen_run_engine_is_remembered_beside_the_other_settings_and_a_wrong_name_is_refused()
+    {
+        var path = Path.Combine(_root, LauncherSettings.FileName);
+        Assert.Null(LauncherSettings.Save(path, new LauncherSettings("X:/Lab", "Default", "C:/Game", "X:/Out", null)));
+        var l = new Launcher { SettingsPath = path };
+        Assert.Contains("Built-in", l.SetController("csharp"));
+        Assert.Equal(new LauncherSettings("X:/Lab", "Default", "C:/Game", "X:/Out", null, "csharp"), LauncherSettings.Load(path).Settings);
+        var next = new Launcher { SettingsPath = path };                         // the next session
+        Assert.Equal(("csharp", "setting"), (next.Controller, next.ControllerFrom));
+        Assert.True(next.Engine.BuiltIn);
+        Assert.Contains("Python", next.SetController("Python"));
+        Assert.Equal("python", LauncherSettings.Load(path).Settings!.Controller);
+        var ex = Assert.Throws<InvalidOperationException>(() => next.SetController("ruby"));
+        Assert.Equal("'ruby' is not a run engine; use python or csharp.", ex.Message);
+        Assert.Equal("python", next.Controller);
+    }
+
+    /// <summary>An empty file where runcontrol.exe would be built, for commands that are composed and not started.</summary>
+    string PlacedExe()
+    {
+        var exe = Path.Combine(_root, "harness", "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(exe)!); File.WriteAllText(exe, "");
+        return exe;
+    }
+
+    [Fact]
+    public void The_bundle_check_and_the_population_are_one_request_to_either_engine()
+    {
+        var exe = PlacedExe();
+        var cs = RunEngine.OfBuiltIn(exe); var py = RunEngine.OfPython(@"H:\gh\evalrun.py", "py3");
+        var v = cs.Verify(@"B:\bundle", @"W:\wb\bundle-verify.json");
+        Assert.Equal(exe, v.FileName);
+        Assert.Equal(new[] { "verify-bundle", @"B:\bundle", "--out", @"W:\wb\bundle-verify.json" }, v.ArgumentList);
+        Assert.Equal(@"W:\wb\runlog", v.Environment["HOUSECARL_RUNLOG_DIR"]);
+        var pv = py.Verify(@"B:\bundle", @"W:\wb\bundle-verify.json");
+        Assert.Equal("py3", pv.FileName);
+        Assert.Equal(new[] { @"H:\gh\evalrun.py" }.Concat(v.ArgumentList), pv.ArgumentList);
+        Assert.Equal(("utf-8", "1"), (pv.Environment["PYTHONIOENCODING"], pv.Environment["PYTHONUTF8"]));
+
+        var p = cs.Population(@"M:\p\Fix.esp", "Fix", @"I:\inst", @"W:\re\population.json");
+        Assert.Equal(exe, p.FileName);
+        Assert.Equal(new[] { "population", "--plugin", @"M:\p\Fix.esp", "--mod", "Fix", "--instance", @"I:\inst", "--out", @"W:\re\population.json" }, p.ArgumentList);
+        Assert.Equal(@"W:\re\runlog", p.Environment["HOUSECARL_RUNLOG_DIR"]);
+        var pp = py.Population(@"M:\p\Fix.esp", "Fix", @"I:\inst", @"W:\re\population.json");
+        Assert.Equal("py3", pp.FileName);
+        Assert.Equal(new[] { @"H:\gh\evalrun.py" }.Concat(p.ArgumentList), pp.ArgumentList);
+
+        // the harness folder: beside the Python controller, or above the built-in one; never a .py path for the built-in
+        Assert.Equal(@"H:\gh", py.HarnessDir());
+        Assert.Equal(Path.Combine(_root, "harness"), cs.HarnessDir());
+        foreach (var c in new[] { v, p }) Assert.DoesNotContain(c.ArgumentList.Prepend(c.FileName), a => a.EndsWith(".py", StringComparison.OrdinalIgnoreCase) || a.Contains("python", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void A_missing_built_in_engine_is_refused_in_one_sentence_naming_where_it_was_looked_for()
+    {
+        var gone = Path.Combine(_root, "nowhere", "runcontrol.exe");
+        foreach (var act in new Action[] { () => RunEngine.OfBuiltIn(gone).Verify("b", Path.Combine(_root, "v.json")), () => RunEngine.OfBuiltIn(gone).Population("p", "m", "i", Path.Combine(_root, "o.json")),
+                                           () => RunEngine.OfBuiltIn(gone).PackageDigest(_root, _root), () => RunEngine.OfBuiltIn(gone).ControllerExe() })
+        {
+            var ex = Assert.Throws<InvalidOperationException>(act);
+            Assert.Equal($"the built-in run engine is not at '{gone}'; build it (dotnet build _geometry-harness/runcontrol -c Release), set WB_RUNCONTROL to runcontrol.exe, or switch the run engine to Python.", ex.Message);
+        }
+    }
+
+    [Fact]
+    public void The_built_in_engine_reads_a_build_folders_digest_from_identity_and_gives_none_when_it_fails()
+    {
+        // a stand-in for `runcontrol identity FOLDER`: prints the folder it was asked about inside the JSON's digest
+        var ok = Path.Combine(_root, "identity-ok.cmd");
+        File.WriteAllText(ok, "@echo off\r\necho {\r\necho  \"digest\": \"folder:abc123\",\r\necho  \"asked\": \"%1 %~nx2\"\r\necho }\r\n");
+        var work = Path.Combine(_root, "recheck");
+        Assert.Equal("folder:abc123", RunEngine.OfBuiltIn(ok).PackageDigest(Path.Combine(_root, "probe"), work));
+        var bad = Path.Combine(_root, "identity-bad.cmd");
+        File.WriteAllText(bad, "@echo off\r\necho REFUSED: no such folder 1>&2\r\nexit /b 2\r\n");
+        Assert.Null(RunEngine.OfBuiltIn(bad).PackageDigest(Path.Combine(_root, "probe"), work));
+        var odd = Path.Combine(_root, "identity-odd.cmd");
+        File.WriteAllText(odd, "@echo off\r\necho not json\r\n");
+        Assert.Null(RunEngine.OfBuiltIn(odd).PackageDigest(Path.Combine(_root, "probe"), work));
+    }
+
     [Fact]
     public void The_settings_round_trip_and_an_unwritable_folder_is_said()
     {

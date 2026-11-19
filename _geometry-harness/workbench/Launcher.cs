@@ -61,6 +61,37 @@ internal sealed class Launcher : IAsyncDisposable
     /// <summary>The current run's own run-log store, where its probes record their progress: the pipeline keeps it under
     /// its output folder (<c>run/runlog</c>).</summary>
     internal string? RunStore => RunFolder is null ? null : Path.Combine(RunFolder, "run", "runlog");
+    string? _controller;
+    /// <summary>The run engine: WB_CONTROLLER when set, else the one chosen here, else the settings file's, else python.</summary>
+    internal string Controller => RunEngine.FromEnv() is { } env ? env.Trim().ToLowerInvariant() : Chosen();
+    /// <summary>Where <see cref="Controller"/> comes from: WB_CONTROLLER, setting, or default.</summary>
+    internal string ControllerFrom => RunEngine.FromEnv() is not null ? "WB_CONTROLLER" : Chosen() == RunEngine.Python && !_controllerSaved ? "default" : "setting";
+    bool _controllerSaved;
+    /// <summary>The engine every command of a run and of a review goes through; an unknown WB_CONTROLLER is refused here.</summary>
+    internal RunEngine Engine => RunEngine.Of(Controller);
+
+    string Chosen()
+    {
+        if (_controller is not null) return _controller;
+        // not chosen in this session yet (a bundle opened directly never restores): what the settings file remembers
+        var saved = LauncherSettings.Load(SettingsPath).Settings?.Controller;
+        try { _controller = saved is null ? RunEngine.Python : RunEngine.Name(saved); _controllerSaved = saved is not null; }
+        catch (InvalidOperationException) { _controller = RunEngine.Python; SettingsNote = $"the saved run engine '{saved}' is not one this workbench knows, so Python is used."; }
+        return _controller;
+    }
+
+    /// <summary>Choose the run engine and remember it; the rest of the settings file is kept as it is.</summary>
+    internal string SetController(string? controller)
+    {
+        var name = RunEngine.Name(controller);
+        if (RunTask is { IsCompleted: false }) throw new InvalidOperationException("a run is going; change the run engine once it has ended.");
+        lock (_gate) { _controller = name; _controllerSaved = true; }
+        var (old, why) = LauncherSettings.Load(SettingsPath);
+        SettingsNote = why ?? LauncherSettings.Save(SettingsPath, (old ?? new LauncherSettings(null, null, null, null, null)) with { Controller = name });
+        return $"the run engine is {RunEngine.Label(name)}"
+               + (RunEngine.FromEnv() is { } env ? $"; WB_CONTROLLER is set to '{env}' and is used instead while it is set" : "");
+    }
+
     readonly Dictionary<string, HousecarlCore.Progress.RunEstimate> _first = new(StringComparer.OrdinalIgnoreCase);
     (double Seconds, int Runs)? _prepGuess;
 
@@ -147,7 +178,7 @@ internal sealed class Launcher : IAsyncDisposable
     void Remember()
     {
         if (Mode != "free" || Instance is null) return;
-        SettingsNote = LauncherSettings.Save(SettingsPath, new LauncherSettings(Instance, Profile, Game, Output, WorkFolderChosen ? WorkFolder : null));
+        SettingsNote = LauncherSettings.Save(SettingsPath, new LauncherSettings(Instance, Profile, Game, Output, WorkFolderChosen ? WorkFolder : null, _controllerSaved ? _controller : null));
     }
 
     /// <summary>Open what the settings file remembers: the instance and profile, then the Output Folder and a chosen Work
@@ -157,6 +188,7 @@ internal sealed class Launcher : IAsyncDisposable
         SettingsNote = LauncherSettings.CannotWrite(SettingsPath);
         var (s, why) = LauncherSettings.Load(SettingsPath);
         if (why is not null) { SettingsNote = why; return why; }
+        _controller = null; Chosen();                                 // the saved run engine, before anything is written back
         if (s?.Instance is null) return "no saved instance to restore.";
         var said = new List<string>();
         try { said.Add(await OpenProfileAsync("free", s.Instance, s.Profile, s.Game)); }
@@ -323,8 +355,8 @@ internal sealed class Launcher : IAsyncDisposable
         return line is not null && int.TryParse(line[6..].Trim(), out var id) ? id : null;
     }
 
-    /// <summary>Start a run of the selection through the existing pipeline: an in-place entry under
-    /// the Work Folder, <c>evalpipeline.py run --through bundle</c>, and the bundle it verifies. Returns at once.</summary>
+    /// <summary>Start a run of the selection through the chosen run engine (<see cref="RunEngine"/>): an in-place entry
+    /// under the Work Folder, its <c>run --through bundle</c>, and the bundle it verifies. Returns at once.</summary>
     internal string Run() => Run(null);
 
     /// <summary>The checks a run of <paramref name="only"/> needs: each must be a probe that can run here; the switch census
@@ -405,6 +437,8 @@ internal sealed class Launcher : IAsyncDisposable
         if (Output is null) throw new InvalidOperationException("choose an Output Folder first.");
         if (WorkFolder is null) throw new InvalidOperationException("with the Output Folder at the instance's mods folder there is no default Work Folder; choose one outside the instance and the game folder.");
         if (WorkFolderRule.Check(WorkFolder, Instance, Profile!, Game!) is { } bad) throw new InvalidOperationException(bad);
+        var engine = Engine;
+        engine.NeedProgram();                                           // before any file of the run is written
         var stamp = DateTime.UtcNow.ToString("yyyyMMdd'T'HHmmss'Z'");
         var dir = Path.Combine(WorkFolder, stamp);
         Directory.CreateDirectory(dir);
@@ -424,9 +458,8 @@ internal sealed class Launcher : IAsyncDisposable
             m["readerCmd"] = "\"" + exe + "\"";
         }
         File.WriteAllText(machine, m.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-        var pipeline = Environment.GetEnvironmentVariable("WB_PIPELINE_CMD") is { Length: > 0 } pc ? pc
-            : Program.FromCheckoutPublic("WB_PIPELINE", "evaluation pipeline evalpipeline.py", "_geometry-harness", "evalpipeline.py");
         var run = Path.Combine(dir, "run");
+        var psi = engine.Pipeline(entry, machine, run, WorkFolder, Path.Combine(dir, "runlog"));
         lock (_gate)
         {
             RunState = "running"; RunRefusal = null; RunBundle = null; RunLine = null; PrepNote = null; ScopeNote = null; RunFolder = dir;
@@ -448,10 +481,6 @@ internal sealed class Launcher : IAsyncDisposable
         }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         RunTask = Task.Run(() =>
         {
-            var psi = new System.Diagnostics.ProcessStartInfo("python") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-            foreach (var a in new[] { "-I", pipeline, "run", "--entry", entry, "--machine", machine, "--out", run, "--through", "bundle", "--reuse-preparation-from", WorkFolder }) psi.ArgumentList.Add(a);
-            psi.Environment["PYTHONIOENCODING"] = "utf-8";
-            psi.Environment["HOUSECARL_RUNLOG_DIR"] = Path.Combine(dir, "runlog");      // set, not left to a default
             var log = Path.Combine(dir, "pipeline.log");
             try
             {
@@ -562,6 +591,7 @@ internal sealed class Launcher : IAsyncDisposable
                 }).ToList(),
                 notProbes = Registry().Where(c => !ProbeKinds.Contains(c.Kind)).Select(c => new { checkId = c.Id, name = ProbeNames.Of(c.Id), why = ProbeNames.NotAProbe(c.Kind) }).ToList(),
                 settings = new { path = SettingsPath, note = SettingsNote },
+                controller = Controller, controllerFrom = ControllerFrom,
                 output = Output, outputVerdict = verdict, workFolder = WorkFolder,
                 depth = Depth,
                 run = new { state = RunState, refusal = RunRefusal, line = RunLine, folder = RunFolder, bundle = RunBundle, preparation = PrepNote, scope = ScopeNote },

@@ -114,7 +114,7 @@ internal sealed class StateTools
                  "choose (`n`: stage that candidate like any edit). " +
                  "Manual mode (the launcher): open_profile (`mode` free with `instance`, `profile`, optional `game`), select_mods (`mods`, `how` " +
                  "set/add/remove), select_probes (`checks`: check ids, probe names or [\"all\"]), set_output (`path`, the Output Folder every " +
-                 "write goes under), set_work_folder (`path`, where a run keeps its files), run (the ticked probes, only `checks`, or [\"all\"]: every probe that can run here), " +
+                 "write goes under), set_work_folder (`path`, where a run keeps its files), set_controller (`controller`: python, the default, or csharp, the built-in run engine that needs no Python; remembered between sessions), run (the ticked probes, only `checks`, or [\"all\"]: every probe that can run here), " +
                  "abort (one probe of the running run by `checks`, leaving the rest running; with no checks, the whole run), capture_window (`path`, a .png of the window), show_tab (`tab`, by its header), search_mods (`search`, filters the Start tab's mod list by name). " +
                  "The app never enables a patch: the load order is unchanged until the user enables it in Mod Organizer 2.")]
     public static Task<CallToolResult> Act(
@@ -138,6 +138,7 @@ internal sealed class StateTools
         [Description("select_mods: set (default), add or remove.")] string? how = null,
         [Description("select_probes: check ids or probe names, or [\"all\"] for every probe check.")] string[]? checks = null,
         [Description("set_output or set_work_folder: the folder, by its full path.")] string? path = null,
+        [Description("set_controller: python or csharp.")] string? controller = null,
         [Description("show_tab: the tab to bring to the front, by its header (Start, Conflicts, Findings or Records).")] string? tab = null,
         [Description("search_mods: the text the Start tab's mod list is filtered by (any case; empty shows every mod).")] string? search = null,
         [Description("stage: a typed offset, such as \"+120 x\", \"-30 z\" or \"15°\" (a turn about the vertical).")] string? offset = null,
@@ -157,7 +158,7 @@ internal sealed class StateTools
         => hub.OnUi(async () =>
         {
             var v = (verb ?? "").Trim().ToLowerInvariant();
-            if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path, tab, search);
+            if (LauncherVerb(verb)) return await LauncherOnUi(hub, verb, mode, instance, profile, game, mods, how, checks, path, tab, search, controller);
             if (v == "decide") return await Decide(hub, conflict, finding, verdict, reason);
             if (v == "select" && scene is { } sn) return SelectScene(hub, sn);
             if (v == "move_with") { var mw = MoveWith(hub.Surface, refs); if (mw.IsError != true) SaveSession(hub.Surface); return mw; }
@@ -544,7 +545,7 @@ internal sealed class StateTools
         return Answer(new { said = $"{view.Header}; {said}", state = Project(s, DefaultParts, 20, 0, null) });
     }
 
-    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "run", "abort", "capture_window", "show_tab", "search_mods" };
+    static readonly string[] LauncherVerbs = { "open_profile", "select_mods", "select_probes", "set_output", "set_work_folder", "set_controller", "run", "abort", "capture_window", "show_tab", "search_mods" };
     static bool LauncherVerb(string? verb) => LauncherVerbs.Contains((verb ?? "").Trim().ToLowerInvariant());
 
     /// <summary>Save the whole window as a PNG at <paramref name="path"/> (an absolute .png path), as the script's capturewindow does.</summary>
@@ -558,7 +559,7 @@ internal sealed class StateTools
     }
 
     static async Task<CallToolResult> LauncherOnUi(StateHub hub, string verb, string? mode, string? instance, string? profile, string? game,
-                                                   string[]? mods, string? how, string[]? checks, string? path, string? tab, string? search)
+                                                   string[]? mods, string? how, string[]? checks, string? path, string? tab, string? search, string? controller = null)
     {
         var l = hub.Launcher;
         string said;
@@ -571,6 +572,7 @@ internal sealed class StateTools
                 "select_probes" => l.SelectProbes(checks),
                 "set_output" => l.SetOutput(path),
                 "set_work_folder" => l.SetWorkFolder(path),
+                "set_controller" => l.SetController(controller),
                 "abort" => checks is { Length: > 0 } ? l.AbortProbe(checks[0]) : l.AbortRun(),
                 "capture_window" => CaptureWindow(path),
                 "show_tab" => Shell.ShowTab(tab),
@@ -693,7 +695,7 @@ internal sealed class StateTools
                     break;
                 }
                 default:
-                    return Refuse($"'{verb}' is not a verb; use select, stage, undo, revert, drop, view, decide, commit, recheck, repair_preview, repair_write, open_profile, select_mods, select_probes, set_output, set_work_folder or run.");
+                    return Refuse($"'{verb}' is not a verb; use select, stage, undo, revert, drop, view, decide, commit, recheck, repair_preview, repair_write, open_profile, select_mods, select_probes, set_output, set_work_folder, set_controller or run.");
             }
         }
         catch (InvalidOperationException ex) { return Refuse(ex.Message); }

@@ -3,8 +3,10 @@ using System.Text.Json;
 namespace Workbench;
 
 /// <summary>What free mode remembers between sessions: the MO2 instance, the profile, the game folder, the Output Folder
-/// and a chosen Work Folder. Kept in <see cref="FileName"/> beside the workbench's exe.</summary>
-internal sealed record LauncherSettings(string? Instance, string? Profile, string? Game, string? Output, string? WorkFolder)
+/// and a chosen Work Folder, and the run engine when one was chosen (python or csharp; absent means python). Kept in
+/// <see cref="FileName"/> beside the workbench's exe.</summary>
+internal sealed record LauncherSettings(string? Instance, string? Profile, string? Game, string? Output, string? WorkFolder,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Controller = null)
 {
     internal const string FileName = "workbench-settings.json";
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };

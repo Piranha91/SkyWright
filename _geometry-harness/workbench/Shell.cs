@@ -28,8 +28,7 @@ internal static class Shell
     {
         var b = Bundle ?? throw new InvalidOperationException("no bundle is open, so the repair has no order to plan on.");
         var t = WorkbenchHost.TargetFromEnv() ?? throw new InvalidOperationException("no write target is set (the launcher's profile, or WB_INSTANCE, WB_PROFILE and WB_GAME_DATA), so the order cannot be read.");
-        var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
-        return (BundleConflicts.CandidateFile(b.Dir, b.Arm), t, NavRepairLane.ProbeExe(Path.GetDirectoryName(Path.GetFullPath(evalrun))!), RepairWork());
+        return (BundleConflicts.CandidateFile(b.Dir, b.Arm), t, NavRepairLane.ProbeExe(Launcher.Engine.HarnessDir()), RepairWork());
     }, t => PatchWriter.StartAsync(Environment.GetEnvironmentVariable("WB_SERVER") is { Length: > 0 } s ? s : Program.DefaultServerExe(), t,
                                    Path.Combine(RepairWork(), "housecarl-data-repair"),
                                    Environment.GetEnvironmentVariable("WB_CORPUS") is { Length: > 0 } cp ? cp : Program.DefaultCorpus(), WorkbenchHost.Say));

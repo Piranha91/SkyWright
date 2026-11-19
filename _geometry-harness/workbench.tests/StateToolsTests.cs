@@ -801,6 +801,125 @@ public sealed class StateToolsTests : IAsyncLifetime
         finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); }
     }
 
+    // ---- the run engine: one setting chooses Python or the built-in controller ----
+
+    /// <summary>A settings file of this test's own, so the choice is not written beside the test exe.</summary>
+    string OwnSettings()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "hc-wb-engine-" + Guid.NewGuid().ToString("N"), LauncherSettings.FileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        _hub.Launcher.SettingsPath = path;
+        return path;
+    }
+
+    [Fact]
+    public void M7l_each_engine_composes_its_own_run_command_and_only_python_gets_python_settings()
+    {
+        Assert.Null(Environment.GetEnvironmentVariable("WB_PIPELINE_CMD"));
+        var exe = Path.Combine(Path.GetTempPath(), "hc-wb-rc-" + Guid.NewGuid().ToString("N"), "runcontrol", "bin", "Release", "net9.0", "runcontrol.exe");
+        Directory.CreateDirectory(Path.GetDirectoryName(exe)!); File.WriteAllText(exe, "");
+        var cs = RunEngine.OfBuiltIn(exe).Pipeline(@"W:\r\entry.json", @"W:\r\machine.json", @"W:\r\run", @"W:\work", @"W:\r\runlog");
+        Assert.Equal(exe, cs.FileName);
+        Assert.Equal(new[] { "run", "--entry", @"W:\r\entry.json", "--machine", @"W:\r\machine.json", "--out", @"W:\r\run", "--through", "bundle", "--reuse-preparation-from", @"W:\work" }, cs.ArgumentList);
+        Assert.Equal(@"W:\r\runlog", cs.Environment["HOUSECARL_RUNLOG_DIR"]);
+        Assert.False(cs.Environment.ContainsKey("PYTHONIOENCODING") && cs.Environment["PYTHONIOENCODING"] != Environment.GetEnvironmentVariable("PYTHONIOENCODING"), "the built-in engine was given a Python setting");
+        Assert.DoesNotContain(cs.ArgumentList, a => a.EndsWith(".py", StringComparison.OrdinalIgnoreCase) || a == "-I");
+        Assert.True(cs.RedirectStandardOutput && cs.RedirectStandardError && !cs.UseShellExecute);
+
+        var py = RunEngine.OfPython().Pipeline(@"W:\r\entry.json", @"W:\r\machine.json", @"W:\r\run", @"W:\work", @"W:\r\runlog");
+        Assert.Equal("python", py.FileName);
+        Assert.Equal("-I", py.ArgumentList[0]);
+        Assert.EndsWith("evalpipeline.py", py.ArgumentList[1]);
+        Assert.Equal(cs.ArgumentList, py.ArgumentList.Skip(2));                 // the same request to either engine
+        Assert.Equal("utf-8", py.Environment["PYTHONIOENCODING"]);
+        Assert.Equal(@"W:\r\runlog", py.Environment["HOUSECARL_RUNLOG_DIR"]);
+
+        // the test seam replaces the script under Python and the program under the built-in engine
+        Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", @"W:\fake\stand-in");
+        try
+        {
+            Assert.Equal(@"W:\fake\stand-in", RunEngine.OfBuiltIn(exe).Pipeline("e", "m", "r", "w", "l").FileName);
+            var seamPy = RunEngine.OfPython().Pipeline("e", "m", "r", "w", "l");
+            Assert.Equal(("python", @"W:\fake\stand-in"), (seamPy.FileName, seamPy.ArgumentList[1]));
+        }
+        finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); }
+    }
+
+    [Fact]
+    public async Task M7m_set_controller_is_read_back_remembered_and_a_run_then_starts_the_built_in_engine_not_python()
+    {
+        var settings = OwnSettings();
+        var inst = LauncherInstanceL5();
+        var s0 = await Ok("workbench_state", A(("project", new[] { "launcher" })));
+        Assert.Equal("python", P(s0, "launcher", "controller").GetString());     // the default, with nothing chosen
+        Assert.Equal("default", P(s0, "launcher", "controllerFrom").GetString());
+        Assert.Contains("not a run engine", await Refused("workbench_act", A(("verb", "set_controller"), ("controller", "perl"))));
+        var set = await Ok("workbench_act", A(("verb", "set_controller"), ("controller", "csharp")));
+        Assert.Contains("Built-in", P(set, "said").GetString());
+        Assert.Equal("csharp", P(set, "launcher", "controller").GetString());
+        Assert.Equal("setting", P(set, "launcher", "controllerFrom").GetString());
+        Assert.Equal("csharp", LauncherSettings.Load(settings).Settings!.Controller);
+
+        // a stand-in for runcontrol.exe: records its arguments and its run-log folder, and writes a bundle where the run asks
+        var fake = Path.Combine(inst + "-fake", "runcontrol-stand-in.cmd");
+        Directory.CreateDirectory(Path.GetDirectoryName(fake)!);
+        File.WriteAllText(fake, string.Join("\r\n",
+            "@echo off", "setlocal",
+            "> \"%~dp0called.txt\" echo %*",
+            ">> \"%~dp0called.txt\" echo RUNLOG=%HOUSECARL_RUNLOG_DIR%",
+            ":next", "if \"%~1\"==\"\" goto made", "if \"%~1\"==\"--out\" set out=%~2", "shift", "goto next",
+            ":made", "mkdir \"%out%\\bundle\\evidence\"", "echo {}> \"%out%\\bundle\\evidence\\manifest.json\"",
+            "echo preparation: not reused: a stand-in ran", "echo stage bundle: done"));
+        Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", fake);
+        try
+        {
+            await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+            Assert.Equal("csharp", LauncherSettings.Load(settings).Settings!.Controller);   // opening a profile keeps the choice
+            await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
+            await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" })));
+            await Ok("workbench_act", A(("verb", "set_output"), ("path", inst + "-out")));
+            var started = await Ok("workbench_act", A(("verb", "run")));
+            Assert.Equal("running", P(started, "launcher", "run", "state").GetString());
+            var done = await Ok("workbench_state", A(("project", new[] { "launcher" }), ("wait_seconds", 60)));
+            Assert.True("done" == P(done, "launcher", "run", "state").GetString(), P(done, "launcher", "run").ToString());
+            Assert.Equal("prepared afresh: a stand-in ran", P(done, "launcher", "run", "preparation").GetString());
+            var folder = P(done, "launcher", "run", "folder").GetString()!;
+            var work = Path.Combine(inst + "-out", "workbench-runs");
+            var called = File.ReadAllLines(Path.Combine(Path.GetDirectoryName(fake)!, "called.txt")).Select(l => l.TrimEnd()).ToArray();
+            Assert.Equal($"run --entry {Path.Combine(folder, "entry.json")} --machine {Path.Combine(folder, "machine.json")} --out {Path.Combine(folder, "run")} --through bundle --reuse-preparation-from {work}", called[0]);
+            Assert.Equal("RUNLOG=" + Path.Combine(folder, "runlog"), called[1]);
+            Assert.Contains("stage bundle: done", File.ReadAllText(Path.Combine(folder, "pipeline.log")));
+        }
+        finally { Environment.SetEnvironmentVariable("WB_PIPELINE_CMD", null); }
+    }
+
+    [Fact]
+    public async Task M7n_with_the_built_in_engine_missing_run_is_refused_in_one_sentence_and_writes_nothing()
+    {
+        OwnSettings();
+        var missing = Path.Combine(Path.GetTempPath(), "hc-wb-none-" + Guid.NewGuid().ToString("N"), "runcontrol.exe");
+        var saved = Environment.GetEnvironmentVariable("WB_RUNCONTROL");
+        Environment.SetEnvironmentVariable("WB_RUNCONTROL", missing);
+        try
+        {
+            var inst = LauncherInstanceL5();
+            await Ok("workbench_act", A(("verb", "set_controller"), ("controller", "csharp")));
+            await Ok("workbench_act", A(("verb", "open_profile"), ("mode", "free"), ("instance", inst), ("profile", "P"), ("game", inst)));
+            await Ok("workbench_act", A(("verb", "select_mods"), ("mods", new[] { "OnMod" })));
+            await Ok("workbench_act", A(("verb", "select_probes"), ("checks", new[] { "geometry.object-overlap" })));
+            await Ok("workbench_act", A(("verb", "set_output"), ("path", inst + "-out")));
+            var why = await Refused("workbench_act", A(("verb", "run")));
+            Assert.Contains("the built-in run engine is not at", why);
+            Assert.Contains(missing, why);
+            Assert.Contains("WB_RUNCONTROL", why);
+            Assert.False(Directory.Exists(Path.Combine(inst + "-out", "workbench-runs")), "a refused run left files");
+            // back on Python the same selection is not refused for the engine
+            await Ok("workbench_act", A(("verb", "set_controller"), ("controller", "python")));
+            Assert.Equal("python", P(await Ok("workbench_state", A(("project", new[] { "launcher" }))), "launcher", "controller").GetString());
+        }
+        finally { Environment.SetEnvironmentVariable("WB_RUNCONTROL", saved); }
+    }
+
     // ---- manual mode: to_file, statuses, refusals ----
 
     [Fact]

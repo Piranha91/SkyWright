@@ -26,7 +26,7 @@ internal sealed record ConflictRow(
     string EvidenceStrength, bool? NewOnArm);
 
 /// <summary>A verified evaluation bundle, read for the Conflicts tab (DESIGN.md section 3). The bundle is verified by
-/// the controller's own verb (<c>evalrun.py verify-bundle DIR --out FILE</c>) and every file a receipt names is read
+/// the run engine's own verb (<c>verify-bundle DIR --out FILE</c>, see <see cref="RunEngine"/>) and every file a receipt names is read
 /// from the path that verb resolved and checked (<c>receiptOutputs</c> in its verdict), never from a guessed root.
 /// Anything the app cannot read that way is refused in one sentence.</summary>
 /// <summary>A ticked check's state on the arm: ran (with its rows), rejected, blocked, not-applicable, and why. In a manual
@@ -89,30 +89,27 @@ internal sealed class BundleConflicts
 
     /// <summary>Verify <paramref name="dir"/> with the controller and write its verdict to <paramref name="verifyOut"/>
     /// (deleted first, so a verdict from an earlier run is never read as this one's).</summary>
-    internal static string Verify(string dir, string verifyOut, string evalrunPy, string python = "python")
+    internal static string Verify(string dir, string verifyOut, RunEngine engine)
     {
         if (File.Exists(verifyOut)) File.Delete(verifyOut);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(verifyOut))!);
-        var psi = new ProcessStartInfo(python) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        psi.ArgumentList.Add(evalrunPy); psi.ArgumentList.Add("verify-bundle"); psi.ArgumentList.Add(dir);
-        psi.ArgumentList.Add("--out"); psi.ArgumentList.Add(verifyOut);
-        psi.Environment["PYTHONIOENCODING"] = "utf-8"; psi.Environment["PYTHONUTF8"] = "1";
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"'{python}' could not be started to verify the bundle; put Python on PATH.");
+        var psi = engine.Verify(dir, verifyOut);
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException($"{engine.CannotStart}, so the bundle was not verified.");
         var outTask = p.StandardOutput.ReadToEndAsync(); var errTask = p.StandardError.ReadToEndAsync();
         p.WaitForExit();
         var said = (outTask.Result + errTask.Result).Trim();
         if (!File.Exists(verifyOut))
-            throw new InvalidOperationException($"evalrun verify-bundle wrote no verdict for '{dir}' (exit {p.ExitCode}): {Last(said)}");
+            throw new InvalidOperationException($"{engine.Controller} verify-bundle wrote no verdict for '{dir}' (exit {p.ExitCode}): {Last(said)}");
         return Last(said);
     }
 
     static string Last(string s) => s.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith("verify:")) ?? s.Split('\n').Last().Trim();
 
     /// <summary>Open a bundle: verify it, then read the arm's placed-object rows. Throws a one-sentence refusal.</summary>
-    internal static BundleConflicts Open(string dir, string arm, string verifyOut, string evalrunPy, string python = "python")
+    internal static BundleConflicts Open(string dir, string arm, string verifyOut, RunEngine engine)
     {
         dir = Path.GetFullPath(dir);
-        var said = Verify(dir, verifyOut, evalrunPy, python);
+        var said = Verify(dir, verifyOut, engine);
         return Read(dir, arm, verifyOut, said);
     }
 

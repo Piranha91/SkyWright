@@ -16,6 +16,11 @@ internal static class LauncherView
 {
     static readonly ComboBox Mode = new() { ItemsSource = new[] { "free", "housecarl" }, SelectedIndex = 0, Width = 110 };
     static readonly TextBox Instance = new() { Width = 300 }, Output = new() { Width = 300 }, Work = new() { Width = 300 };
+    static readonly ComboBox Engine = new()
+    {
+        ItemsSource = new[] { RunEngine.Label(RunEngine.Python), RunEngine.Label(RunEngine.CSharp) }, SelectedIndex = 0, Width = 220,
+        ToolTip = "what runs the probes: Python, as before, or the built-in engine, which needs no Python installed",
+    };
     static readonly ComboBox Profile = new() { MinWidth = 160, IsEditable = true };
     static readonly StackPanel ModList = new(), ProbeGroups = new();
     static readonly TextBox ModSearch = new() { MinWidth = 220, Margin = new Thickness(0, 0, 8, 0), ToolTip = "filter the mods by name" };
@@ -72,6 +77,7 @@ internal static class LauncherView
         setOut.Click += (_, _) => Try(() => L.SetOutput(Output.Text));
         var setWork = new Button { Content = "Set", Margin = new Thickness(4, 0, 0, 0) };
         setWork.Click += (_, _) => Try(() => L.SetWorkFolder(Work.Text));
+        Engine.SelectionChanged += (_, _) => { if (!_filling) Try(() => L.SetController(Engine.SelectedIndex == 1 ? RunEngine.CSharp : RunEngine.Python)); };
         RunAll.Click += (_, _) => Try(() => L.Run());
         RunEvery.Click += (_, _) => Try(() => L.RunAll());
         FullCheck.Click += (_, _) => Try(() => L.RunAll());
@@ -91,6 +97,7 @@ internal static class LauncherView
         panel.Children.Add(Row("Profile", Profile, open));
         panel.Children.Add(Row("Output", Output, Browse(Output), setOut));
         panel.Children.Add(Row("Work folder", Work, Browse(Work), setWork));
+        panel.Children.Add(Row("Run engine", Engine));
         panel.Children.Add(new TextBlock { Text = "Mods (priority order)", FontWeight = FontWeights.SemiBold, Margin = new Thickness(4, 8, 4, 0) });
         panel.Children.Add(new TextBlock { Text = "As in MO2: the mod at the bottom wins. Disabled mods you select are tested as if enabled; their plugins load last, as MO2 places a newly enabled plugin.",
                                            Foreground = Theme.Brush(Theme.Dim), FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 4) });
@@ -186,7 +193,7 @@ internal static class LauncherView
     static string? _seen;
 
     /// <summary>What the text fields and the mods list show; a change made through the state tools refills them.</summary>
-    static string Signature() => string.Join("|", L.Instance, L.Profile, L.Output, L.WorkFolder, string.Join(",", L.Mods.Where(m => m.Selected).Select(m => m.Name)), L.Mods.Count);
+    static string Signature() => string.Join("|", L.Instance, L.Profile, L.Output, L.WorkFolder, L.Controller, string.Join(",", L.Mods.Where(m => m.Selected).Select(m => m.Name)), L.Mods.Count);
 
     /// <summary>The mods as MO2 lists them: lowest priority at the top, the winning mod at the bottom, each separator above its mods.</summary>
     internal static IEnumerable<LauncherMod> InMo2Order(IEnumerable<LauncherMod> mods) => mods.OrderBy(m => m.Priority);
@@ -199,6 +206,9 @@ internal static class LauncherView
         {
             if (L.Instance is not null) { Instance.Text = L.Instance; FillProfiles(); Profile.Text = L.Profile ?? ""; }
             Output.Text = L.Output ?? Output.Text; Work.Text = L.WorkFolder ?? Work.Text;
+            Engine.SelectedIndex = L.Controller == RunEngine.CSharp ? 1 : 0;
+            // WB_CONTROLLER decides while it is set, so the choice here cannot change this session's engine
+            Engine.IsEnabled = L.ControllerFrom != "WB_CONTROLLER" && L.RunTask is not { IsCompleted: false };
             // the boxes are built once per opened profile (a large list is slow to rebuild); a tick only updates them
             var shown = $"{L.Instance}|{L.Profile}|{string.Join(",", L.Mods.Select(m => m.Name))}";
             if (shown != _modsShown)

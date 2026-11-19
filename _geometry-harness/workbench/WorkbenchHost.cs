@@ -637,14 +637,14 @@ internal sealed class WorkbenchHost : IWorkbenchScene
         var t = w.Target;
         var plugin = PluginName(patch);
         var mod = Recheck.PatchFolder(outPath, plugin);
-        var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
-        var harness = Path.GetDirectoryName(Path.GetFullPath(evalrun))!;
+        var engine = Shell.Launcher.Engine;
+        var harness = engine.HarnessDir();
         var conflictdiff = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF") is { Length: > 0 } cd ? cd
             : Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
         var buildDirs = (Environment.GetEnvironmentVariable("WB_PROBE_DIRS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
         var game = Path.GetDirectoryName(Path.GetFullPath(t.DataDir.TrimEnd('\\', '/')))!;
         string population = "not read";
-        var r = await Task.Run(() => Recheck.RunAll(b.Dir, b.Arm, open.Row, plugin, mod, t.Instance, t.Profile, game, work, evalrun, conflictdiff,
+        var r = await Task.Run(() => Recheck.RunAll(b.Dir, b.Arm, open.Row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
             buildDirs, harness, s => { if (population == "not read" && s.Contains("population", StringComparison.OrdinalIgnoreCase)) population = s.Split('\n')[0].Trim();
                                        _window?.Dispatcher.BeginInvoke(() => Say("trial re-check: " + s)); }));
         var un = Path.Combine(work, "unpatched.json"); var pa = Path.Combine(work, "patched.json");
@@ -1074,8 +1074,8 @@ internal sealed class WorkbenchHost : IWorkbenchScene
                 _session.ShowWritten(rk, new RefPlacementEdit.Pose(pp, pr, _session.Current(rk).Scale), plugin);
                 Reframe(rk);
             }
-            var evalrun = Program.FromCheckoutPublic("WB_EVALRUN", "evaluation controller evalrun.py", "_geometry-harness", "evalrun.py");
-            var harness = Path.GetDirectoryName(Path.GetFullPath(evalrun))!;
+            var engine = Shell.Launcher.Engine;
+            var harness = engine.HarnessDir();
             var conflictdiff = Environment.GetEnvironmentVariable("WB_CONFLICTDIFF") is { Length: > 0 } cd ? cd
                 : Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe");
             var buildDirs = (Environment.GetEnvironmentVariable("WB_PROBE_DIRS") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries);
@@ -1085,7 +1085,7 @@ internal sealed class WorkbenchHost : IWorkbenchScene
             Shell.SetBanner($"re-checking conflict {open.Rank} ({open.Row.Kind}) with {plugin}: the detector runs on the patch's cell, unpatched and patched; the window stays usable.");
             UpdateStatus();
             var row = open.Row; var arm = b.Arm; var dir = b.Dir;
-            var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, evalrun, conflictdiff,
+            var r = await Task.Run(() => Recheck.RunAll(dir, arm, row, plugin, mod, t.Instance, t.Profile, game, work, engine, conflictdiff,
                 buildDirs, harness, s => _window?.Dispatcher.BeginInvoke(() => Say("re-check: " + s))));
             LastRecheck = r;
             string news = r.New.Count == 0 ? "no new conflict involving the moved reference" : $"{r.New.Count} new conflict(s) involving the moved reference: " + string.Join("; ", r.New.Select(n => n.Id));

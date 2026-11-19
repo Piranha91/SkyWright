@@ -961,7 +961,7 @@ public sealed class ManualWriteTests
             "patchFolder" => folder,                                 // the patch's folder by its full path
             "patchMod" => Path.GetFileName(folder),                  // the base: the folder's name, which the window found under the instance's mods
             "instance" => w.Instance, "profile" => "Default", "game" => game, "workDir" => work,
-            "evalrunPy" => Path.Combine(harness, "evalrun.py"), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
+            "engine" => RunEngine.OfPython(Path.Combine(harness, "evalrun.py")), "conflictdiffExe" => Path.Combine(harness, "conflictdiff", "bin", "Release", "net9.0", "conflictdiff.exe"),
             "buildDirs" => Array.Empty<string>(), "localProbesRoot" => harness, "say" => (Action<string>)(_ => { }),
             _ => throw new Xunit.Sdk.XunitException($"Recheck.RunAll has a parameter {p.Name} this test does not know"),
         }).ToArray();
