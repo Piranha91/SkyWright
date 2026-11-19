@@ -22,5 +22,6 @@
     <EmbeddedResource Include="known-answers\plan-modules.json" LogicalName="plan-modules.json" />
     <EmbeddedResource Include="known-answers\plan-command.json" LogicalName="plan-command.json" />
     <EmbeddedResource Include="known-answers\sweep.json" LogicalName="sweep.json" />
+    <EmbeddedResource Include="known-answers\finalize.json" LogicalName="finalize.json" />
   </ItemGroup>
 </Project>

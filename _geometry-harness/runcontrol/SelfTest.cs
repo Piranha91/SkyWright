@@ -149,6 +149,7 @@ public static partial class SelfTest
         SelfTestPlanModules.Run(Case, Skip);
         PlanCases();
         SelfTestSweep.Run(Case);
+        SelfTestFinalize.Run(Case);
         LiveCases();
         PipelineLiveCases();
 

@@ -1,0 +1,4989 @@
+{
+ "python": "3.12.6",
+ "placeholders": {
+  "backslash": "<ROOT\\>",
+  "forward": "<ROOT/>",
+  "doubled": "<ROOT\\\\>"
+ },
+ "plans": {
+  "load": [
+   {
+    "name": "no plan",
+    "tree": [],
+    "plan": false,
+    "why": "plan-missing: <ROOT\\>\\plan.json does not exist: this is not an evalrun RUN directory"
+   },
+   {
+    "name": "no hash",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "e30="
+     }
+    ],
+    "plan": false,
+    "why": "plan-changed: <ROOT\\>\\plan.sha256 is missing, so the plan's immutability cannot be checked"
+   },
+   {
+    "name": "hash differs",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "e30="
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMAo="
+     }
+    ],
+    "plan": false,
+    "why": "plan-changed: plan.json no longer hashes to plan.sha256"
+   },
+   {
+    "name": "good",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogMiwNCiAicGxhbklkIjogInBsYW5hYWFhYWFhYSIsDQogInJlcXVlc3RQcm92aWRlcnMiOiAiYXJtLXZpZXciLA0KICJyZWdpc3RyeSI6IHsNCiAgInBhdGgiOiAicmVnaXN0cnkuanNvbiIsDQogICJyZWdpc3RyeVZlcnNpb24iOiA3LA0KICAic2hhMjU2IjogInJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnIiDQogfSwNCiAidG9vbElkZW50aXR5Ijogew0KICAiY29udHJhY3QiOiAxLA0KICAicnVsZSI6ICJ4IiwNCiAgInByb2dyYW1zIjogew0KICAgImNvbnRyb2xsZXIiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAic2NyaXB0czpjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIg0KICAgfSwNCiAgICJwcm9iZTpvdmVybGFwcHJvYmUiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAiZm9sZGVyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiDQogICB9LA0KICAgImhlbHBlcjpjb25mbGljdGRpZmYiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAiZm9sZGVyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiDQogICB9LA0KICAgInByb2JlOmRlcHByb2JlIjogew0KICAgICJraW5kIjogInBhY2thZ2UiLA0KICAgICJzdGF0ZSI6ICJwcmVzZW50IiwNCiAgICAiZGlnZXN0IjogImZvbGRlcjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIg0KICAgfQ0KICB9DQogfSwNCiAiYXJtcyI6IFsNCiAgew0KICAgImFybUlkIjogImJhc2VsaW5lIiwNCiAgICJraW5kIjogImJhc2VsaW5lIg0KICB9LA0KICB7DQogICAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwNCiAgICJraW5kIjogImNhbmRpZGF0ZSINCiAgfQ0KIF0sDQogImNoZWNrcyI6IFsNCiAgew0KICAgImNoZWNrSWQiOiAiZy5vdmVybGFwIiwNCiAgICJwcmVyZXF1aXNpdGVzIjogWw0KICAgICJsLm1hc3RlcnMiDQogICBdDQogIH0sDQogIHsNCiAgICJjaGVja0lkIjogImwubWFzdGVycyINCiAgfSwNCiAgew0KICAgImNoZWNrSWQiOiAicC5vcmRlciIsDQogICAicHJlcmVxdWlzaXRlcyI6IFtdDQogIH0NCiBdDQp9"
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "ZTI1MDI4MTE2ZWZkZjI4NWY2ZDJiNmE2MDU0MzJhYWE5MTU3NTUwNWNkODc4ZjUxMGFmMTFkMGM3YzVmNWFjYgo="
+     }
+    ],
+    "plan": true,
+    "why": null
+   },
+   {
+    "name": "hash with spaces",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogMiwNCiAicGxhbklkIjogInBsYW5hYWFhYWFhYSIsDQogInJlcXVlc3RQcm92aWRlcnMiOiAiYXJtLXZpZXciLA0KICJyZWdpc3RyeSI6IHsNCiAgInBhdGgiOiAicmVnaXN0cnkuanNvbiIsDQogICJyZWdpc3RyeVZlcnNpb24iOiA3LA0KICAic2hhMjU2IjogInJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnIiDQogfSwNCiAidG9vbElkZW50aXR5Ijogew0KICAiY29udHJhY3QiOiAxLA0KICAicnVsZSI6ICJ4IiwNCiAgInByb2dyYW1zIjogew0KICAgImNvbnRyb2xsZXIiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAic2NyaXB0czpjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIg0KICAgfSwNCiAgICJwcm9iZTpvdmVybGFwcHJvYmUiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAiZm9sZGVyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiDQogICB9LA0KICAgImhlbHBlcjpjb25mbGljdGRpZmYiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAiZm9sZGVyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiDQogICB9LA0KICAgInByb2JlOmRlcHByb2JlIjogew0KICAgICJraW5kIjogInBhY2thZ2UiLA0KICAgICJzdGF0ZSI6ICJwcmVzZW50IiwNCiAgICAiZGlnZXN0IjogImZvbGRlcjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIg0KICAgfQ0KICB9DQogfSwNCiAiYXJtcyI6IFsNCiAgew0KICAgImFybUlkIjogImJhc2VsaW5lIiwNCiAgICJraW5kIjogImJhc2VsaW5lIg0KICB9LA0KICB7DQogICAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwNCiAgICJraW5kIjogImNhbmRpZGF0ZSINCiAgfQ0KIF0sDQogImNoZWNrcyI6IFsNCiAgew0KICAgImNoZWNrSWQiOiAiZy5vdmVybGFwIiwNCiAgICJwcmVyZXF1aXNpdGVzIjogWw0KICAgICJsLm1hc3RlcnMiDQogICBdDQogIH0sDQogIHsNCiAgICJjaGVja0lkIjogImwubWFzdGVycyINCiAgfSwNCiAgew0KICAgImNoZWNrSWQiOiAicC5vcmRlciIsDQogICAicHJlcmVxdWlzaXRlcyI6IFtdDQogIH0NCiBdDQp9"
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "ICBlMjUwMjgxMTZlZmRmMjg1ZjZkMmI2YTYwNTQzMmFhYTkxNTc1NTA1Y2Q4NzhmNTEwYWYxMWQwYzdjNWY1YWNiIA0K"
+     }
+    ],
+    "plan": true,
+    "why": null
+   },
+   {
+    "name": "not json",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "e25vdCBqc29u"
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "OTIwNzJkZjM5OWNiNzQ3MDNmOGU4NmY0NTBkNTUyYmMwYmIwMWVlZWI5OGE5MDk4NWExYjc3NzJjOGZkMDAxNgo="
+     }
+    ],
+    "plan": false,
+    "why": "plan-unreadable: <ROOT\\>\\plan.json is not readable as JSON"
+   },
+   {
+    "name": "a list",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "WzEsIDJd"
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "M2EzMTZkNmQzMjI2Zjg0YzFlNDZlNDQ0N2ZhOGQ1ZmQ4MDBiZmY0YTFiYzY0OTgxNTI1MjNjZDRhNjAyYjY5Ygo="
+     }
+    ],
+    "plan": false,
+    "why": "plan-unreadable: <ROOT\\>\\plan.json is not readable as JSON"
+   },
+   {
+    "name": "schema 1",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogMSwNCiAicGxhbklkIjogInBsYW5hYWFhYWFhYSIsDQogInJlcXVlc3RQcm92aWRlcnMiOiAiYXJtLXZpZXciLA0KICJyZWdpc3RyeSI6IHsNCiAgInBhdGgiOiAicmVnaXN0cnkuanNvbiIsDQogICJyZWdpc3RyeVZlcnNpb24iOiA3LA0KICAic2hhMjU2IjogInJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnIiDQogfSwNCiAidG9vbElkZW50aXR5Ijogew0KICAiY29udHJhY3QiOiAxLA0KICAicnVsZSI6ICJ4IiwNCiAgInByb2dyYW1zIjogew0KICAgImNvbnRyb2xsZXIiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAic2NyaXB0czpjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjIg0KICAgfSwNCiAgICJwcm9iZTpvdmVybGFwcHJvYmUiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAiZm9sZGVyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiDQogICB9LA0KICAgImhlbHBlcjpjb25mbGljdGRpZmYiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAiZm9sZGVyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiDQogICB9LA0KICAgInByb2JlOmRlcHByb2JlIjogew0KICAgICJraW5kIjogInBhY2thZ2UiLA0KICAgICJzdGF0ZSI6ICJwcmVzZW50IiwNCiAgICAiZGlnZXN0IjogImZvbGRlcjphYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIg0KICAgfQ0KICB9DQogfSwNCiAiYXJtcyI6IFsNCiAgew0KICAgImFybUlkIjogImJhc2VsaW5lIiwNCiAgICJraW5kIjogImJhc2VsaW5lIg0KICB9LA0KICB7DQogICAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwNCiAgICJraW5kIjogImNhbmRpZGF0ZSINCiAgfQ0KIF0sDQogImNoZWNrcyI6IFsNCiAgew0KICAgImNoZWNrSWQiOiAiZy5vdmVybGFwIiwNCiAgICJwcmVyZXF1aXNpdGVzIjogWw0KICAgICJsLm1hc3RlcnMiDQogICBdDQogIH0sDQogIHsNCiAgICJjaGVja0lkIjogImwubWFzdGVycyINCiAgfSwNCiAgew0KICAgImNoZWNrSWQiOiAicC5vcmRlciIsDQogICAicHJlcmVxdWlzaXRlcyI6IFtdDQogIH0NCiBdDQp9"
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "ZDU5ODEzNmY5NTBiYzM2MjNlZmFiN2FkN2E5M2QyZWRlMmUzYzI5MzExZDYwZjM3MzgyN2ZkZDgyZjE2NTdmMQo="
+     }
+    ],
+    "plan": false,
+    "why": "plan-schema-unsupported: plan.json declares schemaVersion 1; this controller reads 2. A schema-1 plan carries no per-arm requested identity, so an accepted receipt could not be bound to the configuration the arm asked for. Next action: plan again from the same registry, scope and candidates."
+   },
+   {
+    "name": "schema text",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogIjIiLA0KICJwbGFuSWQiOiAicGxhbmFhYWFhYWFhIiwNCiAicmVxdWVzdFByb3ZpZGVycyI6ICJhcm0tdmlldyIsDQogInJlZ2lzdHJ5Ijogew0KICAicGF0aCI6ICJyZWdpc3RyeS5qc29uIiwNCiAgInJlZ2lzdHJ5VmVyc2lvbiI6IDcsDQogICJzaGEyNTYiOiAicnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJyciINCiB9LA0KICJ0b29sSWRlbnRpdHkiOiB7DQogICJjb250cmFjdCI6IDEsDQogICJydWxlIjogIngiLA0KICAicHJvZ3JhbXMiOiB7DQogICAiY29udHJvbGxlciI6IHsNCiAgICAia2luZCI6ICJwYWNrYWdlIiwNCiAgICAic3RhdGUiOiAicHJlc2VudCIsDQogICAgImRpZ2VzdCI6ICJzY3JpcHRzOmNjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2MiDQogICB9LA0KICAgInByb2JlOm92ZXJsYXBwcm9iZSI6IHsNCiAgICAia2luZCI6ICJwYWNrYWdlIiwNCiAgICAic3RhdGUiOiAicHJlc2VudCIsDQogICAgImRpZ2VzdCI6ICJmb2xkZXI6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSINCiAgIH0sDQogICAiaGVscGVyOmNvbmZsaWN0ZGlmZiI6IHsNCiAgICAia2luZCI6ICJwYWNrYWdlIiwNCiAgICAic3RhdGUiOiAicHJlc2VudCIsDQogICAgImRpZ2VzdCI6ICJmb2xkZXI6YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYSINCiAgIH0sDQogICAicHJvYmU6ZGVwcHJvYmUiOiB7DQogICAgImtpbmQiOiAicGFja2FnZSIsDQogICAgInN0YXRlIjogInByZXNlbnQiLA0KICAgICJkaWdlc3QiOiAiZm9sZGVyOmFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWEiDQogICB9DQogIH0NCiB9LA0KICJhcm1zIjogWw0KICB7DQogICAiYXJtSWQiOiAiYmFzZWxpbmUiLA0KICAgImtpbmQiOiAiYmFzZWxpbmUiDQogIH0sDQogIHsNCiAgICJhcm1JZCI6ICJjYW5kaWRhdGUtMDEiLA0KICAgImtpbmQiOiAiY2FuZGlkYXRlIg0KICB9DQogXSwNCiAiY2hlY2tzIjogWw0KICB7DQogICAiY2hlY2tJZCI6ICJnLm92ZXJsYXAiLA0KICAgInByZXJlcXVpc2l0ZXMiOiBbDQogICAgImwubWFzdGVycyINCiAgIF0NCiAgfSwNCiAgew0KICAgImNoZWNrSWQiOiAibC5tYXN0ZXJzIg0KICB9LA0KICB7DQogICAiY2hlY2tJZCI6ICJwLm9yZGVyIiwNCiAgICJwcmVyZXF1aXNpdGVzIjogW10NCiAgfQ0KIF0NCn0="
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "MGI2YmM5ZTFlMjFkMDMzZGMxNjRiYWE4Y2M0NTlhNDk0ZTZjZWNmMTZkYzRkYjk3Mzc0ODAzNTYyOGU2N2E5OAo="
+     }
+    ],
+    "plan": false,
+    "why": "plan-schema-unsupported: plan.json declares schemaVersion '2'; this controller reads 2. A schema-1 plan carries no per-arm requested identity, so an accepted receipt could not be bound to the configuration the arm asked for. Next action: plan again from the same registry, scope and candidates."
+   },
+   {
+    "name": "schema float",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "eyJzY2hlbWFWZXJzaW9uIjogMi4wLCAicGxhbklkIjogInAifQ=="
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "Mzc1MjJkMGU1N2FiNGI2ZDFiNmQyNWE4NGI1ZWRmNjBiYTYwMzk4OWNkODljNzE4YzY4ZmU3MzY0M2FhZmE5YQo="
+     }
+    ],
+    "plan": true,
+    "why": null
+   },
+   {
+    "name": "schema absent",
+    "tree": [
+     {
+      "path": "plan.json",
+      "bytes": "eyJwbGFuSWQiOiAicCJ9"
+     },
+     {
+      "path": "plan.sha256",
+      "bytes": "MTA1MGRhYmMzYWQ2NTkyNWFkNjQ4YzA3MDBlZTcwMDhjY2NjMmE4ZmUwYzA1ODVjZGJmZGM3ZThmOWY2NjE2Ygo="
+     }
+    ],
+    "plan": false,
+    "why": "plan-schema-unsupported: plan.json declares schemaVersion None; this controller reads 2. A schema-1 plan carries no per-arm requested identity, so an accepted receipt could not be bound to the configuration the arm asked for. Next action: plan again from the same registry, scope and candidates."
+   }
+  ],
+  "request": [
+   {
+    "plan": {
+     "requestProviders": "arm-view"
+    },
+    "want": null
+   },
+   {
+    "plan": {},
+    "want": "plan-request-outdated: plan.json declares requestProviders None, not 'arm-view': it froze the scope's providers onto every arm, so a receipt bound to it now could be bound to a view that arm never read. Next action: plan again from the same registry, scope and candidates."
+   },
+   {
+    "plan": {
+     "requestProviders": "scope"
+    },
+    "want": "plan-request-outdated: plan.json declares requestProviders 'scope', not 'arm-view': it froze the scope's providers onto every arm, so a receipt bound to it now could be bound to a view that arm never read. Next action: plan again from the same registry, scope and candidates."
+   },
+   {
+    "plan": {
+     "requestProviders": null
+    },
+    "want": "plan-request-outdated: plan.json declares requestProviders None, not 'arm-view': it froze the scope's providers onto every arm, so a receipt bound to it now could be bound to a view that arm never read. Next action: plan again from the same registry, scope and candidates."
+   },
+   {
+    "plan": {
+     "requestProviders": [
+      "arm-view"
+     ]
+    },
+    "want": "plan-request-outdated: plan.json declares requestProviders ['arm-view'], not 'arm-view': it froze the scope's providers onto every arm, so a receipt bound to it now could be bound to a view that arm never read. Next action: plan again from the same registry, scope and candidates."
+   },
+   {
+    "plan": {
+     "requestProviders": "it's"
+    },
+    "want": "plan-request-outdated: plan.json declares requestProviders \"it's\", not 'arm-view': it froze the scope's providers onto every arm, so a receipt bound to it now could be bound to a view that arm never read. Next action: plan again from the same registry, scope and candidates."
+   }
+  ],
+  "cause": [
+   {
+    "why": "plan-missing: x",
+    "want": "plan-missing"
+   },
+   {
+    "why": "plan-changed: plan.json no longer",
+    "want": "plan-changed"
+   },
+   {
+    "why": "registry-changed: C:\\x now hashes",
+    "want": "registry-changed"
+   },
+   {
+    "why": null,
+    "want": "plan-changed"
+   },
+   {
+    "why": "",
+    "want": "plan-changed"
+   },
+   {
+    "why": "Not a cause: x",
+    "want": "plan-changed"
+   },
+   {
+    "why": " scope-missing : y",
+    "want": "scope-missing"
+   },
+   {
+    "why": "x",
+    "want": "x"
+   },
+   {
+    "why": "x1: y",
+    "want": "plan-changed"
+   },
+   {
+    "why": "-x: y",
+    "want": "plan-changed"
+   },
+   {
+    "why": "a-b-: z",
+    "want": "a-b-"
+   },
+   {
+    "why": "C:\\run\\ledger.json is missing or corrupt.",
+    "want": "plan-changed"
+   },
+   {
+    "why": "foreign-run: a: b",
+    "want": "foreign-run"
+   }
+  ],
+  "contract": [
+   {
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "want": null
+   },
+   {
+    "plan": {},
+    "want": "plan-identity-outdated: plan.json records no tool identity (toolIdentity contract 1), so the programs this would launch cannot be compared with the ones it was planned with. Make a new plan in a new directory."
+   },
+   {
+    "plan": {
+     "toolIdentity": null
+    },
+    "want": "plan-identity-outdated: plan.json records no tool identity (toolIdentity contract 1), so the programs this would launch cannot be compared with the ones it was planned with. Make a new plan in a new directory."
+   },
+   {
+    "plan": {
+     "toolIdentity": {
+      "contract": 1
+     }
+    },
+    "want": "plan-identity-outdated: plan.json records no tool identity (toolIdentity contract 1), so the programs this would launch cannot be compared with the ones it was planned with. Make a new plan in a new directory."
+   },
+   {
+    "plan": {
+     "toolIdentity": {
+      "contract": 2,
+      "programs": {}
+     }
+    },
+    "want": "plan-identity-outdated: plan.json records no tool identity (toolIdentity contract 1), so the programs this would launch cannot be compared with the ones it was planned with. Make a new plan in a new directory."
+   },
+   {
+    "plan": {
+     "toolIdentity": {
+      "contract": 1,
+      "programs": {}
+     }
+    },
+    "want": null
+   },
+   {
+    "plan": {
+     "toolIdentity": {
+      "contract": 1.0,
+      "programs": {}
+     }
+    },
+    "want": null
+   },
+   {
+    "plan": {
+     "toolIdentity": {
+      "contract": true,
+      "programs": {}
+     }
+    },
+    "want": null
+   },
+   {
+    "plan": {
+     "toolIdentity": {
+      "contract": 1,
+      "programs": []
+     }
+    },
+    "want": "plan-identity-outdated: plan.json records no tool identity (toolIdentity contract 1), so the programs this would launch cannot be compared with the ones it was planned with. Make a new plan in a new directory."
+   }
+  ],
+  "premise": {
+   "tree": [
+    {
+     "path": "elsewhere/rel-registry.json",
+     "bytes": "eyJyZWdpc3RyeVZlcnNpb24iOiA3fQ=="
+    },
+    {
+     "path": "registry.json",
+     "bytes": "eyJyZWdpc3RyeVZlcnNpb24iOiA3fQ=="
+    },
+    {
+     "path": "scope.json",
+     "bytes": "eyJjb21wbGV0ZSI6IHRydWV9"
+    }
+   ],
+   "cases": [
+    {
+     "name": "all present",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": null,
+     "relative": null
+    },
+    {
+     "name": "registry changed",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "registry-changed: <ROOT\\>\\registry.json now hashes 45189315ed11, the plan recorded 000000000000. A checklist cannot change under a frozen plan. Next action: re-run scopeprobe and plan again.",
+     "relative": null
+    },
+    {
+     "name": "registry gone",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\gone.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "registry-missing: the plan's registry <ROOT\\>\\gone.json does not exist, so the checklist this run was derived from cannot be re-read. Next action: re-run scopeprobe and plan again.",
+     "relative": null
+    },
+    {
+     "name": "registry hash absent",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json"
+      },
+      "arms": []
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "registry-changed: <ROOT\\>\\registry.json now hashes 45189315ed11, the plan recorded None. A checklist cannot change under a frozen plan. Next action: re-run scopeprobe and plan again.",
+     "relative": null
+    },
+    {
+     "name": "scope changed",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "scope-changed: <ROOT\\>\\scope.json now hashes be0ba73ee242, the plan recorded 111111111111. A scope change changes the checklist. Next action: re-run scopeprobe and plan again.",
+     "relative": null
+    },
+    {
+     "name": "scope gone",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\no-scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "scope-missing: the plan's scope <ROOT\\>\\no-scope.json does not exist, so the applicability this plan froze cannot be re-derived. Next action: re-run scopeprobe and plan again.",
+     "relative": null
+    },
+    {
+     "name": "no scope",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": null,
+       "sha256": null
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": null,
+     "relative": null
+    },
+    {
+     "name": "scope absent",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": null,
+     "relative": null
+    },
+    {
+     "name": "relative registry that resolves",
+     "plan": {
+      "registry": {
+       "path": "registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": null,
+     "relative": null
+    },
+    {
+     "name": "relative registry that does not",
+     "plan": {
+      "registry": {
+       "path": "elsewhere-not/registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "plan-path-relative: this plan stores the registry path 'elsewhere-not/registry.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths).",
+     "relative": "plan-path-relative: this plan stores the registry path 'elsewhere-not/registry.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths)."
+    },
+    {
+     "name": "relative scope",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "nowhere/scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "plan-path-relative: this plan stores the scope path 'nowhere/scope.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths).",
+     "relative": "plan-path-relative: this plan stores the scope path 'nowhere/scope.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths)."
+    },
+    {
+     "name": "relative candidates folder",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "cands",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "plan-path-relative: this plan stores the candidates folder path 'cands' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths).",
+     "relative": "plan-path-relative: this plan stores the candidates folder path 'cands' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths)."
+    },
+    {
+     "name": "relative candidate",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "candidate-03",
+        "candidatePath": "cands/c3.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": "plan-path-relative: this plan stores the candidate (arm candidate-03) path 'cands/c3.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths).",
+     "relative": "plan-path-relative: this plan stores the candidate (arm candidate-03) path 'cands/c3.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths)."
+    },
+    {
+     "name": "relative, limited to scope",
+     "plan": {
+      "registry": {
+       "path": "x/registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "y/scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": [
+      "scope"
+     ],
+     "remedy": "pass --scope naming a copy that hashes 123.",
+     "premise": null,
+     "relative": "plan-path-relative: this plan stores the scope path 'y/scope.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or pass --scope naming a copy that hashes 123."
+    },
+    {
+     "name": "relative, limited to registry",
+     "plan": {
+      "registry": {
+       "path": "x/registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": [
+      "registry"
+     ],
+     "remedy": null,
+     "premise": null,
+     "relative": "plan-path-relative: this plan stores the registry path 'x/registry.json' relative to the folder it was planned from, which the plan does not record, and it does not resolve from <ROOT\\>; run from the folder the plan was made in, or plan again (plans now store absolute paths)."
+    },
+    {
+     "name": "forward slashes",
+     "plan": {
+      "registry": {
+       "path": "<ROOT/>/registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "only": null,
+     "remedy": null,
+     "premise": null,
+     "relative": null
+    }
+   ],
+   "named": [
+    {
+     "label": "registry",
+     "named": "<ROOT\\>\\registry.json",
+     "nxt": "Next.",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "want": null
+    },
+    {
+     "label": "scope",
+     "named": "<ROOT\\>\\scope.json",
+     "nxt": "Go.",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "want": null
+    },
+    {
+     "label": "registry",
+     "named": "<ROOT\\>\\gone.json",
+     "nxt": "Next.",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "want": "registry-missing: --registry <ROOT\\>\\gone.json does not exist. Next."
+    },
+    {
+     "label": "scope",
+     "named": "<ROOT\\>\\registry.json",
+     "nxt": "Other.",
+     "plan": {
+      "registry": {
+       "path": "<ROOT\\>\\registry.json",
+       "sha256": "45189315ed119248434cd01167d46fed25029bca5c7371ef28005fd539b5dc38"
+      },
+      "scope": {
+       "path": "<ROOT\\>\\scope.json",
+       "sha256": "be0ba73ee2428cfb189f8d1d1c87345e0b69c9628fd647d3f051a2514d38e8ae"
+      },
+      "candidatesDir": "<ROOT\\>\\candidates",
+      "arms": [
+       {
+        "armId": "baseline",
+        "candidatePath": "<ROOT\\>\\candidates\\c0.json"
+       }
+      ]
+     },
+     "want": "scope-mismatch: --scope <ROOT\\>\\registry.json hashes 45189315ed11, the plan froze be0ba73ee242. Other."
+    }
+   ]
+  }
+ },
+ "ledger": {
+  "scripts": [
+   {
+    "name": "missing",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "new"
+      ],
+      "want": false,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": "<ROOT\\>\\ledger.json is missing or corrupt. It is the run's record of what happened; rebuild it from the journal with `resume --rebuild-ledger` rather than guessing.",
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": null
+      }
+     }
+    ],
+    "tree": []
+   },
+   {
+    "name": "corrupt",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "write",
+       "ledger.json",
+       "{oops"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "935aaf3a54c0648c74df48a8025f20086019843f5b9fbffe5540b9cba0edcc97",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "new"
+      ],
+      "want": false,
+      "files": {
+       "ledger.json": "935aaf3a54c0648c74df48a8025f20086019843f5b9fbffe5540b9cba0edcc97",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": "<ROOT\\>\\ledger.json is missing or corrupt. It is the run's record of what happened; rebuild it from the journal with `resume --rebuild-ledger` rather than guessing.",
+      "files": {
+       "ledger.json": "935aaf3a54c0648c74df48a8025f20086019843f5b9fbffe5540b9cba0edcc97",
+       "journal.jsonl": null
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "ledger.json",
+      "bytes": "e29vcHM="
+     }
+    ]
+   },
+   {
+    "name": "foreign",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "write",
+       "ledger.json",
+       "{\r\n \"planId\": \"other\",\r\n \"entries\": {}\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "74d82baf7e288a3db4e333b908c77237e6ad307a615029cdb8af6a3b5fe67bce",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "new"
+      ],
+      "want": true,
+      "files": {
+       "ledger.json": "74d82baf7e288a3db4e333b908c77237e6ad307a615029cdb8af6a3b5fe67bce",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": "foreign-run: <ROOT\\>\\ledger.json belongs to plan other, not planaaaaaaaa",
+      "files": {
+       "ledger.json": "74d82baf7e288a3db4e333b908c77237e6ad307a615029cdb8af6a3b5fe67bce",
+       "journal.jsonl": null
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "ledger.json",
+      "bytes": "ew0KICJwbGFuSWQiOiAib3RoZXIiLA0KICJlbnRyaWVzIjoge30NCn0="
+     }
+    ]
+   },
+   {
+    "name": "no plan id",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "write",
+       "ledger.json",
+       "{\r\n \"entries\": {}\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "52bf535e81d11de14a163940ea2584b7dec0972edb85ad18aaffd0f025fff350",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "new"
+      ],
+      "want": true,
+      "files": {
+       "ledger.json": "52bf535e81d11de14a163940ea2584b7dec0972edb85ad18aaffd0f025fff350",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": "foreign-run: <ROOT\\>\\ledger.json belongs to plan None, not planaaaaaaaa",
+      "files": {
+       "ledger.json": "52bf535e81d11de14a163940ea2584b7dec0972edb85ad18aaffd0f025fff350",
+       "journal.jsonl": null
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "ledger.json",
+      "bytes": "ew0KICJlbnRyaWVzIjoge30NCn0="
+     }
+    ]
+   },
+   {
+    "name": "life",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "write",
+       "ledger.json",
+       "{\r\n \"schemaVersion\": 2,\r\n \"planId\": \"planaaaaaaaa\",\r\n \"registrySha256\": \"rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr\",\r\n \"runIds\": [],\r\n \"entries\": {}\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "write",
+       "journal.jsonl",
+       ""
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "new"
+      ],
+      "want": true,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "open",
+       "run",
+       "evalrun-checks-1",
+       null
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "a5b17e33af11e701594eadeb132edffb4c334693464b29996ffd0e69b7fa4e1b",
+       "journal.jsonl": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "l.masters",
+       "baseline",
+       null,
+       "running"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "3da891ab821337d831a4dc76d5560960fbbddb07e6bff68e0c1588409a91ac96",
+       "journal.jsonl": "40bb0fbb4e03c83193396227c45336d44b9498579d3bb63dda0a76616413d6af"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "l.masters",
+       "baseline",
+       null,
+       "completed",
+       {
+        "receipt_id": "abc",
+        "detector": "no-finding",
+        "detail": "ok \u00e9 \u2028 line",
+        "next_action": null
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "fc1b8f48610e3aa9eed6b5f1583170b27b8dd75544977397fcb632ab5e478d1e",
+       "journal.jsonl": "5c4bcf3229cccafb5d4937f058ddde8fb21309f8115515a008d86b078ce9480c"
+      }
+     },
+     {
+      "op": [
+       "entry",
+       "l.masters",
+       "baseline",
+       null
+      ],
+      "want": "{\"checkId\": \"l.masters\", \"armId\": \"baseline\", \"part\": null, \"status\": \"completed\", \"cause\": null, \"receiptId\": \"abc\", \"detector\": \"no-finding\", \"detail\": \"ok \\u00e9 \\u2028 line\", \"nextAction\": null, \"validation\": {\"accepted\": true, \"rejections\": []}, \"result\": {\"detector\": \"no-finding\", \"execution\": \"completed\"}, \"receiptPath\": \"receipts/l.masters__baseline.json\", \"runId\": \"evalrun-checks-1\", \"updatedUtc\": \"2026-01-01T00:00:04Z\"}",
+      "files": {
+       "ledger.json": "fc1b8f48610e3aa9eed6b5f1583170b27b8dd75544977397fcb632ab5e478d1e",
+       "journal.jsonl": "5c4bcf3229cccafb5d4937f058ddde8fb21309f8115515a008d86b078ce9480c"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "candidate-01",
+       "diff",
+       "rejected(exit-nonzero)",
+       {
+        "cause": "exit-nonzero",
+        "receipt_id": "def",
+        "rejections": [
+         {
+          "cause": "exit-nonzero",
+          "detail": "exit 3"
+         }
+        ],
+        "detail": "conflictdiff said \"no\"",
+        "next_action": "resume"
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "b08be37cfcf64949e02baccce45d65ca19ca887bf4fb3444a1ac0fe1f29e5d8c",
+       "journal.jsonl": "306d969d6cea7ec4277280522bbf82cce78fb210e9881d3edc5818c23aa90074"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "baseline",
+       "arm",
+       "completed",
+       {
+        "receipt_id": "r1",
+        "detector": "finding",
+        "extra": {
+         "reusedFromRunId": "old",
+         "derivedFrom": [
+          "a"
+         ],
+         "sweepFolder": "sweep/inv-0001"
+        }
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "160b67e7d530f8cd854177b0e69631066f6983bc62300db2a0970c1613632b6f",
+       "journal.jsonl": "6a2a9d05eaa5517aee00a89fcd5ce49dc935c80bc58d29592e3c2a64e59a69b7"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "baseline",
+       "arm",
+       "reused",
+       {
+        "receipt_id": "r1",
+        "detector": "finding"
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "c9a82d0e98236d98700945e4f76579367d9e742b611ca23ea99d98bd9dd3c155",
+       "journal.jsonl": "470c44353a10a84cb2367f21d7299fba8c70df6324ed0f186b873c20b5f4eca5"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "baseline",
+       "arm",
+       "reused",
+       {
+        "receipt_id": "r1",
+        "detector": "finding",
+        "extra": {
+         "reusedFromRunId": "newer",
+         "imported": null
+        }
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "a972641081b506cfeec76708eaa9c20caf7e344be25c12711f6ebb3e0fbf51b2",
+       "journal.jsonl": "6c0d36695a411b1496c5fd631e3bdb130462b22d7e65dca7e69fb2cdc55224a3"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "p.order",
+       "baseline",
+       null,
+       "completed",
+       {
+        "receipt_id": "i1",
+        "detector": "catalogue",
+        "extra": {
+         "imported": true,
+         "importOrigin": "fresh",
+         "checkId": "overridden"
+        }
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "987a56fc23acd377e9def21d3f11f0eb1d851dc642a6240cf912dee26909361c",
+       "journal.jsonl": "71460ea8be164be9965d3a723f4c6e370711bc3d34a41d5fb657586c69ce50da"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "p.order",
+       "baseline",
+       null,
+       "invalidated(the receipt file is gone)",
+       {
+        "cause": "stale-inputs",
+        "rejections": []
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "40e8ac3063f48b627d2f3e12c6155512ef8c8ceb8b384d21de77b4448ca45f35",
+       "journal.jsonl": "a347354ba7d51160f42d4bbba2f320f19fc942cdae0e8c90c4dae9b73896ef35"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "l.masters",
+       "candidate-01",
+       null,
+       "running"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "8671796033e4aecee4f05c60054f406c75ffbcedec17e5c0f6755f8851c11a64",
+       "journal.jsonl": "72d58c45c63e9af4d63850311d589c925874af943d76c906120d9fbc822c7288"
+      }
+     },
+     {
+      "op": [
+       "transition",
+       "g.overlap",
+       "candidate-01",
+       "arm",
+       "running"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "d962e0727f39215aa6bd3626790dc0f7767dd210fd0ce0479912bc5f825fcd1b",
+       "journal.jsonl": "6c708128fb15cb2a199e6fe229cddb60d614eaddcb9c3e084f6e2b57cfab39ea"
+      }
+     },
+     {
+      "op": [
+       "open",
+       "resume",
+       "evalrun-checks-2",
+       "parent-1",
+       {
+        "budget_minutes": 12.5
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "17d688ab30d5b3e8ad47838a22354a487920b414a86f5461424849172e7e1cdd",
+       "journal.jsonl": "6c708128fb15cb2a199e6fe229cddb60d614eaddcb9c3e084f6e2b57cfab39ea"
+      }
+     },
+     {
+      "op": [
+       "open",
+       "resume",
+       null,
+       null,
+       {
+        "budget_minutes": 0
+       }
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "aec9a20d3b0abdc8f427df6be71b0dc10f84656fdb772111d78c281eb8243ffb",
+       "journal.jsonl": "6c708128fb15cb2a199e6fe229cddb60d614eaddcb9c3e084f6e2b57cfab39ea"
+      }
+     },
+     {
+      "op": [
+       "heal"
+      ],
+      "want": 2,
+      "files": {
+       "ledger.json": "b51670b9d3093fa68e5b5c1feb189fe94a58964ca2aabb8f866eceebedb25116",
+       "journal.jsonl": "64fdedf884d3b4ab70bd2675f248c19fdaff00fe2d6f7d435246d2147d315511"
+      }
+     },
+     {
+      "op": [
+       "entry",
+       "l.masters",
+       "candidate-01",
+       null
+      ],
+      "want": "{\"checkId\": \"l.masters\", \"armId\": \"candidate-01\", \"part\": null, \"status\": \"interrupted\", \"cause\": \"the process did not write a terminal transition\", \"receiptId\": null, \"detector\": null, \"detail\": null, \"nextAction\": null, \"validation\": {\"accepted\": true, \"rejections\": []}, \"result\": {\"detector\": null, \"execution\": \"interrupted\"}, \"receiptPath\": \"receipts/l.masters__candidate-01.json\", \"runId\": null, \"updatedUtc\": \"2026-01-01T00:00:24Z\"}",
+      "files": {
+       "ledger.json": "b51670b9d3093fa68e5b5c1feb189fe94a58964ca2aabb8f866eceebedb25116",
+       "journal.jsonl": "64fdedf884d3b4ab70bd2675f248c19fdaff00fe2d6f7d435246d2147d315511"
+      }
+     },
+     {
+      "op": [
+       "entry",
+       "nothing",
+       "here",
+       null
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "b51670b9d3093fa68e5b5c1feb189fe94a58964ca2aabb8f866eceebedb25116",
+       "journal.jsonl": "64fdedf884d3b4ab70bd2675f248c19fdaff00fe2d6f7d435246d2147d315511"
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "journal.jsonl",
+      "bytes": "eyJhcm1JZCI6ImJhc2VsaW5lIiwiY2F1c2UiOm51bGwsImNoZWNrSWQiOiJsLm1hc3RlcnMiLCJkZXRhaWwiOm51bGwsImZyb20iOm51bGwsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOm51bGwsInJlY2VpcHRJZCI6bnVsbCwicnVuSWQiOiJldmFscnVuLWNoZWNrcy0xIiwidCI6IjIwMjYtMDEtMDFUMDA6MDA6MDNaIiwidG8iOiJydW5uaW5nIn0NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNhdXNlIjpudWxsLCJjaGVja0lkIjoibC5tYXN0ZXJzIiwiZGV0YWlsIjoib2sgw6kg4oCoIGxpbmUiLCJmcm9tIjoicnVubmluZyIsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOm51bGwsInJlY2VpcHRJZCI6ImFiYyIsInJ1bklkIjoiZXZhbHJ1bi1jaGVja3MtMSIsInQiOiIyMDI2LTAxLTAxVDAwOjAwOjA1WiIsInRvIjoiY29tcGxldGVkIn0NCnsiYXJtSWQiOiJjYW5kaWRhdGUtMDEiLCJjYXVzZSI6ImV4aXQtbm9uemVybyIsImNoZWNrSWQiOiJnLm92ZXJsYXAiLCJkZXRhaWwiOiJjb25mbGljdGRpZmYgc2FpZCBcIm5vXCIiLCJmcm9tIjpudWxsLCJuZXh0QWN0aW9uIjoicmVzdW1lIiwicGFydCI6ImRpZmYiLCJyZWNlaXB0SWQiOiJkZWYiLCJydW5JZCI6ImV2YWxydW4tY2hlY2tzLTEiLCJ0IjoiMjAyNi0wMS0wMVQwMDowMDowN1oiLCJ0byI6InJlamVjdGVkKGV4aXQtbm9uemVybykifQ0KeyJhcm1JZCI6ImJhc2VsaW5lIiwiY2F1c2UiOm51bGwsImNoZWNrSWQiOiJnLm92ZXJsYXAiLCJkZXRhaWwiOm51bGwsImZyb20iOm51bGwsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOiJhcm0iLCJyZWNlaXB0SWQiOiJyMSIsInJ1bklkIjoiZXZhbHJ1bi1jaGVja3MtMSIsInQiOiIyMDI2LTAxLTAxVDAwOjAwOjA5WiIsInRvIjoiY29tcGxldGVkIn0NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNhdXNlIjpudWxsLCJjaGVja0lkIjoiZy5vdmVybGFwIiwiZGV0YWlsIjpudWxsLCJmcm9tIjoiY29tcGxldGVkIiwibmV4dEFjdGlvbiI6bnVsbCwicGFydCI6ImFybSIsInJlY2VpcHRJZCI6InIxIiwicnVuSWQiOiJldmFscnVuLWNoZWNrcy0xIiwidCI6IjIwMjYtMDEtMDFUMDA6MDA6MTFaIiwidG8iOiJyZXVzZWQifQ0KeyJhcm1JZCI6ImJhc2VsaW5lIiwiY2F1c2UiOm51bGwsImNoZWNrSWQiOiJnLm92ZXJsYXAiLCJkZXRhaWwiOm51bGwsImZyb20iOiJyZXVzZWQiLCJuZXh0QWN0aW9uIjpudWxsLCJwYXJ0IjoiYXJtIiwicmVjZWlwdElkIjoicjEiLCJydW5JZCI6ImV2YWxydW4tY2hlY2tzLTEiLCJ0IjoiMjAyNi0wMS0wMVQwMDowMDoxM1oiLCJ0byI6InJldXNlZCJ9DQp7ImFybUlkIjoiYmFzZWxpbmUiLCJjYXVzZSI6bnVsbCwiY2hlY2tJZCI6InAub3JkZXIiLCJkZXRhaWwiOm51bGwsImZyb20iOm51bGwsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOm51bGwsInJlY2VpcHRJZCI6ImkxIiwicnVuSWQiOiJldmFscnVuLWNoZWNrcy0xIiwidCI6IjIwMjYtMDEtMDFUMDA6MDA6MTVaIiwidG8iOiJjb21wbGV0ZWQifQ0KeyJhcm1JZCI6ImJhc2VsaW5lIiwiY2F1c2UiOiJzdGFsZS1pbnB1dHMiLCJjaGVja0lkIjoicC5vcmRlciIsImRldGFpbCI6bnVsbCwiZnJvbSI6ImNvbXBsZXRlZCIsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOm51bGwsInJlY2VpcHRJZCI6bnVsbCwicnVuSWQiOiJldmFscnVuLWNoZWNrcy0xIiwidCI6IjIwMjYtMDEtMDFUMDA6MDA6MTdaIiwidG8iOiJpbnZhbGlkYXRlZCh0aGUgcmVjZWlwdCBmaWxlIGlzIGdvbmUpIn0NCnsiYXJtSWQiOiJjYW5kaWRhdGUtMDEiLCJjYXVzZSI6bnVsbCwiY2hlY2tJZCI6ImwubWFzdGVycyIsImRldGFpbCI6bnVsbCwiZnJvbSI6bnVsbCwibmV4dEFjdGlvbiI6bnVsbCwicGFydCI6bnVsbCwicmVjZWlwdElkIjpudWxsLCJydW5JZCI6ImV2YWxydW4tY2hlY2tzLTEiLCJ0IjoiMjAyNi0wMS0wMVQwMDowMDoxOVoiLCJ0byI6InJ1bm5pbmcifQ0KeyJhcm1JZCI6ImNhbmRpZGF0ZS0wMSIsImNhdXNlIjpudWxsLCJjaGVja0lkIjoiZy5vdmVybGFwIiwiZGV0YWlsIjpudWxsLCJmcm9tIjpudWxsLCJuZXh0QWN0aW9uIjpudWxsLCJwYXJ0IjoiYXJtIiwicmVjZWlwdElkIjpudWxsLCJydW5JZCI6ImV2YWxydW4tY2hlY2tzLTEiLCJ0IjoiMjAyNi0wMS0wMVQwMDowMDoyMVoiLCJ0byI6InJ1bm5pbmcifQ0KeyJhcm1JZCI6ImNhbmRpZGF0ZS0wMSIsImNhdXNlIjoidGhlIHByb2Nlc3MgZGlkIG5vdCB3cml0ZSBhIHRlcm1pbmFsIHRyYW5zaXRpb24iLCJjaGVja0lkIjoibC5tYXN0ZXJzIiwiZGV0YWlsIjpudWxsLCJmcm9tIjoicnVubmluZyIsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOm51bGwsInJlY2VpcHRJZCI6bnVsbCwicnVuSWQiOm51bGwsInQiOiIyMDI2LTAxLTAxVDAwOjAwOjI1WiIsInRvIjoiaW50ZXJydXB0ZWQifQ0KeyJhcm1JZCI6ImNhbmRpZGF0ZS0wMSIsImNhdXNlIjoidGhlIHByb2Nlc3MgZGlkIG5vdCB3cml0ZSBhIHRlcm1pbmFsIHRyYW5zaXRpb24iLCJjaGVja0lkIjoiZy5vdmVybGFwIiwiZGV0YWlsIjpudWxsLCJmcm9tIjoicnVubmluZyIsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOiJhcm0iLCJyZWNlaXB0SWQiOm51bGwsInJ1bklkIjpudWxsLCJ0IjoiMjAyNi0wMS0wMVQwMDowMDoyN1oiLCJ0byI6ImludGVycnVwdGVkIn0NCg=="
+     },
+     {
+      "path": "ledger.json",
+      "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogMiwNCiAicGxhbklkIjogInBsYW5hYWFhYWFhYSIsDQogInJlZ2lzdHJ5U2hhMjU2IjogInJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnIiLA0KICJydW5JZHMiOiBbDQogIHsNCiAgICJydW5JZCI6ICJldmFscnVuLWNoZWNrcy0xIiwNCiAgICJwYXJlbnRSdW5JZCI6IG51bGwsDQogICAiY29tbWFuZCI6ICJydW4iLA0KICAgInN0YXJ0ZWRVdGMiOiAiMjAyNi0wMS0wMVQwMDowMDowMVoiDQogIH0sDQogIHsNCiAgICJydW5JZCI6ICJldmFscnVuLWNoZWNrcy0yIiwNCiAgICJwYXJlbnRSdW5JZCI6ICJwYXJlbnQtMSIsDQogICAiY29tbWFuZCI6ICJyZXN1bWUiLA0KICAgInN0YXJ0ZWRVdGMiOiAiMjAyNi0wMS0wMVQwMDowMDoyMloiLA0KICAgImJ1ZGdldE1pbnV0ZXMiOiAxMi41DQogIH0sDQogIHsNCiAgICJydW5JZCI6IG51bGwsDQogICAicGFyZW50UnVuSWQiOiBudWxsLA0KICAgImNvbW1hbmQiOiAicmVzdW1lIiwNCiAgICJzdGFydGVkVXRjIjogIjIwMjYtMDEtMDFUMDA6MDA6MjNaIiwNCiAgICJidWRnZXRNaW51dGVzIjogMA0KICB9DQogXSwNCiAiZW50cmllcyI6IHsNCiAgImwubWFzdGVyc19fYmFzZWxpbmUiOiB7DQogICAiY2hlY2tJZCI6ICJsLm1hc3RlcnMiLA0KICAgImFybUlkIjogImJhc2VsaW5lIiwNCiAgICJwYXJ0IjogbnVsbCwNCiAgICJzdGF0dXMiOiAiY29tcGxldGVkIiwNCiAgICJjYXVzZSI6IG51bGwsDQogICAicmVjZWlwdElkIjogImFiYyIsDQogICAiZGV0ZWN0b3IiOiAibm8tZmluZGluZyIsDQogICAiZGV0YWlsIjogIm9rIMOpIOKAqCBsaW5lIiwNCiAgICJuZXh0QWN0aW9uIjogbnVsbCwNCiAgICJ2YWxpZGF0aW9uIjogew0KICAgICJhY2NlcHRlZCI6IHRydWUsDQogICAgInJlamVjdGlvbnMiOiBbXQ0KICAgfSwNCiAgICJyZXN1bHQiOiB7DQogICAgImRldGVjdG9yIjogIm5vLWZpbmRpbmciLA0KICAgICJleGVjdXRpb24iOiAiY29tcGxldGVkIg0KICAgfSwNCiAgICJyZWNlaXB0UGF0aCI6ICJyZWNlaXB0cy9sLm1hc3RlcnNfX2Jhc2VsaW5lLmpzb24iLA0KICAgInJ1bklkIjogImV2YWxydW4tY2hlY2tzLTEiLA0KICAgInVwZGF0ZWRVdGMiOiAiMjAyNi0wMS0wMVQwMDowMDowNFoiDQogIH0sDQogICJnLm92ZXJsYXBfX2NhbmRpZGF0ZS0wMV9fZGlmZiI6IHsNCiAgICJjaGVja0lkIjogImcub3ZlcmxhcCIsDQogICAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwNCiAgICJwYXJ0IjogImRpZmYiLA0KICAgInN0YXR1cyI6ICJyZWplY3RlZChleGl0LW5vbnplcm8pIiwNCiAgICJjYXVzZSI6ICJleGl0LW5vbnplcm8iLA0KICAgInJlY2VpcHRJZCI6ICJkZWYiLA0KICAgImRldGVjdG9yIjogbnVsbCwNCiAgICJkZXRhaWwiOiAiY29uZmxpY3RkaWZmIHNhaWQgXCJub1wiIiwNCiAgICJuZXh0QWN0aW9uIjogInJlc3VtZSIsDQogICAidmFsaWRhdGlvbiI6IHsNCiAgICAiYWNjZXB0ZWQiOiBmYWxzZSwNCiAgICAicmVqZWN0aW9ucyI6IFsNCiAgICAgew0KICAgICAgImNhdXNlIjogImV4aXQtbm9uemVybyIsDQogICAgICAiZGV0YWlsIjogImV4aXQgMyINCiAgICAgfQ0KICAgIF0NCiAgIH0sDQogICAicmVzdWx0Ijogew0KICAgICJkZXRlY3RvciI6IG51bGwsDQogICAgImV4ZWN1dGlvbiI6ICJyZWplY3RlZChleGl0LW5vbnplcm8pIg0KICAgfSwNCiAgICJyZWNlaXB0UGF0aCI6ICJyZWNlaXB0cy9nLm92ZXJsYXBfX2NhbmRpZGF0ZS0wMV9fZGlmZi5qc29uIiwNCiAgICJydW5JZCI6ICJldmFscnVuLWNoZWNrcy0xIiwNCiAgICJ1cGRhdGVkVXRjIjogIjIwMjYtMDEtMDFUMDA6MDA6MDZaIg0KICB9LA0KICAiZy5vdmVybGFwX19iYXNlbGluZV9fYXJtIjogew0KICAgImNoZWNrSWQiOiAiZy5vdmVybGFwIiwNCiAgICJhcm1JZCI6ICJiYXNlbGluZSIsDQogICAicGFydCI6ICJhcm0iLA0KICAgInN0YXR1cyI6ICJyZXVzZWQiLA0KICAgImNhdXNlIjogbnVsbCwNCiAgICJyZWNlaXB0SWQiOiAicjEiLA0KICAgImRldGVjdG9yIjogImZpbmRpbmciLA0KICAgImRldGFpbCI6IG51bGwsDQogICAibmV4dEFjdGlvbiI6IG51bGwsDQogICAidmFsaWRhdGlvbiI6IHsNCiAgICAiYWNjZXB0ZWQiOiB0cnVlLA0KICAgICJyZWplY3Rpb25zIjogW10NCiAgIH0sDQogICAicmVzdWx0Ijogew0KICAgICJkZXRlY3RvciI6ICJmaW5kaW5nIiwNCiAgICAiZXhlY3V0aW9uIjogInJldXNlZCINCiAgIH0sDQogICAicmVjZWlwdFBhdGgiOiAicmVjZWlwdHMvZy5vdmVybGFwX19iYXNlbGluZV9fYXJtLmpzb24iLA0KICAgInJ1bklkIjogImV2YWxydW4tY2hlY2tzLTEiLA0KICAgInVwZGF0ZWRVdGMiOiAiMjAyNi0wMS0wMVQwMDowMDoxMloiLA0KICAgImRlcml2ZWRGcm9tIjogWw0KICAgICJhIg0KICAgXSwNCiAgICJyZXVzZWRGcm9tUnVuSWQiOiAibmV3ZXIiLA0KICAgImltcG9ydGVkIjogbnVsbA0KICB9LA0KICAicC5vcmRlcl9fYmFzZWxpbmUiOiB7DQogICAiY2hlY2tJZCI6ICJwLm9yZGVyIiwNCiAgICJhcm1JZCI6ICJiYXNlbGluZSIsDQogICAicGFydCI6IG51bGwsDQogICAic3RhdHVzIjogImludmFsaWRhdGVkKHRoZSByZWNlaXB0IGZpbGUgaXMgZ29uZSkiLA0KICAgImNhdXNlIjogInN0YWxlLWlucHV0cyIsDQogICAicmVjZWlwdElkIjogbnVsbCwNCiAgICJkZXRlY3RvciI6IG51bGwsDQogICAiZGV0YWlsIjogbnVsbCwNCiAgICJuZXh0QWN0aW9uIjogbnVsbCwNCiAgICJ2YWxpZGF0aW9uIjogew0KICAgICJhY2NlcHRlZCI6IHRydWUsDQogICAgInJlamVjdGlvbnMiOiBbXQ0KICAgfSwNCiAgICJyZXN1bHQiOiB7DQogICAgImRldGVjdG9yIjogbnVsbCwNCiAgICAiZXhlY3V0aW9uIjogImludmFsaWRhdGVkKHRoZSByZWNlaXB0IGZpbGUgaXMgZ29uZSkiDQogICB9LA0KICAgInJlY2VpcHRQYXRoIjogInJlY2VpcHRzL3Aub3JkZXJfX2Jhc2VsaW5lLmpzb24iLA0KICAgInJ1bklkIjogImV2YWxydW4tY2hlY2tzLTEiLA0KICAgInVwZGF0ZWRVdGMiOiAiMjAyNi0wMS0wMVQwMDowMDoxNloiLA0KICAgImltcG9ydGVkIjogdHJ1ZSwNCiAgICJpbXBvcnRPcmlnaW4iOiAiZnJlc2giDQogIH0sDQogICJsLm1hc3RlcnNfX2NhbmRpZGF0ZS0wMSI6IHsNCiAgICJjaGVja0lkIjogImwubWFzdGVycyIsDQogICAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwNCiAgICJwYXJ0IjogbnVsbCwNCiAgICJzdGF0dXMiOiAiaW50ZXJydXB0ZWQiLA0KICAgImNhdXNlIjogInRoZSBwcm9jZXNzIGRpZCBub3Qgd3JpdGUgYSB0ZXJtaW5hbCB0cmFuc2l0aW9uIiwNCiAgICJyZWNlaXB0SWQiOiBudWxsLA0KICAgImRldGVjdG9yIjogbnVsbCwNCiAgICJkZXRhaWwiOiBudWxsLA0KICAgIm5leHRBY3Rpb24iOiBudWxsLA0KICAgInZhbGlkYXRpb24iOiB7DQogICAgImFjY2VwdGVkIjogdHJ1ZSwNCiAgICAicmVqZWN0aW9ucyI6IFtdDQogICB9LA0KICAgInJlc3VsdCI6IHsNCiAgICAiZGV0ZWN0b3IiOiBudWxsLA0KICAgICJleGVjdXRpb24iOiAiaW50ZXJydXB0ZWQiDQogICB9LA0KICAgInJlY2VpcHRQYXRoIjogInJlY2VpcHRzL2wubWFzdGVyc19fY2FuZGlkYXRlLTAxLmpzb24iLA0KICAgInJ1bklkIjogbnVsbCwNCiAgICJ1cGRhdGVkVXRjIjogIjIwMjYtMDEtMDFUMDA6MDA6MjRaIg0KICB9LA0KICAiZy5vdmVybGFwX19jYW5kaWRhdGUtMDFfX2FybSI6IHsNCiAgICJjaGVja0lkIjogImcub3ZlcmxhcCIsDQogICAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwNCiAgICJwYXJ0IjogImFybSIsDQogICAic3RhdHVzIjogImludGVycnVwdGVkIiwNCiAgICJjYXVzZSI6ICJ0aGUgcHJvY2VzcyBkaWQgbm90IHdyaXRlIGEgdGVybWluYWwgdHJhbnNpdGlvbiIsDQogICAicmVjZWlwdElkIjogbnVsbCwNCiAgICJkZXRlY3RvciI6IG51bGwsDQogICAiZGV0YWlsIjogbnVsbCwNCiAgICJuZXh0QWN0aW9uIjogbnVsbCwNCiAgICJ2YWxpZGF0aW9uIjogew0KICAgICJhY2NlcHRlZCI6IHRydWUsDQogICAgInJlamVjdGlvbnMiOiBbXQ0KICAgfSwNCiAgICJyZXN1bHQiOiB7DQogICAgImRldGVjdG9yIjogbnVsbCwNCiAgICAiZXhlY3V0aW9uIjogImludGVycnVwdGVkIg0KICAgfSwNCiAgICJyZWNlaXB0UGF0aCI6ICJyZWNlaXB0cy9nLm92ZXJsYXBfX2NhbmRpZGF0ZS0wMV9fYXJtLmpzb24iLA0KICAgInJ1bklkIjogbnVsbCwNCiAgICJ1cGRhdGVkVXRjIjogIjIwMjYtMDEtMDFUMDA6MDA6MjZaIg0KICB9DQogfQ0KfQ=="
+     }
+    ]
+   },
+   {
+    "name": "rebuild",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "write",
+       "journal.jsonl",
+       "{\"armId\":\"baseline\",\"cause\":null,\"checkId\":\"g.overlap\",\"detail\":null,\"from\":null,\"nextAction\":null,\"part\":\"arm\",\"receiptId\":null,\"runId\":\"run-1\",\"t\":\"T1\",\"to\":\"running\"}\r\n\r\n   \r\n{broken\r\n{\"armId\":\"baseline\",\"cause\":null,\"checkId\":\"g.overlap\",\"detail\":\"d\",\"from\":\"running\",\"nextAction\":null,\"part\":\"arm\",\"receiptId\":\"rid-1\",\"runId\":\"run-1\",\"t\":\"T2\",\"to\":\"completed\"}\r\n{\"armId\":\"baseline\",\"checkId\":\"l.masters\",\"part\":null,\"receiptId\":\"rid-other\",\"runId\":\"run-1\",\"t\":\"T3\",\"to\":\"completed\"}\r\n{\"armId\":\"candidate-01\",\"t\":\"T4\",\"to\":\"manual\"}\r\n{\"armId\":\"baseline\",\"checkId\":\"p.order\",\"part\":\"\",\"receiptId\":\"rid-9\",\"t\":\"T5\",\"to\":\"completed\"}\r\n"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "write",
+       "receipts/g.overlap__baseline__arm.json",
+       "{\r\n \"receiptId\": \"rid-1\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"g.overlap\",\r\n \"armId\": \"baseline\",\r\n \"part\": \"arm\",\r\n \"result\": {\r\n  \"detector\": \"no-finding\"\r\n },\r\n \"validation\": {\r\n  \"accepted\": 1,\r\n  \"rejections\": null\r\n },\r\n \"imported\": {\r\n  \"origin\": \"fresh\"\r\n }\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "write",
+       "receipts/l.masters__baseline.json",
+       "{\r\n \"receiptId\": \"rid-1\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"l.masters\",\r\n \"armId\": \"baseline\",\r\n \"part\": null,\r\n \"result\": {\r\n  \"detector\": \"no-finding\"\r\n },\r\n \"validation\": {\r\n  \"accepted\": 1,\r\n  \"rejections\": null\r\n },\r\n \"imported\": {\r\n  \"origin\": \"fresh\"\r\n }\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "write",
+       "receipts/p.order__baseline.json",
+       "{\r\n \"receiptId\": \"rid-9\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"p.order\",\r\n \"armId\": \"baseline\",\r\n \"part\": \"\",\r\n \"result\": null,\r\n \"validation\": {\r\n  \"rejections\": [\r\n   {\r\n    \"cause\": \"x\"\r\n   }\r\n  ]\r\n },\r\n \"imported\": \"yes\"\r\n}"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "new"
+      ],
+      "want": false,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "rebuild"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "1e1fffc766c054f0ef8cde9f77288a9ddf6e48463e6c8709322444ad554a8a88",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "1e1fffc766c054f0ef8cde9f77288a9ddf6e48463e6c8709322444ad554a8a88",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "g.overlap__baseline__arm",
+       {
+        "receiptId": null
+       }
+      ],
+      "want": "{}",
+      "files": {
+       "ledger.json": "1e1fffc766c054f0ef8cde9f77288a9ddf6e48463e6c8709322444ad554a8a88",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "g.overlap__baseline__arm",
+       {
+        "receiptId": "rid-1",
+        "checkId": "g.overlap",
+        "armId": "baseline",
+        "part": "arm",
+        "status": "reused"
+       }
+      ],
+      "want": "{\"detector\": \"no-finding\", \"result\": {\"detector\": \"no-finding\", \"execution\": \"reused\"}, \"validation\": {\"accepted\": true, \"rejections\": []}, \"imported\": true, \"importOrigin\": \"fresh\"}",
+      "files": {
+       "ledger.json": "1e1fffc766c054f0ef8cde9f77288a9ddf6e48463e6c8709322444ad554a8a88",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "g.overlap__baseline__arm",
+       {
+        "receiptId": "rid-1",
+        "checkId": "g.overlap",
+        "armId": "baseline",
+        "part": null
+       }
+      ],
+      "want": "{}",
+      "files": {
+       "ledger.json": "1e1fffc766c054f0ef8cde9f77288a9ddf6e48463e6c8709322444ad554a8a88",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     },
+     {
+      "op": [
+       "facts",
+       "no__receipt",
+       {
+        "receiptId": "rid-1"
+       }
+      ],
+      "want": "{}",
+      "files": {
+       "ledger.json": "1e1fffc766c054f0ef8cde9f77288a9ddf6e48463e6c8709322444ad554a8a88",
+       "journal.jsonl": "615dcb38e75785885ea233f98dea26cdafe2f6421a63a3c0f072e3826d11544d"
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "journal.jsonl",
+      "bytes": "eyJhcm1JZCI6ImJhc2VsaW5lIiwiY2F1c2UiOm51bGwsImNoZWNrSWQiOiJnLm92ZXJsYXAiLCJkZXRhaWwiOm51bGwsImZyb20iOm51bGwsIm5leHRBY3Rpb24iOm51bGwsInBhcnQiOiJhcm0iLCJyZWNlaXB0SWQiOm51bGwsInJ1bklkIjoicnVuLTEiLCJ0IjoiVDEiLCJ0byI6InJ1bm5pbmcifQ0KDQogICANCnticm9rZW4NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNhdXNlIjpudWxsLCJjaGVja0lkIjoiZy5vdmVybGFwIiwiZGV0YWlsIjoiZCIsImZyb20iOiJydW5uaW5nIiwibmV4dEFjdGlvbiI6bnVsbCwicGFydCI6ImFybSIsInJlY2VpcHRJZCI6InJpZC0xIiwicnVuSWQiOiJydW4tMSIsInQiOiJUMiIsInRvIjoiY29tcGxldGVkIn0NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNoZWNrSWQiOiJsLm1hc3RlcnMiLCJwYXJ0IjpudWxsLCJyZWNlaXB0SWQiOiJyaWQtb3RoZXIiLCJydW5JZCI6InJ1bi0xIiwidCI6IlQzIiwidG8iOiJjb21wbGV0ZWQifQ0KeyJhcm1JZCI6ImNhbmRpZGF0ZS0wMSIsInQiOiJUNCIsInRvIjoibWFudWFsIn0NCnsiYXJtSWQiOiJiYXNlbGluZSIsImNoZWNrSWQiOiJwLm9yZGVyIiwicGFydCI6IiIsInJlY2VpcHRJZCI6InJpZC05IiwidCI6IlQ1IiwidG8iOiJjb21wbGV0ZWQifQ0K"
+     },
+     {
+      "path": "ledger.json",
+      "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogMiwNCiAicGxhbklkIjogInBsYW5hYWFhYWFhYSIsDQogInJlZ2lzdHJ5U2hhMjU2IjogInJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnIiLA0KICJydW5JZHMiOiBbXSwNCiAiZW50cmllcyI6IHsNCiAgImcub3ZlcmxhcF9fYmFzZWxpbmVfX2FybSI6IHsNCiAgICJjaGVja0lkIjogImcub3ZlcmxhcCIsDQogICAiYXJtSWQiOiAiYmFzZWxpbmUiLA0KICAgInBhcnQiOiAiYXJtIiwNCiAgICJzdGF0dXMiOiAiY29tcGxldGVkIiwNCiAgICJjYXVzZSI6IG51bGwsDQogICAiZGV0YWlsIjogImQiLA0KICAgIm5leHRBY3Rpb24iOiBudWxsLA0KICAgInJlY2VpcHRJZCI6ICJyaWQtMSIsDQogICAicnVuSWQiOiAicnVuLTEiLA0KICAgInJlY2VpcHRQYXRoIjogInJlY2VpcHRzL2cub3ZlcmxhcF9fYmFzZWxpbmVfX2FybS5qc29uIiwNCiAgICJ1cGRhdGVkVXRjIjogIlQyIiwNCiAgICJkZXRlY3RvciI6ICJuby1maW5kaW5nIiwNCiAgICJyZXN1bHQiOiB7DQogICAgImRldGVjdG9yIjogIm5vLWZpbmRpbmciLA0KICAgICJleGVjdXRpb24iOiAiY29tcGxldGVkIg0KICAgfSwNCiAgICJ2YWxpZGF0aW9uIjogew0KICAgICJhY2NlcHRlZCI6IHRydWUsDQogICAgInJlamVjdGlvbnMiOiBbXQ0KICAgfSwNCiAgICJpbXBvcnRlZCI6IHRydWUsDQogICAiaW1wb3J0T3JpZ2luIjogImZyZXNoIg0KICB9LA0KICAibC5tYXN0ZXJzX19iYXNlbGluZSI6IHsNCiAgICJjaGVja0lkIjogImwubWFzdGVycyIsDQogICAiYXJtSWQiOiAiYmFzZWxpbmUiLA0KICAgInBhcnQiOiBudWxsLA0KICAgInN0YXR1cyI6ICJjb21wbGV0ZWQiLA0KICAgImNhdXNlIjogbnVsbCwNCiAgICJkZXRhaWwiOiBudWxsLA0KICAgIm5leHRBY3Rpb24iOiBudWxsLA0KICAgInJlY2VpcHRJZCI6ICJyaWQtb3RoZXIiLA0KICAgInJ1bklkIjogInJ1bi0xIiwNCiAgICJyZWNlaXB0UGF0aCI6ICJyZWNlaXB0cy9sLm1hc3RlcnNfX2Jhc2VsaW5lLmpzb24iLA0KICAgInVwZGF0ZWRVdGMiOiAiVDMiDQogIH0sDQogICI/X19jYW5kaWRhdGUtMDEiOiB7DQogICAiY2hlY2tJZCI6IG51bGwsDQogICAiYXJtSWQiOiAiY2FuZGlkYXRlLTAxIiwNCiAgICJwYXJ0IjogbnVsbCwNCiAgICJzdGF0dXMiOiAibWFudWFsIiwNCiAgICJjYXVzZSI6IG51bGwsDQogICAiZGV0YWlsIjogbnVsbCwNCiAgICJuZXh0QWN0aW9uIjogbnVsbCwNCiAgICJyZWNlaXB0SWQiOiBudWxsLA0KICAgInJ1bklkIjogbnVsbCwNCiAgICJyZWNlaXB0UGF0aCI6ICJyZWNlaXB0cy8/X19jYW5kaWRhdGUtMDEuanNvbiIsDQogICAidXBkYXRlZFV0YyI6ICJUNCINCiAgfSwNCiAgInAub3JkZXJfX2Jhc2VsaW5lIjogew0KICAgImNoZWNrSWQiOiAicC5vcmRlciIsDQogICAiYXJtSWQiOiAiYmFzZWxpbmUiLA0KICAgInBhcnQiOiAiIiwNCiAgICJzdGF0dXMiOiAiY29tcGxldGVkIiwNCiAgICJjYXVzZSI6IG51bGwsDQogICAiZGV0YWlsIjogbnVsbCwNCiAgICJuZXh0QWN0aW9uIjogbnVsbCwNCiAgICJyZWNlaXB0SWQiOiAicmlkLTkiLA0KICAgInJ1bklkIjogbnVsbCwNCiAgICJyZWNlaXB0UGF0aCI6ICJyZWNlaXB0cy9wLm9yZGVyX19iYXNlbGluZS5qc29uIiwNCiAgICJ1cGRhdGVkVXRjIjogIlQ1IiwNCiAgICJ2YWxpZGF0aW9uIjogew0KICAgICJhY2NlcHRlZCI6IGZhbHNlLA0KICAgICJyZWplY3Rpb25zIjogWw0KICAgICB7DQogICAgICAiY2F1c2UiOiAieCINCiAgICAgfQ0KICAgIF0NCiAgIH0NCiAgfQ0KIH0NCn0="
+     },
+     {
+      "path": "receipts/g.overlap__baseline__arm.json",
+      "bytes": "ew0KICJyZWNlaXB0SWQiOiAicmlkLTEiLA0KICJwbGFuSWQiOiAicGxhbmFhYWFhYWFhIiwNCiAiY2hlY2tJZCI6ICJnLm92ZXJsYXAiLA0KICJhcm1JZCI6ICJiYXNlbGluZSIsDQogInBhcnQiOiAiYXJtIiwNCiAicmVzdWx0Ijogew0KICAiZGV0ZWN0b3IiOiAibm8tZmluZGluZyINCiB9LA0KICJ2YWxpZGF0aW9uIjogew0KICAiYWNjZXB0ZWQiOiAxLA0KICAicmVqZWN0aW9ucyI6IG51bGwNCiB9LA0KICJpbXBvcnRlZCI6IHsNCiAgIm9yaWdpbiI6ICJmcmVzaCINCiB9DQp9"
+     },
+     {
+      "path": "receipts/l.masters__baseline.json",
+      "bytes": "ew0KICJyZWNlaXB0SWQiOiAicmlkLTEiLA0KICJwbGFuSWQiOiAicGxhbmFhYWFhYWFhIiwNCiAiY2hlY2tJZCI6ICJsLm1hc3RlcnMiLA0KICJhcm1JZCI6ICJiYXNlbGluZSIsDQogInBhcnQiOiBudWxsLA0KICJyZXN1bHQiOiB7DQogICJkZXRlY3RvciI6ICJuby1maW5kaW5nIg0KIH0sDQogInZhbGlkYXRpb24iOiB7DQogICJhY2NlcHRlZCI6IDEsDQogICJyZWplY3Rpb25zIjogbnVsbA0KIH0sDQogImltcG9ydGVkIjogew0KICAib3JpZ2luIjogImZyZXNoIg0KIH0NCn0="
+     },
+     {
+      "path": "receipts/p.order__baseline.json",
+      "bytes": "ew0KICJyZWNlaXB0SWQiOiAicmlkLTkiLA0KICJwbGFuSWQiOiAicGxhbmFhYWFhYWFhIiwNCiAiY2hlY2tJZCI6ICJwLm9yZGVyIiwNCiAiYXJtSWQiOiAiYmFzZWxpbmUiLA0KICJwYXJ0IjogIiIsDQogInJlc3VsdCI6IG51bGwsDQogInZhbGlkYXRpb24iOiB7DQogICJyZWplY3Rpb25zIjogWw0KICAgew0KICAgICJjYXVzZSI6ICJ4Ig0KICAgfQ0KICBdDQogfSwNCiAiaW1wb3J0ZWQiOiAieWVzIg0KfQ=="
+     }
+    ]
+   },
+   {
+    "name": "rebuild without a journal",
+    "plan": {
+     "schemaVersion": 2,
+     "planId": "planaaaaaaaa",
+     "requestProviders": "arm-view",
+     "registry": {
+      "path": "registry.json",
+      "registryVersion": 7,
+      "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+     },
+     "toolIdentity": {
+      "contract": 1,
+      "rule": "x",
+      "programs": {
+       "controller": {
+        "kind": "package",
+        "state": "present",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+       },
+       "probe:overlapprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "helper:conflictdiff": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       },
+       "probe:depprobe": {
+        "kind": "package",
+        "state": "present",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+       }
+      }
+     },
+     "arms": [
+      {
+       "armId": "baseline",
+       "kind": "baseline"
+      },
+      {
+       "armId": "candidate-01",
+       "kind": "candidate"
+      }
+     ],
+     "checks": [
+      {
+       "checkId": "g.overlap",
+       "prerequisites": [
+        "l.masters"
+       ]
+      },
+      {
+       "checkId": "l.masters"
+      },
+      {
+       "checkId": "p.order",
+       "prerequisites": []
+      }
+     ]
+    },
+    "steps": [
+     {
+      "op": [
+       "new"
+      ],
+      "want": false,
+      "files": {
+       "ledger.json": null,
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "rebuild"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": null
+      }
+     },
+     {
+      "op": [
+       "refusal"
+      ],
+      "want": null,
+      "files": {
+       "ledger.json": "9dfe49288907cd15bdf178b188c4959398f6e5c3ccb6c4c883a9888124bc9875",
+       "journal.jsonl": null
+      }
+     }
+    ],
+    "tree": [
+     {
+      "path": "ledger.json",
+      "bytes": "ew0KICJzY2hlbWFWZXJzaW9uIjogMiwNCiAicGxhbklkIjogInBsYW5hYWFhYWFhYSIsDQogInJlZ2lzdHJ5U2hhMjU2IjogInJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnIiLA0KICJydW5JZHMiOiBbXSwNCiAiZW50cmllcyI6IHt9DQp9"
+     }
+    ]
+   }
+  ],
+  "keys": [
+   {
+    "args": [
+     "c",
+     "a",
+     null
+    ],
+    "want": "c__a"
+   },
+   {
+    "args": [
+     "c",
+     "a",
+     "arm"
+    ],
+    "want": "c__a__arm"
+   },
+   {
+    "args": [
+     "c",
+     "a",
+     ""
+    ],
+    "want": "c__a"
+   },
+   {
+    "args": [
+     null,
+     null,
+     null
+    ],
+    "want": "None__None"
+   },
+   {
+    "args": [
+     "geometry.object-overlap",
+     "candidate-01",
+     "diff"
+    ],
+    "want": "geometry.object-overlap__candidate-01__diff"
+   }
+  ]
+ },
+ "receipts": {
+  "files": [
+   {
+    "path": "run/outputs/g.overlap/candidate-01.json",
+    "bytes": "eyJQcm9iZSI6ICJvdmVybGFwcHJvYmUifQ==",
+    "mtimeNs": 1760000000123456700
+   },
+   {
+    "path": "outside/else.json",
+    "bytes": "b3V0c2lkZSB0aGUgcnVu",
+    "mtimeNs": 1700000000999999900
+   },
+   {
+    "path": "run/logs/g.overlap__candidate-01.txt",
+    "bytes": "JCB4CihleGl0IDAsIDAuMXMpCg==",
+    "mtimeNs": 1760000001000000000
+   }
+  ],
+  "calls": [
+   {
+    "name": "a probe receipt",
+    "part": "arm",
+    "adapter": {
+     "kind": "probe-emit",
+     "exe": "overlapprobe"
+    },
+    "argv": [
+     "<ROOT\\>\\tools\\overlapprobe.exe",
+     "--order",
+     "<ROOT\\>\\run\\candidates\\c1.json",
+     "--emit",
+     "<ROOT\\>\\run\\outputs\\g.overlap\\candidate-01.json",
+     "--instance",
+     "X:/somewhere/else",
+     "--flag",
+     "./relative",
+     ".\\dot",
+     "..\\up",
+     "plain",
+     "/rooted"
+    ],
+    "runId": "run-1",
+    "parent": "parent-1",
+    "started": "2026-01-01T00:00:00Z",
+    "ended": "2026-01-01T00:00:09Z",
+    "exit": 0,
+    "outputs": [
+     "<ROOT\\>\\run\\outputs\\g.overlap\\candidate-01.json",
+     "<ROOT\\>\\run\\outputs\\g.overlap\\missing.json",
+     "<ROOT\\>\\outside\\else.json"
+    ],
+    "log": "<ROOT\\>\\run\\logs\\g.overlap__candidate-01.txt",
+    "consumed": {
+     "candidateSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+     "programs": {
+      "emitter": {
+       "program": "probe:overlapprobe"
+      }
+     }
+    },
+    "validation": {
+     "accepted": true,
+     "rejections": [],
+     "identityLimits": [
+      {
+       "plugin": "A.esp"
+      }
+     ],
+     "detector": "dropped"
+    },
+    "result": {
+     "execution": "completed",
+     "detector": "finding",
+     "findings": 2,
+     "coverage": [],
+     "strength": "measured",
+     "verdict": null
+    },
+    "extra": {
+     "sweep": {
+      "folder": "sweep/inv-0001"
+     },
+     "part": "overridden-by-extra"
+    },
+    "returned": "{\n \"schemaVersion\": 2,\n \"receiptId\": \"9b1588082f5482e7\",\n \"planId\": \"planaaaaaaaa\",\n \"checkId\": \"g.overlap\",\n \"armId\": \"candidate-01\",\n \"part\": \"overridden-by-extra\",\n \"adapter\": {\n  \"kind\": \"probe-emit\",\n  \"exe\": \"overlapprobe\"\n },\n \"argvShape\": [\n  \"<abs>/overlapprobe.exe\",\n  \"--order\",\n  \"<RUN>/candidates/c1.json\",\n  \"--emit\",\n  \"<RUN>/outputs/g.overlap/candidate-01.json\",\n  \"--instance\",\n  \"<abs>/else\",\n  \"--flag\",\n  \"<RUN>/relative\",\n  \"<RUN>/dot\",\n  \"..\\\\up\",\n  \"plain\",\n  \"<abs>/rooted\"\n ],\n \"runId\": \"run-1\",\n \"parentRunId\": \"parent-1\",\n \"startedUtc\": \"2026-01-01T00:00:00Z\",\n \"endedUtc\": \"2026-01-01T00:00:09Z\",\n \"exitCode\": 0,\n \"outputs\": [\n  {\n   \"path\": \"outputs/g.overlap/candidate-01.json\",\n   \"sha256\": \"e1f0d0c4a7678b60d85589052c65bc4d6a40455c5fcd8faeaa746334a44f007e\",\n   \"bytes\": 25,\n   \"mtimeUtc\": \"2025-10-09T08:53:20Z\"\n  },\n  {\n   \"path\": \"outputs/g.overlap/missing.json\",\n   \"sha256\": null,\n   \"bytes\": null,\n   \"mtimeUtc\": null\n  },\n  {\n   \"path\": \"<ROOT/>/outside/else.json\",\n   \"sha256\": \"802b8dc7861cc9706a3c778e2c6576ee7669211c9a2b41ef7e70fb82c77f9f51\",\n   \"bytes\": 15,\n   \"mtimeUtc\": \"2023-11-14T22:13:21Z\"\n  }\n ],\n \"log\": \"logs/g.overlap__candidate-01.txt\",\n \"consumed\": {\n  \"candidateSha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\n  \"programs\": {\n   \"emitter\": {\n    \"program\": \"probe:overlapprobe\"\n   }\n  }\n },\n \"validation\": {\n  \"accepted\": true,\n  \"rejections\": [],\n  \"identityLimits\": [\n   {\n    \"plugin\": \"A.esp\"\n   }\n  ]\n },\n \"result\": {\n  \"execution\": \"completed\",\n  \"detector\": \"finding\",\n  \"findings\": 2,\n  \"coverage\": [],\n  \"strength\": \"measured\",\n  \"verdict\": null\n },\n \"sweep\": {\n  \"folder\": \"sweep/inv-0001\"\n }\n}",
+    "file": "{\r\n \"schemaVersion\": 2,\r\n \"receiptId\": \"9b1588082f5482e7\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"g.overlap\",\r\n \"armId\": \"candidate-01\",\r\n \"part\": \"overridden-by-extra\",\r\n \"adapter\": {\r\n  \"kind\": \"probe-emit\",\r\n  \"exe\": \"overlapprobe\"\r\n },\r\n \"argvShape\": [\r\n  \"<abs>/overlapprobe.exe\",\r\n  \"--order\",\r\n  \"<RUN>/candidates/c1.json\",\r\n  \"--emit\",\r\n  \"<RUN>/outputs/g.overlap/candidate-01.json\",\r\n  \"--instance\",\r\n  \"<abs>/else\",\r\n  \"--flag\",\r\n  \"<RUN>/relative\",\r\n  \"<RUN>/dot\",\r\n  \"..\\\\up\",\r\n  \"plain\",\r\n  \"<abs>/rooted\"\r\n ],\r\n \"runId\": \"run-1\",\r\n \"parentRunId\": \"parent-1\",\r\n \"startedUtc\": \"2026-01-01T00:00:00Z\",\r\n \"endedUtc\": \"2026-01-01T00:00:09Z\",\r\n \"exitCode\": 0,\r\n \"outputs\": [\r\n  {\r\n   \"path\": \"outputs/g.overlap/candidate-01.json\",\r\n   \"sha256\": \"e1f0d0c4a7678b60d85589052c65bc4d6a40455c5fcd8faeaa746334a44f007e\",\r\n   \"bytes\": 25,\r\n   \"mtimeUtc\": \"2025-10-09T08:53:20Z\"\r\n  },\r\n  {\r\n   \"path\": \"outputs/g.overlap/missing.json\",\r\n   \"sha256\": null,\r\n   \"bytes\": null,\r\n   \"mtimeUtc\": null\r\n  },\r\n  {\r\n   \"path\": \"<ROOT/>/outside/else.json\",\r\n   \"sha256\": \"802b8dc7861cc9706a3c778e2c6576ee7669211c9a2b41ef7e70fb82c77f9f51\",\r\n   \"bytes\": 15,\r\n   \"mtimeUtc\": \"2023-11-14T22:13:21Z\"\r\n  }\r\n ],\r\n \"log\": \"logs/g.overlap__candidate-01.txt\",\r\n \"consumed\": {\r\n  \"candidateSha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\r\n  \"programs\": {\r\n   \"emitter\": {\r\n    \"program\": \"probe:overlapprobe\"\r\n   }\r\n  }\r\n },\r\n \"validation\": {\r\n  \"accepted\": true,\r\n  \"rejections\": [],\r\n  \"identityLimits\": [\r\n   {\r\n    \"plugin\": \"A.esp\"\r\n   }\r\n  ]\r\n },\r\n \"result\": {\r\n  \"execution\": \"completed\",\r\n  \"detector\": \"finding\",\r\n  \"findings\": 2,\r\n  \"coverage\": [],\r\n  \"strength\": \"measured\",\r\n  \"verdict\": null\r\n },\r\n \"sweep\": {\r\n  \"folder\": \"sweep/inv-0001\"\r\n }\r\n}",
+    "key": "g.overlap__candidate-01__arm"
+   },
+   {
+    "name": "an accounting receipt",
+    "part": null,
+    "adapter": {
+     "kind": "manual"
+    },
+    "argv": null,
+    "runId": null,
+    "parent": null,
+    "started": null,
+    "ended": "2026-01-01T00:00:10Z",
+    "exit": null,
+    "outputs": [],
+    "log": "<ROOT\\>\\run\\logs\\absent.txt",
+    "consumed": {},
+    "validation": {
+     "accepted": 0
+    },
+    "result": {
+     "execution": "manual",
+     "detector": null
+    },
+    "extra": null,
+    "returned": "{\n \"schemaVersion\": 2,\n \"receiptId\": \"64071f37acb4a80a\",\n \"planId\": \"planaaaaaaaa\",\n \"checkId\": \"g.overlap\",\n \"armId\": \"candidate-01\",\n \"part\": null,\n \"adapter\": {\n  \"kind\": \"manual\"\n },\n \"argvShape\": null,\n \"runId\": null,\n \"parentRunId\": null,\n \"startedUtc\": null,\n \"endedUtc\": \"2026-01-01T00:00:10Z\",\n \"exitCode\": null,\n \"outputs\": [],\n \"log\": null,\n \"consumed\": {},\n \"validation\": {\n  \"accepted\": false,\n  \"rejections\": [],\n  \"identityLimits\": []\n },\n \"result\": {\n  \"execution\": \"manual\",\n  \"detector\": null\n }\n}",
+    "file": "{\r\n \"schemaVersion\": 2,\r\n \"receiptId\": \"64071f37acb4a80a\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"g.overlap\",\r\n \"armId\": \"candidate-01\",\r\n \"part\": null,\r\n \"adapter\": {\r\n  \"kind\": \"manual\"\r\n },\r\n \"argvShape\": null,\r\n \"runId\": null,\r\n \"parentRunId\": null,\r\n \"startedUtc\": null,\r\n \"endedUtc\": \"2026-01-01T00:00:10Z\",\r\n \"exitCode\": null,\r\n \"outputs\": [],\r\n \"log\": null,\r\n \"consumed\": {},\r\n \"validation\": {\r\n  \"accepted\": false,\r\n  \"rejections\": [],\r\n  \"identityLimits\": []\r\n },\r\n \"result\": {\r\n  \"execution\": \"manual\",\r\n  \"detector\": null\r\n }\r\n}",
+    "key": "g.overlap__candidate-01"
+   },
+   {
+    "name": "the same account again",
+    "part": null,
+    "adapter": {
+     "kind": "manual"
+    },
+    "argv": [],
+    "runId": null,
+    "parent": "p2",
+    "started": null,
+    "ended": "2026-01-01T00:00:20Z",
+    "exit": null,
+    "outputs": [],
+    "log": null,
+    "consumed": {},
+    "validation": {
+     "accepted": 0
+    },
+    "result": {
+     "execution": "manual",
+     "detector": null
+    },
+    "extra": null,
+    "keepSame": true,
+    "returned": "{\n \"schemaVersion\": 2,\n \"receiptId\": \"64071f37acb4a80a\",\n \"planId\": \"planaaaaaaaa\",\n \"checkId\": \"g.overlap\",\n \"armId\": \"candidate-01\",\n \"part\": null,\n \"adapter\": {\n  \"kind\": \"manual\"\n },\n \"argvShape\": null,\n \"runId\": null,\n \"parentRunId\": null,\n \"startedUtc\": null,\n \"endedUtc\": \"2026-01-01T00:00:10Z\",\n \"exitCode\": null,\n \"outputs\": [],\n \"log\": null,\n \"consumed\": {},\n \"validation\": {\n  \"accepted\": false,\n  \"rejections\": [],\n  \"identityLimits\": []\n },\n \"result\": {\n  \"execution\": \"manual\",\n  \"detector\": null\n }\n}",
+    "file": "{\r\n \"schemaVersion\": 2,\r\n \"receiptId\": \"64071f37acb4a80a\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"g.overlap\",\r\n \"armId\": \"candidate-01\",\r\n \"part\": null,\r\n \"adapter\": {\r\n  \"kind\": \"manual\"\r\n },\r\n \"argvShape\": null,\r\n \"runId\": null,\r\n \"parentRunId\": null,\r\n \"startedUtc\": null,\r\n \"endedUtc\": \"2026-01-01T00:00:10Z\",\r\n \"exitCode\": null,\r\n \"outputs\": [],\r\n \"log\": null,\r\n \"consumed\": {},\r\n \"validation\": {\r\n  \"accepted\": false,\r\n  \"rejections\": [],\r\n  \"identityLimits\": []\r\n },\r\n \"result\": {\r\n  \"execution\": \"manual\",\r\n  \"detector\": null\r\n }\r\n}",
+    "key": "g.overlap__candidate-01"
+   },
+   {
+    "name": "a changed account",
+    "part": null,
+    "adapter": {
+     "kind": "manual"
+    },
+    "argv": null,
+    "runId": null,
+    "parent": "p3",
+    "started": null,
+    "ended": "2026-01-01T00:00:30Z",
+    "exit": null,
+    "outputs": [],
+    "log": null,
+    "consumed": {},
+    "validation": {
+     "accepted": 0
+    },
+    "result": {
+     "execution": "manual",
+     "detector": null,
+     "note": "new"
+    },
+    "extra": null,
+    "keepSame": true,
+    "returned": "{\n \"schemaVersion\": 2,\n \"receiptId\": \"f85e00f3b30a28a2\",\n \"planId\": \"planaaaaaaaa\",\n \"checkId\": \"g.overlap\",\n \"armId\": \"candidate-01\",\n \"part\": null,\n \"adapter\": {\n  \"kind\": \"manual\"\n },\n \"argvShape\": null,\n \"runId\": null,\n \"parentRunId\": \"p3\",\n \"startedUtc\": null,\n \"endedUtc\": \"2026-01-01T00:00:30Z\",\n \"exitCode\": null,\n \"outputs\": [],\n \"log\": null,\n \"consumed\": {},\n \"validation\": {\n  \"accepted\": false,\n  \"rejections\": [],\n  \"identityLimits\": []\n },\n \"result\": {\n  \"execution\": \"manual\",\n  \"detector\": null,\n  \"note\": \"new\"\n }\n}",
+    "file": "{\r\n \"schemaVersion\": 2,\r\n \"receiptId\": \"f85e00f3b30a28a2\",\r\n \"planId\": \"planaaaaaaaa\",\r\n \"checkId\": \"g.overlap\",\r\n \"armId\": \"candidate-01\",\r\n \"part\": null,\r\n \"adapter\": {\r\n  \"kind\": \"manual\"\r\n },\r\n \"argvShape\": null,\r\n \"runId\": null,\r\n \"parentRunId\": \"p3\",\r\n \"startedUtc\": null,\r\n \"endedUtc\": \"2026-01-01T00:00:30Z\",\r\n \"exitCode\": null,\r\n \"outputs\": [],\r\n \"log\": null,\r\n \"consumed\": {},\r\n \"validation\": {\r\n  \"accepted\": false,\r\n  \"rejections\": [],\r\n  \"identityLimits\": []\r\n },\r\n \"result\": {\r\n  \"execution\": \"manual\",\r\n  \"detector\": null,\r\n  \"note\": \"new\"\r\n }\r\n}",
+    "key": "g.overlap__candidate-01"
+   }
+  ],
+  "plan": {
+   "schemaVersion": 2,
+   "planId": "planaaaaaaaa",
+   "requestProviders": "arm-view",
+   "registry": {
+    "path": "registry.json",
+    "registryVersion": 7,
+    "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+   },
+   "toolIdentity": {
+    "contract": 1,
+    "rule": "x",
+    "programs": {
+     "controller": {
+      "kind": "package",
+      "state": "present",
+      "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+     },
+     "probe:overlapprobe": {
+      "kind": "package",
+      "state": "present",
+      "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "helper:conflictdiff": {
+      "kind": "package",
+      "state": "present",
+      "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     },
+     "probe:depprobe": {
+      "kind": "package",
+      "state": "present",
+      "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    }
+   },
+   "arms": [
+    {
+     "armId": "baseline",
+     "kind": "baseline"
+    },
+    {
+     "armId": "candidate-01",
+     "kind": "candidate"
+    }
+   ],
+   "checks": [
+    {
+     "checkId": "g.overlap",
+     "prerequisites": [
+      "l.masters"
+     ]
+    },
+    {
+     "checkId": "l.masters"
+    },
+    {
+     "checkId": "p.order",
+     "prerequisites": []
+    }
+   ]
+  },
+  "check": {
+   "checkId": "g.overlap"
+  },
+  "arm": {
+   "armId": "candidate-01"
+  },
+  "same": [
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "2",
+     "endedUtc": "t2",
+     "parentRunId": null,
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": true
+   },
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": "arm",
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": false
+   },
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 2,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": false
+   },
+   {
+    "prev": null,
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": false
+   },
+   {
+    "prev": [
+     {
+      "planId": "p",
+      "checkId": "c",
+      "armId": "a",
+      "part": null,
+      "receiptId": "1",
+      "endedUtc": "t1",
+      "parentRunId": "x",
+      "result": {
+       "n": 1,
+       "f": 1.0
+      },
+      "outputs": []
+     }
+    ],
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": false
+   },
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": [],
+     "extra": 1
+    },
+    "want": false
+   },
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "f": 1.0,
+      "n": 1
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": true
+   },
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1
+     },
+     "outputs": []
+    },
+    "want": false
+   },
+   {
+    "prev": {
+     "planId": "q",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "q",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": true
+   },
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "q",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": false
+   },
+   {
+    "prev": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": "",
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "new": {
+     "planId": "p",
+     "checkId": "c",
+     "armId": "a",
+     "part": null,
+     "receiptId": "1",
+     "endedUtc": "t1",
+     "parentRunId": "x",
+     "result": {
+      "n": 1,
+      "f": 1.0
+     },
+     "outputs": []
+    },
+    "want": false
+   }
+  ],
+  "read": {
+   "tree": [
+    {
+     "path": "receipts/a-b__x.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiYS1iX194Lmpzb24ifQ=="
+    },
+    {
+     "path": "receipts/a.b__x.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiYS5iX194Lmpzb24ifQ=="
+    },
+    {
+     "path": "receipts/A__w.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiQV9fdy5qc29uIn0="
+    },
+    {
+     "path": "receipts/a__x.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiYV9feC5qc29uIn0="
+    },
+    {
+     "path": "receipts/a__x__arm.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiYV9feF9fYXJtLmpzb24ifQ=="
+    },
+    {
+     "path": "receipts/a__x__diff.JSON",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiYV9feF9fZGlmZi5KU09OIn0="
+    },
+    {
+     "path": "receipts/a_b__x.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiYV9iX194Lmpzb24ifQ=="
+    },
+    {
+     "path": "receipts/b__x.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiYl9feC5qc29uIn0="
+    },
+    {
+     "path": "receipts/broken.json",
+     "bytes": "e29vcHM="
+    },
+    {
+     "path": "receipts/c__y.json.tmp",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiY19feS5qc29uLnRtcCJ9"
+    },
+    {
+     "path": "receipts/list.json",
+     "bytes": "WzFd"
+    },
+    {
+     "path": "receipts/note.txt",
+     "bytes": "eyJyZWNlaXB0SWQiOiAibm90ZS50eHQifQ=="
+    },
+    {
+     "path": "receipts/z.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiei5qc29uIn0="
+    },
+    {
+     "path": "receipts/\u00e9__x.json",
+     "bytes": "eyJyZWNlaXB0SWQiOiAiXHUwMGU5X194Lmpzb24ifQ=="
+    }
+   ],
+   "dirs": [
+    "receipts/folder.json"
+   ],
+   "keys": [
+    "a-b__x",
+    "a.b__x",
+    "A__w",
+    "a__x",
+    "a__x__arm",
+    "a__x__diff",
+    "a_b__x",
+    "b__x",
+    "z",
+    "\u00e9__x"
+   ],
+   "none": []
+  },
+  "roles": [
+   {
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "diff"
+    },
+    "want": [
+     [
+      "comparator",
+      "helper:conflictdiff"
+     ],
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "arm"
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:overlapprobe"
+     ],
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe"
+     ],
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json"
+     }
+    },
+    "want": [
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {
+     "adapter": {
+      "kind": "patchprobe",
+      "exe": "conflictdiff"
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "helper:conflictdiff"
+     ],
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {
+     "adapter": {
+      "kind": "derived",
+      "exe": "x"
+     }
+    },
+    "want": [
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {
+     "adapter": null
+    },
+    "want": [
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {},
+    "want": [
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   },
+   {
+    "receipt": {
+     "adapter": {
+      "kind": "mcp-only"
+     },
+     "part": "diff"
+    },
+    "want": [
+     [
+      "controller",
+      "controller"
+     ]
+    ]
+   }
+  ],
+  "labels": [
+   {
+    "pid": "controller",
+    "want": "the controller (evalrun.py and the scripts it runs)",
+    "id": "probe:controller"
+   },
+   {
+    "pid": "probe:overlapprobe",
+    "want": "probe overlapprobe",
+    "id": "probe:probe:overlapprobe"
+   },
+   {
+    "pid": "helper:conflictdiff",
+    "want": "helper conflictdiff",
+    "id": "probe:helper:conflictdiff"
+   },
+   {
+    "pid": "odd",
+    "want": "probe ",
+    "id": "probe:odd"
+   },
+   {
+    "pid": "conflictdiff",
+    "want": "probe ",
+    "id": "helper:conflictdiff"
+   },
+   {
+    "pid": "x:y:z",
+    "want": "probe y:z",
+    "id": "probe:x:y:z"
+   }
+  ],
+  "shapes": [
+   {
+    "argv": [
+     "<ROOT\\>\\run\\outputs\\a.json",
+     "<ROOT\\>\\run",
+     "<ROOT\\>\\x.json",
+     "C:/other/place/file.esp",
+     "--flag",
+     "name.json",
+     "./run/rel.json",
+     ".\\run\\sub\\rel.json",
+     "./notrun/rel.json",
+     "\\rooted\\file.txt",
+     "/also/rooted",
+     "C:relative.txt",
+     "<ROOT\\>\\run\\sub\\..\\up.json",
+     "<ROOT\\>\\RUN\\SUB\\Case.json",
+     "",
+     "..",
+     "./.."
+    ],
+    "want": [
+     "<RUN>/outputs/a.json",
+     "<RUN>/.",
+     "<abs>/x.json",
+     "<abs>/file.esp",
+     "--flag",
+     "name.json",
+     "<RUN>/rel.json",
+     "<RUN>/sub/rel.json",
+     "<RUN>/notrun/rel.json",
+     "<abs>/file.txt",
+     "<abs>/rooted",
+     "C:relative.txt",
+     "<RUN>/up.json",
+     "<RUN>/SUB/Case.json",
+     "",
+     "..",
+     "<abs>/.."
+    ]
+   }
+  ],
+  "dependencies": {
+   "receipts": {
+    "p.order__c1": {
+     "receiptId": "d1",
+     "derivedFrom": [
+      "r-arm",
+      "r-diff",
+      "nobody",
+      "r-arm"
+     ]
+    },
+    "g.overlap__c1__arm": {
+     "receiptId": "r-arm"
+    },
+    "g.overlap__c1__diff": {
+     "receiptId": "r-diff"
+    },
+    "other__c1": {
+     "receiptId": "r-arm"
+    },
+    "none__c1": {}
+   },
+   "cases": [
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "b0",
+        "kind": "baseline"
+       },
+       {
+        "armId": "c1",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "g.overlap",
+      "armId": "c1",
+      "part": "diff"
+     },
+     "want": [
+      "g.overlap__c1__arm",
+      "g.overlap__c1__reverse",
+      "g.overlap__b0__arm",
+      "l.masters__c1",
+      "l.masters__b0"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "b0",
+        "kind": "baseline"
+       },
+       {
+        "armId": "c1",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "g.overlap",
+      "armId": "c1",
+      "part": "reverse"
+     },
+     "want": [
+      "g.overlap__c1__arm",
+      "g.overlap__b0__arm",
+      "l.masters__c1",
+      "l.masters__b0"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "b0",
+        "kind": "baseline"
+       },
+       {
+        "armId": "c1",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "g.overlap",
+      "armId": "c1",
+      "part": "arm"
+     },
+     "want": [
+      "g.overlap__b0__arm",
+      "l.masters__c1",
+      "l.masters__b0"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "b0",
+        "kind": "baseline"
+       },
+       {
+        "armId": "c1",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "g.overlap",
+      "armId": "b0",
+      "part": "arm"
+     },
+     "want": [
+      "l.masters__b0",
+      "l.masters__b0"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "b0",
+        "kind": "baseline"
+       },
+       {
+        "armId": "c1",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "g.overlap",
+      "armId": "c1"
+     },
+     "want": [
+      "l.masters__c1",
+      "l.masters__b0"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "b0",
+        "kind": "baseline"
+       },
+       {
+        "armId": "c1",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "p.order",
+      "armId": "c1",
+      "part": null
+     },
+     "want": [
+      "g.overlap__c1__arm",
+      "other__c1",
+      "g.overlap__c1__diff",
+      "g.overlap__c1__arm",
+      "other__c1"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "b0",
+        "kind": "baseline"
+       },
+       {
+        "armId": "c1",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "unknown",
+      "armId": "c1",
+      "part": "diff"
+     },
+     "want": [
+      "unknown__c1__arm",
+      "unknown__c1__reverse",
+      "unknown__b0__arm"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "x",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "g.overlap",
+      "armId": "x",
+      "part": "arm"
+     },
+     "want": [
+      "g.overlap__baseline__arm",
+      "l.masters__x",
+      "l.masters__baseline"
+     ]
+    },
+    {
+     "plan": {
+      "schemaVersion": 2,
+      "planId": "planaaaaaaaa",
+      "requestProviders": "arm-view",
+      "registry": {
+       "path": "registry.json",
+       "registryVersion": 7,
+       "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+      },
+      "toolIdentity": {
+       "contract": 1,
+       "rule": "x",
+       "programs": {
+        "controller": {
+         "kind": "package",
+         "state": "present",
+         "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "probe:overlapprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "helper:conflictdiff": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "probe:depprobe": {
+         "kind": "package",
+         "state": "present",
+         "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+       }
+      },
+      "arms": [
+       {
+        "armId": "x",
+        "kind": "candidate"
+       }
+      ],
+      "checks": [
+       {
+        "checkId": "g.overlap",
+        "prerequisites": [
+         "l.masters"
+        ]
+       },
+       {
+        "checkId": "l.masters"
+       },
+       {
+        "checkId": "p.order",
+        "prerequisites": []
+       }
+      ]
+     },
+     "entry": {
+      "checkId": "g.overlap",
+      "armId": "baseline",
+      "part": "diff"
+     },
+     "want": [
+      "g.overlap__baseline__arm",
+      "g.overlap__baseline__reverse",
+      "l.masters__baseline",
+      "l.masters__baseline"
+     ]
+    }
+   ]
+  }
+ },
+ "identity": {
+  "plans": {
+   "contract": {
+    "schemaVersion": 2,
+    "planId": "planaaaaaaaa",
+    "requestProviders": "arm-view",
+    "registry": {
+     "path": "registry.json",
+     "registryVersion": 7,
+     "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "toolIdentity": {
+     "contract": 1,
+     "rule": "x",
+     "programs": {
+      "controller": {
+       "kind": "package",
+       "state": "present",
+       "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "probe:overlapprobe": {
+       "kind": "package",
+       "state": "present",
+       "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "helper:conflictdiff": {
+       "kind": "package",
+       "state": "present",
+       "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "probe:depprobe": {
+       "kind": "package",
+       "state": "present",
+       "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+     }
+    },
+    "arms": [
+     {
+      "armId": "baseline",
+      "kind": "baseline"
+     },
+     {
+      "armId": "candidate-01",
+      "kind": "candidate"
+     }
+    ],
+    "checks": [
+     {
+      "checkId": "g.overlap",
+      "prerequisites": [
+       "l.masters"
+      ]
+     },
+     {
+      "checkId": "l.masters"
+     },
+     {
+      "checkId": "p.order",
+      "prerequisites": []
+     }
+    ]
+   },
+   "legacy": {
+    "schemaVersion": 2,
+    "planId": "planaaaaaaaa",
+    "requestProviders": "arm-view",
+    "registry": {
+     "path": "registry.json",
+     "registryVersion": 7,
+     "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "arms": [
+     {
+      "armId": "baseline",
+      "kind": "baseline"
+     },
+     {
+      "armId": "candidate-01",
+      "kind": "candidate"
+     }
+    ],
+    "checks": [
+     {
+      "checkId": "g.overlap",
+      "prerequisites": [
+       "l.masters"
+      ]
+     },
+     {
+      "checkId": "l.masters"
+     },
+     {
+      "checkId": "p.order",
+      "prerequisites": []
+     }
+    ]
+   },
+   "absent and odd records": {
+    "schemaVersion": 2,
+    "planId": "planaaaaaaaa",
+    "requestProviders": "arm-view",
+    "registry": {
+     "path": "registry.json",
+     "registryVersion": 7,
+     "sha256": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr"
+    },
+    "toolIdentity": {
+     "contract": 1,
+     "rule": "x",
+     "programs": {
+      "controller": {
+       "kind": "package",
+       "state": "present",
+       "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "probe:overlapprobe": "not a dict",
+      "helper:conflictdiff": {
+       "kind": "package",
+       "state": "present",
+       "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "probe:depprobe": {
+       "kind": "package",
+       "state": "absent",
+       "digest": null
+      }
+     }
+    },
+    "arms": [
+     {
+      "armId": "baseline",
+      "kind": "baseline"
+     },
+     {
+      "armId": "candidate-01",
+      "kind": "candidate"
+     }
+    ],
+    "checks": [
+     {
+      "checkId": "g.overlap",
+      "prerequisites": [
+       "l.masters"
+      ]
+     },
+     {
+      "checkId": "l.masters"
+     },
+     {
+      "checkId": "p.order",
+      "prerequisites": []
+     }
+    ]
+   }
+  },
+  "cases": [
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:depprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:depprobe",
+        "kind": "package",
+        "digest": "folder:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-mismatch",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "folder:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:other",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-mismatch",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      ""
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": null
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      null
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": "text"
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      null
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": "text",
+       "controller": {
+        "program": "controller",
+        "digest": 7
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      null
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      7
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "diff",
+     "consumed": {
+      "programs": {
+       "comparator": {
+        "program": "helper:conflictdiff",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "diff",
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:overlapprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "comparator",
+      "helper:conflictdiff",
+      "tool-identity-missing",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "arm",
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:overlapprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "derived",
+      "exe": null
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "unknownprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:unknownprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:unknownprobe",
+      "tool-identity-mismatch",
+      null,
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ]
+    ]
+   },
+   {
+    "plan": "contract",
+    "receipt": {
+     "adapter": {
+      "kind": "manual"
+     }
+    },
+    "want": [
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:depprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:depprobe",
+        "kind": "package",
+        "digest": "folder:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:other",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": null
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": "text"
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": "text",
+       "controller": {
+        "program": "controller",
+        "digest": 7
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "diff",
+     "consumed": {
+      "programs": {
+       "comparator": {
+        "program": "helper:conflictdiff",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "diff",
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:overlapprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "arm",
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:overlapprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "derived",
+      "exe": null
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "unknownprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:unknownprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "legacy",
+    "receipt": {
+     "adapter": {
+      "kind": "manual"
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:depprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-mismatch",
+      null,
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:depprobe",
+        "kind": "package",
+        "digest": "folder:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-mismatch",
+      null,
+      "folder:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      null,
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:other",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-mismatch",
+      null,
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      ""
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": null
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      null,
+      null
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": "text"
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      null,
+      null
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "depprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": "text",
+       "controller": {
+        "program": "controller",
+        "digest": 7
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:depprobe",
+      "tool-identity-missing",
+      null,
+      null
+     ],
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      7
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "diff",
+     "consumed": {
+      "programs": {
+       "comparator": {
+        "program": "helper:conflictdiff",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "diff",
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:overlapprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "comparator",
+      "helper:conflictdiff",
+      "tool-identity-missing",
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      null
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "ordersweep-probe",
+      "exe": "overlapprobe"
+     },
+     "part": "arm",
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:overlapprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:overlapprobe",
+      "tool-identity-mismatch",
+      null,
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "derived",
+      "exe": null
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": []
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "probe-json",
+      "exe": "unknownprobe"
+     },
+     "part": null,
+     "consumed": {
+      "programs": {
+       "emitter": {
+        "program": "probe:unknownprobe",
+        "kind": "package",
+        "digest": "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       },
+       "controller": {
+        "program": "controller",
+        "kind": "package",
+        "digest": "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "checked": [
+         "launch",
+         "acceptance"
+        ]
+       }
+      }
+     }
+    },
+    "want": [
+     [
+      "emitter",
+      "probe:unknownprobe",
+      "tool-identity-mismatch",
+      null,
+      "folder:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ]
+    ]
+   },
+   {
+    "plan": "absent and odd records",
+    "receipt": {
+     "adapter": {
+      "kind": "manual"
+     }
+    },
+    "want": [
+     [
+      "controller",
+      "controller",
+      "tool-identity-missing",
+      "scripts:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      null
+     ]
+    ]
+   }
+  ],
+  "guarantee": {
+   "contract": {
+    "guarantee": "verified",
+    "detail": "every accepted local result is bound, per role, to the program identity this plan froze; evaluation.integrity lists any receipt that is not"
+   },
+   "legacy": {
+    "guarantee": "legacy",
+    "detail": "this plan predates tool identity: which build produced each result was not checked"
+   },
+   "empty": {
+    "guarantee": "legacy",
+    "detail": "this plan predates tool identity: which build produced each result was not checked"
+   }
+  }
+ }
+}
