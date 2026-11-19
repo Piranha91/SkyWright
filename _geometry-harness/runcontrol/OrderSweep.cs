@@ -84,7 +84,7 @@ public static class OrderSweep
     }
 
     // The baseline file and the other candidate files, in path order.
-    static (string baseline, List<string> others) CandidateFiles(string cdir, string? baseline, BigInteger? limit)
+    internal static (string baseline, List<string> others) CandidateFiles(string cdir, string? baseline, BigInteger? limit)
     {
         var found = new List<string>();
         if (Directory.Exists(cdir))
