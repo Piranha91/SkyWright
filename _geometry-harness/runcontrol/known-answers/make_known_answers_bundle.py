@@ -28,6 +28,8 @@ from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parents[2] / "scripts"))
+from runlog import Run   # noqa: E402
 import make_known_answers_finalize as F   # noqa: E402  (the run-folder builders of slice 6a)
 import evalrun as E                       # noqa: E402
 import bundleenrich as BE                 # noqa: E402
@@ -754,7 +756,7 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="hc-known-bundle-")).resolve()
     store = os.environ.get("HOUSECARL_RUNLOG_DIR")
     try:
-        with F.Run("make-known-answers-bundle", stage_source="single-stage"):
+        with Run("make-known-answers-bundle", stage_source="single-stage"):
             os.environ["HOUSECARL_RUNLOG_DIR"] = str(tmp / "runlog")   # so no run folder here becomes the run-log store
             try:
                 doc = {"python": platform.python_version(), "placeholders": {"backslash": F.BACK, "forward": F.FWD, "doubled": F.DOUBLED}}
