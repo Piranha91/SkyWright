@@ -25,8 +25,10 @@ from types import SimpleNamespace
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parents[2] / "scripts"))
+from runlog import Run   # noqa: E402
 import make_known_answers_finalize as F   # noqa: E402  (its plan, builder and masking helpers)
-from make_known_answers_finalize import E, Run   # noqa: E402
+from make_known_answers_finalize import E   # noqa: E402
 
 OUT = HERE / "evaluate.json"
 T0 = 1767225600.0   # 2026-01-01T00:00:00Z: every fixture file's time of writing, unless a case says otherwise
@@ -49,9 +51,12 @@ def snapshot(root: Path) -> list:
             rows.append({"path": rel, "planSha": True})
             continue
         try:
-            rows.append({"path": rel, "text": F.pack(F.mask(p.read_bytes().decode("utf-8"), root)), "mtime": p.stat().st_mtime})
+            row = {"path": rel, "text": F.pack(F.mask(p.read_bytes().decode("utf-8"), root))}
         except UnicodeDecodeError:
-            rows.append({"path": rel, "bytes": F.packb(p.read_bytes()), "mtime": p.stat().st_mtime})
+            row = {"path": rel, "bytes": F.packb(p.read_bytes())}
+        if abs(p.stat().st_mtime - T0) < 86400:   # a time of writing a case set on purpose; any other is this run's own
+            row["mtime"] = p.stat().st_mtime
+        rows.append(row)
     return rows
 
 
