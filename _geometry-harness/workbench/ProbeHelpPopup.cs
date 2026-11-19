@@ -110,6 +110,9 @@ internal static class ProbeHelpPopup
         };
         KeyboardNavigation.SetTabNavigation(face, KeyboardNavigationMode.Cycle);
         face.SetValue(TextElement.ForegroundProperty, Theme.Brush(Theme.Text));
+        // the popup inherits from the "?" it is placed on (bold, small): its own weight and size are set here
+        face.SetValue(TextElement.FontWeightProperty, FontWeights.Normal);
+        face.SetValue(TextElement.FontSizeProperty, 13.0);
         face.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { close?.Invoke(); e.Handled = true; } };
         return face;
     }

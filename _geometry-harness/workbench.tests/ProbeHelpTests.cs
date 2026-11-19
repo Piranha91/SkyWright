@@ -86,6 +86,22 @@ public sealed class ProbeHelpTests
     }
 
     [Fact]
+    public void The_help_text_is_not_bold_under_a_bold_button()
+    {
+        // the popup inherits from the bold "?" it is placed on; its body text keeps the normal weight
+        var weights = new List<FontWeight>();
+        ShellCollection.Ui.Value.Invoke(() =>
+        {
+            var face = ProbeHelpPopup.Content("geometry.object-overlap");
+            var holder = new Border { Child = face };
+            holder.SetValue(System.Windows.Documents.TextElement.FontWeightProperty, FontWeights.Bold);
+            weights.AddRange(Descendants(face).OfType<TextBlock>().Where(t => t.Text.Length > 60).Select(t => t.FontWeight));
+        });
+        Assert.NotEmpty(weights);
+        Assert.All(weights, w => Assert.Equal(FontWeights.Normal, w));
+    }
+
+    [Fact]
     public void One_popup_is_open_at_a_time_and_Esc_or_close_shuts_it()
     {
         Exception? failed = null;
