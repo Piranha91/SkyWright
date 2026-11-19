@@ -140,12 +140,8 @@ public static class ScopeRules
         return files;
     }
 
-    // The base game's own plugins and Creation Club content (PluginKinds.IsBethesda states the same test for the probes).
-    static bool BaseGame(string name)
-    {
-        string n = PyText.Lower(name);
-        return BaseGamePlugins.IsBaseGame(name) || (n.StartsWith("cc", StringComparison.Ordinal) && PluginFiles.Suffixes.Any(s => n.EndsWith(s, StringComparison.Ordinal)));
-    }
+    // The base game's own plugins and Creation Club content, by the probes' two tests.
+    static bool BaseGame(string name) => BaseGamePlugins.IsBaseGame(name) || BaseGamePlugins.IsCreationClub(name);
 
     static string NamesOf(IEnumerable<string> items, int most = 6)
     {
