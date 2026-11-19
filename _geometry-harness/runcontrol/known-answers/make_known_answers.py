@@ -1,4 +1,7 @@
 """Write foundations.json: the known answers runcontrol's self-test must reach, computed by the Python controller.
+It also writes pipeline.json, the same for the pipeline's own rules (arms, order, scope acceptance, the scope line,
+candidates, check selection, the preparation key) and for the places where the C# controller follows the probes'
+readers instead of Python's copies.
 
 Every expected value comes from the real functions in evalpipeline.py, evalrun.py and toolidentity.py (or from the
 Python runtime itself: json, repr, float formatting, pathlib, ntpath). Run it again only when one of those rules
@@ -27,10 +30,12 @@ sys.path.insert(0, str(HERE.parents[1]))
 sys.path.insert(0, str(HERE.parents[2] / "scripts"))
 from runlog import Run      # noqa: E402
 import evalpipeline as EP   # noqa: E402
+import evalprepreuse as PR  # noqa: E402
 import evalrun as ER        # noqa: E402
 import toolidentity as TI   # noqa: E402
 
 OUT = HERE / "foundations.json"
+PIPELINE_OUT = HERE / "pipeline.json"
 BACK, FWD = "<ROOT\\>", "<ROOT/>"
 
 
@@ -446,6 +451,348 @@ STATUSES = [[], ["accepted"], ["accepted", "accepted"], ["accepted", "refused"],
             ["accepted", "awaiting", "accepted"]]
 
 
+# ------------------------------------------------------------------ the pipeline's rules (pipeline.json)
+
+def hdr(masters, esm=False):
+    return {"masters": masters, "esm": esm}
+
+
+HEADERS = {"Base.esm": hdr([], True), "Dlc.esm": hdr(["Base.esm"], True), "Fix.esp": hdr(["Base.esm", "Dlc.esm"]),
+           "Subj.esp": hdr(["Base.esm"]), "PA.esp": hdr(["Base.esm"]), "PB.esp": hdr(["Base.esm"]),
+           "PC1.esp": hdr(["Base.esm"]), "PC2.esp": hdr(["Base.esm"]), "PCP.esp": hdr(["PC1.esp", "PC2.esp"]),
+           "KA.esp": hdr(["Base.esm", "Subj.esp", "PA.esp"]), "KB.esp": hdr(["Base.esm", "Subj.esp", "PB.esp"]),
+           "KS.esp": hdr(["Base.esm", "Subj.esp"]), "SubjM.esp": hdr(["Base.esm"], True), "Lib.esl": hdr(["Base.esm"]),
+           "Orphan.esp": hdr(["Gone.esm"])}
+BASE = ["Base.esm", "Dlc.esm", "Fix.esp"]
+SOURCE = ["Base.esm", "Dlc.esm", "PA.esp", "Fix.esp", "PB.esp", "PC1.esp", "PC2.esp", "PCP.esp",
+          "Subj.esp", "KA.esp", "KB.esp", "KS.esp", "SubjM.esp", "Lib.esl", "Orphan.esp"]
+
+
+def an_entry(partners, keys, **kw):
+    e = {"subject": {"plugin": "Subj.esp"}, "partners": [{"plugin": p} if isinstance(p, str) else p for p in partners],
+         "keys": [{"plugin": k} for k in keys], "extraArms": [], "orderVariants": []}
+    e.update(kw)
+    return e
+
+
+def answer(fn) -> dict:
+    """The function's value, or the sentence it refuses with."""
+    try:
+        return {"out": fn()}
+    except EP.Refusal as r:
+        return {"refusal": str(r)}
+
+
+NORMALISE = [
+    {"id": "t", "subject": {"plugin": "Subj.esp"},
+     "partners": [{"plugin": "pa.esp"}, {"plugins": ["PB.esp", "SUBJ.ESP"], "group": "g"}], "keys": [{"plugin": "KA.esp"}],
+     "dependencies": [{"plugin": "FIX.esp", "mod": "M"}], "companionsOf": [{"plugin": "c.esp", "mod": "MC"}],
+     "baseline": ["base.esm", "Fix.esp"], "baselineScopeTarget": "BASE.ESM", "companions": {"subj.esp": ["C.esp", "pa.ESP"]},
+     "extraArms": [{"id": "x", "plugins": ["subj.esp", "PA.esp"]}],
+     "orderVariants": [{"id": "v", "of": "combined", "last": ["SUBJ.esp"]}, {"id": "w", "of": "combined", "reverse": True}],
+     "places": {"LAB.esp": {"after": "pb.esp", "why": "x"}, "q.esp": {}}, "modNames": {"SUBJ.ESP": "The Subject", "Other.esp": "O"},
+     "lab": {"instance": "X:/lab"}, "source": {"instance": "X:/src", "profile": "P"}},
+    {"schema": 1, "id": "wb-1", "inPlace": {"instance": "C:\\i", "profile": "P", "game": "C:\\g"},
+     "selection": {"mods": ["Sel", "sel"]}, "evaluation": {"select": ["a.b"], "depth": "standard"}},
+    {"id": "n", "subject": {"plugins": ["A.esp", "a.ESP", "B.esp"]}, "baseline": None, "companions": {"A.ESP": ["x.esp"], "a.esp": ["Y.esp"]},
+     "extraArms": [{"id": "bare"}], "keys": [], "modNames": {}},
+]
+
+DERIVE = [
+    an_entry(["PA.esp"], ["KA.esp"]),
+    an_entry(["PA.esp", "PB.esp"], ["KA.esp", "KB.esp"]),
+    an_entry(["PA.esp", {"plugin": "PC1.esp", "group": "c"}, {"plugin": "PC2.esp", "group": "c"}, {"plugin": "PCP.esp", "group": "c"}], []),
+    an_entry(["PA.esp", "PB.esp"], ["KS.esp"]),
+    an_entry(["PA.esp"], [], extraArms=[{"id": "x", "plugins": ["Subj.esp", "PA.esp"]}],
+             orderVariants=[{"id": "combined-reverse", "of": "combined", "reverse": True}]),
+    an_entry(["PA.esp"], ["KA.esp"], extraArms=[{"id": "with-key", "plugins": ["Subj.esp", "KA.esp", "Subj.esp"]}],
+             orderVariants=[{"id": "ka-last", "of": "combined+key:KA.esp", "last": ["PA.esp"]},
+                            {"id": "both", "of": "subject", "reverse": False, "last": []}]),
+    an_entry([], []),
+    an_entry([{"plugins": ["PA.esp", "PB.esp"]}, {"plugin": "PC1.esp", "group": 1}, {"plugins": ["PC2.esp", "PC1.esp"], "group": 1}], ["KA.esp"]),
+    an_entry(["PA.esp"], [], orderVariants=[{"id": "lost", "of": "no-such-arm", "reverse": True}]),
+    dict(an_entry(["PA.esp"], []), subject={"plugins": ["Subj.esp", "SubjM.esp"]}),
+]
+
+ORDER = [
+    ({"evaluated": ["Subj.esp", "PA.esp", "KA.esp"], "keys": ["KA.esp"]}, BASE, SOURCE),
+    ({"evaluated": ["SubjM.esp", "PA.esp"], "keys": []}, BASE, SOURCE),
+    ({"evaluated": ["Subj.esp", "PA.esp", "KA.esp"], "keys": ["KA.esp"]}, BASE,
+     ["Base.esm", "Dlc.esm", "PA.esp", "Fix.esp", "KA.esp", "Subj.esp"]),
+    ({"evaluated": ["Subj.esp", "Gone.esp"], "keys": []}, BASE, SOURCE),
+    ({"evaluated": ["PC1.esp", "PC2.esp", "PCP.esp"], "keys": [], "reverse": True}, BASE, SOURCE),
+    ({"evaluated": ["Subj.esp", "PA.esp"], "keys": [], "reverse": True}, BASE, SOURCE),
+    ({"id": "a1", "evaluated": ["Subj.esp", "PA.esp", "PB.esp"], "keys": [], "last": ["PA.esp", "Nope.esp"]}, BASE, SOURCE),
+    ({"id": "a2", "evaluated": ["Subj.esp", "Lib.esl"], "keys": []}, BASE, SOURCE),
+    ({"id": "a3", "evaluated": ["Subj.esp", "Orphan.esp"], "keys": []}, BASE, SOURCE),
+    ({"id": "a4", "evaluated": ["Subj.esp", "KB.esp", "KA.esp", "PA.esp", "PB.esp"], "keys": ["KB.esp", "KA.esp"]}, BASE,
+     [p for p in SOURCE if p not in ("KA.esp", "KB.esp")]),
+    ({"id": "a5", "evaluated": ["subj.esp"], "keys": []}, ["BASE.ESM"], SOURCE),
+    ({"id": "a6", "evaluated": ["Subj.esp", "SubjM.esp"], "keys": [], "last": ["SubjM.esp"]}, BASE, SOURCE),
+    ({"id": "a7", "evaluated": ["Subj.esp", "KS.esp"], "keys": ["KS.esp"], "reverse": True}, ["Base.esm"], SOURCE),
+    ({"evaluated": ["KA.esp"], "keys": ["KA.esp"]}, ["Base.esm"], SOURCE),
+    ({"id": "a8", "evaluated": ["Subj.esp", "NoHeader.esp"], "keys": []}, ["Base.esm"], SOURCE + ["NoHeader.esp"]),
+]
+
+
+def scope_doc(**over):
+    d = {"complete": True, "walkFailures": [], "unreadableRecords": [],
+         "configuration": {"fingerprint": "f", "plugins": [{"Name": n, "Path": f"X:/{n}", "Sha256": "h" + n}
+                                                           for n in ["Base.esm", "Subj.esp"]],
+                           "providers": [{"Name": "M1", "Kind": "mod"}, {"Name": "Data", "Kind": "data"}]},
+         "targets": [{"name": "Subj.esp", "sha256": "hSubj.esp",
+                      "footprint": {"placed": {"cells": [{"cell": "000A:Base.esm", "kind": "interior"},
+                                                         {"cell": "000B:Base.esm", "kind": "exterior"},
+                                                         {"cell": "000B:Base.esm", "kind": "exterior"},
+                                                         {"cell": "0001:Base.esm", "kind": "persistent"},
+                                                         {"cell": "grid:Tamriel:1,2", "kind": "exterior"}]}}}]}
+    d.update(over)
+    return d
+
+
+def changed(doc, path, value):
+    """The document with one value replaced, by a dotted path."""
+    doc = json.loads(json.dumps(doc))
+    at = doc
+    *head, last = path.split(".")
+    for k in head:
+        at = at[int(k)] if isinstance(at, list) else at[k]
+    if isinstance(at, list):
+        at[int(last)] = value
+    else:
+        at[last] = value
+    return doc
+
+
+EXPECT = {"plugins": [{"name": n, "path": f"X:/{n}", "sha256": "h" + n} for n in ["Base.esm", "Subj.esp"]],
+          "mods": ["M1"], "targets": ["Subj.esp"], "censusCells": {"Subj.esp": ["000A:Base.esm", "000B:Base.esm"]}}
+
+ACCEPT = [
+    (scope_doc(), EXPECT),
+    (scope_doc(complete=False), EXPECT),
+    (scope_doc(walkFailures=[{"x": 1}]), EXPECT),
+    (scope_doc(unreadableRecords=["r"]), EXPECT),
+    (changed(scope_doc(), "configuration.plugins.1.Sha256", "other"), EXPECT),
+    (changed(scope_doc(), "configuration.plugins.1.Path", "x:\\Subj.esp"), EXPECT),
+    (changed(scope_doc(), "configuration.plugins.1.Path", "Y:/Subj.esp"), EXPECT),
+    (changed(scope_doc(), "configuration.providers", [{"Name": "M2", "Kind": "mod"}]), EXPECT),
+    (changed(scope_doc(), "configuration.providers", [{"name": "M1", "kind": "MOD"}]), EXPECT),
+    (changed(scope_doc(), "configuration.fingerprint", ""), EXPECT),
+    (changed(scope_doc(), "configuration.plugins", [{"name": "Subj.esp", "path": "X:/Subj.esp", "sha256": "hSubj.esp"},
+                                                     {"name": "Base.esm", "path": "X:/Base.esm", "sha256": "hBase.esm"}]), EXPECT),
+    (scope_doc(), dict(EXPECT, censusCells={"Subj.esp": ["000A:Base.esm", "000C:Base.esm", "0009:Base.esm"]})),
+    (scope_doc(targets=[]), EXPECT),
+    (changed(scope_doc(), "targets.0.sha256", "moved"), EXPECT),
+    (scope_doc(), dict(EXPECT, censusCells={"Subj.esp": ["000A:Base.esm"]})),
+    (scope_doc(), dict(EXPECT, censusCells={})),
+    (scope_doc(targets=[{"name": "Zed.esp", "sha256": "z", "footprint": {"placed": {}}}, {"name": "Subj.esp", "sha256": "hSubj.esp"}]),
+     dict(EXPECT, targets=["Subj.esp", "Zed.esp"])),
+    (scope_doc(targets=[{"name": "Zed.esp"}, {"name": "Subj.esp"}]), dict(EXPECT, targets=["Subj.esp"])),
+    (scope_doc(configuration=None), EXPECT),
+]
+
+LINE_SCOPE = {
+    "targets": [{"name": "X.esp", "footprint": {"placed": {"cells": [
+        {"cell": "000D74:Skyrim.esm", "kind": "persistent", "worldspace": "Tamriel"},
+        {"cell": "009634:Skyrim.esm", "kind": "exterior", "name": "WatchExterior02", "worldspace": "Tamriel"},
+        {"cell": "009616:Skyrim.esm", "kind": "exterior", "name": None, "worldspace": "Tamriel"},
+        {"cell": "0151F9:Skyrim.esm", "kind": "interior", "name": "Watch01", "worldspace": None}]}}}],
+    "locationContributors": {"locations": [
+        {"cell": "009634:Skyrim.esm", "plugins": [{"name": "Skyrim.esm"}, {"name": "X.esp"}, {"name": "Y.esp"}]},
+        {"cell": "0151F9:Skyrim.esm", "plugins": [{"name": "Skyrim.esm"}, {"name": "ccbgssse001-fish.esm"}]}]},
+    "nearby": {"ring": 2, "plugins": [{"name": "Z.esp", "cells": ["009700:Skyrim.esm"]}, {"name": "Update.esm", "cells": []}],
+               "alsoScanned": [{"name": "Keys.esp", "footprintCells": ["009634:Skyrim.esm"], "ringCells": []},
+                               {"name": "Far.esp", "footprintCells": [], "ringCells": []},
+                               {"name": "Broken.esp", "footprintCells": [], "ringCells": [], "unreadable": "bad header"}]}}
+MANY_CELLS = [{"cell": f"{i:06X}:Skyrim.esm", "kind": "exterior", "name": f"Cell{i}" if i % 2 else None,
+               "worldspace": "Tamriel" if i < 5 else None, "worldspaceKey": None if i < 7 else "00003C:Skyrim.esm"} for i in range(9)]
+MANY_CELLS += [{"cell": f"1{i:05X}:Skyrim.esm", "kind": "interior", "name": f"Room{i}" if i else None} for i in range(5)]
+MANY_CELLS += [MANY_CELLS[0]]
+SCOPE_LINES = [
+    (LINE_SCOPE, {"selection": ["Mod X"]}, {"keys.esp": "Mod Keys", "far.esp": "Mod Far"}),
+    (dict(LINE_SCOPE, locationContributors={"complete": True, "locations": []}, nearby={"ring": 2, "plugins": [], "alsoScanned": []}),
+     {"selection": ["Mod X"]}, {}),
+    ({"targets": [{"footprint": {"placed": {"cells": []}}}]}, {"selection": ["Mod X"]}, {}),
+    (dict(LINE_SCOPE, locationContributors={"complete": False, "missing": ["'Skyrim.esm' could not be walked " + "x" * 200], "locations": []}),
+     {"selection": ["Mod X"]}, {}),
+    (dict(LINE_SCOPE, locationContributors={"complete": False, "locations": []}), {"selection": []}, {}),
+    ({"targets": [{"name": "X.esp", "footprint": {"placed": {"cells": MANY_CELLS}}}, {"name": "x2.ESP"}],
+      "locationContributors": {"locations": [{"plugins": [{"name": n} for n in
+                                                          ["b.esp", "A.esp", "X2.esp", "Skyrim.esm", "Dragonborn.esm",
+                                                           "ccQDRSSE001-SurvivalMode.esl", "CC.txt", "c.esp", "D.esp", "e.esp", "F.esp", "g.esp"]]}]},
+      "nearby": {"plugins": [{"name": "A.esp"}, {"name": "h.esp"}],
+                 "alsoScanned": [{"name": f"Off{i}.esp", "footprintCells": [], "ringCells": ["c"]} for i in range(6)]
+                 + [{"name": f"Bad{i}.esp", "unreadable": "x"} for i in range(4)]}},
+     {"selection": ["One", "Two", "Three", "Four"]},
+     {"off0.esp": "Mod Zero", "off1.esp": "Mod One", "off2.esp": "Mod One", "off3.esp": "Mod Three", "off4.esp": "Mod Four", "off5.esp": "Mod Five"}),
+    (dict(LINE_SCOPE, nearby={"ring": 0, "plugins": [{"name": "Only.esp"}]}), {}, {}),
+    (dict(LINE_SCOPE, locationContributors={"locations": []}, nearby={}), {"selection": ["Mod X"]}, {}),
+]
+
+#: names the probes' base-game list (BaseGamePlugins) knows and evalpipeline's own list does not, or spells otherwise:
+#: the C# controller follows the probes' list, so its line for this row differs from Python's on purpose
+BASE_GAME_LINE = (dict(LINE_SCOPE, locationContributors={"locations": [{"plugins": [
+    {"name": "SkyrimVR.esm"}, {"name": "skyrim.esm"}, {"name": "_ResourcePack.esl"}, {"name": "X.esp"}]}]}, nearby={}),
+    {"selection": ["Mod X"]}, {})
+
+CAND_RES = {"arms": [{"id": "dependencies", "role": "vanilla", "keys": [], "plugins": ["Base.esm"], "mods": [], "variant": None},
+                     {"id": "combined", "role": "combined", "keys": ["K\u00e9y.esp"], "plugins": ["Base.esm", "Subj.esp", "K\u00e9y.esp"],
+                      "mods": ["MK", "MS"], "variant": "v1"},
+                     {"id": "without-selection", "role": "the profile without the selected mods", "keys": [], "plugins": ["Base.esm"],
+                      "mods": ["Other"]}]}
+
+MINI_REGISTRY = {"checks": [
+    {"id": "load.order", "prerequisites": [], "adapter": {"kind": "scopeprobe"}, "inputs": {"states": "baseline"}},
+    {"id": "geo.overlap", "prerequisites": ["load.order"], "adapter": {"kind": "ordersweep-probe"}, "inputs": {"states": "baseline"}},
+    {"id": "state.census", "prerequisites": ["load.order"], "adapter": {"kind": "probe-json"}, "inputs": {"states": "baseline"}},
+    {"id": "state.geometry", "prerequisites": ["state.census"], "adapter": {"kind": "probe-emit"}, "inputs": {"states": "selected"}},
+    {"id": "patch.discovery-installed", "prerequisites": ["load.order"], "adapter": {"kind": "patchprobe"}, "inputs": {}},
+    {"id": "patch.order-evaluation", "prerequisites": ["load.order"], "adapter": {"kind": "derived"}},
+    {"id": "patch.candidate-qualification", "prerequisites": ["patch.discovery-installed", "patch.order-evaluation"],
+     "adapter": {"kind": "derived"}},
+    {"id": "functional.linked", "prerequisites": ["load.order"], "adapter": {"kind": "derived"}},
+    {"id": "alone", "adapter": {"kind": "probe-json"}},
+]}
+SELECTS = [{"select": ["geo.overlap"], "depth": "standard"}, {"select": ["state.geometry"]}, {"select": ["patch.discovery-installed"], "depth": "quick"},
+           {"select": ["alone"], "depth": ""}, {"select": ["nope.b", "geo.overlap", "nope.a"]}, {"select": []}, {}]
+
+SIZES = [0, 1, 1023, 1024, 1536, 2 ** 20 - 1, 2 ** 20, 2 ** 30 - 1, 2 ** 30, 35 * 10 ** 9, 123456789.5, 1e15]
+
+KEY_TREE = [
+    ("instance/profiles/P/modlist.txt", b"+A\r\n-B\r\n", 1_700_000_000_000_000_000),
+    ("instance/profiles/P/Plugins.txt", b"*A.esp\r\n", 1_700_000_001_123_456_700),
+    ("instance/profiles/P/loadorder.txt", b"Base.esm\r\nA.esp\r\n", 1_700_000_002_000_000_000),
+    ("instance/mods/A/A.esp", b"TES4 a", 1_700_000_003_000_000_100),
+    ("instance/mods/A/Zed.ESM", b"TES4 z", 1_700_000_003_500_000_000),
+    ("instance/mods/A/textures/Stone.dds", b"dds", 1_700_000_004_000_000_000),
+    ("instance/mods/A/textures/a/b.txt", b"b", 1_700_000_004_100_000_000),
+    ("instance/mods/A/Textures2/inner.esp", b"not at the top", 1_700_000_004_200_000_000),
+    ("instance/mods/A/readme.TXT", b"read", 1_700_000_004_300_000_000),
+    ("instance/mods/b/B.esp", b"TES4 b", 1_700_000_005_000_000_000),
+    ("instance/overwrite/Over.esl", b"TES4 o", 1_700_000_006_000_000_000),
+    ("instance/overwrite/logs/x.log", b"log", 1_700_000_006_100_000_000),
+    ("game/Data/Base.esm", b"TES4 base", 1_700_000_007_000_000_000),
+    ("game/Data/meshes/m.nif", b"nif", 1_700_000_007_100_000_000),
+    ("outside/Patch Folder/Patch.esp", b"TES4 p", 1_700_000_008_000_000_000),
+    ("off/Off.esp", b"TES4 off", 1_700_000_009_000_000_000),
+]
+
+
+def prep_key_case(root: Path) -> dict:
+    for rel, data, ns in KEY_TREE:
+        p = root / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    (root / "instance/mods/A/empty").mkdir()
+    for rel, _, ns in KEY_TREE:
+        os.utime(root / rel, ns=(ns, ns))
+    outside = str(root / "outside" / "Patch Folder")
+    arms = [{"id": "combined", "mods": ["A", outside]}, {"id": "without-selection", "mods": ["b", "A", "Gone"]}, {"id": "bare"}]
+    also = [root / "off" / "Off.esp", root / "off" / "Missing.esp"]
+    key = PR.key(root / "instance", "P", root / "game", ["Sel B", "a"], arms, {"tool": "digest"}, also_scanned=also)
+    low_back, low_fwd = str(root).lower(), str(root).replace("\\", "/").lower()
+
+    def low_mask(obj):
+        if isinstance(obj, str):
+            return obj.replace(low_back, BACK).replace(low_fwd, FWD)
+        if isinstance(obj, dict):
+            return {low_mask(k): low_mask(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [low_mask(v) for v in obj]
+        return obj
+    return {"files": [{"path": rel, "bytes": b64(data), "mtimeNs": ns} for rel, data, ns in KEY_TREE], "links": [],
+            "dirs": ["instance/mods/A/empty"], "selection": ["Sel B", "a"],
+            "arms": [dict(a, mods=[m.replace(str(root), BACK) for m in a["mods"]]) if "mods" in a else a for a in arms],
+            "alsoScanned": ["off/Off.esp", "off/Missing.esp"], "tools": {"tool": "digest"}, "key": low_mask(key)}
+
+
+def tes4(masters: list[bytes], flags: int = 0, records: int = 0, tail: bytes = b"") -> bytes:
+    """A header-only plugin: HEDR, one MAST (with its DATA) per master, then `tail`."""
+    body = b"HEDR" + (12).to_bytes(2, "little") + struct.pack("<fII", 1.71, records, 0x800)
+    for m in masters:
+        body += b"MAST" + len(m).to_bytes(2, "little") + m + b"DATA" + (8).to_bytes(2, "little") + bytes(8)
+    body += tail
+    return b"TES4" + len(body).to_bytes(4, "little") + flags.to_bytes(4, "little") + bytes(12) + body
+
+
+#: plugin names whose str.lower() is not the probes' invariant lower-casing (a final sigma)
+LOWER_NAMES = ["ΑΣ x.esp", "ασ x.esp", "Plain.ESP"]
+
+
+def owner_difference_answers(tmp: Path) -> dict:
+    """What Python answers where the C# controller follows the probes' own readers instead. The self-test states the
+    C# answer beside each of these; slice2/intended-differences.md lists them."""
+    out = {"lower": [{"name": n, "python": n.lower()} for n in LOWER_NAMES]}
+    # a master name with a byte cp1252 and Latin-1 read differently, in an .esp whose header carries the ESM and ESL bits
+    data = tes4([b"caf\x80.esm\0", b"Plain.esm\0"], flags=0x201, records=7)
+    (tmp / "Odd.esp").write_bytes(data)
+    head = EP.plugin_header(tmp / "Odd.esp")
+    out["header"] = {"bytes": b64(data), "pythonMasters": head["masters"], "esm": head["esm"], "esl": head["esl"],
+                     "records": EP.plugin_records(tmp / "Odd.esp")}
+    # an oversized subrecord (XXXX) after the masters: both readers have the masters and the count before it
+    big = tes4([b"Base.esm\0"], records=3, tail=b"XXXX" + (4).to_bytes(2, "little") + (70000).to_bytes(4, "little")
+               + b"ONAM" + bytes(2) + bytes(70000) + b"INTV" + (4).to_bytes(2, "little") + bytes(4))
+    (tmp / "Big.esm").write_bytes(big)
+    head = EP.plugin_header(tmp / "Big.esm")
+    out["oversized"] = {"bytes": b64(big), "pythonMasters": head["masters"], "esm": head["esm"], "esl": head["esl"],
+                        "records": EP.plugin_records(tmp / "Big.esm")}
+    # a modlist.txt that starts with a byte-order mark: Python's modlist reader loses the first mod
+    inst, game = tmp / "bom" / "instance", tmp / "bom" / "game"
+    for d in (inst / "profiles" / "P", inst / "mods" / "Top", inst / "overwrite", game / "Data"):
+        d.mkdir(parents=True)
+    (game / "Data" / "Base.esm").write_bytes(tes4([], flags=1))
+    (inst / "mods" / "Top" / "Top.esp").write_bytes(tes4([b"Base.esm\0"]))
+    prof = inst / "profiles" / "P"
+    (prof / "modlist.txt").write_bytes(b"\xef\xbb\xbf+Top\r\n")
+    (prof / "loadorder.txt").write_bytes(b"Base.esm\r\nTop.esp\r\n")
+    (prof / "plugins.txt").write_bytes(b"*Base.esm\r\n*Top.esp\r\n")
+    entry = tmp / "bom" / "entry.json"
+    entry.write_text(json.dumps({"id": "wb-bom", "inPlace": {"instance": str(inst), "profile": "P", "game": str(game)},
+                                 "selection": {"mods": ["Top"]}, "evaluation": {"select": []}}), encoding="utf-8")
+    out["bomModlist"] = answer(lambda: [a["plugins"] for a in EP.Context(entry, None, tmp / "bom" / "out").resolve()["arms"]])
+    return out
+
+
+def pipeline_answers(tmp: Path) -> dict:
+    import types
+    names = EP.PluginNames
+    doc = {"python": platform.python_version(), "placeholders": {"backslash": BACK, "forward": FWD}}
+    doc["normalise"] = [{"in": e, "out": EP.normalise_entry(e, names())} for e in NORMALISE]
+    doc["headers"] = HEADERS
+    doc["derive"] = [{"entry": e, **answer(lambda e=e: EP.derive_arms(e, HEADERS))} for e in DERIVE]
+    doc["order"] = [{"arm": a, "baseline": b, "source": s, **answer(lambda a=a, b=b, s=s: EP.order_arm(a, b, s, HEADERS))}
+                    for a, b, s in ORDER]
+    doc["accept"] = [{"scope": s, "expect": x, **answer(lambda s=s, x=x: EP.accept_scope(s, x))} for s, x in ACCEPT]
+    doc["scopeLine"] = [{"scope": s, "res": r, "disabled": d, "out": EP.scope_line(s, r, d)} for s, r, d in SCOPE_LINES]
+    s, r, d = BASE_GAME_LINE
+    doc["scopeLineBaseGame"] = {"scope": s, "res": r, "disabled": d, "python": EP.scope_line(s, r, d)}
+    cands = []
+    for in_place, cid, profile in ((None, "ho-x", "EP-ho-x"), ({"instance": "i"}, "wb-\u00e9", "Default")):
+        ctx = types.SimpleNamespace(in_place=in_place, id=cid, profile=profile)
+        rows = []
+        for name, arm, cand in EP.candidate_files(ctx, CAND_RES):
+            EP.write_json(tmp / name, cand)
+            rows.append({"name": name, "arm": arm["id"], "doc": cand, "file": b64((tmp / name).read_bytes())})
+        cands.append({"inPlace": bool(in_place), "id": cid, "profile": profile, "res": CAND_RES, "out": rows})
+    doc["candidates"] = cands
+    registry = tmp / "mini-registry.json"
+    registry.write_text(json.dumps(MINI_REGISTRY), encoding="utf-8")
+    saved = EP.REGISTRY
+    EP.REGISTRY = registry
+    try:
+        doc["select"] = {"registry": MINI_REGISTRY, "rows": [
+            {"evaluation": ev, **answer(lambda ev=ev: list(EP.in_place_select(types.SimpleNamespace(entry={"evaluation": ev}))))}
+            for ev in SELECTS]}
+    finally:
+        EP.REGISTRY = saved
+    doc["sizes"] = [{"bytes": b, "out": EP._size(b)} for b in SIZES]
+    (tmp / "key").mkdir()
+    doc["prepKey"] = prep_key_case(tmp / "key")
+    (tmp / "owner").mkdir()
+    doc["ownerDifferences"] = owner_difference_answers(tmp / "owner")
+    return doc
+
+
 def main() -> int:
     if os.name != "nt":
         print("make_known_answers.py records Windows path and text rules; run it on Windows.", file=sys.stderr)
@@ -473,10 +820,13 @@ def write_answers() -> int:
             "runStatus": [{"statuses": s, "out": EP.run_status([{"status": x} for x in s])} for s in STATUSES],
             "exitCodes": {"ok": EP.EXIT_OK, "refused": EP.EXIT_REFUSED, "judgement": EP.EXIT_JUDGEMENT},
         }
+        (tmp / "pipeline").mkdir()
+        pipeline = pipeline_answers(tmp / "pipeline")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    OUT.write_text(json.dumps(doc, indent=1) + "\n", encoding="utf-8", newline="\n")
-    print(f"wrote {OUT} ({OUT.stat().st_size} bytes)")
+    for path, answers in ((OUT, doc), (PIPELINE_OUT, pipeline)):
+        path.write_text(json.dumps(answers, indent=1) + "\n", encoding="utf-8", newline="\n")
+        print(f"wrote {path} ({path.stat().st_size} bytes)")
     return 0
 
 

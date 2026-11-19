@@ -7,7 +7,7 @@ namespace RunControl;
 
 /// <summary>The known answers: every value here was computed by the Python controller
 /// (known-answers/make_known_answers.py) and this program must reach it exactly.</summary>
-public static class SelfTest
+public static partial class SelfTest
 {
     static int _green, _red, _skipped;
 
@@ -137,7 +137,17 @@ public static class SelfTest
         TreeCases(ka);
         LedgerCases(ka);
         EntryCases(ka);
+        PipelineCases();
+        InPlaceCases();
+        LabCases();
+        PrepReuseCases();
+        OwnerDifferenceCases();
+        DriverCases();
+        ChildCases();
+        StageCases();
+        BlackBoxCases();
         LiveCases();
+        PipelineLiveCases();
 
         Console.WriteLine($"{_green} green, {_red} red, {_skipped} skipped");
         return _red == 0 ? 0 : 1;

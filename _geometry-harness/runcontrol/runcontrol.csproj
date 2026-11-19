@@ -17,5 +17,6 @@
     <Compile Include="..\_shared\OrderMasters.cs" Link="OrderMasters.cs" />
     <Compile Include="..\_shared\BaseGamePlugins.cs" Link="BaseGamePlugins.cs" />
     <EmbeddedResource Include="known-answers\foundations.json" LogicalName="foundations.json" />
+    <EmbeddedResource Include="known-answers\pipeline.json" LogicalName="pipeline.json" />
   </ItemGroup>
 </Project>
