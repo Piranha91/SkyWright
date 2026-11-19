@@ -275,7 +275,7 @@ static class UnreadableAssets
 
     /// <summary>MIRRORS the pre-geometry checks of the rendering library's per-shape build
     /// (<c>NifMeshBuilder.BuildShape</c> in the pinned CharacterViewer.Rendering), with the same
-    /// <c>nifly</c> calls in the same order: a shape is skipped when its AppCulled bit is set, when
+    /// checks in the same order: a shape is skipped when its AppCulled bit is set, when
     /// it has no shader property, when it binds no diffuse and no normal texture and carries no alpha
     /// property (the library's "likely physics/collision mesh" rule), or when it has no vertices.
     /// Skyrim's placed water (<c>BSWaterShaderProperty</c>, no texture set) and its editor-marker
@@ -285,32 +285,25 @@ static class UnreadableAssets
     {
         try
         {
-            using var nif = new nifly.NifFile();
+            var nif = new NiflySharp.NifFile();
             int rc = nif.Load(path);
-            if (rc != 0) return new RuleResult(Array.Empty<RuleShape>(), false, $"nifly Load returned {rc}");
-            var header = nif.GetHeader();
-            using var shapes = nif.GetShapes();
+            if (rc != 0) return new RuleResult(Array.Empty<RuleShape>(), false, $"the NIF reader's Load returned {rc}");
             var list = new List<RuleShape>();
-            for (int si = 0; si < shapes.Count; si++)
+            foreach (var shape in nif.Blocks.OfType<NiflySharp.INiShape>().Where(b => b is not NiflySharp.Blocks.NiParticleSystem))
             {
-                var shape = shapes[si];
-                string name = shape.name?.get() ?? "?";
+                string name = (shape as NiflySharp.Interfaces.INiNamed)?.Name?.String ?? "?";
                 string shader = "no shader";
                 string? skip = null;
-                var sref = shape.ShaderPropertyRef();
-                if (sref is not null && !sref.IsEmpty())
-                    shader = header.GetBlockById(sref.index)?.GetType().Name ?? "unknown shader";
-                if ((shape.flags & 1u) != 0) skip = "hidden (AppCulled flag)";
-                else if (sref is null || sref.IsEmpty()) skip = "no shader property";
-                else if (string.IsNullOrWhiteSpace(nif.GetTexturePathByIndex(shape, 0))
-                         && string.IsNullOrWhiteSpace(nif.GetTexturePathByIndex(shape, 1))
-                         && !shape.HasAlphaProperty())
+                var sref = shape.ShaderPropertyRef;
+                bool noShader = sref is null || sref.IsEmpty();
+                var shaderBlock = noShader ? null : nif.GetBlock<NiflySharp.INiObject>(sref);
+                if (!noShader) shader = shaderBlock?.GetType().Name ?? "unknown shader";
+                uint flags = nif.Header.Version.StreamVersion > 26 ? shape.Flags_ui : shape.Flags_us;
+                if ((flags & 1u) != 0) skip = "hidden (AppCulled flag)";
+                else if (noShader) skip = "no shader property";
+                else if (!HasTexture(nif, shaderBlock, 0) && !HasTexture(nif, shaderBlock, 1) && !shape.HasAlphaProperty)
                     skip = "no diffuse or normal texture and no alpha property";
-                else
-                {
-                    using var verts = nif.GetVertsForShape(shape);
-                    if (verts is null || verts.Count == 0) skip = "no vertices";
-                }
+                else if (VertexCount(nif, shape) == 0) skip = "no vertices";
                 list.Add(new RuleShape(name, shader, skip));
             }
             return new RuleResult(list, list.Any(s => s.Skip is null), null);
@@ -320,6 +313,24 @@ static class UnreadableAssets
             return new RuleResult(Array.Empty<RuleShape>(), false, $"{ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    // a texture slot is set when the shader's texture set (or an effect shader's own field) names a file
+    static bool HasTexture(NiflySharp.NifFile nif, NiflySharp.INiObject? shader, int slot)
+    {
+        if (shader is NiflySharp.Blocks.BSLightingShaderProperty lit)
+        {
+            if (lit.TextureSetRef is null || lit.TextureSetRef.IsEmpty() || nif.GetBlock<NiflySharp.Blocks.BSShaderTextureSet>(lit.TextureSetRef) is not { } set) return false;
+            return set.Textures is { } t && slot < t.Count && !string.IsNullOrEmpty(t[slot]?.Content);
+        }
+        if (shader is NiflySharp.Blocks.BSEffectShaderProperty fx)
+            return !string.IsNullOrWhiteSpace(slot == 0 ? fx.SourceTexture?.Content : fx.NormalTexture?.Content);
+        return false;
+    }
+
+    // vertex positions of a shape: a BSTriShape's own, or its geometry data block's
+    static int VertexCount(NiflySharp.NifFile nif, NiflySharp.INiShape shape) =>
+        shape is NiflySharp.Blocks.BSTriShape bs ? bs.VertexPositions.Count()
+        : shape.DataRef is { } d && !d.IsEmpty() && nif.GetBlock<NiflySharp.Blocks.NiGeometryData>(d) is { } data ? data.Vertices?.Count ?? 0 : 0;
 
     /// <summary><c>viewprobe --unreadable-asset-smoke &lt;file&gt;...</c>: the mesh decision, over
     /// real files, printing one JSON line per file. The test that uses it owns the oracle - it

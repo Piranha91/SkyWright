@@ -4174,23 +4174,16 @@ void main(){
     // composing both makes the door edge-on, while Skyrim draws it flush in its north-facing arch.
     static void StripNifRootTransform(string nifPath, IReadOnlyList<NifMeshBuilder.BuiltMesh> built)
     {
-        using var nif = new nifly.NifFile();
+        var nif = new NiflySharp.NifFile();
         if (nif.Load(nifPath) != 0) return;
-        var root = nif.GetRootNode();
-        if (root is null) return;
-        var t = root.GetTransformToParent();
-
-        using var ex = new nifly.Vector3(); ex.x = 1f;
-        using var ey = new nifly.Vector3(); ey.y = 1f;
-        using var ez = new nifly.Vector3(); ez.z = 1f;
-        using var c0 = t.rotation.opMult(ex);
-        using var c1 = t.rotation.opMult(ey);
-        using var c2 = t.rotation.opMult(ez);
+        if (nif.GetRootNode() is not { } root) return;
+        // the rotation's 9 floats in file order, as the renderer's NIF reader holds them
+        var m = root.Rotation;
         var inv = new NifRootTransform(
-            c0.x, c1.x, c2.x,
-            c0.y, c1.y, c2.y,
-            c0.z, c1.z, c2.z,
-            t.translation.x, t.translation.y, t.translation.z, t.scale);
+            m.M11, m.M21, m.M31,
+            m.M12, m.M22, m.M32,
+            m.M13, m.M23, m.M33,
+            root.Translation.X, root.Translation.Y, root.Translation.Z, root.Scale);
 
         static Vector3 ToNif(Vector3 yup) => new(yup.X, -yup.Z, yup.Y);
         static Vector3 ToYUp(Vector3 nifSpace) => new(nifSpace.X, nifSpace.Z, -nifSpace.Y);
